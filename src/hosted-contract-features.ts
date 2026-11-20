@@ -188,6 +188,10 @@ export const hostedContractFeatures = [
    * d3357f40). The CLI then reports the member's refused status write as moved by the server; without it the
    * refusal is reported as before. */
   'planning-start-move',
+  /** Save delta changes may carry `lines` (Item c2388099): +/- counts the CLI measured from its own line sketches,
+   * kept on the Lane's overlap row for the Lane page. Without it the CLI sends none (older servers validate delta
+   * pages strictly) and the page shows no counts. */
+  'save-line-counts',
   /** Explicit Lane holds (e1633718): projectHostedLanePark:set parks a Lane on a holder with a reason, or clears it.
    * Without it the CLI refuses `save {park}` before saving. */
   'lane-park',

@@ -7,7 +7,12 @@ import { z } from 'zod';
 import { digest } from './hash.js';
 import { attributionEdits, attributionLines } from './native-text-merge.js';
 import { durableReplace } from './state/durability.js';
-import { overlapEvidenceSchema, type OverlapEvidence } from './hosted-overlap-evidence.js';
+import {
+  lineBaseTag,
+  overlapEvidenceSchema,
+  type OverlapEvidence,
+  type OverlapLines,
+} from './hosted-overlap-evidence.js';
 import { readSource } from './files.js';
 import type { SymbolLinks } from './hosted-overlap-evidence.js';
 import {
@@ -144,6 +149,31 @@ export function readOverlapBytes(cache: string, blob: string): Buffer | null {
     return null;
   }
 }
+type Edits = ReturnType<typeof attributionEdits>;
+/** The line edits from a base sketch to a saved one, computed once per changed file for its evidence and its counts. */
+export const sketchEdits = (before: Sketch | null, after: Sketch | null): Edits | null =>
+  before && after ? attributionEdits(before.lines, after.lines) : null;
+/** A changed file's +/- counts from those edits, tagged with the base they were measured against (c2388099). */
+export function overlapLineCounts(baseBlob: string, edits: Edits | null): OverlapLines | undefined {
+  if (!edits) return undefined;
+  let added = 0,
+    removed = 0;
+  for (const edit of edits) {
+    added += edit.lines.length;
+    removed += edit.end - edit.start;
+  }
+  return [added, removed, lineBaseTag(baseBlob)];
+}
+/** A deleted file's counts: every line of its retained base bytes removed. Null when the bytes are not retained,
+ * are binary or are over the sketch limit; the caller bounds the bytes read per save. */
+export function deletedLineCounts(
+  cache: string,
+  baseBlob: string,
+): { lines: OverlapLines; bytes: number } | null {
+  const bytes = readOverlapBytes(cache, baseBlob);
+  const lines = bytes ? attributionLines(bytes) : null;
+  return bytes && lines ? { lines: [0, lines.length, lineBaseTag(baseBlob)], bytes: bytes.length } : null;
+}
 export function overlapTextEvidence(
   baseBlob: string,
   before: Sketch | null,
@@ -152,9 +182,11 @@ export function overlapTextEvidence(
   links?: SymbolLinkContext,
   /** Package-level facts of a non-TS/JS file (hosted-overlap-packages), computed by the caller. */
   packageLinks?: SymbolLinks,
+  /** The caller's sketchEdits of the same two sketches, so the alignment runs once. */
+  aligned?: Edits | null,
 ): OverlapEvidence | undefined {
   if (!before || !after) return undefined;
-  const edits = attributionEdits(before.lines, after.lines);
+  const edits = aligned === undefined ? attributionEdits(before.lines, after.lines) : aligned;
   if (!edits) return undefined;
   const symbolFacts =
     code && links

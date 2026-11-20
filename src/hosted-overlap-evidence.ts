@@ -25,6 +25,15 @@ export const overlapEvidenceSchema = z
   })
   .strict();
 export type OverlapEvidence = z.infer<typeof overlapEvidenceSchema>;
+/** Lines added and removed by a changed file (Item c2388099), counted once by the saving CLI from the line sketches it
+ * already holds, against the before blob whose first 6 hex digits close the tuple. A reader shows the counts only when
+ * that tag matches the before blob it shows (lineCounts in hosted-overlap.ts), so a count measured against another
+ * version, or none at all, shows nothing rather than a wrong number. */
+export const overlapLinesSchema = z.tuple([position, position, z.string().regex(/^[a-f0-9]{6}$/)]);
+export type OverlapLines = z.infer<typeof overlapLinesSchema>;
+const emptyTag = emptyBlob.slice(0, 6);
+/** The tag of a before side: its blob's first 6 hex digits, or the empty file's for an added path. */
+export const lineBaseTag = (blob: string | null | undefined) => (blob ? blob.slice(0, 6) : emptyTag);
 export type SymbolLinks = z.infer<typeof symbolLinksSchema>;
 export type OverlapClass = 'blocking' | 'advisory';
 type Change = {

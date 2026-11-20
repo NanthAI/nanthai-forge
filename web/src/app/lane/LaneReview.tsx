@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // The single-Lane page (Items 52235fbf, 4bc460aa, a1e3d771): what changed, file by file, in the order of what needs
 // eyes; where each line of a combined result came from; and the overlap with other Lanes. One bounded read names the
-// pinned saved head and every changed path with its exact blobs; a file's body is read only when it is opened (one
-// describe, then object storage), so a large change costs what the reader opens, never the whole tree.
+// pinned saved head and every changed path with its exact blobs and the +/- counts its save recorded; a file's body is
+// read only when it is opened (one describe, then object storage), so a large change costs what the reader opens,
+// never the whole tree. Once the Lane has landed or is set aside, review is over: no read marks, files in path order.
 import { Component, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { useConvex, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
-import { reviewGroupLabels, type ReviewGroup } from '../../../../src/review-order';
+import { reviewGroupLabels, reviewGroups, type ReviewGroup } from '../../../../src/review-order';
 import { Avatar, Band, CodeBox, Key, State, Who } from '../../ds';
 import { requestHighlight } from '../../highlight-client';
 import type { SourceToken } from '../../source-highlight';
@@ -206,6 +207,8 @@ export function ReviewPage({
   const [order, setOrder] = useState<'eyes' | 'path'>('eyes');
   const [cli, setCli] = useState(false);
   const stop = laneStop(reply, feed);
+  // Review is over once the Lane lands or is set aside (c2388099): no read marks, no "Needs eyes first" order.
+  const closed = Boolean(lane.landed) || lane.state !== 'active';
   const isHeld = Boolean(stop?.held) && !lane.landed;
   const heldView = useHeldView(projectId, isHeld);
   const heldRow = heldView
@@ -228,9 +231,11 @@ export function ReviewPage({
         ? 'Started. Nothing saved yet.'
         : !reply.files.current
           ? 'Saved. The changed files of this save are not recorded yet.'
-          : `${isHeld ? `${holdLine(heldView?.view, lane.laneId, Date.now())} ` : ''}${eyes.toLocaleString()} of ${
-              nextOffset === null ? '' : 'the first '
-            }${plural(files.length, 'file')} need your eyes.`;
+          : `${isHeld ? `${holdLine(heldView?.view, lane.laneId, Date.now())} ` : ''}${
+              eyes
+                ? `${eyes.toLocaleString()} of ${nextOffset === null ? '' : 'the first '}${plural(files.length, 'file')} need your eyes.`
+                : `${nextOffset === null ? '' : 'The first '}${plural(files.length, 'file')}, none with an overlap or a protected path.`
+            }`;
   const command = `nforge agent . diff ${q({ laneId: lane.laneId, summary: true })}`;
   return (
     <>
@@ -242,7 +247,7 @@ export function ReviewPage({
           </>
         }
       >
-        {nothing || !reply.files.current ? null : (
+        {nothing || !reply.files.current || closed ? null : (
           <div className="seg" role="group" aria-label="Order">
             <button type="button" aria-pressed={order === 'eyes'} onClick={() => setOrder('eyes')}>
               Needs eyes first
@@ -307,7 +312,7 @@ export function ReviewPage({
           <div className="ph plain">
             <h2>Changed files</h2>
             <span className="cnt">{reply.files.total.toLocaleString()}</span>
-            {entries.length ? (
+            {entries.length && !closed ? (
               <span className="hint" style={{ marginLeft: 'auto' }}>
                 {readCount.toLocaleString()} of {plural(entries.length, 'file')} read
               </span>
@@ -316,10 +321,10 @@ export function ReviewPage({
           <Files
             reply={reply}
             entries={entries}
-            order={order}
+            order={closed ? 'path' : order}
             projectId={projectId}
             route={route}
-            ticks={ticks}
+            ticks={closed ? null : ticks}
             nothing={nothing}
           />
           {loader ??
@@ -397,7 +402,8 @@ function Files({
   order: 'eyes' | 'path';
   projectId: Id<'hostedProjects'>;
   route: ProjectRoute;
-  ticks: Ticks;
+  /** Null once review is over: no read marks and no "changed since you read". */
+  ticks: Ticks | null;
   nothing: boolean;
 }) {
   const [shown, setShown] = useState<Partial<Record<string, number>>>({});
@@ -413,7 +419,7 @@ function Files({
         .
       </p>
     );
-  const state = (entry: Entry) => ticks.state(entry.path, readMark(entry.file.after));
+  const state = (entry: Entry) => ticks?.state(entry.path, readMark(entry.file.after)) ?? 'unread';
   const row = (entry: Entry) => (
     <FileRow key={entry.path} entry={entry} reply={reply} projectId={projectId} route={route} ticks={ticks} />
   );
@@ -449,7 +455,7 @@ function Files({
   return (
     <>
       {band('changed', 'Changed since you read', 'unread again', changed, true)}
-      {(['eyes', 'tests', 'low'] as const).map(group =>
+      {reviewGroups.map(group =>
         band(
           group,
           reviewGroupLabels[group].title,
@@ -473,12 +479,12 @@ function FileRow({
   reply: Reply;
   projectId: Id<'hostedProjects'>;
   route: ProjectRoute;
-  ticks: Ticks;
+  ticks: Ticks | null;
 }) {
   const client = useConvex();
   const { file } = entry;
   const mark = readMark(file.after);
-  const read: ReadState = ticks.state(file.path, mark);
+  const read: ReadState = ticks?.state(file.path, mark) ?? 'unread';
   const [open, setOpen] = useState(false);
   const [body, setBody] = useState<FileBody | 'loading' | 'failed' | null>(null);
   const [view, setView] = useState<'changes' | 'origin'>('changes');
@@ -488,15 +494,22 @@ function FileRow({
     setBody('loading');
     readFileBody(client, projectId, file.before, file.after).then(setBody, () => setBody('failed'));
   }, [open, body, client, projectId, file.before, file.after]);
+  // The counts the save recorded (c2388099); an older save has none until the file is opened and its body counted.
+  const counts: [number, number] | null =
+    file.lines ?? (body && typeof body === 'object' && body.kind === 'diff' ? [body.add, body.del] : null);
   const stat =
-    body && typeof body === 'object' && body.kind === 'diff' ? (
+    counts && counts[0] + counts[1] > 0 ? (
       <span className="fstat">
-        <span className="a">+{body.add.toLocaleString()}</span>
-        {body.del ? <span className="d"> −{body.del.toLocaleString()}</span> : null}
+        {counts[0] ? <span className="a">+{counts[0].toLocaleString()}</span> : null}
+        {counts[0] > 0 && counts[1] > 0 ? ' ' : null}
+        {counts[1] ? <span className="d">−{counts[1].toLocaleString()}</span> : null}
       </span>
     ) : null;
+  // "code changed" says no more than the row's own counts, so the row shows nothing there.
+  const why =
+    read === 'changed' ? 'changed since you read' : entry.reason === 'code changed' ? null : entry.reason;
   return (
-    <div className="lr-file">
+    <div className={cls('lr-file', ticks && 'marked')}>
       <details className="file" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
         <summary>
           <span className="tw" aria-hidden="true" />
@@ -504,7 +517,7 @@ function FileRow({
             {'‎'}
             {file.path}
           </span>
-          <span className="why">{read === 'changed' ? 'changed since you read' : entry.reason}</span>
+          {why ? <span className="why">{why}</span> : null}
           {stat}
         </summary>
         {open ? (
@@ -534,22 +547,25 @@ function FileRow({
           </>
         ) : null}
       </details>
-      <button
-        type="button"
-        className="tick"
-        aria-pressed={read === 'read'}
-        aria-label={`Read ${file.path}`}
-        title={read === 'read' ? 'Read. Press to mark unread' : 'Mark read'}
-        onClick={() => ticks.mark(file.path, read === 'read' ? null : mark)}
-      >
-        <span className={cls('ck', read === 'read' && 'on')} aria-hidden="true">
-          {read === 'read' ? (
-            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M2.5 6.2 5 8.5l4.5-5" />
-            </svg>
-          ) : null}
-        </span>
-      </button>
+      {ticks ? (
+        <button
+          type="button"
+          className="tick"
+          aria-pressed={read === 'read'}
+          aria-label={`Read ${file.path}`}
+          title={`${read === 'read' ? 'Press to mark unread. ' : ''}Only in this browser; comes back unread if the file changes.`}
+          onClick={() => ticks.mark(file.path, read === 'read' ? null : mark)}
+        >
+          <span className={cls('ck', read === 'read' && 'on')} aria-hidden="true">
+            {read === 'read' ? (
+              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M2.5 6.2 5 8.5l4.5-5" />
+              </svg>
+            ) : null}
+          </span>
+          <span aria-hidden="true">Read</span>
+        </button>
+      ) : null}
     </div>
   );
 }

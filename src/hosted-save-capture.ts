@@ -44,6 +44,9 @@ import {
   overlapTextEvidence,
   overlapBaseBlobs,
   rememberOverlapBases,
+  sketchEdits,
+  overlapLineCounts,
+  deletedLineCounts,
 } from './hosted-overlap-text.js';
 import { outputRoots, SymbolBudget } from './hosted-overlap-symbols.js';
 import { packageFactFile, packageSymbolLinks } from './hosted-overlap-packages.js';
@@ -65,6 +68,8 @@ import { diskMode } from './source-links.js';
 import type { TextAttributes } from './git-attributes.js';
 import { storedBytes, worktreeText } from './checkout-text.js';
 
+/** Bytes of retained base files a save reads to count deleted lines (c2388099); later deletions show no count. */
+const DELETED_COUNT_BYTES = 8 * 1024 * 1024;
 /** Small files hash in memory; only changed bytes ever reach the save staging. */
 const memoryLimit = 1024 * 1024;
 /** Private disk snapshot: bounded buffers, no link target traversal or repository execution.
@@ -270,6 +275,8 @@ export async function captureHostedSave(
               packageContext,
             )
           : undefined;
+      // One alignment serves the evidence and the file's +/- counts (c2388099); a submodule pointer has no lines.
+      const edits = sketchEdits(base, observed.sketch ?? null);
       const evidence = overlapTextEvidence(
         baseBlob,
         base,
@@ -277,9 +284,15 @@ export async function captureHostedSave(
         code,
         observed.text ? { ...links, path, text: observed.text.toString('utf8') } : undefined,
         packageLinks,
+        edits,
       );
+      const lines =
+        observed.file.mode === 'gitlink' || old?.mode === 'gitlink'
+          ? undefined
+          : overlapLineCounts(baseBlob, edits);
       changes.push({
         ...(evidence ? { evidence } : {}),
+        ...(lines ? { lines } : {}),
         path,
         before: old ? { blob: old.blob, mode: old.mode } : null,
         after: { ...observed.file, content: { object: observed.pin, recipe: null } },
@@ -295,10 +308,23 @@ export async function captureHostedSave(
   const machine = machineObjectsDirectory();
   for (const file of files) await rememberObject(machine, join(directory, file.path), file.pin.sha256);
   const present = new Set(local);
+  // A deleted file's count reads its retained base bytes once; past this many bytes a save counts no more deletions.
+  let deletedBytes = 0;
   for (const path of marker.materialized)
     if (!forgeCachePath(path) && !present.has(path)) {
       const old = baseline.get(path)!;
-      changes.push({ path, before: { blob: old.blob, mode: old.mode }, after: null });
+      const baseBlob = bases[path] ?? old.blob;
+      const counted =
+        old.mode !== 'gitlink' && baseBlob !== digest('') && deletedBytes < DELETED_COUNT_BYTES
+          ? deletedLineCounts(cache, baseBlob)
+          : null;
+      if (counted) deletedBytes += counted.bytes;
+      changes.push({
+        ...(counted ? { lines: counted.lines } : {}),
+        path,
+        before: { blob: old.blob, mode: old.mode },
+        after: null,
+      });
     }
   // Capture is retry state, never a Work owner or a Lane publication.
   const excluded = notSaved.value();

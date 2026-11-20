@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { classifyOverlap, type OverlapEvidence, type OverlapClass } from './hosted-overlap-evidence.js';
+import {
+  classifyOverlap,
+  lineBaseTag,
+  type OverlapEvidence,
+  type OverlapClass,
+  type OverlapLines,
+} from './hosted-overlap-evidence.js';
 import { crossFileSymbolNote, symbolFacts, symbolNoteText } from './hosted-overlap-symbol-notes.js';
 import { digest } from './state/hash.js';
 import { agentActor } from './agent-slug.js';
@@ -16,7 +22,14 @@ export type OverlapChange = {
   before: OverlapFile;
   after: OverlapFile;
   evidence?: OverlapEvidence;
+  /** Display only (c2388099): never read by overlap, preflight or landing. Kept while the row has room. */
+  lines?: OverlapLines;
 };
+/** A change's +/- counts, only when they were measured against the before side the row names (c2388099). */
+export function lineCounts(change: Pick<OverlapChange, 'before' | 'lines'>): [number, number] | null {
+  const lines = change.lines;
+  return lines && lines[2] === lineBaseTag(change.before?.blob) ? [lines[0], lines[1]] : null;
+}
 export type OverlapLane = {
   laneId: string;
   intentId: string;
@@ -70,6 +83,7 @@ export function boundOverlapChanges(changes: OverlapChange[], complete = true) {
   let bytes = 2,
     legacyBytes = 2;
   const evidence: { index: number; change: OverlapChange }[] = [];
+  const counted: { index: number; lines: OverlapLines }[] = [];
   for (const change of changes) {
     const value: OverlapChange = {
       path: change.path,
@@ -91,6 +105,7 @@ export function boundOverlapChanges(changes: OverlapChange[], complete = true) {
       continue;
     }
     if (change.evidence) evidence.push({ index: selected.length, change });
+    if (change.lines) counted.push({ index: selected.length, lines: change.lines });
     selected.push(value);
     bytes += size;
   }
@@ -127,6 +142,14 @@ export function boundOverlapChanges(changes: OverlapChange[], complete = true) {
     bytes += extra;
     linkBytes += extra;
   }
+  // Display counts last (c2388099), only in the room left: paths and evidence are chosen exactly as without them, so
+  // overlap, preflight availability and landing read the same row. About 24 bytes a file.
+  for (const { index, lines } of counted) {
+    const size = JSON.stringify(lines).length + 9;
+    if (bytes + size > OVERLAP_METADATA_BYTES) continue;
+    selected[index]!.lines = lines;
+    bytes += size;
+  }
   return { changes: JSON.stringify(selected), complete };
 }
 
@@ -138,7 +161,12 @@ export function mergeOverlapChanges(previous: OverlapChange[], delta: OverlapCha
     // A missing baseline file is significant; do not replace null via ??.
     const original = paths.has(change.path) ? paths.get(change.path)!.before : before;
     if (same(original, change.after)) paths.delete(change.path);
-    else paths.set(change.path, { ...change, before: original });
+    else {
+      const { lines, ...rest } = change;
+      // Counts measured against another version (this machine lost the Lane's first baseline) are not kept.
+      const kept = { ...rest, before: original };
+      paths.set(change.path, lines && lineCounts({ before: original, lines }) ? { ...kept, lines } : kept);
+    }
   }
   return boundOverlapChanges(
     [...paths.values()].sort((a, b) => a.path.localeCompare(b.path)),

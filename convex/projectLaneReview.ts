@@ -2,7 +2,8 @@
 // The Lane review screen's one read (Items 52235fbf, 4bc460aa): everything the page needs before any file body, in
 // one bounded query, so the screen makes one round trip before its first diff instead of 13 serial calls. No State
 // object or file body is read here: the changed paths and their exact blob ids come from the Lane's overlap row, which
-// every save already writes; file bodies are fetched by the browser per opened file (describe, then R2).
+// every save already writes, with each file's +/- counts when the saving CLI recorded them; file bodies are fetched by
+// the browser per opened file (describe, then R2).
 import { v } from 'convex/values';
 import { projectQuery as query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
@@ -10,7 +11,7 @@ import { readHostedRecord } from './projectHostedRecords';
 import { laneConflicts } from './projectHostedConflicts';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { effectivePolicy, protectedMatches } from '../src/autonomy-policy';
-import type { OverlapChange } from '../src/hosted-overlap';
+import { lineCounts, type OverlapChange } from '../src/hosted-overlap';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { landedTiming } from './projectLaneTiming';
@@ -131,13 +132,18 @@ export const read = query({
           total: changes.length,
           offset,
           nextOffset: offset + page.length < changes.length ? offset + page.length : null,
-          items: page.map(change => ({
-            path: change.path,
-            status: !change.before ? 'added' : !change.after ? 'deleted' : 'modified',
-            before: change.before,
-            after: change.after,
-            ...(guarded.has(change.path) ? { protected: true } : {}),
-          })),
+          items: page.map(change => {
+            // +/- counts the saving CLI recorded on this same row (c2388099): no extra read; absent on older saves.
+            const lines = lineCounts(change);
+            return {
+              path: change.path,
+              status: !change.before ? 'added' : !change.after ? 'deleted' : 'modified',
+              before: change.before,
+              after: change.after,
+              ...(lines ? { lines } : {}),
+              ...(guarded.has(change.path) ? { protected: true } : {}),
+            };
+          }),
         },
         conflicts,
         peers,

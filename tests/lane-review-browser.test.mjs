@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// The Lane review screen in a real browser (Items 52235fbf, 4bc460aa, a1e3d771), on synthetic data through its real
-// components (tests/browser/lane-review.tsx). Files are grouped by what needs eyes with an observed reason each, file
-// order is one press away, a folded file reads nothing and an opened one makes only its own download calls, read ticks
-// reconcile with the count, a combined file shows where each line came from, and axe is clean with no sideways scroll
-// at desk and phone width in both themes. Set FORGE_LANE_SHOTS to a folder to also save the screenshots.
+// The Lane review screen in a real browser (Items 52235fbf, 4bc460aa, a1e3d771, c2388099), on synthetic data through
+// its real components (tests/browser/lane-review.tsx). Only overlaps and protected paths need eyes, as the Facts say;
+// every row shows the +/- counts its save recorded with no read; file order is one press away, a folded file reads
+// nothing and an opened one makes only its own download calls, the labelled Read box reconciles with the count and
+// is gone once the Lane has landed or is set aside, a combined file shows where each line came from, and axe is clean
+// with no sideways scroll at desk and phone width in both themes. Set FORGE_LANE_SHOTS to a folder to also save the screenshots.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -115,7 +116,8 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
       async t => {
         const page = await open(t, DESK, 's=review');
         assert.deepEqual(await bands(page), [
-          ['Needs your eyes', 14],
+          ['Needs your eyes', 2],
+          ['Code', 12],
           ['Tests', 1],
           ['Low risk', 2],
         ]);
@@ -123,12 +125,39 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
         assert.match(await first.locator('.path').textContent(), /src\/parser\/stream-parser\.ts/);
         assert.match(await first.locator('.why').textContent(), /same lines as sample-two\/salt-wren, 22-24/);
         assert.match(await page.locator('.lr-file').nth(1).locator('.why').textContent(), /a protected path/);
-        // 8 drawn in the first band, the rest one press away; the band's count is the whole group.
-        assert.equal(await page.locator('.lr-more').first().textContent(), 'Show 6 more');
+        // c2388099: the eyes group is exactly what Facts name, an overlap file and a protected-path match.
+        const fact = name =>
+          page.locator('dt', { hasText: name }).locator('xpath=following-sibling::dd[1]').textContent();
+        assert.match(await fact('Overlaps'), /same lines in 1 file/);
+        assert.match(await fact('Protected paths'), /^1 file matches/);
+        assert.equal(
+          await page.locator('.band', { hasText: 'Needs your eyes' }).locator('.hint').textContent(),
+          'overlaps and protected paths',
+        );
+        // 8 drawn in a band, the rest one press away; the band's count is the whole group.
+        assert.equal(await page.locator('.lr-more').first().textContent(), 'Show 4 more');
         await page.locator('.lr-more').first().click();
         assert.equal(await page.locator('.lr-file').count(), 17);
         // Friction e2f436b6: held, but Needs me has not said it waits on this reader, so never "Held for you".
-        assert.match(await page.locator('.head .sit').textContent(), /Held\. 14 of 17 files need your eyes/);
+        assert.match(await page.locator('.head .sit').textContent(), /Held\. 2 of 17 files need your eyes/);
+        // Every row with recorded counts shows them folded, with no read; an older save's row shows none.
+        const row = path => page.locator('.lr-file', { hasText: path });
+        assert.equal(await row('src/parser/stream-parser.ts').locator('.fstat').textContent(), '+3 −2');
+        assert.equal(await row('src/generated/tables.ts').locator('.fstat').textContent(), '+1,204 −380');
+        assert.equal(await row('src/parser/legacy-decoder.ts').locator('.fstat').textContent(), '−1');
+        assert.equal(await row('docs/parser.md').locator('.fstat').count(), 0);
+        assert.equal(await page.locator('.lr-file .fstat').count(), 15);
+        // "code changed" is dropped: the row's counts say it; a new or removed file keeps its word.
+        assert.equal(await row('adapter-number-1-with').locator('.why').count(), 0);
+        assert.equal(await row('src/parser/utf8-carry.ts').locator('.why').textContent(), 'new file');
+        // The box carries its word; what it means is its hover hint.
+        const box = row('src/parser/stream-parser.ts').locator('.tick');
+        assert.equal(await box.textContent(), 'Read');
+        assert.equal(
+          await box.getAttribute('title'),
+          'Only in this browser; comes back unread if the file changes.',
+        );
+        assert.equal(await calls(page), 0, 'counts need no read');
         await page.getByRole('button', { name: 'Files', exact: true }).click();
         const paths = await page.locator('.lr-file .path').allTextContents();
         assert.deepEqual(paths, [...paths].sort());
@@ -159,7 +188,25 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
         await page.locator('.cmd').first().textContent(),
         /^nforge agent \. sync '\{"laneId":.*"predecessor":\{/,
       );
+      // An older save's row counts the body it opened.
+      const docs = page.locator('.lr-file', { hasText: 'docs/parser.md' });
+      await docs.locator('summary').click();
+      await docs.locator('.code .l.add').first().waitFor();
+      assert.equal(await docs.locator('.fstat').textContent(), '+2');
       await shot(page, 'lane-review-open-1440-dark');
+    });
+
+    await t.test('once landed or set aside, read marks and the needs-eyes order are gone', async t => {
+      for (const s of ['landed', 'abandoned']) {
+        const page = await open(t, DESK, `s=${s}`);
+        assert.deepEqual(await bands(page), [['All files', 17]], s);
+        await page.locator('.lr-more').first().click();
+        assert.equal(await page.locator('.lr-file .tick').count(), 0, `${s}: no Read box`);
+        assert.equal(await page.getByRole('button', { name: 'Needs eyes first' }).count(), 0, s);
+        assert.equal(await page.locator('section[aria-label="The change"] .ph .hint').count(), 0, s);
+        assert.equal(await page.locator('.lr-file .fstat').count(), 15, `${s}: counts stay`);
+        await shot(page, `lane-review-${s}-files-1440-dark`);
+      }
     });
 
     await t.test('a combined file says where each line came from, and that it is provisional', async t => {

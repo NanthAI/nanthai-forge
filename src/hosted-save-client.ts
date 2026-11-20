@@ -101,6 +101,8 @@ export type SaveContract = {
   settleBackground?: boolean;
   /** upload-packs: several new small objects go up as one pack (one PUT). */
   uploadPacks?: boolean;
+  /** save-line-counts: delta changes may carry their +/- counts (c2388099). */
+  lineCounts?: boolean;
   /** The source authority epoch this command discovered. A new request pins it, as sync, compose
    * and finish requests do, instead of the epoch the Lane was opened under (review b1448b61 N3). */
   authorityEpoch?: number;
@@ -118,6 +120,7 @@ export const saveContract = (capabilities: {
   prepareTargets: capabilities.features?.includes('prepare-upload-targets') ?? false,
   runPublish: capabilities.features?.includes('source-run-publish') ?? false,
   uploadPacks: capabilities.features?.includes('upload-packs') ?? false,
+  lineCounts: capabilities.features?.includes('save-line-counts') ?? false,
 });
 
 const blobName = /^[0-9a-f]{64}$/;
@@ -349,6 +352,7 @@ async function saveOnce(
       }
     }
     // Older servers validate delta pages strictly. Reuse capability discovery; never probe per save.
+    if (!contract.lineCounts) for (const change of changes) delete change.lines;
     if (!overlapEvidence) for (const change of changes) delete change.evidence;
     else if (overlapEvidence !== 'symbol-links')
       for (const change of changes) delete change.evidence?.symbolLinks;

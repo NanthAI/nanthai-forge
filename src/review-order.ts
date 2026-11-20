@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // The order a person reads a change in (Item 52235fbf): files grouped by what needs eyes, each with the observed fact
-// that put it there. Never a risk score: every reason is a fact Forge saw (a status, a mode, a path, a protected-path
+// that put it there. "Needs your eyes" holds only what the Lane page's Facts name: a conflict with another Lane or main
+// and a protected-path match; every other code file is "Code" (Item c2388099). Never a risk score: every reason is a fact Forge saw (a status, a mode, a path, a protected-path
 // rule, a conflict with another Lane). The web review screen and the agent's `diff {summary:true}` share this module,
 // so both give the same group and the same words for the same facts. Pure: no reads, no clock, safe in any client.
 
-export type ReviewGroup = 'eyes' | 'tests' | 'low';
+export type ReviewGroup = 'eyes' | 'code' | 'tests' | 'low';
 export type ReviewFacts = {
   path: string;
   status: 'added' | 'deleted' | 'modified';
@@ -22,7 +23,8 @@ export type ReviewFacts = {
 export type ReviewEntry = { path: string; group: ReviewGroup; reason: string; rank: number };
 
 export const reviewGroupLabels: Record<ReviewGroup, { title: string; hint: string }> = {
-  eyes: { title: 'Needs your eyes', hint: 'conflicts and protected paths first' },
+  eyes: { title: 'Needs your eyes', hint: 'overlaps and protected paths' },
+  code: { title: 'Code', hint: 'no overlap, not protected' },
   tests: { title: 'Tests', hint: 'what proves it' },
   low: { title: 'Low risk', hint: 'docs, fixtures and binary files' },
 };
@@ -49,11 +51,11 @@ export function reviewEntry(facts: ReviewFacts): ReviewEntry {
   if (facts.protected) return { path, group: 'eyes', rank: 1, reason: 'a protected path' };
   const after = status === 'deleted' ? null : (facts.after ?? null);
   if (after === 'gitlink' || facts.before === 'gitlink')
-    return { path, group: 'eyes', rank: 2, reason: 'a submodule pointer' };
+    return { path, group: 'code', rank: 2, reason: 'a submodule pointer' };
   if (after === 'symlink' && facts.before !== 'symlink')
-    return { path, group: 'eyes', rank: 2, reason: 'now a link' };
+    return { path, group: 'code', rank: 2, reason: 'now a link' };
   if (after === 'executable' && facts.before !== 'executable' && status !== 'added')
-    return { path, group: 'eyes', rank: 2, reason: 'now executable' };
+    return { path, group: 'code', rank: 2, reason: 'now executable' };
   if (FIXTURE.test(path))
     return {
       path,
@@ -74,13 +76,13 @@ export function reviewEntry(facts: ReviewFacts): ReviewEntry {
     return { path, group: 'low', rank: 3, reason: status === 'deleted' ? 'doc removed' : 'docs only' };
   return {
     path,
-    group: 'eyes',
+    group: 'code',
     rank: status === 'deleted' ? 3 : status === 'added' ? 4 : 5,
     reason: status === 'deleted' ? 'removed' : status === 'added' ? 'new file' : 'code changed',
   };
 }
 
-const GROUPS: ReviewGroup[] = ['eyes', 'tests', 'low'];
+export const reviewGroups: readonly ReviewGroup[] = ['eyes', 'code', 'tests', 'low'];
 
 /** Every file in reading order: by group, then rank, then path. File order is the same entries sorted by path. */
 export function reviewOrder(files: readonly ReviewFacts[]): ReviewEntry[] {
@@ -88,7 +90,7 @@ export function reviewOrder(files: readonly ReviewFacts[]): ReviewEntry[] {
     .map(reviewEntry)
     .sort(
       (a, b) =>
-        GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group) ||
+        reviewGroups.indexOf(a.group) - reviewGroups.indexOf(b.group) ||
         a.rank - b.rank ||
         (a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
     );
@@ -96,7 +98,7 @@ export function reviewOrder(files: readonly ReviewFacts[]): ReviewEntry[] {
 
 /** How many files fall in each group, for the head sentence and the agent summary. */
 export function reviewCounts(entries: readonly Pick<ReviewEntry, 'group'>[]) {
-  const counts: Record<ReviewGroup, number> = { eyes: 0, tests: 0, low: 0 };
+  const counts: Record<ReviewGroup, number> = { eyes: 0, code: 0, tests: 0, low: 0 };
   for (const entry of entries) counts[entry.group]++;
   return counts;
 }

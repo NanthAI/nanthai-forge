@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* The Lane review screen's layout only (Item 52235fbf): the change beside what is known about it, and the read tick
+/* The Lane review screen's layout only (Item 52235fbf): the change beside what is known about it, and the read box
    beside each file's summary (outside it, so the tick is not a control inside the fold's own button). Every part is
    the design system's (review.css, figures.css, core.css); every value is a token. */
 
@@ -19,8 +19,10 @@
   .lr-lead > .ph { flex-wrap: wrap; row-gap: var(--s-0); padding-block: var(--s-1); }
   .lr-lead > .ph > .st { flex: 0 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
   .lr-file { position: relative; }
-  .lr-file > .file > summary { padding-right: calc(var(--gut) + 30px); cursor: pointer; }
-  .lr-file > .tick { position: absolute; top: 0; right: calc(var(--gut) - 6px); width: 28px; height: var(--row-h); display: grid; place-items: center; border: 0; background: transparent; padding: 0; }
+  .lr-file > .file > summary { cursor: pointer; }
+  /* The read box carries its word, "Read"; what it means is its hover hint (Item c2388099). */
+  .lr-file.marked > .file > summary { padding-right: calc(var(--gut) + 56px); }
+  .lr-file > .tick { position: absolute; top: 0; right: calc(var(--gut) - 6px); height: var(--row-h); display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 0 6px; color: var(--text-2); font: inherit; font-size: var(--t-meta); cursor: pointer; }
   .lr-file > .tick:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .lr-tools { display: flex; gap: var(--s-2) var(--s-3); align-items: center; flex-wrap: wrap; padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); }
   .lr-tools .right { margin-left: auto; }

@@ -13,6 +13,8 @@ export type ReviewFile = {
   status: 'added' | 'deleted' | 'modified';
   before: Side;
   after: Side;
+  /** Lines added and removed, recorded once at save (Item c2388099); absent on older saves. */
+  lines?: [number, number];
   protected?: true;
 };
 export type Peer = {

@@ -3,7 +3,9 @@
 // Convex client is a stand-in that answers the two download calls the screen makes and counts them; file bytes come
 // back as data: URLs and the real reader checks each against its digest. `?s=review` is a held Lane with a conflict
 // with the Lane ahead; `?s=combined` is the same Lane after it was combined on top of that Lane; `?s=parked` is the
-// held Lane also parked on a named holder (Item e1633718).
+// held Lane also parked on a named holder (Item e1633718); `?s=landed` and `?s=abandoned` are the Lane once review is
+// over. Each file carries the +/- counts its save recorded (c2388099), except docs/parser.md and the fixture, which
+// stand for an older save that recorded none.
 import { createRoot } from 'react-dom/client';
 import { ConvexProvider, type ConvexReactClient } from 'convex/react';
 import { getFunctionName } from 'convex/server';
@@ -83,18 +85,20 @@ async function reply(): Promise<Reply> {
   };
   const aheadSide = await blob(parserAhead);
   const files: Reply['files']['items'] = [
-    { path: 'src/parser/stream-parser.ts', status: 'modified', ...stream },
+    { path: 'src/parser/stream-parser.ts', status: 'modified', ...stream, lines: [3, 2] },
     {
       path: 'src/parser/utf8-carry.ts',
       status: 'added',
       before: null,
       after: await blob('export const carry = {\n  reset() {},\n};\n'),
+      lines: [3, 0],
     },
     {
       path: 'package.json',
       status: 'modified',
       before: await blob('{\n  "version": "1.0.0"\n}\n'),
       after: await blob('{\n  "version": "1.1.0"\n}\n'),
+      lines: [1, 1],
       protected: true,
     },
     {
@@ -102,12 +106,14 @@ async function reply(): Promise<Reply> {
       status: 'modified',
       before: fake('d1', 2_400_000),
       after: fake('d2', 2_600_000),
+      lines: [1_204, 380],
     },
     {
       path: 'tests/stream-parser.test.ts',
       status: 'modified',
       before: await blob("test('a', () => {});\n"),
       after: await blob("test('a', () => {});\ntest('split', () => {});\n"),
+      lines: [1, 0],
     },
     {
       path: 'docs/parser.md',
@@ -126,6 +132,7 @@ async function reply(): Promise<Reply> {
       status: 'deleted',
       before: await blob('export const old = 1;\n'),
       after: null,
+      lines: [0, 1],
     },
     ...(await Promise.all(
       Array.from({ length: 9 }, async (_, i) => ({
@@ -133,6 +140,7 @@ async function reply(): Promise<Reply> {
         status: 'modified' as const,
         before: await blob(`export const n = ${i};\n`),
         after: await blob(`export const n = ${i + 1};\n`),
+        lines: [1, 1] as [number, number],
       })),
     )),
   ];
@@ -144,7 +152,7 @@ async function reply(): Promise<Reply> {
       goal: 'Stream parser: handle split UTF-8',
       actor: 'sample-owner',
       agent: 'amber-fox',
-      state: 'active',
+      state: scenario === 'abandoned' ? 'abandoned' : scenario === 'landed' ? 'completed' : 'active',
       head: HEAD,
       base: { head: BASE },
       // A landed Lane carries its own time to main and stops (Item a61d3c91).
@@ -229,7 +237,10 @@ const route = {
   rest: LANE,
 };
 const feed = {
-  lanes: [{ laneId: LANE, stage: 'checking' as const, held: true, overlap: true, changedAt: Date.now() }],
+  lanes:
+    scenario === 'abandoned'
+      ? []
+      : [{ laneId: LANE, stage: 'checking' as const, held: true, overlap: true, changedAt: Date.now() }],
   more: 0,
   moreIsLowerBound: false,
   main: { head: BASE },
