@@ -4,10 +4,13 @@
 // already subscribes to and the Needs you rows the page already reads: no read of its own, no timer. Below desk width the
 // picture is the stops as flat rows.
 import type { ReactNode } from 'react';
+import { FlowMotion } from './motion';
+import type { DrawerStop } from './drawer-model';
 import { Glyph, Region } from '../../ds';
 import { A } from '../frames';
 import type { LineFeed } from '../Line';
-import { SizedPicture, jumpToRow, type PictureFacts } from './Picture';
+import { SizedPicture, type PictureFacts } from './Picture';
+import { Tag } from './labels';
 import { clock, duration, flowFigures, flowStations, type HeldRow, type Station } from './model';
 import './flow.css';
 
@@ -23,8 +26,9 @@ function stationFact(station: Station) {
       `${plural(station.checks.length, 'check')}, ${plural(
         station.checks.reduce((a, b) => a + b, 0),
         'Lane',
-      )}`,
+      )} · shards proposed`,
     );
+  if (station.stop === 'saved' && station.n) parts.push('Preflight · proposed');
   if (station.passed) parts.push(`${station.passed} passed, landing`);
   const red = station.held.filter(block => block.shape === '').length;
   if (red) parts.push(`${red} held: main is failing`);
@@ -33,6 +37,13 @@ function stationFact(station: Station) {
 
 export function FlowRegion({
   feed,
+  error,
+  readAt,
+  stop,
+  onOpen,
+  laneHref,
+  stationHref,
+  revealHeld,
   rows,
   needsYou,
   handle,
@@ -40,6 +51,13 @@ export function FlowRegion({
   drawnAt,
 }: {
   feed: LineFeed | undefined;
+  error?: boolean;
+  readAt?: number;
+  stop: DrawerStop | null;
+  onOpen: (stop: DrawerStop) => void;
+  laneHref: (id: string) => string;
+  stationHref: (stop: DrawerStop) => string;
+  revealHeld: (id: string) => void;
   rows: readonly HeldRow[];
   /** Anything waits on the reader: the picture gives Needs you its width (the dock's ratio, needs.css). */
   needsYou: boolean;
@@ -49,12 +67,15 @@ export function FlowRegion({
 }) {
   const stations = flowStations(feed, rows);
   const day = flowFigures(feed, drawnAt);
+  const tracking = !!feed && !error;
+  const active = tracking && !needsYou && stations.some(s => s.n > s.held.length);
   const open = feed ? feed.lanes.length + feed.more : undefined;
   const checking = stations.find(station => station.stop === 'checking')!;
   const waiting = stations.flatMap(s => s.held).filter(block => block.colour === 'failed').length;
   const since = day.since === null ? null : clock(day.since, drawnAt);
   const facts: PictureFacts = {
     today: day.landed,
+    hasMain: !!feed?.main || day.landed > 0 || !!feed?.flow?.main,
     hours: day.byHour,
     red: day.red,
     stationFacts: stations.map(stationFact),
@@ -72,58 +93,103 @@ export function FlowRegion({
       handle={handle}
       hint={feed?.moreIsLowerBound ? 'at least this many open' : undefined}
     >
-      <div className="flow" data-calm={needsYou ? '' : undefined} aria-busy={feed ? undefined : true}>
+      {error ? (
+        <div className="flow-error" role="status">
+          <Glyph of="waiting" size={12} /> Could not refresh Flow.
+          {feed && readAt !== undefined ? <> Last read at {clock(readAt, drawnAt)}.</> : null}
+        </div>
+      ) : null}
+      <FlowMotion active={active} ariaBusy={!feed && !error}>
         <div className="flow-desk">
-          <SizedPicture stations={stations} facts={facts} />
+          <SizedPicture
+            stations={stations}
+            facts={facts}
+            feed={tracking ? feed : undefined}
+            loading={!feed}
+            open={stop}
+            onOpen={onOpen}
+            laneHref={laneHref}
+            stationHref={stationHref}
+            revealHeld={revealHeld}
+          />
         </div>
         <ul className="flow-rows" aria-label="Open Lanes by stop">
           {stations.map(station => (
             <li key={station.stop} className={station.n ? 'flow-row' : 'flow-row zero'}>
-              <span className="n">{station.name}</span>
-              <span className="c num">{feed ? station.n.toLocaleString('en') : '–'}</span>
+              <button
+                type="button"
+                className="flow-stop"
+                aria-expanded={stop === station.stop}
+                onClick={() => onOpen(station.stop)}
+              >
+                <span className="n">{station.name}</span>
+                <span className="c num">{feed ? station.n.toLocaleString('en') : '–'}</span>
+              </button>
               <span className="w">
+                <span className="flow-marks" aria-hidden="true">
+                  {station.blocks
+                    .filter(block => !block.needsYou)
+                    .map(block => (
+                      <span
+                        key={block.laneId}
+                        className={block.running ? 'run' : undefined}
+                        data-st={block.colour}
+                      >
+                        <Glyph of={block.colour} size={10} />
+                      </span>
+                    ))}
+                </span>
                 {station.held
                   .filter(block => block.needsYou)
                   .slice(0, 3)
                   .map(block => (
-                    <a
-                      key={block.laneId}
-                      className="fv-tag"
-                      data-st={block.colour}
-                      href={`#d-${block.laneId}`}
-                      onClick={event => {
-                        if (jumpToRow(block.laneId)) event.preventDefault();
-                      }}
-                    >
-                      <Glyph of={block.colour} size={11} />
-                      {block.word}
-                    </a>
+                    <Tag key={block.laneId} block={block} revealHeld={revealHeld} />
                   ))}
                 {stationFact(station) ? <span className="f">{stationFact(station)}</span> : null}
               </span>
             </li>
           ))}
           <li className="flow-row">
-            <span className="n">main</span>
-            <span className="c num">
-              {day.landed.toLocaleString('en')}
-              <small>today</small>
-            </span>
-            <span className="w">
-              <span className="f">
-                Needs fix {day.fix} today · main failed {day.reverted + day.fixedOnTop} today
+            <button
+              type="button"
+              className="flow-stop"
+              aria-expanded={stop === 'main'}
+              onClick={() => onOpen('main')}
+            >
+              <span className="n">main</span>
+              <span className="c num">
+                {feed ? day.landed.toLocaleString('en') : '–'}
+                {feed ? <small>today</small> : null}
               </span>
+            </button>
+            <span className="w">
+              {feed?.flow?.main ? (
+                <span className="st" data-st={day.red ? 'failed' : 'passed'}>
+                  <Glyph of={day.red ? 'failed' : 'passed'} />
+                  {day.red ? 'Failing' : 'Passing'}
+                </span>
+              ) : null}
             </span>
           </li>
         </ul>
+        {feed ? (
+          <div className="flow-backrows">
+            <span>
+              Needs fix <b>{day.fix}</b> today
+            </span>
+            <span data-st={day.red ? 'failed' : undefined}>
+              main failed <b>{day.reverted + day.fixedOnTop}</b> today
+            </span>
+          </div>
+        ) : null}
         {feed?.more ? (
           <div className="pf">
             {feed.more.toLocaleString('en')}
             {feed.moreIsLowerBound ? ' or more' : ''} open Lanes past the first {feed.lanes.length} are not
-            drawn by stop; Lanes lists them all.
+            drawn by stop; <A href={hrefs.lanes}>Lanes lists them all</A>.
           </div>
         ) : null}
-      </div>
+      </FlowMotion>
       {feed ? (
         <>
           <nav className="flow-figs" aria-label="Today">
@@ -183,7 +249,12 @@ export function FlowRegion({
               <span className="s">{since ? <>since {<b>{since}</b>}</> : 'no verdict yet today'}</span>
             </A>
           </nav>
-          <div className="flow-chk">
+          <button
+            type="button"
+            className="flow-chk"
+            aria-expanded={stop === 'checking'}
+            onClick={() => onOpen('checking')}
+          >
             <b>Checks</b>
             <span>
               {checking.checks.length
@@ -191,11 +262,12 @@ export function FlowRegion({
                 : 'none running'}
               {checking.passed ? `, ${checking.passed} passed` : ''}
             </span>
+            {checking.checks.length ? <span className="prop">Shards · proposed</span> : null}
             <span className="ci">
               <b>{day.ciMinutes.toLocaleString('en')}</b> CI min today,{' '}
               <b>{day.lostMinutes.toLocaleString('en')}</b> on checks that did not land
             </span>
-          </div>
+          </button>
         </>
       ) : null}
     </Region>

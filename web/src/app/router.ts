@@ -57,8 +57,9 @@ export function navigate(href: string, { replace = false } = {}) {
 }
 
 /** The click handler for an <a href> inside the rebuilt app: modified clicks keep the browser's own behaviour. */
-export function followLink(event: MouseEvent<HTMLAnchorElement>) {
+export function followLink(event: MouseEvent<HTMLAnchorElement | SVGAElement>) {
   const anchor = event.currentTarget;
+  const target = typeof anchor.target === 'string' ? anchor.target : anchor.getAttribute('target');
   if (
     event.defaultPrevented ||
     event.button !== 0 ||
@@ -66,10 +67,12 @@ export function followLink(event: MouseEvent<HTMLAnchorElement>) {
     event.ctrlKey ||
     event.shiftKey ||
     event.altKey ||
-    (anchor.target && anchor.target !== '_self')
+    (target && target !== '_self')
   )
     return;
-  const url = new URL(anchor.href, location.href);
+  const href = typeof anchor.href === 'string' ? anchor.href : anchor.href.baseVal;
+  if (!href) return;
+  const url = new URL(href, location.href);
   if (url.origin !== location.origin || !isAppPath(url.pathname)) return;
   event.preventDefault();
   navigate(url.href);

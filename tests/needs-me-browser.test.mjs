@@ -274,7 +274,12 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
           for (const theme of ['dark', 'light']) {
             await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
             // A button eases its colours into the new theme; jump every transition to its end so axe reads the settled page.
-            await page.evaluate(() => document.getAnimations().forEach(a => a.finish()));
+            await page.evaluate(() =>
+              document
+                .getAnimations()
+                .filter(a => a.effect?.getTiming().iterations !== Infinity)
+                .forEach(a => a.finish()),
+            );
             const [scroll, inner] = await page.evaluate(() => [
               document.documentElement.scrollWidth,
               innerWidth,

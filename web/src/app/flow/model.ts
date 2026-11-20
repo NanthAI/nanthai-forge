@@ -26,13 +26,19 @@ export type Block = {
   /** The check it is in; Lanes checked together stand as one tower. */
   check: string | null;
   passed: boolean;
+  running: boolean;
 };
 export type Station = {
   stop: LineStop;
   name: string;
   n: number;
   held: Block[];
+  /** The blocks drawn: every Lane, or past the feed's cap only the held ones, in front of the solid. */
   blocks: Block[];
+  /** Every Lane at this stop, drawn or not (the drawer lists them). */
+  allBlocks: Block[];
+  /** Past the feed's cap (more open Lanes than it lists): the moving Lanes here, drawn as one solid. */
+  solid: number;
   /** Checks running here (Checking only), largest first, as tower sizes. */
   checks: number[];
   /** Checks that passed and wait to land (Checking only). */
@@ -83,17 +89,24 @@ export function flowStations(feed: LineFeed | undefined, rows: readonly HeldRow[
         head: row?.head ?? null,
         who: row?.who ?? null,
         check: lane.stage === 'checking' && lane.check ? lane.check : null,
+        running: !lane.held && (lane.stage === 'editing' || lane.stage === 'checking'),
         passed: lane.stage === 'ready' && !lane.held,
       };
     });
     const sizes = new Map<string, number>();
     for (const block of blocks) if (block.check) sizes.set(block.check, (sizes.get(block.check) ?? 0) + 1);
+    const held = blocks.filter(block => block.shape !== '' || block.word === 'main is failing');
+    // Past the cap the feed lists 60 Lanes, held ones first, and counts the rest: the picture draws counts per stop,
+    // with held Lanes still as blocks (the line's rule; lead 2026-11-20).
+    const over = (feed?.more ?? 0) > 0;
     return {
       stop: stop.stage,
       name: stop.label,
       n: at.length,
-      held: blocks.filter(block => block.shape !== '' || block.word === 'main is failing'),
-      blocks,
+      held,
+      blocks: over ? held : blocks,
+      allBlocks: blocks,
+      solid: over ? blocks.length - held.length : 0,
       checks: [...sizes.values()].sort((a, b) => b - a),
       passed: blocks.filter(block => block.passed).length,
     };

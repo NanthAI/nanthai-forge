@@ -5,7 +5,14 @@
 // line; the account and public frames read only the viewer.
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { ConvexAuthProvider, useAuthActions } from '@convex-dev/auth/react';
-import { ConvexReactClient, useConvex, useConvexAuth, useMutation, useQuery } from 'convex/react';
+import {
+  ConvexReactClient,
+  useConvex,
+  useConvexAuth,
+  useConvexConnectionState,
+  useMutation,
+  useQuery,
+} from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
 import { prefetchLayerWhenIdle } from '../ds';
@@ -253,7 +260,15 @@ function ProjectView({
 }) {
   const client = useConvex();
   const project = useQuery(api.urlProjects.resolve, { handle: route.handle, slug: route.project });
-  const feed = useLiveLine((project?.id ?? null) as Id<'hostedProjects'> | null);
+  const projectId = (project?.id ?? null) as Id<'hostedProjects'> | null;
+  const { value: line, error: lineError } = useLiveLine(projectId);
+  const connection = useConvexConnectionState();
+  const feedError = !!lineError || (connection.hasEverConnected && !connection.isWebSocketConnected);
+  const [lastLine, setLastLine] = useState({ projectId, line, at: Date.now() });
+  if (lastLine.projectId !== projectId || (line && lastLine.line !== line)) {
+    setLastLine({ projectId, line, at: Date.now() });
+  }
+  const feed = line ?? (lastLine.projectId === projectId ? lastLine.line : undefined);
   // The shell's "Needs you" count uses Needs me's own read and rule (needs/count.ts), so the two always agree; on
   // Needs me the page shares this one subscription.
   const needsLive = useQuery(
@@ -313,6 +328,8 @@ function ProjectView({
         projectId={(project?.id ?? null) as Id<'hostedProjects'> | null}
         projectName={name}
         feed={feed}
+        feedError={feedError}
+        feedReadAt={lastLine.at}
         viewerHandle={controls.viewerHandle}
       />
       {overlays((project?.id ?? null) as Id<'hostedProjects'> | null)}

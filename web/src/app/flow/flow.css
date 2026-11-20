@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* The Flow picture on Needs me (Item 85f456c1, direction B): flat fills in the state tokens, no glow, gradient or
-   shadow; labels sit on the plain page. Every colour, font, radius and duration is a token. Nothing here loops. */
+   shadow; labels sit on the plain page. */
 [data-ds] {
   .flow { position: relative; background: var(--bg); }
   .fv-pic { position: relative; background: var(--bg); overflow: hidden; }
@@ -33,6 +33,7 @@
   .fv-strata .seam { fill: none; }
   .fv-strata .t { fill: var(--passed); }
   .fv-strata.red .t { fill: var(--failed); }
+  .fv-strata.unreported .t { fill: var(--surface-3); }
   .fv-strata .g { fill: none; stroke: var(--bg); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 
   /* a stop's label: name and count; at full size beside its platform, smaller above or below it */
@@ -44,8 +45,8 @@
   .fv-stn .f .st { font-size: inherit; }
   .fv-stn.zero .c { color: var(--text-3); }
   .fv-stn.r { text-align: right; justify-items: end; }
-  .fv-stn.inl { grid-template-columns: auto auto; align-items: baseline; justify-content: end; column-gap: 7px; padding: 3px 6px; }
-  .fv-stn.inl .f, .fv-stn.inl .tags { grid-column: 1 / -1; }
+  .fv-stn.inl { justify-content: end; padding: 3px 6px; }
+  .fv-stn.inl .flow-stop { grid-template-columns: auto auto; align-items: baseline; column-gap: 7px; }
   .fv-stn.inl.up { transform: translateX(-50%); justify-content: center; text-align: center; }
   .fv-stn .tags { display: grid; gap: 4px; justify-items: end; margin-top: 4px; min-width: 0; }
   .fv-stn.up .tags { justify-items: center; }
@@ -98,19 +99,19 @@
     .flow-figs > :nth-child(4) { border-left: var(--rule) solid var(--line); }
     .flow-figs > :last-child { grid-column: 1 / -1; }
   }
-  .flow-chk { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--s-3); min-height: var(--row-h); padding: var(--s-2) var(--gut); border-top: var(--rule) solid var(--line); background: var(--surface); color: var(--text-2); font-size: var(--t-meta); }
+  .flow-chk { width: 100%; text-align: start; border: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--s-3); min-height: var(--row-h); padding: var(--s-2) var(--gut); border-top: var(--rule) solid var(--line); background: var(--surface); color: var(--text-2); font-size: var(--t-meta); }
   .flow-chk > b { color: var(--text); font-size: var(--t-small); font-weight: var(--w-strong); }
   .flow-chk .ci { margin-left: auto; }
   .flow-chk .ci b { color: var(--text); font-family: var(--font-mono); font-size: calc(1em * var(--mono-scale)); font-weight: var(--w-strong); }
 
   /* below desk width the stops are flat rows (the phone's picture) */
   .flow-rows { display: none; margin: 0; padding: 0; list-style: none; }
-  .flow-row { display: grid; grid-template-columns: 84px minmax(0, 1fr); grid-template-areas: "n w" "c w"; column-gap: var(--s-3); align-items: center; min-height: 56px; padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); }
-  .flow-row .n { grid-area: n; align-self: end; font: var(--w-strong) var(--t-meta)/1.3 var(--font-sans); color: var(--text-2); }
-  .flow-row .c { grid-area: c; align-self: start; font: var(--w-bold) 22px/1.1 var(--font-sans); letter-spacing: var(--head-track); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .flow-row { display: grid; grid-template-columns: 84px minmax(0, 1fr); column-gap: var(--s-3); align-items: center; min-height: 56px; padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); }
+  .flow-row .n { font: var(--w-strong) var(--t-meta)/1.3 var(--font-sans); color: var(--text-2); }
+  .flow-row .c { font: var(--w-bold) 22px/1.1 var(--font-sans); letter-spacing: var(--head-track); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .flow-row .c small { font: var(--w-regular) var(--t-micro)/1 var(--font-sans); letter-spacing: 0; color: var(--text-2); margin-left: 4px; }
   .flow-row.zero .c { color: var(--text-3); }
-  .flow-row .w { grid-area: w; display: flex; flex-wrap: wrap; gap: 4px var(--s-2); align-items: center; min-width: 0; }
+  .flow-row .w { display: flex; flex-wrap: wrap; gap: 4px var(--s-2); align-items: center; min-width: 0; }
   .flow-row .f { font-size: var(--t-meta); color: var(--text-3); min-width: 0; overflow-wrap: anywhere; }
   @media (max-width: 860px) {
     .flow-desk { display: none; }
@@ -118,7 +119,119 @@
     .flow-chk .ci { margin-left: 0; flex-basis: 100%; }
   }
 
+  .flow-error, .flow-backrows { padding: var(--s-2) var(--gut); font-size: var(--t-meta); }
+  .flow-error { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-1); color: var(--waiting); border-bottom: var(--rule) solid var(--line); }
+  .flow-backrows { display: none; flex-wrap: wrap; gap: var(--s-2) var(--s-4); color: var(--text-2); }
+  .flow-backrows [data-st="failed"] { color: var(--failed); }
+  @media (max-width: 860px) { .flow-backrows { display: flex; } }
+  .flow-marks { display: flex; gap: 4px; flex-wrap: wrap; }
+  .flow-marks > span { display: inline-flex; color: var(--st); }
+  .flow-marks:empty { display: none; }
+  .flow-stop:focus-visible, .flow-chk:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  @media (hover: hover) and (pointer: fine) {
+    .flow-chk:hover { background: var(--hover); }
+    .flow-stop:hover .n { text-decoration: underline; }
+  }
+
   /* a row under Needs you reached from a tag marks itself once */
   .flow-here { animation: ds-settle var(--d-travel) var(--ease-out); }
   @media (prefers-reduced-motion: reduce) { .flow-here { animation: none; } }
 }
+
+[data-ds] {
+  .flow-stop {
+    display: grid;
+    justify-items: start;
+    text-align: inherit;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    width: fit-content;
+    color: inherit;
+    font: inherit;
+  }
+  .fv-stn.r .flow-stop { justify-items: end; }
+  .fv-solid { color: var(--st); }
+  .fv-solid .t { fill: color-mix(in srgb, currentColor 82%, var(--bg)); }
+  .fv-solid .l { fill: color-mix(in srgb, currentColor 54%, var(--bg)); }
+  .fv-solid .r { fill: color-mix(in srgb, currentColor 32%, var(--bg)); }
+  .fv-solid path { stroke: var(--bg); stroke-width: 1; stroke-linejoin: round; }
+  .fv-pic svg a { cursor: pointer; }
+  .fv-pic svg a:focus-visible { outline: none; }
+  .fv-pic svg a:is(:hover, :focus-visible) > :is(.t, .l, .r) { stroke: var(--text); stroke-width: 1.6; }
+  .fv-cube-hint { display: none; pointer-events: none; }
+  .fv-cube:is(:hover, :focus-visible) .fv-cube-hint { display: block; }
+  .fv-cube-hint span {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    padding: 2px 4px;
+    background: var(--surface);
+    border: var(--rule) solid var(--line-strong);
+    color: var(--text);
+    font: var(--t-meta)/1.25 var(--font-sans);
+  }
+
+  .flow-clock { position: absolute; width: 1px; height: 1px; pointer-events: none; opacity: 0; }
+  .fv-dash { fill: none; stroke: var(--text-2); stroke-linecap: round; stroke-width: 2; opacity: 0; }
+  .flow:not([data-still]) .fv-dash {
+    animation: fv-travel calc(var(--run) * var(--motion-rate, 1)) linear
+      calc(var(--lead) * var(--motion-rate, 1)) infinite;
+  }
+  .flow:not([data-still]) .run { animation: fv-breathe calc(3.6s * var(--motion-rate, 1)) ease-in-out infinite; }
+  .flow[data-slow] { --motion-rate: 2; }
+  .flow-clock { animation: fv-clock 60s linear; }
+  .fv-arrive { animation: fv-arrive var(--d-travel) var(--ease-out) var(--arrival-offset) backwards; }
+  .fv-enter { animation: fv-enter var(--d-state) var(--ease-out) var(--arrival-offset) backwards; }
+  .fv-landed { pointer-events: none; animation: fv-arrive var(--d-travel) var(--ease-out) both, fv-disappear var(--d-state) var(--ease-out) var(--d-travel) forwards; }
+  .fv-landing-pulse { pointer-events: none; fill: var(--text); stroke: none; opacity: 0; animation: fv-flash var(--d-ring) var(--ease-out) var(--d-travel) both; }
+  .flow[data-hidden] :is(.run, .fv-dash, .flow-clock, .fv-arrive, .fv-enter, .fv-landed, .fv-landing-pulse) { animation-play-state: paused; }
+  @media (prefers-reduced-motion: reduce) {
+    .flow :is(.fv-dash, .flow-clock, .fv-landed, .fv-landing-pulse) { display: none; }
+    .flow:not([data-still]) .run, .flow :is(.fv-arrive, .fv-enter) { animation: none; }
+  }
+
+  .fv-drawer .tally { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-4); padding: var(--s-2) var(--gut); }
+  .fv-drawer .body { max-height: 420px; overflow: auto; overscroll-behavior: contain; }
+  .fv-drawer .band .lk { margin-inline-start: auto; }
+  .fv-drawer .pager, .fv-ci { padding: var(--s-2) var(--gut); font-size: var(--t-meta); color: var(--text-2); }
+  .fv-drawer .pager { display: flex; align-items: center; justify-content: space-between; }
+  .fv-rax {
+    position: sticky; top: 0; z-index: 1; display: grid;
+    grid-template-columns: minmax(0, 42%) minmax(0, 1fr) 78px; min-height: 24px;
+    background: var(--surface); border-bottom: var(--rule) solid var(--line);
+  }
+  .fv-rax .ax { grid-column: 2; position: relative; }
+  .fv-rax .ax span { position: absolute; top: 5px; color: var(--text-2); font: var(--t-micro)/1 var(--font-mono); white-space: nowrap; transform: translateX(-50%); }
+  .fv-rrow {
+    display: grid; grid-template-columns: minmax(0, 42%) minmax(0, 1fr) 78px;
+    align-items: center; min-height: var(--row-h); border-bottom: var(--rule) solid var(--line);
+    color: inherit; text-decoration: none;
+  }
+  .fv-rrow:is(:hover, :focus-visible) { background: var(--hover); }
+  .fv-rrow[data-weight="act"] { box-shadow: inset var(--act-edge) 0 0 var(--act); }
+  .fv-rrow .w { display: grid; gap: 1px; padding: 6px var(--s-2) 6px var(--gut); min-width: 0; }
+  .fv-rrow :is(.ttl, .meta) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fv-rrow .ttl { font-weight: var(--w-strong); font-size: var(--t-small); }
+  .fv-rrow .meta { color: var(--text-2); font-size: var(--t-meta); }
+  .fv-rrow .meta .mono { margin-inline-start: var(--s-1); }
+  .fv-rrow .bar { position: relative; align-self: stretch; border-right: var(--rule) solid var(--line); }
+  .fv-rrow .bar i { position: absolute; top: 50%; height: 8px; margin-top: -4px; min-width: 3px; background: var(--st, var(--text-3)); }
+  .fv-rrow .bar i.past { margin-top: -6px; height: 12px; background: var(--passed); }
+  .fv-rrow .d { padding: 0 var(--gut) 0 var(--s-2); text-align: right; color: var(--text-2); font: var(--t-meta)/1.2 var(--font-mono); }
+  .flow-chk .prop, .fv-drawer .prop { color: var(--text-2); }
+}
+
+@keyframes fv-clock { from, to { opacity: 0; } }
+@keyframes fv-travel {
+  0% { transform: translate(0, 0); opacity: 0; }
+  15%, 85% { opacity: 0.85; }
+  100% { transform: translate(var(--tx), var(--ty)); opacity: 0; }
+}
+@keyframes fv-breathe { 50% { opacity: 0.65; } }
+@keyframes fv-arrive { from { transform: translate(var(--from-x), var(--from-y)); } to { transform: translate(0, 0); } }
+@keyframes fv-enter { from { opacity: 0; } }
+@keyframes fv-disappear { to { opacity: 0; } }
+@keyframes fv-flash { 0% { opacity: 0.55; } 100% { opacity: 0; } }

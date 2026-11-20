@@ -269,7 +269,9 @@ Flat: four surface steps and one-pixel seams. A shadow only on a menu, a sheet, 
 
 **In the app, something moves only because a state changed, and it moves once.** The public page may loop, because there the motion is the explanation.
 
-**One exception:** the edge of the first stop beats, opacity only, three times over 2,400 ms each (`--beats`, `--d-beat`) when a thing starts to wait on the reader, when the page is shown and when the reader comes back to the tab (`useFirstStop`). Then it holds. It never loops, runs no timer and causes no request; with reduced motion it does not beat.
+**First-stop edge:** the edge of the first stop beats, opacity only, three times over 2,400 ms each (`--beats`, `--d-beat`) when a thing starts to wait on the reader, when the page is shown and when the reader comes back to the tab (`useFirstStop`). Then it holds. It never loops, runs no timer and causes no request; with reduced motion it does not beat.
+
+**Flow exception:** While work is moving on Needs me, its outgoing track may loop and editing or running checks may breathe. These CSS-only loops stop for quiet, stale, held-for-you and reduced-motion views, pause while hidden, and run at half speed after 60 seconds without input.
 
 | Token | Time | Use |
 |---|---|---|

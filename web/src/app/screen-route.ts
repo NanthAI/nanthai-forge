@@ -16,6 +16,8 @@ export type PlaceProps = {
   projectId: Id<'hostedProjects'>;
   projectName: string;
   feed: LineFeed | undefined;
+  feedError?: boolean;
+  feedReadAt?: number;
   viewerHandle: string | undefined;
 };
 

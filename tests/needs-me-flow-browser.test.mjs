@@ -19,6 +19,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const axePath = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
 const shots = process.env.FORGE_NEEDS_SHOTS || null;
 const FIXTURE = 'tests/browser/needs-me.tsx';
+const HOME = '/-/sample-one/tidepool';
 const STOPS = ['editing', 'saved', 'queued', 'checking'];
 /** The picture's size step for its width (web/src/app/flow/geometry.ts `tierOf`). */
 const tierOf = width => (width >= 1000 ? 2 : width >= 640 ? 1 : 0);
@@ -54,8 +55,13 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
   if (shots) mkdirSync(shots, { recursive: true });
   const html = await buildFixture(out);
   const browser = await chromium.launch();
-  async function open(t, width, data, { theme = 'dark', layout = null } = {}) {
-    const context = await browser.newContext({ viewport: { width, height: 1000 } });
+  async function open(
+    t,
+    width,
+    data,
+    { theme = 'dark', layout = null, reducedMotion = 'no-preference', liveDrawer = false } = {},
+  ) {
+    const context = await browser.newContext({ viewport: { width, height: 1000 }, reducedMotion });
     await context.addInitScript(
       dock => {
         // Any interval, or a timeout of a second or more still pending, would be a page waking itself up.
@@ -98,13 +104,15 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
       const url = new URL(route.request().url());
       if (url.protocol === 'data:') return route.continue();
       if (url.hostname !== 'forge.test') return route.abort();
-      if (url.pathname === '/needs.html') return route.fulfill({ contentType: 'text/html', body: html });
+      if (url.pathname === HOME) return route.fulfill({ contentType: 'text/html', body: html });
       const file = join(out, url.pathname.slice(1));
       if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
       const contentType = file.endsWith('.js') ? 'text/javascript' : 'text/css';
       return route.fulfill({ contentType, body: readFileSync(file) });
     });
-    await page.goto(`https://forge.test/needs.html?data=${data}&theme=${theme}`);
+    await page.goto(
+      `https://forge.test${HOME}?data=${data}&theme=${theme}${liveDrawer ? '&live-drawer' : ''}`,
+    );
     await page
       .locator('.dock[data-dock] .region')
       .first()
@@ -176,17 +184,34 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
       assert.equal(await busy.locator('.fv-pic').getAttribute('data-tier'), '0', 'the picture drops a size');
       const phone = await open(t, 390, 'busy');
       const order = await phone.evaluate(() =>
-        [...document.querySelectorAll('section.region')]
-          .map(section => [section.getAttribute('aria-label'), section.getBoundingClientRect().top])
-          .sort((a, b) => a[1] - b[1])
-          .map(([name]) => name),
+        [...document.querySelectorAll('section.region')].map(section => section.getAttribute('aria-label')),
       );
       assert.deepEqual(
         order,
         ['Needs you', 'On the way to main', 'FYI', 'Loose ends'],
         'a phone reads Needs you first',
       );
+      await phone.locator('.needs-me .pstate a').last().focus();
+      const firstRegionFocused = [];
+      for (let i = 0; i < 80 && firstRegionFocused.length < 4; i++) {
+        await phone.keyboard.press('Tab');
+        const active = await phone.evaluate(
+          () => document.activeElement?.closest('section.region')?.ariaLabel,
+        );
+        if (active && !firstRegionFocused.includes(active)) firstRegionFocused.push(active);
+      }
+      assert.deepEqual(firstRegionFocused, order, 'Tab enters every region in DOM order');
       for (const page of [busy, phone]) assert.equal(await idleTimers(page), 0, 'an idle page sets no timer');
+      await phone.getByRole('button', { name: 'Move FYI' }).click();
+      await phone.getByRole('menuitem', { name: 'Up one' }).click();
+      const after = await phone
+        .locator('section.region')
+        .evaluateAll(sections => sections.map(section => section.ariaLabel));
+      assert.deepEqual(
+        after,
+        ['Needs you', 'FYI', 'On the way to main', 'Loose ends'],
+        'the phone grip can rearrange regions',
+      );
     });
 
     await t.test(
@@ -222,12 +247,291 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
       },
     );
 
+    await t.test(
+      'an individual cube opens its Lane, a solid opens its station, and the top line opens a phone sheet',
+      async t => {
+        const page = await open(t, 1440, 'busy', { reducedMotion: 'reduce' });
+        const cube = page.locator('a.fv-cube').first();
+        const id = await cube.getAttribute('data-id');
+        assert.equal(await cube.getAttribute('href'), `${HOME}/lanes/${id}`);
+        assert.match(await cube.getAttribute('aria-label'), /Editing/);
+        await cube.focus();
+        await page.keyboard.press('Tab');
+        await page.keyboard.press('Shift+Tab');
+        assert.equal(await cube.evaluate(el => el.matches(':focus-visible')), true);
+        await cube.locator('.fv-cube-hint').waitFor();
+        await page.keyboard.press('Enter');
+        assert.equal(new URL(page.url()).pathname, `${HOME}/lanes/${id}`);
+
+        const clicked = await open(t, 1440, 'busy', { reducedMotion: 'reduce' });
+        const target = clicked.locator('g[data-stop="editing"] a.fv-cube').last();
+        const href = await target.getAttribute('href');
+        await target.locator('.t').click();
+        assert.equal(new URL(clicked.url()).pathname, href);
+
+        const over = await open(t, 1440, 'over', { reducedMotion: 'reduce' });
+        assert.equal(await region(over, 'On the way to main').locator('.ph .cnt').textContent(), '77');
+        assert.equal(await over.locator('a.fv-cube').count(), 3, 'held Lanes retain their own cubes');
+        const sized = await over
+          .locator('a.fv-solid')
+          .evaluateAll(solids => solids.reduce((sum, solid) => sum + Number(solid.dataset.n), 0));
+        assert.equal(sized, 57, 'the solids account for the other sampled Lanes');
+        assert.match(await over.locator('.flow .pf').textContent(), /17 open Lanes past the first 60/);
+        await over.locator('g[data-stop="editing"] .fv-solid .t').click();
+        const drawer = region(over, 'Editing');
+        await drawer.waitFor();
+        assert.match(await drawer.locator('.tally').textContent(), /here/);
+        assert.equal(new URL(over.url()).searchParams.get('open'), 'editing');
+        await over.keyboard.press('Escape');
+        await drawer.waitFor({ state: 'detached' });
+        await over.locator('.fv-stn[data-stop="saved"] .c').click();
+        await region(over, 'Saved').waitFor();
+
+        const phone = await open(t, 390, 'over');
+        const phoneMarks = await phone.locator('.flow-row .flow-marks > span, .flow-row .fv-tag').count();
+        assert.equal(phoneMarks, 3, 'the compact rows keep held marks only past the cap');
+        await phone.locator('.line.phone [data-stop="checking"]').click();
+        const sheet = phone.getByRole('dialog', { name: 'Checking' });
+        await sheet.waitFor();
+        await phone.keyboard.press('Escape');
+        await sheet.waitFor({ state: 'detached' });
+      },
+    );
+
+    await t.test(
+      'focused Lane links and visible tooltips survive its live move and unrelated updates',
+      async t => {
+        const page = await open(t, 1440, 'calm');
+        const id = '5d1c7a0e-0000-4000-8000-000000000400';
+        const cube = page.locator(`a[data-id="${id}"]`);
+        await cube.focus();
+        await page.keyboard.press('Tab');
+        await page.keyboard.press('Shift+Tab');
+        assert.equal(await cube.evaluate(el => el.matches(':focus-visible')), true);
+        await page.evaluate(() => window.advanceFlow('save'));
+        await page.locator(`g[data-stop="saved"] .fv-arrive a[data-id="${id}"]:focus`).waitFor();
+        await page.evaluate(() => window.advanceFlow('unrelated'));
+        await page.locator('.fv-strata.red').waitFor();
+        assert.equal(await cube.evaluate(el => el.matches(':focus-visible')), true);
+        await cube.locator('.fv-cube-hint').waitFor();
+        await page.keyboard.press('Enter');
+        assert.equal(new URL(page.url()).pathname, `${HOME}/lanes/${id}`);
+      },
+    );
+
+    await t.test(
+      'a held drawer row reveals a decision beyond the cap and moves focus out of the phone sheet',
+      async t => {
+        const id = '5d1c7a0e-0000-4000-8000-000000000005';
+        for (const width of [390, 1440]) {
+          const page = await open(t, width, 'held-more', { reducedMotion: 'reduce' });
+          const decision = page.locator(`#d-${id}`);
+          assert.equal(await decision.count(), 0, 'the fifth decision starts beyond the visible cap');
+          await region(page, 'On the way to main')
+            .getByRole('button', { name: /^Checking/ })
+            .click();
+          const drawer =
+            width === 390 ? page.getByRole('dialog', { name: 'Checking' }) : region(page, 'Checking');
+          await drawer.getByRole('link', { name: /Decision 5/ }).click();
+          if (width === 390) await drawer.waitFor({ state: 'detached' });
+          await page.locator(`#d-${id}:focus`).waitFor();
+          await decision.getByRole('button', { name: 'Approve and land', exact: true }).waitFor();
+        }
+      },
+    );
+
+    await t.test(
+      'seven distinct checks and a 24-Lane tower remain visible and accessible in a narrow column',
+      async t => {
+        const page = await open(t, 1440, 'towers', { reducedMotion: 'reduce' });
+        const picture = page.locator('.fv-pic');
+        assert.equal(await picture.getAttribute('data-tier'), '0');
+        const cubes = picture.locator('g[data-stop="checking"] a.fv-cube');
+        assert.equal(await cubes.count(), 31);
+        const geometry = await cubes.evaluateAll(nodes => {
+          const area = nodes[0].closest('.fv-pic').getBoundingClientRect();
+          return nodes.map(node => ({
+            position: node.parentElement.parentElement.getAttribute('transform'),
+            inside: node.querySelector('.t').getBoundingClientRect().top >= area.top,
+          }));
+        });
+        assert.equal(new Set(geometry.map(cube => cube.position)).size, 31);
+        assert.ok(
+          geometry.every(cube => cube.inside),
+          'no top above the picture',
+        );
+        for (const cube of [cubes.nth(6), cubes.last()]) {
+          await cube.focus();
+          const hint = cube.locator('.fv-cube-hint');
+          await hint.waitFor();
+          assert.equal(
+            await hint.evaluate(
+              el => el.getBoundingClientRect().top >= el.closest('.fv-pic').getBoundingClientRect().top,
+            ),
+            true,
+          );
+        }
+        const href = await cubes.last().getAttribute('href');
+        await page.keyboard.press('Enter');
+        assert.equal(new URL(page.url()).pathname, href);
+      },
+    );
+
+    await t.test(
+      'opening an empty station does not fetch Lanes; one populated drawer reads one bounded page',
+      async t => {
+        const page = await open(t, 1440, 'calm', { liveDrawer: true, reducedMotion: 'reduce' });
+        assert.deepEqual(await page.evaluate(() => window.drawerReads), []);
+        await page.locator('.fv-stn[data-stop="editing"] .flow-stop').click();
+        await region(page, 'Editing').waitFor();
+        assert.deepEqual(await page.evaluate(() => window.drawerReads), [
+          {
+            name: 'projectHostedLiveLanes:list',
+            limit: 60,
+          },
+        ]);
+        await page.keyboard.press('Escape');
+        await page.locator('.fv-stn[data-stop="main"] .flow-stop').click();
+        await region(page, 'main').waitFor();
+        assert.deepEqual(
+          (await page.evaluate(() => window.drawerReads)).map(r => r.name),
+          ['projectHostedLiveLanes:list', 'projectLandingReads:list'],
+        );
+
+        const empty = await open(t, 1440, 'quiet', { liveDrawer: true });
+        await empty.locator('.fv-stn[data-stop="editing"] .flow-stop').click();
+        await region(empty, 'Editing').waitFor();
+        assert.deepEqual(await empty.evaluate(() => window.drawerReads), []);
+      },
+    );
+
+    await t.test(
+      'ambient motion follows work, calms after 60 s, pauses when hidden and respects reduced motion',
+      async t => {
+        const loops = page =>
+          page.locator('.flow').evaluate(el =>
+            el
+              .getAnimations({ subtree: true })
+              .filter(a => a.effect.getTiming().iterations === Infinity)
+              .map(a => ({
+                name: a.animationName,
+                duration: a.effect.getTiming().duration,
+                state: a.playState,
+              })),
+          );
+        for (const data of ['quiet', 'empty', 'busy', 'loading', 'error']) {
+          const page = await open(t, 1440, data);
+          assert.deepEqual(await loops(page), [], `${data} is still (busy fixture has decisions)`);
+        }
+        const page = await open(t, 1440, 'calm');
+        const full = await loops(page);
+        assert.ok(full.some(a => a.name === 'fv-travel' && a.state === 'running'));
+        assert.ok(full.some(a => a.name === 'fv-breathe' && a.state === 'running'));
+        for (const stop of ['editing', 'checking'])
+          assert.ok(await page.locator(`g[data-stop="${stop}"] .fv-cube.run`).count(), `${stop} breathes`);
+        await page.locator('.flow-clock').evaluate(el => {
+          const clock = el.getAnimations()[0];
+          if (clock.effect.getTiming().duration !== 60_000)
+            throw new Error('Calm-down clock must run at 60 s.');
+          clock.finish();
+        });
+        await page.waitForSelector('.flow[data-slow]');
+        assert.deepEqual(
+          (await loops(page)).map(a => a.duration),
+          full.map(a => 2 * a.duration),
+        );
+        await page.keyboard.press('Shift');
+        assert.deepEqual(
+          (await loops(page)).map(a => a.duration),
+          full.map(a => a.duration),
+        );
+        await page.evaluate(() => {
+          Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+          document.dispatchEvent(new Event('visibilitychange'));
+        });
+        const paused = await loops(page);
+        assert.equal(paused.length, full.length);
+        assert.ok(paused.every(a => a.state === 'paused'));
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        assert.deepEqual(await loops(page), []);
+
+        const phone = await open(t, 390, 'calm');
+        assert.deepEqual([...new Set((await loops(phone)).map(a => a.name))], ['fv-breathe']);
+      },
+    );
+
+    await t.test('a new feed moves a saved Lane and shows its landing at main once', async t => {
+      const page = await open(t, 1440, 'calm');
+      const id = '5d1c7a0e-0000-4000-8000-000000000400';
+      assert.equal(await page.locator('.fv-arrive').count(), 0);
+      if (shots) await page.screenshot({ path: join(shots, 'motion-01-editing.png') });
+      await page.evaluate(() => window.advanceFlow('save'));
+      const arrived = page.locator(`g[data-stop="saved"] .fv-arrive [data-id="${id}"]`);
+      await arrived.waitFor();
+      const freezeFrame = async (selector, time) =>
+        page.locator(selector).evaluate((node, time) => {
+          for (const animation of node.getAnimations()) {
+            animation.pause();
+            animation.currentTime = time;
+          }
+        }, time);
+      if (shots) {
+        await freezeFrame('.fv-arrive', 260);
+        await page.screenshot({ path: join(shots, 'motion-02-gliding.png') });
+      }
+      await page.evaluate(() => window.advanceFlow('land'));
+      await page.locator('.fv-landed').waitFor();
+      assert.equal(await page.locator(`[data-id="${id}"]`).count(), 0);
+      assert.equal(await page.locator('.fv-landing-pulse').count(), 1);
+      await freezeFrame('.fv-landed', 300);
+      const inTransit = await page.locator('.fv-landed').evaluate(el => ({
+        opacity: Number(getComputedStyle(el).opacity),
+        x: new DOMMatrix(getComputedStyle(el).transform).m41,
+      }));
+      assert.ok(inTransit.opacity > 0.9 && inTransit.x !== 0, 'the cube stays visible during transit');
+      await freezeFrame('.fv-landed', 800);
+      assert.equal(await page.locator('.fv-landed').evaluate(el => Number(getComputedStyle(el).opacity)), 0);
+      if (shots) {
+        await freezeFrame('.fv-landed', 540);
+        await page.screenshot({ path: join(shots, 'motion-03-landing.png') });
+      }
+    });
+
+    await t.test(
+      'empty, quiet, moving, loading and stale at both widths and themes; Loose ends action stays readable',
+      async t => {
+        for (const width of [1440, 390]) {
+          for (const data of ['empty', 'quiet', 'calm', 'loading', 'error', 'over']) {
+            const page = await open(t, width, data);
+            const flow = region(page, 'On the way to main');
+            assert.equal(await flow.locator('.flow-figs').count(), data === 'loading' ? 0 : 1);
+            assert.equal(await flow.locator('.flow[aria-busy="true"]').count(), data === 'loading' ? 1 : 0);
+            if (width === 1440 && ['loading', 'empty'].includes(data))
+              assert.equal(await flow.locator('.fv-plat.zero').count(), 5, 'all five platforms are empty');
+            if (data === 'error') assert.match(await flow.getByRole('status').textContent(), /Last read at/);
+            for (const theme of ['dark', 'light']) {
+              await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
+              const action = region(page, 'Loose ends').getByRole('button', { name: 'Set aside' }).first();
+              const paint = await action.evaluate(el => getComputedStyle(el).backgroundColor);
+              assert.equal(paint, 'rgba(0, 0, 0, 0)', `${theme} row action uses the quiet button surface`);
+              if (shots)
+                await page.screenshot({
+                  path: join(shots, `flow-${data === 'calm' ? 'moving' : data}-${width}-${theme}.png`),
+                  fullPage: true,
+                });
+            }
+          }
+        }
+      },
+    );
+
     await t.test('a held block’s tag goes to its row under Needs you, which marks itself once', async t => {
       const page = await open(t, 1440, 'busy');
       const tag = page.locator('.fv-pic a.fv-tag').first();
       const id = await tag.getAttribute('data-for');
       await tag.click();
       assert.equal(new URL(page.url()).hash, '', 'the page stays: the row is reached in place');
+      await page.locator(`#d-${id}.flow-here`).waitFor();
       assert.equal(await page.locator(`#d-${id}`).getAttribute('class'), 'dec flow-here');
       assert.ok(
         (await region(page, 'Needs you').locator(`#d-${id}`).count()) === 1,
@@ -277,7 +581,12 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
           await page.addScriptTag({ path: axePath });
           for (const theme of ['dark', 'light']) {
             await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
-            await page.evaluate(() => document.getAnimations().forEach(a => a.finish()));
+            await page.evaluate(() =>
+              document
+                .getAnimations()
+                .filter(a => a.effect?.getTiming().iterations !== Infinity)
+                .forEach(a => a.finish()),
+            );
             const [scroll, inner] = await page.evaluate(() => [
               document.documentElement.scrollWidth,
               innerWidth,

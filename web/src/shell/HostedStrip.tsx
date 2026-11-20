@@ -13,7 +13,7 @@ import { useLiveLine } from './use-live-line';
 export function HostedStrip({ projectId }: { projectId: Id<'hostedProjects'> }) {
   const attention = useAttention();
   const viewer = useViewerHandle();
-  const line = useLiveLine(projectId);
+  const { value: line } = useLiveLine(projectId);
   const connection = useConvexConnectionState();
   const main = line?.main;
   const by = main?.actor && main.actor === viewer ? 'you' : main?.actor;

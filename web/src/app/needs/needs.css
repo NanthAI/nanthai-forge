@@ -29,11 +29,6 @@
     .needs-me .fyi-row .ttl { order: 1; flex: 1 1 100%; }
     .needs-me .fyi-row .fyi-links { order: 2; }
   }
-  /* The approved home (Item 85f456c1): the picture's column gives Needs you width while it holds anything (the ratio
-     is set inline by NeedsMe.tsx); a phone reads Needs you first, then the picture, FYI and Loose ends. */
-  @media (max-width: 860px) {
-    .needs-me .ds-region:has(section[aria-label="Needs you"]) { order: -1; }
-  }
   .loose-ends .loose-tools { display: flex; gap: var(--s-2); flex-wrap: wrap; }
   .loose-ends .loose-row { align-items: start; }
   .loose-ends .loose-row input[type="checkbox"] { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--accent); }

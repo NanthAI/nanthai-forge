@@ -2,15 +2,25 @@
 // The Flow picture (Item 85f456c1, direction B · Works, the approved home mock): Editing, Saved, In queue, Checking and
 // main as isometric platforms, one block per open Lane, Lanes checked together as one tower, main as today's landings
 // hour by hour, and the two ways back to Editing. Its size steps with the width its region gives it (ResizeObserver:
-// no timer, no read). A held block's tag goes to its row under Needs you, which marks itself once. Nothing loops here.
-import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+// no timer, no read). A held block's tag goes to its row under Needs you, which marks itself once. A stop's name opens
+// its drawer. Past the feed's cap a stop's moving Lanes are one solid, held Lanes still blocks in front. The only loops
+// are the ambient exception (DESIGN.md, Motion): a dash on a track while moving work is behind it and the Lanes of a
+// running check breathing, both CSS only (flow.css) and only while the region says it is live.
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Glyph } from '../../ds';
-import { cubeArt, config, layout, placeBlocks, platform, strata, ISO, type Config } from './geometry';
+import { followLink } from '../router';
+import type { LineFeed } from '../Line';
+import { useFlowArrival } from './motion';
+import { Blocks, CubeFaces, CubeFocus, motionStyle } from './blocks';
+import { BackLabel, StationLabel, Tag } from './labels';
+import type { DrawerStop } from './drawer-model';
+import { cubeArt, config, layout, placeBlocks, platform, strata, ISO } from './geometry';
 import { shortWho, type Block, type Station } from './model';
 
 export type PictureFacts = {
   /** Landed today, landings per hour today (oldest first), and main's verdict. */
   today: number;
+  hasMain: boolean;
   hours: readonly number[];
   red: boolean;
   /** The figures each label and rail says. */
@@ -20,134 +30,16 @@ export type PictureFacts = {
   failed: { n: number; reverted: number; fixedOnTop: number };
 };
 
-/** Go to a held Lane's row under Needs you; the row marks itself once. */
-export function jumpToRow(laneId: string) {
-  const row = document.getElementById(`d-${laneId}`);
-  if (!row) return false;
-  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  row.scrollIntoView({ block: 'nearest', behavior: still ? 'auto' : 'smooth' });
-  row.classList.remove('flow-here');
-  void row.offsetWidth;
-  row.classList.add('flow-here');
-  return true;
-}
-
-function Tag({ block, style }: { block: Block; style?: CSSProperties }) {
-  const who = shortWho(block.who);
-  const words = (
-    <>
-      <Glyph of={block.colour} size={11} />
-      {block.word}
-      {who && style ? (
-        <span translate="no" dir="auto">
-          {who}
-        </span>
-      ) : null}
-    </>
-  );
-  const title = [block.head, block.who].filter(Boolean).join(' · ') || undefined;
-  return block.needsYou ? (
-    <a
-      className="fv-tag"
-      data-st={block.colour}
-      data-for={block.laneId}
-      href={`#d-${block.laneId}`}
-      style={style}
-      title={title}
-      onClick={event => {
-        if (jumpToRow(block.laneId)) event.preventDefault();
-      }}
-    >
-      {words}
-    </a>
-  ) : (
-    <span className="fv-tag" data-st={block.colour} style={style} title={title}>
-      {words}
-    </span>
-  );
-}
-
-function Label({
-  station,
-  facts,
-  big,
-  bare,
-  cls,
-  style,
-  unit,
-}: {
-  station: Station;
-  facts: string | null;
-  big: boolean;
-  /** The smallest size: name and count only. */
-  bare: boolean;
-  cls: string;
-  style: CSSProperties;
-  unit?: { n: number; word: string; fact: React.ReactNode };
-}) {
-  const n = unit ? unit.n : station.n;
-  // Only a Lane that waits on the reader carries a tag: it links to its row under Needs you. Other held Lanes keep
-  // their colour and glyph, and say why on hover.
-  const tagged = station.held.filter(block => block.needsYou);
-  return (
-    <div
-      className={`fv-stn ${cls}${n ? '' : ' zero'}`}
-      style={style}
-      data-stop={unit ? 'main' : station.stop}
-    >
-      <span className="n">{station.name}</span>
-      <span className="c num">
-        {n.toLocaleString('en')}
-        {unit ? <small>{unit.word}</small> : null}
-      </span>
-      {!bare && (facts || unit?.fact) ? <span className="f">{unit ? unit.fact : facts}</span> : null}
-      {!big && tagged.length ? (
-        <span className="tags">
-          {tagged.slice(0, 2).map(block => (
-            <Tag key={block.laneId} block={block} />
-          ))}
-          {tagged.length > 2 ? <span className="more">and {tagged.length - 2} more</span> : null}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-function Blocks({ station, c, cx, cy }: { station: Station; c: Config; cx: number; cy: number }) {
-  const art = cubeArt(c.s);
-  const where = new Map(placeBlocks(station, c, cx, cy).map(p => [p.laneId, p]));
-  return (
-    <g data-stop={station.stop}>
-      {station.blocks.map(block => {
-        const p = where.get(block.laneId)!;
-        return (
-          <g
-            key={block.laneId}
-            className="fv-cube"
-            data-id={block.laneId}
-            data-st={block.colour}
-            transform={`translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`}
-          >
-            <title>
-              {[block.head ?? `Lane ${block.laneId.slice(0, 8)}`, block.who, block.word]
-                .filter(Boolean)
-                .join(' · ')}
-            </title>
-            <path className="l" d={art.l} />
-            <path className="r" d={art.r} />
-            <path className="t" d={art.t} />
-            {block.shape === 'waiting' ? (
-              <path className="hole" d={art.hole} />
-            ) : block.shape === 'failed' ? (
-              <path className="g" d={art.cross} />
-            ) : block.shape === 'conflict' ? (
-              <path className="g" d={art.dia} />
-            ) : null}
-          </g>
-        );
-      })}
-    </g>
-  );
+/** A track's dash has the same length and speed on every rail. */
+const DASH = 9;
+const DASH_SPEED = 30;
+function dashStyle(tx: number, ty: number, run: number, phase: number): CSSProperties {
+  return {
+    '--tx': `${tx.toFixed(1)}px`,
+    '--ty': `${ty.toFixed(1)}px`,
+    '--run': `${run.toFixed(2)}s`,
+    '--lead': `${(-run * phase).toFixed(2)}s`,
+  } as CSSProperties;
 }
 
 /** The picture at a width. `undefined` stations draw the empty platforms (loading). */
@@ -155,15 +47,48 @@ export function Picture({
   stations,
   facts,
   width,
+  feed,
+  laneHref,
+  stationHref,
+  revealHeld,
+  loading = false,
+  open,
+  onOpen,
 }: {
   stations: readonly Station[];
   facts: PictureFacts;
   width: number;
+  feed: LineFeed | undefined;
+  laneHref: (id: string) => string;
+  stationHref: (stop: DrawerStop) => string;
+  revealHeld: (id: string) => void;
+  /** The feed has not arrived: empty platforms where the stops will stand, no counts. */
+  loading?: boolean;
+  /** The stop whose drawer is open. */
+  open?: DrawerStop | null;
+  onOpen: (stop: DrawerStop) => void;
 }) {
-  const c = config(width);
+  const c = useMemo(() => config(width), [width]);
   const big = c.t === 2;
   const short = c.t === 0;
-  const { C, d, y1, y2, height, tops, mainH } = layout(stations, facts.today, width, c);
+  const geometry = useMemo(() => {
+    const positions = layout(stations, facts.today, width, c);
+    const blocks = new Map(
+      stations.flatMap((station, i) =>
+        placeBlocks(station, c, ...positions.C[i]!).map(
+          p => [p.laneId, { ...p, stop: station.stop }] as const,
+        ),
+      ),
+    );
+    const [x, y] = positions.C[4]!;
+    return { ...positions, blocks, mainTop: { x, y: y - positions.mainH } };
+  }, [stations, facts.today, width, c]);
+  const { C, d, y1, y2, height, tops, mainH, blocks, mainTop } = geometry;
+  const frame = useMemo(
+    () => (feed ? { feed, width, blocks, main: mainTop, today: facts.today } : undefined),
+    [feed, width, blocks, mainTop, facts.today],
+  );
+  const arrival = useFlowArrival(frame);
   const half = c.half;
   const fe = C[0]![1] + half + 12;
   const rail = (from: number, x1: number, y: number, live: boolean) => (
@@ -184,11 +109,10 @@ export function Picture({
   const tags: { block: Block; left: number; top: number }[] = [];
   if (big) {
     const placed: [number, number][] = [];
-    stations.forEach((station, i) => {
-      const where = new Map(placeBlocks(station, c, C[i]![0], C[i]![1]).map(p => [p.laneId, p]));
+    stations.forEach(station => {
       for (const block of station.held) {
         if (!block.needsYou) continue;
-        const p = where.get(block.laneId)!;
+        const p = blocks.get(block.laneId)!;
         const w = 34 + (block.word.length + (shortWho(block.who)?.length ?? 0)) * 6.5;
         const left = Math.max(4, Math.min(p.x + c.s * 0.9, width - w - 6));
         let top = p.y - c.s - 28;
@@ -213,10 +137,10 @@ export function Picture({
   };
   return (
     <div className="fv-pic" data-tier={c.t} style={{ height }}>
-      <svg
+      <CubeFocus
         width={width}
         height={height}
-        role="img"
+        role="group"
         aria-label="Where every open Lane is, from editing to main"
       >
         <g>
@@ -227,13 +151,32 @@ export function Picture({
               d={`M${x.toFixed(1)} ${y.toFixed(1)}L${C[i + 1]![0].toFixed(1)} ${C[i + 1]![1].toFixed(1)}`}
             />
           ))}
+          {C.slice(0, -1).map(([x, y], i) => {
+            // A dash runs only while the stop behind it holds moving work; constant speed, one pair per track.
+            const behind = stations[i]!;
+            if (behind.allBlocks.length - behind.held.length <= 0) return null;
+            const dx = (C[i + 1]![0] - x) * 0.4;
+            const dy = (C[i + 1]![1] - y) * 0.4;
+            const len = Math.hypot(dx, dy);
+            if (len < DASH) return null;
+            const run = len / DASH_SPEED;
+            const u = [(dx / len) * DASH, (dy / len) * DASH];
+            return [0, 0.5].map(phase => (
+              <path
+                key={`dash-${i}-${phase}`}
+                className="fv-dash"
+                d={`M${(x + dx * 0.75).toFixed(1)} ${(y + dy * 0.75).toFixed(1)}l${u[0]!.toFixed(1)} ${u[1]!.toFixed(1)}`}
+                style={dashStyle(dx - u[0]!, dy - u[1]!, run, phase)}
+              />
+            ));
+          })}
           {rail(4, C[0]![0] - 9, y2, facts.red)}
           {rail(3, C[0]![0] + 9, y1, false)}
         </g>
         <g>
           {C.map(([x, y], i) => {
             const plat = platform(x, y, half);
-            const zero = i < 4 && !stations[i]!.n;
+            const zero = i < 4 ? !stations[i]!.n : !facts.hasMain;
             return (
               <g key={`plat-${i}`} className={zero ? 'fv-plat zero' : 'fv-plat'}>
                 <path className="l" d={plat.l} />
@@ -242,22 +185,47 @@ export function Picture({
               </g>
             );
           })}
-          <g className={facts.red ? 'fv-strata red' : 'fv-strata'}>
-            <path className="l" d={art.l} />
-            <path className="r" d={art.r} />
-            {art.seams.map((seam, i) => (
-              <path key={i} className="seam" d={seam} />
-            ))}
-            <path className="t" d={art.t} />
-            <path className="g" d={art.glyph} />
-          </g>
+          {facts.hasMain ? (
+            <a
+              className={`fv-strata${facts.red ? ' red' : facts.mainFact ? '' : ' unreported'}`}
+              href={stationHref('main')}
+              onClick={followLink}
+              aria-label="main, open drawer"
+            >
+              <path className="l" d={art.l} />
+              <path className="r" d={art.r} />
+              {art.seams.map((seam, i) => (
+                <path key={i} className="seam" d={seam} />
+              ))}
+              <path className="t" d={art.t} />
+              {facts.mainFact ? <path className="g" d={art.glyph} /> : null}
+              {arrival?.pulse ? <path key={arrival.pulse} className="fv-landing-pulse" d={art.t} /> : null}
+            </a>
+          ) : null}
         </g>
         <g>
           {stations.map((station, i) => (
-            <Blocks key={station.stop} station={station} c={c} cx={C[i]![0]} cy={C[i]![1]} />
+            <Blocks
+              key={station.stop}
+              station={station}
+              c={c}
+              cx={C[i]![0]}
+              cy={C[i]![1]}
+              where={blocks}
+              arrival={arrival}
+              laneHref={laneHref}
+              stationHref={stationHref(station.stop)}
+            />
           ))}
+          {arrival?.landed ? (
+            <g key={arrival.pulse} aria-hidden="true" transform={`translate(${mainTop.x} ${mainTop.y})`}>
+              <g className="fv-cube fv-landed" data-st="passed" style={motionStyle(arrival.landed, 0)}>
+                <CubeFaces art={cubeArt(c.s)} shape="" />
+              </g>
+            </g>
+          ) : null}
         </g>
-      </svg>
+      </CubeFocus>
       {[...stations, null].map((station, i) => {
         const [x, y] = C[i]!;
         const high = i % 2 === 0;
@@ -268,16 +236,19 @@ export function Picture({
           n: facts.today,
           held: [],
           blocks: [],
+          allBlocks: [],
+          solid: 0,
           checks: [],
           passed: 0,
         };
         const unit = station ? undefined : mainUnit;
-        const key = station?.stop ?? 'main';
+        const key: DrawerStop = station?.stop ?? 'main';
+        const drawer = { stop: key, shown: open === key, go: onOpen };
         if (big) {
           const right = high ? x - (i === 4 ? half * 0.72 : half) * 2 * ISO.CX - 4 : x - 14;
           const top = high ? y - c.up - (i === 4 ? 0 : tops[i]! - half) : y + half + 16;
           return (
-            <Label
+            <StationLabel
               key={key}
               station={s}
               facts={fact}
@@ -285,13 +256,16 @@ export function Picture({
               bare={false}
               cls="r"
               unit={unit}
+              loading={loading}
+              open={drawer}
+              revealHeld={revealHeld}
               style={{ right: Math.round(width - right), top: Math.round(top), maxWidth: c.lw }}
             />
           );
         }
         if (high)
           return (
-            <Label
+            <StationLabel
               key={key}
               station={s}
               facts={fact}
@@ -299,6 +273,9 @@ export function Picture({
               bare={short}
               cls="inl up"
               unit={unit}
+              loading={loading}
+              open={drawer}
+              revealHeld={revealHeld}
               style={{
                 left: Math.round(x),
                 bottom: Math.round(height - (y - tops[i]!) + 6),
@@ -307,7 +284,7 @@ export function Picture({
             />
           );
         return (
-          <Label
+          <StationLabel
             key={key}
             station={s}
             facts={fact}
@@ -315,6 +292,9 @@ export function Picture({
             bare={short}
             cls="inl r"
             unit={unit}
+            loading={loading}
+            open={drawer}
+            revealHeld={revealHeld}
             style={{
               right: Math.round(width - x + 12),
               top: Math.round(y + half + 12),
@@ -324,47 +304,34 @@ export function Picture({
         );
       })}
       {tags.map(({ block, left, top }) => (
-        <Tag key={block.laneId} block={block} style={{ left: Math.round(left), top: Math.round(top) }} />
+        <Tag
+          key={block.laneId}
+          block={block}
+          revealHeld={revealHeld}
+          style={{ left: Math.round(left), top: Math.round(top) }}
+        />
       ))}
-      <Back
-        label="Needs fix"
-        n={facts.fix.n}
-        fact={facts.fix.waiting ? `${facts.fix.waiting} waiting for its agent` : 'none waiting'}
-        short={short}
-        hot={false}
-        style={{ left: Math.round((C[0]![0] + C[3]![0]) / 2 - (short ? 58 : 150)), top: y1 - 9 }}
-      />
-      <Back
-        label="main failed"
-        n={facts.failed.n}
-        fact={`${facts.failed.reverted} reverted, ${facts.failed.fixedOnTop} fixed on top`}
-        short={short}
-        hot={facts.red}
-        style={{ left: Math.round((C[0]![0] + C[4]![0]) / 2 + (short ? -40 : 20)), top: y2 - 9 }}
-      />
+      {!loading ? (
+        <>
+          <BackLabel
+            label="Needs fix"
+            n={facts.fix.n}
+            fact={facts.fix.waiting ? `${facts.fix.waiting} waiting for its agent` : 'none waiting'}
+            short={short}
+            hot={false}
+            style={{ left: Math.round((C[0]![0] + C[3]![0]) / 2 - (short ? 58 : 150)), top: y1 - 9 }}
+          />
+          <BackLabel
+            label="main failed"
+            n={facts.failed.n}
+            fact={`${facts.failed.reverted} reverted, ${facts.failed.fixedOnTop} fixed on top`}
+            short={short}
+            hot={facts.red}
+            style={{ left: Math.round((C[0]![0] + C[4]![0]) / 2 + (short ? -40 : 20)), top: y2 - 9 }}
+          />
+        </>
+      ) : null}
     </div>
-  );
-}
-
-function Back({
-  label,
-  n,
-  fact,
-  short,
-  hot,
-  style,
-}: {
-  label: string;
-  n: number;
-  fact: string;
-  short: boolean;
-  hot: boolean;
-  style: CSSProperties;
-}) {
-  return (
-    <span className={hot ? 'fv-back hot' : 'fv-back'} style={style}>
-      {label} <b>{n.toLocaleString('en')}</b> today{short ? null : <span className="t3">· {fact}</span>}
-    </span>
   );
 }
 

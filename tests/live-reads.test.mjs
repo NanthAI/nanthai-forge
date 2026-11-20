@@ -243,7 +243,7 @@ test('return-after-idle: a visible return wakes the live line exactly once with 
   const { useLiveLine } = await import(moduleUrl('../web/src/shell/use-live-line.ts'));
   let value;
   function LineReader() {
-    value = useLiveLine('p');
+    ({ value } = useLiveLine('p'));
     return null;
   }
   const root = createRoot(host.container);

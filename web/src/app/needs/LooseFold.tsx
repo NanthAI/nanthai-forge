@@ -109,7 +109,12 @@ export function LooseFoldView({
                         {word.word}
                       </State>
                     ) : group.key === 'idle' && read.setAside ? (
-                      <Key size="sm" disabled={busy !== null} onClick={() => void one(row.laneId)}>
+                      <Key
+                        size="sm"
+                        kind="ghost"
+                        disabled={busy !== null}
+                        onClick={() => void one(row.laneId)}
+                      >
                         Set aside
                       </Key>
                     ) : null}

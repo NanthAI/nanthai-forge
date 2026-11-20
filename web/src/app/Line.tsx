@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The line's slot in the top bar (Item 18af654d owns the marks, their motion and the feed). The frame draws the stops
 // and their counts from the feed's shared contract (convex/projectLiveLine.ts `liveLineResult`); until the feed
-// arrives it draws the stops with no counts, so nothing moves when it does. Each stop links to Lanes at that stop.
+// arrives it draws the stops with no counts, so nothing moves when it does. Each stop opens its station on Needs me.
 // The stops are the Flow picture's (Item 85f456c1): Editing, Saved, In queue, Checking; a Lane whose check passed
 // ('ready') counts at Checking, so the line, the picture and Lanes count every stop alike (`lineStops`).
 import { hrefFor } from './paths';
@@ -60,7 +60,7 @@ export function Line({
   project: string;
   phone?: boolean;
 }) {
-  const lanesHref = hrefFor({ frame: 'project', handle, project, place: 'lanes', section: '', rest: '' });
+  const flowHref = hrefFor({ frame: 'project', handle, project, place: 'needs', section: '', rest: '' });
   return (
     <nav
       className={phone ? 'line phone' : 'line'}
@@ -78,7 +78,7 @@ export function Line({
         return (
           <a
             key={stop.stage}
-            href={`${lanesHref}?stop=${stop.stage}`}
+            href={`${flowHref}?open=${stop.stage}`}
             onClick={followLink}
             className={feed && !at.length ? 'stop zero' : 'stop'}
             data-stop={stop.stage}
@@ -98,11 +98,7 @@ export function Line({
           </a>
         );
       })}
-      <MainStop
-        feed={feed}
-        phone={phone}
-        href={hrefFor({ frame: 'project', handle, project, place: 'code', section: '', rest: '' })}
-      />
+      <MainStop feed={feed} phone={phone} href={`${flowHref}?open=main`} />
     </nav>
   );
 }

@@ -62,24 +62,33 @@ export function placeBlocks(station: Station, c: Config, cx: number, cy: number)
   const put = (col: number, row: number, layer: number) =>
     at(cx, cy, (col - (n - 1) / 2) * g, (row - (n - 1) / 2) * g, layer * s);
   const out: { laneId: string; x: number; y: number }[] = [];
+  // Past the feed's cap the moving Lanes are one solid at the back; held Lanes stand in front of it, one row a layer.
+  if (station.solid) {
+    station.blocks.forEach((block, i) => {
+      const [x, y] = put(i % n, n - 1, Math.floor(i / n));
+      out.push({ laneId: block.laneId, x, y });
+    });
+    return out;
+  }
   if (station.stop === 'checking') {
-    const towers = new Map<string, number>();
+    const sizes = new Map<string, number>();
     for (const block of station.blocks)
-      if (block.check && !towers.has(block.check)) towers.set(block.check, towers.size);
-    const height = new Map<string, number>();
+      if (block.check) sizes.set(block.check, (sizes.get(block.check) ?? 0) + 1);
+    const heights = Array<number>(n * (n - 1)).fill(0);
+    const towers = new Map<string, { slot: number; layer: number }>();
+    for (const [check, size] of sizes) {
+      const slot = towers.size % heights.length;
+      towers.set(check, { slot, layer: heights[slot]! });
+      // Keep later checks distinct when more groups exist than the rear grid can hold.
+      heights[slot] = heights[slot]! + size + 0.35;
+    }
     let rest = 0;
     for (const block of station.blocks) {
-      if (block.check) {
-        const k = towers.get(block.check)!;
-        const j = height.get(block.check) ?? 0;
-        height.set(block.check, j + 1);
-        const [x, y] = put(Math.min(k % n, n - 1), Math.floor(k / n) % (n - 1), j);
-        out.push({ laneId: block.laneId, x, y });
-      } else {
-        const [x, y] = put(rest % n, n - 1, Math.floor(rest / n));
-        out.push({ laneId: block.laneId, x, y });
-        rest++;
-      }
+      const tower = block.check ? towers.get(block.check) : undefined;
+      const [x, y] = tower
+        ? put(tower.slot % n, Math.floor(tower.slot / n), tower.layer++)
+        : put(rest % n, n - 1, Math.floor(rest++ / n));
+      out.push({ laneId: block.laneId, x, y });
     }
     return out;
   }
@@ -90,13 +99,27 @@ export function placeBlocks(station: Station, c: Config, cx: number, cy: number)
   return out;
 }
 
+/** Past the cap: a stop's solid stands as tall as its count, from one block's height up to main's full height. */
+export const solidHeight = (station: Station, c: Config) =>
+  station.solid ? c.s + Math.min(1, station.solid / 40) * (c.mh - c.s) : 0;
+/** The solid's three faces: a column at the back of its platform, the front row left for held Lanes. */
+export function solid(cx: number, cy: number, c: Config, height: number) {
+  const hm = ((c.n - 1) * c.g) / 2;
+  const back = -c.g / 2;
+  const p = (du: number, dv: number, dz: number) => at(cx, cy, du + back, dv + back, dz);
+  const w = hm * 0.75;
+  return {
+    l: poly([p(-w, w, height), p(w, w, height), p(w, w, 0), p(-w, w, 0)]),
+    r: poly([p(w, -w, height), p(w, w, height), p(w, w, 0), p(w, -w, 0)]),
+    t: poly([p(-w, -w, height), p(w, -w, height), p(w, w, height), p(-w, w, height)]),
+  };
+}
 /** How tall a stop's blocks stand, for the space above it. */
 function stack(station: Station, c: Config) {
   if (!station.n) return 0;
-  if (station.stop === 'checking') {
-    const tallest = Math.max(0, ...station.checks);
-    return Math.max(tallest, Math.ceil((station.n - station.checks.reduce((a, b) => a + b, 0)) / c.n)) * c.s;
-  }
+  if (station.solid) return Math.max(solidHeight(station, c), Math.ceil(station.blocks.length / c.n) * c.s);
+  if (station.stop === 'checking')
+    return Math.max(0, ...placeBlocks(station, c, 0, 0).map(block => 1.5 * c.s - block.y));
   return Math.ceil(station.n / (c.n * c.n)) * c.s;
 }
 /** Tag lines a stop's label carries at the two smaller sizes: two, then "and N more". */
@@ -114,10 +137,12 @@ export function layout(stations: readonly Station[], today: number, width: numbe
   const mainH = Math.max(6, Math.min(0.5, c.mh / Math.max(today, 1)) * today);
   const labH = c.t ? 50 : 30;
   const tops = [stack(stations[0]!, c) + half, 0, stack(stations[2]!, c) + half, 0, mainH + half * 0.72];
-  const oy =
+  const upper =
     c.t === 2
       ? Math.max(c.up + 60, mainH + half + 34, stack(stations[2]!, c) + half + c.up)
       : 14 + labH + Math.max(chips(stations[0]), chips(stations[2])) * 24 + 8 + Math.max(...tops);
+  const checkingHeadroom = stack(stations[3]!, c) - d * CY + 48;
+  const oy = Math.max(upper, checkingHeadroom);
   const foot = c.t === 2 ? 128 : 12 + labH + Math.max(chips(stations[1]), chips(stations[3])) * 24 + 18;
   const G: Point[] = [
     [0, 0],

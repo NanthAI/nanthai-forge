@@ -7,6 +7,9 @@
 // Saved, In queue and Checking among moving work; `?data=calm` is the same project with nothing waiting on the reader;
 // `?data=worst` is 56 open Lanes with long handles, right-to-left and 50+ character titles and a request asked ahead.
 // The shell's Needs you count comes from the same rule as the page (needs/count.ts).
+import { useState } from 'react';
+import { ConvexProvider, type ConvexReactClient } from 'convex/react';
+import { getFunctionName, type FunctionReference } from 'convex/server';
 import { createRoot } from 'react-dom/client';
 import '../../web/src/ds';
 import '../../web/src/app/app.css';
@@ -21,7 +24,10 @@ document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
 const first = params.get('data') === 'first';
 const connect = params.get('data') === 'connect';
 const calm = params.get('data') === 'calm';
-const worst = params.get('data') === 'worst';
+const variant = params.get('data');
+const worst = variant === 'worst' || variant === 'over';
+const quiet = variant === 'quiet' || variant === 'empty';
+const unavailable = variant === 'loading' || variant === 'error';
 const writes: unknown[] = [];
 (window as unknown as { writes: unknown[] }).writes = writes;
 
@@ -275,40 +281,54 @@ const worstRead: NeedsRead = {
   canDecide: true,
   asks: [],
 };
-const read: NeedsRead = worst
-  ? worstRead
-  : calm
-    ? {
-        held: [],
-        more: 0,
-        moreIsLowerBound: false,
-        approvals: JSON.stringify({ requests: [], complete: true }),
-        canDecide: true,
-        asks: [],
-      }
-    : connect
-      ? {
-          held: [],
-          more: 0,
-          moreIsLowerBound: false,
-          approvals: JSON.stringify({
-            requests: [
-              {
-                ...approval(
-                  'setting:github-connect',
-                  'Mirror main to synthetic/repo so reviewers on GitHub see each landing.',
-                  4,
-                ),
-                kind: 'setting',
-                setting: { origin: 'github-connect' },
-              },
-            ],
-            complete: true,
-          }),
-          canDecide: true,
-          asks: [],
-        }
-      : baseRead;
+const extraDecisions = Array.from({ length: 5 }, (_, i) =>
+  lane(i + 1, 'review', 15 - i, { title: `Decision ${i + 1}` }),
+);
+const extraRead: NeedsRead = {
+  ...worstRead,
+  held: extraDecisions,
+  approvals: JSON.stringify({
+    requests: extraDecisions.map(row => approval(row.laneId, 'Review this Lane.', 15)),
+    complete: true,
+  }),
+};
+const read: NeedsRead =
+  variant === 'held-more'
+    ? extraRead
+    : worst || variant === 'towers'
+      ? worstRead
+      : calm || quiet || unavailable
+        ? {
+            held: [],
+            more: 0,
+            moreIsLowerBound: false,
+            approvals: JSON.stringify({ requests: [], complete: true }),
+            canDecide: true,
+            asks: [],
+          }
+        : connect
+          ? {
+              held: [],
+              more: 0,
+              moreIsLowerBound: false,
+              approvals: JSON.stringify({
+                requests: [
+                  {
+                    ...approval(
+                      'setting:github-connect',
+                      'Mirror main to synthetic/repo so reviewers on GitHub see each landing.',
+                      4,
+                    ),
+                    kind: 'setting',
+                    setting: { origin: 'github-connect' },
+                  },
+                ],
+                complete: true,
+              }),
+              canDecide: true,
+              asks: [],
+            }
+          : baseRead;
 type Mark = LineFeed['lanes'][number];
 const moving = (n: number, stage: Mark['stage'], minutes: number, check?: string): Mark => ({
   laneId: uuid(400 + n),
@@ -369,12 +389,26 @@ const worstLanes: Mark[] = [
     ),
   ),
 ];
-const feed: LineFeed = {
-  lanes: first || connect ? [moving(81, 'editing', 1)] : worst ? worstLanes : busyLanes,
-  more: 0,
+const towers = [
+  ...Array.from({ length: 7 }, (_, i) => moving(300 + i, 'checking', 32 - i, `check-${i}`)),
+  ...Array.from({ length: 24 }, (_, i) => moving(320 + i, 'checking', 24 - i, 'tower')),
+];
+const fixtureFeed: LineFeed = {
+  lanes: quiet
+    ? []
+    : variant === 'towers'
+      ? towers
+      : first || connect
+        ? [moving(81, 'editing', 1)]
+        : variant === 'over'
+          ? [...worstLanes, ...Array.from({ length: 4 }, (_, i) => moving(200 + i, 'saved', 1))]
+          : worst
+            ? worstLanes
+            : busyLanes,
+  more: variant === 'over' ? 17 : 0,
   moreIsLowerBound: false,
-  main: { head: 'b'.repeat(64), at: new Date(ago(62)).toISOString() },
-  ...(first || connect ? {} : { flow }),
+  main: variant === 'empty' ? null : { head: 'b'.repeat(64), at: new Date(ago(62)).toISOString() },
+  ...(first || connect || variant === 'empty' ? {} : { flow }),
 };
 
 const route = {
@@ -400,42 +434,96 @@ const record =
 
 const { NeedsMeView } = await import('../../web/src/app/needs/NeedsMe');
 const { LooseFoldView } = await import('../../web/src/app/needs/LooseFold');
-createRoot(document.getElementById('root')!).render(
-  <ProjectFrame
-    route={route}
-    name="tidepool"
-    feed={feed}
-    needs={needsCount(read, NOW)}
-    projects={null}
-    controls={{ onPalette: () => {}, onKeys: () => {}, viewerHandle: 'sample-one', onPicker: () => {} }}
-  >
-    <NeedsMeView
+const { DrawerView, StationDrawer } = await import('../../web/src/app/flow/Drawer');
+
+type DrawerRead = { name: string; limit?: number };
+const drawerReads: DrawerRead[] = [];
+const queryFixture = {
+  watchQuery(query: FunctionReference<'query'>, args: { limit?: number }) {
+    const name = getFunctionName(query);
+    return {
+      localQueryResult: () => JSON.stringify({ page: [], rows: [] }),
+      onUpdate: () => {
+        drawerReads.push({ name, limit: args.limit });
+        return () => {};
+      },
+    };
+  },
+} as unknown as ConvexReactClient;
+
+function Fixture() {
+  const [feed, setFeed] = useState(variant === 'loading' ? undefined : fixtureFeed);
+  Object.assign(window, {
+    drawerReads,
+    advanceFlow: (step: 'save' | 'land' | 'unrelated') =>
+      setFeed(current => {
+        const laneId = uuid(400);
+        if (!current) return current;
+        if (step === 'unrelated') return { ...current, flow: { ...flow, main: { red: true, since: NOW } } };
+        return step === 'save'
+          ? {
+              ...current,
+              lanes: current.lanes.map(lane =>
+                lane.laneId === laneId ? { ...lane, stage: 'saved', changedAt: NOW } : lane,
+              ),
+            }
+          : {
+              ...current,
+              lanes: current.lanes.filter(lane => lane.laneId !== laneId),
+              exit: { laneId, kind: 'landed', at: NOW },
+            };
+      }),
+  });
+  return (
+    <ProjectFrame
       route={route}
-      projectName="tidepool"
+      name="tidepool"
       feed={feed}
-      read={read}
-      fyi={fyi}
-      counts={{
-        exact: true,
-        issue: first
-          ? { proposed: 0, open: 0, inProgress: 1, closed: 1, abandoned: 0 }
-          : { proposed: 2, open: 7, inProgress: 5, closed: 46, abandoned: 1 },
-        closedToday: null,
-      }}
-      decide={record('decide')}
-      answer={async (ask, choice) => void writes.push(['answer', ask.id, choice])}
-      dismiss={record('dismiss')}
-      loose={open =>
-        open ? (
-          <LooseFoldView
-            read={loose}
-            setAside={record('setAside')}
-            allHref="/-/sample-one/tidepool/needs/loose-ends"
-            copy={async text => void writes.push(['copy', text])}
-          />
-        ) : null
-      }
-      now={NOW}
-    />
-  </ProjectFrame>,
-);
+      needs={needsCount(read, NOW)}
+      projects={null}
+      controls={{ onPalette: () => {}, onKeys: () => {}, viewerHandle: 'sample-one', onPicker: () => {} }}
+    >
+      <NeedsMeView
+        route={route}
+        projectName="tidepool"
+        feed={feed}
+        feedError={variant === 'error'}
+        feedReadAt={ago(2)}
+        drawer={props =>
+          params.has('live-drawer') ? (
+            <ConvexProvider client={queryFixture}>
+              <StationDrawer {...props} projectId={'fixture-project' as never} />
+            </ConvexProvider>
+          ) : (
+            <DrawerView {...props} lanes={[]} landed={[]} />
+          )
+        }
+        read={read}
+        fyi={fyi}
+        counts={{
+          exact: true,
+          issue: first
+            ? { proposed: 0, open: 0, inProgress: 1, closed: 1, abandoned: 0 }
+            : { proposed: 2, open: 7, inProgress: 5, closed: 46, abandoned: 1 },
+          closedToday: null,
+        }}
+        decide={record('decide')}
+        answer={async (ask, choice) => void writes.push(['answer', ask.id, choice])}
+        dismiss={record('dismiss')}
+        loose={open =>
+          open ? (
+            <LooseFoldView
+              read={loose}
+              setAside={record('setAside')}
+              allHref="/-/sample-one/tidepool/needs/loose-ends"
+              copy={async text => void writes.push(['copy', text])}
+            />
+          ) : null
+        }
+        now={NOW}
+      />
+    </ProjectFrame>
+  );
+}
+
+createRoot(document.getElementById('root')!).render(<Fixture />);

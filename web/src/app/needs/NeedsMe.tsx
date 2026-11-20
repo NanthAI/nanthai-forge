@@ -11,7 +11,16 @@
 //   folded region reads nothing.
 // Reads, sent together: projectNeedsMe:read (shared with the shell's count), projectNeedsFyi:read and the planning
 // counts; Loose ends while open. All re-run only on server writes; idle and hidden tabs cost nothing.
-import { lazy, Suspense, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { api } from '../../../../convex/_generated/api';
@@ -38,6 +47,10 @@ import { progressCells, progressOf, type PlanCountsRead } from '../progress';
 import type { PlaceProps } from '../screens';
 import GettingStarted from '../start/GettingStarted';
 import { FlowRegion } from '../flow/Flow';
+import { jumpToRow } from '../flow/labels';
+import { StationDrawer, type DrawerProps } from '../flow/Drawer';
+import { isDrawerStop, type DrawerStop } from '../flow/drawer-model';
+import { navigate, useSearch } from '../router';
 import { needsRead } from './count';
 import {
   fyiSum,
@@ -51,6 +64,7 @@ import {
 } from './fyi';
 import { HeldSetting } from './HeldSetting';
 import { LooseFold } from './LooseFold';
+import { PhoneDock } from './PhoneDock';
 import {
   needsSentence,
   needsView,
@@ -81,6 +95,12 @@ const dormantAbandon = makeFunctionReference<
 >('projectHostedDormant:abandon');
 /** The approved home (Item 85f456c1): the picture and FYI on the left, Needs you and Loose ends on the right. */
 const LAYOUT: DockLayout = { top: [], a: ['flow', 'fyi'], b: ['needs', 'loose'] };
+const PHONE = '(max-width: 860px)';
+function watchPhone(change: () => void) {
+  const query = matchMedia(PHONE);
+  query.addEventListener('change', change);
+  return () => query.removeEventListener('change', change);
+}
 /** Shown at most this many per band; the rest open in place, oldest last (DESIGN.md rule 43). */
 const CAP = 4;
 /** FYI rows shown before "Show more". */
@@ -102,7 +122,7 @@ export default function NeedsMe(props: PlaceProps) {
   return <NeedsMeScreen {...props} />;
 }
 
-function NeedsMeScreen({ route, projectId, projectName, feed }: PlaceProps) {
+function NeedsMeScreen({ route, projectId, projectName, feed, feedError, feedReadAt }: PlaceProps) {
   const read = useQuery(needsRead, { projectId });
   const fyiLive = useQuery(fyiRead, { projectId });
   const fyi = useMemo(
@@ -126,6 +146,9 @@ function NeedsMeScreen({ route, projectId, projectName, feed }: PlaceProps) {
       route={route}
       projectName={projectName}
       feed={feed}
+      feedError={feedError}
+      feedReadAt={feedReadAt}
+      drawer={props => <StationDrawer {...props} projectId={projectId} />}
       read={read}
       fyi={fyi}
       counts={counts}
@@ -165,6 +188,9 @@ export function NeedsMeView({
   route,
   projectName,
   feed,
+  feedError,
+  feedReadAt,
+  drawer,
   read,
   fyi,
   counts,
@@ -175,7 +201,8 @@ export function NeedsMeView({
   setup,
   settingDetail,
   now,
-}: Pick<PlaceProps, 'route' | 'projectName' | 'feed'> & {
+}: Pick<PlaceProps, 'route' | 'projectName' | 'feed' | 'feedError' | 'feedReadAt'> & {
+  drawer?: (props: DrawerProps) => ReactNode;
   read: NeedsRead | undefined;
   fyi: FyiRead | undefined;
   counts: PlanCountsRead | undefined;
@@ -197,15 +224,58 @@ export function NeedsMeView({
   const drawnAt = useMemo(() => now ?? Date.now(), [read, fyi, feed, now]);
   const view = useMemo(() => (read ? needsView(read, drawnAt) : null), [read, drawnAt]);
   const items = progressOf(counts);
+  const phone = useSyncExternalStore(
+    watchPhone,
+    () => matchMedia(PHONE).matches,
+    () => false,
+  );
   const [layout, setLayout, resetLayout] = useDockLayout('needs-me', LAYOUT);
   const [message, announce] = useAnnounce();
   const list = useMemo(() => (fyi && view ? fyiView(fyi, view.fyi, drawnAt) : null), [fyi, view, drawnAt]);
   // Open by default (owner 2026-11-19): a folded Loose ends left an empty-looking box beside FYI.
   const looseFold = useFold('needs-loose', true);
   const at = (patch: Partial<ProjectRoute>) => hrefFor({ ...route, section: '', rest: '', ...patch });
+  const open = useSearch().get('open');
+  const stop = isDrawerStop(open) ? open : null;
+  const stationHref = (next: DrawerStop | null) => {
+    const url = new URL(location.href);
+    if (next) url.searchParams.set('open', next);
+    else url.searchParams.delete('open');
+    return url.pathname + url.search + url.hash;
+  };
+  const closeStation = () => navigate(stationHref(null), { replace: true });
+  const showStation = (next: DrawerStop) =>
+    navigate(stationHref(stop === next ? null : next), { replace: true });
+  const [reveal, setReveal] = useState<{ laneId: string }>();
+  const revealHeld = (laneId: string) => {
+    setReveal({ laneId });
+    if (phone && stop) closeStation();
+  };
+  useEffect(() => {
+    if (!reveal) return;
+    const afterClose = requestAnimationFrame(() => jumpToRow(reveal.laneId));
+    return () => cancelAnimationFrame(afterClose);
+  }, [reveal]);
+  const heldRows = view ? [...view.now, ...view.asks, ...view.parked] : [];
+  const rowToReveal = view?.now.findIndex(row => row.laneId === reveal?.laneId) ?? -1;
+  const laneHref = (laneId: string) => at({ place: 'lanes', rest: laneId });
+  const drawerContent =
+    stop &&
+    drawer?.({
+      stop,
+      feed,
+      rows: view?.now ?? [],
+      drawnAt,
+      close: closeStation,
+      sheet: phone,
+      laneHref,
+      codeHref: at({ place: 'code' }),
+      receiptHref: id => at({ place: 'code', rest: id }),
+      revealHeld,
+    });
   const sentence = view ? needsSentence(view) : null;
   const lanesOpen = feed ? feed.lanes.length + feed.more : null;
-  const waiting = view ? view.now.length + view.asks.length + view.parked.length : 0;
+  const waiting = heldRows.length;
 
   // The picture's column is wide (1.6 : 1) until something waits on the reader, then gives Needs you the width
   // (1 : 1.1); nothing changes place (approved home mock). The rule follows whichever column holds the picture.
@@ -224,6 +294,13 @@ export function NeedsMeView({
       render: (handle: ReactNode) => (
         <FlowRegion
           feed={feed}
+          error={feedError}
+          readAt={feedReadAt}
+          stop={stop}
+          onOpen={showStation}
+          laneHref={laneHref}
+          stationHref={stationHref}
+          revealHeld={revealHeld}
           rows={view?.now ?? []}
           needsYou={held}
           handle={handle}
@@ -240,98 +317,115 @@ export function NeedsMeView({
       id: 'needs',
       title: 'Needs you',
       render: (handle: ReactNode) => (
-        <Region
-          title="Needs you"
-          weight={view?.count ? 'act' : 'watch'}
-          waiting={
-            view
-              ? [
-                  ...view.now.map(r => r.laneId),
-                  ...view.asks.map(r => r.id),
-                  ...view.parked.map(r => r.laneId),
-                ].join()
-              : 0
-          }
-          count={view ? view.count : undefined}
-          handle={handle}
-          hint="what holds work; requests asked ahead are listed under it and not counted"
-        >
-          {!view ? (
-            <div className="quietline" aria-busy="true">
-              Loading what needs you…
-            </div>
-          ) : (
-            <>
-              {waiting ? (
-                <div className="grp" data-weight="act">
-                  <Band title="Holding work now" count={view.count} needs hint="longest held first" />
-                  <Capped
-                    rows={[...view.now, ...view.asks, ...view.parked]}
-                    more={read!.more}
-                    atLeast={view.atLeast}
-                  >
-                    {row =>
-                      'park' in row ? (
-                        <Parked
-                          key={`park:${row.laneId}`}
-                          row={row}
-                          drawnAt={drawnAt}
-                          laneHref={at({ place: 'lanes', rest: row.laneId })}
-                        />
-                      ) : 'choices' in row ? (
-                        <Question
-                          key={row.id}
-                          row={row}
-                          drawnAt={drawnAt}
-                          answer={answer}
-                          announce={announce}
-                        />
-                      ) : (
-                        <Held
+        <>
+          <Region
+            title="Needs you"
+            weight={view?.count ? 'act' : 'watch'}
+            waiting={
+              view
+                ? [
+                    ...view.now.map(r => r.laneId),
+                    ...view.asks.map(r => r.id),
+                    ...view.parked.map(r => r.laneId),
+                  ].join()
+                : 0
+            }
+            count={view ? view.count : undefined}
+            handle={handle}
+            hint="what holds work; requests asked ahead are listed under it and not counted"
+          >
+            {!view ? (
+              <div className="quietline" aria-busy="true">
+                Loading what needs you…
+              </div>
+            ) : (
+              <>
+                {waiting ? (
+                  <div className="grp" data-weight="act">
+                    <Band title="Holding work now" count={view.count} needs hint="longest held first" />
+                    <Capped
+                      rows={heldRows}
+                      cap={Math.max(CAP, rowToReveal + 1)}
+                      more={read!.more}
+                      atLeast={view.atLeast}
+                    >
+                      {row => {
+                        const decision =
+                          'park' in row ? (
+                            <Parked
+                              key={`park:${row.laneId}`}
+                              row={row}
+                              drawnAt={drawnAt}
+                              laneHref={at({ place: 'lanes', rest: row.laneId })}
+                            />
+                          ) : 'choices' in row ? (
+                            <Question
+                              key={row.id}
+                              row={row}
+                              drawnAt={drawnAt}
+                              answer={answer}
+                              announce={announce}
+                            />
+                          ) : (
+                            <Held
+                              key={row.laneId}
+                              row={row}
+                              drawnAt={drawnAt}
+                              laneHref={at({ place: 'lanes', rest: row.laneId })}
+                              decide={decide}
+                              canDecide={read!.canDecide}
+                              announce={announce}
+                            />
+                          );
+                        return drawerContent && !phone ? (
+                          <details key={'choices' in row ? row.id : row.laneId} className="sumdec">
+                            <summary>
+                              <span className="ttl" dir="auto">
+                                {'choices' in row ? row.text : row.head}
+                              </span>
+                            </summary>
+                            {decision}
+                          </details>
+                        ) : (
+                          decision
+                        );
+                      }}
+                    </Capped>
+                  </div>
+                ) : null}
+                {view.ahead.length ? (
+                  <div className="grp" data-weight="watch">
+                    <Band
+                      title="Asked ahead"
+                      count={view.ahead.length}
+                      hint="not counted in Needs you until it holds work"
+                    />
+                    <Capped rows={view.ahead} more={0} atLeast={false}>
+                      {row => (
+                        <Ahead
                           key={row.laneId}
                           row={row}
+                          detail={row.kind === 'setting' ? settingDetail : undefined}
                           drawnAt={drawnAt}
-                          laneHref={at({ place: 'lanes', rest: row.laneId })}
                           decide={decide}
                           canDecide={read!.canDecide}
                           announce={announce}
                         />
-                      )
-                    }
-                  </Capped>
-                </div>
-              ) : null}
-              {view.ahead.length ? (
-                <div className="grp" data-weight="watch">
-                  <Band
-                    title="Asked ahead"
-                    count={view.ahead.length}
-                    hint="not counted in Needs you until it holds work"
-                  />
-                  <Capped rows={view.ahead} more={0} atLeast={false}>
-                    {row => (
-                      <Ahead
-                        key={row.laneId}
-                        row={row}
-                        detail={row.kind === 'setting' ? settingDetail : undefined}
-                        drawnAt={drawnAt}
-                        decide={decide}
-                        canDecide={read!.canDecide}
-                        announce={announce}
-                      />
-                    )}
-                  </Capped>
-                </div>
-              ) : null}
-              {!waiting && !view.ahead.length ? (
-                <div className="quietline">Nothing waits on you. Agents go on without you.</div>
-              ) : null}
-              {view.approvalsComplete ? null : (
-                <div className="pf">Some requests could not be listed; the newest are shown.</div>
-              )}
-            </>
-          )}
-        </Region>
+                      )}
+                    </Capped>
+                  </div>
+                ) : null}
+                {!waiting && !view.ahead.length ? (
+                  <div className="quietline">Nothing waits on you. Agents go on without you.</div>
+                ) : null}
+                {view.approvalsComplete ? null : (
+                  <div className="pf">Some requests could not be listed; the newest are shown.</div>
+                )}
+              </>
+            )}
+          </Region>
+          {drawerContent}
+        </>
       ),
     },
     {
@@ -404,13 +498,17 @@ export function NeedsMeView({
           },
         })}
       />
-      <Dock
-        label="Regions on Needs me"
-        regions={regions}
-        layout={layout}
-        onLayout={setLayout}
-        onReset={resetLayout}
-      />
+      {phone ? (
+        <PhoneDock label="Regions on Needs me" regions={regions} />
+      ) : (
+        <Dock
+          label="Regions on Needs me"
+          regions={regions}
+          layout={layout}
+          onLayout={setLayout}
+          onReset={resetLayout}
+        />
+      )}
       <Announcer message={message} />
     </div>
   );
@@ -497,7 +595,12 @@ function Held({
         ? 'What failed'
         : 'Open the Lane';
   return (
-    <div className="dec" id={`d-${row.laneId}`} data-st={row.word === 'Conflict' ? 'conflict' : undefined}>
+    <div
+      className="dec"
+      tabIndex={-1}
+      id={`d-${row.laneId}`}
+      data-st={row.word === 'Conflict' ? 'conflict' : undefined}
+    >
       <div className="dtop">
         <State word={row.word}>{row.tag}</State>
         <span>
