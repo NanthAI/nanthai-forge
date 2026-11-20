@@ -7,6 +7,11 @@ import { hostedLaneSchema } from '../src/hosted-lane';
 import { supersedeLaneFinishes } from './projectHostedLaneFinish';
 import { supersedeLane } from './projectHostedSuperseded';
 
+/** Switch FORGE_RESOLUTION_COMPLETE_BY_HEAD (Item 593fc2d7, off by default; acceptance guard): an
+ * origin Lane completes when its head still equals the conflict's pinned head, whatever its save
+ * count. Off: head and sourceVersion must both match, as before. */
+const completeByHead = () => process.env.FORGE_RESOLUTION_COMPLETE_BY_HEAD === '1';
+
 /** A conflict inside a resolution makes a short chain; the walk stays bounded. */
 const DEPTH = 4;
 type Lane = z.infer<typeof hostedLaneSchema>;
@@ -52,9 +57,14 @@ export async function completeResolutionOrigins(
       fromHead: origin.head,
     });
     if (current.state !== 'active' || current.pinned) break;
-    if (current.head !== origin.head || current.sourceVersion !== origin.sourceVersion) {
+    if (
+      current.head !== origin.head ||
+      (!completeByHead() && current.sourceVersion !== origin.sourceVersion)
+    ) {
       // Saved again after the conflict: it keeps its work and stays open, but its original source
-      // reached main through this resolution, so it stops producing advisory notices.
+      // reached main through this resolution, so it stops producing advisory notices. With the
+      // switch on, a re-save of the same bytes (sourceVersion moved, head unchanged) holds no new
+      // work, so the Lane completes like an untouched one (593fc2d7).
       await supersedeLane(ctx, {
         projectId: input.projectId,
         laneId: current.id,
