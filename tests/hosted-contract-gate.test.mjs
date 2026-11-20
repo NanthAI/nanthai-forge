@@ -174,6 +174,10 @@ test('red main holds ready contract attempt and releases queue without polling o
   assert.equal(row.hold, 'main-red');
   assert.equal(row.runnable, false);
   assert.equal(row.alarm, null);
+  // Item 687d1eda hold record: the publication hold is recorded on the same row patch.
+  assert.equal(row.mainRedHolds?.length, 1);
+  assert.equal(row.mainRedHolds[0].kind, 'publication');
+  assert.equal(row.mainRedHolds[0].releasedAt, undefined);
   assert.equal(f.pendingTasks().length, 0);
   assert.equal(f.queue().lease, null);
   assert.equal(f.tables.projectHostedAcceptances.size, 0);

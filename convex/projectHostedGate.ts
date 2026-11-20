@@ -254,6 +254,7 @@ import {
 import { finishRow, wakeLandingOrderWaiters } from './projectHostedFinishWake';
 import { semanticPayload } from '../src/semantic-payload';
 import type { HostedLandingState } from '../src/hosted-landing';
+import { openMainRedHold } from '../src/hosted-acceptance';
 
 /** Publication already validated the exact attempt. A main-red hold is an event
  * wait: retain ordinary observations without the generic ready/finish wakes. */
@@ -275,6 +276,8 @@ export async function holdMainRed(ctx: MutationCtx, row: LandingRow, next: Hoste
     // Its alarm and wake are gone: a reservation it kept would park later landings of the
     // same files on a row nothing drives, as Fix D's park already clears (review e7137e30 4b).
     reservedUntil: undefined,
+    // The hold's record (Item 687d1eda): rides this patch; releaseMainHolds closes it.
+    mainRedHolds: openMainRedHold(row.mainRedHolds, 'publication', new Date().toISOString()),
     value: semanticPayload(next),
   });
   // A held entry gives up its submission-order place; the next waiter re-reads the gate.

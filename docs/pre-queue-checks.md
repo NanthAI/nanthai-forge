@@ -447,7 +447,10 @@ pages of 25 release held landings, publication holds included, with one row patc
 and one stall alarm each (about 6 document reads, 5 writes and 6 KB written per landing). If a release page is lost (a failed task), the redrive sweep or a same-Lane re-submit releases
 again once main is green (one audit-row read, only for a held entry). A failed
 admission costs one audit-row read, plus one Candidate read when its files match main's; parking
-writes less than failing. Idle and passing landings cost nothing more.
+writes less than failing. Idle and passing landings cost nothing more. Each hold leaves a record:
+the park (or publication hold) stamps `heldAt` and the release `releasedAt` on the same row write,
+and the receipt, its `landings` row and the Lane's `lane-history` landing carry them as
+`mainRedHolds` (at most four), so a hold and its re-landing can be read after main recovers.
 
 With `FORGE_QUEUE_KEEP_THE_RUN=1` (Item fa2c1383, off by default), a main move no longer throws away
 every running check it touches. The post-acceptance sweep (at most eight running entries) asks the

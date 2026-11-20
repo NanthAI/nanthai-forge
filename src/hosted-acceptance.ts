@@ -16,6 +16,16 @@ import { secretAllowMarkSchema } from './secret-allow.js';
 import { docsResolutionSchema } from './docs-resolution.js';
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
+/** At most this many main-red holds kept per landing (the newest). */
+export const MAIN_RED_HOLDS = 4;
+const mainRedHoldSchema = z
+  .object({
+    kind: z.enum(['parked', 'publication']),
+    heldAt: z.iso.datetime(),
+    releasedAt: z.iso.datetime().optional(),
+  })
+  .strict();
+export type MainRedHold = z.infer<typeof mainRedHoldSchema>;
 /** Immutable publication evidence. Input roots retain the exact ordered Lane
  * heads and included dependencies; no expanding fan-in lives in this document. */
 export const hostedAcceptanceSchema = z
@@ -79,6 +89,10 @@ export const hostedAcceptanceSchema = z
       .min(1)
       .max(8)
       .optional(),
+    /** Each main-red hold this landing waited under, oldest first (Item 687d1eda): `parked` when its
+     * check failed only on tests main fails too, `publication` when acceptance waited for main to
+     * pass. `releasedAt` is when main's green released it; this receipt is the re-landing. */
+    mainRedHolds: z.array(mainRedHoldSchema).min(1).max(MAIN_RED_HOLDS).optional(),
     actor: hostedLandingAttemptSchema.shape.actor,
     /** The agent run that submitted the landing (session slug, d730121f); shown as `handle/slug`.
      * Absent on older receipts, on person landings and from CLIs that predate it. */
@@ -172,6 +186,20 @@ export function firstCheckReceipt(
 }
 export const firstCheckField = (value: HostedAcceptance['firstCheck']) =>
   value ? { firstCheck: value } : {};
+/** Receipt `mainRedHolds` from the landing row's list (no read). */
+export const mainRedHoldsField = (holds: MainRedHold[] | undefined) =>
+  holds?.length ? { mainRedHolds: holds.slice(-MAIN_RED_HOLDS) } : {};
+/** The row list after a main-red hold starts: an already open hold stays the one entry. */
+export function openMainRedHold(holds: MainRedHold[] | undefined, kind: MainRedHold['kind'], at: string) {
+  if (holds?.length && !holds.at(-1)!.releasedAt) return holds;
+  return [...(holds ?? []), { kind, heldAt: at }].slice(-MAIN_RED_HOLDS);
+}
+/** The row list after main's green releases it; unchanged when no hold is open. */
+export function closeMainRedHold(holds: MainRedHold[] | undefined, at: string) {
+  const last = holds?.at(-1);
+  if (!last || last.releasedAt) return holds;
+  return [...holds!.slice(0, -1), { ...last, releasedAt: at }];
+}
 /** Receipt `orderWaits` from the landing row's server-only list (no read). */
 export const orderWaitsField = (waits: HostedAcceptance['orderWaits'] | undefined) =>
   waits?.length ? { orderWaits: waits.slice(0, 8) } : {};

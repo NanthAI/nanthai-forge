@@ -207,6 +207,8 @@ async function evidence(
       heldAfterCheck: heldAfterCheck(attempts, progress),
       // Older submissions it waited for after its check passed, and whether footprints overlapped (c6b81429).
       orderWaits: receipt.orderWaits ?? null,
+      // Each main-red hold it waited under (held, released); this receipt is the re-landing (687d1eda).
+      mainRedHolds: receipt.mainRedHolds ?? null,
       // A person's acceptance or an automatic one (fe5bea80); older rows fall back to the receipt actor.
       acceptedBy: state?.acceptance?.acceptedBy
         ? landingAcceptedBySchema.parse(state.acceptance.acceptedBy)

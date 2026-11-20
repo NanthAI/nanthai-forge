@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
+import { mainRedHoldValidator } from './projectHostedLandingFields';
 const session = v.optional(
   v.object({
     sessionId: v.string(),
@@ -55,6 +56,8 @@ export const hostedOverlapTables = {
         laneHead: v.string(),
         at: v.string(),
         revertedBy: v.optional(v.object({ receiptId: v.string(), at: v.string() })),
+        /** The receipt's main-red holds (held, released), for lane-history (Item 687d1eda). */
+        mainRedHolds: v.optional(v.array(mainRedHoldValidator)),
       }),
     ),
     /** A Lane of the same Intent landed after this Lane went quiet (Issue 55024d40): the Lane keeps its

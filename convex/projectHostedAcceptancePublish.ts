@@ -29,6 +29,7 @@ import {
   hostedAcceptanceSchema,
   firstCheckField,
   orderWaitsField,
+  mainRedHoldsField,
   firstCheckReceipt,
   landingCompletion,
 } from '../src/hosted-acceptance';
@@ -358,6 +359,7 @@ export async function publishAcceptance(
     previous: attempt.main,
     candidate: attempt.candidate,
     ...orderWaitsField(row.orderWaits),
+    ...mainRedHoldsField(row.mainRedHolds),
     actor,
     ...(row.agentRun ? { agentRun: row.agentRun } : {}),
     ...(row.agentClient ? { agentClient: row.agentClient } : {}),

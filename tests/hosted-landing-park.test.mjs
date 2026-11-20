@@ -14,6 +14,8 @@ const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'
 const admissionWake = await import(moduleUrl('../convex/projectHostedLandingAdmissionWake.ts'));
 const auditState = await import(moduleUrl('../convex/projectHostedMainAuditState.ts'));
 const redrive = await import(moduleUrl('../convex/projectHostedLandingRedrive.ts'));
+const landingsRead = await import(moduleUrl('../convex/projectHostedLandings.ts'));
+const laneHistory = await import(moduleUrl('../convex/projectHostedLaneHistory.ts'));
 import { controllerMetadataFits } from './observer-projection-budget.mjs';
 const SWITCH = 'FORGE_QUEUE_PARK_ON_MAIN_RED';
 const prior = Object.fromEntries([...Object.keys(synthetic), SWITCH].map(k => [k, process.env[k]]));
@@ -140,6 +142,58 @@ test('incident 687d1eda D: a landing failing only on main red tests parks, then 
   await passQueued(f);
   assert.equal(states(f)[0].phase, 'landed', 'the parked landing re-lands on green');
   assert(f.runs().length >= 2, 'its check ran again on green main');
+});
+
+test('incident 687d1eda hold record: a parked landing leaves held, released and its re-landing receipt in landings and lane-history', async t => {
+  // Analyst 2026-11-20: four reds since switch-on left no hold to read after the fact.
+  process.env[SWITCH] = '1';
+  const f = await redMain(t);
+  await parkAll(f);
+  const held = f.landingRow().mainRedHolds;
+  assert.equal(held?.length, 1, 'parking records the hold on the row it already writes');
+  assert.equal(held[0].kind, 'parked');
+  assert.ok(Date.parse(held[0].heldAt));
+  assert.equal(held[0].releasedAt, undefined);
+  await f.green();
+  const released = f.landingRow().mainRedHolds;
+  assert.equal(released.length, 1, 'release closes the same hold');
+  assert.ok(Date.parse(released[0].releasedAt) >= Date.parse(released[0].heldAt));
+  await passQueued(f);
+  assert.equal(states(f)[0].phase, 'landed');
+  const receipt = JSON.parse(
+    [...f.tables.projectHostedAcceptances.values()].find(r => r.projectId === f.projectId).value,
+  );
+  assert.deepEqual(receipt.mainRedHolds, released, 'the receipt carries the record');
+  const { landings } = JSON.parse(
+    await f.transaction('landingsRead', landingsRead.read, { projectId: f.projectId, receiptId: receipt.id }),
+  );
+  assert.deepEqual(landings[0].mainRedHolds, released, 'landings shows held and released');
+  assert.equal(landings[0].receiptId, receipt.id, 'on the re-landing receipt');
+  assert.ok(Date.parse(landings[0].committedAt) >= Date.parse(released[0].releasedAt));
+  const history = JSON.parse(
+    await f.transaction('laneHistory', laneHistory.read, {
+      projectId: f.projectId,
+      laneId: f.entries[0].lane.laneId,
+    }),
+  );
+  assert.equal(history.landing?.receiptId, receipt.id, 'lane-history names the re-landing');
+  assert.deepEqual(history.landing.mainRedHolds, released, 'lane-history shows held and released');
+});
+
+test('687d1eda hold record: a landing never held carries no mainRedHolds anywhere', async t => {
+  const f = await redMain(t);
+  f.setRed(undefined);
+  await passQueued(f);
+  assert.equal(states(f)[0].phase, 'landed');
+  assert.equal(f.landingRow().mainRedHolds, undefined);
+  const receipt = JSON.parse(
+    [...f.tables.projectHostedAcceptances.values()].find(r => r.projectId === f.projectId).value,
+  );
+  assert.equal('mainRedHolds' in receipt, false);
+  const { landings } = JSON.parse(
+    await f.transaction('landingsRead', landingsRead.read, { projectId: f.projectId, receiptId: receipt.id }),
+  );
+  assert.equal(landings[0].mainRedHolds, null);
 });
 
 test('687d1eda D review 1: parking writes one observation per version; observe pages across park and release', async t => {

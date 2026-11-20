@@ -40,6 +40,7 @@ import {
   hostedAcceptanceSchema,
   firstCheckField,
   orderWaitsField,
+  mainRedHoldsField,
   firstCheckReceipt,
   landingCompletion,
 } from '../src/hosted-acceptance';
@@ -374,6 +375,7 @@ export async function publishLandingBatch(
         }),
       ),
       ...orderWaitsField(member.row.orderWaits),
+      ...mainRedHoldsField(member.row.mainRedHolds),
       actor: member.attempt.actor,
       ...(member.row.agentRun ? { agentRun: member.row.agentRun } : {}),
       ...(member.row.agentClient ? { agentClient: member.row.agentClient } : {}),

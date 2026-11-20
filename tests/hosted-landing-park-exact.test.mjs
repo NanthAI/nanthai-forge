@@ -111,6 +111,16 @@ test('incident 687d1eda: a cohort failing only on main red tests parks every mem
   assert(f.runs().length >= 2, 'their check ran again on green main');
   const files = JSON.parse(f.c.objects.get(f.currentMain().head)).files.map(file => file.path);
   for (let i = 0; i < 4; i++) assert(files.includes(`member-${i}`), 'every change is on main');
+  // Hold record (Item 687d1eda): each re-landing receipt, solo or cohort, carries its park and release.
+  const receipts = [...f.tables.projectHostedAcceptances.values()]
+    .filter(row => row.projectId === f.projectId)
+    .map(row => JSON.parse(row.value));
+  assert.equal(receipts.length, 4);
+  for (const receipt of receipts) {
+    assert.equal(receipt.mainRedHolds?.length, 1, 'one hold per parked member');
+    assert.equal(receipt.mainRedHolds[0].kind, 'parked');
+    assert.ok(Date.parse(receipt.mainRedHolds[0].releasedAt) >= Date.parse(receipt.mainRedHolds[0].heldAt));
+  }
 });
 
 test('c3c69c57: a cohort composed on a moved main that parks on main red names the race main-red', async t => {

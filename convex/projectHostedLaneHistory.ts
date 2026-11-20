@@ -103,6 +103,8 @@ export async function journalLaneHistoryRead(
             // A reverted landing is off main: not current even while the Lane still holds that head.
             current: landed.laneHead === lane.head && !landed.revertedBy,
             ...(landed.revertedBy ? { revertedBy: landed.revertedBy } : {}),
+            // Main-red holds it waited under before this landing (held, released; Item 687d1eda).
+            ...(landed.mainRedHolds ? { mainRedHolds: landed.mainRedHolds } : {}),
           }
         : null,
     });

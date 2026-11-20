@@ -30,8 +30,10 @@ MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
 - `lane-history {laneId?}` is one query from stored rows for an open, landed or
   abandoned Lane: `openedAt`, `startBase` (the main it started from),
   `lastSyncedBase` (the main its base is now), `synced`, `state`, `head`,
-  `lastActivityAt` and `landing {receiptId,commit,head,at,current,revertedBy?}` (null
-  when nothing landed or the Lane landed before the landing stamp). Once a
+  `lastActivityAt` and `landing {receiptId,commit,head,at,current,revertedBy?,mainRedHolds?}` (null
+  when nothing landed or the Lane landed before the landing stamp). `mainRedHolds` lists each
+  main-red hold the landing waited under before it landed (`kind` `parked` or `publication`,
+  `heldAt`, `releasedAt`), the same list as its receipt and its `landings` row. Once a
   compensating landing takes that landing off main, `current` is false and
   `revertedBy {receiptId,at}` names the revert. No writes. The Lane's save history
   is `records {"collection":"saves","parentId":LANE_ID}`: each save with its full

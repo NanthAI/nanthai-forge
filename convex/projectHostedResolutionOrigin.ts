@@ -6,6 +6,7 @@ import { readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { supersedeLaneFinishes } from './projectHostedLaneFinish';
 import { supersedeLane } from './projectHostedSuperseded';
+import type { MainRedHold } from '../src/hosted-acceptance';
 
 /** A conflict inside a resolution makes a short chain; the walk stays bounded. */
 const DEPTH = 4;
@@ -26,6 +27,8 @@ export async function completeResolutionOrigins(
     receiptId: string;
     commit: string | null;
     at: string;
+    /** The receipt's main-red holds, stamped for the origin Lane's lane-history (Item 687d1eda). */
+    mainRedHolds?: MainRedHold[];
   },
   lane: Lane,
   /** Each origin Lane whose source reached main through this resolution, from the record already read
@@ -94,6 +97,7 @@ export async function completeResolutionOrigins(
                 commit: input.commit,
                 laneHead: current.head,
                 at: input.at,
+                ...(input.mainRedHolds ? { mainRedHolds: input.mainRedHolds } : {}),
               },
             }
           : {}),

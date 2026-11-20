@@ -320,7 +320,10 @@ run record keeps its request time, not a start time. `runsPerLanding` and `disca
 moved main made useless) show what drives them. Finish-to-main reports `p50Minutes`, `p90Minutes`,
 `meanMinutes` and `admissionRunShare` (admitted landings that landed on their admission check): the p50 alone
 flips on a two-humped distribution (main did not move versus moved). `heldAfterCheck` and the 60 s floor on its
-waits are a floor: shorter order waits are in `orderWaits` without a duration. The builder's own measurement-hold
+waits are a floor: shorter order waits are in `orderWaits` without a duration. `mainRedHolds` lists
+each main-red hold a landing waited under (`parked` after its check failed only on main's red tests,
+or `publication` when acceptance waited for green), with `heldAt` and `releasedAt`; the row's
+receipt is the re-landing, so `committedAt` minus `releasedAt` is its green-to-land time. The builder's own measurement-hold
 wait is client-side before submission, so no server timestamp includes it.
 
 #### Fallback reasons
@@ -447,7 +450,8 @@ or `not-reported`. It reads only on request and writes nothing.
 `lane-history {laneId?}` is the matching per-Lane read: one query, six indexed reads
 (Lane head and record, its first version, the overlap row), a few hundred bytes, no
 writes. It gives `openedAt`, `startBase` and `lastSyncedBase` (main at start and main now),
-and `landing` (receipt, commit, saved head, time) for open, landed and abandoned Lanes.
+and `landing` (receipt, commit, saved head, time, and `mainRedHolds` when it waited under a
+main-red hold) for open, landed and abandoned Lanes.
 `diff {laneId,summary:true}` reports per changed path whether current main is `equal`,
 `absent` or `different`, from the base, saved-head and main State manifests only: no hunks and
 no blob reads. A friction id given to `comment-planning-item` fails with a pointer: friction

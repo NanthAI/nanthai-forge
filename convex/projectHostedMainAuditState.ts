@@ -3,7 +3,7 @@ import { cancelPendingTask } from './schedulerCancel';
 import { makeFunctionReference } from 'convex/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './server';
-import type { HostedAcceptance } from '../src/hosted-acceptance';
+import { closeMainRedHold, type HostedAcceptance } from '../src/hosted-acceptance';
 import { hostedCheckTerminal, hostedCheckRunSchema, type HostedCheckRun } from '../src/hosted-check';
 import { mainGateSchema, type MainGate } from '../src/bet2-gate';
 import {
@@ -291,6 +291,8 @@ export async function releaseMainHolds(ctx: MutationCtx, projectId: Id<'hostedPr
         orderLive: holdsLandingOrder({ phase: row.phase, hold: undefined }, state) ? true : undefined,
         ...(rearm ? { alarm: await armLandingAlarm(ctx, row, now) } : {}),
         ...(parked ? { batchable: cohortPlace(row, state) } : {}),
+        // Closes the hold's record (Item 687d1eda): the receipt carries held and released times.
+        ...(row.mainRedHolds ? { mainRedHolds: closeMainRedHold(row.mainRedHolds, now) } : {}),
         value: canonicalPayload(state),
       });
     }

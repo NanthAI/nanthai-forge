@@ -320,6 +320,12 @@
       "test": "incident 687d1eda D: a landing failing only on main red tests parks, then re-lands once main is green"
     },
     {
+      "incident": "687d1eda",
+      "what": "Four main reds after the park switch went on (2026-11-19/20) left no hold to read after the fact: landings, lane-history and records showed no held, released or re-landing time",
+      "file": "tests/hosted-landing-park.test.mjs",
+      "test": "incident 687d1eda hold record: a parked landing leaves held, released and its re-landing receipt in landings and lane-history"
+    },
+    {
       "incident": "43b51a5e",
       "what": "Queue stall 2026-11-19: an older entry changing only a nightly workflow counted as CI configuration; 9 passed landings waited up to 80 min behind it as dependent and it re-checked on every main move",
       "file": "tests/hosted-landing-overtake.test.mjs",

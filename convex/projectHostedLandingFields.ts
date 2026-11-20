@@ -17,6 +17,12 @@ export const runnerAccounting = v.optional(
     lastCancelled: v.optional(v.string()),
   }),
 );
+/** One main-red hold of a landing (receipt and Lane landing stamp `mainRedHolds`, Item 687d1eda). */
+export const mainRedHoldValidator = v.object({
+  kind: v.union(v.literal('parked'), v.literal('publication')),
+  heldAt: v.string(),
+  releasedAt: v.optional(v.string()),
+});
 const alarm = v.optional(
   v.union(
     v.object({
@@ -278,6 +284,9 @@ export const hostedLandingTables = {
         }),
       ),
     ),
+    /** Each main-red hold this entry waited under, newest last (receipt `mainRedHolds`, Item
+     * 687d1eda): set when it parks or its publication holds, closed when main's green releases it. */
+    mainRedHolds: v.optional(v.array(mainRedHoldValidator)),
     /** The Candidate's Intent, so the next submission of the same work finds this one (10d253c6). */
     intentId: v.optional(v.string()),
     /** Supersessions after a passed check in a row, ending with the previous landing of this Intent. */

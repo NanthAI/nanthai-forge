@@ -16,6 +16,7 @@ import { auditRow, redTests } from './projectHostedMainAuditState';
 import { finishRow } from './projectHostedFinishWake';
 import { cancelPendingTask } from './schedulerCancel';
 import { writeLanding, type LandingRow } from './projectHostedLandingStore';
+import { openMainRedHold } from '../src/hosted-acceptance';
 export { parkOnMainRed } from './projectHostedMainAuditState';
 
 /** A finished run whose only failure is one test job: every job reported, none cancelled or
@@ -127,4 +128,8 @@ export async function parkLanding(ctx: MutationCtx, row: LandingRow, next: Hoste
     await ctx.db.patch(finish._id, { wake: null });
   }
   await writeLanding(ctx, row, next, false, true, undefined, 'main-red');
+  // The hold's record (Item 687d1eda), closed by releaseMainHolds; the same row in this mutation.
+  await ctx.db.patch(row._id, {
+    mainRedHolds: openMainRedHold(row.mainRedHolds, 'parked', new Date().toISOString()),
+  });
 }

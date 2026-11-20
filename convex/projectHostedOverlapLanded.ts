@@ -8,6 +8,7 @@ import { labelOverlapMainLog } from './projectHostedOverlapMainLog';
 import { publicActorLabel } from './publicPeople';
 import { closeConflictNotices } from './projectHostedConflicts';
 import { readHostedRecord } from './projectHostedRecords';
+import type { MainRedHold } from '../src/hosted-acceptance';
 
 /** One immutable input page is at most 100 entries; later pages are reached through the completion ledger. */
 const RETIRE_LIMIT = 100;
@@ -18,7 +19,7 @@ const RETIRE_LIMIT = 100;
 export async function retireLandedOverlapLanes(
   ctx: MutationCtx,
   identity: ReceiptIdentity,
-  landed?: { commit: string; at: string; sequence?: number },
+  landed?: { commit: string; at: string; sequence?: number; mainRedHolds?: MainRedHold[] },
 ) {
   await stampLegacyOverlapActivity(ctx, identity.projectId);
   const page = await acceptancePage(ctx, { ...identity, kind: 'inputs', index: 0 });
@@ -68,7 +69,13 @@ export async function retireLandedOverlapLanes(
     }
     // Landing evidence rides on the same row patch: Lane status reads it with no extra call.
     const stamp = landed
-      ? { receiptId: identity.receiptId, commit: landed.commit, laneHead: row.head, at: landed.at }
+      ? {
+          receiptId: identity.receiptId,
+          commit: landed.commit,
+          laneHead: row.head,
+          at: landed.at,
+          ...(landed.mainRedHolds ? { mainRedHolds: landed.mainRedHolds } : {}),
+        }
       : undefined;
     const stamped = !stamp || row.landed?.receiptId === stamp.receiptId;
     if (row.conflicted) await closeConflictNotices(ctx, identity.projectId, row.laneId, 'landed');
