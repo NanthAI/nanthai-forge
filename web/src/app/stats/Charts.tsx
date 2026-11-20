@@ -14,10 +14,11 @@ import {
   minutes,
   monthName,
   monthPartWords,
+  percent,
   plural,
   scale,
 } from './model';
-import type { StatsAgents, StatsMonths, StatsWaited } from '../../../../src/stats-period';
+import type { StatsAgents, StatsMonths, StatsTrend, StatsWaited } from '../../../../src/stats-period';
 
 /** A chart with its table one press away (every chart offers the same figures as a table). */
 function ChartOr({ caption, chart, table }: { caption: string; chart: ReactNode; table: ReactNode }) {
@@ -43,21 +44,32 @@ function ChartOr({ caption, chart, table }: { caption: string; chart: ReactNode;
 /** Landings per day: fixed-width bars from the left, each with its value on top (on a narrow screen with many days,
  * the tallest, the newest and the chosen one), the day of the month under it, and the full day in the readout. */
 const NOT_MEASURED = 'not measured: its close did not finish';
-/** Landings per day; a day whose close did not finish (null) is drawn as missing, never as zero. */
-export function PerDay({ days }: { days: Array<[string, number | null]> }) {
+const shortMonth = (month: string) =>
+  new Intl.DateTimeFormat('en', { month: 'short', timeZone: 'UTC' }).format(
+    new Date(`${month}-01T00:00:00Z`),
+  );
+/** Landings per day; a day whose close did not finish (null) is drawn as missing, never as zero. With `months` (All
+ * time), one bar per month ('YYYY-MM'). */
+export function PerDay({ days, months = false }: { days: Array<[string, number | null]>; months?: boolean }) {
   const [at, setAt] = useState(days.length - 1);
   const heights = scale(days.map(([, n]) => n ?? 0));
   const top = Math.max(0, ...days.map(([, n]) => n ?? 0));
   const shown = days[Math.min(at, days.length - 1)];
   const said = (n: number | null) => (n === null ? NOT_MEASURED : plural(n, 'landing'));
+  const name = months ? monthName : dayName;
+  const caption = months ? 'Landings per month' : 'Landings per day';
   return (
     <ChartOr
-      caption="Landings per day"
+      caption={caption}
       table={
         <Table
-          caption="Landings per day"
+          caption={caption}
           columns={[
-            { key: 'day', title: 'Day', cell: ([day]: [string, number | null]) => dayName(day) },
+            {
+              key: 'day',
+              title: months ? 'Month' : 'Day',
+              cell: ([day]: [string, number | null]) => name(day),
+            },
             {
               key: 'n',
               title: 'Landings',
@@ -76,7 +88,7 @@ export function PerDay({ days }: { days: Array<[string, number | null]> }) {
               className="stats-days"
               data-dense={days.length > 14 || undefined}
               role="group"
-              aria-label="Landings per closed day"
+              aria-label={months ? 'Landings per closed month' : 'Landings per closed day'}
             >
               {days.map(([day, n], i) => (
                 <button
@@ -88,7 +100,7 @@ export function PerDay({ days }: { days: Array<[string, number | null]> }) {
                       .join(' ') || undefined
                   }
                   aria-pressed={i === at}
-                  aria-label={`${dayName(day)}: ${said(n)}`}
+                  aria-label={`${name(day)}: ${said(n)}`}
                   data-missing={n === null || undefined}
                   onClick={() => setAt(i)}
                   onFocus={() => setAt(i)}
@@ -99,7 +111,7 @@ export function PerDay({ days }: { days: Array<[string, number | null]> }) {
                   </span>
                   <i style={{ '--h': heights[i] } as CSSProperties} />
                   <span className="d" aria-hidden="true">
-                    {Number(day.slice(8))}
+                    {months ? shortMonth(day) : Number(day.slice(8))}
                   </span>
                 </button>
               ))}
@@ -108,7 +120,7 @@ export function PerDay({ days }: { days: Array<[string, number | null]> }) {
           <p className="stats-readout" aria-live="polite">
             {shown ? (
               <>
-                <b>{dayName(shown[0])}:</b> {said(shown[1])}.
+                <b>{name(shown[0])}:</b> {said(shown[1])}.
               </>
             ) : null}
           </p>
@@ -265,5 +277,99 @@ export function ByMonth({ r }: { r: StatsMonths }) {
       rows={r.months}
       rowKey={row => row.month}
     />
+  );
+}
+
+type TrendLine = StatsTrend['current'];
+const TREND: Array<{
+  key: string;
+  title: string;
+  value: (l: TrendLine) => number | null;
+  show: (n: number) => string;
+  change: (d: number) => string;
+}> = [
+  {
+    key: 'n',
+    title: 'Landings per closed day',
+    value: l => l.landingsPerDay,
+    show: n => (Math.round(n * 10) / 10).toLocaleString('en'),
+    change: d => `${d > 0 ? '+' : '−'}${(Math.round(Math.abs(d) * 10) / 10).toLocaleString('en')}`,
+  },
+  {
+    key: 'f',
+    title: 'First try',
+    value: l => l.firstTryRate,
+    show: n => percent(n),
+    change: d => `${d > 0 ? '+' : '−'}${Math.round(Math.abs(d) * 100)} pts`,
+  },
+  {
+    key: 't',
+    title: 'Median time to main',
+    value: l => l.toMainSeconds,
+    show: n => clock(n),
+    change: d => `${duration(Math.abs(d))} ${d > 0 ? 'longer' : 'shorter'}`,
+  },
+  {
+    key: 'c',
+    title: 'CI minutes per landing',
+    value: l => l.ciMinutesPerLanding,
+    show: n => minutes(n),
+    change: d => `${minutes(Math.abs(d))} ${d > 0 ? 'more' : 'fewer'}`,
+  },
+];
+const spanWords = (l: TrendLine) =>
+  l.cover.first === null
+    ? 'no closed day'
+    : l.cover.first === l.cover.last
+      ? dayName(l.cover.first)
+      : `${dayName(l.cover.first)} to ${dayName(l.cover.last!)}`;
+/** Against the days before: this period's rates and medians beside the same number of days just before it, so a
+ * project that started on Forge still has a comparison. The method is on hover. */
+export function Trend({ r }: { r: StatsTrend }) {
+  const now = r.current,
+    then = r.previous;
+  if (!then.cover.closed)
+    return (
+      <p className="stats-note">
+        No day closed in the{' '}
+        {plural(Math.round((Date.parse(then.to) - Date.parse(then.from)) / 86_400_000) + 1, 'day')} before
+        this period, so there is nothing of this project’s own to set beside it yet.
+      </p>
+    );
+  type Row = (typeof TREND)[number];
+  const cell = (l: TrendLine, row: Row) => {
+    const n = row.value(l);
+    return n === null ? '–' : row.show(n);
+  };
+  return (
+    <>
+      <p
+        className="stats-readout"
+        title="Rates, medians and landings per closed day, so two periods compare however many of their days closed. Days not measured are left out of both."
+      >
+        <b>This period</b> {spanWords(now)} ({plural(now.cover.closed, 'closed day')}), beside{' '}
+        <b>the one before</b> {spanWords(then)} ({plural(then.cover.closed, 'closed day')}).
+      </p>
+      <Table<Row>
+        caption="This period beside the one before"
+        columns={[
+          { key: 'm', title: 'Figure', cell: row => row.title },
+          { key: 'a', title: 'This period', numeric: true, cell: row => cell(now, row) },
+          { key: 'b', title: 'The one before', numeric: true, cell: row => cell(then, row) },
+          {
+            key: 'd',
+            title: 'Change',
+            numeric: true,
+            cell: row => {
+              const a = row.value(now),
+                b = row.value(then);
+              return a === null || b === null ? '–' : a === b ? 'the same' : row.change(a - b);
+            },
+          },
+        ]}
+        rows={TREND}
+        rowKey={row => row.key}
+      />
+    </>
   );
 }

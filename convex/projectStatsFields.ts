@@ -23,4 +23,11 @@ export const statsTables = {
     day: v.string(),
     value: v.string(),
   }).index('by_project_and_day', ['projectId', 'day']),
+  // All time (Item a61d3c91): one row per project per closed month, a `StatsMonth` (src/stats-period.ts) of its days'
+  // totals, written once the month has closed (convex/projectStats.ts#rollMonth), so All time reads about 12 rows a year.
+  projectStatsMonths: defineTable({
+    projectId: v.id('hostedProjects'),
+    month: v.string(),
+    value: v.string(),
+  }).index('by_project_and_month', ['projectId', 'month']),
 };

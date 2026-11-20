@@ -11,6 +11,8 @@ import { makeFunctionReference } from 'convex/server';
 import { internalMutation } from './server';
 import { recordPersonDays } from './personDays';
 import { DAY_MS, dayStart, lanesByDay } from './statsLanes';
+import { statsDaySchema } from '../src/stats-estimate';
+import { notMeasured } from '../src/stats-period';
 
 /** Closed-day rows one run looks at. */
 export const BACKFILL_DAYS = 40;
@@ -22,12 +24,18 @@ export const BACKFILL_PROJECTS = 25;
 
 const ref = (name: string) => makeFunctionReference<'mutation'>(`statsLanesBackfill:${name}`);
 
-/** One project, in order through its closed days: `prev` is the last closed day already handled. The gap before the
- * first closed day starts at the beginning of time; the open tail after the last closed day is the next close's. */
+/** One project, in order through its closed days: `prev` is the last day row already handled, and `closed` the last
+ * closed day before the gap still open (null: none yet, the gap starts at the beginning of time; absent: `prev`). A day
+ * left not measured is not a closed day (its close wrote no person days): the gap runs on through it to the next closed
+ * day, and a trailing run of them is filed too. The open tail after the last row is the next close's. */
 export const project = internalMutation({
-  args: { projectId: v.id('hostedProjects'), prev: v.optional(v.string()) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    prev: v.optional(v.string()),
+    closed: v.optional(v.union(v.string(), v.null())),
+  },
   returns: v.object({ gaps: v.number(), lanes: v.number(), isDone: v.boolean() }),
-  handler: async (ctx, { projectId, prev }) => {
+  handler: async (ctx, { projectId, prev, closed }) => {
     const rows = await ctx.db
       .query('projectStatsDays')
       .withIndex('by_project_and_day', q =>
@@ -37,28 +45,38 @@ export const project = internalMutation({
       .take(BACKFILL_DAYS);
     let spent = 0,
       gaps = 0,
-      last = prev,
+      last = closed === undefined ? prev : (closed ?? undefined),
+      seen = prev,
       paused = false;
+    const fill = async (to: number) => {
+      const from = last === undefined ? 0 : dayStart(last) + DAY_MS;
+      if (to <= from) return;
+      const lanes = await lanesByDay(ctx, projectId, from, to);
+      spent += lanes.read;
+      for (const [day, list] of [...lanes.byDay].sort((a, b) => a[0].localeCompare(b[0]))) {
+        await recordPersonDays(ctx, projectId, day, list, { lanesOnly: true });
+        gaps++;
+      }
+    };
     for (const row of rows) {
       if (spent >= BACKFILL_LANE_BUDGET) {
         paused = true;
         break;
       }
-      const from = last === undefined ? 0 : dayStart(last) + DAY_MS;
-      const to = dayStart(row.day);
-      if (to > from) {
-        const lanes = await lanesByDay(ctx, projectId, from, to);
-        spent += lanes.read;
-        for (const [day, list] of [...lanes.byDay].sort((a, b) => a[0].localeCompare(b[0]))) {
-          await recordPersonDays(ctx, projectId, day, list, { lanesOnly: true });
-          gaps++;
-        }
-      }
+      seen = row.day;
+      if (notMeasured(statsDaySchema.parse(JSON.parse(row.value)))) continue;
+      await fill(dayStart(row.day));
       last = row.day;
     }
     const isDone = rows.length < BACKFILL_DAYS && !paused;
-    if (!isDone && last !== undefined)
-      await ctx.scheduler.runAfter(0, ref('project'), { projectId, prev: last });
+    // Days left not measured after the last closed day: their Lanes, up to the end of the newest of them.
+    if (isDone && seen !== undefined && seen !== last) await fill(dayStart(seen) + DAY_MS);
+    if (!isDone && seen !== undefined)
+      await ctx.scheduler.runAfter(0, ref('project'), {
+        projectId,
+        prev: seen,
+        ...(last === seen ? {} : { closed: last ?? null }),
+      });
     return { gaps, lanes: spent, isDone };
   },
 });

@@ -32,21 +32,39 @@ export const STATS_CLOSE_PAGE = 200;
  * paths, contract reports), so a read past the meter's check stays inside the room it keeps (review d6b0f1aa finding
  * 6). They are few: rows written before their projection (convex/projectMetricReadWriter.ts). */
 export const STATS_CLOSE_UNPROJECTED_PAGE = 1;
-/** What a reader leaves of the transaction when it stops: queries (index ranges and gets), bytes and documents. */
-export type StatsKeep = { queries: number; bytes: number; documents: number };
+/** What a reader leaves of the transaction when it stops: queries (index ranges and gets), bytes and documents read,
+ * and for a writer the documents and bytes it may still write. */
+export type StatsKeep = {
+  queries: number;
+  bytes: number;
+  documents: number;
+  writes?: { documents: number; bytes: number };
+};
 /** The runs and their lookups stop here: room for one more page (at most 200 compact rows of a few KB, or one full run
  * row of at most 1 MiB) and the close's writes. */
 export const STATS_RUNS_KEEP: StatsKeep = { queries: 64, bytes: 2 * 1024 * 1024, documents: 400 };
 /** The landings stop here, after a person's day is read: room for the person-day writes and at least a share of the
  * day's runs. */
 export const STATS_LANDINGS_KEEP: StatsKeep = { queries: 1_000, bytes: 5 * 1024 * 1024, documents: 1_000 };
-/** The transaction still has more than `keep` left to read (Convex: 4,096 queries, 16 MiB, 32,000 documents). */
+/** People's days stop here (one read and one write per person and day, convex/personDays.ts#recordPersonDays): room
+ * for the day's runs (their pages, attempts and lookups take a few hundred queries) and the close's own writes. */
+export const STATS_PEOPLE_KEEP: StatsKeep = {
+  queries: 700,
+  bytes: 4 * 1024 * 1024,
+  documents: 1_000,
+  writes: { documents: 200, bytes: 2 * 1024 * 1024 },
+};
+/** The transaction still has more than `keep` left to read (Convex: 4,096 queries, 16 MiB, 32,000 documents) and, for
+ * a writer, to write (Convex's documents and bytes written per transaction). */
 export async function statsRoom(ctx: Pick<MutationCtx, 'meta'>, keep: StatsKeep) {
   const left = await ctx.meta.getTransactionMetrics();
   return (
     left.databaseQueries.remaining > keep.queries &&
     left.bytesRead.remaining > keep.bytes &&
-    left.documentsRead.remaining > keep.documents
+    left.documentsRead.remaining > keep.documents &&
+    (keep.writes === undefined ||
+      (left.documentsWritten.remaining > keep.writes.documents &&
+        left.bytesWritten.remaining > keep.writes.bytes))
   );
 }
 /** Attempts are read from this long before the day (a run's attempt starts before it) to this long after it (a

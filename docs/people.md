@@ -99,8 +99,11 @@ comments, plus one Item-version read per put that sets an Item closed (two, and 
 project whose planning is only in the journal index). A landing
 writes nothing extra; an idle project writes nothing. A project's day is counted once that day closes, which the
 project's first landing of a later day triggers, so today shows from tomorrow. A close looks back at most 366 days and
-keeps the newest 1,000 open and 1,000 closed Lanes of its window. Days closed before this (Item a9ad21c9) are filled in
-by the one-time `statsLanesBackfill` run.
+keeps the newest 1,000 open and 1,000 closed Lanes of its window. A day left not measured (its close never finished)
+is not a closed day: the next close reads from where that close would have, and marks those days partial, since their
+landings were never read. The person-day writes are on the close's meter: a day with more people than one close can
+write closes with the rest unwritten, marked partial. Days closed before this (Item a9ad21c9) are filled in by the
+one-time `statsLanesBackfill` run, which runs a gap on through days left not measured.
 
 - Row size: about 100 B per project-day plus about 40 B per agent run (at most 40 runs per project-day; more are
   counted, not listed), plus about 6 B for Items closed and comments and about 2 B per run that commented.

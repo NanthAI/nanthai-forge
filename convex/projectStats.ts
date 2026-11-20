@@ -14,7 +14,7 @@ import { discardedRunnerSeconds } from '../src/cost-budgets';
 import type { Contribution } from '../src/person-days';
 import { landingAcceptedBySchema } from '../src/landing-accepted-by';
 import { recordPersonDays } from './personDays';
-import { DAY_MS, isAccount, laneWindowStart, lanesByDay } from './statsLanes';
+import { DAY_MS, STATS_LANE_LOOKBACK_DAYS, isAccount, laneWindowStart, lanesByDay } from './statsLanes';
 import { PLANNING_HOT_MS, planningContributions, planningMembers, planningPartialDays } from './personWork';
 import { utcDay } from './projectStatsClose';
 import {
@@ -28,7 +28,7 @@ import {
   statsDaySchema,
   type StatsLanding,
 } from '../src/stats-estimate';
-import { STATS_LANDINGS_KEEP, statsDayRuns, statsRoom } from './projectStatsRuns';
+import { STATS_LANDINGS_KEEP, STATS_PEOPLE_KEEP, statsDayRuns, statsRoom } from './projectStatsRuns';
 import { landingRequestOriginalDb } from './projectLandingRequestBody';
 import { workRecordOriginalDb } from './projectWorkRecordWriter';
 import { metricRunKind } from './projectMetricReadProjection';
@@ -36,7 +36,11 @@ import { makeFunctionReference } from 'convex/server';
 import {
   STATS_PARTS,
   STATS_RANGE_MAX_DAYS,
+  previousRange,
   rangeDays,
+  statsAllReply,
+  statsMonth,
+  statsMonthSchema,
   statsRangeReply,
   validRange,
 } from '../src/stats-period';
@@ -239,6 +243,8 @@ export const closeDay = internalMutation({
     // never stops the days after it.
     const prior = before ? statsDaySchema.parse(JSON.parse(before.value)) : null;
     const priorFailed = prior?.schema === 2 ? prior.failed : undefined;
+    // A previous day left not measured wrote no person days: count its people's work from where its close would have.
+    const since = priorFailed?.since;
     if (!reclose && before && priorFailed && priorFailed.tries < STATS_CLOSE_TRIES) {
       await ctx.db.patch(before._id, {
         value: canonicalPayload({ ...prior, failed: { ...priorFailed, tries: priorFailed.tries + 1 } }),
@@ -258,7 +264,9 @@ export const closeDay = internalMutation({
         await ctx.db.insert('projectStatsDays', {
           projectId,
           day: gap,
-          value: canonicalPayload(statsFailedDay(gap, statsCarry(prior))),
+          value: canonicalPayload(
+            statsFailedDay(gap, statsCarry(prior), 1, utcDay(laneWindowStart(before?.day, gap, since))),
+          ),
         });
         await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectStats:closeDay'), {
           projectId,
@@ -286,12 +294,28 @@ export const closeDay = internalMutation({
     // A person's day (Items 6a251b23, a9ad21c9): the Lanes started since the previous closed day, open or not, and the
     // Items closed and planning comments in the same window (convex/personWork.ts), each under its own caps. Read
     // first, so the landings and runs after them see on the transaction's read meter what they used.
-    const window = laneWindowStart(before?.day, day);
+    const window = laneWindowStart(before?.day, day, since);
     const personReads = reclose
       ? null
       : {
           lanes: await lanesByDay(ctx, projectId, window, from + DAY_MS),
           planning: await planningContributions(ctx, projectId, window, from + DAY_MS),
+          // The days of the window left not measured: their landings were never counted for anyone, so their people's
+          // days are marked partial. Read only when a not-measured day opens the window (rare): its rows are small.
+          unmeasured: new Set(
+            since === undefined
+              ? []
+              : (
+                  await ctx.db
+                    .query('projectStatsDays')
+                    .withIndex('by_project_and_day', q =>
+                      q.eq('projectId', projectId).gte('day', since).lt('day', day),
+                    )
+                    .take(STATS_LANE_LOOKBACK_DAYS + 1)
+                )
+                  .filter(row => notMeasured(row.value))
+                  .map(row => row.day),
+          ),
         };
     // Each landing: its receipt (read above), its landing row's own columns (never its body pages: the close needs
     // none of the request) and the Intent's earlier submissions. They stop while the transaction still has room for
@@ -318,8 +342,15 @@ export const closeDay = internalMutation({
     }
     let planningPartial =
       reclose && existing ? statsDaySchema.parse(JSON.parse(existing.value)).planningPartial === true : false;
+    let peoplePartial =
+      reclose && existing
+        ? (() => {
+            const kept = statsDaySchema.parse(JSON.parse(existing.value));
+            return kept.schema === 2 && kept.peoplePartial === true;
+          })()
+        : false;
     if (personReads) {
-      const { lanes, planning } = personReads;
+      const { lanes, planning, unmeasured } = personReads;
       const byDay = new Map([...lanes.byDay].map(([d, list]) => [d, [...list]] as const));
       for (const c of planning.contributions)
         byDay.set(utcDay(c.at), [...(byDay.get(utcDay(c.at)) ?? []), c]);
@@ -336,8 +367,6 @@ export const closeDay = internalMutation({
         projectCreated: window < now - PLANNING_HOT_MS ? ((await projectRow())?._creationTime ?? 0) : now,
         now,
       });
-      for (const [d, list] of [...byDay].sort((a, b) => a[0].localeCompare(b[0])))
-        if (d !== day) await recordPersonDays(ctx, projectId, d, list, { partial: partial.has(d) });
       contributions.push(...(byDay.get(day) ?? []));
       // A partial close may have left someone's only planning work unread (past the change-row cap, or archived), so
       // nothing of theirs would carry the mark: everyone who can do planning work here gets it on this day (no counts,
@@ -347,11 +376,27 @@ export const closeDay = internalMutation({
         for (const person of await planningMembers(ctx, row))
           if (!contributions.some(c => c.person === person))
             contributions.push({ kind: 'partial', person, at: from });
-      // Landings left unread (the day's cap, or the room the meter keeps) leave people's landings short too (review
-      // d6b0f1aa finding 4).
-      await recordPersonDays(ctx, projectId, day, contributions, {
-        partial: partial.has(day) || receipts.length > landingsRead,
-      });
+      // Each person-day is one read and one write, under the transaction's meter: a day with more people than it holds
+      // closes with the rest unwritten and is marked (peoplePartial), never failing whole (Item a61d3c91, d5857b5c).
+      // Oldest day first, this close's own day last.
+      const room = () => statsRoom(ctx, STATS_PEOPLE_KEEP);
+      const days: Array<[string, Contribution[], boolean]> = [
+        ...[...byDay]
+          .filter(([d]) => d !== day)
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .map(
+            ([d, list]) =>
+              [d, list, partial.has(d) || unmeasured.has(d)] as [string, Contribution[], boolean],
+          ),
+        // Landings left unread (the day's cap, or the room the meter keeps) leave people's landings short too (review
+        // d6b0f1aa finding 4).
+        [day, contributions, partial.has(day) || receipts.length > landingsRead],
+      ];
+      for (const [d, list, mark] of days)
+        if (!(await recordPersonDays(ctx, projectId, d, list, { partial: mark, room }))) {
+          peoplePartial = true;
+          break;
+        }
       planningPartial = partial.any;
     }
 
@@ -361,6 +406,7 @@ export const closeDay = internalMutation({
     const value = canonicalPayload({
       ...(receipts.length > landingsRead ? { ...closed, partial: true } : closed),
       ...(planningPartial ? { planningPartial: true as const } : {}),
+      ...(peoplePartial ? { peoplePartial: true as const } : {}),
     });
     const reruns = rerunsWhileWaiting(landings);
     const runnerContributions = [...contributionIds].map(([i, submissionId]) => ({
@@ -386,7 +432,54 @@ export const closeDay = internalMutation({
         day: utcDay(from + DAY_MS),
         reclose,
       });
+    // A month closes for All time once a day of a later month closes (or a re-close finishes it): one rollup a month.
+    const month = day.slice(0, 7);
+    const rolled = reclose
+      ? (day === reclose.through || utcDay(from + DAY_MS).slice(0, 7) !== month) &&
+        month < utcDay(Date.now()).slice(0, 7)
+        ? month
+        : null
+      : before && before.day.slice(0, 7) < month
+        ? before.day.slice(0, 7)
+        : null;
+    if (rolled)
+      await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectStats:rollMonth'), {
+        projectId,
+        month: rolled,
+      });
     await closeNext();
+    return null;
+  },
+});
+
+/** Months All time reads at most (twenty years), and the day rows after the newest rolled month. */
+export const STATS_ALL_MONTHS = 240;
+
+/** A closed month's rollup for All time (src/stats-period.ts#statsMonth), from its day rows (at most 31), replacing any
+ * earlier one. Scheduled once a month per active project by the close (never for an idle project), and by a re-close. */
+export const rollMonth = internalMutation({
+  args: { projectId: v.id('hostedProjects'), month: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { projectId, month }) => {
+    invariant(/^\d{4}-\d{2}$/.test(month), 'BAD_ARGUMENT', 'A month is YYYY-MM.');
+    const rows = await ctx.db
+      .query('projectStatsDays')
+      .withIndex('by_project_and_day', q =>
+        q.eq('projectId', projectId).gte('day', `${month}-01`).lte('day', `${month}-31`),
+      )
+      .take(31);
+    const value = canonicalPayload(
+      statsMonth(
+        month,
+        rows.map(row => statsDaySchema.parse(JSON.parse(row.value))),
+      ),
+    );
+    const existing = await ctx.db
+      .query('projectStatsMonths')
+      .withIndex('by_project_and_month', q => q.eq('projectId', projectId).eq('month', month))
+      .unique();
+    if (existing) await ctx.db.patch(existing._id, { value });
+    else if (rows.length) await ctx.db.insert('projectStatsMonths', { projectId, month, value });
     return null;
   },
 });
@@ -441,14 +534,63 @@ export const read = query({
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'AUTH_REQUIRED', 'Sign in to see Stats.');
       await memberProject(ctx, projectId, user.subject);
-      const rows = await ctx.db
-        .query('projectStatsDays')
-        .withIndex('by_project_and_day', q => q.eq('projectId', projectId).gte('day', from).lte('day', to))
-        .take(STATS_RANGE_MAX_DAYS);
-      const days = rows.map(row => statsDaySchema.parse(JSON.parse(row.value)));
+      const range = (a: string, b: string) =>
+        ctx.db
+          .query('projectStatsDays')
+          .withIndex('by_project_and_day', q => q.eq('projectId', projectId).gte('day', a).lte('day', b))
+          .take(STATS_RANGE_MAX_DAYS);
+      const rows = await range(from, to);
+      // The self-trend also reads the same number of days just before (only when its fold is open).
+      const before =
+        part === 'trend' ? await range(previousRange({ from, to }).from, previousRange({ from, to }).to) : [];
+      const parse = (list: typeof rows) => list.map(row => statsDaySchema.parse(JSON.parse(row.value)));
       return canonicalPayload({
-        ...statsRangeReply(days, { from, to }, part),
-        bytesRead: rows.reduce((s, row) => s + row.value.length, 0),
+        ...statsRangeReply(parse(rows), { from, to }, part, parse(before)),
+        bytesRead: [...rows, ...before].reduce((s, row) => s + row.value.length, 0),
+      });
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+/** All time for a project's members: each closed month's stored rollup (about 12 rows a year, at most STATS_ALL_MONTHS)
+ * and the day rows after the newest one (the open month; at most STATS_RANGE_MAX_DAYS, the newest kept), never every
+ * day. One part at a time, as `read`; re-run only by a close or a rollup. */
+export const readAll = query({
+  args: {
+    projectId: v.id('hostedProjects'),
+    part: v.optional(v.union(...STATS_PARTS.map(part => v.literal(part)))),
+  },
+  returns: v.string(),
+  handler: async (ctx, { projectId, part = 'head' }) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'AUTH_REQUIRED', 'Sign in to see Stats.');
+      await memberProject(ctx, projectId, user.subject);
+      const months = await ctx.db
+        .query('projectStatsMonths')
+        .withIndex('by_project_and_month', q => q.eq('projectId', projectId))
+        .take(STATS_ALL_MONTHS);
+      const newest = months.at(-1)?.month;
+      const tail = (
+        await ctx.db
+          .query('projectStatsDays')
+          .withIndex('by_project_and_day', q =>
+            newest === undefined
+              ? q.eq('projectId', projectId)
+              : q.eq('projectId', projectId).gt('day', `${newest}-99`),
+          )
+          .order('desc')
+          .take(STATS_RANGE_MAX_DAYS)
+      ).reverse();
+      return canonicalPayload({
+        ...statsAllReply(
+          months.map(row => statsMonthSchema.parse(JSON.parse(row.value))),
+          tail.map(row => statsDaySchema.parse(JSON.parse(row.value))),
+          part,
+        ),
+        bytesRead: [...months, ...tail].reduce((s, row) => s + row.value.length, 0),
       });
     } catch (error) {
       return report(error);

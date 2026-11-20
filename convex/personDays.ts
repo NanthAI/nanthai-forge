@@ -32,15 +32,17 @@ import {
 
 /** Called by the project's day close: replaces this project's entry in each active person's row for that day.
  * `partial`: the close could not count all of the day's planning work. `lanesOnly`: the contributions are a Lanes-only
- * recount (the Lane backfill), which keeps the planning counts already in the entry. */
+ * recount (the Lane backfill), which keeps the planning counts already in the entry. `room`: asked before each person
+ * (the close's transaction meter); when it says no, the rest are not written and this returns false. */
 export async function recordPersonDays(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   day: string,
   contributions: readonly Contribution[],
-  options: { partial?: boolean; lanesOnly?: boolean } = {},
+  options: { partial?: boolean; lanesOnly?: boolean; room?: () => Promise<boolean> } = {},
 ) {
   for (const [person, entry] of projectDays(contributions, options.partial)) {
+    if (options.room && !(await options.room())) return false;
     const row = await ctx.db
       .query('personDays')
       .withIndex('by_person_and_day', q => q.eq('person', person).eq('day', day))
@@ -56,6 +58,7 @@ export async function recordPersonDays(
     if (row) await ctx.db.patch(row._id, { value });
     else await ctx.db.insert('personDays', { person, day, value });
   }
+  return true;
 }
 
 /** The profile for one viewer: `viewer` is an account id, or null when signed out. */

@@ -4,19 +4,28 @@
 // bound first. The page opens with one read (the headline figures and landings per day) of the chosen period's closed
 // days; each other chart is a fold that reads its own part only once opened, so an unopened fold costs nothing. A read
 // re-runs only when a day in its period closes; choosing another period or opening a fold are the only other calls.
+// All time reads one stored rollup per closed month and the open month's days; "Against the days before" (a range
+// only) is a fold too.
 import './stats.css';
 import '../../ds/figures.css';
 import { useRef, type ReactNode } from 'react';
 import { useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import { Region, useFold } from '../../ds';
-import type { StatsAgents, StatsMonths, StatsPart, StatsWaited } from '../../../../src/stats-period';
+import { rangeDays } from '../../../../src/stats-period';
+import type {
+  StatsAgents,
+  StatsMonths,
+  StatsPart,
+  StatsTrend,
+  StatsWaited,
+} from '../../../../src/stats-period';
 import { Head } from '../Place';
 import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { navigate, useSearch } from '../router';
 import type { PlaceProps } from '../screens';
-import { ByMonth, ByWho, PerDay, Waited } from './Charts';
+import { ByMonth, ByWho, PerDay, Trend, Waited } from './Charts';
 import { Compare, Measured } from './Compare';
 import { PeriodPicker } from './PeriodPicker';
 import {
@@ -42,15 +51,21 @@ export type UsePart = (part: FoldPart) => unknown;
 
 export default function Stats(props: PlaceProps) {
   const period = periodOf(useSearch(), Date.now());
+  const all = period.kind === 'all';
   const range = { projectId: props.projectId, from: period.from, to: period.to };
-  const result = useQuery(api.projectStats.read, range);
+  // One read for the chosen period: a range, or All time (the other is skipped, never read).
+  const ranged = useQuery(api.projectStats.read, all ? 'skip' : range);
+  const allTime = useQuery(api.projectStats.readAll, all ? { projectId: props.projectId } : 'skip');
+  const result = all ? allTime : ranged;
   const usePart: UsePart = function usePartRead(part) {
-    const reply = useQuery(api.projectStats.read, { ...range, part });
+    const a = useQuery(api.projectStats.read, all ? 'skip' : { ...range, part });
+    const b = useQuery(api.projectStats.readAll, all ? { projectId: props.projectId, part } : 'skip');
+    const reply = all ? b : a;
     return reply === undefined ? undefined : JSON.parse(reply);
   };
   // While another period is read, the last one stays on screen (marked busy) instead of collapsing the page.
   const last = useRef<{ data: Reply; key: string } | null>(null);
-  const key = `${period.from}/${period.to}`;
+  const key = `${period.kind}/${period.from}/${period.to}`;
   if (result !== undefined) last.current = { data: JSON.parse(result) as Reply, key };
   const data = last.current?.data;
   return (
@@ -84,7 +99,9 @@ export function StatsView({
   onPeriod: (search: string) => void;
 }) {
   const trail = [{ label: 'Stats' }];
-  const picker = <PeriodPicker key={`${period.from}/${period.to}`} period={period} onPeriod={onPeriod} />;
+  const picker = (
+    <PeriodPicker key={`${period.kind}/${period.from}/${period.to}`} period={period} onPeriod={onPeriod} />
+  );
   if (data === undefined)
     return (
       <Head trail={trail} sentence={<span aria-busy="true">Reading this project’s closed days…</span>}>
@@ -109,7 +126,7 @@ export function StatsView({
       {period.error}
     </p>
   ) : null;
-  if (!data.perDay.length)
+  if (!data.cover.closed && !data.cover.notMeasured)
     return (
       <>
         <Head
@@ -142,7 +159,7 @@ export function StatsView({
         <Compare data={data} w={w} />
         <Measured w={w} />
         <Region
-          title="Landings per day"
+          title={data.perMonth ? 'Landings per month' : 'Landings per day'}
           hint={
             <>
               {plural(w.landings, 'landing')} closed through {data.through ? dayName(data.through) : 'no day'}
@@ -153,8 +170,17 @@ export function StatsView({
             </>
           }
         >
-          <PerDay days={filledDays(data.perDay)} />
+          {data.perMonth ? <PerDay days={data.perMonth} months /> : <PerDay days={filledDays(data.perDay)} />}
         </Region>
+        {data.kind === 'range' ? (
+          <Fold
+            id="trend"
+            title="Against the days before"
+            hint={`the ${plural(rangeDays(period), 'day')} before`}
+          >
+            {() => <Part usePart={usePart} part="trend" body={(r: StatsTrend) => <Trend r={r} />} />}
+          </Fold>
+        ) : null}
         <Fold
           id="waited"
           title="Where work waited"
@@ -173,8 +199,13 @@ export function StatsView({
             />
           )}
         </Fold>
-        {data.perDay[0]![0].slice(0, 7) !== data.perDay.at(-1)![0].slice(0, 7) ? (
-          <Fold id="months" title="By month" hint="each month of this period">
+        {(data.perMonth?.length ?? 0) > 1 ||
+        (data.perDay.length > 0 && data.perDay[0]![0].slice(0, 7) !== data.perDay.at(-1)![0].slice(0, 7)) ? (
+          <Fold
+            id="months"
+            title="By month"
+            hint={data.perMonth ? 'each month so far' : 'each month of this period'}
+          >
             {() => <Part usePart={usePart} part="months" body={(r: StatsMonths) => <ByMonth r={r} />} />}
           </Fold>
         ) : null}
@@ -186,7 +217,7 @@ export function StatsView({
 function Sentence({ data, period }: { data: StatsRead; period: Period }) {
   const w = data.window,
     c = w.comparison,
-    when = coverWords(period, data.perDay),
+    when = coverWords(period, data.cover),
     part = partialWords(w);
   if (!c)
     return (

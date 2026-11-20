@@ -176,7 +176,10 @@ shows only the measured figures.
   (null under 50 landings, when a day was not recorded, or with no solo full check to price it;
   `compare.gap` names which), and `who`.
 
-Days are additive, so a month is the merge of its days and medians stay exact.
+Days are additive (`dayTotals`, `addTotals`, `statsFigures`), so a range's figures are the sum of its days and its
+medians are exact. A closed month is also kept as one rollup row (`projectStatsMonths`, `statsMonth`): its sums, and
+each distribution as at most `STATS_DIST_SAMPLES` (400) evenly spaced quantiles weighted by the values they stand for,
+so a month's medians stay within one sample's share of exact.
 
 ### When it is computed and what it costs
 
@@ -205,19 +208,29 @@ Every read counts on the transaction's own meter (`ctx.meta.getTransactionMetric
 and 32,000 documents). The landings stop while 1,000 queries, 5 MiB and 1,000 documents are left
 (`STATS_LANDINGS_KEEP`), so the person-day writes and the runs have room; the runs, attempts and lookups stop while 64
 queries, 2 MiB and 400 documents are left (`STATS_RUNS_KEEP`), room for one more page and the close's writes: a
-close reads at most 14 MiB and one page, about $0.0029 a day at $0.20 per GB. The person-day writes are not on the
-meter yet (one query and one write per person and day): a day with thousands of people's days fails whole, and is left
-not measured after its tries.
+close reads at most 14 MiB and one page, about $0.0029 a day at $0.20 per GB. The person-day writes (one query and one write per person and day)
+are on the same meter (`STATS_PEOPLE_KEEP`: they stop while 700 queries, 4 MiB, 1,000 documents read, 200 documents or
+2 MiB written are left): a day with thousands of people still closes, its figures whole, the person days it had no
+room for unwritten and the day marked `peoplePartial`. A close after a day left not measured reads that day's Lanes
+from where the failed close would have read (its mark keeps `since`), so its people's work is kept and marked partial.
 `tests/stats-close.test.mjs` drives a day with every reader at its cap through one close at Convex's own limits.
 Anything past a cap or the meter is not guessed: the day is marked `partial`. The close then writes one
 `projectStatsDays` row.
 `projectStats:recloseDays` rebuilds closed days only (it refuses today and later).
+A month's rollup is written by `projectStats:rollMonth` (at most 31 day rows read, one write): scheduled by the first
+close of a later month, or by a reclose that rebuilds a month's last day or the end of its run. An idle project
+schedules nothing, and a month with no closed day has no row.
 
-The Stats screen has one period picker (last 7 or 30 days, this month, last month, or a custom range of at most 92
-days), kept in the address. Opening the page makes one query (`projectStats.read`, part `head`) over the chosen
+The Stats screen has one period picker (last 7 or 30 days, this month, last month, All time, or a custom range of at
+most 92 days), kept in the address. All time (`projectStats.readAll`) reads the month rollups (at most 240) and the
+newest open month's day rows (at most 92), never every day row, and draws landings per month. Opening the page makes one query (`projectStats.read`, part `head`) over the chosen
 period's day rows only: the headline figures and landings per day. Where work waited, By agent and By month are folds,
-shut by default; each reads its own part of the same rows only once opened, so an unopened fold costs nothing. A read
+shut by default; each reads its own part of the same rows only once opened, so an unopened fold costs nothing. A
+range also has "Against the days before", a fold setting it beside the same number of days just before it (landings
+per closed day, first try, median time to main, CI minutes per landing); opened, it reads the previous range's day
+rows too (at most 184 rows for the two), and its method is on hover only. A read
 re-runs only when a day inside its period closes; it takes no clock argument. Until a period has fully closed, the
-page names the closed days it covers ("over 17–18 Nov 2026 (2 closed days)"), never the whole month. By agent shows
+page names the closed days it covers ("over 17–18 Nov 2026 (2 closed days)"), never the whole month. A day left not
+measured is not a closed day: it is in neither the span nor the count, and a period holding one has not wholly closed. By agent shows
 agents in four first-try buckets (100%, 75–99%, 50–74%, under 50%), never a list per agent; each landing's own
 time to main and stops are on its Lane page.

@@ -13,6 +13,7 @@ export const projectPurgeTables = {
   projectStars: 'by_project_and_account',
   projectLandingReads: 'by_project_and_account',
   projectStatsDays: 'by_project_and_day',
+  projectStatsMonths: 'by_project_and_month',
   projectGithubMirrors: 'by_project',
   projectGithubMirrorJobs: 'by_project_and_state',
   projectGithubBindings: 'by_project_and_name',

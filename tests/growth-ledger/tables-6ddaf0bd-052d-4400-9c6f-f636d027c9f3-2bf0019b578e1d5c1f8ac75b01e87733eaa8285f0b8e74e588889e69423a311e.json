@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "projectStatsMonths: one row per project per closed month holds All time's rollup, so All time reads at most 240 rows instead of every day row; nothing can go: day rows stay for ranges and the reclose, and the rollup cannot live in a day row without the read growing with history",
+  "date": "2026-11-19"
+}

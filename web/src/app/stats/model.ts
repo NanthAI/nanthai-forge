@@ -2,18 +2,19 @@
 // Stats screen model (Items 2cf30e0a, a61d3c91): the chosen period, the read reply of convex/projectStats.ts and the
 // words the screen prints. Figures come only from the project's own closed days (src/stats-period.ts); nothing here
 // estimates.
-import type { StatsHead } from '../../../../src/stats-period';
+import type { StatsCover, StatsHead } from '../../../../src/stats-period';
 import { STATS_RANGE_MAX_DAYS, rangeDays, validRange } from '../../../../src/stats-period';
 
 export type StatsRead = StatsHead;
 export type StatsWindow = StatsRead['window'];
-export type PeriodKind = '7' | '30' | 'this' | 'last' | 'custom';
-/** The page's one period picker, in the address as `?period=7|30|last` (this month is the plain address). */
+export type PeriodKind = '7' | '30' | 'this' | 'last' | 'all' | 'custom';
+/** The page's one period picker, in the address as `?period=7|30|last|all` (this month is the plain address). */
 export const PERIODS: { value: PeriodKind; text: string }[] = [
   { value: '7', text: 'Last 7 days' },
   { value: '30', text: 'Last 30 days' },
   { value: 'this', text: 'This month' },
   { value: 'last', text: 'Last month' },
+  { value: 'all', text: 'All time' },
   { value: 'custom', text: 'Custom range' },
 ];
 export const periodSearch = (kind: Exclude<PeriodKind, 'custom'>) =>
@@ -43,7 +44,8 @@ const shortDay = (day: string, year = false) =>
   }).format(new Date(`${day}T00:00:00Z`));
 
 /** The period in the address (`?period=last`, or `?from=…&to=…`), so a link, a reload and Back show the same one.
- * Months are UTC calendar months, the days the close files landings under. */
+ * Months are UTC calendar months, the days the close files landings under. All time has no range of its own: the read
+ * names the days it covers. */
 export function periodOf(search: URLSearchParams, now: number): Period {
   const today = new Date(now);
   const from = search.get('from'),
@@ -63,6 +65,7 @@ export function periodOf(search: URLSearchParams, now: number): Period {
     };
   }
   const kind = search.get('period');
+  if (kind === 'all') return { kind, from: '', to: '', label: 'all time' };
   if (kind === '7' || kind === '30') {
     const n = Number(kind);
     return { kind, from: utc(now - (n - 1) * 86_400_000), to: utc(now), label: `the last ${n} days` };
@@ -71,17 +74,18 @@ export function periodOf(search: URLSearchParams, now: number): Period {
   const range = monthOf(today.getUTCFullYear(), today.getUTCMonth() - (last ? 1 : 0));
   return { kind: last ? 'last' : 'this', ...range, label: monthName(range.from.slice(0, 7)) };
 }
-/** "in November 2026" or "from 3 Nov to 18 Nov 2026". */
+/** "in November 2026", "from 3 Nov to 18 Nov 2026", or "yet" for All time. */
 export const periodWords = (p: Period) =>
-  p.kind === 'custom' && !p.error ? `from ${p.label}` : `in ${p.label}`;
+  p.kind === 'all' ? 'yet' : p.kind === 'custom' && !p.error ? `from ${p.label}` : `in ${p.label}`;
 /** The closed days the figures cover, until the whole period has closed: "over 17–18 Nov 2026 (2 closed days)", never
- * "in November 2026" for two days. */
-export function coverWords(period: Period, perDay: Array<[string, number | null]>) {
-  if (!perDay.length) return periodWords(period);
-  const first = perDay[0]![0],
-    last = perDay.at(-1)![0];
-  if (first === period.from && last === period.to) return periodWords(period);
-  const closed = `(${plural(perDay.length, 'closed day')})`;
+ * "in November 2026" for two days. A day not measured (its close did not finish) is not a closed day: it is in neither
+ * the span nor the count, and a period holding one has not wholly closed. */
+export function coverWords(period: Period, cover: StatsCover) {
+  const { first, last } = cover;
+  if (first === null || last === null) return periodWords(period);
+  if (period.kind !== 'all' && first === period.from && last === period.to && !cover.notMeasured)
+    return periodWords(period);
+  const closed = `(${plural(cover.closed, 'closed day')})`;
   if (first === last) return `on ${shortDay(first, true)} ${closed}`;
   const span =
     first.slice(0, 7) === last.slice(0, 7)

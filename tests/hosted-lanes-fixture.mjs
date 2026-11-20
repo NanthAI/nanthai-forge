@@ -237,6 +237,9 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
             databaseQueries: { used: meter.ranges, remaining: 4096 - meter.ranges },
             documentsRead: { used: meter.documents, remaining: readLimits.documents - meter.documents },
             bytesRead: { used: meter.readBytes, remaining: 16 * 1024 * 1024 - meter.readBytes },
+            // Convex gives the write meter too; the fixture's own write bound is 8,192 documents and 16 MiB.
+            documentsWritten: { used: meter.writes, remaining: 8192 - meter.writes },
+            bytesWritten: { used: meter.writeBytes, remaining: 16 * 1024 * 1024 - meter.writeBytes },
           }),
         },
         // Scheduled work is recorded, never run (a save's trial merge, flip 4): tests read `scheduled`.

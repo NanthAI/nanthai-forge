@@ -156,7 +156,23 @@ const statsDayV2Schema = statsDayV1Schema
       .strict(),
     /** The close did not finish (convex/projectStats.ts#closeDay): the day is not measured. It holds no figures,
      * only what the previous closed day hands on, and the page shows it as missing, never as zero. */
-    failed: z.object({ tries: z.number().int().positive(), reason: z.string() }).strict().optional(),
+    failed: z
+      .object({
+        tries: z.number().int().positive(),
+        reason: z.string(),
+        /** The first day of the person work this day's close would have counted (convex/statsLanes.ts
+         * #laneWindowStart): a later close past this day counts from there, so the day keeps its Lanes and planning
+         * work. Absent on marks written before it was kept. */
+        since: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .optional(),
+      })
+      .strict()
+      .optional(),
+    /** The close stopped writing people's days before it had written them all (the transaction's meter): some people's
+     * work of this close's window is not on their profile. */
+    peoplePartial: z.literal(true).optional(),
   })
   .strict();
 /** Forge's one "first try" (owner 2026-11-19, Item a61d3c91): a change landed with no resubmission and no discarded
@@ -206,10 +222,14 @@ export function statsCarry(previous: StatsDay | null): StatsCarry {
 export const STATS_CLOSE_TRIES = 3;
 /** A day whose close has not finished: no figures, the previous day's carry handed on (src/stats-period.ts leaves it out
  * of every figure and shows it as missing). */
-export function statsFailedDay(day: string, carry: StatsCarry, tries = 1): StatsDayV2 {
+export function statsFailedDay(day: string, carry: StatsCarry, tries = 1, since?: string): StatsDayV2 {
   return {
     ...statsDay(day, [], null, carry),
-    failed: { tries, reason: 'The day close did not finish, so this day is not measured.' },
+    failed: {
+      tries,
+      reason: 'The day close did not finish, so this day is not measured.',
+      ...(since ? { since } : {}),
+    },
   };
 }
 
@@ -320,6 +340,260 @@ const minutesOf = (t: { runs: number; seconds: number; unknown: number }) => ({
 /** Why a window shows no comparison: too few landings yet, days closed before every run was recorded (or whose runs
  * could not be read), or no solo full check to price a GitHub run. */
 export type CompareGap = 'landings' | 'not-recorded' | 'no-solo';
+
+/** Sorted seconds standing for `n` values: every value while `n` is `v.length`, else evenly spaced quantiles of them (a
+ * month's rollup keeps at most STATS_DIST_SAMPLES), each sample standing for n / v.length values. */
+export type StatsDist = { n: number; v: number[] };
+/** Samples a month rollup keeps per distribution: its medians stay within one sample's share of the exact one. */
+export const STATS_DIST_SAMPLES = 400;
+const exactDist = (v: readonly number[] | null): StatsDist[] =>
+  v?.length ? [{ n: v.length, v: [...v] }] : [];
+/** Each sample with its weight, sorted by value. */
+const weighted = (parts: readonly StatsDist[]) => {
+  const pairs: Array<[number, number]> = [];
+  for (const p of parts) if (p.v.length) for (const x of p.v) pairs.push([x, p.n / p.v.length]);
+  return pairs.sort((a, b) => a[0] - b[0]);
+};
+/** The median of several distributions, each sample weighted by the values it stands for: the plain median (the mean
+ * of the two middle values for an even count) when every part holds every value. */
+export function distMedian(parts: readonly StatsDist[]) {
+  const pairs = weighted(parts);
+  if (!pairs.length) return null;
+  const half = pairs.reduce((s, [, w]) => s + w, 0) / 2;
+  let at = 0;
+  for (let i = 0; i < pairs.length; i++) {
+    at += pairs[i]![1];
+    if (at > half + 1e-9) return pairs[i]![0];
+    if (at >= half - 1e-9) return i + 1 < pairs.length ? (pairs[i]![0] + pairs[i + 1]![0]) / 2 : pairs[i]![0];
+  }
+  return pairs.at(-1)![0];
+}
+/** One stored distribution for several: every value while they fit in `samples`, else `samples` evenly spaced
+ * quantiles. */
+export function distOf(parts: readonly StatsDist[], samples = STATS_DIST_SAMPLES): StatsDist {
+  const pairs = weighted(parts);
+  const n = parts.reduce((s, p) => s + (p.v.length ? p.n : 0), 0);
+  if (pairs.length <= samples && pairs.every(([, w]) => w === 1)) return { n, v: pairs.map(([x]) => x) };
+  const v: number[] = [];
+  let at = 0,
+    i = 0;
+  for (let k = 0; k < samples; k++) {
+    const rank = ((k + 0.5) * n) / samples;
+    while (i < pairs.length - 1 && at + pairs[i]![1] <= rank) at += pairs[i++]![1];
+    v.push(pairs[i]![0]);
+  }
+  return { n, v };
+}
+
+type Tally = { runs: number; seconds: number; unknown: number };
+const tally = (): Tally => ({ runs: 0, seconds: 0, unknown: 0 });
+const addTally = (a: Tally, b: Tally): Tally => ({
+  runs: a.runs + b.runs,
+  seconds: a.seconds + b.seconds,
+  unknown: a.unknown + b.unknown,
+});
+/** What a window of closed days adds up to, before its figures are worked out (statsFigures): sums, the days' sorted
+ * seconds and who landed. A day gives its own (dayTotals); a month rollup (src/stats-period.ts) stores the sum of its
+ * days, so All time reads one row a month. Every figure of statsWindow comes from these alone. */
+export type StatsTotals = {
+  days: number;
+  landings: number;
+  partialLandings: boolean;
+  partialRuns: boolean;
+  counted: number;
+  first: number;
+  priced: number;
+  acceptedSeconds: number;
+  discardedSeconds: number;
+  who: Array<[string, number, number, number]>;
+  others: number;
+  toMain: StatsDist[];
+  stops: { queue: StatsDist[]; check: StatsDist[]; land: StatsDist[] };
+  /** Days closed by this method with every run read (`d.ci`). */
+  ci: { days: number; landings: number; all: Tally; unlinked: Tally; discarded: Record<DiscardCause, Tally> };
+  /** Of those, days with a check time to replay: the comparison's days. */
+  cmp: {
+    days: number;
+    landings: number;
+    forgeSeconds: number;
+    /** Runs of these days that reported no minutes. */
+    unknownRuns: number;
+    toMain: StatsDist[];
+    failed: Tally;
+    failedInQueue: Tally;
+    notLanded: { runs: number; seconds: number };
+    unlinked: Tally;
+    soloRunner: StatsDist[];
+    soloWall: StatsDist[];
+    soloRuns: number;
+    /** Sum of arrivals × check seconds, for the queue's load. */
+    asked: number;
+    oneRuns: number;
+    queueRuns: number;
+    one: StatsDist[];
+    queue: StatsDist[];
+    fast: StatsDist[];
+    slow: StatsDist[];
+  };
+};
+const causes = () => Object.fromEntries(DISCARD_CAUSES.map(c => [c, tally()])) as Record<DiscardCause, Tally>;
+export const noTotals = (): StatsTotals => ({
+  days: 0,
+  landings: 0,
+  partialLandings: false,
+  partialRuns: false,
+  counted: 0,
+  first: 0,
+  priced: 0,
+  acceptedSeconds: 0,
+  discardedSeconds: 0,
+  who: [],
+  others: 0,
+  toMain: [],
+  stops: { queue: [], check: [], land: [] },
+  ci: { days: 0, landings: 0, all: tally(), unlinked: tally(), discarded: causes() },
+  cmp: {
+    days: 0,
+    landings: 0,
+    forgeSeconds: 0,
+    unknownRuns: 0,
+    toMain: [],
+    failed: tally(),
+    failedInQueue: tally(),
+    notLanded: { runs: 0, seconds: 0 },
+    unlinked: tally(),
+    soloRunner: [],
+    soloWall: [],
+    soloRuns: 0,
+    asked: 0,
+    oneRuns: 0,
+    queueRuns: 0,
+    one: [],
+    queue: [],
+    fast: [],
+    slow: [],
+  },
+});
+/** One closed day's totals. */
+export function dayTotals(d: StatsDay): StatsTotals {
+  const t = noTotals();
+  t.days = 1;
+  t.landings = d.landings;
+  t.partialLandings = d.partial;
+  t.counted = d.firstTry.counted;
+  t.first = d.firstTry.first;
+  t.priced = d.runner.priced;
+  t.acceptedSeconds = d.runner.acceptedSeconds;
+  t.discardedSeconds = d.runner.discardedSeconds;
+  t.who = d.who.map(row => [...row]);
+  t.others = d.others;
+  t.toMain = exactDist(d.toMain);
+  t.stops = {
+    queue: exactDist(d.stops.queue),
+    check: exactDist(d.stops.check),
+    land: exactDist(d.stops.land),
+  };
+  if (d.schema !== 2 || d.ci === null) return t;
+  const ci = d.ci;
+  t.partialRuns = ci.partial;
+  t.ci = {
+    days: 1,
+    landings: d.landings,
+    all: { ...ci.all },
+    unlinked: { ...ci.unlinked },
+    discarded: Object.fromEntries(DISCARD_CAUSES.map(c => [c, { ...ci.discarded[c] }])) as Record<
+      DiscardCause,
+      Tally
+    >,
+  };
+  if (d.replay.wallSeconds === null) return t;
+  t.cmp = {
+    days: 1,
+    landings: d.landings,
+    forgeSeconds: ci.all.seconds,
+    unknownRuns: ci.all.unknown,
+    toMain: exactDist(d.toMain),
+    failed: { ...ci.discarded.failed },
+    failedInQueue: { ...ci.failedInQueue },
+    notLanded: {
+      runs: ci.discarded.superseded.runs + ci.discarded.cancelled.runs,
+      seconds: ci.discarded.superseded.seconds + ci.discarded.cancelled.seconds,
+    },
+    unlinked: { ...ci.unlinked },
+    soloRunner: exactDist(d.solo.runnerSeconds),
+    soloWall: exactDist(d.solo.wallSeconds),
+    soloRuns: d.solo.runnerSeconds.length,
+    asked: d.replay.arrivals * d.replay.wallSeconds,
+    oneRuns: d.landings + d.replay.reruns,
+    queueRuns: d.landings + d.replay.builds,
+    one: exactDist(d.replay.oneAtATime),
+    queue: exactDist(d.replay.mergeQueue),
+    fast: exactDist(d.replay.mergeQueueFast),
+    slow: exactDist(d.replay.mergeQueueSlow),
+  };
+  return t;
+}
+/** Two windows' totals as one (sums in order, so a window of days adds exactly as its days do). */
+export function addTotals(a: StatsTotals, b: StatsTotals): StatsTotals {
+  const who = new Map<string, [number, number, number]>();
+  for (const [name, n, first, c] of [...a.who, ...b.who]) {
+    const row = who.get(name) ?? [0, 0, 0];
+    who.set(name, [row[0] + n, row[1] + first, row[2] + c]);
+  }
+  return {
+    days: a.days + b.days,
+    landings: a.landings + b.landings,
+    partialLandings: a.partialLandings || b.partialLandings,
+    partialRuns: a.partialRuns || b.partialRuns,
+    counted: a.counted + b.counted,
+    first: a.first + b.first,
+    priced: a.priced + b.priced,
+    acceptedSeconds: a.acceptedSeconds + b.acceptedSeconds,
+    discardedSeconds: a.discardedSeconds + b.discardedSeconds,
+    who: [...who].map(([name, row]) => [name, ...row]),
+    others: a.others + b.others,
+    toMain: [...a.toMain, ...b.toMain],
+    stops: {
+      queue: [...a.stops.queue, ...b.stops.queue],
+      check: [...a.stops.check, ...b.stops.check],
+      land: [...a.stops.land, ...b.stops.land],
+    },
+    ci: {
+      days: a.ci.days + b.ci.days,
+      landings: a.ci.landings + b.ci.landings,
+      all: addTally(a.ci.all, b.ci.all),
+      unlinked: addTally(a.ci.unlinked, b.ci.unlinked),
+      discarded: Object.fromEntries(
+        DISCARD_CAUSES.map(c => [c, addTally(a.ci.discarded[c], b.ci.discarded[c])]),
+      ) as Record<DiscardCause, Tally>,
+    },
+    cmp: {
+      days: a.cmp.days + b.cmp.days,
+      landings: a.cmp.landings + b.cmp.landings,
+      forgeSeconds: a.cmp.forgeSeconds + b.cmp.forgeSeconds,
+      unknownRuns: a.cmp.unknownRuns + b.cmp.unknownRuns,
+      toMain: [...a.cmp.toMain, ...b.cmp.toMain],
+      failed: addTally(a.cmp.failed, b.cmp.failed),
+      failedInQueue: addTally(a.cmp.failedInQueue, b.cmp.failedInQueue),
+      notLanded: {
+        runs: a.cmp.notLanded.runs + b.cmp.notLanded.runs,
+        seconds: a.cmp.notLanded.seconds + b.cmp.notLanded.seconds,
+      },
+      unlinked: addTally(a.cmp.unlinked, b.cmp.unlinked),
+      soloRunner: [...a.cmp.soloRunner, ...b.cmp.soloRunner],
+      soloWall: [...a.cmp.soloWall, ...b.cmp.soloWall],
+      soloRuns: a.cmp.soloRuns + b.cmp.soloRuns,
+      asked: a.cmp.asked + b.cmp.asked,
+      oneRuns: a.cmp.oneRuns + b.cmp.oneRuns,
+      queueRuns: a.cmp.queueRuns + b.cmp.queueRuns,
+      one: [...a.cmp.one, ...b.cmp.one],
+      queue: [...a.cmp.queue, ...b.cmp.queue],
+      fast: [...a.cmp.fast, ...b.cmp.fast],
+      slow: [...a.cmp.slow, ...b.cmp.slow],
+    },
+  };
+}
+
 /** What Stats shows for a window of closed days. Measured figures are facts. `comparison` replays the same days
  * through two GitHub setups, null until the window holds STATS_COMPARE_MIN_LANDINGS landings on days closed by this
  * method with a solo full check to price them (`compare` says why not):
@@ -332,55 +606,28 @@ export type CompareGap = 'landings' | 'not-recorded' | 'no-solo';
  * builds instead), and checks of work that was replaced, withdrawn or stopped. Forge's side is every check run
  * (audits apart); checks no landing attempt names are counted on Forge's side only. */
 export function statsWindow(days: readonly StatsDay[]) {
-  const sum = <T>(list: readonly T[], pick: (d: T) => number) => list.reduce((s, d) => s + pick(d), 0);
-  const merged = <T>(list: readonly T[], pick: (d: T) => number[] | null) => list.flatMap(d => pick(d) ?? []);
-  const v2 = days.filter((d): d is StatsDayV2 => d.schema === 2);
-  const withCi = v2.filter(d => d.ci !== null);
-  const landings = sum(days, d => d.landings);
-  const counted = sum(days, d => d.firstTry.counted);
-  const toMain = median(merged(days, d => d.toMain));
-  type Ci = NonNullable<StatsDayV2['ci']>;
-  const tallyOf = (
-    list: readonly StatsDayV2[],
-    pick: (ci: Ci) => { runs: number; seconds: number; unknown: number },
-  ) => ({
-    runs: sum(list, d => pick(d.ci!).runs),
-    seconds: sum(list, d => pick(d.ci!).seconds),
-    unknown: sum(list, d => pick(d.ci!).unknown),
-  });
-  const all = tallyOf(withCi, ci => ci.all);
-  const ciLandings = sum(withCi, d => d.landings);
-  const causes = Object.fromEntries(
-    DISCARD_CAUSES.map(c => [c, minutesOf(tallyOf(withCi, ci => ci.discarded[c]))]),
-  ) as Record<DiscardCause, ReturnType<typeof minutesOf>>;
+  return statsFigures(days.reduce((t, d) => addTotals(t, dayTotals(d)), noTotals()));
+}
+
+/** statsWindow's figures from a window's totals: its days, or its months' rollups (All time). */
+export function statsFigures(t: StatsTotals) {
+  const { ci, cmp } = t;
   const discarded = {
-    runs: sum(DISCARD_CAUSES, c => causes[c].runs),
-    minutes: sum(DISCARD_CAUSES, c => causes[c].minutes),
-    unknown: sum(DISCARD_CAUSES, c => causes[c].unknown),
-    byCause: causes,
+    runs: DISCARD_CAUSES.reduce((s, c) => s + ci.discarded[c].runs, 0),
+    minutes: DISCARD_CAUSES.reduce((s, c) => s + ci.discarded[c].seconds / 60, 0),
+    unknown: DISCARD_CAUSES.reduce((s, c) => s + ci.discarded[c].unknown, 0),
+    byCause: Object.fromEntries(DISCARD_CAUSES.map(c => [c, minutesOf(ci.discarded[c])])) as Record<
+      DiscardCause,
+      ReturnType<typeof minutesOf>
+    >,
   };
-  const priced = sum(days, d => d.runner.priced);
-  const who = new Map<string, [number, number, number]>();
-  for (const d of days)
-    for (const [name, n, first, c] of d.who) {
-      const row = who.get(name) ?? [0, 0, 0];
-      who.set(name, [row[0] + n, row[1] + first, row[2] + c]);
-    }
   // The comparison: days closed by this method with every run read and a check time to replay.
-  const compared = withCi.filter(d => d.replay.wallSeconds !== null);
-  const perRun = median(merged(compared, d => d.solo.runnerSeconds));
-  const comparedLandings = sum(compared, d => d.landings);
-  const forgeMinutes = sum(compared, d => d.ci!.all.seconds) / 60;
-  const forgeToMain = median(merged(compared, d => d.toMain));
-  const failed = tallyOf(compared, ci => ci.discarded.failed);
-  const failedInQueue = tallyOf(compared, ci => ci.failedInQueue);
-  const notLanded = {
-    runs: sum(compared, d => d.ci!.discarded.superseded.runs + d.ci!.discarded.cancelled.runs),
-    seconds: sum(compared, d => d.ci!.discarded.superseded.seconds + d.ci!.discarded.cancelled.seconds),
-  };
-  const baseline = (runs: number, recorded: { runs: number; seconds: number }, replayed: number[]) => {
+  const perRun = distMedian(cmp.soloRunner);
+  const forgeMinutes = cmp.forgeSeconds / 60;
+  const forgeToMain = distMedian(cmp.toMain);
+  const baseline = (runs: number, recorded: { runs: number; seconds: number }, replayed: StatsDist[]) => {
     const ciMinutes = (runs * perRun! + recorded.seconds) / 60;
-    const toMainSeconds = median(replayed);
+    const toMainSeconds = distMedian(replayed);
     return {
       /** Runs priced at the solo check (full-build equivalents), and runs taken at their recorded minutes. */
       runs,
@@ -392,26 +639,26 @@ export function statsWindow(days: readonly StatsDay[]) {
       sooner: toMainSeconds === null || forgeToMain === null ? null : toMainSeconds - forgeToMain,
     };
   };
-  const daysWithoutRuns = days.length - withCi.length;
-  const daysWithoutSolo = withCi.length - compared.length;
+  const daysWithoutRuns = t.days - ci.days;
+  const daysWithoutSolo = ci.days - cmp.days;
   const gap: CompareGap | null =
-    comparedLandings >= STATS_COMPARE_MIN_LANDINGS
+    cmp.landings >= STATS_COMPARE_MIN_LANDINGS
       ? perRun === null
         ? 'no-solo'
         : null
-      : landings >= STATS_COMPARE_MIN_LANDINGS
+      : t.landings >= STATS_COMPARE_MIN_LANDINGS
         ? daysWithoutRuns
           ? 'not-recorded'
           : 'no-solo'
         : 'landings';
   return {
-    days: days.length,
-    landings,
-    partial: days.some(d => d.partial) || withCi.some(d => d.ci!.partial),
+    days: t.days,
+    landings: t.landings,
+    partial: t.partialLandings || t.partialRuns,
     /** Some day's close read only part of its landings (the replays cover fewer than landed) or of its check runs
      * (Forge's minutes are short): which way the comparison may be off depends on which (web/src/app/stats/model.ts). */
-    partialLandings: days.some(d => d.partial),
-    partialRuns: withCi.some(d => d.ci!.partial),
+    partialLandings: t.partialLandings,
+    partialRuns: t.partialRuns,
     /** Days closed by the first method, or whose runs could not be read: left out of the CI figures. */
     daysWithoutRuns,
     /** Days with runs read but no solo full check yet (none that day or before): left out of the comparison. */
@@ -419,84 +666,85 @@ export function statsWindow(days: readonly StatsDay[]) {
     /** Why `comparison` is null, and the landings still needed when it is only too few. */
     compare: {
       gap,
-      toGo: gap === 'landings' ? STATS_COMPARE_MIN_LANDINGS - comparedLandings : 0,
+      toGo: gap === 'landings' ? STATS_COMPARE_MIN_LANDINGS - cmp.landings : 0,
     },
     measured: {
       /** Every check run started on these days, audits apart; null when no day recorded its runs. Runs with no
        * recorded minutes are counted in `unknownRuns` and add nothing. */
-      ciMinutes: withCi.length ? all.seconds / 60 : null,
-      runs: all.runs,
-      unknownRuns: all.unknown,
-      ciMinutesPerLanding: ciLandings ? all.seconds / 60 / ciLandings : null,
+      ciMinutes: ci.days ? ci.all.seconds / 60 : null,
+      runs: ci.all.runs,
+      unknownRuns: ci.all.unknown,
+      ciMinutesPerLanding: ci.landings ? ci.all.seconds / 60 / ci.landings : null,
       /** The landed path alone: a landing's own accepted check and the checks it discarded. */
-      landedPathMinutesPerLanding: priced
-        ? (sum(days, d => d.runner.acceptedSeconds) + sum(days, d => d.runner.discardedSeconds)) / 60 / priced
-        : null,
+      landedPathMinutesPerLanding: t.priced ? (t.acceptedSeconds + t.discardedSeconds) / 60 / t.priced : null,
       /** Checks no landing attempt names: counted on Forge's side, never discarded. */
-      unlinked: minutesOf(tallyOf(withCi, ci => ci.unlinked)),
+      unlinked: minutesOf(ci.unlinked),
       /** null when no day recorded its runs. */
-      discarded: withCi.length ? discarded : null,
-      firstTryRate: counted ? sum(days, d => d.firstTry.first) / counted : null,
-      firstTryCounted: counted,
-      toMainSeconds: toMain,
+      discarded: ci.days ? discarded : null,
+      firstTryRate: t.counted ? t.first / t.counted : null,
+      firstTryCounted: t.counted,
+      toMainSeconds: distMedian(t.toMain),
       stops: {
-        queue: median(merged(days, d => d.stops.queue)),
-        check: median(merged(days, d => d.stops.check)),
-        land: median(merged(days, d => d.stops.land)),
+        queue: distMedian(t.stops.queue),
+        check: distMedian(t.stops.check),
+        land: distMedian(t.stops.land),
       },
     },
     comparison:
       gap !== null
         ? null
         : {
-            days: compared.length,
-            landings: comparedLandings,
+            days: cmp.days,
+            landings: cmp.landings,
             forgeMinutes,
             /** Forge's median over the same days as the replays. */
             forgeToMainSeconds: forgeToMain,
-            unknownRuns: sum(compared, d => d.ci!.all.unknown),
+            unknownRuns: cmp.unknownRuns,
             check: {
               runnerSeconds: perRun!,
-              wallSeconds: median(merged(compared, d => d.solo.wallSeconds)),
-              runs: sum(compared, d => d.solo.runnerSeconds.length),
+              wallSeconds: distMedian(cmp.soloWall),
+              runs: cmp.soloRuns,
             },
             /** Failed checks: rechecks after main moved fail in the queue; the rest fail pull-request runs. */
-            failed: { inQueue: failedInQueue.runs, pullRequest: failed.runs - failedInQueue.runs },
+            failed: {
+              inQueue: cmp.failedInQueue.runs,
+              pullRequest: cmp.failed.runs - cmp.failedInQueue.runs,
+            },
             /** Checks of work that was replaced, withdrawn or stopped: the same on both sides. */
-            notLanded: { runs: notLanded.runs, minutes: notLanded.seconds / 60 },
-            unlinked: minutesOf(tallyOf(compared, ci => ci.unlinked)),
+            notLanded: { runs: cmp.notLanded.runs, minutes: cmp.notLanded.seconds / 60 },
+            unlinked: minutesOf(cmp.unlinked),
             /** Check time asked of one queue as a share of the window: above 1, one at a time cannot keep up. */
-            load: sum(compared, d => d.replay.arrivals * d.replay.wallSeconds!) / (compared.length * 86_400),
+            load: cmp.asked / (cmp.days * 86_400),
             oneAtATime: baseline(
-              sum(compared, d => d.landings + d.replay.reruns),
-              { runs: failed.runs + notLanded.runs, seconds: failed.seconds + notLanded.seconds },
-              merged(compared, d => d.replay.oneAtATime),
+              cmp.oneRuns,
+              {
+                runs: cmp.failed.runs + cmp.notLanded.runs,
+                seconds: cmp.failed.seconds + cmp.notLanded.seconds,
+              },
+              cmp.one,
             ),
             mergeQueue: {
               concurrency: MERGE_QUEUE_CONCURRENCY,
               maxToMerge: 1,
               ...baseline(
-                sum(compared, d => d.landings + d.replay.builds),
+                cmp.queueRuns,
                 {
-                  runs: failed.runs - failedInQueue.runs + notLanded.runs,
-                  seconds: failed.seconds - failedInQueue.seconds + notLanded.seconds,
+                  runs: cmp.failed.runs - cmp.failedInQueue.runs + cmp.notLanded.runs,
+                  seconds: cmp.failed.seconds - cmp.failedInQueue.seconds + cmp.notLanded.seconds,
                 },
-                merged(compared, d => d.replay.mergeQueue),
+                cmp.queue,
               ),
               /** Replayed median with the check 10% faster and 10% slower, each carried day to day on its own. */
-              sensitivity: {
-                fast: median(merged(compared, d => d.replay.mergeQueueFast)),
-                slow: median(merged(compared, d => d.replay.mergeQueueSlow)),
-              },
+              sensitivity: { fast: distMedian(cmp.fast), slow: distMedian(cmp.slow) },
             },
           },
-    who: [...who]
-      .sort((a, b) => b[1][0] - a[1][0] || a[0].localeCompare(b[0]))
-      .map(([name, [n, first, c]]) => ({
+    who: [...t.who]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, n, first, c]) => ({
         who: name || null,
         landings: n,
         firstTryRate: c ? first / c : null,
       })),
-    others: sum(days, d => d.others),
+    others: t.others,
   };
 }

@@ -17,9 +17,11 @@ export const dayStart = (day: string) => Date.parse(`${day}T00:00:00.000Z`);
 
 /** Where a close for `day` starts counting Lanes: the day after the previous closed day (Item a9ad21c9), so a Lane
  * started on a day without a landing in this project (a weekend, a Lane that crossed midnight) is counted by the next
- * close rather than lost; never before the lookback. */
-export function laneWindowStart(previousClosedDay: string | undefined, day: string) {
+ * close rather than lost; never before the lookback. When that previous day is not measured (its close never finished,
+ * so it wrote no person days), from where its own close would have counted (`since`), so its work is kept. */
+export function laneWindowStart(previousClosedDay: string | undefined, day: string, since?: string) {
   const floor = dayStart(day) - STATS_LANE_LOOKBACK_DAYS * DAY_MS;
+  if (since !== undefined) return Math.max(floor, dayStart(since));
   return previousClosedDay === undefined ? floor : Math.max(floor, dayStart(previousClosedDay) + DAY_MS);
 }
 

@@ -302,6 +302,14 @@ test('a day whose close always throws is left not measured after its tries, and 
     _creationTime: Date.parse(`${days[0]}T02:00:00.000Z`),
     value: '{',
   });
+  // A Lane started on the failing day (Done-when 22:05Z): its close never finishes, so a later close must count it.
+  const laneRow = [...f.tables.projectHostedOverlapLanes.values()][0];
+  f.tables.projectHostedOverlapLanes.set('fail-day-lane', {
+    ...laneRow,
+    _id: 'fail-day-lane',
+    _creationTime: Date.parse(`${days[0]}T03:00:00.000Z`),
+    laneId: 'fail-day-lane',
+  });
   const run = day => closeChain(f, day);
   const row = d => [...f.tables.projectStatsDays.values()].find(r => r.day === d);
   const failedOf = d => JSON.parse(row(d).value).failed;
@@ -316,7 +324,15 @@ test('a day whose close always throws is left not measured after its tries, and 
   assert.deepEqual(failedOf(days[0]), {
     tries: 3,
     reason: 'The day close did not finish, so this day is not measured.',
+    since: days[0],
   });
+  // The day keeps its person-day work: the next close past it counts from where its close would have, and marks the
+  // day partial (its landings were never read).
+  const person = [...f.tables.personDays.values()].find(r => r.day === days[0] && r.person === laneRow.actor);
+  assert(person, 'the not-measured day’s Lane is on its person’s day');
+  const entry = JSON.parse(person.value).p[f.projectId];
+  assert.equal(entry.n, 1, 'its Lane is counted');
+  assert.equal(entry.pp, 1, 'marked partial: that day’s landings were never counted');
   for (const d of days.slice(1)) {
     assert(row(d), `${d} closed`);
     assert.equal(failedOf(d), undefined, `${d} is measured`);
@@ -773,40 +789,22 @@ test('a worst-case day through every reader of the close stays inside one transa
   assert([...f.tables.personDays.values()].length > 0, 'the person-day rows are written');
 });
 
-test('a worst-case day with many people fails whole, and the days after it still close', async t => {
-  // 2,000 Lanes by 2,000 people: one person-day read and write each after the landings stop (they keep 1,000 queries),
-  // so the close passes Convex's 4,096 queries. Person-day writes under the meter are the successor Lane's (Item
-  // a61d3c91, Done-when d5857b5c); until then such a day fails whole, writes nothing, and after its tries is left not
-  // measured while the next day closes (review d6b0f1aa finding 5).
-  const { f, day } = await worstDay(t, { landings: true, person: true, people: 2_000 });
-  const start = Date.parse(`${day}T00:00:00.000Z`);
-  const prev = dayOf(start - DAY),
-    next = dayOf(start + DAY);
-  f.tables.projectStatsDays.set('prev-day', {
-    _id: 'prev-day',
-    _creationTime: start - 1,
-    projectId: f.projectId,
-    day: prev,
-    value: JSON.stringify(statsDay(prev, [])),
-  });
-  const row = d => [...f.tables.projectStatsDays.values()].find(r => r.day === d);
-  readLimits.documents = 32_000;
-  try {
-    assert.deepEqual(await closeChain(f, day), [day], 'its own close fails');
-    assert.equal(row(day), undefined, 'no day row');
-    assert.equal(f.tables.personDays.size, 0, 'no person-day row: the close wrote nothing');
-    for (let tries = 1; tries <= 3; tries++) {
-      assert.deepEqual(await closeChain(f, next), [day], `try ${tries} from the next day`);
-      assert.equal(JSON.parse(row(day).value).failed.tries, tries);
-      assert.equal(row(next), undefined);
-    }
-    assert.deepEqual(await closeChain(f, next), [], 'out of tries: the next day closes');
-  } finally {
-    readLimits.documents = 4096;
-  }
-  assert(row(next), 'the next day is closed');
-  assert.equal(JSON.parse(row(next).value).failed, undefined);
-  assert.equal(JSON.parse(row(day).value).failed.tries, 3, 'the day is not measured');
+test('a worst-case day with many people closes, its person days metered and marked partial', async t => {
+  // 2,000 Lanes by 2,000 people: one person-day read and write each after the landings stop (they keep 1,000 queries).
+  // Unmetered, the close passed Convex's 4,096 queries and failed whole (review d6b0f1aa finding 5). The person-day
+  // writes are under the transaction's meter (Done-when d5857b5c): the day closes, with the people it could not write
+  // left out and the day marked, and its runs still read.
+  const { f, day } = await worstDay(t, { landings: true, person: true, people: 2_000, runs: true });
+  const close = await closeAtLimits(f, day);
+  const row = [...f.tables.projectStatsDays.values()].find(r => r.day === day);
+  assert(row, 'the day closes');
+  const closed = JSON.parse(row.value);
+  assert.equal(closed.failed, undefined, 'measured, not failed');
+  assert.equal(closed.peoplePartial, true, 'people left unwritten are marked on the day');
+  const written = [...f.tables.personDays.values()].filter(r => r.day === day).length;
+  assert(written > 100 && written < 2_000, `person days written: ${written}`);
+  assert(closed.ci.all.runs > 0, `the runs still get room: ${closed.ci.all.runs}`);
+  assert(close.ranges < 4_096 - 64, `queries: ${close.ranges}`);
 });
 
 test('a day whose landings were read only in part marks each person’s day partial', async t => {
@@ -876,4 +874,86 @@ test('the runs, attempts and landing lookups at their caps stay inside one trans
   const closed = JSON.parse([...f.tables.projectStatsDays.values()].find(r => r.day === day).value);
   assert.equal(closed.ci.partial, true, 'attempts past the room left are not guessed');
   assert.equal(closed.landings, 4);
+});
+
+// Done-when 22:05Z (Item a61d3c91): All time from monthly rollups, and the self-trend's read.
+test('All time reads one rollup a closed month and the open month’s days, never every day', async t => {
+  const f = await batchesFixture(t);
+  await f.drain();
+  const put = (name, n) => {
+    const start = Date.parse(`${name}T09:00:00.000Z`);
+    const landings = Array.from({ length: n }, (_, i) => ({
+      id: `${name}-${i}`,
+      who: 'amber-fox',
+      submittedAt: start + i * 60_000,
+      landedAt: start + i * 60_000 + 300_000,
+      checkStartedAt: null,
+      checkEndedAt: null,
+      runnerSeconds: 100,
+      discardedRunnerSeconds: 0,
+      attempts: 1,
+      ranInFull: true,
+    }));
+    f.tables.projectStatsDays.set(`sd-${name}`, {
+      _id: `sd-${name}`,
+      _creationTime: start,
+      projectId: f.projectId,
+      day: name,
+      value: JSON.stringify(statsDay(name, landings)),
+    });
+  };
+  const sep = Array.from({ length: 30 }, (_, i) => `2026-09-${String(i + 1).padStart(2, '0')}`);
+  const oct = Array.from({ length: 31 }, (_, i) => `2026-10-${String(i + 1).padStart(2, '0')}`);
+  const nov = ['2026-11-01', '2026-11-02', '2026-11-03'];
+  // A re-close that finishes a closed month rolls it up (here before the rows exist: it writes no empty day).
+  const at = scheduledIds(f);
+  await f.tx('statsClose', statsApi.closeDay, {
+    projectId: f.projectId,
+    day: '2026-10-31',
+    reclose: { through: '2026-10-31' },
+  });
+  assert.deepEqual(
+    [...f.tables._scheduled_functions.values()]
+      .filter(task => !at.has(task._id) && task.name === 'projectStats:rollMonth')
+      .map(task => task.args[0]),
+    [{ projectId: f.projectId, month: '2026-10' }],
+  );
+  for (const d of [...sep, ...oct, ...nov]) put(d, 2);
+  for (const month of ['2026-09', '2026-10'])
+    await f.tx('statsRoll', statsApi.rollMonth, { projectId: f.projectId, month });
+  assert.equal(f.tables.projectStatsMonths.size, 2);
+  const before = f.counts.length;
+  const all = JSON.parse(await f.tx('statsReadAll', statsApi.readAll, { projectId: f.projectId }));
+  const read = f.counts.slice(before).find(c => c.name === 'statsReadAll');
+  assert.equal(read.readDocumentsByTable.projectStatsMonths, 2, 'one row a closed month');
+  assert.equal(read.readDocumentsByTable.projectStatsDays, 3, 'only the open month’s days');
+  assert.equal(all.window.landings, 2 * 64, 'every day counted');
+  assert.deepEqual(all.cover, { first: '2026-09-01', last: '2026-11-03', closed: 64, notMeasured: 0 });
+  assert.deepEqual(all.perMonth, [
+    ['2026-09', 60],
+    ['2026-10', 62],
+    ['2026-11', 6],
+  ]);
+  // The self-trend: the range, and the same number of days just before it (only when its fold asks).
+  const trendAt = f.counts.length;
+  const trend = JSON.parse(
+    await f.tx('statsRead', statsApi.read, {
+      projectId: f.projectId,
+      from: '2026-11-01',
+      to: '2026-11-03',
+      part: 'trend',
+    }),
+  );
+  const trendRead = f.counts.slice(trendAt).find(c => c.name === 'statsRead');
+  assert.equal(trendRead.readDocumentsByTable.projectStatsDays, 6, 'this range and the one before');
+  assert.deepEqual([trend.previous.from, trend.previous.to], ['2026-10-29', '2026-10-31']);
+  assert.equal(trend.previous.cover.closed, 3);
+  assert.equal(trend.current.landingsPerDay, 2);
+  const headAt = f.counts.length;
+  await f.tx('statsRead', statsApi.read, { projectId: f.projectId, from: '2026-11-01', to: '2026-11-03' });
+  assert.equal(
+    f.counts.slice(headAt).find(c => c.name === 'statsRead').readDocumentsByTable.projectStatsDays,
+    3,
+    'the head reads its own range only',
+  );
 });

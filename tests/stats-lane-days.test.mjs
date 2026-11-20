@@ -9,7 +9,7 @@ import { moduleUrl } from './convex-module.mjs';
 
 const { closeDay } = await import(moduleUrl('../convex/projectStats.ts'));
 const backfill = await import(moduleUrl('../convex/statsLanesBackfill.ts'));
-const { statsDay } = await import(moduleUrl('../src/stats-estimate.ts'));
+const { statsDay, statsFailedDay, NO_CARRY } = await import(moduleUrl('../src/stats-estimate.ts'));
 const { canonicalPayload } = await import(moduleUrl('../src/hosted-source-operation.ts'));
 
 const at = (day, hour = 9, minute = 0) =>
@@ -98,6 +98,14 @@ const closedDay = day => ({
   day,
   value: canonicalPayload(statsDay(day, [], 0)),
 });
+/** A day whose close did not finish (src/stats-estimate.ts#statsFailedDay), out of tries. */
+const failedDay = (day, since) => ({
+  _id: `failed-${day}`,
+  _creationTime: at(day, 23),
+  projectId: PROJECT,
+  day,
+  value: canonicalPayload(statsFailedDay(day, NO_CARRY, 3, since)),
+});
 const receipt = (iso, id = 'r1') => ({
   _id: `rec-${id}`,
   _creationTime: Date.parse(iso),
@@ -117,17 +125,21 @@ const personRows = tables =>
       .map(row => [row.day, JSON.parse(row.value).p[PROJECT]]),
   );
 
-async function close(tables, day) {
+async function close(tables, day, scheduled = []) {
   const { db, queries } = fakeDb(tables);
+  // Convex's scheduler: recorded, never run.
+  const scheduler = { runAfter: async (_delay, ref, args) => scheduled.push(args) };
   // The transaction's read meter, as Convex gives every function (the close stops its readers on it): queries made.
   const meta = {
     getTransactionMetrics: async () => ({
       databaseQueries: { used: queries.length, remaining: 4096 - queries.length },
       bytesRead: { used: 0, remaining: 16 * 1024 * 1024 },
       documentsRead: { used: 0, remaining: 32_000 },
+      documentsWritten: { used: 0, remaining: 8192 },
+      bytesWritten: { used: 0, remaining: 16 * 1024 * 1024 },
     }),
   };
-  await handler(closeDay)({ db, meta }, { projectId: PROJECT, day });
+  await handler(closeDay)({ db, meta, scheduler }, { projectId: PROJECT, day });
   return queries;
 }
 
@@ -408,4 +420,79 @@ test('past the change-row cap, everyone who can plan here is marked, even with n
     agentsFrom: 0,
   });
   assert.deepEqual([read.closedPartial, read.days, read.projects, read.first], [true, [], [], null]);
+});
+
+// Done-when 22:05Z (Item a61d3c91): a day left not measured is not a closed day.
+test('a close after a day left not measured counts that day’s Lanes, marked partial', async () => {
+  const tables = {
+    projectStatsDays: [closedDay('2026-11-05'), failedDay('2026-11-06', '2026-11-06')],
+    projectHostedAcceptances: [receipt('2026-11-08T09:00:00.000Z')],
+    projectHostedOverlapLanes: [lane('2026-11-06T10:00:00.000Z'), lane('2026-11-07T10:00:00.000Z')],
+  };
+  await close(tables, '2026-11-08');
+  const rows = personRows(tables);
+  assert.deepEqual(Object.keys(rows).sort(), ['2026-11-06', '2026-11-07', '2026-11-08']);
+  assert.equal(rows['2026-11-06'].n, 1, 'the not-measured day’s Lane is counted');
+  assert.equal(rows['2026-11-06'].pp, 1, 'its landings were never read: a floor');
+  assert.equal(rows['2026-11-07'].pp, undefined, 'a day with no row had no landings: exact');
+});
+
+test('the backfill runs a gap on through a day left not measured, and files trailing ones', async () => {
+  const tables = {
+    projectStatsDays: [
+      closedDay('2026-11-05'),
+      failedDay('2026-11-06'),
+      closedDay('2026-11-08'),
+      failedDay('2026-11-10'),
+    ],
+    projectHostedOverlapLanes: [
+      lane('2026-11-06T10:00:00.000Z'),
+      lane('2026-11-07T10:00:00.000Z'),
+      lane('2026-11-10T10:00:00.000Z'),
+      lane('2026-11-11T10:00:00.000Z'), // after the last row: the next close's
+    ],
+  };
+  const { db } = fakeDb(tables);
+  const ctx = { db, scheduler: { runAfter: async () => {} } };
+  const out = await handler(backfill.project)(ctx, { projectId: PROJECT });
+  assert.equal(out.isDone, true);
+  assert.deepEqual(Object.keys(personRows(tables)).sort(), ['2026-11-06', '2026-11-07', '2026-11-10']);
+});
+
+test('the backfill carries the last closed day across a page that ends on days left not measured', async () => {
+  const { BACKFILL_DAYS } = backfill;
+  const first = Date.parse('2026-09-01T00:00:00.000Z');
+  const dayN = n => new Date(first + n * 86_400_000).toISOString().slice(0, 10);
+  // A page of closed days ending on one left not measured, whose Lane the next page must still file.
+  const tables = {
+    projectStatsDays: [
+      ...Array.from({ length: BACKFILL_DAYS - 1 }, (_, n) => closedDay(dayN(n))),
+      failedDay(dayN(BACKFILL_DAYS - 1)),
+      closedDay(dayN(BACKFILL_DAYS)),
+    ],
+    projectHostedOverlapLanes: [lane(`${dayN(BACKFILL_DAYS - 1)}T10:00:00.000Z`)],
+  };
+  const calls = [];
+  const { db } = fakeDb(tables);
+  const ctx = { db, scheduler: { runAfter: async (_delay, _ref, args) => calls.push(args) } };
+  assert.equal((await handler(backfill.project)(ctx, { projectId: PROJECT })).isDone, false);
+  assert.deepEqual(calls, [
+    { projectId: PROJECT, prev: dayN(BACKFILL_DAYS - 1), closed: dayN(BACKFILL_DAYS - 2) },
+  ]);
+  assert.equal((await handler(backfill.project)(ctx, calls[0])).isDone, true);
+  assert.deepEqual(Object.keys(personRows(tables)), [dayN(BACKFILL_DAYS - 1)]);
+});
+
+test('the first close of a later month schedules one rollup, of the month before', async () => {
+  const tables = {
+    projectStatsDays: [closedDay('2026-10-30')],
+    projectHostedAcceptances: [receipt('2026-11-02T09:00:00.000Z')],
+  };
+  const scheduled = [];
+  await close(tables, '2026-11-02', scheduled);
+  assert.deepEqual(scheduled, [{ projectId: PROJECT, month: '2026-10' }]);
+  tables.projectHostedAcceptances.push(receipt('2026-11-03T09:00:00.000Z', 'r2'));
+  const again = [];
+  await close(tables, '2026-11-03', again);
+  assert.deepEqual(again, [], 'a close in the same month schedules none');
 });
