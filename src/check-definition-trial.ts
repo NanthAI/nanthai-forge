@@ -10,7 +10,7 @@
  * edits a workflow and runs its own version, without letting the edit judge itself.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import type { CheckGate } from './bet2-gate.js';
 import { checkRunEntryPaths, coverageChangePaths } from './first-check-risk.js';
 import { STANDARD_CHECK_ENTRY, STANDARD_CHECK_INPUTS, STANDARD_SELECTION_INPUTS } from './standard-check.js';
@@ -22,21 +22,48 @@ export const DEFINITION_TRIAL_ENV = 'FORGE_CHECK_TRIAL';
 const DECLARATION = /^export const CHECK_DEFINITION_TRIAL = (\d+);/m;
 /** Paths named in the pinned plan; the rest are counted. */
 const NAMED_PATHS = 20;
+/** The standard check selects its tests through this module and every module it imports. */
+const SELECTION_ROOT = 'scripts/test-impact.mjs';
+/** A literal relative specifier after `from`, `import` (static, bare or dynamic) or `require`. Comment
+ * mentions match too; they can only add a path. */
+const RELATIVE_IMPORT = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"](\.\.?\/[^'"]+)['"]/g;
+
+/** The scripts/ modules scripts/test-impact.mjs imports, directly or through each other (selection-guard,
+ * core-queue-paths, script-impact, docs-readers, the import graph): they decide which tests run, so
+ * they are check definition. Read from the Candidate's inventory as text, never run: a Lane that
+ * drops an import edits its importer, itself still in the list. The walk stays inside scripts/, the
+ * only folder whose changes make the planner read the list; a selector import outside it would need
+ * that condition widened. */
+export function selectionModules(files: ReadonlyMap<string, string> | undefined): string[] {
+  const found = new Set<string>();
+  const pending = [SELECTION_ROOT];
+  for (const path of pending)
+    for (const [, specifier] of (files?.get(path) ?? '').matchAll(RELATIVE_IMPORT)) {
+      const target = posix.join(posix.dirname(path), specifier!);
+      if (!target.startsWith('scripts/') || found.has(target)) continue;
+      found.add(target);
+      pending.push(target);
+    }
+  return [...found].sort();
+}
 
 type TrialCheck = Parameters<typeof checkRunEntryPaths>[0] | undefined;
 type DefinitionTrial = { paths: string[]; more?: number };
 
 /** The changed paths that alter how Forge's standard check selects or runs tests, or null when the
  * run gets no trial: another command, no such path, or a main audit or failed-file probe (neither
- * judges a change before it lands). Paths only; no Candidate code runs. */
+ * judges a change before it lands). Paths, plus the selection modules read as text; no Candidate code runs. */
 export function definitionTrialPaths(
   check: TrialCheck,
   gate: CheckGate | undefined,
   paths: readonly string[],
+  files?: ReadonlyMap<string, string>,
 ): DefinitionTrial | null {
   if (gate?.mode === 'audit' || gate?.mode === 'probe') return null;
   // The standard check's own entries, whatever the run carries, plus its setup and declared risk paths.
   const entries = [STANDARD_CHECK_ENTRY, ...STANDARD_CHECK_INPUTS, ...STANDARD_SELECTION_INPUTS];
+  // Only when a script changed: no inventory read for any other Lane.
+  if (paths.some(path => path.startsWith('scripts/'))) entries.push(...selectionModules(files));
   if (Array.isArray(check?.args)) entries.push(...checkRunEntryPaths(check));
   const changed = coverageChangePaths(paths, entries);
   if (!changed.length) return null;

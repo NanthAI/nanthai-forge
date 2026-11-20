@@ -13,6 +13,7 @@ import {
   definitionTrialPaths,
   definitionTrialShard,
   runDefinitionTrial,
+  selectionModules,
 } from '../dist/check-definition-trial.js';
 
 const standardCheck = { executable: 'node', args: ['scripts/forge-check.mjs'], definition: 'c'.repeat(64) };
@@ -103,6 +104,45 @@ test('the definition paths: entry, inputs, selection inputs and the Actions work
   });
 });
 
+test('Item 687d1eda: a Lane that changes a module scripts/test-impact.mjs imports gets main’s full check plus the trial', () => {
+  // The selector's own imports decide which tests run (lead 2026-11-20), read from the inventory as text.
+  const modules = ['selection-guard', 'core-queue-paths', 'script-impact', 'docs-readers'];
+  const files = tree([
+    [
+      'scripts/test-impact.mjs',
+      modules.map(name => `import { x } from './${name}.mjs';`).join('\n') +
+        "\nimport './side-effect.mjs';\nimport { y } from '../src/a.js';" +
+        "\nconst lazy = () => import('./lazy-selector.mjs');\nexport const standardSelection = lazy;",
+    ],
+    ...modules.map(name => [`scripts/${name}.mjs`, '']),
+    ['scripts/docs-readers.mjs', "import { scan } from './tree-scan.mjs';"],
+    ['scripts/tree-scan.mjs', ''],
+    ['scripts/lazy-selector.mjs', ''],
+    ['scripts/side-effect.mjs', ''],
+    ['scripts/unrelated-tool.mjs', ''],
+  ]);
+  assert.deepEqual(selectionModules(files), [
+    'scripts/core-queue-paths.mjs',
+    'scripts/docs-readers.mjs',
+    'scripts/lazy-selector.mjs',
+    'scripts/script-impact.mjs',
+    'scripts/selection-guard.mjs',
+    'scripts/side-effect.mjs',
+    'scripts/tree-scan.mjs',
+  ]);
+  for (const path of [...modules.map(name => `scripts/${name}.mjs`), 'scripts/tree-scan.mjs']) {
+    const selected = actionsGateSelection(contractRun, [path], files, true);
+    assert.equal(selected.scope, 'full', `${path}: main's full check`);
+    assert.deepEqual(selected.trial, { paths: [path] }, `${path}: trial pinned`);
+  }
+  // A script the selector does not import stays an ordinary change.
+  assert.equal(definitionTrialPaths(standardCheck, undefined, ['scripts/unrelated-tool.mjs'], files), null);
+  // A Lane that changes no script reads no inventory file for this: its recipe and cost stay as before.
+  const unread = new Map([...files.keys()].map(path => [path, '']));
+  unread.get = path => assert.fail(`read ${path}`);
+  assert.equal(definitionTrialPaths(standardCheck, undefined, ['src/a.ts', 'docs/x.md'], unread), null);
+});
+
 test('a Lane that deletes or weakens its check is still judged by main’s definition', t => {
   // The Candidate's selector claims nothing runs and its check entry is gone: the planner reads paths
   // only, never runs Candidate code, so main's full selection stands.
@@ -167,17 +207,25 @@ test('the trial runs in the browser job when the plan has one, else in the stati
 
 /** A Candidate tree for the entry's trial mode: `tests/b.test.mjs` is a check test only this tree's
  * definition selects; its stub runner records the files it is asked to run. */
-function trialTree(t, { failing = false } = {}) {
+function trialTree(t, { failing = false, browser = false, shard = '0' } = {}) {
   const root = temporaryDirectory(t, 'forge-definition-trial-');
   for (const dir of ['src', 'web', 'convex', 'netlify', 'tests', 'scripts']) mkdirSync(join(root, dir));
-  writeFileSync(join(root, 'package.json'), '{}');
+  // The static job builds before the trial's tests; the synthetic build does nothing.
+  const noop = 'node -e 0';
+  writeFileSync(
+    join(root, 'package.json'),
+    JSON.stringify({ scripts: { 'build:core': noop, 'build:web': noop } }),
+  );
   writeFileSync(join(root, 'package-lock.json'), '{}');
   writeFileSync(join(root, 'tests/a.test.mjs'), '');
   writeFileSync(join(root, 'tests/b.test.mjs'), '');
+  // A browser test by this tree's own naming rule, which main's plan (no browser job) did not run.
+  if (browser) writeFileSync(join(root, 'tests/lane-only-browser.test.mjs'), '');
   const ran = join(root, 'ran.json');
   writeFileSync(
     join(root, 'scripts/test-files.mjs'),
     `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(ran)}, JSON.stringify(process.argv.slice(2)));\n` +
+      `writeFileSync(${JSON.stringify(ran)} + '.browser', process.env.FORGE_BROWSER_TESTS ?? '');\n` +
       (failing ? 'process.exitCode = 1;\n' : ''),
   );
   writeFileSync(join(root, 'scripts/prepare-convex-api.mjs'), '');
@@ -203,7 +251,7 @@ function trialTree(t, { failing = false } = {}) {
     spawnSync(process.execPath, [entry], {
       cwd: root,
       encoding: 'utf8',
-      env: { ...process.env, FORGE_ACTIONS_PLAN: plan, FORGE_ACTIONS_SHARD: '0', FORGE_CHECK_TRIAL: '1' },
+      env: { ...process.env, FORGE_ACTIONS_PLAN: plan, FORGE_ACTIONS_SHARD: shard, FORGE_CHECK_TRIAL: '1' },
     });
   return { trial, ran };
 }
@@ -225,4 +273,21 @@ test('a Lane that adds a check test sees it run before landing: the trial runs w
   const failed = failing.trial();
   assert.notEqual(failed.status, 0, 'a failing trial test fails the trial');
   assert.ok(existsSync(failing.ran));
+});
+
+test('Item 687d1eda: browser tests the trial finds in the static job are named, never run into a false red', t => {
+  // Main's plan has no browser job, so the trial runs in the static job, which has no browser.
+  const { trial, ran } = trialTree(t, { browser: true, shard: 'static' });
+  const result = trial();
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(
+    result.stdout,
+    /Definition trial: 1 browser test file not run: main's plan has no browser job\. Main's check runs them after landing: tests\/lane-only-browser\.test\.mjs\./,
+  );
+  assert.deepEqual(
+    JSON.parse(readFileSync(ran, 'utf8')),
+    ['tests/b.test.mjs'],
+    'the other extra test still runs; the browser test does not',
+  );
+  assert.equal(readFileSync(`${ran}.browser`, 'utf8'), '0', 'and it runs with browser tests off');
 });

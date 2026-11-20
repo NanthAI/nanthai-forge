@@ -464,6 +464,10 @@ letting the edit judge itself:
   (`STANDARD_SELECTION_INPUTS`, both in `src/standard-check.ts`), the check contract and Forge's
   Actions workflow and local actions (`.github/workflows/forge-check.yml`, `.github/actions/`). The
   same coverage paths name a culprit landing (`coverageChangePaths` in `src/first-check-risk.ts`).
+  Every module `scripts/test-impact.mjs` imports, directly or through each other (selection-guard,
+  core-queue-paths, script-impact, docs-readers, the import graph), also counts for the trial: they
+  decide which tests run. The planner reads that list from the Candidate's own imports as text, and
+  only when the Lane changed a script, so no second list is kept by hand.
   Other `.github/` files, a main audit and a failed-file probe get no trial.
 - **Main's side.** The planner, reading paths only, widens such a Lane to main's full selection
   (with every browser test) and pins `selection.trial` (the definition paths) in the plan
@@ -477,6 +481,13 @@ letting the edit judge itself:
   kind of check test, or browser tests main left out). The trial's output goes to the job log only:
   its test reports and JUnit files are never check evidence. Its failure fails the job; its pass
   decides nothing.
+- **Browser tests.** Main's full selection has a browser job whenever main's rules see a browser
+  test, and the trial runs there, so browser tests the Lane's own rules add run before it lands.
+  When main's plan has no browser job (main's rules see none), the trial runs in the static job,
+  which has no browser: it names the browser tests its rules found and does not run them, rather
+  than failing on the missing browser. Main's check runs them once this definition is main's; the
+  main audit names this change as the culprit only through the paths noted at the end of this section. The Lane's own rules decide
+  what counts as a browser test here, like everything else in the trial.
 - **It is not dropped by accident.** The supervisor reads `export const CHECK_DEFINITION_TRIAL = 1;`
   from the Candidate's entry as data before any Candidate code runs. An entry without it fails the
   trial job. This catches a definition change that loses the trial; it is not a guard against a
@@ -494,9 +505,8 @@ need a pushed Candidate ref with the runner repository's secrets). Their unit te
 full check, and the main audit after landing names the definition landing as the culprit if a newly
 run test fails ([culprit attribution](../pre-queue-checks.md)). Tests that main's plan already
 ran are not rerun under the Candidate's executor. When there is nothing extra to run, the Candidate's executor is only
-loaded. Modules that `scripts/test-impact.mjs` imports but `STANDARD_SELECTION_INPUTS` does not
-list are not yet definition paths. If the Candidate's own browser policy finds browser tests main's
-plan left out, the trial runs them in the static job, which fails closed when it has no browser.
+loaded. Main's culprit naming still uses only the check's entry paths and
+`STANDARD_SELECTION_INPUTS`, not the modules `scripts/test-impact.mjs` imports.
 
 ### JUnit XML reports from any check
 

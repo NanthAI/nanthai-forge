@@ -366,7 +366,7 @@ export function actionsGateSelection(
 ) {
   const gated = gateSelection(run, paths, files, standard, mainPaths, members, graphCache);
   // A change to the check definition runs main's full check plus a trial of its own (src/check-definition-trial.ts).
-  const trial = standard ? definitionTrialPaths(run.check, run.gate, paths) : null;
+  const trial = standard ? definitionTrialPaths(run.check, run.gate, paths, files) : null;
   const raw = trial
     ? definitionTrialSelection(gated, trial, () =>
         standardSelection({

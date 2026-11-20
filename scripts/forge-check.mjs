@@ -46,13 +46,24 @@ async function definitionTrial() {
     files,
   );
   const planned = new Set(plan.groups.flat());
-  const extra = own.tests.filter(
+  const beyond = own.tests.filter(
     test => !planned.has(test) || (isBrowserTest(test) && own.browser && !plan.selection?.browser),
   );
-  const named = extra.slice(0, 20).join(', ') + (extra.length > 20 ? ', ...' : '');
+  const list = tests => tests.slice(0, 20).join(', ') + (tests.length > 20 ? ', ...' : '');
   console.log(
-    `Definition trial: this tree's definition selects ${own.tests.length} test files; ${extra.length} beyond main's plan${extra.length ? `: ${named}` : ''}.`,
+    `Definition trial: this tree's definition selects ${own.tests.length} test files; ${beyond.length} beyond main's plan${beyond.length ? `: ${list(beyond)}` : ''}.`,
   );
+  // The trial runs in the browser job when main's plan has one, else in the static job, which has no
+  // browser: browser tests found there are named, never run into a false red. Main's check runs them
+  // once this definition is main's, and the main audit names this change if one fails. A test job
+  // already built this Candidate; the static job did not.
+  const build = process.env.FORGE_ACTIONS_SHARD === 'static';
+  const deferred = build ? beyond.filter(isBrowserTest) : [];
+  const extra = beyond.filter(test => !deferred.includes(test));
+  if (deferred.length)
+    console.log(
+      `Definition trial: ${deferred.length} browser test file${deferred.length === 1 ? '' : 's'} not run: main's plan has no browser job. Main's check runs them after landing: ${list(deferred)}.`,
+    );
   if (!extra.length) return;
   const folder = mkdtempSync(join(tmpdir(), 'forge-definition-trial-'));
   const trialPlan = join(folder, 'plan.json');
@@ -66,13 +77,11 @@ async function definitionTrial() {
         scope: 'scoped',
         reason: 'Definition trial',
         tests: extra,
-        browser: own.browser,
+        browser: own.browser && !build,
       },
       groups: [extra],
     }),
   );
-  // A test job already built this Candidate; the static job did not.
-  const build = process.env.FORGE_ACTIONS_SHARD === 'static';
   Object.assign(process.env, { FORGE_ACTIONS_PLAN: trialPlan, FORGE_ACTIONS_SHARD: '0' });
   delete process.env.FORGE_ACTIONS_POOL_PART;
   try {
