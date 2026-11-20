@@ -190,6 +190,18 @@ export function useWorkRecords<T>(
         failed: result.failed,
       };
 }
+const none: readonly never[] = [];
+/** Records the project frame already holds, never a subscription of its own: empty when not shared. */
+export function useSharedWorkRecords<T>(
+  projectId: Id<'hostedProjects'>,
+  workspace: WorkIndexWorkspace | null,
+  collection: string,
+): readonly T[] {
+  const context = useContext(WorkRecordsContext);
+  return context?.projectId === projectId && context.generationId === workspace?.generationId
+    ? ((context.collections[collection]?.records ?? none) as T[])
+    : none;
+}
 export function useResolvedWorkValue<T>(
   projectId: Id<'hostedProjects'>,
   workspace: WorkIndexWorkspace | null,

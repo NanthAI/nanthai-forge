@@ -14,11 +14,14 @@ export function SearchPalette({
   source,
   open,
   close,
+  onQuery,
 }: {
   project: string;
   source: SearchSource;
   open: boolean;
   close: () => void;
+  /** The owner may look up an id the page does not hold (debounced; see IdLookup). */
+  onQuery?: (query: string) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -41,6 +44,7 @@ export function SearchPalette({
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (open) {
       setQuery('');
+      onQuery?.('');
       select(0);
       element?.showModal();
       input.current?.focus();
@@ -107,6 +111,7 @@ export function SearchPalette({
           aria-activedescendant={results.length ? `forge-result-${index}` : undefined}
           onChange={event => {
             setQuery(event.target.value);
+            onQuery?.(event.target.value);
             select(0);
             expand('');
           }}
@@ -163,7 +168,9 @@ export function SearchPalette({
                             ? 'code'
                             : item.kind === 'Candidate'
                               ? 'view'
-                              : (item.kind.toLowerCase() as 'intent' | 'lane')
+                              : item.kind === 'Item'
+                                ? 'intent'
+                                : (item.kind.toLowerCase() as 'intent' | 'lane')
                         }
                         size={15}
                       />

@@ -19,7 +19,7 @@ import { planningGroups } from './planning-rows';
 import { useDestination } from './WorkspaceUI';
 import { useViewerHandle } from './shell/viewer';
 import { age } from './ui/status';
-import type { PlanningLane } from './planning-rows';
+import type { PlanningLane, PlanningView } from './planning-rows';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { ActionPanel } from './WorkspaceUI';
 import { useConvex } from 'convex/react';
@@ -34,6 +34,7 @@ import {
 } from './WorkPlanning';
 import {
   useWorkRecords,
+  useSharedWorkRecords,
   useWorkRecord,
   useResolvedWorkValue,
   readWorkRecord,
@@ -336,6 +337,8 @@ export default function HostedIndexedPlanning(
   );
   const items = useWorkRecords<PlanningItem>(props.projectId, props.workspace, 'planningItems');
   const lanes = useWorkRecords<PlanningLane>(props.projectId, props.workspace, 'lanes');
+  // Candidate ids for the filter come only from the frame's shared page: no read of their own.
+  const views = useSharedWorkRecords<PlanningView>(props.projectId, props.workspace, 'views');
   const comments = useWorkRecords<WorkData['planningComments'][number]>(
     props.projectId,
     props.workspace,
@@ -354,6 +357,7 @@ export default function HostedIndexedPlanning(
   const data: PlanningData = {
     intents: props.intents,
     lanes: lanes.records,
+    views,
     planningItems: items.records,
     planningComments: comments.records,
     hostedEvents: [],

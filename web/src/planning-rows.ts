@@ -7,6 +7,7 @@ import type { IntentFilter } from './intents/model';
 import { age, type Tone } from './ui/status';
 import { issuePaths, SCHEDULE_RULE, suggestSchedule } from '../../src/work-schedule';
 import { markdownDoc } from '../../src/docs-resolution';
+import { idMatches, idPrefix } from './id-search';
 
 export type PlanningLane = {
   intentId: string;
@@ -39,6 +40,10 @@ export type PlanningRow = {
   id: string;
   title: string;
   searchText: string;
+  /** Item, Intent, Lane and Candidate ids an id query finds this row by. */
+  ids: string[];
+  /** Set by searchPlanningGroups when an id query named this row: it leads its group. */
+  idMatch?: boolean;
   label: ReturnType<typeof intentProgress> | 'Proposed';
   tone: Tone;
   fact: string;
@@ -96,6 +101,7 @@ function row(
     createdAt?: string;
   },
   lanes: readonly PlanningLane[],
+  viewIds: readonly string[] = [],
 ): PlanningRow {
   const tone =
     input.label === 'Working'
@@ -105,16 +111,28 @@ function row(
         : input.label === 'Abandoned'
           ? 'stale'
           : 'plain';
-  return { ...input, tone, searchText: input.title, fact: rowFacts(input.label, lanes, input.at) };
+  const ids = [input.intentId, input.itemId, ...lanes.map(lane => lane.id), ...viewIds].filter(
+    (id): id is string => !!id,
+  );
+  return { ...input, tone, searchText: input.title, ids, fact: rowFacts(input.label, lanes, input.at) };
 }
+export type PlanningView = { id: string; intentId?: string };
 
 /** Each Initiative contains its linked Intents once, including legacy and unified memberships. */
 export function planningGroups(
   items: readonly PlanningItem[],
   intents: readonly PlanningIntent[],
   lanes: readonly PlanningLane[],
+  views: readonly PlanningView[] = [],
 ) {
   const intentById = new Map(intents.map(intent => [intent.id, intent]));
+  const viewIds = new Map<string, string[]>();
+  for (const view of views)
+    if (view.intentId) {
+      const list = viewIds.get(view.intentId) ?? [];
+      list.push(view.id);
+      viewIds.set(view.intentId, list);
+    }
   const grouped = new Set<string>();
   for (const item of items) {
     if (item.kind === 'initiative' || item.initiativeId)
@@ -130,7 +148,7 @@ export function planningGroups(
   ];
   return groups.map(group => {
     const rows = new Map<string, PlanningRow>();
-    const addIntent = (id: string, linkedTitle = '') => {
+    const addIntent = (id: string, linkedTitle = '', linkedId = '') => {
       const intent = intentById.get(id);
       if (!intent || (group.id === '' && intent.status === 'proposed')) return;
       const own = lanes.filter(lane => lane.intentId === id);
@@ -138,9 +156,11 @@ export function planningGroups(
       const value = row(
         { id, intentId: id, title: intent.outcome, label, at: intent.updatedAt ?? intent.createdAt },
         own,
+        viewIds.get(id),
       );
       value.actor = own.find(lane => lane.startedBy)?.startedBy;
       value.searchText = [rows.get(id)?.searchText, intent.outcome, linkedTitle].filter(Boolean).join(' ');
+      value.ids = [...new Set([...value.ids, ...(rows.get(id)?.ids ?? []), ...(linkedId ? [linkedId] : [])])];
       rows.set(id, value);
     };
     for (const id of group.item?.intentIds ?? []) addIntent(id);
@@ -159,7 +179,7 @@ export function planningGroups(
         (item.initiativeId ?? (item.status === 'proposed' ? 'proposed' : '')) === group.id,
     )) {
       if (intentById.has(item.id)) continue;
-      if (item.intentIds?.length) item.intentIds.forEach(id => addIntent(id, item.title));
+      if (item.intentIds?.length) item.intentIds.forEach(id => addIntent(id, item.title, item.id));
       else
         rows.set(
           `planning:${item.id}`,
@@ -186,8 +206,36 @@ export function planningGroups(
 /** Keep activity first and closed work last, preserving source order within each bucket. */
 export function initiativeRows(rows: readonly PlanningRow[]) {
   const rank = (row: PlanningRow) =>
-    planningRowMatches(row, 'in-motion') ? 0 : planningRowMatches(row, 'done') ? 2 : 1;
+    row.idMatch ? -1 : planningRowMatches(row, 'in-motion') ? 0 : planningRowMatches(row, 'done') ? 2 : 1;
   return [...rows].sort((a, b) => rank(a) - rank(b));
+}
+/**
+ * The planning filter: text matches a row's titles or its Initiative's; an id prefix (8+ hex, any
+ * case) also finds the row by its Item, Intent, Lane or Candidate id, ahead of titles that merely
+ * contain the text, and an Initiative by its own id. Uses only the rows the page holds.
+ */
+export function searchPlanningGroups<G extends { title: string; item?: { id: string }; rows: PlanningRow[] }>(
+  groups: readonly G[],
+  search: string,
+): G[] {
+  const needle = search.trim().toLowerCase();
+  if (!needle) return [...groups];
+  const prefix = idPrefix(search);
+  const hit = (row: PlanningRow) => idMatches(row.ids, prefix);
+  return groups
+    .map(group => {
+      const whole =
+        group.title.toLowerCase().includes(needle) || idMatches(group.item && [group.item.id], prefix);
+      const rows = group.rows
+        .filter(row => whole || hit(row) || row.searchText.toLowerCase().includes(needle))
+        .map(row => (hit(row) ? { ...row, idMatch: true } : row));
+      return {
+        group: { ...group, rows },
+        named: idMatches(group.item && [group.item.id], prefix) || rows.some(hit),
+      };
+    })
+    .sort((a, b) => Number(b.named) - Number(a.named))
+    .map(({ group }) => group);
 }
 export function initiativeProgress(item: PlanningItem, rows: readonly PlanningRow[]) {
   const done = rows.filter(row => planningRowMatches(row, 'done')).length;

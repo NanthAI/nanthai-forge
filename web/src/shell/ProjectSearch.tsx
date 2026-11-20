@@ -1,14 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useReadRetry } from '../ui/read-retry';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useReducer, useState } from 'react';
 import { useConvexAuth, useConvex, useQuery as useHostedQuery } from 'convex/react';
+import { makeFunctionReference } from 'convex/server';
+import { IdLookup, idMatches, idPrefix } from '../id-search';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type { CockpitWork } from '../cockpit/model';
 import { useWorkRecords, workIndex, type WorkIndexWorkspace } from '../hosted-work-index';
 import type { MoveRecord } from '../cockpit/now-model';
 import { Glyph } from '../ui/Glyph';
 import { SearchPalette } from './SearchPalette';
-import { searchHref, workSearchItems, type SearchItem } from './search-model';
+import { idOnPage, itemSearchItems, searchHref, workSearchItems, type SearchItem } from './search-model';
+
+/** The existing planning search: it resolves an Item by 8-character prefix or full UUID first. */
+const planningSearch = makeFunctionReference<
+  'query',
+  {
+    projectId: Id<'hostedProjects'>;
+    text: string;
+    omittedTerms: number;
+    status: 'all';
+    cursor: null;
+    limit: number;
+  },
+  string
+>('projectHostedPlanningSearch:search');
 
 type Props = { project: string; projectId: Id<'hostedProjects'> };
 export function ProjectSearch(props: Props) {
@@ -133,15 +149,48 @@ function HostedSearch({
     hostedMoves.complete,
     readAttempt,
   ]);
-  const items = useMemo(
-    () => [
-      ...workSearchItems(
+  const work = useMemo(
+    () =>
+      workSearchItems(
         { intents: intents.records, lanes: lanes.records, views: views.records, runs: [] },
         true,
       ),
-      ...files,
-    ],
-    [intents.records, lanes.records, views.records, files],
+    [intents.records, lanes.records, views.records],
+  );
+  // An id the page does not hold (an Item, which this palette does not load) costs one debounced
+  // planning search per id, never a call per keystroke and never one while the palette is idle.
+  const [query, setQuery] = useState('');
+  const [, answered] = useReducer((n: number) => n + 1, 0);
+  const lookup = useMemo(
+    () =>
+      new IdLookup<SearchItem>(async text => {
+        const result = JSON.parse(
+          await client.query(planningSearch, {
+            projectId,
+            text,
+            omittedTerms: 0,
+            status: 'all',
+            cursor: null,
+            limit: 5,
+          }),
+        ) as { items?: { id: string; matchedBy?: string }[] };
+        return itemSearchItems(
+          (result.items ?? []).filter(item => item.matchedBy === 'id'),
+          true,
+        );
+      }, answered),
+    [client, projectId],
+  );
+  useEffect(() => () => lookup.cancel(), [lookup]);
+  const prefix = idPrefix(query);
+  const settled = !intents.loading && !lanes.loading && !views.loading;
+  const planning = !!workspace?.capabilities.planning;
+  const known = !planning || !settled || idOnPage(work, prefix);
+  useEffect(() => lookup.want(prefix, known), [lookup, prefix, known]);
+  const found = lookup.found(prefix);
+  const items = useMemo(
+    () => [...work, ...(found ?? []).filter(item => idMatches(item.ids, prefix)), ...files],
+    [work, found, prefix, files],
   );
   return (
     <SearchPalette
@@ -149,6 +198,7 @@ function HostedSearch({
       source={{ items, loading: loading || intents.loading || lanes.loading || views.loading, error }}
       open
       close={close}
+      onQuery={setQuery}
     />
   );
 }

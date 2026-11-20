@@ -15,9 +15,11 @@ import {
   initiativeProgress,
   initiativeRows,
   planningRowMatches,
+  searchPlanningGroups,
   type PlanningFilter,
   type PlanningLane,
   type PlanningRow,
+  type PlanningView,
 } from './planning-rows';
 import { intentFilterLabels, intentFilters } from './intents/model';
 import { PagedList } from './cockpit/ScaleList';
@@ -32,7 +34,7 @@ import type { PlanningCommand, PlanningItem, PlanningWrite, WorkData } from '../
 export type PlanningData = Pick<
   WorkData,
   'intents' | 'planningItems' | 'planningComments' | 'hostedEvents'
-> & { lanes?: readonly PlanningLane[] };
+> & { lanes?: readonly PlanningLane[]; views?: readonly PlanningView[] };
 export type PlanningExport = { json: string; filename: string; sha256: string };
 export type PlanningAct = (command: PlanningWrite) => Promise<{ operationId: string } | void>;
 type Props = {
@@ -205,21 +207,17 @@ export function WorkPlanning({
   const [exporting, setExporting] = useState(false),
     [error, setError] = useState('');
   const items = [...new Map(data.planningItems.map(item => [item.id, item])).values()];
-  const groups = planningGroups(items, data.intents, data.lanes ?? []);
+  const groups = planningGroups(items, data.intents, data.lanes ?? [], data.views ?? []);
   const hints = scheduleHints(items);
-  const needle = search.trim().toLowerCase();
-  const scopedGroups = groups
-    .filter(group => !initiative || group.id === initiative)
-    .map(group => ({
-      ...group,
-      rows: group.rows.filter(
-        row =>
-          (!linkedOnly || row.intentId === intentId) &&
-          (!needle ||
-            row.searchText.toLowerCase().includes(needle) ||
-            group.title.toLowerCase().includes(needle)),
-      ),
-    }));
+  const scopedGroups = searchPlanningGroups(
+    groups
+      .filter(group => !initiative || group.id === initiative)
+      .map(group => ({
+        ...group,
+        rows: group.rows.filter(row => !linkedOnly || row.intentId === intentId),
+      })),
+    search,
+  );
   const countRows = scopedGroups.flatMap(group => group.rows);
   const visibleGroups = scopedGroups.map(group => ({
     ...group,
