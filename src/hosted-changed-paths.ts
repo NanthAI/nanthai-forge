@@ -105,6 +105,50 @@ export function checkoutProtectedPathNotice(
   root: string,
   marker: HostedLaneCheckoutMarker,
   policy: ProtectedPathPolicy,
+  mainHead?: string,
 ) {
-  return protectedPathNotice(policy, pathsAgainstBase(root, marker));
+  return mainFilteredNotice(root, policy, pathsAgainstBase(root, marker), marker.state.files, mainHead);
+}
+
+type FileEntry = { path: string; blob?: string; mode?: string };
+/** Paths whose saved bytes differ from main's, by main's State manifest when this machine already
+ * has it (after a sync it does). Content merged in from main, or an edit reverted to main's bytes,
+ * is not this Lane's change, so it needs no approval (ad80e037). No server call: without the cached
+ * manifest, or on any read error, the paths come back unchanged. */
+export function withoutMainBytes(
+  root: string,
+  mainHead: string | undefined,
+  files: readonly FileEntry[] | undefined,
+  paths: string[] | null,
+): string[] | null {
+  if (!paths || !mainHead || !files) return paths;
+  const bytes = cachedObject(root, mainHead);
+  if (!bytes) return paths;
+  let main: Map<string, FileEntry>;
+  try {
+    main = new Map(parseNativeState(bytes).files.map(file => [file.path, file]));
+  } catch {
+    return paths;
+  }
+  const saved = new Map(files.map(file => [file.path, file]));
+  return paths.filter(path => {
+    const mine = saved.get(path),
+      theirs = main.get(path);
+    return mine?.blob !== theirs?.blob || mine?.mode !== theirs?.mode;
+  });
+}
+
+/** The protected-path notice for these changed paths, dropping paths whose saved bytes equal main's.
+ * The main comparison runs only when a protected path matched, so ordinary saves read nothing more. */
+export function mainFilteredNotice(
+  root: string,
+  policy: ProtectedPathPolicy,
+  paths: string[] | null,
+  files: readonly FileEntry[] | undefined,
+  mainHead: string | undefined,
+) {
+  const notice = protectedPathNotice(policy, paths);
+  return notice?.coverage === 'complete' && mainHead && files
+    ? protectedPathNotice(policy, withoutMainBytes(root, mainHead, files, paths))
+    : notice;
 }

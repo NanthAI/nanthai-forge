@@ -2,6 +2,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { posix, join } from 'node:path';
 import { testImportGraph } from './test-import-graph.mjs';
+import { moduleTaint, wholeTaint } from './test-symbols.mjs';
 import { watchRanking } from './test-name-watchers.mjs';
 import { closenessIndex, compareRank } from './test-closeness.mjs';
 import { changeSalt, compareRelevance, relevanceFor, stableKey } from './test-tiebreak.mjs';
@@ -435,7 +436,7 @@ function selectWithGraph(
   );
   const graph = suppliedGraph ?? (graphCache.graph ||= testImportGraph(files, scriptsChanged));
   if (graph.error) return full(graph.error);
-  const { reverse, evidence, packageGraph, workspaceUsers } = graph;
+  const { reverse, evidence, packageGraph, workspaceUsers, symbols, sites } = graph;
   // Product source and JSON are data to the static tools (build, typecheck, lint, format,
   // schema, package smoke), which run on every exact Candidate. Their chains stop at
   // those commands, and at those tools when the tool reads it rather than imports it.
@@ -454,22 +455,77 @@ function selectWithGraph(
     edges: [...previous.edges, edge.kind],
     ...(edge.detail || previous.detail ? { detail: edge.detail ?? previous.detail } : {}),
   });
+  // Symbol-level reach (test-symbols.mjs): a reached module carries the exports a change can alter
+  // there, once as affected and once as held. An importer that uses none of them is not reached.
+  // A changed path, a module without symbols and an edge without a known site are whole.
+  const taints = { affected: new Map(), held: new Map() };
+  const transfer = (taint, dependency, importer) => {
+    if (!taint.whole && !taint.names.size) return null;
+    const info = symbols?.get(importer),
+      record = sites?.get(dependency)?.get(importer),
+      declared = info?.imports.get(dependency);
+    if (
+      !info ||
+      !record ||
+      record.whole ||
+      (!declared && !record.statements.size) ||
+      (declared && taint.whole)
+    )
+      return { whole: true };
+    const delta = { statements: [...record.statements], locals: [], exports: [] };
+    const has = name => (name === '*' ? taint.names.size > 0 : taint.names.has(name));
+    for (const [local, imported] of declared?.bindings ?? []) if (has(imported)) delta.locals.push(local);
+    for (const [imported, exported] of declared?.reexports ?? [])
+      if (has(imported)) delta.exports.push(exported);
+    if (declared?.star) for (const name of taint.names) if (name !== 'default') delta.exports.push(name);
+    return delta.statements.length || delta.locals.length || delta.exports.length ? delta : null;
+  };
+  /** Adds `delta` to the module's entries; true when what it passes on grew (or it is new). */
+  const merge = (mode, path, delta) => {
+    if (!taints[mode].has(path))
+      taints[mode].set(path, {
+        entries: { whole: false, statements: new Set(), locals: new Set(), exports: new Set() },
+        taint: null,
+      });
+    const state = taints[mode].get(path);
+    let grew = false;
+    if (delta.whole) grew = !state.entries.whole;
+    else
+      for (const key of ['statements', 'locals', 'exports'])
+        for (const value of delta[key])
+          if (!state.entries[key].has(value)) {
+            state.entries[key].add(value);
+            grew = true;
+          }
+    if (delta.whole) state.entries.whole = true;
+    if (!grew) return false;
+    const info = symbols?.get(path);
+    const previous = state.taint;
+    state.taint = !info || state.entries.whole ? wholeTaint : moduleTaint(info, state.entries);
+    return (
+      !previous ||
+      (state.taint.whole && !previous.whole) ||
+      (!state.taint.whole && state.taint.names.size > previous.names.size)
+    );
+  };
   const walk = (queue, blocked) => {
     for (let i = 0; i < queue.length; i++) {
-      const current = queue[i];
-      const previous = affected.get(current) ?? held.get(current);
+      const [current, mode] = queue[i];
+      const previous = (mode === 'affected' ? affected : held).get(current);
       if (blocked && docsWrapper(current, previous.changedPath)) continue;
-      const holding = !affected.has(current);
+      const { taint } = taints[mode].get(current);
       for (const importer of reverse.get(current) ?? []) {
-        if (affected.has(importer) || (holding && held.has(importer))) continue;
         const edge = evidence.get(current).get(importer);
         if (fenced(previous, importer, edge)) continue;
-        const entry = step(previous, edge, importer);
-        if ((holding || edge.kind === 'workspace-path') && !workspaceUsers?.has(importer)) {
-          if (held.has(importer)) continue;
-          held.set(importer, entry);
-        } else affected.set(importer, entry);
-        queue.push(importer);
+        const target =
+          (mode === 'held' || edge.kind === 'workspace-path') && !workspaceUsers?.has(importer)
+            ? 'held'
+            : 'affected';
+        const delta = transfer(taint, current, importer);
+        if (!delta) continue;
+        const reached = target === 'affected' ? affected : held;
+        if (!reached.has(importer)) reached.set(importer, step(previous, edge, importer));
+        if (merge(target, importer, delta)) queue.push([importer, target]);
       }
     }
   };
@@ -477,15 +533,15 @@ function selectWithGraph(
     const queue = [];
     for (const item of items)
       for (const seed of item.seeds) {
-        if (affected.has(seed)) continue;
-        affected.set(seed, {
-          kind: seed === item.path ? 'changed' : 'domain',
-          changedPath: item.path,
-          chain: seed === item.path ? [seed] : [item.path, seed],
-          edges: [],
-          ...(item.reason ? { detail: item.reason } : {}),
-        });
-        queue.push(seed);
+        if (!affected.has(seed))
+          affected.set(seed, {
+            kind: seed === item.path ? 'changed' : 'domain',
+            changedPath: item.path,
+            chain: seed === item.path ? [seed] : [item.path, seed],
+            edges: [],
+            ...(item.reason ? { detail: item.reason } : {}),
+          });
+        if (merge('affected', seed, { whole: true })) queue.push([seed, 'affected']);
       }
     walk(queue, blocked);
   };

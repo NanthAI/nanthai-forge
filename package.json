@@ -315,6 +315,7 @@
     "scripts/docs-readers.mjs",
     "scripts/test-tree-scanners.mjs",
     "scripts/convex-function-names.mjs",
+    "scripts/test-symbols.mjs",
     "scripts/test-directory-path.mjs",
     "scripts/test-coverage.mjs",
     "scripts/test-coverage.d.mts",

@@ -108,6 +108,44 @@ test('direct preflight and land without prior explicit save both explain approva
   assert.deepEqual(land.result.protectedPathNotice.paths, ['netlify.toml']);
 });
 
+test('ad80e037: a protected file whose saved bytes equal main (merged in by a sync, or reverted) needs no approval notice, with no added call', async t => {
+  const names = [];
+  for (const known of [false, true, 'uncached']) {
+    const s = await fixture(t);
+    const saved = readHostedLaneCheckout(s.root).state.files.find(file => file.path === 'netlify.toml');
+    // Main moved after the Lane's base and now holds exactly the Lane's bytes for the file.
+    const main = JSON.parse(s.objects.get(s.main.head));
+    main.files = main.files.filter(file => file.path !== 'netlify.toml').concat(saved);
+    const bytes = Buffer.from(JSON.stringify(main));
+    const head = digest(bytes);
+    if (known !== 'uncached') writeFileSync(join(clientCacheRoot(s.root), 'objects', head), bytes);
+    if (known) s.caps.main = { ...s.main, head };
+    const before = s.calls.length;
+    const save = await s
+      .transport()
+      .dispatch('save', { operationId: randomUUID(), message: 'Save configuration' });
+    const preflight = await s.transport().dispatch('preflight', { laneId: s.lane.laneId, run: false });
+    names.push(s.calls.slice(before).map(call => call.name));
+    if (known === true) {
+      assert.equal(save.result.protectedPathNotice, undefined, 'saved bytes equal main: no approval');
+      assert.equal(preflight.result.protectedPathNotice, undefined);
+    } else {
+      // No main manifest on this machine: the notice stays (a missing observation never hides it).
+      assert.deepEqual(save.result.protectedPathNotice.paths, ['netlify.toml']);
+      assert.deepEqual(preflight.result.protectedPathNotice.paths, ['netlify.toml']);
+    }
+  }
+  for (const list of names.slice(1)) assert.deepEqual(list, names[0], 'the main comparison adds zero calls');
+  // Unit: a path whose saved bytes differ from main's keeps the notice.
+  const s = await fixture(t);
+  const marker = readHostedLaneCheckout(s.root);
+  assert.deepEqual(
+    checkoutProtectedPathNotice(s.root, marker, policy(), s.main.head).paths,
+    ['netlify.toml'],
+    'the Lane changes the file against main: notice kept',
+  );
+});
+
 test('current and doubled manifests explain approval locally with constant server calls and bounded replies', async t => {
   const s = await fixture(t);
   for (const size of [3000, 6000]) {

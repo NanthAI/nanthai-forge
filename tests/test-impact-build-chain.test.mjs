@@ -88,8 +88,10 @@ schema('/tmp/fixture');`,
     'tests/repo.test.mjs': `import { fileURLToPath } from 'node:url';
 import { schema } from '../dist/preview.js';
 schema(fileURLToPath(new URL('..', import.meta.url)));`,
+    // The child runs the CLI, which resolves the schema in its inherited directory (5dcfce75: an
+    // unused import of preview.js no longer reaches the export).
+    'src/cli.ts': "import { schema } from './preview.js'; schema(process.cwd());",
     'tests/spawned.test.mjs': `import { spawnSync } from 'node:child_process';
-import '../dist/preview.js';
 spawnSync(process.execPath, ['dist/cli.js']);`,
     'tests/start.test.mjs': "import { worker } from '../dist/start.js'; worker();",
   });

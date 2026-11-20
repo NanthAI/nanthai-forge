@@ -22,7 +22,8 @@ const files = new Map(
     'src/hub.ts':
       "export async function loadLeaf() { return import('./leaf.js'); } export const unrelated = 2;",
     'tests/leaf.test.mjs': "import '../dist/leaf.js';",
-    'tests/hub.test.mjs': "import '../dist/hub.js';",
+    // It names the loader (the graph reaches it) but never calls it (its trace never touches leaf).
+    'tests/hub.test.mjs': "import { loadLeaf } from '../dist/hub.js'; void loadLeaf;",
     'tests/files.test.mjs': '',
   }),
 );

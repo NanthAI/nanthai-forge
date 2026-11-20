@@ -169,7 +169,7 @@ test('a path template in product code is workspace data, like a product literal;
   const files = base({
     'src/a.ts': 'export const a = 1;',
     'src/aliases.ts': 'export const aliases = name => [name, `dist/${name}.js`];',
-    'tests/aliases.test.mjs': "import '../src/aliases.ts';",
+    'tests/aliases.test.mjs': "import { aliases } from '../src/aliases.ts'; aliases('a');",
     'tests/reader.test.mjs': 'const name = pick(); readFileSync(`src/${name}.ts`);',
   });
   const graph = testImportGraph(files);
@@ -178,7 +178,10 @@ test('a path template in product code is workspace data, like a product literal;
   assert.ok(!picked.includes('tests/aliases.test.mjs'), 'not a workspace user: no cwd read reaches it');
   assert.ok(picked.includes('tests/reader.test.mjs'), 'a test template is still a dynamic read');
   // A workspace user (it runs product code with this repository as cwd) still gets it.
-  files.set('tests/aliases.test.mjs', "import '../src/aliases.ts'; process.cwd();");
+  files.set(
+    'tests/aliases.test.mjs',
+    "import { aliases } from '../src/aliases.ts'; aliases('a'); process.cwd();",
+  );
   assert.ok(selected(files, 'src/a.ts').includes('tests/aliases.test.mjs'));
 });
 

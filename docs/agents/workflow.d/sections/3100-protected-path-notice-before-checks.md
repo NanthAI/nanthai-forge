@@ -7,7 +7,10 @@ owner (a person) for owner-approval paths and check entry files, or a person all
 to accept for `acceptance.protectedPaths`. The notice also appears on direct
 preflight and `land --save`, before inline preflight or the landing check starts.
 It appears even when save replies `settling`; later ordinary saves continue to
-name a retained protected edit. Reverting that edit removes its notice.
+name a retained protected edit. Reverting that edit removes its notice. A path whose saved
+bytes equal main's (merged in by a sync, or reverted to main's bytes after one) is not this
+Lane's change and is dropped, compared with main's State manifest when this machine already has
+it (main's head rides on capability discovery); without that manifest the notice stays.
 
 `message`, `paths` (at most 10 and 1,200 total path characters), `more` and `coverage`
 remain visible in compact replies. Missing local base-manifest coverage is marked

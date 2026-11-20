@@ -131,7 +131,11 @@ import {
   openLaneHolder,
 } from './hosted-agent-actions.js';
 import { executeHostedApproval, openApprovalsReply, type ApprovalCommand } from './hosted-agent-approval.js';
-import { savedChangedPaths, checkoutProtectedPathNotice } from './hosted-changed-paths.js';
+import {
+  savedChangedPaths,
+  checkoutProtectedPathNotice,
+  mainFilteredNotice,
+} from './hosted-changed-paths.js';
 import { publishClientSourcePack } from './source-pack-client.js';
 import { missingRequiredFeatures } from './hosted-contract-features.js';
 import { capabilityOptions, takeEarlyCapabilities } from './hosted-capabilities-early.js';
@@ -314,6 +318,9 @@ export class HostedAgentTransport {
   /** Contract features the server advertised on this process's latest capability read (a83b6fd5);
    * undefined before discovery. The CLI keeps the old safe behaviour for any feature not listed. */
   private protectedPolicy: ProtectedPathPolicy | undefined;
+  /** Main's head as this command's capability read carried it: the protected-path notice compares
+   * saved bytes with main's manifest when it is already cached (no call). */
+  private knownMain: string | undefined;
   private serverFeatures: readonly string[] | undefined;
   get advertisedFeatures() {
     return this.serverFeatures;
@@ -930,6 +937,7 @@ export class HostedAgentTransport {
           this.address.projectId,
         );
       this.protectedPolicy = capabilities.protectedPathPolicy;
+      this.knownMain = capabilities.main?.head;
       this.callerActor = capabilities.actor;
       this.serverFeatures = capabilities.features ?? [];
       this.exchange.sourceStateReads = this.serverFeatures.includes('source-state');
@@ -1801,11 +1809,25 @@ export class HostedAgentTransport {
   }
   private async protectedNotice(marker: ReturnType<typeof readHostedLaneCheckout>) {
     if (!marker || !this.protectedPolicy) return;
-    const notice = checkoutProtectedPathNotice(this.root, marker, this.protectedPolicy);
+    const notice = checkoutProtectedPathNotice(this.root, marker, this.protectedPolicy, this.knownMain);
     this.reportProtectedNotice(notice);
   }
   private protectedPaths(paths: string[] | null) {
-    if (this.protectedPolicy) this.reportProtectedNotice(protectedPathNotice(this.protectedPolicy, paths));
+    if (!this.protectedPolicy) return;
+    // The saved files only when a protected path matched: an ordinary save reads nothing more.
+    const files = () => {
+      try {
+        return readHostedLaneCheckout(this.root)?.state.files;
+      } catch {
+        return undefined;
+      }
+    };
+    const notice = protectedPathNotice(this.protectedPolicy, paths);
+    this.reportProtectedNotice(
+      notice?.coverage === 'complete' && this.knownMain
+        ? mainFilteredNotice(this.root, this.protectedPolicy, paths, files(), this.knownMain)
+        : notice,
+    );
   }
   private reportProtectedNotice(notice: ReturnType<typeof protectedPathNotice>) {
     const context = this.operationContext.getStore();

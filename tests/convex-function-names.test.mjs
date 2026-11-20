@@ -116,7 +116,9 @@ test('product clients name functions over the network; only a by-name loader mak
       '}',
     ].join('\n'),
     'tests/harness.test.mjs': "import './convex-context.mjs'; import '../dist/client.js';",
-    'tests/context-only.test.mjs': "import './convex-context.mjs';",
+    // It calls the loader, so the loader's own reach (not an unused import) decides (5dcfce75).
+    'tests/context-only.test.mjs':
+      "import * as context from './convex-context.mjs'; await context.check?.(ref); await context.load?.(name);",
   });
   const selected = tests(files, 'convex/callee.ts');
   // A fake client never runs the module: the client test is not selected.

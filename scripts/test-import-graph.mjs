@@ -23,6 +23,7 @@ import {
   templateFunctionModules,
   templateStrings,
 } from './convex-function-names.mjs';
+import { moduleSymbols, siteOf } from './test-symbols.mjs';
 
 export function testImportGraph(files, scriptsChanged = [], { typeImports = false } = {}) {
   const reverse = new Map(),
@@ -46,7 +47,28 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
         .get(dependency)
         .set(importer, { kind, ...(detail ? { detail } : {}), ...(byName ? { byName: true } : {}) });
     reverse.get(dependency).add(importer);
+    // Where the importer refers to the dependency (test-symbols.mjs). An import or re-export
+    // declaration is read from the importer's symbols; an edge made outside a parse is whole.
+    if (!sites) return;
+    if (!sites.has(dependency)) sites.set(dependency, new Map());
+    const into = sites.get(dependency);
+    if (!into.has(importer)) into.set(importer, { whole: false, statements: new Set() });
+    const record = into.get(importer);
+    if (!site || sitePath !== importer) record.whole = true;
+    else if (!moduleSpecifier(site)) {
+      // A widening site makes many edges: classify it once.
+      if (siteAt?.node !== site) siteAt = { node: site, ...siteOf(site) };
+      const at = siteAt;
+      if (at.run || at.statement < 0) record.whole = true;
+      else record.statements.add(at.statement);
+    }
   };
+  // Symbol-level reach is for runtime selection; type-contract graphs keep whole-module edges.
+  const symbols = typeImports ? null : new Map(),
+    sites = typeImports ? null : new Map();
+  let site = null,
+    sitePath = null,
+    siteAt = null;
   const packageGraph = packageScriptGraph(files, edge);
   if (scriptsChanged.length && packageGraph.error) return { error: packageGraph.error };
   const self = packageSelf(files);
@@ -159,6 +181,10 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
     const ast = ts.createSourceFile(path, files.get(path), ts.ScriptTarget.Latest, true);
     if (ast.parseDiagnostics.length)
       return { error: `Unparseable ${scriptPath(path) ? 'script' : 'module'}: ${path}` };
+    symbols?.set(
+      path,
+      moduleSymbols(ast, value => resolve(path, value)),
+    );
     const loaders = shadowsRequire(ast)
       ? ['moduleUrl', 'moduleSource']
       : ['require', 'moduleUrl', 'moduleSource'];
@@ -238,6 +264,8 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
     };
     let loaded = [];
     function visit(node) {
+      site = node;
+      sitePath = path;
       // Browser coverage also follows web-facing type contracts. Keep ordinary
       // runtime test selection unchanged (type-only edits still have static checks).
       if (typeImports) {
@@ -405,6 +433,9 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
         node.expression.name.text === 'glob' &&
         ts.isMetaProperty(node.expression.expression);
       const globbed = viteGlob ? literalGlobTargets(path, node.arguments, files) : null;
+      // Vite compiles an eager glob into static imports: it loads with the module wherever it stands
+      // (even inside a function), so its edges are whole. An unproven glob may be eager too.
+      if (viteGlob && (!globbed || eagerGlob(node.arguments[1]))) site = null;
       if (globbed) {
         for (const target of globbed) edge(target, path, 'import');
         return;
@@ -459,18 +490,37 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
       loaded = [];
       ts.forEachChild(node, visit);
       // After the children: a literal's own (narrower) evidence kind is recorded first and kept.
+      // The loader call is the site (the children moved it).
+      if (proven.length) ((site = node), (sitePath = path));
       for (const target of proven) edge(target, path, 'import');
     }
     // convex-module is a known test loader: its moduleUrl callers contribute literal
     // edges above; its recursive resolver is represented by transitive source imports.
     visit(ast);
+    site = null;
   }
   if (uncertain) return { error: uncertain };
   const workspaceUsers = repositoryWorkspaceUsers(files);
   if (scriptsChanged.length && packageGraph.error) return { error: packageGraph.error };
   byNameDispatch(files, reverse, evidence, edge, named, nameLoaders);
-  return { reverse, evidence, packageGraph, workspaceUsers };
+  return { reverse, evidence, packageGraph, workspaceUsers, symbols, sites };
 }
+
+const moduleSpecifier = node =>
+  ts.isStringLiteralLike(node) &&
+  (ts.isImportDeclaration(node.parent) || ts.isExportDeclaration(node.parent)) &&
+  node.parent.moduleSpecifier === node;
+
+const eagerGlob = options =>
+  !!options &&
+  ts.isObjectLiteralExpression(options) &&
+  options.properties.some(
+    item =>
+      ts.isPropertyAssignment(item) &&
+      (ts.isIdentifier(item.name) || ts.isStringLiteralLike(item.name)) &&
+      item.name.text === 'eager' &&
+      item.initializer.kind === ts.SyntaxKind.TrueKeyword,
+  );
 
 // A resolved literal in one branch must never hide an unknown alternative.
 /** Only proven literal Vite forms narrow coverage. Unknown patterns/options use the broad loader. */

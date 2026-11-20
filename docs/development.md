@@ -423,6 +423,20 @@ A script path or package command name that tests or scripts only compare
 through its callers' paths and the loaded sources' imports. Its recursive moduleUrl
 implementation does not imply every module depends on every other module.
 
+Selection follows exports, not only files (symbol-level reach, `scripts/test-symbols.mjs`). A
+changed file is whole: the selector has no base bytes to tell which declaration changed, so
+every importer of any of its exports is selected, and a static import of a whole module is
+whole too. Further on, an edge reaches a module at a site. A site inside a function body, or
+a value only bound to a name (`const f = g`, an object or array member, a method, a static
+field), alters just the top-level declarations that refer to it, and an importer that uses
+none of their exports is not reached. Named, default and namespace imports, re-exports and
+`export *` carry the names they bind. A site that runs at load (a call, a callback or object
+handed to a call, a property or destructuring read, a spread, a template, a decorator, a
+static block) makes the whole module reach. Edges made outside a parse (by-name loader
+closures, package commands) are whole, and `eval`, `new Function`, `with` or `export =`
+make a module whole. A side-effect import therefore reaches a module only when its load
+changed.
+
 A `scoped` selection names its domain (`web`, `convex`, `core`, `netlify`, `tests`,
 `scripts`, `tooling`, or `mixed`) and prints its reason and complete file list before tests.
 Root non-Markdown files, non-Markdown `docs/` files and non-Markdown `evals/` files
