@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import { clientCacheRoot } from './root-paths.js';
-import { lstatSync, readFileSync, type Stats } from 'node:fs';
+import {
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+  type Stats,
+} from 'node:fs';
 import { join } from 'node:path';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { durableReplace } from './state/durability.js';
@@ -127,4 +136,179 @@ export function indexInstalledFiles(stage: string, files: { path: string; blob: 
       /* Not installed here (sparse); it is simply not indexed. */
     }
   return { since, entries };
+}
+
+/** Git's untracked cache for a hosted checkout (Issue 48835eea), kept beside it in
+ * `<root>.forge-client` (never source, never sent anywhere). A full source walk records the lstat of
+ * every directory it listed (taken before the listing) and of every file whose own bytes or links
+ * decided an inclusion (ignore files, credential-name holds, dependency installs). While none of
+ * those changed, the same walk returns the same paths: creating, deleting or renaming an entry
+ * always changes its directory's mtime and ctime, and an edit changes the file's. So a check can
+ * take the recorded paths and skip the walk; an edit to a listed file is still found by the
+ * caller's own per-file lstat pass. Anything that differs, is missing or is racy (changed inside
+ * the timestamp window before the walk began) means the caller walks again. File events are never
+ * used: under load they arrive late with no error, exactly when saves must not trust them. As Git
+ * gates its untracked cache, a record is kept only where a probe shows this file system moves a
+ * directory's stat when an entry is created (some FUSE and network mounts do not): the probe runs in
+ * the client cache beside the checkout, on the same device, never inside the checkout. */
+export const checkoutTreeCacheName = 'checkout-tree.json';
+type Seen = [mtimeMs: number, ctimeMs: number, ino: number, size: number];
+type Recorded = {
+  schema: 1;
+  since: number;
+  /** The checkout's device: a record from another mount is never trusted. */
+  dev: number;
+  paths: string[];
+  /** One character per `paths` entry: '1' when that path was in the walk's retained set. */
+  retained: string;
+  /** Retained paths the walk did not return (absent here, or excluded anyway). */
+  retainedOnly: string[];
+  directories: Record<string, Seen>;
+  inputs: Record<string, Seen>;
+};
+
+const file = (root: string) => join(clientCacheRoot(root), checkoutTreeCacheName);
+const seen = (stat: Stats): Seen => [stat.mtimeMs, stat.ctimeMs, stat.ino, stat.size];
+
+/** True when the client cache sits on the checkout's device and a file created there moves its
+ * directory's mtime (from a stamp set an hour back, so a coarse clock tick cannot hide the move). A
+ * few local syscalls, once per recorded walk. */
+function directoryStatsMove(root: string, dev: number) {
+  let probe: string | undefined;
+  try {
+    const cache = clientCacheRoot(root);
+    if (lstatSync(cache).dev !== dev) return false;
+    probe = mkdtempSync(join(cache, 'tree-probe-'));
+    const old = (Date.now() - 3_600_000) / 1000;
+    utimesSync(probe, old, old);
+    const before = lstatSync(probe).mtimeMs;
+    writeFileSync(join(probe, 'entry'), '');
+    return lstatSync(probe).mtimeMs !== before;
+  } catch {
+    return false;
+  } finally {
+    if (probe) rmSync(probe, { recursive: true, force: true });
+  }
+}
+
+/** Records one full walk. Create it before the walk starts (its clock is the racy bound). Stats are
+ * taken below the resolved root (a symlinked root's own lstat never moves). Recording never throws
+ * into the walk: anything it cannot observe, or a folder on another device (a mount inside the
+ * checkout, which the probe does not cover), leaves no record. */
+export function treeRecorder(checkout: string) {
+  const since = Date.now(),
+    directories: Record<string, Seen> = {},
+    inputs: Record<string, Seen> = {};
+  let root = checkout,
+    dev = -1,
+    trusted = true;
+  try {
+    root = realpathSync(checkout);
+    dev = lstatSync(root).dev;
+  } catch {
+    trusted = false;
+  }
+  const observe = (path: string, stat?: Stats) => {
+    try {
+      const value = stat ?? lstatSync(join(root, path));
+      if (value.dev !== dev) trusted = false;
+      return seen(value);
+    } catch {
+      trusted = false;
+      return undefined;
+    }
+  };
+  return {
+    /** Call before listing `path` ('' is the root). */
+    directory(path: string) {
+      const value = observe(path);
+      if (value) directories[path] = value;
+    },
+    /** A file whose own bytes or links decided whether it, or its directory's rules, apply. */
+    input(path: string, stat?: Stats) {
+      const value = observe(path, stat);
+      if (value) inputs[path] = value;
+    },
+    /** After a walk that returned `paths` for `retained`. Best effort: a failed write only means
+     * the next check walks. */
+    write(paths: readonly string[], retained: Iterable<string>) {
+      const kept = new Set(retained),
+        returned = new Set(paths);
+      const value: Recorded = {
+        schema: 1,
+        since,
+        dev,
+        paths: [...paths],
+        retained: paths.map(path => (kept.has(path) ? '1' : '0')).join(''),
+        retainedOnly: [...kept].filter(path => !returned.has(path)),
+        directories,
+        inputs,
+      };
+      try {
+        // Nothing on this file system can vouch for a directory: no record, and none older kept.
+        if (trusted && directoryStatsMove(root, dev)) durableReplace(file(root), JSON.stringify(value));
+        else rmSync(file(root), { force: true });
+      } catch {
+        /* Speed only. */
+      }
+    },
+  };
+}
+export type TreeRecorder = ReturnType<typeof treeRecorder>;
+
+/** True while `stat` still equals what was recorded and was already old when the walk began. */
+function unchanged(root: string, path: string, recorded: Seen, since: number) {
+  let stat: Stats;
+  try {
+    stat = lstatSync(join(root, path));
+  } catch {
+    return false;
+  }
+  const margin = racyMarginMs(stat);
+  return (
+    stat.mtimeMs === recorded[0] &&
+    stat.ctimeMs === recorded[1] &&
+    stat.ino === recorded[2] &&
+    stat.size === recorded[3] &&
+    stat.mtimeMs < since - margin &&
+    stat.ctimeMs < since - margin
+  );
+}
+
+/** The paths a full source walk with this `retained` set would return now, from the last recorded
+ * walk, or undefined when it must walk (nothing recorded, anything recorded changed or is racy, or
+ * the retained set differs in a way that could change the result). Retention only ever adds
+ * paths, so a path retained now but not then must already have been returned, and a path retained
+ * then but not now must not have been. One lstat per listed directory and recorded input; no
+ * listing, no file read. */
+export function cachedSourcePaths(checkout: string, retained: Iterable<string>): string[] | undefined {
+  try {
+    const root = realpathSync(checkout),
+      path = file(root);
+    if (!checkoutPathExists(path)) return undefined;
+    const written = lstatSync(path).mtimeMs;
+    const value = JSON.parse(readFileSync(path, 'utf8')) as Recorded;
+    if (
+      value.schema !== 1 ||
+      value.retained.length !== value.paths.length ||
+      value.dev !== lstatSync(root).dev
+    )
+      return undefined;
+    // The file system's clock after every observation bounds a client clock ahead of it (Git's rule).
+    const since = Math.min(value.since, written);
+    for (const [directory, recorded] of Object.entries(value.directories))
+      if (!unchanged(root, directory, recorded, since)) return undefined;
+    for (const [input, recorded] of Object.entries(value.inputs))
+      if (!unchanged(root, input, recorded, since)) return undefined;
+    const now = new Set(retained);
+    const returned = new Set(value.paths),
+      before = new Set(value.retainedOnly);
+    for (let index = 0; index < value.paths.length; index++)
+      if (value.retained[index] === '1') before.add(value.paths[index]!);
+    for (const kept of now) if (!before.has(kept) && !returned.has(kept)) return undefined;
+    for (const kept of before) if (!now.has(kept) && returned.has(kept)) return undefined;
+    return value.paths;
+  } catch {
+    return undefined;
+  }
 }

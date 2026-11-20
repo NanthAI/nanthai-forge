@@ -66,21 +66,23 @@ export function capturedTree(root: string, operationId: string): CapturedTree | 
         files.delete(change.path);
         materialized.delete(change.path);
       }
-    return { files: [...files.values()], materialized: [...materialized] };
+    return { files: [...files.values()], materialized: [...materialized], changes: capture.changes.length };
   } catch {
     return null;
   }
 }
-type CapturedTree = { files: NativeFile[]; materialized: string[] };
+/** `changes`: how many paths the save captured as changed. */
+type CapturedTree = { files: NativeFile[]; materialized: string[]; changes: number };
 
 /** Paths in this checkout that differ from the head its marker names (or from `expected`, a tree a
  * settling save captured): hostedLaneDirty's comparison, listing every path. One lstat pass that
- * reads only files the stat index cannot vouch for. Null when the folder is not a Lane checkout or an
+ * reads only files the stat index cannot vouch for, and no source walk while the last recorded one
+ * (the save's own capture) still holds. Null when the folder is not a Lane checkout or an
  * in-place apply is pending; throws when a file cannot be read. No call. */
 export function unsavedPaths(root: string, expected?: CapturedTree): string[] | null {
   const marker = readHostedLaneCheckout(root);
   if (!marker || deltaApplyPending(root)) return null;
-  return [...new Set(laneChanges(root, marker, expected ? { expected } : {}))].sort();
+  return [...new Set(laneChanges(root, marker, { record: true, ...(expected ? { expected } : {}) }))].sort();
 }
 
 const SHOWN = 20;

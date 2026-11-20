@@ -12,7 +12,9 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { nativePaths } from './source-paths.js';
-import { indexedBlob, readCheckoutStatIndex } from './checkout-stat-index.js';
+import { backgroundSaveOperation } from './hosted-save-pending.js';
+import { capturedTree, unsavedPaths } from './hosted-save-receipt-state.js';
+import { cachedSourcePaths, indexedBlob, readCheckoutStatIndex } from './checkout-stat-index.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 import { SourceFileReader } from './source-file-reader.js';
 import { digest } from './hash.js';
@@ -88,7 +90,8 @@ export function finishSourceFingerprint(root: string, command: Command, operatio
 export function scanCheckout(root: string, marker: HostedLaneCheckoutMarker) {
   const baselineFiles = new Map(marker.state.files.map(file => [file.path, file]));
   const files = new Map(baselineFiles);
-  const local = nativePaths(root, [...files.keys()]);
+  // No walk while the last recorded one holds (checkout-tree.json; Issue 48835eea).
+  const local = cachedSourcePaths(root, files.keys()) ?? nativePaths(root, [...files.keys()]);
   const present = new Set(local);
   const changed: string[] = [];
   for (const path of marker.materialized)
@@ -149,7 +152,10 @@ export function scanCheckout(root: string, marker: HostedLaneCheckoutMarker) {
 }
 
 /** `status {files:true}` (git status): this folder's files that differ from its saved head, from
- * the same local scan a save makes. No server call; at most 50 paths listed (ad80e037). */
+ * the same local scan a save makes. No server call; at most 50 paths listed (ad80e037). While a save
+ * of this folder is settling (it returned before the server finished), the files that equal what it
+ * captured are `settling`, not unsaved; only files that differ from its capture are unsaved
+ * (friction 9124ec2f). Local capture read only. */
 export function unsavedFiles(root: string, laneId?: string) {
   const marker = readHostedLaneCheckout(root);
   if (!marker || (laneId && marker.selection.laneId !== laneId))
@@ -158,23 +164,60 @@ export function unsavedFiles(root: string, laneId?: string) {
       'Run status {"files":true} in the Lane folder printed by start: it compares that folder with its saved head.',
     );
   const { files, changed, marked } = scanCheckout(root, marker);
+  const settlingId = backgroundSaveOperation(root),
+    captured = settlingId ? capturedTree(root, settlingId) : null;
+  // Differs from what the settling save captured: still unsaved once it settles. Unreadable: all unsaved.
+  let pending: Set<string> | null = null;
+  if (captured)
+    try {
+      pending = new Set(unsavedPaths(root, captured) ?? changed);
+    } catch {
+      pending = null;
+    }
   const saved = new Set(marker.state.files.map(file => file.path));
-  const rows = [...new Set(changed)].sort().map(path => ({
+  const capturedPaths = pending && captured ? new Set(captured.files.map(file => file.path)) : saved;
+  const row = (path: string, against: Set<string>) => ({
     path,
-    change: !saved.has(path) ? 'added' : files.has(path) ? 'modified' : 'deleted',
+    change: !against.has(path) ? 'added' : files.has(path) ? 'modified' : 'deleted',
     ...(marked.includes(path) ? { conflictMarkers: true } : {}),
-  }));
+  });
+  const rows = [...(pending ?? new Set(changed))].sort().map(path => row(path, capturedPaths)),
+    held = pending
+      ? [...new Set(changed)]
+          .filter(path => !pending.has(path))
+          .sort()
+          .map(path => row(path, saved))
+      : [];
+  const list = (items: typeof rows) => ({
+    count: items.length,
+    paths: items.slice(0, 50),
+    ...(items.length > 50 ? { more: items.length - 50 } : {}),
+  });
+  const settling =
+    pending && settlingId
+      ? {
+          operationId: settlingId,
+          captured: captured!.changes,
+          ...list(held),
+        }
+      : undefined;
   return {
     laneId: marker.selection.laneId,
     head: marker.selection.head,
-    unsaved: {
-      count: rows.length,
-      paths: rows.slice(0, 50),
-      ...(rows.length > 50 ? { more: rows.length - 50 } : {}),
-    },
-    note: rows.length
-      ? 'Unsaved: save records these files; land --save saves and lands them. Undo one file (git checkout -- FILE): x snapshots {"restore":"saved","paths":["FILE"]}.'
-      : 'This folder matches its saved head.',
+    unsaved: list(rows),
+    ...(settling ? { settling } : {}),
+    note: [
+      settling
+        ? `Settling: save ${settlingId} (${settling.captured} captured file${settling.captured === 1 ? '' : 's'}) is still finishing on the server; the files listed under settling are in it, and the next command here reports its outcome.`
+        : '',
+      rows.length
+        ? `Unsaved: save records these files; land --save saves and lands them. Undo one file (git checkout -- FILE): x snapshots {"restore":"saved","paths":["FILE"]}.`
+        : settling
+          ? 'Nothing else is unsaved.'
+          : 'This folder matches its saved head.',
+    ]
+      .filter(Boolean)
+      .join(' '),
   };
 }
 

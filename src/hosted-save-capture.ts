@@ -61,6 +61,7 @@ import {
   indexedBlob,
   readCheckoutStatIndex,
   statEntry,
+  treeRecorder,
   writeCheckoutStatIndex,
   type CheckoutStatIndex,
 } from './checkout-stat-index.js';
@@ -256,7 +257,12 @@ export async function captureHostedSave(
     { bases, guess } = laneFirstBaselines(root, cache, marker);
   const baseline = new Map(marker.state.files.map(file => [file.path, file])),
     notSaved = notSavedCollector(),
-    local = scanSourcePaths(root, { retained: [...baseline.keys()], onExcluded: notSaved.onExcluded });
+    // The walk is recorded so this save's final check need not repeat it (checkout-tree.json).
+    local = scanSourcePaths(root, {
+      retained: [...baseline.keys()],
+      onExcluded: notSaved.onExcluded,
+      tree: treeRecorder(root),
+    });
   const marked: string[] = [];
   const resolving = pendingConflictPaths(root, marker.selection.laneId).length > 0;
   const changes: SaveChange[] = [],

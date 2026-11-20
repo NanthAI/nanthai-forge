@@ -308,3 +308,42 @@ test('48835eea review: keptOut reads this apply’s own receipt past 20 entries,
   mkdirSync(join(kept, torn));
   assert.deepEqual(keptOut(root, { applyOperationId: torn }).directories, [join(kept, torn)]);
 });
+
+test('48835eea review: recover-apply where nothing was moved returns success with no kept copy', async t => {
+  const { keptOut } = await import('../dist/hosted-apply-kept.js');
+  const { s, f, root } = await opened(t);
+  f.moveMain({ overlap: false });
+  // The local apply stops after the sync is submitted (its marker vanished); no local edit exists.
+  const original = s.exchange.client.mutation,
+    marker = join(root, '.forge', 'hosted-lane.json');
+  let removed = false;
+  s.exchange.client.mutation = async (ref, args) => {
+    const result = await original(ref, args);
+    if (getFunctionName(ref) === 'projectHostedSyncJobs:submit' && !removed) {
+      removed = true;
+      rmSync(marker);
+    }
+    return result;
+  };
+  let retained;
+  try {
+    await assert.rejects(
+      s.transport().dispatch('sync', { laneId: f.lane.laneId, operationId: randomUUID(), apply: true }),
+      error => {
+        retained = error.recovery;
+        return true;
+      },
+    );
+  } finally {
+    s.exchange.client.mutation = original;
+  }
+  assert(removed, 'the apply stopped after source submission');
+  const { action, ...next } = retained.next;
+  assert.equal(action, 'recover-apply');
+  const recovered = await s.transport().dispatch('recover-apply', next);
+  assert.equal(recovered.result.status, 'applied');
+  assert.equal(recovered.result.kept, undefined, 'nothing kept');
+  assert.equal(recovered.result.unsavedEdits, undefined);
+  assert.equal(readHostedLaneCheckout(root).selection.head, (await f.readLane(f.lane.laneId)).head);
+  assert.equal(keptOut(root, recovered.result), null, 'no Lane edit was kept out of the checkout');
+});

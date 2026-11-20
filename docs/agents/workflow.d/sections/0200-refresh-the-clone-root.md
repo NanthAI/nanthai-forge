@@ -10,7 +10,9 @@ install). Current: 1 query, 0 GETs; idle: 0 calls.
 In a Lane folder, `status {"files":true}` is the `git status` of your edits: the
 files that differ from the Lane's saved head (`added`, `modified` or `deleted`,
 `conflictMarkers` when a file still holds them; at most 50 paths, then `more`).
-It is a local file compare: no call, works offline (ad80e037). The `git checkout --
+It is a local file compare: no call, works offline (ad80e037). While a save of this
+folder is still settling, `settling` names it (`operationId`, `captured` file count) and
+lists the files it holds; only files that differ from what it captured are `unsaved`. The `git checkout --
 FILE` of a Lane is `x snapshots {"restore":"saved","paths":["FILE"]}`: those files
 (or every file under a named folder; `"."` is all) go back to the saved head.
 The current files are snapshotted first and the result is recorded in the

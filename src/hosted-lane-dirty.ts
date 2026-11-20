@@ -6,8 +6,14 @@ import type { NativeFile } from './state/format.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 import { digest } from './hash.js';
 import { gitlinkDirectoryPointer } from './gitlink-workspace.js';
-import { nativePaths } from './source-paths.js';
-import { indexedBlob, readCheckoutStatIndex, statIndexRefresh } from './checkout-stat-index.js';
+import { scanSourcePaths } from './source-paths.js';
+import {
+  cachedSourcePaths,
+  indexedBlob,
+  readCheckoutStatIndex,
+  statIndexRefresh,
+  treeRecorder,
+} from './checkout-stat-index.js';
 import { deltaApplyPending } from './hosted-checkout-delta-pending.js';
 import { diskMode } from './source-links.js';
 import { workingMatches, worktreeText } from './checkout-text.js';
@@ -32,12 +38,17 @@ export function hostedLaneDirty(root: string, options: { refresh?: boolean } = {
 
 /** The paths of this checkout that differ from `expected` (by default the head its marker names):
  * the same comparison as hostedLaneDirty, listing up to `limit` paths. `expected` describes another
- * tree on this marker's checkout (what a settling save captured). Throws when a file cannot be read. */
+ * tree on this marker's checkout (what a settling save captured). Throws when a file cannot be read.
+ * Cost (Issue 48835eea): one lstat per saved file, plus one per listed directory. The source walk
+ * (listing every directory, applying ignore rules) runs only when the last recorded walk no longer
+ * holds (checkout-tree.json, checkout-stat-index: an entry was created, deleted or renamed, an ignore file changed, or it
+ * is racy); `record` (a command working in this Lane) then keeps that walk for the next check. */
 export function laneChanges(
   root: string,
   marker: HostedLaneCheckoutMarker,
   options: {
     refresh?: boolean;
+    record?: boolean;
     limit?: number;
     expected?: { files: readonly NativeFile[]; materialized: readonly string[] };
   } = {},
@@ -47,7 +58,13 @@ export function laneChanges(
     changed: string[] = [];
   const baseline = new Map(files.map(file => [file.path, file]));
   const refresh = statIndexRefresh(root);
-  const local = nativePaths(root, [...baseline.keys()]),
+  const retained = [...baseline.keys()];
+  const local =
+      cachedSourcePaths(root, retained) ??
+      scanSourcePaths(root, {
+        retained,
+        tree: options.record || options.refresh ? treeRecorder(root) : undefined,
+      }),
     index = readCheckoutStatIndex(root),
     text = worktreeText(root, [...files]);
   for (const path of local) {

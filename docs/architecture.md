@@ -1653,6 +1653,17 @@ start and rewrites the index with that start; every rewritten entry was observed
 after it, and a file written inside the window stays racy. The window is measured
 against both the client clock and the index file's own mtime (the filesystem
 clock). Housekeeping probes never write the index.
+The dirty check also skips the source walk while the last recorded one still holds,
+as Git's untracked cache does: a full walk (a save's capture, or the check of a
+command working in that Lane) records the lstat of every directory it listed and of
+every file whose bytes decided an inclusion (ignore files, credential-name holds,
+dependency installs) in `checkout-tree.json` beside the stat index. While every one of
+those is unchanged and older than the walk's start (the same racy rule), the check
+takes the recorded paths and lstats only the saved files; a created, deleted or
+renamed entry moves its directory's mtime and ctime, so it walks again. A save's final
+check therefore reuses its own capture walk (about 65 ms instead of 190 ms at 6,100
+files). File events are never trusted for this: under load they arrive late with no
+error.
 
 When the checkout already has a trusted installed marker, apply is in place and
 proportional to changed paths: only paths whose bytes or mode differ are fetched,

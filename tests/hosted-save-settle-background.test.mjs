@@ -612,3 +612,33 @@ test('48835eea review: a settling save in a scoped checkout does not name files 
   const saved = await agent.dispatch('save', { message: 'scoped split save' });
   assert.equal(saved.result.status, 'settling');
 });
+
+test('9124ec2f: status {files:true} right after a settling save names it and lists only a later edit as unsaved', async t => {
+  const f = await setup(t),
+    address = { url: 'https://fixture.invalid', projectId: f.s.projectId },
+    agent = new HostedAgentTransport(f.root, address, f.exchange);
+  for (const name of ['f01', 'f02', 'f03']) writeFileSync(join(f.root, name), `settling ${name}\n`);
+  const saved = await agent.dispatch('save', { message: 'split save' });
+  assert.equal(saved.result.status, 'settling');
+  writeFileSync(join(f.root, 'f05'), 'edited after the save returned\n');
+  const before = f.c.calls.length;
+  const status = (await agent.dispatch('status', { files: true })).result;
+  assert.equal(f.c.calls.length, before, 'status reads the local capture only, no server call');
+  assert.deepEqual(
+    status.unsaved.paths.map(row => row.path),
+    ['f05'],
+    'only the edit after the capture is unsaved',
+  );
+  assert.equal(status.settling.operationId, saved.operationId);
+  const captured = JSON.parse(
+    readFileSync(join(clientCacheRoot(f.root), 'saves', saved.operationId, 'capture.json'), 'utf8'),
+  ).changes.map(change => change.path);
+  for (const name of ['f01', 'f02', 'f03']) assert(captured.includes(name), name);
+  assert.equal(status.settling.captured, captured.length);
+  assert.deepEqual(
+    status.settling.paths.map(row => row.path),
+    captured.sort(),
+    'every file the settling save holds shows as settling',
+  );
+  assert.match(status.note, new RegExp(`Settling: save ${saved.operationId}`));
+});

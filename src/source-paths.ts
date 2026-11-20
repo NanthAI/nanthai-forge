@@ -3,7 +3,8 @@ import { lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { captureExclusion, localCredentialName, safeRelative } from './files.js';
 import { invariant } from './errors.js';
-import { forgeIncludes, ignoredBy, readIgnoreLayer, type IgnoreMatch } from './source-ignore.js';
+import { forgeIncludes, ignoredBy, ignoreNames, readIgnoreLayer, type IgnoreMatch } from './source-ignore.js';
+import type { TreeRecorder } from './checkout-stat-index.js';
 import { credentialNameHold } from './capture-credential-check.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 import { gitlinkDirectory } from './gitlink-workspace.js';
@@ -28,6 +29,8 @@ type SourcePathOptions = {
   validate?: boolean;
   /** Exact imported history is validated without rewriting its retained paths. */
   preserveRetained?: boolean;
+  /** Record this whole-checkout walk for later checks (checkout-tree.json, checkout-stat-index). */
+  tree?: TreeRecorder | undefined;
 };
 /** One local ignore walk for capture, first-write advice and status inventory. */
 export function scanSourcePaths(root: string, options: SourcePathOptions = {}): string[] {
@@ -40,6 +43,7 @@ export function scanSourcePaths(root: string, options: SourcePathOptions = {}): 
     capture = true,
     preserveRetained = false,
     validate = capture,
+    tree,
   } = options;
   const paths: string[] = [];
   const retainedFiles = new Set(retained),
@@ -68,7 +72,9 @@ export function scanSourcePaths(root: string, options: SourcePathOptions = {}): 
   }
   function walk(dir: string, patterns: ReturnType<typeof readIgnoreLayer>) {
     visitDirectory?.(dir);
+    tree?.directory(dir);
     const names = readdirSync(join(root, dir)).sort();
+    for (const name of ignoreNames) if (names.includes(name)) tree?.input(dir ? `${dir}/${name}` : name);
     const layer = readIgnoreLayer(root, dir, names);
     const next = layer.length ? [...patterns, ...layer] : patterns;
     for (const name of names) {
@@ -98,6 +104,7 @@ export function scanSourcePaths(root: string, options: SourcePathOptions = {}): 
       // A submodule checked out at a saved path is one opaque leaf (its pointer is its HEAD);
       // its files are never walked, captured or reported as added source.
       if (selected && stat.isDirectory() && !stat.isSymbolicLink() && gitlinkDirectory(root, path)) {
+        tree?.directory(path);
         if (capture) paths.push(path);
         continue;
       }
@@ -112,8 +119,10 @@ export function scanSourcePaths(root: string, options: SourcePathOptions = {}): 
         // A new file's credential-looking name is only a prompt: its bytes decide, unless an
         // exact `.forgeignore` negation includes it on purpose. Local credential files
         // (`.env`, `.netrc`) are never re-included. Ignored files are never read.
-        if (reason === 'sensitive-name' && stat.isFile() && !ignoredToo && !localCredentialName(name))
+        if (reason === 'sensitive-name' && stat.isFile() && !ignoredToo && !localCredentialName(name)) {
+          tree?.input(path, stat);
           reason = forgeIncludes(next, path) ? null : credentialNameHold(root, path, stat.size);
+        }
         if (reason) {
           excluded?.push({ path, reason });
           onExcluded?.({ path, reason, ignoredToo });
@@ -125,6 +134,7 @@ export function scanSourcePaths(root: string, options: SourcePathOptions = {}): 
       // that no ignore rule names, an untracked hard-linked file is an install: leave it out and
       // say so, instead of refusing the whole save. Tracked paths and other folders still fail.
       if (stat.isFile() && stat.nlink > 1 && !selected && inDependencyDirectory(path)) {
+        tree?.input(path, stat);
         const item = { path, reason: 'dependency-install' };
         excluded?.push(item);
         onExcluded?.(item);
@@ -141,7 +151,9 @@ export function scanSourcePaths(root: string, options: SourcePathOptions = {}): 
     }
   }
   walk('', []);
-  return paths.sort();
+  paths.sort();
+  if (tree && capture && !scope && !preserveRetained) tree.write(paths, retainedFiles);
+  return paths;
 }
 
 export function nativePaths(
