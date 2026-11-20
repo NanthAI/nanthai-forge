@@ -439,8 +439,15 @@ export async function heavyCli(
           { command: args[0]!, cwd: process.cwd() },
         );
   const heldSince = Date.now();
+  // One compiled-module cache for every test file this command runs (Item dceb1bef): helpers that
+  // read FORGE_TEST_MODULE_DIRECTORY reuse content-addressed outputs instead of each file
+  // recompiling. Created on first use; an inherited directory belongs to the command that set it.
+  const moduleCache = process.env.FORGE_TEST_MODULE_DIRECTORY
+    ? null
+    : join(tmpdir(), `forge-test-modules-${process.pid}-${heldSince.toString(36)}`);
   const release = () => {
     if (slot) rmSync(slot, { recursive: true, force: true });
+    if (moduleCache) rmSync(moduleCache, { recursive: true, force: true, maxRetries: 3 });
   };
   process.once('exit', release);
   try {
@@ -463,6 +470,7 @@ export async function heavyCli(
         stdio: 'inherit',
         env: {
           ...process.env,
+          ...(moduleCache ? { FORGE_TEST_MODULE_DIRECTORY: moduleCache } : {}),
           FORGE_HEAVY_PARENT: held
             ? JSON.stringify({
                 directory: canonicalRoot(heavySlotDirectory()),

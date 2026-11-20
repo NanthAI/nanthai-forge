@@ -5,7 +5,7 @@ import { capTestWorkers, nodeTestWithoutPaths, testWorkersPerSlot } from '../dis
 import { withSourceRecovery } from '../dist/hosted-agent-source-recovery.js';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -258,4 +258,33 @@ test('heavy passes the worker cap to the node --test it runs', t => {
     '--test',
     'tests/a.test.mjs',
   ]);
+});
+
+test('dceb1bef: heavy gives its command one module cache, removes it after, and keeps an inherited one', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'forge-heavy-modules-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  // The command fills the cache as a test run would and reports where it was.
+  const fill = `const { mkdirSync, writeFileSync } = require('node:fs');
+    const dir = process.env.FORGE_TEST_MODULE_DIRECTORY;
+    mkdirSync(dir, { recursive: true }); writeFileSync(dir + '/compiled.mjs', '');
+    process.stdout.write(dir);`;
+  const heavy = inherited =>
+    spawnSync(process.execPath, ['dist/cli-entry.js', 'heavy', '--no-build', process.execPath, '-e', fill], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        FORGE_HEAVY_DIR: join(directory, 'slots'),
+        FORGE_HEAVY_PARENT: '',
+        FORGE_TEST_MODULE_DIRECTORY: inherited,
+      },
+    });
+  const own = heavy('');
+  assert.equal(own.status, 0, own.stderr);
+  assert.ok(own.stdout, 'the command received a cache directory');
+  assert.equal(existsSync(own.stdout), false, 'heavy removes the cache it created');
+  const shared = join(directory, 'shared');
+  const nested = heavy(shared);
+  assert.equal(nested.status, 0, nested.stderr);
+  assert.equal(nested.stdout, shared);
+  assert.ok(existsSync(join(shared, 'compiled.mjs')), 'an inherited cache belongs to whoever set it');
 });

@@ -59,7 +59,9 @@ export function runActionsCheck(
         // A configured command keeps where the runner image and declared setup steps put its
         // toolchains (JAVA_HOME, GOROOT, ...) and the CI's runner variables (GITHUB_ACTIONS,
         // RUNNER_OS, ...). Forge's own suite keeps its exact environment.
-        ...(plan.standard ? [] : [...toolchainEnvAllow(), ...runnerEnvAllow()]),
+        // Forge's own suite also keeps the job's one compiled-test-module cache, shared by the kept
+        // part and every pool unit (Item dceb1bef).
+        ...(plan.standard ? ['FORGE_TEST_MODULE_DIRECTORY'] : [...toolchainEnvAllow(), ...runnerEnvAllow()]),
       ],
     }),
     [CHECK_CONTRACT_ENV]: String(CHECK_CONTRACT_PROVIDED),

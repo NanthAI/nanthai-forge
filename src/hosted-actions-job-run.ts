@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { childEnv, runnerEnvAllow, toolchainEnvAllow } from '../scripts/child-env.mjs';
 import {
@@ -246,6 +247,9 @@ async function executeActiveActionsJob(
   };
   // Any check may write JUnit XML here (docs/operations/github-actions-checks.md).
   const junit = junitDirectory();
+  // One compiled-test-module cache for the whole job (Item dceb1bef): the kept part and every pool
+  // unit it claims reuse what earlier parts compiled, instead of each executor process starting cold.
+  const modules = mkdtempSync(join(tmpdir(), 'forge-test-modules-'));
   // Candidate children run as their own unprivileged user where the runner allows it (Linux with
   // passwordless sudo, Issue 432164bf); elsewhere only with the owner's opt-in (Issue 3b67363d).
   const placement =
@@ -262,6 +266,7 @@ async function executeActiveActionsJob(
     writable: [
       directory,
       junit.directory,
+      modules,
       ...(recipe.actions?.cache ? homePaths(cachePaths(recipe.actions.cache), home) : []),
       // Forge's own suite installs from the npm download cache restored with the control install.
       ...(recipe.standard && home ? [join(home, '.npm')] : []),
@@ -315,6 +320,7 @@ async function executeActiveActionsJob(
       ...(packages ? { FORGE_CHECK_PACKAGES: packages.path } : {}),
       ...(packages?.run ? { FORGE_CHECK_PACKAGES_RUN: packages.run } : {}),
       [junitDirEnv]: junit.directory,
+      FORGE_TEST_MODULE_DIRECTORY: modules,
     };
     const argv = isolation.mode === 'user' ? isolation.command(command, env, directory, paths) : command;
     const child = spawn(argv[0]!, argv.slice(1), {
@@ -415,8 +421,11 @@ async function executeActiveActionsJob(
       // The provider-stage guard fails before any test reports: still say why.
       note(`Forge: browser tests did not run. ${cause}`);
   } finally {
-    if (isolation.mode === 'user') isolation.remove(junit.directory);
-    else junit.remove();
+    if (isolation.mode === 'user') for (const path of [junit.directory, modules]) isolation.remove(path);
+    else {
+      junit.remove();
+      rmSync(modules, { recursive: true, force: true });
+    }
     packages?.remove();
   }
   lap('commandMs');

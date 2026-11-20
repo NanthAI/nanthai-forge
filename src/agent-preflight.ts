@@ -1597,6 +1597,9 @@ export function runPreflight(
         // (NODE_TEST_CONTEXT), which would swallow this run's own exit code.
         const env = { ...cleanEnv() };
         const directory = mkdtempSync(join(tmpdir(), 'forge-preflight-'));
+        // Every group shares one compiled-module cache, removed with the directory (Item dceb1bef).
+        // The clean environment never carries an outer one, so this preflight always owns it.
+        env.FORGE_TEST_MODULE_DIRECTORY = join(directory, 'modules');
         const testStarted = Date.now();
         const budgetMs = plan.local && plan.local.trim !== false ? plan.local.budgetSeconds * 1000 : Infinity;
         const stats = preflightFileStats(root);

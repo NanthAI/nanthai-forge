@@ -434,10 +434,13 @@ test('toolchain locations pass to configured commands; credential names never do
 
   const root = mkdtempSync(join(tmpdir(), 'forge-toolchain-env-'));
   const saved = Object.fromEntries(
-    ['FORGE_ACTIONS_PLAN', 'FORGE_ACTIONS_SHARD', 'JAVA_HOME_21_X64', 'GITHUB_TOKEN'].map(n => [
-      n,
-      process.env[n],
-    ]),
+    [
+      'FORGE_ACTIONS_PLAN',
+      'FORGE_ACTIONS_SHARD',
+      'JAVA_HOME_21_X64',
+      'GITHUB_TOKEN',
+      'FORGE_TEST_MODULE_DIRECTORY',
+    ].map(n => [n, process.env[n]]),
   );
   t.after(() => {
     for (const [name, value] of Object.entries(saved))
@@ -447,6 +450,7 @@ test('toolchain locations pass to configured commands; credential names never do
   });
   process.env.JAVA_HOME_21_X64 = '/opt/jdk21';
   process.env.GITHUB_TOKEN = 'synthetic';
+  process.env.FORGE_TEST_MODULE_DIRECTORY = join(root, 'modules');
   process.env.FORGE_ACTIONS_SHARD = 'static';
   process.env.FORGE_ACTIONS_PLAN = join(root, 'plan.json');
   const seen = [];
@@ -467,8 +471,11 @@ test('toolchain locations pass to configured commands; credential names never do
     forge = seen.find(s => s.standard);
   assert.equal(opaque.env.JAVA_HOME_21_X64, '/opt/jdk21');
   assert.equal(opaque.env.GITHUB_TOKEN, undefined);
-  // Forge's own suite keeps its exact environment.
+  // Forge's own suite keeps its exact environment, with the job's module cache (dceb1bef); a
+  // configured command gets no Forge worker variables.
   assert.equal(forge.env.JAVA_HOME_21_X64, undefined);
+  assert.equal(forge.env.FORGE_TEST_MODULE_DIRECTORY, join(root, 'modules'));
+  assert.equal(opaque.env.FORGE_TEST_MODULE_DIRECTORY, undefined);
   assert.equal(existsSync(join(root, 'plan.json')), true);
 });
 

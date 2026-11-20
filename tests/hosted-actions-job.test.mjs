@@ -16,7 +16,7 @@ import {
   existsSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -3381,7 +3381,7 @@ test('output PUT timeout retries the same bytes and records the real test exit o
 
 // Shard pool guard (Issue 0ea17a29): every selected file runs and is counted exactly once, a
 // store failure degrades to the static plan, and a forged claim can only fail the check.
-async function pooledCheck(t, scenario) {
+async function pooledCheck(t, scenario, record) {
   const tests = Array.from({ length: 40 }, (_, i) => `tests/pool-${String(i).padStart(2, '0')}.test.mjs`);
   const s = fixture(t, {
     timingHistory: {
@@ -3426,7 +3426,8 @@ async function pooledCheck(t, scenario) {
     const plan = JSON.parse(readFileSync(process.env.FORGE_ACTIONS_PLAN, 'utf8'));
     const index = Number(process.env.FORGE_ACTIONS_SHARD), part = process.env.FORGE_ACTIONS_POOL_PART;
     const files = part === 'kept' ? keptFiles(plan.groups, plan.pool, index) : poolUnits(plan.groups, plan.pool)[Number(part)].files;
-    for (const file of files) console.log('__FORGE_TESTS__' + JSON.stringify({ file, complete: true, durationMs: 5, failed: false, results: [{ name: 'x', passed: true }] }));`;
+    for (const file of files) console.log('__FORGE_TESTS__' + JSON.stringify({ file, complete: true, durationMs: 5, failed: false, results: [{ name: 'x', passed: true }] }));
+    ${record ? `(await import('node:fs')).appendFileSync(${JSON.stringify(record)}, JSON.stringify({ index, part, modules: process.env.FORGE_TEST_MODULE_DIRECTORY, exists: (await import('node:fs')).existsSync(process.env.FORGE_TEST_MODULE_DIRECTORY) }) + '\\n');` : ''}`;
   const before = s.calls.length;
   for (let index = 0; index < groups.length; index++)
     assert.equal(
@@ -3441,6 +3442,28 @@ async function pooledCheck(t, scenario) {
   assert.equal(s.calls.slice(before).filter(call => call.kind !== 'preflight').length, 0);
   return { s, tests, groups, units, results };
 }
+
+test('dceb1bef: every part of one shard job shares one module cache, removed when the job ends', async t => {
+  const record = join(mkdtempSync(join(tmpdir(), 'forge-pool-modules-')), 'parts.jsonl');
+  t.after(() => rmSync(dirname(record), { recursive: true, force: true }));
+  const { units } = await pooledCheck(t, 'healthy', record);
+  const parts = readFileSync(record, 'utf8')
+    .trim()
+    .split('\n')
+    .map(line => JSON.parse(line));
+  // Shard 0 ran its kept files and then claimed every unit (see the next test).
+  const first = parts.filter(part => part.index === 0);
+  assert.equal(first.length, 1 + units.length, 'kept plus every claimed unit');
+  assert.ok(
+    first.every(part => part.exists && part.modules === first[0].modules),
+    'one cache for the job',
+  );
+  assert.equal(new Set(parts.map(part => part.modules)).size, new Set(parts.map(part => part.index)).size);
+  assert.ok(
+    parts.every(part => !existsSync(part.modules)),
+    'each job removes its cache',
+  );
+});
 
 test('shard pool: an early shard steals every free unit, later homes yield theirs, each file reported once', async t => {
   const { s, tests, units, results } = await pooledCheck(t, 'healthy');

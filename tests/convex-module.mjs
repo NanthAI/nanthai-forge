@@ -6,8 +6,9 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-// Compiled test modules use the supervisor-provided shared cache when selected;
-// direct test files own a private cache that is reclaimed on exit. The file name is a hash of everything the output depends on: this
+// Compiled test modules use the run's shared cache (FORGE_TEST_MODULE_DIRECTORY, set by the file
+// supervisor, preflight and nforge heavy); a test file run on its own owns a private cache
+// that is reclaimed on exit. The file name is a hash of everything the output depends on: this
 // file (rewrite rules), the TypeScript version, the compiler options, the
 // source bytes and import resolutions of every module its source can reach. Any source edit therefore yields a new file; an old
 // one is never read. Files are written to a temp name and renamed, so readers
@@ -114,6 +115,33 @@ function moduleKey(file, keys) {
 
 const moduleKeys = () => Object.assign(new Map(), { facts: new Map(), outputs: new Map() });
 
+// A cached output is a hit only when every cached module it reaches exists. Dependencies publish
+// before their importers, except around an import cycle: there a writer publishes a member that
+// imports a module it has not written yet. Another file sharing the cache (one per test run) may
+// find that member then; it compiles the missing members itself (same key, same bytes).
+const cachedRef = /file:\/\/[^'"]*?\/[a-f0-9]{64}\.mjs(?=['"])/g;
+// A name is a content hash, so the cached modules one output imports never change: scan each once.
+const importsOf = new Map();
+function published(output) {
+  const seen = new Set();
+  const walk = path => {
+    if (seen.has(path)) return true;
+    seen.add(path);
+    if (!existsSync(path)) return false;
+    let imports = importsOf.get(path);
+    if (!imports) {
+      try {
+        imports = [...readFileSync(path, 'utf8').matchAll(cachedRef)].map(([ref]) => fileURLToPath(ref));
+      } catch {
+        return false;
+      }
+      importsOf.set(path, imports);
+    }
+    return imports.every(walk);
+  };
+  return walk(output);
+}
+
 function compile(file, directory, keys) {
   ts ??= require('typescript');
   return ts
@@ -142,7 +170,7 @@ function build(file, directory, keys) {
   // each member is published once before the caller imports the root.
   if (keys.outputs.has(file.href)) return keys.outputs.get(file.href);
   const output = directory && join(directory, `${moduleKey(file, keys)}.mjs`);
-  if (output && existsSync(output)) return pathToFileURL(output).href;
+  if (output && published(output)) return pathToFileURL(output).href;
   if (process.env.FORGE_TEST_PRECOMPILED === '1')
     throw new Error(`Precompiled test module is missing: ${file.pathname}`);
   if (output) keys.outputs.set(file.href, pathToFileURL(output).href);

@@ -113,6 +113,10 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   (`nforge heavy sh -c 'npm run build:core && node --test …'`) runs its `node --test` uncapped. Put
   `--test-concurrency=N` in that `node --test` yourself (slots from `nforge heavy --status`), or run
   the build and the tests as two heavy commands. The full `npm test` is the landing check's.
+- Heavy gives its command one compiled-test-module cache (`FORGE_TEST_MODULE_DIRECTORY`, under the
+  OS temp folder) unless one is already set, and removes it when the command ends: every test file
+  the command runs reuses modules earlier files compiled. Preflight does the same for all its
+  groups ([module cache](development.md)).
 - Preflight takes a slot itself for its build and tests (c180152a): `nforge agent . preflight`
   waits for one like any heavy command, and its build and tests inherit it, so their own
   `nforge heavy` calls reuse it. Wrapped in `nforge heavy`, it reuses that slot instead of taking a

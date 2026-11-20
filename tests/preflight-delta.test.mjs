@@ -707,3 +707,24 @@ test('c180152a: a fixture run inside a test takes no slot, so a full machine nev
   assert.equal(seen.parent, null);
   assert.deepEqual(seen.held, [{ slot: '1', pid: process.pid }]);
 });
+
+test('dceb1bef: every test file of one preflight shares one module cache, removed when it ends', t => {
+  const f = fixture(t);
+  for (const name of ['a', 'b'])
+    f.put(
+      `tests/${name}.test.mjs`,
+      `import test from 'node:test'; import { writeFileSync } from 'node:fs'; import '../src/${name}.ts';
+      test('${name}', () => writeFileSync(${JSON.stringify(join(f.root, `${name}.cache`))}, process.env.FORGE_TEST_MODULE_DIRECTORY ?? ''));`,
+    );
+  const inherited = process.env.FORGE_TEST_MODULE_DIRECTORY;
+  delete process.env.FORGE_TEST_MODULE_DIRECTORY;
+  t.after(() => {
+    if (inherited !== undefined) process.env.FORGE_TEST_MODULE_DIRECTORY = inherited;
+  });
+  const receipt = f.run(f.plan());
+  assert.equal(receipt.passed, true, JSON.stringify(receipt));
+  assert.equal(receipt.tests, 2);
+  const [a, b] = ['a', 'b'].map(name => readFileSync(join(f.root, `${name}.cache`), 'utf8'));
+  assert.ok(a && a === b, 'both files read the one preflight cache');
+  assert.equal(existsSync(a), false, 'the cache goes with the preflight directory');
+});

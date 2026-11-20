@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { fileTimeout } from '../scripts/test-files.mjs';
 
 test('whole-file timeout defaults to ten minutes and validates its override', () => {
@@ -79,6 +80,63 @@ test('file supervisor preserves assertion failures and successful file totals', 
   const success = await run([file], { FORGE_TEST_FILE_TIMEOUT_MS: '30000' });
   assert.equal(success.code, 0, success.output);
   assert.match(success.output, /# pass 1/);
+});
+
+test('dceb1bef: files of one run share one module cache, compile each module once, and never read stale output', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-test-files-'));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const loader = new URL('./convex-module.mjs', import.meta.url).href;
+  const top = pathToFileURL(join(root, 'top.ts')).href;
+  writeFileSync(join(root, 'leaf.ts'), 'export const leaf: number = 1;\n');
+  writeFileSync(
+    join(root, 'top.ts'),
+    "import { leaf } from './leaf';\nexport const top: number = leaf + 1;\n",
+  );
+  const out = join(root, 'loads.jsonl');
+  const files = ['first.mjs', 'second.mjs'].map(name => join(root, name));
+  for (const file of files)
+    writeFileSync(
+      file,
+      `import test from 'node:test'; import { appendFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+      import { fileURLToPath } from 'node:url'; import { moduleUrl } from ${JSON.stringify(loader)};
+      test('load', async () => {
+        const dir = process.env.FORGE_TEST_MODULE_DIRECTORY;
+        const before = existsSync(dir) ? readdirSync(dir).length : 0;
+        const url = moduleUrl(new URL(${JSON.stringify(top)}));
+        const { top } = await import(url);
+        appendFileSync(${JSON.stringify(out)}, JSON.stringify({ dir, before, url, top, ino: statSync(fileURLToPath(url)).ino }) + '\\n');
+      });`,
+    );
+  const loads = () =>
+    readFileSync(out, 'utf8')
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line));
+  const environment = { FORGE_TEST_WORKERS: '1', FORGE_TEST_FILE_TIMEOUT_MS: '60000' };
+  const result = await run(files, { ...environment, FORGE_TEST_MODULE_DIRECTORY: '' });
+  assert.equal(result.code, 0, result.output);
+  const [first, second] = loads();
+  assert.ok(first.dir && first.dir === second.dir, 'both files of the run use the one supervisor cache');
+  assert.equal(first.before, 0);
+  assert.equal(second.before, 2, "the second file finds the first file's outputs");
+  assert.deepEqual(
+    [second.url, second.ino, second.top],
+    [first.url, first.ino, 2],
+    'compiled once, not twice',
+  );
+  assert.equal(existsSync(first.dir), false, 'the supervisor removes the cache it created');
+
+  // An inherited cache is kept for its owner; a changed module gets a new key and is never served stale.
+  const shared = join(root, 'shared');
+  rmSync(out);
+  assert.equal((await run([files[0]], { ...environment, FORGE_TEST_MODULE_DIRECTORY: shared })).code, 0);
+  writeFileSync(join(root, 'leaf.ts'), 'export const leaf: number = 41;\n');
+  assert.equal((await run([files[1]], { ...environment, FORGE_TEST_MODULE_DIRECTORY: shared })).code, 0);
+  const [cold, edited] = loads();
+  assert.equal(cold.dir, shared);
+  assert.equal(edited.top, 42, 'the edited dependency is compiled, not read from the earlier output');
+  assert.notEqual(edited.url, cold.url);
+  assert.ok(existsSync(shared), 'an inherited cache belongs to whoever set it');
 });
 
 function run(files, overrides) {

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -25,7 +25,7 @@ function workspace(t) {
   return { cache, src, top: pathToFileURL(join(src, 'top.ts')) };
 }
 
-async function load(cache, top, windowsRename = false, mismatched = false, patches = []) {
+async function load(cache, top, windowsRename = false, mismatched = false, patches = [], call = '') {
   const script = `import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 let collisions = 0;
@@ -49,7 +49,8 @@ if (${windowsRename}) {
 }
 const { moduleUrl } = await import(${JSON.stringify(loader)});
 const url = moduleUrl(new URL(process.argv[1]));
-console.log(JSON.stringify({ url, top: (await import(url)).top, ...(${windowsRename} ? { collisions } : {}) }));`;
+const loaded = await import(url);
+console.log(JSON.stringify({ url, top: ${JSON.stringify(call)} ? await loaded[${JSON.stringify(call)}]() : loaded.top, ...(${windowsRename} ? { collisions } : {}) }));`;
   const { stdout } = await run(process.execPath, ['--input-type=module', '-e', script, top.href], {
     env: {
       ...process.env,
@@ -112,6 +113,24 @@ test('literal lazy imports can close a value-import cycle without recursively co
   );
   assert.equal((await load(cache, top)).top, 42);
   assert.equal(readdirSync(cache).length, 2);
+});
+
+test('a shared cache never serves an import cycle another process has only partly published', async t => {
+  const { cache, src } = workspace(t);
+  // The writer publishes cycle members one by one: leaf (which imports top back) lands before top.
+  writeFileSync(join(src, 'top.ts'), "import { leaf } from './leaf';\nexport const top = leaf + 1;\n");
+  writeFileSync(
+    join(src, 'leaf.ts'),
+    "export const leaf = 1;\nexport const viaTop = async () => (await import('./top')).top;\n",
+  );
+  const top = pathToFileURL(join(src, 'top.ts'));
+  const leaf = pathToFileURL(join(src, 'leaf.ts'));
+  const full = await load(cache, top);
+  rmSync(fileURLToPath(full.url));
+  // A second file of the same run now finds leaf published and top still missing.
+  const partial = await load(cache, leaf, false, false, [], 'viaTop');
+  assert.equal(partial.top, 2, 'the missing cycle member is compiled, not imported as a dangling URL');
+  assert.ok(existsSync(fileURLToPath(full.url)), 'the reader completes the cycle with the same bytes');
 });
 
 test('parallel cold processes share one cache without partial or temporary files', async t => {

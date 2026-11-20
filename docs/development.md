@@ -42,6 +42,21 @@ including deferred writes. Child processes reuse their parent's prepared module 
 the enclosing file owner reclaims a terminated worker's runtime root. Explicit shared
 precompiled-module caches retain their supervisor's ownership.
 
+Compiled test modules (`tests/convex-module.mjs`) go to one cache per test run, named by
+`FORGE_TEST_MODULE_DIRECTORY`. A hosted check job creates one for all its executor parts
+(the kept files and every pool unit it claims); `scripts/test-files.mjs` (`verify`, any
+other run) and `nforge heavy` create one when none is set; local preflight always creates
+its own for all its groups. Each removes its cache when the run ends; an inherited
+directory stays with whoever set it. A file then reuses the modules
+earlier files of its run compiled instead of compiling its whole import reach again.
+An output's name hashes the loader, the TypeScript version and options, and the path,
+bytes and import resolutions of every module it can reach, so a changed module or another
+checkout always gets a new name and an old output is never read. Writes are
+temp-file-then-rename. Around an import cycle a writer publishes one member before the
+other, so a cached output counts as present only when every cached module it imports
+exists; otherwise the reader compiles the missing ones itself (same name, same bytes).
+A file run on its own, outside any of these, keeps a private cache removed on exit.
+
 Two guards keep hosted code on the intended path. `tests/hot-storage-invariant.test.mjs` fails any new use of Convex file storage in `convex/` (write, read, handle or `v.id('_storage')` field): bytes go to R2 ([data placement](data-placement.md)), and the few remaining uses are legacy-read allowlist entries with a count and an expiry date. `node scripts/check-convex-runtime.mjs` (a verify step) fails when a Convex module without `"use node"` reaches a `node:` builtin, a Node global, or any dynamic `import()` through its runtime graph (including `src/` and nested Convex modules). V8 helpers use static imports; only code isolated behind Node action roots may load modules dynamically. Type-only imports are erased. The same check resolves registered functions in isolated bundles and reports their reachable module count and output bytes.
 
 The compact Work/detail and native companion fixtures close their MCP clients and HTTP servers before removing owner directories. CLI presence workers are detached; directory removal retries transient `ENOTEMPTY` errors while those workers release their queue files. A presence worker that stops on an error writes one line (code and message) to stderr and the stack to the diagnostics log, and exits 1; a normal stop exits 0. Test fixtures that listen on a Unix socket take their path from `tests/helpers/short-socket.mjs`, so a deep `TMPDIR` (local preflight) never exceeds the macOS 104-byte limit.

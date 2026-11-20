@@ -7,7 +7,7 @@ import { resolve, join } from 'node:path';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { coverageMarker, v8Touched } from './test-coverage.mjs';
-import { fileTemp } from './test-temp.mjs';
+import { fileTemp, temporaryDirectory } from './test-temp.mjs';
 import { workerBudget } from '../tests/worker-budget.mjs';
 
 const errorExcerpt = text =>
@@ -48,6 +48,12 @@ export async function runFiles(
       );
     }
   }
+  // One compiled-module cache per run (Item dceb1bef): content-addressed outputs one file compiled
+  // serve every later file, instead of each file recompiling its whole reach into a private cache.
+  // An inherited directory belongs to whoever set it.
+  const moduleCache = process.env.FORGE_TEST_MODULE_DIRECTORY
+    ? null
+    : temporaryDirectory(null, 'forge-test-modules-');
   let next = 0,
     failed = false;
   const reports = new Map();
@@ -76,6 +82,7 @@ export async function runFiles(
       const started = performance.now();
       const temp = fileTemp();
       const childEnv = { ...process.env, ...temp.env };
+      if (moduleCache) childEnv.FORGE_TEST_MODULE_DIRECTORY = moduleCache;
       delete childEnv.NODE_TEST_CONTEXT;
       let coverageDirectory = null;
       if (coverageFiles) {
@@ -265,6 +272,7 @@ export async function runFiles(
     for (const report of reports.values()) process.stdout.write(`__FORGE_TESTS__${JSON.stringify(report)}\n`);
   process.off('SIGTERM', stop);
   process.off('SIGINT', stop);
+  if (moduleCache) rmSync(moduleCache, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   for (const [name, count] of Object.entries(totals)) process.stdout.write(`# ${name} ${count}\n`);
   return !failed;
 }
