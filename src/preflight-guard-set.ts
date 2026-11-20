@@ -255,7 +255,7 @@ export function planGuardSet(
       : mode === 'manual'
         ? `Guard set manual (${source}): ${pinned.length} pinned file(s); Automatic would pick ${auto.length ? auto.join(', ') : 'nothing'}.`
         : window.outcomes
-          ? `Guard set Automatic from the project's last ${window.outcomes} landing outcome(s) (${window.failed} failed the check): ${tests.length} file(s), about ${total} s of the ${round(options.capSeconds)} s budget.`
+          ? `Guard set Automatic from the project's last ${window.outcomes} landing outcome(s) (project history, not this run: ${window.failed} of them failed their landing check): ${tests.length} file(s), about ${total} s of the ${round(options.capSeconds)} s budget.`
           : window.revision === null
             ? `Guard set Automatic: no start, open, preflight or land on this machine has fetched the project set yet (looked in ${guardCachePath(root)}), so it is empty.`
             : 'Guard set Automatic: the project has no landing outcomes in its window yet, so the set is empty.';

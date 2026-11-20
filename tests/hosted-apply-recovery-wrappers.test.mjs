@@ -137,20 +137,21 @@ for (const wrapper of ['cli', 'mcp'])
 
 // Dogfood 2026-11-07 (118a5539 comment): `save --sync` with one unsaved edit stopped with source
 // done and the local apply pending; getting out took recover-apply, redoing the edit and syncing
-// again. An edit the sync does not touch is now carried, as Git carries it.
-test('dogfood replay: sync --apply carries one unsaved edit in a file main did not change, and save then records it', async t => {
+// again. An edit the sync does not touch is now carried, as Git carries it; since 593fc2d7 the same
+// `save --sync` then saves it on top of the merge (the verb is save), so no second save is needed.
+test('dogfood replay: sync --apply carries one unsaved edit in a file main did not change, and saves it on top of the merge', async t => {
   const { s, f, root } = await opened(t, 'cli');
   f.moveMain({ overlap: false }); // main adds accepted.txt only
   fs.writeFileSync(join(root, 'a.txt'), 'unsaved local edit\n');
   const command = { laneId: f.lane.laneId, operationId: randomUUID(), apply: true };
   const synced = await s.transport().dispatch('sync', command);
   const remote = await f.readLane(f.lane.laneId);
-  assert.equal(synced.result.applied.head, remote.head);
+  assert.notEqual(synced.result.applied.head, remote.head, 'the carried edit was saved on top of the merge');
+  assert.equal(synced.result.saved.status, 'completed');
   assert.equal(readHostedLaneCheckout(root).selection.head, remote.head);
   assert.equal(fs.readFileSync(join(root, 'a.txt'), 'utf8'), 'unsaved local edit\n', 'edit kept in place');
   assert(fs.existsSync(join(root, 'accepted.txt')), 'main change installed');
   assert.equal(synced.result.applied.displacedRecovery, undefined);
-  await s.transport().dispatch('save', { message: 'record the carried edit' });
   const saved = readHostedLaneCheckout(root).state.files.find(file => file.path === 'a.txt');
   assert.equal(saved.blob, digest(Buffer.from('unsaved local edit\n')));
 });

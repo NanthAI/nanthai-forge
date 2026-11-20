@@ -12,18 +12,32 @@ const fullIdHint = (field: string) =>
       : /^(id|planningItemId|parentId|initiativeId)$/.test(field.split('.')[0]!)
         ? `planning '{"search":"words"}' returns full planning ids`
         : `copy it from the receipt or listing that showed it`;
+/** A wrong value is echoed only when short and plain, so a secret pasted into the wrong field is
+ * never repeated back; otherwise its type and length. */
+function gotValue(value: unknown) {
+  if (value === undefined) return '';
+  if (typeof value === 'string')
+    return /^[\w.:-]{1,24}$/.test(value) ? ` (got "${value}")` : ` (got a ${value.length}-character string)`;
+  return typeof value === 'number' || typeof value === 'boolean' || value === null
+    ? ` (got ${String(value)})`
+    : ` (got ${Array.isArray(value) ? 'an array' : 'an object'})`;
+}
+
 /** One shared argument-error text: each bad field by name with its expected shape,
  * and for a short id where to find the full one. Local only; no hosted call. */
 export function describeIssues(issues: readonly z.core.$ZodIssue[], input: unknown): string {
   return issues
     .map(issue => {
       const field = issue.path.map(String).join('.') || 'parameters';
+      const value = issue.path.reduce<unknown>(
+        (item, key) =>
+          item && typeof item === 'object' ? (item as Record<PropertyKey, unknown>)[key] : undefined,
+        input,
+      );
+      // The allowed values right after the field, so a cut line still says what to send (593fc2d7).
+      if (issue.code === 'invalid_value' && issue.values.length)
+        return `${field}: one of ${issue.values.map(String).join('|')}${gotValue(value)}`;
       if (issue.code === 'invalid_format' && issue.format === 'uuid') {
-        const value = issue.path.reduce<unknown>(
-          (item, key) =>
-            item && typeof item === 'object' ? (item as Record<PropertyKey, unknown>)[key] : undefined,
-          input,
-        );
         const short = typeof value === 'string' && /^[0-9a-f][0-9a-f-]{0,34}$/i.test(value);
         return `${field}: expected the full 36-character UUID (${uuidShape})${short ? `, got the short id "${value}"; pass the full id (${fullIdHint(field)})` : ''}`;
       }

@@ -244,11 +244,20 @@ export async function selectHostedFinish(
       throw error;
     }
   };
+  const staleRefused = (prior: FinishSelection) => {
+    const path = join(directory, `${prior.operationId}.json`);
+    return (
+      checkoutPathExists(path) &&
+      (readAgentJson(path) as { values: Record<string, unknown> }).values[finishRefusedKey] === 'WORK_STALE'
+    );
+  };
   let selected = operationId;
   if (!selected && previous && !sameSource && !(await terminal(previous))) selected = previous.operationId;
   if (!selected && previous && sameSource && previous.command.accept === command.accept) {
-    if (!command.retry) selected = previous.operationId;
-    else if (canonicalPayload(previous.command) === canonicalPayload(command)) {
+    // A pre-submit WORK_STALE pinned that operation to Lane pins that moved on: never replay it.
+    if (!command.retry) {
+      if (!staleRefused(previous)) selected = previous.operationId;
+    } else if (canonicalPayload(previous.command) === canonicalPayload(command)) {
       if (!(await terminal(previous))) selected = previous.operationId;
     }
   }

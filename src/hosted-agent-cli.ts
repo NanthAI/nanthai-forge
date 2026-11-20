@@ -12,7 +12,7 @@ import { hostedWaitSchema } from './hosted-wait-schema.js';
 import { invariant } from './errors.js';
 import { recordLaneHold, withLaneCommand } from './lane-registry.js';
 import { markerIdentity } from './lane-prune.js';
-import { landExitsFailed, landSummary } from './hosted-land-summary.js';
+import { landExitsFailed, landSummary, selfReviewLine } from './hosted-land-summary.js';
 import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
 import { holdLines, landingHold } from './hosted-landing-hold.js';
 import { landingStateField } from './landing-state.js';
@@ -522,5 +522,8 @@ async function dispatchHostedAgentCli(
       body = JSON.stringify(address);
     if (!receiptMatches(receipt, body)) durableReplace(receipt, body);
   }
+  // A passed preflight names the self-review of what will land (593fc2d7).
+  if (action === 'preflight' && (result.result as { outcome?: unknown } | undefined)?.outcome === 'passed')
+    process.stderr.write(`${selfReviewLine(root)}\n`);
   return result;
 }

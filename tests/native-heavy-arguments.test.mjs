@@ -54,6 +54,28 @@ test('friction 7ea3a168: heavy treats a leading -- as the end of its own options
   assert.match(bare.stderr + bare.stdout, /heavy -- needs a command/);
 });
 
+test('593fc2d7: heavy status and heavy help (bare words) answer at once and never queue a command', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'forge-heavy-bare-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  // Before the fix the word was spawned as a command: it took a slot (after any queue) and failed ENOENT.
+  const env = { ...process.env, FORGE_HEAVY_DIR: directory };
+  const heavy = (...args) =>
+    spawnSync(process.execPath, ['dist/cli-entry.js', 'heavy', ...args], {
+      encoding: 'utf8',
+      env,
+      timeout: 20_000,
+    });
+  const status = heavy('status');
+  assert.equal(status.status, 0, status.stderr);
+  assert.deepEqual(Object.keys(JSON.parse(status.stdout)), Object.keys(JSON.parse(heavy('--status').stdout)));
+  const help = heavy('help');
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /^nforge heavy \[--\] CMD/);
+  // A real command of that name still runs after --.
+  const named = heavy('--', process.execPath, '-e', 'process.stdout.write("ran")');
+  assert.equal(named.stdout, 'ran');
+});
+
 test('native save distinguishes completed receipts from pending exact-operation replay without extra calls', async () => {
   const operationId = 'a8526d55-dada-4c33-a1a4-c00f9b25ef70';
   const command = {

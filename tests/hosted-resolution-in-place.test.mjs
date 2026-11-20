@@ -11,6 +11,9 @@ import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 import { laneSiblingPath } from '../dist/hosted-root-checkout.js';
 import { canonicalRoot } from '../dist/root-paths.js';
 import { submitHostedLand } from '../dist/hosted-land-cli.js';
+import { hostedLaneDirty } from '../dist/hosted-lane-dirty.js';
+import { ForgeError } from '../dist/errors.js';
+import { getFunctionName } from 'convex/server';
 import { keptCopies, resolutionFolderReason, workInLine } from '../dist/hosted-resolution-placement.js';
 
 const strip = ({ action, ...parameters }) => [action, parameters];
@@ -229,6 +232,82 @@ test('land --save after editing the conflict files saves the resolution and land
   const again = await submitHostedLand(root, command, s.address, s.transport(root));
   assert.notEqual(again.result.submission?.phase, 'queued');
   assert.equal(f.text(f.currentMain().head, 'a.txt'), 'chosen\nb\nc\n');
+});
+
+test('593fc2d7: land --save on an edited resolution prints the landing operation id first, not the resolve id', async t => {
+  const s = await resolutionFixture(t, { overlap: true }),
+    f = s.f;
+  f.moveMain({ overlap: true });
+  const root = s.root;
+  await s.transport(root).dispatch('open', { laneId: f.lane.laneId });
+  const conflict = (await s.transport(root).dispatch('sync', { laneId: f.lane.laneId })).result.conflict;
+  writeFileSync(join(root, 'a.txt'), 'chosen\nb\nc\n');
+  const notes = [];
+  const write = process.stderr.write;
+  process.stderr.write = line => (notes.push(String(line)), true);
+  let submitted;
+  try {
+    submitted = await submitHostedLand(
+      root,
+      { laneId: f.lane.laneId, message: 'fix' },
+      s.address,
+      s.transport(root),
+    );
+  } finally {
+    process.stderr.write = write;
+  }
+  // A script that takes the first printed id must get the one to wait on.
+  const text = notes.join('');
+  const lanes = [f.lane.laneId, conflict.laneId];
+  const ids = (text.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g) ?? []).filter(
+    id => !lanes.includes(id),
+  );
+  assert.equal(ids[0], submitted.operationId, text);
+  assert.equal(/operationId ([0-9a-f-]{36})/.exec(text)?.[1], submitted.operationId);
+  assert.match(notes.join(''), /saved your edited conflict files as the resolution/);
+});
+
+test('593fc2d7: save --sync that merges main leaves the folder equal to the saved head (preflight needs no second save)', async t => {
+  const s = await resolutionFixture(t),
+    f = s.f;
+  const root = s.root;
+  await s.transport(root).dispatch('open', { laneId: f.lane.laneId });
+  writeFileSync(join(root, 'notes.txt'), 'unsaved notes\n');
+  f.moveMain();
+  const synced = await s.transport(root).dispatch('sync', { laneId: f.lane.laneId, message: 'wip' });
+  assert.equal(synced.result.source.outcome.result.status, 'merged');
+  assert.equal(readFileSync(join(root, 'notes.txt'), 'utf8'), 'unsaved notes\n');
+  assert.equal(readFileSync(join(root, 'accepted.txt'), 'utf8'), 'already accepted\n');
+  assert.equal(synced.result.saved.status, 'completed', 'the sync saved the edits it kept');
+  assert.equal(hostedLaneDirty(root, { refresh: true }), false, 'the merge is the saved head');
+  const lane = await f.readLane(f.lane.laneId);
+  assert.equal(readHostedLaneCheckout(root).selection.head, lane.head);
+  // A clean folder makes no save: a second sync answers up to date without one.
+  const again = await s.transport(root).dispatch('sync', { laneId: f.lane.laneId });
+  assert.equal(again.result.saved, undefined);
+});
+
+test('593fc2d7: a refused save after a merged sync leaves the merge installed and the sync successful', async t => {
+  const s = await resolutionFixture(t),
+    f = s.f;
+  const root = s.root;
+  await s.transport(root).dispatch('open', { laneId: f.lane.laneId });
+  writeFileSync(join(root, 'notes.txt'), 'unsaved notes\n');
+  f.moveMain();
+  const mutation = s.exchange.client.mutation;
+  s.exchange.client.mutation = async (ref, args) => {
+    if (getFunctionName(ref) === 'projectHostedSaves:prepare')
+      throw new ForgeError('WORK_STALE', 'Synthetic save refusal.');
+    return mutation(ref, args);
+  };
+  t.after(() => (s.exchange.client.mutation = mutation));
+  const synced = await s.transport(root).dispatch('sync', { laneId: f.lane.laneId });
+  assert.equal(synced.result.source.outcome.result.status, 'merged');
+  assert.equal(readFileSync(join(root, 'accepted.txt'), 'utf8'), 'already accepted\n', 'main installed');
+  assert.equal(readFileSync(join(root, 'notes.txt'), 'utf8'), 'unsaved notes\n', 'edit kept');
+  assert.equal(synced.result.saved.status, 'failed');
+  assert.equal(synced.result.saved.code, 'WORK_STALE');
+  assert.match(synced.result.saved.note, /The merge is installed; .* save '\{\}'/);
 });
 
 test('a Lane opened from another Lane folder is its sibling under lanes/, never nested', async t => {

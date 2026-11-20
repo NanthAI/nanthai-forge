@@ -30,13 +30,15 @@ NOT_FOUND names what was looked up: run from the Lane root start printed, or pas
   land: {
     title: 'Landing a Lane',
     text: `From the Lane folder: nforge agent . land --save '{"message":"what changed"}' saves, updates from main, runs the check and lands under the project policy.
-- To save without submitting (no check, no landing): nforge agent . save '{}'.
-- It waits by default; --no-wait returns after submission. Clients that wake on background exit (Claude Code; FORGE_AGENT_WAKE=background-exit|off) get result.wake.command at once: run it once in the background; it exits when the landing settles. --wait keeps the foreground wait. --check-only checks without landing.
-- land --withdraw {laneId?,reason?} ends this Lane's live landing when you know its check will fail; confirm with confirm.waitCommand (it returns LANDING_CANCELLED), then fix, save and land --save again.
-- NOTHING_TO_LAND: the Lane equals its base; save your edits first.
-- LANDED is acceptance; CHECK PASSED alone is not. After a failure, fix in the same Lane and land again; never abandon and re-create it.
-- Required preflight runs inline in its existing local budget. PREFLIGHT_REQUIRED names the exact command after failure or budget exhaustion; then replay the same land operation.
-- Every local preflight test run (finish, retry and trim:false too) stops at a 600 s ceiling; the rest goes to the landing check and the receipt names the ceiling. preflight {budgetSeconds} above 600 raises it for that one run (named as an override).
+- To save without submitting: nforge agent . save '{}' (an agent action, not top-level).
+- Review what will land: diff '{"summary":true}' lists changed paths, diff '{}' the hunks.
+- It waits by default; --no-wait returns after submission. Clients that wake on background exit (Claude Code; FORGE_AGENT_WAKE=background-exit|off) get result.wake.command: run it once in the background. --wait keeps the foreground wait; --check-only checks without landing.
+- land --withdraw {laneId?,reason?} ends a live landing whose check will fail; confirm.waitCommand returns LANDING_CANCELLED; then fix, save, land --save.
+- NOTHING_TO_LAND: the Lane equals its base; save first.
+- After a failed check: land --save with "retry":true,"reason":"flake"|"main-moved"|"infra"|"other" (next.retryReason).
+- LANDED is acceptance; CHECK PASSED is not. Fix in the same Lane and land again; never abandon and re-create it.
+- Required preflight runs inline in its local budget; PREFLIGHT_REQUIRED names the command, then replay the same land.
+- Local preflight tests stop at a 600 s ceiling (the rest goes to the landing check); preflight {budgetSeconds} above 600 raises it for one run.
 More: help wait, help conflict, help check, help overlap.`,
   },
   wait: {

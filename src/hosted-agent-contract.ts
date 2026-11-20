@@ -208,10 +208,16 @@ export const hostedAgentCommandSchemas = {
         .optional(),
     })
     .strict()
-    .refine(
-      command => !command.planningItemId || (!command.intentId && !command.outcome),
-      'planningItemId starts from its Issue; omit intentId and outcome.',
-    ),
+    // Each refusal names the field to drop (593fc2d7): the Issue's title and body are the outcome.
+    .refine(command => !command.planningItemId || !command.outcome, {
+      path: ['outcome'],
+      message:
+        'drop it: planningItemId starts from its Issue, whose title and body are the outcome (outcome alone starts unplanned work)',
+    })
+    .refine(command => !command.planningItemId || !command.intentId, {
+      path: ['intentId'],
+      message: 'drop it: planningItemId starts from its Issue (intentId alone joins an Intent)',
+    }),
   open: z
     .object({
       laneId: uuid,

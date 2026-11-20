@@ -307,6 +307,11 @@ test('a delivered guard runs first in every preflight, inside the budget, with w
   assert.match(setting.signal, /held on the server/);
   assert.ok(setting.touches.some(item => /180 s/.test(item)));
   assert.match(after.local.summary, /Guard set Automatic from the project's last 5 landing outcome\(s\)/);
+  // 593fc2d7: the project-wide failure count reads as history, never as this run's result.
+  assert.match(
+    after.local.summary,
+    /\(project history, not this run: 2 of them failed their landing check\)/,
+  );
   assert.match(
     after.local.summary,
     /schema-guard\.test\.mjs \(2 landing failures, p 0\.4 x C 840 s \/ r 1 - t 2 s = \+334 s\)/,

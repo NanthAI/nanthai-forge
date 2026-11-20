@@ -4,12 +4,18 @@ import type { z } from 'zod';
 import { checkTerminal, checkUnsuccessful } from './check-run-state.js';
 import type { HostedAgentResponse } from './hosted-agent-transport.js';
 import { scrubText } from './client-error-text.js';
+import { shellQuote } from './shell-quote.js';
 import { failedErrorChars, failedErrors } from './check-file-summary.js';
 import { retryableFinishSource } from './hosted-agent-finish-result.js';
 import { holdLines, landingHold } from './hosted-landing-hold.js';
 import { syncRequiredSummary } from './hosted-would-conflict.js';
 import { acceptedByLine } from './landing-accepted-by.js';
 import type { CheckTime } from './hosted-check.js';
+
+/** The self-review step a passed preflight names before land (593fc2d7): what will land, by path then hunk. */
+export function selfReviewLine(root: string) {
+  return `preflight: before land, review what will land: nforge agent ${shellQuote(root)} diff '{"summary":true}' (changed paths), diff '{}' (hunks against the Lane's base)`;
+}
 
 /** The land reply's line for a named landing. */
 /* Kept here so the CLI loads no schema module for it. */
@@ -153,6 +159,12 @@ function classifyLand(response: HostedAgentResponse): { kind: LandOutcomeKind; l
   const lines: string[] = [];
   let failed = false;
   const error = submission?.error;
+  // A withdrawn landing: replaying its operationId only returns this state again (593fc2d7).
+  if (phase === 'terminal-failed' && error?.code === 'LANDING_CANCELLED')
+    return out('failed', [
+      `CANCELLED: this landing was withdrawn; nothing landed${response.operationId ? `. Its operationId ${response.operationId} is spent: replaying it returns this cancelled state` : ''}`,
+      `Submit again as a new operation: ${result.retryCommand ?? "nforge agent ROOT land --save '{}' with no operationId"}`,
+    ]);
   const recovery =
     result.recovery?.conflict?.instruction ??
     result.recovery?.conflict?.command ??

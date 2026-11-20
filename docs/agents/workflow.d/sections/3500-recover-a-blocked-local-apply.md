@@ -1,6 +1,8 @@
 ### Recover a blocked local apply
 
-`save --sync` and `sync` keep unsaved edits in files the sync does not change; only an
+`save --sync` and `sync` keep unsaved edits in files the sync does not change, and after a
+clean merge they save them on top of it (`saved` in the reply), so the folder equals the
+saved head and preflight needs no second save. Only an
 edit on a path main changed stops the local apply, and the error names the one
 `recover-apply` command that finishes it. That command moves only the edits that clash
 with the incoming change; the rest stay in place. `status:"superseded"` from `recover-apply`

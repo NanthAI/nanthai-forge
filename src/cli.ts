@@ -265,12 +265,6 @@ async function main(args: string[]): Promise<unknown> {
     args = args.slice(0, flag);
   }
   const [command, root, subject, first, last] = args;
-  invariant(
-    root && !root.startsWith('--'),
-    'BAD_ARGUMENT',
-    'A ROOT is required: a Forge clone, a Lane checkout or a Git worktree ("." for the current folder). Use --help.',
-  );
-  invariant(!args.some(a => a.startsWith('--')), 'BAD_ARGUMENT', 'Unknown option. Use --help.');
   const sizes: Record<string, [number, number]> = {
     mcp: [2, 2],
     'mcp-config': [2, 2],
@@ -283,6 +277,15 @@ async function main(args: string[]): Promise<unknown> {
     imports: [3, 3],
     source: [3, 5],
   };
+  // Only a command this CLI does not know loads the agent verb lists (593fc2d7).
+  if (command && !Object.hasOwn(sizes, command))
+    (await import('./agent-cli.js')).refuseTopLevelAgentVerb(command);
+  invariant(
+    root && !root.startsWith('--'),
+    'BAD_ARGUMENT',
+    'A ROOT is required: a Forge clone, a Lane checkout or a Git worktree ("." for the current folder). Use --help.',
+  );
+  invariant(!args.some(a => a.startsWith('--')), 'BAD_ARGUMENT', 'Unknown option. Use --help.');
   const expected = sizes[command ?? ''];
   invariant(
     expected && args.length >= expected[0] && args.length <= expected[1],

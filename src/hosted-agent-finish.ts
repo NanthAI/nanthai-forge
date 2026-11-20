@@ -22,6 +22,7 @@ import {
 } from './hosted-agent-actions.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { ForgeError, invariant } from './errors.js';
+import { hostedActionError } from './hosted-action-error.js';
 import { shellQuote } from './shell-quote.js';
 import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 import {
@@ -233,6 +234,17 @@ async function reuseCheckedFinish(session: HostedAgentSession, command: FinishCo
   return { candidateId: candidate.id, composeOperationId, check: { kind: 'run' as const, runId: run.id } };
 }
 
+function staleBeforeCompose(session: HostedAgentSession, error: unknown) {
+  const compose = session.journal.get<string>('finish-compose-operation');
+  return (
+    hostedActionError(error, 'finish').code === 'WORK_STALE' &&
+    !session.journal.get('finish-check-run') &&
+    session.journal.get('finish-request') === undefined &&
+    session.journal.get('desired-landing') === undefined &&
+    (!compose || session.journal.get(`compose:${compose}`) === undefined)
+  );
+}
+
 export async function executeHostedFinish(session: HostedAgentSession, input: unknown) {
   let result: unknown;
   for (let tries = 1; ; tries++)
@@ -252,6 +264,10 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
       const code = (error as { code?: unknown }).code;
       if (typeof code === 'string' && FINISH_REFUSALS.has(code))
         await session.journal.retain(finishRefusedKey, () => code);
+      // Lane pins moved before any compose request was built: this operation can only replay the
+      // stale pins, so the next shorthand land is new work on the folder's pins (593fc2d7).
+      else if (staleBeforeCompose(session, error))
+        await session.journal.retain(finishRefusedKey, () => 'WORK_STALE');
       if (error instanceof ForgeError && code === 'PREFLIGHT_REQUIRED') {
         const parameters = {
           ...(input as Record<string, unknown>),

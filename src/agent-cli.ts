@@ -11,11 +11,20 @@ import { discoversCapabilitiesFirst, startEarlyCapabilities } from './hosted-cap
 import { hostedAgentRoot } from './hosted-agent-journal.js';
 import { LAND_CHILD_ENV } from './hosted-land-child-env.js';
 import { canonicalOperationIds } from './operation-id-case.js';
-import { aliasNotice, landSaveCommand, lowerVerb, newForm, parseVerbForm } from './agent-verbs.js';
+import {
+  aliasNotice,
+  landSaveCommand,
+  lifecycleVerbs,
+  lowerVerb,
+  namedReads,
+  newForm,
+  operatorActions,
+  parseVerbForm,
+} from './agent-verbs.js';
 import { parseWaitBudget } from './agent-operation-wait.js';
 import { recordTurnWait } from './agent-turn-work.js';
 import { readFileSync } from 'node:fs';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { housekeepingLines, type IdleLane, type OtherRunLane } from './lane-prune.js';
 
 /** process: invoked as the nforge process (land detaches its submission and waits by default). */
@@ -359,4 +368,20 @@ async function runAgentCli(
   }
   // One client mode: a folder without a hosted marker is refused, with no network call, naming its next step.
   throw hostedRootRequired(root);
+}
+
+/** An agent action typed without `agent ROOT` (`nforge save`, 593fc2d7) names the command it meant.
+ * The top-level CLI loads this on that error path only, from the agent chunk it already has. */
+export function refuseTopLevelAgentVerb(command: string) {
+  const lists: Array<[readonly string[], string]> = [
+    [lifecycleVerbs, 'agent'],
+    [namedReads, 'agent'],
+    [operatorActions, 'x'],
+  ];
+  const prefix = lists.find(([names]) => names.includes(command))?.[1];
+  if (prefix)
+    throw new ForgeError(
+      'BAD_ARGUMENT',
+      `${command} is an agent action, not a top-level command: run nforge ${prefix} ROOT ${command} 'JSON' (ROOT: your Lane folder, or . inside it). Help: nforge ${prefix} ROOT ${command} --help.`,
+    );
 }

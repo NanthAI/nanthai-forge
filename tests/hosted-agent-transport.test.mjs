@@ -721,6 +721,39 @@ test('friction d6378866: a preflight that ran no test because a save is settling
   assert.match(lines.join(''), new RegExp(`wait '\\{"operationIds":\\["${save}"\\]\\}'`));
 });
 
+test('593fc2d7: a passed preflight names the self-review diff of what will land; a failed one does not', async t => {
+  const s = agentFixture(t);
+  for (const [outcome, named] of [
+    ['passed', true],
+    ['failed', false],
+  ]) {
+    const lines = [];
+    const quiet = t.mock.method(process.stderr, 'write', line => (lines.push(String(line)), true));
+    await hostedAgentCli(
+      s.root,
+      'preflight',
+      {},
+      { url: 'https://fixture.invalid', projectId: 'unused' },
+      {
+        dispatch: async () => ({
+          schema: 1,
+          transport: 'hosted',
+          action: 'preflight',
+          operationId: null,
+          result: { outcome },
+        }),
+      },
+    );
+    quiet.mock.restore();
+    process.exitCode = 0;
+    const hint =
+      /preflight: before land, review what will land: nforge agent \S+ diff '\{"summary":true\}'/.test(
+        lines.join(''),
+      );
+    assert.equal(hint, named, `${outcome}: ${lines.join('')}`);
+  }
+});
+
 test('an empty supplied landing message is refused before any server call (friction 737e85cb)', async t => {
   const s = agentFixture(t);
   await s.transport().dispatch('open', { laneId: s.lane.laneId });

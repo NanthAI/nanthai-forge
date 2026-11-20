@@ -11,6 +11,7 @@ import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { recordLane } from '../dist/lane-registry.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
 import { landSummary } from '../dist/hosted-land-summary.js';
+import { finishResubmitContinuation } from '../dist/hosted-agent-finish-result.js';
 import { synthetic } from './hosted-revert-fixture.mjs';
 import { ConvexError } from 'convex/values';
 
@@ -172,4 +173,70 @@ test('the LANDED line states the number of changed paths', () => {
   assert.deepEqual(landSummary(landed(0)), ['LANDED receipt r1, 0 changed paths']);
   assert.deepEqual(landSummary(landed(null)), ['LANDED receipt r1']);
   assert.deepEqual(landSummary(landed(undefined)), ['LANDED receipt r1']);
+});
+
+// Issue 593fc2d7 (Lane 0200969a, 2026-11-19): the Lane moved on the server after the folder was
+// read (same head, newer sourceVersion), so `land --save` met WORK_STALE before anything was
+// submitted. After the folder caught up, every shorthand `land --save` reused that refused
+// operation and its pinned selection, and failed WORK_STALE again; only adding a laneId (a new
+// shorthand key) landed. A pre-submit WORK_STALE ends the operation: the re-run is new work.
+test('593fc2d7: land --save after a pre-submit WORK_STALE and a refreshed folder is new work, never the same WORK_STALE', async t => {
+  const s = agentFixture(t);
+  process.env.XDG_STATE_HOME = temporaryDirectory(t, 'forge-stale-land-');
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const objects = join(clientCacheRoot(s.root), 'objects');
+  mkdirSync(objects, { recursive: true });
+  writeFileSync(join(objects, s.lane.base.head), s.objects.get(s.lane.base.head));
+  // The server Lane moves on (a sync or resolution elsewhere): same head, newer source version.
+  s.lane.version++;
+  s.lane.sourceVersion++;
+  const run = () => {
+    const transport = s.transport();
+    const query = transport.query.bind(transport);
+    transport.query = async (name, args) => {
+      if (name === 'projectHostedComposeSelection:page')
+        for (const item of args.inputs)
+          if (
+            item.expected &&
+            (item.expected.version !== s.lane.version || item.expected.sourceVersion !== s.lane.sourceVersion)
+          )
+            throw new ConvexError({ code: 'WORK_STALE', message: 'The selected Lane pins changed.' });
+      return query(name, args);
+    };
+    return transport.dispatch('finish', {});
+  };
+  await assert.rejects(run(), error => error.code === 'WORK_STALE');
+  // The folder catches up with the server Lane (what open, sync or a resolution records).
+  const markerPath = join(s.root, '.forge', 'hosted-lane.json');
+  const marker = JSON.parse(readFileSync(markerPath, 'utf8'));
+  marker.selection.version = s.lane.version;
+  marker.selection.sourceVersion = s.lane.sourceVersion;
+  writeFileSync(markerPath, JSON.stringify(marker));
+  const landed = await run();
+  assert.equal(landed.result.phase, 'finish', 'the re-run composes on the current pins and lands');
+  // Re-running the same source again replays that new operation.
+  assert.equal((await run()).operationId, landed.operationId);
+});
+
+// Review of Lane 66778884: the submit-again command after a withdrawn landing must be new work. The
+// plain shorthand replays the same operation for unchanged source, so the command keeps retry.
+test('593fc2d7: the submit-again command of a withdrawn landing starts a new operation for the same source', async t => {
+  const s = agentFixture(t);
+  process.env.XDG_STATE_HOME = temporaryDirectory(t, 'forge-resubmit-');
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const objects = join(clientCacheRoot(s.root), 'objects');
+  mkdirSync(objects, { recursive: true });
+  writeFileSync(join(objects, s.lane.base.head), s.objects.get(s.lane.base.head));
+  const first = await s.transport().dispatch('finish', {});
+  assert.equal(
+    (await s.transport().dispatch('finish', {})).operationId,
+    first.operationId,
+    'shorthand replays',
+  );
+  const { action, ...again } = finishResubmitContinuation(s.root, { operationId: first.operationId }).next;
+  assert.equal(action, 'finish');
+  const resubmitted = await s.transport().dispatch(action, again);
+  assert.notEqual(resubmitted.operationId, first.operationId, 'the suggested command is new work');
+  // Run again while that new landing is in flight: it replays it, never a second submission.
+  assert.equal((await s.transport().dispatch(action, again)).operationId, resubmitted.operationId);
 });

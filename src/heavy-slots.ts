@@ -188,8 +188,8 @@ export function wakeHeavyWaiters(directory = heavySlotDirectory()) {
 
 export const HEAVY_HELP = `nforge heavy [--] CMD [ARGS...]
 nforge heavy --no-build [--] CMD [ARGS...]
-nforge heavy --status
-nforge heavy --help | -h
+nforge heavy --status | status
+nforge heavy --help | -h | help
 Run bounded builds and test batches under the machine-wide slot limit.
 Nested commands reuse their live parent slot; project-declared static commands run directly.
 --no-build runs tests against the existing dist/ without rebuilding it (failing-first checks).
@@ -383,6 +383,10 @@ export async function heavyCli(
   beforeRun?: () => Promise<boolean>,
   beforeLocal?: () => Promise<void>,
 ): Promise<number> {
+  // A bare `status` or `help` is heavy's own option, never a command to queue (593fc2d7); a program
+  // of that name still runs after --.
+  if (args.length === 1 && (args[0] === 'status' || args[0] === 'help'))
+    args = [args[0] === 'status' ? '--status' : '--help'];
   const noBuild = args[0] === '--no-build';
   if (noBuild) args = args.slice(1);
   // A leading -- ends heavy's own options, as in most CLIs; everything after it is the command.

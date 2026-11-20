@@ -39,6 +39,23 @@ export function finishRetryContinuation(root: string, selection: Reply) {
   return { next: { action: 'finish', ...retry }, command, retry, retryCommand: command };
 }
 
+/** A withdrawn landing (LANDING_CANCELLED) is not a failed check: its operationId is spent, so a
+ * replay returns the same cancelled state. The next step is land --save as new work: `retry` makes the
+ * shorthand select a new operation instead of the cancelled one for the same source (593fc2d7). */
+export function finishResubmitContinuation(root: string, selection: Reply) {
+  const again = {
+    ...Object.fromEntries(
+      Object.entries(selection).filter(
+        ([key]) => !['operationId', 'action', 'retry', 'reason'].includes(key),
+      ),
+    ),
+    retry: true,
+    reason: 'other',
+  };
+  const command = `nforge agent ${shellQuote(root)} land --save ${shellQuote(JSON.stringify(again))}`;
+  return { next: { action: 'finish', ...again }, command, retryCommand: command };
+}
+
 /** Pending admitted work waits for its canonical parent outcome.
  * Preparation before admission and retryable source children retain their recovery. */
 export function hostedObservationContinuation(root: string, result: Reply, operationId?: string): Reply {
@@ -177,5 +194,7 @@ export function normalizeObservedFinish(root: string, selection: Reply, result: 
     (progress as { outcome?: { error?: unknown } } | undefined)?.outcome?.error;
   if ((error as { code?: string } | undefined)?.code === 'SOURCE_STATE_TOO_LARGE')
     return { ...clean, status: 'failed', terminal: true };
+  if ((error as { code?: string } | undefined)?.code === 'LANDING_CANCELLED')
+    return { ...clean, status: 'failed', terminal: true, ...finishResubmitContinuation(root, selection) };
   return { ...clean, status: 'failed', terminal: true, ...finishRetryContinuation(root, selection) };
 }

@@ -91,17 +91,42 @@ export async function submitHostedLand(
   // A save or check-only compose that waits for its own outcome inside finish stops at this deadline.
   transport.waitUntil ??= deadline;
   // An edited, unsaved resolution in this folder: save it (resolve) and land the resolution Lane.
-  const chained = await landEditedResolution(
-    hostedAgentRoot(root),
-    command,
-    (action, body) => hostedAgentCli(root, action, body, address, transport),
-    line => process.stderr.write(`${line}\n`),
-  );
-  if (chained && 'response' in chained) return chained.response as HostedAgentResponse;
+  // The landing's operation id is the first id printed (593fc2d7): the resolve step names none, and
+  // its note follows the land line. Replaying this land reaches the same resolve and finish.
+  const notes: string[] = [];
+  const previous = transport.onOperation;
+  transport.onOperation = action =>
+    process.stderr.write(`land: ${action} step first; if this stops, run the same land again\n`);
+  let chained;
+  try {
+    chained = await landEditedResolution(
+      hostedAgentRoot(root),
+      command,
+      (action, body) => hostedAgentCli(root, action, body, address, transport),
+      line => notes.push(line),
+    );
+  } finally {
+    if (previous) transport.onOperation = previous;
+    else delete transport.onOperation;
+  }
+  const flush = () => {
+    for (const line of notes.splice(0)) process.stderr.write(`${line}\n`);
+  };
+  if (chained && 'response' in chained) {
+    flush();
+    return chained.response as HostedAgentResponse;
+  }
   if (chained) command = chained.finish;
-  let response = (await hostedAgentCli(root, 'finish', command, address, transport)) as HostedAgentResponse;
+  let response: HostedAgentResponse;
+  try {
+    response = (await hostedAgentCli(root, 'finish', command, address, transport)) as HostedAgentResponse;
+  } catch (error) {
+    flush();
+    throw error;
+  }
   // The first receipt already carries the operation id and any overlap notice: show them now, not at exit.
   announce(transport.root ?? root, command, response, wake);
+  flush();
   for (let round = 0; round < rounds; round++) {
     const result = resultOf(response);
     if (result.phase !== 'save' || !result.saveOperationId || result.progress?.status === 'failed') break;

@@ -28,6 +28,7 @@ import {
   settlePriorHostedSave,
 } from './hosted-save-client.js';
 import { capturedNotSaved } from './save-not-saved.js';
+import { hostedLaneDirty } from './hosted-lane-dirty.js';
 import {
   keptSaveTiming,
   nothingToSave,
@@ -59,6 +60,7 @@ import {
   SyncPinsStale,
 } from './hosted-agent-source.js';
 import { ForgeError, invariant } from './errors.js';
+import { shellQuote } from './shell-quote.js';
 import { plannedIntent } from './hosted-agent-planning.js';
 import { unadvertisedActionError } from './hosted-agent-version.js';
 import { hostedActionError } from './hosted-action-error.js';
@@ -835,7 +837,11 @@ export async function executeHostedAgent(
         );
         clearSyncHandoff(session.root, operationId);
         timing.mark('apply');
-        return { source: result, applied, timing: timing.value() };
+        const saved =
+          source.status === 'merged' && !command.cleanOnly
+            ? await saveAfterSync(session, command)
+            : undefined;
+        return { source: result, applied, ...(saved ? { saved } : {}), timing: timing.value() };
       }
     }
     if (completed && handoff) clearSyncHandoff(session.root, operationId);
@@ -1030,6 +1036,48 @@ async function waitSaveUntil(
   } catch {
     return pending;
   }
+}
+/** A clean sync keeps unsaved edits in files it did not change. `save --sync` then saves them on top of
+ * the merge, so the folder equals the saved head and preflight runs without another save (593fc2d7).
+ * A local digest check first: a clean folder makes no call. Retained by the sync's operation, so a
+ * replay reaches the same save. Undo: edit and save again, as after any save. */
+async function saveAfterSync(session: HostedAgentSession, command: { message?: string | undefined }) {
+  if (!markerAt(session.root) || !hostedLaneDirty(session.root, { refresh: true })) return undefined;
+  const operationId = await session.journal.id('sync-save');
+  let status: string | undefined;
+  try {
+    const saved = await saveHostedLane(
+      session.root,
+      { operationId, message: command.message ?? 'Save the edits kept by sync' },
+      session.exchange,
+      {
+        ...saveContract(session.capabilities),
+        authorship: session.authorship,
+        ...(session.holderSessionId ? { holderSessionId: session.holderSessionId } : {}),
+        onCapture: session.saveNotice,
+      },
+      false,
+      undefined,
+      (id, pending) => waitSaveUntil(session, id, pending),
+    );
+    status = agentSourceOutcome(await awaitSaveOutcome(session, operationId, saved))?.status;
+  } catch (error) {
+    // The merge is installed either way: a refused save leaves the edits unsaved, never fails the sync.
+    const { code } = hostedActionError(error, 'save');
+    return {
+      operationId,
+      status: 'failed',
+      ...(typeof code === 'string' ? { code } : {}),
+      note: `The merge is installed; saving the unsaved edits it kept failed. Run: nforge agent ${shellQuote(session.root)} save '{}'`,
+    };
+  }
+  return status === 'completed'
+    ? { operationId, status, note: 'Saved the unsaved edits this sync kept, on top of the merged head.' }
+    : {
+        operationId,
+        status: status ?? 'pending',
+        note: `The save of the unsaved edits this sync kept is ${status ?? 'still running'}; run save before preflight.`,
+      };
 }
 /** A save waits for its own outcome within the agent budget: the job's progress subscription
  * delivers the receipt and the Lane binding advances from it, with no replay or extra call. A save
