@@ -55,6 +55,7 @@ import {
   type AskRow,
   type NeedsRead,
   type NowRow,
+  type ParkedRow,
 } from './model';
 import { decideTarget, useProjectDecide, type Decide } from './decide';
 import { DecisionKeys, useDecideRun } from './DecisionKeys';
@@ -185,19 +186,20 @@ export function NeedsMeView({
   /** The drawing time, for tests; otherwise the time the reads arrived (nothing ticks). */
   now?: number;
 }) {
-  const view = useMemo(() => (read ? needsView(read) : null), [read]);
+  // Drawn times are relative to when the view was drawn; nothing ticks (idle costs nothing). A Lane parked with no one
+  // named shows once 4 h idle by this same time (count.ts parkShown).
+  const drawnAt = useMemo(() => now ?? Date.now(), [read, fyi, now]);
+  const view = useMemo(() => (read ? needsView(read, drawnAt) : null), [read, drawnAt]);
   const items = progressOf(counts);
   const [layout, setLayout, resetLayout] = useDockLayout('needs-me', LAYOUT);
   const [message, announce] = useAnnounce();
-  // Drawn times are relative to when the view was drawn; nothing ticks (idle costs nothing).
-  const drawnAt = useMemo(() => now ?? Date.now(), [read, fyi, now]);
   const list = useMemo(() => (fyi && view ? fyiView(fyi, view.fyi, drawnAt) : null), [fyi, view, drawnAt]);
   // Open by default (owner 2026-11-19): a folded Loose ends left an empty-looking box beside FYI.
   const looseFold = useFold('needs-loose', true);
   const at = (patch: Partial<ProjectRoute>) => hrefFor({ ...route, section: '', rest: '', ...patch });
   const sentence = view ? needsSentence(view) : null;
   const lanesOpen = feed ? feed.lanes.length + feed.more : null;
-  const waiting = view ? view.now.length + view.asks.length : 0;
+  const waiting = view ? view.now.length + view.asks.length + view.parked.length : 0;
 
   const regions = [
     {
@@ -207,7 +209,15 @@ export function NeedsMeView({
         <Region
           title="Needs you"
           weight={view?.count ? 'act' : 'watch'}
-          waiting={view ? [...view.now.map(r => r.laneId), ...view.asks.map(r => r.id)].join() : 0}
+          waiting={
+            view
+              ? [
+                  ...view.now.map(r => r.laneId),
+                  ...view.asks.map(r => r.id),
+                  ...view.parked.map(r => r.laneId),
+                ].join()
+              : 0
+          }
           count={view ? view.count : undefined}
           handle={handle}
           hint="what holds work; requests asked ahead are listed under it and not counted"
@@ -221,9 +231,20 @@ export function NeedsMeView({
               {waiting ? (
                 <div className="grp" data-weight="act">
                   <Band title="Holding work now" count={view.count} needs hint="longest held first" />
-                  <Capped rows={[...view.now, ...view.asks]} more={read!.more} atLeast={view.atLeast}>
+                  <Capped
+                    rows={[...view.now, ...view.asks, ...view.parked]}
+                    more={read!.more}
+                    atLeast={view.atLeast}
+                  >
                     {row =>
-                      'choices' in row ? (
+                      'park' in row ? (
+                        <Parked
+                          key={`park:${row.laneId}`}
+                          row={row}
+                          drawnAt={drawnAt}
+                          laneHref={at({ place: 'lanes', rest: row.laneId })}
+                        />
+                      ) : 'choices' in row ? (
                         <Question
                           key={row.id}
                           row={row}
@@ -341,7 +362,7 @@ export function NeedsMeView({
           inProgress:
             lanesOpen === null
               ? undefined
-              : `${lanesOpen.toLocaleString()} ${lanesOpen === 1 ? 'Lane' : 'Lanes'} open${view?.now.length ? `, ${view.now.length} need you` : ''}`,
+              : `${lanesOpen.toLocaleString()} ${lanesOpen === 1 ? 'Lane' : 'Lanes'} open${view?.now.length || view?.parked.length ? `, ${view.now.length + view.parked.length} need you` : ''}`,
           hrefs: {
             done: at({ place: 'code' }),
             inProgress: at({ place: 'lanes' }),
@@ -467,6 +488,40 @@ function Held({
         ) : null}
         <A className="btn ghost sm" href={laneHref}>
           {link}
+        </A>
+        <Key kind="ghost" size="sm" onClick={() => setLater(true)}>
+          Later
+        </Key>
+      </div>
+    </div>
+  );
+}
+
+/** A Lane parked for the reader (Item e1633718): who parked it, why in their words, and how long it has waited. */
+function Parked({ row, drawnAt, laneHref }: { row: ParkedRow; drawnAt: number; laneHref: string }) {
+  const [later, setLater] = useState(false);
+  if (later) return <Later head={row.head} onShow={() => setLater(false)} />;
+  return (
+    <div className="dec">
+      <div className="dtop">
+        <State word="Needs you">{row.tag}</State>
+        <span>
+          <span className="mono" translate="no">
+            Lane {row.mark}
+          </span>
+        </span>
+        <span>
+          {row.park.named ? 'parked' : 'idle'} {waited(row.since, drawnAt)}
+        </span>
+        {row.who ? <Who handle={row.who} /> : null}
+      </div>
+      <h3 dir="auto">{row.head}</h3>
+      <p className="why" dir="auto">
+        {row.park.reason}
+      </p>
+      <div className="btns">
+        <A className="btn ghost sm" href={laneHref}>
+          Open the Lane
         </A>
         <Key kind="ghost" size="sm" onClick={() => setLater(true)}>
           Later

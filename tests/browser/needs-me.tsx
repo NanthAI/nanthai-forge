@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Needs me (Item 48049998) on synthetic data, through the real shell frame, screen, model and the folded Loose ends
 // body: `?data=busy` holds a protected-path approval and a question, with an agent's conflict, a refusal and a
-// person's own failed check under FYI beside landings and a settings change; `?data=first` is a first day with one approval.
+// person's own failed check under FYI beside landings and a settings change, plus Lanes parked for the reader (Item
+// e1633718): one named to them, one with no one named idle 5 h (shown) and one idle 1 h (not yet); `?data=first` is a
+// first day with one approval.
 // The shell's Needs you count comes from the same rule as the page (needs/count.ts).
 import { createRoot } from 'react-dom/client';
 import '../../web/src/ds';
@@ -99,6 +101,46 @@ const baseRead: NeedsRead = first
           text: 'The adapter tests can run in 12 Lanes or 4. Which do you want?',
           choices: ['12 Lanes', '4 Lanes'],
           laneId: uuid(3),
+        },
+      ],
+      parked: [
+        {
+          laneId: uuid(60),
+          intentId: uuid(160),
+          title: 'Docs: queue limits page',
+          actor: 'sample-two',
+          agent: 'brisk-heron',
+          park: {
+            to: 'sample-one',
+            named: true,
+            reason: 'Waits for you to say which limit the page should state.',
+            at: ago(35),
+            by: 'sample-two/brisk-heron',
+          },
+          at: ago(35),
+        },
+        {
+          laneId: uuid(61),
+          intentId: uuid(161),
+          title: 'Bench: replay the 12-Lane run',
+          actor: 'sample-one',
+          agent: 'quiet-otter',
+          park: {
+            named: false,
+            reason: 'Parked until the bench window ends.',
+            at: ago(300),
+            by: 'sample-one/quiet-otter',
+          },
+          at: ago(300),
+        },
+        {
+          laneId: uuid(62),
+          intentId: uuid(162),
+          title: 'Parked an hour ago',
+          actor: 'sample-one',
+          agent: 'quiet-otter',
+          park: { named: false, reason: 'Not yet four hours.', at: ago(60), by: 'sample-one/quiet-otter' },
+          at: ago(60),
         },
       ],
     };
@@ -265,7 +307,7 @@ createRoot(document.getElementById('root')!).render(
     route={route}
     name="tidepool"
     feed={feed}
-    needs={needsCount(read)}
+    needs={needsCount(read, NOW)}
     projects={null}
     controls={{ onPalette: () => {}, onKeys: () => {}, viewerHandle: 'sample-one', onPicker: () => {} }}
   >

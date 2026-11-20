@@ -7,6 +7,7 @@ import type { LineFeed, LineStage } from '../Line';
 import type { StateKind, StateWord } from '../../ds';
 import { QUIET_MS } from '../../../../src/lane-quiet';
 import { currentEntries, landingOf, laneState, notLandedWhy, stopWords, waitLine } from '../lane-state';
+import { parkWords, type Park } from '../needs/count';
 
 /** One open Lane from `projectHostedLiveLanes:list` (the agent `lanes` page). */
 export type LaneMeta = {
@@ -20,6 +21,8 @@ export type LaneMeta = {
   lastActivityAt?: string;
   /** A resolution Lane: the conflicted Lane of the same Item it continues. */
   resolves?: string;
+  /** Parked (Item e1633718): who it waits on and why. */
+  park?: Park;
 };
 /** One entry from `projectHostedQueueView:read`. `landingState` is the server's one reading of this submission
  * (src/landing-state.ts); a Lane can have older entries too, and only its newest is current (lane-state.ts). */
@@ -309,6 +312,10 @@ export function buildYard(
           why: `waits for ${meta.get(parent.laneId)?.intent ?? parent.intentTitle ?? `Lane ${short(parent.laneId)}`} to land`,
         }
       : {};
+    // A parked Lane (Item e1633718) says who it waits on and since when, with the reason as its second line.
+    const parked = lane?.park
+      ? { why: `${parkWords(lane.park)} ${ago(now - lane.park.at)}`, detail: lane.park.reason }
+      : {};
     if (mark.held) return { ...base, band: 'needs', ...after, ...left };
     // A running check counts from its reservation, as the usual check time does (Item ecd6e610).
     const started =
@@ -340,6 +347,7 @@ export function buildYard(
         band: 'quiet',
         state: 'stale',
         why: `no save since ${ago(now - Date.parse(lane.lastActivityAt ?? lane.lastSaveAt ?? ''))}`,
+        ...parked,
         ...left,
       };
     return {
@@ -350,6 +358,8 @@ export function buildYard(
       why:
         said.why ||
         (lane ? (lane.lastSaveAt ? `saved ${ago(now - Date.parse(lane.lastSaveAt))}` : 'no save yet') : ''),
+      // A conflict or another hold reason stays first; a park replaces only the last-save words.
+      ...(said.why ? {} : parked),
       ...left,
     };
   });

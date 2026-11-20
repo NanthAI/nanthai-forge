@@ -5,7 +5,8 @@ import type { z } from 'zod';
 import type { hostedLaneSchema } from '../src/hosted-lane';
 import { mergeOverlapChanges, advanceOverlapMain, type OverlapChange } from '../src/hosted-overlap';
 import { trackLineLane } from './projectLiveLineStore';
-import { trackHostedPresence } from './projectHostedPresence';
+import { dropLanePark, routeLanePark, trackHostedPresence } from './projectHostedPresence';
+import { parkedFor } from '../src/hosted-records';
 import { notifyStackDependents, trackStackDependent } from './projectHostedStackNotice';
 import { closeConflictNotices, planTrialMerge } from './projectHostedConflicts';
 import { appendOverlapMainLog } from './projectHostedOverlapMainLog';
@@ -119,6 +120,8 @@ export async function trackHostedOverlapLane(
     ...(old?.stacked ? { stacked: true as const } : {}),
     // Open exact-conflict notices (flip 4) are ended by closeConflictNotices, never by a record write.
     ...(old?.conflicted ? { conflicted: true as const } : {}),
+    // Parked (Item e1633718): only an open Lane is parked; closing it ends the park with its presence row.
+    ...(open && lane.park ? { park: lane.park } : {}),
     ...projection,
   };
   const at = Date.parse(lane.at);
@@ -145,8 +148,18 @@ export async function trackHostedOverlapLane(
           goal: value.intent,
           changes: value.changes,
           at: Number.isFinite(at) ? at : Date.now(),
+          ...(value.park ? { park: value.park } : {}),
         }
       : null,
+  );
+  // Parked Lanes (Item e1633718) route to the named holder's account, or the starter's: a routing row exists only
+  // while an open Lane is parked, written only when that account changes.
+  await routeLanePark(
+    ctx,
+    projectId,
+    lane.id,
+    old?.presenceRow && old.park ? parkedFor(old.park, lane.actor) : undefined,
+    presenceRow && value.park ? parkedFor(value.park, lane.actor) : undefined,
   );
   const stored = { ...value, ...(presenceRow ? { presenceRow } : {}) };
   const sourceId = old ? old._id : await ctx.db.insert('projectHostedOverlapLanes', stored);
@@ -207,6 +220,8 @@ export async function markHostedOverlapLifecycle(
     .unique();
   // A staged close hides the Lane from presence now; a later record write of a still-open Lane restores it.
   if (row?.presenceRow) await ctx.db.delete(row.presenceRow.id);
+  // A parked Lane (Item e1633718) leaves its holder's Needs me with its presence row.
+  if (row) await dropLanePark(ctx, row);
   if (row) await ctx.db.patch(row._id, { lifecyclePlanId, presenceRow: undefined });
   if (row?.open && row.conflicted) await closeConflictNotices(ctx, projectId, laneId, 'abandoned');
   // The only staged close is an abandonment by an Intent cascade: Lanes stacked on this one are told.
@@ -230,6 +245,7 @@ export async function materializeHostedOverlapLifecycle(
     .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
     .unique();
   if (row?.presenceRow) await ctx.db.delete(row.presenceRow.id);
+  if (row) await dropLanePark(ctx, row);
   if (row)
     await ctx.db.patch(row._id, {
       open: false,

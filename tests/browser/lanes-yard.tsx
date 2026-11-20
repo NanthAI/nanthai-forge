@@ -81,7 +81,17 @@ const lanes = [
   meta(ids.oldB, 'pages', 'Public pages: share cards, sitemap and page titles', 'mara/salt-wren', 292),
   meta(ids.first, 'cli', 'Hosted CLI and agent workflow papercuts', 'devon/brisk-heron', 47),
   meta(ids.second, 'stamp', 'Stamp every save and landing with who made it', 'devon/amber-finch', 14),
-  meta(ids.acct1, 'acct', 'Account Projects page in the redesign', 'mara/upbeat-stork', 6),
+  // Item e1633718: parked on a named holder, with the reason under it.
+  {
+    ...meta(ids.acct1, 'acct', 'Account Projects page in the redesign', 'mara/upbeat-stork', 6),
+    park: {
+      to: 'devon',
+      named: true,
+      reason: 'Waits for devon to pick the empty-state copy.',
+      at: NOW - 40 * 60_000,
+      by: 'mara/upbeat-stork',
+    },
+  },
   meta(ids.acct2, 'acct', 'Account Projects page in the redesign', 'mara/wild-gecko', 21),
   meta(ids.acct3, 'acct', 'Account Projects page in the redesign', 'mara/calm-lynx', 26),
   meta(ids.origin, 'browser', BROWSER, 'mara/true-petrel', 25 * 60),

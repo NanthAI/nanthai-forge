@@ -18,6 +18,10 @@ const session = v.optional(
     ),
   }),
 );
+/** A parked Lane's hold (src/hosted-records.ts laneParkSchema), mirrored from its Lane record. */
+const park = v.optional(
+  v.object({ to: v.optional(v.string()), reason: v.string(), at: v.number(), by: v.string() }),
+);
 export const hostedOverlapTables = {
   projectHostedOverlapLanes: defineTable({
     projectId: v.id('hostedProjects'),
@@ -75,6 +79,8 @@ export const hostedOverlapTables = {
     /** Set while this Lane may hold or be named in an open exact-conflict notice (flip 4): only then do
      * its saves, landing and abandon read projectHostedConflictNotices. */
     conflicted: v.optional(v.literal(true)),
+    /** The Lane record's park (Item e1633718), kept here so a record write knows when presence must change. */
+    park,
   })
     .index('by_project_and_lane', ['projectId', 'laneId'])
     // index-order: caller: convex/projectHostedDormancy.ts#liveOpenOverlapLanes; order: dormancy-off peer window selects newest Lanes by creation time.
@@ -127,10 +133,23 @@ export const hostedOverlapTables = {
     pathBloom: v.optional(v.string()),
     /** Last Lane record time (ms). */
     at: v.number(),
+    /** A parked Lane's park (Item e1633718), for Needs me to show; absent while the Lane is not parked. */
+    park,
   })
     .index('by_project_and_lane', ['projectId', 'laneId'])
     .index('by_project_and_at', ['projectId', 'at'])
     .index('by_project_and_intent_and_at', ['projectId', 'intentId', 'at']),
+  /** Parked Lanes (Item e1633718): one row per open parked Lane, naming the account whose Needs me lists it (the
+   * named holder's or, with no one named, the starter's). Written only when a park's routing changes, deleted when
+   * the park is cleared or the Lane closes. A table of its own so unparked Lanes carry no index entry (an index on
+   * every presence row grew stored index entries per landing). */
+  projectHostedParks: defineTable({
+    projectId: v.id('hostedProjects'),
+    laneId: v.string(),
+    parkedFor: v.string(),
+  })
+    .index('by_project_and_parked_for', ['projectId', 'parkedFor'])
+    .index('by_project_and_lane', ['projectId', 'laneId']),
   /** Exact conflicts at save (flip 4, Issue 853fcde3): one row per recipient Lane and other side (a
    * Lane id or 'main') while a trial merge of their saved files really conflicts. Written only by a
    * save's trial merge and closed (open false, `cleared`) when a later save no longer conflicts or a

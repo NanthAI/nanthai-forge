@@ -3,7 +3,7 @@
 // with the tab (live-reads.ts) and holds token refresh while asleep (auth-hold.ts), so an idle or hidden tab makes no
 // calls. Each page sends one bounded read for its frame: the project frame resolves its address and then reads the
 // line; the account and public frames read only the viewer.
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { ConvexAuthProvider, useAuthActions } from '@convex-dev/auth/react';
 import { ConvexReactClient, useConvex, useConvexAuth, useMutation, useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
@@ -256,9 +256,12 @@ function ProjectView({
   const feed = useLiveLine((project?.id ?? null) as Id<'hostedProjects'> | null);
   // The shell's "Needs you" count uses Needs me's own read and rule (needs/count.ts), so the two always agree; on
   // Needs me the page shares this one subscription.
-  const needs = needsCount(
-    useQuery(needsRead, project?.id ? { projectId: project.id as Id<'hostedProjects'> } : 'skip'),
+  const needsLive = useQuery(
+    needsRead,
+    project?.id ? { projectId: project.id as Id<'hostedProjects'> } : 'skip',
   );
+  // A parked Lane with no one named counts once 4 h idle, by the time the read arrived (count.ts parkShown).
+  const needs = useMemo(() => needsCount(needsLive, Date.now()), [needsLive]);
   const [picker, setPicker] = useState<readonly PickerEntry[] | null>(null);
   const asked = useRef(false);
   const name = project?.name ?? route.project;

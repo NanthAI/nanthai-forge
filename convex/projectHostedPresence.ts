@@ -11,6 +11,7 @@ import {
   type PresenceMe,
   type PresenceRow,
 } from '../src/hosted-presence';
+import { samePark, type LanePark } from '../src/hosted-records';
 
 type PresenceValue = {
   intentId: string;
@@ -20,6 +21,8 @@ type PresenceValue = {
   goal: string;
   changes: string;
   at: number;
+  /** The Lane record's park (Item e1633718). */
+  park?: LanePark;
 };
 type Pointer = { id: Id<'projectHostedPresence'>; at: number };
 /** A Lane whose presence data is unchanged rewrites its row at most this often (activity time only). */
@@ -28,8 +31,8 @@ const same = (a: string[], b: string[]) => a.length === b.length && a.every((pat
 
 /** Written inside the Lane record write that already runs (no added call, no added read: the
  * overlap row it already read holds the pointer). Writes slim metadata plus a 512-character path
- * filter (only for truncated paths) when the Issue, goal, actor or saved paths change, or activity moved
- * by 10 minutes. A closed Lane's row is deleted, so the
+ * filter (only for truncated paths) when the Issue, goal, actor, saved paths or park change, or activity
+ * moved by 10 minutes. A closed Lane's row is deleted, so the
  * table only holds open Lanes. Returns the pointer to keep on the overlap row. */
 export async function trackHostedPresence(
   ctx: MutationCtx,
@@ -43,6 +46,7 @@ export async function trackHostedPresence(
     session?: import('zod').infer<typeof import('../src/hosted-lane').sessionMetadataSchema>;
     goal: string;
     changes: string;
+    park?: LanePark;
   } | null,
   value: PresenceValue | null,
 ): Promise<Pointer | undefined> {
@@ -61,6 +65,7 @@ export async function trackHostedPresence(
     goal: value.goal.slice(0, PRESENCE_GOAL_CHARS),
     ...presencePaths(value.changes),
     at: value.at,
+    ...(value.park ? { park: value.park } : {}),
   };
   if (pointer) {
     const before = presencePaths(old.changes);
@@ -73,6 +78,7 @@ export async function trackHostedPresence(
       before.pathCount === row.pathCount &&
       same(before.paths, row.paths) &&
       before.pathBloom === row.pathBloom &&
+      samePark(old.park, value.park) &&
       row.at - pointer.at < PRESENCE_REFRESH_MS
     )
       return pointer;
@@ -80,6 +86,44 @@ export async function trackHostedPresence(
     return { id: pointer.id, at: row.at };
   }
   return { id: await ctx.db.insert('projectHostedPresence', row), at: row.at };
+}
+
+/** Keeps a Lane's projectHostedParks row (Item e1633718) in step with its park: the account whose Needs me lists it,
+ * or none. The row exists exactly while the Lane is parked and has a presence row, so every place that deletes a
+ * presence row of a parked Lane calls dropLanePark. Touches the table only when that account changes (park, re-park
+ * to someone else, clear, Lane closed or superseded, superseded Lane saved again), so an unparked Lane and an
+ * unchanged park cost nothing. It reads the Lane's rows before writing and keeps at most one, so a missed drop can
+ * never leave two rows for one Lane. */
+export async function routeLanePark(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  laneId: string,
+  before: string | undefined,
+  after: string | undefined,
+) {
+  if (before === after) return;
+  const rows = await ctx.db
+    .query('projectHostedParks')
+    .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
+    .take(PARK_ROUTE_ROWS);
+  // Cleared: every row goes. Parked: the first row is kept (re-pointed when the account changed), any extra goes.
+  const keep = after ? rows[0] : undefined;
+  for (const row of keep ? rows.slice(1) : rows) await ctx.db.delete(row._id);
+  if (keep && after) {
+    if (keep.parkedFor !== after) await ctx.db.patch(keep._id, { parkedFor: after });
+  } else if (after) await ctx.db.insert('projectHostedParks', { projectId, laneId, parkedFor: after });
+}
+/** At most this many routing rows are read for one Lane: one is the rule; more only repairs a past missed drop. */
+const PARK_ROUTE_ROWS = 4;
+
+/** A parked Lane's presence row is being deleted without a record write (superseded, or closed by an Intent
+ * cascade): its routing row goes too, so the holder's Needs me never spends a slot on it. A later save that makes the
+ * Lane live again routes it afresh. Reads nothing for an unparked Lane. */
+export async function dropLanePark(
+  ctx: MutationCtx,
+  row: { projectId: Id<'hostedProjects'>; laneId: string; presenceRow?: unknown; park?: unknown },
+) {
+  if (row.presenceRow && row.park) await routeLanePark(ctx, row.projectId, row.laneId, 'parked', undefined);
 }
 
 /** Related open Lanes for the caller's Lane, from at most 25 + 6 slim rows. `since` (a previous

@@ -188,6 +188,9 @@ export const hostedContractFeatures = [
    * d3357f40). The CLI then reports the member's refused status write as moved by the server; without it the
    * refusal is reported as before. */
   'planning-start-move',
+  /** Explicit Lane holds (e1633718): projectHostedLanePark:set parks a Lane on a holder with a reason, or clears it.
+   * Without it the CLI refuses `save {park}` before saving. */
+  'lane-park',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

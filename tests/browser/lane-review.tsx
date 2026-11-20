@@ -2,7 +2,8 @@
 // The Lane review screen (Items 52235fbf, 4bc460aa, a1e3d771) on synthetic data, through its real components. The
 // Convex client is a stand-in that answers the two download calls the screen makes and counts them; file bytes come
 // back as data: URLs and the real reader checks each against its digest. `?s=review` is a held Lane with a conflict
-// with the Lane ahead; `?s=combined` is the same Lane after it was combined on top of that Lane.
+// with the Lane ahead; `?s=combined` is the same Lane after it was combined on top of that Lane; `?s=parked` is the
+// held Lane also parked on a named holder (Item e1633718).
 import { createRoot } from 'react-dom/client';
 import { ConvexProvider, type ConvexReactClient } from 'convex/react';
 import { getFunctionName } from 'convex/server';
@@ -156,6 +157,17 @@ async function reply(): Promise<Reply> {
               timing: { toMain: 477, queue: 42, check: 430, land: 5 },
             }
           : null,
+      ...(scenario === 'parked'
+        ? {
+            park: {
+              to: 'sample-two',
+              named: true,
+              reason: 'Waits for the bench window to end before it lands.',
+              at: Date.now() - 95 * 60_000,
+              by: 'sample-owner/amber-fox',
+            },
+          }
+        : {}),
       ...(combined
         ? {
             earlyResolution: {

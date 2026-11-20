@@ -398,3 +398,45 @@ test('1dd4e095: replaying a completed split save removes its background flag wit
   assert.notEqual(readHostedLaneCheckout(f.root).selection.head, f.entry.head);
   assert.deepEqual(f.c.calls.slice(before), ['projectHostedSaves:progress']);
 });
+
+// Item e1633718, review 1d3e59ac: a save that parks never returns before its settlement. Sent while the server still
+// settled the save, the park's Lane record write moved the version and the save failed as stale after the CLI had
+// said "Saved", with the Lane shown as parked without its last edits.
+test('a save that parks waits for its own settlement, then parks: the save lands and the park holds', async t => {
+  const f = await setup(t),
+    address = { url: 'https://fixture.invalid', projectId: f.s.projectId },
+    transport = new HostedAgentTransport(f.root, address, f.exchange),
+    originalWait = sourceWaitHooks.wait;
+  t.after(() => {
+    sourceWaitHooks.wait = originalWait;
+  });
+  t.mock.method(process.stderr, 'write', () => true);
+  // Should the save be left to settle in the background, settle it only after the CLI has replied (the incident).
+  sourceWaitHooks.wait = async (_address, operationId) => {
+    const dispatch = f.scheduled.find(item => item.name === 'projectConvexSource:dispatch');
+    await f.settle(dispatch.args.jobId);
+    return JSON.parse(
+      await f.c.client.query(makeFunctionReference('projectHostedSaves:progress'), {
+        projectId: f.s.projectId,
+        operationId,
+      }),
+    ).terminal;
+  };
+  const saved = await hostedAgentCli(
+    f.root,
+    'save',
+    { message: 'park after this save', park: { reason: 'Waits for the lead.' } },
+    address,
+    transport,
+  );
+  assert.notEqual(saved.result.status, 'settling', 'a parking save does not return before its settlement');
+  const committed = f.c.calls.lastIndexOf('projectConvexSourceStore:commit'),
+    parked = f.c.calls.indexOf('projectHostedLanePark:set');
+  assert(committed >= 0 && parked > committed, 'the save settled before the park was sent');
+  assert.equal(saved.result.outcome.status, 'completed', 'the save itself completed, not failed as stale');
+  assert.equal(saved.result.park.reason, 'Waits for the lead.');
+  const saveHead = saved.result.outcome.result.head;
+  assert.notEqual(saveHead, f.entry.head, 'the edits are in the saved head');
+  assert.equal(f.overlap().head, saveHead, 'the Lane is on the saved head');
+  assert.equal(f.overlap().park?.reason, 'Waits for the lead.', 'and it is parked');
+});

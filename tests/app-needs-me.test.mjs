@@ -7,8 +7,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 
-const { needsView, needsSentence, whoOf } = await import(moduleUrl('../web/src/app/needs/model.ts'));
-const { needsCount } = await import(moduleUrl('../web/src/app/needs/count.ts'));
+const { needsView, needsSentence, whoOf, parkLine } = await import(
+  moduleUrl('../web/src/app/needs/model.ts')
+);
+const countModule = await import(moduleUrl('../web/src/app/needs/count.ts'));
+const { needsCount } = countModule;
 const { decideTarget } = await import(moduleUrl('../web/src/app/needs/decide.ts'));
 
 const held = (laneId, why, since, extra = {}) => ({
@@ -251,6 +254,73 @@ test('0cb9b064: a landing its agent withdrew is FYI, labelled withdrawn, and nev
   assert.match(fyi.head, /: its agent withdrew the landing\.$/);
   assert.doesNotMatch(fyi.head, /refused/i);
   assert.equal(needsSentence(needsView(read([held('l1', 'withdrawn', 30)], []))).bold, 'Nothing needs you.');
+});
+
+// Item e1633718, owner decision ead78765: a named holder sees a parked Lane at once; with no one named, the starter
+// sees it once it has had no activity for 4 h, marked "parked, no one named". The page decides by the time its read
+// arrived, so the shell count and the page agree and nothing ticks.
+test('e1633718: a Lane parked for the reader counts at once; one parked with no one named only after 4 h idle', () => {
+  const { PARK_UNNAMED_AFTER_MS } = countModule;
+  const parked = (laneId, park, at) => ({
+    laneId,
+    intentId: `i-${laneId}`,
+    title: `Title ${laneId}`,
+    actor: 'sample-one',
+    agent: 'quiet-otter',
+    park,
+    at,
+  });
+  const named = parked(
+    'p1',
+    { to: 'sample-one', named: true, reason: 'Bench window', at: 50, by: 'sample-lead/brisk-heron' },
+    50,
+  );
+  const unnamed = parked(
+    'p2',
+    { named: false, reason: 'Until the lead decides', at: 100, by: 'sample-one' },
+    100,
+  );
+  const input = { ...read([], []), parked: [named, unnamed] };
+  const early = 100 + PARK_UNNAMED_AFTER_MS - 1;
+  const soon = needsView(input, early);
+  assert.deepEqual(
+    soon.parked.map(row => row.laneId),
+    ['p1'],
+    'unnamed waits for 4 h of no activity',
+  );
+  assert.equal(soon.parked[0].head, 'Title p1 is parked for you.');
+  assert.equal(soon.parked[0].who, 'sample-lead/brisk-heron', 'who parked it');
+  assert.deepEqual(needsCount(input, early), { n: 1, atLeast: false }, 'the shell count agrees');
+  const late = needsView(input, 100 + PARK_UNNAMED_AFTER_MS);
+  assert.deepEqual(
+    late.parked.map(row => row.laneId),
+    ['p1', 'p2'],
+  );
+  assert.equal(late.parked[1].head, 'Title p2 is parked, no one named.');
+  assert.equal(late.parked[1].tag, 'Parked, no one named');
+  assert.equal(late.count, 2);
+  assert.match(needsSentence(late).bold, /^2 things hold work until you decide\.$/);
+  assert.deepEqual(needsCount(input, 100 + PARK_UNNAMED_AFTER_MS), { n: 2, atLeast: false });
+  const run = needsView(
+    { ...input, parked: [parked('p3', { ...named.park, to: 'sample-one/quiet-otter' }, 50)] },
+    60,
+  );
+  assert.equal(run.parked[0].head, 'Title p3 is parked for your agent run quiet-otter.');
+});
+
+test('e1633718: the Lane page says who a parked Lane waits on, how long, and why', () => {
+  const at = 0;
+  assert.equal(
+    parkLine(
+      { to: 'sample-lead', named: true, reason: 'Waits for the  bench window.', at, by: 'x' },
+      90 * 60_000,
+    ),
+    'Parked for @sample-lead (1 h 30 min): Waits for the bench window.',
+  );
+  assert.equal(
+    parkLine({ named: false, reason: 'Until the lead decides.', at, by: 'x' }, 5 * 60_000),
+    'Parked, no one named (5 min): Until the lead decides.',
+  );
 });
 
 test('a Lane held for a dependency names the Lane it lands after when the read names it (9e748e41)', () => {

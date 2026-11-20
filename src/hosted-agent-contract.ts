@@ -15,6 +15,7 @@ import { saveExpectedSchema } from './hosted-save.js';
 import { snapshotsCommandSchema } from './lane-snapshot-contract.js';
 import { safeRelative } from './safe-relative.js';
 import { guardCandidatesSchema } from './hosted-lane.js';
+import { parkInputSchema } from './hosted-records.js';
 import {
   planningCommentCommandSchema,
   planningModelPutKeys,
@@ -244,8 +245,16 @@ export const hostedAgentCommandSchemas = {
       paths: z.array(z.string().refine(safeRelative)).optional(),
     })
     .strict(),
+  /** `park` (Item e1633718): after the save, park the Lane on a holder (`@handle` or `handle/word-word`) with a
+   * reason, or with a reason only (no one named); `park: null` clears it. */
   save: z
-    .object({ ...lane, ...message, model: z.string().optional(), supersedeFinish: z.boolean().optional() })
+    .object({
+      ...lane,
+      ...message,
+      model: z.string().optional(),
+      supersedeFinish: z.boolean().optional(),
+      park: parkInputSchema.optional(),
+    })
     .strict(),
   compose: z.object(selection).strict(),
   sync: z

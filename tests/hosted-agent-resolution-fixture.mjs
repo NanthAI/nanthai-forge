@@ -30,6 +30,7 @@ const names = [
   'projectHostedSaves',
   'projectHostedSaveJobs',
   'projectHostedOverlaps',
+  'projectHostedLanePark',
 ];
 const modules = Object.fromEntries(
   await Promise.all(names.map(async name => [name, await import(moduleUrl(`../convex/${name}.ts`))])),

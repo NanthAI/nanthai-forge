@@ -5,9 +5,21 @@
 // ahead are listed apart and never counted (DESIGN.md rules 15, 16, 41). Pure: tests/app-needs-me.test.mjs pins it.
 import type { StateWord } from '../../ds';
 import { heldState, heldWhyState } from '../lane-state';
-import { laneRequests, waitsOnPerson, type Ask, type HeldLane, type HeldWhy, type NeedsRead } from './count';
+import {
+  laneRequests,
+  parkHolder,
+  parkShown,
+  parkWords,
+  waitsOnPerson,
+  type Ask,
+  type HeldLane,
+  type HeldWhy,
+  type NeedsRead,
+  type Park,
+  type ParkedLane,
+} from './count';
 
-export type { Ask, HeldLane, HeldWhy, NeedsRead } from './count';
+export type { Ask, HeldLane, HeldWhy, NeedsRead, Park, ParkedLane } from './count';
 /** One open request from the approvals payload (projectHostedApprovals `openApprovalRequests`). */
 export type Approval = {
   laneId: string;
@@ -42,12 +54,23 @@ export type NowRow = HeldLane & {
   next: string | null;
 };
 export type AskRow = Ask & { who: string | null };
+/** A Lane parked for the reader (Item e1633718): named to the reader, or the reader's own Lane parked with no one
+ * named and idle 4 h. `since` is when it was parked (named) or last active (no one named). */
+export type ParkedRow = ParkedLane & {
+  head: string;
+  tag: string;
+  who: string | null;
+  mark: string;
+  since: number;
+};
 /** `head` stays the request's own head, which a decision must name; `question` is what the row says. */
 export type AheadRow = Approval & { word: StateWord; tag: string; question: string; who: string | null };
 export type NeedsView = {
   now: NowRow[];
   /** Questions with choices for the reader: they wait on the reader, so they are counted. */
   asks: AskRow[];
+  /** Lanes parked for the reader that show now (count.ts `parkShown`): counted. */
+  parked: ParkedRow[];
   /** Held, but nothing for a person to decide (count.ts `waitsOnPerson`): FYI rows, never counted. */
   fyi: NowRow[];
   ahead: AheadRow[];
@@ -156,7 +179,28 @@ function aheadHead(request: Approval) {
   return request.label;
 }
 
-export function needsView(read: NeedsRead): NeedsView {
+/** The parked row's line. The holder named is the reader (an agent run's holder is the reader's own run). */
+function parkedRow(row: ParkedLane): ParkedRow {
+  const title = laneTitle(row);
+  const holder = parkHolder(row.park);
+  const run = holder?.includes('/') ? holder.slice(holder.indexOf('/') + 1) : null;
+  return {
+    ...row,
+    head: !row.park.named
+      ? `${title} is parked, no one named.`
+      : run
+        ? `${title} is parked for your agent run ${run}.`
+        : `${title} is parked for you.`,
+    tag: row.park.named ? 'Parked' : 'Parked, no one named',
+    who: row.park.named ? row.park.by || null : whoOf(row.actor, row.agent),
+    mark: row.laneId.slice(0, 8),
+    since: row.park.named ? row.park.at : row.at,
+  };
+}
+
+/** `now` decides only which Lanes parked with no one named show (count.ts `parkShown`); the page passes the time
+ * its reads arrived, so nothing ticks. */
+export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
   const { requests, complete } = approvalsOf(read.approvals);
   const laneApprovals = new Map(
     requests.filter(request => request.kind === 'lane').map(request => [request.laneId, request]),
@@ -198,11 +242,15 @@ export function needsView(read: NeedsRead): NeedsView {
     })
     // Longest held first (Item 9e748e41, I41); ties keep the read's order.
     .sort((a, b) => a.since - b.since);
-  const now = rows.filter(row => row.waits).map(({ waits: _waits, ...row }) => row);
+  const waiting = rows.filter(row => row.waits).map(({ waits: _waits, ...row }) => row);
   const fyi = rows.filter(row => !row.waits).map(({ waits: _waits, ...row }) => row);
   const asks = (read.asks ?? [])
     .map(ask => ({ ...ask, who: whoOf(ask.actor, ask.agent) }))
     .sort((a, b) => a.at - b.at);
+  const parked = (read.parked ?? [])
+    .filter(row => parkShown(row, now))
+    .map(parkedRow)
+    .sort((a, b) => a.since - b.since);
   // A Lane request holds that Lane's landing, so it is drawn on the held row, never twice (rule 9).
   const ahead = requests
     .filter(request => request.kind !== 'lane')
@@ -222,12 +270,13 @@ export function needsView(read: NeedsRead): NeedsView {
       who: whoOf(request.requester, request.agent),
     }));
   return {
-    now,
+    now: waiting,
     asks,
+    parked,
     fyi,
     ahead,
-    count: now.length + asks.length,
-    atLeast: read.more > 0,
+    count: waiting.length + asks.length + parked.length,
+    atLeast: read.more > 0 || read.parkedMore === true,
     approvalsComplete: complete,
   };
 }
@@ -256,6 +305,12 @@ export function waited(since: number, now: number) {
   const hours = Math.floor(minutes / 60);
   if (hours < 48) return `${hours} h ${minutes % 60 ? `${minutes % 60} min` : ''}`.trim();
   return `${Math.floor(hours / 24)} d`;
+}
+
+/** The Lane page's park sentence (Item e1633718): who it waits on, for how long, and why in the parker's words. */
+export function parkLine(park: Park, now: number) {
+  const words = parkWords(park);
+  return `${words[0]!.toUpperCase()}${words.slice(1)} (${waited(park.at, now)}): ${park.reason.replace(/\s+/g, ' ').trim()}`;
 }
 
 /** The Lane page's hold sentence (friction e2f436b6), from the same Needs me read: "for you" only when Needs me says

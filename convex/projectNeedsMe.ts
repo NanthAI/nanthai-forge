@@ -3,7 +3,8 @@
 // It starts from the live line's held marks (the same set the top bar counts as "Needs you"), so the count
 // beside Needs you, the screen's count and its rows always agree. For each held Lane it adds the Lane's title
 // and holder (its slim presence row) and why Forge holds it (the bound landing's recorded observation), and
-// it adds the open approval requests. No paths, source, activity or check output; idle costs nothing.
+// it adds the open approval requests, and the Lanes parked for the reader (Item e1633718: one index range on the parked
+// Lanes' routing rows, plus each one's slim presence row). No paths, source, activity or check output; idle costs nothing.
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import type { QueryCtx } from './_generated/server';
@@ -25,6 +26,8 @@ export const withoutRawId = (goal: string) => goal.replace(RAW_ID, '').replace(/
 
 /** The most held Lanes one read describes; the rest are counted, as the line does. */
 export const NEEDS_ME_HELD_LIMIT = 30;
+/** The most parked Lanes one read lists for the reader (Item e1633718); one index range of at most this plus one. */
+const NEEDS_ME_PARKED_LIMIT = 30;
 const NOTE_CHARS = 240;
 
 export const needsMeWhy = v.union(
@@ -72,6 +75,31 @@ export const needsMeResult = v.object({
   approvals: v.string(),
   /** Whether the viewer can approve or decline (the project owner). */
   canDecide: v.boolean(),
+  /** Open Lanes parked for the reader (Item e1633718): named to the reader, or parked by the reader's own Lane with
+   * no one named. The page shows an unnamed one only once `at` (its last activity) is 4 h old, by its own clock
+   * when it draws (count.ts `parkShown`), so no timer and no clock argument: idle costs nothing. */
+  parked: v.optional(
+    v.array(
+      v.object({
+        laneId: v.string(),
+        intentId: v.string(),
+        title: v.union(v.string(), v.null()),
+        actor: v.string(),
+        agent: v.union(v.string(), v.null()),
+        /** `named` stays true when the reader may not see the holder's handle, so a hidden name never reads as none. */
+        park: v.object({
+          to: v.optional(v.string()),
+          named: v.boolean(),
+          reason: v.string(),
+          at: v.number(),
+          by: v.string(),
+        }),
+        /** The Lane's last activity (ms): its presence row's record time. */
+        at: v.number(),
+      }),
+    ),
+  ),
+  parkedMore: v.optional(v.boolean()),
   /** Questions with choices addressed to the viewer, unanswered, on an open Lane (Items 12fde646, 48049998). */
   asks: v.optional(
     v.array(
@@ -155,13 +183,19 @@ export const read = query({
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read what needs you.');
       const project = await accessibleProject(ctx, projectId, user.subject);
-      const [marks, approvals, asks] = await Promise.all([
+      const [marks, approvals, asks, parks] = await Promise.all([
         ctx.db
           .query('projectLiveLineLanes')
           .withIndex('by_project_and_held', q => q.eq('projectId', projectId).eq('held', true))
           .take(NEEDS_ME_HELD_LIMIT + 1),
         openApprovalRequests(ctx, projectId),
         messagesTo(ctx, projectId, user.subject, true),
+        ctx.db
+          .query('projectHostedParks')
+          .withIndex('by_project_and_parked_for', q =>
+            q.eq('projectId', projectId).eq('parkedFor', user.subject),
+          )
+          .take(NEEDS_ME_PARKED_LIMIT + 1),
       ]);
       const shown = marks.slice(0, NEEDS_ME_HELD_LIMIT);
       // A goal that is only a raw id names its Item instead (the Lane's Intent is the Item it started from): one
@@ -203,8 +237,29 @@ export const read = query({
           };
         }),
       );
+      // parkedFor is the named holder's account, or the starter's when no one is named (projectHostedPresence.ts
+      // routeLanePark); the Lane's slim presence row holds its title, people, park and last activity.
+      const parked = [];
+      for (const route of parks.slice(0, NEEDS_ME_PARKED_LIMIT)) {
+        const row = await ctx.db
+          .query('projectHostedPresence')
+          .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', route.laneId))
+          .unique();
+        if (!row?.park) continue;
+        parked.push({
+          laneId: row.laneId,
+          intentId: row.intentId,
+          title: await titleOf(row),
+          actor: row.actor,
+          agent: row.agent ?? null,
+          park: { ...row.park, named: Boolean(row.park.to) },
+          at: row.at,
+        });
+      }
       return {
         held,
+        parked,
+        parkedMore: parks.length > NEEDS_ME_PARKED_LIMIT,
         more: Math.max(0, marks.length - NEEDS_ME_HELD_LIMIT),
         moreIsLowerBound: marks.length > NEEDS_ME_HELD_LIMIT,
         approvals,

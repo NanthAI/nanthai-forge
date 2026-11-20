@@ -109,6 +109,10 @@ export const read = query({
           head: lane.head,
           base: lane.base,
           landed: row?.landed ? { ...row.landed, timing } : null,
+          // Parked (Item e1633718): who it waits on and why, from the record already read.
+          ...(lane.state === 'active' && lane.park
+            ? { park: { ...lane.park, named: Boolean(lane.park.to) } }
+            : {}),
           ...(lane.earlyResolution ? { earlyResolution: lane.earlyResolution, ahead } : {}),
           ...(lane.resolution
             ? {

@@ -820,6 +820,50 @@ test("a Lanes layout saved while it still had Landed today gives way to today's 
   assert.deepEqual(keptLayout(null, now), now);
 });
 
+test('e1633718: a parked Lane’s yard row says who it waits on and since when, with the parker’s reason under it', () => {
+  const park = {
+    to: 'sample-lead',
+    named: true,
+    reason: 'Waits for the bench window.',
+    at: -45 * 60_000,
+    by: 'sample-one/quiet-otter',
+  };
+  const yard = model.buildYard(
+    feed([mark('a', 'saved'), mark('b', 'saved'), mark('c', 'editing', { overlap: true })]),
+    [
+      { ...meta('a', 'Parked work'), park },
+      {
+        ...meta('b', 'Nobody named'),
+        park: { reason: 'Until the lead decides.', named: false, at: -5 * 60 * 60_000, by: 'mara' },
+      },
+      { ...meta('c', 'Conflicting'), park },
+    ],
+    undefined,
+    0,
+  );
+  const row = id => yard.rows.find(entry => entry.laneId === id);
+  assert.deepEqual(
+    [row('a').why, row('a').detail],
+    ['parked for @sample-lead 45 min ago', 'Waits for the bench window.'],
+  );
+  assert.deepEqual(
+    [row('b').why, row('b').detail],
+    ['parked, no one named 5 h ago', 'Until the lead decides.'],
+  );
+  assert.equal(row('c').why, 'its saved changes conflict with another Lane', 'a conflict still comes first');
+  const hidden = model.buildYard(
+    feed([mark('a', 'saved')]),
+    [{ ...meta('a', 'Parked work'), park: { ...park, to: undefined } }],
+    undefined,
+    0,
+  );
+  assert.equal(
+    hidden.rows[0].why,
+    'parked for a member 45 min ago',
+    'a name the reader may not see never reads as none',
+  );
+});
+
 test("a landing from a reopened Item's follow-up Intent is titled with the goal its Intent was started with", async () => {
   const f = readsFixture();
   const itemId = randomUUID();

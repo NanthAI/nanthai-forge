@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
+import { dropLanePark } from './projectHostedPresence';
 
 type Row = Doc<'projectHostedOverlapLanes'>;
 const overlapRow = (ctx: MutationCtx, projectId: Id<'hostedProjects'>, laneId: string) =>
@@ -15,6 +16,8 @@ const overlapRow = (ctx: MutationCtx, projectId: Id<'hostedProjects'>, laneId: s
 async function supersede(ctx: MutationCtx, row: Row, by: { laneId: string; receiptId: string; at: string }) {
   if (!row.open || row.superseded?.laneHead === row.head) return false;
   if (row.presenceRow) await ctx.db.delete(row.presenceRow.id);
+  // A parked Lane (Item e1633718) leaves its holder's Needs me with its presence row.
+  await dropLanePark(ctx, row);
   await ctx.db.patch(row._id, {
     presenceRow: undefined,
     superseded: { by: by.laneId, receiptId: by.receiptId, laneHead: row.head, at: by.at },

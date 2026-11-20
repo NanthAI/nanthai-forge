@@ -2,7 +2,8 @@
 // Needs me in a real browser (Item 48049998), on synthetic data through the real shell frame, screen and model
 // (tests/browser/needs-me.tsx): the shell's Needs you count equals the page's; an agent's conflict and a refusal are
 // FYI rows, never Needs you; a protected-path approval and a question stay in Needs you; Dismiss and Clear all write
-// once, on the click; Loose ends is open by default (77d2e8bc), says "No loose ends." on one line when it has no rows,
+// once, on the click; a Lane parked for the reader is in Needs you, one parked with no one named only after 4 h idle
+// (Item e1633718); Loose ends is open by default (77d2e8bc), says "No loose ends." on one line when it has no rows,
 // and a reader's fold is kept and reads nothing; nothing on the page sets a timer; axe is
 // clean with no sideways scroll at desk and phone width in both themes, busy and first-day. Set FORGE_NEEDS_SHOTS to a
 // folder to also save the screenshots.
@@ -106,7 +107,11 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       const shell = await page.locator('header.top a.needs .cnt').textContent();
       const own = await region(page, 'Needs you').locator('.ph .cnt').textContent();
       assert.equal(shell, own, 'the shell count is the page count');
-      assert.equal(own, '2', 'the protected-path approval and a question: only what the reader decides');
+      assert.equal(
+        own,
+        '4',
+        'the protected-path approval, a question, a Lane parked for the reader and one parked with no one named, idle 5 h',
+      );
       const needs = await region(page, 'Needs you').locator('h3').allTextContents();
       assert.ok(
         needs.some(text => text.startsWith('CI: drop Node 18')),
@@ -116,6 +121,12 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
         needs.some(text => text.startsWith('The adapter tests can run')),
         'the question stays',
       );
+      assert.ok(needs.includes('Docs: queue limits page is parked for you.'), 'named to the reader: at once');
+      assert.ok(
+        needs.includes('Bench: replay the 12-Lane run is parked, no one named.'),
+        'no one named, idle 5 h: in the starter’s Needs me',
+      );
+      assert.ok(!needs.some(text => text.startsWith('Parked an hour ago')), 'idle 1 h: not yet');
       assert.ok(!needs.some(text => text.includes('retry budget')), "an agent's conflict is not Needs you");
       assert.ok(!needs.some(text => text.includes('Release notes')), 'a refusal is not Needs you');
       const fyi = await region(page, 'FYI').locator('.fyi-row .ttl').allTextContents();

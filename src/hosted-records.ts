@@ -13,6 +13,63 @@ import { invariant } from './errors.js';
 import { sourceJobControlSchema } from './hosted-source-job.js';
 import { docsMergeSchema } from './docs-resolution.js';
 import { planningItemSchema, planningCommentSchema } from './work-planning-types.js';
+import { splitAgentActor } from './agent-slug.js';
+
+// Explicit Lane holds (Item e1633718): a builder parks its Lane on a named holder with a reason, or with no one
+// named. One optional field on the Lane record, mirrored onto the Lane's slim presence row, plus one routing row per
+// parked Lane so Needs me finds the Lanes parked for the reader with one index range. Kept here (not its own module)
+// so the CLI/MCP graph gains no module.
+export const PARK_REASON_CHARS = 280;
+const reason = z.string().trim().min(1).max(PARK_REASON_CHARS);
+
+/** The stored park. `to` and `by` are account ids, or `ACCOUNT/slug` for an agent run of that account; public
+ * reads map both to handles (convex/publicPeople.ts). No `to`: parked with no one named. */
+export const laneParkSchema = z
+  .object({
+    to: z.string().min(1).optional(),
+    reason,
+    /** When it was parked (ms). */
+    at: z.number().int().nonnegative(),
+    by: z.string().min(1),
+  })
+  .strict();
+export type LanePark = z.infer<typeof laneParkSchema>;
+
+/** `save {park}`: park with a holder (`@handle`, or `handle/word-word` for that person's agent run) and a reason,
+ * or with a reason only (no one named); `null` clears it. */
+export const parkInputSchema = z.union([
+  z
+    .object({
+      holder: z
+        .string()
+        .trim()
+        .regex(/^@?[A-Za-z0-9-]{1,39}(?:\/[a-z]+-[a-z]+)?$/, 'holder: @handle or handle/agent-run')
+        .optional(),
+      reason,
+    })
+    .strict(),
+  z.null(),
+]);
+
+/** The account a park routes to: its named holder's account, else the account that started the Lane. */
+export function parkedFor(park: Pick<LanePark, 'to'>, starter: string) {
+  if (!park.to) return starter;
+  return splitAgentActor(park.to)?.actor ?? park.to;
+}
+
+/** Same park, field by field (no serialisation on the record-write path). */
+export const samePark = (a: LanePark | undefined, b: LanePark | undefined) =>
+  a === b || (!!a && !!b && a.to === b.to && a.reason === b.reason && a.at === b.at && a.by === b.by);
+
+/** projectHostedLanePark:set's reply; `to` and `by` arrive as public handles. */
+export const parkResultSchema = z
+  .object({
+    laneId: z.uuid(),
+    park: laneParkSchema.nullable(),
+    changed: z.boolean(),
+    version: z.number(),
+  })
+  .strict();
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 const version = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -98,6 +155,8 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
       state: z.enum(['active', 'completed', 'abandoned']),
       /** Owner pin: cleanup (complete-merged, completeOnAccept, prune, cache GC) never completes or deletes it. Absent when unpinned. */
       pinned: z.literal(true).optional(),
+      /** Parked (Item e1633718): who it waits on and why. Saves carry it forward; save {park:null} clears it. */
+      park: laneParkSchema.optional(),
       authorityEpoch: version,
       revert: z.object({ receiptId: z.uuid(), previous: hash, accepted: hash }).strict().optional(),
       resolution: z

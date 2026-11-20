@@ -4,7 +4,8 @@
 // Item never look the same and a left-behind one says what replaced it, below the live one; a Ready Lane behind
 // another says what it waits on; a Lane further back is traced to the front of the queue (9e748e41); in the dense
 // yard the Lane mark is never cut (real case: Item 1dd4e095, whose two Lanes read the same once the meta line was
-// cut); axe is clean with no sideways scroll at desk and phone width in both themes, plain and dense. Set
+// cut); axe is clean with no sideways scroll at desk and phone width in both themes, plain and dense; a parked Lane
+// names who it waits on and why (Item e1633718). Set
 // FORGE_LANE_SHOTS to a folder to also save the screenshots.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -123,6 +124,12 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
       assert.ok(
         account.every(row => !row.why.startsWith('replaced')),
         'busy Lanes of one Item are only grouped',
+      );
+      assert.ok(
+        account.some(
+          row => row.why === 'parked for @devon 40 min ago Waits for devon to pick the empty-state copy.',
+        ),
+        'e1633718: a parked Lane names who it waits on and since when, with the reason under it',
       );
     });
 

@@ -803,8 +803,12 @@ layer out of both first paints.
   sections. Needs you reads `projectNeedsMe:read`: the live line's held marks
   (at most 30, the rest counted), each with its title, holder and recorded
   hold reason (the landing's recorded cause wins over an overlap mark), the
-  open approval requests (`openApprovalRequests`) and questions with choices
-  addressed to the reader. A held Lane is in Needs you only when the reader
+  open approval requests (`openApprovalRequests`), questions with choices
+  addressed to the reader, and the Lanes parked for the reader (one index range
+  on `projectHostedPresence.by_project_and_parked_for`, at most 30; a park is
+  one optional field on the Lane record, mirrored onto its presence row). A
+  Lane parked with no one named shows once its stored last-activity time is 4 h
+  old, compared when the page draws (`needs/count.ts` `parkShown`). A held Lane is in Needs you only when the reader
   decides it (an approval or a landing held for review, for the owner;
   `needs/count.ts` `waitsOnPerson`); every other hold is an FYI row naming who
   acts next. The top bar's Needs you count subscribes to the same read and

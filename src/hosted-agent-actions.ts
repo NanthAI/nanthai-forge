@@ -4,7 +4,7 @@ import { commandScopeProposal } from './check-command-scope.js';
 import { retainSyncHandoff, clearSyncHandoff } from './hosted-sync-handoff.js';
 import { guideHostedSync, resolveHostedAgent } from './hosted-agent-resolution.js';
 import { syncTiming, type StepTimer } from './sync-timing.js';
-import { hostedRecordSchema } from './hosted-records.js';
+import { hostedRecordSchema, parkResultSchema } from './hosted-records.js';
 import { executeHostedFinish } from './hosted-agent-finish.js';
 import { executeHostedWithdraw } from './hosted-agent-withdraw.js';
 import { settleTurnWork } from './agent-turn-work.js';
@@ -647,6 +647,24 @@ export async function executeHostedAgent(
   if (action === 'save') {
     const command = hostedAgentCommandSchemas.save.parse(input);
     checkLocalLane(session, command.laneId);
+    if (command.park !== undefined && !session.capabilities.features?.includes('lane-park'))
+      throw unadvertisedActionError('save park');
+    // Park (Item e1633718) after the save returns: one call, a repeat with the same holder and reason writes nothing.
+    const parkLane = async () => {
+      if (command.park === undefined) return {};
+      const laneId = command.laneId ?? session.marker()?.selection.laneId;
+      invariant(laneId, 'BAD_ARGUMENT', SELECT_LANE);
+      const parked = parseHostedResponse(
+        parkResultSchema,
+        await session.mutation('projectHostedLanePark:set', {
+          authorityEpoch: epoch,
+          laneId,
+          ...(session.agent ? { agent: session.agent } : {}),
+          park: command.park,
+        }),
+      );
+      return { park: parked.park };
+    };
     const timing = syncTiming();
     // A save already settled here answers from its receipt and captures nothing new: say so.
     const replayed = saveSettledHere(session.root, operationId),
@@ -659,9 +677,14 @@ export async function executeHostedAgent(
       const nothing = nothingToSave(session.root, operationId);
       // A file the capture left out by name (a credential-named .env.local) still sits unsaved: say so.
       const notSaved = nothing && capturedNotSaved(session.root, operationId);
-      if (nothing) return { ...nothing, ...(notSaved ? { notSaved } : {}) };
+      // A park still applies: the server writes nothing when it is unchanged, so a true replay stays a no-op.
+      if (nothing) return { ...nothing, ...(notSaved ? { notSaved } : {}), ...(await parkLane()) };
     }
-    const settleBackground = session.capabilities.features?.includes('save-settle-background') ?? false;
+    // A save that parks waits for its own outcome first (review 1d3e59ac): the park is a Lane record write, so sent
+    // while the server still settles the save it would move the Lane's version and fail that save as stale.
+    const settleBackground =
+      command.park === undefined &&
+      (session.capabilities.features?.includes('save-settle-background') ?? false);
     const saved = await saveHostedLane(
       session.root,
       {
@@ -700,6 +723,7 @@ export async function executeHostedAgent(
     const outcome = await awaitSaveOutcome(session, operationId, saved, timing),
       split = timing.value();
     if (!outcome || typeof outcome !== 'object') return outcome;
+    const parked = await parkLane();
     // The invocation that saw the outcome keeps its split in the operation journal (marked when it was
     // a replay of an unfinished save); a replay answered from the settled receipt returns that split.
     const kept = await keptSaveTiming(session.journal, {
@@ -719,6 +743,7 @@ export async function executeHostedAgent(
       ...(kept ? { timing: kept } : {}),
       ...(notSaved ? { notSaved } : {}),
       ...(unsaved ? { unsavedEdits: unsaved } : {}),
+      ...parked,
     };
   }
   if (action === 'compose')

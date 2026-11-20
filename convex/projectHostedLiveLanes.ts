@@ -216,6 +216,8 @@ export const list = query({
           head: lane.head,
           // A resolution Lane names the conflicted Lane it continues (Item d9e1ac62): from the record already read.
           ...(lane.resolution?.origin ? { resolves: lane.resolution.origin.laneId } : {}),
+          // Parked (Item e1633718): who it waits on, why and since when, from the record already read.
+          ...(lane.park ? { park: { ...lane.park, named: Boolean(lane.park.to) } } : {}),
           lastSaveAt: saved ? JSON.parse(await hostedRecordBody(ctx, saved)).at : null,
           // Last Lane-record change (save, start, sync, landing), from the record already read (f0d0fdd6).
           lastActivityAt: lane.at,

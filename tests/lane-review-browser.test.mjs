@@ -182,9 +182,17 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
       await shot(page, 'lane-review-origin-1440-dark');
     });
 
+    await t.test('e1633718: a parked Lane says who it waits on, for how long, and why', async t => {
+      const page = await open(t, DESK, 's=parked');
+      assert.equal(
+        await page.getByText(/^Parked for @sample-two/).textContent(),
+        'Parked for @sample-two (1 h 35 min): Waits for the bench window to end before it lands.',
+      );
+    });
+
     await t.test('axe and widths: both themes, desk and phone', async t => {
       for (const viewport of [DESK, PHONE])
-        for (const s of ['review', 'combined']) {
+        for (const s of ['review', 'combined', 'parked']) {
           const page = await open(t, viewport, `s=${s}`);
           await page.locator('.lr-file').first().locator('summary').click();
           await page.locator('.lr-file').first().locator('.code').first().waitFor();

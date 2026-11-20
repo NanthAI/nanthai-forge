@@ -5,6 +5,7 @@
 import { documentationPath } from '../../../../src/prose-paths';
 import { reviewEntry, type ReviewEntry, type ReviewFacts } from '../../../../src/review-order';
 import type { LineFeed, LineStage } from '../Line';
+import type { Park } from '../needs/count';
 
 export type Side = { blob: string; mode: string } | null;
 export type ReviewFile = {
@@ -64,6 +65,8 @@ export type Reply = {
     } | null;
     earlyResolution?: EarlyResolution;
     ahead?: string | null;
+    /** Parked (Item e1633718): who it waits on (a handle, `handle/run`, or none named), why and since when. */
+    park?: Park;
     resolution?: { status: string; origin: string | null };
   };
   supervised: boolean;

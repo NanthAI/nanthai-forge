@@ -34,6 +34,7 @@ const names = [
   'projectHostedResolveChain',
   // The agent's capability call (it carries a split save's outcome, fea47345 C).
   'projectHostedAgent',
+  'projectHostedLanePark',
 ];
 export const modules = Object.fromEntries(
   await Promise.all(names.map(async name => [name, await import(moduleUrl(`../convex/${name}.ts`))])),

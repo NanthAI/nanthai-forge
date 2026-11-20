@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "projectHostedParks (Item e1633718): one routing row per open parked Lane only. An index on projectHostedPresence instead put a stored index entry on every open Lane and failed the ten-landing storage ratchet (scenario 2); no existing table is keyed by recipient account and limited to parked Lanes, so nothing can go.",
+  "date": "2026-11-18"
+}
