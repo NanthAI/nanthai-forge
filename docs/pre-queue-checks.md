@@ -512,7 +512,13 @@ Each tier answers a different question. None depends on a particular CI provider
    two-module consumers), with only the last four trimmed by a local time budget
    (180 s by default, `budgetSeconds` overrides). The budget is also a wall-time
    cap: the run starts no file once it is spent and names those files in
-   `stopped`, with `stoppedRerun` to run just them. The plan, the receipt and
+   `stopped`, with `stoppedRerun` to run just them. Every local test phase,
+   `trim:false`, finish and retry runs included, also stops at a 600 s ceiling
+   (`PREFLIGHT_RUN_CEILING_SECONDS`, Item 8dbd2683; declared guards too): runs
+   past it held half of all preflight slot time on 2026-11-19 and caught nothing.
+   What it stops goes to the landing check, and the receipt's `ceiling` names it;
+   a `budgetSeconds` above 600 raises it for that one run, named as an override.
+   The plan, the receipt and
    the builder output name the rule, the trimmed tier and files, the one command
    that runs them (`trim:false`), the estimate and the number of tests left for this
    pre-queue tier. The local tier **may leave out** any hub, name-watch or farther

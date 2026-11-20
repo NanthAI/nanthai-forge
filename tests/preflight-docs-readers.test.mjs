@@ -126,6 +126,6 @@ test('a file the save ignores never makes the inventory incomplete; the plan pri
   t.mock.restoreAll();
   assert.match(
     lines[0],
-    /^preflight plan: scope docs, 0 test file\(s\) here, 0 deferred to the pre-queue check; 180 s budget, about \d+ min\. Why: Only Markdown/,
+    /^preflight plan: scope docs, 0 test file\(s\) here, 0 deferred to the pre-queue check; 180 s budget, 600 s ceiling, about \d+ min\. Why: Only Markdown/,
   );
 });

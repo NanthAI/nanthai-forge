@@ -124,6 +124,19 @@ export const INFERRED_RUNNER_ADVISORY =
  * count; the run is a wall-time cap on the test phase: it starts no file once the budget is spent and
  * names every file it did not start. Whatever either cuts runs in the pre-queue Lane check. */
 export const PREFLIGHT_LOCAL_BUDGET_SECONDS = 180;
+/** Longest any one local test phase runs (seconds), whatever its budget, trim:false, finish or retry
+ * (Item 8dbd2683): on 2026-11-19, runs over 600 s held half of all preflight slot time and caught
+ * nothing. No file starts past it, declared guards included; what it stops goes to the landing check
+ * as a budget stop does. An explicit budgetSeconds above it raises it for that one run. */
+export const PREFLIGHT_RUN_CEILING_SECONDS = 600;
+/** The ceiling a run keeps: the default, or the caller's explicit larger budget (named as an override). */
+export const runCeiling = (budgetSeconds: number | undefined): { seconds: number; override?: true } =>
+  budgetSeconds !== undefined && budgetSeconds > PREFLIGHT_RUN_CEILING_SECONDS
+    ? { seconds: budgetSeconds, override: true }
+    : { seconds: PREFLIGHT_RUN_CEILING_SECONDS };
+/** The ceiling a planned run keeps, wherever its plan carries it; the default when it carries none. */
+const planCeiling = (plan: PreflightPlan & { status: 'planned' }) =>
+  plan.local?.ceiling ?? plan.ceiling ?? runCeiling(undefined);
 /** Longest a group is planned to run (seconds). The run re-checks the budget between groups and sizes
  * the next one from the speed it observed and the time left, so this is only how finely it can stop,
  * never how many tests may run. */
@@ -195,6 +208,16 @@ export const preflightReceiptSchema = z
     /** Selection rule, budget and cut, so a receipt says what was left for the pre-queue check. */
     rule: z.string().optional(),
     budgetSeconds: z.number().nonnegative().optional(),
+    /** The run's wall-time ceiling (8dbd2683): `override` when an explicit budget raised it, `reached`
+     * when it stopped files. */
+    ceiling: z
+      .object({
+        seconds: z.number().positive(),
+        override: z.literal(true).optional(),
+        reached: z.literal(true).optional(),
+      })
+      .strict()
+      .optional(),
     trimmedTiers: z.array(z.string()).optional(),
     deferredTo: z.literal('pre-queue').optional(),
     buildMs: z.number().nonnegative().optional(),
@@ -252,8 +275,10 @@ export type LocalSelection = {
   trimmedTests?: string[];
   /** The one command that runs every trimmed file (passed ones are reused). */
   rerun?: string;
-  /** false: run every ranked local tier, no time budget (the rerun command). */
+  /** false: run every ranked local tier, no time budget (the rerun command); the ceiling still holds. */
   trim?: false;
+  /** Hard wall-time ceiling of the test phase (8dbd2683); absent in a caller-built plan (the default holds). */
+  ceiling?: { seconds: number; override?: true };
   /** Changed paths whose edit is comment-only: they add only tests that read their text. */
   commentOnly?: string[];
   /** Set when the plan runs only the files a previous run stopped for time. */
@@ -304,6 +329,8 @@ export type PreflightPlan =
       estimateBasis?: 'measured' | 'hosted' | 'default';
       /** The packages the change affects (package-graph runner). */
       packages?: SelectedPackage[];
+      /** A package-graph plan's run ceiling (8dbd2683); other plans keep it on `local`. */
+      ceiling?: { seconds: number; override?: true };
     };
 
 const preparedEvidence = new WeakMap<PreflightPlan, PreflightEvidence>();
@@ -596,7 +623,7 @@ function runnerPlan(
     }
     if (wrappers && typeof wrappers.value !== 'boolean')
       return { status: 'unavailable', reason: `${wrappers.label} is true or false` };
-    return packagePlan(
+    const plan = packagePlan(
       root,
       runner,
       paths,
@@ -607,6 +634,9 @@ function runnerPlan(
       declaredPackageFlags(forgeJson),
       wrappers?.value === true,
     );
+    // Same object: plannedPaths keys on it. Package commands have no time budget, but the ceiling holds.
+    if (plan.status === 'planned') plan.ceiling = runCeiling(options.budgetSeconds);
+    return plan;
   }
   const selection = runnerSelection(runner, allPaths, paths, preflightImports(root, runner, allPaths, paths));
   // Tests that failed in a landing check or preflight while these paths changed run again, as for
@@ -696,6 +726,7 @@ function runnerPlan(
     protected: tests.length,
     deferred: 0,
     ...(trim ? {} : { trim: false as const }),
+    ceiling: runCeiling(options.budgetSeconds),
     ...(only ? { only: 'stopped' as const } : {}),
     deferredTo: 'pre-queue',
     summary: `Local rule: ${rule}. ${reason}.${guardSet ? ` ${guardSetLine(guardSet)}` : ''}`,
@@ -1148,6 +1179,7 @@ function planTests(
       commentOnly,
       only: !!only,
     });
+    local.ceiling = runCeiling(options?.budgetSeconds);
     const checks = planStatic(files.get('package.json'), changed.paths, forgeJson);
     if ('reason' in checks) return { status: 'unavailable', reason: checks.reason };
     const plan: PreflightPlan = {
@@ -1224,11 +1256,14 @@ function guardSetLine(report: GuardSetReport) {
 export function planLine(plan: PreflightPlan & { status: 'planned' }) {
   const deferred = plan.deferredTests?.length ?? 0;
   const reused = plan.reusedTests?.length ?? 0;
-  const budget = plan.local
-    ? plan.local.trim === false
-      ? 'no time budget (trim:false)'
-      : `${plan.local.budgetSeconds} s budget`
-    : 'no time budget';
+  const ceiling = planCeiling(plan);
+  const budget = `${
+    plan.local
+      ? plan.local.trim === false
+        ? 'no time budget (trim:false)'
+        : `${plan.local.budgetSeconds} s budget`
+      : 'no time budget'
+  }, ${ceiling.seconds} s ceiling${ceiling.override ? ' (budgetSeconds override)' : ''}`;
   const checks = plan.static?.selected.length
     ? ` Static first: ${plan.static.selected.map(check => check.name).join(', ')}.`
     : '';
@@ -1468,6 +1503,9 @@ export function runPreflight(
   const notRun: string[] = [];
   const stopped: string[] = [];
   const fileMs: Record<string, number> = {};
+  const ceiling = planCeiling(plan);
+  const ceilingMs = ceiling.seconds * 1000;
+  let ceilingReached = false;
   const failedFiles: string[] = [];
   // Units whose program is not installed here: an environment result, never a failed run.
   const missingPrograms: string[] = [];
@@ -1587,6 +1625,12 @@ export function runPreflight(
           if (plan.packageCommands) {
             // Package commands: one process per unit, in its package folder; a pass covers that unit.
             for (const [at, unit] of group.entries()) {
+              // Each unit is its own process, often minutes long: the ceiling is checked between them.
+              if (ran && Date.now() - testStarted >= ceilingMs) {
+                ceilingReached = true;
+                notRun.push(...group.slice(at));
+                break;
+              }
               const command = plan.packageCommands[unit]!;
               const cwd = join(root, command.cwd);
               // A toolchain this machine lacks (cargo, go, uv, a JVM…) is not run and not failed.
@@ -1693,7 +1737,14 @@ export function runPreflight(
               stopped.push(...queue.splice(0));
               break;
             }
-            const remaining = (budgetMs - (Date.now() - testStarted)) / 1000;
+            const elapsed = Date.now() - testStarted;
+            // The ceiling stops every queued file, guards too: the landing check runs them (8dbd2683).
+            if (elapsed >= ceilingMs && ran) {
+              ceilingReached = true;
+              notRun.push(...queue.splice(0));
+              break;
+            }
+            const remaining = (budgetMs - elapsed) / 1000;
             // The first group always runs (a budget of 0 still runs one file, the most relevant).
             if (remaining <= 0 && ran) {
               const spent = budgetSpent(queue.splice(0), guardTests);
@@ -1701,7 +1752,10 @@ export function runPreflight(
               queue.push(...spent.start);
               if (!queue.length) break;
             }
-            const window = Math.max(0, Math.min(remaining, PREFLIGHT_GROUP_SECONDS));
+            const window = Math.max(
+              0,
+              Math.min(remaining, (ceilingMs - elapsed) / 1000, PREFLIGHT_GROUP_SECONDS),
+            );
             const group: string[] = [];
             let planned = 0;
             while (queue.length) {
@@ -1816,6 +1870,15 @@ export function runPreflight(
           ...(plan.deferredTests?.length || skipped ? { deferredTo: plan.local.deferredTo } : {}),
         }
       : {}),
+    ...(!staticOnly && plan.tests.length
+      ? {
+          ceiling: {
+            seconds: ceilingMs / 1000,
+            ...(ceiling.override ? { override: true as const } : {}),
+            ...(ceilingReached ? { reached: true as const } : {}),
+          },
+        }
+      : {}),
     ...(buildMs !== undefined ? { buildMs } : {}),
     ...(testMs !== undefined ? { testMs } : {}),
     ...(peakRssMb !== null ? { peakRssMb } : {}),
@@ -1862,6 +1925,13 @@ export function runPreflight(
   return receipt;
 }
 
+/** Why a run stopped at its ceiling, and how to run longer once; undefined when the ceiling did not stop it. */
+function ceilingWords(receipt: PreflightReceipt) {
+  if (!receipt.ceiling?.reached) return undefined;
+  return receipt.ceiling.override
+    ? `the ${receipt.ceiling.seconds} s budgetSeconds override was reached`
+    : `the ${receipt.ceiling.seconds} s run ceiling was reached (longer local runs hold a test slot and rarely catch what the landing check would not; pass a larger budgetSeconds to run longer once)`;
+}
 /** Longest skipped list the closing line spells out; the receipt always names every file. */
 const SKIPPED_NAMED = 20;
 /** The builder's closing line: what ran, how long it took, and what waits for the pre-queue check. */
@@ -1878,27 +1948,29 @@ function runSummary(
   ].filter(Boolean);
   const deferred = receipt.deferredTests ?? 0;
   const needs = receipt.incomplete?.needs;
-  const stopped = receipt.incomplete
-    ? (receipt.incomplete.mustRun
-        ? ` ${receipt.incomplete.mustRun} must-run test file(s) (changed, learned or direct) not started, 0 failed: the ${receipt.budgetSeconds} s local budget ran out` +
-          ` (receipt.stopped names them, first). Next: land --save; the landing check runs them.` +
-          (receipt.incomplete.finish
-            ? ` To finish them here first (about ${receipt.incomplete.estimateMinutes} min): ${receipt.incomplete.finish}.`
-            : ` Finishing them here takes about ${receipt.incomplete.estimateMinutes} min, longer than one agent wait (${AGENT_WAIT_SECONDS / 60} min).`)
-        : '') +
-      (needs
-        ? ` ${needs.files.length} test file(s) skipped: needs ${needs.runtime}, so they are not a pass (${
-            needs.files.length <= SKIPPED_NAMED
-              ? needs.files.join(' ')
-              : 'receipt.incomplete.needs names them'
-          }). To run them here: ${needs.next}; the landing check runs them either way.`
-        : '')
-    : receipt.stoppedForTime
-      ? ` The ${receipt.budgetSeconds} s local budget ran out, so ${receipt.stoppedForTime} planned test file(s) were not started` +
+  const ranOut = ceilingWords(receipt) ?? `the ${receipt.budgetSeconds} s local budget ran out`;
+  // Must-run files stopped, other files stopped for time, and browser files skipped are separate
+  // sentences: a run can have the last two at once (needs with no must-run file still stops for time).
+  const mustRun = receipt.incomplete?.mustRun
+    ? ` ${receipt.incomplete.mustRun} must-run test file(s) (changed, learned or direct) not started, 0 failed: ${ranOut}` +
+      ` (receipt.stopped names them, first). Next: land --save; the landing check runs them.` +
+      (receipt.incomplete.finish
+        ? ` To finish them here first (about ${receipt.incomplete.estimateMinutes} min): ${receipt.incomplete.finish}.`
+        : ` Finishing them here takes about ${receipt.incomplete.estimateMinutes} min, longer than one agent wait (${AGENT_WAIT_SECONDS / 60} min).`)
+    : '';
+  const forTime =
+    !mustRun && receipt.stoppedForTime
+      ? ` ${ranOut[0]!.toUpperCase()}${ranOut.slice(1)}, so ${receipt.stoppedForTime} planned test file(s) were not started` +
         ` (receipt.stopped names them${
           receipt.stopped && receipt.stopped.length <= SKIPPED_NAMED ? `: ${receipt.stopped.join(' ')}` : ''
         }); run just those: ${receipt.stoppedRerun}.`
       : '';
+  const browserNeeds = needs
+    ? ` ${needs.files.length} test file(s) skipped: needs ${needs.runtime}, so they are not a pass (${
+        needs.files.length <= SKIPPED_NAMED ? needs.files.join(' ') : 'receipt.incomplete.needs names them'
+      }). To run them here: ${needs.next}; the landing check runs them either way.`
+    : '';
+  const stopped = mustRun + forTime + browserNeeds;
   const failedFirst = receipt.stoppedForFailure
     ? ` ${receipt.stoppedForFailure} planned test file(s) were not started because an earlier group failed; fix it and run preflight again (passed files are reused).`
     : '';

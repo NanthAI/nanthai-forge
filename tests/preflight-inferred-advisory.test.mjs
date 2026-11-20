@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
@@ -152,6 +152,35 @@ test('a missing toolchain is an environment result, not a failed run', t => {
     'java',
   );
   assert.equal(missingToolchain({ argv: ['/bin/sh'], ecosystem: 'cargo' }, root, { PATH: '' }), null);
+});
+
+test('8dbd2683: package commands stop at the 600 s ceiling between units; a larger budgetSeconds overrides it', t => {
+  const { root, dir } = repo(t, cargo);
+  const advice = changed(['crates/jiter/build.rs']);
+  const plan = preflightPlan(root, advice.changedPaths);
+  assert.deepEqual(plan.ceiling, { seconds: 600 });
+  const longer = preflightPlan(root, advice.changedPaths, undefined, { budgetSeconds: 900 });
+  assert.deepEqual(longer.ceiling, { seconds: 900, override: true });
+  // Two units in one group, each marking that it ran; once one has, this process's clock reads 601 s
+  // later, as if that unit had taken 601 s.
+  const marker = join(dir, 'ran');
+  const unit = { cwd: '', argv: ['/bin/sh', '-c', `: > '${marker}'`] };
+  const twoUnits = p => ({
+    ...p,
+    tests: ['package:a', 'package:b'],
+    packageCommands: { 'package:a': unit, 'package:b': unit },
+  });
+  const now = Date.now;
+  t.mock.method(Date, 'now', () => now.call(Date) + (existsSync(marker) ? 601_000 : 0));
+  const receipt = runPreflight(root, lane.laneId, lane.head, twoUnits(plan));
+  assert.deepEqual(receipt.ceiling, { seconds: 600, reached: true });
+  assert.equal(receipt.exitCode, 0, 'nothing failed');
+  assert.deepEqual(receipt.stopped, ['package:b'], 'the second unit goes to the landing check');
+  rmSync(marker, { force: true });
+  const ran = runPreflight(root, lane.laneId, lane.head, twoUnits(longer));
+  assert.deepEqual(ran.ceiling, { seconds: 900, override: true }, 'the receipt names the override');
+  assert.equal(ran.stopped, undefined);
+  assert.equal(ran.exitCode, 0);
 });
 
 const gradle = {

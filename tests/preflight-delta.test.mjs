@@ -1,12 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { digest } from '../dist/state/hash.js';
 import { sourceTree } from '../dist/source-tree.js';
 import {
+  planLine,
   preflightPlan,
   runPreflight,
   preflightRuntime,
@@ -342,6 +351,100 @@ test('the run stops between groups when the local budget is spent and reports wh
   assert.equal(receipt.deferredTests, 1);
   assert.equal(receipt.deferredTo, 'pre-queue');
   assert.equal(f.plan().reusedTests.includes('tests/far.test.mjs'), false);
+});
+
+test('8dbd2683: a 600 s ceiling stops any run, trim:false and finish included; a larger explicit budget overrides it, named', t => {
+  const f = fixture(t);
+  const said = [];
+  const write = process.stderr.write.bind(process.stderr);
+  t.mock.method(process.stderr, 'write', (chunk, ...rest) => {
+    said.push(String(chunk));
+    return write(chunk, ...rest);
+  });
+  // trim:false (rerun, finish) has no time budget, but the ceiling still holds and is named.
+  const plan = f.plan([], { trim: false });
+  assert.deepEqual(plan.local.ceiling, { seconds: 600 });
+  assert.match(planLine(plan), /no time budget \(trim:false\), 600 s ceiling, about/);
+  const [, last] = plan.tests;
+  // Pretend the ceiling is reached after the first group: no other file starts, and both tests are must-run.
+  plan.local.ceiling = { seconds: 0.001 };
+  const receipt = f.run(plan);
+  assert.deepEqual(receipt.ceiling, { seconds: 0.001, reached: true });
+  assert.equal(receipt.exitCode, 0, 'nothing failed');
+  assert.equal(receipt.passed, false, 'stopped must-run files are never a pass');
+  assert.deepEqual(receipt.stopped, [last]);
+  assert.equal(receipt.deferredTo, 'pre-queue', 'the rest goes to the landing check');
+  assert.match(receipt.incomplete.finish, /"retry":true,"trim":false/);
+  assert.match(
+    said.join(''),
+    /0 failed: the 0\.001 s run ceiling was reached \(longer local runs hold a test slot/,
+  );
+  assert.match(said.join(''), /pass a larger budgetSeconds to run longer once/);
+  // The finish command still works: it plans exactly the stopped file, under the default ceiling.
+  const finish = f.plan([], { trim: false, only: receipt.stopped });
+  assert.deepEqual(finish.tests, [last]);
+  const done = f.run(finish);
+  assert.equal(done.passed, true);
+  assert.deepEqual(done.ceiling, { seconds: 600 });
+  // An explicit budget above the ceiling raises it for that run and says so; a smaller one keeps 600.
+  assert.deepEqual(f.plan([], { budgetSeconds: 300 }).local.ceiling, { seconds: 600 });
+  const longer = f.plan([], { budgetSeconds: 900, trim: false });
+  assert.deepEqual(longer.local.ceiling, { seconds: 900, override: true });
+  assert.match(planLine(longer), /900 s ceiling \(budgetSeconds override\)/);
+  // Earlier passes would be reused; drop them so this run executes both files.
+  rmSync(join(clientCacheRoot(f.root), 'agent', 'preflight', 'evidence'), { recursive: true, force: true });
+  const ran = f.run(f.plan([], { budgetSeconds: 900, trim: false }));
+  assert.deepEqual(ran.ceiling, { seconds: 900, override: true }, 'the receipt names the override');
+  assert.equal(ran.stopped, undefined);
+});
+
+test('8dbd2683: a 601 s test phase stops at the default 600 s ceiling; a 900 s override keeps running', t => {
+  const f = fixture(t);
+  const said = [];
+  const write = process.stderr.write.bind(process.stderr);
+  t.mock.method(process.stderr, 'write', (chunk, ...rest) => {
+    said.push(String(chunk));
+    return write(chunk, ...rest);
+  });
+  // Each test file marks that it ran; from then on this process's clock reads 601 s later, so the
+  // first group looks like it took 601 s of wall time without the test waiting for it.
+  const marker = join(f.root, '..', 'ran');
+  const marks = `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, '');`;
+  f.put(
+    'tests/a.test.mjs',
+    `${marks} import test from 'node:test'; import {n} from '../src/a.ts'; test('a', () => n);`,
+  );
+  f.put(
+    'tests/b.test.mjs',
+    `${marks} import test from 'node:test'; import {n} from '../src/b.ts'; test('b', () => n);`,
+  );
+  const now = Date.now;
+  t.mock.method(Date, 'now', () => now.call(Date) + (existsSync(marker) ? 601_000 : 0));
+  // A finish or retry run (trim:false: no time budget) under the product default ceiling.
+  const plan = f.plan([], { trim: false });
+  assert.equal(plan.tests.length, 2);
+  // One file per group, so the run re-checks the clock between the two files.
+  plan.local.secondsPerFile = 20;
+  const receipt = f.run(plan);
+  assert.deepEqual(receipt.ceiling, { seconds: 600, reached: true });
+  assert.equal(receipt.exitCode, 0, 'nothing failed');
+  assert.equal(receipt.passed, false, 'a stopped must-run file is never a pass');
+  assert.deepEqual(receipt.stopped, [plan.tests[1]]);
+  assert.equal(receipt.deferredTo, 'pre-queue', 'the rest goes to the landing check');
+  const reply = said.join('');
+  assert.match(reply, /the 600 s run ceiling was reached \(longer local runs hold a test slot/);
+  assert.match(reply, /pass a larger budgetSeconds to run longer once/);
+  assert.match(reply, /Next: land --save; the landing check runs them/);
+  // The same 601 s phase with an explicit 900 s budget runs every file, and the receipt names it.
+  rmSync(marker, { force: true });
+  rmSync(join(clientCacheRoot(f.root), 'agent', 'preflight', 'evidence'), { recursive: true, force: true });
+  const longer = f.plan([], { budgetSeconds: 900, trim: false });
+  assert.equal(longer.tests.length, 2);
+  longer.local.secondsPerFile = 20;
+  const ran = f.run(longer);
+  assert.deepEqual(ran.ceiling, { seconds: 900, override: true });
+  assert.equal(ran.stopped, undefined);
+  assert.equal(ran.passed, true);
 });
 
 test('timing estimates average the last runs instead of trusting one sample', t => {

@@ -36,6 +36,7 @@ NOT_FOUND names what was looked up: run from the Lane root start printed, or pas
 - NOTHING_TO_LAND: the Lane equals its base; save your edits first.
 - LANDED is acceptance; CHECK PASSED alone is not. After a failure, fix in the same Lane and land again; never abandon and re-create it.
 - Required preflight runs inline in its existing local budget. PREFLIGHT_REQUIRED names the exact command after failure or budget exhaustion; then replay the same land operation.
+- Every local preflight test run (finish, retry and trim:false too) stops at a 600 s ceiling; the rest goes to the landing check and the receipt names the ceiling. preflight {budgetSeconds} above 600 raises it for that one run (named as an override).
 More: help wait, help conflict, help check, help overlap.`,
   },
   wait: {

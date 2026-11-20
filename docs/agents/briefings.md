@@ -87,6 +87,9 @@ merges (or why nothing can go).
    proceed with the advisory preflight status. The landing check is full verification.
    Hosted preflight can take a few minutes; when your shell stops commands after
    120 s, run it in the background and wait for it, never re-run it in a loop.
+   Any one local test run stops at 600 s (finish, retry and trim:false too); the
+   landing check runs the rest. Pass `budgetSeconds` above 600 only when a longer
+   local run is worth the slot time; the receipt names the override.
 9. Never weaken, skip or quarantine tests or raise timeouts to hide races. Explain
    any correction to an impossible assertion. Preflight and `land --save` flag a
    changed existing test (`weakenedTests`: removed or loosened assertions, added skips
