@@ -198,20 +198,29 @@ function SignedIn({
   };
   useFrameKeys(go);
   const controls: FrameControls = { onPalette: go.openPalette, onKeys: go.openKeys, viewerHandle };
-  const overlays = <Keys go={go} palette={palette} setPalette={setPalette} keys={keys} setKeys={setKeys} />;
+  const overlays = (projectId?: Id<'hostedProjects'> | null) => (
+    <Keys
+      go={go}
+      palette={palette}
+      setPalette={setPalette}
+      keys={keys}
+      setKeys={setKeys}
+      projectId={projectId}
+    />
+  );
   if (route.frame === 'project') return <ProjectView route={route} controls={controls} overlays={overlays} />;
   if (route.frame === 'account')
     return (
       <AccountFrame place={route.place} back={lastProject} controls={controls}>
         <AccountScreen place={route.place} handle={viewerHandle} leave={leave} />
-        {overlays}
+        {overlays()}
       </AccountFrame>
     );
   if (route.frame === 'bare')
     return (
       <BareFrame controls={controls}>
         <Suspense fallback={null}>{route.page === 'import' ? <ImportRepository /> : <Start />}</Suspense>
-        {overlays}
+        {overlays()}
       </BareFrame>
     );
   return (
@@ -224,7 +233,7 @@ function SignedIn({
           Your projects
         </a>
       </Head>
-      {overlays}
+      {overlays()}
     </BareFrame>
   );
 }
@@ -240,7 +249,7 @@ function ProjectView({
 }: {
   route: ProjectRoute;
   controls: FrameControls;
-  overlays: React.ReactNode;
+  overlays: (projectId?: Id<'hostedProjects'> | null) => React.ReactNode;
 }) {
   const client = useConvex();
   const project = useQuery(api.urlProjects.resolve, { handle: route.handle, slug: route.project });
@@ -284,7 +293,7 @@ function ProjectView({
     return (
       <BareFrame controls={controls}>
         <Head trail={[{ label: 'Project not found' }]} sentence="It may be private, renamed or removed." />
-        {overlays}
+        {overlays()}
       </BareFrame>
     );
   return (
@@ -303,7 +312,7 @@ function ProjectView({
         feed={feed}
         viewerHandle={controls.viewerHandle}
       />
-      {overlays}
+      {overlays((project?.id ?? null) as Id<'hostedProjects'> | null)}
     </ProjectFrame>
   );
 }

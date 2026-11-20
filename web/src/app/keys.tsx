@@ -2,8 +2,10 @@
 // Keyboard navigation of the frames: ⌘K or Ctrl+K opens go to or run, ? lists every key, 1–6 go to the project's
 // places. Keys never fire while the reader types in a field or holds a modifier other than the palette's. The palette
 // and the keys sheet are the design system's (they arrive with the behaviour layer; a key pressed first waits for it).
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import type { Id } from '../../../convex/_generated/dataModel';
 import { Palette, Sheet, type PaletteGroup } from '../ds';
+import { useIdPalette } from './id-palette';
 import { accountPlaces, hrefFor, projectPlaces, type AppRoute } from './paths';
 import { accountPlaceLabels, projectPlaceLabels } from './places';
 import { keyAction, navigate } from './router';
@@ -76,20 +78,33 @@ export function Keys({
   setPalette,
   keys,
   setKeys,
+  projectId,
 }: {
   go: Go;
   palette: boolean;
   setPalette: (open: boolean) => void;
   keys: boolean;
   setKeys: (open: boolean) => void;
+  /** In a project, a pasted id finds the Item, Lane or landing it names (id-palette.ts). */
+  projectId?: Id<'hostedProjects'> | null;
 }) {
+  // The search text, kept only while the palette is open: a reopened palette starts empty.
+  const [query, setQuery] = useState('');
+  const found = useIdPalette(projectId, go.route, palette, palette ? query : '');
   return (
     <>
       <Palette
         open={palette}
-        onOpenChange={setPalette}
-        groups={groupsFor(go)}
-        placeholder="Go to a place or run…"
+        onOpenChange={open => {
+          if (!open) setQuery('');
+          setPalette(open);
+        }}
+        groups={[...found.groups, ...groupsFor(go)]}
+        placeholder={
+          go.route.frame === 'project' ? 'Go to a place, or paste an id…' : 'Go to a place or run…'
+        }
+        onInputChange={setQuery}
+        {...(found.empty ? { empty: found.empty } : {})}
       />
       <Sheet open={keys} onOpenChange={setKeys} title="Keys">
         <dl className="keylist">

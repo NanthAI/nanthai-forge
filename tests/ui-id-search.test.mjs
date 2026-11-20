@@ -135,7 +135,7 @@ test('an id lookup runs at most once per id, debounced, and never while idle or 
   const lookup = new IdLookup(
     async text => {
       calls.push(text);
-      return [{ id: text }];
+      return { rows: [{ id: text }], retry: false };
     },
     () => changed++,
     350,
@@ -179,8 +179,8 @@ test('an id lookup runs at most once per id, debounced, and never while idle or 
 
 test('the palette lookup is a one-shot read, never a subscription, and only for an id not on the page', () => {
   const source = readFileSync(new URL('../web/src/shell/ProjectSearch.tsx', import.meta.url), 'utf8');
-  assert.match(source, /client\.query\(planningSearch,/);
-  assert.doesNotMatch(source, /useHostedQuery\(planningSearch/);
+  assert.match(source, /client\.query\(api\.projectHostedPlanningSearch\.search,/);
+  assert.doesNotMatch(source, /useHostedQuery\(api\.projectHostedPlanningSearch/);
   assert.match(source, /lookup\.want\(prefix, known\)/);
   assert.match(source, /idOnPage\(work, prefix\)/);
 });
@@ -282,9 +282,10 @@ test('one id lookup sends the Item search and the receipt read together; no land
       ['landing', receiptId],
     ]);
     assert.deepEqual(
-      found.map(item => item.kind),
+      found.rows.map(item => item.kind),
       ['Item', 'Landing'],
     );
+    assert.equal(found.retry, false);
     // An id that names no landing (or more than one) answers empty, so the Item still shows and no retry runs.
     for (const code of ['NOT_FOUND', 'AMBIGUOUS_ID']) {
       const none = await search.idLookupItems(
@@ -298,39 +299,43 @@ test('one id lookup sends the Item search and the receipt read together; no land
         true,
       );
       assert.deepEqual(
-        none.map(item => item.kind),
+        none.rows.map(item => item.kind),
         ['Item'],
         code,
       );
+      assert.equal(none.retry, false, code);
     }
-    // Any other failure rejects, so IdLookup forgets the id and a later query may retry it.
-    await assert.rejects(
-      search.idLookupItems(
-        '1d69905b',
-        {
-          items,
-          landing: async () => {
-            throw new ConvexError({ code: 'HOSTED_REQUEST_FAILED', message: 'retry' });
-          },
+    // Any other failure drops only the receipt read's rows (review finding 3 on de1fd508): the Item still
+    // shows, and the answer says to retry, so IdLookup lets a later query ask again.
+    const partial = await search.idLookupItems(
+      '1d69905b',
+      {
+        items,
+        landing: async () => {
+          throw new ConvexError({ code: 'HOSTED_REQUEST_FAILED', message: 'retry' });
         },
-        true,
-      ),
+      },
+      true,
     );
+    assert.deepEqual(
+      partial.rows.map(item => item.kind),
+      ['Item'],
+    );
+    assert.equal(partial.retry, true);
     // Without the planning capability or a signed-in reader, that call is not sent at all.
     calls.length = 0;
     assert.deepEqual(
-      (await search.idLookupItems('8d27a463', { landing }, true)).map(item => item.kind),
+      (await search.idLookupItems('8d27a463', { landing }, true)).rows.map(item => item.kind),
       ['Landing'],
     );
-    assert.deepEqual(await search.idLookupItems('8d27a463', {}, true), []);
+    assert.deepEqual(await search.idLookupItems('8d27a463', {}, true), { rows: [], retry: false });
     assert.deepEqual(calls, [['landing', '8d27a463']]);
   }));
 
 test('the receipt lookup is the existing one-shot receipt read, never a subscription', () => {
   const source = readFileSync(new URL('../web/src/shell/ProjectSearch.tsx', import.meta.url), 'utf8');
-  assert.match(source, /'projectHostedLandings:read'/);
-  assert.match(source, /client\.query\(landingRead, \{ projectId, receiptId \}\)/);
-  assert.doesNotMatch(source, /useHostedQuery\(landingRead/);
+  assert.match(source, /client\.query\(api\.projectHostedLandings\.read, \{ projectId, receiptId \}\)/);
+  assert.doesNotMatch(source, /useHostedQuery\(api\.projectHostedLandings/);
 });
 
 test('a result opened after a landing at its code does not keep that landing pinned (Argon review nit 1)', () => {
@@ -345,3 +350,182 @@ test('a result opened after a landing at its code does not keep that landing pin
     else globalThis.location = previous;
   }
 });
+
+test('a failed read keeps the other reads rows, and only that id may be asked again', async () => {
+  const timers = [];
+  const clock = {
+    set: run => (timers.push(run), run),
+    clear: run => {
+      const at = timers.indexOf(run);
+      if (at >= 0) timers.splice(at, 1);
+    },
+  };
+  const flush = async () => {
+    for (const run of timers.splice(0)) run();
+    await new Promise(resolve => setImmediate(resolve));
+  };
+  const answers = [
+    { rows: [{ id: '1d69905b' }], retry: true },
+    { rows: [{ id: '1d69905b' }, { id: '1d69905b-landing' }], retry: false },
+  ];
+  const calls = [];
+  const lookup = new IdLookup(
+    async text => (calls.push(text), answers.shift()),
+    () => {},
+    350,
+    clock,
+  );
+  // Before its answer an id query is pending, so the palette says it is looking rather than "nothing matches".
+  lookup.want('1d69905b', false);
+  assert.equal(lookup.pending('1d69905b'), true);
+  await flush();
+  assert.deepEqual(lookup.found('1d69905b'), [{ id: '1d69905b' }]);
+  assert.equal(lookup.pending('1d69905b'), false);
+  assert.equal(lookup.failed('1d69905b'), false);
+  // The failed read is asked again on the next query for that id; a complete answer is then kept.
+  lookup.want('1d69905b', false);
+  await flush();
+  lookup.want('1d69905b', false);
+  await flush();
+  assert.deepEqual(calls, ['1d69905b', '1d69905b']);
+  assert.equal(lookup.found('1d69905b').length, 2);
+  // A lookup whose every read failed says so and is retried, never cached as "no such id".
+  const failing = new IdLookup(
+    async () => Promise.reject(new Error('offline')),
+    () => {},
+    350,
+    clock,
+  );
+  failing.want('cafebabe', false);
+  await flush();
+  assert.equal(failing.failed('cafebabe'), true);
+  assert.deepEqual(failing.found('cafebabe'), []);
+});
+
+test('lookupEach sends every read and drops only the rows of one that fails', async () => {
+  const { lookupEach } = await import(moduleUrl('../web/src/id-search.ts'));
+  assert.deepEqual(await lookupEach([Promise.resolve([1]), Promise.reject(new Error('x')), [2]]), {
+    rows: [1, 2],
+    retry: true,
+  });
+  assert.deepEqual(await lookupEach([Promise.resolve([1]), []]), { rows: [1], retry: false });
+});
+
+// Incident 2026-11-20 (Item ee9899ca): on the live site the owner pasted 1d69905b into ⌘K and got "Nothing
+// matches.". Every address under /- is the rebuilt app, whose palette (app/keys.tsx) never had id search; the
+// tests above cover only the old shell's palette. The rebuilt palette's lookup sends these three existing reads,
+// and its arguments are checked against the real Convex validators, so the fake cannot drift from the server.
+test('the rebuilt palette finds an Item, a Lane and a landing by id through the real reads and validators', async () => {
+  const { checkArgs } = await import('./convex-args.mjs');
+  const { getFunctionName } = await import('convex/server');
+  const { ConvexError } = await import('convex/values');
+  const { idRows, idGroups } = await import(moduleUrl('../web/src/app/id-palette.ts'));
+  const modules = {
+    projectHostedPlanningSearch: await import(moduleUrl('../convex/projectHostedPlanningSearch.ts')),
+    projectHostedLaneHistory: await import(moduleUrl('../convex/projectHostedLaneHistory.ts')),
+    projectHostedLandings: await import(moduleUrl('../convex/projectHostedLandings.ts')),
+  };
+  const route = {
+    frame: 'project',
+    handle: 'example',
+    project: 'parser',
+    place: 'needs',
+    section: '',
+    rest: '',
+  };
+  const itemId = '1d69905b-6539-42d9-a8ed-519234dbf9c6';
+  const calls = [];
+  const replies = {
+    'projectHostedPlanningSearch:search': () =>
+      JSON.stringify({
+        items: [
+          { id: itemId, kind: 'issue', title: 'Speed series follow-ups', matchedBy: 'id' },
+          // A text mention of the id is someone else's Item: never offered as what the id names.
+          { id: 'ad80e037-35a3-44c5-9ba2-025519a2c45f', kind: 'issue', title: 'Mentions 1d69905b' },
+        ],
+      }),
+    'projectHostedLaneHistory:resolveLaneId': () => JSON.stringify({ ids: [laneId], more: false }),
+    'projectHostedLandings:read': () => {
+      throw new ConvexError({ code: 'NOT_FOUND', message: 'No landing' });
+    },
+  };
+  const query = async (ref, args) => {
+    const name = getFunctionName(ref);
+    const [module, fn] = name.split(':');
+    checkArgs(modules[module][fn], args, name);
+    calls.push([name, args]);
+    return replies[name]();
+  };
+  const found = await idRows('1d69905b', route, 'synthetic', query);
+  assert.deepEqual(
+    calls.map(([name]) => name),
+    [
+      'projectHostedPlanningSearch:search',
+      'projectHostedLaneHistory:resolveLaneId',
+      'projectHostedLandings:read',
+    ],
+  );
+  assert.equal(found.retry, false);
+  const groups = idGroups(found.rows, '1d69905b');
+  assert.deepEqual(
+    groups.map(group => [group.title, group.entries.map(entry => entry.label)]),
+    [['Items', ['1d69905b · Speed series follow-ups']]],
+  );
+  // The palette filters by what was typed: an entry matches its full id in any case.
+  assert.match(groups[0].entries[0].text, new RegExp(itemId));
+  const lane = idGroups(found.rows, '2ae78416');
+  assert.deepEqual(
+    lane.map(group => group.title),
+    ['Lanes'],
+  );
+  // A full UUID: the planning search gets its spaced form, the Lane resolver its first 35 characters (its
+  // limit) and the receipt read the dashed id.
+  calls.length = 0;
+  replies['projectHostedLandings:read'] = () =>
+    JSON.stringify({
+      schema: 1,
+      landings: [{ receiptId, title: 'Fix id search', laneId }],
+      nextCursor: null,
+    });
+  const full = await idRows(receiptId.replaceAll('-', ' '), route, 'synthetic', query);
+  assert.deepEqual(
+    calls.map(([name, args]) => args.text ?? args.prefix ?? args.receiptId),
+    [receiptId.replaceAll('-', ' '), receiptId.slice(0, 35), receiptId],
+  );
+  const landing = idGroups(full.rows, receiptId).find(group => group.title === 'Landings');
+  assert.equal(landing.entries[0].label, `${receiptId.slice(0, 8)} · Fix id search`);
+});
+
+test('the rebuilt palette opens what an id names at its rebuilt address', async () =>
+  withLocation(async () => {
+    const { idRows } = await import(moduleUrl('../web/src/app/id-palette.ts'));
+    const route = {
+      frame: 'project',
+      handle: 'example',
+      project: 'parser',
+      place: 'stats',
+      section: '',
+      rest: '',
+    };
+    const itemId = '1d69905b-6539-42d9-a8ed-519234dbf9c6';
+    const query = async ref => {
+      const name = (await import('convex/server')).getFunctionName(ref);
+      if (name.endsWith(':search'))
+        return JSON.stringify({ items: [{ id: itemId, title: 'An Item', matchedBy: 'id' }] });
+      if (name.endsWith(':resolveLaneId')) return JSON.stringify({ ids: [laneId] });
+      return JSON.stringify({
+        landings: [{ receiptId }, { receiptId: '8d27a463-0000-4000-8000-000000000002', laneId }],
+      });
+    };
+    const { rows } = await idRows('1d69905b', route, 'synthetic', query);
+    // A landing opens its Lane (Code's History holds only its newest pages: review 4cb180d5 finding 1), else its receipt.
+    assert.deepEqual(
+      rows.map(row => row.href),
+      [
+        `/-/example/parser/plan/${itemId}`,
+        `/-/example/parser/lanes/${laneId}`,
+        `/-/example/parser/code/${receiptId}`,
+        `/-/example/parser/lanes/${laneId}`,
+      ],
+    );
+  }));

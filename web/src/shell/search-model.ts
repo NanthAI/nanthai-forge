@@ -3,9 +3,17 @@ import { intentProgress } from '../../../src/work-intent-progress';
 import { age } from '../ui/status';
 import { cockpitLanes, type CockpitWork } from '../cockpit/model';
 import { cleanUrl, routeUrlState } from './location';
-import { idMatches, idPrefix } from '../id-search';
+import {
+  idMatches,
+  idPrefix,
+  idRef,
+  itemsById,
+  landingsById,
+  lookupEach,
+  type IdItem,
+  type IdLanding,
+} from '../id-search';
 import { planningDestination } from './route';
-import { hostedErrorCode } from '../snapshot';
 export type SearchItem = {
   id: string;
   kind: 'Intent' | 'Item' | 'Lane' | 'Candidate' | 'Landing' | 'File';
@@ -115,10 +123,7 @@ export function workSearchItems(work: CockpitWork, hosted: boolean, now = Date.n
   ];
 }
 /** Planning Items the id lookup returned (projectHostedPlanningSearch:search summaries). */
-export function itemSearchItems(
-  summaries: readonly { id: string; kind?: string; title?: string; status?: string; at?: string }[],
-  hosted: boolean,
-): SearchItem[] {
+export function itemSearchItems(summaries: readonly IdItem[], hosted: boolean): SearchItem[] {
   return summaries.map(item => ({
     id: `item:${item.id}`,
     kind: 'Item',
@@ -134,17 +139,7 @@ export function itemSearchItems(
 }
 /** Landings the receipt read returned (projectHostedLandings:read rows). A landing opens its Lane, else its
  * Intent, else the code as it landed. */
-export function landingSearchItems(
-  rows: readonly {
-    receiptId: string;
-    title?: string | null;
-    laneId?: string | null;
-    intentId?: string | null;
-    committedAt?: string | null;
-    landedHead?: string;
-  }[],
-  hosted: boolean,
-): SearchItem[] {
+export function landingSearchItems(rows: readonly IdLanding[], hosted: boolean): SearchItem[] {
   return rows.map(row => ({
     id: `landing:${row.receiptId}`,
     kind: 'Landing',
@@ -159,44 +154,23 @@ export function landingSearchItems(
     ids: [row.receiptId],
   }));
 }
-/** Codes the receipt read answers for an id that names no single landing: an empty answer, not a retry. */
-const noLanding = new Set(['NOT_FOUND', 'AMBIGUOUS_ID', 'BAD_ARGUMENT']);
 /**
  * One id lookup (IdLookup's run, for an id the page does not hold): the planning search for an Item and
  * the receipt read for a landing, sent together so the answer costs one round trip. A reader without
- * either capability skips that call. An id that names no landing is an empty answer.
+ * either capability skips that call. An id that names no landing is an empty answer, and a read that
+ * fails drops only its own rows (lookupEach).
  */
-export async function idLookupItems(
+export function idLookupItems(
   text: string,
   read: { items?: (text: string) => Promise<string>; landing?: (receiptId: string) => Promise<string> },
   hosted: boolean,
 ) {
-  const [items, landings] = await Promise.all([
-    read.items
-      ? read.items(text).then(raw =>
-          itemSearchItems(
-            ((JSON.parse(raw) as { items?: { id: string; matchedBy?: string }[] }).items ?? []).filter(
-              item => item.matchedBy === 'id',
-            ),
-            hosted,
-          ),
-        )
-      : [],
+  return lookupEach<SearchItem>([
+    read.items ? read.items(text).then(raw => itemSearchItems(itemsById(raw), hosted)) : [],
     read.landing
-      ? read.landing(text.replaceAll(' ', '-')).then(
-          raw =>
-            landingSearchItems(
-              (JSON.parse(raw) as { landings?: Parameters<typeof landingSearchItems>[0] }).landings ?? [],
-              hosted,
-            ),
-          error => {
-            if (noLanding.has(hostedErrorCode(error) ?? '')) return [];
-            throw error;
-          },
-        )
+      ? landingsById(read.landing(idRef(text))).then(rows => landingSearchItems(rows, hosted))
       : [],
   ]);
-  return [...items, ...landings];
 }
 /** Whether a result on the page already answers this id query (so no lookup is needed). */
 export const idOnPage = (items: readonly SearchItem[], prefix: string | undefined) =>

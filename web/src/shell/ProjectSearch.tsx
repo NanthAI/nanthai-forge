@@ -2,7 +2,7 @@
 import { useReadRetry } from '../ui/read-retry';
 import { useEffect, useMemo, useReducer, useState } from 'react';
 import { useConvexAuth, useConvex, useQuery as useHostedQuery } from 'convex/react';
-import { makeFunctionReference } from 'convex/server';
+import { api } from '../../../convex/_generated/api';
 import { IdLookup, idMatches, idPrefix } from '../id-search';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type { CockpitWork } from '../cockpit/model';
@@ -11,26 +11,6 @@ import type { MoveRecord } from '../cockpit/now-model';
 import { Glyph } from '../ui/Glyph';
 import { SearchPalette } from './SearchPalette';
 import { idLookupItems, idOnPage, searchHref, workSearchItems, type SearchItem } from './search-model';
-
-/** The existing planning search: it resolves an Item by 8-character prefix or full UUID first. */
-const planningSearch = makeFunctionReference<
-  'query',
-  {
-    projectId: Id<'hostedProjects'>;
-    text: string;
-    omittedTerms: number;
-    status: 'all';
-    cursor: null;
-    limit: number;
-  },
-  string
->('projectHostedPlanningSearch:search');
-/** The existing receipt read: one landing by its receipt id or a unique 8+ character prefix. */
-const landingRead = makeFunctionReference<
-  'query',
-  { projectId: Id<'hostedProjects'>; receiptId: string },
-  string
->('projectHostedLandings:read');
 
 type Props = { project: string; projectId: Id<'hostedProjects'> };
 export function ProjectSearch(props: Props) {
@@ -179,7 +159,7 @@ function HostedSearch({
               ...(planning
                 ? {
                     items: (text: string) =>
-                      client.query(planningSearch, {
+                      client.query(api.projectHostedPlanningSearch.search, {
                         projectId,
                         text,
                         omittedTerms: 0,
@@ -191,7 +171,10 @@ function HostedSearch({
                 : {}),
               // The receipt read needs a signed-in reader; a public visitor skips it.
               ...(isAuthenticated
-                ? { landing: (receiptId: string) => client.query(landingRead, { projectId, receiptId }) }
+                ? {
+                    landing: (receiptId: string) =>
+                      client.query(api.projectHostedLandings.read, { projectId, receiptId }),
+                  }
                 : {}),
             },
             true,
