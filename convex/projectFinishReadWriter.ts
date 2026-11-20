@@ -187,6 +187,7 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
                     projectId: before.projectId,
                     phase: before.phase,
                     held: Boolean(before.hold),
+                    hold: before.hold ?? null,
                   },
                   {
                     ...JSON.parse(source.value as string),
@@ -194,6 +195,7 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
                     projectId: source.projectId,
                     phase: source.phase,
                     held: Boolean(source.hold),
+                    hold: (source.hold as string | undefined) ?? null,
                   },
                 );
               }

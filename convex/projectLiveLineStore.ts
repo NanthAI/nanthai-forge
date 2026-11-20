@@ -4,6 +4,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { lineOwner, detachLineOwner } from './projectLiveLineOwners';
 import { internal } from './_generated/api';
 import { nextActivityHour } from './accountProjectOrderHour';
+import { flowMain, stepFlow, type FlowStep } from '../src/flow-day';
 
 type Db = MutationCtx['db'];
 type Mark = Doc<'projectLiveLineLanes'>;
@@ -15,19 +16,44 @@ export const lineSummary = (db: Pick<Db, 'query'>, projectId: Id<'hostedProjects
     .query('projectFinishReadRows')
     .withIndex('by_kind_and_source', q => q.eq('kind', summaryKind).eq('sourceId', projectId))
     .unique();
-/** Only an explicit removal updates the small latest-exit snapshot. */
+/** Only an explicit removal updates the small latest-exit snapshot. A landing or failed check that writes it also
+ * steps the Flow view's day (src/flow-day.ts) in the same write; `step` alone writes only when it counts something. */
 export async function lineExit(
   db: Db,
   projectId: Id<'hostedProjects'>,
-  exit: { laneId: string; kind: 'landed' | 'set-aside'; at: number },
+  exit: { laneId: string; kind: 'landed' | 'set-aside'; at: number } | null,
+  step?: FlowStep,
 ) {
   const old = await lineSummary(db, projectId);
   const value = old ? JSON.parse(old.value) : {};
   // Last removal only, never a history/replay. Missing events never imply an exit kind.
-  value.exit = exit;
+  if (exit) value.exit = exit;
+  if (step) value.flow = stepFlow(value.flow, exit?.at ?? Date.now(), step);
   const next = { kind: summaryKind, sourceId: String(projectId), projectId, value: JSON.stringify(value) };
   if (old) await db.replace(old._id, next);
   else await db.insert('projectFinishReadRows', next);
+}
+/** main's audit verdict flipped (red, or green again): the Flow view's main state. A red episode that ends counts
+ * once, as reverted or fixed on top by the audit's own recovery verdict (the one Needs me's Main broke row shows); a
+ * flake counts as neither. Written only on a flip, never per landing or per audit. */
+export async function lineMainState(
+  db: Db,
+  projectId: Id<'hostedProjects'>,
+  verdict: { red: boolean; at: string; ended?: 'reverted' | 'fixed-on-top' },
+) {
+  const old = await lineSummary(db, projectId);
+  const value = old ? JSON.parse(old.value) : {};
+  const at = Date.parse(verdict.at);
+  const when = Number.isFinite(at) ? at : Date.now();
+  const flow = flowMain(value.flow, verdict.red, when);
+  const next = verdict.ended
+    ? stepFlow(flow, when, verdict.ended === 'reverted' ? { reverted: 1 } : { fixedOnTop: 1 })
+    : flow;
+  if (JSON.stringify(next) === JSON.stringify(value.flow)) return;
+  value.flow = next;
+  const row = { kind: summaryKind, sourceId: String(projectId), projectId, value: JSON.stringify(value) };
+  if (old) await db.replace(old._id, row);
+  else await db.insert('projectFinishReadRows', row);
 }
 export async function removeLineMark(db: Db, old: Mark, kind: 'landed' | 'set-aside') {
   await db.delete(old._id);
@@ -36,15 +62,24 @@ export async function removeLineMark(db: Db, old: Mark, kind: 'landed' | 'set-as
   if (owner) await db.delete(owner._id);
   await lineExit(db, old.projectId, { laneId: old.laneId, kind, at: Date.now() });
 }
+/** A mark's check key and main-red hold ride its stage/held patches (Item 85f456c1); a key in `patch` set to
+ * undefined clears it, a key left out keeps it. */
 export async function changeLineMark(
   db: Db,
   old: Mark,
-  patch: Partial<Pick<Mark, 'stage' | 'held' | 'overlap'>>,
+  patch: Partial<Pick<Mark, 'stage' | 'held' | 'overlap' | 'check' | 'mainRed'>>,
 ) {
   const stage = patch.stage ?? old.stage;
   const held = patch.held ?? old.held;
   const overlap = patch.overlap ?? old.overlap;
-  const changed = stage !== old.stage || held !== old.held || overlap !== old.overlap;
+  const check = 'check' in patch ? patch.check : old.check;
+  const mainRed = 'mainRed' in patch ? patch.mainRed : old.mainRed;
+  const changed =
+    stage !== old.stage ||
+    held !== old.held ||
+    overlap !== old.overlap ||
+    check !== old.check ||
+    mainRed !== old.mainRed;
   if (!changed) return;
   await db.patch(old._id, { ...patch, ...(stage !== old.stage ? { changedAt: Date.now() } : {}) });
 }
@@ -92,6 +127,9 @@ export async function trackLineLane(
     stage: (lane.head === lane.baseHead ? 'editing' : 'saved') as Stage,
     held,
     overlap: Boolean(lane.conflicted),
+    // A new head leaves its submission: no check key, no main-red hold.
+    check: undefined,
+    mainRed: undefined,
   };
   if (old) {
     const owner = await lineOwner(ctx.db, old.laneId);
@@ -110,7 +148,9 @@ export async function trackLineLane(
     projectId: lane.projectId,
     laneId: lane.laneId,
     sourceId,
-    ...next,
+    stage: next.stage,
+    held: next.held,
+    overlap: next.overlap,
     changedAt: Date.now(),
   });
   await ctx.db.insert('projectFinishReadRows', {

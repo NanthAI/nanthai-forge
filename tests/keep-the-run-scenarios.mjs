@@ -108,10 +108,12 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
  * tests/hosted-landing-keep-the-run.test.mjs hold the wiring to these). They include the hold-order write
  * and the gate reads; the fixture's runner reports in few calls and resolves no source. Bytes moved by a few
  * (carry, scoped recheck) and about 1 KB (red, which retires more source work) with the source repair wakes (e62d834b, review 308f217c): each scheduled source step arms a wake at its lease end that its commit cancels (a scheduler insert, a status read and a cancel), and a job that fails or is cancelled outside a commit reads its step row to cancel any wake left; no call. */
+// Item 85f456c1 (2026-11-20): carry and red moved -19 write bytes each: the line's Flow fields (summary day, check key)
+// grow slightly more on the retire's extra run than on the keep. Calls and reads unchanged.
 export const WIRED = {
-  carry: { calls: 7, readBytes: 404_022, writeBytes: 74_741 },
+  carry: { calls: 7, readBytes: 404_022, writeBytes: 74_722 },
   'scoped-recheck': { calls: 17, readBytes: 533_139, writeBytes: 143_001 },
-  red: { calls: -18, readBytes: -395_740, writeBytes: -144_139 },
+  red: { calls: -18, readBytes: -395_740, writeBytes: -144_158 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */

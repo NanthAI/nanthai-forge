@@ -326,10 +326,12 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // Reads 1,894,559 -> 1,895,343 B, writes 606,570 -> 607,145 B (e62d834b, review 308f217c): each scheduled source
   // step arms a repair wake at its lease end that its commit cancels (a scheduler insert, a status read and a cancel);
   // no call, about 0.7 KB of DB I/O per landing.
+  // Reads 1,895,343 -> 1,895,409 B, writes 607,145 -> 607,326 B (Item 85f456c1, Flow view): the line summary's Flow
+  // day and the marks' check key ride writes that already happen; no call or write added, about 120 B per landing.
   const measured = { calls: pair.calls, readBytes: pair.readBytes, writeBytes: pair.writeBytes };
   assert.deepEqual(
     measured,
-    { calls: 111, readBytes: 1_895_343, writeBytes: 607_145 },
+    { calls: 111, readBytes: 1_895_409, writeBytes: 607_326 },
     'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
@@ -366,10 +368,12 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // DB reads 1,904,377 -> 1,899,801 (Item 76be0714, one get per document per query), as in the small replay.
   // Reads 1,899,801 -> 1,900,595 B, writes 609,061 -> 609,641 B (e62d834b, review 308f217c): the source repair
   // wake, as in the small replay; no call.
+  // Reads 1,900,595 -> 1,900,661 B, writes 609,641 -> 609,822 B (Item 85f456c1): the Flow fields, as in the small
+  // replay; no call.
   const measured = { calls: after.calls, readBytes: after.readBytes, writeBytes: after.writeBytes };
   assert.deepEqual(
     measured,
-    { calls: 111, readBytes: 1_900_595, writeBytes: 609_641 },
+    { calls: 111, readBytes: 1_900_661, writeBytes: 609_822 },
     'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(after.idle, 0);

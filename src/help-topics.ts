@@ -106,6 +106,7 @@ CHECK_NOT_PASSED: acceptance needs a passed check for this exact head; land --sa
 - lanes {planningItemId?,intentId?,state?,limit?,cursor?,view?} filters open Lanes by Issue (current Intent) or exact Intent; full UUIDs. state "all" (with planningItemId) lists every Lane of the Issue, landed ones with their receipt id. It lists Lanes with Intent, actor, last save and latest landing in one query; view "live" hides and "dormant" lists Lanes idle past dormantAfterDays (default 2); view "tree" adds text lines of which Lanes stack on which, which overlap, and each Lane's state and next step, from the same query (use it to pick what to land next). Follow continueCursor.
 - x abandon-dormant {apply?,limit?} dry-runs, or with apply:true abandons at most 25 abandonable dormant Lanes per call.
 - lane-history {laneId?} reads one Lane's history: openedAt, startBase, lastSyncedBase, state, head and landing {receiptId,commit,current,revertedBy?}.
+- flow {} draws the project as text from the top bar's one line feed read: one line per stop (open, held Lanes by id, longest wait, checks), main today, the ways back, CI minutes and the next step. Same counts as the top bar.
 - LANE_DIRTY: unsaved edits; save '{}' first. LANE_NOT_ACTIVE: the Lane landed or was abandoned; keep your edits and start a new Lane.
 - x abandon {laneId,reason} closes a Lane without deleting anything; keepPatch:true keeps unsaved edits as a patch.`,
   },

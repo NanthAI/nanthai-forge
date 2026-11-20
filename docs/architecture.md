@@ -2167,7 +2167,27 @@ Existing writes update changed marks atomically, including main-red holds.
 Heartbeat/holder/name/device changes leave marks alone. Holds and overlaps keep
 stage time; resolving the last conflict clears both flags. Closed/landed marks
 are deleted; the summary keeps main and the latest explicit exit. Starts write
-no shared counter. Ordinary writes initialize legacy Lanes; untouched Lanes
+no shared counter.
+
+The Flow view's fields ride the same writes. A mark carries a short check key
+while it is checked (Lanes checked together share it) and `mainRed` while the
+gate parks it for a red main; both go in the stage/held patch that already
+happens. The summary's `flow` field (`src/flow-day.ts`) keeps one rolling day of
+hour buckets (landed, needs fix, reverted, fixed on top, CI seconds, seconds on
+checks that did not land) and the last 48 land-to-main times. A landing steps it
+in the summary write its exit already makes (a landing with no mark on the line,
+which wrote none before, now writes the step alone), a failed check in one summary write,
+and main's audit verdict only when it flips; a red episode counts once when it
+ends, as reverted or fixed on top by the audit's recovery verdict. CI seconds count
+each check once: a submission's latest check (a batch member's share) when it
+lands or its check fails, and a check it discards (a failed shared check, a cancelled run)
+when a write moves those seconds into its own discarded seconds, in one summary
+write. A resubmission's carried seconds arrive with its insert, which is no
+transition, so they never count again; any other failed end (superseded,
+cancelled, stalled) counts none, since its check may have passed and a
+resubmission that reuses it counts it when it lands. A predecessor's last check that its successor does
+not reuse is not counted, so CI minutes stay a lower bound. Readers work out "today" and
+elapsed times themselves; `nforge agent ROOT flow` renders the same feed as text. Ordinary writes initialize legacy Lanes; untouched Lanes
 remain uncounted, and reads never backfill. Legacy main uses exact Channel/receipt
 lookups until publication installs its summary.
 

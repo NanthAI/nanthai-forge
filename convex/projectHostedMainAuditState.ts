@@ -25,6 +25,7 @@ import { holdsLandingOrder } from './projectHostedLandingOrder';
 import { armLandingAlarm } from './projectHostedLandingStallWake';
 import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 import { recordAuditRunnerSeconds } from './projectLandingSpeed';
+import { lineMainState } from './projectLiveLineStore';
 import {
   drillClaims,
   drillInTime,
@@ -174,6 +175,15 @@ export async function auditEvent(
     ...(drill ? { drill } : {}),
     ...(reverted !== undefined ? { reverted } : {}),
   });
+  // `row` is the audit before this verdict: only a flip reaches the line's summary (Flow view, Item 85f456c1).
+  if (kind === 'red' && !row.red) await lineMainState(ctx.db, row.projectId, { red: true, at });
+  else if (kind === 'green' && row.red)
+    await lineMainState(ctx.db, row.projectId, {
+      red: false,
+      at,
+      // The event's own `reverted`, as Needs me's Main broke row reads it (convex/projectMainRed.ts).
+      ended: reverted === true ? 'reverted' : 'fixed-on-top',
+    });
 }
 type DrillRecord = NonNullable<Doc<'projectHostedMainAuditEvents'>['drill']>;
 /** The owner's drill that claimed the current red, as the counter rule takes it (fe7d67a8). A claim is

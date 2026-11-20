@@ -23,6 +23,7 @@ import { exactConflictEnvelope, exactConflictsSchema } from './hosted-conflict-n
 import { QUEUE_VIEW_LIMIT } from './hosted-queue-view.js';
 import { hostedLandingsSchema } from './hosted-agent-landings.js';
 import { hostedLaneHistorySchema } from './hosted-agent-lane-history.js';
+import { hostedAgentRoot } from './hosted-agent-journal.js';
 import { liveLanesInput } from './hosted-live-lanes.js';
 import { hostedBoardSchemas } from './hosted-board.js';
 import { SELECT_LANE } from './hosted-lane-location.js';
@@ -91,6 +92,16 @@ export async function peersHostedSource(transport: HostedAgentTransport, input: 
     ...exactConflictEnvelope(laneId, conflicts),
   };
 }
+/** `flow {}` (Item 85f456c1): the Flow view as text, from the top bar's one line feed read. No parameters. */
+export const hostedFlowSchema = z.object({}).strict();
+export async function flowHostedSource(transport: HostedAgentTransport, input: unknown) {
+  const parsed = hostedFlowSchema.safeParse(input ?? {});
+  invariant(parsed.success, 'BAD_ARGUMENT', 'flow takes no parameters: nforge agent ROOT flow {}.');
+  const feed = await transport.query<import('./flow-text.js').FlowFeed>('projectLiveLine:read', {});
+  // Loaded only for this read: the status path and the MCP server load no more modules (7b2ae8d8, ad80e037).
+  const { flowText } = await import('./flow-text.js');
+  return flowText(feed, Date.now(), shellQuote(hostedAgentRoot(transport.root)));
+}
 export const hostedQueueSchema = z
   .object({
     limit: z.number().int().min(1).max(QUEUE_VIEW_LIMIT).optional(),
@@ -148,6 +159,7 @@ export const hostedClientReadSchemas = {
   queue: hostedQueueSchema,
   landings: hostedLandingsSchema,
   'lane-history': hostedLaneHistorySchema,
+  flow: hostedFlowSchema,
   wait: hostedWaitSchema,
   show: hostedSourceShowSchema.omit({ action: true }),
   /** The board verbs are client actions too: `board --post`/`--reply` write one note each, `--resolve` withdraws one. */

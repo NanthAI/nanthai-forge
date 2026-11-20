@@ -1,0 +1,6 @@
+{
+  "kind": "agentActions",
+  "delta": 1,
+  "reason": "Issue 85f456c1 names nforge agent ROOT flow as the agent's text of the Flow view. Nothing can go: no CLI read drew the work by stop before; it reuses the top bar's line feed query (no new server function) and loads its renderer only for itself.",
+  "date": "2026-11-20"
+}

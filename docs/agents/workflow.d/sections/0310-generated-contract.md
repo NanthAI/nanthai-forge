@@ -54,6 +54,7 @@
 | `queue` | `limit?, laneId?` |
 | `landings` | `from?, to?, receiptId?, limit?, cursor?` |
 | `lane-history` | `laneId?` |
+| `flow` | `{}` |
 | `wait` | `runId?, operationIds?, cursor?, until?, timeoutSeconds?, peer?, approval?` |
 | `show` | `laneId?, state?, candidateId?, expected?, channel?, at?, path, force?` |
 | `board` | `id?, laneId?, all?` |

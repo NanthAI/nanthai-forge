@@ -63,6 +63,7 @@ const actionTopic: Record<string, HelpTopicId> = {
   start: 'lanes',
   lanes: 'lanes',
   'lane-history': 'lanes',
+  flow: 'lanes',
   history: 'review',
   abandon: 'lanes',
   'abandon-dormant': 'lanes',

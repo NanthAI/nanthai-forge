@@ -1,0 +1,4 @@
+{
+  "issue": "85f456c1",
+  "reason": "Adds the agent read flow {} (Item 85f456c1): one projectLiveLine:read query (the top bar line feed; no new server function, no write), rendered by a module loaded only by this action (its own CLI chunk), so status, planning, save and land load no added module. Installed size grows by the two small source modules; ceilings unchanged."
+}

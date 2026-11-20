@@ -53,6 +53,7 @@ import { hostedLandingRequestSchema } from '../src/hosted-landing';
 import { presignPut, r2Config, r2Key } from './r2';
 import { verifyArchiveUpload } from './archiveUpload';
 import { ForgeError, invariant } from '../src/errors';
+import { lineMainState } from './projectLiveLineStore';
 import { findObject, objectRow } from './projectObjectFind';
 import { resolveObjects } from './projectGithubMirrorObjects';
 
@@ -764,6 +765,8 @@ async function classify(
         window: auditWindowFlake(auditRow.window, state.audit.id, covered),
         earned: undefined,
       });
+      // A flake ends the red without a revert or a fix: main passes again (Flow view, Item 85f456c1).
+      await lineMainState(ctx.db, input.projectId, { red: false, at: run.endedAt! });
       if (count) await armAudit(ctx, auditRow, auditDue(count, firstAt, settings));
       await ctx.scheduler.runAfter(
         0,

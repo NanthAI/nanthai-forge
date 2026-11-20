@@ -73,6 +73,7 @@ export const namedReads = [
   'queue',
   'landings',
   'lane-history',
+  'flow',
   'board',
   'metrics',
   'decisions',

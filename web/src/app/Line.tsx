@@ -8,12 +8,24 @@ import { followLink } from './router';
 export type LineStage = 'editing' | 'saved' | 'checking' | 'ready';
 /** The feed's shape (liveLineResult), restated so the frame does not import Convex server code. */
 export type LineFeed = {
-  lanes: readonly { laneId: string; stage: LineStage; held: boolean; overlap: boolean; changedAt: number }[];
+  lanes: readonly {
+    laneId: string;
+    stage: LineStage;
+    held: boolean;
+    overlap: boolean;
+    changedAt: number;
+    /** Lanes checked together share it while checked (Flow view, Item 85f456c1). */
+    check?: string;
+    /** Held only because main is failing. */
+    mainRed?: true;
+  }[];
   more: number;
   moreIsLowerBound: boolean;
   main: { head: string; at?: string } | null;
   /** The last Lane that left the line, and how. */
   exit?: { laneId: string; kind: 'landed' | 'set-aside'; at: number } | null;
+  /** The Flow view's running day (src/flow-day.ts `FlowDay`); read it with `flowToday`. */
+  flow?: { hours: number[][]; took: number[][]; main?: { red: boolean; since: number } };
 };
 
 const stops: readonly { stage: LineStage; label: string; short: string }[] = [

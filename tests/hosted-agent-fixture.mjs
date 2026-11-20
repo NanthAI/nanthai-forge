@@ -101,6 +101,7 @@ export function agentFixture(t, source) {
     requests = new Map(),
     completed = new Set();
   const queueView = { total: 0, listed: 0, more: false, train: 0, entries: [] };
+  const lineFeed = { lanes: [], more: 0, moreIsLowerBound: false, main: null, exit: null };
   let fail = null,
     pending = false,
     allowed = true,
@@ -402,6 +403,7 @@ export function agentFixture(t, source) {
     )
       result = { pending: true, version: args.version ?? 0 };
     else if (name === 'projectHostedQueueView:read') result = queueView;
+    else if (name === 'projectLiveLine:read') result = lineFeed;
     else if (name === 'projectHostedOverlapAnswers:read') result = { schema: 1, answers: [], args };
     else if (name === 'projectHostedLaneHistory:read') result = { schema: 1, laneId: args.laneId };
     else if (name === 'projectHostedApprovals:request')
@@ -502,6 +504,7 @@ export function agentFixture(t, source) {
     laneFiles: JSON.parse(laneBytes).files,
     transport,
     queueView,
+    lineFeed,
     lose(name) {
       fail = name;
     },

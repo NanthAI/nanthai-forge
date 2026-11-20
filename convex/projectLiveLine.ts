@@ -8,6 +8,7 @@ import { finishReadSourceDb } from './projectFinishReadReader';
 import { liveLineStage } from './projectLiveLineFields';
 import { report } from './errors';
 import { invariant } from '../src/errors';
+import { flowDay } from '../src/flow-day';
 
 const mainView = v.object({
   head: v.string(),
@@ -25,6 +26,8 @@ export const liveLineResult = v.object({
       held: v.boolean(),
       overlap: v.boolean(),
       changedAt: v.number(),
+      check: v.optional(v.string()),
+      mainRed: v.optional(v.literal(true)),
     }),
   ),
   more: v.number(),
@@ -37,6 +40,14 @@ export const liveLineResult = v.object({
       at: v.number(),
     }),
     v.null(),
+  ),
+  /** The Flow view's running day (src/flow-day.ts), from the same summary row; absent until its first step. */
+  flow: v.optional(
+    v.object({
+      hours: v.array(v.array(v.number())),
+      took: v.array(v.array(v.number())),
+      main: v.optional(v.object({ red: v.boolean(), since: v.number() })),
+    }),
   ),
 });
 export const read = finishQuery({
@@ -58,6 +69,7 @@ export const read = finishQuery({
       const value: {
         main?: import('convex/values').Infer<typeof mainView>;
         exit?: import('convex/values').Infer<typeof liveLineResult>['exit'];
+        flow?: unknown;
       } = summary ? JSON.parse(summary.value) : {};
       let main = value.main ?? null;
       // An untouched pre-upgrade project still shows its accepted main. This is an
@@ -102,17 +114,20 @@ export const read = finishQuery({
           main = await legacyLineMain(sourceDb, projectId, original.work.generationId);
       }
       return {
-        lanes: marks.slice(0, 60).map(({ laneId, stage, held, overlap, changedAt }) => ({
+        lanes: marks.slice(0, 60).map(({ laneId, stage, held, overlap, changedAt, check, mainRed }) => ({
           laneId,
           stage,
           held,
           overlap,
           changedAt,
+          ...(check ? { check } : {}),
+          ...(mainRed ? { mainRed } : {}),
         })),
         more: Math.max(0, marks.length - 60),
         moreIsLowerBound: marks.length === 101,
         main,
         exit: value.exit ?? null,
+        ...(value.flow ? { flow: flowDay(value.flow) } : {}),
       };
     } catch (error) {
       return report(error);

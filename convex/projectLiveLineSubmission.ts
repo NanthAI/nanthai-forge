@@ -6,21 +6,62 @@ import { changeLineMark, lineExit } from './projectLiveLineStore';
 import { lineOwner, detachLineOwner, type LineBinding, type LineOwnerValue } from './projectLiveLineOwners';
 
 type LineState = Pick<HostedLandingState, 'id' | 'projectId' | 'phase'> &
-  Partial<Pick<HostedLandingState, 'observation' | 'error'>> & { held?: boolean };
+  Partial<Pick<HostedLandingState, 'observation' | 'error' | 'batchId' | 'timing' | 'counts' | 'at'>> & {
+    held?: boolean;
+    hold?: string | null;
+  };
 const pageKind = 'projectLiveLineSubmissionPage';
 function selection(state: LineState) {
+  const stage = (state.phase === 'checking' ? 'checking' : state.phase === 'ready' ? 'ready' : 'saved') as
+    | 'checking'
+    | 'ready'
+    | 'saved';
   return {
-    stage: (state.phase === 'checking' ? 'checking' : state.phase === 'ready' ? 'ready' : 'saved') as
-      | 'checking'
-      | 'ready'
-      | 'saved',
+    stage,
     // A landing withdrawn by its agent (or a person) waits on nobody: its Lane is back at Saved (Item 0cb9b064).
     held:
       state.held === true ||
       (state.phase === 'terminal-failed' && state.error?.code !== 'LANDING_CANCELLED') ||
       state.observation?.pendingReason === 'waiting-for-review' ||
       state.observation?.pendingReason === 'waiting-for-dependency',
+    // Lanes checked together (one batch, or one submission of several Lanes) share a key while checked.
+    check: stage === 'checking' ? (state.batchId ?? state.id)?.slice(0, 8) : undefined,
+    // Parked by the gate while main is red (projectHostedGate.ts holdMainRed): held, but no person is asked.
+    mainRed: state.hold === 'main-red' ? (true as const) : undefined,
   };
+}
+const seconds = (n: number | undefined) => (n && Number.isFinite(n) && n > 0 ? n : 0);
+/** What one submission's write adds to the Flow view's day (src/flow-day.ts), or nothing. A landing or a failed end
+ * counts only on its first arrival, so a replayed write of the same phase never counts twice. CI seconds count each
+ * check at most once (review 85f456c1): a submission's latest check (`runnerSeconds`, a batch member's share) when it
+ * lands or its check fails, and a check it discards on the way (a failed shared batch check, a cancelled run, a
+ * recheck after main moved) when that write moves the seconds into its own `discardedRunnerSeconds`. A
+ * resubmission's carried seconds arrive with its insert, which is no transition, so they never count again. Any
+ * other failed end (superseded, cancelled, stalled, declined) counts no seconds: its check may have passed and its
+ * resubmission may reuse it, which counts it then. A write that both binds a reused check and discards another sees
+ * only the net change, so it can undercount, never overcount: CI minutes are a lower bound. Reverts and fixes on
+ * top count once per red episode, when main turns green (projectLiveLineStore). */
+function flowStep(before: LineState, state: LineState) {
+  const discarded =
+    seconds(state.counts?.discardedRunnerSeconds) - seconds(before.counts?.discardedRunnerSeconds);
+  const dropped = discarded > 0 ? { ciSeconds: discarded, lostSeconds: discarded } : null;
+  if (before.phase === state.phase) return dropped;
+  const lost = dropped?.lostSeconds ?? 0;
+  if (state.phase === 'landed') {
+    const runner = seconds(state.counts?.runnerSeconds);
+    const submitted = Date.parse(state.timing?.submittedAt ?? state.at ?? '');
+    return {
+      landed: 1,
+      ciSeconds: runner + lost,
+      lostSeconds: lost,
+      ...(Number.isFinite(submitted) ? { took: Math.max(0, (Date.now() - submitted) / 1000) } : {}),
+    };
+  }
+  if (state.phase !== 'terminal-failed') return dropped;
+  const fix = state.observation?.cause === 'check-failed' || state.error?.code === 'CHECK_FAILED' ? 1 : 0;
+  const runner = fix ? seconds(state.counts?.runnerSeconds) : 0;
+  // A failed end that counts nothing writes nothing.
+  return fix || runner + lost ? { fix, ciSeconds: runner + lost, lostSeconds: runner + lost } : null;
 }
 /** The normal input-staging transaction already authenticated these exact pins. */
 export async function bindLineInputs(
@@ -107,8 +148,18 @@ export async function transitionLineSubmission(
 ) {
   const prior = selection(before),
     next = selection(state);
-  if (before.phase === state.phase && prior.stage === next.stage && prior.held === next.held) return;
+  const moved =
+    prior.stage !== next.stage ||
+    prior.held !== next.held ||
+    prior.check !== next.check ||
+    prior.mainRed !== next.mainRed;
+  const step = flowStep(before, state);
   const projectId = state.projectId as Id<'hostedProjects'>;
+  if (before.phase === state.phase && !moved) {
+    // A check discarded without a stage change: the step alone (one summary write per discarded check).
+    if (step) await lineExit(ctx.db, projectId, null, step);
+    return;
+  }
   let cursor: string | null = null;
   let removed = 0;
   let last: string | undefined;
@@ -127,7 +178,7 @@ export async function transitionLineSubmission(
           await ctx.db.delete(entry.ownerId);
           removed++;
           last = entry.laneId;
-        } else if (prior.stage !== next.stage || prior.held !== next.held) {
+        } else if (moved) {
           await ctx.db.patch(entry.markId, {
             ...next,
             ...(prior.stage !== next.stage ? { changedAt: Date.now() } : {}),
@@ -141,5 +192,13 @@ export async function transitionLineSubmission(
     if (page.isDone) break;
     cursor = state.phase === 'landed' ? null : page.continueCursor;
   } while (true);
-  if (removed) await lineExit(ctx.db, projectId, { laneId: last!, kind: 'landed', at: Date.now() });
+  // One summary write: the exit a landing already writes, carrying the Flow day's step. A landing with no bound
+  // mark, or a failed check, writes the step alone.
+  if (removed || step)
+    await lineExit(
+      ctx.db,
+      projectId,
+      removed ? { laneId: last!, kind: 'landed', at: Date.now() } : null,
+      step ?? undefined,
+    );
 }

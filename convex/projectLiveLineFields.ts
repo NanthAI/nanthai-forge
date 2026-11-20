@@ -17,6 +17,10 @@ export const liveLineTables = {
     held: v.boolean(),
     overlap: v.boolean(),
     changedAt: v.number(),
+    /** Lanes checked together share this short key while they are checked (Item 85f456c1). */
+    check: v.optional(v.string()),
+    /** Held only because main is failing: no person is asked (Item 85f456c1). */
+    mainRed: v.optional(v.literal(true)),
   })
     .index('by_project_and_lane', ['projectId', 'laneId'])
     .index('by_project_and_held', ['projectId', 'held'])
