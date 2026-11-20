@@ -21,6 +21,7 @@ it was set from and why. Change a number there, with the new data, and nowhere e
 | R2 request dollars and bytes put by a landing's composes, mean (Issue 3e3f9fe6) | every recomposed landing | Latest 20 jointly stamped dev landings at 2026-11-12 23:20Z: 2.55 A / 1.00 B, or $0.000011835 per landing; request budget $0.000018 (about 1.5x, rounded up to a microdollar, absolute floor $0.000010). Separate bytes budget remains 1.35 MB; missing stamps are skipped |
 | GitHub runner minutes of a landing's checks, mean: accepted / discarded / audit (Issue 3e3f9fe6) | every landing | 54.4 / 4.7 / 18.8 shard minutes over the 36 landings of 2026-11-10 (rolling 20-landing means 49 to 57 / 2.5 to 5.9 / 13 to 23); budget 70 / 12 / 32 min |
 | Runner minutes per full check, p50 (shard execution of the accepted run when it ran in full) | every landing with a full check | 76.4 min over the first 8 full checks after d5de1c98 (121.6 over 34 before it); budget 92 min |
+| Cancelled or discarded runner minutes per UTC day (Item a217b83e) | the Stats day close, once per closed day | live 2026-11-11 to 11-19: 0 to 1,620 on ordinary days, 6,613 on the 11-17 incident day, 7,945 on 11-19; budget 2,100 min ([below](#daily-waste-tripwire)) |
 | Save / preflight, p90 | every landing with a recorded duration | initial budgets 30 / 120 s; sources and calibration below |
 | Cold read of a packed landing's history, p90 (marker query plus capsule history action) | `perf-harness --capsule-cold-read`, re-run after each packer or reader change | 2026-11-18, 46 cold reads through the Node history action: p50 749 ms, p90 1,024 ms (an earlier run's max 3.7 s was an isolate cold start); budget 2 s |
 
@@ -138,6 +139,34 @@ the window: the budget sends one "not enough data" message (no Issue) and `nforg
 row; it clears silently once it can be judged. It fires only once full-check stamps reach the oldest quarter
 of the row, so a row written before the stamp existed never reads as short and no extra field is stored. The landings reply's `costs.runnerFull` gives the same minutes.
 
+### Naming the landing behind a shift
+
+A whole-check shift is judged on full checks reserved after a landing landed, never on the check that first saw
+it: the hosted executor runs from main, so a landing's own check still runs the old code. When the newest 3 to 5
+full checks (non-batch, accepted, whole) all sit beyond the band of the 8 to 10 before them, in the same
+direction (band = max(3 × 1.4826 × MAD of the earlier log minutes, 15%)), the landings committed between the last
+check reserved before the split and the first check reserved after it are named, oldest first, in one owner
+message: "adds about X runner minutes to every full check" for a slowdown, "Credit, not a fault" for a speedup.
+It opens no Issue; the budget's own break does that. One slow runner or a slow creep names nobody, and the
+same shift is never named twice (the row keeps the split's reservation time and its last landing, about 35
+bytes, only after a shift). Precision is bounded by full-check spacing: the live replay
+(`tests/speed-budget-shift-waste.test.mjs`) names 9 landings for d5de1c98's shift, including the right one,
+never the one whose check saw it. Contract-selected checks cannot localize it: they carry no coverage and
+their seconds per file are the same on both sides.
+
+### Daily waste tripwire
+
+`runner-waste-daily` sums each landed change's discarded runner seconds (checks of earlier attempts that were
+replaced, failed, cancelled or went stale) per closed UTC day. The Stats day close judges it once per day from
+the receipts and landing rows it already reads, and keeps its state (open break, ratchet, note) on that day's
+Stats row: nothing on the landing path, no new call or table, about 150 bytes per closed day. It uses the same
+alert and P0 Issue path as the other budgets and the [ratchet](#ratchet) rules with one closed day per held
+day. A day where more than half the landings have no discarded-minutes stamp yet (usage pending, or past the
+close's read cap) cannot be compared with a line set from whole days: it sends one "not enough data" note and is
+not judged. Late usage that arrives after a day closed corrects Stats, not the judged day. Checks of work that
+never landed (withdrawn) are on Stats' discarded tally, not here. The file max (2,100 min, about $17 a day at list
+price) is the per-landing discarded budget (12 min) × the busiest day's 171 landings.
+
 ## Check time per landing
 
 When a whole check run's per-file timings join the planner's timing history (`projectHostedTestTimings`, the
@@ -159,9 +188,12 @@ seeded runs at 30 and 100 edited files name 0). A file the history has timed in 
 as new (the history entry carries `n` until then), so the change's own failed or discarded attempts, which
 also feed the history, do not hide it.
 
-Only whole runs are judged. A contract-selected or scoped run skips files on purpose, so it cannot tell a
-deleted file from an unselected one; a landing accepted on one is not named, and the runner-minutes budget
-still sees its class. A batch's shared run names the stacked change on main's (last) receipt. Timings that
+Whole runs and contract-selected runs are judged. A contract-selected run skips files on purpose, so it cannot
+tell a deleted file from an unselected one: it names new test files only, never files it no longer ran. Nothing
+is lost: a deleted or renamed path selects the whole run (`classifyCheckPath` returns no scope for it), and a
+changed test file is always in the selection, so the files that could offset a new one are judged on a whole
+run. Of 60 replayed landings, 22 were contract-selected and named nothing before. A main-race scoped recheck
+and a scoped plan are never judged. A batch's shared run names the stacked change on main's (last) receipt. Timings that
 arrive in several argument pages, or through the scheduled legacy timing path, leave the run without the
 record. The seconds are runner seconds summed over shards, the unit of the budget above; wall time is about
 that divided by the shard count. A docs-only change is never named.
@@ -189,7 +221,7 @@ already writes the budget row:
 | Bounds | never above the file `max`; never below the worst held day or the value judged now |
 | Undo | a window over a ratcheted line but at or under the file `max` undoes the ratchet (back to the line before it, or the file `max`) with a reason and one message; only the file `max` opens the P0 Issue |
 | Override | `"ratchet": false` pins a budget to its file `max` and drops any ratcheted line; editing its `max` in `src/speed-budgets.json`, with data and reason, drops the ratcheted line and restarts the hold |
-| Record | the row keeps the line, the file `max` it tightened, the line before it, the landing, the time and a one-line reason; the stall-alert channels get one message; no Issue opens |
+| Record | the row keeps the line, the file `max` it tightened, the line before it, the landing, the time and a one-line reason; the stall-alert channels get one message; no Issue opens. Each undo also keeps its flow record (the last 4 per budget): the day, the tightened line, the line it went back to, the landings that landed while the tighter line held, and how many of their outcomes it changed. A speed line only sends alerts, so that is 0; a future reader that gates or holds on a line must count what it changed (the reader list in `tests/speed-budget-shift-waste.test.mjs` fails until it does) |
 | Report | `nforge metrics` prints `value / file max (automatic line)`, the date it ratcheted, the held days left before the next ratchet check, and for a pinned budget what the automatic rule would pick |
 
 The band floor exists because the signal is a smoothed rolling percentile: on a quiet week its day-to-day MAD

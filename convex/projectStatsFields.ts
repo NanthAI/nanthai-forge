@@ -19,6 +19,9 @@ export const statsTables = {
     /** Stopped runs of this day with no minutes yet, and the tally that holds each (src/stats-runs.ts#classifyRuns):
      * a late cancelled-run report adds its minutes there once (convex/projectCancelledRunDay.ts). */
     lateRuns: v.optional(v.array(v.object({ runId: v.string(), bucket: v.string() }))),
+    // The day budgets' open break, ratchet and notes after this day (src/landing-speed-alerts.ts
+    // judgeClosedDay, JSON); absent while no day budget holds state.
+    budgets: v.optional(v.string()),
     projectId: v.id('hostedProjects'),
     day: v.string(),
     value: v.string(),

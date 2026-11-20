@@ -62,6 +62,12 @@ test('runner minutes per full check: a heavier test set breaks it once, naming t
   const heavy = Math.ceil(full.max * 60 * 1.6);
   const slow = Array.from({ length: W }, () => sample((at += minute), { runner: heavy }));
   ({ state, events } = replay(state, slow));
+  // The step is also a whole-check shift: named once, as its own message (tests/speed-budget-shift-waste.test.mjs).
+  assert.deepEqual(
+    events.filter(e => e.kind === 'shift').map(e => e.shift.after > e.shift.before),
+    [true],
+  );
+  events = events.filter(e => e.kind !== 'shift');
   const broken = events.filter(e => e.budget.id === full.id);
   assert.equal(broken.length, 1, 'one alert, not one per landing');
   assert.equal(broken[0].kind, 'broken');
@@ -73,8 +79,13 @@ test('runner minutes per full check: a heavier test set breaks it once, naming t
     state,
     Array.from({ length: W }, () => sample((at += minute), { runner: normal })),
   ));
+  const back = events.filter(e => e.kind === 'shift');
+  assert(
+    back.length <= 1 && back.every(e => e.shift.after < e.shift.before),
+    'at most one shift, back to faster',
+  );
   assert.deepEqual(
-    events.filter(e => e.budget.id === full.id).map(e => e.kind),
+    events.filter(e => e.budget.id === full.id && e.kind !== 'shift').map(e => e.kind),
     ['recovered'],
   );
 });

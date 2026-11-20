@@ -21,8 +21,16 @@ import { costGuardSchema, costBudgetSchema, discardedRunnerSeconds } from './cos
  * - Override: `"ratchet": false` pins a budget to its file `max` (any ratcheted line is dropped; held
  *   days still count, so the report shows what the automatic line would be); editing `max` in
  *   src/speed-budgets.json, with the data and reason, replaces any ratcheted line and restarts the hold.
- * - Top metric: the budget's own statistic; it interacts with its own break and recovery only. */
+ * - Top metric: the budget's own statistic; it interacts with its own break and recovery only. Each undo
+ *   also records the shared flow metric it could have moved (lead note on a217b83e, Forge adapts): how
+ *   many landings landed while the tighter line held, and how many of their outcomes it changed. That is
+ *   0 by construction: no landing, queue or acceptance path reads a speed line, only these alerts do
+ *   (tests/speed-budget-ratchet.test.mjs lists every reader of the speed row and fails on a new one). */
 const RATCHET_DAYS = 7;
+/** Undo records kept per budget, newest last. */
+const UNDOS_KEPT = 4;
+/** Landing outcomes a speed line can change: none, it only sends alerts (see the reader guard above). */
+export const LINE_OUTCOMES_CHANGED = 0;
 /** The band's floor as a share of the current line. */
 const MIN_BAND = 0.15;
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -40,6 +48,20 @@ export const ratchetEntrySchema = z
     at: z.iso.datetime().optional(),
     landing: z.string().optional(),
     reason: z.string().max(400).optional(),
+    /** Each undo: [day, tightened line, line back to, landings landed while it held (in the retained
+     * row, so at most 40), landing outcomes it changed]. Newest last. */
+    undos: z
+      .array(
+        z.tuple([
+          day,
+          z.number(),
+          z.number(),
+          z.number().int().nonnegative(),
+          z.number().int().nonnegative(),
+        ]),
+      )
+      .max(UNDOS_KEPT)
+      .optional(),
   })
   .strict();
 type RatchetEntry = z.infer<typeof ratchetEntrySchema>;
@@ -77,7 +99,7 @@ type RatchetStep = {
   /** Set when this landing tightened the line. */
   ratcheted?: { from: number; to: number; reason: string };
   /** Set when this landing's value broke a ratcheted line at or under the file max. */
-  undone?: { from: number; to: number; reason: string };
+  undone?: { from: number; to: number; reason: string; landed: number; changed: number };
 };
 const isoDay = (at: number) => new Date(at).toISOString().slice(0, 10);
 /** Pure: fold one landing's window value into the budget's entry. `at` is the landing's time. */
@@ -88,6 +110,10 @@ export function stepRatchet(
   at: number,
   landing: string,
   pinned = false,
+  /** Landings landed since the line tightened (from the retained row), for the undo's flow record. */
+  landedSince = 0,
+  /** A day budget: `value` is a whole closed day, held (or not) at once instead of on the next day. */
+  closedDay = false,
 ): RatchetStep {
   // A changed file line is a manual override: drop the old ratchet and start a new hold.
   const kept =
@@ -102,23 +128,34 @@ export function stepRatchet(
     open = undefined;
   }
   open = open && open[0] === today ? [today, Math.max(open[1], value)] : [today, value];
+  if (closedDay) {
+    days = open[1] <= line ? [...days, open].slice(-RATCHET_DAYS) : [];
+    open = undefined;
+  }
+  const opened = open ? { open } : {};
   // Pinned: judged at the file max; held days still count for the report's automatic line.
-  if (pinned) return { entry: { open, days }, line };
+  if (pinned) return { entry: { ...opened, days }, line };
   if (kept?.line !== undefined && line < max && value > line) {
     // Over a ratcheted line: undo the ratchet, never a P0 unless the file max breaks too.
     const back = kept.from !== undefined && kept.from <= max && value <= kept.from ? kept.from : max;
     const since = kept.at ? Math.max(0, Math.floor((at - Date.parse(kept.at)) / 86_400_000)) : null;
+    const changed = LINE_OUTCOMES_CHANGED;
     const reason =
       `Ratchet undone: the window reached ${value}, over the ratcheted line ${line}` +
       (since === null ? '' : ` ${since} day${since === 1 ? '' : 's'} after it tightened`) +
-      `; line back to ${back}${back === max ? ' (the file max)' : ''}.`;
-    const undone = { from: line, to: back, reason };
+      `; line back to ${back}${back === max ? ' (the file max)' : ''}. ` +
+      `Flow: ${landedSince} landing${landedSince === 1 ? '' : 's'} landed while it held; it changed ${changed} of their outcomes (a speed line only sends alerts).`;
+    const undone = { from: line, to: back, reason, landed: landedSince, changed };
+    const undos = [
+      ...(kept.undos ?? []),
+      [today, line, back, landedSince, changed] as [string, number, number, number, number],
+    ].slice(-UNDOS_KEPT);
     line = back;
     return {
       entry:
         back < max
           ? {
-              open,
+              ...opened,
               days: [],
               line: back,
               fromMax: max,
@@ -126,8 +163,9 @@ export function stepRatchet(
               at: new Date(at).toISOString(),
               landing,
               reason,
+              undos,
             }
-          : { open, days: [] },
+          : { ...opened, days: [], undos },
       line,
       ...(value <= max ? { undone } : {}),
     };
@@ -136,13 +174,14 @@ export function stepRatchet(
     ...(kept?.line !== undefined ? { line: kept.line, fromMax: kept.fromMax } : {}),
     ...(kept?.from !== undefined ? { from: kept.from } : {}),
     ...(kept?.at ? { at: kept.at, landing: kept.landing, reason: kept.reason } : {}),
+    ...(kept?.undos ? { undos: kept.undos } : {}),
   };
-  const entry: RatchetEntry = { ...base, open, days };
+  const entry: RatchetEntry = { ...base, ...opened, days };
   if (days.length < RATCHET_DAYS) return { entry, line };
   const target = ratchetTarget(
     days.map(d => d[1]),
     line,
-    open[1],
+    open?.[1] ?? value,
   );
   if (!(target.line < line)) return { entry, line };
   const reason =
@@ -150,7 +189,7 @@ export function stepRatchet(
     `median ${round3(target.median)}, band ${round3(target.band)} (3 x 1.4826 x MAD, at least ${MIN_BAND * 100}% of the line); line ${line} -> ${target.line}.`;
   return {
     entry: {
-      open,
+      ...opened,
       days: [],
       line: target.line,
       fromMax: max,
@@ -158,6 +197,7 @@ export function stepRatchet(
       at: new Date(at).toISOString(),
       landing,
       reason,
+      ...(kept?.undos ? { undos: kept.undos } : {}),
     },
     line: target.line,
     ratcheted: { from: line, to: target.line, reason },
@@ -203,8 +243,9 @@ export const speedBudgetSchema = z
      * nothing records the value yet; the report says so and names the gap. */
     measuredBy: z.enum(['landing-record', 'perf-harness', 'build-guard', 'unrecorded']),
     metric: z.string().min(1),
-    /** mean: cost budgets, where every landing's share adds up; p50/p90: speed budgets. */
-    stat: z.enum(['p50', 'p90', 'mean']).optional(),
+    /** mean: cost budgets, where every landing's share adds up; p50/p90: speed budgets; day: the total
+     * of one closed UTC day (the waste tripwire), judged once when the day's last landing is followed. */
+    stat: z.enum(['p50', 'p90', 'mean', 'day']).optional(),
     unit: z.enum(['min', 's', 'ms', 'calls', 'bytes', 'attempts', 'writes', 'ops', 'USD']),
     max: z.number().min(0).nullable(),
     source: z.string().min(1),
@@ -250,8 +291,9 @@ export type LandingMetric =
   | 'runnerAccepted'
   | 'runnerDiscarded'
   | 'runnerAudit'
-  | 'runnerFull';
-type Stat = 'p50' | 'p90' | 'mean';
+  | 'runnerFull'
+  | 'wasteDaily';
+type Stat = 'p50' | 'p90' | 'mean' | 'day';
 const INDEX: Partial<Record<LandingMetric, number>> = {
   toMain: 1,
   saveMs: 8,
@@ -272,7 +314,12 @@ const COUNT: Partial<Record<LandingMetric, [number, number]>> = {
   runnerAudit: [5, 60],
   runnerFull: [6, 60],
 };
-const METRICS = [...Object.keys(INDEX), ...Object.keys(COUNT), 'r2RequestUsd'] as LandingMetric[];
+const METRICS = [
+  ...Object.keys(INDEX),
+  ...Object.keys(COUNT),
+  'r2RequestUsd',
+  'wasteDaily',
+] as LandingMetric[];
 const isLanding = (b: SpeedBudget): b is SpeedBudget & { metric: LandingMetric; stat: Stat; max: number } =>
   b.measuredBy === 'landing-record' && !!b.stat && b.max !== null && (METRICS as string[]).includes(b.metric);
 /** The budgets a landing's own stamps can judge. */
@@ -312,6 +359,73 @@ const sampleSchema = z.tuple([
   // Minutes from the first passed check to the commit; absent on rows written before it (42200ce4).
   z.number().nonnegative().nullable().optional(),
 ]);
+/** Whole-check shift (Item a217b83e, lead 7c9e5a86): name the landing behind a step in runner minutes per
+ * full check. The hosted executor and check runner run from main's control checkout, so a change to them
+ * shows only in checks reserved after it landed; the landing whose own check first saw the shift is never
+ * blamed. Signal: ln runner minutes of the full checks in the row (counts slot 6), ordered by when each
+ * check was reserved (commit time minus settle minus check minutes, all already in the sample).
+ * - A split between two consecutive full checks names the landings committed between their reservations.
+ * - Before: up to SHIFT_BEFORE full checks reserved earlier, at least SHIFT_BEFORE_MIN. After: the first
+ *   SHIFT_AFTER full checks reserved later, at least SHIFT_AFTER_MIN.
+ * - Band: 3 x 1.4826 x MAD of the before logs, never under ln(1.15) (the F1 floor of the ratchet).
+ * - Named when the after median is beyond the before median by more than the band and every after check
+ *   is beyond it in the same direction, so one slow runner never names anyone. The earliest such split
+ *   wins. After a named shift, a later split needs a baseline of checks all reserved after it, so the same
+ *   shift is never named twice and the next one is judged against the new normal. */
+const SHIFT_BEFORE = 10,
+  SHIFT_BEFORE_MIN = 8,
+  SHIFT_AFTER = 5,
+  SHIFT_AFTER_MIN = 3;
+export type CheckShift = {
+  /** The landings committed between the last check before and the first check after (newest last). */
+  landings: string[];
+  /** Median runner minutes per full check before and after, and the band in the same log units. */
+  before: number;
+  after: number;
+  band: number;
+  checks: { before: number; after: number };
+  /** When the first check after the shift was reserved (ms). */
+  reservedAt: number;
+};
+export function wholeCheckShift(
+  samples: LandingSpeedState['samples'],
+  named?: [number, string],
+): CheckShift | null {
+  const full = samples
+    .flatMap(row => {
+      const seconds = row[7]?.[6],
+        check = row[2],
+        settle = row[4];
+      if (seconds == null || !(seconds > 0) || check == null || settle == null) return [];
+      return [{ reserved: row[0] - settle * 1000 - check * minute, log: Math.log(seconds / 60) }];
+    })
+    .sort((a, b) => a.reserved - b.reserved);
+  for (let k = SHIFT_BEFORE_MIN; k + SHIFT_AFTER_MIN <= full.length; k++) {
+    const first = full[k]!.reserved,
+      last = full[k - 1]!.reserved,
+      baseline = full.slice(Math.max(0, k - SHIFT_BEFORE), k);
+    if (named && (first <= named[0] || baseline[0]!.reserved < named[0])) continue;
+    const landings = samples.filter(row => row[0] >= last && row[0] < first).map(row => row[3]);
+    if (!landings.length) continue;
+    const before = baseline.map(c => c.log),
+      after = full.slice(k, k + SHIFT_AFTER).map(c => c.log);
+    const mid = ratchetMedian(before),
+      band = Math.max(3 * 1.4826 * ratchetMedian(before.map(v => Math.abs(v - mid))), Math.log(1 + MIN_BAND)),
+      shift = ratchetMedian(after) - mid,
+      sign = Math.sign(shift);
+    if (!(Math.abs(shift) > band) || !after.every(v => (v - mid) * sign > band)) continue;
+    return {
+      landings,
+      before: round(Math.exp(mid)),
+      after: round(Math.exp(mid + shift)),
+      band: round3(band),
+      checks: { before: before.length, after: after.length },
+      reservedAt: Math.round(first),
+    };
+  }
+  return null;
+}
+
 const brokenSchema = z
   .object({
     since: z.iso.datetime(),
@@ -332,6 +446,9 @@ export const landingSpeedStateSchema = z
     ratchet: z.record(z.string(), ratchetEntrySchema).optional(),
     /** Budgets that cannot be judged although the row is full (too few stamped landings): since when. */
     short: z.record(z.string(), z.iso.datetime()).optional(),
+    /** The last whole-check shift named (wholeCheckShift below): [ms the first check after it was
+     * reserved, landing id]; absent until one is named. */
+    shift: z.tuple([z.number().int(), z.string()]).optional(),
   })
   .strict();
 export type LandingSpeedState = z.infer<typeof landingSpeedStateSchema>;
@@ -360,8 +477,9 @@ export type LandingSpeedSample = {
 };
 export type SpeedBudgetEvent = {
   /** `undone`: a ratcheted line broke at or under the file max and went back (no P0). `short`: the full
-   * row holds too few stamped landings to judge the budget (no P0). */
-  kind: 'broken' | 'recovered' | 'ratcheted' | 'undone' | 'short';
+   * row holds too few stamped landings to judge the budget (no P0). `shift`: runner minutes per full
+   * check stepped after a landing landed (the budget is the runner-full one; no P0, a message). */
+  kind: 'broken' | 'recovered' | 'ratcheted' | 'undone' | 'short' | 'shift';
   budget: SpeedBudget;
   /** The statistic over the window now. */
   value: number;
@@ -379,6 +497,13 @@ export type SpeedBudgetEvent = {
   stage?: string;
   /** Missing stamps in the newest landing window, excluded rather than charged as zero. */
   unknown?: number;
+  /** Day budgets: the closed UTC day judged, and its landings. */
+  day?: string;
+  landings?: number;
+  /** Shift only: what changed and the landings it names. */
+  shift?: CheckShift;
+  /** Undone only: landings landed while the tighter line held, and landing outcomes it changed. */
+  flow?: { landed: number; changed: number };
 };
 
 const span = (from?: string, to?: string, unit = minute) => {
@@ -548,6 +673,8 @@ export function observeLandingSpeed(
   const events: SpeedBudgetEvent[] = [];
   const since = new Date(sample.at).toISOString();
   for (const budget of judged) {
+    // Day budgets are judged by the Stats day close (judgeClosedDay below), never per landing.
+    if (budget.stat === 'day') continue;
     const value = windowValue(samples, budget.metric, budget.stat, budgets.window.landings);
     if (value === null) {
       // Runner minutes per full check skip batch members and scoped rechecks by design, so a full row
@@ -586,10 +713,19 @@ export function observeLandingSpeed(
           : windowValue([row], budget.metric, budget.stat, 1) === null,
       ).length;
     // Speed budgets (percentiles) ratchet here; cost means keep the cost ledger's own ratchet.
+    const tightenedAt = Date.parse(ratchet[budget.id]?.at ?? '');
     const step =
       budget.stat === 'mean'
         ? null
-        : stepRatchet(ratchet[budget.id], value, budget.max, sample.at, sample.id, budget.ratchet === false);
+        : stepRatchet(
+            ratchet[budget.id],
+            value,
+            budget.max,
+            sample.at,
+            sample.id,
+            budget.ratchet === false,
+            Number.isFinite(tightenedAt) ? samples.filter(row => row[0] > tightenedAt).length : 0,
+          );
     const line = step?.line ?? budget.max;
     if (step) ratchet[budget.id] = step.entry;
     const change = step?.ratcheted ?? step?.undone;
@@ -603,6 +739,7 @@ export function observeLandingSpeed(
         reason: change.reason,
         landing: sample.id,
         since,
+        ...(step?.undone ? { flow: { landed: step.undone.landed, changed: step.undone.changed } } : {}),
       });
     const open = broken[budget.id];
     if (value > line && !open) {
@@ -631,6 +768,23 @@ export function observeLandingSpeed(
       });
     }
   }
+  // Name the landing behind a whole-check shift (wholeCheckShift above), once per shift.
+  const runnerFull = judged.find(b => b.metric === 'runnerFull');
+  let shift = previous?.shift;
+  const found = runnerFull ? wholeCheckShift(samples, shift) : null;
+  if (runnerFull && found) {
+    // The split's reservation time and its last landing (8 characters): about 35 bytes, kept after a shift only.
+    shift = [found.reservedAt, found.landings.at(-1)!.slice(0, 8)];
+    events.push({
+      kind: 'shift',
+      budget: runnerFull,
+      value: found.after,
+      line: found.before,
+      landing: found.landings.at(-1)!,
+      since,
+      shift: found,
+    });
+  }
   return {
     state: {
       schema: 2,
@@ -638,9 +792,146 @@ export function observeLandingSpeed(
       broken,
       ...(Object.keys(ratchet).length ? { ratchet } : {}),
       ...(Object.keys(short).length ? { short } : {}),
+      ...(shift ? { shift } : {}),
     },
     events,
   };
+}
+
+/** What a day budget keeps between closed days, on the Stats day row (src/stats-estimate.ts): its open
+ * break, ratchet and not-enough-data note, as the landing row keeps them for window budgets, and the
+ * landings judged since its line last tightened (the undo's flow record). */
+export const dayBudgetStateSchema = landingSpeedStateSchema
+  .pick({ broken: true, ratchet: true, short: true })
+  .extend({ landed: z.record(z.string(), z.number().int().nonnegative()).optional() })
+  .partial()
+  .strict();
+export type DayBudgetState = z.infer<typeof dayBudgetStateSchema>;
+/** One closed UTC day, as the Stats day close counts it from the receipts and landing rows it already
+ * reads: known discarded runner seconds, landings with an unknown stamp, landings, and the landing with
+ * the most discarded seconds. */
+export type ClosedDay = {
+  day: string;
+  seconds: number;
+  unknown: number;
+  landings: number;
+  top: string | null;
+};
+/** One closed day from the Stats close's landings (src/stats-estimate.ts StatsLanding): known discarded
+ * runner seconds, landings whose discarded time is not known yet (usage still pending, or `unread`: past the
+ * close's read cap), and the landing that discarded the most (first 8 characters of its receipt id). */
+export function closedDay(
+  day: string,
+  landings: ReadonlyArray<{ id: string; discardedRunnerSeconds: number | null }>,
+  unread = 0,
+): ClosedDay {
+  let seconds = 0,
+    unknown = unread,
+    top: { id: string; discardedRunnerSeconds: number | null } | null = null;
+  for (const landing of landings) {
+    const discarded = landing.discardedRunnerSeconds;
+    if (discarded === null) unknown++;
+    else {
+      seconds += discarded;
+      if (discarded > (top?.discardedRunnerSeconds ?? 0)) top = landing;
+    }
+  }
+  return { day, seconds, unknown, landings: landings.length + unread, top: top ? top.id.slice(0, 8) : null };
+}
+/** Pure: judge the day budgets (stat `day`) on one closed day: the same break, recovery, P0 Issue, F1
+ * ratchet (one closed day per step) and not-enough-data note as a window budget. A day where more than
+ * half the landings have an unknown stamp cannot be compared with a line set from whole days: it says so
+ * once and is not judged. Daily waste tripwire (Item a217b83e, lead 20b27f1d). */
+export function judgeClosedDay(
+  previous: DayBudgetState | undefined,
+  closed: ClosedDay,
+  budgets: SpeedBudgets,
+) {
+  const judged = landingBudgets(budgets).filter(b => b.stat === 'day');
+  const ids = new Set(judged.map(b => b.id));
+  const keep = <T>(record?: Record<string, T>) =>
+    Object.fromEntries(Object.entries(record ?? {}).filter(([id]) => ids.has(id)));
+  const broken = keep(previous?.broken),
+    ratchet = keep(previous?.ratchet),
+    short = keep(previous?.short),
+    landed = keep(previous?.landed);
+  const events: SpeedBudgetEvent[] = [];
+  const value = round(closed.seconds / 60),
+    since = `${closed.day}T23:59:59.999Z`;
+  for (const budget of judged) {
+    const landing = closed.top ?? closed.day,
+      common = {
+        budget,
+        landing,
+        since,
+        day: closed.day,
+        landings: closed.landings,
+        ...(closed.unknown ? { unknown: closed.unknown } : {}),
+      };
+    if (closed.unknown * 2 > closed.landings || !closed.landings) {
+      if (!short[budget.id]) {
+        short[budget.id] = since;
+        const stamped = closed.landings - closed.unknown;
+        events.push({
+          ...common,
+          kind: 'short',
+          value: stamped,
+          line: budget.max,
+          stamped,
+          retained: closed.landings,
+        });
+      }
+      continue;
+    }
+    delete short[budget.id];
+    const step = stepRatchet(
+      ratchet[budget.id],
+      value,
+      budget.max,
+      Date.parse(`${closed.day}T12:00:00.000Z`),
+      landing,
+      budget.ratchet === false,
+      (landed[budget.id] ?? 0) + closed.landings,
+      true,
+    );
+    ratchet[budget.id] = step.entry;
+    // Landings judged since the line last tightened; a tighten or an undo restarts the count.
+    if (step.ratcheted || step.undone || step.entry.line === undefined) delete landed[budget.id];
+    else landed[budget.id] = (landed[budget.id] ?? 0) + closed.landings;
+    const change = step.ratcheted ?? step.undone;
+    if (change)
+      events.push({
+        ...common,
+        kind: step.ratcheted ? 'ratcheted' : 'undone',
+        value,
+        line: change.to,
+        from: change.from,
+        reason: change.reason,
+        ...(step.undone ? { flow: { landed: step.undone.landed, changed: step.undone.changed } } : {}),
+      });
+    const open = broken[budget.id];
+    if (value > step.line && !open) {
+      broken[budget.id] = { since, landing, value };
+      events.push({ ...common, kind: 'broken', value, line: step.line });
+    } else if (value <= step.line && open) {
+      delete broken[budget.id];
+      events.push({
+        ...common,
+        kind: 'recovered',
+        value,
+        line: step.line,
+        landing: open.landing,
+        since: open.since,
+      });
+    }
+  }
+  const state: DayBudgetState = {
+    ...(Object.keys(broken).length ? { broken } : {}),
+    ...(Object.keys(ratchet).length ? { ratchet } : {}),
+    ...(Object.keys(short).length ? { short } : {}),
+    ...(Object.keys(landed).length ? { landed } : {}),
+  };
+  return { state, events };
 }
 type Row = [
   number,
@@ -677,8 +968,10 @@ const NAME: Record<LandingMetric, string> = {
   runnerDiscarded: 'runner minutes of discarded checks per landing',
   runnerAudit: 'runner minutes of main audits per landing',
   runnerFull: 'runner minutes per full check',
+  wasteDaily: 'cancelled or discarded runner minutes per UTC day',
 };
-const describe = (b: SpeedBudget) => `${NAME[b.metric as LandingMetric]} ${b.stat}`;
+const describe = (b: SpeedBudget) =>
+  b.stat === 'day' ? NAME[b.metric as LandingMetric] : `${NAME[b.metric as LandingMetric]} ${b.stat}`;
 const NEXT: Record<LandingMetric, string> = {
   saveMs:
     'Next: compare the crossing landing save receipt durationMs and its CLI capture, upload and server step timings; inspect the latest save path change.',
@@ -722,10 +1015,16 @@ const NEXT: Record<LandingMetric, string> = {
     'Next: audits ran longer or more often: read the main audit state (`nforge agent ROOT status`, audit) and the audit cadence setting.',
   runnerFull:
     "Next: full checks burn more runner minutes: read the `checkTime` line of the window's receipts (`nforge agent ROOT landings`), which names " +
-    'a landing whose new test files added seconds to every check (whole runs only; edited files and runner or executor changes are never named), ' +
+    'a landing whose new test files added seconds to every check (whole and contract-selected runs; edited files are never named), ' +
     'then compare `status {"runId":"RUN","summary":true}` slowest files and executionSeconds on a full check before and after the crossing landing. ' +
-    'A shift on every file points at the check runner or executor, which shows first on checks dispatched after its landing. ' +
+    'A shift on every file points at the check runner or executor, which shows first on checks reserved after its landing: ' +
+    'Forge names that landing in a separate "Full checks slower since landing" message. ' +
     'Parallel shards hide this from check wall time (Issue d5de1c98: coverage collection on every shard).',
+  wasteDaily:
+    'Next: read `nforge metrics ROOT --text` for waste by cause on that day (main-race rechecks, cancels, supersedes) and ' +
+    '`nforge agent ROOT landings` for the named landing (checkRunIds, recomposeCount, heldAfterCheck). Runs thrown away when main ' +
+    'moved are the usual cause (incident 5e3c3a3c on 2026-11-17: 6,613 minutes); a cancel loop or a stalled queue is the other. ' +
+    'Counts accepted landings only, as the Stats day close does.',
 };
 const lastLandings = (budgets: SpeedBudgets) => `the last ${budgets.window.landings} landings`;
 
@@ -733,12 +1032,17 @@ const lastLandings = (budgets: SpeedBudgets) => `the last ${budgets.window.landi
 export function speedBudgetMessage(event: SpeedBudgetEvent, project: string, budgets: SpeedBudgets) {
   const b = event.budget;
   const line = event.line ?? b.max;
+  const over = event.day
+    ? `on UTC day ${event.day} (${event.landings ?? 0} landings) was`
+    : `over ${lastLandings(budgets)} is`;
   const head =
-    `${describe(b)} over ${lastLandings(budgets)} is ${event.value} ${b.unit}; budget ${line} ${b.unit}` +
+    `${describe(b)} ${over} ${event.value} ${b.unit}; budget ${line} ${b.unit}` +
     (line < (b.max ?? line) ? ` (ratcheted from ${b.max})` : '') +
     '.' +
     (event.unknown
-      ? ` ${event.unknown} of the newest ${budgets.window.landings} landings have an unknown ${b.metric} stamp; excluded, never counted as zero.`
+      ? event.day
+        ? ` ${event.unknown} of that day's landings have an unknown ${b.metric} stamp; excluded, never counted as zero.`
+        : ` ${event.unknown} of the newest ${budgets.window.landings} landings have an unknown ${b.metric} stamp; excluded, never counted as zero.`
       : '');
   if (event.kind === 'ratcheted')
     return {
@@ -749,6 +1053,35 @@ export function speedBudgetMessage(event: SpeedBudgetEvent, project: string, bud
     return {
       subject: `[Forge] Speed budget ratchet undone: ${describe(b)}: ${project}`,
       text: `Speed budget ${b.id} ratchet undone on ${project} at landing ${event.landing.slice(0, 8)}: ${event.reason} Still within the file max ${b.max} ${b.unit}, so no P0 Issue; the hold restarts.`,
+    };
+  if (event.kind === 'shift' && event.shift) {
+    const sh = event.shift,
+      slower = sh.after > sh.before,
+      ids = sh.landings.map(id => id.slice(0, 8)),
+      shown = ids.slice(0, 10).join(', ') + (ids.length > 10 ? ` and ${ids.length - 10} more` : '');
+    return {
+      subject: `[Forge] Full checks ${slower ? 'slower' : 'faster'} since landing ${ids.length === 1 ? ids[0] : `${ids[0]}..${ids.at(-1)}`}: ${project}`,
+      text:
+        `Runner minutes per full check went from ${sh.before} to ${sh.after} min on ${project} (median of ${sh.checks.before} full checks reserved before, ` +
+        `${sh.checks.after} after), beyond the noise band (ln ${sh.band}), and every check after it moved the same way. ` +
+        `The check runner runs from main, so the change landed before the first slower check was reserved, never in the landing whose own check saw it: ` +
+        (ids.length === 1
+          ? `landing ${ids[0]}.`
+          : `one of the ${ids.length} landings committed between the last full check before and the first after, oldest first: ${shown}.`) +
+        ' ' +
+        (slower
+          ? `It adds about ${round(sh.after - sh.before)} runner minutes to every full check. Next: read their changes to the check runner, executor, test setup or shard plan, and compare \`status {"runId":"RUN","summary":true}\` on a full check before and after. `
+          : 'Credit, not a fault: nothing to do. ') +
+        `Budget ${b.id} (file max ${b.max} ${b.unit}) judges the window; this message names the cause once per shift and opens no Issue.`,
+    };
+  }
+  if (event.kind === 'short' && event.day)
+    return {
+      subject: `[Forge] Speed budget has too little data: ${describe(b)}: ${project}`,
+      text:
+        `Speed budget ${b.id} cannot judge UTC day ${event.day} on ${project}: ${event.unknown ?? 0} of its ${event.landings ?? 0} landings have an unknown ${b.metric} stamp (cancelled usage not reported yet, or written before the stamp). ` +
+        'Not enough data: a day missing more than half its landings cannot be compared with its line, so that day neither breaks nor recovers it. ' +
+        'This message does not repeat until a day has been judged again.',
     };
   if (event.kind === 'short')
     return {
@@ -764,7 +1097,9 @@ export function speedBudgetMessage(event: SpeedBudgetEvent, project: string, bud
         subject: `[Forge] Speed budget broken: ${describe(b)}: ${project}`,
         text: [
           `Speed budget ${b.id} broke on ${project}: ${head}`,
-          `Crossed by landing ${event.landing.slice(0, 8)} (${b.area})${event.stage ? `; its longest stage was ${event.stage}` : ''}.`,
+          event.day
+            ? `Most of that day's waste came from landing ${event.landing.slice(0, 8)} (${b.area}).`
+            : `Crossed by landing ${event.landing.slice(0, 8)} (${b.area})${event.stage ? `; its longest stage was ${event.stage}` : ''}.`,
           `Budget source: ${b.source}`,
           NEXT[b.metric as LandingMetric],
           'One P0 Issue tracks this budget; this alert does not repeat while it stays broken, and a recovery message follows.',
@@ -805,9 +1140,11 @@ export function speedBudgetIssue(event: SpeedBudgetEvent, projectId: string, bud
     commentOperationId: operation('comment'),
     title: `P0 speed budget broken: ${describe(b)} (${b.area})`,
     body: [
-      `Opened by Forge. Budget \`${b.id}\`: ${describe(b)} over ${lastLandings(budgets)} must stay at or under ${event.line ?? b.max} ${b.unit}${(event.line ?? b.max) < (b.max ?? event.line) ? ` (ratcheted from ${b.max})` : ''}.`,
+      `Opened by Forge. Budget \`${b.id}\`: ${describe(b)} ${b.stat === 'day' ? 'on each closed UTC day' : `over ${lastLandings(budgets)}`} must stay at or under ${event.line ?? b.max} ${b.unit}${(event.line ?? b.max) < (b.max ?? event.line) ? ` (ratcheted from ${b.max})` : ''}.`,
       '',
-      `Crossed by landing \`${event.landing}\` at ${event.since}. Area: ${b.area}.`,
+      event.day
+        ? `Crossed on UTC day ${event.day}; most of its waste came from landing \`${event.landing}\`. Area: ${b.area}.`
+        : `Crossed by landing \`${event.landing}\` at ${event.since}. Area: ${b.area}.`,
       `Budget source: ${b.source}`,
       `Reason: ${b.reason}`,
       ...(b.issue ? [`Decision it protects: Issue ${b.issue}.`] : []),

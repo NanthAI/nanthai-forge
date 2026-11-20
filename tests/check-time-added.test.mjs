@@ -17,6 +17,7 @@ import { finishFixture } from './hosted-finish-fixture.mjs';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { moduleUrl } from './convex-module.mjs';
+import { classifyCheckPath } from '../scripts/check-path-scopes.mjs';
 const { recordHostedTestTimings } = await import(moduleUrl('../convex/projectHostedTestTimings.ts'));
 
 const env = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
@@ -215,6 +216,84 @@ test('the result transaction stamps whole runs once from the history it already 
   });
   await record(scoped);
   assert.equal(scoped.checkTime, undefined, 'a scoped recheck cannot see deletions: no evidence');
+});
+
+test('contract-selected runs name new test files too (22 of 60 replayed landings were blind); no unselected file reads as deleted', async () => {
+  // A contract run skips about 200 files on purpose. Judged as a whole run, its 12 "gone" slots would fill
+  // with files it only did not select; selected evidence records new files only.
+  const skipped = Object.keys(ms).slice(100);
+  const selectedRun = run(1, 50, { 'tests/new-slow.test.mjs': 90_000 }, () => 1, skipped);
+  const asWhole = checkTimeEvidence(prior, selectedRun);
+  assert.equal(
+    asWhole.files.filter(([, , base]) => base !== null).length,
+    12,
+    'unselected files read as gone',
+  );
+  const selected = checkTimeEvidence(prior, selectedRun, false);
+  assert(selected && selected.files.every(([, , base]) => base === null), 'no gone files on a selected run');
+  const time = attributeCheckTime(selected, ['src/x.ts', 'tests/new-slow.test.mjs']);
+  assert(time && Math.abs(time.seconds - 90) <= 5, `named, got ${time?.seconds}`);
+  // Why no deleted file needs netting there: the selector sends a change that deletes or renames a path
+  // to a full run (an unknown or deleted path selects everything), so it never lands on a contract run.
+  const files = new Map([
+    ['tests/kept.test.mjs', ''],
+    ['src/a.ts', ''],
+  ]);
+  assert.equal(
+    classifyCheckPath('tests/gone.test.mjs', files),
+    null,
+    'a deleted test path selects the full run',
+  );
+  assert.notEqual(classifyCheckPath('tests/kept.test.mjs', files), null);
+
+  // The result transaction stamps a contract run, and still never a main-race scoped recheck.
+  const s = lanesFixture(),
+    projectId = s.insert('hostedProjects', {
+      owner: 'synthetic',
+      key: randomUUID(),
+      name: 'Synthetic selected check time',
+      currentBackup: null,
+      revision: 0,
+    });
+  const result = (durations, i, extra = {}) => ({
+    id: randomUUID(),
+    status: 'passed',
+    endedAt: `2026-11-19T01:${String(i).padStart(2, '0')}:00Z`,
+    contractReports: Object.fromEntries(
+      Object.entries(durations).map(([file, d]) => [file, { durationMs: d }]),
+    ),
+    ...extra,
+  });
+  const record = r =>
+    s.transaction('record', { _handler: ctx => recordHostedTestTimings(ctx, projectId, r) }, {});
+  for (let i = 0; i < 6; i++) await record(result(run(1, 60 + i), i));
+  const contract = {
+    mode: 'contract',
+    tests: ['tests/f1.test.mjs'],
+    contractVersion: 1,
+    effective: 'contract',
+  };
+  const accepted = result(selectedRun, 10, { gate: contract });
+  await record(accepted);
+  assert(accepted.checkTime, 'a contract-selected run carries evidence');
+  assert(accepted.checkTime.files.every(([, , base]) => base === null));
+  assert(attributeCheckTime(accepted.checkTime, ['tests/new-slow.test.mjs']));
+  const recheck = result(
+    run(1, 70, { 'tests/other.test.mjs': 90_000 }, () => 1, skipped),
+    11,
+    {
+      gate: { mode: 'scoped', reason: `scoped-recheck:${'a'.repeat(64)}`, effective: 'contract' },
+    },
+  );
+  await record(recheck);
+  assert.equal(recheck.checkTime, undefined, 'a scoped recheck selects by shared impact: no evidence');
+  const docs = result(
+    run(1, 71, {}, () => 1, skipped),
+    12,
+    { gate: { mode: 'contract', effective: 'docs' } },
+  );
+  await record(docs);
+  assert.equal(docs.checkTime, undefined, 'a docs run is never judged');
 });
 
 /** A runner whose whole run times the change's new test file: the evidence the timing write stamps. */

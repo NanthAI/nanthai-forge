@@ -144,7 +144,8 @@ async function applyLandingSample(
   return deliverBudgetEvents(ctx, projectId, events);
 }
 
-async function deliverBudgetEvents(
+/** Owner message for every event, P0 Issue write for a break or recovery; also used by the Stats day close. */
+export async function deliverBudgetEvents(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   events: ReturnType<typeof observeLandingSpeed>['events'],

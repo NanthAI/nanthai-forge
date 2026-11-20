@@ -614,6 +614,8 @@ async function seededLanding(t, stallAlerts) {
   // Three slow landings just before this one: whatever it takes, the p90 of the last 20 is over 60 min.
   const seed = landings(null, normal(WINDOW - 4)).state;
   seed.samples = seed.samples.map(([at, ...rest]) => [at - noon + wall - 3_600_000, ...rest]);
+  // The waste tripwire's open day was built at the replay's dates; the shifted seed has no day of its own.
+  delete seed.waste;
   seed.samples.push(
     [wall - 3, 120, 3, 'seed0001'],
     [wall - 2, 120, 3, 'seed0002'],

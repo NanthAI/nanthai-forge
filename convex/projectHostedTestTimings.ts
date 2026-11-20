@@ -18,6 +18,7 @@ import type { HostedCheckRun } from '../src/hosted-check';
 import { hostedCheckRunSchema } from '../src/hosted-check';
 import { parseTimingHistory, updateHostedTimingHistory } from '../src/hosted-test-timings';
 import { checkTimeEvidence } from '../src/check-time-added';
+import { isScopedRecheck } from '../src/scoped-recheck-policy';
 
 /** Same advisory JSON/EWMA as the native owner's .forge/work/test-timings.json.
  * One indexed document, read/written inside existing authorized transactions.
@@ -116,12 +117,15 @@ export async function recordHostedTestTimings(
       'Timing history changed during its argument pages.',
     );
   }
-  // Check-time evidence (Issue a217b83e): this whole run's files against the history already read, once,
-  // for a run whose timings arrive in one final part. The caller's existing run write keeps it.
+  // Check-time evidence (Issue a217b83e): this run's files against the history already read, once, for a
+  // run whose timings arrive in one final part. The caller's existing run write keeps it. A whole run also
+  // names files it no longer runs; a contract-selected run (never a main-race scoped recheck) names new
+  // files only (src/check-time-added.ts says why nothing is lost).
   const whole = (run.gate === undefined || run.gate.effective === 'full') && !run.plan?.scoped;
+  const selected = run.gate?.effective === 'contract' && !run.plan?.scoped && !isScopedRecheck(run.gate);
   const evidence =
-    whole && final && !transport?.timingParts?.length
-      ? checkTimeEvidence(history.files, durations ?? reportDurations(run))
+    (whole || selected) && final && !transport?.timingParts?.length
+      ? checkTimeEvidence(history.files, durations ?? reportDurations(run), whole)
       : null;
   if (evidence) run.checkTime = evidence;
   const value = {

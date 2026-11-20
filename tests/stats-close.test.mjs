@@ -876,6 +876,51 @@ test('the runs, attempts and landing lookups at their caps stay inside one trans
   assert.equal(closed.landings, 4);
 });
 
+test('the day close judges the daily waste tripwire from the rows it read and carries its state to the next day', async t => {
+  // Item a217b83e (lead 20b27f1d): day budgets are judged once per closed day here, never on the landing path.
+  const f = await batchesFixture(t);
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  const day = utcDay([...f.tables.projectHostedAcceptances.values()][0]._creationTime);
+  // Every landing's usage is in: known runner seconds and no discarded check.
+  for (const request of [...f.tables.projectHostedLandingRequests.values()]) {
+    const state = JSON.parse(request.value);
+    if (state.phase === 'landed')
+      f.patch('projectHostedLandingRequests', request._id, {
+        value: JSON.stringify({
+          ...state,
+          counts: { ...state.counts, runnerSeconds: 300, discardedRunnerSeconds: 0 },
+        }),
+      });
+  }
+  const priorDay = new Date(Date.parse(day) - 86_400_000).toISOString().slice(0, 10);
+  // The previous closed day left the tripwire broken (landing 1117w000 discarded the most).
+  const open = { since: `${priorDay}T23:59:59.999Z`, landing: '1117w000', value: 6613 };
+  f.insert('projectStatsDays', {
+    projectId: f.projectId,
+    day: priorDay,
+    value: JSON.stringify(statsDay(priorDay, [])),
+    budgets: JSON.stringify({ broken: { 'runner-waste-daily': open } }),
+  });
+  const scheduled = () =>
+    [...f.tables._scheduled_functions.values()].filter(s => s.name === 'projectLandingSpeedIssue:write');
+  const before = scheduled().length;
+  await f.tx('statsClose', statsApi.closeDay, { projectId: f.projectId, day });
+  const row = [...f.tables.projectStatsDays.values()].find(r => r.day === day);
+  const carried = JSON.parse(row.budgets);
+  assert.equal(carried.broken, undefined, 'a day under the line ends the break');
+  assert(carried.ratchet['runner-waste-daily'], 'the closed day joins the ratchet history');
+  assert(row.budgets.length < 400, `day state stays small: ${row.budgets.length}`);
+  const written = scheduled().slice(before);
+  assert.equal(
+    written.length,
+    1,
+    'the recovery updates the P0 Issue through the same path as a window budget',
+  );
+  assert.match(JSON.parse(written[0].args[0].issue).title, /recovered|P0 speed budget/i);
+});
+
 // Done-when 22:05Z (Item a61d3c91): All time from monthly rollups, and the self-trend's read.
 test('All time reads one rollup a closed month and the open month’s days, never every day', async t => {
   const f = await batchesFixture(t);

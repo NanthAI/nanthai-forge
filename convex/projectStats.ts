@@ -11,6 +11,9 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
 import type { HostedLandingState } from '../src/hosted-landing';
 import { discardedRunnerSeconds } from '../src/cost-budgets';
+import { closedDay, dayBudgetStateSchema, judgeClosedDay } from '../src/landing-speed-alerts';
+import { speedBudgets } from '../src/speed-budgets';
+import { deliverBudgetEvents } from './projectLandingSpeed';
 import type { Contribution } from '../src/person-days';
 import { landingAcceptedBySchema } from '../src/landing-accepted-by';
 import { recordPersonDays } from './personDays';
@@ -267,6 +270,8 @@ export const closeDay = internalMutation({
           value: canonicalPayload(
             statsFailedDay(gap, statsCarry(prior), 1, utcDay(laneWindowStart(before?.day, gap, since))),
           ),
+          // The day budgets' state carries through a gap day, even one that never closes.
+          ...(before?.budgets ? { budgets: before.budgets } : {}),
         });
         await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectStats:closeDay'), {
           projectId,
@@ -415,7 +420,29 @@ export const closeDay = internalMutation({
       ...(resubmissions.has(i) ? { resubmitted: true } : {}),
     }));
     const lateRuns = runs.unknownRuns.map(([runId, bucket]) => ({ runId, bucket }));
-    if (existing) await ctx.db.patch(existing._id, { value, runnerContributions, lateRuns });
+    // Day budgets (the daily waste tripwire, Item a217b83e): judged once per ordinary close, from the rows this close
+    // already read, carrying their state from the previous closed day's row. Nothing on the landing path. A day with
+    // no landing carries the state unchanged; a re-close leaves it as it was. Landings the close did not read count
+    // as unknown.
+    const unread = receipts.length - landingsRead;
+    const judged =
+      !reclose && receipts.length
+        ? judgeClosedDay(
+            before?.budgets ? dayBudgetStateSchema.parse(JSON.parse(before.budgets)) : undefined,
+            closedDay(day, landings, unread),
+            speedBudgets,
+          )
+        : null;
+    const budgets = reclose
+      ? {}
+      : {
+          budgets: judged
+            ? Object.keys(judged.state).length
+              ? canonicalPayload(judged.state)
+              : undefined
+            : before?.budgets,
+        };
+    if (existing) await ctx.db.patch(existing._id, { value, runnerContributions, lateRuns, ...budgets });
     // A re-close writes no row for a day with no landings and no check runs; an ordinary close always marks its day
     // closed.
     else if (!reclose || landings.length || runs.all.runs + runs.audits.runs > 0)
@@ -425,7 +452,9 @@ export const closeDay = internalMutation({
         value,
         ...(runnerContributions.length ? { runnerContributions } : {}),
         ...(lateRuns.length ? { lateRuns } : {}),
+        ...(budgets.budgets ? { budgets: budgets.budgets } : {}),
       });
+    if (judged) await deliverBudgetEvents(ctx, projectId, judged.events);
     if (reclose && day < reclose.through)
       await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectStats:closeDay'), {
         projectId,

@@ -433,6 +433,18 @@
       "issue": "a217b83e"
     },
     {
+      "id": "runner-waste-daily",
+      "area": "GitHub runner minutes thrown away per UTC day: discarded checks and cancelled provider job execution of the day's accepted landings",
+      "measuredBy": "landing-record",
+      "metric": "wasteDaily",
+      "stat": "day",
+      "unit": "min",
+      "max": 2100,
+      "source": "Dogfood landings read 2026-11-09 to 11-19 (755 accepted landings, costs.runnerDiscarded, the stamp the Stats day close reads), per UTC day of commit: 11-11 1,620 min (84 landings), 11-12 83, 11-13 0, 11-14 0, 11-15 377, 11-16 392, 11-17 6,613 (114 landings, queue incident 5e3c3a3c), 11-18 1,339, 11-19 7,945 (101 landings, a main-race recheck wave); 11-09 and 11-10 were before the stamp (130 of 130 and 76 of 171 unknown).",
+      "reason": "The per-landing discarded budget (12 min, landing-runner-discarded-mean) at the busiest day's volume (171 landings) is 2,052 min, rounded up to 2,100: a busy normal day passes, while both waste days seen (6,613 and 7,945) break it on their day close. A per-landing mean dilutes one bad day across 20 landings; this totals the day. About $17 a day at list price for a private repository. Judged once per day from the stamp already on each sample (no read); the ratchet tightens it with the F1 rules after 7 held days.",
+      "issue": "a217b83e"
+    },
+    {
       "id": "source-state-manifest-probes",
       "area": "source descriptor lookup",
       "measuredBy": "build-guard",

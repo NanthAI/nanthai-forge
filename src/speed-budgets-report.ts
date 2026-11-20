@@ -15,7 +15,7 @@ export type SpeedBudgetRow = {
   id: string;
   area: string;
   measuredBy: SpeedBudget['measuredBy'];
-  stat: 'p50' | 'p90' | 'mean' | null;
+  stat: 'p50' | 'p90' | 'mean' | 'day' | null;
   unit: SpeedBudget['unit'];
   max: number | null;
   value: number | null;
@@ -123,6 +123,11 @@ export function speedBudgetRows(
     const rows = samples(b.metric as LandingMetric);
     // The automatic setting beside the file line (Issue a217b83e): live ratchet state, hosted only.
     const live = records.landingSpeed;
+    if (b.stat === 'day')
+      return {
+        ...base,
+        ...dayRow(landingSamples, period, b.max, live?.ratchet?.[b.id], b.ratchet === false),
+      };
     const auto =
       live && b.stat !== 'mean' ? ratchetStatus(live.ratchet?.[b.id], b.max, b.ratchet === false) : null;
     const ratchetNote = !auto
@@ -170,6 +175,61 @@ export function speedBudgetRows(
           note: `last ${budgets.window.landings} ${stamped} in the period${coverage}${shortNote}${ratchetNote}${b.metric === 'runnerAudit' ? '; audit seconds attributed by run end (delayed reports can shift the live stamp)' : ''}`,
         };
   });
+}
+
+/** A day budget (the waste tripwire): the newest UTC day the period holds whole, as the landing path judges it
+ * when that day closes; the worst whole day beside it. A day missing more than half its stamps is not judged. */
+function dayRow(
+  samples: LandingSpeedState['samples'],
+  period: MetricPeriod,
+  max: number,
+  entry: Parameters<typeof ratchetStatus>[0],
+  pinned: boolean,
+): Pick<SpeedBudgetRow, 'value' | 'status' | 'note' | 'line'> {
+  const days = new Map<string, { seconds: number; unknown: number; landings: number }>();
+  const end = Date.parse(period.to);
+  for (const row of samples) {
+    // Whole days only: a day the period cuts off, or today, is still open.
+    if (row[0] >= end - (end % 86_400_000)) continue;
+    const key = new Date(row[0]).toISOString().slice(0, 10);
+    const d = days.get(key) ?? { seconds: 0, unknown: 0, landings: 0 };
+    const seconds = row[7]?.[4];
+    d.landings++;
+    if (seconds == null) d.unknown++;
+    else d.seconds += seconds;
+    days.set(key, d);
+  }
+  const judged = [...days]
+    .filter(([, d]) => d.unknown * 2 <= d.landings)
+    .sort((a, b) => a[0].localeCompare(b[0]));
+  const auto = entry || pinned ? ratchetStatus(entry, max, pinned) : null;
+  const line = auto && auto.line < max ? { line: auto.line } : {};
+  const ratchet = !auto
+    ? ''
+    : auto.line < max
+      ? `; automatic line ${auto.line} (ratcheted ${auto.since?.slice(0, 10) ?? ''})`
+      : auto.daysLeft
+        ? `; next ratchet check in ${auto.daysLeft} held day${auto.daysLeft === 1 ? '' : 's'}`
+        : '';
+  const newest = judged.at(-1);
+  if (!newest)
+    return {
+      ...line,
+      value: null,
+      status: 'unrun',
+      note: `not enough data: no whole UTC day in the period with at least half its landings stamped (${days.size} day${days.size === 1 ? '' : 's'} seen)${ratchet}`,
+    };
+  const minutes = (d: { seconds: number }) => Math.round(d.seconds / 6) / 10;
+  const worst = judged.reduce((a, b) => (minutes(b[1]) > minutes(a[1]) ? b : a));
+  const value = minutes(newest[1]);
+  return {
+    ...line,
+    value,
+    status: value > max ? 'fail' : 'pass',
+    note:
+      `UTC day ${newest[0]}: ${newest[1].landings} landings${newest[1].unknown ? `, ${newest[1].unknown} unknown (excluded, never zero)` : ''}; ` +
+      `worst whole day in the period ${worst[0]} ${minutes(worst[1])} min over ${judged.length} judged day${judged.length === 1 ? '' : 's'}${ratchet}`,
+  };
 }
 
 const cell = (row: SpeedBudgetRow) =>

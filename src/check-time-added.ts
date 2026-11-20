@@ -4,11 +4,15 @@ import { checkTimeSchema, type CheckTime, type CheckTimeEvidence } from './hoste
 /** Name the landing that adds check time (Issue a217b83e). When a check run's per-file timings join the
  * planner's timing history (the same mutation that already reads and writes that row), the run keeps a
  * small `checkTime` record: the seconds of each test file that is new to the history, after dividing out
- * the run's own speed (runner hardware), and the history seconds of files it no longer runs. Only whole
- * runs get one: a scoped recheck skips files on purpose, so it cannot tell a deleted file from one it
- * did not select, and a landing accepted on one is not named (the runner-minutes budget still sees it). Acceptance, which already holds the run and the change's paths, names the change's new test files
- * when they add seconds beyond timing noise, net of test files it deletes or renames. A change that only
- * deletes test files is not named. It never blocks.
+ * the run's own speed (runner hardware), and, for a whole run, the history seconds of files it no longer
+ * runs. A contract-selected run skips files on purpose, so it cannot tell a deleted file from one it did not
+ * select: it records new files only. That loses nothing, because the selector runs a change's own test
+ * files (mandatory tier) and sends any change that deletes or renames a path to a full run
+ * (scripts/check-path-scopes.mjs: an unknown or deleted path selects everything), so a change accepted on a
+ * contract-selected run deletes no test file to net. A main-race scoped recheck selects by shared impact, not
+ * by the change's own tests, so it records nothing. Acceptance, which already holds the run and the change's
+ * paths, names the change's new test files when they add seconds beyond timing noise, net of test files it
+ * deletes or renames. A change that only deletes test files is not named. It never blocks.
  *
  * Only new files are named. An edited file's per-file change is too noisy to attribute: with 30 or 100
  * edited files some are always the run's random outliers (review F2 on a217b83e). A file the history
@@ -32,11 +36,13 @@ const r3 = (value: number) => Math.round(value * 1000) / 1000;
 
 type PriorFile = { durationMs: number; updatedAt: string; n?: number };
 /** Pure. `prior` is the history's files before this run (an entry with `n` is young); `durations` the
- * milliseconds of a whole run, whose missing files left the test set. Null when the run has too few
- * established timed files to tell its speed from noise. */
+ * milliseconds of the run. `whole`: the run ran every test file, so its missing files left the test set;
+ * false for a contract-selected run, whose missing files were only not selected (no gone files). Null when
+ * the run has too few established timed files to tell its speed from noise. */
 export function checkTimeEvidence(
   prior: Record<string, PriorFile>,
   durations: Record<string, number>,
+  whole = true,
 ): CheckTimeEvidence | null {
   const timed = Object.entries(durations).filter(([, ms]) => Number.isFinite(ms) && ms > 0);
   const known = (file: string) => prior[file]!.durationMs > 0 && prior[file]!.n === undefined;
@@ -52,7 +58,7 @@ export function checkTimeEvidence(
     .sort((a, b) => b[1] - a[1])
     .slice(0, CHECK_TIME_FILES);
   const gone = Object.entries(prior)
-    .filter(([file, item]) => !Object.hasOwn(durations, file) && item.durationMs > 0)
+    .filter(([file, item]) => whole && !Object.hasOwn(durations, file) && item.durationMs > 0)
     .sort((a, b) => b[1].updatedAt.localeCompare(a[1].updatedAt) || a[0].localeCompare(b[0]))
     .slice(0, CHECK_TIME_FILES)
     .map(([file, item]): [string, number, number] => {
