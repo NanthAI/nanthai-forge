@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { JournalNeeded, journalReadReply } from './projectJournalStore';
-import { journalSegmentSchema } from '../src/journal-segment';
+import { parseLoadedJournalSegment } from './projectJournalStore';
 import { v } from 'convex/values';
 import { internalMutation } from './server';
 import { activeProject } from './projectAuthority';
@@ -25,7 +25,7 @@ export const rebuildPage = internalMutation({
     const ctx = {
       ...original,
       journalPrivate: true,
-      journalLoaded: (input.segments ?? []).map(text => journalSegmentSchema.parse(JSON.parse(text))),
+      journalLoaded: (input.segments ?? []).map(parseLoadedJournalSegment),
     };
     try {
       await activeProject(ctx, input.projectId, input.actor);

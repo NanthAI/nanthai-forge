@@ -15,7 +15,7 @@ import { guard } from './cliServer';
 import { decodeRequest, publicWorkResult, publicWorkSelected } from './publicWorkReads';
 import { journalRecordRead } from './projectHostedRecordReads';
 import { journalProvenanceRead } from './projectHostedProvenanceRead';
-import { journalSegmentSchema } from '../src/journal-segment';
+import { parseLoadedJournalSegment } from './projectJournalStore';
 const NESTED_READERS = new Set(['projectHostedRecordReads:read', 'projectHostedProvenanceRead:read']);
 /** Raw verified rows travel only across the private server boundary. The action maps current identities. */
 export const read = internalQuery({
@@ -64,7 +64,7 @@ async function journalResult(
   },
 ) {
   await guard(ctx, input.query.startsWith('projectCoordination') ? 'coordination' : 'cli');
-  const journalLoaded = input.segments.map(text => journalSegmentSchema.parse(JSON.parse(text)));
+  const journalLoaded = input.segments.map(parseLoadedJournalSegment);
   const selected = { ...ctx, journalLoaded, journalPrivate: true };
   const command = JSON.parse(input.request);
   const original = { ...command, projectId: input.projectId };

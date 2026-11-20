@@ -13,6 +13,7 @@ import { purgeableCommandSchema, purgedFactsDigest, redactPlanningWrite } from '
 import { isUnifiedWork } from './work-unified-types.js';
 import { planningTarget, type UnifiedPlanningData } from './work-planning-unified.js';
 import { maxIntentChain, successorIntentId } from './hosted-intent-chain.js';
+import type { HostedLifecycleRequest } from './hosted-lifecycle.js';
 
 /**
  * Append the id-only tombstone for a purge. The Item must exist, be Deleted and be at `expectedVersion`, on the
@@ -236,4 +237,9 @@ export function purgeableRowTarget(operationId: string, command: unknown) {
     command: data,
     id: data.action === 'intent' ? operationId : data.action === 'note' ? data.intentId : data.itemId,
   };
+}
+
+/** An abandon plan still needs a reason to replay under its original lifecycle schema. */
+export function purgedLifecycleReason(action: HostedLifecycleRequest['action']) {
+  return action === 'abandon' ? PURGED_ITEM_TITLE : '';
 }

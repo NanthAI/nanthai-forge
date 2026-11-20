@@ -11,5 +11,9 @@ const transient = new Set([
   'journalLane',
 ]);
 export function journalSourceRow(row: object) {
-  return Object.fromEntries(Object.entries(row).filter(([key]) => !transient.has(key)));
+  return Object.fromEntries(
+    Object.entries(row).filter(
+      ([key]) => !transient.has(key) || (key === 'journalCommand' && 'purged' in row),
+    ),
+  );
 }

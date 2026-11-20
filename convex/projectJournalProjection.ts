@@ -3,9 +3,8 @@
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction } from './_generated/server';
-import { getJournalSegment } from './projectJournalObject';
+import { loadJournalSegment } from './projectJournalObject';
 import type { JournalIndex } from '../src/journal-segment';
-import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 /** Rebuild a disposable snapshot page from verified canonical versions, rechecking current
  * access inside the original transaction after IO. Live rebuilds remain one mutation. */
@@ -34,7 +33,7 @@ export const rebuildPage = internalAction({
         'Journal projection selection changed; retry the original page.',
       );
       seen.add(reply.index.pointer.sha256);
-      segments.push(canonicalPayload(await getJournalSegment(input.projectId, reply.index)));
+      segments.push(await loadJournalSegment(input.projectId, reply.index));
     }
   },
 });

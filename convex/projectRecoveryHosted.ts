@@ -250,8 +250,9 @@ export async function journalRecoveryRead(
       'WORK_STALE',
       'Hosted recovery pins changed; retain the original staging and request.',
     );
+    const usesArchives = !!(expected.capsuleRevision || project.journalRevision);
     invariant(
-      (!expected.capsuleRevision && !expected.journalRevision) || input.capsuleProtocol === 1,
+      !usesArchives || input.capsuleProtocol === 1,
       'CLI_UPGRADE_REQUIRED',
       'This recovery includes landing capsules. Run nforge update and retry.',
     );
@@ -270,8 +271,7 @@ export async function journalRecoveryRead(
             table === 'projectHostedRecords') &&
           'journalSegment' in row
         ) &&
-        ((!expected.capsuleRevision && !expected.journalRevision) ||
-          !(await capsuleOwnsRecoveryRow(ctx, input.projectId, table, row)))
+        (!usesArchives || !(await capsuleOwnsRecoveryRow(ctx, input.projectId, table, row)))
       )
         rows.push(canonicalPayload(journalSourceRow(row)));
     const physicalRoots = [];
@@ -295,10 +295,10 @@ export async function journalRecoveryRead(
       rows,
       cursor: !result.isDone
         ? result.continueCursor
-        : expected.capsuleRevision || expected.journalRevision
+        : usesArchives
           ? recoveryCapsuleCursor({ table, phase: 'capsules', cursor: null })
           : null,
-      done: result.isDone && !expected.capsuleRevision && !expected.journalRevision,
+      done: result.isDone && !usesArchives,
     });
   } catch (error) {
     if (error instanceof JournalNeeded) return journalReadReply(ctx, error, input.projectId);

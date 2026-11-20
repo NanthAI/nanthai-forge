@@ -48,6 +48,8 @@ export type JournalIndex = Pick<JournalSegment, 'scope' | 'from' | 'through' | '
   records?: JournalRecordPin[];
   savePages?: [number, string][];
   parts?: LandingCapsulePointer[];
+  /** Logical hash of a replacement, including when its physical bytes are split into fragments. */
+  rewritten?: string;
 };
 export function journalTablePins(tables: JournalSegment['tables']) {
   return JOURNAL_TABLES.flatMap((table, ordinal) => {

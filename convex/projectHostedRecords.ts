@@ -74,7 +74,7 @@ export async function recordVersion(
     )
     .unique();
   if (row) {
-    if (row.journalSegment) {
+    if (row.journalSegment && row.purged === undefined) {
       const original = loadedJournalRows(ctx, 'projectHostedRecords').find(item => item._id === row._id);
       if (original) return original;
     }

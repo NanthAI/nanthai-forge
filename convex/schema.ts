@@ -390,6 +390,8 @@ const projectFields = {
   /** Item purges (Item 4c9e961e, convex/projectPlanningPurge.ts): one entry per purge, ids and decision requests the
    * redaction needs, `purgedAt` only once the completeness check found no words left. Bounded: an unfinished purge
    * stays until it finishes; finished ones keep the newest few. */
+  /** Invalidates whole-Work and recovery reads that crossed the end of a physical Item redaction. */
+  planningPurgeRevision: v.optional(v.number()),
   itemPurges: v.optional(
     v.array(
       v.object({
@@ -397,6 +399,7 @@ const projectFields = {
         itemId: v.string(),
         ids: v.array(v.string()),
         intentId: v.optional(v.string()),
+        intentKeys: v.optional(v.array(v.string())),
         version: v.number(),
         decisions: v.array(v.array(v.string())),
         rows: v.number(),
@@ -404,6 +407,20 @@ const projectFields = {
         created: v.optional(v.number()),
         startedAt: v.number(),
         purgedAt: v.optional(v.number()),
+        segmentSweep: v.optional(
+          v.object({
+            after: v.union(v.string(), v.null()),
+            done: v.boolean(),
+            claim: v.optional(v.object({ id: v.string(), until: v.number() })),
+            pending: v.optional(
+              v.object({
+                key: v.string(),
+                planned: v.optional(v.array(v.string())),
+                retire: v.optional(v.array(v.string())),
+              }),
+            ),
+          }),
+        ),
       }),
     ),
   ),

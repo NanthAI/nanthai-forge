@@ -8,6 +8,7 @@ import { beginHostedOperation, hostedOperationRow } from './projectHostedOperati
 import { lifecycleGuard } from './projectHostedLifecycleOverlay';
 import { sameSaveLane, loadSave } from './projectHostedSaveStore';
 import { hostedLifecycleRequestSchema } from '../src/hosted-lifecycle';
+import { purgedLifecycleReason } from '../src/work-planning-purge';
 import { canonicalPayload, hostedPayloadHash, hostedOperationSchema } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { accessibleProject } from './projectAuthority';
@@ -144,7 +145,13 @@ export const transition = mutation({
         intentId,
         receiptId: first.ids.receipt!,
         authorityEpoch: request.authorityEpoch,
-        request: canonicalPayload(request),
+        request: canonicalPayload(
+          prepared.project.itemPurges?.some(
+            purge => purge.intentKeys?.includes(intentId) && purge.purgedAt === undefined,
+          )
+            ? { ...request, reason: purgedLifecycleReason(request.action) }
+            : request,
+        ),
         at: first.at,
         revision: guard.revision,
         status: 'pending',

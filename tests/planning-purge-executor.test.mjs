@@ -5,9 +5,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { gunzipSync, gzipSync } from 'node:zlib';
+import { canonicalPayload } from '../dist/hosted-source-operation.js';
+import { metadataRequest } from '../dist/work-metadata.js';
+import { digest } from '../dist/hash.js';
+import { encodeArchiveBytes } from '../dist/landing-capsule-bytes.js';
+import { journalFragmentTexts } from '../dist/journal-fragments.js';
+import { journalSegmentText, journalTablePins } from '../dist/journal-segment.js';
 import { getFunctionName } from 'convex/server';
 import { setup, actions } from './hosted-planning-fixture.mjs';
 import { workRecordRows } from './hosted-fixture.mjs';
+import { meterWorkIO } from './hosted-read-set.mjs';
 import { moduleUrl } from './convex-module.mjs';
 
 const SECRET = 'quokka-executor-fixture';
@@ -15,6 +23,15 @@ const code = expected => error => (error.data?.code ?? error.code) === expected;
 const modules = {
   projectPlanningPurge: await import(moduleUrl('../convex/projectPlanningPurge.ts')),
   projectPlanningPurgeSelect: await import(moduleUrl('../convex/projectPlanningPurgeSelect.ts')),
+  projectPlanningPurgeSegmentRun: await import(moduleUrl('../convex/projectPlanningPurgeSegmentRun.ts')),
+  projectPlanningPurgeSegments: await import(moduleUrl('../convex/projectPlanningPurgeSegments.ts')),
+  projectPlanningPurgeArchiveSelection: await import(
+    moduleUrl('../convex/projectPlanningPurgeArchiveSelection.ts')
+  ),
+  projectJournalRead: await import(moduleUrl('../convex/projectJournalRead.ts')),
+  projectJournalCapture: await import(moduleUrl('../convex/projectJournalCapture.ts')),
+  projectJournalPublish: await import(moduleUrl('../convex/projectJournalPublish.ts')),
+  projectJournalRun: await import(moduleUrl('../convex/projectJournalRun.ts')),
 };
 const { ensure } = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 const { purgeSteps, partitionsOf } = await import(moduleUrl('../convex/projectPlanningPurgeRedact.ts'));
@@ -27,22 +44,29 @@ const { dispatchHostedWork } = await import('../dist/hosted-work-client.js');
 const { indexedRecord } = await import('../dist/work-hosted-index.js');
 
 /** Route the executor's internal calls to their handlers; `crash` throws before the given redaction call. */
-function executor(s, crash = Infinity) {
-  const calls = { query: 0, mutation: 0, redact: 0 };
+function executor(s, crash = Infinity, beforeCall) {
+  const calls = { query: 0, mutation: 0, redact: 0, action: 0 };
   const route = kind => {
     const original = s.ctx[kind];
     return (ref, args) => {
       const [module, name] = getFunctionName(ref).split(':');
       const target = modules[module]?.[name];
       if (!target) return original(ref, args);
-      calls[kind === 'runQuery' ? 'query' : 'mutation']++;
+      calls[kind.slice(3).toLowerCase()]++;
       if (name === 'redact' && ++calls.redact > crash) throw new Error('executor stopped');
-      return target._handler(s.ctx, args);
+      beforeCall?.(module, name, args);
+      return target._handler(kind === 'runAction' ? ctx : s.ctx, args);
     };
   };
-  const ctx = { ...s.ctx, runQuery: route('runQuery'), runMutation: route('runMutation') };
+  const ctx = {
+    ...s.ctx,
+    runQuery: route('runQuery'),
+    runMutation: route('runMutation'),
+    runAction: route('runAction'),
+  };
   return {
     calls,
+    ctx,
     run: (itemId, operationId) =>
       modules.projectPlanningPurge.run._handler(ctx, { projectId: s.projectId, itemId, operationId }),
   };
@@ -90,7 +114,7 @@ function addAlias(s, intentId) {
 /** An Item (Intent-born unless `intentBorn` is false) with two versions, a comment, a decision comment and a note,
  * then Deleted; and a kept Item. `records`: the work store is written from the start and primary when the Item is
  * Deleted, and one comment is written through an alias of the Item. */
-async function deletedItem(t, { records = false, intentBorn = true, large = false } = {}) {
+async function deletedItem(t, { records = false, intentBorn = true, large = false, useAlias = true } = {}) {
   const s = await setup(t);
   if (records) await storeMode(s, 'dual');
   const initial = await s.read(),
@@ -157,23 +181,24 @@ async function deletedItem(t, { records = false, intentBorn = true, large = fals
     await s.send(deleted);
     await s.send(keep);
   } else {
-    alias = addAlias(s, itemId);
+    if (useAlias) alias = addAlias(s, itemId);
     await storeMode(s, 'records');
     await s.send(keep);
     // The alias lives in the index only (a real one comes from the base checkpoint, which a full read replays from),
     // so the last two writes pass their revision instead of reading the whole journal.
     const revision = (await s.read()).data.revision;
-    await s.send(
-      {
-        action: 'comment-planning-item',
-        operationId: randomUUID(),
-        itemId: alias,
-        authorLabel: 'agent',
-        text: `Alias comment ${SECRET}`,
-      },
-      revision,
-    );
-    await s.send(deleted, revision + 1);
+    if (alias)
+      await s.send(
+        {
+          action: 'comment-planning-item',
+          operationId: randomUUID(),
+          itemId: alias,
+          authorLabel: 'agent',
+          text: `Alias comment ${SECRET}`,
+        },
+        revision,
+      );
+    await s.send(deleted, revision + (alias ? 1 : 0));
   }
   assert.ok(secretRows(s).length > 0, 'the fixture holds the words before the purge');
   return { s, itemId, keep, alias };
@@ -269,7 +294,7 @@ test('a purge refuses an Item with more than 1000 Work rows and writes nothing',
     await s.ctx.db.insert('projectWorkEvents', {
       projectId: s.projectId,
       operationId: command.operationId,
-      request: 'a'.repeat(64),
+      request: metadataRequest(command),
       previousRevision: revision,
       revision: ++revision,
       actor: 'owner',
@@ -717,4 +742,558 @@ test('review r1: a put linking large Intents through parents and relations hydra
       rows.some(row => row?.collection === 'intents:attributes' && row.key === id),
       'hydrated',
     );
+});
+
+function storage(t) {
+  const objects = new Map(),
+    requests = [];
+  let failDeletion = false,
+    losePut = false;
+  const keys = ['R2_ACCOUNT_ID', 'R2_BUCKET', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'];
+  const prior = new Map(keys.map(key => [key, process.env[key]]));
+  for (const key of keys) process.env[key] = 'synthetic';
+  t.after(() => {
+    for (const [key, value] of prior)
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+  });
+  const original = globalThis.fetch;
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    const path = new URL(url).pathname;
+    if (!path.includes('/journal-segments/')) return original(url, init);
+    const key = path.split('/').at(-1);
+    const method = init?.method ?? 'GET';
+    requests.push({ key, method });
+    if (method === 'PUT') {
+      objects.set(key, Buffer.from(init.body));
+      if (losePut) {
+        losePut = false;
+        throw new TypeError('Synthetic lost successful PUT response');
+      }
+      return new Response(null, { status: 200 });
+    }
+    if (method === 'DELETE') {
+      if (failDeletion) return new Response(null, { status: 403 });
+      objects.delete(key);
+      return new Response(null, { status: 204 });
+    }
+    return objects.has(key) ? new Response(objects.get(key)) : new Response(null, { status: 404 });
+  });
+  return {
+    objects,
+    requests,
+    refuseDeletions: value => {
+      failDeletion = value;
+    },
+    loseNextPut: () => {
+      losePut = true;
+    },
+  };
+}
+
+async function putSegment(s, storage, category, from, tables, { fragmented = false } = {}) {
+  const segment = {
+    protocol: 1,
+    kind: 'forge-journal-segment',
+    projectId: s.projectId,
+    scope: category === 'record' ? 'records' : 'events',
+    from,
+    through: from,
+    tables,
+  };
+  const texts = fragmented ? journalFragmentTexts(segment) : [journalSegmentText(segment)];
+  const pointers = texts.map(text => {
+    const { pointer, body } = encodeArchiveBytes(text, from, journalTablePins(JSON.parse(text).tables));
+    storage.objects.set(pointer.sha256, body);
+    return pointer;
+  });
+  const [pointer, ...parts] = pointers;
+  const index = { scope: segment.scope, from, through: from, pointer, ...(parts.length ? { parts } : {}) };
+  const fields = { projectId: s.projectId, scope: segment.scope, from, through: from };
+  await s.ctx.db.insert('projectJournalSegments', {
+    ...fields,
+    key: pointer.sha256,
+    category,
+    value: canonicalPayload(index),
+  });
+  for (const part of parts)
+    await s.ctx.db.insert('projectJournalSegments', {
+      ...fields,
+      key: part.sha256,
+      category: 'fragment',
+      value: canonicalPayload({ scope: segment.scope, from, through: from, pointer: part }),
+    });
+  return pointers.map(pin => pin.sha256);
+}
+
+async function oldIntentSegment(s, r2, itemId, options) {
+  const record = [...s.tables.projectHostedRecords.values()].find(
+    row =>
+      row.kind === 'intent' &&
+      row.key === itemId &&
+      JSON.stringify(s.tables.projectHostedRecordBodies.get(row.bodyId)).includes(SECRET),
+  );
+  assert(record);
+  const body = s.tables.projectHostedRecordBodies.get(record.bodyId);
+  assert.equal(body.operationId, undefined, 'only an exclusive plain body moves with a record');
+  const unrelated = options?.fragmented
+    ? [
+        canonicalPayload({
+          _id: 'large-unrelated',
+          kind: 'lane',
+          projectId: s.projectId,
+          inline: 'x'.repeat(230_000),
+        }),
+      ]
+    : [];
+  const keys = await putSegment(
+    s,
+    r2,
+    'record',
+    record.version,
+    {
+      projectHostedRecords: [canonicalPayload(record), ...unrelated],
+      projectHostedRecordBodies: [canonicalPayload(body)],
+    },
+    options,
+  );
+  await s.ctx.db.patch(record._id, { inline: undefined, journalSegment: keys[0] });
+  await s.ctx.db.delete(record.bodyId);
+  return { keys, record };
+}
+
+test('purge rewrites only the affected archive objects, preserves original event retries, and rebuilds without fixture text', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  await workStore.setMode._handler(s.ctx, {
+    projectId: s.projectId,
+    mode: 'records',
+    writers: ['planning', 'note'],
+  });
+  const revision = journalRevision(s);
+  for (let offset = 0; offset < 3; offset++)
+    await s.send(
+      { action: 'note', intentId: itemId, text: `Note ${SECRET} ${offset}`, kind: 'comment' },
+      revision + offset,
+    );
+  const old = await oldIntentSegment(s, r2, itemId);
+  const note = structuredClone(
+    [...s.tables.projectHostedRecordBodies.values()].find(row => row.command?.includes('Note ' + SECRET)),
+  );
+  assert(note, 'the fixture has a record-store event to relocate');
+  const [eventKey] = await putSegment(s, r2, 'events', note.revision, {
+    projectHostedRecordBodies: [canonicalPayload(note)],
+  });
+  await s.ctx.db.patch(note._id, {
+    command: undefined,
+    journalSegment: '1',
+    journalCommand: canonicalPayload({ action: 'note' }),
+  });
+  for (let i = 1; i <= 18; i++)
+    await putSegment(s, r2, 'record', 10_000 + i, {
+      projectHostedRecords: [
+        canonicalPayload({
+          _id: 'unrelated-' + i,
+          projectId: s.projectId,
+          kind: 'lane',
+          key: 'untouched-' + i,
+          version: i,
+          inline: 'unchanged',
+        }),
+      ],
+    });
+  const project = s.tables.hostedProjects.get(s.projectId);
+  project.journalRevision = 20;
+  const original = new Map(r2.objects);
+  const operationId = randomUUID();
+  const worker = executor(s);
+  const meter = meterWorkIO(s.ctx, s.tables);
+  const start = performance.now();
+  let done, io;
+  try {
+    io = await meter.cost(async () => {
+      done = await worker.run(itemId, operationId);
+    });
+  } finally {
+    meter.restore();
+  }
+  assert.equal(typeof done.purgedAt, 'number');
+  assert.equal(done.rows, 10, 'the purge cost fixture contains ten Work rows');
+  t.diagnostic(
+    JSON.stringify({
+      workRows: done.rows,
+      segments: original.size,
+      ...worker.calls,
+      ...io,
+      gets: r2.requests.filter(row => row.method === 'GET').length,
+      puts: r2.requests.filter(row => row.method === 'PUT').length,
+      deletes: r2.requests.filter(row => row.method === 'DELETE').length,
+      wallMs: Math.round(performance.now() - start),
+      sampledRss: process.memoryUsage().rss,
+    }),
+  );
+  const retired = new Set([...old.keys, eventKey]);
+  assert.deepEqual(new Set(r2.requests.filter(row => row.method === 'DELETE').map(row => row.key)), retired);
+  assert.equal(r2.requests.filter(row => row.method === 'PUT').length, 2);
+  assert.equal(
+    r2.requests.filter(row => row.method === 'GET').length,
+    25,
+    '20 sweep reads, one selection and four write verification reads',
+  );
+  for (const [key, bytes] of original)
+    if (!retired.has(key))
+      assert.equal(r2.objects.get(key), bytes, 'unrelated object remains byte-identical');
+  assert.equal(
+    [...r2.objects.values()].some(bytes => gunzipSync(bytes).includes(SECRET)),
+    false,
+  );
+  const stored = s.tables.projectHostedRecords.get(old.record._id);
+  assert.equal(stored.purged, operationId);
+  await assert.rejects(hostedRecords.hostedRecordBody(s.ctx, stored), code('PLANNING_ITEM_PURGED'));
+  const events = await import(moduleUrl('../convex/projectWorkEventStore.ts'));
+  await assert.rejects(
+    events.findWorkEvent(s.ctx, s.projectId, note.operationId, { command: note.command }),
+    code('PLANNING_ITEM_PURGED'),
+  );
+  await ensure._handler(worker.ctx, { projectId: s.projectId, rebuild: true });
+  const journal = await actions.exportJournal._handler(worker.ctx, { projectId: s.projectId, purgedRows: 2 });
+  assert.equal(JSON.stringify(journal).includes(SECRET), false);
+  assert.deepEqual(secretRows(s), []);
+});
+
+test('an interrupted purge retires the original R2 object on retry without uploading it again', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const old = await oldIntentSegment(s, r2, itemId, { fragmented: true });
+  assert.ok(old.keys.length > 1, 'the original uses several physical objects');
+  s.tables.hostedProjects.get(s.projectId).journalRevision = 1;
+  const operationId = randomUUID();
+  r2.refuseDeletions(true);
+  await assert.rejects(executor(s).run(itemId, operationId), code('R2_DELETE_FAILED'));
+  const partial = s.tables.hostedProjects.get(s.projectId).itemPurges[0];
+  assert.equal(partial.purgedAt, undefined);
+  assert.ok(partial.segmentSweep.pending.retire.length);
+  assert.ok(r2.objects.has(old.keys[0]), 'the original still exists after the failed retirement');
+  const puts = r2.requests.filter(row => row.method === 'PUT').length;
+  r2.refuseDeletions(false);
+  const worker = executor(s);
+  const done = await worker.run(itemId, operationId);
+  assert.equal(typeof done.purgedAt, 'number');
+  assert.equal(r2.requests.filter(row => row.method === 'PUT').length, puts);
+  assert.equal(
+    [...r2.objects.values()].some(bytes => gunzipSync(bytes).includes(SECRET)),
+    false,
+  );
+  await ensure._handler(worker.ctx, { projectId: s.projectId, rebuild: true });
+  assert.deepEqual(secretRows(s), []);
+});
+
+test('purge scrubs lifecycle plans and child events and fences an earlier recovery selection', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true, intentBorn: false });
+  const head = await hostedRecords.recordHead(s.ctx, s.projectId, 'intent', itemId);
+  const lifecycle = await import(moduleUrl('../convex/projectHostedLifecycle.ts'));
+  const operationId = randomUUID();
+  const request = canonicalPayload({
+    operationId,
+    authorityEpoch: 1,
+    action: 'abandon',
+    reason: 'Abandon ' + SECRET,
+    target: { kind: 'intent', intentId: itemId, version: head.version },
+  });
+  const input = { projectId: s.projectId, request };
+  const receipt = await lifecycle.transition._handler(s.ctx, input);
+  const plan = [...s.tables.projectHostedLifecyclePlans.values()].find(
+    row => row.operationId === operationId,
+  );
+  const [event] = s.tables.projectHostedLifecycleEvents.values();
+  assert.ok(JSON.stringify(plan).includes(SECRET) && JSON.stringify(event).includes(SECRET));
+  for (let index = 0; index < 40; index++)
+    await s.ctx.db.insert('projectHostedLifecycleEvents', {
+      projectId: s.projectId,
+      planId: plan._id,
+      key: randomUUID(),
+      kind: 'lane',
+      index,
+      value: event.value,
+    });
+  const terminal = [...s.tables.projectHostedOperations.values()].find(
+    row => row.operationId === operationId,
+  ).value;
+  const purgeId = randomUUID();
+  const stopped = executor(s, Infinity, (module, name, args) => {
+    if (module === 'projectPlanningPurge' && name === 'redact' && args.step === 'lifecyclePlans')
+      throw new Error('executor stopped');
+  });
+  await assert.rejects(stopped.run(itemId, purgeId), /executor stopped/);
+  assert.equal(s.tables.hostedProjects.get(s.projectId).itemPurges[0].purgedAt, undefined);
+
+  const main = {
+    schema: 2,
+    projectId: s.projectId,
+    snapshotId: 'main-snapshot',
+    sourceRevision: 1,
+    authority: { mode: 'server', epoch: 1 },
+    channel: 'main',
+    head: 'b'.repeat(64),
+    receipt: { id: 'main-receipt', kind: 'server', previousHead: null, previousReceiptId: null },
+  };
+  await s.ctx.db.insert('projectHostedChannels', {
+    projectId: s.projectId,
+    operationId: randomUUID(),
+    name: 'main',
+    selection: canonicalPayload(main),
+  });
+  const recovery = await import(moduleUrl('../convex/projectRecovery.ts'));
+  const hostedRecovery = await import(moduleUrl('../convex/projectRecoveryHosted.ts'));
+  const prepare = async () =>
+    JSON.parse(
+      await recovery.prepare._handler(s.ctx, {
+        projectId: s.projectId,
+        operationId: randomUUID(),
+      }),
+    ).selection;
+  const oldSelection = await prepare();
+  const page = selection =>
+    hostedRecovery.page._handler(s.ctx, {
+      projectId: s.projectId,
+      selection: canonicalPayload(selection),
+      table: 'projectHostedLifecyclePlans',
+      cursor: null,
+    });
+  assert.ok(
+    (await page(oldSelection)).includes(SECRET),
+    'recovery had already collected the original author reason',
+  );
+  assert.equal(typeof (await executor(s).run(itemId, purgeId)).purgedAt, 'number');
+  await assert.rejects(page(oldSelection), code('WORK_STALE'));
+  const fresh = await prepare();
+  assert.equal(fresh.revision, oldSelection.revision);
+  assert.deepEqual(fresh.hostedMain, main);
+  const restored = JSON.parse(await page(fresh));
+  assert.ok(restored.done && !JSON.stringify(restored.rows).includes(SECRET));
+  assert.deepEqual(secretRows(s), []);
+  assert.equal(await lifecycle.transition._handler(s.ctx, input), receipt);
+  assert.equal(
+    [...s.tables.projectHostedOperations.values()].find(row => row.operationId === operationId).value,
+    terminal,
+  );
+});
+
+test('purge recovers an expired staged Intent upload even when packing has been disabled', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const previous = process.env.FORGE_JOURNAL_SEGMENTS;
+  process.env.FORGE_JOURNAL_SEGMENTS = '1';
+  t.after(() => {
+    if (previous === undefined) delete process.env.FORGE_JOURNAL_SEGMENTS;
+    else process.env.FORGE_JOURNAL_SEGMENTS = previous;
+  });
+  const [old] = storeIntents(s, itemId);
+  await s.ctx.db.patch(old._id, { journalReadyAt: 1 });
+  const capture = JSON.parse(
+    await modules.projectJournalCapture.page._handler(s.ctx, {
+      projectId: s.projectId,
+      operationId: randomUUID(),
+      claim: randomUUID(),
+      phase: 0,
+    }),
+  );
+  assert.deepEqual(capture.pending.intentKeys, [itemId]);
+  const { encodePlannedJournal } = await import(moduleUrl('../convex/projectJournalArchivePlan.ts'));
+  for (const text of capture.texts) {
+    const { body, pointer } = encodePlannedJournal(text, JSON.parse(text));
+    assert.ok(capture.pending.planned.includes(pointer.sha256));
+    r2.objects.set(pointer.sha256, body);
+  }
+  assert.ok([...r2.objects.values()].some(bytes => gunzipSync(bytes).includes(SECRET)));
+  const purgeId = randomUUID();
+  await assert.rejects(executor(s).run(itemId, purgeId), /archiving one of this Item/);
+  assert.equal(s.tables.hostedProjects.get(s.projectId).itemPurges, undefined);
+
+  // The writer died after its PUT. Disabling the writer still permits purge to retire the
+  // unpublished objects of that exact expired capture.
+  delete process.env.FORGE_JOURNAL_SEGMENTS;
+  for (const row of s.tables.projectJournalReceipts.values()) {
+    const envelope = JSON.parse(row.envelope);
+    if (envelope.pending) envelope.pending.until = 0;
+    else if (row.operationId === 'journal-pending') envelope.until = 0;
+    else continue;
+    await s.ctx.db.patch(row._id, { envelope: canonicalPayload(envelope) });
+  }
+  const done = await executor(s).run(itemId, purgeId);
+  assert.equal(typeof done.purgedAt, 'number');
+  assert.ok(capture.pending.planned.every(hash => !r2.objects.has(hash)));
+  assert.ok(
+    r2.requests.every(request => request.method === 'DELETE'),
+    'cleanup starts no new packing',
+  );
+  assert.deepEqual(secretRows(s), []);
+});
+
+test('a lost fragment PUT and codec change leave no hidden bytes from a later-purged Item', async t => {
+  const { s, itemId, keep } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const otherText = 'a different synthetic Item rationale';
+  await s.send(s.item({ itemId: keep.itemId, expectedVersion: 1, title: otherText }), journalRevision(s));
+  await s.send(s.item({ itemId: keep.itemId, expectedVersion: 2, status: 'deleted' }), journalRevision(s));
+  const versions = [
+    [itemId, SECRET],
+    [keep.itemId, otherText],
+  ].map(([key, text]) =>
+    storeIntents(s, key).find(row =>
+      s.tables.projectHostedRecordBodies.get(row.bodyId)?.value.includes(text),
+    ),
+  );
+  assert.ok(versions.every(Boolean));
+  const keys = await putSegment(
+    s,
+    r2,
+    'record',
+    versions[0].version,
+    {
+      projectHostedRecords: [
+        ...versions.map(row => canonicalPayload(row)),
+        canonicalPayload({
+          _id: 'large-unrelated',
+          kind: 'lane',
+          projectId: s.projectId,
+          inline: 'x'.repeat(550_000),
+        }),
+      ],
+      projectHostedRecordBodies: versions.map(row =>
+        canonicalPayload(s.tables.projectHostedRecordBodies.get(row.bodyId)),
+      ),
+    },
+    { fragmented: true },
+  );
+  for (const row of versions) {
+    await s.ctx.db.patch(row._id, { inline: undefined, journalSegment: keys[0] });
+    await s.ctx.db.delete(row.bodyId);
+  }
+  s.tables.hostedProjects.get(s.projectId).journalRevision = 1;
+  const operationId = randomUUID();
+  r2.loseNextPut();
+  await assert.rejects(executor(s).run(itemId, operationId));
+  const project = s.tables.hostedProjects.get(s.projectId);
+  const pending = project.itemPurges[0].segmentSweep.pending;
+  const [replacement] = pending.planned;
+  assert.ok(
+    pending.planned.length > 1 && r2.objects.has(replacement),
+    'the lost response followed the first fragment',
+  );
+  assert.ok(r2.objects.has(keys[0]), 'the original is still authoritative');
+
+  const former = gzipSync(gunzipSync(r2.objects.get(replacement)), { level: 1 });
+  const formerKey = digest(former);
+  assert.notEqual(formerKey, replacement);
+  pending.planned[0] = formerKey;
+  r2.objects.set(formerKey, former);
+  r2.objects.delete(replacement);
+  assert.equal(typeof (await executor(s).run(itemId, operationId)).purgedAt, 'number');
+  assert.ok(!r2.objects.has(formerKey));
+  assert.equal(typeof (await executor(s).run(keep.itemId, randomUUID())).purgedAt, 'number');
+  const { getJournalSegment } = await import(moduleUrl('../convex/projectJournalObject.ts'));
+  for (const row of s.tables.projectJournalSegments.values()) {
+    if (row.category === 'fragment') continue;
+    const segment = JSON.stringify(await getJournalSegment(s.projectId, JSON.parse(row.value)));
+    assert.ok(!segment.includes(SECRET) && !segment.includes(otherText));
+  }
+  assert.deepEqual(secretRows(s), []);
+});
+
+async function archiveOneNote(s, r2, itemId) {
+  await workStore.setMode._handler(s.ctx, {
+    projectId: s.projectId,
+    mode: 'records',
+    writers: ['planning', 'note'],
+  });
+  await s.send(
+    { action: 'note', kind: 'comment', intentId: itemId, text: `Archived ${SECRET}` },
+    journalRevision(s),
+  );
+  const row = structuredClone(
+    [...s.tables.projectHostedRecordBodies.values()].find(value =>
+      value.command?.includes(`Archived ${SECRET}`),
+    ),
+  );
+  assert.ok(row);
+  const [key] = await putSegment(s, r2, 'events', row.revision, {
+    projectHostedRecordBodies: [canonicalPayload(row)],
+  });
+  await s.ctx.db.patch(row._id, {
+    command: undefined,
+    journalSegment: '1',
+    journalCommand: canonicalPayload({ action: 'note' }),
+  });
+  return key;
+}
+
+test('journal export refuses old author text collected before purge completion', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  await archiveOneNote(s, r2, itemId);
+  s.tables.hostedProjects.get(s.projectId).journalRevision = 1;
+  const operationId = randomUUID();
+  await assert.rejects(executor(s, 0).run(itemId, operationId), /executor stopped/);
+  const { ctx } = executor(s);
+  let oldBytes = false,
+    projectReads = 0;
+  const exporting = {
+    ...ctx,
+    async runQuery(ref, args) {
+      const name = getFunctionName(ref);
+      if (name === 'projectWork:get' && ++projectReads === 2) {
+        assert.ok(oldBytes, 'the export already collected the original archived command');
+        assert.equal(typeof (await executor(s).run(itemId, operationId)).purgedAt, 'number');
+      }
+      const result = await ctx.runQuery(ref, args);
+      if (name === 'projectJournalRead:read' && JSON.stringify(result).includes(SECRET)) oldBytes = true;
+      return result;
+    },
+  };
+  await assert.rejects(
+    actions.exportJournal._handler(exporting, { projectId: s.projectId, purgedRows: 2 }),
+    code('WORK_CHANGED_DURING_PUSH'),
+  );
+  const current = await actions.exportJournal._handler(ctx, { projectId: s.projectId, purgedRows: 2 });
+  assert.equal(current.includes(SECRET), false);
+});
+
+test('an interrupted archive selection resumes from its saved page and consumes the cursor with the tombstone', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  for (let i = 0; i < 16; i++)
+    await putSegment(s, r2, 'events', 20_000 + i, {
+      projectHostedRecordBodies: [
+        canonicalPayload({
+          _id: 'unrelated-event-' + i,
+          projectId: s.projectId,
+          value: '',
+        }),
+      ],
+    });
+  const eventKey = await archiveOneNote(s, r2, itemId);
+  s.tables.hostedProjects.get(s.projectId).journalRevision = 17;
+  const operationId = randomUUID();
+  let pages = 0;
+  const stopped = executor(s, Infinity, (module, name) => {
+    if (module === 'projectPlanningPurgeSegments' && name === 'page' && ++pages === 2)
+      throw new Error('selection stopped after one page');
+  });
+  await assert.rejects(stopped.run(itemId, operationId), /selection stopped/);
+  assert.equal(r2.requests.filter(row => row.method === 'GET').length, 16);
+  assert.equal(s.tables.hostedProjects.get(s.projectId).itemPurges, undefined);
+  r2.requests.length = 0;
+  const worker = executor(s, Infinity, (module, name) => {
+    if (module === 'projectPlanningPurge' && name === 'begin')
+      assert.deepEqual(r2.requests, [{ key: eventKey, method: 'GET' }]);
+  });
+  const done = await worker.run(itemId, operationId);
+  assert.equal(typeof done.purgedAt, 'number');
+  assert.equal(done.rows, 8);
+  assert.ok(
+    [...s.tables.projectJournalReceipts.values()].every(
+      row => row.operationId !== 'purge-selection:' + operationId,
+    ),
+  );
 });

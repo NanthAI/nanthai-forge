@@ -36,6 +36,9 @@ export async function recoverySelection(ctx: QueryCtx | MutationCtx, original: D
     'Hosted recovery main and project authority differ.',
   );
   const capsuleRevision = await capsuleRecoveryRevision(ctx, project._id);
+  // Reuse the recovery revision pin. Only the actual archive revision enables physical paging or requires
+  // a capsule-capable client.
+  const journalRevision = (project.journalRevision ?? 0) + (project.planningPurgeRevision ?? 0);
   return recoverySelectionSchema.parse({
     projectId: project._id,
     ownerId: project.key,
@@ -45,7 +48,7 @@ export async function recoverySelection(ctx: QueryCtx | MutationCtx, original: D
     manifestSha256: backup.preview.manifestDigest,
     revision: project.work!.revision,
     ...(capsuleRevision ? { capsuleRevision } : {}),
-    ...(project.journalRevision ? { journalRevision: project.journalRevision } : {}),
+    ...(journalRevision ? { journalRevision } : {}),
     authority,
     ...(hostedMain ? { hostedMain } : {}),
     transport: backup.transport ?? 'archive',
@@ -74,7 +77,7 @@ export const prepare = query({
           : await find(ctx, input.projectId, input.operationId);
       const selection = old ? null : await recoverySelection(ctx, project);
       invariant(
-        (!selection?.capsuleRevision && !selection?.journalRevision) || input.capsuleProtocol === 1,
+        !selection || (!selection.capsuleRevision && !project.journalRevision) || input.capsuleProtocol === 1,
         'CLI_UPGRADE_REQUIRED',
         'This recovery includes landing capsules. Run nforge update and retry.',
       );

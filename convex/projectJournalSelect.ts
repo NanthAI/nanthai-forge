@@ -43,6 +43,7 @@ export async function selectJournal(
   ctx: MutationCtx,
   input: JournalRunInput,
   cursor: Pending['cursor'] = [],
+  purgingIntents: ReadonlySet<string> = new Set(),
 ) {
   const phase = input.phase ?? 0,
     now = Date.now();
@@ -139,9 +140,12 @@ export async function selectJournal(
     const selected: [Pending['refs'][number]['table'], JournalRow][] = [];
     if (phase === 0) {
       const record = row as Doc<'projectHostedRecords'>;
-      // Issue, comment and Intent versions hold an Item's words: a purge must reach them in Convex, so they never
-      // enter a segment (Item 4c9e961e). One that was marked ready leaves the ready index instead of being rescanned.
-      if (wordsKinds.has(record.kind)) {
+      // Planning versions and already redacted headers stay hot.
+      if (
+        wordsKinds.has(record.kind) ||
+        record.purged !== undefined ||
+        (record.kind === 'intent' && purgingIntents.has(record.key))
+      ) {
         if (record.journalReadyAt !== undefined)
           await ctx.db.patch(record._id, { journalReadyAt: undefined });
       } else if (!record.journalSegment && !record.lifecyclePlanId) {

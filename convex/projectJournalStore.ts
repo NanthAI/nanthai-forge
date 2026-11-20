@@ -3,7 +3,7 @@ import { ConvexError } from 'convex/values';
 import { historyViewVersion } from './projectLandingCapsuleContext';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id, Doc } from './_generated/dataModel';
-import type { JournalIndex, JournalSegment } from '../src/journal-segment';
+import { journalSegmentSchema, type JournalIndex, type JournalSegment } from '../src/journal-segment';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
@@ -42,6 +42,15 @@ export function journalDependency(ctx: Context, key: string, value: unknown) {
   selected.set(key, value);
 }
 type LoadedContext = Context & { journalLoaded?: JournalSegment[]; journalPrivate?: boolean };
+const physicalPins = new WeakMap<JournalSegment, string>();
+export function parseLoadedJournalSegment(text: string) {
+  const value = JSON.parse(text);
+  if (!value?.segment) return journalSegmentSchema.parse(value);
+  const segment = journalSegmentSchema.parse(value.segment);
+  invariant(/^[a-f0-9]{64}$/.test(value.sha256), 'EVIDENCE_CHANGED', 'Loaded journal pin differs.');
+  physicalPins.set(segment, value.sha256);
+  return segment;
+}
 export class JournalNeeded extends Error {
   constructor(readonly index: JournalIndex) {
     super('Selected journal segment requires a server read.');
@@ -112,12 +121,24 @@ export async function journalIndexAfter(
 }
 export function requireJournal(ctx: Context, index: JournalIndex) {
   journalDependency(ctx, `segment:${index.scope}:${index.from}`, index.pointer.sha256);
-  const loaded = (ctx as LoadedContext).journalLoaded?.find(
-    segment =>
-      segment.scope === index.scope && segment.from === index.from && segment.startKey === index.startKey,
-  );
+  const segments = (ctx as LoadedContext).journalLoaded ?? [];
+  const loaded =
+    segments.find(segment => physicalPins.get(segment) === index.pointer.sha256) ??
+    segments.find(
+      segment =>
+        !physicalPins.has(segment) &&
+        segment.scope === index.scope &&
+        segment.from === index.from &&
+        segment.startKey === index.startKey &&
+        (!index.rewritten || digest(canonicalPayload(segment)) === index.rewritten),
+    );
   if (!loaded) throw new JournalNeeded(index);
-  invariant(loaded.through === index.through, 'WORK_STALE', 'Journal range changed while reading.');
+  invariant(
+    loaded.through === index.through &&
+      (!index.rewritten || digest(canonicalPayload(loaded)) === index.rewritten),
+    'WORK_STALE',
+    'Journal bytes changed while reading; retry the original request.',
+  );
   return loaded;
 }
 export async function journalRecord(
@@ -129,9 +150,13 @@ export async function journalRecord(
 ) {
   const index = await journalIndexAt(ctx, projectId, journalScope(kind, key), version);
   if (!index) return null;
-  const loaded = loadedJournalRows(ctx, 'projectHostedRecords').find(
-    row => row.kind === kind && row.key === key && row.version === version,
-  );
+  const loaded = (
+    index.rewritten
+      ? (requireJournal(ctx, index).tables.projectHostedRecords ?? []).map(
+          text => JSON.parse(text) as Doc<'projectHostedRecords'>,
+        )
+      : loadedJournalRows(ctx, 'projectHostedRecords')
+  ).find(row => row.kind === kind && row.key === key && row.version === version);
   if (loaded) return loaded;
   const pin = index.records?.find(pin => pin[0] === version);
   if (!pin) return null; // Sparse imported versions retain their original not-found result.
@@ -172,7 +197,11 @@ export async function journalBody(ctx: Context, row: Doc<'projectHostedRecords'>
     ? (JSON.parse(indexed.value) as JournalIndex)
     : await journalIndexAt(ctx, row.projectId, journalScope(row.kind, row.key), row.version);
   invariant(
-    index && (!pointer || !/^[a-f0-9]{64}$/.test(pointer) || index.pointer.sha256 === pointer),
+    index &&
+      (!pointer ||
+        !/^[a-f0-9]{64}$/.test(pointer) ||
+        index.pointer.sha256 === pointer ||
+        (indexed?.key === pointer && index.rewritten)),
     'SOURCE_UNAVAILABLE',
     'Exact journal record is unavailable.',
   );

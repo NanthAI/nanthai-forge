@@ -156,17 +156,21 @@ export async function load(
 ): Promise<SourceSnapshot & { events: HostedEvent[]; envelopeOnly: number }> {
   const project: Doc<'hostedProjects'> = await ctx.runQuery(internal.projectWork.get, { projectId, owner });
   invariant(project.work, 'PROJECT_WORK_MISSING', 'Start hosted Work from a stored source backup.');
-  const unchanged = async () => {
+  const consistency = async () => {
     const current: Doc<'hostedProjects'> = await ctx.runQuery(internal.projectWork.get, { projectId, owner });
-    return (
-      current.work?.backupId === project.work!.backupId &&
-      current.work?.revision === project.work!.revision &&
-      current.work?.initialRevision === project.work!.initialRevision &&
-      JSON.stringify(current.work?.intentMigration ?? null) ===
-        JSON.stringify(project.work!.intentMigration ?? null) &&
-      JSON.stringify(current.work?.recordDetails ?? null) ===
-        JSON.stringify(project.work!.recordDetails ?? null)
-    );
+    const samePurge = current.planningPurgeRevision === project.planningPurgeRevision;
+    return {
+      samePurge,
+      sameWork:
+        samePurge &&
+        current.work?.backupId === project.work!.backupId &&
+        current.work?.revision === project.work!.revision &&
+        current.work?.initialRevision === project.work!.initialRevision &&
+        JSON.stringify(current.work?.intentMigration ?? null) ===
+          JSON.stringify(project.work!.intentMigration ?? null) &&
+        JSON.stringify(current.work?.recordDetails ?? null) ===
+          JSON.stringify(project.work!.recordDetails ?? null),
+    };
   };
   try {
     const snapshot = await source(ctx, project.work.backupId, owner, reader, options.cacheMetadata, true),
@@ -211,9 +215,9 @@ export async function load(
     checkPurgedJournal(events);
     snapshot.data = migrateHostedIntents(snapshot.data, project.work.intentMigration);
     validateWorkSize(snapshot.data);
-    const current = await unchanged();
+    const signed = await consistency();
     invariant(
-      !options.requireCurrent || current,
+      signed.samePurge && (!options.requireCurrent || signed.sameWork),
       'WORK_CHANGED_DURING_PUSH',
       'Hosted Work changed while reading its checkpoint and journal. Retry the original operation to read a consistent snapshot.',
     );
@@ -222,7 +226,7 @@ export async function load(
   } catch (error) {
     // Recheck authority before identifying a race; corruption under a stable
     // head remains the original validation failure. Never disguise access denial.
-    if (!(await unchanged()))
+    if (!(await consistency()).sameWork)
       throw new ForgeError(
         'WORK_CHANGED_DURING_PUSH',
         'Hosted Work changed while reading its checkpoint and journal. Retry the original operation to read a consistent snapshot.',

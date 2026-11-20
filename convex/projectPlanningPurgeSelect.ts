@@ -6,13 +6,15 @@ import { v } from 'convex/values';
 import { internalQuery, type QueryCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
-import { PURGE_ROW_LIMIT } from '../src/work-planning-types';
 import { purgedFactsDigest, redactPlanningWrite } from '../src/work-intent-types';
 import { purgeableRowTarget, purgedIntentKeys } from '../src/work-planning-purge';
 import { decisionOperationId } from '../src/work-planning-put';
 import { purgedDecisionRequest } from '../src/work-planning-state';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { splitRecordTable } from './projectWorkRecordTables';
+import { recordHead } from './projectHostedRecords';
+import { metadataRequest } from '../src/work-metadata';
+import { pendingIntentArchives } from './projectJournalArchivePlan';
 
 /** Journal rows per selection page: a planning row is at most ~110 KB, so a page stays far under the read limit. */
 export const PURGE_SELECT_PAGE = 64;
@@ -76,46 +78,20 @@ export async function purgeTarget(ctx: QueryCtx, projectId: Id<'hostedProjects'>
   };
 }
 
-/** Whether a work-store version the purge must redact sits in a journal segment (stored before segments stopped taking
- * it): its words are in R2, so the redaction step would refuse it after the tombstone. Issue and comment versions of
- * the Item's ids, and every version of its Intent and successor Intents (purgedIntentKeys; the chain ends at the
- * first id with no record). */
-async function segmentedVersions(
+/** The copied Intent chain ends at the first missing head or a successor with its own Item. */
+export async function purgeIntentChain(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
-  ids: string[],
   itemId: string,
   partition: Id<'projectWorkGenerations'>,
 ) {
-  const records = ctx.db.query('projectHostedRecords');
-  const segmented = (rows: Doc<'projectHostedRecords'>[]) => rows.some(row => row.journalSegment);
-  for (const key of ids) {
-    const versions = await records
-      .withIndex('by_project_and_kind_and_key_and_version_and_plan', q =>
-        q.eq('projectId', projectId).eq('kind', 'issue').eq('key', key),
-      )
-      .take(PURGE_ROW_LIMIT + 1);
-    const comments = await ctx.db
-      .query('projectHostedRecords')
-      .withIndex('by_project_and_kind_and_parent', q =>
-        q.eq('projectId', projectId).eq('kind', 'comment').eq('parent', key),
-      )
-      .take(PURGE_ROW_LIMIT + 1);
-    if (segmented([...versions, ...comments])) return true;
+  const keys: string[] = [];
+  for (const key of purgedIntentKeys(itemId)) {
+    if (key !== itemId && (await record(ctx, partition, 'planningItems', key))) break;
+    if (!(await recordHead(ctx, projectId, 'intent', key))) break;
+    keys.push(key);
   }
-  for (const [at, key] of purgedIntentKeys(itemId).entries()) {
-    // A successor id that names a planning Item of its own is that Issue's (the executor's chain ends there too).
-    if (at > 0 && (await record(ctx, partition, 'planningItems', key))) break;
-    const versions = await ctx.db
-      .query('projectHostedRecords')
-      .withIndex('by_project_and_kind_and_key_and_version_and_plan', q =>
-        q.eq('projectId', projectId).eq('kind', 'intent').eq('key', key),
-      )
-      .take(PURGE_ROW_LIMIT + 1);
-    if (!versions.length) break;
-    if (segmented(versions)) return true;
-  }
-  return false;
+  return keys;
 }
 /** The revision the stored base reaches: the generation's backup, or the record-detail catalog a migration saved for
  * that backup (src/hosted-work-client.ts migrate-record-details), which a full load or rebuild starts from. Rows at
@@ -145,9 +121,8 @@ export async function displaySnapshots(ctx: QueryCtx, projectId: Id<'hostedProje
 
 /** Read-only preflight the lead runs before a purge: what will be selected and whether anything blocks it. Blocks:
  * the Item is not Deleted (and not already this purge's tombstone), its Intent id is not its own (the store's Intent
- * chain and the readers' check start from the Item id), the project keeps display snapshots, a work-store version of
- * the Item or its Intents sits in a journal segment, or (at selection) a planning row does (its words are in R2, out
- * of the purge's reach). Reports the index generation and the work-store mode. */
+ * chain and the readers' check start from the Item id), or the project keeps display snapshots. Reports the index
+ * generation and the work-store mode. */
 export const preflight = internalQuery({
   args: { projectId: v.id('hostedProjects'), itemId: v.string() },
   returns: v.any(),
@@ -165,6 +140,13 @@ export const preflight = internalQuery({
       // Rows at or before this revision are in the base checkpoint (the stored archive the index is built from).
       initialRevision: baseRevision(target.project, target.generation),
       workStore: target.project.workStore ?? 'journal',
+      journalRevision: target.project.journalRevision ?? 0,
+      pendingArchives: await pendingIntentArchives(
+        ctx,
+        projectId,
+        await purgeIntentChain(ctx, projectId, target.historyId, target.partition),
+      ),
+
       // Base-checkpoint planning versions: the executor redacts their index copies; the R2 archive stays.
       baseItems: counts.planningItems ?? null,
       blocked:
@@ -174,21 +156,13 @@ export const preflight = internalQuery({
             ? 'This Item’s Intent has an id of its own; a purge cannot follow it yet. Nothing was purged.'
             : (await displaySnapshots(ctx, projectId))
               ? DISPLAY_BLOCK
-              : (await segmentedVersions(
-                    ctx,
-                    projectId,
-                    [target.historyId],
-                    target.historyId,
-                    target.partition,
-                  ))
-                ? 'A work-store version of this Item sits in a journal segment; its words are out of the purge’s reach.'
-                : null,
+              : null,
     };
   },
 });
 
 /** One selection page of one journal table: the Item's rows after `after` (revision), with their purged digests,
- * plus any decision comment (its derived version's purged request). A segmented row of the Item refuses the purge. */
+ * plus any decision comment (its derived version's purged request). Archived rows are selected by the Node reader. */
 export const selectPage = internalQuery({
   args: {
     projectId: v.id('hostedProjects'),
@@ -213,11 +187,32 @@ export async function selectRows(
   ctx: QueryCtx,
   input: { projectId: Id<'hostedProjects'>; table: JournalTable; ids: string[]; after: number },
 ) {
-  const named = new Set(input.ids);
   const page = await ctx.db
     .query(input.table)
     .withIndex('by_project_and_revision', q => q.eq('projectId', input.projectId).gt('revision', input.after))
     .take(PURGE_SELECT_PAGE);
+  return {
+    ...selectEventRows(
+      page.filter(row => !('journalSegment' in row && row.journalSegment)),
+      input.ids,
+    ),
+    after: page.at(-1)?.revision ?? input.after,
+    done: page.length < PURGE_SELECT_PAGE,
+  };
+}
+
+export function selectEventRows(
+  page: readonly {
+    operationId?: string;
+    revision?: number;
+    request?: string;
+    command?: string;
+    journalCommand?: string;
+    purged?: string;
+  }[],
+  ids: readonly string[],
+) {
+  const named = new Set(ids);
   const rows: { operationId: string; revision: number; digest: string; request: string }[] = [];
   const decisions: string[][] = [];
   // The lowest revision of any of the Item's rows on this page (an Intent row, note or comment can predate the put),
@@ -226,7 +221,13 @@ export async function selectRows(
     creates = false;
   for (const row of page) {
     const text = journalText(row);
-    if (text === undefined || row.operationId === undefined || row.request === undefined) continue;
+    if (
+      text === undefined ||
+      row.operationId === undefined ||
+      row.request === undefined ||
+      row.purged !== undefined
+    )
+      continue;
     let command;
     try {
       command = JSON.parse(text);
@@ -236,9 +237,9 @@ export async function selectRows(
     const target = purgeableRowTarget(row.operationId, command);
     if (!target || !named.has(target.id)) continue;
     invariant(
-      !('journalSegment' in row && row.journalSegment) || row.purged !== undefined,
-      'WORK_STALE',
-      'A row of this Item sits in a journal segment; its words are out of the purge’s reach.',
+      metadataRequest(target.command) === row.request,
+      'INVALID_WORK_JOURNAL',
+      'A Work row does not match its original request.',
     );
     rows.push({
       operationId: row.operationId,
@@ -251,12 +252,5 @@ export async function selectRows(
     if (target.command.action === 'comment-planning-item' && target.command.decision)
       decisions.push([decisionOperationId(row.operationId), purgedDecisionRequest(row.request)]);
   }
-  return {
-    rows,
-    decisions,
-    created,
-    creates,
-    after: page.at(-1)?.revision ?? input.after,
-    done: page.length < PURGE_SELECT_PAGE,
-  };
+  return { rows, decisions, created, creates };
 }

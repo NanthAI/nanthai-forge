@@ -14,7 +14,7 @@ export type StoredWorkEvent = Omit<Doc<'projectWorkEvents'>, '_id'> & {
 export type WorkProvenance = Omit<StoredWorkEvent, '_id' | '_creationTime' | 'previousRevision'>;
 export function eventDocument(row: Doc<'projectHostedRecordBodies'>): StoredWorkEvent {
   if (row.purged !== undefined) {
-    // The archived command-less envelope with a purge marker and no segment. Its purge is checked separately
+    // The command-less envelope with a purge marker. Its purge is checked separately
     // (convex/projectWorkPurgedRows.ts), because that needs a read.
     invariant(
       row.operationId !== undefined &&
@@ -90,7 +90,8 @@ export async function findWorkEvent(
     .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
     .unique();
   if (!body) return null;
-  if (body.purged !== undefined) return purgedReplay(ctx, projectId, eventDocument(body), replay);
+  if (body.purged !== undefined)
+    return purgedReplay(ctx, projectId, eventDocument({ ...body, journalSegment: undefined }), replay);
   if (!body.journalSegment) return eventDocument(body);
   if (replay && 'command' in replay) {
     const command = journalCommandSchema.parse(JSON.parse(replay.command));

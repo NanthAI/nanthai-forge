@@ -2,7 +2,9 @@
 import { v } from 'convex/values';
 import { internalMutation } from './server';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { journalSegmentText } from '../src/journal-segment';
+import { journalSegmentText, type JournalSegment } from '../src/journal-segment';
+import { encodePlannedJournal } from './projectJournalArchivePlan';
+import { invariant } from '../src/errors';
 import { journalFragmentTexts } from '../src/journal-fragments';
 import { wakeJournal, journalEligibilityKey } from './projectJournalWake';
 import { selectJournal } from './projectJournalSelect';
@@ -20,10 +22,15 @@ import {
   type JournalRunInput,
 } from './projectJournalMaintenance';
 export const page = internalMutation({
-  args: { ...journalRunArgs, claim: v.string() },
+  args: {
+    ...journalRunArgs,
+    claim: v.string(),
+    discarded: v.optional(v.array(v.string())),
+    discardExpired: v.optional(v.literal(true)),
+  },
   returns: v.string(),
-  handler: async (ctx, input) => {
-    if (!journalEnabled()) return canonicalPayload({ kept: 'disabled' });
+  handler: async (ctx, { discarded, discardExpired, ...input }) => {
+    if (!discardExpired && !journalEnabled()) return canonicalPayload({ kept: 'disabled' });
     const claimRow = await pendingJournal(ctx, input.projectId);
     const active = claimRow ? JSON.parse(claimRow.envelope) : null;
     if (
@@ -45,15 +52,16 @@ export const page = internalMutation({
       if (wake) await ctx.db.delete(wake._id);
     }
     const pageId = pageKey(input);
+    if (discardExpired && pending?.pageId !== pageId) return canonicalPayload({ kept: 'capture-changed' });
     if (input.existing && (input.phase ?? 0) < 3 && control.runId !== input.operationId && !control.pending) {
       delete control.cursor;
       control.runId = input.operationId;
     }
     if (control.last?.pageId === pageId) return control.last.result;
-    const published = await ctx.db
+    const [published] = await ctx.db
       .query('projectJournalSegments')
       .withIndex('by_project_and_page', q => q.eq('projectId', input.projectId).eq('pageId', pageId))
-      .first();
+      .take(1);
     if (published) {
       const saved = JSON.parse(published.value).pageReceipt;
       if (typeof saved === 'string') return saved;
@@ -83,7 +91,16 @@ export const page = internalMutation({
       for (const marker of expired) await ctx.db.delete(marker._id);
       const { future: known, ...selected } = expired.length
         ? { refs: [], proofs: [], groups: [], cursor: control.cursor ?? [], done: false, future: [] }
-        : await selectJournal(ctx, input, !input.existing && (input.phase ?? 0) < 2 ? [] : control.cursor);
+        : await selectJournal(
+            ctx,
+            input,
+            !input.existing && (input.phase ?? 0) < 2 ? [] : control.cursor,
+            new Set(
+              project.itemPurges?.flatMap(purge =>
+                purge.purgedAt === undefined ? (purge.intentKeys ?? []) : [],
+              ),
+            ),
+          );
       future = known ?? [];
       const { claim: invocationClaim, ...request } = input;
       void invocationClaim;
@@ -127,9 +144,40 @@ export const page = internalMutation({
     }
     pending.claim = input.claim;
     pending.until = Date.now() + 10 * 60_000;
-    const rows = await loadCaptured(ctx, pending);
-    if (!rows) {
-      // No source has been removed; retry selection at the same durable frontier.
+    const rows = discardExpired ? null : await loadCaptured(ctx, pending);
+    if (!rows || discarded) {
+      // An unpublished Intent page may already be in R2 after a lost PUT or a rejected publication.
+      // Retain its physical pins until the action confirms deletion, then recapture the still-hot source.
+      const staged = [
+        ...new Set([...pending.pointers.map(pointer => pointer.sha256), ...(pending.planned ?? [])]),
+      ];
+      const indexed = await Promise.all(
+        staged.map(key =>
+          ctx.db
+            .query('projectJournalSegments')
+            .withIndex('by_project_and_key', q => q.eq('projectId', input.projectId).eq('key', key))
+            .unique(),
+        ),
+      );
+      // A different capture can have published the same immutable bytes while this one lost its head proof.
+      // A published root owns all its fragments, and only the Item sweep may replace that object.
+      const retired =
+        indexed[0] && indexed[0].category !== 'fragment'
+          ? []
+          : staged.filter((_, i) => !indexed[i] || indexed[i]!.category === 'fragment');
+      if (retired.length && !discarded) {
+        control.pending = pending;
+        await putControl(ctx, input, control, controlRow, claimRow);
+        return canonicalPayload({ discard: retired });
+      }
+      if (discarded) {
+        invariant(
+          !rows && canonicalPayload(discarded) === canonicalPayload(retired),
+          'WORK_STALE',
+          'Staged journal page changed.',
+        );
+        for (const row of indexed) if (row?.category === 'fragment') await ctx.db.delete(row._id);
+      }
       delete control.pending;
       await putControl(ctx, input, control, controlRow, claimRow);
       const { claim: ignoredClaim, ...request } = input;
@@ -151,6 +199,24 @@ export const page = internalMutation({
         texts.push(parts[pending.fragment]!);
         fragmented = pending.fragment + 1 < parts.length;
       } else texts.push(journalSegmentText(segment));
+    }
+    const intentKeys = [
+      ...new Set(
+        rows.flatMap((row, i) =>
+          pending.refs[i]?.table === 'projectHostedRecords' &&
+          'kind' in row &&
+          row.kind === 'intent' &&
+          'key' in row
+            ? [row.key]
+            : [],
+        ),
+      ),
+    ];
+    if (intentKeys.length) {
+      pending.intentKeys = intentKeys;
+      pending.planned = texts.map(
+        text => encodePlannedJournal(text, JSON.parse(text) as JournalSegment).pointer.sha256,
+      );
     }
     control.pending = pending;
     await putControl(ctx, input, control, controlRow, claimRow);

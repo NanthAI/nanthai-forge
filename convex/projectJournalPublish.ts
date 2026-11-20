@@ -65,7 +65,14 @@ export const page = internalMutation({
       return canonicalPayload({ deferred: 'claimed', retryAt: active.until });
     const pending = control.pending;
     invariant(pending && pending.claim === input.claim, 'WORK_STALE', 'Archive capture claim changed.');
+    invariant(
+      !pending.planned ||
+        canonicalPayload(pending.planned) === canonicalPayload(input.pointers.map(pin => pin.sha256)),
+      'EVIDENCE_CHANGED',
+      'Uploaded journal bytes differ from the capture pins.',
+    );
     const rows = await loadCaptured(ctx, pending);
+    if (!rows && pending.planned) return canonicalPayload({ staleCapture: true });
     invariant(rows, 'WORK_STALE', 'Captured source changed before archive publication.');
     const segments = await logicalSegments(pending, rows);
     let fragmented = false,
@@ -169,6 +176,7 @@ export const page = internalMutation({
     }
     if (incomplete) {
       pending.pointers.push(...input.pointers);
+      delete pending.planned;
       pending.fragment++;
       pending.until = 0;
       await putControl(ctx, pending.input, { ...control, pending }, row, claimRow);

@@ -87,8 +87,8 @@ structural fields (`redactPlanningWrite` in `src/work-intent-types.ts`: kind, st
 parent, thread, base), with the words replaced (title and outcome "Deleted Item", empty body and constraints,
 comment text "Deleted comment", note text "Deleted note") and free text or attribution dropped (reason, type
 label, owner, import facts, note anchor). A field a schema gains is dropped until it is classified, and a test fails
-until it is. It has no segment: planning, Intent, note and purge journal rows never enter a journal segment, so a purge can
-reach them in Convex (older record versions are not yet covered; the executor's preflight checks segments are off). A purged issue, comment or Intent version keeps its header and digest. Readers accept a
+until it is. New planning, Intent, note and purge command rows stay in Convex. The executor also selects older archived
+commands. A purged Issue, comment or Intent version keeps its header and digest. Readers accept a
 journal row under one rule: it hashes to its request, or it names a purge command that exists, is itself whole,
 comes later and lists the row with the digest of its facts, parsed strictly (no unknown key) and holding no words.
 Anything else is `INVALID_WORK_JOURNAL`, so a row cannot vouch for its own structure. Replay runs a purged row as its
@@ -103,10 +103,15 @@ lifecycle, the Intent with its handoff summaries, the Item's root, Initiative re
 chunks), the work store's issue, comment and lifecycle versions, bodies and heads, its Intent versions (the Item's
 Intent and every successor Intent a later start continued it on: the head becomes a new 'Deleted Item' version that
 keeps status and Lane pin, and every older version is purged; the chain ends at a successor id that names an Issue of
-its own), the outcome copy on each of their Lanes' overlap rows, and the store fingerprints. Lane records, receipts and
-Lane lifecycle plans (with an abandon reason a member wrote) are Lane history and stay, like commit messages. Aliases have no index by Intent, so a purge
-reads all of the project's aliases and refuses a project with more than 8,000 (nothing written); the preflight also
-refuses an Item with a work-store version (its Intents' included) in a journal segment, a project that keeps hosted
+its own), the outcome copy on each of their Lanes' overlap rows, lifecycle plan reasons and their copies in
+lifecycle events, and the store fingerprints. Lane records, receipts and accepted source retain their bytes.
+The purge checkpoints its archived command selection by page and reads one verified segment at a time. It replaces only segments
+that contain affected rows, keeps their logical positions, and deletes their superseded R2 objects and fragments
+before reporting completion. The completion revision invalidates Work exports and recovery selections that carried
+older bytes. A stopped purge resumes selection or retirement using the original operation id. Superseded Intent
+versions can enter journal segments again. An in-flight Intent archive keeps its upload pins until publication or
+cleanup, so a purge can account for bytes from an interrupted upload. Aliases have no index by Intent, so a purge reads all of the project's
+aliases and refuses a project with more than 8,000 (nothing written). The preflight also refuses a project that keeps hosted
 display snapshots (they copy record bodies under no index by Item), an Item whose Intent has an id of its own, an Item
 in a stored base (no creation row after the
 backup's revision or a record-detail catalog's: the archive keeps its words and a load or rebuild reads it again, so a
@@ -114,7 +119,7 @@ base scrub must come first; a detail migration is refused while a purge is open)
 record partitions differs from the one the check walked. The same pages
 run read-only as the completeness check; the purge's `purgedAt` (project `itemPurges`) is set only when the check
 finds nothing left on the generation still selected. A stopped purge resumes by running again with the same
-operation id, also after an index rebuild. Issue, comment and Intent record versions never enter a journal segment.
+operation id, also after an index rebuild. New Issue and comment versions stay in Convex.
 A purged Intent or lifecycle version, read by version, answers `PLANNING_ITEM_PURGED` naming the Item. A note or
 status change on the Item's Intent is still accepted after the first step (refusing it would cost every note write a
 read); the last step refuses to finish while such a note exists, so the purge never reports done over it. A purged decision

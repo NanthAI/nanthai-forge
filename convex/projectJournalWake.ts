@@ -36,9 +36,8 @@ export async function wakeJournal(ctx: MutationCtx, input: JournalRunInput, dueA
   );
 }
 /** Attached to the existing supersession write; no added RPC and no idle wake. */
-/** Work store record kinds that hold an Item's words (purge executor, convex/projectPlanningPurgeRedact.ts): their
- * superseded versions never enter a journal segment, so they are never marked ready. */
-export const wordsKinds = new Set(['issue', 'comment', 'intent']);
+/** Planning versions stay hot; superseded Intent versions can be rewritten by an Item purge. */
+export const wordsKinds = new Set(['issue', 'comment']);
 export async function readyJournalRecord(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,

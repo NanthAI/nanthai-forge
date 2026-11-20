@@ -3,8 +3,7 @@
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { action, type ActionCtx } from './cliServer';
-import { getJournalSegment } from './projectJournalObject';
-import { canonicalPayload } from '../src/hosted-source-operation';
+import { loadJournalSegment } from './projectJournalObject';
 import type { Id } from './_generated/dataModel';
 import type { JournalIndex } from '../src/journal-segment';
 import { invariant } from '../src/errors';
@@ -49,7 +48,7 @@ export async function readJournalHistory(
         'Journal selection changed during the read; retry the original request.',
       );
       seen.add(reply.index.pointer.sha256);
-      args.segments.push(canonicalPayload(await getJournalSegment(input.projectId, reply.index)));
+      args.segments.push(await loadJournalSegment(input.projectId, reply.index));
     }
   } catch (error) {
     return report(error);

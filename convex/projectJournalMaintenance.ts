@@ -2,7 +2,7 @@
 import { expandOperationReceipt } from '../src/compact-operation-receipt';
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
-import type { MutationCtx } from './_generated/server';
+import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { JournalSegment, JournalIndex, JOURNAL_TABLES } from '../src/journal-segment';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
@@ -52,6 +52,8 @@ export type Pending = {
   done: boolean;
   fragment: number;
   pointers: JournalIndex['pointer'][];
+  intentKeys?: string[];
+  planned?: string[];
 };
 export type Control = {
   runId?: string;
@@ -64,7 +66,7 @@ export const phaseKey = (input: JournalRunInput) =>
   `journal-control:${input.phase ?? 0}:${input.laneId ?? (input.existing && (input.phase ?? 0) < 3 ? 'existing' : 'live')}`;
 export const pageKey = (input: JournalRunInput) =>
   `${input.operationId}:${input.phase ?? 0}:${input.laneId ?? (input.existing && (input.phase ?? 0) < 3 ? 'e' : 'l')}:${input.part ?? 0}`;
-export const receiptRow = (ctx: MutationCtx, projectId: Id<'hostedProjects'>, operationId: string) =>
+export const receiptRow = (ctx: QueryCtx, projectId: Id<'hostedProjects'>, operationId: string) =>
   ctx.db
     .query('projectJournalReceipts')
     .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))

@@ -21,11 +21,15 @@ import { splitRecordTable } from './projectWorkRecordTables';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { hostedRecordBody, recordHead, recordVersion } from './projectHostedRecords';
 import { fingerprintHostedIntent } from './projectWorkStoreFingerprintWrites';
+import { purgeLifecyclePlans } from './projectPlanningPurgeLifecycle';
+import { purgeIntentChain } from './projectPlanningPurgeSelect';
 
 /** Every store an Item purge redacts, and how. The end-to-end test (tests/planning-purge-executor.test.mjs) searches
  * every table for the purged words, so a new store that keeps them fails the build. */
 export const planningPurgeStores = {
   projectWorkEvents: 'journal row: redacted facts in `command`, `purged` marker',
+  projectJournalSegments:
+    'replace the verified object for each affected segment and delete the original and its fragments',
   projectHostedRecordBodies:
     'journal row: facts in `journalCommand`, no `command`, `purged`; record body emptied',
   projectHostedRecords:
@@ -37,6 +41,9 @@ export const planningPurgeStores = {
   projectWorkRecords:
     'events, notes, lifecycle, Intent, Initiative root: purged form; store fingerprints of the Item deleted',
   projectWorkDataRecords: 'payload chunks of the above: rewritten from the purged value, stale ones deleted',
+  projectHostedLifecyclePlans:
+    'redacted reason in the canonical lifecycle request; original operation hash retained',
+  projectHostedLifecycleEvents: 'redacted reason in the plan event and its cascaded child events',
   projectHostedOverlapLanes:
     "overlap rows of the Lanes on the Item's Intents: the outcome copy reads 'Deleted Item'",
 } as const;
@@ -63,6 +70,7 @@ export const purgeSteps = [
   'storeNotes',
   'storeLifecycle',
   'storeIntents',
+  'lifecyclePlans',
   'overlapLanes',
   'storeHeads',
 ] as const;
@@ -202,6 +210,15 @@ async function pageOf(
   }
   if (input.step === 'payloads') return stalePayloads(ctx, write, partition!, purge, input.after);
   if (input.step === 'storeHeads') return storeHeads(ctx, write, input.projectId, purge, input.after);
+  if (input.step === 'lifecyclePlans') {
+    const project = await ctx.db.get(input.projectId);
+    const generation = project && (await selectedGeneration(ctx, project));
+    invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index before purging.');
+    const keys =
+      purge.intentKeys ??
+      (await purgeIntentChain(ctx, input.projectId, purge.itemId, recordPartition(generation)));
+    return purgeLifecyclePlans(ctx, write, input.projectId, keys, input.after);
+  }
   if (input.step === 'storeIntents') return storeIntents(ctx, write, input.projectId, purge, input.after);
   if (input.step === 'overlapLanes') return overlapLanes(ctx, write, input.projectId, purge, input.after);
   const parentStep = parentSteps.find(([collection]) => collection === input.step);
@@ -289,11 +306,9 @@ async function journalRow(
   const row = event ?? body;
   invariant(row, 'INVALID_WORK_JOURNAL', 'A row the purge lists is missing from the Work journal.');
   if (row.purged !== undefined) return 0;
-  invariant(
-    row.command !== undefined && !('journalSegment' in row && row.journalSegment),
-    'WORK_STALE',
-    'A listed row sits in a journal segment.',
-  );
+  // The segment action publishes the redacted event and the live retry envelope together.
+  if ('journalSegment' in row && row.journalSegment) return 1;
+  invariant(row.command !== undefined, 'INVALID_WORK_JOURNAL', 'A listed Work row has no command.');
   const facts = redactPlanningWrite(purgeableCommandSchema.parse(JSON.parse(row.command)));
   invariant(
     purgedFactsDigest(facts) === expected,
@@ -438,7 +453,6 @@ async function storeRecord(
   const body = await ctx.db.get(row.bodyId);
   const plain = body && body.operationId === undefined && body.value !== '' ? body : null;
   if (row.purged !== undefined && !plain) return 0;
-  invariant(!row.journalSegment, 'WORK_STALE', 'A version of this Item sits in a journal segment.');
   let emptied = false;
   if (plain) {
     const owners = await ctx.db
@@ -454,7 +468,13 @@ async function storeRecord(
   }
   if (row.purged !== undefined && !emptied) return 0;
   if (!write) return 1;
-  if (row.purged === undefined) await write.patch(row._id, { purged: purge.operationId, inline: undefined });
+  if (row.purged === undefined)
+    await write.patch(row._id, {
+      purged: purge.operationId,
+      inline: undefined,
+      journalReady: undefined,
+      journalReadyAt: undefined,
+    });
   if (emptied) await write.patch(plain!._id, { value: '' });
   return 1;
 }

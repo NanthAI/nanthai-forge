@@ -20,8 +20,10 @@ import {
   DISPLAY_BLOCK,
   displaySnapshots,
   purgeJournalTables,
+  purgeIntentChain,
   purgeTarget,
   selectRows,
+  selectEventRows,
 } from './projectPlanningPurgeSelect';
 import {
   partitionsOf,
@@ -33,6 +35,9 @@ import {
 } from './projectPlanningPurgeRedact';
 
 import { selectedGeneration } from './projectWorkIndexStore';
+import { pendingIntentArchives } from './projectJournalArchivePlan';
+import { journalEnabled } from './projectJournalMaintenance';
+import { clearArchiveSelection } from './projectPlanningPurgeArchiveSelection';
 
 const LATE_ROW_BLOCK =
   'A note reached this Item’s Intent after its purge began; its words are not on the purge’s list, so the purge stays open (not done). Nothing more was purged.';
@@ -43,6 +48,7 @@ const selection = v.object({
   created: v.number(),
   rows: v.array(v.array(v.string())),
   decisions: v.array(v.array(v.string())),
+  journalRevision: v.number(),
   through: v.object({ projectWorkEvents: v.number(), projectHostedRecordBodies: v.number() }),
 });
 const stepName = v.union(...purgeSteps.map(step => v.literal(step)));
@@ -57,8 +63,13 @@ async function entry(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'
 export const status = internalQuery({
   args: { projectId: v.id('hostedProjects'), operationId: v.string() },
   returns: v.any(),
-  handler: async (ctx, { projectId, operationId }) =>
-    (await ctx.db.get(projectId))?.itemPurges?.find(item => item.operationId === operationId) ?? null,
+  handler: async (ctx, { projectId, operationId }) => {
+    const project = await ctx.db.get(projectId);
+    const purge = project?.itemPurges?.find(item => item.operationId === operationId);
+    return purge && project?.journalRevision && purge.purgedAt === undefined && !purge.segmentSweep
+      ? { ...purge, segmentSweep: { after: null, done: false } }
+      : (purge ?? null);
+  },
 });
 
 /** The atomic first step: no row of the Item was appended after the selection read (else WORK_STALE: select again),
@@ -71,6 +82,11 @@ export const begin = internalMutation({
     const project = await ctx.db.get(input.projectId);
     invariant(project, 'PROJECT_UNAVAILABLE', 'Select an existing Forge project.');
     if (project.itemPurges?.some(item => item.operationId === input.operationId)) return null;
+    invariant(
+      (project.journalRevision ?? 0) === input.selection.journalRevision,
+      'WORK_STALE',
+      'The archived Work journal changed while selecting the Item. Run the same purge again to resume.',
+    );
     const target = await purgeTarget(ctx, input.projectId, input.itemId);
     invariant(input.selection.created > baseRevision(project, target.generation), 'BAD_ARGUMENT', BASE_BLOCK);
     // The store's Intent chain and every reader's purged-version check start from the Item id (purgedIntentKeys).
@@ -98,6 +114,12 @@ export const begin = internalMutation({
         after = tail.after;
       }
     }
+    const intentKeys = await purgeIntentChain(ctx, input.projectId, target.historyId, target.partition);
+    invariant(
+      !(await pendingIntentArchives(ctx, input.projectId, intentKeys)).length,
+      'WORK_STALE',
+      'The journal is archiving one of this Item’s Intent versions. Run the same purge again to resume.',
+    );
     const command = {
       action: 'purge-planning-item' as const,
       operationId: input.operationId,
@@ -119,12 +141,15 @@ export const begin = internalMutation({
       itemId: target.historyId,
       ids: target.ids,
       ...(target.intentId ? { intentId: target.intentId } : {}),
+      intentKeys,
       version: target.item.version,
       decisions: input.selection.decisions,
       rows: input.selection.rows.length,
       created: input.selection.created,
       startedAt: Date.now(),
+      ...(project.journalRevision || journalEnabled() ? { segmentSweep: { after: null, done: false } } : {}),
     };
+    if (input.selection.journalRevision) await clearArchiveSelection(ctx, input.projectId, input.operationId);
     const others = project.itemPurges ?? [];
     const finished = others.filter(item => item.purgedAt !== undefined).slice(0, KEPT_FINISHED - 1);
     await ctx.db.patch(input.projectId, {
@@ -190,6 +215,11 @@ export const finish = internalMutation({
     const purge = await entry(ctx, input.projectId, input.operationId);
     if (purge.purgedAt !== undefined) return purge.purgedAt;
     const project = (await ctx.db.get(input.projectId))!;
+    invariant(
+      !project.journalRevision || purge.segmentSweep?.done,
+      'WORK_STALE',
+      'The journal segment sweep has not finished. Run the purge again to resume.',
+    );
     const generation = await selectedGeneration(ctx, project);
     invariant(
       generation?._id === input.generationId,
@@ -227,10 +257,15 @@ export const finish = internalMutation({
       }
     const purgedAt = Date.now();
     await ctx.db.patch(input.projectId, {
-      // A finished entry keeps no decision list: the project document stays small on every later read.
-      itemPurges: project.itemPurges!.map(item =>
-        item.operationId === input.operationId ? { ...item, decisions: [], purgedAt } : item,
-      ),
+      planningPurgeRevision: (project.planningPurgeRevision ?? 0) + 1,
+      // A finished entry keeps no working decisions or archive cursor on later project reads.
+      itemPurges: project.itemPurges!.map(item => {
+        if (item.operationId !== input.operationId) return item;
+        const finished = { ...item, decisions: [], purgedAt };
+        delete finished.intentKeys;
+        delete finished.segmentSweep;
+        return finished;
+      }),
     });
     return purgedAt;
   },
@@ -245,11 +280,12 @@ export const run = internalAction({
     const id = { projectId: input.projectId, operationId: input.operationId };
     let purge: ItemPurge | null = await ctx.runQuery(ref.status, id);
     if (!purge) {
-      const preflight = await ctx.runQuery(internal.projectPlanningPurgeSelect.preflight, {
-        projectId: input.projectId,
-        itemId: input.itemId,
-      });
+      const preflightArgs = { projectId: input.projectId, itemId: input.itemId };
+      const preflight = await ctx.runQuery(internal.projectPlanningPurgeSelect.preflight, preflightArgs);
       invariant(!preflight.blocked, 'BAD_ARGUMENT', preflight.blocked ?? '');
+      for (const pending of preflight.pendingArchives)
+        if (pending.availableAt <= Date.now())
+          await ctx.runAction(internal.projectJournalRun.pack, { ...pending.input, discardExpired: true });
       const rows: [number, string, string][] = [],
         decisions: string[][] = [];
       const through = { projectWorkEvents: -1, projectHostedRecordBodies: -1 };
@@ -280,14 +316,28 @@ export const run = internalAction({
           );
           if (page.done) break;
         }
+      if (preflight.journalRevision) {
+        const archived: ReturnType<typeof selectEventRows> = await ctx.runAction(
+          internal.projectPlanningPurgeSegmentRun.select,
+          { ...input, ids: preflight.ids, journalRevision: preflight.journalRevision },
+        );
+        for (const row of archived.rows) rows.push([row.revision, row.operationId, row.digest]);
+        decisions.push(...archived.decisions);
+        if (archived.created !== null) created = Math.min(created ?? archived.created, archived.created);
+        creates ||= archived.creates;
+      }
+      const validBase = creates && created !== null && created > preflight.initialRevision;
+      if (preflight.journalRevision && (rows.length > PURGE_ROW_LIMIT || !validBase))
+        await ctx.runMutation(internal.projectPlanningPurgeArchiveSelection.discard, id);
+      invariant(
+        rows.length <= PURGE_ROW_LIMIT,
+        'BAD_ARGUMENT',
+        `This Item has more than ${PURGE_ROW_LIMIT} Work rows; a purge removes at most ${PURGE_ROW_LIMIT}.`,
+      );
       // An Item with no creation row after the base checkpoint is in the stored archive: a rebuild would read it.
       // Every row of the Item, its Intent's included, must come after the stored base, and the put that created it
       // must be there: otherwise a base archive holds some of its words and a rebuild reads them again.
-      invariant(
-        creates && created !== null && created > preflight.initialRevision,
-        'BAD_ARGUMENT',
-        BASE_BLOCK,
-      );
+      invariant(validBase, 'BAD_ARGUMENT', BASE_BLOCK);
       rows.sort((a, b) => a[0] - b[0]);
       await ctx.runMutation(ref.begin, {
         ...input,
@@ -297,6 +347,7 @@ export const run = internalAction({
           rows: rows.map(([, operationId, digest]) => [operationId, digest]),
           decisions,
           through,
+          journalRevision: preflight.journalRevision,
         },
       });
       purge = await ctx.runQuery(ref.status, id);
@@ -309,6 +360,8 @@ export const run = internalAction({
         do after = (await ctx.runMutation(ref.redact, { ...id, step, after })).after;
         while (after !== null);
       }
+      if (purge!.segmentSweep && !purge!.segmentSweep.done)
+        await ctx.runAction(internal.projectPlanningPurgeSegmentRun.run, id);
       let dirty = 0,
         generationId: string | undefined,
         partitions: string | undefined;
