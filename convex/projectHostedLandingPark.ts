@@ -112,7 +112,7 @@ function declaredTests(
 
 /** A parked queued entry (any park path). Publication holds stay `ready`, so this is never one. */
 export const parkedEntry = (row: { hold?: string | undefined; phase: string }) =>
-  row.hold === 'main-red' && row.phase === 'queued';
+  row.hold !== undefined && row.phase === 'queued';
 
 export const parkedMessage = (files: readonly string[]) =>
   `Not this change: its check failed only on tests main fails too (${files.slice(0, 3).join(', ')}${
@@ -120,16 +120,23 @@ export const parkedMessage = (files: readonly string[]) =>
   }). It waits and joins the queue again when main passes; no action needed.`;
 
 /** Parks a settled admission in one landing write (one observation at `next.version`). Like a
- * publication hold it is an event wait: its finish wake stops and releaseMainHolds resumes it. */
-export async function parkLanding(ctx: MutationCtx, row: LandingRow, next: HostedLandingState) {
+ * publication hold it is an event wait: its finish wake stops and releaseMainHolds (or, for the
+ * CI-down hold, its probe or a verdict) resumes it. */
+export async function parkLanding(
+  ctx: MutationCtx,
+  row: LandingRow,
+  next: HostedLandingState,
+  hold: 'main-red' | 'ci-down' = 'main-red',
+) {
   const finish = await finishRow(ctx, { projectId: row.projectId, submissionId: row.submissionId });
   if (finish?.wake) {
     await cancelPendingTask(ctx, finish.wake.taskId);
     await ctx.db.patch(finish._id, { wake: null });
   }
-  await writeLanding(ctx, row, next, false, true, undefined, 'main-red');
+  await writeLanding(ctx, row, next, false, true, undefined, hold);
   // The hold's record (Item 687d1eda), closed by releaseMainHolds; the same row in this mutation.
-  await ctx.db.patch(row._id, {
-    mainRedHolds: openMainRedHold(row.mainRedHolds, 'parked', new Date().toISOString()),
-  });
+  if (hold === 'main-red')
+    await ctx.db.patch(row._id, {
+      mainRedHolds: openMainRedHold(row.mainRedHolds, 'parked', new Date().toISOString()),
+    });
 }

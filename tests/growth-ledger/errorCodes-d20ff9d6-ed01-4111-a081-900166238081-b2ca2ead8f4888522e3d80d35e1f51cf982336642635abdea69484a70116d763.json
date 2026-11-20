@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 1,
+  "reason": "CI_DOWN is the one reason for the new queue-wide CI-down hold (e62d834b line 5): it tells agents CI is down and the change was not judged, so they do not land again. Nothing merges into it: RUNNER_UNAVAILABLE names one run's end, MAIN_RED a red main.",
+  "date": "2026-11-20"
+}

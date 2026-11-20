@@ -132,9 +132,9 @@ batch fenced or queued behind other projects' slots past its lease is renewed an
 requeued. A wake that finds the step still pending, running or renewed looks once more
 at the lease end. A repair refused part-way (a Forge error after it renewed the lease)
 keeps that renewal, so the wake watches the renewed lease to its end once; a second
-refusal in a row ends the watch. An expired lease that nothing renewed (an authority
-fence) is watched only while the step's own action is still pending or running, so the
-wake never polls a stuck job. An execution that settles
+refusal in a row ends the watch, and so does a refusal that leaves the lease expired. An
+expired lease that nothing renewed (an authority fence) is watched only while the step's
+own action is still pending or running, so the wake never polls a stuck job. An execution that settles
 cancels its wake. The wake's own modules (projectConvexSourceLease, ...SourceActive,
 projectSourceJobs) are core queue paths (Guard 4). The desired-landing
 watchdog still runs the same repair on its own wakes, only once the lease has expired,

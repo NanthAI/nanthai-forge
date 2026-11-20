@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { providerRetryDelay } from '../src/ci-provider-recovery';
+import { clearCiDown, holdOnCiDown, infraEnd, noteInfraEnd } from './projectHostedLandingCiDown';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { LandingClaim, requireLandingLease } from './projectHostedLandingControl';
@@ -100,6 +101,8 @@ export async function startLandingAdmission(
 }
 async function recordFirstCheck(ctx: MutationCtx, projectId: Id<'hostedProjects'>, passed: boolean) {
   const queue = await landingQueue(ctx, { projectId, channel: 'main' });
+  // A verdict shows CI runs checks: a CI-down hold ends (nothing to do when unset).
+  await clearCiDown(ctx, queue);
   if (queue)
     await ctx.db.patch(queue._id, {
       checkHistory: { ...queue.checkHistory, first: recordOutcome(queue.checkHistory?.first, passed) },
@@ -122,6 +125,12 @@ export async function settleLandingAdmission(
     return true;
   const kind = checkFailureKind(run, { conflicts: [] });
   const retries = row.admission.retries ?? 0;
+  // An admission check that CI could not run counts toward the CI-down hold; the admission itself
+  // still lets the entry join unadmitted, where its queue check holds while CI is down.
+  if (holdOnCiDown() && infraEnd(run)) {
+    const queue = await landingQueue(ctx, { projectId: row.projectId, channel: 'main' });
+    if (queue) await noteInfraEnd(ctx, queue, run);
+  }
   // Keep the run (fa2c1383, review a09af93a nit 4): a kept run checked an older main, and the elapsed
   // share the keep was for is lost with the platform's result. A restart there would pay a whole fresh
   // run plus the scoped recheck, so it retires as the main move would have, onto current main.

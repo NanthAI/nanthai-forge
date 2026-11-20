@@ -258,45 +258,7 @@ export async function releaseMainHolds(ctx: MutationCtx, projectId: Id<'hostedPr
     return;
   }
   const release = async () => {
-    const page = await held().paginate({
-      cursor: null,
-      numItems: park ? 25 : 100,
-      maximumRowsRead: 100,
-      maximumBytesRead: 512 * 1024,
-    });
-    let released = false;
-    for (const row of page.page) {
-      // An ended entry never resumes (a withdrawn or superseded park must not land): drop its hold.
-      if (row.phase === 'landed' || row.phase === 'terminal-failed') {
-        await ctx.db.patch(row._id, { hold: undefined });
-        continue;
-      }
-      released = true;
-      const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
-      state.version++;
-      state.error = null;
-      state.observation = landingObservation('queued');
-      // A parked admission (fix D: queued, no alarm; parkLanding cancelled it) gets back what
-      // parking took: its cohort window place and a stall alarm. Release is progress, so the
-      // alarm counts 15 min from now, not from before the red episode (no false stall at once).
-      // With the switch on a publication hold gets its alarm back too.
-      const parked = row.phase === 'queued' && !row.alarm;
-      const rearm = parked || (park && row.phase === 'ready');
-      const now = new Date().toISOString();
-      if (rearm) state.timing = { submittedAt: state.at, ...state.timing, ciProgressAt: now };
-      await recordLandingObservation(ctx, state, null);
-      await ctx.db.patch(row._id, {
-        hold: undefined,
-        runnable: true,
-        orderLive: holdsLandingOrder({ phase: row.phase, hold: undefined }, state) ? true : undefined,
-        ...(rearm ? { alarm: await armLandingAlarm(ctx, row, now) } : {}),
-        ...(parked ? { batchable: cohortPlace(row, state) } : {}),
-        // Closes the hold's record (Item 687d1eda): the receipt carries held and released times.
-        ...(row.mainRedHolds ? { mainRedHolds: closeMainRedHold(row.mainRedHolds, now) } : {}),
-        value: canonicalPayload(state),
-      });
-    }
-    if (released) await wakeLandingQueue(ctx, { projectId, channel: 'main' });
+    const page = await releaseHeldPage(ctx, projectId, 'main-red', park ? 25 : 100, park);
     if (!page.isDone)
       await ctx.scheduler.runAfter(
         0,
@@ -307,6 +269,58 @@ export async function releaseMainHolds(ctx: MutationCtx, projectId: Id<'hostedPr
       );
   };
   await (park ? withQueueStatusBatch(ctx, release) : release());
+}
+/** One page of held rows back into the queue (its `hold` index advances as rows leave it), then one
+ * queue wake when any row was released. `rearmReady`: a publication hold (`ready`) also gets its
+ * alarm back. Shared by the main-red release and the CI-down hold's probe and release. */
+export async function releaseHeldPage(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  hold: 'main-red' | 'ci-down',
+  numItems: number,
+  rearmReady: boolean,
+) {
+  const page = await ctx.db
+    .query('projectHostedLandingRequests')
+    .withIndex('by_project_and_hold', q => q.eq('projectId', projectId).eq('hold', hold))
+    .paginate({ cursor: null, numItems, maximumRowsRead: 100, maximumBytesRead: 512 * 1024 });
+  const park = rearmReady;
+  let released = false;
+  for (const row of page.page) {
+    // An ended entry never resumes (a withdrawn or superseded park must not land): drop its hold.
+    if (row.phase === 'landed' || row.phase === 'terminal-failed') {
+      await ctx.db.patch(row._id, { hold: undefined });
+      continue;
+    }
+    released = true;
+    const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+    state.version++;
+    state.error = null;
+    state.observation = landingObservation('queued');
+    // A parked admission (fix D: queued, no alarm; parkLanding cancelled it) gets back what
+    // parking took: its cohort window place and a stall alarm. Release is progress, so the
+    // alarm counts 15 min from now, not from before the red episode (no false stall at once).
+    // With the switch on a publication hold gets its alarm back too.
+    const parked = row.phase === 'queued' && !row.alarm;
+    const rearm = parked || (park && row.phase === 'ready');
+    const now = new Date().toISOString();
+    if (rearm) state.timing = { submittedAt: state.at, ...state.timing, ciProgressAt: now };
+    await recordLandingObservation(ctx, state, null);
+    await ctx.db.patch(row._id, {
+      hold: undefined,
+      runnable: true,
+      orderLive: holdsLandingOrder({ phase: row.phase, hold: undefined }, state) ? true : undefined,
+      ...(rearm ? { alarm: await armLandingAlarm(ctx, row, now) } : {}),
+      ...(parked ? { batchable: cohortPlace(row, state) } : {}),
+      // Closes the hold's record (Item 687d1eda): the receipt carries held and released times.
+      ...(hold === 'main-red' && row.mainRedHolds
+        ? { mainRedHolds: closeMainRedHold(row.mainRedHolds, now) }
+        : {}),
+      value: canonicalPayload(state),
+    });
+  }
+  if (released) await wakeLandingQueue(ctx, { projectId, channel: 'main' });
+  return { released, isDone: page.isDone };
 }
 /** writeLanding's cohort window rule for a queued entry, from the row in hand (0 reads): parking
  * kept `batchSelection`, which writeLanding sets whenever the attempt defers its check. */

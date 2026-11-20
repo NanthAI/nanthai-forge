@@ -43,12 +43,18 @@ type Entry = { row: LandingRow; state: HostedLandingState };
  * does: no check, a deferred one. Only an attempt that was already deferred is re-deferred, so a
  * parked entry gets nothing its submission was not already given (owner inputs, batch policy, no
  * recovery gate, no revert, a requested check). */
-async function parkEntry(
+/** How an entry parks: the hold, its fork reason and the stored error (main red by default). */
+export type ParkAs = { hold: 'main-red' | 'ci-down'; error: { code: string; message: string } };
+const mainRed = (files: readonly string[]): ParkAs => ({
+  hold: 'main-red',
+  error: { code: 'MAIN_RED', message: parkedMessage(files) },
+});
+export async function parkEntry(
   ctx: MutationCtx,
   entry: Entry,
-  files: readonly string[],
   run: HostedCheckRun,
   own: HostedLandingAttempt,
+  as: ParkAs,
 ) {
   const {
     crossHeadProof: _proof,
@@ -74,7 +80,7 @@ async function parkEntry(
     ...forkRaceReason(
       await loadLandingAttempt(ctx, { projectId: entry.row.projectId, attemptId: entry.state.attemptId }),
       pins,
-      'main-red',
+      as.hold,
     ),
   };
   await insertLandingAttempt(ctx, attempt);
@@ -89,20 +95,25 @@ async function parkEntry(
     ...state
   } = entry.state;
   void [_batch, _solo, _origin, _needs, _diagnostic];
-  await parkLanding(ctx, entry.row, {
-    ...state,
-    attemptId: attempt.id,
-    version: state.version + 1,
-    phase: 'queued',
-    ...(run.testFiles ? { testFiles: run.testFiles } : {}),
-    observation: landingObservation('queued'),
-    error: { code: 'MAIN_RED', message: parkedMessage(files) },
-  });
+  await parkLanding(
+    ctx,
+    entry.row,
+    {
+      ...state,
+      attemptId: attempt.id,
+      version: state.version + 1,
+      phase: 'queued',
+      ...(run.testFiles ? { testFiles: run.testFiles } : {}),
+      observation: landingObservation('queued'),
+      error: as.error,
+    },
+    as.hold,
+  );
 }
 
 /** Drops parked entries from the speculative train: nothing stacks on them while they wait. One
  * queue read and at most one patch, red path only. */
-async function leaveTrain(ctx: MutationCtx, entries: readonly Entry[]) {
+export async function leaveTrain(ctx: MutationCtx, entries: readonly Entry[]) {
   const queue = await landingQueue(ctx, { projectId: entries[0]!.row.projectId, channel: 'main' });
   const ids = new Set(entries.map(entry => entry.state.id));
   if (queue?.train?.some(id => ids.has(id)))
@@ -127,7 +138,7 @@ export async function parkFailedBatch(
   };
   await writeBatch(ctx, key, { ...batch, phase: 'failed', failure, transition });
   if (batch.included) await settleBatchConflicts(ctx, key, { ...batch, phase: 'failed' });
-  for (const member of pending) await parkEntry(ctx, member, files, run, member.original);
+  for (const member of pending) await parkEntry(ctx, member, run, member.original, mainRed(files));
   if (pending.length) await leaveTrain(ctx, pending);
 }
 
@@ -144,10 +155,26 @@ export async function parkRedOnlyEntry(
   entry: Entry & { attempt: HostedLandingAttempt },
   run: HostedCheckRun,
 ) {
+  const origin = await parkableOrigin(ctx, claim, entry);
+  if (!origin) return false;
+  const files = await redOnlyFailure(ctx, claim.projectId, entry.attempt, run);
+  if (!files) return false;
+  await parkEntry(ctx, entry, run, origin.own, mainRed(files));
+  await leaveTrain(ctx, [entry]);
+  if (origin.line) await advanceBatchFallback(ctx, origin.line.key, origin.line.batch);
+  return true;
+}
+/** The deferred attempt a parked exact entry forks from, and the serial fallback line it leaves,
+ * or null when its check never came from a deferred attempt (that check fails as before). */
+export async function parkableOrigin(
+  ctx: MutationCtx,
+  claim: { projectId: Id<'hostedProjects'> },
+  entry: Entry & { attempt: HostedLandingAttempt },
+) {
   const { request } = entry.state;
   // Free: the request fields that keep a submission from ever being deferred.
   if (!request.finish || request.finish.after || request.revertOf || request.check?.kind !== 'request')
-    return false;
+    return null;
   const origin = entry.state.batchOriginId;
   let line: { key: BatchIdentity; batch: LandingBatch } | undefined;
   let own: HostedLandingAttempt | undefined;
@@ -161,11 +188,6 @@ export async function parkRedOnlyEntry(
   } else {
     own = (await deferredOrigin(ctx, claim.projectId, entry.attempt)) ?? undefined;
   }
-  if (!own?.deferredCheck || own.check) return false;
-  const files = await redOnlyFailure(ctx, claim.projectId, entry.attempt, run);
-  if (!files) return false;
-  await parkEntry(ctx, entry, files, run, own);
-  await leaveTrain(ctx, [entry]);
-  if (line) await advanceBatchFallback(ctx, line.key, line.batch);
-  return true;
+  if (!own?.deferredCheck || own.check) return null;
+  return { own, line };
 }

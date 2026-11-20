@@ -36,7 +36,7 @@ export const laneRegistryEntrySchema = z.object({
   hold: z
     .object({
       operationId: z.string(),
-      kind: z.enum(['review', 'dependency', 'main-red']),
+      kind: z.enum(['review', 'dependency', 'main-red', 'ci-down']),
       reason: z.string(),
       paths: z.array(z.string()).nullable(),
       next: z.string(),

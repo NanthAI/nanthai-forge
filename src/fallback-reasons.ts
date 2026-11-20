@@ -34,6 +34,7 @@ const REUSE = {
   revert: G,
   'reuse-policy': G,
   'main-red': G,
+  'ci-down': G,
   'audit-debt': G,
   'text-conflict': G,
   'check-evidence': L,
@@ -145,7 +146,7 @@ export function attemptCarryRefusal(previous: {
 export function forkRaceReason(
   parent: { main: { head: string }; check: unknown },
   child: { main: { head: string } },
-  reason: 'cohort' | 'retired-running' | 'main-red' | 'text-conflict',
+  reason: 'cohort' | 'retired-running' | 'main-red' | 'ci-down' | 'text-conflict',
 ): { forkReason?: string } {
   return parent.check && parent.main.head !== child.main.head ? { forkReason: reason } : {};
 }

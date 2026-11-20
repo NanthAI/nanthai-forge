@@ -153,7 +153,7 @@ export async function writeLanding(
   releaseRun = true,
   consumedAlarm?: Id<'_scheduled_functions'>,
   /** Fix D (Item 687d1eda): only parkLanding passes 'main-red'. Never inferred from the row. */
-  hold?: 'main-red',
+  hold?: 'main-red' | 'ci-down',
 ) {
   invariant(
     input.phase !== 'composing',
@@ -219,7 +219,8 @@ export async function writeLanding(
   // (publication holds stay `ready` with their own writer, holdMainRed). Any end clears a hold,
   // so a withdrawn or superseded entry can never be released onto main.
   invariant(!hold || state.phase === 'queued', 'WORK_OPERATION_CHANGED', 'Only a queued entry parks.');
-  const parked = hold === 'main-red';
+  // The CI-down hold (incident e62d834b line 5) parks the same way; its probe wake releases it.
+  const parked = hold !== undefined;
   const ended = state.phase === 'landed' || state.phase === 'terminal-failed';
   if (parked) runnable = false;
   const runId = attempt.check?.runId ?? (admissionRun ? row.admission!.runId : null);
@@ -393,7 +394,7 @@ export async function writeLanding(
     ),
     phase: state.phase as LandingRow['phase'],
     runnable,
-    ...(parked ? { hold: 'main-red' as const } : ended && row.hold ? { hold: undefined } : {}),
+    ...(parked ? { hold } : ended && row.hold ? { hold: undefined } : {}),
     wouldConflict,
     orderLive: orderLive ? true : undefined,
     reservedUntil: reserving ? row.reservedUntil : undefined,

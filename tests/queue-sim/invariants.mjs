@@ -145,6 +145,15 @@ function entryLive(f, row, byId, queue, now, depth) {
       ? 'release page'
       : null;
   }
+  // The CI-down hold (e62d834b line 5): live while its probe wake is armed (the hold is tripped), or,
+  // once the hold ended, while its release page is armed.
+  if (row.hold === 'ci-down') {
+    if (armedTasks(f, 'projectHostedLandingCiDown:probe', args => args.projectId === row.projectId))
+      return 'CI-down probe';
+    return armedTasks(f, 'projectHostedLandingCiDown:release', args => args.projectId === row.projectId)
+      ? 'CI-down release page'
+      : null;
+  }
   const finish = finishOf(f, row.submissionId);
   if (finish?.waiting && finish.parentSubmissionId) {
     const parent = byId.get(finish.parentSubmissionId);
@@ -175,11 +184,13 @@ export function l1Issue(f, row, byId, queue, now = Date.now()) {
     if (!chain.dead && claimDue(f, claimant, now + CHECK_WALL_MS)) return null;
     return `parked chain ends at ${chain.end?.submissionId ?? 'nothing'} (${chain.why}): no alarm, wake or live check`;
   }
-  const waiting = row.hold === 'main-red' || finishOf(f, row.submissionId)?.waiting;
+  const waiting = row.hold || finishOf(f, row.submissionId)?.waiting;
   if (!waiting || entryLive(f, row, byId, queue, now, 0)) return null;
   return row.hold === 'main-red'
     ? 'held for red main while main is green and no release page is armed'
-    : 'dependency wait on a parent that owns no progress';
+    : row.hold === 'ci-down'
+      ? 'held for CI down with no probe wake or release page armed'
+      : 'dependency wait on a parent that owns no progress';
 }
 
 /** Structural checks use stored rows and live scheduler state, never the

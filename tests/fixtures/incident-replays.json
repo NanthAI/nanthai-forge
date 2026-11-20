@@ -552,6 +552,24 @@
       "what": "A landing wait stayed silent for 2 h while its compose step failed (friction c7f3afac, 2026-11-20): the wait reports LANDING_STALLED with the cause and the replay",
       "file": "tests/hosted-landing-stall-report.test.mjs",
       "test": "incident replay e62d834b (friction c7f3afac): a stalled landing wait names the stall, the failed source step and the replay"
+    },
+    {
+      "incident": "e62d834b",
+      "what": "Every landing check ended RUNNER_UNAVAILABLE 05:27-06:41Z on 2026-11-20, so each landing spent its platform retries on a broken CI and failed for good: with FORGE_QUEUE_HOLD_ON_CI_DOWN on, a cohort waits under one CI-down reason and lands once CI runs checks again",
+      "file": "tests/hosted-landing-ci-down.test.mjs",
+      "test": "incident replay e62d834b line 5: a cohort whose CI fails every check waits under one CI-down reason, then lands when CI runs again"
+    },
+    {
+      "incident": "e62d834b",
+      "what": "The same CI outage for one entry checked on its own (e62d834b line 5): it waits under the CI-down hold instead of failing",
+      "file": "tests/hosted-landing-ci-down.test.mjs",
+      "test": "incident replay e62d834b line 5: one entry whose own checks all end runner-unavailable waits instead of failing"
+    },
+    {
+      "incident": "e62d834b",
+      "what": "A CI-down probe whose check ended on another infrastructure cause (interrupted after runner-unavailable) restarted the streak, so a later pass released nothing and the other held entries were stranded (review 2bf14e44 B1)",
+      "file": "tests/hosted-landing-ci-down.test.mjs",
+      "test": "incident replay e62d834b line 5 (review 2bf14e44 B1): a probe that ends on another infrastructure cause keeps the hold, so a later verdict releases every held entry"
     }
   ]
 }

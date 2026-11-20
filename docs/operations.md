@@ -371,7 +371,7 @@ reaches, and on records written before these codes split.
 Every other writer that moves a checked attempt onto another main names its race in the
 attempt's `forkReason`, which `metrics` reads and the landing order does not: the cohort's next
 generation (`cohort`), a retired pipeline descendant (`retired-running`), a main-red park
-(`main-red`) and a conflict against the moved main (`text-conflict`).
+(`main-red`), a CI-down park (`ci-down`) and a conflict against the moved main (`text-conflict`).
 
 A **limitation** is a fallback where Forge could not use its fast path for this repository
 or change shape (for example `unsupported-mode`: a changed symlink or submodule;

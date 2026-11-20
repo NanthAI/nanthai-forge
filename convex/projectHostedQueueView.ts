@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { ciDownMessage, ciDownTripped } from './projectHostedLandingCiDown';
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
@@ -201,7 +202,9 @@ export const read = query({
         });
       }
       // The gate parks main-red entries without rewriting the directory, so the listed rows say so (B3).
-      const parked = entries.filter(entry => entry.hold?.kind === 'main-red').length;
+      const parked = entries.filter(
+        entry => entry.hold?.kind === 'main-red' || entry.hold?.kind === 'ci-down',
+      ).length;
       const held = (queue?.status ? (queue.status.held ?? 0) : keys.filter(key => key.held).length) + parked;
       const total = (queue?.status?.total ?? keys.length - held + parked) - parked;
       // One indexed read: main red and why, in this reply (Item 687d1eda), so no landing is blamed by guess.
@@ -214,6 +217,20 @@ export const read = query({
         ...(usual !== undefined ? { usualCheck: usual } : {}),
         ...(held ? { held } : {}),
         ...(red ? { mainRed: mainRedField(red) } : {}),
+        // The CI-down hold (e62d834b line 5), from the queue row already read: one reason for the queue.
+        ...(queue?.ciDown && ciDownTripped(queue.ciDown)
+          ? {
+              ciDown: {
+                cause: queue.ciDown.cause,
+                since: new Date(queue.ciDown.since).toISOString(),
+                streak: queue.ciDown.streak,
+                ...(queue.ciDown.probeAt
+                  ? { nextProbeAt: new Date(queue.ciDown.probeAt).toISOString() }
+                  : {}),
+                reason: ciDownMessage(queue.ciDown),
+              },
+            }
+          : {}),
         listed: entries.length + preparationEntries.length,
         preparing: preparing.length,
         more: total + held > entries.length || preparing.length > preparationEntries.length,

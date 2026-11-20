@@ -19,6 +19,7 @@ export const control = await import(moduleUrl('../convex/projectHostedFinishCont
 export const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 export const landingApi = await import(moduleUrl('../convex/projectHostedLanding.ts'));
 const stallApi = await import(moduleUrl('../convex/projectHostedLandingStall.ts'));
+const ciDownApi = await import(moduleUrl('../convex/projectHostedLandingCiDown.ts'));
 const cohortHoldApi = await import(moduleUrl('../convex/projectHostedLandingCohortHold.ts'));
 const stallAlertApi = await import(moduleUrl('../convex/projectHostedLandingStallAlert.ts'));
 const wouldConflictApi = await import(moduleUrl('../convex/projectHostedLandingWouldConflict.ts'));
@@ -445,6 +446,12 @@ export async function finishFixture(
       } else if (task.name === 'projectHostedFinishDriver:retry') {
         // Review ba9ce962 L2: a step's retained IO retry as a mutation (switch on).
         await tx('finishRetry', driver.retry, input);
+      } else if (
+        task.name === 'projectHostedLandingCiDown:probe' ||
+        task.name === 'projectHostedLandingCiDown:release'
+      ) {
+        // The CI-down hold (e62d834b line 5): its probe wake and release pages.
+        await tx(task.name, ciDownApi[task.name.split(':')[1]], input);
       } else if (task.name === 'projectHostedLandingStall:alarm') {
         await tx('landingAlarm', stallApi.alarm, input);
       } else if (task.name === 'projectHostedLandingStall:deadline') {

@@ -16,6 +16,7 @@ import { activeStoragePause } from './legacyStoragePause';
 import { loadBatch } from './projectHostedLandingBatchState';
 import { redriveCohortHold } from './projectHostedLandingCohortHold';
 import { auditRow } from './projectHostedMainAuditState';
+import { redriveCiDown } from './projectHostedLandingCiDown';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { report } from './errors';
@@ -52,6 +53,8 @@ export async function redriveLanding(
     probe?: boolean;
     /** One sweep transaction's main-red release check: one audit read and one release per project. */
     mainRed?: { green?: boolean; scheduled?: boolean };
+    /** One sweep transaction's CI-down backstop: one queue read and one task per project. */
+    ciDown?: { checked?: boolean };
   } = {},
 ) {
   const done: string[] = [];
@@ -97,6 +100,14 @@ export async function redriveLanding(
       }
       done.push('main-red');
     }
+  }
+  // The CI-down hold's backstop (e62d834b line 5): a held row whose hold ended (its release page was
+  // lost) is released again, and one whose hold has no armed probe gets one. Held rows only: one
+  // queue-row read.
+  if (row.phase === 'queued' && row.hold === 'ci-down') {
+    const memo = options.ciDown ?? {};
+    if (!memo.checked && (await redriveCiDown(ctx, row.projectId, act))) done.push('ci-down');
+    memo.checked = true;
   }
   const finish = await finishRow(ctx, input);
   if (finish && row.phase === 'queued' && (await idleCohortLeader(ctx, row, finish))) {
@@ -237,7 +248,8 @@ export const sweep = internalMutation({
       .paginate({ cursor, numItems: 1 });
     for (const queue of page.page) {
       await redriveQueue(ctx, queue.projectId);
-      const mainRed = {};
+      const mainRed = {},
+        ciDown = {};
       for (const phase of ['ready', 'checking', 'queued'] as const) {
         const rows = await ctx.db
           .query('projectHostedLandingRequests')
@@ -245,7 +257,7 @@ export const sweep = internalMutation({
             q.eq('projectId', queue.projectId).eq('channel', 'main').eq('phase', phase),
           )
           .take(REDRIVE_SWEEP_ENTRIES);
-        for (const row of rows) await redriveLanding(ctx, row, { row, queueChecked: true, mainRed });
+        for (const row of rows) await redriveLanding(ctx, row, { row, queueChecked: true, mainRed, ciDown });
       }
     }
     if (!page.isDone)

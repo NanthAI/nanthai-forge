@@ -62,7 +62,7 @@ type WorkLaneState = 'open' | 'queued' | 'parked' | 'landed' | 'abandoned';
 /** A live submission of the Intent: queued (or checking/ready), parked behind an older entry or a red main. */
 function submissionState(request: Pick<Doc<'projectHostedLandingRequests'>, 'phase' | 'orderWait' | 'hold'>) {
   if (!['queued', 'checking', 'ready'].includes(request.phase)) return null;
-  return request.orderWait || request.hold === 'main-red' ? ('parked' as const) : ('queued' as const);
+  return request.orderWait || request.hold ? ('parked' as const) : ('queued' as const);
 }
 
 const modelOf = (client: unknown) =>

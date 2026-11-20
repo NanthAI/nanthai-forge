@@ -499,6 +499,26 @@ attempt reads): its check fails only on main's
 tests, so it waits and lands once main passes. Any other landing is told to land again once main
 passes.
 
+With `FORGE_QUEUE_HOLD_ON_CI_DOWN=1` (incident e62d834b line 5, off by default), the queue holds
+landings while CI is failing for every check. Once three landing checks in a row end on one
+infrastructure cause (the CI never started the run, or stopped it, with no failing test) and no
+verdict came between, an entry whose own exact check, or whose cohort's shared check, ends that
+way parks under the `ci-down` hold with a fresh deferred attempt, instead of spending its
+platform retries and failing for good. While the hold is on, an infrastructure end on any cause
+(a runner that dies mid-run, or none at all) extends it with the same probe. A submission whose
+check was never deferred (an explicit check, a revert, or one with no finish or an `after`) cannot
+park: it spends its platform retries and fails as before, and its ends still count toward the
+streak. The queue reply's `ciDown` field and each held entry give one reason (the cause, since
+when, the streak) and `wait` prints `HELD: CI IS DOWN`. One probe wake releases one held entry
+after 2, 4, 8, 15 and then every 30 minutes; the first verdict (a pass or a failing test) of a
+landing check ends the hold and releases the rest in pages. A cohort parked for red main does not
+end it; the held entries then wait for the next verdict or probe. An entry that arrives while the
+hold is on still gets its first check, which works as one more probe; if CI cannot run it, the
+entry parks at once with no retries. An admission check that CI could not run counts toward the
+streak; the entry joins the queue unadmitted as before. The streak is a field on the queue row,
+written only on an infrastructure end or its clear, so a healthy queue reads and writes nothing
+more. Turning the switch off stops new holds; a verdict still releases what it held.
+
 **Optional red-audit drill.** To exercise detection and recovery, the owner can start a drill.
 It is advice, never an eligibility condition. From an agent sign-in, the existing owner
 approval still applies:

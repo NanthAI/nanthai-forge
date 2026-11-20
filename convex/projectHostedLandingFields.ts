@@ -159,6 +159,20 @@ export const hostedLandingTables = {
         admitted: v.optional(v.string()),
       }),
     ),
+    /** CI-down hold (FORGE_QUEUE_HOLD_ON_CI_DOWN, incident e62d834b line 5): consecutive landing checks
+     * that ended on one infrastructure cause with no verdict between, and while that streak trips the
+     * hold, its one probe wake. Written only on an infrastructure end or its clear. */
+    ciDown: v.optional(
+      v.object({
+        cause: v.string(),
+        since: v.number(),
+        streak: v.number(),
+        reason: v.optional(v.string()),
+        probes: v.optional(v.number()),
+        probeAt: v.optional(v.number()),
+        wakeId: v.optional(v.id('_scheduled_functions')),
+      }),
+    ),
   }).index('by_project_and_channel', ['projectId', 'channel']),
   // S3: cold immutable request and batch selection; owned and deleted through its ticket.
   projectHostedLandingBodies: defineTable({ value: v.string() }),
@@ -245,7 +259,7 @@ export const hostedLandingTables = {
       }),
     ),
     selectionKey: v.optional(v.string()),
-    hold: v.optional(v.literal('main-red')),
+    hold: v.optional(v.union(v.literal('main-red'), v.literal('ci-down'))),
     /** Set when main changed a file this queued, not-yet-checked entry changes (JSON). */
     wouldConflict: v.optional(v.string()),
     earlyResolveDependents: v.optional(v.literal(true)),

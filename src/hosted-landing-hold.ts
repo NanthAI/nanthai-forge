@@ -4,8 +4,9 @@
  * protected-path landing sat in phase "ready" for 75+ min while every read said "queued to
  * land" and the queue dropped it, so the builder cancelled it as stranded. */
 export type LandingHold = {
-  /** `main-red`: the gate parked a ready entry until main's full check is green (B2/B3). */
-  kind: 'review' | 'dependency' | 'main-red';
+  /** `main-red`: the gate parked a ready entry until main's full check is green (B2/B3).
+   * `ci-down`: CI ended every recent check on one infrastructure cause (e62d834b line 5). */
+  kind: 'review' | 'dependency' | 'main-red' | 'ci-down';
   /** The server's stored reason, verbatim (it names the protected paths). */
   reason: string;
   /** Protected paths named by the reason; null when the reason names none. */
@@ -31,6 +32,13 @@ export function landingHold(state: HoldInput | null | undefined, laneId?: string
       reason: state.error.message?.trim() || "Main's full check is red",
       paths: null,
       next: "Held while main's full check is red; it resumes by itself when main is green again (no queue position meanwhile). Nothing to do in this Lane: fixing main releases it. Keep waiting.",
+    };
+  if (state?.observation?.state === 'pending' && state.error?.code === 'CI_DOWN')
+    return {
+      kind: 'ci-down',
+      reason: state.error.message?.trim() || 'CI is failing for every check',
+      paths: null,
+      next: 'Held while CI is failing for every check; one held landing checks again on a backoff, and the first check CI runs again releases the rest (no queue position meanwhile). Nothing to do in this Lane. Keep waiting.',
     };
   if (reason === 'waiting-for-review') {
     const stored = state?.error?.message?.trim() || 'Waiting for review by a person';
@@ -62,6 +70,7 @@ const holdWords = {
   review: 'WAITING FOR REVIEW',
   dependency: 'WAITING FOR DEPENDENCY',
   'main-red': 'HELD: MAIN IS RED',
+  'ci-down': 'HELD: CI IS DOWN',
 } as const satisfies Record<LandingHold['kind'], string>;
 /** The two lines a waiting agent reads: what holds it (verbatim reason) and the next step. */
 export const holdLines = (hold: LandingHold) => [

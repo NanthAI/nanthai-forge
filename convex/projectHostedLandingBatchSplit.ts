@@ -6,6 +6,7 @@ import type { BatchFailure } from '../src/hosted-batch-diagnosis';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { landingObservation, type HostedLandingAttempt } from '../src/hosted-landing';
 import { HOSTED_PLATFORM_RETRIES, recordOutcome, splitGroups } from '../src/hosted-landing-admission';
+import { clearCiDown, holdBatchForCiDown } from './projectHostedLandingCiDown';
 import { batchMemberDiagnostic } from '../src/hosted-batch-diagnosis';
 import {
   enqueueBatchCheck,
@@ -41,6 +42,8 @@ export async function recordCohortOutcome(
 ) {
   const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
   if (!queue) return;
+  // A shared check's verdict shows CI runs checks: a CI-down hold ends (nothing to do when unset).
+  await clearCiDown(ctx, queue);
   const kind = batch.admitted ? 'admitted' : 'first';
   await ctx.db.patch(queue._id, {
     checkHistory: { ...queue.checkHistory, [kind]: recordOutcome(queue.checkHistory?.[kind], passed) },
@@ -244,6 +247,8 @@ export async function retryLandingBatchCheck(
   shared: HostedLandingAttempt,
   run: HostedCheckRun,
 ) {
+  // CI down for every check (e62d834b line 5): the members park instead of spending the retries.
+  if (await holdBatchForCiDown(ctx, input, batch, run, () => pendingMembers(ctx, input, batch))) return;
   const retries = (batch.platformRetries ?? 0) + 1;
   if (retries > HOSTED_PLATFORM_RETRIES) return failLandingBatchPlatform(ctx, input, batch, run);
   const pending = await pendingMembers(ctx, input, batch);

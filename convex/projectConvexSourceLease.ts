@@ -59,9 +59,10 @@ export const renew = internalMutation({
  * requeued). Whatever is still this step's work afterwards gets one wake at its lease end: a live
  * lease (renewed by the repair or another path), or an expired one only while the step's own action
  * is still pending or running, which the platform's action time limit bounds. A lease that nothing
- * renewed and no action holds (an authority fence) is not watched, and a repair refused twice in a
- * row ends the watch, so the wake never polls a stuck job (review 82171a53). Never runs for a healthy
- * step, and never polls an idle project. */
+ * renewed and no action holds (an authority fence) is not watched. A refused repair ends the watch
+ * when the lease is still expired after it, and a re-armed wake whose repair is refused again ends
+ * it too, so the wake never polls a stuck job (review 82171a53; wording, review be78a4be). Never
+ * runs for a healthy step, and never polls an idle project. */
 export const expired = internalMutation({
   args: {
     projectId: v.id('hostedProjects'),

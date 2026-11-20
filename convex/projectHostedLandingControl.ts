@@ -29,6 +29,8 @@ import { reservationAhead } from './projectHostedLandingReservation';
 import { overtakeMark } from '../src/landing-overtake';
 import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
 import { retrySoloLandingCheck } from './projectHostedLandingCheckRetry';
+import { clearCiDown, holdSoloForCiDown } from './projectHostedLandingCiDown';
+import { checkFailureKind } from '../src/hosted-landing-admission';
 import { parkExactOnMainRed, parkRedOnlyEntry } from './projectHostedLandingParkExact';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
@@ -245,6 +247,9 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
       const check = attempt.check;
       const { run } = await loadHostedCheck(ctx, { projectId: claim.projectId, runId: check.runId });
       retainCheckProgress(state, run, now);
+      // A verdict (a pass or a failing test) shows CI runs checks: a CI-down hold ends (0 I/O unset).
+      if (held?.ciDown && hostedCheckTerminal(run) && checkFailureKind(run, { conflicts: [] }) !== 'platform')
+        await clearCiDown(ctx, held);
       const semantic = semanticVerdict(
         attempt.semanticPlan ?? run.semanticPlan,
         run.reportSummary?.semantic ?? run.contractReports ?? {},
@@ -276,6 +281,12 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
         observation = landingObservation('conflict');
         state.semanticConflicts = semantic.conflicts;
         error = { code: 'INTENT_SEMANTIC_CONFLICT', message: semanticConflictMessage(semantic.conflicts) };
+      } else if (
+        hostedCheckTerminal(run) &&
+        (await holdSoloForCiDown(ctx, claim, { row, state, attempt }, run, held))
+      ) {
+        await releaseLandingQueue(ctx, held, now);
+        return (await loadLanding(ctx, claim)).state;
       } else if (hostedCheckTerminal(run) && (await retrySoloLandingCheck(ctx, claim, attempt, run))) {
         await releaseLandingQueue(ctx, held, now);
         return (await loadLanding(ctx, claim)).state;

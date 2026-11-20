@@ -182,9 +182,12 @@ function stateOf(record: LandingRecord): LandingStateName {
     case 'pending':
       // The gate parks a ready entry while main is red (B2/B3): held, not landing or queued.
       // A passed entry parked behind an older one is not being accepted (core-claim incident 43b51a5e).
+      // The CI-down hold (e62d834b line 5): CI is not running checks, so the code was not judged.
       return code === 'MAIN_RED'
         ? 'held-main-red'
-        : pendingState(observed.pendingReason, record.phase, Boolean(record.orderWait));
+        : code === 'CI_DOWN'
+          ? 'waiting-for-runner'
+          : pendingState(observed.pendingReason, record.phase, Boolean(record.orderWait));
     case 'terminal-failed': {
       const cause = observed.cause;
       if (cause === 'conflict' || code === 'COMPOSITION_CONFLICT') return 'conflict';
