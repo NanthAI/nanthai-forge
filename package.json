@@ -86,6 +86,51 @@
       ],
       "guards": [
         {
+          "name": "agent weight",
+          "tests": [
+            "tests/perf-harness.test.mjs"
+          ],
+          "inputs": [
+            "src/**",
+            "scripts/perf/**",
+            "scripts/agent-weight*.mjs",
+            "scripts/agent-default-lines.mjs",
+            "scripts/agent-verb-forms.mjs",
+            "scripts/browser-test-policy.mjs",
+            "scripts/build-cli-bundle.mjs",
+            "scripts/build-edit-hook.mjs",
+            "scripts/check-agent-weight.mjs",
+            "scripts/check-growth.mjs",
+            "scripts/check-packages-run.mjs",
+            "scripts/check-path-scopes.mjs",
+            "scripts/child-env.mjs",
+            "scripts/control-browser-cache.mjs",
+            "scripts/convex-function-names.mjs",
+            "scripts/core-queue-paths.mjs",
+            "scripts/docs-readers.mjs",
+            "scripts/main-module.mjs",
+            "scripts/node-runtime.mjs",
+            "scripts/script-impact.mjs",
+            "scripts/selection-guard.mjs",
+            "scripts/shard-pool.mjs",
+            "scripts/test-closeness.mjs",
+            "scripts/test-coverage.mjs",
+            "scripts/test-directory-path.mjs",
+            "scripts/test-impact.mjs",
+            "scripts/test-import-graph.mjs",
+            "scripts/test-name-watchers.mjs",
+            "scripts/test-shards.mjs",
+            "scripts/test-symbols.mjs",
+            "scripts/test-tiebreak.mjs",
+            "scripts/test-timings-file.mjs",
+            "scripts/test-tree-scanners.mjs",
+            "tsconfig.json",
+            "tests/agent-weight-baseline.json",
+            "package.json",
+            "package-lock.json"
+          ]
+        },
+        {
           "name": "landing exact I/O",
           "tests": [
             "tests/landing-cost-guard.test.mjs",

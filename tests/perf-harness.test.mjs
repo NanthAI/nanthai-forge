@@ -2,15 +2,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { budgets, measurement, eagerFiles, landingTiming } from '../scripts/perf/report.mjs';
 import { cliColdStartSamples, cpuMs, options } from '../scripts/perf-harness.mjs';
 import { agentCommands, firstNetworkSamples } from '../scripts/perf/cli-first-network.mjs';
-import { readWeightBaseline } from '../scripts/agent-weight.mjs';
+import { agentSurfaceFindings, readWeightBaseline } from '../scripts/agent-weight.mjs';
+import { agentActionNames } from '../scripts/check-growth.mjs';
+import { lifecycleVerbs } from '../scripts/agent-verb-forms.mjs';
 import { successfulSample } from '../scripts/perf/browser.mjs';
+import { childEnv } from '../scripts/child-env.mjs';
 
 test('budget medians include the boundary, and an empty or incomplete run never passes', () => {
   assert.equal(measurement('now', [{ durationMs: 1500 }]).status, 'pass');
@@ -79,6 +82,51 @@ test('381c62df: --version, --help and an idle turn-end hook stay on a minimal im
     assert.deepEqual(loaded, [], `${name} loaded the command graph`);
     assert.ok(mine.length <= ceiling, `${name} loaded ${mine.length} modules (ceiling ${ceiling})`);
   }
+});
+
+test('ad80e037: the MCP listing stays within its module and tool-list byte ceilings on the source build', () => {
+  // Package smoke measures the installed archive; this is the same probe on the Lane's own build, so the
+  // preflight guard that runs this file on src/ changes finds an added MCP import or a longer tool text
+  // before the landing check does. Exact counts only; CPU is not judged from a local number.
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const state = mkdtempSync(join(tmpdir(), 'forge-mcp-weight-'));
+  const run = spawnSync(
+    process.execPath,
+    [
+      '--import',
+      join(root, 'scripts/perf/startup-preload.mjs'),
+      join(root, 'scripts/perf/mcp-startup.mjs'),
+      pathToFileURL(`${root}/`).href,
+    ],
+    {
+      encoding: 'utf8',
+      timeout: 15_000,
+      env: childEnv({ extra: { HOME: state, XDG_CONFIG_HOME: state, XDG_STATE_HOME: state, TMPDIR: state } }),
+    },
+  );
+  rmSync(state, { recursive: true, force: true });
+  const sample = JSON.parse(/FORGE_STARTUP (\{.*\})/.exec(run.stderr)?.[1] ?? '{}');
+  assert.equal(sample.code, 0, run.stderr.slice(-2000));
+  const { ceilings } = readWeightBaseline('.');
+  assert.ok(
+    sample.modules <= ceilings.mcpModules,
+    `mcpModules: ${sample.modules}, ceiling ${ceilings.mcpModules}`,
+  );
+  const { toolListBytes } = JSON.parse(run.stdout);
+  assert.ok(
+    toolListBytes <= ceilings.toolListBytes,
+    `toolListBytes: ${toolListBytes}, ceiling ${ceilings.toolListBytes}`,
+  );
+});
+
+test('ad80e037: the agent actions and runtime dependencies on this source match the weight baseline', () => {
+  const baseline = readWeightBaseline('.');
+  const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
+  const report = {
+    boundary: Object.keys(manifest.dependencies).sort(),
+    agentActions: [...agentActionNames(readFileSync('src/agent-verbs.ts', 'utf8'), lifecycleVerbs)].sort(),
+  };
+  assert.deepEqual(agentSurfaceFindings(report, baseline), []);
 });
 
 test('7b2ae8d8: agent status, planning, save and land reach their first network call without the TypeScript compiler, zod locales or the command graph', () => {
@@ -267,4 +315,51 @@ test('requested live setup failure still writes JSON and returns a failure, neve
   assert.equal(record.browser.status, 'failed');
   assert.equal(record.measurements.now.status, 'unrun');
   assert.equal(record.measurements.now.medianMs, null);
+});
+
+test('ad80e037: preflight runs this file as the agent weight guard for build inputs, never for a docs- or test-only Lane', async () => {
+  const { preflightGuards, selectGuards } = await import('../dist/agent-preflight-static.js');
+  const guards = preflightGuards(readFileSync('package.json', 'utf8'), path => existsSync(path));
+  const weight = guards.find(guard => guard.name === 'agent weight');
+  assert.deepEqual(weight?.tests, ['tests/perf-harness.test.mjs']);
+  for (const path of ['src/mcp-hosted-agent.ts', 'scripts/build-cli-bundle.mjs', 'package-lock.json'])
+    assert.ok(selectGuards([weight], [path]).selected.length, path);
+  assert.equal(
+    selectGuards([weight], ['docs/sample-guide.md', 'tests/sample-only.test.mjs', 'sample-notes.md']).selected
+      .length,
+    0,
+  );
+});
+
+test('ad80e037: the agent weight guard triggers on every script the built CLI or MCP server imports', async () => {
+  // dist bundles any scripts/*.mjs that src/ reaches, directly or through other scripts, so each one
+  // can change a module count; a script added to that graph must join the guard inputs.
+  const { preflightGuards } = await import('../dist/agent-preflight-static.js');
+  const { globRegExp } = await import('../dist/path-glob.js');
+  const weight = preflightGuards(readFileSync('package.json', 'utf8'), path => existsSync(path)).find(
+    guard => guard.name === 'agent weight',
+  );
+  const patterns = weight.inputs.map(globRegExp);
+  const spec = /(?:from|import\()\s*['"](\.{1,2}\/[^'"]+)['"]/g;
+  const reached = new Set(),
+    queue = [];
+  const visit = (from, target) => {
+    const path = join(dirname(from), target).replaceAll('\\', '/');
+    if (path.startsWith('scripts/') && !reached.has(path) && existsSync(path))
+      (reached.add(path), queue.push(path));
+  };
+  for (const file of readdirSync('src', { recursive: true }))
+    if (/\.m?ts$/.test(file) && !file.endsWith('.d.ts'))
+      for (const [, target] of readFileSync(join('src', file), 'utf8').matchAll(spec))
+        visit(join('src', file), target);
+  while (queue.length) {
+    const file = queue.shift();
+    for (const [, target] of readFileSync(file, 'utf8').matchAll(spec)) visit(file, target);
+  }
+  assert.ok(reached.size > 10, 'the scan finds the scripts src/ imports');
+  assert.deepEqual(
+    [...reached].filter(path => !patterns.some(pattern => pattern.test(path))).sort(),
+    [],
+    'add these to the agent weight guard inputs in package.json',
+  );
 });
