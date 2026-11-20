@@ -387,6 +387,12 @@
     },
     {
       "incident": "43b51a5e",
+      "what": "Review 48555882 F1: an urgent waiter parked on a non-urgent holder, handed on unmarked by a landed urgent holder or made urgent while parked, is driven by that holder's new-run wake or baton (its claim skips it); behind an urgent holder its own risk still holds it",
+      "file": "tests/hosted-landing-handoff.test.mjs",
+      "test": "43b51a5e: an urgent waiter parked on a non-urgent holder is driven, handed on by a landed holder or promoted while parked"
+    },
+    {
+      "incident": "43b51a5e",
       "what": "Review 8c3f272f: overlapping, newer-risk and late disjoint followers handed on together keep their own rules and the second-generation bound",
       "file": "tests/hosted-landing-handoff.test.mjs",
       "test": "43b51a5e case 2: mixed handed followers keep their own rules and the second-generation bound"

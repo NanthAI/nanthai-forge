@@ -379,3 +379,80 @@ test('43b51a5e: an urgent waiter with its own global risk is driven; a normal on
     'a normal own-risk waiter waits for its holder',
   );
 });
+
+/** Review 48555882 finding 1: H, Q and a Ready urgent waiter F with its own global risk, shaped
+ * directly. `handed`: F's last claim overlapped an older urgent H; H lands, its exit wake drives Q and
+ * hands F to it unmarked (main moved under F's files). `promoted`: F parked on Q itself, its last
+ * claim overlapping, then the owner made it urgent (prioritize patches the row and wakes nothing).
+ * Q (non-urgent unless `next` says so) then binds a run (`new-run`) or parks for a long hold (`baton`). */
+async function urgentWaiterShape(t, { via, trigger, next = {}, footprints = 'overlap' }) {
+  const f = await batchesFixture(t, { ...queueShape, count: 3, memberPaths: ['h.ts', 'q.ts', 'f.ts'] });
+  await f.drain();
+  const [H, Q, F] = f.entries.map(e => row(f, e.state.id));
+  const handed = via === 'handed';
+  if (handed) f.patch('projectHostedLandingRequests', H._id, { priority: 'urgent' });
+  f.patch('projectHostedLandingRequests', Q._id, {
+    phase: 'queued',
+    orderLive: true,
+    ...(handed ? { orderWait: H.submissionId } : { orderWaited: true }),
+    ...next,
+  });
+  const holder = handed ? H : Q;
+  f.patch('projectHostedLandingRequests', F._id, {
+    phase: 'ready',
+    orderLive: true,
+    priority: 'urgent',
+    ownGlobalRisk: true,
+    orderWait: holder.submissionId,
+    orderWaits: [{ submissionId: holder.submissionId, held: handed ? 'urgent' : 'accepting', footprints }],
+  });
+  for (const finish of f.tables.projectHostedFinishes.values()) {
+    const value = JSON.parse(finish.value);
+    if (value.pending)
+      f.patch('projectHostedFinishes', finish._id, {
+        value: JSON.stringify({ ...value, pending: undefined }),
+      });
+  }
+  const run = (name, fn) => f.transaction(name, { _handler: fn }, {});
+  if (handed) {
+    await run('urgent-holder-lands', ctx =>
+      wake.wakeLandingOrderWaiters(ctx, row(f, H.submissionId), false, false, true),
+    );
+    const parked = row(f, F.submissionId);
+    assert.equal(parked.orderWait, Q.submissionId, 'the landed holder hands F to Q');
+    assert.equal(parked.orderWaitHanded, undefined, 'unmarked: H landed on its files');
+  }
+  await run(`next-${trigger}`, ctx =>
+    trigger === 'baton'
+      ? wake.passParkedFollowers(ctx, row(f, Q.submissionId))
+      : wake.wakeNewRunFollower(ctx, row(f, Q.submissionId)),
+  );
+  return { after: row(f, F.submissionId), Q };
+}
+
+// Review 48555882 finding 1 (rare, not a regression): the urgent waiter was held by the overlap
+// clause of heldByPaths until Q left the order, a whole check wall of Q, though its claim skips Q.
+test('43b51a5e: an urgent waiter parked on a non-urgent holder is driven, handed on by a landed holder or promoted while parked', async t => {
+  for (const via of ['handed', 'promoted'])
+    for (const trigger of ['new-run', 'baton']) {
+      const { after } = await urgentWaiterShape(t, { via, trigger });
+      assert.equal(after.orderWait, undefined, `${via}, ${trigger}: Q's wake drives the urgent waiter`);
+    }
+  // Behind an urgent holder its claim holds on its own risk: no drive that would only re-park. On the
+  // baton its last wait is disjoint, so only its own risk holds it (review 01a38b28 nit: the old
+  // blanket urgent exception drove it). An own-risk claim records only overlap waits, so the new-run
+  // wake's evidence rule, which needs a non-overlap wait, keeps the real shape.
+  for (const trigger of ['new-run', 'baton']) {
+    const { after, Q } = await urgentWaiterShape(t, {
+      via: 'promoted',
+      trigger,
+      next: { priority: 'urgent' },
+      footprints: trigger === 'baton' ? 'disjoint' : 'overlap',
+    });
+    assert.equal(
+      after.orderWait,
+      Q.submissionId,
+      `${trigger}: an urgent holder keeps the urgent own-risk waiter`,
+    );
+  }
+});

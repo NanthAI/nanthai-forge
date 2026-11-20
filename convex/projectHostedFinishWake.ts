@@ -193,6 +193,11 @@ export function bindsNewRun(
     }) === 'spend',
   );
 }
+/** An urgent claim never waits for a non-urgent older entry (`olderLandingAhead`). */
+const skipsHolder = (
+  waiter: Pick<Doc<'projectHostedLandingRequests'>, 'priority'>,
+  holder: Pick<Doc<'projectHostedLandingRequests'>, 'priority'>,
+) => waiter.priority === 'urgent' && holder.priority !== 'urgent';
 /** The waiter touches a global-risk file itself (`ownGlobalRisk`: every older live entry holds it,
  * whatever the holder), or its latest claim found its footprints overlap the entry it then waited
  * for: on `holder` itself, or on a former holder that landed and left it unhanded (main moved under
@@ -201,18 +206,25 @@ export function bindsNewRun(
  * +35 calls without this rule, 43b51a5e landing check). Exact holder only (review 14cf6d7e F1): a
  * waiter handed to `holder` by a former holder that withdrew, failed or parked keeps a valid pass and
  * stays eligible. A full receipt list (HOSTED_ORDER_WAITS) may hide a later wait: unknown, never held.
- * A waiter holding a live landing reservation is never held this way: it goes ahead of the older
- * entries its reservation holds back, which may be parked on it (case 3 shape, review 012bd638).
- * Nor is an urgent one by its own risk: its claim skips every non-urgent older entry. */
-const heldByPaths = (waiter: Doc<'projectHostedLandingRequests'>, holder: string) => {
+ * A waiter is never held this way by a holder its claim goes ahead of: one holding a live landing
+ * reservation goes ahead of the older entries it holds back, which may be parked on it (case 3
+ * shape, review 012bd638); an urgent one skips every non-urgent older entry (`olderLandingAhead`),
+ * whatever its paths or its last wait, so it is neither held by its own risk there nor by an overlap
+ * on a former urgent holder that landed or on a holder it waited for before it was made urgent
+ * (review 48555882 F1). Behind an urgent holder its paths hold it as for any waiter. */
+const heldByPaths = (
+  waiter: Doc<'projectHostedLandingRequests'>,
+  holder: Pick<Doc<'projectHostedLandingRequests'>, 'submissionId' | 'priority'>,
+) => {
   if (waiter.reservedUntil !== undefined && waiter.reservedUntil > Date.now()) return false;
+  if (skipsHolder(waiter, holder)) return false;
   const waits = waiter.orderWaits ?? [];
   const last = waits[waits.length - 1];
   return (
-    (waiter.ownGlobalRisk === true && waiter.priority !== 'urgent') ||
+    waiter.ownGlobalRisk === true ||
     (waits.length < HOSTED_ORDER_WAITS &&
       last?.footprints === 'overlap' &&
-      (last.submissionId === holder || waiter.orderWaitHanded !== holder))
+      (last.submissionId === holder.submissionId || waiter.orderWaitHanded !== holder.submissionId))
   );
 };
 /** A waiter handed to `next`, which takes main before it, is marked as handed to it
@@ -222,7 +234,9 @@ const heldByPaths = (waiter: Doc<'projectHostedLandingRequests'>, holder: string
  * keeps only waits a claim decided; the waiter's next claim clears the mark. Whatever `next`'s
  * phase: a queued `next` (a conflict cohort or an early resolution) that then binds a run must
  * find it too (finding 4 of 120fcc09). No mark only when the holder `from` landed on the
- * waiter's files (`heldByPaths`): its pass cannot carry anyway. */
+ * waiter's files (`heldByPaths`): its pass cannot carry anyway. An urgent waiter that `from` did
+ * not outrank is marked even then: `from` held it by nothing (`skipsHolder`), and its own claim
+ * re-checks a stale pass. */
 const handedTo = (
   waiter: Doc<'projectHostedLandingRequests'>,
   next: Doc<'projectHostedLandingRequests'>,
@@ -231,23 +245,29 @@ const handedTo = (
 ) => ({
   orderWait: next.submissionId,
   orderWaitHanded:
-    waiter.phase === 'ready' && !(landed && heldByPaths(waiter, from.submissionId))
-      ? next.submissionId
-      : undefined,
+    waiter.phase === 'ready' && !(landed && heldByPaths(waiter, from)) ? next.submissionId : undefined,
 });
 /** A Ready follower whose latest recorded wait is on `holder` itself, held only because the
  * holder was about to land, on footprints not known to overlap. A full receipt list stops
  * recording (HOSTED_ORDER_WAITS), so its latest entry may name a former holder: skip it. */
-const passedFollower = (waiter: Doc<'projectHostedLandingRequests'>, holder: string) => {
+const passedFollower = (
+  waiter: Doc<'projectHostedLandingRequests'>,
+  holder: Pick<Doc<'projectHostedLandingRequests'>, 'submissionId' | 'priority'>,
+) => {
+  // An urgent waiter on a non-urgent holder waits on nothing that holder does: its claim skips it,
+  // so it is driven as soon as the holder re-checks (review 48555882 F1: handed on unmarked by a
+  // landed urgent holder, or made urgent while parked, it waited out the holder's whole check).
+  if (waiter.phase === 'ready' && skipsHolder(waiter, holder)) return true;
   // Handed to this holder by a wake and not claimed since: it waits only because the holder takes
   // main first, so its own claim decides (43b51a5e case 2; c6953f0b's evidence rule is unchanged).
-  if (waiter.phase === 'ready' && waiter.orderWaitHanded === holder) return !heldByPaths(waiter, holder);
+  if (waiter.phase === 'ready' && waiter.orderWaitHanded === holder.submissionId)
+    return !heldByPaths(waiter, holder);
   const waits = waiter.orderWaits ?? [];
   const last = waits[waits.length - 1];
   return (
     waiter.phase === 'ready' &&
     waits.length < HOSTED_ORDER_WAITS &&
-    last?.submissionId === holder &&
+    last?.submissionId === holder.submissionId &&
     (last.held === 'accepting' || last.held === 'unsealed') &&
     last.footprints !== 'overlap'
   );
@@ -267,7 +287,7 @@ export async function wakeNewRunFollower(ctx: MutationCtx, row: Doc<'projectHost
     .take(32);
   let woken: Doc<'projectHostedLandingRequests'> | null = null;
   for (const waiter of waiters) {
-    if (!passedFollower(waiter, row.submissionId)) continue;
+    if (!passedFollower(waiter, row)) continue;
     if (woken) {
       await ctx.db.patch(waiter._id, handedTo(waiter, woken, row, false));
       if (!woken.orderWaited) await ctx.db.patch(woken._id, { orderWaited: (woken.orderWaited = true) });
@@ -320,7 +340,7 @@ export async function wakeLandingOrderWaiters(
       .take(32);
     for (const waiter of waiters) {
       after = waiter.sequence;
-      if (readyOnly && (waiter.phase !== 'ready' || heldByPaths(waiter, row.submissionId))) continue;
+      if (readyOnly && (waiter.phase !== 'ready' || heldByPaths(waiter, row))) continue;
       // A re-pin retires speculative source generations, but this predecessor
       // still owns its ordinary place in acceptance order. Only parked conflict
       // cohorts and exact early resolutions need another compose before settlement.
