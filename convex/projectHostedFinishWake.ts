@@ -272,6 +272,28 @@ const passedFollower = (
     last.footprints !== 'overlap'
   );
 };
+/** Drive one parked Ready waiter: its own claim decides. Its stall alarm is armed in the same
+ * transaction (c329d191: this one drive is its only wake). False when its finish has IO in flight
+ * (`pending`): that finish claims again by itself. */
+export async function driveParkedWaiter(ctx: MutationCtx, waiter: Doc<'projectHostedLandingRequests'>) {
+  const finish = await finishRow(ctx, { projectId: waiter.projectId, submissionId: waiter.submissionId });
+  if (!finish || JSON.parse(finish.value).pending) return false;
+  const alarm = waiter.alarm
+    ? undefined
+    : await armLandingAlarm(
+        ctx,
+        waiter,
+        hostedLandingProgressAt(hostedLandingStateSchema.parse(JSON.parse(waiter.value))),
+      );
+  await ctx.db.patch(waiter._id, {
+    orderWait: undefined,
+    orderWaitHanded: undefined,
+    ...(alarm ? { alarm } : {}),
+  });
+  // Review d4f55e9f F3: a parked finish has no IO in flight, so its wake is a mutation.
+  await scheduleFinish(ctx, finish, 0, true, true);
+  return true;
+}
 /** N1 pass (see `bindsNewRun`): one finish drive per bound run. The oldest eligible follower
  * on the first index page gets the drive and its stall alarm (c329d191); eligible younger
  * ones are handed to it only while it holds order (it takes main before them and wakes them
@@ -293,22 +315,7 @@ export async function wakeNewRunFollower(ctx: MutationCtx, row: Doc<'projectHost
       if (!woken.orderWaited) await ctx.db.patch(woken._id, { orderWaited: (woken.orderWaited = true) });
       continue;
     }
-    const finish = await finishRow(ctx, { projectId: row.projectId, submissionId: waiter.submissionId });
-    if (!finish || JSON.parse(finish.value).pending) continue;
-    const alarm = waiter.alarm
-      ? undefined
-      : await armLandingAlarm(
-          ctx,
-          waiter,
-          hostedLandingProgressAt(hostedLandingStateSchema.parse(JSON.parse(waiter.value))),
-        );
-    await ctx.db.patch(waiter._id, {
-      orderWait: undefined,
-      orderWaitHanded: undefined,
-      ...(alarm ? { alarm } : {}),
-    });
-    // Review d4f55e9f F3: a parked finish has no IO in flight, so its wake is a mutation.
-    await scheduleFinish(ctx, finish, 0, true, true);
+    if (!(await driveParkedWaiter(ctx, waiter))) continue;
     if (!waiter.orderLive) return;
     woken = waiter;
   }

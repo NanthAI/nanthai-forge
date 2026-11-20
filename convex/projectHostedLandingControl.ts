@@ -40,7 +40,12 @@ import {
   type HostedLandingState,
 } from '../src/hosted-landing';
 import { ForgeError, invariant } from '../src/errors';
-import { finishRow, passParkedFollowers, wakeLandingOrderWaiters } from './projectHostedFinishWake';
+import {
+  driveParkedWaiter,
+  finishRow,
+  passParkedFollowers,
+  wakeLandingOrderWaiters,
+} from './projectHostedFinishWake';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { claimFinishPrecompose } from './projectHostedFinishPrecompose';
 import { alertExhausted, exhaustLanding, exhaustedReason } from './projectHostedLandingExhaust';
@@ -456,8 +461,18 @@ export async function claimReadyLanding(
         selected.observation.pendingReason !== 'waiting-for-review' &&
         selected.observation.pendingReason !== 'waiting-for-dependency' &&
         !(state.batchId && state.batchId === selected.batchId)
-      )
-        return null;
+      ) {
+        // Give way only to an urgent entry that can take main now (review 01a38b28 F1). One parked on
+        // this entry (handed to it by an urgent holder's exit, or made urgent while parked, since
+        // prioritize wakes nothing) waited for this claim while this claim re-polled for it, forever:
+        // drive it, its claim skips this normal entry. One parked on another entry cannot land before
+        // that one moves, so this claim goes on rather than re-polling through that entry's check.
+        if (!urgent.orderWait) return null;
+        if (urgent.orderWait === row.submissionId) {
+          await driveParkedWaiter(ctx, urgent);
+          return null;
+        }
+      }
     }
   }
   if (queue.wake) await cancelPendingTask(ctx, queue.wake.taskId);
