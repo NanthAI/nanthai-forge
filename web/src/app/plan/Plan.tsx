@@ -7,6 +7,8 @@
 // Everything scopes add one bounded page each of done and dropped Items, and the Archive and Deleted views one page of
 // theirs (projectPlanSettled:page); who works on an unowned Item is one bounded one-shot read by Intent
 // (projectPlanWorkers:read, workers.ts), again only when the in-progress Items change or a hidden tab is shown again.
+// An owner on the page of an Item the plan rows leave out reads that Item's root (projectWorkIndex:detail, one point
+// read) to show an Archived or Deleted Item with Unarchive or Restore.
 // Writes:
 // projectWorkCommand:command for one row, projectPlanningBatch:apply for a selection, each retry-safe by its
 // operation id.
@@ -17,7 +19,7 @@ import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { Band, Key, Menu, Region, Row, Standing } from '../../ds';
 import { Announcer, useAnnounce } from '../../ds/behaviour/announce';
-import { inverseRelationLabel, isLive, itemStatusLabel } from '../../../../src/planning-model';
+import { inverseRelationLabel, isLive, itemStatus, itemStatusLabel } from '../../../../src/planning-model';
 import type { PlanRow } from '../../../../src/planning-model';
 import { planningBatchLimit } from '../../../../src/planning-batch';
 import { useSafePaginatedQuery, useSafeQuery } from '../../safe-query';
@@ -37,7 +39,9 @@ import { COLS, DoneWhen, Line, Owner, Status } from './rows';
 import { useWorkers, type ActiveLane, type Workers } from './workers';
 import { Tick, type Ticker } from './Tick';
 import { Versions } from './Versions';
-import { isShelf, shelfWords, shelve, ShelfList, unshelve, type Shelf } from './Shelf';
+import { isShelf, shelfWords, shelve, shelvedRowOf, ShelfList, unshelve, type Shelf } from './Shelf';
+import { workIndex } from '../../hosted-work-index';
+import { isPlanningUuid } from '../../../../src/planning-id';
 import type { BatchPut } from '../../../../src/planning-batch';
 import { BulkBar, SplitSheet, UndoToast, outcomeWords, type Reads } from './Bulk';
 import {
@@ -45,6 +49,7 @@ import {
   movedInitiativeRank,
   movedRank,
   planSentence,
+  parseRows,
   planView,
   statusOf,
   type PlanGroup,
@@ -119,6 +124,25 @@ function useSettled(
 }
 export type Settled = ReturnType<typeof useSettled>;
 
+/** The root of one Item the plan rows leave out, read only for an owner on that Item's page (one indexed point read,
+ * re-run by writes to that root): the row when it is Archived or Deleted, else null, and 'loading' meanwhile. A
+ * refused or failed read is null: the page says the Item is not in open work, as before. */
+function useShelvedRow(projectId: Id<'hostedProjects'> | undefined, id: string | null) {
+  const result = useSafeQuery(
+    workIndex.detail,
+    projectId && id ? { projectId, collection: 'planningItems', id } : 'skip',
+  );
+  return useMemo(
+    (): PlanRow | null | 'loading' =>
+      !id || result.error
+        ? null
+        : result.value === undefined
+          ? 'loading'
+          : shelvedRowOf(result.value.value, id),
+    [id, result.value, result.error],
+  );
+}
+
 function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: PlaceProps) {
   const search = useSearch();
   const query = useMemo(() => readQuery(search), [search.toString()]);
@@ -136,6 +160,13 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
   const dropped = useSettled(projectId, 'abandoned', settledOn, settledIn);
   const shelfScope = isShelf(query.scope) ? query.scope : null;
   const shelved = useSettled(projectId, shelfScope ?? 'archived', shelfScope !== null, undefined);
+  // An owner opening an Item the plan rows leave out (Archived or Deleted) reads its root, to offer the way back.
+  const rowIds = useMemo(() => new Set(read ? parseRows(read).map(row => row.id) : []), [read]);
+  const lookupId = route.rest.toLowerCase();
+  const shelvedItem = useShelvedRow(
+    projectId,
+    read?.canEdit && isPlanningUuid(lookupId) && !rowIds.has(lookupId) ? lookupId : null,
+  );
   const mutate = useMutation(api.projectWorkCommand.command);
   const apply = useMutation(batchApply);
   const client = useConvex();
@@ -182,6 +213,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
       closed={closed}
       dropped={dropped}
       shelved={shelved}
+      shelvedItem={shelvedItem}
       showDone={showDone}
       progress={counts.value}
     />
@@ -221,11 +253,14 @@ export function PlanScreenView({
   closed = noSettled,
   dropped = noSettled,
   shelved = noSettled,
+  shelvedItem = null,
   showDone = () => undefined,
   progress: progressRead,
 }: Pick<PlaceProps, 'route' | 'projectName' | 'feed'> & {
   /** The project's progress counts (convex/projectPlanCounts.ts), the same read Needs me shows. */
   progress?: PlanCountsRead | undefined;
+  /** The Item page's Item when the plan rows leave it out because it is Archived or Deleted (owner only). */
+  shelvedItem?: PlanRow | null | 'loading';
   /** Hosted reads for the Item page's comments and versions; without it the page draws neither. */
   projectId?: Id<'hostedProjects'> | undefined;
   read: PlanRead | undefined;
@@ -315,6 +350,20 @@ export function PlanScreenView({
       setError(`Forge could not change ${row.title}; nothing changed.`);
     }
   };
+  const here =
+    route.rest &&
+    shelvedItem &&
+    shelvedItem !== 'loading' &&
+    shelvedItem.id.startsWith(route.rest.toLowerCase()) &&
+    isShelf(shelvedItem.status)
+      ? { row: shelvedItem, shelf: shelvedItem.status, back: unshelve(shelvedItem) }
+      : sent && sent.row.id.startsWith(route.rest)
+        ? {
+            row: sent.row,
+            shelf: sent.shelf,
+            back: unshelve({ ...sent.row, version: sent.version, was: sent.row.status }),
+          }
+        : null;
   if (route.rest && !initiativeRow)
     return (
       <ItemPage
@@ -327,17 +376,9 @@ export function PlanScreenView({
         onSplit={whole?.canEdit && reads && run ? () => setSplit(true) : undefined}
         onVersions={projectId ? () => setVersions(true) : undefined}
         onShelve={whole?.canEdit && run ? (row, to) => void shelfMove(shelve([row], to), row, to) : undefined}
-        sent={sent}
-        onBack={
-          sent && run
-            ? () =>
-                void shelfMove(
-                  [unshelve({ ...sent.row, version: sent.version, was: sent.row.status })],
-                  sent.row,
-                  null,
-                )
-            : undefined
-        }
+        shelved={here}
+        looking={shelvedItem === 'loading' && !here}
+        onBack={here && run ? () => void shelfMove([here.back], here.row, null) : undefined}
         error={error}
         versions={
           versions && projectId ? (
@@ -833,12 +874,13 @@ function ItemPage({
   onSplit,
   onVersions,
   onShelve,
-  sent,
+  shelved,
   onBack,
   error,
   split,
   versions,
   toast,
+  looking = false,
 }: {
   route: PlaceProps['route'];
   projectName: string;
@@ -850,8 +892,10 @@ function ItemPage({
   onVersions?: (() => void) | undefined;
   /** Archive or Delete this Item (the owner only). */
   onShelve?: ((row: PlanRow, to: Shelf) => void) | undefined;
-  /** The Item this page just sent to a shelf, and its way back. */
-  sent?: { row: PlanRow; shelf: Shelf } | null;
+  /** This page's Item when it is Archived or Deleted (just sent, or opened by its link); onBack brings it back. */
+  shelved?: { row: PlanRow; shelf: Shelf } | null;
+  /** Its root is still being read: the page says it is loading, not that the Item is missing. */
+  looking?: boolean;
   onBack?: (() => void) | undefined;
   error?: string;
   versions?: ReactNode;
@@ -859,7 +903,7 @@ function ItemPage({
   toast?: ReactNode;
 }) {
   const row = view
-    ? ([...view.byId.values()].find(entry => entry.id.startsWith(route.rest)) ?? null)
+    ? ([...view.byId.values()].find(entry => entry.id.startsWith(route.rest)) ?? (looking ? undefined : null))
     : undefined;
   const legacy = currentScreenHref(route);
   const full = legacy && row ? `${legacy}?planningItem=${encodeURIComponent(row.id)}` : legacy;
@@ -894,6 +938,10 @@ function ItemPage({
         sentence={
           row === undefined ? (
             'Loading the Item…'
+          ) : row === null && shelved ? (
+            <>
+              <b dir="auto">{shelved.row.title}</b> {shelfWords[shelved.shelf].done}.
+            </>
           ) : row === null ? (
             'This Item is not in open work.'
           ) : (
@@ -919,7 +967,15 @@ function ItemPage({
             Open the full Item
           </a>
         ) : null}
-        {row && onShelve && row.kind === 'issue' ? (
+        {row === null && shelved && onBack ? (
+          <Menu
+            label="More actions"
+            className="btn ghost sm"
+            items={[{ id: 'back', label: shelfWords[shelved.shelf].back, onAction: onBack }]}
+          >
+            ⋯
+          </Menu>
+        ) : row && onShelve && row.kind === 'issue' ? (
           <Menu
             label="More actions"
             className="btn ghost sm"
@@ -978,14 +1034,15 @@ function ItemPage({
             </Suspense>
           ) : null}
         </Region>
-      ) : row === null && sent && sent.row.id.startsWith(route.rest) ? (
+      ) : row === null && shelved ? (
         <Region title="Item">
           <div className="quietline" role="status">
-            <b dir="auto">{sent.row.title}</b> is {shelfWords[sent.shelf].done.toLowerCase()}: out of every
+            <b dir="auto">{shelved.row.title}</b> is {shelfWords[shelved.shelf].done.toLowerCase()}
+            {shelved.row.was ? `, was ${itemStatusLabel[itemStatus[shelved.row.was]]}` : ''}: out of every
             view, count and agent list. Its Lanes, landings and comments stay.{' '}
             {onBack ? (
               <Key size="sm" onClick={onBack}>
-                {shelfWords[sent.shelf].back}
+                {shelfWords[shelved.shelf].back}
               </Key>
             ) : null}
           </div>

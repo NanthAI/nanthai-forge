@@ -12,6 +12,7 @@ import { PlaceIcon } from '../places';
 import { Tune } from './Tune';
 import {
   agentRead,
+  agentReadNote,
   loadViews,
   removeView,
   saveView,
@@ -223,6 +224,7 @@ function SaveView({
         </label>
         <p className="t2">Kept on this browser. Agents read the same view with:</p>
         <CodeBox label="Agent command">{agentRead(query)}</CodeBox>
+        {agentReadNote(query) ? <p className="t3">{agentReadNote(query)}</p> : null}
         {saved.length ? (
           <div className="plan-saved">
             {saved.map(view => (

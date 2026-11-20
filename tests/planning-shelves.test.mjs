@@ -14,8 +14,12 @@ const { planningPutSchema } = await import(moduleUrl('../src/work-planning-types
 const { publicPlanVisible, progress } = await import(moduleUrl('../src/planning-model.ts'));
 const { planViewRow } = await import(moduleUrl('../convex/projectPlanRows.ts'));
 const { lineDiff } = await import(moduleUrl('../web/src/app/plan/diff.ts'));
-const { shelve, unshelve } = await import(moduleUrl('../web/src/app/plan/Shelf.tsx'));
-const { readQuery, agentRead } = await import(moduleUrl('../web/src/app/plan/query.ts'));
+const { shelve, unshelve, shelvedRowOf } = await import(moduleUrl('../web/src/app/plan/Shelf.tsx'));
+const { planView } = await import(moduleUrl('../web/src/app/plan/model.ts'));
+const { planCountsWriter, emptyPlanCounts, utcDay } = await import(
+  moduleUrl('../convex/projectPlanCountsStore.ts')
+);
+const { readQuery, agentRead, agentReadNote } = await import(moduleUrl('../web/src/app/plan/query.ts'));
 const { batchUndo } = await import(moduleUrl('../src/planning-batch.ts'));
 const settled = await import(moduleUrl('../convex/projectPlanSettled.ts'));
 const batch = await import(moduleUrl('../convex/projectPlanningBatch.ts'));
@@ -99,6 +103,17 @@ test('Archive and Deleted are views in the address with the matching agent read'
   assert.equal(readQuery(new URLSearchParams('scope=archived')).scope, 'archived');
 });
 
+test('the Everything view copies the agent read that leaves Archived and Deleted out, as the view does', () => {
+  // Review 9cc310fc finding 1: `"status":"all"` also returns both shelves, which Everything never shows.
+  assert.equal(agentRead(readQuery(new URLSearchParams('scope=all'))), `nforge agent . planning '{}'`);
+  assert.equal(agentReadNote(readQuery(new URLSearchParams('scope=all'))), '');
+  // A search with no status returns open work only (src/hosted-agent-planning.ts), so with Find it stays "all" and
+  // says what that adds (review c9a52ef1).
+  const found = readQuery(new URLSearchParams('scope=all&q=login'));
+  assert.equal(agentRead(found), `nforge agent . planning '{"status":"all","search":"login"}'`);
+  assert.match(agentReadNote(found), /also lists Archived and Deleted/);
+});
+
 test('a rewritten line marks only the words that changed', () => {
   const lines = lineDiff(
     'Title\n\nCovers every API removed in v3.',
@@ -179,4 +194,92 @@ test('hosted: delete applies once under replay, leaves the plan, lists in Delete
     error => error.data?.code === 'PROJECT_UNAVAILABLE',
   );
   await assert.rejects(settled.settledPage(s.ctx, s.projectId, 'deleted', { cursor: null, numItems: 50 }));
+});
+
+test('an archived or deleted Item opened by its link reads as its shelf with the way back to the status it left', () => {
+  // Review 9cc310fc finding 2: the Item page offered Archive and Delete, never Unarchive or Restore.
+  const id = randomUUID();
+  const root = fields => JSON.stringify({ id, kind: 'issue', title: 'Old parser', version: 4, ...fields });
+  const row = shelvedRowOf(root({ status: 'deleted', was: 'closed' }), id);
+  assert.equal(row.status, 'deleted');
+  assert.deepEqual(unshelve(row), {
+    action: 'put-planning-item',
+    itemId: id,
+    expectedVersion: 4,
+    status: 'closed',
+  });
+  assert.equal(shelvedRowOf(root({ status: 'archived' }), id).status, 'archived');
+  assert.equal(shelvedRowOf(root({ status: 'open' }), id), null, 'an Item on the plan keeps its own page');
+  assert.equal(
+    shelvedRowOf(root({ status: 'archived' }), randomUUID()),
+    null,
+    'another Item never stands in',
+  );
+  assert.equal(shelvedRowOf(null, id), null);
+});
+
+test("bringing back a closed Item leaves today's closed count alone; closing one still counts", async () => {
+  // Review 9cc310fc finding 3: Restore of a deleted Item whose `was` is closed added 1 to closed today.
+  const generationId = 'g1';
+  const counts = { ...emptyPlanCounts(true), day: utcDay(Date.now()) };
+  const counter = { _id: 'c', value: JSON.stringify(counts) };
+  const db = {
+    query: () => ({ withIndex: () => ({ unique: async () => counter }) }),
+    patch: async (_id, patch) => Object.assign(counter, patch),
+  };
+  const root = (status, was) => ({
+    collection: 'planningSearch',
+    key: 'item',
+    generationId,
+    value: JSON.stringify(was ? { was } : {}),
+    planning: { kind: 'issue', status },
+  });
+  const writer = planCountsWriter(db);
+  writer.change(root('deleted', 'closed'), root('closed'));
+  writer.change(root('archived', 'closed'), root('closed'));
+  await writer.flush();
+  let after = JSON.parse(counter.value);
+  assert.equal(after.closedToday, 0);
+  assert.equal(after.issue.closed, 2, 'the Items count as closed again');
+  writer.change(root('in-progress'), root('closed'));
+  // Closing a shelved Item that left as open work (a put straight to closed from the CLI or MCP) is a closing.
+  writer.change(root('archived', 'open'), root('closed'));
+  await writer.flush();
+  after = JSON.parse(counter.value);
+  assert.equal(after.closedToday, 2);
+});
+
+test('an Item whose Initiative was archived or deleted shows under No Initiative with that mark', () => {
+  // Review 9cc310fc finding 4: an Initiative archived from the CLI or MCP left its Items pointing at nothing.
+  const live = { id: randomUUID(), kind: 'initiative', title: 'Live', status: 'open', position: 0 };
+  const gone = randomUUID();
+  const item = (title, initiativeId, position) => ({
+    id: randomUUID(),
+    kind: 'issue',
+    title,
+    status: 'open',
+    position,
+    initiativeId,
+  });
+  const rows = [
+    live,
+    item('Under live', live.id, 1),
+    item('Under gone', gone, 2),
+    item('Loose', undefined, 3),
+  ];
+  const lines = read =>
+    planView(read).groups.flatMap(group =>
+      group.lines.map(line => [
+        line.row.title,
+        line.shelvedInitiative ?? false,
+        group.initiative?.id ?? null,
+      ]),
+    );
+  assert.deepEqual(lines({ rows: JSON.stringify(rows), more: false, settled: [], canEdit: true }), [
+    ['Under live', false, live.id],
+    ['Under gone', true, null],
+    ['Loose', false, null],
+  ]);
+  // When some Initiatives were not read, a missing one may just be unread: no mark.
+  assert.equal(lines({ rows: JSON.stringify(rows), more: true, settled: [], canEdit: true })[1][1], false);
 });

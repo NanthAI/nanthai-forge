@@ -48,8 +48,13 @@ Restore put `was` back, which adds a version and keeps the history. The web send
 so every one has the 10-second Undo.
 
 Reads list them only when asked: `planning {"status":"archived"}` or `{"status":"deleted"}`, or `"all"`. A read with no
-status, or `"active"`, leaves them out. The Plan screen has Archive and Deleted views, one bounded page of 50 at a
-time from the search roots (`projectPlanSettled:page`), read only while the view is open.
+status, or `"active"`, leaves them out; the Everything view's copyable command is that read with no status (a search
+with no status returns open work only, so with Find it says `"all"` and notes that this adds both shelves). The Plan
+screen has Archive and Deleted views, one bounded page of 50 at a time from the search roots
+(`projectPlanSettled:page`), read only while the view is open. An archived or deleted Item's own page (opened by its
+link) reads that Item's root (one point read, re-run only by writes to it), for the owner only, and offers Unarchive or Restore instead of Archive and Delete.
+Bringing back a closed Item does not add to today's closed count. An Issue whose Initiative is archived or deleted
+stays in members' views under No Initiative, marked "Initiative archived or deleted"; public reads hide it.
 
 Storage: no new table, index or row kind. A move costs what a status change costs today: one version row and one
 search-root rewrite. `was` adds about 15 bytes to that version and its root, and only on shelved Items.

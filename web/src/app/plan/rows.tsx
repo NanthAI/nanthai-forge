@@ -113,6 +113,14 @@ export function Line({
             blocked by {line.blockedBy.id.slice(0, 4)}
           </span>
         ) : null}
+        {line.shelvedInitiative ? (
+          <span
+            className="flag"
+            title="Its Initiative was archived or deleted; the Item stays here until it moves"
+          >
+            Initiative archived or deleted
+          </span>
+        ) : null}
         {row.type ? <span className="flag">{row.type}</span> : null}
         {row.hidden ? <span className="flag">hidden</span> : null}
       </span>

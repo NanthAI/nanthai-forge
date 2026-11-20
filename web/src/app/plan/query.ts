@@ -59,16 +59,15 @@ export function writeQuery(query: Partial<PlanQuery>) {
 export const filtered = (query: PlanQuery) =>
   Boolean(query.type || query.owner || query.relation || query.initiative || query.find.trim());
 
+/** Everything shows every Item but Archived and Deleted ones. A list with no status returns exactly that; a search
+ * with no status returns open work only, so with Find the command says `"all"`, which adds both shelves. */
+const everythingSearch = (query: PlanQuery) => query.scope === 'all' && Boolean(query.find.trim());
 /** The agent read a view is a shortcut to (saved views stay a web shortcut to this call). */
 export function agentRead(query: PlanQuery) {
-  const input: Record<string, unknown> = {
-    status:
-      query.scope === 'open'
-        ? 'active'
-        : query.scope === 'closed' || query.scope === 'archived' || query.scope === 'deleted'
-          ? query.scope
-          : 'all',
-  };
+  const input: Record<string, unknown> =
+    query.scope === 'all' && !everythingSearch(query)
+      ? {}
+      : { status: query.scope === 'open' ? 'active' : query.scope };
   if (query.type) input.type = query.type;
   if (query.owner) input.owner = query.owner;
   if (query.relation) input.relation = query.relation;
@@ -76,6 +75,9 @@ export function agentRead(query: PlanQuery) {
   if (query.find.trim()) input.search = query.find.trim();
   return `nforge agent . planning '${JSON.stringify(input)}'`;
 }
+/** What the command returns beyond the view, said under it; empty when they match. */
+export const agentReadNote = (query: PlanQuery) =>
+  everythingSearch(query) ? 'With a search, "all" also lists Archived and Deleted Items.' : '';
 
 const statusRank: Record<PlanRow['status'], number> = {
   'in-progress': 0,

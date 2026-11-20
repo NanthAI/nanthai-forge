@@ -41,8 +41,8 @@ type Root = {
   value: string;
   planning?: { kind: string; status: string } | undefined;
 };
-/** A planning root's kind and status, from its index fields (as `planningPage` counts them) or else its value. */
-export function planRootFacts(root: Root | null) {
+/** A planning root's stored kind and status, from its index fields (as `planningPage` counts them) or else its value. */
+function rootWords(root: Root | null) {
   if (root?.collection !== 'planningSearch' || !root.key) return null;
   let kind = root.planning?.kind,
     status = root.planning?.status;
@@ -52,10 +52,30 @@ export function planRootFacts(root: Root | null) {
     } catch {
       return null;
     }
-  if ((kind !== 'issue' && kind !== 'initiative') || !(PLAN_STATUSES as readonly string[]).includes(status!))
-    return null;
-  return { key: root.key, kind: kind as Kind, status: status as Status };
+  return { key: root.key, kind, status };
 }
+/** A counted root's kind and status; null for Archived and Deleted roots, which no count includes. */
+export function planRootFacts(root: Root | null) {
+  const words = rootWords(root);
+  if (
+    !words ||
+    (words.kind !== 'issue' && words.kind !== 'initiative') ||
+    !(PLAN_STATUSES as readonly string[]).includes(words.status!)
+  )
+    return null;
+  return { key: words.key, kind: words.kind as Kind, status: words.status as Status };
+}
+/** Unarchive or Restore puts back the status an Item left: bringing back an Item that left as closed is not a
+ * closing; closing a shelved Item that left as anything else is. */
+const shelvedClosed = (root: Root | null) => {
+  const status = rootWords(root)?.status;
+  if (status !== 'archived' && status !== 'deleted') return false;
+  try {
+    return (JSON.parse(root!.value) as { was?: string }).was === 'closed';
+  } catch {
+    return false;
+  }
+};
 
 export const planCounter = (db: QueryCtx['db'], partition: Id<'projectWorkGenerations'>) =>
   db
@@ -99,7 +119,11 @@ export function planCountsWriter(db: MutationCtx['db']) {
         list(after!.generationId).push({
           ...now,
           sign: 1,
-          closing: now.kind === 'issue' && now.status === 'closed' && was?.status !== 'closed',
+          closing:
+            now.kind === 'issue' &&
+            now.status === 'closed' &&
+            was?.status !== 'closed' &&
+            !shelvedClosed(before),
         });
     },
     async flush() {

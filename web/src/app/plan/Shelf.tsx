@@ -3,7 +3,8 @@
 // hides it from every view and count and keeps its links with no time limit; Deleted hides it the same way. Each
 // action, and each way back, is one ordinary put through the batch call, so it is retry-safe by operation id, adds
 // one version, keeps the history and gets the same 10-second Undo as any batch. The server allows planning writes
-// to the project owner only. The lists read one bounded page of 50 only while their view is open.
+// to the project owner only. The lists read one bounded page of 50 only while their view is open; a shelved Item's
+// own page reads its root (Plan.tsx useShelvedRow; re-run only by writes to it) to offer its way back.
 import { useState } from 'react';
 import type { PlanRow, StoredStatus } from '../../../../src/planning-model';
 import { itemStatusLabel, itemStatus } from '../../../../src/planning-model';
@@ -37,6 +38,26 @@ export const unshelve = (row: Pick<PlanRow, 'id' | 'version' | 'was'>): BatchPut
   expectedVersion: row.version ?? 0,
   status: (row.was ?? 'open') as Exclude<StoredStatus, Shelf>,
 });
+
+/** One Item's current root (the work-index detail value) as a row, when it is Archived or Deleted; else null. */
+export function shelvedRowOf(value: string | null, id: string): PlanRow | null {
+  try {
+    const item = value ? (JSON.parse(value) as Partial<PlanRow>) : null;
+    if (!item || item.id !== id || !isShelf(item.status ?? '')) return null;
+    return {
+      id,
+      kind: item.kind === 'initiative' ? 'initiative' : 'issue',
+      title: typeof item.title === 'string' && item.title ? item.title : id.slice(0, 8),
+      status: item.status as Shelf,
+      position: 0,
+      ...(typeof item.version === 'number' ? { version: item.version } : {}),
+      ...(item.was ? { was: item.was } : {}),
+      ...(typeof item.at === 'string' ? { at: item.at } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
 
 const day = (at: string | undefined) =>
   at ? new Date(at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '';

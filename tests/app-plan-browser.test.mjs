@@ -93,7 +93,8 @@ function Fixture() {
     <React.Suspense fallback={<h1>Loading</h1>}><PlanScreenView route={route} projectId={rest === uuid(16) ? undefined : "synthetic"} projectName="Synthetic project" feed={undefined} read={read}
       put={put} run={run} reads={reads} query={query} go={go} viewer="example-builder"
       closed={query.scope === 'open' && !rest ? undefined : settled}
-      shelved={shelfRows[query.scope] ? { ...settled, rows: shelfRows[query.scope] } : undefined} showDone={id => window.doneFor.push(id)} /></React.Suspense>
+      shelved={shelfRows[query.scope] ? { ...settled, rows: shelfRows[query.scope] } : undefined}
+      shelvedItem={[...shelfRows.archived, ...shelfRows.deleted].find(row => row.id === rest) ?? null} showDone={id => window.doneFor.push(id)} /></React.Suspense>
   </ProjectFrame>;
 }
 createRoot(document.getElementById('root')).render(<Fixture />);
@@ -684,6 +685,29 @@ test('plan views and bulk bar: real components keep the view in the address and 
     assert.deepEqual(errors, []);
     await context.close();
   }
+  {
+    // Review 9cc310fc: a Deleted Item opened by its link says where it is and offers Restore, never Archive or Delete.
+    const gone = '00000000-0000-4000-8000-000000000031';
+    const { page, errors, context } = await open(1440, 'light', `/${gone}`);
+    assert.match(await page.locator('main').textContent(), /Benchmark against the v1 parser Deleted\./);
+    assert.match(await page.locator('.quietline[role=status]').textContent(), /is deleted, was In progress/);
+    await page.getByRole('button', { name: 'More actions' }).click();
+    const menu = page.getByRole('menuitem');
+    assert.deepEqual(await menu.allTextContents(), ['Restore']);
+    const before = await page.evaluate(() => window.calls.length);
+    await menu.click();
+    await page.waitForFunction(n => window.calls.length === n + 1, before);
+    assert.deepEqual(await page.evaluate(() => window.calls.at(-1)), [
+      {
+        action: 'put-planning-item',
+        itemId: gone,
+        expectedVersion: 3,
+        status: 'in-progress',
+      },
+    ]);
+    assert.deepEqual(errors, []);
+    await context.close();
+  }
   for (const [name, search] of [
     ['list', ''],
     ['tree', '?view=tree'],
@@ -694,6 +718,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
     // Find and the Item page (Item 4c9e961e): the same width and theme checks as the plan views.
     ['find', '?q=parser'],
     ['item', '/00000000-0000-4000-8000-000000000016'],
+    ['archived item', '/00000000-0000-4000-8000-000000000030'],
   ])
     for (const width of [1440, 390])
       for (const theme of ['dark', 'light'])

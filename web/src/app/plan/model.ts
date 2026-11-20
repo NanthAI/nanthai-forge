@@ -20,7 +20,16 @@ export type PlanRead = {
   canEdit: boolean;
 };
 
-export type PlanLine = { row: PlanRow; depth: number; rank: number; next: boolean; blockedBy?: PlanRow };
+export type PlanLine = {
+  row: PlanRow;
+  depth: number;
+  rank: number;
+  next: boolean;
+  blockedBy?: PlanRow;
+  /** Its Initiative is not among the read Initiatives although all were read: it was archived or deleted (members
+   * see the Item under No Initiative with this mark; public reads hide it). */
+  shelvedInitiative?: true;
+};
 export type PlanGroup = {
   /** null: No Initiative. */
   initiative: PlanRow | null;
@@ -81,6 +90,7 @@ export function planView(
   const shown = all.filter(row => row.kind === 'issue' || isLive(row) || withItems.has(row.id));
   const { next } = nextItem(shown);
   const open = new Set(items.map(row => row.id));
+  const initiatives = new Set(all.filter(row => row.kind === 'initiative').map(row => row.id));
   const settled = new Map(read.settled.map(entry => [entry.initiativeId, entry]));
   const groups: PlanGroup[] = [];
   for (const { initiative, rows } of planOrder(shown)) {
@@ -103,6 +113,9 @@ export function planView(
         rank: top,
         next: row.id === next?.id,
         ...(blocker ? { blockedBy: byId.get(blocker.id) } : {}),
+        ...(!initiative && !read.more && row.initiativeId && !initiatives.has(row.initiativeId)
+          ? { shelvedInitiative: true as const }
+          : {}),
       });
     });
     groups.push({
