@@ -8,6 +8,14 @@
   a.lk.lanes-inline { text-decoration: underline; }
   .yard .grp { display: block; }
   .yard a.ln { text-decoration: none; }
+  /* A row that shares files (Item f787005c): its own link under the row, at the title's edge, inside the row's rule. */
+  .yard .ln-item.sh { border-bottom: var(--rule) solid var(--line); }
+  .yard .ln-item.sh > .ln { border-bottom: 0; }
+  /* 38px and 32px: the row's avatar (28px, dense 22px) and its 10px gap in ds figures.css .ln .lab, so the line starts
+     under the title. */
+  .yard .ln-sh { padding: 0 var(--gut) var(--s-1) calc(var(--gut) + 38px); font-size: var(--t-meta); line-height: var(--lh-head); }
+  .yard .ln-sh > a { display: inline-flex; align-items: center; min-block-size: var(--s-6); }
+  .yard.dense .ln-sh { padding-left: calc(var(--gut) + 32px); padding-bottom: 0; }
   .lanes-files { list-style: none; margin: 0; padding: 0; }
   .lanes-files .row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .lanes-files .row:has(> .num) { grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--s-3); }

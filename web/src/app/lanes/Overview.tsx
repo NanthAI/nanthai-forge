@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Lanes (Item e317b6ea): what needs the reader, then every open Lane on the shell's stops and the files Lanes share.
-// What landed is History (c613e6bc). The yard's stops and held marks are the line feed's, so the counts here are
-// the top bar's.
-// Regions move with the dock; the deep regions read only while open. Filters live in the address, so a link, a
-// reload and browser Back show the same view.
+// Lanes (Item e317b6ea): what needs the reader, then every open Lane on the shell's stops. What landed is History
+// (c613e6bc). The yard's stops and held marks are the line feed's, so the counts here are the top bar's. Each row that
+// shares saved files with other open Lanes says so and links to Who is touching what (Item f787005c), which replaced
+// the Overlaps block that sat below the yard.
+// Regions move with the dock. Filters live in the address, so a link, a reload and browser Back show the same view.
 import { useMemo, type ReactNode } from 'react';
-import { Dock, Key, Region, useDockLayout, useFold, type DockLayout } from '../../ds';
+import { Dock, Key, Region, useDockLayout, type DockLayout } from '../../ds';
 import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { navigate, useSearch } from '../router';
@@ -14,7 +14,9 @@ import {
   atStop,
   buildYard,
   filterRows,
+  laneFocusHref,
   sharedFiles,
+  sharesByLane,
   situation,
   stopWords,
   yardReady,
@@ -24,8 +26,9 @@ import { useLaneMeta, useQueue, useSharedFiles } from './reads';
 import { Yard } from './Yard';
 import { FirstRun, type LanesProps } from './common';
 
-// History (Item c613e6bc) replaced Landed today; a layout saved with it falls back to this one (useDockLayout).
-const LAYOUT: DockLayout = { top: ['yard', 'overlaps'], a: [], b: [] };
+// History (Item c613e6bc) replaced Landed today and the rows replaced Overlaps (f787005c); a layout saved with either
+// falls back to this one (useDockLayout).
+const LAYOUT: DockLayout = { top: ['yard'], a: [], b: [] };
 const filters: readonly { id: Filter; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'needs', label: 'Held' },
@@ -38,17 +41,17 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
   const stop = search.get('stop');
   const { lanes, error: laneError } = useLaneMeta(projectId);
   const { queue, error: queueError } = useQueue(projectId);
-  const overlapsFold = useFold('lanes-overlaps', true);
-  const shared = useSharedFiles(projectId, overlapsFold[0]);
+  const shared = useSharedFiles(projectId);
   const [layout, setLayout, resetLayout] = useDockLayout('lanes', LAYOUT);
   // Ages ("saved 4 min ago") are worked out when the data changes, never on a timer. Rows wait for all three reads, so
   // a reload never paints titles, people or states that change a moment later (Item 31328be4).
   const yard = useMemo(
     () =>
-      feed && yardReady({ feed, lanes, laneError, queue, queueError })
+      feed && yardReady({ feed, lanes, laneError, queue, queueError, shared })
         ? buildYard(feed, lanes ?? [], queue, Date.now())
         : null,
-    [feed, lanes, laneError, queue, queueError],
+    // shared.view and shared.error, not the object rebuilt each render.
+    [feed, lanes, laneError, queue, queueError, shared.view, shared.error],
   );
   const laneHref = (laneId: string) => hrefFor({ ...route, section: '', rest: laneId });
   const setFilter = (id: Filter) => {
@@ -61,8 +64,9 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
   const said = yard ? situation(yard) : null;
   const shown = yard ? atStop(filterRows(yard.rows, filter, viewerHandle), stop) : [];
   const files = sharedFiles(shared.view);
-  const titleOf = new Map(yard?.rows.map(row => [row.laneId, row.title]));
+  const shares = sharesByLane(files.files);
   const touching = hrefFor({ ...route, section: 'touching', rest: '' });
+  const touchingFor = (laneId: string) => laneFocusHref(touching, laneId);
   const moved = JSON.stringify(layout) !== JSON.stringify(LAYOUT);
 
   const regions = [
@@ -106,7 +110,23 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
             </div>
           ) : shown.length ? (
             <>
-              <Yard rows={shown} hrefOf={laneHref} dense={shown.length > 12} />
+              <Yard
+                rows={shown}
+                hrefOf={laneHref}
+                dense={shown.length > 12}
+                sharesOf={laneId => shares.get(laneId)}
+                sharesHref={touchingFor}
+              />
+              {shared.error || (shared.view && !files.complete) ? (
+                <div className="pf">
+                  {shared.error
+                    ? 'Which Lanes share files could not be read. '
+                    : 'Some Lanes were not compared, so a row may share more files than it says. '}
+                  <A className="lk" href={touching}>
+                    Who is touching what
+                  </A>
+                </div>
+              ) : null}
               {shown.some(row => row.longWait) ? (
                 <div className="pf">
                   A Lane waits longer than a usual check.{' '}
@@ -140,63 +160,6 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
               <Key onClick={() => (stop ? navigate(location.pathname) : setFilter('all'))}>Show all</Key>
             </div>
           )}
-        </Region>
-      ),
-    },
-    {
-      id: 'overlaps',
-      title: 'Overlaps',
-      render: (handle: ReactNode) => (
-        <Region
-          title="Overlaps"
-          handle={handle}
-          weight="watch"
-          fold="lanes-overlaps"
-          foldState={overlapsFold}
-          count={shared.view ? files.files.length : undefined}
-          hint="the same file saved in more than one Lane"
-          sum={
-            shared.view
-              ? files.files.length
-                ? `${files.files.length.toLocaleString()} shared ${files.files.length === 1 ? 'file' : 'files'}`
-                : 'no two open Lanes share a file'
-              : undefined
-          }
-        >
-          {shared.error ? (
-            <p className="quietline">The overlaps could not be read.</p>
-          ) : !shared.view ? (
-            <div className="sk-rows" aria-busy="true" aria-label="Loading the overlaps">
-              <div className="sk" />
-            </div>
-          ) : files.files.length ? (
-            <ul className="lanes-files">
-              {files.files.slice(0, 5).map(file => (
-                <li key={file.path} className="row">
-                  <span className="mono cut" translate="no" title={file.path} dir="ltr">
-                    {file.path}
-                  </span>
-                  <span className="meta t2 cut">
-                    {file.laneIds
-                      .slice(0, 2)
-                      .map(id => titleOf.get(id) ?? `Lane ${id.slice(0, 8)}`)
-                      .join(' and ')}
-                    {file.laneIds.length > 2 ? ` and ${file.laneIds.length - 2} more` : ''}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="quietline">No two open Lanes have saved changes to the same file.</p>
-          )}
-          <div className="pf">
-            {files.files.length > 5 ? `${(files.files.length - 5).toLocaleString()} more. ` : null}
-            {shared.view && !files.complete ? 'Some Lanes were not compared. ' : null}
-            Saved work only.{' '}
-            <A className="lk" href={touching}>
-              Who is touching what
-            </A>
-          </div>
         </Region>
       ),
     },

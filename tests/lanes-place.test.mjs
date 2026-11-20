@@ -273,6 +273,71 @@ test('shared files list only paths saved in two or more Lanes and keep incomplet
   assert.equal(complete, false, 'unknown coverage never becomes a complete list');
 });
 
+test('f787005c: each Lane row counts the files it shares and the other Lanes it shares them with, from the one overlap read', () => {
+  const view = {
+    lanes: [{ laneId: 'a' }, { laneId: 'b' }, { laneId: 'c' }, { laneId: 'd' }],
+    paths: ['x.ts', 'y.ts', 'z.ts'],
+    edits: [
+      { lane: 0, paths: [0, 1] },
+      { lane: 1, paths: [0] },
+      { lane: 2, paths: [0, 1] },
+      { lane: 3, paths: [2] },
+    ],
+    complete: true,
+  };
+  const shares = model.sharesByLane(model.sharedFiles(view).files);
+  assert.deepEqual(Object.fromEntries(shares), {
+    a: { files: 2, lanes: 2 },
+    b: { files: 1, lanes: 2 },
+    c: { files: 2, lanes: 2 },
+  });
+  assert.equal(shares.has('d'), false, 'a Lane alone on its files gets no line');
+  assert.equal(model.sharesWords(shares.get('a')), 'shares 2 files with 2 Lanes');
+  assert.equal(model.sharesWords({ files: 1, lanes: 1 }), 'shares 1 file with 1 Lane');
+});
+
+test('f787005c: Lanes rows wait for the overlap read, so a "shares" line never pushes rows down after they paint', () => {
+  const ready = { feed: feed([mark('a', 'saved')]), lanes: [], queue: { entries: [] } };
+  assert.equal(model.yardReady({ ...ready, shared: { view: undefined } }), false);
+  const view = { lanes: [], paths: [], edits: [], complete: true };
+  assert.equal(model.yardReady({ ...ready, shared: { view } }), true);
+  assert.equal(
+    model.yardReady({ ...ready, shared: { view: undefined, error: new Error('x') } }),
+    true,
+    'a failed overlap read still lets the rows draw (the yard then says it could not read them)',
+  );
+  assert.equal(model.yardReady(ready), true, "a view without the rows' shares does not wait for them");
+});
+
+test("f787005c: a row's shares line opens Who is touching what on that Lane's shared files", () => {
+  const route = {
+    frame: 'project',
+    handle: 'mara',
+    project: 'forge',
+    place: 'lanes',
+    section: 'touching',
+    rest: '',
+  };
+  const href = model.laneFocusHref(hrefFor(route), 'a3cd248a-7ed4-4b01-8590-5e607ac26e75');
+  const url = new URL(href, 'https://forge.test');
+  const opened = parseAppPath(url.pathname);
+  assert.equal(opened.place, 'lanes');
+  assert.equal(opened.section, 'touching');
+  assert.equal(opened.rest, '', 'the Touching view, never the placeholder a detail path opens');
+  const focus = url.searchParams.get(model.LANE_FOCUS);
+  assert.equal(focus, 'a3cd248a-7ed4-4b01-8590-5e607ac26e75');
+  const files = [
+    { path: 'x.ts', laneIds: ['a', focus] },
+    { path: 'y.ts', laneIds: ['a', 'b'] },
+  ];
+  assert.deepEqual(
+    model.filesOfLane(files, focus).map(file => file.path),
+    ['x.ts'],
+  );
+  assert.deepEqual(model.filesOfLane(files, null), files, 'no Lane picked: every shared file');
+  assert.deepEqual(model.filesOfLane(files, 'gone'), [], 'a Lane that landed since shares nothing now');
+});
+
 test('who waits on whom puts waits on a person first and each queued Lane on the one ahead', () => {
   const entries = [
     { position: 1, laneId: 'q1', phase: 'checking', submittedAt: '2026-11-17T10:00:00Z', lastProgressAt: '' },
@@ -812,10 +877,11 @@ test('the old To read address opens History, and History keeps its filters in th
   assert.deepEqual(historyFilter(new URLSearchParams('')), { unread: false, by: null, item: null });
 });
 
-test("a Lanes layout saved while it still had Landed today gives way to today's regions", () => {
-  const now = { top: ['yard', 'overlaps'], a: [], b: [] };
+test("a Lanes layout saved while it still had Landed today or Overlaps gives way to today's regions (f787005c)", () => {
+  const now = { top: ['yard'], a: [], b: [] };
   assert.deepEqual(keptLayout({ top: ['yard'], a: ['overlaps'], b: ['landed'] }, now), now);
-  const moved = { top: [], a: ['overlaps'], b: ['yard'] };
+  assert.deepEqual(keptLayout({ top: ['yard', 'overlaps'], a: [], b: [] }, now), now);
+  const moved = { top: [], a: ['yard'], b: [] };
   assert.deepEqual(keptLayout(moved, now), moved, 'a layout of the same regions is kept');
   assert.deepEqual(keptLayout(null, now), now);
 });

@@ -5,7 +5,8 @@
 // another says what it waits on; a Lane further back is traced to the front of the queue (9e748e41); in the dense
 // yard the Lane mark is never cut (real case: Item 1dd4e095, whose two Lanes read the same once the meta line was
 // cut); axe is clean with no sideways scroll at desk and phone width in both themes, plain and dense; a parked Lane
-// names who it waits on and why (Item e1633718). Set
+// names who it waits on and why (Item e1633718); a row that shares saved files says how many with how many Lanes, in
+// a link of its own to Who is touching what, never nested in the row's link (Item f787005c). Set
 // FORGE_LANE_SHOTS to a folder to also save the screenshots.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -185,6 +186,56 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
         }
       },
     );
+
+    await t.test('f787005c: a sharing row says what it shares, linked to Who is touching what', async t => {
+      for (const [viewport, query] of [
+        [DESK, ''],
+        [PHONE, '?dense=1'],
+      ]) {
+        const page = await open(t, viewport, query);
+        const lines = await page.locator('.yard [role="listitem"]').evaluateAll(items =>
+          items.flatMap(item => {
+            const link = item.querySelector('.ln-sh a');
+            if (!link) return [];
+            return [
+              {
+                title: item.querySelector('a.ln .ttl')?.textContent,
+                shown: link.textContent.replace(item.querySelector('.ln-sh .sr')?.textContent ?? '', ''),
+                href: link.getAttribute('href'),
+                nested: !!link.closest('a.ln'),
+                below:
+                  link.getBoundingClientRect().top >=
+                  item.querySelector('a.ln').getBoundingClientRect().bottom - 0.5,
+              },
+            ];
+          }),
+        );
+        assert.equal(lines.length, 3, `only the three sharing Lanes get a line at ${viewport.width}`);
+        assert.ok(lines.every(line => line.title.startsWith('Account Projects')));
+        assert.deepEqual(lines.map(line => line.shown).sort(), [
+          'shares 1 file with 2 Lanes',
+          'shares 2 files with 2 Lanes',
+          'shares 2 files with 2 Lanes',
+        ]);
+        assert.ok(
+          lines.every(line => line.href.startsWith('#touching-')),
+          'each links to the pair view for its Lane',
+        );
+        assert.ok(
+          lines.every(line => !line.nested && line.below),
+          'a link of its own, under the row',
+        );
+        const name = await page
+          .locator('.ln-sh a')
+          .first()
+          .evaluate(link => link.textContent);
+        assert.match(
+          name,
+          /^Account Projects page in the redesign: shares /,
+          'the link names its Lane to a screen reader',
+        );
+      }
+    });
 
     await t.test('axe and widths: both themes, desk and phone, plain and dense', async t => {
       for (const [viewport, query] of [

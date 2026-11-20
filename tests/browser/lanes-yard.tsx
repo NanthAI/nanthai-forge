@@ -4,12 +4,19 @@
 // Lanes of another Item still busy, a Ready Lane waiting behind one whose check restarted, and (Item 1dd4e095's real
 // case) a quiet Lane beside its quiet resolution Lane. `?dense=1` draws the dense yard a long list uses.
 // Who waits on whom (Item 9e748e41) renders the same queue plus one Lane further back, so its wait is traced to the
-// front.
+// front. Three Lanes share saved files (Item f787005c): each of their rows says how many, linked to Who is touching
+// what for that Lane.
 import { createRoot } from 'react-dom/client';
 import { Region } from '../../web/src/ds';
 import '../../web/src/app/app.css';
 import '../../web/src/app/lanes/lanes.css';
-import { buildYard, waits, type LaneMeta, type QueueEntry } from '../../web/src/app/lanes/model';
+import {
+  buildYard,
+  sharesByLane,
+  waits,
+  type LaneMeta,
+  type QueueEntry,
+} from '../../web/src/app/lanes/model';
 import { WaitRow } from '../../web/src/app/lanes/Touching';
 import { Yard } from '../../web/src/app/lanes/Yard';
 import type { LineFeed } from '../../web/src/app/Line';
@@ -138,6 +145,11 @@ const pairs = waits(
   titleOf,
 );
 
+const shares = sharesByLane([
+  { path: 'web/src/app/account/Projects.tsx', laneIds: [ids.acct1, ids.acct2, ids.acct3] },
+  { path: 'web/src/app/account/account.css', laneIds: [ids.acct1, ids.acct2] },
+]);
+
 createRoot(document.getElementById('root')!).render(
   <main>
     <h1 className="sr">Lanes</h1>
@@ -148,7 +160,13 @@ createRoot(document.getElementById('root')!).render(
       count={yard.rows.length}
       hint="stuck work first"
     >
-      <Yard rows={yard.rows} hrefOf={id => `#${id}`} dense={params.get('dense') === '1'} />
+      <Yard
+        rows={yard.rows}
+        hrefOf={id => `#${id}`}
+        dense={params.get('dense') === '1'}
+        sharesOf={id => shares.get(id)}
+        sharesHref={id => `#touching-${id}`}
+      />
     </Region>
     <Region title="Who waits on whom" weight="act" waiting={1} count={pairs.length}>
       {pairs.map(pair => (

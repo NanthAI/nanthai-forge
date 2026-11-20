@@ -202,8 +202,16 @@ export function yardReady(reads: {
   laneError?: Error;
   queue: QueueView | undefined;
   queueError?: Error;
+  /** The overlap read, when the rows show what they share (Item f787005c): rows wait for it too, so a "shares" line
+   * never pushes the rows below it down a moment after they paint. */
+  shared?: { view: SharedFiles | undefined; error?: Error };
 }) {
-  return !!reads.feed && (!!reads.lanes || !!reads.laneError) && (!!reads.queue || !!reads.queueError);
+  return (
+    !!reads.feed &&
+    (!!reads.lanes || !!reads.laneError) &&
+    (!!reads.queue || !!reads.queueError) &&
+    (!reads.shared || !!reads.shared.view || !!reads.shared.error)
+  );
 }
 
 type Sibling = { laneId: string; intentId: string; lastAt: number; inFlight: boolean; resolves?: string };
@@ -456,6 +464,37 @@ export function sharedFiles(view: SharedFiles | undefined): { files: SharedFile[
     .map(([at, laneIds]) => ({ path: view.paths[at]!, laneIds }))
     .sort((a, b) => b.laneIds.length - a.laneIds.length || a.path.localeCompare(b.path));
   return { files, complete: view.complete };
+}
+
+/** Per open Lane, from the same shared files: how many files it shares and with how many other Lanes (Item
+ * f787005c). Lanes that share nothing are absent. One pass over the overlap read; no read per row. */
+export type LaneShares = { files: number; lanes: number };
+export function sharesByLane(files: readonly SharedFile[]): Map<string, LaneShares> {
+  const seen = new Map<string, { files: number; with: Set<string> }>();
+  for (const file of files)
+    for (const laneId of file.laneIds) {
+      const entry = seen.get(laneId) ?? { files: 0, with: new Set<string>() };
+      entry.files += 1;
+      for (const other of file.laneIds) if (other !== laneId) entry.with.add(other);
+      seen.set(laneId, entry);
+    }
+  return new Map(
+    [...seen].map(([laneId, entry]) => [laneId, { files: entry.files, lanes: entry.with.size }]),
+  );
+}
+/** Who is touching what for one Lane: the address a row's "shares" line opens; Touching reads `lane` back. */
+export const LANE_FOCUS = 'lane';
+export const laneFocusHref = (touching: string, laneId: string) =>
+  `${touching}?${new URLSearchParams({ [LANE_FOCUS]: laneId })}`;
+/** The shared files one Lane is in, or every shared file when no Lane is picked. */
+export function filesOfLane(files: readonly SharedFile[], laneId: string | null): SharedFile[] {
+  return laneId ? files.filter(file => file.laneIds.includes(laneId)) : [...files];
+}
+/** "shares 3 files with 2 Lanes". */
+export function sharesWords(shares: LaneShares): string {
+  const files = `${shares.files.toLocaleString()} ${shares.files === 1 ? 'file' : 'files'}`;
+  const lanes = `${shares.lanes.toLocaleString()} ${shares.lanes === 1 ? 'Lane' : 'Lanes'}`;
+  return `shares ${files} with ${lanes}`;
 }
 
 export type Wait = {

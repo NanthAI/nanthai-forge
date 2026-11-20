@@ -4,7 +4,7 @@
 // (live-reads.ts). The line feed is not read here: the project frame already holds it and passes it down.
 //
 // Per view, at 50 open Lanes: the Lane page (one execution, about 7 indexed reads per Lane, at most 100 Lanes), the queue view (at most
-// 20 entries, about 7 reads each) and, only while its region is open, the overlap view (20 KB budget); the
+// 20 entries, about 7 reads each) and the overlap view (20 KB budget; each yard row's shared-file count comes from it); the
 // newest landings only on History (one page of 30 receipts, 3 rows each for the Lane and Item). Idle: zero.
 import { useState } from 'react';
 import { useConvex, useMutation } from 'convex/react';
@@ -35,8 +35,8 @@ export function useQueue(projectId: Id<'hostedProjects'>) {
   return { queue: parse<QueueView>(read.value), error: read.error };
 }
 
-export function useSharedFiles(projectId: Id<'hostedProjects'>, open: boolean) {
-  const read = useSafeQuery(api.projectNowOverlaps.now, open ? { projectId } : 'skip');
+export function useSharedFiles(projectId: Id<'hostedProjects'>) {
+  const read = useSafeQuery(api.projectNowOverlaps.now, { projectId });
   return { view: parse<{ signals: SharedFiles }>(read.value)?.signals, error: read.error };
 }
 

@@ -2,15 +2,28 @@
 // Who is touching what (Item eb0bbb94): files saved in more than one Lane, who waits on whom and why (traced to the
 // front of the queue, Item 9e748e41), the landing
 // queue in order with held Lanes apart, and who has what. Built only from the existing queue, hold and overlap
-// records the Lanes place already reads; saved work only, so no row here ever proves two Lanes independent.
+// records the Lanes place already reads; saved work only, so no row here ever proves two Lanes independent. A yard row's
+// "shares N files with M Lanes" opens this with `?lane=` (Item f787005c): Where Lanes cross then lists that Lane's
+// shared files first-hand, with a link back to every shared file; the address alone carries it.
 import { useMemo, type ReactNode } from 'react';
 import { Avatar, Dock, Key, Region, State, useDockLayout, type DockLayout } from '../../ds';
 import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { Head, crumbsFor } from '../Place';
+import { useSearch } from '../router';
 import type { LanesProps } from './common';
 import { currentEntries, queueEntryState, waitLine, type LaneMark } from '../lane-state';
-import { buildYard, sharedFiles, waits, yardReady, type QueueEntry, type Wait, type YardRow } from './model';
+import {
+  LANE_FOCUS,
+  buildYard,
+  filesOfLane,
+  sharedFiles,
+  waits,
+  yardReady,
+  type QueueEntry,
+  type Wait,
+  type YardRow,
+} from './model';
 import { useLaneMeta, useQueue, useSharedFiles } from './reads';
 
 const LAYOUT: DockLayout = { top: ['cross'], a: ['waits', 'queue'], b: ['has'] };
@@ -28,7 +41,7 @@ const age = (from: string, now: number) => {
 export function Touching({ route, projectId, projectName, feed }: LanesProps) {
   const { lanes, error: laneError } = useLaneMeta(projectId);
   const { queue, error: queueError } = useQueue(projectId);
-  const shared = useSharedFiles(projectId, true);
+  const shared = useSharedFiles(projectId);
   const [layout, setLayout, resetLayout] = useDockLayout('touching', LAYOUT);
   const now = Date.now();
   const yard = useMemo(
@@ -41,7 +54,10 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
   const rowOf = new Map<string, YardRow>(yard?.rows.map(row => [row.laneId, row]));
   const titleOf = (laneId: string) => rowOf.get(laneId)?.title ?? `Lane ${laneId.slice(0, 8)}`;
   const laneHref = (laneId: string) => hrefFor({ ...route, section: '', rest: laneId });
-  const files = sharedFiles(shared.view);
+  const all = sharedFiles(shared.view);
+  const focus = useSearch().get(LANE_FOCUS);
+  const files = { ...all, files: filesOfLane(all.files, focus) };
+  const everyFile = hrefFor({ ...route, section: 'touching', rest: '' });
   const ordered = (queue?.entries ?? []).filter(entry => entry.position !== null);
   // Out of the order: held for a person, a dependency or main, and ended checks; only each Lane's current submission
   // (an earlier one is history).
@@ -67,8 +83,8 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
   );
   const lead = !shared.view
     ? 'Loading the Lanes…'
-    : files.files.length
-      ? `${files.files.length.toLocaleString()} ${files.files.length === 1 ? 'file is' : 'files are'} saved in more than one Lane.`
+    : all.files.length
+      ? `${all.files.length.toLocaleString()} ${all.files.length === 1 ? 'file is' : 'files are'} saved in more than one Lane.`
       : 'No two open Lanes have saved the same file.';
   const rest = queue
     ? `${onPerson ? `${onPerson.toLocaleString()} ${onPerson === 1 ? 'Lane waits' : 'Lanes wait'} on a person, ` : ''}${(pairs.length - onPerson).toLocaleString()} on another Lane or on main.`
@@ -97,9 +113,22 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
           count={shared.view ? files.files.length : undefined}
           hint="saved work only: unsaved edits are not seen"
         >
+          {focus && yard ? (
+            <p className="quietline">
+              The files{' '}
+              <A className="lk lanes-inline" href={laneHref(focus)} dir="auto">
+                {titleOf(focus)}
+              </A>{' '}
+              shares with other open Lanes.{' '}
+              <A className="lk" href={everyFile}>
+                Every shared file
+              </A>
+            </p>
+          ) : null}
           {shared.error ? (
             <p className="quietline">The overlaps could not be read.</p>
-          ) : !shared.view ? (
+          ) : !shared.view || (focus && !yard) ? (
+            // With a Lane picked, its files wait for its title too, so the line above never pushes them down.
             <div className="sk-rows" aria-busy="true" aria-label="Loading the overlaps">
               <div className="sk" />
             </div>
@@ -130,7 +159,11 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
               ))}
             </ul>
           ) : (
-            <p className="quietline">No two open Lanes have saved changes to the same file.</p>
+            <p className="quietline">
+              {focus
+                ? 'This Lane shares no saved file with another open Lane now.'
+                : 'No two open Lanes have saved changes to the same file.'}
+            </p>
           )}
           {more(files.files.length - CAP, 'more shared files')}
           {shared.view && !files.complete ? (

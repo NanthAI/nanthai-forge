@@ -6,6 +6,8 @@
 // along the Checking stop by a CSS animation drawn from the check's start: the browser moves it with no script per
 // frame and no server call. One timer at most, for the whole yard, armed only for the next minute its words change and
 // never past the usual slowest check, none while live reads sleep (hidden or idle tab), when the mark rests in place.
+// A Lane that saved a file another open Lane also saved says so under its row, "shares 3 files with 2 Lanes", linked to
+// Who is touching what for that Lane (Item f787005c); a link of its own, beside the row's link, never inside it.
 import { useEffect, useState, type CSSProperties } from 'react';
 import { Avatar, Band, State } from '../../ds';
 import { useReadsAsleep } from '../../live-reads';
@@ -16,8 +18,10 @@ import {
   CHECK_TO,
   bandTitles,
   checkProgress,
+  sharesWords,
   stopWords,
   type Band as BandName,
+  type LaneShares,
   type YardRow,
 } from './model';
 
@@ -29,10 +33,15 @@ export function Yard({
   rows,
   hrefOf,
   dense,
+  sharesOf,
+  sharesHref,
 }: {
   rows: readonly YardRow[];
   hrefOf: (laneId: string) => string;
   dense: boolean;
+  /** What a Lane shares with other open Lanes, from the one overlap read; absent when it shares nothing. */
+  sharesOf?: (laneId: string) => LaneShares | undefined;
+  sharesHref?: (laneId: string) => string;
 }) {
   const { now, asleep } = useCheckClock(rows);
   return (
@@ -48,11 +57,24 @@ export function Yard({
               hint={bandTitles[band].hint}
               needs={band === 'needs'}
             />
-            {inBand.map(row => (
-              <div role="listitem" key={row.laneId} style={{ display: 'contents' }}>
-                <LaneLine row={row} href={hrefOf(row.laneId)} dense={dense} now={now} glide={!asleep} />
-              </div>
-            ))}
+            {inBand.map(row => {
+              const shares = sharesHref ? sharesOf?.(row.laneId) : undefined;
+              return (
+                <div role="listitem" key={row.laneId} className={shares ? 'ln-item sh' : 'ln-item'}>
+                  <LaneLine row={row} href={hrefOf(row.laneId)} dense={dense} now={now} glide={!asleep} />
+                  {shares && sharesHref ? (
+                    <div className="ln-sh">
+                      <A className="lk" href={sharesHref(row.laneId)}>
+                        <span className="sr" dir="auto">
+                          {row.title}:{' '}
+                        </span>
+                        {sharesWords(shares)}
+                      </A>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         );
       })}
