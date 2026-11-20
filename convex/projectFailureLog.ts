@@ -6,10 +6,19 @@
 import type { Id } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';
 import { scrubText } from '../src/client-error-text';
+import {
+  FAILURE_ERROR_CHARS,
+  FAILURE_FILES_KEPT,
+  FAILURE_FILE_CHARS,
+  FAILURE_STEP_CHARS,
+  checkFailureCodes,
+  messageDetail,
+  type FailureDetail,
+} from '../src/failure-noise';
 
 /** Most characters of a failure message kept. */
 export const FAILURE_MESSAGE_MAX = 240;
-export type FailureRecord = {
+export type FailureRecord = FailureDetail & {
   schema: 1;
   kind: 'operation' | 'landing';
   code: string;
@@ -29,15 +38,44 @@ const chosenEndings = new Set([
   'RECOVERY_SUPERSEDED',
 ]);
 
-/** One line, scrubbed by the shared client-error rules (URL queries, tokens), home folder names removed. */
-export const sanitizeFailureMessage = (text: string) =>
+const sanitize = (text: string, max: number) =>
   scrubText(
     text
       .replace(/\s+/g, ' ')
       .replace(/\/(?:Users|home)\/[^/\s]+/g, '~')
       .trim(),
-    FAILURE_MESSAGE_MAX,
+    max,
   );
+/** One line, scrubbed by the shared client-error rules (URL queries, tokens), home folder names removed. */
+export const sanitizeFailureMessage = (text: string) => sanitize(text, FAILURE_MESSAGE_MAX);
+
+/**
+ * The bounded detail a failed check keeps (Item 44f2b109): its failing test files and first error from the
+ * summary the landing already holds, else the failing job step its settled message names. Pure; reads
+ * nothing. Only check failures carry it (the message alone says enough for any other code).
+ */
+export function failureDetail(state: {
+  testFiles?:
+    | { counts: { failed: number }; failed: { file: string; report: { firstError?: string | undefined } }[] }
+    | undefined;
+  error: { code: string; message: string };
+}): FailureDetail {
+  if (!checkFailureCodes.has(state.error.code)) return {};
+  const failed = state.testFiles?.failed ?? [];
+  if (failed.length) {
+    const files = failed.slice(0, FAILURE_FILES_KEPT).map(item => sanitize(item.file, FAILURE_FILE_CHARS));
+    const first = failed[0]!.report.firstError;
+    const more = Math.max(failed.length, state.testFiles!.counts.failed) - files.length;
+    return {
+      files,
+      ...(more > 0 ? { more } : {}),
+      ...(first ? { error: sanitize(first, FAILURE_ERROR_CHARS) } : {}),
+    };
+  }
+  // A run that named no file: its job and line, as the message sentence carries them.
+  const step = messageDetail(state.error.message).step;
+  return step ? { step: sanitize(step, FAILURE_STEP_CHARS) } : {};
+}
 
 /**
  * Append one failure row unless this operation already has one (a replayed settle writes nothing).
@@ -51,6 +89,7 @@ export async function recordFailure(
     kind: FailureRecord['kind'];
     error: { code: string; message: string };
     startedAt?: string | undefined;
+    detail?: FailureDetail | undefined;
   },
 ) {
   if (chosenEndings.has(input.error.code)) return false;
@@ -68,6 +107,7 @@ export async function recordFailure(
     code: input.error.code.slice(0, 80),
     message: sanitizeFailureMessage(input.error.message),
     elapsedMs: Number.isFinite(started) ? Math.max(0, Date.now() - started) : null,
+    ...input.detail,
   };
   await ctx.db.insert('projectFailures', {
     projectId: input.projectId,

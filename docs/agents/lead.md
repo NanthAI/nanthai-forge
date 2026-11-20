@@ -185,7 +185,8 @@ A speed or reliability question gets a number with its metric and window, or
 "cannot measure yet". Say first when the metrics cannot observe the path.
 Each check-in runs `nforge metrics ROOT --failures --from <previous check-in>` and
 reports the top failure codes with counts, any code not seen in the previous report
-and any landing failure an agent could not recover from. A rising or new code gets a
+and any landing failure an agent could not recover from (`--failures --checks` lists the failed
+checks with their files or step and a `runner`/`budget`/`flake`/`real` tag in one read). A rising or new code gets a
 planning search and a comment or new Issue, like a flaky file.
 Before launching more than one test-heavy builder, a check-in also reads the
 [queue health alarm](#queue-health-alarm) state (`pass-to-land-p90` in `nforge metrics ROOT --text`);

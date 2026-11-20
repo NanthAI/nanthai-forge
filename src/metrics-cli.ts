@@ -12,7 +12,7 @@ export async function metricsCli(args: string[]) {
   if (args[0] === 'record-bill') return recordBillCli(args.slice(1));
   if (!args.length || args[0] === '--help') {
     process.stdout.write(
-      'nforge metrics ROOT [--from DATE] [--to DATE] [--json | --text] [--report FILE.md] [--compare FROM..TO] [--limit N] [--cursor C] [--context-days N] [--flake-issues]\nnforge metrics ROOT --failures [--from DATE] [--to DATE] [--text]\nnforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [...]\nUTC windows are [from,to). JSON is the default for agents/non-TTY output.\n--limit N pages the report row lists (N entries per list; follow page.nextCursor with --cursor C, same window); per-day rows are omitted when paging.\n--context-days N (0 to 30, default 2) sets the days of pre-window history read to classify landings; the window and this horizon bound the read.\n--flake-issues prints only the flaky-file list, each with its Issue.\n--failures prints the health report: failed operations and landings in the window counted by code, with first and last time, median time to fail and the latest message (one bounded read; default window the last 7 days).\n',
+      'nforge metrics ROOT [--from DATE] [--to DATE] [--json | --text] [--report FILE.md] [--compare FROM..TO] [--limit N] [--cursor C] [--context-days N] [--flake-issues]\nnforge metrics ROOT --failures [--from DATE] [--to DATE] [--text] [--checks [--limit N] [--cursor C] [--noise TAG]]\nnforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [...]\nUTC windows are [from,to). JSON is the default for agents/non-TTY output.\n--limit N pages the report row lists (N entries per list; follow page.nextCursor with --cursor C, same window); per-day rows are omitted when paging.\n--context-days N (0 to 30, default 2) sets the days of pre-window history read to classify landings; the window and this horizon bound the read.\n--flake-issues prints only the flaky-file list, each with its Issue.\n--failures prints the health report: failed operations and landings in the window counted by code, with first and last time, median time to fail and the latest message (one bounded read; default window the last 7 days).\n--failures --checks lists failed checks instead, newest first: operation id, code, failing test files or static step, first error and a noise tag (runner, budget, flake, real, unknown), N per page (default 20, up to 100; follow nextCursor with --cursor C), --noise TAG keeps one tag. One read of at most 500 rows.\n',
     );
     return;
   }
@@ -31,6 +31,8 @@ export async function metricsCli(args: string[]) {
         '--text',
         '--flake-issues',
         '--failures',
+        '--checks',
+        '--noise',
         '--limit',
         '--cursor',
         '--context-days',
@@ -38,7 +40,13 @@ export async function metricsCli(args: string[]) {
       'BAD_ARGUMENT',
       'Unknown or repeated metrics option.',
     );
-    if (flag === '--json' || flag === '--text' || flag === '--flake-issues' || flag === '--failures')
+    if (
+      flag === '--json' ||
+      flag === '--text' ||
+      flag === '--flake-issues' ||
+      flag === '--failures' ||
+      flag === '--checks'
+    )
       options[flag] = 'true';
     else {
       const value = flags[++i];
@@ -69,7 +77,7 @@ export async function metricsCli(args: string[]) {
     `--context-days must be a finite number from 0 to ${METRICS_CONTEXT_DAYS_MAX}.`,
   );
   invariant(
-    !options['--cursor'] || limit !== undefined,
+    !options['--cursor'] || limit !== undefined || options['--checks'] !== undefined,
     'BAD_ARGUMENT',
     '--cursor needs --limit, the same as its first page.',
   );
@@ -78,15 +86,27 @@ export async function metricsCli(args: string[]) {
     'BAD_ARGUMENT',
     '--context-days N (0 to 30, default 2) sets the days of pre-window history read to classify landings; the window and this horizon bound the read.\n--flake-issues prints only the flake list; do not combine it with --limit or --compare.',
   );
+  invariant(
+    !(options['--checks'] || options['--noise']) || options['--failures'],
+    'BAD_ARGUMENT',
+    '--checks and --noise go with --failures.',
+  );
   if (options['--failures']) {
+    const checks = options['--checks'] !== undefined;
     invariant(
-      limit === undefined &&
+      limit === undefined || !checks || limit <= 100,
+      'BAD_ARGUMENT',
+      '--limit with --checks is at most 100.',
+    );
+    invariant(
+      (limit === undefined || checks) &&
         !compare &&
         !options['--flake-issues'] &&
         !options['--report'] &&
-        contextDays === undefined,
+        contextDays === undefined &&
+        (checks || (!options['--cursor'] && !options['--noise'])),
       'BAD_ARGUMENT',
-      '--failures takes only --from, --to and --json or --text.',
+      '--failures takes --from, --to, --json or --text, and with --checks also --limit, --cursor and --noise.',
     );
     const address = metricAddress(owner).address;
     invariant(
@@ -96,7 +116,21 @@ export async function metricsCli(args: string[]) {
     );
     // One query: the bounded failure-log read (convex/projectFailureReport.ts).
     const failures: unknown = JSON.parse(
-      String(await metricQuery(address)('projectFailureReport:report', { from: period.from, to: period.to })),
+      String(
+        await metricQuery(address)('projectFailureReport:report', {
+          from: period.from,
+          to: period.to,
+          ...(checks
+            ? {
+                checks: {
+                  limit: limit ?? 20,
+                  ...(options['--cursor'] ? { cursor: options['--cursor'] } : {}),
+                  ...(options['--noise'] ? { noise: options['--noise'] } : {}),
+                },
+              }
+            : {}),
+        }),
+      ),
     );
     if (options['--text']) process.stdout.write(JSON.stringify(failures, null, 2) + '\n');
     else return failures;

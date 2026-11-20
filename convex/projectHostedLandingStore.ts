@@ -41,7 +41,7 @@ import {
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
 import { recordGuardFailure, recordLandingSpeed } from './projectLandingSpeed';
 import { PASS_HELD, keepsPassStamp } from '../src/landing-speed-alerts';
-import { recordFailure } from './projectFailureLog';
+import { failureDetail, recordFailure } from './projectFailureLog';
 import { bindRunnerAccounting, bindSupersededCheck } from './projectHostedLandingRunnerCosts';
 import { invariant } from '../src/errors';
 import { settleEndedBatch } from './projectHostedLandingBatchSettle';
@@ -534,6 +534,7 @@ export async function failedLanding(ctx: MutationCtx, state: HostedLandingState)
     kind: 'landing',
     error: state.error,
     startedAt: state.timing?.submittedAt ?? state.at,
+    detail: failureDetail({ testFiles: state.testFiles, error: state.error }),
   });
   // Once per failed check (the failure row dedupes): it teaches the preflight guard set (13ea93bf).
   if (recorded && state.error.code === 'CHECK_FAILED') await recordGuardFailure(ctx, state);

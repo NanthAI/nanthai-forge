@@ -122,3 +122,202 @@ test('the report groups by kind and code, newest message last, and says when the
   ]);
   assert.equal(health.FAILURE_REPORT_ROWS, 500);
 });
+
+// Item 44f2b109: one read lists failed checks with their causes (friction 3185b8bd: 82 audits took 82 reads).
+const noise = await import(moduleUrl('../src/failure-noise.ts'));
+const { checkFailureDetail, CHECK_FAILED_NEXT } = await import(moduleUrl('../src/check-failure-detail.ts'));
+
+test('a failed check keeps its failing files, first error and step, not just the clipped message', () => {
+  const report = error => ({ failed: true, ...(error ? { firstError: error } : {}) });
+  const detail = log.failureDetail({
+    testFiles: {
+      counts: { failed: 8 },
+      failed: ['a', 'b', 'c', 'd', 'e', 'f'].map((name, i) => ({
+        file: `tests/${name}.test.mjs`,
+        report: report(i === 0 ? 'cliAgentLandCpuMs 410 over   budget 300\nstack' : undefined),
+      })),
+    },
+    error: { code: 'CHECK_FAILED', message: 'x' },
+  });
+  assert.deepEqual(
+    detail.files,
+    ['a', 'b', 'c', 'd', 'e'].map(name => `tests/${name}.test.mjs`),
+  );
+  assert.equal(detail.more, 3, 'six listed or counted files, eight failed: five kept, three more');
+  assert.equal(detail.error, 'cliAgentLandCpuMs 410 over budget 300 stack');
+  assert(Buffer.byteLength(JSON.stringify(detail)) < 600, 'the added detail stays a few hundred bytes');
+  const step = log.failureDetail({
+    error: {
+      code: 'CHECK_FAILED',
+      message: `The original exact check settled as failed. ${checkFailureDetail({}, { job: 'static', excerpt: 'error TS2322 in src/x.ts' })} ${CHECK_FAILED_NEXT}`,
+    },
+  });
+  assert.deepEqual(step, { step: 'static: error TS2322 in src/x.ts' });
+  assert.deepEqual(
+    log.failureDetail({ error: { code: 'SOURCE_RETRY_EXHAUSTED', message: 'Failing: a.ts' } }),
+    {},
+  );
+});
+
+test('the message reader returns what the formatter wrote: files, first error and step (old rows)', () => {
+  const sentence = checkFailureDetail(
+    {
+      testFiles: {
+        counts: { failed: 3 },
+        failed: [
+          { file: 'tests/a.test.mjs', report: { failed: true, firstError: 'boom: 1 !== 2' } },
+          { file: 'tests/b.test.mjs', report: { failed: true } },
+        ],
+      },
+    },
+    null,
+    2,
+  );
+  assert.deepEqual(
+    noise.messageDetail(`The original exact check settled as failed. ${sentence} Fix it in this Lane`),
+    {
+      files: ['tests/a.test.mjs', 'tests/b.test.mjs'],
+      error: 'boom: 1 !== 2',
+    },
+  );
+  assert.deepEqual(
+    noise.messageDetail(
+      `The exact check settled as failed. ${checkFailureDetail({}, { job: 'static', excerpt: 'lint: no-unused' })} Fix it in this Lane, save`,
+    ),
+    { step: 'static: lint: no-unused' },
+  );
+  // The settled message names one file: what follows is the next step or a flaky note, never a second file.
+  const next = 'Fix it in this Lane, save, then run land --save again';
+  const one = checkFailureDetail({
+    testFiles: {
+      counts: { failed: 1 },
+      failed: [{ file: 'tests/a.test.mjs', report: { failed: true, firstError: 'boom' } }],
+    },
+  });
+  assert.deepEqual(noise.messageDetail(`The exact check settled as failed. ${one} ${next}`), {
+    files: ['tests/a.test.mjs'],
+    error: 'boom',
+  });
+  assert.deepEqual(
+    noise.messageDetail(
+      `settled as failed. ${checkFailureDetail({ testFiles: { counts: { failed: 1 }, failed: [{ file: 'tests/a.test.mjs', report: { failed: true } }] } })} ${next}`,
+    ),
+    { files: ['tests/a.test.mjs'] },
+    'a file with no first error is still listed, not dropped',
+  );
+  const flaky = noise.messageDetail(
+    `settled as failed. Failing: tests/a.test.mjs (expected 1, got 2). Flaky, passed on retry: tests/b.test.mjs (page.goto: Timeout 30000ms exceeded). ${next}`,
+  );
+  assert.deepEqual(flaky, { files: ['tests/a.test.mjs'], error: 'expected 1, got 2' });
+  assert.equal(
+    noise.failureNoise({ code: 'CHECK_FAILED', ...flaky }),
+    'real',
+    'a flaky file that passed is not the cause',
+  );
+  // A static step that fails while a file passed on retry: the flaky note follows the step line with no period.
+  const stepAndFlaky = noise.messageDetail(
+    `settled as failed. ${checkFailureDetail(
+      {
+        testFiles: {
+          counts: { failed: 0 },
+          failed: [],
+          flaky: [{ file: 'tests/b.test.mjs', report: { flaky: true, firstError: 'Test timed out' } }],
+        },
+      },
+      { job: 'test (ubuntu-latest)', excerpt: 'Error: lint failed in src/a.ts' },
+    )} ${next}`,
+  );
+  assert.deepEqual(stepAndFlaky, { step: 'test (ubuntu-latest): Error: lint failed in src/a.ts' });
+  assert.equal(noise.failureNoise({ code: 'CHECK_FAILED', ...stepAndFlaky }), 'real');
+  assert.deepEqual(noise.messageDetail('The admission check settled; nothing named.'), {});
+});
+
+test('noise tags: runner, budget, flake, real, and unknown when nothing names a cause', () => {
+  const tag = (code, detail) => noise.failureNoise({ code, ...detail });
+  assert.equal(tag('CHECK_NOT_PASSED', {}), 'runner');
+  assert.equal(tag('CONTRACT_OVER_BUDGET', {}), 'budget');
+  assert.equal(
+    tag('CHECK_FAILED', { files: ['tests/smoke-package.test.mjs'], error: 'cliAgentLandCpuMs 410 > 300' }),
+    'budget',
+    'the 11-19 smoke:package CPU budget failures',
+  );
+  assert.equal(
+    tag('CHECK_FAILED', {
+      files: ['tests/app-id-palette-browser.test.mjs'],
+      error: 'page.goto: Timeout 30000ms exceeded',
+    }),
+    'flake',
+    'the app-id-palette-browser flakes',
+  );
+  assert.equal(tag('CHECK_FAILED', { step: 'static: ENOSPC: no space left on device' }), 'runner');
+  assert.equal(tag('CHECK_FAILED', { files: ['tests/x.test.mjs'], error: 'expected 1, got 2' }), 'real');
+  assert.equal(tag('CHECK_FAILED', {}), 'unknown');
+});
+
+test('failed checks page newest first with a cursor that loses and repeats nothing, and filter by tag', () => {
+  const row = (minute, code, value, kind = 'landing') => ({
+    _creationTime: Date.parse('2026-11-19T10:00:00Z') + minute * 60_000,
+    operationId: `op${minute}`,
+    value: JSON.stringify({ schema: 1, kind, code, message: 'm', elapsedMs: 1000, ...value }),
+  });
+  const rows = [
+    row(9, 'CHECK_FAILED', { files: ['tests/a.test.mjs'], error: 'expected 1, got 2' }),
+    row(8, 'SOURCE_RETRY_EXHAUSTED', {}, 'operation'),
+    row(7, 'CHECK_FAILED', { files: ['tests/a.test.mjs', 'tests/b.test.mjs'], more: 2, error: 'timed out' }),
+    row(6, 'LANDING_BATCH_LEAKED', {}),
+    row(5, 'CHECK_NOT_PASSED', {}),
+    row(4, 'CHECK_FAILED', { step: 'static: lint' }),
+  ];
+  const first = health.failedChecks(rows, { limit: 2, more: false });
+  assert.deepEqual(
+    first.checks.map(c => [c.operationId, c.noise]),
+    [
+      ['op9', 'real'],
+      ['op7', 'flake'],
+    ],
+    'operations and other landing codes are not checks',
+  );
+  assert.equal(first.checks[1].more, 2);
+  assert.deepEqual(first.repeatedFiles, [{ file: 'tests/a.test.mjs', count: 2 }]);
+  assert.deepEqual(first.noise, { runner: 0, budget: 0, flake: 1, real: 1, unknown: 0 });
+  const rest = rows.filter(r => r._creationTime < Number(first.nextCursor));
+  const second = health.failedChecks(rest, { limit: 2, more: false });
+  assert.deepEqual(
+    second.checks.map(c => c.operationId),
+    ['op5', 'op4'],
+  );
+  assert.equal(second.nextCursor, null);
+  assert.deepEqual(
+    health.failedChecks(rows, { limit: 5, noise: 'runner', more: false }).checks.map(c => c.operationId),
+    ['op5'],
+  );
+  assert.equal(
+    health.failedChecks(rows.slice(0, 2), { limit: 5, more: true }).nextCursor,
+    String(rows[1]._creationTime),
+    'a scan that ended before the window did continues after its last row',
+  );
+});
+
+test('the failed-checks read refuses a bad limit, cursor or tag and keeps the owner-only rule', async t => {
+  const { f } = await checking(t);
+  const at = Date.now(),
+    window = { from: new Date(at - 86_400_000).toISOString(), to: new Date(at + 60_000).toISOString() };
+  for (const checks of [
+    { limit: 0 },
+    { limit: 101 },
+    { limit: 5, noise: 'bogus' },
+    { limit: 5, cursor: 'x' },
+  ])
+    await assert.rejects(
+      f.tx('badChecks', health.report, { projectId: f.projectId, ...window, checks }),
+      /BAD_ARGUMENT/,
+    );
+  await assert.rejects(
+    f.tx(
+      'checksOther',
+      health.report,
+      { projectId: f.projectId, ...window, checks: { limit: 5 } },
+      'stranger',
+    ),
+  );
+});

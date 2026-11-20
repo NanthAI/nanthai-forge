@@ -215,6 +215,21 @@ operational expiry pages. Owner or agent-guidance maintainer only. Messages keep
 URL query string, token-shaped value or home folder name (the shared
 `src/client-error-text.ts` rules), at most 240 characters.
 
+`nforge metrics ROOT --failures --checks [--limit N] [--cursor C] [--noise TAG]` lists failed
+checks instead (Item 44f2b109): newest first, each with its operation id, code, failing test
+files (at most five, `more` counts the rest) or the failing static step, the first error and one
+noise tag, so a flaky gate and a real failure are told apart in one read. The tags are `runner`
+(the CI or machine, or a check that never ran), `budget` (a time or size budget), `flake` (a
+timeout, browser or port signature), `real` (a named file or step with none of those) and
+`unknown` (nothing retained names a cause). The tag is read from the stored row, so rows written
+before the detail fields exist are tagged from their clipped message and may list fewer files.
+`--noise TAG` keeps one tag. A page is `--limit` rows (default 20, at most 100, up to about 1 KB
+each, so at most about 100 KB) with the tag counts and the files that failed more than once on
+the page; follow `nextCursor` with `--cursor` for the next page of the same window. It is one
+query over the same indexed read (at most 500 rows), nothing while idle and no new table or
+command; a failed check's row grows from about 300 to at most about 1 KB (a read of 500 rows is at most about 500 KB). Only landing
+codes `CHECK_FAILED`, `CHECK_NOT_PASSED` and `CONTRACT_OVER_BUDGET` are checks.
+
 `metrics` replies are boundable: `--limit N` (`limit` in `nforge agent ROOT metrics`,
 1 to 200) pages every row list in the window totals (waste, landings by path, authority
 lag) by one shared offset, and `page.nextCursor` continues the same `from`/`to`.

@@ -8,7 +8,7 @@ export const failureLogTables = {
   projectFailures: defineTable({
     projectId: v.id('hostedProjects'),
     operationId: v.string(),
-    /** JSON `FailureRecord`: kind, code, sanitized message (at most 240 characters), elapsed time. */
+    /** JSON `FailureRecord`: kind, code, sanitized message (at most 240 characters), elapsed time; a failed check adds its failing files, step and first error (src/failure-noise.ts). */
     value: v.string(),
   })
     // index-order: caller: convex/projectFailureReport.ts#report; order: the health report reads a creation-time window newest first.
