@@ -10,7 +10,7 @@ import { useWorkRecords, workIndex, type WorkIndexWorkspace } from '../hosted-wo
 import type { MoveRecord } from '../cockpit/now-model';
 import { Glyph } from '../ui/Glyph';
 import { SearchPalette } from './SearchPalette';
-import { idOnPage, itemSearchItems, searchHref, workSearchItems, type SearchItem } from './search-model';
+import { idLookupItems, idOnPage, searchHref, workSearchItems, type SearchItem } from './search-model';
 
 /** The existing planning search: it resolves an Item by 8-character prefix or full UUID first. */
 const planningSearch = makeFunctionReference<
@@ -25,6 +25,12 @@ const planningSearch = makeFunctionReference<
   },
   string
 >('projectHostedPlanningSearch:search');
+/** The existing receipt read: one landing by its receipt id or a unique 8+ character prefix. */
+const landingRead = makeFunctionReference<
+  'query',
+  { projectId: Id<'hostedProjects'>; receiptId: string },
+  string
+>('projectHostedLandings:read');
 
 type Props = { project: string; projectId: Id<'hostedProjects'> };
 export function ProjectSearch(props: Props) {
@@ -157,35 +163,47 @@ function HostedSearch({
       ),
     [intents.records, lanes.records, views.records],
   );
-  // An id the page does not hold (an Item, which this palette does not load) costs one debounced
-  // planning search per id, never a call per keystroke and never one while the palette is idle.
+  // An id the page does not hold (an Item or a landing receipt, which this palette does not load) costs
+  // one debounced lookup per id: the planning search and the receipt read, sent together. Never a call
+  // per keystroke and never one while the palette is idle.
   const [query, setQuery] = useState('');
   const [, answered] = useReducer((n: number) => n + 1, 0);
+  const planning = !!workspace?.capabilities.planning;
   const lookup = useMemo(
     () =>
-      new IdLookup<SearchItem>(async text => {
-        const result = JSON.parse(
-          await client.query(planningSearch, {
-            projectId,
+      new IdLookup<SearchItem>(
+        text =>
+          idLookupItems(
             text,
-            omittedTerms: 0,
-            status: 'all',
-            cursor: null,
-            limit: 5,
-          }),
-        ) as { items?: { id: string; matchedBy?: string }[] };
-        return itemSearchItems(
-          (result.items ?? []).filter(item => item.matchedBy === 'id'),
-          true,
-        );
-      }, answered),
-    [client, projectId],
+            {
+              ...(planning
+                ? {
+                    items: (text: string) =>
+                      client.query(planningSearch, {
+                        projectId,
+                        text,
+                        omittedTerms: 0,
+                        status: 'all',
+                        cursor: null,
+                        limit: 5,
+                      }),
+                  }
+                : {}),
+              // The receipt read needs a signed-in reader; a public visitor skips it.
+              ...(isAuthenticated
+                ? { landing: (receiptId: string) => client.query(landingRead, { projectId, receiptId }) }
+                : {}),
+            },
+            true,
+          ),
+        answered,
+      ),
+    [client, projectId, planning, isAuthenticated],
   );
   useEffect(() => () => lookup.cancel(), [lookup]);
   const prefix = idPrefix(query);
   const settled = !intents.loading && !lanes.loading && !views.loading;
-  const planning = !!workspace?.capabilities.planning;
-  const known = !planning || !settled || idOnPage(work, prefix);
+  const known = !workspace || !settled || idOnPage(work, prefix);
   useEffect(() => lookup.want(prefix, known), [lookup, prefix, known]);
   const found = lookup.found(prefix);
   const items = useMemo(

@@ -5,9 +5,10 @@ import { cockpitLanes, type CockpitWork } from '../cockpit/model';
 import { cleanUrl, routeUrlState } from './location';
 import { idMatches, idPrefix } from '../id-search';
 import { planningDestination } from './route';
+import { hostedErrorCode } from '../snapshot';
 export type SearchItem = {
   id: string;
-  kind: 'Intent' | 'Item' | 'Lane' | 'Candidate' | 'File';
+  kind: 'Intent' | 'Item' | 'Lane' | 'Candidate' | 'Landing' | 'File';
   title: string;
   href: string;
   at?: string;
@@ -41,6 +42,8 @@ export function searchHref(hosted: boolean, params: Record<string, string>) {
     'state',
     'sourceHead',
     'sourceBackup',
+    // A landing opened at its code pins `head`, which Code prefers over `sourceHead`: never carry it on.
+    'head',
   ])
     url.searchParams.delete(key);
   if (hosted) url.searchParams.set('surface', 'projects');
@@ -129,6 +132,72 @@ export function itemSearchItems(
     ids: [item.id],
   }));
 }
+/** Landings the receipt read returned (projectHostedLandings:read rows). A landing opens its Lane, else its
+ * Intent, else the code as it landed. */
+export function landingSearchItems(
+  rows: readonly {
+    receiptId: string;
+    title?: string | null;
+    laneId?: string | null;
+    intentId?: string | null;
+    committedAt?: string | null;
+    landedHead?: string;
+  }[],
+  hosted: boolean,
+): SearchItem[] {
+  return rows.map(row => ({
+    id: `landing:${row.receiptId}`,
+    kind: 'Landing',
+    title: row.title || `Receipt ${row.receiptId.slice(0, 8)}`,
+    secondary: `Receipt ${row.receiptId.slice(0, 8)}`,
+    href: row.laneId
+      ? laneHref(hosted, row.laneId)
+      : row.intentId
+        ? searchHref(hosted, planningDestination({ kind: 'intent', id: row.intentId }))
+        : searchHref(hosted, { projectTab: 'delivery', ...(row.landedHead ? { head: row.landedHead } : {}) }),
+    ...(row.committedAt ? { at: row.committedAt } : {}),
+    ids: [row.receiptId],
+  }));
+}
+/** Codes the receipt read answers for an id that names no single landing: an empty answer, not a retry. */
+const noLanding = new Set(['NOT_FOUND', 'AMBIGUOUS_ID', 'BAD_ARGUMENT']);
+/**
+ * One id lookup (IdLookup's run, for an id the page does not hold): the planning search for an Item and
+ * the receipt read for a landing, sent together so the answer costs one round trip. A reader without
+ * either capability skips that call. An id that names no landing is an empty answer.
+ */
+export async function idLookupItems(
+  text: string,
+  read: { items?: (text: string) => Promise<string>; landing?: (receiptId: string) => Promise<string> },
+  hosted: boolean,
+) {
+  const [items, landings] = await Promise.all([
+    read.items
+      ? read.items(text).then(raw =>
+          itemSearchItems(
+            ((JSON.parse(raw) as { items?: { id: string; matchedBy?: string }[] }).items ?? []).filter(
+              item => item.matchedBy === 'id',
+            ),
+            hosted,
+          ),
+        )
+      : [],
+    read.landing
+      ? read.landing(text.replaceAll(' ', '-')).then(
+          raw =>
+            landingSearchItems(
+              (JSON.parse(raw) as { landings?: Parameters<typeof landingSearchItems>[0] }).landings ?? [],
+              hosted,
+            ),
+          error => {
+            if (noLanding.has(hostedErrorCode(error) ?? '')) return [];
+            throw error;
+          },
+        )
+      : [],
+  ]);
+  return [...items, ...landings];
+}
 /** Whether a result on the page already answers this id query (so no lookup is needed). */
 export const idOnPage = (items: readonly SearchItem[], prefix: string | undefined) =>
   items.some(item => idMatches(item.ids, prefix) || item.named?.some(other => idMatches(other.ids, prefix)));
@@ -169,7 +238,7 @@ export function searchGroups(
   const ranked = rankSearchItems(items, query, recent);
   if (query.trim())
     return (
-      (['Intent', 'Item', 'Lane', 'Candidate', 'File'] as const)
+      (['Intent', 'Item', 'Lane', 'Candidate', 'Landing', 'File'] as const)
         .map(kind => {
           const matches = ranked.filter(item => item.kind === kind);
           return {

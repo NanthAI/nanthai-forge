@@ -225,3 +225,123 @@ test('planning filter finds rows by Item, Intent, Lane and Candidate id ahead of
   // Text search is unchanged.
   assert.deepEqual(rowsFor('site search'), [`planning:${itemId}`]);
 });
+
+// Item ee9899ca, receipt line: a landing receipt id (8+ hex or full, any case) finds its landing.
+const receiptId = '8d27a463-0b8d-46e3-8301-9046a7a99034';
+const landingRow = (extra = {}) => ({
+  receiptId,
+  title: 'Site search finds Items by id',
+  laneId,
+  intentId,
+  committedAt: '2026-11-20T00:42:01.578Z',
+  landedHead: 'c92859e3',
+  ...extra,
+});
+test('a receipt id lists its landing first in a Landings group, opening its Lane, else Intent, else code', () =>
+  withLocation(() => {
+    const items = [...search.workSearchItems(work, true), ...search.landingSearchItems([landingRow()], true)];
+    for (const query of ['8d27a463', '8D27A463', receiptId, receiptId.toUpperCase()]) {
+      const groups = search.searchGroups(items, query, [], []);
+      assert.equal(groups[0].name, 'Landings', query);
+      assert.equal(groups[0].items[0].id, `landing:${receiptId}`, query);
+    }
+    const [landing] = search.landingSearchItems([landingRow()], true);
+    assert.equal(landing.href, search.searchHref(true, { projectTab: 'lanes', lane: laneId }));
+    assert.equal(landing.secondary, 'Receipt 8d27a463');
+    const [byIntent] = search.landingSearchItems([landingRow({ laneId: null })], true);
+    assert.equal(byIntent.href, search.searchHref(true, { projectTab: 'intent', intent: intentId }));
+    const [byCode] = search.landingSearchItems(
+      [landingRow({ laneId: null, intentId: null, title: null })],
+      true,
+    );
+    assert.equal(byCode.href, search.searchHref(true, { projectTab: 'delivery', head: 'c92859e3' }));
+    assert.equal(byCode.title, 'Receipt 8d27a463');
+    // A text query never surfaces a landing by its receipt id alone.
+    assert.deepEqual(
+      search.rankSearchItems(items, 'deadbeef', []).map(item => item.id),
+      [],
+    );
+  }));
+
+test('one id lookup sends the Item search and the receipt read together; no landing is an empty answer', async () =>
+  withLocation(async () => {
+    const { ConvexError } = await import('convex/values');
+    const calls = [];
+    const items = async text => {
+      calls.push(['items', text]);
+      return JSON.stringify({ items: [{ id: 'ee9899ca-0000-4000-8000-000000000001', matchedBy: 'id' }] });
+    };
+    const landing = async id => {
+      calls.push(['landing', id]);
+      return JSON.stringify({ schema: 1, landings: [landingRow()], nextCursor: null });
+    };
+    // A full UUID is looked up in the planning search's spaced form and the receipt read's dashed form.
+    const found = await search.idLookupItems(receiptId.replaceAll('-', ' '), { items, landing }, true);
+    assert.deepEqual(calls, [
+      ['items', receiptId.replaceAll('-', ' ')],
+      ['landing', receiptId],
+    ]);
+    assert.deepEqual(
+      found.map(item => item.kind),
+      ['Item', 'Landing'],
+    );
+    // An id that names no landing (or more than one) answers empty, so the Item still shows and no retry runs.
+    for (const code of ['NOT_FOUND', 'AMBIGUOUS_ID']) {
+      const none = await search.idLookupItems(
+        '1d69905b',
+        {
+          items,
+          landing: async () => {
+            throw new ConvexError({ code, message: 'no landing' });
+          },
+        },
+        true,
+      );
+      assert.deepEqual(
+        none.map(item => item.kind),
+        ['Item'],
+        code,
+      );
+    }
+    // Any other failure rejects, so IdLookup forgets the id and a later query may retry it.
+    await assert.rejects(
+      search.idLookupItems(
+        '1d69905b',
+        {
+          items,
+          landing: async () => {
+            throw new ConvexError({ code: 'HOSTED_REQUEST_FAILED', message: 'retry' });
+          },
+        },
+        true,
+      ),
+    );
+    // Without the planning capability or a signed-in reader, that call is not sent at all.
+    calls.length = 0;
+    assert.deepEqual(
+      (await search.idLookupItems('8d27a463', { landing }, true)).map(item => item.kind),
+      ['Landing'],
+    );
+    assert.deepEqual(await search.idLookupItems('8d27a463', {}, true), []);
+    assert.deepEqual(calls, [['landing', '8d27a463']]);
+  }));
+
+test('the receipt lookup is the existing one-shot receipt read, never a subscription', () => {
+  const source = readFileSync(new URL('../web/src/shell/ProjectSearch.tsx', import.meta.url), 'utf8');
+  assert.match(source, /'projectHostedLandings:read'/);
+  assert.match(source, /client\.query\(landingRead, \{ projectId, receiptId \}\)/);
+  assert.doesNotMatch(source, /useHostedQuery\(landingRead/);
+});
+
+test('a result opened after a landing at its code does not keep that landing pinned (Argon review nit 1)', () => {
+  const previous = globalThis.location;
+  globalThis.location = { href: 'http://local/?project=p&projectTab=delivery&head=c92859e3' };
+  try {
+    const [file] = [search.searchHref(true, { projectTab: 'delivery', file: 'a.ts', sourceHead: 'main1' })];
+    assert.doesNotMatch(file, /[?&]head=/);
+    assert.match(file, /sourceHead=main1/);
+  } finally {
+    if (previous === undefined) delete globalThis.location;
+    else globalThis.location = previous;
+  }
+});

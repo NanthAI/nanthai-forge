@@ -99,8 +99,8 @@ export function SearchPalette({
         <Glyph name="search" size={16} />
         <input
           ref={input}
-          aria-label="Search Intents, Lanes, Candidates and files"
-          placeholder="Search Intents, Lanes, Candidates and files"
+          aria-label="Search work and files, or paste an id"
+          placeholder="Search work and files, or paste an id"
           value={query}
           role="combobox"
           aria-autocomplete="list"
@@ -170,7 +170,9 @@ export function SearchPalette({
                               ? 'view'
                               : item.kind === 'Item'
                                 ? 'intent'
-                                : (item.kind.toLowerCase() as 'intent' | 'lane')
+                                : item.kind === 'Landing'
+                                  ? 'channel'
+                                  : (item.kind.toLowerCase() as 'intent' | 'lane')
                         }
                         size={15}
                       />
