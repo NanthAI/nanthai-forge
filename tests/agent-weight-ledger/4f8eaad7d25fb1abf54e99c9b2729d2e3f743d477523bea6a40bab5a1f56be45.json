@@ -1,0 +1,4 @@
+{
+  "issue": "10fbb67b",
+  "reason": "Adds the runner-speed calibration reference (calibration.cpuMs 52 ms) so CPU is judged at reference speed in the same job; the in-job retry is deleted. Ceilings, report and inventories unchanged. Analysis of 33 smoke:package failures from 2026-11-18 to 2026-11-20 is on Issue 10fbb67b."
+}

@@ -62,7 +62,20 @@ twice the largest relative full range among those paths (recorded as
 `cpuNoiseRatio`); each path allows its ten-run median plus the larger of 10 ms
 and that ratio times its median. This is a coarse CPU guard on shared hardware,
 not evidence that smaller CPU changes are absent. Existing `src/speed-budgets.json` CPU budgets still apply through the
-same performance-harness judge inside this check. If only CPU fails, package smoke repeats the five-sample batch once in the same job and judges the repeat against every unchanged ceiling. Both batches are reported. Deterministic byte, module, dependency and action-surface failures fail immediately; a repeat CPU failure also fails. There is no wall-clock timing assertion. Samples record
+same performance-harness judge inside this check. CPU is judged at reference-runner
+speed (10fbb67b): before each measured batch the probe also loads a fixed synthetic
+module graph that shares no code with Forge (100 modules, its own warm compile cache,
+50-100 ms of CPU locally depending on load; seven samples). Every CPU value and sample is divided by the
+runner scale, `max(1, calibration median / baseline calibration.cpuMs)`, and judged
+against the unchanged ceilings and budgets. A slow or loaded runner raises the
+calibration and the CLI paths together, so it cannot fail the check; a CLI path that
+grows raises its own samples alone, so it still fails. A runner faster than the
+reference keeps the absolute ceilings, and a report or baseline without calibration
+is judged unscaled. The summary line and any CPU failure name the scale. Two days of
+landing checks before this showed every command, the version probe included, about
+1.5 times slower on one runner class with unchanged module counts. There is no
+in-job repeat. Deterministic byte, module, dependency and action-surface failures
+fail immediately. There is no wall-clock timing assertion. Samples record
 child peak RSS; the guard reports its wall time and parent peak RSS. The guard
 adds seconds inside existing package smoke, targets under 60 s, and adds no
 Convex calls, DB I/O, timers, production or idle work. Source and Work placement

@@ -16,32 +16,55 @@ const clean = () => ({
   actual: { ...baseline.ceilings },
   samples: Object.fromEntries(Object.keys(baseline.report.samples).map(name => [name, [{ cpuMs: 0 }]])),
 });
-const noisy = () => {
+// Every CPU number at `speed` times the reference runner, just under its ceiling at reference
+// speed; `land` multiplies the land path alone (a real regression). The calibration probe
+// measures the runner, so it moves with `speed` and never with `land`.
+const runner = ({ speed, land = 1, calibration = speed }) => {
   const report = clean();
-  report.actual.cliAgentLandCpuMs = 521;
-  report.samples.cliAgentLandCpu = Array.from({ length: 5 }, () => ({ cpuMs: 521 }));
+  for (const name of Object.keys(baseline.ceilings).filter(name => name.endsWith('Ms')))
+    report.actual[name] = baseline.ceilings[name] * 0.95 * speed;
+  report.actual.cliAgentLandCpuMs *= land;
+  for (const name of Object.keys(report.samples)) {
+    const cpuMs = (name.startsWith('cliAgent') ? 470 : 40) * speed * (name === 'cliAgentLandCpu' ? land : 1);
+    report.samples[name] = Array.from({ length: 5 }, () => ({ cpuMs }));
+  }
+  report.actual.calibrationCpuMs = baseline.calibration.cpuMs * calibration;
   return report;
 };
-
-test('a7073c8d: shared-runner CPU-only failure retries once against unchanged budgets', () => {
-  const reports = [noisy(), clean()];
+const judge = report => {
+  let attempts = 0;
   const messages = [];
-  const accepted = checkAgentWeight('synthetic', {
-    measure: () => reports.shift(),
-    log: line => messages.push(line),
-  });
-  assert.equal(reports.length, 0);
-  assert.equal(accepted.actual.cliAgentLandCpuMs, 500);
-  assert.match(messages[0], /CPU retry.*521/);
+  const run = () =>
+    checkAgentWeight('synthetic', {
+      measure: () => (attempts++, report),
+      log: line => messages.push(line),
+    });
+  return { run, attempts: () => attempts, messages };
+};
+
+test('10fbb67b: a uniformly slow runner (every CPU sample and the calibration 1.6x) passes unchanged ceilings', () => {
+  const slow = judge(runner({ speed: 1.6 }));
+  assert.equal(slow.run().actual.cliAgentLandCpuMs, baseline.ceilings.cliAgentLandCpuMs * 0.95 * 1.6);
+  assert.equal(slow.attempts(), 1);
+  assert.match(slow.messages[0], /"runnerScale":1\.6/);
 });
 
-test('a7073c8d: a sustained CPU regression still fails after the single in-job retry', () => {
-  let attempts = 0;
-  assert.throws(
-    () => checkAgentWeight('synthetic', { measure: () => (attempts++, noisy()), log() {} }),
-    /cliAgentLandCpu.*500/,
-  );
-  assert.equal(attempts, 2);
+test('10fbb67b: a land-path CPU regression fails on a reference-speed runner and on a slow one, without retry', () => {
+  for (const speed of [1, 1.6]) {
+    const regressed = judge(runner({ speed, land: 1.3 }));
+    assert.throws(
+      regressed.run,
+      /cliAgentLandCpuMs: \d+(\.\d+)?, ceiling 500[^]*cliAgentLandCpu: exceeds[^]*runner scale/,
+    );
+    assert.equal(regressed.attempts(), 1);
+  }
+});
+
+test('10fbb67b: a fast runner keeps the absolute ceilings; a missing calibration judges unscaled', () => {
+  assert.throws(judge(runner({ speed: 1.6, calibration: 0.5 })).run, /runner scale 1\.000/);
+  const missing = runner({ speed: 1.6 });
+  delete missing.actual.calibrationCpuMs;
+  assert.throws(judge(missing).run, /calibration missing ms/);
 });
 
 test('a7073c8d: a real heavy eager import fails the deterministic module guard without retry', t => {

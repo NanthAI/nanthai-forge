@@ -29,6 +29,28 @@ import {
 } from './agent-weight.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
+/** Runner-speed calibration (10fbb67b): a fixed synthetic ESM graph that shares no code with Forge,
+ * loaded like the CLI paths (fresh process, warm compile cache). A slow or loaded runner raises it and
+ * the CLI samples alike; a CLI regression raises the CLI samples alone. */
+function writeCalibrationGraph(directory) {
+  mkdirSync(directory);
+  for (let m = 0; m < 100; m++) {
+    let source = m
+      ? `import { v${m - 1} } from './m${m - 1}.mjs';\nconst base = v${m - 1};\n`
+      : 'const base = 0;\n';
+    for (let f = 0; f < 60; f++)
+      source += `export function f${f}(a, b = ${f}) { const o = { k: a, n: [b, a, 's${m}_${f}'], m: new Map([[a, b]]) }; return o.n[0] + String(a).length + o.n[2].length + o.m.size; }\n`;
+    source += `const table = {};\nfor (let i = 0; i < 60; i++) table['k' + i] = { i, s: String(i).padStart(4, '0') };\n`;
+    source += `export const v${m} = base + f0(${m}) + Object.keys(table).length;\n`;
+    writeFileSync(join(directory, `m${m}.mjs`), source);
+  }
+  const entry = join(directory, 'entry.mjs');
+  writeFileSync(
+    entry,
+    `import { v99 } from './m99.mjs';\nif (!Number.isFinite(v99)) process.exitCode = 1;\n`,
+  );
+  return entry;
+}
 export function measureAgentWeight(prefix, count = 5, enforceBoundary = true) {
   const started = performance.now();
   const installed = join(prefix, 'node_modules/@nanthai/forge');
@@ -62,10 +84,10 @@ export function measureAgentWeight(prefix, count = 5, enforceBoundary = true) {
       },
     });
     const preload = join(root, 'scripts/perf/startup-preload.mjs');
-    const run = args => {
+    const run = (args, runEnv = env) => {
       const child = spawnSync(process.execPath, ['--import', preload, ...args], {
         cwd: temp,
-        env,
+        env: runEnv,
         encoding: 'utf8',
         timeout: 15_000,
       });
@@ -80,11 +102,19 @@ export function measureAgentWeight(prefix, count = 5, enforceBoundary = true) {
         stdout: child.stdout,
       };
     };
+    // One calibration sample before each measured batch, so the calibration sees the same load. Its own
+    // compile cache keeps it independent of how many Forge modules the other batches cached.
+    const calibrationEntry = writeCalibrationGraph(join(temp, 'calibration'));
+    const calibrationEnv = { ...env, NODE_COMPILE_CACHE: join(temp, 'calibration-cache') };
+    run([calibrationEntry], calibrationEnv);
+    const calibration = [];
+    const calibrate = () => calibration.push(run([calibrationEntry], calibrationEnv).cpuMs);
     for (const [name, args] of [
       ['version', [join(installed, manifest.bin.nforge), '--version']],
       ['help', [join(installed, manifest.bin.nforge), '--help']],
       ['mcp', [mcpProbe, pathToFileURL(`${installed}/`).href]],
     ]) {
+      calibrate();
       run(args); // Warm the compile cache exactly as the installed launcher does.
       const rows = Array.from({ length: count }, () => run(args));
       samples[name] = rows.map(s => ({ cpuMs: s.cpuMs, modules: s.modules, maxRssKiB: s.maxRssKiB }));
@@ -97,6 +127,7 @@ export function measureAgentWeight(prefix, count = 5, enforceBoundary = true) {
       if (name === 'mcp') actual.toolListBytes = JSON.parse(rows[0].stdout).toolListBytes;
     }
     for (const name of Object.keys(agentCommands)) {
+      calibrate();
       const rows = firstNetworkSamples(count, name, { modules: true });
       if (rows.some(s => !Number.isFinite(s.durationMs)))
         throw new Error(`${name} did not reach the network boundary.`);
@@ -112,6 +143,8 @@ export function measureAgentWeight(prefix, count = 5, enforceBoundary = true) {
         root,
       );
     }
+    samples.calibration = calibration.map(cpuMs => ({ cpuMs }));
+    actual.calibrationCpuMs = median([...calibration]);
     return {
       actual,
       samples,
@@ -138,6 +171,14 @@ export function measureAgentWeight(prefix, count = 5, enforceBoundary = true) {
   }
 }
 const median = values => values.sort((a, b) => a - b)[Math.floor(values.length / 2)];
+/** How much slower this runner is than the one the CPU ceilings were set on: this job's calibration
+ * median over the baseline's reference, never below 1 (a fast runner keeps the absolute ceilings).
+ * Without both numbers the scale is 1, as strict as an unscaled check. */
+function runnerScale(report, baseline) {
+  const measured = report.actual.calibrationCpuMs,
+    reference = baseline.calibration?.cpuMs;
+  return measured > 0 && reference > 0 ? Math.max(1, measured / reference) : 1;
+}
 export function agentWeightFindings(report, baseline) {
   const cpuCeilings = {},
     exactCeilings = {};
@@ -147,7 +188,13 @@ export function agentWeightFindings(report, baseline) {
     ...weightFindings(report.actual, { ceilings: exactCeilings }),
     ...agentSurfaceFindings(report, baseline),
   ];
-  const cpu = weightFindings(report.actual, { ceilings: cpuCeilings });
+  // CPU is judged at reference-runner speed: every CPU number divided by the runner scale.
+  const scale = runnerScale(report, baseline);
+  const atReference = value => (Number.isFinite(value) ? Math.round((value / scale) * 1000) / 1000 : value);
+  const cpu = weightFindings(
+    Object.fromEntries(Object.keys(cpuCeilings).map(name => [name, atReference(report.actual[name])])),
+    { ceilings: cpuCeilings },
+  );
   for (const [name, metric] of [
     ['version', 'cliColdStartCpu'],
     ['help', 'cliColdStartCpu'],
@@ -155,28 +202,23 @@ export function agentWeightFindings(report, baseline) {
   ]) {
     const verdict = measurement(
       metric,
-      report.samples[name].map(sample => ({ durationMs: sample.cpuMs })),
+      report.samples[name].map(sample => ({ durationMs: atReference(sample.cpuMs) })),
     );
     if (verdict.status !== 'pass')
       cpu.push(`${name}: exceeds the existing speed-budgets.json CPU ceiling ${verdict.budgetMs} ms.`);
   }
-  return { exact, cpu };
+  if (cpu.length)
+    cpu.push(
+      `CPU judged at reference speed: runner scale ${scale.toFixed(3)} (calibration ${report.actual.calibrationCpuMs ?? 'missing'} ms, reference ${baseline.calibration?.cpuMs ?? 'missing'} ms).`,
+    );
+  return { exact, cpu, scale };
 }
 export function checkAgentWeight(prefix, { measure = measureAgentWeight, log = console.log } = {}) {
   const baseline = readWeightBaseline(root);
-  let report = measure(prefix);
-  let findings = agentWeightFindings(report, baseline);
-  // One in-job repeat for shared-runner CPU noise. Exact weight failures never retry,
-  // and both batches retain every unchanged CPU ceiling and five-sample median.
-  if (!findings.exact.length && findings.cpu.length) {
-    log(
-      `Agent weight CPU retry: ${JSON.stringify({ findings: findings.cpu, actual: report.actual, wallMs: report.wallMs })}`,
-    );
-    report = measure(prefix);
-    findings = agentWeightFindings(report, baseline);
-  }
+  const report = measure(prefix);
+  const findings = agentWeightFindings(report, baseline);
   const { packages, samples, moduleInventory: inventories, ...summary } = report;
-  log(`Agent weight: ${JSON.stringify(summary)}`);
+  log(`Agent weight: ${JSON.stringify({ ...summary, runnerScale: findings.scale })}`);
   if (findings.exact.length || findings.cpu.length)
     // Added modules first: a cut receipt excerpt still names them (ad80e037).
     throw new Error([...moduleFindings(report, baseline), ...findings.exact, ...findings.cpu].join('\n'));
