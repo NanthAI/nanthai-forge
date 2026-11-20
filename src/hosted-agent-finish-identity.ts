@@ -18,6 +18,7 @@ import { SourceFileReader } from './source-file-reader.js';
 import { digest } from './hash.js';
 import { gitlinkDirectoryPointer } from './gitlink-workspace.js';
 import { canonicalPayload } from './hosted-source-operation.js';
+import { ForgeError } from './errors.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { readHostedLaneCheckout, type HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import { hostedAgentDirectory, readAgentJson, HostedAgentJournal } from './hosted-agent-journal.js';
@@ -145,6 +146,36 @@ export function scanCheckout(root: string, marker: HostedLaneCheckoutMarker) {
     files.set(path, { path, blob, mode });
   }
   return { files, marked, changed };
+}
+
+/** `status {files:true}` (git status): this folder's files that differ from its saved head, from
+ * the same local scan a save makes. No server call; at most 50 paths listed (ad80e037). */
+export function unsavedFiles(root: string, laneId?: string) {
+  const marker = readHostedLaneCheckout(root);
+  if (!marker || (laneId && marker.selection.laneId !== laneId))
+    throw new ForgeError(
+      'HOSTED_CHECKOUT_REQUIRED',
+      'Run status {"files":true} in the Lane folder printed by start: it compares that folder with its saved head.',
+    );
+  const { files, changed, marked } = scanCheckout(root, marker);
+  const saved = new Set(marker.state.files.map(file => file.path));
+  const rows = [...new Set(changed)].sort().map(path => ({
+    path,
+    change: !saved.has(path) ? 'added' : files.has(path) ? 'modified' : 'deleted',
+    ...(marked.includes(path) ? { conflictMarkers: true } : {}),
+  }));
+  return {
+    laneId: marker.selection.laneId,
+    head: marker.selection.head,
+    unsaved: {
+      count: rows.length,
+      paths: rows.slice(0, 50),
+      ...(rows.length > 50 ? { more: rows.length - 50 } : {}),
+    },
+    note: rows.length
+      ? 'Unsaved: save records these files; land --save saves and lands them.'
+      : 'This folder matches its saved head.',
+  };
 }
 
 /** One durable index per normalized finish selection, independent of history size.

@@ -136,7 +136,7 @@ import { publishClientSourcePack } from './source-pack-client.js';
 import { missingRequiredFeatures } from './hosted-contract-features.js';
 import { capabilityOptions, takeEarlyCapabilities } from './hosted-capabilities-early.js';
 import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
-import { selectHostedFinish } from './hosted-agent-finish-identity.js';
+import { selectHostedFinish, unsavedFiles } from './hosted-agent-finish-identity.js';
 import { backgroundSaveOperation, reconcileHostedSave, settleBackgroundSave } from './hosted-save-client.js';
 import { markLandStep, type LandTiming } from './land-timing.js';
 import {
@@ -854,6 +854,11 @@ export class HostedAgentTransport {
         );
         await this.refreshDependencies(this.root);
         return this.response(action, result.operationId, result);
+      }
+      // git status: local, before capability discovery, so it makes no server call (ad80e037).
+      if (action === 'status' && (input as { files?: unknown }).files === true) {
+        const selected = hostedAgentCommandSchemas.status.parse(input);
+        return this.response(action, null, unsavedFiles(this.root, selected.laneId));
       }
       if (action === 'status' && Object.keys(input).length === 0 && readHostedMainSelection(this.root))
         return this.response(

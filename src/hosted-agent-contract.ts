@@ -414,6 +414,9 @@ export const hostedAgentCommandSchemas = {
         ])
         .optional(),
       cursor: z.string().nullable().optional(),
+      /** From a Lane folder: the files that differ from its saved head (git status), answered
+       * locally with no server call (ad80e037). */
+      files: z.literal(true).optional(),
     })
     .strict(),
   observe: z

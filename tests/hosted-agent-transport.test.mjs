@@ -896,3 +896,34 @@ test('preflight timing reaches the existing landing request without another Conv
   }
   assert.deepEqual(calls[1], calls[0], 'preflight and finish call counts are unchanged by recording timing');
 });
+
+test('ad80e037: status {files:true} lists the files that differ from the saved head with no server call', async t => {
+  const s = agentFixture(t, {
+    base: { 'keep.txt': 'Keep\n', 'edit.txt': 'Before\n', 'gone.txt': 'Gone\n' },
+    lane: { 'keep.txt': 'Keep\n', 'edit.txt': 'Saved\n', 'gone.txt': 'Gone\n' },
+  });
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const clean = await s.transport().dispatch('status', { files: true });
+  assert.deepEqual(clean.result.unsaved, { count: 0, paths: [] });
+  assert.equal(clean.result.note, 'This folder matches its saved head.');
+  writeFileSync(join(s.root, 'edit.txt'), 'Unsaved\n');
+  writeFileSync(join(s.root, 'new.txt'), 'New\n');
+  rmSync(join(s.root, 'gone.txt'));
+  const before = s.calls.length;
+  const reply = await s.transport().dispatch('status', { files: true });
+  assert.equal(s.calls.length, before, 'answered locally: no server call');
+  assert.equal(reply.result.laneId, s.lane.laneId);
+  assert.equal(reply.result.head, readHostedLaneCheckout(s.root).selection.head);
+  assert.deepEqual(reply.result.unsaved, {
+    count: 3,
+    paths: [
+      { path: 'edit.txt', change: 'modified' },
+      { path: 'gone.txt', change: 'deleted' },
+      { path: 'new.txt', change: 'added' },
+    ],
+  });
+  await assert.rejects(
+    s.transport().dispatch('status', { files: true, laneId: randomUUID() }),
+    error => error.code === 'HOSTED_CHECKOUT_REQUIRED',
+  );
+});
