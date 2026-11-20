@@ -416,8 +416,6 @@ Each is a component or class in `web/src/ds/`; the class names below are what th
 
 ## Decision rules
 
-Each rule ends in "use this, not that".
-
 ### Regions, not boxes
 1. **Rule, space, band or nothing?** Different regions get a seam. Rows in one list get a seam each. Groups inside one list get a band. Parts of one thought get space only. A thing and its own label get nothing. *Use* one surface with a band per group and a seam per row. *Not* a rounded card with cards inside it.
 2. **A tint is a message.** A region is `--surface`; a region that is only context is `--bg`; the selected row is `--accent-bg`. *Use* shape and word for a row's state. *Not* a tinted row.
@@ -503,6 +501,12 @@ Pointed at or focused, a reference row returns to full ink and its state word to
 | Does not carry over | display type, loops, the orange band, the 8 px key | the rail, dense rows, key caps, movable regions | docks, state tints | colour as the only signal |
 
 48. **Text never sits on a moving or drawn background.** A background scene lives in its own window; headlines, buttons and links sit on a plain surface. A section's colour ends at the section's edge.
+
+### Actions and review detail
+
+49. **Menu, sheet or fold?** Use the shared `Menu` for a short set of actions on one row or region. Use the shared `Sheet` for a focused task with its own title and controls, such as comparing saved Item versions. Use a fold when the reader needs more detail in the same place.
+50. **Reading and comparing.** Use `Prose` for an Item body or other formatted text. Use the prose-version pattern to compare two saved wordings and show the changed text. Use `CodeBox` for exact source or a source diff, with the applicable line numbers beside the source. Keep a line note with its target line. Use the line-origin gutter when the question is where a line came from.
+51. **Evidence for a review.** When a changed file's place in the review order needs an explanation, put the observed reason beside its path. For a failed check, use the suspects to compare the possible causes and their evidence. Use the checked list for individual test outcomes and the output block for the log. Put the source words from rule 30 beside the fact they qualify.
 
 ## The live line
 
