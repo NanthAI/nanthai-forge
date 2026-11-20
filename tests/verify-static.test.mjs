@@ -17,6 +17,7 @@ for (const failure of [
   'package',
   'test',
 ]) {
+  const weight = 'Agent weight summary: land CPU 450 ms, calibration 60 ms, scaled 390 ms, version CPU 40 ms';
   test(`synthetic static verification preserves ${failure} outcome with queued builds`, t => {
     const root = mkdtempSync(join(tmpdir(), 'forge-verify-static-'));
     t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
@@ -65,6 +66,14 @@ for (const failure of [
       for (const [name, count] of [['native', 4], ['legacy', 1], ['oxc', 2]])
         assert.equal(readFileSync(name + '.jsonl', 'utf8').trim().split('\\n').length, count);
       writeFileSync('package-checked', '');
+      if (${failure === 'test'}) {
+        console.error(${JSON.stringify(weight)});
+      } else {
+        process.stderr.write('package warning without a newline');
+        console.log(${JSON.stringify(weight)});
+      }
+      console.log('Agent weight: full report');
+      console.log('other package diagnostics');
       process.exit(${failure === 'package' ? 7 : 0});`,
     );
     write(
@@ -131,6 +140,13 @@ for (const failure of [
         new RegExp(`\\[smoke:package\\] ${failure === 'package' ? 'FAILED' : 'ok'}`),
       );
       assert.equal(readFileSync(join(root, 'package-checked'), 'utf8'), '');
+      if (failure === 'none') {
+        assert.equal(result.stdout.split('\n').filter(line => line.trim() === weight).length, 1);
+      } else if (failure === 'test') {
+        assert.doesNotMatch(result.stdout, /Agent weight summary:/);
+      }
+      assert.equal(result.stdout.includes('Agent weight: full report'), failure === 'package');
+      assert.equal(result.stdout.includes('other package diagnostics'), failure === 'package');
     } else assert.doesNotMatch(result.stdout, /\[smoke:package\]/);
     assert.match(
       result.stdout,

@@ -76,6 +76,7 @@ function runCommand(name, command, args) {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const chunks = [],
+      smokeStdout = [],
       failures = [];
     const decoder = new StringDecoder('utf8');
     let pending = '',
@@ -84,6 +85,7 @@ function runCommand(name, command, args) {
     child.stdout.on('data', chunk => {
       if (name !== 'test') {
         chunks.push(chunk);
+        if (name === 'smoke:package') smokeStdout.push(chunk);
         return;
       }
       pending += decoder.write(chunk);
@@ -131,12 +133,19 @@ function runCommand(name, command, args) {
       if (code === 137) outOfMemory = true;
       const seconds = ((Date.now() - begin) / 1000).toFixed(1);
       timings.push(`${code === 0 ? 'ok  ' : 'FAIL'} ${seconds.padStart(6)}s  ${name}`);
-      // Passing steps print one line; a failing step prints everything it said.
+      // Keep the usual passing status and bounded summaries. A failing step prints all diagnostics.
       if (code === 0) {
-        const summary = Buffer.concat(chunks)
-          .toString()
-          .split('\n')
-          .filter(line => /^(?:ℹ |# )(tests|pass|fail|cancelled|skipped|todo) /.test(line));
+        const lines = Buffer.concat(chunks).toString().split('\n');
+        const summary = lines.filter(line =>
+          /^(?:ℹ |# )(tests|pass|fail|cancelled|skipped|todo) /.test(line),
+        );
+        if (name === 'smoke:package') {
+          const weight = Buffer.concat(smokeStdout)
+            .toString()
+            .split('\n')
+            .find(line => line.startsWith('Agent weight summary: ') && Buffer.byteLength(line) <= 197);
+          if (weight) summary.push(weight);
+        }
         process.stdout.write(`[${name}] ok (${seconds}s)\n${summary.map(line => `  ${line}\n`).join('')}`);
       } else {
         const output = Buffer.concat(chunks).toString();

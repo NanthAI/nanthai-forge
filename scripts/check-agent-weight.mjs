@@ -177,6 +177,9 @@ function runnerScale(report, baseline) {
     reference = baseline.calibration?.cpuMs;
   return measured > 0 && reference > 0 ? Math.max(1, measured / reference) : 1;
 }
+const atReference = (value, scale) =>
+  Number.isFinite(value) ? Math.round((value / scale) * 1000) / 1000 : value;
+
 export function agentWeightFindings(report, baseline) {
   const cpuCeilings = Object.fromEntries(
     Object.entries(baseline.ceilings).filter(([name]) => name.endsWith('Ms')),
@@ -184,9 +187,8 @@ export function agentWeightFindings(report, baseline) {
   const exact = [...agentCeilingFindings(report.actual, baseline), ...agentSurfaceFindings(report, baseline)];
   // CPU is judged at reference-runner speed: every CPU number divided by the runner scale.
   const scale = runnerScale(report, baseline);
-  const atReference = value => (Number.isFinite(value) ? Math.round((value / scale) * 1000) / 1000 : value);
   const cpu = weightFindings(
-    Object.fromEntries(Object.keys(cpuCeilings).map(name => [name, atReference(report.actual[name])])),
+    Object.fromEntries(Object.keys(cpuCeilings).map(name => [name, atReference(report.actual[name], scale)])),
     { ceilings: cpuCeilings },
   );
   for (const [name, metric] of [
@@ -196,7 +198,7 @@ export function agentWeightFindings(report, baseline) {
   ]) {
     const verdict = measurement(
       metric,
-      report.samples[name].map(sample => ({ durationMs: atReference(sample.cpuMs) })),
+      report.samples[name].map(sample => ({ durationMs: atReference(sample.cpuMs, scale) })),
     );
     if (verdict.status !== 'pass')
       cpu.push(`${name}: exceeds the existing speed-budgets.json CPU ceiling ${verdict.budgetMs} ms.`);
@@ -216,6 +218,11 @@ export function checkAgentWeight(prefix, { measure = measureAgentWeight, log = c
   if (findings.exact.length || findings.cpu.length)
     // Added modules first: a cut receipt excerpt still names them (ad80e037).
     throw new Error([...moduleFindings(report, baseline), ...findings.exact, ...findings.cpu].join('\n'));
+  const { cliAgentLandCpuMs, calibrationCpuMs, versionCpuMs } = report.actual;
+  const ms = value => (Number.isFinite(value) ? value.toFixed(3) : 'n/a');
+  log(
+    `Agent weight summary: land CPU ${ms(cliAgentLandCpuMs)} ms, calibration ${ms(calibrationCpuMs)} ms, scaled ${ms(atReference(cliAgentLandCpuMs, findings.scale))} ms, version CPU ${ms(versionCpuMs)} ms`,
+  );
   return report;
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

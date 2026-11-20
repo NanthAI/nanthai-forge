@@ -46,7 +46,13 @@ test('10fbb67b: a uniformly slow runner (every CPU sample and the calibration 1.
   const slow = judge(runner({ speed: 1.6 }));
   assert.equal(slow.run().actual.cliAgentLandCpuMs, baseline.ceilings.cliAgentLandCpuMs * 0.95 * 1.6);
   assert.equal(slow.attempts(), 1);
-  assert.match(slow.messages[0], /"runnerScale":1\.6/);
+  const { runnerScale } = JSON.parse(slow.messages[0].slice('Agent weight: '.length));
+  assert.ok(Math.abs(runnerScale - 1.6) < 1e-12);
+  assert.equal(
+    slow.messages[1],
+    `Agent weight summary: land CPU 760.000 ms, calibration ${(baseline.calibration.cpuMs * 1.6).toFixed(3)} ms, scaled 475.000 ms, version CPU ${(baseline.ceilings.versionCpuMs * 0.95 * 1.6).toFixed(3)} ms`,
+  );
+  assert.ok(Buffer.byteLength(`  ${slow.messages[1]}\n`) <= 200);
 });
 
 test('10fbb67b: a land-path CPU regression fails on a reference-speed runner and on a slow one, without retry', () => {

@@ -71,7 +71,10 @@ against the unchanged ceilings and budgets. A slow or loaded runner raises the
 calibration and the CLI paths together, so it cannot fail the check; a CLI path that
 grows raises its own samples alone, so it still fails. A runner faster than the
 reference keeps the absolute ceilings, and a report or baseline without calibration
-is judged unscaled. The summary line and any CPU failure name the scale. Two days of
+is judged unscaled. Passing package smoke checks keep one summary line with raw
+land CPU, calibration CPU, scaled land CPU and version CPU. Version CPU gives
+older reports a comparison point from before the calibration probe existed.
+Failures keep the full report, including the scale. Two days of
 landing checks before this showed every command, the version probe included, about
 1.5 times slower on one runner class with unchanged module counts. There is no
 in-job repeat. Deterministic byte, module, dependency and action-surface failures
