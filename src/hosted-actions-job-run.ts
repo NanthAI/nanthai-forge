@@ -376,7 +376,7 @@ async function executeActiveActionsJob(
   // Browser setup (Item 687d1eda): the workflow restores or installs the pinned Chromium before this
   // job. If it is still missing here, the cause is setup, not the Candidate: install it once.
   const browserShard = Boolean(
-    recipe.standard && recipe.selection?.browser && recipe.groups[index]?.some(isBrowserTest),
+    !planError && recipe.standard && recipe.selection?.browser && recipe.groups[index]?.some(isBrowserTest),
   );
   const browserCache = process.env.PLAYWRIGHT_BROWSERS_PATH;
   const setupRetry =

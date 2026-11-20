@@ -1664,6 +1664,11 @@ checks the pinned cache; if it is still missing, that is a setup fault, and it
 installs the pinned Chromium once (the one retry) before the tests run, at the
 same pinned Playwright version the plan read.
 
+If the selected browser tests have no exact Playwright version in a valid
+Candidate `package-lock.json`, the hosted plan pins a refusal that names the
+lockfile. The planned jobs report that failure
+without restoring a browser cache, installing Chromium or running Candidate code.
+
 Browser fixtures stay together on one existing test job, which also carries ordinary
 tests to balance the critical path, without increasing the job or Convex-call budget. That job keeps its browser files out of the work-stealing pool.
 The hosted and public workflows restore a Chromium cache keyed by the exact

@@ -88,6 +88,21 @@ class SourceFiles extends Map<string, string> {
     for (const path of this.keys()) yield this.get(path)!;
   }
 }
+
+function pinnedPlaywrightVersion(lockfile: string | undefined): string | undefined {
+  if (lockfile === undefined) return undefined;
+  let lock;
+  try {
+    lock = JSON.parse(lockfile);
+  } catch {
+    return undefined;
+  }
+  const version: unknown = lock?.packages?.['node_modules/playwright']?.version;
+  return typeof version === 'string' && /^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(version)
+    ? version
+    : undefined;
+}
+
 export async function prepareActionsJob(
   client: ActionsJobClient,
   directory: string,
@@ -173,9 +188,7 @@ export async function prepareActionsJob(
     ...('changes' in selected ? { changes: selected.changes } : {}),
     // A package-graph first check's minority share, recorded on the run (src/graph-first-check.ts).
     ...('graph' in selected && selected.graph ? { graph: selected.graph } : {}),
-    // A Candidate-decided refusal (src/hosted-actions-job-source.ts): every job fails with its code
-    // before project code runs. Notes are lines every job prints into the check output.
-    ...(source.planError ? { planError: source.planError } : {}),
+    // Materialization notes are printed in the check output.
     ...(source.notes.length ? { notes: source.notes } : {}),
     // Pinned in the plan so the static job fails on it. Value-free: path, line, kind, fingerprint.
     ...(secrets.findings.length || secrets.allowed || secrets.allowChanges
@@ -215,14 +228,17 @@ export async function prepareActionsJob(
   if (standard) groups = browserGroups(groups, Boolean(selection.browser), client.timings);
   const browserIndex = standard ? browserShard(groups, Boolean(selection.browser)) : -1;
   const playwrightVersion =
-    browserIndex < 0
-      ? null
-      : JSON.parse(files.get('package-lock.json') ?? '{}').packages?.['node_modules/playwright']?.version;
-  if (
-    browserIndex >= 0 &&
-    (typeof playwrightVersion !== 'string' || !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(playwrightVersion))
-  )
-    throw new Error('Browser tests require a pinned Playwright package version in package-lock.json.');
+    browserIndex < 0 ? undefined : pinnedPlaywrightVersion(files.get('package-lock.json'));
+  // Every planned job reports a Candidate refusal before running project code.
+  const planError =
+    source.planError ??
+    (browserIndex >= 0 && !playwrightVersion
+      ? {
+          code: 'CHECK_FAILED',
+          message: 'Browser tests require a pinned Playwright version in a valid package-lock.json.',
+        }
+      : undefined);
+  const browser = playwrightVersion ? { shard: String(browserIndex), version: playwrightVersion } : undefined;
   if (capacity)
     console.log(
       `Actions capacity: ${capacity.activeChecks} active checks, ${capacity.jobCap} slots; ${groups.length} test shards`,
@@ -255,7 +271,7 @@ export async function prepareActionsJob(
   const pins = {
     head: run.request.expectedHead,
     definition: run.check.definition,
-    selection,
+    selection: planError ? { ...selection, planError } : selection,
     groups,
     ...(pool ? { pool } : {}),
     standard,
@@ -338,8 +354,8 @@ export async function prepareActionsJob(
       os: process.env.RUNNER_OS,
       arch: process.env.RUNNER_ARCH,
     }),
-    browserShard: browserIndex < 0 ? '' : String(browserIndex),
-    browser: browserIndex < 0 ? {} : { shard: String(browserIndex), version: playwrightVersion as string },
+    browserShard: browser?.shard ?? '',
+    browser: browser ?? {},
     matrix: groups.length === 0 ? [] : [...groups.map((_, index) => String(index)), 'static'],
   };
 }

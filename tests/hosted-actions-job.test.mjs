@@ -1413,6 +1413,82 @@ test('1dd4e095: Linux Candidate home replacement binds the restored browser cach
   assert.equal(launched, true);
 });
 
+test('1dd4e095: invalid Candidate Playwright metadata records a plan refusal on every job', async t => {
+  const cases = [
+    ['missing lockfile', null],
+    ['malformed JSON', '{"packages":'],
+    ['null lockfile data', 'null'],
+    ['missing Playwright entry', '{"packages":{}}'],
+    ['invalid Playwright pin', '{"packages":{"node_modules/playwright":{"version":"^1.2.3"}}}'],
+  ];
+  for (const [name, lockfile] of cases)
+    await t.test(name, async t => {
+      const s = fixture(t, { browser: true });
+      s.run.request.expectedHead = s.state([
+        ...s.files.filter(file => file.path !== 'package-lock.json'),
+        ...(lockfile === null ? [] : [s.entry('package-lock.json', lockfile)]),
+        s.entry('web/demo.ts', 'export const demo = 1;'),
+      ]).sha256;
+      const candidate = join(s.directory, 'candidate');
+      const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+      assert.equal(prepared.recipe.selection.browser, true);
+      assert.deepEqual(prepared.browser, {});
+      assert.equal(prepared.browserShard, '');
+      const plans = s.calls.filter(call => call.kind === 'plan');
+      assert.equal(plans.length, 1);
+      assert.equal(plans[0].plan.recipe.selection.planError.code, 'CHECK_FAILED');
+      assert.match(plans[0].plan.recipe.selection.planError.message, /pinned Playwright.*package-lock\.json/);
+      assert.deepEqual(prepared.matrix, ['0', 'static']);
+
+      const path = join(s.directory, 'plan.json');
+      writeFileSync(path, JSON.stringify(prepared.recipe));
+      for (const shard of prepared.matrix)
+        assert.equal(await executeActionsJob(s.client, candidate, path, shard, ['true']), 1);
+      const results = s.calls.filter(call => call.kind === 'result').map(call => call.result);
+      assert.equal(results.length, prepared.matrix.length);
+      for (const result of results) {
+        assert.equal(result.exitCode, 1);
+        assert.match(result.log.failureSummary, /CHECK_FAILED: .*pinned Playwright.*package-lock\.json/);
+        assert.doesNotMatch(result.log.failureSummary, /cause: setup/i);
+      }
+    });
+});
+
+test('1dd4e095: a selected browser shard keeps its exact pin and excluded browser coverage ignores the lock', async t => {
+  await t.test('selected with a valid pin', async t => {
+    const s = fixture(t, { browser: true });
+    const prepared = await prepareActionsJob(
+      s.client,
+      join(s.directory, 'candidate'),
+      join(s.directory, 'objects'),
+    );
+    assert.equal(prepared.recipe.selection.planError, undefined);
+    assert.equal(prepared.recipe.selection.browser, true);
+    assert.deepEqual(prepared.browser, { shard: prepared.browserShard, version: '1.2.3' });
+    assert.deepEqual(prepared.recipe.groups[Number(prepared.browserShard)], ['tests/demo-browser.test.mjs']);
+  });
+  await t.test('excluded with malformed JSON on main', async t => {
+    const s = fixture(t, { browser: true });
+    const files = s.files.map(file =>
+      file.path === 'package-lock.json' ? s.entry(file.path, '{"packages":') : file,
+    );
+    s.run.candidate.base.head = s.state(files).sha256;
+    s.run.request.expectedHead = s.state(
+      files.map(file => (file.path === 'README.md' ? s.entry(file.path, 'synthetic after') : file)),
+    ).sha256;
+    const prepared = await prepareActionsJob(
+      s.client,
+      join(s.directory, 'candidate'),
+      join(s.directory, 'objects'),
+    );
+    assert.equal(prepared.recipe.selection.planError, undefined);
+    assert.equal(prepared.recipe.selection.scope, 'docs');
+    assert.equal(prepared.recipe.selection.browser, false);
+    assert.deepEqual(prepared.browser, {});
+    assert.equal(prepared.browserShard, '');
+  });
+});
+
 test('1dd4e095: empty browser metadata never restores or installs on shard zero; only control versions seed cache', async t => {
   const s = fixture(t);
   const prepared = await prepareActionsJob(
