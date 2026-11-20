@@ -63,6 +63,8 @@ npm run model:landing-queue -- prequeue-early         # early refusal: stale Lan
 npm run model:landing-queue -- prequeue-early-mixed   # the same with a red and an independent change
 npm run model:landing-queue -- cohorthold             # expected: lost release wake (10b0a94b)
 npm run model:landing-queue -- cohorthold-fixed
+npm run model:landing-queue -- settle-serial          # expected: one main move is handled twice
+npm run model:landing-queue -- settle-once            # one round, exact publication and live recovery
 npm run model:landing-queue -- lostdispatch           # expected: a lost check dispatch strands the head (a7de3a93)
 npm run model:landing-queue -- lostdispatch-fixed
 npm run model:landing-queue -- supervisor             # expected: a driver that fails every time strands the head (19328518)
@@ -104,6 +106,25 @@ At very large production queue sizes, this tool still makes **zero Convex calls,
 zero DB reads/writes and zero provider calls**. Exploration cost grows with model
 bounds, not production records. Idle cost is zero. The model is opt-in; only the
 fast syntax-only phase-name guard runs in ordinary foundation verification.
+
+## Settlement round after main moves
+
+`SettlementRound.tla` models one move of main under three parked landings with
+passes pinned to the old main. The round can carry an ordered prefix and uses
+one shared check for the remaining suffix. Each carried receipt pins its
+predecessor and its own resulting head. A checked cohort pins one exact
+composed head for all its members. A second main move invalidates any prepared
+publication or in-flight check on the old base. One lost order wake is
+recoverable by the alarm that was armed alongside it.
+
+`settle-once` checks publication order, exact evidence, one decision and at
+most one new check per observed move, and eventual settlement (L1 and L2). It
+explores 158 distinct states. `settle-serial` selects one entry per decision
+and violates the one-round invariant when a second entry re-evaluates the same
+move. The `orderwake-fixed` and `orderchain-fixed` litmus cases separately check
+the lost-wake class. This design model abstracts the existing carry decision
+as an eligible prefix and assumes an eventual successful replacement check.
+See the [queue design assessment](../../docs/operations/landing-queue-invariants.md#settlement-after-a-main-move).
 
 ## State and properties
 

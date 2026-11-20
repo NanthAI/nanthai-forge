@@ -48,3 +48,47 @@ baselines rather than guessing. A regression disables that rule's switch, or for
 
 Cap 3, urgent-retry removal, early-refusal scope and per-generation `unsealed` wait for a real
 N=10 bench A/B of both arms, with owner go. The lifetime S4 bound remains.
+
+## Settlement after a main move
+
+A Ready finish keeps its passed evidence while parked on an older entry.
+When the holder leaves the order, the release wakes the oldest waiter and hands
+the rest to it. If main moved, publication refuses the first waiter's old head
+or receipt with `CHANNEL_CHANGED`. The finish releases its lease, reserves a
+named retry on current main and recomposes the original inputs. That retry
+either proves carry or needs another check. Followers handed to it can then
+meet another main move when it publishes. See the [order claim](../../convex/projectHostedLandingControl.ts),
+[waiter release](../../convex/projectHostedFinishWake.ts),
+[publication fence](../../convex/projectHostedAcceptancePublish.ts) and
+[named retry](../../convex/projectHostedFinishCompose.ts).
+
+Waking all waiters can start their decisions sooner, but each single-head
+publication changes the predecessor the remaining proofs must cover. If they
+all recompose on the same main, each later publication must still re-pin or
+recheck. Waking dependent entries sooner can start work on a base their holder
+will supersede. The existing early-refusal path already groups certainly stale
+pre-queue passes within the bounded cohort hold where it can. Its five-entry
+fixture lands the first pass and groups four refusals into one replacement check
+with no extra calls against its serial baseline. The fixture also checks that
+there is no work left scheduled after settlement.
+[Early-refusal guard](../../tests/hosted-landing-early-refusal.test.mjs)
+
+The 121-landing ladder window recorded 45 post-check waits ending in
+`CHANNEL_CHANGED` across 35 landings. Their per-landing unions total 761.6 minutes.
+The carry hop trace measured p50 of 0.8 seconds in scheduler hops out of 23.2
+seconds from CI end to commit. In a fixed-timeline sensitivity, removing up
+to 0.8 seconds from each affected interval saves 0.8 seconds at p90, about
+0.1% of the estimated gain from halving those waits (52.89 to 42.02 minutes).
+The receipt timings cannot separate a greater saving from the risk of
+starting speculative work. The estimate supports keeping the existing scheduler. [Ladder and cause split](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=45f49fb7-d591-44c5-b94c-319b37577835)
+[Hop trace, comment 287a6ce4](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4e013cdb-5ed0-4ed7-85ea-6b9ec144738c)
+
+The full round in design note `755da7b1` needs a trusted Candidate for each
+carried prefix and chained publication that preserves each member's own
+head, check proof, receipt and revert target. Today's batch publication
+writes every member's receipt against one shared checked head.
+The design estimate is 30–40 agent-hours. The
+[settlement model](../../models/landing-queue/README.md#settlement-round-after-main-moves)
+tests ordering and evidence under a second main move and a lost wake. The
+model does not measure service latency or cost.
+[Batch publication](../../convex/projectHostedLandingBatchPublish.ts)

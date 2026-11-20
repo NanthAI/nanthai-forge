@@ -59,6 +59,8 @@ if (config === 'all') {
     'prequeue-hold-order',
     'cohorthold',
     'cohorthold-fixed',
+    'settle-serial',
+    'settle-once',
     'lostdispatch',
     'lostdispatch-fixed',
     'supervisor',
@@ -145,7 +147,9 @@ try {
   const bytes = await officialJar();
   const jar = join(scratch, 'tla2tools.jar');
   await writeFile(jar, bytes);
-  const module = cfg.includes('\\* Incident') ? 'Incidents' : 'LandingQueue';
+  const module =
+    cfg.match(/\\\* Module: ([A-Za-z]+)/)?.[1] ??
+    (cfg.includes('\\* Incident') ? 'Incidents' : 'LandingQueue');
   const args = [
     `-Duser.home=${home}`,
     `-Djava.io.tmpdir=${temp}`,
