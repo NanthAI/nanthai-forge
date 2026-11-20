@@ -170,6 +170,24 @@ A brief or a lead comment on the Issue can override one for that slice.
   the list in the same landing: `tests/core-queue-paths.test.mjs`, also in that set, fails when the
   queue simulation reaches a queue module that is neither core nor a listed exception with its
   reason (the 2026-11-17 wake cut saved a little and cost hours of landing time; incident 5e3c3a3c).
+- **Automatic settings.** Forge adapts to each project ([principle 6](../../PRODUCT.md#product-principles)).
+  Every new automatic setting declares:
+  - its signal, read from the project's own records;
+  - its formula and its bounds (the lowest and highest value it may pick);
+  - its manual override, and the hint manual mode shows: "Automatic would pick X because Y";
+  - a one-line reason it exists;
+  - that it is judged on the shared top metric, flow (landings that stay landed), never on its own
+    local metric; CI minutes, wall time and $/1,000 landings are guards, not goals;
+  - the settings it touches or interacts with.
+
+  At most one automatic setting changes per project at a time, with a cooldown before the next,
+  and the change rolls back when flow regresses against the project's own baseline. Every change
+  keeps a (setting, context, outcome) record. A workaround the lead repeats by hand (notice,
+  measure, act or not, roll back when worse) is a sign that a setting should become automatic.
+  The shared registry and tuner are built in Item 0807b632. Until then, put the declaration beside
+  the setting, as the preflight guard set does
+  ([`setting` in preflight-guard-set.ts](../../src/preflight-guard-set.ts)), and test that it is
+  complete.
 - **Data access.** History and evidence objects in R2 are server-only. Clients read them through
   a server action that checks current access and redacts; no client-readable raw object or signed
   URL unless the design proves it safe. Replies never contain object keys or signed URLs.

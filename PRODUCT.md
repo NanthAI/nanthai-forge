@@ -50,6 +50,7 @@ Forge never surprises you and never loses anything. It is a calm shift lead, not
 3. **Decisions arrive as questions with answers.** Needs-you items end in two or three buttons, recommended answer first (never orange), not a link.
 4. **No standing reassurance or explainers.** The app never explains itself to people who already know it. Explanations live behind (i), a "Why" link, docs or first run. A permanent line must change the decision in front of the user right now.
 5. **Status is colour + glyph + word**, always together, and only in the six status colours. Every element must earn its place; if in doubt, cut it.
+6. **Forge adapts to each project.** Settings are Automatic by default: Forge picks them from the project's own records and changes them as the way its people and agents work changes. Every setting serves one goal, flow (work that lands and stays landed), and is judged on it, never on its own number; CI minutes, time and cost are means. A manual override is always there, and manual mode shows what Automatic would pick and why.
 
 ## Accessibility & Inclusion
 WCAG AA contrast in both themes; status never by colour alone; visible focus ring (`--focus`); `prefers-reduced-motion` makes all motion instant and pulses static; touch targets ≥ 32px on mobile (390px reference width) with no horizontal page overflow.
