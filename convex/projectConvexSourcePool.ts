@@ -9,8 +9,9 @@ import {
   sourceRetryExpired,
 } from './projectConvexSourceFailure';
 import { moveSourceWake, sourceStep } from './projectConvexSourceActive';
-import { saveSourceJob } from './projectSourceJobs';
+import { saveSourceJob, type SourceJob } from './projectSourceJobs';
 import { SOURCE_MAX_FAILED_ATTEMPTS, unknownSourceFailure } from '../src/hosted-source-retry';
+import { sourceStallCause } from './projectSourceStepTiming';
 import { invariant } from '../src/errors';
 export type SourceBatchValidator = (batch: Doc<'projectSourceBatches'>) => Promise<boolean>;
 export function sourceParallelism(env: Record<string, string | undefined> = process.env) {
@@ -30,20 +31,19 @@ export async function scheduleSourceTask(
   update: Partial<ReturnType<typeof sourceFailureUpdate>> = {},
 ) {
   const generation = task.generation + (retry ? 1 : 0);
-  const scheduledId = await ctx.scheduler.runAfter(
-    Math.max(0, (update.retryAt ?? task.retryAt ?? 0) - Date.now()),
-    taskRef,
-    {
-      projectId: task.projectId,
-      jobId: task.jobId,
-      step: task.step,
-      index: task.index,
-      generation,
-    },
-  );
+  const now = Date.now(),
+    scheduledAt = Math.max(now, update.retryAt ?? task.retryAt ?? 0);
+  const scheduledId = await ctx.scheduler.runAfter(scheduledAt - now, taskRef, {
+    projectId: task.projectId,
+    jobId: task.jobId,
+    step: task.step,
+    index: task.index,
+    generation,
+  });
   await ctx.db.patch(task._id, {
     status: 'running',
     scheduledId,
+    scheduledAt,
     ...(retry ? { generation } : {}),
     ...update,
   });
@@ -199,7 +199,11 @@ export async function releaseSourceTask(ctx: MutationCtx, id: Id<'projectSourceT
  * the same execution. Only unfinished/fenced children change generation; completed
  * outputs and durable prefixes survive. Old in-progress runs keep their slots
  * until the scheduler confirms they stopped. Bounded by the fork limit of 800. */
-export async function requeueSourceBatch(ctx: MutationCtx, batch: Doc<'projectSourceBatches'>) {
+export async function requeueSourceBatch(
+  ctx: MutationCtx,
+  batch: Doc<'projectSourceBatches'>,
+  control: SourceJob['control'],
+) {
   const tasks = await ctx.db
     .query('projectSourceTasks')
     .withIndex('by_batch_and_index', q => q.eq('batchId', batch._id))
@@ -228,7 +232,13 @@ export async function requeueSourceBatch(ctx: MutationCtx, batch: Doc<'projectSo
     const failed =
       task.status === 'running' && (!scheduled || ['failed', 'canceled'].includes(scheduled.state.kind));
     const update: Partial<ReturnType<typeof sourceFailureUpdate>> = failed
-      ? sourceFailureUpdate(task, task.lastFailure ?? unknownSourceFailure('scheduled-task'), task.retryUntil)
+      ? sourceFailureUpdate(
+          task,
+          sourceStallCause(control, { step: batch.step, batchId: batch._id }, task) ??
+            task.lastFailure ??
+            unknownSourceFailure('scheduled-task'),
+          task.retryUntil,
+        )
       : {};
     if (failed && update.failedAttempts! >= SOURCE_MAX_FAILED_ATTEMPTS) {
       await ctx.db.patch(task._id, update);

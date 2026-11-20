@@ -10,9 +10,15 @@ import { runSourceTask, type SourceTaskInput } from '../src/hosted-source-fanout
 import { storeTaskData, loadTaskData } from '../src/hosted-source-task-data';
 import { sourceDomainError } from './projectConvexSourceErrors';
 import { sourceStorage } from './projectConvexSourceStorage';
-import { logSourceFailure, withSourceFailureLog, sourceCall } from '../src/hosted-source-io-error';
+import {
+  logSourceFailure,
+  withSourceFailureLog,
+  sourceCall,
+  sourceFailureCause,
+} from '../src/hosted-source-io-error';
 import { parseSourceTaskInput } from '../src/hosted-source-task-schema';
 import { keepSourceLease } from '../src/hosted-source-lease';
+import { sourceStepClock } from '../src/source-step-clock';
 import { sourceValidation } from '../src/hosted-source-validation';
 const args = {
   projectId: v.id('hostedProjects'),
@@ -24,25 +30,33 @@ const args = {
 export const run = internalAction({
   args,
   returns: v.null(),
-  handler: async (ctx, input): Promise<null> =>
-    withSourceFailureLog(
+  handler: async (ctx, input): Promise<null> => {
+    const clock = sourceStepClock();
+    return withSourceFailureLog(
       input,
       'task',
       async () => {
         const started = performance.now();
-        const loaded: string | null = await sourceCall('task-begin', () =>
-          ctx.runMutation(makeFunctionReference<'mutation'>('projectConvexSourceFanout:begin'), input),
+        const loaded: string | null = await clock.startup(() =>
+          sourceCall('task-begin', () =>
+            ctx.runMutation(makeFunctionReference<'mutation'>('projectConvexSourceFanout:begin'), input),
+          ),
         );
         if (!loaded) return null;
-        const state = JSON.parse(loaded),
-          { io, outputs, observedStates } = convexSourceTransport(ctx, input, [], undefined, {
-            hash: nativeDigest,
+        const state = JSON.parse(loaded);
+        clock.dispatchedAt(state.scheduledAt);
+        const { io, outputs, observedStates } = convexSourceTransport(ctx, input, [], undefined, {
+          hash: nativeDigest,
+          clock,
+        });
+        const { read, store } = sourceStorage(ctx, input.projectId, nativeDigest, undefined, false, clock);
+        const stopLease = keepSourceLease(() => {
+          const phase = clock.slowPhase();
+          return ctx.runMutation(makeFunctionReference<'mutation'>('projectConvexSourceLease:renew'), {
+            ...input,
+            ...(phase ? { phase } : {}),
           });
-        const { read, store } = sourceStorage(ctx, input.projectId, nativeDigest);
-        const stopLease = keepSourceLease(
-          () => ctx.runMutation(makeFunctionReference<'mutation'>('projectConvexSourceLease:renew'), input),
-          state.lease,
-        );
+        }, state.lease);
         try {
           let result: Awaited<ReturnType<typeof runSourceTask>>;
           try {
@@ -61,41 +75,51 @@ export const run = internalAction({
             });
             while (outputs.length)
               await sourceCall('task-stage', () =>
-                ctx.runMutation(makeFunctionReference<'mutation'>('projectConvexSourceStore:stage'), {
-                  projectId: input.projectId,
-                  jobId: input.jobId,
-                  step: input.step,
-                  objects: takeSourceOutputs(outputs),
-                }),
+                clock.call(() =>
+                  ctx.runMutation(makeFunctionReference<'mutation'>('projectConvexSourceStore:stage'), {
+                    projectId: input.projectId,
+                    jobId: input.jobId,
+                    step: input.step,
+                    objects: takeSourceOutputs(outputs),
+                  }),
+                ),
               );
             const saved =
               result.done && result.progress.states.length === 0 && !result.progress.calculations?.length
                 ? null
                 : await sourceCall('task-progress-store', () => storeTaskData(result.progress, store));
+            const timing = clock.summary();
             await sourceCall('task-complete', () =>
-              ctx.runMutation(makeFunctionReference<'mutation'>('projectConvexSourceFanout:complete'), {
-                ...input,
-                done: result.done,
-                progress: result.done ? null : saved,
-                output: result.done ? saved : null,
-                failure: null,
-                stateSizes: observedStates(),
-              }),
+              clock.call(() =>
+                ctx.runMutation(makeFunctionReference<'mutation'>('projectConvexSourceFanout:complete'), {
+                  ...input,
+                  done: result.done,
+                  progress: result.done ? null : saved,
+                  output: result.done ? saved : null,
+                  failure: null,
+                  stateSizes: observedStates(),
+                  timing,
+                }),
+              ),
             );
             return null;
           } catch (error) {
             const domain = sourceDomainError(error);
             if (!domain || domain.code === 'SOURCE_JOB_FENCED') throw error;
-            logSourceFailure(error, input, 'task', started);
+            const timing = clock.summary();
+            logSourceFailure(error, input, 'task', started, timing);
             await sourceCall('task-complete', () =>
-              ctx.runMutation(makeFunctionReference<'mutation'>('projectConvexSourceFanout:complete'), {
-                ...input,
-                done: true,
-                progress: null,
-                output: null,
-                failure: domain.code,
-                ...(domain.code === 'SOURCE_STATE_TOO_LARGE' ? { failureReason: domain.message } : {}),
-              }),
+              clock.call(() =>
+                ctx.runMutation(makeFunctionReference<'mutation'>('projectConvexSourceFanout:complete'), {
+                  ...input,
+                  done: true,
+                  progress: null,
+                  output: null,
+                  failure: domain.code,
+                  cause: sourceFailureCause(error, 'task', started, timing),
+                  ...(domain.code === 'SOURCE_STATE_TOO_LARGE' ? { failureReason: domain.message } : {}),
+                }),
+              ),
             );
             return null;
           }
@@ -108,5 +132,7 @@ export const run = internalAction({
           ...input,
           cause,
         }),
-    ),
+      clock.summary,
+    );
+  },
 });

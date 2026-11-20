@@ -113,10 +113,11 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // Item 85f456c1, In-queue writer and batch truth gap (2026-11-20): each moved by one write byte (carry and scoped recheck +1, red -1, keep minus retire): a bound
 // Lane's mark now says 'queued', one byte longer than 'saved'.
 // Calls and reads unchanged.
+// e3082c24: source timings on compose settlement move the exact byte deltas.
 export const WIRED = {
-  carry: { calls: 7, readBytes: 404_022, writeBytes: 74_723 },
-  'scoped-recheck': { calls: 17, readBytes: 533_139, writeBytes: 143_002 },
-  red: { calls: -18, readBytes: -395_740, writeBytes: -144_159 },
+  carry: { calls: 7, readBytes: 404_403, writeBytes: 74_723 },
+  'scoped-recheck': { calls: 17, readBytes: 533_520, writeBytes: 143_002 },
+  red: { calls: -18, readBytes: -396_121, writeBytes: -144_390 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */

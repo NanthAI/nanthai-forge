@@ -9,6 +9,7 @@ import { finishHostedOperation } from './projectHostedOperations';
 import { writeHostedRecord } from './projectHostedRecords';
 import { saveObjects, type SaveIdentity } from './projectHostedSaveStore';
 import { loadSourceJob } from './projectSourceJobs';
+import type { SourcePhaseTiming } from '../src/hosted-source-retry';
 import { sourceR2Counts, sourceServerTiming } from './projectSourceStepTiming';
 import { composeResultSchema } from '../src/hosted-compose';
 import { savePin } from '../src/hosted-save';
@@ -23,7 +24,7 @@ export async function publishHostedCompose(
   input: SaveIdentity & {
     result: string;
     /** R2 requests the job's steps signed, when the committing step already holds its step row. */
-    r2?: [number, number, number];
+    source?: { r2: [number, number, number]; timing?: SourcePhaseTiming };
   },
 ) {
   const { row, state, operation, project } = await loadCompose(ctx, input, false);
@@ -133,10 +134,13 @@ export async function publishHostedCompose(
   };
   await finishHostedOperation(ctx, { ...input, receipt: terminal });
   // The terminal commit hands its step row's sum in; the scheduled publish reads that row once.
-  const r2 = input.r2 ?? sourceR2Counts(await sourceServerTiming(ctx, input.projectId, row.jobId));
+  const timing = input.source ? undefined : await sourceServerTiming(ctx, input.projectId, row.jobId);
+  const r2 = input.source?.r2 ?? sourceR2Counts(timing);
+  const sourceTiming = input.source?.timing ?? timing?.summary;
   await writeComposeState(ctx, row._id, {
     ...state,
     ...(r2.some(Boolean) ? { r2 } : {}),
+    ...(sourceTiming ? { sourceTiming } : {}),
     ...(output.dropped ? { dropped: output.dropped } : {}),
     ...(result.status === 'conflict' && result.paths
       ? { conflictSummary: { paths: result.paths, more: result.more ?? 0 } }
@@ -152,7 +156,7 @@ export async function publishComposeJob(
     projectId: Id<'hostedProjects'>;
     jobId: string;
     result: string;
-    r2?: [number, number, number];
+    source?: { r2: [number, number, number]; timing?: SourcePhaseTiming };
   },
 ) {
   const row = await composeForJob(ctx, input.projectId, input.jobId);
@@ -168,7 +172,7 @@ export async function publishComposeJob(
       operationId: row.operationId,
       actor: row.actor,
       result: input.result,
-      ...(input.r2 ? { r2: input.r2 } : {}),
+      ...(input.source ? { source: input.source } : {}),
     }),
   );
 }

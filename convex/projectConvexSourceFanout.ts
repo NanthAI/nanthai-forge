@@ -14,12 +14,13 @@ import {
 import { receiveConvexSourceJobCallback } from './projectSourceJobCallbacks';
 import { sourceFailure, sourceTaskData, sourceStateSizes } from './projectSourceStepFields';
 import { recordSourceStateSizes } from './projectConvexSourceOutput';
-import { recordSourceStep, sourceStepTiming } from './projectSourceStepTiming';
+import { recordSourceStep, sourcePhaseTiming, sourceStepTiming } from './projectSourceStepTiming';
 import { sourceDispatch } from '../src/hosted-source-job-controller';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { ForgeError, invariant } from '../src/errors';
 import { exhaustSourceExecution, sourceRetryExpired } from './projectConvexSourceFailure';
-import { sourceFailureSchema } from '../src/hosted-source-retry';
+import { addSourcePhaseTiming } from '../src/source-step-clock';
+import { sourceFailureSchema, type SlowSourcePhase } from '../src/hosted-source-retry';
 import { moveSourceWake, sourceStep } from './projectConvexSourceActive';
 import { sourceMutation } from './projectConvexSourceErrors';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string(), step: v.number() };
@@ -36,6 +37,7 @@ export async function validSourceBatch(ctx: MutationCtx, batch: Doc<'projectSour
 export async function heartbeat(
   ctx: MutationCtx,
   active: NonNullable<Awaited<ReturnType<typeof activeStep>>>,
+  renewal?: { step: number; generation: number; index?: number; phase?: SlowSourcePhase },
 ) {
   const body: Partial<ReturnType<typeof sourceDispatch>> = sourceDispatch(active.row.projectId, active.job);
   // Dispatch-only fields do not belong to the existing terminal manifest.
@@ -45,7 +47,11 @@ export async function heartbeat(
   await receiveConvexSourceJobCallback(ctx, active.row.projectId, {
     ...body,
     executionId: active.row.executionId,
-    result: { status: 'heartbeat', sequence: active.job.control.heartbeat + 1 },
+    result: {
+      status: 'heartbeat',
+      sequence: active.job.control.heartbeat + 1,
+      ...(renewal ? { renewal } : {}),
+    },
   });
 }
 export const taskRow = (ctx: MutationCtx, batchId: Id<'projectSourceBatches'>, index: number) =>
@@ -172,6 +178,7 @@ export const begin = sourceMutation({
     return canonicalPayload({
       input: task.input,
       progress: task.progress,
+      ...(task.scheduledAt === undefined ? {} : { scheduledAt: task.scheduledAt }),
       jobKind: active.job.jobKind,
       lease: {
         ms: active.job.control.workerLeaseMs,
@@ -188,6 +195,8 @@ export const complete = sourceMutation({
     output: v.union(sourceTaskData, v.null()),
     failure: v.union(v.string(), v.null()),
     failureReason: v.optional(v.string()),
+    timing: v.optional(sourcePhaseTiming),
+    cause: v.optional(sourceFailure),
     stateSizes: sourceStateSizes,
   },
   returns: v.null(),
@@ -209,7 +218,7 @@ export const complete = sourceMutation({
       return null;
     }
     if (!args.failure) await recordSourceStateSizes(ctx, args.projectId, args.stateSizes);
-    await heartbeat(ctx, active);
+    await heartbeat(ctx, active, { step: args.step, generation: args.generation, index: args.index });
     // The renewed lease moves the batch's repair wake; the join's step keeps the same wake target.
     await moveSourceWake(
       ctx,
@@ -218,10 +227,12 @@ export const complete = sourceMutation({
       active.job.control.workerLeaseMs,
       true,
     );
+    const timing = addSourcePhaseTiming(task.timing, args.timing);
     if (!args.done && !args.failure) {
       await ctx.db.patch(task._id, {
         generation: task.generation + 1,
         progress: args.progress,
+        ...(timing ? { timing } : {}),
         failedAttempts: undefined,
         failedGeneration: undefined,
         lastFailure: undefined,
@@ -238,7 +249,10 @@ export const complete = sourceMutation({
     }
     await ctx.db.patch(task._id, {
       status: 'done',
+      scheduledAt: undefined,
       ...(args.failure ? {} : { input: '' }),
+      ...(timing ? { timing } : {}),
+      ...(args.cause ? { lastFailure: args.cause } : {}),
       progress: null,
       output: args.output,
       failure: args.failure,
@@ -286,7 +300,15 @@ export const results = sourceMutation({
       'SOURCE_JOB_INVALID',
       'Source join is incomplete.',
     );
+    const timing = tasks.reduce<Doc<'projectSourceTasks'>['timing']>(
+      (total, task) => addSourcePhaseTiming(total, task.timing),
+      undefined,
+    );
+    const cause = batch.failure
+      ? tasks.find(task => task.failure === batch.failure && task.lastFailure)?.lastFailure
+      : undefined;
     return canonicalPayload({
+      ...(cause ? { cause } : timing ? { timing } : {}),
       kind: batch.kind,
       end: batch.end,
       failure: batch.failure,

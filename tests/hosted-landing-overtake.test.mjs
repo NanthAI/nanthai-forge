@@ -319,7 +319,8 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // `"checkKind":"full"` on every later row read, no new call or write, under $0.001 per 1,000 landings.
   // Exact on the fixed clock (Item fa2c1383 follow-up f): ISO stamps, scheduler time and measured
   // step durations (`callMs`, the old 20 B spread) are frozen, so the replay's cost is one number and a
-  // drop fails too: ratchet it with the change that earned it. On this clock the pair measures
+  // drop fails too: ratchet it with the change that earned it. Source phase timing (e3082c24) adds
+  // 381 read and 231 write bytes to both fixtures. On this clock the pair measures
   // 111 calls, 1,899,135 read / 606,570 write B (wall clock: 111 calls, about 1,900,046 / 607,524 B),
   // below the ceilings above (121 calls, 1,900,085 / 676,662 B), which this exact row replaces.
   // DB reads 1,899,135 -> 1,894,559 (Item 76be0714, public plan visibility): a query reads a document by id once and
@@ -336,7 +337,7 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   const measured = { calls: pair.calls, readBytes: pair.readBytes, writeBytes: pair.writeBytes };
   assert.deepEqual(
     measured,
-    { calls: 111, readBytes: 1_896_106, writeBytes: 608_297 },
+    { calls: 111, readBytes: 1_896_487, writeBytes: 608_528 },
     'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
@@ -382,7 +383,7 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   const measured = { calls: after.calls, readBytes: after.readBytes, writeBytes: after.writeBytes };
   assert.deepEqual(
     measured,
-    { calls: 111, readBytes: 1_901_360, writeBytes: 610_798 },
+    { calls: 111, readBytes: 1_901_741, writeBytes: 611_029 },
     'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(after.idle, 0);

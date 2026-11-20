@@ -1,12 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v, type Infer } from 'convex/values';
 import { z } from 'zod';
+import { addSourcePhaseTiming } from '../src/source-step-clock';
+import { sourcePhaseTimingSchema } from '../src/hosted-source-retry';
 import type { QueryCtx } from './_generated/server';
+import type { SourceJob } from './projectSourceJobs';
+import { unknownSourceFailure, type SourceFailure } from '../src/hosted-source-retry';
 import type { Id } from './_generated/dataModel';
 
 /** Which cursor phases a step ran (`from>to`), why it stopped (`done`, or a yield/budget reason from
  * src/hosted-source-step-verify.ts) and how many State manifests, other Forge JSON pages and file
  * blobs it read (friction 09c0b7cd). Steps from older workers report none of these. */
+export const sourcePhaseTiming = v.object({
+  startupMs: v.number(),
+  readMs: v.number(),
+  computeMs: v.number(),
+  writeMs: v.number(),
+  convexMs: v.number(),
+  gets: v.number(),
+  puts: v.number(),
+  heads: v.number(),
+});
 const stepDetail = {
   phase: v.optional(v.string()),
   stop: v.optional(v.string()),
@@ -29,6 +43,7 @@ export const sourceStepTiming = v.object({
   reads: v.number(),
   writes: v.number(),
   bootMs: v.optional(v.number()),
+  summary: v.optional(sourcePhaseTiming),
   ...stepDetail,
 });
 const recorded = v.object({
@@ -51,6 +66,7 @@ export const sourceExecutionTiming = v.object({
   /** When the next step (or the first) was scheduled. */
   scheduledAt: v.number(),
   steps: v.array(recorded),
+  summary: v.optional(sourcePhaseTiming),
   /** When the terminal commit ran. */
   doneAt: v.optional(v.number()),
 });
@@ -66,7 +82,7 @@ export function recordSourceStep(
   done: boolean,
 ): SourceExecutionTiming | undefined {
   if (!prior || !reported) return prior && !done ? { ...prior, scheduledAt: now } : prior;
-  const { startedAt, bootMs, phase, stop, ...rest } = reported;
+  const { startedAt, bootMs, phase, stop, summary, ...rest } = reported;
   const counts = Object.fromEntries(Object.entries(rest).map(([k, value]) => [k, ms(value)]));
   const entry = {
     waitMs: ms(startedAt - prior.scheduledAt),
@@ -91,7 +107,9 @@ export function recordSourceStep(
     }
     steps = [...steps.slice(0, -2), merged as Recorded];
   }
+  const merged = addSourcePhaseTiming(prior.summary, summary);
   return {
+    ...(merged ? { summary: merged } : {}),
     queuedAt: prior.queuedAt,
     scheduledAt: done ? prior.scheduledAt : now,
     steps,
@@ -105,6 +123,7 @@ export const sourceServerTimingSchema = z
     scheduledAt: z.number(),
     steps: z.array(z.record(z.string(), z.union([z.number(), z.string().max(40)]))).max(16),
     doneAt: z.number().optional(),
+    summary: sourcePhaseTimingSchema.optional(),
     publishedAt: z.number(),
   })
   .strict();
@@ -128,4 +147,24 @@ export function sourceR2Counts(timing: { steps: readonly Record<string, number |
   const sum = (key: string) =>
     (timing?.steps ?? []).reduce((total, step) => total + (typeof step[key] === 'number' ? step[key] : 0), 0);
   return [sum('r2a'), sum('r2b'), sum('r2put')] as [number, number, number];
+}
+
+/** Match the current attempt before attributing a stopped action to its last renewal sample. */
+export function sourceStallCause(
+  control: SourceJob['control'],
+  step: { step: number; generation?: number; batchId?: unknown },
+  task?: { index: number; generation: number },
+): SourceFailure | undefined {
+  if (!control) return undefined;
+  if (step.batchId) {
+    if (!task || control.slowTasks?.step !== step.step) return undefined;
+    const sample = control.slowTasks.samples.find(([i, g]) => i === task.index && g === task.generation);
+    return sample && { ...unknownSourceFailure('scheduled-task'), slowestPhase: sample[2] };
+  }
+  const sample = control.activePhase;
+  if (sample?.step !== step.step || sample.generation !== (step.generation ?? 0)) return undefined;
+  return {
+    ...unknownSourceFailure('scheduled-step'),
+    slowestPhase: sample.phase,
+  };
 }

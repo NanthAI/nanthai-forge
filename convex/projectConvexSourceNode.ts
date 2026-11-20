@@ -29,7 +29,14 @@ import {
 import { cachedReads } from '../src/hosted-source-read-cache';
 import { invariant } from '../src/errors';
 import { sourceDomainError } from './projectConvexSourceErrors';
-import { logSourceFailure, logSourceStep, withSourceFailureLog } from '../src/hosted-source-io-error';
+import {
+  logSourceFailure,
+  logSourceStep,
+  sourceFailureCause,
+  withSourceFailureLog,
+} from '../src/hosted-source-io-error';
+import { addSourcePhaseTiming, sourceStepClock } from '../src/source-step-clock';
+import type { SourceFailure, SourcePhaseTiming } from '../src/hosted-source-retry';
 import { keepSourceLease } from '../src/hosted-source-lease';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string() };
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
@@ -63,7 +70,8 @@ async function runNodeSourceStep(
     preloaded?: { sha256: string; size: number; text: string }[];
   } = {},
 ): Promise<string | null> {
-  const entered = performance.now();
+  const entered = performance.now(),
+    clock = sourceStepClock(args.delegatedAt);
   let generation = args.generation ?? 0,
     retained = options.retained;
   const published = await withSourceFailureLog(
@@ -74,12 +82,15 @@ async function runNodeSourceStep(
       const { loaded: supplied, delegatedAt, ...input } = args;
       const loaded: string | null =
         supplied ??
-        (await ctx.runMutation(reference('projectConvexSourceStore:begin'), {
-          ...input,
-          ...(options.inline ? { inline: true } : {}),
-        }));
+        (await clock.startup(() =>
+          ctx.runMutation(reference('projectConvexSourceStore:begin'), {
+            ...input,
+            ...(options.inline ? { inline: true } : {}),
+          }),
+        ));
       if (!loaded) return null;
       const state = JSON.parse(loaded);
+      clock.dispatchedAt(state.scheduledAt);
       const chain = state.jobKind === 'save' && state.chain === true;
       if (chain) retained = retainedSave(state);
       generation = state.generation ?? generation;
@@ -87,16 +98,16 @@ async function runNodeSourceStep(
       // A delegated step runs under its caller's keeper (runConvexSourceStep); others keep their own.
       const stopLease = supplied
         ? async () => {}
-        : keepSourceLease(
-            () =>
-              ctx.runMutation(reference('projectConvexSourceLease:renew'), {
-                projectId: input.projectId,
-                jobId: input.jobId,
-                step: input.step,
-                generation,
-              }),
-            state.lease,
-          );
+        : keepSourceLease(() => {
+            const phase = clock.slowPhase();
+            return ctx.runMutation(reference('projectConvexSourceLease:renew'), {
+              projectId: input.projectId,
+              jobId: input.jobId,
+              step: input.step,
+              generation,
+              ...(phase ? { phase } : {}),
+            });
+          }, state.lease);
       try {
         if (state.physicalSeed) {
           try {
@@ -115,7 +126,7 @@ async function runNodeSourceStep(
             return null;
           }
         }
-        const { io, outputs, settle, clock, smallOutput, putMetrics, observedStates } = convexSourceTransport(
+        const { io, outputs, settle, smallOutput, putMetrics, observedStates } = convexSourceTransport(
             ctx,
             input,
             state.locations,
@@ -123,6 +134,7 @@ async function runNodeSourceStep(
             // Texts the delegating action holds come only through `loaded` (never from a schedule).
             {
               overlapWrites: true,
+              clock,
               hash: nativeDigest,
               preloaded: options.preloaded ?? (supplied ? state.preloaded : undefined),
               physicalManifests: state.physicalManifests === true,
@@ -131,11 +143,21 @@ async function runNodeSourceStep(
               observed: supplied ? state.observedStates : undefined,
             },
           ),
-          durable = sourceStorage(ctx, input.projectId, nativeDigest, putMetrics.observer('progress'));
+          durable = sourceStorage(
+            ctx,
+            input.projectId,
+            nativeDigest,
+            putMetrics.observer('progress'),
+            false,
+            clock,
+          );
         let cursor: SourceStepCursor = initialSourceStep(state.input),
           progress: SourceProgress | null = null;
         let result!: Awaited<ReturnType<typeof runSourceStep>>;
         let fanout: SourceFanout | null = null;
+        let joinedTiming: SourcePhaseTiming | undefined, joinedFailure: SourceFailure | undefined;
+        const summary = () =>
+          addSourcePhaseTiming(addSourcePhaseTiming(clock.summary(), state.preludeTiming), joinedTiming);
         io.fanout = plan => {
           fanout = plan;
         };
@@ -149,6 +171,8 @@ async function runNodeSourceStep(
             const joined = JSON.parse(
               await clock.call(() => ctx.runMutation(reference('projectConvexSourceFanout:results'), input)),
             );
+            joinedTiming = joined.timing;
+            joinedFailure = joined.cause;
             invariant(
               !joined.failure,
               joined.failure ?? 'SOURCE_WORKER_FAILED',
@@ -202,6 +226,7 @@ async function runNodeSourceStep(
               outputs: outputCount,
               putBytes: putMetrics.snapshot(result!.cursor.output),
               started,
+              timing: clock.summary(),
             });
           if (fanout) {
             const plan = fanout as SourceFanout;
@@ -213,15 +238,18 @@ async function runNodeSourceStep(
                 ctx.runMutation(reference('projectConvexSourceStore:stage'), { ...input, objects }),
               );
             }
-            await ctx.runMutation(reference('projectConvexSourceFanout:fork'), {
-              ...input,
-              cursor: saved,
-              kind: plan.kind,
-              end: plan.end,
-              tasks: plan.tasks.map(task => JSON.stringify(task)),
-              timing: { ...clock.value(), ...result.metrics.detail },
-              stateSizes: observedStates(),
-            });
+            const timing = { ...clock.value(), ...result.metrics.detail, summary: summary() };
+            await clock.call(() =>
+              ctx.runMutation(reference('projectConvexSourceFanout:fork'), {
+                ...input,
+                cursor: saved,
+                kind: plan.kind,
+                end: plan.end,
+                tasks: plan.tasks.map(task => JSON.stringify(task)),
+                timing,
+                stateSizes: observedStates(),
+              }),
+            );
             logStep();
             return null;
           }
@@ -233,9 +261,9 @@ async function runNodeSourceStep(
             );
           }
           const resultText = smallOutput(result.cursor.output);
-          const published: string | null = await ctx.runMutation(
-            reference('projectConvexSourceStore:commit'),
-            {
+          const timing = { ...clock.value(), ...result.metrics.detail, summary: summary() };
+          const published: string | null = await clock.call<string | null>(() =>
+            ctx.runMutation(reference('projectConvexSourceStore:commit'), {
               ...input,
               cursor: saved,
               objects: outputs,
@@ -243,9 +271,9 @@ async function runNodeSourceStep(
               failure: null,
               ...(chain ? { chain: true } : {}),
               stateSizes: observedStates(),
-              timing: { ...clock.value(), ...result.metrics.detail },
+              timing,
               ...(resultText === null ? {} : { result: resultText }),
-            },
+            }),
           );
           logStep();
           // A sync the step published also hands its submitter the result as changes from the
@@ -257,13 +285,16 @@ async function runNodeSourceStep(
           // still records it, so the server retries it while it is the current attempt).
           const domain = sourceDomainError(error);
           if (!domain || domain.code === 'SOURCE_JOB_FENCED') throw error;
-          logSourceFailure(error, input, 'step', started);
+          const measured = clock.summary();
+          logSourceFailure(error, input, 'step', started, measured);
           await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
             ...input,
             cursor: state.cursor,
             objects: [],
             output: null,
             failure: domain.code,
+            cause: joinedFailure ?? sourceFailureCause(error, 'step', started, measured),
+            timing: clock.value(),
             ...(domain.code === 'SOURCE_STATE_TOO_LARGE' ? { failureReason: domain.message } : {}),
           });
           return null;
@@ -280,6 +311,7 @@ async function runNodeSourceStep(
         generation,
         cause,
       }),
+    clock.summary,
   );
   if (!published || !retained) return published;
   const publication = JSON.parse(published) as InlinePublication;

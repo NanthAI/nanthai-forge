@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { sourceRetryFailureMessage } from '../src/hosted-source-retry';
+import { sourceFailurePhase, sourceRetryFailureMessage } from '../src/hosted-source-retry';
 import { sourceProgress } from './projectSourceProgress';
 import { v } from 'convex/values';
 import { sourceWorkerPlan } from '../src/convex-source-provider';
@@ -143,7 +143,8 @@ export const resultDownload = internalMutation({
                 job.control.failureCode === 'SOURCE_RETRY_EXHAUSTED'
                   ? sourceRetryFailureMessage(job.control.failureCause)
                   : (job.control.failureReason ??
-                    'The original source job did not complete; its sync inputs are retained.'),
+                      'The original source job did not complete; its sync inputs are retained.') +
+                    sourceFailurePhase(job.control.failureCause),
             },
           },
         },

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { sourcePhaseTimingSchema } from '../src/hosted-source-retry';
 import { batchComposeSchema, batchDroppedSchema } from '../src/hosted-landing-batch';
 import { semanticPayload } from '../src/semantic-payload';
 import { semanticPlanSchema } from '../src/intent-semantic-conflict';
@@ -41,6 +42,7 @@ export const composeStateSchema = z
     /** R2 requests the compose's source steps signed, written once at publication: class A, class B,
      * bytes put (Issue 3e3f9fe6). The landing that adopts this compose adds them to its own counts. */
     r2: z.tuple([count, count, count]).optional(),
+    sourceTiming: sourcePhaseTimingSchema.optional(),
     request: composeRequestSchema,
     main: saveWorkerObjectSchema,
     inputs: progress,

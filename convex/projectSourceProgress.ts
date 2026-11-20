@@ -2,6 +2,7 @@
 import { sourceRetryFailureMessage } from '../src/hosted-source-retry';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
+import { sourceStallCause } from './projectSourceStepTiming';
 import { loadSourceJob, type SourceJob } from './projectSourceJobs';
 
 /** Selected metadata only. Observation never renews a lease or schedules work.
@@ -30,7 +31,18 @@ export async function sourceProgress(
         : `source-${job.jobKind}`;
   const deadline =
     job.status === 'completed' ? Date.parse(job.at) + control.workerLeaseMs : control.workerUntil;
-  const source = { jobId, status: job.status, phase, workerUntil: deadline };
+  const currentFailure = step?.failedGeneration === (step?.generation ?? 0) ? step?.lastFailure : undefined;
+  const cause = control.failureCause ?? currentFailure;
+  const timing = cause?.timing ?? step?.timing?.summary;
+  const slowestPhase = cause?.slowestPhase;
+  const source = {
+    jobId,
+    status: job.status,
+    phase,
+    workerUntil: deadline,
+    ...(timing ? { timing } : {}),
+    ...(slowestPhase ? { slowestPhase } : {}),
+  };
   if (job.status === 'failed' || job.status === 'cancelled')
     return {
       status: 'failed',
@@ -67,11 +79,19 @@ export async function sourceProgress(
     !!batch?.failure ||
     (!!step?.scheduledId && (!scheduled || ['failed', 'canceled'].includes(scheduled.state.kind)));
   const expired = control.dispatch !== 'unstarted' && deadline <= Date.now();
-  if (stopped || expired)
+  if (stopped || expired) {
+    const stalled = step ? sourceStallCause(control, step) : undefined;
+    const slowTasks =
+      batch?.status === 'waiting' && control.slowTasks?.step === step?.step ? control.slowTasks : undefined;
     return {
       status: 'retryable',
       jobId,
-      source,
+      source: {
+        ...source,
+        ...(stalled?.timing ? { timing: stalled.timing } : {}),
+        ...(stalled?.slowestPhase ? { slowestPhase: stalled.slowestPhase } : {}),
+        ...(slowTasks ? { slowTasks } : {}),
+      },
       failedPhase: phase,
       error: {
         code: batch?.failure ?? (stopped ? 'SOURCE_WORKER_STEP_FAILED' : 'SOURCE_JOB_STALLED'),
@@ -80,5 +100,6 @@ export async function sourceProgress(
           : 'The source job made no progress before its worker lease expired. Replay the original operation to reconcile the same execution.',
       },
     };
+  }
   return { status: 'submitted', jobId, source };
 }

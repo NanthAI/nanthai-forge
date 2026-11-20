@@ -28,7 +28,7 @@ import { SourceIoError, transientSourceStatus } from '../src/hosted-source-io-er
 import { retryR2Lag } from '../src/hosted-r2-retry';
 import { sourceDomainError } from './projectConvexSourceErrors';
 import { packHeaders, verifyPackRange, type PackRange, type ObjectPack } from '../src/object-pack-range';
-import { sourceStepClock } from '../src/source-step-clock';
+import { sourceStepClock, type SourceStepClock } from '../src/source-step-clock';
 import { PhysicalManifestReader, manifestOrCatalog } from '../src/physical-manifest';
 import type { PhysicalPin, PhysicalEntry } from '../src/physical-manifest-codec';
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
@@ -61,8 +61,10 @@ export function convexSourceTransport(
     physicalManifests = false,
     sourceKind,
     bindings = [],
+    clock = sourceStepClock(delegatedAt),
   }: {
     overlapWrites?: boolean;
+    clock?: SourceStepClock;
     /** Node supplies native SHA-256; V8 retains portable hashing. */
     hash?: (bytes: Uint8Array) => string;
     putMetrics?: ReturnType<typeof sourcePutMetrics>;
@@ -75,12 +77,14 @@ export function convexSourceTransport(
     observed?: ({ sha256: string; size: number } & StateSize)[] | undefined;
   } = {},
 ) {
+  // Preserve the old signing meter's transport boundary. Begin can sign R2
+  // locations, but the action-local request meter counts only actual fetches.
+  clock.startSignedMeter(r2Counts);
   // Fan-out tasks pass their wider identity; the object validator accepts only these fields.
   const input = { projectId, jobId, step };
   const locations = new Map<string, ObjectLocation>(initial.map(row => [row.descriptor.object.sha256, row])),
     outputs: SourceOutput[] = [],
     reads = { objects: 0, bytes: 0 },
-    clock = sourceStepClock(delegatedAt, r2Counts),
     // The last few small outputs, by digest: a step's final result manifest is one of them, so
     // commit can carry it to publication without a separate action re-reading it from R2.
     small = new Map<string, string>(),
@@ -92,16 +96,16 @@ export function convexSourceTransport(
   const settle = async () => {
     while (writing.length) outputs.push(await writing.shift()!);
   };
-  const durable = sourceStorage(ctx, projectId, hash, putMetrics.observer('other'));
+  const durable = sourceStorage(ctx, projectId, hash, putMetrics.observer('other'), false, clock);
   // Retries and recompositions can generate exactly the same immutable State or
   // chunk. Confirm its checksum before sending its body again, including when a
   // previous action's successful PUT reply was lost before its commit.
-  const stateStorage = sourceStorage(ctx, projectId, hash, putMetrics.observer('state'), true);
+  const stateStorage = sourceStorage(ctx, projectId, hash, putMetrics.observer('state'), true, clock);
   const chunks = sourceStateChunks(
     projectId,
     hash,
     async (pin, bytes) => {
-      const ref = await clock.write(() => stateStorage.store(bytes, pin)),
+      const ref = await stateStorage.store(bytes, pin),
         r2 = sourceR2Pin(ref);
       invariant(
         r2 && r2.sha256 === pin.sha256 && r2.size === pin.size,
@@ -287,7 +291,7 @@ export function convexSourceTransport(
     log: reportBindings,
     put: async bytes => {
       const pin = { sha256: hash(bytes), size: bytes.length };
-      const ref = await clock.write(() => stateStorage.store(bytes, pin));
+      const ref = await stateStorage.store(bytes, pin);
       invariant(
         sourceR2Pin(ref)?.sha256 === pin.sha256,
         'SOURCE_HASH_MISMATCH',
@@ -581,11 +585,13 @@ export function convexSourceTransport(
       // A committed object that answers 404 may be read-after-write lag; the
       // shared bound retries it, then the exact SOURCE_UNAVAILABLE stands.
       response = await retryR2Lag(
-        () =>
-          convexFetch(url, {
+        () => {
+          clock.request('gets');
+          return convexFetch(url, {
             headers: { 'accept-encoding': 'identity', ...packHeaders(row.range, pin.size) },
             signal: networkTimeout(15000),
-          }),
+          });
+        },
         lagged => lagged.status === 404,
         lagged => lagged.body?.cancel().catch(() => {}),
       );
@@ -664,7 +670,7 @@ export function convexSourceTransport(
               ? { projected, ref: null }
               : {
                   projected: null,
-                  ref: await clock.write(() => (stateParents ? stateStorage : durable).store(bytes, pin)),
+                  ref: await (stateParents ? stateStorage : durable).store(bytes, pin),
                 };
           })(),
         ]);

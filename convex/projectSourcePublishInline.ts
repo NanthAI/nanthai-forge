@@ -7,6 +7,8 @@ import { publishComposeJob } from './projectHostedComposePublish';
 
 import { syncForJob } from './projectHostedSyncStore';
 import { composeForJob } from './projectHostedComposeStore';
+import { sourceR2Counts, type SourceExecutionTiming } from './projectSourceStepTiming';
+import type { SourcePhaseTiming } from '../src/hosted-source-retry';
 import { canonicalPayload } from '../src/hosted-source-operation';
 
 /** What a terminal commit that published its own small result returns to the step's action: the
@@ -14,7 +16,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
  * resolve after it, the chain that action runs itself (`chainRun`, never sent to clients). */
 export type InlinePublication = {
   terminal: unknown;
-  state: { submittedAt?: number; serverTiming?: unknown };
+  state: { submittedAt?: number; serverTiming?: unknown; sourceTiming?: SourcePhaseTiming };
   chainRun?: { projectId: Id<'hostedProjects'>; actor: string; operationId: string };
   /** A sync's result as changes from the client's Lane head (src/hosted-sync-delta.ts), added by
    * the step for its submitter's reply only. */
@@ -30,15 +32,21 @@ export async function publishSourceResult(
   input: { projectId: Id<'hostedProjects'>; jobId: string; result: string },
   /** The committing action runs a save's resolve chain itself; the publication keeps only a fallback. */
   chainInline: boolean,
-  /** R2 requests the job's steps signed, from the step row the commit just wrote (compose only). */
-  r2?: [number, number, number],
+  /** The step row the commit just wrote, so inline compose needs no timing read. */
+  timing?: SourceExecutionTiming,
 ): Promise<string | null> {
   const terminal =
     kind === 'save'
       ? await publishSaveJob(ctx, input, chainInline)
       : kind === 'sync'
         ? await publishSyncJob(ctx, input)
-        : await publishComposeJob(ctx, { ...input, ...(r2 ? { r2 } : {}) });
+        : await publishComposeJob(ctx, {
+            ...input,
+            source: {
+              r2: sourceR2Counts(timing),
+              ...(timing?.summary ? { timing: timing.summary } : {}),
+            },
+          });
   if (terminal === null) return null;
   const row =
     kind === 'save'
@@ -47,13 +55,14 @@ export async function publishSourceResult(
         ? await syncForJob(ctx, input.projectId, input.jobId)
         : await composeForJob(ctx, input.projectId, input.jobId);
   const state = row
-    ? (JSON.parse(row.value) as { submittedAt?: number; serverTiming?: unknown; chainFallbackId?: string })
+    ? (JSON.parse(row.value) as InlinePublication['state'] & { chainFallbackId?: string })
     : {};
   const published: InlinePublication = {
     terminal: JSON.parse(terminal),
     state: {
       ...(state.submittedAt === undefined ? {} : { submittedAt: state.submittedAt }),
       ...(state.serverTiming === undefined ? {} : { serverTiming: state.serverTiming }),
+      ...(state.sourceTiming ? { sourceTiming: state.sourceTiming } : {}),
     },
     ...(row && state.chainFallbackId
       ? { chainRun: { projectId: input.projectId, actor: row.actor, operationId: row.operationId } }

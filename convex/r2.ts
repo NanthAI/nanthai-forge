@@ -158,7 +158,12 @@ export type HeadResult =
   | { status: 'ok'; size: number; checksum: string | null }
   | { status: 'missing' }
   | { status: 'error'; detail: string; httpStatus?: number };
-export async function headObject(config: R2Config, key: string, repairable = false): Promise<HeadResult> {
+export async function headObject(
+  config: R2Config,
+  key: string,
+  repairable = false,
+  onAttempt?: () => void,
+): Promise<HeadResult> {
   try {
     const url = await presign({
       method: 'HEAD',
@@ -171,7 +176,7 @@ export async function headObject(config: R2Config, key: string, repairable = fal
       'R2 object HEAD verification',
       url,
       { method: 'HEAD', headers: { 'accept-encoding': 'identity' } },
-      { retries: 1 },
+      { retries: 1, onAttempt },
     );
     if (response.status === 404) return { status: 'missing' };
     if (repairable && transientSourceStatus(response.status))

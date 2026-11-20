@@ -251,6 +251,7 @@ type SourceFailure = {
   attempts?: number;
   maxAttempts?: number;
   retryAt?: string;
+  slowestPhase?: string;
 };
 /** What a waiting agent is told about a stalled landing (friction c7f3afac: a landing wait stayed
  * silent for 2 h while its compose step had failed). The stall, the source step's recorded failure
@@ -275,6 +276,7 @@ export function landingStallReport(
   if (failure?.code)
     lines.push(
       `Source step ${failure.step ?? '?'} failed: ${failure.code}${failure.stage ? ` at ${failure.stage}` : ''}` +
+        (failure.slowestPhase ? `, longest phase ${failure.slowestPhase}` : '') +
         (failure.attempts ? ` (attempt ${failure.attempts} of ${failure.maxAttempts ?? '?'})` : '') +
         (failure.retryAt ? `; next try from ${failure.retryAt}` : '') +
         '. The server retries it by itself.',

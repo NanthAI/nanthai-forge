@@ -7,6 +7,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { sourceStepClock } from '../dist/source-step-clock.js';
 import { serverSyncTiming, syncTiming } from '../dist/sync-timing.js';
 import { digest } from '../dist/state/hash.js';
+import { sourceTimingMax } from '../dist/hosted-source-retry.js';
 const { recordSourceStep, sourceR2Counts } = await import(moduleUrl('../convex/projectSourceStepTiming.ts'));
 const { inlineSourceResult } = await import(moduleUrl('../convex/projectConvexSourceStore.ts'));
 
@@ -177,4 +178,29 @@ test('only a small save, sync or compose result that matches the signed output s
   assert.equal(inlineSourceResult('sync', { ...output, size: output.size + 1 }, result), false);
   const big = 'x'.repeat(64 * 1024 + 1);
   assert.equal(inlineSourceResult('sync', { sha256: digest(big), size: big.length }, big), false);
+});
+
+test('source receipts fold action totals without growing the timing field beyond 200 bytes', () => {
+  const max = sourceTimingMax,
+    summary = {
+      startupMs: max,
+      readMs: max,
+      writeMs: max,
+      computeMs: max,
+      convexMs: max,
+      gets: max,
+      puts: max,
+      heads: max,
+    };
+  let timing = { queuedAt: 0, scheduledAt: 0, steps: [] };
+  for (let index = 1; index <= 20; index++)
+    timing = recordSourceStep(timing, report(index, { summary }), index, index === 20);
+  assert.deepEqual(timing.summary, summary);
+  assert(!timing.steps.some(step => 'summary' in step));
+  assert(Buffer.byteLength(JSON.stringify({ timing: summary, slowestPhase: 'startup' })) <= 200);
+  const slowTasks = {
+    step: Number.MAX_SAFE_INTEGER,
+    samples: Array.from({ length: 4 }, () => [799, Number.MAX_SAFE_INTEGER, 'startup']),
+  };
+  assert(Buffer.byteLength(JSON.stringify({ slowTasks })) <= 200);
 });

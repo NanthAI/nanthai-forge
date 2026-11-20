@@ -8,6 +8,7 @@ import { invariant } from '../src/errors';
 import { r2Config, r2Key, presignGet } from './r2';
 import { storeSourceBytes } from './projectSourceBytes';
 import { SourceIoError, transientSourceStatus } from '../src/hosted-source-io-error';
+import type { SourceStepClock } from '../src/source-step-clock';
 import { retryR2Lag } from '../src/hosted-r2-retry';
 
 /** Durable cursor/task data. Project-scoped R2 references carry exact byte pins
@@ -26,68 +27,81 @@ export function sourceStorage(
   hash: (bytes: Uint8Array) => string = digest,
   observe?: (event: 'put' | 'refused' | 'reused', pin: { sha256: string; size: number }) => void,
   reuse = false,
+  clock?: SourceStepClock,
 ) {
-  return {
-    // `verified` is supplied only by the fixed transport after its exact hash
-    // check (or its chunk builder); durable cursor callers still compute it here.
-    async store(bytes: Uint8Array, verified?: { sha256: string; size: number }): Promise<string> {
-      const pin = verified ?? { sha256: hash(bytes), size: bytes.length };
-      const stored = await storeSourceBytes(ctx, projectId, bytes, pin, reuse, undefined, observe);
-      return 'r2Key' in stored ? `r2source:${pin.sha256}:${pin.size}` : stored.storageId;
-    },
-    async read(ref: string): Promise<Uint8Array> {
-      const pin = sourceR2Pin(ref);
-      if (!pin) {
-        invariant(!ref.startsWith('r2source:'), 'SOURCE_HASH_MISMATCH', 'Source storage reference changed.');
-        const owned = await ctx.runQuery(
-          makeFunctionReference<'query'>('projectConvexSourceOwnership:owns'),
-          { projectId, ref },
-        );
-        invariant(
-          owned,
-          'SOURCE_REF_UNOWNED',
-          'Durable source reference has no owner in this project, so this saved continuation cannot resume. ' +
-            'Start the operation again from its input; Forge never reads an unowned legacy reference.',
-        );
+  const fetchBytes = async (pin: { sha256: string; size: number }): Promise<Uint8Array> => {
+    const url = await presignGet(r2Config(), r2Key(projectId, pin.sha256));
+    let response: Response;
+    try {
+      // A pinned durable object that answers 404 may be read-after-write lag;
+      // the shared bound retries it, then the exact SOURCE_UNAVAILABLE stands.
+      response = await retryR2Lag(
+        () => {
+          clock?.request('gets');
+          return convexFetch(url, {
+            headers: { 'accept-encoding': 'identity' },
+            redirect: 'error',
+            signal: networkTimeout(20_000),
+          });
+        },
+        lagged => lagged.status === 404,
+        lagged => lagged.body?.cancel().catch(() => {}),
+      );
+    } catch (error) {
+      throw new SourceIoError(error, 'durable-headers', pin.sha256);
+    }
+    if (transientSourceStatus(response.status)) {
+      await response.body?.cancel().catch(() => {});
+      throw new SourceIoError(null, 'durable-headers', pin.sha256, response.status);
+    }
+    invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Durable source download failed.');
+    try {
+      return new Uint8Array(await response.arrayBuffer());
+    } catch (error) {
+      throw new SourceIoError(error, 'durable-body', pin.sha256, response.status);
+    }
+  };
+  const read = async (ref: string): Promise<Uint8Array> => {
+    const pin = sourceR2Pin(ref);
+    if (!pin) {
+      invariant(!ref.startsWith('r2source:'), 'SOURCE_HASH_MISMATCH', 'Source storage reference changed.');
+      const owns = () =>
+        ctx.runQuery(makeFunctionReference<'query'>('projectConvexSourceOwnership:owns'), {
+          projectId,
+          ref,
+        });
+      const owned = await (clock ? clock.call(owns) : owns());
+      invariant(
+        owned,
+        'SOURCE_REF_UNOWNED',
+        'Durable source reference has no owner in this project, so this saved continuation cannot resume. ' +
+          'Start the operation again from its input; Forge never reads an unowned legacy reference.',
+      );
+      const get = async () => {
         const blob = await ctx.storage.get(ref as Id<'_storage'>);
         invariant(blob, 'SOURCE_UNAVAILABLE', 'Durable source data is absent.');
         return new Uint8Array(await blob.arrayBuffer());
-      }
-      const url = await presignGet(r2Config(), r2Key(projectId, pin.sha256));
-      let response: Response;
-      try {
-        // A pinned durable object that answers 404 may be read-after-write lag;
-        // the shared bound retries it, then the exact SOURCE_UNAVAILABLE stands.
-        response = await retryR2Lag(
-          () =>
-            convexFetch(url, {
-              headers: { 'accept-encoding': 'identity' },
-              redirect: 'error',
-              signal: networkTimeout(20_000),
-            }),
-          lagged => lagged.status === 404,
-          lagged => lagged.body?.cancel().catch(() => {}),
-        );
-      } catch (error) {
-        throw new SourceIoError(error, 'durable-headers', pin.sha256);
-      }
-      if (transientSourceStatus(response.status)) {
-        await response.body?.cancel().catch(() => {});
-        throw new SourceIoError(null, 'durable-headers', pin.sha256, response.status);
-      }
-      invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Durable source download failed.');
-      let bytes: Uint8Array;
-      try {
-        bytes = new Uint8Array(await response.arrayBuffer());
-      } catch (error) {
-        throw new SourceIoError(error, 'durable-body', pin.sha256, response.status);
-      }
-      invariant(
-        bytes.length === pin.size && hash(bytes) === pin.sha256,
-        'SOURCE_HASH_MISMATCH',
-        'Durable source data changed.',
-      );
-      return bytes;
+      };
+      return clock ? clock.readBytes(get) : get();
+    }
+    const load = () => fetchBytes(pin);
+    const bytes = await (clock ? clock.readBytes(load) : load());
+    invariant(
+      bytes.length === pin.size && hash(bytes) === pin.sha256,
+      'SOURCE_HASH_MISMATCH',
+      'Durable source data changed.',
+    );
+    return bytes;
+  };
+  return {
+    // The transport already verified this pin; durable cursor callers still hash here.
+    async store(bytes: Uint8Array, verified?: { sha256: string; size: number }): Promise<string> {
+      const pin = verified ?? { sha256: hash(bytes), size: bytes.length };
+      const put = () =>
+        storeSourceBytes(ctx, projectId, bytes, pin, reuse, undefined, observe, clock?.request);
+      const stored = await (clock ? clock.write(put) : put());
+      return 'r2Key' in stored ? `r2source:${pin.sha256}:${pin.size}` : stored.storageId;
     },
+    read,
   };
 }

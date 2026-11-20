@@ -64,9 +64,22 @@ export async function receiveConvexSourceJobCallback(
     'SOURCE_JOB_FENCED',
     'The source-worker lease is absent or expired.',
   );
+  const rest = { ...control };
+  delete rest.activePhase;
+  delete rest.slowTasks;
   if (callback.result.status === 'heartbeat') {
     // Duplicate/old internal heartbeats never extend the lease a second time.
     if (callback.result.sequence <= control.heartbeat) return job;
+    const renewal = callback.result.renewal;
+    if (renewal?.index !== undefined) {
+      const { step, index, generation, phase } = renewal;
+      const tasks =
+        control.slowTasks?.step === step ? control.slowTasks.samples.filter(([i]) => i !== index) : [];
+      if (phase) tasks.push([index, generation, phase]);
+      if (tasks.length) rest.slowTasks = { step, samples: tasks.slice(-4) };
+    } else if (renewal?.phase) {
+      rest.activePhase = { step: renewal.step, generation: renewal.generation, phase: renewal.phase };
+    }
     return saveSourceJob(
       ctx,
       input.projectId,
@@ -76,7 +89,7 @@ export async function receiveConvexSourceJobCallback(
         status: 'running',
         executionId: callback.executionId,
         control: {
-          ...control,
+          ...rest,
           dispatch: 'accepted',
           heartbeat: callback.result.sequence,
           workerUntil: now + control.workerLeaseMs,
@@ -95,7 +108,7 @@ export async function receiveConvexSourceJobCallback(
       executionId: callback.executionId,
       output: callback.result.status === 'completed' ? callback.result.output : null,
       control: {
-        ...control,
+        ...rest,
         dispatch: 'accepted',
         callbackDigest,
         failureCode: callback.result.status === 'failed' ? callback.result.code : null,

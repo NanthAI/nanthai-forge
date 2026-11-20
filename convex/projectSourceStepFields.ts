@@ -2,8 +2,9 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { objectPack, recipeClosure, stateSize } from './projectObjectFields';
-import { sourceExecutionTiming } from './projectSourceStepTiming';
+import { sourceExecutionTiming, sourcePhaseTiming } from './projectSourceStepTiming';
 import {
+  sourcePhaseNames,
   sourceFailureStages,
   sourceFailureClasses,
   sourceFailureCodes,
@@ -50,6 +51,8 @@ export const sourceFailure = v.object({
   objects: v.optional(v.number()),
   elapsedMs: v.number(),
   httpStatus: v.union(v.number(), v.null()),
+  timing: v.optional(sourcePhaseTiming),
+  slowestPhase: v.optional(v.union(...sourcePhaseNames.map(phase => v.literal(phase)))),
 });
 const retryFields = {
   failedAttempts: v.optional(v.number()),
@@ -104,6 +107,8 @@ export const sourceStepTables = {
   projectSourceTasks: defineTable({
     ...retryFields,
     retryUntil: v.optional(v.number()),
+    timing: v.optional(sourcePhaseTiming),
+    scheduledAt: v.optional(v.number()),
     projectId: v.id('hostedProjects'),
     jobId: v.string(),
     step: v.number(),

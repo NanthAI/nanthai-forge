@@ -4,6 +4,8 @@ import {
   sourceFailureStages,
   sourceFailureCodes,
   sourceFailureCalls,
+  slowestSourcePhase,
+  type SourcePhaseTiming,
   type SourceFailure,
 } from './hosted-source-retry.js';
 /** Transport failures are deliberately not ForgeErrors: a scheduled source
@@ -76,8 +78,9 @@ export function logSourceFailure(
   identity: { jobId: string; step: number; index?: number; generation?: number },
   stage: string,
   started: number,
+  timing?: SourcePhaseTiming,
 ) {
-  const cause = sourceFailureCause(error, stage, started);
+  const cause = sourceFailureCause(error, stage, started, timing);
   const io = error instanceof SourceIoError ? error : null;
   console.warn(
     JSON.stringify({
@@ -114,6 +117,7 @@ export function logSourceStep(
       avoided: number;
     };
     started: number;
+    timing?: SourcePhaseTiming;
   },
 ) {
   const count = (value: number) => (Number.isSafeInteger(value) && value >= 0 ? value : null);
@@ -122,6 +126,7 @@ export function logSourceStep(
   console.warn(
     JSON.stringify({
       event: 'forge-source-step',
+      ...(fields.timing ? { timing: fields.timing } : {}),
       job: identity.jobId,
       step: identity.step,
       runtime: fields.runtime,
@@ -146,17 +151,26 @@ export function logSourceStep(
     }),
   );
 }
-export function sourceFailureCause(error: unknown, stage: string, started: number): SourceFailure {
+export function sourceFailureCause(
+  error: unknown,
+  stage: string,
+  started: number,
+  timing?: SourcePhaseTiming,
+): SourceFailure {
   const io = error instanceof SourceIoError ? error : null;
   const selected = io?.stage ?? stage;
   const status = io?.httpStatus;
+  const elapsedMs = Math.max(0, Math.round(performance.now() - started));
+  const slowestPhase = timing && slowestSourcePhase(timing);
   return {
     stage: (sourceFailureStages as readonly string[]).includes(selected)
       ? (selected as SourceFailure['stage'])
       : 'step',
     exception: (io?.exception ?? exceptionClass(error)) as SourceFailure['exception'],
     code: (failureCode(error) ?? 'SOURCE_RUNTIME_ERROR') as SourceFailure['code'],
-    elapsedMs: Math.min(600000, Math.max(0, Math.round(performance.now() - started))),
+    elapsedMs: Math.min(600000, elapsedMs),
+    ...(timing ? { timing } : {}),
+    ...(slowestPhase ? { slowestPhase } : {}),
     ...(io?.context.call && (sourceFailureCalls as readonly string[]).includes(io.context.call)
       ? { call: io.context.call }
       : {}),
@@ -176,13 +190,15 @@ export async function withSourceFailureLog<T>(
   stage: string,
   run: () => Promise<T>,
   failed?: (cause: SourceFailure) => Promise<unknown>,
+  timing?: () => SourcePhaseTiming | undefined,
 ) {
   const started = performance.now();
   try {
     return await run();
   } catch (error) {
-    logSourceFailure(error, identity, stage, started);
-    const cause = { ...sourceFailureCause(error, stage, started), step: identity.step };
+    const measured = timing?.();
+    logSourceFailure(error, identity, stage, started, measured);
+    const cause = { ...sourceFailureCause(error, stage, started, measured), step: identity.step };
     try {
       // A fenced step is recorded too (incident e62d834b): the server decides whether it is still the
       // current attempt (then it is retried) or was superseded (then recording is a no-op).

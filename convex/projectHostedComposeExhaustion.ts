@@ -6,10 +6,15 @@ import { composeRow, loadCompose, writeComposeState } from './projectHostedCompo
 import { finishHostedOperation } from './projectHostedOperations';
 import { failFinish } from './projectHostedFinishStore';
 import { exhaustSourceExecution, exhaustSourceWithoutStep } from './projectConvexSourceFailure';
+import { sourceStallCause } from './projectSourceStepTiming';
 import { loadSourceJob } from './projectSourceJobs';
 import { drainSourcePool } from './projectConvexSourcePool';
 import { validSourceBatch } from './projectConvexSourceFanout';
-import { sourceRetryFailureMessage, unknownSourceFailure } from '../src/hosted-source-retry';
+import {
+  sourceFailurePhase,
+  sourceRetryFailureMessage,
+  unknownSourceFailure,
+} from '../src/hosted-source-retry';
 /** The existing compose watch owns settlement as well as reconciliation. This
  * runs only at its cutoff, without adding work to the healthy read/write path. */
 export async function exhaustFinishCompose(
@@ -49,7 +54,11 @@ export async function exhaustFinishCompose(
       if (job) {
         if (job.status === 'failed' || job.status === 'cancelled')
           code = job.control!.failureCode ?? 'SOURCE_JOB_CANCELLED';
-        cause = job.control!.failureCause ?? step?.lastFailure ?? cause;
+        cause =
+          job.control!.failureCause ??
+          step?.lastFailure ??
+          (step ? sourceStallCause(job.control, step) : undefined) ??
+          cause;
         // A terminal job already fixed its cause. Otherwise choose the latest
         // recorded child failure, independently of the four reservations' order.
         let failureAt = step?.lastFailureAt ?? -Infinity;
@@ -58,18 +67,18 @@ export async function exhaustFinishCompose(
             .query('projectSourcePools')
             .withIndex('by_key', q => q.eq('key', 'source'))
             .unique();
+          let sampledTask;
           for (const slot of pool?.active ?? []) {
             if (typeof slot !== 'string' && slot.batch !== step.batchId) continue;
             const task = await ctx.db.get(typeof slot === 'string' ? slot : slot.task);
-            if (
-              task?.batchId === step.batchId &&
-              task.lastFailure &&
-              (task.lastFailureAt ?? -Infinity) >= failureAt
-            ) {
+            if (task?.batchId !== step.batchId) continue;
+            if (task.status === 'running') sampledTask ??= sourceStallCause(job.control, step, task);
+            if (task.lastFailure && (task.lastFailureAt ?? -Infinity) >= failureAt) {
               cause = task.lastFailure;
               failureAt = task.lastFailureAt ?? -Infinity;
             }
           }
+          if (!cause.slowestPhase && cause.exception === 'UnknownError') cause = sampledTask ?? cause;
         }
         if (step) await exhaustSourceExecution(ctx, step, cause);
       }
@@ -87,7 +96,8 @@ export async function exhaustFinishCompose(
               message:
                 code === 'SOURCE_RETRY_EXHAUSTED'
                   ? sourceRetryFailureMessage(cause)
-                  : 'The original source job did not complete; its inputs and operation are retained.',
+                  : 'The original source job did not complete; its inputs and operation are retained.' +
+                    sourceFailurePhase(cause),
             },
           },
         },
@@ -102,6 +112,7 @@ export async function exhaustFinishCompose(
     code,
     code === 'SOURCE_RETRY_EXHAUSTED'
       ? sourceRetryFailureMessage(cause)
-      : 'The original source job did not complete; its inputs and operation are retained.',
+      : 'The original source job did not complete; its inputs and operation are retained.' +
+          sourceFailurePhase(cause),
   );
 }

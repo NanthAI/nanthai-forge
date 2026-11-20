@@ -10,6 +10,7 @@ export type ExchangeRequestOptions = {
   headerTimeoutMs?: number;
   idleTimeoutMs?: number;
   totalTimeoutMs?: number;
+  onAttempt?: (() => void) | undefined;
   onBytes?: ((done: number, total?: number) => void) | undefined;
 };
 
@@ -44,6 +45,7 @@ export async function exchangeRequest<T>(
     try {
       const result = await networkDeadline(
         async deadlineSignal => {
+          options.onAttempt?.();
           observeExchangeRequest(url, init);
           response = await networkFetch(url, { ...init, signal: deadlineSignal }, { ...options, retries: 0 });
           if (

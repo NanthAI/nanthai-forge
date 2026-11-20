@@ -13,7 +13,8 @@ import { landingStorage, storageBudgets } from './landing-storage-fixture.mjs';
 import { journalMaintenanceFixture } from './journal-maintenance-fixture.mjs';
 for (const dogfood of [false, true])
   test(`S2 ${dogfood ? 'dogfood' : 'fresh'} retained bytes include every journal index, receipt and terminal result`, async t => {
-    storageClock(t);
+    // e3082c24: measure the same deterministic source timing bytes as the landing storage fixture.
+    storageClock(t, { elapsed: true });
     let writer, results;
     const samples = {};
     const measured = await landingStorage(t, dogfood, {

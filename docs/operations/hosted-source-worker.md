@@ -288,6 +288,27 @@ least five orchestration invocations before Workflow start/resume costs. The
 application-owned pool preserves the zero-idle requirement and the small-save
 call budget. No Convex component configuration or component deployment is needed.
 
+## Source phase diagnostics
+
+The existing source-step clock reports startup, storage read, compute, write and
+Convex call milliseconds in existing source results and failure records. Startup
+includes the begin call and, when the action has a scheduling or runtime hand-off
+timestamp, the delay before the handler. Read and write intervals can overlap.
+Compute is the handler time outside the measured I/O intervals. The clock also
+counts attempted R2 GET, PUT and HEAD requests, including retries. The older R2
+signing counters remain the basis of the existing landing cost estimate.
+
+Compose progress keeps the compact totals in `state.sourceTiming`. Save and sync
+keep them in `state.serverTiming.summary`. These job totals add the work of
+parallel child actions, so the totals can exceed elapsed time. A failed source
+attempt names its longest measured phase. After the existing 20-second quantum
+budget, an already scheduled lease renewal can carry a slow sample into a stall
+record. The sample is tied to the step and generation, and fan-out samples also
+identify the child index. A Node action delegated by V8 uses its caller's lease.
+If it stops before returning, that lease cannot report the Node action's phase.
+The diagnostic adds no requests,
+scheduled functions or database reads and uses no new table.
+
 ## Source-step cost evidence
 
 The unchanged six-landing cost fixture (solo, main-race recompose and batch of

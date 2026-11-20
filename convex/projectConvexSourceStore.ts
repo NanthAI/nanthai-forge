@@ -44,7 +44,7 @@ import {
   unknownSourceFailure,
   sourceFailureSchema,
 } from '../src/hosted-source-retry';
-import { recordSourceStep, sourceR2Counts, sourceStepTiming } from './projectSourceStepTiming';
+import { recordSourceStep, sourceStallCause, sourceStepTiming } from './projectSourceStepTiming';
 import { saveStepReads, sourceObjectLocation } from './projectSourceBeginReads';
 import { sourceResultInlineBytes } from './projectConvexSourceTransport';
 import { digest } from '../src/state/hash';
@@ -177,7 +177,7 @@ export async function repairConvexSource(
       (await renewConvexSource(ctx, { ...args, step: row.step })) &&
       batch.status === 'fenced'
     )
-      await requeueSourceBatch(ctx, batch);
+      await requeueSourceBatch(ctx, batch, job.control);
     await drainSourcePool(ctx, async batch => {
       try {
         const active = await activeStep(ctx, batch);
@@ -203,7 +203,11 @@ export async function repairConvexSource(
     const update: Partial<ReturnType<typeof sourceFailureUpdate>> =
       row.failedGeneration === (row.generation ?? 0)
         ? {}
-        : sourceFailureUpdate(row, unknownSourceFailure('scheduled-step'), job.control.retryUntil);
+        : sourceFailureUpdate(
+            row,
+            sourceStallCause(job.control, row) ?? unknownSourceFailure('scheduled-step'),
+            job.control.retryUntil,
+          );
     const failures = update.failedAttempts ?? row.failedAttempts ?? 0;
     const current = await sourceStep(ctx, { ...args, step: row.step }, false);
     if (!current) return 'none';
@@ -322,6 +326,9 @@ export const begin = sourceMutation({
     }
     return canonicalPayload({
       generation: active.row.generation ?? 0,
+      ...(!inline && !active.row.batchId && !active.row.generation && active.row.timing
+        ? { scheduledAt: active.row.timing.scheduledAt }
+        : {}),
       input: active.job.input,
       jobKind: active.job.jobKind,
       ...(active.project.physicalSeed?.jobId === args.jobId
@@ -402,6 +409,7 @@ export const commit = sourceMutation({
     output: v.union(v.object({ sha256: v.string(), size: v.number() }), v.null()),
     failure: v.union(v.string(), v.null()),
     failureReason: v.optional(v.string()),
+    cause: v.optional(sourceFailure),
     stateSizes: sourceStateSizes,
     timing: v.optional(sourceStepTiming),
     /** The output manifest's exact text when small: publication then needs no R2 re-read. */
@@ -441,6 +449,7 @@ export const commit = sourceMutation({
         ? {
             status: 'failed',
             code: args.failure,
+            ...(args.cause ? { cause: args.cause } : {}),
             ...(args.failureReason ? { reason: args.failureReason } : {}),
           }
         : args.output
@@ -501,7 +510,7 @@ export const commit = sourceMutation({
             kind as 'save' | 'sync' | 'compose',
             { projectId: args.projectId, jobId: args.jobId, result: args.result! },
             args.chain === true,
-            kind === 'compose' ? sourceR2Counts(timing) : undefined,
+            timing,
           )
         : null;
       // A job with no operation row to publish (none in production) keeps the complete action.

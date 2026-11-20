@@ -8,6 +8,7 @@ import { hostedWriteProject } from './projectHostedRecords';
 import { invariant } from '../src/errors';
 import { sourceStep } from './projectConvexSourceActive';
 import { receiveConvexSourceJobCallback } from './projectSourceJobCallbacks';
+import { sourceStallCause } from './projectSourceStepTiming';
 import { sourceDispatch } from '../src/hosted-source-job-controller';
 import {
   sourceFailureSchema,
@@ -63,13 +64,26 @@ export async function fenceSourceSlots(
  * the computation lease expired. Exhaustion changes no pins or business attempt. */
 export async function exhaustSourceExecution(
   ctx: MutationCtx,
-  identity: { projectId: Id<'hostedProjects'>; jobId: string; step: number },
+  identity: {
+    projectId: Id<'hostedProjects'>;
+    jobId: string;
+    step: number;
+    index?: number;
+    generation?: number;
+  },
   cause: SourceFailure = unknownSourceFailure('scheduled-step'),
   finishedTask?: Id<'projectSourceTasks'>,
 ) {
   const active = await sourceStep(ctx, identity, false);
   if (!active) return;
   const { job, row } = active;
+  if (!cause.slowestPhase && cause.exception === 'UnknownError') {
+    const task =
+      identity.index === undefined || identity.generation === undefined
+        ? undefined
+        : { index: identity.index, generation: identity.generation };
+    cause = sourceStallCause(job.control, row, task) ?? cause;
+  }
   const body: Partial<ReturnType<typeof sourceDispatch>> = sourceDispatch(identity.projectId, job);
   delete body.jobKind;
   delete body.input;

@@ -5,6 +5,7 @@ import { activeStep, armSourceWake, moveSourceWake, rowFor } from './projectConv
 import { repairConvexSource } from './projectConvexSourceStore';
 import { heartbeat, taskRow } from './projectConvexSourceFanout';
 import { loadSourceJob, sourceJobTerminal } from './projectSourceJobs';
+import { sourcePhaseNames } from '../src/hosted-source-retry';
 import { ForgeError } from '../src/errors';
 /** A running step (or fan-out task) renews its worker lease from inside the step (keepSourceLease,
  * incident e62d834b). Only the current execution renews: the step, its generation (for a task, its
@@ -19,6 +20,7 @@ export const renew = internalMutation({
     step: v.number(),
     generation: v.optional(v.number()),
     index: v.optional(v.number()),
+    phase: v.optional(v.union(...sourcePhaseNames.map(phase => v.literal(phase)))),
   },
   returns: v.boolean(),
   handler: async (ctx, args) => {
@@ -40,7 +42,12 @@ export const renew = internalMutation({
       const task = await taskRow(ctx, batch._id, args.index);
       if (!task || task.status !== 'running' || task.generation !== args.generation) return false;
     }
-    await heartbeat(ctx, active);
+    await heartbeat(ctx, active, {
+      step: args.step,
+      generation: args.generation ?? 0,
+      ...(args.index === undefined ? {} : { index: args.index }),
+      ...(args.phase ? { phase: args.phase } : {}),
+    });
     await moveSourceWake(
       ctx,
       active.row,

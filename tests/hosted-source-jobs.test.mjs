@@ -11,6 +11,7 @@ import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { driveSourceJob } from '../dist/hosted-source-job-controller.js';
 
 const jobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
+const { sourceStallCause } = await import(moduleUrl('../convex/projectSourceStepTiming.ts'));
 const callbacks = await import(moduleUrl('../convex/projectSourceJobCallbacks.ts'));
 const api = await import(moduleUrl('../convex/projectSourceJobApi.ts'));
 const bridge = await import(moduleUrl('../convex/projectSourceJobDispatch.ts'));
@@ -675,4 +676,45 @@ test('registered enqueue, callback and cancel preserve the same internal contrac
   assert.equal(cancelled.status, 'completed');
   assert.equal(cancelled.version, completed.version);
   x.check(t);
+});
+
+test('a sibling heartbeat preserves a fan-out stall sample and it matches only the sampled attempt', async () => {
+  const x = await fixture();
+  await x.drive();
+  const step = { step: 4, batchId: 'batch' };
+  const stalled = { index: 3, generation: 2 };
+  const sibling = { index: 4, generation: 2 };
+  await x.receive(
+    await x.body({
+      status: 'heartbeat',
+      sequence: 1,
+      renewal: { step: step.step, ...stalled, phase: 'read' },
+    }),
+  );
+  const { control } = await x.receive(
+    await x.body({
+      status: 'heartbeat',
+      sequence: 2,
+      renewal: { step: step.step, ...sibling },
+    }),
+  );
+  assert.equal(sourceStallCause(control, step, stalled)?.slowestPhase, 'read');
+  assert.equal(sourceStallCause(control, step, sibling), undefined);
+  assert.equal(sourceStallCause(control, step, { ...stalled, generation: 3 }), undefined);
+  assert.equal(sourceStallCause(control, { ...step, step: 5 }, stalled), undefined);
+});
+
+test('a restarted serial source action cannot inherit the previous generation’s stall cause', async () => {
+  const x = await fixture();
+  await x.drive();
+  const { control } = await x.receive(
+    await x.body({
+      status: 'heartbeat',
+      sequence: 1,
+      renewal: { step: 4, generation: 3, phase: 'read' },
+    }),
+  );
+  assert.equal(sourceStallCause(control, { step: 4, generation: 3 })?.slowestPhase, 'read');
+  assert.equal(sourceStallCause(control, { step: 4, generation: 4 }), undefined);
+  assert.equal(sourceStallCause(control, { step: 5, generation: 3 }), undefined);
 });

@@ -5,6 +5,7 @@ import type { Id } from './_generated/dataModel';
 import { r2Config, r2Key, presignPut, headObject, checksumOf } from './r2';
 import { invariant } from '../src/errors';
 import { SourceIoError, transientSourceStatus } from '../src/hosted-source-io-error';
+import type { SourceRequestCounter } from '../src/source-step-clock';
 import { retryR2Lag } from '../src/hosted-r2-retry';
 
 /** One byte-write seam for trusted source producers in either Convex runtime. Bytes go
@@ -22,6 +23,7 @@ export async function storeSourceBytes(
   reuse = false,
   created?: (wrote: boolean) => void,
   observe?: (event: 'put' | 'refused' | 'reused', pin: { sha256: string; size: number }) => void,
+  count?: SourceRequestCounter,
 ): Promise<{ storageId: Id<'_storage'> } | { r2Key: string }> {
   invariant(bytes.length === pin.size, 'SOURCE_HASH_MISMATCH', 'Source output size changed.');
   invariant(projectId, 'SOURCE_JOB_INVALID', 'R2 source needs its exact project binding.');
@@ -29,8 +31,9 @@ export async function storeSourceBytes(
     key = r2Key(projectId, pin.sha256);
   const matches = (head: Awaited<ReturnType<typeof headObject>>) =>
     head.status === 'ok' && head.size === pin.size && head.checksum === checksumOf(pin.sha256);
+  const head = () => headObject(config, key, true, count ? () => count('heads') : undefined);
   if (reuse) {
-    const existing = await headObject(config, key, true);
+    const existing = await head();
     if (matches(existing)) {
       observe?.('reused', pin);
       return { r2Key: key };
@@ -41,6 +44,7 @@ export async function storeSourceBytes(
   let response: Response;
   observe?.('put', pin);
   try {
+    count?.('puts');
     response = await convexFetch(target.url, {
       method: 'PUT',
       headers: target.headers,
@@ -61,12 +65,7 @@ export async function storeSourceBytes(
   // Our own PUT was acknowledged, so a 404 here is read-after-write lag: retry it
   // within the shared bound. Mismatch or any other answer fails at once.
   invariant(
-    matches(
-      await retryR2Lag(
-        () => headObject(config, key, true),
-        head => head.status === 'missing',
-      ),
-    ),
+    matches(await retryR2Lag(head, head => head.status === 'missing')),
     'R2_VERIFY_FAILED',
     'Exact source size and checksum were not confirmed.',
   );

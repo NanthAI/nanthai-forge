@@ -1,12 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
-import { sourceFailureSchema } from './hosted-source-retry.js';
+import { sourceFailureSchema, sourcePhaseNames } from './hosted-source-retry.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './state/hash.js';
 
 export const jobHash = z.string().regex(/^[0-9a-f]{64}$/);
 export const jobNumber = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 export const jobObject = z.object({ sha256: jobHash, size: jobNumber }).strict();
+const renewalIdentity = { step: jobNumber, generation: jobNumber };
+const taskIndex = jobNumber.max(799);
+const sampledTask = z.tuple([taskIndex, jobNumber, z.enum(sourcePhaseNames)]);
+const renewal = z
+  .object({
+    ...renewalIdentity,
+    index: taskIndex.optional(),
+    phase: z.enum(sourcePhaseNames).optional(),
+  })
+  .strict();
 export const sourceJobControlSchema = z
   .object({
     actor: z.string().min(1),
@@ -27,6 +37,14 @@ export const sourceJobControlSchema = z
     providerReservation: z.object({ input: jobHash, token: z.uuid() }).strict().optional(),
     failureCode: z.string().nullable(),
     failureCause: sourceFailureSchema.optional(),
+    activePhase: z
+      .object({ ...renewalIdentity, phase: z.enum(sourcePhaseNames) })
+      .strict()
+      .optional(),
+    slowTasks: z
+      .object({ step: jobNumber, samples: z.array(sampledTask).max(4) })
+      .strict()
+      .optional(),
     /** Operator-written reason for a reviewed terminal failure (SOURCE_JOB_STALE); shown to the caller. */
     failureReason: z.string().min(1).max(240).optional(),
     retryUntil: jobNumber.optional(),
@@ -59,7 +77,13 @@ export const sourceJobCallbackSchema = z
           cause: sourceFailureSchema.optional(),
         })
         .strict(),
-      z.object({ status: z.literal('heartbeat'), sequence: jobNumber }).strict(),
+      z
+        .object({
+          status: z.literal('heartbeat'),
+          sequence: jobNumber,
+          renewal: renewal.optional(),
+        })
+        .strict(),
     ]),
   })
   .strict();

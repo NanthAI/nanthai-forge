@@ -1337,7 +1337,10 @@ test('GitHub inbound cost: one changed blob imports, composes, checks, lands and
 });
 
 test('storage per landing ratchets every table on fresh and dogfood-shaped checks before and after exhaust expiry', async t => {
-  fixedClock(t);
+  // e3082c24: compact source diagnostics retain up to 200 B per record. On the dogfood
+  // fixture the compose and step copies add 121 B and 104 B respectively. Freeze elapsed
+  // time so exact JSON byte ceilings measure fields rather than runner load.
+  fixedClock(t, { elapsed: true });
   const scenarios = {
     fresh: await landingStorage(t, false, { capsules: true, journals: true }),
     dogfood: await landingStorage(t, true, { capsules: true, journals: true }),

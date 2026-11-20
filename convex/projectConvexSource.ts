@@ -8,7 +8,13 @@ import { convexSourceTransport } from './projectConvexSourceTransport';
 import { runSmallSourceCompose } from '../src/hosted-source-small-compose';
 import { runSmallSourceSave } from '../src/hosted-source-small-save';
 import { sourceDomainError } from './projectConvexSourceErrors';
-import { logSourceFailure, logSourceStep, withSourceFailureLog } from '../src/hosted-source-io-error';
+import {
+  logSourceFailure,
+  logSourceStep,
+  sourceFailureCause,
+  withSourceFailureLog,
+} from '../src/hosted-source-io-error';
+import { sourceStepClock } from '../src/source-step-clock';
 import { keepSourceLease } from '../src/hosted-source-lease';
 export { dispatch } from './projectConvexSourceStore';
 export { convexSourceTransport } from './projectConvexSourceTransport';
@@ -59,6 +65,7 @@ export async function runConvexSourceStep(
   input: { projectId: Id<'hostedProjects'>; jobId: string; step: number; generation?: number },
   options: InlineStepOptions = {},
 ): Promise<string | null> {
+  const clock = sourceStepClock();
   let delegated = false,
     generation = input.generation ?? 0;
   return withSourceFailureLog(
@@ -66,34 +73,38 @@ export async function runConvexSourceStep(
     'small-save',
     async () => {
       const started = performance.now();
-      const loaded: string | null = await ctx.runMutation(reference('projectConvexSourceStore:begin'), {
-        ...input,
-        ...(options.inline ? { inline: true } : {}),
-      });
+      const loaded: string | null = await clock.startup(() =>
+        ctx.runMutation(reference('projectConvexSourceStore:begin'), {
+          ...input,
+          ...(options.inline ? { inline: true } : {}),
+        }),
+      );
       if (!loaded) return null;
       const state = JSON.parse(loaded);
+      clock.dispatchedAt(state.scheduledAt);
       generation = state.generation ?? generation;
       input = { ...input, generation };
       // Also covers a step delegated to the Node runtime: this action awaits it.
-      const stopLease = keepSourceLease(
-        () =>
-          ctx.runMutation(reference('projectConvexSourceLease:renew'), {
-            projectId: input.projectId,
-            jobId: input.jobId,
-            step: input.step,
-            generation,
-          }),
-        state.lease,
-      );
+      const stopLease = keepSourceLease(() => {
+        const phase = delegated ? undefined : clock.slowPhase();
+        return ctx.runMutation(reference('projectConvexSourceLease:renew'), {
+          projectId: input.projectId,
+          jobId: input.jobId,
+          step: input.step,
+          generation,
+          ...(phase ? { phase } : {}),
+        });
+      }, state.lease);
       try {
         const transport = convexSourceTransport(ctx, input, state.locations, undefined, {
           overlapWrites: true,
+          clock,
           preloaded: options.preloaded,
           bindings: options.bindings,
           physicalManifests: state.physicalManifests === true,
           sourceKind: state.jobKind,
         });
-        let output;
+        let output: Awaited<ReturnType<typeof runSmallSourceSave>> = null;
         try {
           if (state.jobKind === 'save' && !state.cursor && !state.batchId)
             output = await runSmallSourceSave(
@@ -118,6 +129,7 @@ export async function runConvexSourceStep(
               loaded: JSON.stringify({
                 ...state,
                 locations: [...transport.locations.values()],
+                preludeTiming: clock.summary(),
                 preloaded: transport.preloaded(),
                 ...(options.bindings ? { bindings: options.bindings } : {}),
                 observedStates: transport.observedStates(),
@@ -135,20 +147,21 @@ export async function runConvexSourceStep(
               ctx.runMutation(reference('projectConvexSourceStore:stage'), { ...input, objects }),
             );
           }
-          const resultText = transport.smallOutput(output);
-          const published: string | null = await ctx.runMutation(
-            reference('projectConvexSourceStore:commit'),
-            {
+          const outputPin = output;
+          const resultText = transport.smallOutput(outputPin);
+          const timing = { ...clock.value(), summary: clock.summary(), phase: 'input>done', stop: 'done' };
+          const published: string | null = await clock.call<string | null>(() =>
+            ctx.runMutation(reference('projectConvexSourceStore:commit'), {
               ...input,
               cursor: null,
               objects: transport.outputs,
-              output,
+              output: outputPin,
               failure: null,
               stateSizes: transport.observedStates(),
-              timing: { ...transport.clock.value(), phase: 'input>done', stop: 'done' },
+              timing,
               ...(resultText === null ? {} : { result: resultText }),
               ...(options.chain ? { chain: true } : {}),
-            },
+            }),
           );
           logSourceStep(input, {
             runtime: 'v8',
@@ -160,6 +173,7 @@ export async function runConvexSourceStep(
             outputs: outputCount,
             putBytes: transport.putMetrics.snapshot(output),
             started,
+            timing: clock.summary(),
           });
           return published;
         } catch (error) {
@@ -173,18 +187,22 @@ export async function runConvexSourceStep(
             bytes: transport.reads.bytes,
             outputs: transport.outputs.length,
             started,
+            timing: clock.summary(),
             outcome: 'failed',
             putBytes: transport.putMetrics.snapshot(),
           });
           const domain = sourceDomainError(error);
           if (!domain || domain.code === 'SOURCE_JOB_FENCED') throw error;
-          logSourceFailure(error, input, 'small-save', started);
+          const timing = clock.summary();
+          logSourceFailure(error, input, 'small-save', started, timing);
           await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
             ...input,
             cursor: state.cursor,
             objects: [],
             output: null,
             failure: domain.code,
+            cause: sourceFailureCause(error, 'small-save', started, timing),
+            timing: clock.value(),
             ...(domain.code === 'SOURCE_STATE_TOO_LARGE' ? { failureReason: domain.message } : {}),
           });
           return null;
@@ -197,5 +215,6 @@ export async function runConvexSourceStep(
       delegated
         ? Promise.resolve()
         : ctx.runMutation(reference('projectConvexSourceStore:failed'), { ...input, generation, cause }),
+    () => (delegated ? undefined : clock.summary()),
   );
 }
