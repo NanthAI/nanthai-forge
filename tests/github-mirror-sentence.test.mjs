@@ -50,6 +50,16 @@ test('each recorded mirror state reads as one sentence; only states that wait on
     assert.equal(summary.sentence.split(/(?<=\.) (?=[A-Z])/).length <= 2, true, summary.sentence);
     assert.equal(summary.next !== null, weight === 'act' || state === 'off', summary.sentence);
   }
+  // A failed bring-in GitHub main keeps reads as moved and tells the web to hide its keys; other states do not.
+  const kept = mirrorSummary(
+    twoWay,
+    status({ status: 'failed', error: 'GITHUB_INBOUND_FAILED', kept: true }),
+  );
+  assert.deepEqual([kept.state, kept.kept], ['moved', true]);
+  assert.equal(
+    mirrorSummary(twoWay, status({ status: 'failed', error: 'GITHUB_SYNC_CHANGED' })).kept,
+    undefined,
+  );
   // One-way says pushes made on GitHub are not taken in; two-way says they come back.
   assert.match(mirrorSummary({ ...twoWay, inbound: false }, status()).sentence, /not taken in/);
   assert.match(mirrorSummary(twoWay, status()).sentence, /come back as landings/);

@@ -22,6 +22,7 @@ export const read = query({
     weight: v.union(v.literal('act'), v.literal('watch'), v.literal('reference')),
     sentence: v.string(),
     next: v.union(v.string(), v.null()),
+    kept: v.optional(v.literal(true)),
     /** The two ends: Forge main's State and the GitHub commit it was last pushed as. */
     ends: v.union(
       v.object({

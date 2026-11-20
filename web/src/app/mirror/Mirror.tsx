@@ -90,7 +90,11 @@ export default function Mirror({ projectId, route, projectName }: PlaceProps) {
           </div>
         </div>
         {mirror.ends?.detail ? <p className="quietline">{mirror.ends.detail}</p> : null}
-        {command && mirror.weight === 'act' && mirror.state !== 'inbound-failed' && mirror.owner ? (
+        {command &&
+        mirror.weight === 'act' &&
+        mirror.state !== 'inbound-failed' &&
+        !mirror.kept &&
+        mirror.owner ? (
           <div className="pad gs-stack">
             <div className="btns">
               {mirror.state === 'moved' ? (

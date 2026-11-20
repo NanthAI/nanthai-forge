@@ -52,9 +52,10 @@ test('import defaults to two-way; mirror pauses/resumes the retained link and co
     let legacy = new URLSearchParams(location.search).has('legacy');
     let policy = { githubMirror: { repo: 'example/parser', autoPush: !legacy, inbound: !legacy, laneRefs: false } };
     let pausedInbound = false;
-    const moved = new URLSearchParams(location.search).has('moved');
+    const kept = new URLSearchParams(location.search).has('kept');
+    const moved = kept || new URLSearchParams(location.search).has('moved');
     if (moved) policy.githubMirror.inbound = false;
-    const status = { repository: 'example/parser', status: moved ? 'failed' : 'synced', error: moved ? 'GITHUB_SYNC_CHANGED' : null, lagging: moved, targetHead: 'a'.repeat(64), mirroredHead: 'a'.repeat(64), gitHead: 'b'.repeat(40), mirroredAt: 1800000000000 };
+    const status = { repository: 'example/parser', status: moved ? 'failed' : 'synced', error: kept ? 'GITHUB_INBOUND_FAILED' : moved ? 'GITHUB_SYNC_CHANGED' : null, ...(kept ? { kept: true } : {}), lagging: moved, targetHead: 'a'.repeat(64), mirroredHead: 'a'.repeat(64), gitHead: 'b'.repeat(40), mirroredAt: 1800000000000 };
     const refresh = () => { window.mirror = { ...mirrorSummary(policy.githubMirror ? { ...policy.githubMirror, paused: !legacy && !policy.githubMirror.autoPush } : null, status), owner: true, repoId: policy.githubMirror && !new URLSearchParams(location.search).has('unbound') ? 42 : null, inbound: policy.githubMirror?.autoPush === false ? (legacy || pausedInbound) : policy.githubMirror?.inbound === true, ends: policy.githubMirror ? { forgeHead: status.targetHead, mirroredHead: status.mirroredHead, gitHead: status.gitHead, mirroredAt: status.mirroredAt } : null }; listeners.forEach(f => f()); };
     window.client = {
       query: async () => policy,
@@ -216,6 +217,11 @@ test('import defaults to two-way; mirror pauses/resumes the retained link and co
     ['projectGithubMirrorResume:bringIn'],
     'one press, one call',
   );
+  // Review 1812f2ad: while a failed bring-in is kept, both keys would do nothing, so neither shows.
+  await page.goto('https://forge.test/-/example/parser/settings/mirror?kept=1');
+  await page.locator('.mr', { hasText: 'GitHub’s main keeps it' }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Bring GitHub’s commit into Forge' }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: 'Resume the mirror' }).count(), 0);
   await page.goto('https://forge.test/-/new/import?import=1');
   await page.getByLabel('Address', { exact: true }).fill('https://github.com/example/parser');
   await page.getByRole('button', { name: 'Check it', exact: true }).click();

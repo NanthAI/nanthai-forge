@@ -30,6 +30,8 @@ export type MirrorSummary = {
   sentence: string;
   /** One plain next action, or null when nothing needs anyone. */
   next: string | null;
+  /** A failed bring-in GitHub main keeps: bring-in and resume do nothing until the next landing settles it. */
+  kept?: true;
 };
 
 export function mirrorDirection(policy: MirrorPolicy): MirrorDirection {
@@ -91,6 +93,7 @@ export function mirrorSummary(
           `The GitHub commit chosen for Forge failed its check here; GitHub’s main keeps it and the mirror to ${repo} stays stopped.`,
         ),
         next: `fix and land the Lane named in the detail to keep that change, then reset GitHub main to the commit Forge pushed last, and nforge github resume ${project} pushes it on top`,
+        kept: true,
       };
     if (status.error === 'GITHUB_INBOUND_FAILED')
       return {
