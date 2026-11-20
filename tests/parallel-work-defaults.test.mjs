@@ -260,7 +260,7 @@ test('heavy slots are machine-wide, reclaim dead holders and run the command wit
   writeFileSync(process.env.FORGE_CLIENT_SETTINGS, JSON.stringify({ localHeavySlots: 1 }));
   assert.equal(await heavyCli([process.execPath, '-e', 'process.exit(7)']), 7);
   // No slot or ticket stays behind; only the hold-time history used for wait estimates remains.
-  assert.deepEqual(readdirSync(process.env.FORGE_HEAVY_DIR), ['history.json']);
+  assert.deepEqual(readdirSync(process.env.FORGE_HEAVY_DIR), ['holds.jsonl']);
   writeFileSync(process.env.FORGE_CLIENT_SETTINGS, JSON.stringify({ localHeavySlots: 0 }));
   assert.equal(await heavyCli([process.execPath, '-e', '']), 0);
 });

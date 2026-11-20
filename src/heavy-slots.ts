@@ -13,8 +13,10 @@ import { processAlive } from './local-process.js';
 import {
   estimateWaitMs,
   joinQueue,
+  laneOf,
   leaveQueue,
   queuedNames,
+  readHoldHistory,
   readHolds,
   readQueue,
   recordHold,
@@ -194,15 +196,11 @@ Run bounded builds and test batches under the machine-wide slot limit.
 Nested commands reuse their live parent slot; project-declared static commands run directly.
 --no-build runs tests against the existing dist/ without rebuilding it (failing-first checks).
 Callers wait first come, first served; a waiting caller prints its queue position and an estimate.
---status lists the holders and the queue by Lane, command and time, never folders or arguments.
+--status lists the holders and the queue by Lane, command and time, never folders or arguments,
+and sums the last day of holds (per kind, busiest Lanes, CPU and load peaks).
 Run long-lived servers (Vite/dev servers) directly, outside heavy.
 node --test with no test file path is refused (Node would run the whole suite); name the files.
 `;
-const LANE_FOLDER =
-  /(?:^|[\\/])lanes[\\/]([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\/]|$)/i;
-/** A Lane id names who runs a command; a folder path never leaves the slot files. */
-const laneOf = (folder: string | null) =>
-  folder ? (LANE_FOLDER.exec(folder)?.[1]?.toLowerCase() ?? null) : null;
 /** Metadata contains only the executable basename, never arguments or environment. */
 export function heavyStatus(directory: string, slots: number, cwd = process.cwd()) {
   const holders = [];
@@ -242,6 +240,17 @@ export function heavyStatus(directory: string, slots: number, cwd = process.cwd(
   const holds = readHolds(directory);
   const medianMs = holds.length ? holds.slice().sort((a, b) => a - b)[Math.floor(holds.length / 2)]! : null;
   return { slots, holders, queue, medianHoldMs: medianMs, selfHeld: holders.some(holder => holder.selfHeld) };
+}
+/** heavy-hold loads only for a heavy command, never on the paths that only take a slot (the MCP
+ * startup graph reaches this module); a sibling URL keeps the CLI bundle from splitting it. */
+const loadHold = async () =>
+  (await import(
+    /* @vite-ignore */ new URL('./heavy-hold.js', import.meta.url).href
+  )) as typeof import('./heavy-hold.js');
+/** `nforge heavy --status`: the live slots plus the last day of holds (when, who, what kind, peaks). */
+async function heavyStatusReport(directory: string, slots: number) {
+  const { holdSummary } = await loadHold();
+  return { ...heavyStatus(directory, slots), today: holdSummary(readHoldHistory(directory)) };
 }
 const minutes = (ms: number) =>
   ms >= 90_000 ? `${Math.round(ms / 60_000)} min` : `${Math.max(1, Math.round(ms / 1000))} s`;
@@ -309,22 +318,6 @@ export function nodeTestPathCount(args: string[]): number | null {
     } else if (arg.trim()) paths++;
   }
   return testing ? paths : null;
-}
-
-/** Test files one `node --test` in a slot may run at once: the cores shared by the slots, at least
- * one. A slot limits jobs, not CPU; without this each job ran up to cores - 1 files (load 165 on 10
- * cores with 3 slots). */
-export const testWorkersPerSlot = (cores: number, slots: number) =>
-  Math.max(1, Math.floor(cores / Math.max(1, slots)));
-/** `node --test` with the per-slot worker cap added, unless it sets its own `--test-concurrency`.
- * Other commands (npm scripts, shells) are returned unchanged: their own `node --test` is not ours to
- * rewrite. */
-export function capTestWorkers(args: string[], cores: number, slots: number): string[] {
-  if (slots <= 0 || nodeTestPathCount(args) === null) return args;
-  const end = args.indexOf('--');
-  const options = end < 0 ? args : args.slice(0, end);
-  if (options.some(arg => arg === '--test-concurrency' || arg.startsWith('--test-concurrency='))) return args;
-  return [args[0]!, `--test-concurrency=${testWorkersPerSlot(cores, slots)}`, ...args.slice(1)];
 }
 
 /** An inherited holder is a scheduling lease, never source or user authority. */
@@ -423,10 +416,12 @@ export async function heavyCli(
   const slots = slotLimit();
   if (!endOfOptions && args[0] === '--status') {
     await beforeLocal?.();
-    process.stdout.write(`${JSON.stringify(heavyStatus(heavySlotDirectory(), slots))}\n`);
+    process.stdout.write(`${JSON.stringify(await heavyStatusReport(heavySlotDirectory(), slots))}\n`);
     return 0;
   }
   if (beforeRun && !(await beforeRun())) return Number(process.exitCode ?? 0);
+  // Loaded before a slot is taken, so a failure here can never leave one held.
+  const { commandKind, sampleHold, slotCapEnv } = await loadHold();
   const inherited = inheritedHeavySlot(heavySlotDirectory());
   const queuedAt = Date.now();
   const slot =
@@ -445,9 +440,20 @@ export async function heavyCli(
   const moduleCache = process.env.FORGE_TEST_MODULE_DIRECTORY
     ? null
     : join(tmpdir(), `forge-test-modules-${process.pid}-${heldSince.toString(36)}`);
+  // Every runner the command (and the core build before it) starts, at any depth, gets the slot's
+  // core share (Item 7008ff18). A command outside any slot (static, slots off) is not capped.
+  const cap = slotCapEnv(process.env, availableParallelism(), slot || inherited ? slots : 0);
+  const before = Object.keys(cap.env).map(name => [name, process.env[name]] as const);
+  Object.assign(process.env, cap.env);
+  let sampler: ReturnType<typeof sampleHold> | undefined;
   const release = () => {
     if (slot) rmSync(slot, { recursive: true, force: true });
     if (moduleCache) rmSync(moduleCache, { recursive: true, force: true, maxRetries: 3 });
+    // An in-process caller keeps its own environment, never a removed preload.
+    for (const [name, value] of before)
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    cap.dispose();
   };
   process.once('exit', release);
   try {
@@ -465,8 +471,7 @@ export async function heavyCli(
     }
     return await new Promise<number>((resolve, reject) => {
       const held = slot ?? inherited;
-      const command = capTestWorkers(args, availableParallelism(), slots);
-      const child = spawn(command[0]!, command.slice(1), {
+      const child = spawn(args[0]!, args.slice(1), {
         stdio: 'inherit',
         env: {
           ...process.env,
@@ -488,6 +493,7 @@ export async function heavyCli(
         signal => [signal, forward(signal)] as const,
       );
       for (const [signal, handler] of handlers) process.on(signal, handler);
+      if (slot && child.pid) sampler = sampleHold(child.pid);
       child.once('error', reject);
       child.once('exit', (code, signal) => {
         for (const [name, handler] of handlers) process.removeListener(name, handler);
@@ -497,6 +503,12 @@ export async function heavyCli(
   } finally {
     release();
     process.removeListener('exit', release);
-    if (slot) recordHold(heavySlotDirectory(), Date.now() - heldSince);
+    if (slot)
+      recordHold(heavySlotDirectory(), Date.now() - heldSince, {
+        at: heldSince,
+        lane: laneOf(process.cwd()),
+        kind: commandKind(args),
+        ...(sampler?.stop() ?? {}),
+      });
   }
 }

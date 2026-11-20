@@ -105,14 +105,27 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   for each waiter ahead. It is a rough guide, not a promise.
 - A slot or ticket whose process died is reclaimed at the next check. Liveness compares the
   process start time as well as the pid, so a reused pid cannot hold a slot or a place in line.
-- A slot limits jobs, not CPU, so heavy also caps test workers. A `node --test` command run in a
-  slot that sets no `--test-concurrency` of its own gets `--test-concurrency=N`, with N =
-  max(1, floor(cores / slots)): 3 on 10 cores with 3 slots, 5 with 2. Without it, each slot's
-  `node --test` ran up to 9 files at once (load 165 on 10 cores). A command's own
-  `--test-concurrency` wins. Heavy rewrites only the command it starts: an npm script or a shell
-  (`nforge heavy sh -c 'npm run build:core && node --test …'`) runs its `node --test` uncapped. Put
-  `--test-concurrency=N` in that `node --test` yourself (slots from `nforge heavy --status`), or run
-  the build and the tests as two heavy commands. The full `npm test` is the landing check's.
+- A slot limits jobs, not CPU, so heavy also bounds every runner its command starts, at any depth
+  (an npm script, `sh -c`, `npx`, a script that spawns `process.execPath`, a nested `nforge heavy`),
+  to the slot's core share N = max(1, floor(cores / slots)): 3 on 10 cores with 3 slots, 5 with 2.
+  Without it, each slot's `node --test` ran up to 9 files at once (load 165 on 10 cores), and an
+  npm script's or shell's `node --test` and a native typecheck stayed unbounded (load 65 on 10
+  cores, 7008ff18).
+  - `node --test`: a preload that heavy adds to `NODE_OPTIONS` (`--require`, from a folder in the
+    OS temp folder that only this user can write, created 0700 and checked) restarts an uncapped
+    test runner in place with
+    `--test-concurrency=N`. A runner's own `--test-concurrency` on its command line wins; one set
+    only in a Node config file does not. Node refuses `--test-concurrency` in `NODE_OPTIONS`
+    itself, and a command that replaces `NODE_OPTIONS` instead of adding to it drops the cap.
+    Node before 20.10 is left uncapped (it has no `--test-concurrency`). Where Node cannot restart a
+    process in place (Windows, Node before 22.15) the capped runner runs as a child of the first,
+    so a signal sent to that one process (not its group) does not reach the runner. A full or
+    read-only temp folder costs the test cap, never the slot.
+  - Go tools (the native TypeScript checker, esbuild) get `GOMAXPROCS=N` and Rust tools using
+    rayon (oxlint) get `RAYON_NUM_THREADS=N`, unless the command already sets them.
+  - Preflight's own slot gives its build and tests the same variables (so its tests see a
+    `NODE_OPTIONS` preload the landing check's do not); its tests run `--test-concurrency=1`.
+  - The full `npm test` is the landing check's.
 - Heavy gives its command one compiled-test-module cache (`FORGE_TEST_MODULE_DIRECTORY`, under the
   OS temp folder) unless one is already set, and removes it when the command ends: every test file
   the command runs reuses modules earlier files compiled. Preflight does the same for all its
@@ -123,9 +136,17 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   second one. Its tests run `--test-concurrency=1`, one group at a time, under the cap. A preflight
   that a test runs on a fixture takes no slot (the test already runs in one).
 - `nforge heavy --status` lists holders and waiters by Lane id, executable name and time; it never
-  prints folders, arguments or environment.
-- The exit code is the command's exit code. The slots, tickets and hold-time history live in
-  `/tmp/forge-heavy-slots`; `FORGE_HEAVY_DIR` selects another directory.
+  prints folders, arguments or environment. Its `today` field sums the last 24 hours: holds and
+  minutes per kind, the three busiest Lanes, and the hold with the highest CPU and with the highest
+  load (when, which Lane, what kind), so a load spike can be explained afterwards.
+- Every hold appends one line to the hold history: when the slot was taken, wall time, Lane, kind
+  (test, typecheck, build or other, from the command words, which are not stored), peak CPU of the
+  command's process tree in cores and peak 1-minute load. CPU comes from one `ps` per 10 seconds
+  that reads process ids and CPU only, never arguments or environment; preflight records only the
+  load when it ends; Windows records neither. The file is rolling: past 512 KiB it keeps its newest
+  2,048 holds. Wait estimates use the last 32.
+- The exit code is the command's exit code. The slots, tickets and hold history (`holds.jsonl`)
+  live in `/tmp/forge-heavy-slots`; `FORGE_HEAVY_DIR` selects another directory.
 - Example: `nforge heavy npm run build:core`.
 
 ### shareDependencies

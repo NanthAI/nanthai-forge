@@ -85,6 +85,7 @@ export function installTestTemp() {
   // for unregistered operation/fixture directories.
   for (const name of [
     `forge-peers-${process.getuid?.() ?? 'user'}`,
+    `forge-heavy-cap-${process.getuid?.() ?? 'user'}`,
     'forge-mac-check-logs',
     'forge-logs',
     ...(process.platform === 'win32' ? ['forge-heavy-slots'] : []),

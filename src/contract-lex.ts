@@ -42,14 +42,24 @@ function templateEnd(text: string, start: number): number {
     if (c === '\\') j++;
     else if (c === '`') return j + 1;
     else if (c === '$' && text[j + 1] === '{') {
-      let depth = 1;
+      // A substitution is code: strings, templates and regex literals (a `"` inside `/["]/`
+      // is not a string) end where the same lexer says, judged by the code before them.
+      let depth = 1,
+        previous = '{';
       j += 2;
       for (; j < text.length && depth; j++) {
         const d = text[j]!;
-        if (d === '`') j = templateEnd(text, j) - 1;
-        else if (d === "'" || d === '"') j = literalEnd(text, j, '') - 1;
-        else if (d === '{') depth++;
+        if (d === '{') depth++;
         else if (d === '}') depth--;
+        else {
+          const end = literalEnd(text, j, previous);
+          if (end > j) {
+            j = end - 1;
+            previous = text[j]!;
+            continue;
+          }
+        }
+        if (!/\s/.test(d)) previous = d;
       }
       j--;
     }

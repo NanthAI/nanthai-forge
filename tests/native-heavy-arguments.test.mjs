@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import { shellQuote } from '../dist/shell-quote.js';
-import { capTestWorkers, nodeTestWithoutPaths, testWorkersPerSlot } from '../dist/heavy-slots.js';
+import { nodeTestWithoutPaths } from '../dist/heavy-slots.js';
 import { withSourceRecovery } from '../dist/hosted-agent-source-recovery.js';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { availableParallelism, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 test('native heavy preserves whitespace, quotes and multiline arguments without shell splitting', t => {
@@ -193,71 +193,6 @@ test('terminal source-size failures never gain a finish retry command after obse
     assert.equal(reply.command, undefined);
     if (reply.landingState) assert.match(reply.landingState.nextStep, /Split the repository\./);
   }
-});
-
-test('heavy caps node --test workers per slot at max(1, floor(cores / slots)) unless the command sets its own', () => {
-  const node = process.execPath;
-  assert.equal(testWorkersPerSlot(10, 3), 3);
-  assert.equal(testWorkersPerSlot(10, 2), 5);
-  assert.equal(testWorkersPerSlot(2, 3), 1, 'never below one');
-  const files = ['tests/a.test.mjs', 'tests/b.test.mjs'];
-  assert.deepEqual(capTestWorkers([node, '--import', './x.mjs', '--test', ...files], 10, 3), [
-    node,
-    '--test-concurrency=3',
-    '--import',
-    './x.mjs',
-    '--test',
-    ...files,
-  ]);
-  for (const own of [
-    ['node', '--test', '--test-concurrency=1', ...files],
-    ['node', '--test-concurrency', '4', '--test', ...files],
-  ])
-    assert.deepEqual(capTestWorkers(own, 10, 3), own, 'its own --test-concurrency wins');
-  // A test file named like the flag after `--` is a path, not the command's own setting.
-  assert.deepEqual(capTestWorkers(['node', '--test', '--', '--test-concurrency=9'], 10, 2), [
-    'node',
-    '--test-concurrency=5',
-    '--test',
-    '--',
-    '--test-concurrency=9',
-  ]);
-  for (const other of [
-    ['npm', 'test'],
-    ['node', 'script.mjs'],
-    ['sh', '-c', 'node --test x'],
-  ])
-    assert.deepEqual(capTestWorkers(other, 10, 3), other, 'not a node --test command');
-  assert.deepEqual(capTestWorkers(['node', '--test', ...files], 10, 0), ['node', '--test', ...files]);
-});
-
-test('heavy passes the worker cap to the node --test it runs', t => {
-  const directory = mkdtempSync(join(tmpdir(), 'forge-heavy-workers-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const settings = join(directory, 'client.json');
-  writeFileSync(settings, JSON.stringify({ localHeavySlots: 2 }));
-  // A stand-in named node that prints the arguments heavy gave it, one per line.
-  const node = join(directory, 'node');
-  writeFileSync(node, '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
-  const result = spawnSync(
-    process.execPath,
-    ['dist/cli-entry.js', 'heavy', '--no-build', node, '--test', 'tests/a.test.mjs'],
-    {
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        FORGE_HEAVY_DIR: join(directory, 'slots'),
-        FORGE_CLIENT_SETTINGS: settings,
-        FORGE_HEAVY_PARENT: '',
-      },
-    },
-  );
-  assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(result.stdout.trim().split('\n'), [
-    `--test-concurrency=${testWorkersPerSlot(availableParallelism(), 2)}`,
-    '--test',
-    'tests/a.test.mjs',
-  ]);
 });
 
 test('dceb1bef: heavy gives its command one module cache, removes it after, and keeps an inherited one', t => {

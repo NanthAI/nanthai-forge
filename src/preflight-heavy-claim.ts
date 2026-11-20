@@ -30,4 +30,4 @@ if (claimed)
 const parent = inherited
   ? process.env.FORGE_HEAVY_PARENT
   : claimed && JSON.stringify({ directory: canonicalRoot(directory), slot: basename(claimed), pid: holder });
-process.stdout.write(JSON.stringify({ slot: claimed, parent: parent || null }));
+process.stdout.write(JSON.stringify({ slot: claimed, parent: parent || null, slots }));

@@ -186,6 +186,16 @@ test('default exports keep their ESM name for declarations, generators and expre
     assert.deepEqual([...scanExports(text).keys()], ['default'], text);
   }
 });
+test('a regex literal with a quote inside a template substitution never hides the exports after it (7008ff18 landing)', () => {
+  // The source text: const o = `--require="${file.replace(/["\\]/g, '\\$&')}"`;
+  const text = [
+    String.raw`const o = ${'`'}--require="${'${'}file.replace(/["\\]/g, '\\$&')}"${'`'};`,
+    'export const after = 1;',
+    'export function later() {}',
+  ].join('\n');
+  assert.deepEqual([...scanExports(text).keys()], ['after', 'later']);
+});
+
 test('export scanner agrees with the TypeScript parser on every source module', () => {
   const directory = new URL('../src/', import.meta.url);
   let names = 0;

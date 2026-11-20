@@ -12,10 +12,11 @@ import {
   rmSync,
 } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
+import { availableParallelism, loadavg, tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { recordHold } from './heavy-queue.js';
+import { laneOf, recordHold } from './heavy-queue.js';
+import { slotCapEnv } from './heavy-hold.js';
 import { safeRelative } from './files.js';
 import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { z } from 'zod';
@@ -1479,13 +1480,13 @@ type HeldHeavySlot = { env: Record<string, string>; release(): void };
 /** One `nforge heavy` slot for this preflight's build and tests, held for this process (c180152a). The
  * synchronous run waits for it in a child (FIFO with every other heavy command); a preflight inside
  * `nforge heavy` reuses that slot. Null when slots are off or the claim fails (the run goes on, said once). */
-function holdHeavySlot(cwd: string): HeldHeavySlot | null {
+function holdHeavySlot(cwd: string, base: NodeJS.ProcessEnv): HeldHeavySlot | null {
   const claim = spawnSync(
     process.execPath,
     [fileURLToPath(new URL('./preflight-heavy-claim.js', import.meta.url)), String(process.pid), cwd],
     { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
   );
-  let held: { slot: string | null; parent: string | null } | undefined;
+  let held: { slot: string | null; parent: string | null; slots?: number } | undefined;
   try {
     held = claim.status === 0 ? JSON.parse(claim.stdout) : undefined;
   } catch {}
@@ -1496,15 +1497,22 @@ function holdHeavySlot(cwd: string): HeldHeavySlot | null {
   if (!held.parent) return null;
   const since = Date.now();
   const { slot } = held;
+  // The build's checker and any nested test runner get the slot's core share (7008ff18); its own
+  // test groups already run --test-concurrency=1.
+  const cap = slotCapEnv(base, availableParallelism(), held.slots ?? 0);
   return {
     env: {
+      ...cap.env,
       FORGE_HEAVY_PARENT: held.parent,
       ...(process.env.FORGE_HEAVY_DIR ? { FORGE_HEAVY_DIR: process.env.FORGE_HEAVY_DIR } : {}),
     },
     release() {
+      cap.dispose();
       if (!slot) return;
       rmSync(slot, { recursive: true, force: true });
-      recordHold(dirname(slot), Date.now() - since);
+      // A synchronous run cannot sample its tree; the load when it ends is the one reading.
+      const load = process.platform === 'win32' ? null : Math.round(loadavg()[0]! * 10) / 10;
+      recordHold(dirname(slot), Date.now() - since, { at: since, lane: laneOf(cwd), kind: 'test', load });
     },
   };
 }
@@ -1596,7 +1604,7 @@ export function runPreflight(
     if (!staticOnly && plan.tests.length && exitCode === 0) {
       // The build and tests count against the machine-wide `nforge heavy` limit (c180152a); their own
       // nested `nforge heavy` calls inherit this lease instead of waiting for a second slot.
-      heavy = options.heavySlot ? holdHeavySlot(root) : null;
+      heavy = options.heavySlot ? holdHeavySlot(root, cleanEnv()) : null;
       if (heavy) Object.assign(cleanEnv(), heavy.env);
       // Only Forge's own Node layout (no project runner) builds first; another project's script of
       // that name is not Forge's to run, and its runner builds what it needs.

@@ -1,6 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, join } from 'node:path';
 import { processesAlive, processIdentity, processStartTime } from './local-process.js';
 
@@ -24,8 +37,6 @@ export function startIdentity(pid = process.pid): string | undefined {
     return undefined;
   }
 }
-const HISTORY = 'history.json';
-const HISTORY_LENGTH = 32;
 const MIN_HISTORY = 3;
 
 const ticketName = /^q-(\d{15})-(\d+)-[0-9a-f]{8}$/;
@@ -110,27 +121,89 @@ export function readQueue(directory: string, options: { deep?: boolean; reap?: b
   return tickets.filter((_, index) => alive[index]);
 }
 
-/** Recent hold times, newest last. Losing an entry to a concurrent write only blurs an estimate. */
-export function readHolds(directory: string): number[] {
+/** What a hold was spent on (Item 7008ff18); see commandKind in heavy-hold.ts. */
+export type HeavyKind = 'test' | 'typecheck' | 'build' | 'other';
+const LANE_FOLDER =
+  /(?:^|[\\/])lanes[\\/]([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\/]|$)/i;
+/** A Lane id names who runs a command; a folder path never leaves the slot files. */
+export const laneOf = (folder: string | null) =>
+  folder ? (LANE_FOLDER.exec(folder)?.[1]?.toLowerCase() ?? null) : null;
+
+/** One finished hold. `cpu`: peak cores the command's process tree used (sampled); `load`: peak
+ * 1-minute load average seen while it held the slot. Null where the platform cannot tell. */
+export type HeavyHold = {
+  at: number;
+  ms: number;
+  lane: string | null;
+  kind: HeavyKind;
+  cpu: number | null;
+  load: number | null;
+};
+const HISTORY = 'holds.jsonl';
+/** Rolling bound: past maxBytes the file is rewritten with its newest `keep` holds (~110 bytes
+ * each: about a busy day of holds at 2 slots). Losing a line to a concurrent trim only blurs it. */
+const LIMITS = { maxBytes: 512 * 1024, keep: 2048 };
+const ESTIMATE_SAMPLES = 32;
+
+export function recordHold(
+  directory: string,
+  ms: number,
+  hold: Partial<Omit<HeavyHold, 'ms'>> = {},
+  limits = LIMITS,
+) {
+  const entry: HeavyHold = {
+    at: hold.at ?? Date.now() - ms,
+    ms: Math.round(ms),
+    lane: hold.lane ?? null,
+    kind: hold.kind ?? 'other',
+    cpu: hold.cpu ?? null,
+    load: hold.load ?? null,
+  };
   try {
-    const value = JSON.parse(readFileSync(join(directory, HISTORY), 'utf8')) as unknown;
-    return Array.isArray(value)
-      ? value.filter((item): item is number => Number.isFinite(item) && item >= 0)
-      : [];
+    const path = join(directory, HISTORY);
+    // One small append per hold; a single write under PIPE_BUF lands whole.
+    appendFileSync(path, `${JSON.stringify(entry)}\n`);
+    if (statSync(path).size <= limits.maxBytes) return;
+    const kept = readFileSync(path, 'utf8').trimEnd().split('\n').slice(-limits.keep);
+    const temporary = join(directory, `t-${HISTORY}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`);
+    writeFileSync(temporary, `${kept.join('\n')}\n`);
+    renameSync(temporary, path);
+  } catch {}
+}
+const parse = (line: string): HeavyHold | null => {
+  try {
+    const value = JSON.parse(line) as HeavyHold;
+    return Number.isFinite(value.at) && Number.isFinite(value.ms) && value.ms >= 0 ? value : null;
+  } catch {
+    return null;
+  }
+};
+/** Holds newest last; `tailBytes` reads only the end of the file (wait estimates). */
+export function readHoldHistory(directory: string, tailBytes?: number): HeavyHold[] {
+  let text = '';
+  try {
+    const fd = openSync(join(directory, HISTORY), 'r');
+    try {
+      const size = fstatSync(fd).size,
+        length = Math.min(size, tailBytes ?? size);
+      const buffer = Buffer.alloc(length);
+      readSync(fd, buffer, 0, length, size - length);
+      text = buffer.toString('utf8');
+      if (length < size) text = text.slice(text.indexOf('\n') + 1);
+    } finally {
+      closeSync(fd);
+    }
   } catch {
     return [];
   }
+  return text.split('\n').flatMap(line => parse(line) ?? []);
 }
-export function recordHold(directory: string, ms: number) {
-  try {
-    const temporary = join(directory, `t-${HISTORY}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`);
-    writeFileSync(
-      temporary,
-      JSON.stringify([...readHolds(directory), Math.round(ms)].slice(-HISTORY_LENGTH)),
-    );
-    renameSync(temporary, join(directory, HISTORY));
-  } catch {}
-}
+/** Recent hold times for wait estimates, newest last. */
+export const readHolds = (directory: string) =>
+  readHoldHistory(directory, ESTIMATE_SAMPLES * 256)
+    .slice(-ESTIMATE_SAMPLES)
+    .map(hold => hold.ms);
+
 /** Wait until a caller with `ahead` waiters in front of it starts: the earliest slot to free
  * serves each waiter in turn for the median hold time. Null without enough history. */
 export function estimateWaitMs(holds: number[], runningMs: number[], slots: number, ahead: number) {
