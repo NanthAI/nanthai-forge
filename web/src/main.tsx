@@ -13,7 +13,7 @@ import { createRoot } from 'react-dom/client';
 // Shared by the loader and both apps; the old screens' styles load with the old app (legacy-styles.ts).
 import './ui/tokens.css';
 import './ui/components.css';
-import { isAppPath } from './app/paths';
+import { isAppPath, normalizeAccountPathname } from './app/paths';
 import { applyMotion } from './motion-pref';
 class AppBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -43,8 +43,12 @@ class AppBoundary extends Component<{ children: ReactNode }, { failed: boolean }
 installErrorCapture();
 applyMotion();
 const root = createRoot(document.getElementById('root')!);
+// The CDN can serve the shell after normalizing the origin request while the browser keeps the original path.
+const pathname = normalizeAccountPathname(location.pathname);
+if (pathname !== location.pathname)
+  history.replaceState(history.state, '', pathname + location.search + location.hash);
 // The rebuilt app (Item 84125787) serves every address under /-; everything else is the old app until stage C.
-if (isAppPath(location.pathname)) {
+if (isAppPath(pathname)) {
   root.render(
     <AppBoundary>
       <AppLoader />

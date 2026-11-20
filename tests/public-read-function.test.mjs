@@ -12,10 +12,12 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { moduleUrl, moduleSource } from './convex-module.mjs';
 
-const functionSource = moduleSource('../netlify/functions/public-read.mts').replace(
-  new URL('../netlify/lib/public-meta.js', import.meta.url).href,
-  moduleUrl('../netlify/lib/public-meta.ts'),
-);
+const functionSource = moduleSource('../netlify/functions/public-read.mts')
+  .replace(
+    new URL('../netlify/lib/public-meta.js', import.meta.url).href,
+    moduleUrl('../netlify/lib/public-meta.ts'),
+  )
+  .replace(new URL('../web/src/app/paths.js', import.meta.url).href, moduleUrl('../web/src/app/paths.ts'));
 const {
   default: serve,
   readFor,
@@ -224,6 +226,36 @@ test('private app places retain the SPA shell without a public backend read', as
     assert.equal(response.status, 200);
     assert.equal(await response.text(), APP);
   }
+  assert.equal(asked.length, 0);
+});
+
+test('doubled-leading-slash account addresses reach the ordinary SPA without public reads', async t => {
+  const asked = backend(t, () => {
+    throw Error('must not fetch');
+  });
+  const fixtures = JSON.parse(
+    readFileSync(new URL('./fixtures/public-read-netlify.json', import.meta.url)),
+  ).accountRedirects;
+  const origin = 'https://site.example';
+  for (const { path, location } of fixtures) {
+    const request = new Request(`${origin}${path}`);
+    assert(
+      config.path.some(pattern => new URLPattern({ pathname: pattern }).test(request.url)),
+      path,
+    );
+
+    const response = await serve(request);
+    assert.equal(response.status, 308, path);
+    assert.equal(response.headers.get('location'), `${origin}${location}`, path);
+
+    const account = await serve(new Request(response.headers.get('location')));
+    assert.equal(account.status, 200, location);
+    assert.equal(account.headers.get('location'), null, location);
+    assert.equal(await account.text(), APP, location);
+  }
+  const outside = await serve(new Request(`${origin}//outside/account`));
+  assert.equal(outside.status, 404);
+  assert.equal(outside.headers.get('location'), null);
   assert.equal(asked.length, 0);
 });
 

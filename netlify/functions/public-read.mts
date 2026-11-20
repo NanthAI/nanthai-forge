@@ -11,6 +11,7 @@ import type { Config } from '@netlify/functions';
 import fs from 'node:fs/promises';
 import { join } from 'node:path';
 import { networkFetch, networkTimeout } from '../../src/network-fetch.js';
+import { normalizeAccountPathname } from '../../web/src/app/paths.js';
 import { exploreMeta, profileMeta, projectMeta, withMeta, type PageMeta } from '../lib/public-meta.js';
 
 const SHARED = 'public, durable, s-maxage=30, must-revalidate';
@@ -179,7 +180,7 @@ async function respond(request: Request) {
   if (request.method !== 'GET' && request.method !== 'HEAD') return new Response(null, { status: 405 });
   const url = new URL(request.url);
   const origin = siteOrigin();
-  const path = canonicalPath(url.pathname);
+  const path = canonicalPath(normalizeAccountPathname(url.pathname));
   const data = path === '/sitemap.xml' || path.startsWith('/-/public/v1/');
   if (path !== '/sitemap.xml' && !path.startsWith('/-/'))
     return new Response(

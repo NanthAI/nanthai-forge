@@ -71,6 +71,10 @@ export function isAppPath(pathname: string) {
   return pathname === ROOT || pathname.startsWith(`${ROOT}/`);
 }
 
+export function normalizeAccountPathname(pathname: string) {
+  return pathname.replace(/^\/{2,}(?=-\/account(?:\/|$))/, '/');
+}
+
 export function hrefFor(route: AppRoute): string {
   switch (route.frame) {
     case 'public':

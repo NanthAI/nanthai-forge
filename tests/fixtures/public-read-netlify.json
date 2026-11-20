@@ -16,6 +16,16 @@
       "location": "/-/explore?q=kept"
     }
   ],
+  "accountRedirects": [
+    {
+      "path": "//-/account",
+      "location": "/-/account"
+    },
+    {
+      "path": "///-/account/devices?tab=current",
+      "location": "/-/account/devices?tab=current"
+    }
+  ],
   "rawDotPath": {
     "path": "/-/ada/./atlas",
     "status": 404,
