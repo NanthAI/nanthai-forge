@@ -1,7 +1,16 @@
 ## Terminal landing capsules
 
-S1 (`bea7868d`) packs every landing that settles once the writer is deployed;
-earlier terminal landings are not backfilled. After the approved seven-day
+S1 (`bea7868d`) packs every landing that settles once the writer is deployed.
+Landings that settled earlier have no wake; a one-time backfill (`b149b16b`,
+`convex/projectLandingCapsuleBackfill.ts`) packs them on an explicit operator call
+per project. `dryRun` reads only (resumable with its `cursor`) and reports landings,
+rows, bytes, calls and whether the project index is built. `run` builds an unbuilt
+capsule index before it schedules any pack, then pages 64 requests without reading
+cold bodies, classifies them with the packer's shared rules and schedules the same
+verified packer 2 s apart (`staggerMs` 0.5–60 s). One control row holds the cursor,
+a generation and the one pending chained call (`pages`): an overlapping call is
+refused, `restart` cancels the pending call. There is no cron or idle work, and the
+module is deleted once dev and bench are done. After the approved seven-day
 terminal grace, one complete private gzip object
 holds canonical observations, attempts, landing-owned finish projections,
 acceptance events/pages/plans/snapshots, compose pages and expired callback digest

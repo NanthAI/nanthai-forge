@@ -21,6 +21,8 @@ import {
  * Steady-state patches read the narrow projection, not the large source row.
  * Only a legacy row's first relevant write needs its selected source document. */
 const wrapped = new WeakMap<object, () => MutationCtx['db']>();
+/** The database beneath one finish-read writer (reads are unchanged by it; it only adds write upkeep). */
+export const finishReadOriginalDb = (db: MutationCtx['db']) => wrapped.get(db)?.() ?? db;
 /** Validated permanent purge and verified capsule removal own companion disposition.
  * Their inventories remove or retain each companion explicitly, including prior-page work.
  * Keeping ordinary projection upkeep here would double-delete or recreate them. */

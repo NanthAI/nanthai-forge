@@ -2,7 +2,7 @@
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
-import { landingCapsuleGraceMs } from './projectLandingCapsuleWake';
+import { isCapsuleTerminal, landingCapsuleDueAt } from './projectLandingCapsuleStore';
 import { landingAttemptRow } from './projectHostedLandingAttemptRead';
 import { acceptanceRow, acceptancePlan } from './projectHostedAcceptanceStore';
 import { finishRow } from './projectHostedFinishWake';
@@ -263,12 +263,8 @@ export const begin = internalMutation({
   handler: async (ctx, input) => {
     const { row, state } = await loadLanding(ctx, input);
     if (row.capsule) return canonicalPayload({ pointer: row.capsule });
-    if (!['landed', 'terminal-failed'].includes(state.phase))
-      return canonicalPayload({ kept: true, reason: 'active' });
-    const dueAt = Math.max(
-      input.dueAt,
-      Date.parse(state.timing?.settledAt ?? state.at) + landingCapsuleGraceMs,
-    );
+    if (!isCapsuleTerminal(state.phase)) return canonicalPayload({ kept: true, reason: 'active' });
+    const dueAt = Math.max(input.dueAt, landingCapsuleDueAt(state));
     if (Date.now() < dueAt) return canonicalPayload({ kept: true, reason: 'grace', dueAt });
     const batchId = state.batchOriginId ?? state.batchId;
     if (batchId) {

@@ -116,6 +116,8 @@ export async function capsuleMaintenanceFixture(
     requests,
     scheduled,
     pack: () => run.pack._handler(ctx, input).then(JSON.parse),
+    /** Run the packer with another wake's arguments (a backfill-scheduled pack). */
+    packWith: args => run.pack._handler(ctx, args).then(JSON.parse),
     packNode: () => runNode.pack._handler(ctx, input).then(JSON.parse),
     /** Answer the nth (0-based) call of `name` with reply(realValue), as another run racing it would. */
     replaceReply: (name, nth, reply) => (replaced = { name, nth, reply }),

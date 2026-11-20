@@ -29,13 +29,50 @@ export function landingCapsulePointer(ctx: Ctx, input: Identity) {
   }
   return selected;
 }
+/** Shared S1 classification (packer `begin`, read-through and the one-time backfill). */
+export const isCapsuleTerminal = (phase: string) => phase === 'landed' || phase === 'terminal-failed';
+type SettleTime = { timing?: { settledAt?: string | null } | null; at: string };
+/** When a terminal landing may pack. An unparsable time is NaN: never inside the grace. */
+export const landingCapsuleDueAt = (state: SettleTime) =>
+  Date.parse(state.timing?.settledAt ?? state.at) + landingCapsuleGraceMs;
+export function landingCapsuleInGrace(state: SettleTime, now = Date.now()) {
+  const dueAt = landingCapsuleDueAt(state);
+  return Number.isFinite(dueAt) && now < dueAt;
+}
+export type LandingCapsuleClass =
+  | { kind: 'active' }
+  | { kind: 'grace'; dueAt: number }
+  | { kind: 'packed'; pointer: LandingCapsulePointer }
+  | { kind: 'removing'; pointer: LandingCapsulePointer; dueAt: number }
+  | { kind: 'unpacked'; dueAt: number };
+/** A raw request row (no body hydration needed): an inline pointer first, then phase, grace and
+ * the separate pointer row, in the read-through's order. */
+export async function classifyLandingCapsule(
+  ctx: Ctx,
+  row: Pick<
+    Doc<'projectHostedLandingRequests'>,
+    'projectId' | 'submissionId' | 'phase' | 'value' | 'capsule'
+  >,
+  now = Date.now(),
+): Promise<LandingCapsuleClass> {
+  const state = JSON.parse(row.value) as SettleTime;
+  const due = landingCapsuleDueAt(state),
+    dueAt = Number.isFinite(due) ? due : 0;
+  const removal = (pointer: LandingCapsulePointer): LandingCapsuleClass =>
+    JSON.parse(pointer.summary ?? '{}').removalDone
+      ? { kind: 'packed', pointer }
+      : { kind: 'removing', pointer, dueAt };
+  if (row.capsule) return removal(row.capsule);
+  if (!isCapsuleTerminal(row.phase)) return { kind: 'active' };
+  if (landingCapsuleInGrace(state, now)) return { kind: 'grace', dueAt };
+  const pointer = await landingCapsulePointer(ctx, row);
+  return pointer ? removal(pointer) : { kind: 'unpacked', dueAt };
+}
 export async function withLandingCapsule(ctx: Ctx, row: Doc<'projectHostedLandingRequests'> | null) {
-  if (!row || row.capsule || !['landed', 'terminal-failed'].includes(row.phase)) return row;
+  if (!row || row.capsule || !isCapsuleTerminal(row.phase)) return row;
   // A separate pointer cannot exist before the approved terminal grace. Keep the
   // live controller and recent-terminal observer dependency sets unchanged.
-  const state = JSON.parse(row.value);
-  const settledAt = Date.parse(state.timing?.settledAt ?? state.at);
-  if (Number.isFinite(settledAt) && Date.now() < settledAt + landingCapsuleGraceMs) return row;
+  if (landingCapsuleInGrace(JSON.parse(row.value))) return row;
   const capsule = await landingCapsulePointer(ctx, row);
   return capsule ? { ...row, capsule } : row;
 }
