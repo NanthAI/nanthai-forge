@@ -54,7 +54,14 @@ export async function notifyLandingCheck(
         q.eq('projectId', input.projectId).eq('runId', input.runId).eq('phase', 'queued'),
       )
       .take(1);
-  if (!waiting || (input.terminal === false && waiting.admitting && !input.providerDelayed)) return;
+  // A kept admission run (fa2c1383) still settles only on its terminal event.
+  if (
+    !waiting ||
+    (input.terminal === false &&
+      (waiting.admitting || (waiting.admission?.kept && waiting.admission.status === 'checking')) &&
+      !input.providerDelayed)
+  )
+    return;
   const row = await checkWakeRow(ctx, { projectId: input.projectId, runId: input.runId });
   // Advance even while a fanout is in flight. Pages which already consumed a
   // progress event must see a later terminal event before that fanout retires.

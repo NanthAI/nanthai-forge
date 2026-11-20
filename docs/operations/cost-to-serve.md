@@ -1381,6 +1381,13 @@ The fixtures do not model every save, large source fan-out or a whole user month
 | Fresh project, two test shards | 42,067 B | 30,288 B | 1,070 B / 3 rows immediate; +240 B / 1 index row retained |
 | Dogfood-shaped, main race / two large checks | 813,380 B | 226,443 B | 97,716 B / 3 rows immediate; +240 B / 1 index row retained |
 
+Keep the run (Item fa2c1383) stamps a check's kind on the landing row with the check's start,
+including the first check bound at insert, so `projectHostedLandingRequests` rises 19 B per landing
+(`"checkKind":"full"`; 2,368 to 2,387 B fresh, 2,510 to 2,531 B dogfood): the record the
+scoped-share measure reads. The landing-speed sample then carries that kind for the first check too
+(`projectLandingSpeed` +9 B fresh, +11 B dogfood per landing; 245 to 254 / 256 B), and the sample
+window stays bounded. Together that is about 30 KB stored per 1,000 landings.
+
 These are the committed fixture ceilings, not an observed saving. The fixed
 rows' respective byte ceilings are 638 / 279 / 153 B (fresh) and
 668 / 281 / 96,767 B (dogfood). The former combined retained ceilings of

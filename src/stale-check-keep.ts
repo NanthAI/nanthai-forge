@@ -172,6 +172,16 @@ export const needsFastMain = (input: StaleCheckInput) =>
   staleCheckDisposition({ ...input, fastMain: false }).reason !==
   staleCheckDisposition({ ...input, fastMain: true }).reason;
 
+/** Today's keep, unchanged: a mover that touches no global-risk file and does not change which tests
+ * run keeps every run whose paths it does not overlap, and every run whose paths are unknown. It reads
+ * nothing beyond the sweep's own rows, so the sweep answers it before any further read. A path-disjoint
+ * mover cannot change a running probe's answer either. */
+export const todayKeeps = (
+  input: Pick<StaleCheckInput, 'paths' | 'changed' | 'globalMover' | 'coverageMover'>,
+) =>
+  !input.coverageMover &&
+  !input.globalMover &&
+  (!input.paths || !pathsOverlap([...input.paths], [...input.changed]));
 export function staleCheckDisposition(input: StaleCheckInput): StaleCheckDisposition {
   const { paths, changed } = input;
   // Lane B: the probe composed this Candidate on current main and it conflicts. Main is cumulative: a
@@ -182,9 +192,8 @@ export function staleCheckDisposition(input: StaleCheckInput): StaleCheckDisposi
   // never main's baseline (687d1eda). This comes before today's unrelated keep on purpose: selection
   // inputs (STANDARD_SELECTION_INPUTS) are not global risk, so today keeps runs under them.
   if (input.coverageMover) return cancel('coverage-mover');
-  // Today's rule, unchanged: a mover that touches no global-risk file keeps every run whose paths it
-  // does not overlap, and every run whose paths are unknown.
-  if (!input.globalMover && (!paths || !pathsOverlap([...paths], [...changed]))) return keep('unrelated');
+  // Today's rule, unchanged (`todayKeeps`, after the coverage cancel above).
+  if (todayKeeps(input)) return keep('unrelated');
   // An empty path list is refused by the proof (`analyzeCrossHeadReuse`) and the scoped recheck alike.
   if (!paths?.length) return cancel('unknown-paths');
   // Lane B: a run that shares any path with the mover (code or a shared Markdown file) may meet a

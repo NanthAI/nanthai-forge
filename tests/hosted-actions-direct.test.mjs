@@ -3527,3 +3527,24 @@ test('OIDC key refresh is shared, expires after ten minutes and unknown keys can
   await verifyActionsOidc(token, audience, request, now + 60001 + 600001);
   assert.equal(requestCalls.length, 3);
 });
+
+test('keep the run F2: the first session after the plan stamps the shard start once, only with the switch on', async t => {
+  for (const on of [false, true]) {
+    variables(t, { FORGE_QUEUE_KEEP_THE_RUN: on ? '1' : '0' });
+    const s = await fixture(t);
+    const row = () => [...s.tables.projectHostedCheckRuns.values()].find(r => r.runId === s.run.id);
+    await s.bind();
+    await s.call(sessions, 'session', s.input());
+    assert.equal(row().shardStartedAt, undefined, "the plan job's own session is runner wait, not progress");
+    await s.prepare();
+    await s.call(sessions, 'session', s.input());
+    const first = row().shardStartedAt;
+    if (!on) {
+      assert.equal(first, undefined, 'switch off: no new write');
+      continue;
+    }
+    assert.equal(typeof first, 'number', 'the first shard session stamps the start');
+    await s.call(sessions, 'session', s.input());
+    assert.equal(row().shardStartedAt, first, 'one write per run');
+  }
+});

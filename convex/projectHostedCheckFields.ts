@@ -69,6 +69,10 @@ export const hostedCheckTables = {
     ciMirrorJob: v.optional(v.id('projectGithubMirrorJobs')),
     /** Private cancellation fence; it never expands the client run schema. */
     ciCancel: v.optional(v.union(v.literal('queued'), v.literal('attempted'))),
+    /** When the run's first test shard opened its session (the first after the plan), in ms;
+     * server-only, written with keep-the-run on. Keep the run (fa2c1383) measures a run's progress
+     * from here, so waiting for runners is not progress. */
+    shardStartedAt: v.optional(v.number()),
     reportStorage: v.optional(v.literal('r2')),
     resultBatch: v.optional(v.object({ packed: v.boolean() })),
     reportTimingStamp: v.optional(v.object({ generation: v.string(), sequence: v.number() })),

@@ -203,7 +203,11 @@ export async function writeLanding(
     'WORK_OPERATION_CHANGED',
     'The selected attempt must belong to this original request.',
   );
-  const admitting = row.admission?.status === 'checking' && state.phase === 'checking';
+  // A checking admission run is bound through the row. It is pre-queue (admitting, no queue order)
+  // until main moves under it and the keep rule keeps it (`kept`, fa2c1383): from then on it holds
+  // order as the retire it replaced would have, and still settles as the admission.
+  const admissionRun = row.admission?.status === 'checking' && state.phase === 'checking';
+  const admitting = admissionRun && !row.admission!.kept;
   // Fix D (Item 687d1eda): a queued entry parked under the main-red hold waits for one event
   // (releaseMainHolds). It never runs, holds no stall alarm, cohort window place or reservation.
   // Only the explicit `hold` parks: every other write keeps main's behaviour for a held row
@@ -213,7 +217,16 @@ export async function writeLanding(
   const parked = hold === 'main-red';
   const ended = state.phase === 'landed' || state.phase === 'terminal-failed';
   if (parked) runnable = false;
-  const runId = attempt.check?.runId ?? (admitting ? row.admission!.runId : null);
+  const runId = attempt.check?.runId ?? (admissionRun ? row.admission!.runId : null);
+  // The check's kind, stamped once with its start (the write that binds it): ecd6e610, fa2c1383.
+  const checkKind =
+    runId && runId !== row.runId
+      ? state.batchId && !state.batchSolo
+        ? ('batch' as const)
+        : attempt.recheck
+          ? ('scoped' as const)
+          : ('full' as const)
+      : row.checkKind;
   const carried = bindSupersededCheck(state.counts, row.supersededCheck, runId);
   if (carried.counts) state.counts = carried.counts;
   // Solo checking/ready tails can own speculative descendants too. Retire the
@@ -355,6 +368,7 @@ export async function writeLanding(
       : {}),
     supersededCheck: carried.supersededCheck,
     checkWakeVersion: row.runId === runId ? row.checkWakeVersion : undefined,
+    ...(checkKind !== row.checkKind ? { checkKind } : {}),
     admitting: admitting ? true : undefined,
     deciding,
     batchSelection:
@@ -365,7 +379,7 @@ export async function writeLanding(
       !parked &&
       !state.batchId &&
       !state.batchSolo &&
-      !admitting &&
+      !admissionRun &&
       row.admission?.status !== 'failed' &&
       // Pre-queue: an admitted change tries its own Lane run once before any cohort.
       !(row.admission?.full && row.admission.status === 'passed' && !row.admission.reuse) &&
@@ -399,9 +413,7 @@ export async function writeLanding(
   if (
     releaseRun &&
     row.runId &&
-    (row.runId !== (attempt.check?.runId ?? (admitting ? row.admission!.runId : null)) ||
-      state.phase === 'terminal-failed' ||
-      state.phase === 'landed')
+    (row.runId !== runId || state.phase === 'terminal-failed' || state.phase === 'landed')
   )
     await cancelUnneededHostedCheck(ctx, {
       projectId: row.projectId,
@@ -414,6 +426,7 @@ export async function writeLanding(
       pendingRunnerState(state, row.runnerAccounting?.pending),
       attempt.number + 1,
       firstPass,
+      checkKind,
     );
     const project = await ctx.db.get(row.projectId);
     if (project?.needsFix)

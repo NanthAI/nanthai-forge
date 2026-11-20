@@ -133,7 +133,14 @@ export async function settleLandingAdmission(
       retries + 1,
     );
     if (runId) {
-      const admission = { runId, status: 'checking' as const, full: true as const, retries: retries + 1 };
+      // A kept run (fa2c1383) keeps holding queue order through its platform restart.
+      const admission = {
+        runId,
+        status: 'checking' as const,
+        full: true as const,
+        retries: retries + 1,
+        ...(row.admission.kept ? { kept: true as const } : {}),
+      };
       await ctx.db.patch(row._id, { admission });
       await writeLanding(
         ctx,
@@ -183,8 +190,11 @@ export async function settleLandingAdmission(
     await parkLanding(ctx, { ...row, admission }, next);
     return false;
   }
+  // A kept run settles here like any admission (review 563c595b F3c): its first check is recorded
+  // below, and installFinishCompose names why it did not carry. `kept` stays for the receipt.
   const admission = {
     ...(row.admission.full ? { full: true as const, ...(retries ? { retries } : {}) } : {}),
+    ...(row.admission.kept ? { kept: true as const } : {}),
     runId: run.id,
     status:
       kind === 'passed'

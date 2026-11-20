@@ -103,16 +103,20 @@ export const servingUsd = c =>
   ((c.readBytes + c.writeBytes) / 1e9) * RATES.ioPerGb + (c.egressBytes / 1e9) * RATES.egressPerGb;
 export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHours * RATES.perGbHour;
 
+/** The wired keep against the retire it replaces on the same scenario, switch on against off: fixture
+ * calls and DB bytes from the mover's pass until every landing settles (the "line 3" rows of
+ * tests/hosted-landing-keep-the-run.test.mjs hold the wiring to these). They include the hold-order write
+ * and the gate reads; the fixture's runner reports in few calls and resolves no source. */
+export const WIRED = {
+  carry: { calls: 7, readBytes: 404_024, writeBytes: 74_743 },
+  'scoped-recheck': { calls: 17, readBytes: 533_143, writeBytes: 143_005 },
+  red: { calls: -18, readBytes: -394_996, writeBytes: -143_562 },
+};
+
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */
 export const KEPT_CONVEX = {
   // Its pass carries: one prove action; the retire's replacement would have resolved its source.
-  carry: add(
-    [1, minus('unrelated mover, fast', 'global-risk mover, fast')],
-    [1, PROVE],
-    [-1, RESOLVE],
-    [1, HOLD_ORDER],
-    [1, GATE_READS],
-  ),
+  carry: add([1, WIRED.carry], [1, PROVE], [-1, RESOLVE]),
   // Carry with an overlapping follower: today's keep (no order) against today's retire (order held),
   // the upper bound for the wired hold-order keep.
   'carry, C1 follower': add(
@@ -124,20 +128,9 @@ export const KEPT_CONVEX = {
   ),
   // Carry refused, then the scoped recheck: the kept run's own completion is a real ingest the
   // retired run never paid; the recheck and the retire's replacement each resolve source (no credit).
-  'scoped-recheck': add(
-    [1, minus('unrelated mover, fast, carry off', 'global-risk mover, fast, carry off')],
-    [1, INGEST],
-    [1, PROVE],
-    [1, HOLD_ORDER],
-    [1, GATE_READS],
-  ),
+  'scoped-recheck': add([1, WIRED['scoped-recheck']], [1, INGEST], [1, PROVE]),
   // The kept run fails: the landing ends; the retire's replacement would have resolved, run and failed.
-  red: add(
-    [1, minus('unrelated mover, strict, red', 'global-risk mover, strict, red')],
-    [-1, RESOLVE],
-    [1, HOLD_ORDER],
-    [1, GATE_READS],
-  ),
+  red: add([1, WIRED.red], [-1, RESOLVE]),
 };
 
 /** Runner job-minutes and minutes to main one kept run saves against a retire at elapsed share `e`.

@@ -519,6 +519,11 @@ export async function enqueueHostedLanding(
     ...(admission ? {} : { orderLive: true as const }),
     phase: state.phase as import('./projectHostedLandingStore').LandingRow['phase'],
     runId: attempt.check?.runId ?? admission,
+    // The check's kind, stamped with its start as writeLanding does for later checks (ecd6e610,
+    // fa2c1383). A scoped admission (own affected set) is neither kind and stays unstamped.
+    ...(attempt.check || (admission && preQueueCheck(attempt.policy))
+      ? { checkKind: attempt.recheck ? ('scoped' as const) : ('full' as const) }
+      : {}),
     attemptId: attempt.id,
     value: canonicalPayload(state),
   });

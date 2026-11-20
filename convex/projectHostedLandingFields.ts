@@ -198,6 +198,10 @@ export const hostedLandingTables = {
         retries: v.optional(v.number()),
         /** The admitted change has tried its own Lane run as acceptance evidence. */
         reuse: v.optional(v.literal('tried')),
+        /** Keep the run (fa2c1383): main moved under this admission run and the keep rule kept it. The
+         * run still settles as the admission (first-check history), but the entry holds queue order
+         * from the keep on, as the retire it replaced would have. Kept after it settles, for receipts. */
+        kept: v.optional(v.literal(true)),
         /** Why that Lane run did not carry the landing (receipt `firstCheck`, 7fe54c7c). */
         recheck: v.optional(v.string()),
         /** Its one cohort hold for peers still deciding their own Lane proof (10b0a94b). */
@@ -212,6 +216,10 @@ export const hostedLandingTables = {
       }),
     ),
     admitting: v.optional(v.literal(true)),
+    /** The bound check's kind, stamped with its start (the write that binds `runId`): a whole run, a
+     * scoped main-race recheck, or a cohort's shared run. The accepted one joins the landing-speed
+     * sample, which gives per-kind p50s and the keep rule's measured costs (fa2c1383, ecd6e610). */
+    checkKind: v.optional(v.union(v.literal('full'), v.literal('scoped'), v.literal('batch'))),
     /** Admission end of an admitted change still deciding its own Lane proof
      * (untried, or bound to its Lane run): refused peers wait for it (10b0a94b). */
     deciding: v.optional(v.number()),

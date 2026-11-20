@@ -7,6 +7,7 @@ import { readHostedRecord, hostedWriteProject } from './projectHostedRecords';
 import type { MutationCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { hostedStartMain } from './projectHostedChannels';
+import { keepTheRunOn } from './projectHostedKeepSwitch';
 import { beginHostedOperation } from './projectHostedOperations';
 import { composeRow, loadCompose, type ComposeState } from './projectHostedComposeStore';
 import { saveObject } from './projectHostedSaveStore';
@@ -360,13 +361,29 @@ export async function installFinishCompose(
     'The named recompose changed the original exact selection.',
   );
   if (pending.precompose) {
-    const obsoleteConflict =
-      candidate.result.status === 'conflict' &&
-      (await hostedStartMain(ctx, row.projectId)).head !== pending.main.head;
+    const startMain =
+      candidate.result.status === 'conflict' ? await hostedStartMain(ctx, row.projectId) : null;
+    const obsoleteConflict = startMain !== null && startMain.head !== pending.main.head;
     // A real earlier conflict may already have disappeared on accepted main.
     // Retain its artifact, but let the latest notified source job (or ordinary
     // current-head controller) decide before publishing a terminal outcome.
     if (obsoleteConflict && (await continuePrecompose(ctx, row, value))) return;
+    // Keep the run (fa2c1383, review a09af93a finding 2): a kept run's probe has no current-head
+    // controller until its check passes, and the sweep skips it for a mover it does not touch. An
+    // obsolete conflict re-probes on current main, so a real conflict still ends the run early.
+    if (obsoleteConflict && state.phase === 'checking' && keepTheRunOn()) {
+      const { next: _next, ...context } = pending.precompose;
+      void _next;
+      await reserveFinishRetry(
+        ctx,
+        (await ctx.db.get(row._id))!,
+        { ...value, pending: null },
+        'CHECK_EVIDENCE_REFRESH',
+        context,
+        startMain,
+      );
+      return;
+    }
     // A probe never reserves a check or replaces shared batch membership. Keep
     // a clean result for an ordinary retry; a real conflict settles immediately.
     await writeFinish(ctx, row, {

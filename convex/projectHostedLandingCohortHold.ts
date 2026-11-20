@@ -69,6 +69,9 @@ export async function holdForPeers(
     !admission?.full ||
     admission.reuse !== 'tried' ||
     admission.hold ||
+    // Keep the run (fa2c1383, review a09af93a finding 1): a kept run already holds its queue place.
+    // Parking it would drop that place and let a later overlapping peer land ahead of it.
+    admission.kept ||
     !attempt.deferredCheck ||
     state.batchId ||
     state.batchSolo

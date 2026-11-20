@@ -33,8 +33,9 @@ export async function recordLandingSpeed(
   state: HostedLandingState,
   attempts: number | null = null,
   passedAt?: number,
+  checkKind?: 'full' | 'scoped' | 'batch',
 ) {
-  const sample = landingSpeedSample(state, attempts, passedAt);
+  const sample = landingSpeedSample(state, attempts, passedAt, checkKind);
   return sample ? applyLandingSample(ctx, projectId, sample) : [];
 }
 

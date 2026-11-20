@@ -22,12 +22,26 @@ import { hostedRecordSchema } from '../src/hosted-records';
 import { hostedCheckTerminal } from '../src/hosted-check';
 import { landingObservation } from '../src/hosted-landing';
 import { pathsOverlap } from '../src/hosted-cross-head-proof';
-import { firstCheckRiskPaths } from '../src/first-check-risk';
 import { HOSTED_BATCH_MEMBERS } from '../src/hosted-landing-batch';
+import { keepTheRunOn } from './projectHostedKeepSwitch';
+import { claimFinishPrecompose } from './projectHostedFinishPrecompose';
+import { coverageLanding } from './projectHostedMainAuditState';
+import { coverageChangePaths, firstCheckRiskPaths } from '../src/first-check-risk';
+import { STANDARD_SELECTION_INPUTS } from '../src/standard-check';
+import { todayKeeps } from '../src/stale-check-keep';
+import {
+  holdKeptOrder,
+  keepDecision,
+  probeKeptRun,
+  retargetKeptProbe,
+  type KeepMemo,
+} from './projectHostedLandingKeep';
 
 /** The existing post-acceptance transaction inspects at most eight running
  * entries. An empty indexed window reads zero documents/bytes. Source and test
- * files are never read here; this waste decision grants no acceptance proof. */
+ * files are never read here; this waste decision grants no acceptance proof.
+ * With keep-the-run on, each kept row it probes is reserved here directly, so
+ * the queued-entry precompose budget (PRECOMPOSE_ENTRIES) never starves it. */
 export async function cancelStaleLandingChecks(
   ctx: MutationCtx,
   input: {
@@ -60,6 +74,17 @@ export async function cancelStaleLandingChecks(
     firstCheckRiskPaths(changed, [...(project?.checkEntries ?? []), ...(project?.globalRiskPaths ?? [])])
       .length > 0;
   const retired = new Set<string>();
+  const keep = keepTheRunOn() && !!project;
+  // Keep the run: an upper bound of `coverageLanding` for any run's check, once per mover (coverage
+  // only widens with more entries). Below it, today's keep is answered before any further read.
+  const coverageBound =
+    keep &&
+    coverageChangePaths(changed, [
+      ...(project?.checkEntries ?? []),
+      ...(project?.globalRiskPaths ?? []),
+      ...STANDARD_SELECTION_INPUTS,
+    ]).length > 0;
+  const memo: KeepMemo = {};
   for (const selected of rows) {
     if (!selected.runId || retired.has(selected.runId)) continue;
     // A previous member may have retired this row's whole cohort/descendants.
@@ -96,20 +121,62 @@ export async function cancelStaleLandingChecks(
       )) === 'pending'
     )
       continue;
-    if (!global) {
+    let paths: string[] | null = null;
+    if (!global || keep) {
       const record = await readHostedRecord(ctx, {
         projectId: input.projectId,
         actor: state.actor,
         kind: 'candidate',
         key: attempt.candidate.id,
       });
-      if (!record || record.digest !== attempt.candidate.digest) continue;
-      const paths = hostedRecordSchema.options[3].parse(JSON.parse(record.value)).governance?.paths;
-      if (!paths || !pathsOverlap(paths, changed)) continue;
+      paths =
+        record && record.digest === attempt.candidate.digest
+          ? (hostedRecordSchema.options[3].parse(JSON.parse(record.value)).governance?.paths ?? null)
+          : null;
+      if (!keep && (!paths || !pathsOverlap(paths, changed))) continue;
     }
+    // Today's keep, cohorts included, with no read beyond today's (no run, finish, gate or cost read).
+    if (keep && todayKeeps({ paths, changed, globalMover: global, coverageMover: coverageBound })) continue;
     const runId = row.runId;
-    const { run } = await loadHostedCheck(ctx, { projectId: input.projectId, runId }, false);
+    const { row: runRow, run } = await loadHostedCheck(ctx, { projectId: input.projectId, runId }, false);
     if (hostedCheckTerminal(run)) continue;
+    // The bound above was loose for this run's own check: today's keep still holds.
+    if (
+      keep &&
+      todayKeeps({ paths, changed, globalMover: global, coverageMover: coverageLanding(run, changed) })
+    )
+      continue;
+    // Keep the run (fa2c1383, switch FORGE_QUEUE_KEEP_THE_RUN): a solo run the rule keeps goes on;
+    // every cancel retires it below exactly as today. A cohort's shared run retires (cohort) unless
+    // today keeps it.
+    if (keep && !(state.batchId && !state.batchSolo)) {
+      const finish = await loadFinish(ctx, { projectId: input.projectId, submissionId: state.id });
+      // An ordinary finish attempt owns the row, as today; only a probe still running is decided.
+      const probing = Boolean(finish.value.pending?.precompose);
+      if (finish.value.pending && !probing) continue;
+      const decided = await keepDecision(ctx, memo, {
+        project: project!,
+        state,
+        attempt,
+        finish: finish.value,
+        run,
+        shardStartedAt: runRow.shardStartedAt,
+        paths,
+        changed,
+        globalMover: global,
+        now: Date.now(),
+      });
+      if (decided.action === 'keep') {
+        if (decided.holdOrder) await holdKeptOrder(ctx, row, state);
+        // Sticky: a running probe now answers on this main too; an idle one starts here.
+        if (probing) await retargetKeptProbe(ctx, finish, paths, changed, main);
+        else if (decided.probe) await probeKeptRun(ctx, finish, row, paths, changed, main);
+        continue;
+      }
+      // A cancel while the probe runs: detach it (its exact-main result stays cached, as a queue
+      // claim does), so the retire below proceeds as today instead of skipping the row.
+      if (probing) await claimFinishPrecompose(ctx, finish.row);
+    }
     if (state.batchId && !state.batchSolo) {
       const key = { projectId: input.projectId, batchId: state.batchId };
       const { batch } = grouped!;
@@ -119,10 +186,13 @@ export async function cancelStaleLandingChecks(
     } else {
       const finish = await loadFinish(ctx, { projectId: input.projectId, submissionId: state.id });
       if (finish.value.pending) continue;
+      // A kept run the sweep now retires drops its `kept` marker (review a09af93a nit 5).
+      const { kept: _kept, ...retired } = row.admission ?? {};
+      void _kept;
       const admission =
         row.admission?.status === 'checking'
           ? {
-              ...row.admission,
+              ...(retired as NonNullable<typeof row.admission>),
               status: 'unavailable' as const,
               reuse: 'tried' as const,
               recheck: 'main-moved',

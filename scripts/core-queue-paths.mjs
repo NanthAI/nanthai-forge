@@ -6,7 +6,7 @@
 // registered incident replays for them. Rule: the builder decision rules in the agent briefings.
 
 const CORE = [
-  /^convex\/projectHosted(?:Landing|Finish|Acceptance|Queue|Compose|Gate|Check|Batch|ScopedRecheck|LandGates|Reuse|EarlyResolution|MainAudit|ActionsWake|ActionsDirect|ActionsReports|Holders|Superseded|LaneFinish|OwnerReview|OwnerGrant)[^/]*\.ts$/,
+  /^convex\/projectHosted(?:Landing|Finish|Acceptance|Queue|Compose|Gate|Check|Batch|ScopedRecheck|LandGates|Reuse|EarlyResolution|MainAudit|ActionsWake|ActionsDirect|ActionsReports|Holders|Superseded|LaneFinish|OwnerReview|OwnerGrant|Keep)[^/]*\.ts$/,
   /^convex\/(?:projectAcceptance|projectLandingProof|schedulerCancel)[^/]*\.ts$/,
   /^src\/(?:landing-(?!capsule|accepted-by|message|preview-records)|hosted-landing|hosted-finish|hosted-acceptance|hosted-batch|hosted-compose|hosted-cross-head|hosted-would-conflict|hosted-land-gates|hosted-queue-status|scoped-recheck|check-reuse|queue-|first-check-risk)[^/]*\.ts$/,
   /^src\/hosted-check(?:-evidence|-verdict|-controller|-only-compose)?\.ts$/,

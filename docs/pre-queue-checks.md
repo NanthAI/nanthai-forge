@@ -434,6 +434,23 @@ again once main is green (one audit-row read, only for a held entry). A failed
 admission costs one audit-row read, plus one Candidate read when its files match main's; parking
 writes less than failing. Idle and passing landings cost nothing more.
 
+With `FORGE_QUEUE_KEEP_THE_RUN=1` (Item fa2c1383, off by default), a main move no longer throws away
+every running check it touches. The post-acceptance sweep (at most eight running entries) asks the
+keep rule (`src/stale-check-keep.ts`) per solo run. A kept run never lands on its own pass: the pass
+either carries through the ordinary cross-head proof or becomes the basis of a scoped recheck on current
+main, so nothing changes what may land. A run is kept to carry wherever the proof could use it, and kept
+for a scoped recheck only when that costs less than a full replacement on the project's own measured
+check costs (from the first test shard's start, never runner wait; recorded scoped rechecks that ran in
+full count in the scoped share). A run sharing a path with the mover keeps only until a precompose probe
+of its Candidate on current main answers: a conflict ends the landing with `COMPOSITION_CONFLICT` and
+releases the run, and a later mover retargets a probe still running (or detaches it when the rule then
+cancels). A kept pre-queue admission run takes queue order in the write that would have retired it
+(`admission.kept`), so followers compose behind it while the pipeline has a slot; with the pipeline full a
+follower checks on its own, as today. Coverage movers, red main or audit debt, cohorts, recoveries,
+reverts and partial runs retire as today, and today's unrelated keep reads nothing more. Each landing
+row records its check kind (full, scoped or batch) when the check starts. With the switch off the sweep
+is unchanged.
+
 **Optional red-audit drill.** To exercise detection and recovery, the owner can start a drill.
 It is advice, never an eligibility condition. From an agent sign-in, the existing owner
 approval still applies:

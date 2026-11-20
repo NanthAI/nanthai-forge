@@ -311,7 +311,11 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // under $0.001 per 1,000 landings; no new call or write.
   // DB reads 1,897,683 -> 1,897,704 (Item 43b51a5e, queue-stall fix: handoff mark, own-risk flag and
   // reservation-cycle fields on landing rows): 21 B per pair, no new call or write.
-  const baseline = { calls: 121, readBytes: 1_897_704, writeBytes: 676_662 };
+  // DB reads 1,897,704 -> 1,900,085 (Item fa2c1383, keep the run: the check's kind recorded on the
+  // landing row for admission and first checks too, the record the scoped-share measure reads):
+  // `"checkKind":"full"` on every later row read, no new call or write, under $0.001 per 1,000 landings.
+  // The highest of six runs (1,900,065-1,900,085): this replay's reads vary by up to 20 B run to run.
+  const baseline = { calls: 121, readBytes: 1_900_085, writeBytes: 676_662 };
   assert(pair.calls <= baseline.calls, `Convex transactions ${baseline.calls} -> ${pair.calls}`);
   assert(pair.readBytes <= baseline.readBytes, `DB reads ${baseline.readBytes} -> ${pair.readBytes}`);
   assert(pair.writeBytes <= baseline.writeBytes, `DB writes ${baseline.writeBytes} -> ${pair.writeBytes}`);
@@ -342,7 +346,9 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // DB reads 1,827,467 -> 1,901,561 (Item 9a04d916, compose settle; owner-approved +$0.02/1k), as in the small replay.
   // DB reads 1,901,561 -> 1,902,948 (Item 42200ce4, pass-to-land stamp on landing rows), as in the small replay.
   // DB reads 1,902,948 -> 1,902,970 (Item 43b51a5e, queue-stall fix), as in the small replay.
-  const baseline = { calls: 121, readBytes: 1_902_970, writeBytes: 679_017 };
+  // DB reads 1,902,970 -> 1,905,313 (Item fa2c1383, recorded check kind), as in the small replay;
+  // the highest of six runs (1,905,311-1,905,313).
+  const baseline = { calls: 121, readBytes: 1_905_313, writeBytes: 679_017 };
   assert(after.calls <= baseline.calls, `transactions ${baseline.calls} -> ${after.calls}`);
   assert(after.readBytes <= baseline.readBytes, `DB reads ${baseline.readBytes} -> ${after.readBytes}`);
   assert(after.writeBytes <= baseline.writeBytes, `DB writes ${baseline.writeBytes} -> ${after.writeBytes}`);

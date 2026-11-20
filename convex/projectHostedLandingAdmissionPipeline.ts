@@ -15,6 +15,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { pipelinePredecessor } from './projectHostedLandingPipeline';
 import type { LandingRow } from './projectHostedLandingStore';
 import { landingChangedPaths } from './projectHostedLandingOvertake';
+import { keepTheRunOn } from './projectHostedKeepSwitch';
 
 /** A solo pass cannot carry an overlapping or global-risk interaction. Use the existing exact
  * predicted-head train instead of first spending a run on a tree that cannot
@@ -44,16 +45,18 @@ export async function pipelineAdmission(
     attempt.policy.acceptance.hostedCrossHeadReuse === false
   )
     return null;
-  const [seed] = queue.train?.length
+  const firstLive = () =>
+    ctx.db
+      .query('projectHostedLandingRequests')
+      .withIndex('by_project_and_channel_and_orderLive_and_sequence', q =>
+        q.eq('projectId', project._id).eq('channel', 'main').eq('orderLive', true),
+      )
+      .order('asc')
+      .take(1);
+  let [seed] = queue.train?.length
     ? []
     : fast
-      ? await ctx.db
-          .query('projectHostedLandingRequests')
-          .withIndex('by_project_and_channel_and_orderLive_and_sequence', q =>
-            q.eq('projectId', project._id).eq('channel', 'main').eq('orderLive', true),
-          )
-          .order('asc')
-          .take(1)
+      ? await firstLive()
       : await ctx.db
           .query('projectHostedLandingRequests')
           .withIndex('by_project_and_channel_and_admitting_and_sequence', q =>
@@ -61,6 +64,24 @@ export async function pipelineAdmission(
           )
           .order('asc')
           .take(1);
+  // Keep the run (fa2c1383, review 563c595b F4): a kept admission run left the admitting set to hold
+  // queue order, so strict also seeds from order-holding rows; only a kept admission run qualifies.
+  // It holds order (orderLive), so an overlapping follower composes behind it before spending a check
+  // (guard A2, C1) while the pipeline has a slot to compose it in. With the pipeline full the follower
+  // checks on its own, as it does today behind the retired entry: stacked, it would wait for the kept
+  // run with no owner of its own (L5b).
+  let keptSeed = false;
+  if (!queue.train?.length && !fast && keepTheRunOn()) {
+    const [live] = await firstLive();
+    if (
+      live?.admission?.kept &&
+      live.admission.status === 'checking' &&
+      (!seed || live.sequence < seed.sequence)
+    ) {
+      seed = live;
+      keptSeed = true;
+    }
+  }
   if (!queue.train?.length && !seed) return null;
   const selected: { row?: LandingRow; attempt?: HostedLandingAttempt } = {};
   let full = false;
@@ -94,7 +115,8 @@ export async function pipelineAdmission(
   const earlier = await landingChangedPaths(ctx, prior.row, prior.state);
   const entries = [...project.checkEntries, ...(project.globalRiskPaths ?? [])];
   if (!earlier?.length) return null;
-  if (pathsOverlap(paths, earlier)) return prior.row.orderLive === true ? predecessor.submissionId : null;
+  if (pathsOverlap(paths, earlier))
+    return prior.row.orderLive === true && !(keptSeed && full) ? predecessor.submissionId : null;
   return !fast &&
     !full &&
     globalRiskBetween(paths, earlier, entries) &&

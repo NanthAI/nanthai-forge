@@ -24,8 +24,9 @@ import { costGuardSchema, costBudgetSchema, discardedRunnerSeconds } from './cos
  * - Top metric: the budget's own statistic; it interacts with its own break and recovery only. Each undo
  *   also records the shared flow metric it could have moved (lead note on a217b83e, Forge adapts): how
  *   many landings landed while the tighter line held, and how many of their outcomes it changed. That is
- *   0 by construction: no landing, queue or acceptance path reads a speed line, only these alerts do
- *   (tests/speed-budget-ratchet.test.mjs lists every reader of the speed row and fails on a new one). */
+ *   0 by construction: no landing, queue or acceptance path reads a speed line, only these alerts do.
+ *   The keep rule (fa2c1383) reads the row's check samples for measured costs, never a line
+ *   (tests/speed-budget-shift-waste.test.mjs lists every reader of the speed row and fails on a new one). */
 const RATCHET_DAYS = 7;
 /** Undo records kept per budget, newest last. */
 const UNDOS_KEPT = 4;
@@ -342,6 +343,10 @@ const countsSchema = z.tuple([
   z.number().min(0).nullable().optional(),
 ]);
 export type LandingCounts = z.infer<typeof countsSchema>;
+/** The accepted check's kind: a whole run, a scoped recheck, a scoped recheck that fell back to the
+ * whole suite, or a cohort's shared run. */
+export const checkKindSchema = z.enum(['full', 'scoped', 'scoped-full', 'batch']);
+export type SampleCheckKind = z.infer<typeof checkKindSchema>;
 const sampleSchema = z.tuple([
   z.number().int(),
   z.number().nullable(),
@@ -358,6 +363,8 @@ const sampleSchema = z.tuple([
   z.number().nonnegative().nullable().optional(),
   // Minutes from the first passed check to the commit; absent on rows written before it (42200ce4).
   z.number().nonnegative().nullable().optional(),
+  // The accepted check's kind (keep the run, fa2c1383): absent on rows written before it.
+  checkKindSchema.nullable().optional(),
 ]);
 /** Whole-check shift (Item a217b83e, lead 7c9e5a86): name the landing behind a step in runner minutes per
  * full check. The hosted executor and check runner run from main's control checkout, so a change to them
@@ -438,7 +445,8 @@ export const landingSpeedStateSchema = z
   .object({
     schema: z.literal(2),
     /** [settled at ms, time-to-main minutes, check minutes, landing id, settle seconds, attempts,
-     * landing-state writes, counts, save ms, preflight ms, pass-to-land minutes], oldest first. */
+     * landing-state writes, counts, save ms, preflight ms, pass-to-land minutes, check kind], oldest
+     * first. */
     samples: z.array(sampleSchema),
     /** Budgets over their limit now, by budget id: one entry means one alert and one Issue. */
     broken: z.record(z.string(), brokenSchema),
@@ -474,6 +482,8 @@ export type LandingSpeedSample = {
   counts?: LandingCounts | null;
   /** Minutes in each stage of this landing: waiting and composing, check, settling. */
   stages: { queue: number | null; check: number | null; settle: number | null };
+  /** The accepted check's kind, from the landing row (`checkKind`) and the run's fallback. */
+  kind?: SampleCheckKind | null;
 };
 export type SpeedBudgetEvent = {
   /** `undone`: a ratcheted line broke at or under the file max and went back (no P0). `short`: the full
@@ -540,6 +550,7 @@ export function landingSpeedSample(
   state: HostedLandingState,
   attempts: number | null = null,
   passedAt?: number,
+  checkKind?: 'full' | 'scoped' | 'batch',
 ): LandingSpeedSample | null {
   const timing = state.timing;
   const at = Date.parse(timing?.committedAt ?? timing?.settledAt ?? '');
@@ -578,6 +589,9 @@ export function landingSpeedSample(
       check: span(timing.checkReservedAt, timing.ciEndedAt),
       settle: span(timing.ciEndedAt, timing.committedAt),
     },
+    ...(checkKind
+      ? { kind: checkKind === 'scoped' && state.ranInFull ? ('scoped-full' as const) : checkKind }
+      : {}),
   };
 }
 
@@ -640,11 +654,13 @@ export function observeLandingSpeed(
       sample.attempts ?? null,
       sample.writes ?? null,
       sample.counts ?? null,
-      ...(sample.passToLand != null
-        ? [sample.saveMs ?? null, sample.preflightMs ?? null, sample.passToLand]
-        : sample.saveMs == null && sample.preflightMs == null
-          ? []
-          : [sample.saveMs ?? null, sample.preflightMs ?? null]),
+      ...(sample.kind != null
+        ? [sample.saveMs ?? null, sample.preflightMs ?? null, sample.passToLand ?? null, sample.kind]
+        : sample.passToLand != null
+          ? [sample.saveMs ?? null, sample.preflightMs ?? null, sample.passToLand]
+          : sample.saveMs == null && sample.preflightMs == null
+            ? []
+            : [sample.saveMs ?? null, sample.preflightMs ?? null]),
     ] as const,
   ]
     .sort((a, b) => a[0] - b[0])
@@ -950,6 +966,7 @@ type Row = [
   (number | null)?,
   (number | null)?,
   (number | null)?,
+  (SampleCheckKind | null)?,
 ];
 
 const R2_NEXT =
