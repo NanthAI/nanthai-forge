@@ -401,7 +401,7 @@ export async function noteMainLanding(
       ),
       earned: undefined,
     });
-    await clearFixedNotices(ctx, projectId, receipt.snapshot.revision);
+    await clearFixedNotices(ctx, input.project, receipt.snapshot.revision);
     if (row.red) {
       await auditEvent(
         ctx,
@@ -535,14 +535,27 @@ export const parkOnMainRed = () => process.env.FORGE_QUEUE_PARK_ON_MAIN_RED === 
 /** Switch FORGE_QUEUE_PARK_EXACT_ON_MAIN_RED (Item 687d1eda: queue checks, not only admission, park
  * on main's red; off by default; queue-regression guard). */
 export const parkExactOnMainRed = () => process.env.FORGE_QUEUE_PARK_EXACT_ON_MAIN_RED === '1';
-/** Switch FORGE_NEEDS_FIX_CLEAR_ON_GREEN (Item 593fc2d7, off by default): a full green main at or after a
- * needs-fix notice's failed sequence means its fix landed, so the notice clears itself in one scheduled hop.
- * Off, or with no notice, a green costs nothing more. */
-export const clearFixOnGreen = () => process.env.FORGE_NEEDS_FIX_CLEAR_ON_GREEN === '1';
-async function clearFixedNotices(ctx: MutationCtx, projectId: Id<'hostedProjects'>, sequence: number) {
-  if (!clearFixOnGreen() || !(await ctx.db.get(projectId))?.needsFix) return;
+/** A full green main at or after a needs-fix notice's failed sequence means its fix landed, so the
+ * notice clears itself in one scheduled hop (Item 593fc2d7). With no open Fix needed notice (none, or
+ * only reverted ones, which wait for their Intent to land again), a green schedules nothing. A landing
+ * passes the project its caller already read; an audit reads it once. */
+async function clearFixedNotices(
+  ctx: MutationCtx,
+  project: Id<'hostedProjects'> | Doc<'hostedProjects'> | null,
+  sequence: number,
+) {
+  const doc = typeof project === 'string' ? await ctx.db.get(project) : project;
+  if (!doc?.needsFix) return;
+  const open = Object.values(doc.needsFix).some(value => {
+    try {
+      return (JSON.parse(value) as { state?: string }).state === 'needs-fix';
+    } catch {
+      return false;
+    }
+  });
+  if (!open) return;
   await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedCulprit:clearFixed'), {
-    projectId,
+    projectId: doc._id,
     sequence,
   });
 }

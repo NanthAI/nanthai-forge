@@ -27,6 +27,7 @@ import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { hostedBoardSchemas } from './hosted-board.js';
 import { lowerMcpCommand, verbInputSchemas } from './mcp-verbs.js';
 import { hostedAgentCli } from './hosted-agent-cli.js';
+import { canonicalOperationIds } from './operation-id-case.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { observeHostedRun, type HostedRunSubscription } from './hosted-agent-observe.js';
 import { hostedWaitSchema } from './hosted-wait-schema.js';
@@ -315,7 +316,9 @@ export function registerHostedAgentWorkflow(
       },
       annotations: read,
     },
-    async ({ maxWaitMs, replyDetail, ...input }, extra) => {
+    async ({ maxWaitMs, replyDetail, ...selected }, extra) => {
+      // One spelling per operation id, as the CLI wait (52f2f894, 593fc2d7): uuidgen prints upper case.
+      const input = canonicalOperationIds(transport.root, selected);
       const controller = new AbortController();
       const cancel = () => controller.abort();
       extra.signal.addEventListener('abort', cancel, { once: true });

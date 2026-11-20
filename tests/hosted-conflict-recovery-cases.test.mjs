@@ -20,18 +20,6 @@ const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 
 const strip = ({ action, ...parameters }) => [action, parameters];
 
-/** Set (or clear) switch FORGE_RESOLUTION_COMPLETE_BY_HEAD for one test, restoring the prior value. */
-function completeByHead(t, value) {
-  const prior = process.env.FORGE_RESOLUTION_COMPLETE_BY_HEAD;
-  if (value === undefined) delete process.env.FORGE_RESOLUTION_COMPLETE_BY_HEAD;
-  else process.env.FORGE_RESOLUTION_COMPLETE_BY_HEAD = value;
-  t.after(() =>
-    prior === undefined
-      ? delete process.env.FORGE_RESOLUTION_COMPLETE_BY_HEAD
-      : (process.env.FORGE_RESOLUTION_COMPLETE_BY_HEAD = prior),
-  );
-}
-
 /** Conflict on finish from the original Lane's own checkout, then follow the returned steps. */
 async function conflicted(t, laneRoot) {
   const s = await resolutionFixture(t, { overlap: true }),
@@ -95,19 +83,9 @@ test('case 1 (bd201506, 015bfc34, 2e264cd6): landing the resolution Lane complet
   );
 });
 
-test('case 1: an original Lane saved again after the conflict holds new work and stays open', async t => {
-  completeByHead(t, undefined);
-  const run = await conflicted(t);
-  const { f } = run;
-  // A newer save on the original after the resolution was made: its recorded source no longer matches.
-  await f.changeLane(f.lane.laneId, { sourceVersion: f.lane.sourceVersion + 1 });
-  await resolveAndLand(run);
-  assert.equal((await f.readLane(f.lane.laneId)).state, 'active');
-});
-
 // Item 593fc2d7 (Lane 0200969a, receipt 93b3b701): the original was saved again with the same bytes
 // ("save to refresh binding"), so only its sourceVersion moved; it stayed open and was abandoned by
-// hand. Switch FORGE_RESOLUTION_COMPLETE_BY_HEAD (off by default) completes it by head.
+// hand. An original Lane completes by head: only a changed head holds new work (case 1).
 for (const [name, change, expected, intentStatus] of [
   [
     'a same-bytes re-save (sourceVersion only) completes',
@@ -122,8 +100,7 @@ for (const [name, change, expected, intentStatus] of [
     'active',
   ],
 ])
-  test(`593fc2d7 switch on: ${name}`, async t => {
-    completeByHead(t, '1');
+  test(`593fc2d7 case 1: ${name}`, async t => {
     const run = await conflicted(t);
     const { f } = run;
     const { intentId } = await f.readLane(f.lane.laneId);

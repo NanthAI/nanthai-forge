@@ -374,7 +374,51 @@ test('593fc2d7: a comment whose run ended mid-write is posted once by the next p
     [`${stuck.operationId}.json`, `${live.operationId}.json`, recent.split('/').pop()].sort(),
     'the refused write and a temp file under a day old stay',
   );
+  // A refused write backs off between reads: five of them fill one read's five resends, then wait, so
+  // the next read posts the newer comment behind them and resends none of them.
+  const readEntry = entry => JSON.parse(readFileSync(join(outbox, `${entry.operationId}.json`), 'utf8'));
+  assert.equal(readEntry(stuck).refused, 1);
+  rmSync(join(outbox, `${stuck.operationId}.json`));
+  const stuckFive = Array.from({ length: 5 }, (_, index) => ({
+    ...lost,
+    operationId: randomUUID(),
+    at: Date.now() - 60_000 + index,
+    input: { ...lost.input, text: `stuck ${index}` },
+  }));
+  const behind = {
+    ...lost,
+    operationId: randomUUID(),
+    at: Date.now(),
+    input: { ...lost.input, text: 'behind' },
+  };
+  for (const entry of [...stuckFive, behind])
+    writeFileSync(join(outbox, `${entry.operationId}.json`), JSON.stringify(entry));
+  let stuckSends = 0;
+  p.mutation = async (name, args) => {
+    if (JSON.stringify(args).includes('stuck')) {
+      stuckSends++;
+      throw new ForgeError('HOSTED_ACTION_FAILED', 'Try again.');
+    }
+    return mutation(name, args);
+  };
+  assert.equal((await list(p, { id: issue.itemId, reconcile: false })).recoveredComments, undefined);
+  assert.equal(stuckSends, 5, 'the five oldest fill this read');
+  assert.ok(
+    stuckFive.every(entry => readEntry(entry).nextAt > Date.now()),
+    'each refused write waits',
+  );
+  stuckSends = 0;
+  assert.deepEqual((await list(p, { id: issue.itemId, reconcile: false })).recoveredComments, [
+    { itemId: issue.itemId, commentId: behind.operationId },
+  ]);
+  assert.equal(stuckSends, 0, 'a waiting write is not resent on every read');
+  // Once its wait is over, a refused write is resent and posts when the server takes it.
   p.mutation = mutation;
+  const due = readEntry(stuckFive[0]);
+  writeFileSync(join(outbox, `${due.operationId}.json`), JSON.stringify({ ...due, nextAt: Date.now() - 1 }));
+  assert.deepEqual((await list(p, { id: issue.itemId, reconcile: false })).recoveredComments, [
+    { itemId: issue.itemId, commentId: due.operationId },
+  ]);
 });
 
 test('agents create an Initiative and Issue, comment, and read them filtered and paged', async t => {

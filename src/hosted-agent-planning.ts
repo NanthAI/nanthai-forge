@@ -2,13 +2,23 @@
 import { memberDataNotice, systemCommentNotice } from './member-data-notice.js';
 import { planningSummary, planningSearchTerms } from './planning-search.js';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { laneRegistryDirectory } from './lane-registry.js';
 import { makeFunctionReference } from 'convex/server';
 import { HostedAgentJournal } from './hosted-agent-journal.js';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { hostedActionError } from './hosted-action-error.js';
+import { retryableCodes } from './exchange-retry.js';
 import { readIndexedWorkDetail } from './hosted-work-client.js';
 import { ForgeError, invariant, itemChanged } from './errors.js';
 import { isPlanningPrefix, planningIdMaxCandidates } from './planning-id.js';
@@ -819,22 +829,29 @@ type OutboxEntry = {
   author: CommentAuthor;
   pid: number;
   at: number;
+  /** Refusals so far and the earliest next resend: a write the server keeps refusing backs off
+   * between reads (1 min, doubling, at most 1 h), so it neither delays every read nor takes one of
+   * the 5 resends a read makes while it waits. */
+  refused?: number;
+  nextAt?: number;
 };
 const OUTBOX_MAX_AGE_MS = 24 * 3_600_000;
-const OUTBOX_PASSING =
-  /^(WORK_BUSY|WORK_CHANGED_DURING_PUSH|HOSTED_CONFLICT|HOSTED_ACTION_FAILED|HOSTED_REQUEST_FAILED|LEGACY_STORAGE_WRITES_PAUSED)$/;
+const outboxBackoff = (refused: number) => Math.min(60_000 * 2 ** (refused - 1), 3_600_000);
 const outboxDirectory = () =>
   Boolean(process.env.NODE_TEST_CONTEXT) && !process.env.XDG_STATE_HOME
     ? null
     : join(dirname(laneRegistryDirectory()), 'comment-outbox');
+function writeEntry(path: string, entry: OutboxEntry) {
+  writeFileSync(`${path}.${process.pid}.tmp`, JSON.stringify(entry), { mode: 0o600 });
+  renameSync(`${path}.${process.pid}.tmp`, path);
+}
 function keepComment(entry: OutboxEntry) {
   const directory = outboxDirectory();
   if (!directory) return () => {};
   const path = join(directory, `${entry.operationId}.json`);
   try {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
-    writeFileSync(`${path}.${process.pid}.tmp`, JSON.stringify(entry), { mode: 0o600 });
-    renameSync(`${path}.${process.pid}.tmp`, path);
+    writeEntry(path, entry);
   } catch {
     return () => {}; // Best effort: the write itself still runs.
   }
@@ -874,6 +891,7 @@ async function flushComments(port: PlanningPort, actor: string) {
       else if (
         entry.url === port.address.url &&
         entry.projectId === port.address.projectId &&
+        (entry.nextAt ?? 0) <= Date.now() &&
         !alive(entry.pid)
       )
         return [{ entry, path: join(directory, name) }];
@@ -902,9 +920,18 @@ async function flushComments(port: PlanningPort, actor: string) {
           /^(AUTH_|EXCHANGE_|RATE_LIMITED$)|NETWORK|TIMEOUT|UNAVAILABLE/.test(error.code)
         )
           break;
-        // This write is refused for now (busy, conflicting, paused): keep it and try the next one. A
-        // refusal (no access, a changed or spent operation) will not change on a retry, so it goes.
-        if (error.recovery?.retryable === true || OUTBOX_PASSING.test(error.code)) continue;
+        // This write is refused for now (busy, conflicting, paused): keep it, back it off and try the
+        // next one. A refusal (no access, a changed or spent operation) will not change on a retry, so
+        // it goes.
+        if (error.recovery?.retryable === true || retryableCodes.has(error.code)) {
+          const refused = (entry.refused ?? 0) + 1;
+          try {
+            // Another read may have posted and removed it meanwhile: never bring it back.
+            if (existsSync(path))
+              writeEntry(path, { ...entry, refused, nextAt: Date.now() + outboxBackoff(refused) });
+          } catch {}
+          continue;
+        }
       }
       rmSync(path, { force: true });
     }

@@ -7,18 +7,13 @@ import { hostedLaneSchema } from '../src/hosted-lane';
 import { supersedeLaneFinishes } from './projectHostedLaneFinish';
 import { supersedeLane } from './projectHostedSuperseded';
 
-/** Switch FORGE_RESOLUTION_COMPLETE_BY_HEAD (Item 593fc2d7, off by default; acceptance guard): an
- * origin Lane completes when its head still equals the conflict's pinned head, whatever its save
- * count. Off: head and sourceVersion must both match, as before. */
-const completeByHead = () => process.env.FORGE_RESOLUTION_COMPLETE_BY_HEAD === '1';
-
 /** A conflict inside a resolution makes a short chain; the walk stays bounded. */
 const DEPTH = 4;
 type Lane = z.infer<typeof hostedLaneSchema>;
 
 /** A landed resolution Lane completes the conflicted Lane it was made for, so the original never
- * stays open as unfinished work. Only when that Lane is still active, unpinned and at the exact
- * recorded source: a Lane saved again afterwards holds new work and stays open. Runs in the
+ * stays open as unfinished work. Only when that Lane is still active, unpinned and at the recorded
+ * head: a Lane saved with new bytes afterwards holds new work and stays open. Runs in the
  * acceptance completion tick that completed the resolution Lane, on resolution Lanes only: at most
  * DEPTH record reads/writes and overlap rows, no added call. Reopen undoes it. Returns the Intents
  * of the Lanes it completed. */
@@ -57,14 +52,11 @@ export async function completeResolutionOrigins(
       fromHead: origin.head,
     });
     if (current.state !== 'active' || current.pinned) break;
-    if (
-      current.head !== origin.head ||
-      (!completeByHead() && current.sourceVersion !== origin.sourceVersion)
-    ) {
+    if (current.head !== origin.head) {
       // Saved again after the conflict: it keeps its work and stays open, but its original source
-      // reached main through this resolution, so it stops producing advisory notices. With the
-      // switch on, a re-save of the same bytes (sourceVersion moved, head unchanged) holds no new
-      // work, so the Lane completes like an untouched one (593fc2d7).
+      // reached main through this resolution, so it stops producing advisory notices. A re-save of
+      // the same bytes (sourceVersion moved, head unchanged) holds no new work, so the Lane
+      // completes like an untouched one (593fc2d7).
       await supersedeLane(ctx, {
         projectId: input.projectId,
         laneId: current.id,

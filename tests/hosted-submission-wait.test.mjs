@@ -410,6 +410,37 @@ test('MCP hosted wait accepts multi-operation selection and closes on disconnect
   assert.equal((await s.f.status(a.state.id)).request.phase, 'queued');
 });
 
+// 593fc2d7 (lead follow-up to 52f2f894): uuidgen prints upper case; the MCP wait must treat an
+// uppercase id and its lowercase twin as one operation, as the CLI wait does.
+test('593fc2d7: MCP forge_wait finds a landing by the uppercase spelling of its operation id', async () => {
+  const s = await fixture(),
+    a = await s.start(),
+    tools = new Map();
+  registerHostedAgentWorkflow(
+    {
+      registerTool(name, config, call) {
+        tools.set(name, { config, call });
+      },
+    },
+    s.transport,
+    s.subscribe,
+  );
+  const extra = { signal: new AbortController().signal, _meta: {}, async sendNotification() {} };
+  const wait = async id =>
+    JSON.parse(
+      (await tools.get('forge_wait').call({ operationIds: [id], timeoutSeconds: 0, maxWaitMs: 0 }, extra))
+        .content[0].text,
+    );
+  const lower = await wait(a.request.operationId);
+  const upper = await wait(a.request.operationId.toUpperCase());
+  assert.equal(upper.error, undefined, JSON.stringify(upper.error));
+  assert.equal(upper.result.status, lower.result.status);
+  assert.deepEqual(
+    upper.result.submissions?.map(entry => entry.submission.id),
+    lower.result.submissions?.map(entry => entry.submission.id),
+  );
+});
+
 test('historical failed/conflicted attempts retain their own evidence after a landed child; old pins stay immutable', async () => {
   const s = await fixture(),
     a = await s.start();

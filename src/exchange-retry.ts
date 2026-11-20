@@ -2,7 +2,9 @@
 import { hostedActionError } from './hosted-action-error.js';
 import { ForgeError } from './errors.js';
 
-const retryable = new Set([
+/** Refusals that ran nothing and are safe to resend under the same operation ID (the comment outbox
+ * keeps an entry on these too). */
+export const retryableCodes: ReadonlySet<string> = new Set([
   'WORK_BUSY',
   'WORK_CHANGED_DURING_PUSH',
   'HOSTED_CONFLICT',
@@ -89,7 +91,8 @@ export async function retryExchange<T>(
         );
       // A 429/503 refusal ran nothing, so it is as safe to resend as a conflict.
       const refused = refusedWait(error, attempt, Number.POSITIVE_INFINITY) !== null;
-      if (!refused && !retryable.has(error.code) && !options.retryCodes?.includes(error.code)) throw error;
+      if (!refused && !retryableCodes.has(error.code) && !options.retryCodes?.includes(error.code))
+        throw error;
       const backoff = (options.delayMs ?? 100) * 2 ** attempt;
       const until = error.retryAt ? error.retryAt - Date.now() : 0;
       if (attempt >= retries || until > (options.maxWaitMs ?? 60_000))

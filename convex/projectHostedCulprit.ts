@@ -19,7 +19,6 @@ import { prepareHostedRevert } from './projectHostedRevert';
 import {
   armAudit,
   auditSettings,
-  clearFixOnGreen,
   closeDrill,
   coverageLanding,
   noteRedCause,
@@ -1842,14 +1841,14 @@ export const accepted = internalMutation({
   },
 });
 
-/** Scheduled by a full green main (switch FORGE_NEEDS_FIX_CLEAR_ON_GREEN): clears each needs-fix notice whose failed
+/** Scheduled by a full green main: clears each needs-fix notice whose failed
  * sequence that green covers. A reverted notice stays: its work is off main until it re-lands. At most 20 notices. */
 export const clearFixed = internalMutation({
   args: { projectId: v.id('hostedProjects'), sequence: v.number() },
   returns: v.null(),
   handler: async (ctx, input) => {
     const project = await ctx.db.get(input.projectId);
-    if (!clearFixOnGreen() || !project?.needsFix || !project.sourceAuthority) return null;
+    if (!project?.needsFix || !project.sourceAuthority) return null;
     // Reverted notices stay in the map; filter before the cap so they never crowd out the clearable ones.
     const open = Object.entries(project.needsFix)
       .filter(([, value]) => (JSON.parse(value) as { state?: string }).state === 'needs-fix')

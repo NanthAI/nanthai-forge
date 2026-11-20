@@ -1735,12 +1735,7 @@ test('every single culprit position stays within the logarithmic probe budget', 
   t.diagnostic(JSON.stringify({ boundaries: measurements }));
 });
 
-test('593fc2d7 switch FORGE_NEEDS_FIX_CLEAR_ON_GREEN: a full green at or after a needs-fix notice clears it; an older green or a reverted notice keeps it', async t => {
-  const prior = process.env.FORGE_NEEDS_FIX_CLEAR_ON_GREEN;
-  t.after(() => {
-    if (prior === undefined) delete process.env.FORGE_NEEDS_FIX_CLEAR_ON_GREEN;
-    else process.env.FORGE_NEEDS_FIX_CLEAR_ON_GREEN = prior;
-  });
+test('593fc2d7: a full green at or after a needs-fix notice clears it; an older green or a reverted notice keeps it', async () => {
   const f = await fixture();
   await f.runCulprit();
   const run = f.probes()[0];
@@ -1773,10 +1768,6 @@ test('593fc2d7 switch FORGE_NEEDS_FIX_CLEAR_ON_GREEN: a full green at or after a
   });
   const clear = sequence =>
     f.transaction('clearFixed', culprit.clearFixed, { projectId: f.projectId, sequence });
-  delete process.env.FORGE_NEEDS_FIX_CLEAR_ON_GREEN;
-  await clear(notice.sequence);
-  assert.equal(culprit.needsFix(project()).length, 22, 'switch off: nothing clears');
-  process.env.FORGE_NEEDS_FIX_CLEAR_ON_GREEN = '1';
   await clear(notice.sequence - 1);
   assert.equal(culprit.needsFix(project()).length, 22, 'a green before the failed sequence proves no fix');
   await clear(notice.sequence);

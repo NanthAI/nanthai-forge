@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readdirSync } from 'node:fs';
 import { hostedAgentDirectory } from './hosted-agent-journal.js';
+import { ForgeError } from './errors.js';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const keys = ['operationId', 'composeOperationId', 'applyOperationId'] as const;
@@ -13,8 +14,15 @@ export function canonicalOperationId(root: string, id: string) {
   if (!uuid.test(id)) return id;
   // The directory listing is the authority on the stored spelling: a case-insensitive disk
   // answers an exists-check for either case, so the check cannot tell them apart.
-  const lower = id.toLowerCase(),
+  const lower = id.toLowerCase();
+  let stored: string | undefined;
+  try {
     stored = readdirSync(hostedAgentDirectory(root)).find(name => name.toLowerCase() === `${lower}.json`);
+  } catch (error) {
+    // No journal folder (none can be made here): nothing was journaled under another spelling. A
+    // refused folder (a symlinked cache) is still an error.
+    if (!(error as NodeJS.ErrnoException).code || error instanceof ForgeError) throw error;
+  }
   return stored ? stored.slice(0, -'.json'.length) : lower;
 }
 

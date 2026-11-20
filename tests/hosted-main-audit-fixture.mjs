@@ -140,7 +140,8 @@ export async function auditFixture() {
         value: canonicalPayload(receipt),
       });
       await state.noteMainLanding(ctx, {
-        project,
+        // The publish path reads its project in the same mutation: hand over the current row.
+        project: f.tables.hostedProjects.get(f.projectId),
         receipt,
         run: selected,
         ...('paths' in options ? { paths: options.paths } : {}),
