@@ -4,6 +4,7 @@
 // keeping focus on the same control. A press made before the layer arrived is carried out when it does.
 import {
   createContext,
+  useCallback,
   useContext,
   useLayoutEffect,
   useMemo,
@@ -185,12 +186,23 @@ function Grip({
 export function ReorderList<T extends ReorderItem>(props: ReorderListProps<T>) {
   const layer = useLayer();
   const { box, onFocus } = useSwapFocus(!!layer);
+  const keepListHeight = useCallback((list: HTMLDivElement | null) => {
+    if (!list) return;
+    // The grid commits before its rows. Keep the actual first-paint height during that gap,
+    // including wrapped rows, so scroll anchoring cannot move a grip further down the page.
+    return () => {
+      list.parentElement?.style.setProperty(
+        '--ds-first-list-height',
+        `${list.getBoundingClientRect().height}px`,
+      );
+    };
+  }, []);
   return (
     <div ref={box} onFocus={onFocus} className="ds-swap">
       {layer ? (
         <layer.ReorderList {...props} />
       ) : (
-        <div role="list" aria-label={props.label} className="ds-list">
+        <div ref={keepListHeight} role="list" aria-label={props.label} className="ds-list">
           {props.items.map((item, index) => (
             <div
               role="listitem"
@@ -253,8 +265,7 @@ export function Dock(props: DockProps) {
                         focusKey={`drag-${id}`}
                         onPointerDown={grip.hold}
                         onClick={event => {
-                          if (event.detail > 0 || matchMedia('(max-width: 860px), (pointer: coarse)').matches)
-                            setInitialMenu(id);
+                          if (event.detail > 0 || matchMedia('(pointer: coarse)').matches) setInitialMenu(id);
                           else markPress(event.currentTarget, `drag-${id}`);
                           grip.release();
                         }}

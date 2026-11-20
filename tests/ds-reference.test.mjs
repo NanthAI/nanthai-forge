@@ -13,7 +13,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { chromium } from 'playwright';
+import { chromium, firefox, webkit } from 'playwright';
 import { LAYER_GZIP_BUDGET, layerBundleReport } from '../scripts/ds-build-guard.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -161,16 +161,26 @@ const shot = async (target, name) => {
 // --- the checks ---------------------------------------------------------------------------------------------------
 
 test('the reference surface: reorder, dock, late layer, axe and widths in both themes', async t => {
-  const executablePath = process.env.FORGE_UI_BROWSER || chromium.executablePath();
-  if (!existsSync(executablePath)) return t.skip('A test browser is not installed.');
+  const engines = { chromium, firefox, webkit };
+  const engineName = process.env.FORGE_DS_BROWSER || 'chromium';
+  const engine = engines[engineName];
+  assert.ok(engine, `Unknown reference browser: ${engineName}`);
+  const executablePath = (engine === chromium && process.env.FORGE_UI_BROWSER) || engine.executablePath();
+  if (!existsSync(executablePath)) {
+    if (process.env.FORGE_DS_BROWSER) assert.fail(`Playwright ${engineName} is not installed.`);
+    return t.skip('A test browser is not installed.');
+  }
   const out = mkdtempSync(join(tmpdir(), 'forge-ds-reference-'));
   if (shots) mkdirSync(shots, { recursive: true });
   const layerFiles = await buildReference(out);
-  const browser = await chromium.launch({ executablePath });
+  const browser = engine === chromium ? await chromium.launch({ executablePath }) : await engine.launch();
 
   /** A fresh page on the built surface; `hold` keeps the layer's chunks back until the returned release is called. */
-  async function open(t, viewport = DESK, { hold = false } = {}) {
-    const context = await browser.newContext({ viewport });
+  async function open(t, viewport = DESK, { hold = false, touch = false } = {}) {
+    const context = await browser.newContext({
+      viewport,
+      ...(touch ? { hasTouch: true, isMobile: true } : {}),
+    });
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -226,38 +236,98 @@ test('the reference surface: reorder, dock, late layer, axe and widths in both t
       },
     );
 
-    await t.test('a Dock grip keeps a press through behaviour attachment and opens one menu', async t => {
-      for (const viewport of [DESK, PHONE]) {
-        const { page, release } = await open(t, viewport, { hold: true });
-        const notes = page.getByRole('button', { name: 'Move Notes', exact: true });
-        await notes.hover();
-        await page.mouse.down();
-        release();
-        await page.locator('.ds-list[role=grid]').waitFor();
-        assert.equal(await page.locator(DOCK).count(), 0, 'the Dock grip does not swap during its press');
-        await page.mouse.up();
-        const wide = page.getByRole('menuitem', { name: 'Full width' });
-        await hear(page, DOCK, () => wide.click());
-        assert.deepEqual((await zones(page)).top, ['needs', 'notes']);
-        assert.equal(await page.getByRole('menu').count(), 0, 'the move does not reopen the initial menu');
-      }
-    });
+    await t.test(
+      'a Dock grip holds its place during attachment and supports menu moves and native drops at both widths',
+      async t => {
+        for (const viewport of [DESK, PHONE]) {
+          const { page, release } = await open(t, viewport, { hold: true });
+          const notes = page.getByRole('button', { name: 'Move Notes', exact: true });
+          await notes.hover();
+          const held = await notes.boundingBox();
+          assert.ok(held);
+          await page.mouse.down();
+          try {
+            release();
+            await page.locator('.ds-list[role=grid] > .ds-row').first().waitFor();
+            assert.equal(await page.locator(DOCK).count(), 0, 'the Dock grip does not swap during its press');
+            assert.deepEqual(
+              await notes.boundingBox(),
+              held,
+              `held grip at ${viewport.width}px keeps its place`,
+            );
+          } finally {
+            await page.mouse.up();
+          }
+          const wide = page.getByRole('menuitem', { name: 'Full width' });
+          await hear(page, DOCK, () => wide.click());
+          assert.deepEqual((await zones(page)).top, ['needs', 'notes']);
+          assert.equal(await page.getByRole('menu').count(), 0, 'the move does not reopen the initial menu');
 
-    await t.test('a touch press opens the desktop Dock grip menu on a hybrid device', async t => {
-      const { page } = await open(t);
-      const notes = page.locator(`${DOCK} .ds-drag[aria-label="Move Notes"]`);
-      await notes.scrollIntoViewIfNeeded();
-      const bounds = await notes.boundingBox();
-      assert.ok(bounds, 'the desktop grip is visible with a fine pointer');
-      const cdp = await page.context().newCDPSession(page);
-      await cdp.send('Input.dispatchTouchEvent', {
-        type: 'touchStart',
-        touchPoints: [{ x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }],
+          await notes.scrollIntoViewIfNeeded();
+          const from = await notes.boundingBox();
+          assert.ok(from);
+          const x = from.x + from.width / 2;
+          const y = from.y + from.height / 2;
+          await page.mouse.move(x, y);
+          await page.mouse.down();
+          const moved = await hear(page, DOCK, async () => {
+            try {
+              await page.mouse.move(x + 16, y, { steps: 5 });
+              await page.locator(`${DOCK}[data-carrying]`).waitFor();
+              const plan = await page.getByRole('region', { name: 'Plan, in order' }).boundingBox();
+              assert.ok(plan);
+              const targetX = plan.x + plan.width / 2;
+              const targetY = plan.y + 16;
+              await page.mouse.move(targetX - 4, targetY, { steps: 10 });
+              await page.mouse.move(targetX, targetY);
+              await page
+                .locator('[data-zone="a"] .dropline[data-drop-target]')
+                .getByText('Notes, left column, 1st', { exact: true })
+                .waitFor();
+            } finally {
+              await page.mouse.up();
+            }
+          });
+          assert.equal(moved, 'Moved Notes to the left column, position 1 of 3.');
+          assert.deepEqual(await zones(page), {
+            top: ['needs'],
+            a: ['notes', 'plan', 'lanes'],
+            b: ['checks'],
+          });
+        }
+      },
+    );
+
+    if (engine === chromium)
+      await t.test('touch opens the Dock grip menu on a hybrid desktop and a cold phone', async t => {
+        for (const viewport of [DESK, PHONE]) {
+          const touchFirst = viewport === PHONE;
+          const { page, release } = await open(t, viewport, { hold: touchFirst, touch: touchFirst });
+          const notes = page.getByRole('button', { name: 'Move Notes', exact: true });
+          assert.equal(await page.evaluate(() => matchMedia('(pointer: coarse)').matches), touchFirst);
+          await notes.scrollIntoViewIfNeeded();
+          const bounds = await notes.boundingBox();
+          assert.ok(bounds, 'the Dock grip is visible');
+          const cdp = await page.context().newCDPSession(page);
+          await cdp.send('Input.dispatchTouchEvent', {
+            type: 'touchStart',
+            touchPoints: [{ x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }],
+          });
+          try {
+            if (touchFirst) {
+              release();
+              await page.locator('.ds-list[role=grid] > .ds-row').first().waitFor();
+              assert.equal(await page.locator(DOCK).count(), 0, 'the Dock waits for the active touch');
+            }
+          } finally {
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+          }
+          const gripKind = touchFirst ? 'ds-move' : 'ds-drag';
+          await page.locator(`${DOCK} .${gripKind}[aria-label="Move Notes"]`).waitFor();
+          await hear(page, DOCK, () => page.getByRole('menuitem', { name: 'Full width' }).click());
+          assert.deepEqual((await zones(page)).top, ['needs', 'notes']);
+        }
       });
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-      await hear(page, DOCK, () => page.getByRole('menuitem', { name: 'Full width' }).click());
-      assert.deepEqual((await zones(page)).top, ['needs', 'notes']);
-    });
 
     await t.test(
       'keyboard reorder: the drop line, the screen and the announcement agree after every move',
@@ -368,7 +438,7 @@ test('the reference surface: reorder, dock, late layer, axe and widths in both t
 
       const phone = (await open(t, PHONE)).page;
       const menu = async (region, action) => {
-        await phone.locator(`${DOCK} .ds-move[aria-label="Move ${region}"]`).click();
+        await phone.getByRole('button', { name: `Move ${region}`, exact: true }).click();
         return hear(phone, DOCK, () => phone.getByRole('menuitem', { name: action }).click());
       };
       assert.equal(
@@ -470,7 +540,6 @@ test('the reference surface: reorder, dock, late layer, axe and widths in both t
             `${width}: at rest, light`,
           );
           await shot(page.locator(DOCK), `dock-one-column-${width}-light`);
-          if (viewport !== DESK) continue; // a phone moves regions by the handle's menu, never by carrying them
           await tabTo(page, 'Move Checks');
           await page.keyboard.press('Enter');
           await waitForDropTarget(page);
@@ -486,7 +555,7 @@ test('the reference surface: reorder, dock, late layer, axe and widths in both t
               break;
             await page.keyboard.press('Tab');
           }
-          await shot(page.locator(DOCK), 'mid-drag-empty-zone-light');
+          await shot(page.locator(DOCK), `mid-drag-empty-zone-${width}-light`);
           const heard = await hear(page, DOCK, () => page.keyboard.press('Enter'));
           assert.equal(heard, 'Moved Checks to the right column, position 1 of 1.');
           assert.deepEqual(await zones(page), {
@@ -497,8 +566,8 @@ test('the reference surface: reorder, dock, late layer, axe and widths in both t
           const after = await drawn(page);
           assert.deepEqual(
             [after.empty, after.b, after.full],
-            [[], true, false],
-            'two columns again, nothing empty',
+            [[], true, viewport === PHONE],
+            'both zones hold regions, stacked only at phone width',
           );
           // Carried and put back: the empty zone shuts again.
           const notesFirst = { top: ['needs'], a: ['notes', 'plan', 'lanes', 'checks'], b: [] };
@@ -542,6 +611,14 @@ test('the reference surface: reorder, dock, late layer, axe and widths in both t
         const { page } = await open(t, viewport);
         for (const fold of await page.locator('button.fold[aria-expanded="false"]').all()) await fold.click();
         await page.addScriptTag({ path: axePath });
+        const light = page.getByRole('button', { name: 'Light', exact: true });
+        const transitions = () =>
+          light.evaluate(key => getComputedStyle(key).transitionProperty.split(/,\s*/));
+        assert.deepEqual(
+          await transitions(),
+          ['transform'],
+          'the theme switch applies ink and fill together',
+        );
         for (const name of ['dark', 'light']) {
           await theme(page, name);
           const [scroll, inner] = await page.evaluate(() => [
@@ -567,6 +644,9 @@ test('the reference surface: reorder, dock, late layer, axe and widths in both t
         assert.deepEqual(dialog, [], `axe on the sheet at ${viewport.width}`);
         await shot(page, `sheet-${viewport.width}-light`);
         await page.keyboard.press('Escape');
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        await theme(page, 'dark');
+        assert.deepEqual(await transitions(), ['none'], 'reduced motion also removes the key press movement');
       }
     });
   } finally {

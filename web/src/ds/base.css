@@ -42,7 +42,7 @@
 
   /* keys: a press moves them down by one pixel */
   kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 var(--s-1); border: var(--rule) solid var(--key-edge); border-bottom-width: 2px; border-radius: var(--r); background: var(--surface-2); color: var(--text-2); font-size: var(--t-micro); line-height: 1; font-weight: var(--w-medium); }
-  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: var(--ctl-h); padding: 0 11px; min-width: 0; margin: 0; border: var(--rule) solid var(--line-strong); border-bottom: 2px solid var(--key-edge); border-radius: var(--r); background: var(--surface-2); color: var(--text); font-weight: var(--w-strong); font-size: 13px; line-height: 1; white-space: nowrap; transition: transform var(--d-press) var(--ease-out), background-color var(--d-quick); }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: var(--ctl-h); padding: 0 11px; min-width: 0; margin: 0; border: var(--rule) solid var(--line-strong); border-bottom: 2px solid var(--key-edge); border-radius: var(--r); background: var(--surface-2); color: var(--text); font-weight: var(--w-strong); font-size: 13px; line-height: 1; white-space: nowrap; transition: transform var(--d-press) var(--ease-out); }
   .btn > span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .btn:active { transform: translateY(1px); }
   .btn.primary { background: var(--brand); color: var(--on-brand); border-color: var(--brand); border-bottom-color: var(--brand-edge); font-weight: var(--w-bold); }

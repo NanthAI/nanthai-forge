@@ -3,7 +3,7 @@
 // same model as a list (Enter picks up, arrow keys choose, Enter drops, Escape cancels; Tab reaches the other parts of
 // the dock while carrying it), or by the handle's menu: up, down, to the other column, full width, reset the layout.
 // An empty zone is not drawn at rest (the other column takes the full width); it comes back as a drop target, saying
-// "Drop a region here", only while a region is carried.
+// "Drop a region here", only while a region is carried on a Dock that supports cross-column moves.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -96,9 +96,11 @@ export function Dock({
     announce('Layout reset.');
   };
   const place = (id: string, zone: DockZone, index: number) => {
+    const from = zoneOf(layout, id);
+    if (singleColumn && from !== zone) return;
     const next = moveRegion(layout, id, zone, index);
     const at = next[zone].indexOf(id);
-    if (zoneOf(layout, id) === zone && layout[zone].indexOf(id) === at) return;
+    if (from === zone && layout[zone].indexOf(id) === at) return;
     const title = byId.get(id)?.title;
     if (!title) return;
     onLayout(next);
@@ -153,7 +155,7 @@ export function Dock({
         aria-label={label}
         data-dock=""
         data-carrying={moving === null ? undefined : ''}
-        data-shut={shutZones(layout, moving !== null)}
+        data-shut={shutZones(layout, moving !== null && !singleColumn)}
       >
         {ZONES.map(zone => (
           <Zone
@@ -312,7 +314,7 @@ function DockGrip({
   items: MenuAction[];
   open: boolean;
 }) {
-  const menuOnly = open && matchMedia('(max-width: 860px), (pointer: coarse)').matches;
+  const menuOnly = open && matchMedia('(pointer: coarse)').matches;
   return (
     <>
       <ActionMenu

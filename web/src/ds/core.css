@@ -171,7 +171,7 @@
     .head { grid-template-columns: minmax(0, 1fr); padding: 14px var(--gut); } .head .sit { font-size: 18px; } .head .tools { justify-content: flex-start; }
     .btn { height: var(--ctl-h-touch); padding: 0 14px; font-size: 14.5px; } .btn.sm { height: 34px; } .btn kbd { display: none; } .btn.wrap { min-height: var(--ctl-h-touch); }
     .seg button { height: 36px; padding: 0 var(--s-3); } .grip { width: 34px; height: 36px; } .cli { height: 36px; } .menu button { height: 42px; }
-    .dock { display: flex; flex-direction: column; } .zone { display: contents; }
+    .dock { display: flex; flex-direction: column; } .zone[data-zone="a"] { border-right: 0; }
     .dec { padding: var(--gut); } .dec .btns .btn { flex: 1 1 auto; }
   }
   .shell { display: grid; grid-template: "top top" var(--top-h) "rail main" minmax(0, 1fr) / var(--rail-w) minmax(0, 1fr); min-height: calc(100dvh); }

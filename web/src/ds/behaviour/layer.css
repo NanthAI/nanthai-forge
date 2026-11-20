@@ -28,6 +28,7 @@
   @media (max-width: 860px) { .pal-scrim { place-items: end center; padding-top: 0; } }
 
   .ds-list, .zone { outline: 0; }
+  .ds-list:has(> .ds-row) { --ds-first-list-height: 0px; }
   .ds-row { position: relative; }
   .ds-row[data-focus-visible], .ds-region[data-focus-visible] { outline: 2px solid var(--focus); outline-offset: -2px; }
   .ds-row[data-dragging], .ds-region[data-dragging] { opacity: 0.5; }
@@ -43,9 +44,10 @@
   /* Portaled region content keeps its React owner. Native drop events need to hit the zone's own rows. */
   .dock[data-carrying] [data-dock-body], .dock[data-carrying] [data-dock-body] * { pointer-events: none !important; }
 
-  /* A pointer drags the handle; a phone gets the handle's menu instead (DESIGN.md rule 4). */
+  /* A touch-first device gets the handle's menu. A Dock with a mouse can drag at any width. */
   .ds-move { display: none; }
-  @media (max-width: 860px), (pointer: coarse) { .ds-drag { display: none; } .ds-move { display: grid; } }
+  @media (max-width: 860px) { .ds-list .ds-drag { display: none; } .ds-list .ds-move { display: grid; } }
+  @media (pointer: coarse) { .ds-drag { display: none; } .ds-move { display: grid; } }
 }
 
 @keyframes ds-pop-in { from { opacity: 0; transform: translateY(-2px); } }

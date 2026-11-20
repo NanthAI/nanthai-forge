@@ -164,7 +164,7 @@ Interactive components (menus, dialogs and sheets, the palette, reorderable list
 - The build fails if anything outside `behaviour/` imports the library, if a second behaviour, drag or motion library appears, or if the layer reaches the first-paint chunks or outgrows its budget (`scripts/ds-build-guard.mjs`). The layer keeps only its English messages.
 - A page or mock names its own thing with its own class. `npm run check` fails when a page stylesheet scoped to `[data-ds]` claims a system class alone that the system only styles together with another one (`.row.hold`), joins two system parts the system never joins, or lays out a fixed-size mark the system positions out of flow; it names the file, line and class and the system file that owns the name. Restyling a system class inside the page's own scope, or extending it with a page class, is fine. `node scripts/check-ds-class-clash.mjs <folder>` runs the same check over a mock folder (.css and `<style>` blocks).
 - `figures.css`: the current calendar month figure (`month`, `facts`) with the shared owner pool, yardsticks, the overlap ruler, charts, the access table and presence, money and figures, devices and holders, and the yard. These are class patterns without a component; a screen sets each figure's inputs (`--v`, `--a`, `--b`, `--h`, `--used`, `--full`, `--at` and the like) inline as numbers.
-- `web/ds.html` is the reference surface, on the dev server only: one screen built from the parts, in both themes. `tests/ds-reference.test.mjs` checks it in Chromium: the reorder model and the dock by keyboard and by the handle's menu (the drop line, the screen and the announcement agree), a press made before the layer arrives, axe, and no sideways scroll at 1440 and 390 px in both themes.
+- `web/ds.html` is the reference surface, on the dev server only: one screen built from the parts, in both themes. `tests/ds-reference.test.mjs` checks keyboard reorder, the handle’s menu, mouse drops in the Dock, a held grip during layer attachment, axe, and no sideways scroll at 1440 and 390 px in both themes. Set `FORGE_DS_BROWSER` to `firefox` or `webkit` to repeat the portable cases in those engines.
 
 ## Overview
 
@@ -276,7 +276,7 @@ Flat: four surface steps and one-pixel seams. A shadow only on a menu, a sheet, 
 | Token | Time | Use |
 |---|---|---|
 | `--d-press` | 100 ms | a key going down |
-| `--d-quick` | 120 ms | hover colour, a disclosure turning |
+| `--d-quick` | 120 ms | a disclosure turning |
 | `--d-state` | 200 ms | a switch, a toast, a mark appearing |
 | `--d-colour` | 240 ms | a state colour changing |
 | `--d-pose` | 320 ms | a shape changing in place |

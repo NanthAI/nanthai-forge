@@ -103,7 +103,11 @@ export function ReorderList<T extends ReorderItem>({
         // everything below it (Item 88c08511 trial: phone CLS 0.34). The list keeps its rows' room from the first paint:
         // each row is at least --row-h tall, or the --ds-row-min a screen sets for taller rows (never more than the
         // shortest row, or the room would outlast the rows as a gap).
-        style={{ minHeight: `calc(${items.length} * var(--ds-row-min, var(--row-h)))` }}
+        style={{
+          minHeight: items.length
+            ? `max(var(--ds-first-list-height, 0px), ${items.length} * var(--ds-row-min, var(--row-h)))`
+            : undefined,
+        }}
       >
         {item => {
           const index = order.indexOf(item.id);

@@ -241,6 +241,24 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       },
     );
 
+    await t.test('Dock: at phone width the keyboard carries within the flat Needs me layout', async t => {
+      const page = await open(t, PHONE);
+      await region(page, 'Needs you').getByRole('button', { name: 'Move Needs you', exact: true }).focus();
+      await page.keyboard.press('Enter');
+      const dock = page.locator('.dock[data-dock]');
+      await page.locator('.dock[data-carrying]').waitFor();
+      assert.deepEqual(await dock.locator('.zone-empty:visible').allTextContents(), []);
+
+      const target = dock.getByText('Needs you, full-width row, 2nd', { exact: true });
+      for (let i = 0; i < 4 && !(await target.isVisible()); i++) await page.keyboard.press('ArrowDown');
+      assert.ok(await target.isVisible(), 'the drop line is between regions in the original column');
+      await page.keyboard.press('Enter');
+      await dock
+        .getByText('Moved Needs you to the full-width row, position 2 of 4.', { exact: true })
+        .waitFor();
+      assert.deepEqual(await page.evaluate(() => window.dockWrites), ['set']);
+    });
+
     await t.test('Dock: touch menu changes the drawn phone order, and reset restores it', async t => {
       const page = await open(t, PHONE, 'busy', 'dark', { hasTouch: true });
       await checkPhoneDock(page);
