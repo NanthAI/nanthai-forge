@@ -379,3 +379,193 @@ test('the selector names the lead tests and the repo-wide guards of a change', t
   assert.deepEqual(plan.leadTests, ['tests/zz-queue-order.test.mjs', 'tests/queue.test.mjs']);
   assert.deepEqual(plan.treeGuards, ['tests/src-rules.test.mjs']);
 });
+
+test('13ea93bf 2026-11-20 settings miss: the only test of a changed module starts before files learned for a hub path', () => {
+  // Lane e19e57b0: parallel-work-defaults was the one test that loads the changed client settings
+  // module. It sat 93rd, behind 28 files learned for the shared transport module and a hub's
+  // consumers, and the 180 s clock stopped it; the landing check failed on it.
+  const learned = Array.from({ length: 28 }, (_, i) => `learned-${String(i).padStart(2, '0')}.test`);
+  const hub = Array.from({ length: 30 }, (_, i) => `hub-${String(i).padStart(2, '0')}.test`);
+  const secondsFor = test =>
+    test === 'settings.test' ? 2 : test === 'own.test' ? 60 : test.startsWith('learned-') ? 17 : 9;
+  const order = protectedRunOrder({
+    tiers: [
+      { tier: 'mandatory', tests: ['own.test'] },
+      { tier: 'learned', tests: learned },
+      { tier: 'direct', tests: [...hub, 'settings.test'] },
+    ],
+    isProtected: tier => protectedTiers.has(tier),
+    guards: new Set(),
+    treeGuards: [],
+    leadTests: ['own.test'],
+    ownTests: ['own.test'],
+    // The selector's order: the settings module has one loader, the transport hub thirty.
+    specificModules: [{ tests: ['settings.test'] }, { tests: hub }],
+    budgetSeconds: 180,
+    measuredSeconds: secondsFor,
+    secondsFor,
+    failureSeconds: () => 0,
+  });
+  assert.deepEqual(order.slice(0, 2), ['own.test', 'settings.test']);
+  assert.ok(started(order, secondsFor, 180).includes('settings.test'));
+  // The hub's 270 s of loaders do not fit what is left, so they keep their place after the learned files.
+  assert.ok(order.indexOf('hub-00.test') > order.indexOf(learned.at(-1)));
+  // Membership never changes.
+  assert.deepEqual([...order].sort(), [...learned, ...hub, 'settings.test', 'own.test'].sort());
+});
+
+test('specific modules run whole, most specific first; one that does not fit is skipped and a later one still runs', () => {
+  const secondsFor = test => (test.startsWith('big-') ? 50 : 5);
+  const order = protectedRunOrder({
+    tiers: [{ tier: 'direct', tests: ['big-1.test', 'big-2.test', 'one.test', 'two-a.test', 'two-b.test'] }],
+    isProtected: () => true,
+    guards: new Set(),
+    treeGuards: [],
+    leadTests: [],
+    ownTests: [],
+    // 100 s budget - 10 s kept for fast files: one (5 s) fits, big (100 s) does not, two (10 s) does.
+    specificModules: [
+      { tests: ['one.test'] },
+      { tests: ['big-1.test', 'big-2.test'] },
+      { tests: ['two-b.test', 'two-a.test'] },
+    ],
+    budgetSeconds: 100,
+    measuredSeconds: secondsFor,
+    secondsFor,
+    failureSeconds: () => 0,
+  });
+  assert.deepEqual(order, ['one.test', 'two-a.test', 'two-b.test', 'big-1.test', 'big-2.test']);
+});
+
+test('a loader that failed before leads its module and is never pushed back by loaders that never failed', () => {
+  // Module x: fifteen 11 s loaders that never failed and one that did; with it, x does not fit the room
+  // (180 s - 10 s for fast files). Module y fits. The failed loader still starts first.
+  const never = Array.from({ length: 15 }, (_, i) => `x-${String(i).padStart(2, '0')}.test`);
+  const ys = ['y-1.test', 'y-2.test', 'y-3.test'];
+  const secondsFor = test => (test.startsWith('x-') ? 11 : test.startsWith('y-') ? 50 : 10);
+  const order = protectedRunOrder({
+    tiers: [
+      { tier: 'learned', tests: ['failed.test'] },
+      { tier: 'direct', tests: [...never, ...ys] },
+    ],
+    isProtected: () => true,
+    guards: new Set(),
+    treeGuards: [],
+    leadTests: [],
+    ownTests: [],
+    specificModules: [{ tests: [...never, 'failed.test'] }, { tests: ys }],
+    budgetSeconds: 180,
+    measuredSeconds: secondsFor,
+    secondsFor,
+    failureSeconds: () => 0,
+  });
+  assert.deepEqual(order.slice(0, 4), ['failed.test', ...ys]);
+  assert.deepEqual([...order].sort(), ['failed.test', ...never, ...ys].sort());
+});
+
+test('files that failed before outside every module keep their room: a broad module group does not push them past the budget', () => {
+  // A non-hub module with twenty 7 s loaders (140 s) and 30 s of own tests would fill the room; two
+  // files learned for these paths that the import graph does not reach still start.
+  const loaders = Array.from({ length: 20 }, (_, i) => `m-${String(i).padStart(2, '0')}.test`);
+  const learned = ['history-a.test', 'history-b.test'];
+  const secondsFor = test => (test === 'own.test' ? 30 : test.startsWith('history-') ? 15 : 7);
+  const order = protectedRunOrder({
+    tiers: [
+      { tier: 'mandatory', tests: ['own.test'] },
+      { tier: 'learned', tests: learned },
+      { tier: 'direct', tests: loaders },
+    ],
+    isProtected: () => true,
+    guards: new Set(),
+    treeGuards: [],
+    leadTests: ['own.test'],
+    ownTests: ['own.test'],
+    specificModules: [{ tests: loaders }],
+    budgetSeconds: 180,
+    measuredSeconds: secondsFor,
+    secondsFor,
+    failureSeconds: () => 0,
+  });
+  for (const test of learned) assert.ok(started(order, secondsFor, 180).includes(test), order.join(' '));
+  assert.deepEqual([...order].sort(), ['own.test', ...learned, ...loaders].sort());
+});
+
+test('a loader that failed before in a later module starts before earlier modules of loaders that never failed', () => {
+  // Module a: thirteen 10 s loaders that never failed fill the 130 s room after 40 s of own tests.
+  // Module b (less specific) holds two loaders that failed in this machine's last run.
+  const never = Array.from({ length: 13 }, (_, i) => `a-${String(i).padStart(2, '0')}.test`);
+  const secondsFor = test => (test === 'own.test' ? 40 : test.startsWith('f') ? 20 : 10);
+  const order = protectedRunOrder({
+    tiers: [
+      { tier: 'mandatory', tests: ['own.test'] },
+      { tier: 'direct', tests: [...never, 'f1.test', 'f2.test'] },
+    ],
+    isProtected: () => true,
+    guards: new Set(),
+    treeGuards: [],
+    leadTests: ['own.test'],
+    ownTests: ['own.test'],
+    specificModules: [{ tests: never }, { tests: ['f1.test', 'f2.test', 'b-other.test'] }],
+    failing: new Set(['f1.test', 'f2.test']),
+    budgetSeconds: 180,
+    measuredSeconds: secondsFor,
+    secondsFor,
+    failureSeconds: () => 0,
+  });
+  assert.deepEqual(order.slice(0, 3), ['own.test', 'f1.test', 'f2.test']);
+  assert.deepEqual([...order].sort(), ['own.test', ...never, 'f1.test', 'f2.test'].sort());
+});
+
+test('13ea93bf 2026-11-20 timeline-id miss: a test that runs a changed module through one module starts inside the budget', t => {
+  // Lane 9385c8f0: ui-intent-detail runs the changed lane timeline through the intent timeline and
+  // hard-coded an id the change renamed. Here ten slow files learned for the shared hub path fill the
+  // 180 s budget ahead of the direct tier, as on Lane e19e57b0.
+  const dir = mkdtempSync(join(tmpdir(), 'forge-run-order-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const files = new Map([
+    ['package.json', '{"type":"module","scripts":{}}'],
+    ['scripts/forge-check.mjs', ''],
+    ['src/timeline.ts', 'export const id = (x) => `accepted:${x}`;'],
+    ['src/intent-timeline.ts', "import { id } from './timeline.js';\nexport const rows = () => [id('v')];"],
+    ['src/hub.ts', 'export const hub = 1;'],
+    ['tests/intent-detail.test.mjs', "import '../dist/intent-timeline.js';"],
+    ...Array.from({ length: 12 }, (_, i) => [`tests/hub-${i}.test.mjs`, "import '../dist/hub.js';"]),
+    // One file learned for the hub also runs the changed timeline: it leads the timeline's group.
+    ['tests/learned-0.test.mjs', "import '../dist/intent-timeline.js';"],
+    ...Array.from({ length: 9 }, (_, i) => [`tests/learned-${i + 1}.test.mjs`, '']),
+  ]);
+  const root = join(dir, 'lane');
+  for (const [path, body] of files) {
+    mkdirSync(join(root, path, '..'), { recursive: true });
+    writeFileSync(join(root, path), body);
+  }
+  const stats = {};
+  for (let i = 0; i < 12; i++) stats[`tests/hub-${i}.test.mjs`] = { ms: 9000, failed: false };
+  const learned = {};
+  for (let i = 0; i < 10; i++) {
+    stats[`tests/learned-${i}.test.mjs`] = { ms: 20_000, failed: false };
+    learned[`tests/learned-${i}.test.mjs`] = Date.now() - 60_000;
+  }
+  mkdirSync(join(`${root}.forge-client`, 'agent'), { recursive: true });
+  writeFileSync(join(`${root}.forge-client`, 'agent', 'preflight-files.json'), JSON.stringify(stats));
+  writeFileSync(
+    join(`${root}.forge-client`, 'agent', 'preflight-learned.json'),
+    JSON.stringify({ learned: { 'src/hub.ts': learned }, lanes: {} }),
+  );
+  const head = [...files].map(([path, body]) => ({ path, blob: digest(body), mode: 'file' }));
+  const plan = preflightPlan(
+    root,
+    { paths: ['src/hub.ts', 'src/timeline.ts'], complete: true },
+    { laneId: '44444444-4444-4444-8444-444444444444', files: head },
+  );
+  assert.equal(plan.status, 'planned', plan.reason);
+  assert.equal(plan.local.tierTests.learned.length, 10);
+  const secondsFor = test => (stats[test] ? stats[test].ms / 1000 : 7);
+  assert.ok(
+    started(plan.tests, secondsFor, 180).includes('tests/intent-detail.test.mjs'),
+    plan.tests.join(' '),
+  );
+  const at = test => plan.tests.indexOf(test);
+  assert.ok(at('tests/learned-0.test.mjs') < at('tests/intent-detail.test.mjs'), plan.tests.join(' '));
+  assert.ok(at('tests/learned-0.test.mjs') < at('tests/learned-1.test.mjs'), plan.tests.join(' '));
+});

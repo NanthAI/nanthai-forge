@@ -1052,10 +1052,11 @@ function planTests(
       guardTests,
     );
     // Protected tiers run fast repo-wide guards and fast files with a learned saving (10 s always, up to
-    // 30 s while the guards, the change's own tests and the files that failed before fit), guards, the change's own
-    // tests, files that failed before (learned tier, failed for these paths or last run here), fast files
-    // the room left out, named tests, then the rest by learned saving per second, smoke and explicit
-    // coverage last (Item 5dcfce75 fixes 3, 4).
+    // 30 s while the later protected steps fit), guards, the change's own tests, the tests that load a
+    // changed module (most specific module first, failed-before loaders first, while they fit; Item
+    // 13ea93bf), files that failed before (learned tier, failed for these paths or last run here), fast
+    // files the room left out, named tests, then the rest by learned saving per second, smoke and
+    // explicit coverage last (Item 5dcfce75 fixes 3, 4).
     // Saving is the 13ea93bf formula from the project's own record: p = failures of the file in the
     // window's landing outcomes, C and r from the server's candidates; 0 (keep the order) without them.
     const candidates = cachedGuardCandidates(root);
@@ -1070,6 +1071,7 @@ function planTests(
       treeGuards: selection.treeGuards ?? [],
       leadTests: selection.leadTests ?? [],
       ownTests: changed.paths.filter(isTest),
+      specificModules: selection.specificModules ?? [],
       // Files that failed for these paths (also when another tier holds them) or in this machine's last run.
       failing: new Set([...learnedForPaths, ...Object.keys(stats).filter(test => stats[test]!.failed)]),
       budgetSeconds,

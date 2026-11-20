@@ -213,15 +213,26 @@ export function selectPreflightTests(input, graphCache = {}) {
         // A comment-only edit runs the same tokens: only tests that read the file's text reach it.
         ...[...commentOnly].map(path => ({ path, tests: [...index.consumers(path, { readers: true })] })),
       ]
-        .map(item => ({ ...item, tests: item.tests.filter(([test]) => eligible(test)) }))
-        .filter(item => item.tests.length)
+        .map(item => ({
+          ...item,
+          // Learned tests stay in their own tier but keep their place at the head of the module's group.
+          failed: item.tests.filter(([test]) => covered.has(test) && !mandatory(test) && learned.has(test)),
+          tests: item.tests.filter(([test]) => eligible(test)),
+        }))
+        .filter(item => item.tests.length || item.failed.length)
         .map(item => ({ ...item, loaders: item.tests.filter(([, value]) => value[0] === 0).length }))
         .sort((a, b) => a.loaders - b.loaders || (a.path < b.path ? -1 : 1))
     : [];
   const cost = test => input.hubBudget?.secondsFor(test) ?? 0;
   let spent = 0;
   const broad = [];
-  for (const { path, tests } of modules) {
+  // The tests that load each protected module, then those that run it through one module, in the same
+  // most-specific-first order: the run starts them right after the change's own tests
+  // (src/preflight-run-order.ts), so the only test of a changed module never waits behind a hub's
+  // consumers (Item 13ea93bf, the 2026-11-20 settings and timeline-id misses).
+  const specificModules = [],
+    throughOne = [];
+  for (const { path, tests, failed } of modules) {
     for (const [test, value] of tests) offer(test, value);
     const added = tests.map(([test]) => test).filter(test => !direct.has(test));
     const extra = tests
@@ -233,6 +244,11 @@ export function selectPreflightTests(input, graphCache = {}) {
       continue;
     }
     spent += extra;
+    const hop = at => [...failed, ...tests].filter(([, value]) => value[0] === at).map(([test]) => test);
+    const loaders = hop(0);
+    const near = hop(1);
+    if (loaders.length) specificModules.push({ path, tests: loaders });
+    if (near.length) throughOne.push({ path, tests: near });
     for (const test of added) {
       direct.add(test);
       wide.delete(test);
@@ -344,6 +360,14 @@ export function selectPreflightTests(input, graphCache = {}) {
       .concat(protectedTests.filter(test => !changed.has(test) && namedFor(test, named))),
     /** Repo-wide guards: tests that scan a folder holding a changed file (test-tree-scanners.mjs). */
     treeGuards: protectedTests.filter(test => scanning.has(test)),
+    /** Tests that load each protected changed module, most specific module (fewest loaders) first,
+     * then the tests that run each through one module, in the same order. */
+    specificModules: [...specificModules, ...throughOne]
+      .map(item => ({
+        ...item,
+        tests: item.tests.filter(test => tierOf(test) === 'direct' || tierOf(test) === 'learned'),
+      }))
+      .filter(item => item.tests.length),
     broadModules: broad,
     ...(commentOnly.size ? { commentOnly: [...commentOnly].sort() } : {}),
     /** Rank of each direct and wide test ([product hops, carrier fan-in, helper hops]). */

@@ -656,9 +656,15 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   machine timed at about 2 s or less, repo-wide guard tests for the change first, then files whose
   learned saving beats their seconds (ahead of the declared guards, which are never stopped, so they
   always start): the first 10 s of them always (so nothing after them starts more than 10 s later),
-  up to 30 s while the guards, the change's own test files and the files that failed before still fit
+  up to 30 s while the guards, the change's own test files, the changed modules' tests below and the
+  files that failed before still fit
   the budget; declared and learned guards; the change's own
-  test files; files that failed before (the learned tier, and any other protected file that failed a
+  test files; the tests that load a changed module, a whole module at a time, the module the fewest
+  tests load first, then the tests that run one through one other module, while they fit what the
+  guards, own tests and the first 10 s of fast files leave of the budget, with up to half of that kept
+  for files that failed before (loaders that failed before go first, across all modules; a module
+  that does not fit is skipped and a later one still runs);
+  files that failed before (the learned tier, and any other protected file that failed a
   landing check for these paths or this machine's last run), most saving per second first; fast files
   the room left out; tests named for
   a changed module (failed here last time first, then cheapest); repo-wide guards this machine never

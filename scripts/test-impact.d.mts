@@ -89,6 +89,10 @@ export function selectPreflightTests(
   leadTests?: string[];
   /** Protected tests that scan a folder holding a changed file (repo-wide guards). */
   treeGuards?: string[];
+  /** Direct and learned tests that load each protected changed module (through test fixtures too),
+   * most specific module (fewest loaders) first, then those that run each through one module in the
+   * same order; the run starts them right after the change's own tests (src/preflight-run-order.ts). */
+  specificModules?: { path: string; tests: string[] }[];
 };
 export function fitPreflightBudget(input: {
   tiers: PreflightTier[];
