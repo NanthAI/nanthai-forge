@@ -375,6 +375,18 @@
     },
     {
       "incident": "43b51a5e",
+      "what": "Re-check 120fcc09 finding 4: an exit wake drives a queued entry first; the Ready follower handed to it carries the mark and the new-run wake drives it when that entry binds a run",
+      "file": "tests/hosted-landing-handoff.test.mjs",
+      "test": "43b51a5e F4: a Ready follower handed to a queued next is marked and driven when that entry binds a run"
+    },
+    {
+      "incident": "43b51a5e",
+      "what": "Review 012bd638: an urgent waiter with its own global-risk file is driven by the new-run wake (its claim skips non-urgent older entries); a normal one stays held",
+      "file": "tests/hosted-landing-handoff.test.mjs",
+      "test": "43b51a5e: an urgent waiter with its own global risk is driven; a normal one stays held by its paths"
+    },
+    {
+      "incident": "43b51a5e",
       "what": "Review 8c3f272f: overlapping, newer-risk and late disjoint followers handed on together keep their own rules and the second-generation bound",
       "file": "tests/hosted-landing-handoff.test.mjs",
       "test": "43b51a5e case 2: mixed handed followers keep their own rules and the second-generation bound"

@@ -41,6 +41,10 @@ npm run model:landing-queue -- progresswake    # expected liveness violation: a 
 npm run model:landing-queue -- progresswake-fixed
 npm run model:landing-queue -- reserve         # expected: a large Lane on hot files is superseded on every passed check (10d253c6)
 npm run model:landing-queue -- reserve-fixed
+npm run model:landing-queue -- reservecycle-budget   # expected: parked entries ahead spend the shared chain budget, so the holder parks in a reservation cycle (43b51a5e case 3)
+npm run model:landing-queue -- reservecycle-budget-fixed
+npm run model:landing-queue -- reservecycle-handed   # expected: the walk stops at a handed link, so the holder parks in a reservation cycle (43b51a5e case 3)
+npm run model:landing-queue -- reservecycle-handed-fixed
 npm run model:landing-queue -- moving
 npm run model:landing-queue -- reuse
 npm run model:landing-queue -- reuse-fixed

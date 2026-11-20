@@ -248,7 +248,8 @@ export const hostedLandingTables = {
      * claim decides a wait: the new-run wake may then drive it (incident 43b51a5e case 2). */
     orderWaitHanded: v.optional(v.string()),
     /** Set by a claim that found this change touches a global-risk file: every older live entry
-     * holds it, so the new-run wake and batons never drive it (43b51a5e). Its paths are pinned. */
+     * holds it, so the new-run wake and batons never drive it (43b51a5e). Its paths are pinned.
+     * Not for an urgent entry, whose claim skips non-urgent older ones. */
     ownGlobalRisk: v.optional(v.literal(true)),
     /** The check generation a newer passed entry overtook (`overtakeMark`); later ones hold order. */
     overtaken: v.optional(v.string()),

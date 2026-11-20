@@ -202,13 +202,14 @@ export function bindsNewRun(
  * waiter handed to `holder` by a former holder that withdrew, failed or parked keeps a valid pass and
  * stays eligible. A full receipt list (HOSTED_ORDER_WAITS) may hide a later wait: unknown, never held.
  * A waiter holding a live landing reservation is never held this way: it goes ahead of the older
- * entries its reservation holds back, which may be parked on it (case 3 shape, review 012bd638). */
+ * entries its reservation holds back, which may be parked on it (case 3 shape, review 012bd638).
+ * Nor is an urgent one by its own risk: its claim skips every non-urgent older entry. */
 const heldByPaths = (waiter: Doc<'projectHostedLandingRequests'>, holder: string) => {
   if (waiter.reservedUntil !== undefined && waiter.reservedUntil > Date.now()) return false;
   const waits = waiter.orderWaits ?? [];
   const last = waits[waits.length - 1];
   return (
-    waiter.ownGlobalRisk === true ||
+    (waiter.ownGlobalRisk === true && waiter.priority !== 'urgent') ||
     (waits.length < HOSTED_ORDER_WAITS &&
       last?.footprints === 'overlap' &&
       (last.submissionId === holder || waiter.orderWaitHanded !== holder))
@@ -218,8 +219,10 @@ const heldByPaths = (waiter: Doc<'projectHostedLandingRequests'>, holder: string
  * (`orderWaitHanded`), so the new-run wake finds it if `next` re-checks instead. Incident 43b51a5e
  * case 2: handed waiters kept a wait naming a former holder, the new-run wake never found them, and
  * disjoint passed landings waited out each head's whole re-check. The receipt list (`orderWaits`)
- * keeps only waits a claim decided; the waiter's next claim clears the mark. No mark only when the
- * holder `from` landed on the waiter's files (`heldByPaths`): its pass cannot carry anyway. */
+ * keeps only waits a claim decided; the waiter's next claim clears the mark. Whatever `next`'s
+ * phase: a queued `next` (a conflict cohort or an early resolution) that then binds a run must
+ * find it too (finding 4 of 120fcc09). No mark only when the holder `from` landed on the
+ * waiter's files (`heldByPaths`): its pass cannot carry anyway. */
 const handedTo = (
   waiter: Doc<'projectHostedLandingRequests'>,
   next: Doc<'projectHostedLandingRequests'>,
@@ -228,7 +231,7 @@ const handedTo = (
 ) => ({
   orderWait: next.submissionId,
   orderWaitHanded:
-    waiter.phase === 'ready' && next.phase === 'ready' && !(landed && heldByPaths(waiter, from.submissionId))
+    waiter.phase === 'ready' && !(landed && heldByPaths(waiter, from.submissionId))
       ? next.submissionId
       : undefined,
 });

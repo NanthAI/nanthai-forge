@@ -169,12 +169,14 @@ reading Candidates only for a new comparison; a link made only by the older side
 risk counts as `disjoint`. Current parking clears the waiter's alarm and hands remaining waiters
 to the oldest wake; incident `5e3c3a3c` exposes stale edges in that path. A handed Ready waiter is marked as handed to
 the entry it now waits for (`orderWaitHanded`; its own next claim clears the mark and records its
-real wait), so the new-run wake finds it if that entry re-checks instead. A waiter whose latest
+real wait), so the new-run wake finds it if that entry re-checks instead, a queued entry (a
+conflict cohort or an early resolution) that then binds a run included. A waiter whose latest
 claim recorded an overlap with the holder that then landed gets no mark (main moved under its
 files, so its pass cannot carry); neither the new-run wake nor a baton drives a waiter whose latest
 claim overlaps the exact entry it waits on, one that was left unmarked that way, or one whose own
 change touches a global-risk file (`ownGlobalRisk`, set by its claim from paths it already read:
-every older live entry holds it, so a drive only parks it again). A holder that leaves
+every older live entry holds it, so a drive only parks it again; not for an urgent waiter, whose
+claim skips non-urgent older entries). A holder that leaves
 without landing (withdrawn, failed, parked on red main) hands its waiters on marked: their passes
 still carry (review `14cf6d7e` F1). A full receipt list is unknown and never held this way. A
 publication hold on red main ends the entry's reservation, as parking does. An entry that parks for a

@@ -3,9 +3,10 @@
 // from one waited-on entry to the next waited out every head's re-check, whatever their paths.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { synthetic } from './hosted-landing-batches-fixture.mjs';
+import { batchesFixture, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { drive, overlapBase, overlapEdits } from './queue-sim/overtake-drive.mjs';
 import { moduleUrl } from './convex-module.mjs';
+const wake = await import(moduleUrl('../convex/projectHostedFinishWake.ts'));
 const { overtakeMark, overtakeRiskOnly, ownGlobalRisk, waitFootprints } = await import(
   moduleUrl('../src/landing-overtake.ts')
 );
@@ -321,4 +322,60 @@ test('43b51a5e case 2: mixed handed followers keep their own rules and the secon
   assert(r.runs[7] <= 3, `the late follower re-checks only for the schema changes (${r.runs[7]} runs)`);
   assert(last > a, `it lands after A (${last})`);
   assert.equal(r.idle, 0, 'the drained queue has no idle work');
+});
+
+/** Three live entries shaped directly: holder H, then Q (queued: a conflict cohort member or an
+ * early resolution) and a Ready follower F, both parked on H, F's last claim disjoint from H. H's
+ * exit wake drives Q and hands F to it; Q then binds a run (the new-run wake). */
+async function queuedNextShape(t, follower = {}) {
+  const f = await batchesFixture(t, { ...queueShape, count: 3, memberPaths: ['h.ts', 'q.ts', 'f.ts'] });
+  await f.drain();
+  const [H, Q, F] = f.entries.map(e => row(f, e.state.id));
+  f.patch('projectHostedLandingRequests', Q._id, {
+    phase: 'queued',
+    orderLive: true,
+    orderWait: H.submissionId,
+  });
+  f.patch('projectHostedLandingRequests', F._id, {
+    phase: 'ready',
+    orderLive: true,
+    orderWait: H.submissionId,
+    orderWaits: [{ submissionId: H.submissionId, held: 'accepting', footprints: 'disjoint' }],
+    ...follower,
+  });
+  for (const finish of f.tables.projectHostedFinishes.values()) {
+    const value = JSON.parse(finish.value);
+    if (value.pending)
+      f.patch('projectHostedFinishes', finish._id, {
+        value: JSON.stringify({ ...value, pending: undefined }),
+      });
+  }
+  const run = (name, fn) => f.transaction(name, { _handler: fn }, {});
+  await run('holder-exit', ctx => wake.wakeLandingOrderWaiters(ctx, row(f, H.submissionId)));
+  const handed = row(f, F.submissionId);
+  assert.equal(handed.orderWait, Q.submissionId, 'the exit wake hands F to the queued entry it drove');
+  await run('queued-next-binds-run', ctx => wake.wakeNewRunFollower(ctx, row(f, Q.submissionId)));
+  return { handed, after: row(f, F.submissionId), Q };
+}
+
+// Re-check 120fcc09 finding 4: an exit wake can drive a queued entry first. The Ready followers
+// handed to it got no mark, so when it bound a run the new-run wake found none of them: the case-2
+// stall in this shape. Fails before the fix on the mark and on the drive.
+test('43b51a5e F4: a Ready follower handed to a queued next is marked and driven when that entry binds a run', async t => {
+  const { handed, after, Q } = await queuedNextShape(t);
+  assert.equal(handed.orderWaitHanded, Q.submissionId, 'handed to a queued next, F carries the mark');
+  assert.equal(after.orderWait, undefined, 'the new-run wake drives F, whose own claim decides');
+});
+
+// Review 012bd638 (non-blocking): an urgent claim skips every non-urgent older entry
+// (olderLandingAhead), so an urgent change on a global-risk file is not held by its own risk.
+test('43b51a5e: an urgent waiter with its own global risk is driven; a normal one stays held by its paths', async t => {
+  const urgent = await queuedNextShape(t, { ownGlobalRisk: true, priority: 'urgent' });
+  assert.equal(urgent.after.orderWait, undefined, 'the new-run wake drives the urgent own-risk waiter');
+  const normal = await queuedNextShape(t, { ownGlobalRisk: true, priority: 'normal' });
+  assert.equal(
+    normal.after.orderWait,
+    normal.Q.submissionId,
+    'a normal own-risk waiter waits for its holder',
+  );
 });

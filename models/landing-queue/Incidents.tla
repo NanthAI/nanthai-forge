@@ -324,9 +324,39 @@ ReserveStream == /\ Scenario = "reserve"
      \/ /\ a = "landed" /\ a' = "queued"
         /\ UNCHANGED <<pc, canonical, observed, inputsDone, returned, b, main, checked, applied, owner>>
 Reserve == ReserveDriver \/ ReserveStream
+\* Incident 43b51a5e case 3, re-check 120fcc09 findings 1-2: R holds a reservation and is
+\* Ready; W, older, waits for R's reservation; X, older than R and Ready, the entry R
+\* would wait on, waits for W through main hops, by a recorded wait or a handoff mark
+\* (a = "wait" or "handed"). checked = sealed parked entries before X in R's window, which
+\* R skips anyway. R's claim walks a wait chain within CHAIN_READS reads (applied = reads
+\* spent); a chain that reaches W shows X waits on R's own waiter, so R breaks the cycle at
+\* once: it goes ahead of a disjoint X, or ends its reservation and wakes W when X overlaps
+\* it ("landed" abstracts both: nobody waits for the time bound). Unfixed, the walk
+\* runs for every parked entry on one shared budget and stops at a handed row; Fixed, it
+\* runs only for the entry R would wait on and follows handed links. b = "parked" is the
+\* cycle R -> X -> W -> R, which only the reservation's time bound (inputsDone) ends.
+CHAIN_READS == 8
+ChainFound == (Fixed \/ a = "wait") /\ applied + main <= CHAIN_READS
+ReserveCycle == /\ Scenario \in {"reservebudget", "reservehanded"}
+  /\ CASE pc = 0 -> \E k \in (IF Scenario = "reservehanded" THEN {0} ELSE 0..(CHAIN_READS + 1)),
+                         hops \in 1..2,
+                         link \in (IF Scenario = "reservebudget" THEN {"wait"} ELSE {"wait", "handed"}):
+                     /\ checked' = k /\ main' = hops /\ a' = link /\ b' = "claiming" /\ pc' = 1
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, applied, owner>>
+       [] pc = 1 /\ checked > 0 ->
+                     /\ checked' = checked - 1
+                     /\ applied' = (IF Fixed \/ applied = CHAIN_READS THEN applied ELSE applied + 1)
+                     /\ UNCHANGED <<pc, canonical, observed, inputsDone, returned, a, b, main, owner>>
+       [] pc = 1 /\ checked = 0 ->
+                     /\ b' = (IF ChainFound THEN "landed" ELSE "parked") /\ pc' = 2
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] pc = 2 /\ b = "parked" /\ ~inputsDone ->
+                     /\ inputsDone' = TRUE /\ owner' = FALSE
+                     /\ UNCHANGED <<pc, canonical, observed, returned, a, b, main, checked, applied>>
+       [] OTHER -> FALSE
 Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead \/ OrderWake \/ Outage \/ CohortHold \/ LostDispatch
         \/ Supervisor \/ CheckRound
-        \/ RetryKeep \/ OrderChain \/ OutageExpiry \/ ProgressWake \/ Reserve
+        \/ RetryKeep \/ OrderChain \/ OutageExpiry \/ ProgressWake \/ Reserve \/ ReserveCycle
 \* The two reserve fairness conjuncts are never enabled in any other scenario.
 Spec == Init /\ [][Step]_vars /\ WF_vars(Step) /\ WF_vars(ReserveDriver) /\ WF_vars(ReserveStream)
 FreshTerminal == returned => observed = canonical
@@ -355,4 +385,8 @@ WithinTwo == Scenario = "reserve" => applied <= 2
 ReserveSettles == Scenario = "reserve" => <>(pc \in {3, 4})
 ReserveEnds == Scenario = "reserve" => [](ReserveLive => <>~ReserveLive)
 StreamFlows == Scenario = "reserve" => []<>(a = "landed")
+\* 43b51a5e case 3: the holder never parks on an entry whose wait chain reaches a waiter on
+\* its own reservation (that cycle lasts until the time bound); it goes ahead and lands.
+NoReservationCycle == Scenario \in {"reservebudget", "reservehanded"} => b # "parked"
+CycleBreaks == Scenario \in {"reservebudget", "reservehanded"} => <>(b = "landed")
 =============================================================================
