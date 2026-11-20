@@ -141,7 +141,12 @@ import { missingRequiredFeatures } from './hosted-contract-features.js';
 import { capabilityOptions, takeEarlyCapabilities } from './hosted-capabilities-early.js';
 import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
 import { selectHostedFinish, unsavedFiles } from './hosted-agent-finish-identity.js';
-import { backgroundSaveOperation, reconcileHostedSave, settleBackgroundSave } from './hosted-save-client.js';
+import {
+  backgroundSaveOperation,
+  reconcileHostedSave,
+  saveContract,
+  settleBackgroundSave,
+} from './hosted-save-client.js';
 import { markLandStep, type LandTiming } from './land-timing.js';
 import {
   callerReceipts,
@@ -1081,6 +1086,7 @@ export class HostedAgentTransport {
           action,
           command.data as Record<string, unknown>,
           capabilities.authority.epoch,
+          saveContract(capabilities),
         );
       if (action === 'check-settings')
         return this.response(action, null, await hostedCheckSettings(this.query.bind(this), capabilities));
@@ -1152,7 +1158,12 @@ export class HostedAgentTransport {
         return this.response(action, typeof operationId === 'string' ? operationId : null, pendingSync);
       const pendingSave =
         action === 'finish' && !replaying
-          ? await reconcileHostedSave(root, this.exchange, capabilities.authority.epoch)
+          ? await reconcileHostedSave(
+              root,
+              this.exchange,
+              capabilities.authority.epoch,
+              saveContract(capabilities),
+            )
           : null;
       if (pendingSave)
         return this.response(action, typeof operationId === 'string' ? operationId : null, pendingSave);
@@ -2005,7 +2016,12 @@ export class HostedAgentTransport {
       throw error;
     }
   }
-  private async clientAction(action: 'preflight', input: Record<string, unknown>, epoch: number) {
+  private async clientAction(
+    action: 'preflight',
+    input: Record<string, unknown>,
+    epoch: number,
+    features: SaveContract,
+  ) {
     const root = hostedAgentRoot(this.root);
     // A save the client returned as pending may have completed on the server while the marker still
     // names the earlier head. Settle that original operation (no new save) before anything pins the
@@ -2013,7 +2029,7 @@ export class HostedAgentTransport {
     // An interrupted local apply leaves the marker describing other bytes; finish it first.
     finishPendingCheckoutDelta(root);
     await this.refreshDependencies(root);
-    const pendingSave = await reconcileHostedSave(root, this.exchange, epoch);
+    const pendingSave = await reconcileHostedSave(root, this.exchange, epoch, features);
     if (pendingSave) return this.response(action, null, pendingSave);
     const marker = readHostedLaneCheckout(root);
     const laneId = (input.laneId as string | undefined) ?? marker?.selection.laneId;

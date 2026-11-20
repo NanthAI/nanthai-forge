@@ -5,7 +5,7 @@
 // is dropped rather than shown, an older server is sent none, and the page's one read adds no document for them.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -18,6 +18,7 @@ import {
   OVERLAP_METADATA_BYTES,
 } from '../dist/hosted-overlap.js';
 import { lineBaseTag } from '../dist/hosted-overlap-evidence.js';
+import { carryOverlapBases, overlapBaseBlobs } from '../dist/hosted-overlap-text.js';
 import { saveChangeSchema } from '../dist/hosted-save.js';
 import { saveContract } from '../dist/hosted-save-client.js';
 import { hostedContractFeatures } from '../dist/hosted-contract-features.js';
@@ -85,6 +86,40 @@ async function checkout(t, files) {
       state.selection.head = digest(`save ${saves}`);
       writeFileSync(marker, JSON.stringify(state));
     },
+    /** A sync moved the Lane's base to a newer main; the server row keeps its paths and their first baseline. */
+    rebase(baseHead) {
+      state.selection.base = { head: baseHead, receiptId: 'main-1' };
+      state.selection.head = digest(`synced ${baseHead}`);
+      writeFileSync(marker, JSON.stringify(state));
+    },
+    /** The Lane opened in a second client folder at its current head: own cache, no first-baseline record. */
+    continueIn(t2) {
+      const second = mkdtempSync(join(tmpdir(), 'forge-line-counts-2-'));
+      t2.after(() => rmSync(second, { recursive: true, force: true }));
+      const root2 = join(second, 'lane'),
+        cache2 = `${root2}.forge-client`;
+      mkdirSync(join(root2, '.forge'), { recursive: true });
+      mkdirSync(join(cache2, 'objects'), { recursive: true });
+      const state2 = structuredClone({ ...state, operationId: randomUUID() }),
+        marker2 = join(root2, '.forge/hosted-lane.json');
+      writeFileSync(marker2, JSON.stringify(state2));
+      for (const path of state.materialized) {
+        const bytes = readFileSync(join(root, path));
+        writeFileSync(join(root2, path), bytes);
+        writeFileSync(join(cache2, 'objects', digest(bytes)), bytes, { mode: 0o600 });
+      }
+      let saves2 = 0;
+      return {
+        root: root2,
+        capture: () => captureHostedSave(root2, join(second, `save-${++saves2}`)),
+        advance(captured) {
+          for (const change of captured.changes)
+            state2.state.files.find(entry => entry.path === change.path).blob = change.after.blob;
+          state2.selection.head = digest(`second ${saves2}`);
+          writeFileSync(marker2, JSON.stringify(state2));
+        },
+      };
+    },
   };
 }
 
@@ -135,7 +170,7 @@ test('a save records +/- against the Lane base across saves; a lost baseline sho
   // merged row (whose before is still the base) keeps no count for that file rather than a wrong one.
   lane.advance(second);
   for (const name of readdirSync(lane.cache))
-    if (name.startsWith('overlap-base-')) rmSync(join(lane.cache, name));
+    if (name.startsWith('overlap-base')) rmSync(join(lane.cache, name));
   writeFileSync(join(lane.root, 'a.txt'), base.replace('line 9\n', 'nine\n'));
   const third = await lane.capture();
   const lost = third.changes.find(change => change.path === 'a.txt');
@@ -145,6 +180,95 @@ test('a save records +/- against the Lane base across saves; a lost baseline sho
   assert.equal(shown.before.blob, digest(base));
   assert.equal(shown.lines, undefined, 'dropped, not stored');
   assert.equal(lineCounts(shown), null);
+});
+
+test('review f25d5544 finding 1: counts survive a sync to a newer main, a resolution rebind and a second folder', async t => {
+  const other = 'one\ntwo\nthree\n';
+  const lane = await checkout(t, { 'a.txt': base, 'c.txt': other });
+  writeFileSync(join(lane.root, 'a.txt'), base.replace('line 3\n', 'line 3\ninserted\n'));
+  writeFileSync(join(lane.root, 'c.txt'), 'one\n2\nthree\n');
+  const first = await lane.capture();
+  const row1 = JSON.parse(mergeOverlapChanges([], first.changes).changes);
+
+  // A sync to a newer main (main changed only b.txt): the row keeps a.txt's first baseline, and so does this folder.
+  lane.advance(first);
+  const main = Buffer.from(
+    JSON.stringify({
+      schema: 1,
+      kind: 'forge-source-state',
+      parents: [],
+      files: [
+        { path: 'a.txt', blob: digest(base), mode: 'file' },
+        { path: 'b.txt', blob: digest('main\n'), mode: 'file' },
+        { path: 'c.txt', blob: digest(other), mode: 'file' },
+      ],
+      message: 'main 2',
+      at: '2026-01-02T00:00:00.000Z',
+    }),
+  );
+  lane.rebase(digest(main));
+  writeFileSync(
+    join(lane.root, 'a.txt'),
+    base.replace('line 3\n', 'line 3\ninserted\n').replace('line 9\n', 'nine\n'),
+  );
+  const second = await lane.capture();
+  const synced = second.changes.find(change => change.path === 'a.txt');
+  assert.deepEqual(
+    synced.lines,
+    [2, 1, lineBaseTag(digest(base))],
+    'measured against the shown base, not the save',
+  );
+  const row2 = JSON.parse(mergeOverlapChanges(row1, second.changes).changes);
+  assert.deepEqual(lineCounts(row2.find(change => change.path === 'a.txt')), [2, 1]);
+
+  // Rebound onto its own resolution Lane, the folder keeps them: that row starts from this one.
+  const laneId = JSON.parse(readFileSync(join(lane.root, '.forge/hosted-lane.json'), 'utf8')).selection
+      .laneId,
+    resolution = randomUUID();
+  carryOverlapBases(lane.cache, laneId, resolution);
+  assert.equal(overlapBaseBlobs(lane.cache, resolution, digest(main))['a.txt'], digest(base));
+  carryOverlapBases(lane.cache, resolution, laneId);
+
+  // Continued in a second folder: no record there, so it reads the base State from this machine's object store (which
+  // the first folder filled) and measures against the base the row shows.
+  lane.advance(second);
+  const machine = mkdtempSync(join(tmpdir(), 'forge-line-counts-machine-')),
+    previous = process.env.FORGE_OBJECT_CACHE;
+  process.env.FORGE_OBJECT_CACHE = machine;
+  t.after(() => {
+    if (previous === undefined) delete process.env.FORGE_OBJECT_CACHE;
+    else process.env.FORGE_OBJECT_CACHE = previous;
+    rmSync(machine, { recursive: true, force: true });
+  });
+  writeFileSync(join(machine, digest(main)), main);
+  writeFileSync(join(machine, digest(base)), base);
+  writeFileSync(join(machine, digest(other)), other);
+  const elsewhere = lane.continueIn(t);
+  writeFileSync(
+    join(elsewhere.root, 'a.txt'),
+    base.replace('line 3\n', 'line 3\ninserted\n').replace('line 9\n', 'nine\n').replace('line 15\n', ''),
+  );
+  const third = await elsewhere.capture();
+  const continued = third.changes.find(change => change.path === 'a.txt');
+  assert.notEqual(continued.before.blob, digest(base));
+  assert.deepEqual(continued.lines, [2, 2, lineBaseTag(digest(base))]);
+  const row3 = JSON.parse(mergeOverlapChanges(row2, third.changes).changes);
+  assert.deepEqual(lineCounts(row3.find(change => change.path === 'a.txt')), [2, 2]);
+
+  // A second save there edits a file only the first folder saved: that folder's record lacks it, and it still counts
+  // against the shown base (review a42b7a29 finding 1).
+  elsewhere.advance(third);
+  writeFileSync(join(elsewhere.root, 'c.txt'), 'one\n2\nthree\nfour\n');
+  const fourth = await elsewhere.capture();
+  const later = fourth.changes.find(change => change.path === 'c.txt');
+  assert.deepEqual(later.lines, [2, 1, lineBaseTag(digest(other))]);
+  const row4 = JSON.parse(mergeOverlapChanges(row3, fourth.changes).changes);
+  assert.deepEqual(lineCounts(row4.find(change => change.path === 'c.txt')), [2, 1]);
+  assert.deepEqual(
+    lineCounts(row4.find(change => change.path === 'a.txt')),
+    [2, 2],
+    'untouched keeps its count',
+  );
 });
 
 test('counts ride in the room left: paths and evidence are chosen exactly as without them', () => {

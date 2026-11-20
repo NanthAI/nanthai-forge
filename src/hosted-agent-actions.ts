@@ -809,6 +809,7 @@ export async function executeHostedAgent(
         session.exchange,
         (id, pending) => waitSaveUntil(session, id, pending),
         session.capabilities.authority.epoch,
+        saveContract(session.capabilities),
       );
     if (command.apply && !markerAt(session.root)) {
       const blocked = retainedLocalApplyBlocked(
@@ -831,6 +832,7 @@ export async function executeHostedAgent(
           session.exchange,
           (id, pending) => waitSaveUntil(session, id, pending),
           session.capabilities.authority.epoch,
+          saveContract(session.capabilities),
         ),
       );
     try {

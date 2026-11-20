@@ -23,7 +23,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { SourceFileReader } from './source-file-reader.js';
-import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
+import { readHostedLaneCheckout, type HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { gitlinkCommit } from './gitlink.js';
 import { gitlinkDirectoryPointer } from './gitlink-workspace.js';
@@ -42,11 +42,11 @@ import {
   overlapTextSketch,
   sketchCodePath,
   overlapTextEvidence,
-  overlapBaseBlobs,
-  rememberOverlapBases,
   sketchEdits,
   overlapLineCounts,
   deletedLineCounts,
+  overlapBaseBlobs,
+  rememberOverlapBases,
 } from './hosted-overlap-text.js';
 import { outputRoots, SymbolBudget } from './hosted-overlap-symbols.js';
 import { packageFactFile, packageSymbolLinks } from './hosted-overlap-packages.js';
@@ -56,7 +56,7 @@ import { finishPendingCheckoutDelta, settlePendingCheckoutDelta } from './hosted
 import { canonicalPayload } from './hosted-source-operation.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 import { neverIndex } from './forge-disk.js';
-import { machineObjectsDirectory, rememberObject } from './machine-object-store.js';
+import { localObjects, machineObjectsDirectory, rememberObject } from './machine-object-store.js';
 import {
   indexedBlob,
   readCheckoutStatIndex,
@@ -202,6 +202,40 @@ function captureFile(
   // Cross-file symbol facts read the changed lines of a parsed regular file; never a link target.
   return { ...observed, changed: true, stat, sketch, text: sketch && mode !== 'symlink' ? bytes : null };
 }
+/** Each path's first baseline as the Lane's server row keeps it (c2388099): counts and evidence are
+ * measured against it. The record survives syncs and resolution rebinds (overlapBaseBlobs). A Lane on its
+ * own base has an empty row, so it starts over. A path the record lacks (the Lane continued in a second
+ * folder or on another machine, or saved there since) is guessed from the base State in this machine's
+ * caches, read once per save and only then (~10 ms at 6,000 files), never a server call: right unless main
+ * changed that path since the Lane first saved it, and then the row's tag check drops the count rather than
+ * show a wrong one. A path this Lane never saved has the base's bytes, so the guess equals its baseline. A
+ * guess is kept in the record once a save uses it. */
+function laneFirstBaselines(root: string, cache: string, marker: HostedLaneCheckoutMarker) {
+  const { laneId, head, base } = marker.selection;
+  const own = head === base.head;
+  const bases: Record<string, string> =
+    (own ? null : overlapBaseBlobs(cache, laneId, base.head)) ?? Object.create(null);
+  let files: Map<string, string> | null | undefined = own ? null : undefined;
+  const guess = (path: string) => {
+    if (files === undefined) {
+      // Digest-verified bytes, plain JSON: ~10 ms for 6,000 files; a malformed entry only costs its count (tag check).
+      const bytes = localObjects(root)(base.head);
+      try {
+        const listed: { path?: unknown; blob?: unknown }[] = bytes
+          ? JSON.parse(bytes.toString('utf8')).files
+          : [];
+        files = bytes ? new Map() : null;
+        for (const file of listed)
+          if (typeof file.path === 'string' && typeof file.blob === 'string')
+            files!.set(file.path, file.blob);
+      } catch {
+        files = null;
+      }
+    }
+    return files ? (files.get(path) ?? digest('')) : undefined;
+  };
+  return { bases, guess };
+}
 export async function captureHostedSave(
   root: string,
   directory: string,
@@ -219,7 +253,7 @@ export async function captureHostedSave(
     text = worktreeText(root, marker.state.files),
     observedStats = new Map<string, ReturnType<typeof statEntry>>(),
     cache = clientCacheRoot(root),
-    bases = overlapBaseBlobs(cache, marker.selection.base.head);
+    { bases, guess } = laneFirstBaselines(root, cache, marker);
   const baseline = new Map(marker.state.files.map(file => [file.path, file])),
     notSaved = notSavedCollector(),
     local = scanSourcePaths(root, { retained: [...baseline.keys()], onExcluded: notSaved.onExcluded });
@@ -253,7 +287,7 @@ export async function captureHostedSave(
     if (!observed.stat.isDirectory()) observedStats.set(path, statEntry(observed.stat, observed.file.blob));
     if (observed.changed) {
       if (observed.markers) marked.push(path);
-      const baseBlob = bases[path] ?? old?.blob ?? digest('');
+      const baseBlob = bases[path] ?? guess(path) ?? old?.blob ?? digest('');
       bases[path] = baseBlob;
       const code = sketchCodePath(path);
       let base =
@@ -304,7 +338,7 @@ export async function captureHostedSave(
   }
   if (!preserveConflicts)
     assertNoConflictMarkers(root, marker.selection.laneId, marked, resolving, continuation);
-  if (changes.length) rememberOverlapBases(cache, marker.selection.base.head, bases);
+  if (changes.length) rememberOverlapBases(cache, marker.selection.laneId, marker.selection.base.head, bases);
   const machine = machineObjectsDirectory();
   for (const file of files) await rememberObject(machine, join(directory, file.path), file.pin.sha256);
   const present = new Set(local);
@@ -313,7 +347,7 @@ export async function captureHostedSave(
   for (const path of marker.materialized)
     if (!forgeCachePath(path) && !present.has(path)) {
       const old = baseline.get(path)!;
-      const baseBlob = bases[path] ?? old.blob;
+      const baseBlob = bases[path] ?? guess(path) ?? old.blob;
       const counted =
         old.mode !== 'gitlink' && baseBlob !== digest('') && deletedBytes < DELETED_COUNT_BYTES
           ? deletedLineCounts(cache, baseBlob)

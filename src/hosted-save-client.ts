@@ -50,6 +50,7 @@ import {
   BeganAtOlderEpoch,
   authorityPinRefusal,
   beganAtOlderEpoch,
+  freshOperationRefusal,
   olderEpochRefusal,
 } from './hosted-main-pin.js';
 import type { StepTimer } from './sync-timing.js';
@@ -103,6 +104,11 @@ export type SaveContract = {
   uploadPacks?: boolean;
   /** save-line-counts: delta changes may carry their +/- counts (c2388099). */
   lineCounts?: boolean;
+  /** Read from the server's advertised features now (saveContract), so a retained save's pages are checked against
+   * them; a caller's reduced contract (a replay of a prior save) never is. */
+  advertised?: true;
+  /** Settling an earlier save for another command, which lacks that save's identity: never rebuilt, only dropped. */
+  settling?: true;
   /** The source authority epoch this command discovered. A new request pins it, as sync, compose
    * and finish requests do, instead of the epoch the Lane was opened under (review b1448b61 N3). */
   authorityEpoch?: number;
@@ -121,7 +127,36 @@ export const saveContract = (capabilities: {
   runPublish: capabilities.features?.includes('source-run-publish') ?? false,
   uploadPacks: capabilities.features?.includes('upload-packs') ?? false,
   lineCounts: capabilities.features?.includes('save-line-counts') ?? false,
+  advertised: true,
 });
+/** Fields a retained save's pages carry that the server no longer advertises: it was rolled back after this save was
+ * prepared (c2388099 review finding 2), and its strict page schema refuses them on every replay. */
+function retainedPagesOutrun(directory: string, contract: SaveContract) {
+  if (!contract.advertised || !checkoutPathExists(join(directory, 'pages.json'))) return false;
+  const pages: { value: { changes?: SaveChange[] } }[] = JSON.parse(
+    readFileSync(join(directory, 'pages.json'), 'utf8'),
+  );
+  return pages.some(page =>
+    (page.value.changes ?? []).some(
+      change =>
+        (change.lines && !contract.lineCounts) ||
+        (change.evidence && !contract.overlapEvidence) ||
+        (change.evidence?.symbolLinks && contract.overlapEvidence !== 'symbol-links'),
+    ),
+  );
+}
+/** The server holds this save's request, not yet submitted, with fields it no longer takes: it can never finish
+ * under this id. A settle of it by a later command drops it instead (resumeRetainedSave). */
+class OutrunSaveRefused extends ForgeError {}
+const outrunRefusal = (root: string, continuation: ConflictContinuation) => {
+  const refusal = freshOperationRefusal(
+    root,
+    'WORK_OPERATION_CHANGED',
+    `This ${continuation.action}'s save was prepared with per-file counts or overlap evidence that the server no longer takes (it changed since), and the server holds that request unsubmitted, so it can never finish. It published nothing, and this checkout no longer replays it; your edits are still in the checkout.`,
+    continuation,
+  );
+  return new OutrunSaveRefused(refusal.code, refusal.message, undefined, refusal.recovery);
+};
 
 const blobName = /^[0-9a-f]{64}$/;
 /** Remove the staged blobs of a save the server has acknowledged. Retries reuse request.json and
@@ -259,7 +294,14 @@ async function saveOnce(
   // An earlier save whose reply was not seen pins this baseline. Settle it first,
   // or every new save captures against the old head and the server refuses it.
   if (!checkoutPathExists(capturePath))
-    await settlePriorHostedSave(root, command.operationId, exchange, waitPrior, contract.authorityEpoch);
+    await settlePriorHostedSave(
+      root,
+      command.operationId,
+      exchange,
+      waitPrior,
+      contract.authorityEpoch,
+      contract,
+    );
   timing?.mark('settle');
   const capture: Awaited<ReturnType<typeof captureHostedSave>> = checkoutPathExists(capturePath)
     ? JSON.parse(readFileSync(capturePath, 'utf8'))
@@ -292,6 +334,51 @@ async function saveOnce(
     !checkoutPathExists(acknowledged) &&
     !checkoutPathExists(describeMarker) &&
     files.every(file => file.pin.size <= rawLimit);
+  // Pages the server can no longer take (it was rolled back since this save was prepared, review f25d5544 finding 2):
+  // one progress read, on this rare path only, says how far the server got. Not held: rebuilt under this operation.
+  // Held unsubmitted: nothing can publish, so it is dropped and the refusal names the same action as a new operation.
+  // Submitted: its job publishes on its own and is only observed, never staged again.
+  if (checkoutPathExists(requestPath) && retainedPagesOutrun(directory, contract)) {
+    const retained = saveRequestSchema.parse(JSON.parse(readFileSync(requestPath, 'utf8')));
+    let held: { terminal?: { outcome?: unknown }; state?: { status?: string } } | null;
+    try {
+      held = JSON.parse(
+        await exchange.client.query(makeFunctionReference<'query'>('projectHostedSaves:progress'), {
+          projectId: exchange.projectId,
+          operationId: command.operationId,
+        }),
+      );
+    } catch (error) {
+      if (hostedActionError(error, 'save').code !== 'NOT_FOUND') throw error;
+      held = null;
+    }
+    if (held?.terminal?.outcome) {
+      applyHostedSaveReceipt(root, capture, retained, held.terminal as never);
+      return held.terminal;
+    }
+    // A settling command cannot rebuild it (authorship, holder session and chain are the save's own): dropped,
+    // as settle drops any save the server does not know; its edits are still in the checkout.
+    if (!held?.state && !contract.settling)
+      workLocked(join(clientCacheRoot(root), 'lock'), () => {
+        for (const name of ['request.json', 'pages.json']) rmSync(join(directory, name), { force: true });
+      });
+    else if (!held?.state || ['staging', 'ready'].includes(held.state.status ?? '')) {
+      dropRetainedSave(root, command.operationId, pendingSavePath(root, capture.marker));
+      throw outrunRefusal(root, continuation);
+    } else {
+      // Submitted at an older epoch: its callbacks are refused, so it never settles (N3, as below).
+      if (
+        contract.authorityEpoch !== undefined &&
+        beganAtOlderEpoch(retained.authorityEpoch, contract.authorityEpoch, undefined)
+      )
+        throw new BeganAtOlderEpoch(retained.authorityEpoch, contract.authorityEpoch);
+      const observed = waitPrior ? await waitPrior(command.operationId, held) : null;
+      if ((observed as { outcome?: unknown } | null)?.outcome)
+        applyHostedSaveReceipt(root, capture, retained, observed as never);
+      // No wait here (a later command settling it): the pending snapshot, as the background save returns it.
+      return observed ?? sourceWaitSnapshot(held);
+    }
+  }
   let request: SaveRequest;
   if (checkoutPathExists(requestPath)) {
     request = saveRequestSchema.parse(JSON.parse(readFileSync(requestPath, 'utf8')));
@@ -400,6 +487,27 @@ async function saveOnce(
   });
   const objects = hostedObjectWriter(exchange);
   const args = { projectId: exchange.projectId, operationId: command.operationId };
+  /** This save's outcome from its progress, waiting while its job still publishes. */
+  const observeSave = async () => {
+    const progress = JSON.parse(
+      await exchange.client.query(makeFunctionReference<'query'>('projectHostedSaves:progress'), args),
+    );
+    if (progress.terminal) return JSON.stringify(progress.terminal);
+    return JSON.stringify(
+      await (waitPrior
+        ? waitPrior(command.operationId, progress)
+        : waitHostedAgentSource(
+            { url: capture.marker.url, projectId: exchange.projectId },
+            command.operationId,
+            progress,
+            undefined,
+            undefined,
+            'Saves',
+            AGENT_WAIT_SECONDS,
+            observe,
+          )),
+    );
+  };
   const pages: { pin: ContentPin; value: unknown }[] = JSON.parse(
     readFileSync(join(directory, 'pages.json'), 'utf8'),
   );
@@ -536,26 +644,7 @@ async function saveOnce(
     };
   };
   const submit = (send: () => Promise<string>) =>
-    reconcileSourceRequest(command.operationId, send, async () => {
-      const progress = JSON.parse(
-        await exchange.client.query(makeFunctionReference<'query'>('projectHostedSaves:progress'), args),
-      );
-      if (progress.terminal) return JSON.stringify(progress.terminal);
-      return JSON.stringify(
-        await (waitPrior
-          ? waitPrior(command.operationId, progress)
-          : waitHostedAgentSource(
-              { url: capture.marker.url, projectId: exchange.projectId },
-              command.operationId,
-              progress,
-              undefined,
-              undefined,
-              'Saves',
-              AGENT_WAIT_SECONDS,
-              observe,
-            )),
-      );
-    });
+    reconcileSourceRequest(command.operationId, send, observeSave);
 
   if (run) {
     // Recorded before the call: a save whose reply is lost is still reported by the next command.
@@ -793,6 +882,8 @@ export async function reconcileHostedSave(
   exchange: Parameters<typeof saveHostedLane>[2],
   /** This command's source authority epoch: a save that began at an older one is dropped (N3). */
   epoch?: number,
+  /** This command's advertised save features: a prior save the server can no longer stage is dropped (c2388099). */
+  features?: SaveContract,
 ) {
   const marker = readHostedLaneCheckout(root);
   if (!marker) return null;
@@ -800,6 +891,12 @@ export async function reconcileHostedSave(
   if (!checkoutPathExists(pending)) return null;
   const command = saveCommandSchema.parse(JSON.parse(readFileSync(pending, 'utf8')));
   const directory = join(clientCacheRoot(root), `saves/${command.operationId}`);
+  // No request yet (or its rebuild was cut short): the server never held this operation, so the save is
+  // dropped like one it does not know, and the edits stay in the checkout (review 07d1168a finding 2).
+  if (!checkoutPathExists(join(directory, 'request.json'))) {
+    dropRetainedSave(root, command.operationId, pending);
+    return null;
+  }
   const capture = JSON.parse(readFileSync(join(directory, 'capture.json'), 'utf8'));
   const request = saveRequestSchema.parse(JSON.parse(readFileSync(join(directory, 'request.json'), 'utf8')));
   let progress: { terminal?: { outcome: { status: string; result?: unknown } } };
@@ -820,7 +917,7 @@ export async function reconcileHostedSave(
   }
   // The checkpoint may have stopped before preparation or job submission.
   // Resume its retained bytes and operation rather than waiting for an unscheduled job.
-  const resumed = await resumeRetainedSave(root, command, exchange, epoch);
+  const resumed = await resumeRetainedSave(root, command, exchange, epoch, features);
   if (!resumed || resumed.outcome) return null;
   return { phase: 'save', saveOperationId: command.operationId, progress: resumed };
 }
@@ -838,6 +935,8 @@ export async function settlePriorHostedSave(
   wait?: (operationId: string, pending: unknown) => Promise<unknown>,
   /** This command's source authority epoch: a save that began at an older one is dropped (N3). */
   epoch?: number,
+  /** This command's advertised save features: a prior save the server can no longer stage is dropped (c2388099). */
+  features?: SaveContract,
 ): Promise<void> {
   const marker = readHostedLaneCheckout(root);
   if (!marker) return;
@@ -873,7 +972,7 @@ export async function settlePriorHostedSave(
     reportBackgroundSave(root, prior.operationId, progress.terminal);
     return;
   }
-  const resumed = await resumeRetainedSave(root, prior, exchange, epoch);
+  const resumed = await resumeRetainedSave(root, prior, exchange, epoch, features);
   if (!resumed) return;
   if (resumed.outcome) {
     reportBackgroundSave(root, prior.operationId, resumed);
@@ -902,7 +1001,16 @@ async function resumeRetainedSave(
   prior: { operationId: string; message: string; supersedeFinish?: boolean | undefined },
   exchange: SaveExchange,
   epoch: number | undefined,
+  /** The settling command's advertised features: its retained pages are checked against them, nothing more. */
+  features?: SaveContract,
 ) {
+  const advertised = features?.advertised
+    ? {
+        advertised: true as const,
+        overlapEvidence: features.overlapEvidence,
+        ...(features.lineCounts ? { lineCounts: true } : {}),
+      }
+    : {};
   try {
     return await saveHostedLane(
       root,
@@ -912,11 +1020,22 @@ async function resumeRetainedSave(
         ...(prior.supersedeFinish ? { supersedeFinish: true } : {}),
       },
       exchange,
-      epoch === undefined ? false : { overlapEvidence: false, submitPage: false, authorityEpoch: epoch },
+      epoch === undefined && !features?.advertised
+        ? false
+        : {
+            overlapEvidence: false,
+            submitPage: false,
+            ...(epoch === undefined ? {} : { authorityEpoch: epoch }),
+            ...advertised,
+            settling: true,
+          },
     );
   } catch (error) {
     const dropped = !checkoutPathExists(join(clientCacheRoot(root), `saves/${prior.operationId}`));
     if (epoch !== undefined && dropped && authorityPinRefusal(error, 'save')) return null;
+    // A prior save the server holds unsubmitted with fields it no longer takes: dropped, so this command's capture
+    // supersedes it (its edits are still in the checkout).
+    if (dropped && error instanceof OutrunSaveRefused) return null;
     throw error;
   }
 }

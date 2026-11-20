@@ -69,6 +69,7 @@ export async function transitionHostedLane(
       exchange,
       undefined,
       saveFeatures ? saveFeatures.authorityEpoch : undefined,
+      saveFeatures || undefined,
     );
   const original = workLocked(lock, () => {
     const identity = { root, projectId: exchange.projectId, ...parsed };

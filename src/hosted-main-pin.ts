@@ -69,14 +69,27 @@ export function olderEpochRefusal(
   continuation: { action: string; parameters: Record<string, unknown> },
   dropped = '',
 ) {
+  return freshOperationRefusal(
+    root,
+    code,
+    `${subject} began at source authority epoch ${began}, and the project is now at epoch ${epoch}, so it can never finish. It published nothing${dropped}.`,
+    continuation,
+  );
+}
+/** A retained operation that can never finish under its id: the refusal names the same action as a new operation. */
+export function freshOperationRefusal(
+  root: string,
+  code: string,
+  message: string,
+  continuation: { action: string; parameters: Record<string, unknown> },
+) {
   const parameters = { ...continuation.parameters, operationId: randomUUID() };
   const command = `nforge agent ${shellQuote(root)} ${continuation.action} ${shellQuote(JSON.stringify(parameters))}`;
-  return new ForgeError(
-    code,
-    `${subject} began at source authority epoch ${began}, and the project is now at epoch ${epoch}, so it can never finish. It published nothing${dropped}. Run it again as a new operation: ${command}`,
-    undefined,
-    { root, next: { action: continuation.action, ...parameters }, command },
-  );
+  return new ForgeError(code, `${message} Run it again as a new operation: ${command}`, undefined, {
+    root,
+    next: { action: continuation.action, ...parameters },
+    command,
+  });
 }
 
 /** Thrown by a source drive whose replayed operation began at an older epoch (beganAtOlderEpoch);

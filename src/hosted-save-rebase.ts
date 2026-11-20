@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { carryOverlapBases } from './hosted-overlap-text.js';
 import { clientCacheRoot } from './root-paths.js';
 import { sourceTree } from './source-tree.js';
 import { cpSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
@@ -180,6 +181,8 @@ export async function rebaseHostedCheckout(
       syncDirectory(dirname(target));
     }
     durableReplace(join(root, '.forge/hosted-lane.json'), JSON.stringify(marker));
+    // The resolution's row starts from its origin's, so this folder's first baselines carry over (c2388099).
+    if (onto) carryOverlapBases(clientCacheRoot(root), stale.selection.laneId, lane.laneId);
     // A save pinned to the old baseline either moved the Lane or will be refused; never look it up again.
     rmSync(pendingSavePath(root, stale), { force: true });
   });

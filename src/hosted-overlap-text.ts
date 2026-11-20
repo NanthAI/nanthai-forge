@@ -6,7 +6,6 @@ import { parser } from '@lezer/javascript';
 import { z } from 'zod';
 import { digest } from './hash.js';
 import { attributionEdits, attributionLines } from './native-text-merge.js';
-import { durableReplace } from './state/durability.js';
 import {
   lineBaseTag,
   overlapEvidenceSchema,
@@ -14,6 +13,8 @@ import {
   type OverlapLines,
 } from './hosted-overlap-evidence.js';
 import { readSource } from './files.js';
+import { durableReplace } from './state/durability.js';
+import { machineObjectsDirectory } from './machine-object-store.js';
 import type { SymbolLinks } from './hosted-overlap-evidence.js';
 import {
   symbolBindings,
@@ -144,6 +145,14 @@ export function readOverlapBytes(cache: string, blob: string): Buffer | null {
       if (typeof objects === 'string' && isAbsolute(objects) && !lstatSync(objects).isSymbolicLink())
         bytes = readSource(realpathSync(objects), blob, limit, blob);
     }
+    // Another folder on this machine fetched it (a Lane continued in a second folder keeps its first baseline).
+    const machine = bytes ? null : machineObjectsDirectory();
+    if (machine)
+      try {
+        bytes = readSource(realpathSync(machine), blob, limit, blob);
+      } catch {
+        /* Not on this machine. */
+      }
     return bytes && digest(bytes) === blob ? bytes : null;
   } catch {
     return null;
@@ -207,22 +216,56 @@ export function overlapTextEvidence(
   });
   return result.success ? result.data : undefined;
 }
-/** First baseline per path and Lane base survives successive saves. Its hash must match the
- * server projection before it can block, so old clients, syncs and missing caches stay advisory. */
-export function overlapBaseBlobs(cache: string, baseHead: string): Record<string, string> {
+/** The Lane's first baseline per path (c2388099): what its server overlap row keeps as each path's `before`, across
+ * successive saves, a sync to a newer main (the row keeps its paths) and a resolution rebind of this folder. One record
+ * per checkout cache, named for its Lane, so no base change replaces it. Its hash must match the server projection
+ * before evidence can block or a count can show, so old clients and missing caches stay advisory. Null when this cache
+ * holds no record for the Lane (a fresh folder, or one an older CLI keyed by base head and the base has moved). */
+export function overlapBaseBlobs(
+  cache: string,
+  laneId: string,
+  baseHead: string,
+): Record<string, string> | null {
+  const bases = z.record(z.string(), z.string().regex(/^[a-f0-9]{64}$/));
   try {
-    const parsed = z
-      .record(z.string(), z.string().regex(/^[a-f0-9]{64}$/))
-      .parse(JSON.parse(readFileSync(join(cache, `overlap-base-${baseHead}.json`), 'utf8')));
+    const record = z
+      .object({ laneId: z.string(), bases })
+      .parse(JSON.parse(readFileSync(join(cache, basesName), 'utf8')));
+    if (record.laneId === laneId) return Object.assign(Object.create(null), record.bases);
+  } catch {
+    /* No record yet, or an older CLI's one below. */
+  }
+  try {
+    // Written by an older CLI, keyed by the base head; read once and replaced by the Lane's record.
+    const parsed = bases.parse(JSON.parse(readFileSync(join(cache, legacyBasesName(baseHead)), 'utf8')));
     return Object.assign(Object.create(null), parsed);
   } catch {
-    return Object.create(null) as Record<string, string>;
+    return null;
   }
 }
-export function rememberOverlapBases(cache: string, baseHead: string, bases: Record<string, string>) {
+const basesName = 'overlap-bases.json';
+const legacyBasesName = (baseHead: string) => `overlap-base-${baseHead}.json`;
+export function rememberOverlapBases(
+  cache: string,
+  laneId: string,
+  baseHead: string,
+  bases: Record<string, string>,
+) {
   try {
-    durableReplace(join(cache, `overlap-base-${baseHead}.json`), JSON.stringify(bases));
+    durableReplace(join(cache, basesName), JSON.stringify({ laneId, bases }));
+    rmSync(join(cache, legacyBasesName(baseHead)), { force: true });
   } catch {
     /* Missing evidence is advisory. */
+  }
+}
+/** A folder rebound onto the resolution Lane of its own Lane: that row starts from the origin's (mergeOverlapChanges
+ * over the origin row), so the first baselines carry over. Any other Lane keeps none. */
+export function carryOverlapBases(cache: string, from: string, to: string) {
+  try {
+    const record = JSON.parse(readFileSync(join(cache, basesName), 'utf8'));
+    if (record?.laneId === from)
+      durableReplace(join(cache, basesName), JSON.stringify({ ...record, laneId: to }));
+  } catch {
+    /* Nothing recorded: the resolution's saves measure against what this folder holds. */
   }
 }

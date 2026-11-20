@@ -23,7 +23,7 @@ import { tmpdir } from 'node:os';
 import { getFunctionName } from 'convex/server';
 import { lifecycleFixture, api as lifeApi, lanes, code } from './hosted-lane-lifecycle-fixture.mjs';
 import { api } from './hosted-saves-fixture.mjs';
-import { saveHostedLane } from '../dist/hosted-save-client.js';
+import { reconcileHostedSave, saveContract, saveHostedLane } from '../dist/hosted-save-client.js';
 import { transitionHostedLane } from '../dist/hosted-lifecycle-client.js';
 import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 import { buildSavePages } from '../dist/hosted-save.js';
@@ -379,4 +379,251 @@ test('a new save while the earlier one still publishes resumes it and asks for o
   await s.complete(second);
   await saveHostedLane(s.root, { operationId: second, message: 'second' }, s.exchange);
   assert.equal(await s.savedFile('a.txt'), digest('second'));
+});
+
+/** The server rolled back to a version without save-line-counts after a save was prepared: its strict page schema
+ * refuses a page that carries counts (review f25d5544 finding 2). The retry reads the older contract. */
+function rolledBack(s) {
+  const mutation = s.exchange.client.mutation;
+  s.exchange.client.mutation = async (ref, args) => {
+    if (
+      getFunctionName(ref) === 'projectHostedSaves:stage' &&
+      JSON.parse(args.page).changes.some(c => c.lines)
+    )
+      throw Object.assign(Error('The Forge request failed. Retry the original request.'), {
+        data: {
+          code: 'HOSTED_REQUEST_FAILED',
+          message: 'The Forge request failed. Retry the original request.',
+        },
+      });
+    return mutation(ref, args);
+  };
+}
+const newer = saveContract({ features: ['save-line-counts'] }),
+  older = saveContract({ features: [] });
+const stagedCounts = s =>
+  s.calls
+    .filter(c => c.name === 'projectHostedSaves:stage')
+    .some(c => JSON.parse(c.args.page).changes.some(x => x.lines));
+
+test('review f25d5544 finding 2: a save retried after a rollback before the server held it is rebuilt and succeeds', async t => {
+  const s = await fixture(t),
+    op = randomUUID();
+  writeFileSync(join(s.root, 'a.txt'), 'mine\n');
+  s.loseNextPrepare();
+  await assert.rejects(
+    saveHostedLane(s.root, { operationId: op, message: 'mine' }, s.exchange, newer),
+    /lost/,
+  );
+  rolledBack(s);
+  await saveHostedLane(s.root, { operationId: op, message: 'mine' }, s.exchange, older);
+  await s.complete(op);
+  const done = await saveHostedLane(s.root, { operationId: op, message: 'mine' }, s.exchange, older);
+  assert.equal(done.outcome.status, 'completed');
+  assert.equal(await s.savedFile('a.txt'), digest('mine\n'));
+  assert(!stagedCounts(s), 'no page with counts reached the rolled-back server');
+});
+
+test('review f25d5544 finding 2: a save the rolled-back server already holds names a next step that saves', async t => {
+  const s = await fixture(t),
+    op = randomUUID();
+  writeFileSync(join(s.root, 'a.txt'), 'mine\n');
+  rolledBack(s);
+  // Prepared on the newer server, which went away before the page was staged.
+  await assert.rejects(
+    saveHostedLane(s.root, { operationId: op, message: 'mine' }, s.exchange, newer),
+    /Retry/,
+  );
+  const error = await saveHostedLane(s.root, { operationId: op, message: 'mine' }, s.exchange, older).then(
+    () => assert.fail('the held request can never stage'),
+    error => error,
+  );
+  assert.equal(error.code, 'WORK_OPERATION_CHANGED');
+  const next = error.recovery.next;
+  assert.equal(next.action, 'save');
+  assert.notEqual(next.operationId, op);
+  assert.match(error.message, new RegExp(next.operationId));
+  const stages = s.calls.filter(c => c.name === 'projectHostedSaves:stage').length;
+  await saveHostedLane(s.root, { operationId: next.operationId, message: next.message }, s.exchange, older);
+  await s.complete(next.operationId);
+  const done = await saveHostedLane(
+    s.root,
+    { operationId: next.operationId, message: next.message },
+    s.exchange,
+    older,
+  );
+  assert.equal(done.outcome.status, 'completed');
+  assert.equal(await s.savedFile('a.txt'), digest('mine\n'));
+  assert.equal(s.calls.filter(c => c.name === 'projectHostedSaves:stage').length, stages + 1);
+});
+
+test('review a42b7a29 finding 2: a save submitted before the rollback is observed to its outcome, never dropped', async t => {
+  const s = await fixture(t),
+    op = randomUUID();
+  writeFileSync(join(s.root, 'a.txt'), 'mine\n');
+  const mutation = s.exchange.client.mutation;
+  s.exchange.client.mutation = async (ref, args) => {
+    const reply = await mutation(ref, args);
+    if (getFunctionName(ref) === 'projectHostedSaveJobs:submit') throw Error('reply lost after submit');
+    return reply;
+  };
+  await assert.rejects(
+    saveHostedLane(s.root, { operationId: op, message: 'mine' }, s.exchange, newer),
+    /lost/,
+  );
+  s.exchange.client.mutation = mutation;
+  rolledBack(s);
+  const waited = async id => {
+    await s.complete(id);
+    return JSON.parse(await s.call('progress', api.progress, { projectId: s.projectId, operationId: id }))
+      .terminal;
+  };
+  const done = await saveHostedLane(
+    s.root,
+    { operationId: op, message: 'mine' },
+    s.exchange,
+    older,
+    false,
+    undefined,
+    waited,
+  );
+  assert.equal(done.outcome.status, 'completed');
+  assert.equal(await s.savedFile('a.txt'), digest('mine\n'));
+  assert.equal(
+    readHostedLaneCheckout(s.root).selection.head,
+    (await s.read(s.laneId)).head,
+    'receipt applied',
+  );
+});
+
+test('review a42b7a29 finding 3: another command after the stuck save drops it and saves', async t => {
+  const s = await fixture(t),
+    op = randomUUID();
+  writeFileSync(join(s.root, 'a.txt'), 'mine\n');
+  rolledBack(s);
+  await assert.rejects(
+    saveHostedLane(s.root, { operationId: op, message: 'mine' }, s.exchange, newer),
+    /Retry/,
+  );
+  // Not the printed next step: a fresh save of its own, which settles the earlier one first.
+  const fresh = randomUUID();
+  writeFileSync(join(s.root, 'a.txt'), 'mine again\n');
+  await saveHostedLane(s.root, { operationId: fresh, message: 'again' }, s.exchange, older);
+  await s.complete(fresh);
+  const done = await saveHostedLane(s.root, { operationId: fresh, message: 'again' }, s.exchange, older);
+  assert.equal(done.outcome.status, 'completed');
+  assert.equal(await s.savedFile('a.txt'), digest('mine again\n'));
+  assert(!existsSync(join(`${s.root}.forge-client`, 'saves', op)), 'the stuck save is gone');
+});
+
+test('review a8f77c10 findings 1+3: a run-path save (no acknowledged marker) submitted before the rollback is observed without blocking, never dropped', async t => {
+  const s = await fixture(t),
+    op = randomUUID();
+  writeFileSync(join(s.root, 'a.txt'), 'mine\n');
+  const mutation = s.exchange.client.mutation;
+  s.exchange.client.mutation = async (ref, args) => {
+    const reply = await mutation(ref, args);
+    if (getFunctionName(ref) === 'projectHostedSaveJobs:submit') throw Error('reply lost after submit');
+    return reply;
+  };
+  await assert.rejects(
+    saveHostedLane(s.root, { operationId: op, message: 'mine' }, s.exchange, newer),
+    /lost/,
+  );
+  s.exchange.client.mutation = mutation;
+  // The run path writes `acknowledged` only after the submit action's reply: a lost reply leaves none.
+  rmSync(join(`${s.root}.forge-client`, 'saves', op, 'acknowledged'), { force: true });
+  rolledBack(s);
+  const at = s.calls.length;
+  // No wait callback (a settling command): the pending snapshot comes back at once.
+  const pendingSave = await saveHostedLane(s.root, { operationId: op, message: 'mine' }, s.exchange, older);
+  assert.equal(pendingSave.outcome, undefined);
+  assert.equal(since(s, at, /stage|prepare|submit/).length, 0, 'never prepared, staged or submitted again');
+  assert(existsSync(join(`${s.root}.forge-client`, 'saves', op, 'request.json')), 'the live save is kept');
+  await s.complete(op);
+  const done = await saveHostedLane(s.root, { operationId: op, message: 'mine' }, s.exchange, older);
+  assert.equal(done.outcome.status, 'completed');
+  assert.equal(await s.savedFile('a.txt'), digest('mine\n'));
+});
+
+test('review a4d55c86 finding 1: land --save and preflight settle a stuck save with the server features, then proceed', async t => {
+  const s = await fixture(t),
+    op = randomUUID();
+  writeFileSync(join(s.root, 'a.txt'), 'mine\n');
+  rolledBack(s);
+  await assert.rejects(
+    saveHostedLane(s.root, { operationId: op, message: 'mine' }, s.exchange, newer),
+    /Retry/,
+  );
+  // The settle that land --save and preflight run first: dropped (edits stay in the checkout), nothing pending.
+  assert.equal(await reconcileHostedSave(s.root, s.exchange, undefined, older), null);
+  assert(!existsSync(join(`${s.root}.forge-client`, 'saves', op)), 'the stuck save is gone');
+  assert.equal(s.pending().length, 0);
+  assert.equal(readFileSync(join(s.root, 'a.txt'), 'utf8'), 'mine\n');
+});
+
+test('review a4d55c86 finding 2: a submitted outrun save from an older epoch is refused with a next step, never waited on', async t => {
+  const s = await fixture(t),
+    op = randomUUID();
+  writeFileSync(join(s.root, 'a.txt'), 'mine\n');
+  const mutation = s.exchange.client.mutation;
+  s.exchange.client.mutation = async (ref, args) => {
+    const reply = await mutation(ref, args);
+    if (getFunctionName(ref) === 'projectHostedSaveJobs:submit') throw Error('reply lost after submit');
+    return reply;
+  };
+  await assert.rejects(
+    saveHostedLane(s.root, { operationId: op, message: 'mine' }, s.exchange, { ...newer, authorityEpoch: 1 }),
+    /lost/,
+  );
+  s.exchange.client.mutation = mutation;
+  rolledBack(s);
+  const error = await saveHostedLane(
+    s.root,
+    { operationId: op, message: 'mine' },
+    s.exchange,
+    { ...older, authorityEpoch: 2 },
+    false,
+    undefined,
+    async () => assert.fail('a save from an older epoch never settles: never waited on'),
+  ).then(
+    () => assert.fail('refused'),
+    error => error,
+  );
+  assert.notEqual(error.recovery?.next?.operationId ?? op, op, error.message);
+  assert(!existsSync(join(`${s.root}.forge-client`, 'saves', op)), 'dropped');
+});
+
+test('review 07d1168a finding 1: settling a save the server never held drops it, never rebuilds it without its identity', async t => {
+  const s = await fixture(t),
+    op = randomUUID();
+  writeFileSync(join(s.root, 'a.txt'), 'mine\n');
+  s.loseNextPrepare();
+  await assert.rejects(
+    saveHostedLane(s.root, { operationId: op, message: 'mine' }, s.exchange, newer),
+    /lost/,
+  );
+  rolledBack(s);
+  const at = s.calls.length;
+  assert.equal(await reconcileHostedSave(s.root, s.exchange, undefined, older), null);
+  assert.equal(since(s, at, /prepare|stage|submit/).length, 0, 'nothing rebuilt by the settling command');
+  assert(!existsSync(join(`${s.root}.forge-client`, 'saves', op)), 'dropped');
+  assert.equal(s.pending().length, 0);
+  assert.equal(readFileSync(join(s.root, 'a.txt'), 'utf8'), 'mine\n', 'edits stay for the next save');
+});
+
+test('review 07d1168a finding 2: a pending save whose request is gone (rebuild cut short) is dropped by the settle', async t => {
+  const s = await fixture(t),
+    op = randomUUID();
+  writeFileSync(join(s.root, 'a.txt'), 'mine\n');
+  s.loseNextPrepare();
+  await assert.rejects(
+    saveHostedLane(s.root, { operationId: op, message: 'mine' }, s.exchange, newer),
+    /lost/,
+  );
+  // The rebuild removed the request, then the CLI died before writing the new one.
+  rmSync(join(`${s.root}.forge-client`, 'saves', op, 'request.json'));
+  assert.equal(await reconcileHostedSave(s.root, s.exchange), null);
+  assert(!existsSync(join(`${s.root}.forge-client`, 'saves', op)), 'dropped');
+  assert.equal(s.pending().length, 0);
 });
