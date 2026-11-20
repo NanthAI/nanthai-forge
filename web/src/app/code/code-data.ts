@@ -2,13 +2,16 @@
 // The Code place's reads. History is one live page (it re-runs only when a landing is accepted) plus earlier pages
 // read once on request. Source reads are actions on exact States, which never change, so each answer is kept for the
 // visit and asking again costs nothing. No read waits on a timer, and an idle or hidden tab sends nothing.
-import { useEffect, useState } from 'react';
+// A signed-out visitor of a public project (Item 4c164732) gets the same answers from the site's cached public read
+// (VisitorCode below): one GET each, no Convex connection, no Lane or Item evidence.
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useConvex, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import type { CodeHistoryRow } from '../../../../src/code-history';
 import type { CodeChange, CodeDir } from '../../../../src/code-tree';
 import { receiptWindow } from './code-words';
+import { publicReadUrl } from '../../public/read';
 
 export type ProjectId = Id<'hostedProjects'>;
 export type { CodeHistoryRow, CodeDir, CodeChange };
@@ -66,11 +69,86 @@ export function messageOf(error: unknown): string {
     : 'The read did not finish. Your work is safe; try again.';
 }
 
+/** The first page of a public project's code read (convex/publicCode.ts): the project, main's head and landings. */
+export type VisitorHistory = {
+  project: { id: string; handle: string; slug: string; name: string };
+  main?: string | null;
+  landings: CodeHistoryRow[];
+  nextBefore: number | null;
+};
+/** Set by the public Code page: `base` is code/HANDLE/SLUG under the public read, `first` its first history page. */
+type VisitorCode = { base: string; first: VisitorHistory };
+export const VisitorCodeContext = createContext<VisitorCode | null>(null);
+
+/** One cached public GET; a refusal reads like the members' error, in the product's words. */
+async function visitorGet<T>(path: string): Promise<T> {
+  const response = await fetch(publicReadUrl(path), {
+    credentials: 'omit',
+    headers: { accept: 'application/json' },
+  });
+  const type = response.headers.get('content-type') ?? '';
+  const body = type.includes('json') ? ((await response.json()) as T & { message?: unknown }) : null;
+  if (response.ok && body) return body;
+  const message =
+    response.status === 404
+      ? 'No public project at this address.'
+      : typeof body?.message === 'string'
+        ? body.message
+        : 'The read did not finish; try again.';
+  throw Object.assign(new Error(message), { data: { message } });
+}
+const hex = (path: string) =>
+  path
+    ? Array.from(new TextEncoder().encode(path), byte => byte.toString(16).padStart(2, '0')).join('')
+    : '-';
+/** A source read's public address: every argument in the path (convex/publicCode.ts). */
+function visitorPath(base: string, args: Record<string, unknown>): string {
+  const state = String(args.state);
+  const path = hex(String(args.path ?? ''));
+  switch (args.want) {
+    case 'more':
+      return `${base}/${state}/more/${path}/${Number(args.cursor ?? 0)}.json`;
+    case 'page':
+      return `${base}/${state}/page/${path}/${Number(args.offset ?? 0)}.json`;
+    case 'changes':
+      return `${base}/${state}/changes/${String(args.base)}.json`;
+    case 'touched':
+      return `${base}/${state}/touched/${path}/${(args.pairs as { base: string; head: string }[])
+        .map(pair => pair.base + pair.head)
+        .join('')}.json`;
+    default:
+      return `${base}/${state}/open/${path}.json`;
+  }
+}
+
+/** Who answers source reads on this page: the members' action, or the visitor's cached GET. */
+type Reader = { key: string; ask: (args: Record<string, unknown>) => Promise<string> };
+export function useReader(): Reader {
+  const client = useConvex();
+  const visitor = useContext(VisitorCodeContext);
+  return useMemo<Reader>(
+    () =>
+      visitor
+        ? {
+            key: visitor.base,
+            ask: args =>
+              visitorGet<unknown>(visitorPath(visitor.base, args)).then(body => JSON.stringify(body)),
+          }
+        : { key: '', ask: args => client.action(browseRef, args) },
+    [client, visitor],
+  );
+}
+
 type History = { landings: CodeHistoryRow[]; nextCursor: string | null };
-/** The newest page, live; then earlier pages appended in order. */
+const fromVisitor = (page: VisitorHistory): History => ({
+  landings: page.landings,
+  nextCursor: page.nextBefore === null ? null : String(page.nextBefore),
+});
+/** The newest page, live (a visitor's is the cached first page); then earlier pages appended in order. */
 export function useHistory(projectId: ProjectId) {
   const client = useConvex();
-  const first = useQuery(historyRef, { projectId, cursor: null });
+  const visitor = useContext(VisitorCodeContext);
+  const live = useQuery(historyRef, visitor ? 'skip' : { projectId, cursor: null });
   const [more, setMore] = useState<{
     rows: CodeHistoryRow[];
     next: string | null;
@@ -82,38 +160,38 @@ export function useHistory(projectId: ProjectId) {
     loading: false,
     error: '',
   });
-  const head = first === undefined ? null : parseReply<History>(first);
+  const head = visitor ? fromVisitor(visitor.first) : live === undefined ? null : parseReply<History>(live);
   const seen = new Set(head?.landings.map(row => row.receiptId));
   const rows = [...(head?.landings ?? []), ...more.rows.filter(row => !seen.has(row.receiptId))];
   const next = more.rows.length ? more.next : (head?.nextCursor ?? null);
   const loadMore = () => {
     if (!next || more.loading) return;
     setMore(was => ({ ...was, loading: true, error: '' }));
-    void client
-      .query(historyRef, { projectId, cursor: next })
-      .then(text => parseReply<History>(text))
-      .then(
-        page =>
-          setMore(was => ({
-            rows: [...was.rows, ...page.landings],
-            next: page.nextCursor,
-            loading: false,
-            error: '',
-          })),
-        caught => setMore(was => ({ ...was, loading: false, error: messageOf(caught) })),
-      );
+    const earlier = visitor
+      ? visitorGet<VisitorHistory>(`${visitor.base}/history/${next}.json`).then(fromVisitor)
+      : client.query(historyRef, { projectId, cursor: next }).then(text => parseReply<History>(text));
+    void earlier.then(
+      page =>
+        setMore(was => ({
+          rows: [...was.rows, ...page.landings],
+          next: page.nextCursor,
+          loading: false,
+          error: '',
+        })),
+      caught => setMore(was => ({ ...was, loading: false, error: messageOf(caught) })),
+    );
   };
-  return { loading: first === undefined, rows, next, loadMore, more };
+  return { loading: head === null, rows, next, loadMore, more };
 }
 
 const answers = new Map<string, Promise<unknown>>();
 const ANSWERS_KEPT = 200;
 /** One source read on an exact State, kept for the visit. A failed read is forgotten so Retry asks again. */
-export function browse<T>(client: ReturnType<typeof useConvex>, args: Record<string, unknown>): Promise<T> {
-  const key = JSON.stringify(args);
+export function browse<T>(reader: Reader, args: Record<string, unknown>): Promise<T> {
+  const key = reader.key + JSON.stringify(args);
   let pending = answers.get(key) as Promise<T> | undefined;
   if (!pending) {
-    pending = client.action(browseRef, args).then(text => parseReply<T>(text));
+    pending = reader.ask(args).then(text => parseReply<T>(text));
     answers.set(key, pending);
     pending.catch(() => answers.delete(key));
     if (answers.size > ANSWERS_KEPT) answers.delete(answers.keys().next().value!);
@@ -141,21 +219,23 @@ export function useRead<T>(key: string | null, read: () => Promise<T>, retry = 0
 }
 
 export function useChanges(projectId: ProjectId, row: CodeHistoryRow | null) {
-  const client = useConvex();
+  const reader = useReader();
   return useRead<Changes>(row ? `changes:${row.base}:${row.head}` : null, () =>
-    browse<Changes>(client, { projectId, state: row!.head, base: row!.base, want: 'changes' }),
+    browse<Changes>(reader, { projectId, state: row!.head, base: row!.base, want: 'changes' }),
   );
 }
 
 /** The existing landings read (its owner: projectHostedLandings) for one receipt: when it was asked to land, its
- * Lane and Item. The window is the receipt's own time, never the clock. */
+ * Lane and Item. The window is the receipt's own time, never the clock. Visitors get none: Lanes and Items are not
+ * theirs to open here. */
 export function useEvidence(
   projectId: ProjectId,
   row: CodeHistoryRow | null,
 ): LandingEvidence | null | undefined {
-  const window = row ? receiptWindow(row.at) : null;
+  const visitor = useContext(VisitorCodeContext);
+  const window = row && !visitor ? receiptWindow(row.at) : null;
   const text = useQuery(landingsRef, window ? { projectId, ...window, limit: 30 } : 'skip');
-  if (!row) return null;
+  if (!row || visitor) return null;
   if (text === undefined) return undefined;
   return (
     parseReply<{ landings: LandingEvidence[] }>(text).landings.find(l => l.receiptId === row.receiptId) ??

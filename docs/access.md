@@ -23,7 +23,7 @@ The table is `projectVerbs` in `convex/projectAccessContract.ts`; `projectMay` g
 
 | Verb | public | read | write | owner | Agents | Enforced in |
 | --- | --- | --- | --- | --- | --- | --- |
-| Read code, history and plan (`readSource`) | public projects | yes | yes | yes | same as their person | `accessibleProject` |
+| Read code, history and plan (`readSource`) | public projects | yes | yes | yes | same as their person | `accessibleProject`; signed out, the cached public route (`publicCode`, `projectCodeBrowse.visitorRead`) |
 | Read Lanes, receipts and checks (`readWork`) | public projects; Lane titles follow the project's opt-in | yes | yes | yes | same | `accessibleProject` |
 | See the roster by handle (`readPeople`) | no | self and nobody else | yes | yes | same | `publicPeople` |
 | Full Work archives (`readArchives`) | no | no | yes | yes | same | `memberProject` |

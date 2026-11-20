@@ -5,6 +5,7 @@ import { v } from 'convex/values';
 import { query } from './cliServer';
 import { internalQuery } from './server';
 import { accessibleProject } from './projectAuthority';
+import { isPublicProject } from './publicVisibility';
 import { report } from './errors';
 import { invariant } from '../src/errors';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
@@ -18,7 +19,7 @@ export const history = query({
   handler: async (ctx, input) => {
     try {
       const user = await ctx.auth.getUserIdentity();
-      // Public projects open to signed-out readers with the public reads Item (6a60e89a); the view needs no change.
+      // Signed-out visitors read the same rows through the cached public route (publicCode.ts), never this query.
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read what landed.');
       await accessibleProject(ctx, input.projectId, user.subject);
       const page = await ctx.db
@@ -44,9 +45,27 @@ export const history = query({
   },
 });
 
-/** The stored checkpoint the project's source reads verify against. The caller's checkpoint mutation authorizes. */
+/** The stored checkpoint the project's source reads verify against, after the caller's access check: a project the
+ * caller may not read answers exactly like a missing one, never "no stored source" (Item 4c164732). Signed out, only a
+ * public project opens. The source reader's checkpoint mutation checks again around the bytes. */
 export const checkpoint = internalQuery({
   args: { projectId: v.id('hostedProjects') },
   returns: v.union(v.id('projectBackups'), v.null()),
-  handler: async (ctx, { projectId }) => (await ctx.db.get(projectId))?.work?.backupId ?? null,
+  handler: async (ctx, { projectId }) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      const project = user
+        ? await accessibleProject(ctx, projectId, user.subject)
+        : await ctx.db.get(projectId);
+      invariant(
+        isPublicProject(project) || (user && project),
+        'PROJECT_UNAVAILABLE',
+        'This Forge project is unavailable with the current account.',
+      );
+      return project!.work?.backupId ?? null;
+    } catch (error) {
+      // Called with runQuery: only a ConvexError keeps PROJECT_UNAVAILABLE for the caller.
+      return report(error);
+    }
+  },
 });

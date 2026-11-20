@@ -4,9 +4,9 @@
 // subfolders (listing.ts), so a folder the reader can see opens with no read, and opening it fetches the level below in
 // the background. Nothing is read twice in a visit (code-data.ts keeps every answer) and the whole State never is.
 import { useEffect, useReducer, useRef, useState } from 'react';
-import { useConvex } from 'convex/react';
 import {
   browse,
+  useReader,
   messageOf,
   type CodeDir,
   type CodeFile,
@@ -32,7 +32,7 @@ export type Source = {
 const parentOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
 
 export function useSource(projectId: ProjectId, state: string | null, path: string): Source {
-  const client = useConvex();
+  const reader = useReader();
   const listing = useRef<Listing>({ dirs: new Map(), ahead: new Set() });
   const at = useRef<string | null>(null);
   const [, redraw] = useReducer((n: number) => n + 1, 0);
@@ -52,7 +52,7 @@ export function useSource(projectId: ProjectId, state: string | null, path: stri
     keepListing(listing.current, reply, append);
     redraw();
   };
-  const ask = <T>(args: Record<string, unknown>) => browse<T>(client, { projectId, state, ...args });
+  const ask = <T>(args: Record<string, unknown>) => browse<T>(reader, { projectId, state, ...args });
 
   useEffect(() => {
     if (!state) return;

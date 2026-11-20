@@ -6,9 +6,8 @@
 //   root has .github, one folder read of .github/workflows and the first page of at most WORKFLOWS_READ files.
 // - With a CI file chosen and no landing checked yet: the first page of that one file.
 import { useEffect, useState } from 'react';
-import { useConvex } from 'convex/react';
 import type { Id } from '../../../../convex/_generated/dataModel';
-import { browse, messageOf, type CodeDir, type CodeFile } from '../code/code-data';
+import { browse, messageOf, useReader, type CodeDir, type CodeFile } from '../code/code-data';
 import { ciFiles, type CiFiles } from './ci';
 import {
   WORKFLOW_DIR,
@@ -39,14 +38,14 @@ const triggerOf = (file: CodeFile): Trigger | null | undefined =>
         : { kind: 'unknown' };
 
 export function useWorkflows(projectId: Id<'hostedProjects'>, state: string | null | undefined, on: boolean) {
-  const client = useConvex();
+  const reader = useReader();
   const [result, setResult] = useState<Workflows>({ kind: 'idle' });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!on || !state) return;
     let live = true;
     setResult({ kind: 'loading' });
-    const ask = <T>(args: Record<string, unknown>) => browse<T>(client, { projectId, state, ...args });
+    const ask = <T>(args: Record<string, unknown>) => browse<T>(reader, { projectId, state, ...args });
     const folder = async (path: string) => {
       const reply = await ask<Listing>({ want: 'more', path, cursor: 0 });
       if (reply.available === false) throw new Error(reply.reason ?? 'This source is not available.');
@@ -75,7 +74,7 @@ export function useWorkflows(projectId: Id<'hostedProjects'>, state: string | nu
     return () => {
       live = false;
     };
-  }, [client, projectId, state, on, attempt]);
+  }, [reader, projectId, state, on, attempt]);
   return {
     result: on && state ? result : ({ kind: 'idle' } as Workflows),
     retry: () => setAttempt(n => n + 1),
@@ -88,18 +87,18 @@ export function useWorkflowTrigger(
   state: string | null | undefined,
   path: string | null,
 ) {
-  const client = useConvex();
+  const reader = useReader();
   const [answer, setAnswer] = useState<{ key: string; trigger: Trigger | null | undefined } | null>(null);
   const key = state && path ? `${state}:${path}` : null;
   useEffect(() => {
     if (!key) return;
     let live = true;
-    void browse<{ file: CodeFile }>(client, { projectId, state, want: 'page', path })
+    void browse<{ file: CodeFile }>(reader, { projectId, state, want: 'page', path })
       .then(reply => live && setAnswer({ key, trigger: triggerOf(reply.file) }))
       .catch(() => undefined);
     return () => {
       live = false;
     };
-  }, [client, projectId, state, path, key]);
+  }, [reader, projectId, state, path, key]);
   return answer && answer.key === key ? answer.trigger : undefined;
 }

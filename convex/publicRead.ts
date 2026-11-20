@@ -31,7 +31,7 @@ const DAY = 86_400_000;
 type Activity = NonNullable<Doc<'projectPublic'>['activity']>;
 
 /** A public project at its canonical address, or null: missing, private and removed answer alike. */
-async function publicProject(ctx: QueryCtx, handle: string, slug: string) {
+export async function publicProject(ctx: QueryCtx, handle: string, slug: string) {
   const id = await resolveProjectId(ctx, { handle, slug });
   const project = id ? await ctx.db.get(id) : null;
   if (!project || !isPublicProject(project)) return null;

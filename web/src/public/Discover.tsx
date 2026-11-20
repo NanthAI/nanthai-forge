@@ -4,8 +4,9 @@
 // 2026-11-16). Every page is one read of the cached public JSON (read.ts): no Convex connection for a visitor, no
 // polling. Signed in, the explore and profile rows add one read of the viewer's own stars and the star toggle.
 // Everything shown here already passed the backend's visibility rule (convex/publicVisibility.ts): hidden Items,
-// members-only plans and Lane titles without the owner's opt-in never reach this page.
-import { useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+// members-only plans and Lane titles without the owner's opt-in never reach this page. A public project's code and
+// history (Item 4c164732) are the members' Code views on the same cached read (PublicCode.tsx).
+import { lazy, Suspense, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
@@ -24,6 +25,9 @@ import {
   type ProjectPage,
 } from './read';
 import { Person } from './Person';
+import type { VisitorHistory } from '../app/code/code-data';
+
+const PublicCode = lazy(() => import('./PublicCode'));
 
 type Props = { route: AppRoute; signedIn: boolean; viewerHandle: string | undefined };
 const DOCS = '/docs/';
@@ -36,6 +40,8 @@ const day = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', y
 const clock = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
 const projectHref = (handle: string, slug: string) =>
   hrefFor({ frame: 'project', handle, project: slug, place: 'needs', section: '', rest: '' });
+const codeHref = (handle: string, slug: string) =>
+  hrefFor({ frame: 'project', handle, project: slug, place: 'code', section: 'files', rest: '' });
 const profileHref = (handle: string) => hrefFor({ frame: 'discover', page: 'profile', handle });
 const signInHref = () =>
   `${hrefFor({ frame: 'public', page: 'signin' })}?next=${encodeURIComponent(location.pathname)}`;
@@ -46,6 +52,8 @@ export default function Discover({ route, signedIn, viewerHandle }: Props) {
       <Explore signedIn={signedIn} />
     ) : route.frame === 'discover' ? (
       <Profile handle={route.handle} signedIn={signedIn} />
+    ) : route.frame === 'project' && route.place === 'code' ? (
+      <Code route={route} />
     ) : route.frame === 'project' ? (
       <Project handle={route.handle} slug={route.project} />
     ) : null;
@@ -553,6 +561,9 @@ function Project({ handle, slug }: { handle: string; slug: string }) {
               {stars === 1 ? 'star' : 'stars'} for {project.name}
             </span>
           </button>
+          <a className="btn" href={codeHref(project.handle, project.slug)} onClick={followLink}>
+            Browse the code
+          </a>
           <button type="button" className="btn" onClick={() => setSheet('share')}>
             Share
           </button>
@@ -686,6 +697,22 @@ function Project({ handle, slug }: { handle: string; slug: string }) {
         </Sheet>
       ) : null}
     </>
+  );
+}
+
+/** A public project's code and history: the first history page names the project and main, then the Code views. */
+function Code({ route }: { route: Extract<AppRoute, { frame: 'project' }> }) {
+  const what = `${route.handle}/${route.project}`;
+  // The site keeps data addresses in lower case; asking in that form skips its redirect.
+  const base = `code/${encodeURIComponent(route.handle.toLowerCase())}/${encodeURIComponent(route.project.toLowerCase())}`;
+  const [read, retry] = usePublicRead<VisitorHistory>(`${base}/history.json`);
+  if (read.state === 'loading') return <Loading what={what} />;
+  if (read.state === 'missing') return <NotFound what="No public project at this address" />;
+  if (read.state !== 'ok') return <Failed what={what} retry={retry} />;
+  return (
+    <Suspense fallback={<Loading what={what} />}>
+      <PublicCode route={route} base={base} first={read.data} />
+    </Suspense>
   );
 }
 

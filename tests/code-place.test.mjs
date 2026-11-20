@@ -183,6 +183,12 @@ test('who landed it is a public handle: person/agent for an agent run, an agent 
   assert.equal(words.landedBy({ agent: false, agentRun: null }), null);
 });
 
+test('one day ago reads as one day (seen on the visitor history, Item 4c164732)', () => {
+  const at = Date.UTC(2026, 10, 18, 12);
+  assert.equal(words.ago(new Date(at - 86_400_000).toISOString(), at), '1 day ago');
+  assert.equal(words.ago(new Date(at - 3 * 86_400_000).toISOString(), at), '3 days ago');
+});
+
 test('only an exact State pins the files, and only #L<number> selects a line', () => {
   assert.equal(words.pinnedState(`?at=${head}`), head);
   assert.equal(words.pinnedState('?at=main'), null);

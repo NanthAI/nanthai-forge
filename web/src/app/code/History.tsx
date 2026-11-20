@@ -75,7 +75,7 @@ export function History(props: CodeProps) {
                 <span className={`ttl${row.title ? '' : ' none'}`} dir="auto">
                   {titleOf(row)}
                 </span>
-                <span className="who">{landedBy(row) ? <Who handle={landedBy(row)!} /> : null}</span>
+                <span className="who">{row.actor ? <Who handle={landedBy(row)!} /> : landedBy(row)}</span>
                 <span className="t2">{row.check ? 'Checked' : 'No check'}</span>
               </A>
             ))}
@@ -188,7 +188,13 @@ function Receipt({
         </div>
         <dl className="kv" style={{ borderTop: 'var(--rule) solid var(--line)' }}>
           <dt>By</dt>
-          <dd>{by ? <Who handle={by} app={row.agentClient ?? undefined} /> : 'not reported'}</dd>
+          <dd>
+            {by && row.actor ? (
+              <Who handle={by} app={row.agentClient ?? undefined} />
+            ) : (
+              (by ?? 'not reported')
+            )}
+          </dd>
           {evidence?.intentId ? (
             <>
               <dt>Why</dt>

@@ -1077,6 +1077,63 @@ wait. The agent-day below contains additional commands outside those landings.
 Changing that allocation changes forecasts when landings per agent-day change;
 a serving-only trace tagged by initiating command is the single missing measurement.
 
+## Public code views
+
+Item 4c164732. A signed-out visitor reads code and history only through the cached public route
+(`/public/v1/code/…`, CDN 30 s, no stale serving). An open or idle tab, and a cache hit, cost zero Convex calls,
+zero database I/O and zero R2 operations: there is no socket, no polling and no timer. Only a cache miss reaches
+Convex, at most once per address per 30 seconds, whatever the number of visitors.
+
+**Per miss, counted** (`tests/public-code-access.test.mjs`, "one visitor cache miss"; the test fails if a read
+adds functions). Stored object reads are counted in one process, so a file read after its folder reuses the State
+already read; a cold reader also reads the State. "Landings that touched it" runs one listing per landing compared, at
+most eight per address.
+
+| Address | Functions | Fixture DB read / write B | Reply B | Stored object reads |
+| --- | --- | ---: | ---: | ---: |
+| History page | HTTP action + `publicCode:history` | 1,739 / 0 | 1,035 | 0 |
+| Folder | HTTP action + `publicCode:resolve` + `projectCodeBrowse:visitorRead` + `projectCode:checkpoint` + 2 × `projectSourceReviewStore:checkpoint` + 6 × `projectObjects:resolve` (12) | 8,643 / 171 | 209 | 3 |
+| File (first page) | the same, with two source reviews: 4 checkpoints + 14 object lookups (22) | 18,522 / 342 | 472 | 1 |
+
+**Per miss, priced.** The visitor source read is the members' `readCode` with no identity, so each function is
+priced at the mean of its own rows in the dev spend meter (`scripts/convex-spend.mjs` ledger, 2026-11-10 to
+2026-11-20, rate card `spendRates`: $2/million calls, $0.20/GB I/O, $0.30/GB-hour, $0.12/GB egress).
+`projectCodeBrowse:read` has 97 rows (13 cold reads at about 0.0093 GB-hours each, the rest warm at about
+0.000065), `projectObjects:resolve` 6,962, `projectSourceReviewStore:checkpoint` 189, `projectCode:checkpoint` 97,
+and `GET /public/v1/*` 36. The two `publicCode` queries are priced from fixture bytes. The HTTP action that waits
+on the Node read is charged at V8 memory (64 MB) for the Node read's duration (512 MB), so one eighth of its
+compute. R2 Class B reads add about $0.001 per 1,000.
+
+| Per 1,000 cache misses | Mean (includes cold starts) | Median (warm reader) |
+| --- | ---: | ---: |
+| History page | $0.006 | $0.006 |
+| Folder | $0.52 | $0.054 |
+| File | $0.55 | $0.080 |
+
+Compute from cold Node starts is most of the mean. On Convex Professional, calls and compute come out of the
+included allowance, so the billed marginal is database I/O plus egress: about $0.04 (folder) to $0.06 (file)
+per 1,000 source misses, and under $0.001 per 1,000 history misses.
+
+**Per page view.** One page view makes more than one miss (`web/src/public/PublicCode.tsx`,
+`web/src/app/code/use-source.ts`): every view first reads the history page, which names main's head. A Files view
+then opens the folder or file, and may read one more folder for the level below, the look-ahead. A History view
+reads only the history page until the visitor opens a landing's changes.
+
+| Per 1,000 page views, every miss uncached | Misses | Mean (list rates) | Median (warm reader) | Billed (I/O + egress) |
+| --- | --- | ---: | ---: | ---: |
+| History | history | $0.006 | $0.006 | under $0.001 |
+| Files, a folder | history + folder + look-ahead | $1.05 | $0.11 | about $0.08 |
+| Files, a file | history + file + look-ahead | $1.08 | $0.14 | about $0.10 |
+
+These are the most 1,000 views can cost: they assume every view misses the cache and every reader starts cold at the
+metered rate. A refused address is a 404 before any function runs. Repeat views of an address within 30 seconds are
+cache hits and cost $0. The landing path is unchanged: $0.00 per 1,000 landings against the
+[P6 baseline](#p6-final-cost-baseline).
+
+Not measured live yet: dev has no public project (follow-up 43d2f68d), so the HTTP action's share is derived from
+the meter rather than observed. When that project exists, rerun the spend meter over a scripted set of
+visitor misses and replace the derived row.
+
 ## Per-unit budget
 
 | Unit | Brief/capture rates | Published Starter | Evidence |

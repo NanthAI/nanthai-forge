@@ -105,14 +105,13 @@ function Pages() {
   const search = useSearch();
   const { isLoading, isAuthenticated } = useConvexAuth();
   const viewer = useQuery(api.urlAccounts.current, isAuthenticated ? {} : 'skip');
-  // Anyone can browse signed out: explore, profiles and a project's front page (owner decision 2026-11-16).
+  // Anyone can browse signed out: explore, profiles, a project's front page (owner decision 2026-11-16) and its code
+  // and history, read only (Item 4c164732). A private or missing project answers "No public project" alike.
   const discovering =
     route.frame === 'discover' ||
     (route.frame === 'project' &&
       !isAuthenticated &&
-      route.place === 'needs' &&
-      !route.section &&
-      !route.rest);
+      ((route.place === 'needs' && !route.section && !route.rest) || route.place === 'code'));
   const needsSignIn =
     !isLoading &&
     !isAuthenticated &&

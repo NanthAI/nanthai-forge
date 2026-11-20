@@ -4,6 +4,7 @@ import { internalMutation } from './server';
 import { readableProject, sourcePins } from './projectObjectDownloads';
 import { projectBackupDocument } from './schema';
 import { invariant } from '../src/errors';
+import { report } from './errors';
 /** Private viewer context. The public action returns rendered pages, never this archive plan. */
 export const checkpoint = internalMutation({
   args: {
@@ -17,16 +18,21 @@ export const checkpoint = internalMutation({
     pins: v.union(v.null(), v.array(v.object({ sha256: v.string(), size: v.number() }))),
   }),
   handler: async (ctx, input) => {
-    const project = await readableProject(ctx, input.projectId, !input.recheck);
-    const backup = await ctx.db.get(input.backupId);
-    invariant(
-      backup && backup.projectId === input.projectId && backup.status === 'stored',
-      'PROJECT_UNAVAILABLE',
-      'Select a stored checkpoint from this project.',
-    );
-    return {
-      backup,
-      pins: input.recheck ? null : await sourcePins(ctx, project, input.backupId, input.digests),
-    };
+    try {
+      const project = await readableProject(ctx, input.projectId, !input.recheck);
+      const backup = await ctx.db.get(input.backupId);
+      invariant(
+        backup && backup.projectId === input.projectId && backup.status === 'stored',
+        'PROJECT_UNAVAILABLE',
+        'Select a stored checkpoint from this project.',
+      );
+      return {
+        backup,
+        pins: input.recheck ? null : await sourcePins(ctx, project, input.backupId, input.digests),
+      };
+    } catch (error) {
+      // Called with runMutation: only a ConvexError keeps PROJECT_UNAVAILABLE and RATE_LIMITED for the reader.
+      return report(error);
+    }
   },
 });

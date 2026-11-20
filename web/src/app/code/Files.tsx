@@ -2,7 +2,6 @@
 // Files: the tree, the file and what touched it, at main or at one exact State (`?at=`). One fixed frame (DESIGN.md
 // rule 3): the tree drives the file, the file drives the context. Each region loads and fails on its own.
 import { useState } from 'react';
-import { useConvex } from 'convex/react';
 import { Head, crumbsFor } from '../Place';
 import { A } from '../frames';
 import { hrefFor } from '../paths';
@@ -10,7 +9,7 @@ import { useSearch } from '../router';
 import { RegionBoundary, type CodeProps } from './CodePlace';
 import { landedAt, landedBy, pinnedState, plural, short, titleOf } from './code-words';
 import { FileBody } from './FileBody';
-import { browse, messageOf, useHistory, type CodeDir, type CodeHistoryRow } from './code-data';
+import { browse, messageOf, useHistory, useReader, type CodeDir, type CodeHistoryRow } from './code-data';
 import { useSource, type Source } from './use-source';
 import { CODE_TOUCHED_PAIRS } from '../../../../src/code-tree';
 
@@ -262,7 +261,7 @@ function Touched({
   route: CodeProps['route'];
   landing: CodeHistoryRow | null;
 }) {
-  const client = useConvex();
+  const reader = useReader();
   const from = landing ? Math.max(0, rows.indexOf(landing)) : 0;
   const pairs = rows.slice(from, from + CODE_TOUCHED_PAIRS);
   const [found, setFound] = useState<{ rows: CodeHistoryRow[]; looked: number } | null>(null);
@@ -271,7 +270,7 @@ function Touched({
   const look = () => {
     setBusy(true);
     setError('');
-    void browse<{ touched: (string | null)[] }>(client, {
+    void browse<{ touched: (string | null)[] }>(reader, {
       projectId,
       state: pairs[0]!.head,
       want: 'touched',

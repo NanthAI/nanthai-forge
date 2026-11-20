@@ -47,7 +47,8 @@ export function ago(iso: string, now = Date.now()) {
   if (ms < minute) return 'just now';
   if (ms < 60 * minute) return `${Math.round(ms / minute)} min ago`;
   if (ms < 24 * 60 * minute) return `${Math.round(ms / (60 * minute))} h ago`;
-  return `${Math.round(ms / (24 * 60 * minute))} days ago`;
+  const days = Math.round(ms / (24 * 60 * minute));
+  return `${days} ${days === 1 ? 'day' : 'days'} ago`;
 }
 /** "5 min 12 s" between two times; null when either is missing. */
 export function between(from: string | null | undefined, to: string | null | undefined) {
