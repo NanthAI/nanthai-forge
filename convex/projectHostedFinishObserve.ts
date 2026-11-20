@@ -28,7 +28,7 @@ import { sourceAuthority } from '../src/hosted-source-authority';
 import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
 import { boardWake } from './projectBoardDelivery';
-import { loadHeldPolicy, noteHeldPolicy } from './projectHostedOwnerReview';
+import { heldReview, loadHeldPolicy, noteHeldPolicy } from './projectHostedOwnerReview';
 
 /** Finite selected-request pages. Every page/subscription rechecks current access;
  * neither reading nor reconnecting wakes a controller. Versions are durable offsets,
@@ -206,8 +206,11 @@ async function observePage(
       eventCount = events.length;
     }
     stage = 'response';
-    // A held landing says which policy it is pinned to and when it re-reads it; one read, only while held.
-    const pin = await loadHeldPolicy(ctx, project, state);
+    // Only the current snapshot gains review details. History does not repeat a live handle or link.
+    const [pin, review] = await Promise.all([
+      loadHeldPolicy(ctx, project, state),
+      heldReview(ctx, project, state),
+    ]);
     if (pin)
       for (const event of events)
         if (event.submission.version === state.version)
@@ -218,6 +221,7 @@ async function observePage(
     for (const event of events)
       if (event.submission.version === state.version) Object.assign(event, delay, cause);
     const payload = {
+      ...review,
       ...delay,
       ...cause,
       projectId: input.projectId,

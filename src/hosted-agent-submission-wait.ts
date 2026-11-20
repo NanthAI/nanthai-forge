@@ -41,8 +41,9 @@ export const hostedSubmissionWaitSchema = z
     timeoutSeconds: z.number().nonnegative().finite().default(600),
   })
   .strict();
+const approvalFields = { approver: z.string().optional(), url: z.string().optional() };
 const eventSchema = z.object({
-  submission: hostedLandingStateSchema,
+  submission: hostedLandingStateSchema.extend(approvalFields),
   providerDelay: z.string().optional(),
   /** Why a failed check did not pass and the one next step (src/check-failure-cause.ts failureCauseField). */
   failureCause: z.unknown().optional(),
@@ -63,6 +64,7 @@ const pageSchema = eventSchema.extend({
   canonicalOperationId: z.uuid().optional(),
   authority: sourceAuthoritySchema,
   submission: hostedLandingStateSchema,
+  ...approvalFields,
   pendingAttempt: hostedFinishSchema.shape.pending,
   events: z.array(eventSchema),
   nextVersion: z.number().int().nonnegative(),
@@ -458,7 +460,11 @@ async function observeHostedSubmissionsOnce(
         operationId,
         page.isDone
           ? await observedConflictRecovery(transport, {
-              submission: page.submission,
+              submission: {
+                ...page.submission,
+                ...(page.approver ? { approver: page.approver } : {}),
+                ...(page.url ? { url: page.url } : {}),
+              },
               ...(page.providerDelay ? { providerDelay: page.providerDelay } : {}),
               ...(page.failureCause ? { failureCause: page.failureCause } : {}),
               ...(page.sourceFailure ? { sourceFailure: page.sourceFailure } : {}),

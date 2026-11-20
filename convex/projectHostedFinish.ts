@@ -11,6 +11,7 @@ import { finishPendingForReader } from '../src/hosted-finish';
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
+import { heldReview } from './projectHostedOwnerReview';
 import { activeProject, accessibleProject } from './projectAuthority';
 import { loadFinish } from './projectHostedFinishStore';
 import { acceptancePage, acceptancePlan } from './projectHostedAcceptanceStore';
@@ -59,7 +60,7 @@ export const status = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted finish progress.');
-      await accessibleProject(ctx, input.projectId, user.subject);
+      const project = await accessibleProject(ctx, input.projectId, user.subject);
       const { row, state } = await loadLanding(ctx, input),
         { value } = await loadFinish(ctx, input);
       const wouldConflict = state.phase === 'queued' ? readWouldConflict(row) : undefined;
@@ -67,7 +68,9 @@ export const status = query({
       const stallAlert = await latestStallAlert(ctx, input, queueAwareLandingState(state, queue));
       const orderWait = landingOrderWaitForReader(row, state);
       const reservation = landingReservationForReader(row);
+      const review = await heldReview(ctx, project, state);
       return canonicalPayload({
+        ...review,
         ...(reservation ? { reservation } : {}),
         ...(await readProviderDelay(ctx, row, state)),
         // The cause and next step the Failed check screen shows (b030c3c5); failure states only.

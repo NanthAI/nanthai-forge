@@ -4,7 +4,7 @@ import { landingStateField, type LandingRecord } from './landing-state.js';
 import { orderWaitOf } from './hosted-wait-line.js';
 import { shellQuote } from './shell-quote.js';
 import { operationWait } from './agent-operation-wait.js';
-import { landingHold } from './hosted-landing-hold.js';
+import { landingHold, type LandingReview } from './hosted-landing-hold.js';
 import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
 
 type Reply = Record<string, unknown>;
@@ -90,7 +90,13 @@ export function hostedObservationContinuation(root: string, result: Reply, opera
   if (!pending || !original) return result;
   const continuation = operationWait(root, { operationIds: [original], until: 'acceptance' });
   // A held landing names who releases it beside the wait (5c59940b); derived, no read.
-  const hold = landingHold(submission as Parameters<typeof landingHold>[0]);
+  const selected = submission as Parameters<typeof landingHold>[0];
+  const approval = Object.hasOwn(result, 'pendingAttempt') ? (result as LandingReview) : undefined;
+  const hold = landingHold({
+    ...selected,
+    approver: approval?.approver ?? selected?.approver,
+    url: approval?.url ?? selected?.url,
+  });
   return {
     ...result,
     ...(hold ? { hold } : {}),
@@ -170,6 +176,7 @@ export function normalizeObservedFinish(root: string, selection: Reply, result: 
           'nextCommand',
           'waitStatus',
           'inProgress',
+          'hold',
           'instruction',
           'retry',
           'retryCommand',

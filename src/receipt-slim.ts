@@ -445,3 +445,12 @@ function brief(out: Json): Json {
     out.result = omit(out.result as Json, 'messages');
   return out;
 }
+
+/** The same readable approval line for land, status and approve-link. */
+export function reviewHoldLine(
+  review?: { approver?: string | undefined; url?: string | undefined },
+  fallback?: string,
+) {
+  const approver = review?.approver ? `@${review.approver}` : 'the project owner';
+  return `Held, waiting for ${approver}.${review?.url ? ` Open ${review.url}` : fallback ? ` ${fallback}` : ''}`;
+}

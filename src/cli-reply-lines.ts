@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 /** Terminal-only facts from the reply already in hand. Never traverse arbitrary receipt fields:
  * credentials, device labels and exact machine evidence belong to their existing contracts. */
+import { reviewHoldLine } from './receipt-slim.js';
+
 type Row = Record<string, unknown>;
 const row = (value: unknown): Row =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Row) : {};
@@ -93,10 +95,14 @@ export function cliReplyLines(args: string[], output: unknown): string[] {
       submission = row(result.submission);
     if (run.status || (result.status && result.checkId))
       return [`Check ${short(run.id ?? result.id)}: ${state(run.status ?? result.status)}.`];
-    if (row(submission.observation).pendingReason === 'waiting-for-review')
+    if (row(submission.observation).pendingReason === 'waiting-for-review') {
       return [
-        `Held, waiting for the project owner. Next: nforge agent ROOT approve-link '{"operationId":"${text(submission.operationId)}"}'`,
+        reviewHoldLine(
+          { approver: text(result.approver ?? submission.approver), url: text(result.url ?? submission.url) },
+          `Next: nforge agent ROOT approve-link '{"operationId":"${text(submission.operationId)}"}'`,
+        ),
       ];
+    }
     return statusLines(result);
   }
   if (action === 'check-settings')
@@ -129,7 +135,10 @@ export function cliReplyLines(args: string[], output: unknown): string[] {
   }
   if (action === 'approve-link' && result.held)
     return [
-      `Held, waiting for ${handle(result.owner) || 'the project owner'}.${result.url ? ` Open ${text(result.url)}` : next(result.next)}`,
+      reviewHoldLine(
+        { approver: text(result.approver) || handle(result.owner).slice(1), url: text(result.url) },
+        text(result.next),
+      ),
     ];
   return [];
 }

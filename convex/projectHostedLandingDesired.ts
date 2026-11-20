@@ -22,7 +22,7 @@ import { repairConvexSource } from './projectConvexSourceStore';
 import { enqueueHostedLanding } from './projectHostedLanding';
 import { replaceOwnerlessLanding } from './projectHostedLaneFinish';
 import { landingAlias } from './projectHostedLandingIdentity';
-import { failedLanding, landingRow } from './projectHostedLandingStore';
+import { failedLanding, landingRow, type LandingRow } from './projectHostedLandingStore';
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
 import { enforceLandGates } from './projectHostedLandGates';
 import { requireQueueRoom } from './projectHostedQueueRoom';
@@ -34,6 +34,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
+import { heldReview } from './projectHostedOwnerReview';
 
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() };
 /** Register the goal while the first source job runs. The selected source pages
@@ -70,6 +71,7 @@ export const submit = receiptMutation({
         { value: input.gates },
         tokens.agentTokens,
         input.maxChecks,
+        true,
       );
     } catch (error) {
       return report(error);
@@ -91,6 +93,7 @@ export async function submitDesiredLanding(
   agentTokens?: number,
   /** Public submit only: `land {maxChecks}` (convex/projectHostedQueueRoom.ts). */
   maxChecks?: number,
+  includeReview = false,
 ): Promise<string> {
   if (command.outside !== undefined) command = { ...command, outside: sanitizeOutside(command.outside) };
   const input = { projectId, agent, agentClient };
@@ -103,6 +106,14 @@ export async function submitDesiredLanding(
   // one that began at an older epoch reads its record back instead of a refusal on every try (N3,
   // Item 1d69905b). The project read and its access check stay first.
   const project = await activeProject(ctx, input.projectId, actor.id);
+  // Only reused canonical states can be held. Project the current approval on the public reply,
+  // leaving the stored state bytes intact and every fresh submission on its existing path.
+  const reply = async (row: LandingRow) => {
+    if (!includeReview || row.phase !== 'ready') return row.value;
+    const state = JSON.parse(row.value) as z.infer<typeof hostedLandingStateSchema>;
+    const review = await heldReview(ctx, project, state);
+    return review ? canonicalPayload({ ...state, ...review }) : row.value;
+  };
   const request = canonicalPayload(withoutAuthorship(command));
   const old = await ctx.db
     .query('projectHostedLandingDesired')
@@ -117,7 +128,7 @@ export async function submitDesiredLanding(
       const task = await ctx.db.system.get(old.wake.taskId);
       if (!task || task.state.kind === 'failed') await schedule(ctx, old, 0);
     }
-    return canonical?.value ?? old.value;
+    return canonical ? reply(canonical) : old.value;
   }
   const alias = await landingAlias(ctx, {
     projectId: input.projectId,
@@ -133,7 +144,7 @@ export async function submitDesiredLanding(
     const canonical = await landingRow(ctx, alias);
     const desired = canonical ? null : await desiredLanding(ctx, alias);
     invariant(canonical || desired, 'SOURCE_UNAVAILABLE', 'Original desired landing is unavailable.');
-    return canonical?.value ?? desired!.value;
+    return canonical ? reply(canonical) : desired!.value;
   }
   requireWriteEpoch(project, command.authorityEpoch);
   // Fresh goals and fresh aliases charge once; canonical admission retains this reservation.
@@ -185,7 +196,7 @@ export async function submitDesiredLanding(
       requestHash: digest(request),
       submissionId: queued.submissionId,
     });
-    return queued.value;
+    return reply(queued);
   }
   const [existing] = await ctx.db
     .query('projectHostedLandingDesired')
@@ -209,7 +220,7 @@ export async function submitDesiredLanding(
       requestHash: digest(request),
       submissionId: existing.submissionId,
     });
-    return existingCanonical?.value ?? existing.value;
+    return existingCanonical ? reply(existingCanonical) : existing.value;
   }
   // A new desired landing only: replays and joins of a live landing above return unjudged.
   await requireQueueRoom(ctx, input.projectId, maxChecks);

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+import { reviewHoldLine } from './receipt-slim.js';
 /** A pending landing that no queue, controller or agent advances on its own: it waits for a
  * person (review/owner approval) or for a dependency to land. Incident 5c59940b: a passed
  * protected-path landing sat in phase "ready" for 75+ min while every read said "queued to
  * land" and the queue dropped it, so the builder cancelled it as stranded. */
+export type LandingReview = { approver?: string | undefined; url?: string | undefined };
 export type LandingHold = {
   /** `main-red`: the gate parked a ready entry until main's full check is green (B2/B3).
    * `ci-down`: CI ended every recent check on one infrastructure cause (e62d834b line 5). */
@@ -12,8 +14,9 @@ export type LandingHold = {
   /** Protected paths named by the reason; null when the reason names none. */
   paths: string[] | null;
   next: string;
+  review?: LandingReview;
 };
-type HoldInput = {
+type HoldInput = LandingReview & {
   id?: string;
   operationId?: string;
   observation?: { state?: string; pendingReason?: string | null } | null;
@@ -43,9 +46,11 @@ export function landingHold(state: HoldInput | null | undefined, laneId?: string
   if (reason === 'waiting-for-review') {
     const stored = state?.error?.message?.trim() || 'Waiting for review by a person';
     const named = PATHS.exec(stored)?.[1];
+    const review = state?.approver || state?.url ? { approver: state.approver, url: state.url } : undefined;
     const lane = `{"laneId":"${laneId ?? 'LANE_ID'}"}`;
     return {
       kind: 'review',
+      ...(review ? { review } : {}),
       reason: stored,
       paths: named
         ? named
@@ -53,7 +58,9 @@ export function landingHold(state: HoldInput | null | undefined, laneId?: string
             .map(path => path.trim())
             .filter(Boolean)
         : null,
-      next: `Check passed; held until the project owner approves ${state?.id ? `submission ${state.id}` : 'it'} as a person (agents cannot approve; it does not time out). Hand the owner the link from nforge agent ROOT approve-link '{"operationId":"${state?.operationId ?? 'ORIGINAL_UUID'}"}' and keep waiting: this wait returns on their decision. To drop it instead: nforge agent ROOT land --withdraw '${lane}'.`,
+      next: review?.url
+        ? `Hand the approval link to the owner and keep waiting for their decision. To withdraw: nforge agent ROOT land --withdraw '${lane}'.`
+        : `Check passed; held until the project owner approves ${state?.id ? `submission ${state.id}` : 'it'} as a person (agents cannot approve; it does not time out). Hand the owner the link from nforge agent ROOT approve-link '{"operationId":"${state?.operationId ?? 'ORIGINAL_UUID'}"}' and keep waiting: this wait returns on their decision. To drop it instead: nforge agent ROOT land --withdraw '${lane}'.`,
     };
   }
   if (reason === 'waiting-for-dependency')
@@ -72,8 +79,11 @@ const holdWords = {
   'main-red': 'HELD: MAIN IS RED',
   'ci-down': 'HELD: CI IS DOWN',
 } as const satisfies Record<LandingHold['kind'], string>;
-/** The two lines a waiting agent reads: what holds it (verbatim reason) and the next step. */
+/** What holds the landing (verbatim reason), the available approval details, and the next step. */
 export const holdLines = (hold: LandingHold) => [
-  `${holdWords[hold.kind]}; not landed yet: ${hold.reason.replace(/\s+/g, ' ').slice(0, 900)}`,
+  hold.kind === 'review' && hold.review
+    ? reviewHoldLine(hold.review)
+    : `${holdWords[hold.kind]}; not landed yet: ${hold.reason.replace(/\s+/g, ' ').slice(0, 900)}`,
+  ...(hold.kind === 'review' && hold.review ? [hold.reason.replace(/\s+/g, ' ').slice(0, 900)] : []),
   hold.next,
 ];

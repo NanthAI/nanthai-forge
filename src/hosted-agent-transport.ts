@@ -144,6 +144,7 @@ import {
 } from './hosted-changed-paths.js';
 import { publishClientSourcePack } from './source-pack-client.js';
 import { missingRequiredFeatures } from './hosted-contract-features.js';
+import type { LandingHold } from './hosted-landing-hold.js';
 import { bareStatus, capabilityOptions, takeEarlyCapabilities } from './hosted-capabilities-early.js';
 import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
 import { selectHostedFinish, unsavedFiles } from './hosted-agent-finish-identity.js';
@@ -397,6 +398,8 @@ export class HostedAgentTransport {
   waitUntil?: number;
   /** Lane inbox context of an explicit wait; piggybacks its existing status read. */
   waitBoard?: BoardWaitOption | undefined;
+  /** Plain status in a Lane: the operation read replaces the overlap read it does not display. */
+  plainStatus = false;
   constructor(
     readonly root: string,
     readonly address: HostedAgentAddress,
@@ -1137,17 +1140,24 @@ export class HostedAgentTransport {
           laneId,
         );
       }
-      if (observation && action === 'status' && Object.keys(command.data).length === 0)
+      if (observation && action === 'status' && Object.keys(command.data).length === 0) {
+        const laneId = readHostedLaneCheckout(this.root)?.selection.laneId;
+        const hold =
+          laneId && this.plainStatus && capabilities.overlapVersion === 1
+            ? await this.statusReview(laneId)
+            : undefined;
         return this.response(
           action,
           null,
           {
             needsFix: capabilities.needsFix ?? [],
+            ...(hold ? { landingHold: hold } : {}),
             ...(capabilities.githubMirror !== undefined ? { githubMirror: capabilities.githubMirror } : {}),
             ...(capabilities.mainDay ? { mainToday: await mainTodayFrom(capabilities.mainDay) } : {}),
           },
-          capabilities.overlapVersion === 1 ? readHostedLaneCheckout(this.root)?.selection.laneId : undefined,
+          capabilities.overlapVersion === 1 && hold === undefined ? laneId : undefined,
         );
+      }
       if (observation) {
         const observed = (await this.observe(
           command.data as z.infer<typeof hostedAgentCommandSchemas.status>,
@@ -2312,6 +2322,30 @@ export class HostedAgentTransport {
           }
         : {}),
     };
+  }
+  private async statusReview(laneId: string): Promise<LandingHold | null | undefined> {
+    const entry = readLaneEntry(laneId);
+    const operationId = entry?.landing?.operationId;
+    if (!operationId || entry.state) return;
+    const forgetSettled = () => {
+      const current = readLaneEntry(laneId);
+      if (current?.landing?.operationId === operationId)
+        recordLane({ laneId, landing: null, lastActionAt: current.lastActionAt });
+    };
+    try {
+      const observation = await this.query<Record<string, unknown>>('projectHostedFinishObserve:page', {
+        operationId,
+        nextVersion: Number.MAX_SAFE_INTEGER,
+      });
+      const submission = observation.submission as { observation?: { state?: string } } | undefined;
+      if (submission?.observation?.state && submission.observation.state !== 'pending') forgetSettled();
+      const hold = hostedObservationContinuation(this.root, observation).hold as LandingHold | undefined;
+      return hold?.kind === 'review' ? hold : null;
+    } catch (error) {
+      if (hostedActionError(error, 'landing status').code !== 'NOT_FOUND') throw error;
+      forgetSettled();
+      return null;
+    }
   }
   private async observe(command: z.infer<typeof hostedAgentCommandSchemas.status>) {
     const { laneId, operationId, submissionId, runId, kind, version, summary, reports, cursor, main } =

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { LandingReview } from './hosted-landing-hold.js';
 import { reconcileSourceRequest } from './hosted-source-request.js';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -370,6 +371,8 @@ export async function queuedConflict(session: HostedAgentSession, submission: Ho
   try {
     const read = await session.query<{
       request: HostedLandingState;
+      approver?: LandingReview['approver'];
+      url?: LandingReview['url'];
       queuePosition?: number | null;
       queue?: unknown;
       queueAheadSelection?: unknown;
@@ -379,7 +382,11 @@ export async function queuedConflict(session: HostedAgentSession, submission: Ho
     // The read can settle the submission while enqueue's reply is in flight.
     // Never combine its newer metadata with the older admission snapshot.
     const current = {
-      submission: read.request ?? submission,
+      submission: {
+        ...(read.request ?? submission),
+        ...(read.approver ? { approver: read.approver } : {}),
+        ...(read.url ? { url: read.url } : {}),
+      },
       queuePosition: read.queuePosition,
       ...(read.queue ? { queue: read.queue } : {}),
       ...(read.queueAheadSelection ? { queueAheadSelection: read.queueAheadSelection } : {}),

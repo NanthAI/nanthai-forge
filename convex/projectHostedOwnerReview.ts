@@ -20,6 +20,9 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { settleAttemptApprovals } from './projectHostedApprovalStore';
+import { accountFor } from './urlIdentity';
+import { handleError } from '../src/readable-urls';
+import type { LandingReview } from '../src/hosted-landing-hold';
 
 export const REVIEW_HELD = 'waiting-for-review';
 export const held = (state: HostedLandingState) =>
@@ -177,7 +180,20 @@ export function approveUrl(projectId: string, submissionId: string) {
   url.searchParams.set('submission', submissionId);
   return url.href;
 }
-/** One indexed read: the approve link of a landing operation, for any project reader (an agent
+/** Only the current held operation needs the project's public address handle. Never infer it from
+ * the owner subject, the submitter, a provider name or an email. No lookup on an unheld operation. */
+export async function heldReview(
+  ctx: QueryCtx | MutationCtx,
+  project: Pick<Doc<'hostedProjects'>, '_id' | 'owner'> | undefined,
+  state: HostedLandingState,
+): Promise<LandingReview | undefined> {
+  if (!project || !held(state)) return;
+  const approver = (await accountFor(ctx, project.owner))?.handle;
+  const url = approveUrl(project._id, state.id);
+  return { ...(approver && !handleError(approver) ? { approver } : {}), ...(url ? { url } : {}) };
+}
+
+/** The approve link of a landing operation, for any project reader (an agent
  * hands it to the owner). Opening it approves nothing; the page needs a signed-in owner. */
 export const link = query({
   args: { projectId: v.id('hostedProjects'), operationId: v.string() },
@@ -195,7 +211,10 @@ export const link = query({
         .take(1);
       invariant(row, 'NOT_FOUND', 'No hosted landing has this operation id.');
       const state = landingStateFromRow(row);
-      const policy = await loadHeldPolicy(ctx, project, state);
+      const [policy, review] = await Promise.all([
+        loadHeldPolicy(ctx, project, state),
+        heldReview(ctx, project, state),
+      ]);
       return canonicalPayload({
         operationId: state.operationId,
         submissionId: state.id,
@@ -205,7 +224,8 @@ export const link = query({
         // Which policy the held attempt is pinned to and when it re-reads it (991a1a94).
         ...(policy ? { policy, policyNote: heldPolicyNote(policy) } : {}),
         phase: state.phase,
-        url: approveUrl(input.projectId, state.id),
+        ...review,
+        url: review?.url ?? approveUrl(input.projectId, state.id),
       });
     } catch (error) {
       return report(error);

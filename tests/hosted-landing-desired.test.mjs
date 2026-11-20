@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { finishFixture, desired, landingApi, code } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { policyPreset } from '../dist/autonomy-policy.js';
 const synthetic = {
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
   FORGE_SOURCE_PROVIDER: 'convex',
@@ -53,6 +54,33 @@ function pauseSource(f) {
   f.patch('projectHostedOperations', row._id, { value: JSON.stringify({ ...operation, terminal: null }) });
   return () => f.patch('projectHostedOperations', row._id, { value: saved });
 }
+test('replaying a supervised desired landing returns current approval details on the original submission', async t => {
+  const web = 'https://forge.example.invalid';
+  const priorWeb = process.env.FORGE_WEB_URL;
+  process.env.FORGE_WEB_URL = web;
+  t.after(() => {
+    if (priorWeb === undefined) delete process.env.FORGE_WEB_URL;
+    else process.env.FORGE_WEB_URL = priorWeb;
+  });
+  const f = await finishFixture(t);
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: { ...policyPreset('supervised'), agentDefaults: { preflight: 'advise' } },
+  });
+  f.insert('forgeAccounts', { owner: 'owner', handle: 'river' });
+  const command = request(f);
+  const submitted = await submit(f, command);
+  assert.equal(submitted.url, undefined);
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  const held = await submit(f, command);
+  assert.equal(held.id, submitted.id);
+  assert.equal(held.operationId, command.operationId);
+  assert.equal(held.observation.pendingReason, 'waiting-for-review');
+  assert.equal(held.approver, 'river');
+  assert.equal(held.url, `${web}/approve?project=${f.projectId}&submission=${submitted.id}`);
+});
+
 for (const stopped of ['submitted', 'claimed', 'composing']) {
   test(`hosted desired landing recovers after the client disappears at ${stopped}`, async t => {
     const f = await finishFixture(t),

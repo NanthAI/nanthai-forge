@@ -9,7 +9,7 @@ import {
   isCapsuleAttemptCursor,
 } from './projectLandingCapsuleContext';
 import { runProof } from './projectLandingProof';
-import { held, heldPolicy, noteHeldPolicy } from './projectHostedOwnerReview';
+import { held, heldPolicy, heldReview, noteHeldPolicy } from './projectHostedOwnerReview';
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
 import { finishPendingForReader } from '../src/hosted-finish';
 import {
@@ -38,7 +38,7 @@ import { v } from 'convex/values';
 import { mutation, query, receiptMutation } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
 import { landingAgentClient, landingAgentRun } from '../src/agent-slug';
-import { activeProject, accessibleProject } from './projectAuthority';
+import { activeProject, accessibleProject, authorizedReadProject } from './projectAuthority';
 import { beginHostedOperation } from './projectHostedOperations';
 import {
   ensureLandingQueue,
@@ -114,21 +114,21 @@ export const enqueue = receiptMutation({
       const tokens = landingTokensColumn(input.tokens);
       const request = hostedLandingRequestSchema.parse(JSON.parse(input.request));
       const actor = await acceptanceActor(ctx, request.agent);
-      return canonicalPayload(
-        await enqueueHostedLanding(
-          ctx,
-          {
-            projectId: input.projectId,
-            ...landingAgentRun(input.agent),
-            ...landingAgentClient(input.agentClient),
-            ...tokens,
-            gates: { value: input.gates },
-            ...(input.maxChecks === undefined ? {} : { maxChecks: input.maxChecks }),
-          },
-          request,
-          actor,
-        ),
+      const state = await enqueueHostedLanding(
+        ctx,
+        {
+          projectId: input.projectId,
+          ...landingAgentRun(input.agent),
+          ...landingAgentClient(input.agentClient),
+          ...tokens,
+          gates: { value: input.gates },
+          ...(input.maxChecks === undefined ? {} : { maxChecks: input.maxChecks }),
+        },
+        request,
+        actor,
       );
+      const review = await heldReview(ctx, authorizedReadProject(ctx, input.projectId), state);
+      return canonicalPayload(review ? { ...state, ...review } : state);
     } catch (error) {
       return report(error);
     }
@@ -173,7 +173,9 @@ export const status = query({
       const queue = await readQueueStatus(ctx, state);
       const orderWait = landingOrderWaitForReader(row, state);
       const reservation = landingReservationForReader(row);
+      const review = await heldReview(ctx, project, state);
       const payload = {
+        ...review,
         request: noteHeldPolicy(
           landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
           pin,

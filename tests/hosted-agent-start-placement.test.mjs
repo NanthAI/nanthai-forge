@@ -8,7 +8,8 @@ import { tmpdir } from 'node:os';
 import { getFunctionName } from 'convex/server';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { hostedAgentActions } from '../dist/hosted-agent-contract.js';
-import { readLaneEntry } from '../dist/lane-registry.js';
+import { readLaneEntry, recordLane } from '../dist/lane-registry.js';
+import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
 import { submitHostedLand } from '../dist/hosted-land-cli.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 
@@ -64,6 +65,61 @@ test('start reports the Lane before its checkout and opens it at the chosen path
     request = args.request ? JSON.parse(args.request) : args;
   assert.equal(request.intent.outcome, 'Placed Lane');
   assert(!('path' in request) && !('open' in request));
+});
+
+test('Lane status names a live approval and keeps the status call budget for old and settled entries', async t => {
+  stateHome(t);
+  const s = agentFixture(t);
+  signedDownloads(t, s);
+  const path = join(s.root, '..', 'lanes', 'status');
+  const started = await s.transport().dispatch('start', { outcome: 'Observe a held landing', path });
+  const root = started.result.path;
+  const transport = new HostedAgentTransport(root, s.address, s.exchange);
+  const operationId = randomUUID();
+  recordLane({ laneId: s.lane.laneId, landing: { operationId, at: Date.now() } });
+  const review = { approver: 'river', url: 'https://fixture.invalid/approve?selection=fixture' };
+  let pending = true;
+  const query = s.exchange.client.query;
+  s.exchange.client.query = async (ref, args) => {
+    const name = getFunctionName(ref);
+    if (name === 'projectHostedFinishObserve:page') {
+      s.calls.push({ name, args });
+      assert.equal(args.operationId, operationId);
+      return {
+        pendingAttempt: null,
+        submission: {
+          operationId,
+          phase: pending ? 'ready' : 'landed',
+          observation: pending
+            ? { state: 'pending', pendingReason: 'waiting-for-review' }
+            : { state: 'landed' },
+        },
+        ...(pending ? review : {}),
+      };
+    }
+    return query(ref, args);
+  };
+  const capabilities = 'projectHostedAgent:capabilities';
+  const observation = 'projectHostedFinishObserve:page';
+  const overlap = 'projectHostedOverlaps:read';
+  const status = async expected => {
+    s.calls.length = 0;
+    const result = await readHostedCliStatus(root, transport);
+    assert.deepEqual(
+      s.calls.map(call => call.name),
+      expected,
+    );
+    return result;
+  };
+  assert.equal((await status([capabilities])).value.landingHold, undefined, 'older server adds no call');
+  s.caps.overlapVersion = 1;
+  const held = await status([capabilities, observation]);
+  assert(held.text.includes(`Held, waiting for @river. Open ${review.url}`));
+  assert.deepEqual(held.value.landingHold.review, review);
+  pending = false;
+  assert.equal((await status([capabilities, observation])).value.landingHold, undefined);
+  assert.equal(readLaneEntry(s.lane.laneId).landing, null);
+  assert.equal((await status([capabilities, overlap])).value.landingHold, undefined);
 });
 
 test('start open:false returns pins only, with no checkout download', async t => {

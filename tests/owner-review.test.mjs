@@ -10,6 +10,10 @@ import { finishFixture, code } from './hosted-finish-fixture.mjs';
 import { policyPreset as preset } from '../dist/autonomy-policy.js';
 // Server preflight gate (Issue 029138ef) has its own tests (hosted-landing-desired.test.mjs).
 const policyPreset = name => ({ ...preset(name), agentDefaults: { preflight: 'advise' } });
+import { cliReplyLines } from '../dist/cli-reply-lines.js';
+import { observeHostedSubmissions } from '../dist/hosted-agent-submission-wait.js';
+import { hostedObservationContinuation } from '../dist/hosted-agent-finish-result.js';
+import { waitEventLine } from '../dist/hosted-wait-line.js';
 import { landSummary } from '../dist/hosted-land-summary.js';
 import { approvalWait, deriveApproval } from '../dist/approval-state.js';
 import { openApprovalsReply } from '../dist/hosted-agent-approval.js';
@@ -25,13 +29,13 @@ const needsMe = await import(moduleUrl('../convex/projectNeedsMe.ts'));
 const { needsView } = await import(moduleUrl('../web/src/app/needs/model.ts'));
 const { decideTarget } = await import(moduleUrl('../web/src/app/needs/decide.ts'));
 
-function syntheticR2(t) {
+function syntheticR2(t, web = 'https://forge.example.invalid') {
   const synthetic = {
     R2_ACCOUNT_ID: 'synthetic',
     R2_BUCKET: 'synthetic',
     R2_ACCESS_KEY_ID: 'synthetic',
     R2_SECRET_ACCESS_KEY: 'synthetic',
-    FORGE_WEB_URL: 'https://forge.example.invalid',
+    FORGE_WEB_URL: web,
     FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
   };
   const previous = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
@@ -56,11 +60,11 @@ function syntheticDevice(f) {
   });
 }
 /** A public project whose owner agent's finish touches a protected path: checked, then held. */
-async function heldLanding(t) {
-  syntheticR2(t);
+async function heldLanding(t, mode = 'trusted', web) {
+  syntheticR2(t, web);
   const f = await finishFixture(t);
-  const policy = policyPreset('trusted');
-  policy.acceptance.ownerApprovalPaths = ['selected.txt'];
+  const policy = policyPreset(mode);
+  if (mode === 'trusted') policy.acceptance.ownerApprovalPaths = ['selected.txt'];
   f.patch('hostedProjects', f.projectId, { visibility: 'public', autonomyPolicy: policy });
   f.insert('projectContributors', { projectId: f.projectId, contributor: 'contributor' });
   syntheticDevice(f);
@@ -77,6 +81,70 @@ async function heldLanding(t) {
   return { f, state, select };
 }
 const device = { subject: 'owner', forgeCredential: 'synthetic-device' };
+
+test('a supervised landing names its public approver and approval URL on land, observe and status', async t => {
+  const web = 'https://forge-dogfood.example.invalid';
+  const { f, state, select } = await heldLanding(t, 'supervised', web);
+  const input = { projectId: f.projectId, operationId: state.operationId, nextVersion: 0 };
+  const url = `${web}/approve?project=${f.projectId}&submission=${state.id}`;
+  const observeLanding = () => f.tx('heldObservation', observe.page, input, device).then(JSON.parse);
+  const unnamed = await observeLanding();
+  assert.equal(unnamed.submission.observation.pendingReason, 'waiting-for-review');
+  assert.equal(unnamed.url, url);
+  assert.equal(unnamed.approver, undefined, 'no subject or fallback name when no handle is configured');
+  const handle = 'forge-' + 'r'.repeat(33);
+  f.insert('forgeAccounts', { owner: 'owner', handle });
+  const named = await observeLanding();
+  const reviewDetails = { approver: handle, url };
+  const approvalOf = ({ approver, url }) => ({ approver, url });
+  assert.deepEqual(approvalOf(named), reviewDetails);
+  assert.deepEqual(approvalOf(await f.current(state.id)), reviewDetails);
+  assert.deepEqual(approvalOf(await f.enqueue(state.request)), reviewDetails);
+  assert(
+    named.events.every(event => event.url === undefined),
+    'the current approval link appears once per page',
+  );
+  const { approver: _approver, url: _url, ...bare } = named;
+  const wireBytes = Buffer.byteLength(JSON.stringify(named)) - Buffer.byteLength(JSON.stringify(bare));
+  assert(
+    wireBytes + (32 - f.projectId.length) <= 200,
+    `held reply grows by ${wireBytes} bytes on the fixture`,
+  );
+  const link = JSON.parse(
+    await f.tx('link', review.link, { projectId: f.projectId, operationId: state.operationId }, device),
+  );
+  assert.equal(link.held, true);
+  assert.equal(link.approver, handle);
+  assert.equal(link.url, url);
+  const result = hostedObservationContinuation('/tmp/root', named);
+  assert.equal(result.hold.kind, 'review');
+  assert.deepEqual(result.hold.review, reviewDetails);
+  const submission = { ...named.submission, ...reviewDetails };
+  const line = `Held, waiting for @${handle}. Open ${url}`;
+  assert.equal(landSummary({ result: { submission } })[0], line);
+  assert.equal(cliReplyLines(['agent', '.', 'observe'], { result: named })[0], line);
+  const events = [];
+  const waited = await observeHostedSubmissions(
+    {
+      root: '/tmp/root',
+      address: { url: web, projectId: f.projectId },
+      dispatch: async () => ({ result: { actor: handle } }),
+      query: async (_, { nextVersion }) => f.tx('heldWait', observe.page, { ...input, nextVersion }, device),
+    },
+    { operationIds: [state.operationId], until: 'acceptance', timeoutSeconds: 0 },
+    undefined,
+    event => events.push(event),
+  );
+  assert.deepEqual(approvalOf(waited.result.submissions[0].submission), reviewDetails);
+  assert.deepEqual(waitEventLine(events.at(-1)).line.hold.review, reviewDetails);
+  assert.equal(landSummary({ result: waited.result.submissions[0] })[0], line);
+  await f.tx('ownerApprove', acceptance.approve, await select());
+  assert.equal(
+    (await observeLanding()).url,
+    undefined,
+    'a settled landing no longer carries approval details',
+  );
+});
 
 test('agents, device sign-ins and contributors cannot approve or decline; the link names the hold', async t => {
   const { f, state, select } = await heldLanding(t);

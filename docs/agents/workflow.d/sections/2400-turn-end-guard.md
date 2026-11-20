@@ -68,11 +68,14 @@ which submissions land or fail.
 
 A pending landing held by `waiting-for-review` (a person must accept it, for example
 for protected paths) or `waiting-for-dependency` is not lost and not queued to land.
-Every read names it, derived from the state already returned with no extra call:
-`land` and `wait` print `WAITING FOR REVIEW; not landed yet: REASON` and the next
-step, and their JSON carries `hold {kind,reason,paths,next}` (`paths` lists the
-protected paths the reason names, or null); `status`/`observe` on the operation and
-the wait line carry the same `hold`. `queue` keeps held entries after the dispatch
+The current landing observation includes `approver` and `url` when available while it
+waits for the owner. `land` and `wait` name the hold, print the owner's public
+Forge handle when configured and give the approval link when the deployment has
+a web address. Their JSON and `status`/`observe` on the operation carry
+`hold {kind,reason,paths,next,review?}`, with `review {approver?,url?}`. `paths` lists the protected paths named
+by the reason, or null. In a Lane checkout, `nforge status ROOT` checks the
+locally recorded in-flight operation and prints its current approval details.
+It uses the operation read in place of the overlap read, with no extra call. `queue` keeps held entries after the dispatch
 order with `position:null` and `hold`, counts them in `held`, and never makes one a
 predecessor; `yourLane` shows the hold. A `dependency` hold's entry also carries
 `dependsOn {submissionId}`, the landing it lands after, from the finish record the
