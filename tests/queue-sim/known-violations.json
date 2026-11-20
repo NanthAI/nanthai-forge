@@ -1,7 +1,6 @@
 {
   "schema": 1,
   "violations": {
-    "L1": { "item": "5e3c3a3c", "reason": "Parking clears the alarm and the supervisor does not re-arm it." },
     "L2": { "item": "5e3c3a3c", "reason": "Holder changes and parked handoffs do not always schedule a fresh claim." },
     "S6": { "item": "5e3c3a3c", "reason": "Handoffs can replace orderWait without recording the edge." },
     "S5": { "item": "5e3c3a3c", "reason": "Main-race recompositions have no generation cap." },

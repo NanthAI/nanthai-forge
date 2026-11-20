@@ -55,7 +55,7 @@ export async function parkedIncident(t, { seed } = {}) {
   for (const id of followers) {
     const row = rows(f).find(r => r.submissionId === id);
     assert.equal(row.orderWait, holder);
-    // The old code has no alarm here; the invariant inspector reports L1.
+    // No alarm of its own (L1 option B, 687d1eda): the chain end, the holder, owns progress.
   }
   await seed?.(f, { head, holder, followers });
   await f.rawChecks.pass(headRun);

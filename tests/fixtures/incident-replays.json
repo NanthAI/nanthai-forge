@@ -255,9 +255,9 @@
     },
     {
       "incident": "5e3c3a3c",
-      "what": "Stored order waits survive a holder generation change without a fresh claim or armed deadline; the read-only detector must expose the stale chain.",
+      "what": "Stored order waits survive a holder generation change without a fresh claim; the read-only detector must expose the stale chain.",
       "file": "tests/hosted-landing-queue-sim.test.mjs",
-      "test": "5e3c3a3c: holder starts a new check while followers are parked; a parked entry with no alarm is detected"
+      "test": "5e3c3a3c: holder starts a new check while followers are parked; the pre-N1 stale chain is detected"
     },
     {
       "incident": "e4aee4fe",

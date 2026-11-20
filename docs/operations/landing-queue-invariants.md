@@ -16,7 +16,7 @@ Targets; violations remain.
 | S10 | Terminal phases stay terminal and retire work; a settled queue owns no queue tasks. |
 | S11 | No bare polling. Eight short lease retries, then one expiry wake; record urgent waits. |
 | S12 | Alert once at the root; followers show their dependency. |
-| L1 | Parked deadline: 1.5× holder check wall, clamped 5–15 minutes, unknown 10. Re-arm on firing. |
+| L1 | Parked chain liveness (Item 687d1eda, option B): a parked waiter holds no timer (idle costs nothing). Every `orderWait` chain, and every row held for red main or waiting on a dependency, ends at an unparked entry, through entries that still hold the order or a live landing reservation, and that end is driven: an armed stall alarm, a finish wake due within the stall window, a live check (an entry checking a non-terminal run that has an armed confirm, an armed watchdog once the provider accepted the dispatch, or a runner lease with its matching armed expiry; a running run alone drives nothing) or a queue wake while runnable. A held red-main row is live while main is red or its release page is armed; a dependency wait while its parent is live or its dependents page is armed. A live but undriven end is excused only by the waiter's own finish wake due within one check wall; a terminal, missing, looping or order-dropping end fails whatever claim the waiter holds. Source mutants of the review e7137e30 liveness bugs must fail it. |
 | L2 | A changed wait decision leaves a pending claim in that transaction. Include holder parking. |
 | L3 | Unblocked Ready: one 30-second slot per predecessor plus itself. |
 | L4 | Dependent waits end within remaining bounded generations and one slot. |
@@ -32,7 +32,7 @@ Eight seeds cover eight profiles; 20 took 136 seconds. Counterexamples stay in t
 
 ## Owner rollout decision
 
-Calibration is stopped; retained results are unqualified. Sequence: foundation, new-run wake, parked deadlines.
+Calibration is stopped; retained results are unqualified. Sequence: foundation, new-run wake, parked-chain liveness (L1: the chain end owns the deadline; per-row parked alarms were rejected on idle cost, 687d1eda).
 Each runtime rule has a documented switch, deleted after proof. The new-run wake (N1) has no
 switch: an order holder that starts checking a run it can be charged for (`overtakeOlder` is `spend`; never while merely queued, which
 is a free overtake that records no mark) drives one Ready follower whose latest receipt wait names

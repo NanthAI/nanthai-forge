@@ -5,7 +5,6 @@
       "seed": 1,
       "profile": "disjoint",
       "invariants": [
-        "L1",
         "L2",
         "S10"
       ],
@@ -15,7 +14,6 @@
       "seed": 2,
       "profile": "overlap",
       "invariants": [
-        "L1",
         "L2",
         "S6",
         "S10"

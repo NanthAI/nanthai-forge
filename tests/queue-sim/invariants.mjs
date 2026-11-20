@@ -2,7 +2,10 @@
 import assert from 'node:assert/strict';
 import { ticketState } from '../landing-ticket-fixture.mjs';
 import { moduleUrl } from '../convex-module.mjs';
-const { olderLandingAhead } = await import(moduleUrl('../convex/projectHostedLandingOrder.ts'));
+import { hostedCheckTerminal } from '../../dist/hosted-check.js';
+const { holdsLandingOrder, olderLandingAhead } = await import(
+  moduleUrl('../convex/projectHostedLandingOrder.ts')
+);
 const terminal = row => ['landed', 'terminal-failed'].includes(row.phase);
 export const requestRows = f => [...f.tables.projectHostedLandingRequests.values()];
 export const armed = (f, id) =>
@@ -39,16 +42,149 @@ export async function decide(f, row) {
   );
 }
 
+/** The stall alarm's window (LANDING_STALL_MS): a finish wake due later than this is a hold-expiry
+ * timer, not a driver, for L1. */
+export const STALL_MS = 15 * 60_000;
+const armedTasks = (f, name, match) =>
+  [...f.tables._scheduled_functions.values()].some(
+    task => armed(f, task._id) && task.name === name && match(task.args?.[0] ?? {}),
+  );
+/** A check that still owns its own progress (review e7137e30 finding 1): the entry is checking a
+ * non-terminal run, and that run has a bounded driver: an armed verdict confirmation, an armed
+ * execution watchdog once the provider accepted the dispatch, or a runner lease with its exact
+ * armed expiry (function, fence and until match). Any other task that names the run, or
+ * a bare lease timestamp, drives nothing. */
+export function liveCheck(f, row, now = Date.now()) {
+  if (row.phase !== 'checking' || !row.runId) return false;
+  const saved = [...f.tables.projectHostedCheckRuns.values()].find(r => r.runId === row.runId);
+  const run = saved && JSON.parse(saved.value);
+  if (!run || hostedCheckTerminal(run)) return false;
+  if (armed(f, run.actions?.confirm)) return true;
+  if (run.actions?.outcome === 'accepted' && armed(f, run.actions.watchdog)) return true;
+  // The armed expiry owns the lease even at or just past `until`, until it runs (review a66aa1ce 3).
+  const until = run.lease?.until ?? run.ownerDeadline;
+  return (
+    until !== undefined &&
+    armedTasks(
+      f,
+      'projectHostedCheckLease:expire',
+      args => args.runId === run.id && args.fence === run.fence && args.until === until,
+    )
+  );
+}
+const finishOf = (f, id) => [...f.tables.projectHostedFinishes.values()].find(r => r.submissionId === id);
+/** What drives an entry that waits on no one: its armed stall alarm, a finish wake due within the
+ * stall window, a live check, or the queue's wake or lease while it is runnable. */
+function driver(f, row, queue, now) {
+  if (armed(f, row.alarm?.taskId)) return 'alarm';
+  if (claimDue(f, row.submissionId, now + STALL_MS)) return 'wake';
+  if (liveCheck(f, row, now)) return 'check';
+  if (row.runnable && (armed(f, queue?.wake?.taskId) || (queue?.lease?.until ?? 0) > now)) return 'queue';
+  return null;
+}
+/** A live landing reservation still parks same-file landings (reservationAhead's holder rules and
+ * writeLanding's `reserving`): unexpired, not held for red main, finish-driven, not stalled and not
+ * waiting for review. A dependency wait, a suspect or an error do not end it (review a66aa1ce 3). */
+function holdsReservation(row, state, now) {
+  return (
+    !row.hold &&
+    (row.reservedUntil ?? 0) > now &&
+    Boolean(state.request.finish) &&
+    !state.observation.stall &&
+    state.observation.pendingReason !== 'waiting-for-review'
+  );
+}
+/** Follow stored `orderWait` edges to the first unparked entry. A terminal, missing or looping
+ * end, or a hop that no longer holds the order, is dead whatever any claim says (lead, review
+ * e7137e30 finding 2). */
+export function parkedChainEnd(f, row, byId, queue, now = Date.now(), depth = 0) {
+  const seen = new Set([row.submissionId]);
+  let end = row;
+  while (end.orderWait) {
+    const next = byId.get(end.orderWait);
+    if (!next || terminal(next) || seen.has(next.submissionId))
+      return {
+        end: next ?? null,
+        live: false,
+        dead: true,
+        why: next ? (terminal(next) ? next.phase : 'cycle') : 'missing',
+      };
+    seen.add(next.submissionId);
+    // A waiter is woken when the entry it waits on leaves the order (its exit wake). An entry that
+    // no longer holds the order (held for red main, stalled, failed) owes its waiters nothing more,
+    // unless it still holds a live landing reservation, which keeps same-file waiters parked.
+    const state = ticketState(f, next);
+    if (!holdsLandingOrder(next, state, now) && !holdsReservation(next, state, now))
+      return { end: next, live: false, dead: true, why: `${next.phase}, holds no order` };
+    end = next;
+  }
+  const why = entryLive(f, end, byId, queue, now, depth);
+  return { end, live: Boolean(why), dead: false, why: why ?? `${end.phase}, undriven` };
+}
+/** An unparked entry owns progress through a driver, or it waits on an event that still has an
+ * owner: a red-main hold while main is red or its release page is armed (Fix D), or a dependency
+ * wait whose parent is itself live, or whose ended parent's dependents page is armed. */
+function entryLive(f, row, byId, queue, now, depth) {
+  const own = driver(f, row, queue, now);
+  if (own) return own;
+  if (depth > 16) return null;
+  if (row.hold === 'main-red') {
+    const audit = [...f.tables.projectHostedMainAudits.values()].find(r => r.projectId === row.projectId);
+    if (audit?.red) return 'main red';
+    return armedTasks(f, 'projectHostedMainAudit:releaseHeld', args => args.projectId === row.projectId)
+      ? 'release page'
+      : null;
+  }
+  const finish = finishOf(f, row.submissionId);
+  if (finish?.waiting && finish.parentSubmissionId) {
+    const parent = byId.get(finish.parentSubmissionId);
+    if (!parent || terminal(parent))
+      return armedTasks(
+        f,
+        'projectHostedFinishDriver:dependents',
+        args => args.submissionId === finish.parentSubmissionId,
+      )
+        ? 'dependents page'
+        : null;
+    const chain = parkedChainEnd(f, parent, byId, queue, now, depth + 1);
+    return chain.live ? `parent ${chain.why}` : null;
+  }
+  return null;
+}
+/** L1 (Item 687d1eda, option B; strengthened by review e7137e30): a waiting entry holds no timer,
+ * so an idle queue costs nothing; what it waits on owns progress. A parked row's stored chain must
+ * end at a live entry (a dead end fails outright; a live but undriven end is excused only by the
+ * row's own claim due within one check wall). A row held for red main, and a dependency waiter,
+ * must wait on an event that still has an owner. Returns the violation detail, or null. */
+export function l1Issue(f, row, byId, queue, now = Date.now()) {
+  if (terminal(row)) return null;
+  if (row.orderWait) {
+    const chain = parkedChainEnd(f, row, byId, queue, now);
+    if (chain.live) return null;
+    if (!chain.dead && claimDue(f, row.submissionId, now + CHECK_WALL_MS)) return null;
+    return `parked chain ends at ${chain.end?.submissionId ?? 'nothing'} (${chain.why}): no alarm, wake or live check`;
+  }
+  const waiting = row.hold === 'main-red' || finishOf(f, row.submissionId)?.waiting;
+  if (!waiting || entryLive(f, row, byId, queue, now, 0)) return null;
+  return row.hold === 'main-red'
+    ? 'held for red main while main is green and no release page is armed'
+    : 'dependency wait on a parent that owns no progress';
+}
+
 /** Structural checks use stored rows and live scheduler state, never the
  * existence of a holder alone as evidence that a stale edge can wake. */
 export async function inspectQueue(f) {
   const issues = [],
     rows = requestRows(f),
     byId = new Map(rows.map(r => [r.submissionId, r]));
+  const queue = [...f.tables.projectHostedLandingQueues.values()].find(row => row.projectId === f.projectId);
   const add = (id, row, detail) => issues.push({ id, submission: row.submissionId, detail });
   for (const row of rows) {
+    const l1 = l1Issue(f, row, byId, queue);
+    if (l1) add('L1', row, l1);
+  }
+  for (const row of rows) {
     if (!row.orderWait || terminal(row)) continue;
-    if (!armed(f, row.alarm?.taskId)) add('L1', row, 'parked without an armed deadline');
     const seen = new Set([row.submissionId]);
     for (let next = row.orderWait; next; next = byId.get(next)?.orderWait) {
       if (seen.has(next)) {

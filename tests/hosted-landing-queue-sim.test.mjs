@@ -34,7 +34,7 @@ const cases = [
   ).values(),
 ];
 test('known queue violations may only shrink from the initial measured baseline', () => {
-  assert(Object.keys(known).length <= 5, 'a new waiver requires a reviewed baseline decision');
+  assert(Object.keys(known).length <= 4, 'a new waiver requires a reviewed baseline decision');
 });
 for (const { seed, profile } of cases) {
   test(`queue invariants seed ${seed} ${profile}`, async t => {
@@ -85,10 +85,12 @@ function mutantChild() {
   })();
   return mutant;
 }
-test('5e3c3a3c: holder starts a new check while followers are parked; a parked entry with no alarm is detected', async t => {
+test('5e3c3a3c: holder starts a new check while followers are parked; the pre-N1 stale chain is detected', async t => {
   const { parkedIncident } = await import('./queue-sim/parked-incident.mjs');
   const { inspectQueue } = await import('./queue-sim/invariants.mjs');
-  // The mutant child asserts L1/L2 on the stored chain and that the detector left it unchanged.
+  // The mutant child asserts the stale edge (L2) on the stored chain, that L1 stays silent (a
+  // parked follower holds no timer of its own; the holder's live re-check drives the chain end),
+  // and that the detector left the chain unchanged.
   assert.match(
     await mutantChild(),
     /^ok \d+ - pre-N1 parked incident: the detector exposes the stale chain$/m,
@@ -166,13 +168,115 @@ test('5e3c3a3c new-run wake: holder starts a new check while followers are parke
   assert(waiterReclaimed, 'a new holder generation leaves its oldest parked follower a fresh claim');
 });
 
-test.skip('5e3c3a3c L1 deadline: a parked entry with no alarm', async t => {
+// L1 (Item 687d1eda, lead decision b5ad7376, option B): a parked waiter holds no timer, so idle
+// costs nothing; every parked chain must end at an entry that owns progress (an armed alarm, a
+// wake or a live check). After the 5e3c3a3c incident's new-run wake, the three followers still
+// parked wait on the reclaimed oldest follower, the head of their chain, and its alarm covers them.
+test('5e3c3a3c L1: every parked chain ends at a live entry; the chain head covers its parked followers', async t => {
   const { parkedIncident } = await import('./queue-sim/parked-incident.mjs');
-  const { inspectQueue } = await import('./queue-sim/invariants.mjs');
-  const { f } = await parkedIncident(t);
+  const { inspectQueue, requestRows, parkedChainEnd, armed, pendingClaim, liveCheck } =
+    await import('./queue-sim/invariants.mjs');
+  // While the head checks, every follower is parked behind the holder, itself parked behind the
+  // head: each chain ends at the head, which owns its stall alarm.
+  let mid = null;
+  const {
+    f,
+    followers,
+    head: first,
+  } = await parkedIncident(t, {
+    seed: async (f, { head }) => {
+      const rows = requestRows(f),
+        byId = new Map(rows.map(row => [row.submissionId, row]));
+      mid = {
+        ends: rows.filter(row => row.orderWait).map(row => parkedChainEnd(f, row, byId, null)),
+        parkedTimers: rows.filter(row => row.orderWait && armed(f, row.alarm?.taskId)).length,
+        headAlarm: armed(f, byId.get(head).alarm?.taskId),
+        l1: (await inspectQueue(f)).filter(issue => issue.id === 'L1'),
+      };
+    },
+  });
+  assert.equal(mid.ends.length, 5, 'the holder and four followers are parked');
+  assert(
+    mid.ends.every(chain => chain.live && chain.end.submissionId === first),
+    JSON.stringify(mid.ends),
+  );
+  assert.equal(mid.parkedTimers, 0, 'no parked waiter holds a timer');
+  assert(mid.headAlarm, "the head's stall alarm is armed");
+  assert.deepEqual(mid.l1, []);
+  const rows = requestRows(f),
+    byId = new Map(rows.map(row => [row.submissionId, row]));
+  const parked = rows.filter(row => row.orderWait && !['landed', 'terminal-failed'].includes(row.phase));
+  assert.deepEqual(
+    parked.map(row => row.submissionId).sort(),
+    followers.slice(1).sort(),
+    'three followers stay parked',
+  );
+  const head = byId.get(followers[0]);
+  for (const row of parked) {
+    assert(!armed(f, row.alarm?.taskId), 'a parked waiter holds no timer (idle costs nothing)');
+    assert(!pendingClaim(f, row.submissionId), 'and no wake of its own');
+    const chain = parkedChainEnd(f, row, byId, null);
+    assert.equal(chain.end.submissionId, head.submissionId, 'the chain ends at the reclaimed follower');
+    assert(chain.live, JSON.stringify(chain));
+  }
+  assert(armed(f, head.alarm?.taskId), "the chain head's stall alarm is armed");
   assert.deepEqual(
     (await inspectQueue(f)).filter(issue => issue.id === 'L1'),
     [],
-    'every parked entry has an armed deadline',
+    'every parked chain ends at an entry with an armed alarm, a wake or a live check',
   );
+  // Mutant: the chain head loses its alarm and its wake while its followers wait. With no driver
+  // left, L1 names exactly the three parked followers.
+  const finish = [...f.tables.projectHostedFinishes.values()].find(r => r.submissionId === head.submissionId);
+  for (const taskId of [head.alarm.taskId, finish?.wake?.taskId].filter(Boolean))
+    f.patch('_scheduled_functions', taskId, { state: { kind: 'canceled' } });
+  assert(!pendingClaim(f, head.submissionId) && !liveCheck(f, head), 'no driver is left on the chain head');
+  assert.deepEqual(
+    (await inspectQueue(f))
+      .filter(issue => issue.id === 'L1')
+      .map(issue => issue.submission)
+      .sort(),
+    followers.slice(1).sort(),
+  );
+});
+
+// L1 source mutants (review e7137e30 finding 4): each reviewed chain hand-off, on current code, ends
+// every parked chain at a live entry; on its own pre-fix code (its CHAIN_MUTANTS entry, one
+// uncompiled child per scenario) L1 names the stranded follower. Each must pass by name in its child.
+test('687d1eda L1 source mutants: each finding-4 regression strands a follower that L1 names', async t => {
+  const { CHAIN_MUTANTS, scenarios, allL1 } = await import('./queue-sim/chain-scenarios.mjs');
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  assert.deepEqual(Object.keys(CHAIN_MUTANTS).sort(), Object.keys(scenarios).sort());
+  for (const [name, scenario] of Object.entries(scenarios)) {
+    const { f } = await scenario(t);
+    assert.deepEqual(await allL1(f), [], `${name}: current code leaves no row without a live end`);
+    const environment = {
+      ...process.env,
+      FORGE_TEST_SOURCE_PATCHES: JSON.stringify(CHAIN_MUTANTS[name]),
+      FORGE_TEST_PRECOMPILED: '0',
+      FORGE_CHAIN_SCENARIO: name,
+    };
+    delete environment.NODE_TEST_CONTEXT;
+    const { code, stdout } = await promisify(execFile)(
+      process.execPath,
+      [
+        '--import',
+        './tests/check-runtime.mjs',
+        '--test',
+        '--test-reporter=tap',
+        'tests/queue-sim/chain-mutant-runner.mjs',
+      ],
+      { env: environment, maxBuffer: 4 * 1024 * 1024 },
+    ).then(
+      result => ({ code: 0, stdout: result.stdout }),
+      error => ({ code: error.code, stdout: `${error.stdout}\n${error.stderr}` }),
+    );
+    assert.match(
+      stdout,
+      new RegExp(`^ok \\d+ - chain mutant ${name}: L1 names the stranded follower$`, 'm'),
+      stdout.slice(-4000),
+    );
+    assert.equal(code, 0, `${name}: the mutant child exits cleanly\n${stdout.slice(-4000)}`);
+  }
 });
