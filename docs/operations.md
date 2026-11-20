@@ -333,7 +333,7 @@ The list of codes and their kind lives in `src/fallback-reasons.ts`:
 | Stage | Recorded on | Codes |
 | --- | --- | --- |
 | `first-check` | receipt `firstCheck.reason` (an admitted landing that rechecked) | reuse codes below |
-| `main-race` | landing attempt `recheckReason` (main moved; the attempt rechecked) | reuse codes below |
+| `main-race` | landing attempt `recheckReason` (main moved; the attempt rechecked), or `forkReason` on a fork outside the finish install | reuse codes below |
 | `scoped-recheck` | landing attempt `scopedFallback` | `scoped-no-evidence` |
 | `contract-gate` | the run's server gate (`gate.reason` when the contract gate went full) | `contract-supervised`, `contract-actor`, `contract-protected-paths`, `contract-trust`, `contract-none`, `main-red`, `audit-debt`, `contract-other` |
 | `selection` | check run `fallback`, from the runner's pinned selection | `contract-full`, `docs-paths-undeclared`, `test-runner-unavailable`, `scoped-base-unavailable`, `scoped-root-config`, `scoped-unclassified`, `graph-full` (a [package-graph first check](workflows.md#check-command-scope) ran full: majority, unplaced path, flags Forge cannot place or nothing to run; the run's `fallbackReason` says which) |
@@ -349,6 +349,10 @@ carries semantic merge members), `recovery` (culprit recovery or its fix Lane), 
 `checked-not-full`, `audit-not-full`, `source-unavailable`, `analysis-expired`.
 `not-eligible` remains only for a finish with no pending recompose, which no current caller
 reaches, and on records written before these codes split.
+Every other writer that moves a checked attempt onto another main names its race in the
+attempt's `forkReason`, which `metrics` reads and the landing order does not: the cohort's next
+generation (`cohort`), a retired pipeline descendant (`retired-running`), a main-red park
+(`main-red`) and a conflict against the moved main (`text-conflict`).
 
 A **limitation** is a fallback where Forge could not use its fast path for this repository
 or change shape (for example `unsupported-mode`: a changed symlink or submodule;

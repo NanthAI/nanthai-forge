@@ -228,8 +228,9 @@ export async function retireSoloCheck(
   if (admission !== row.admission) await ctx.db.patch(row._id, { admission });
   let attemptId = state.attemptId;
   if (attempt.check) {
-    const { crossHeadProof: _proof, check: _check, ...pins } = attempt;
-    void [_proof, _check];
+    // A fork's metrics-only reason names its own race, never this same-main retire (c3c69c57).
+    const { crossHeadProof: _proof, check: _check, forkReason: _fork, ...pins } = attempt;
+    void [_proof, _check, _fork];
     const next = {
       ...pins,
       ...(await forkLandingAttempt(ctx, state)),

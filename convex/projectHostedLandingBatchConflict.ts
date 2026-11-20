@@ -10,12 +10,14 @@ import {
   forkLandingAttempt,
   insertLandingAttempt,
   loadLanding,
+  loadLandingAttempt,
   writeLanding,
 } from './projectHostedLandingStore';
 import { failFinish } from './projectHostedFinishStore';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { ForgeError, invariant } from '../src/errors';
 import { hostedStartMain } from './projectHostedChannels';
+import { forkRaceReason } from '../src/fallback-reasons';
 
 /** Retain a resolvable Candidate for this particular rejected merge, including
  * the worker's exact conflict root. The original clean selection is immutable. */
@@ -69,14 +71,20 @@ export async function retainBatchConflict(
     record: candidate,
   });
   const current = await loadLanding(ctx, { projectId: input.projectId, submissionId: member.submissionId });
-  const { deferredCheck, recheckReason, scopedFallback, ...pins } = member;
-  void [deferredCheck, recheckReason, scopedFallback];
+  const { deferredCheck, recheckReason, forkReason, scopedFallback, ...pins } = member;
+  void [deferredCheck, recheckReason, forkReason, scopedFallback];
   const attempt = {
     ...pins,
     ...(await forkLandingAttempt(ctx, current.state)),
     main: input.main,
     check: null,
     candidate: { ...member.candidate, id: candidate.id, digest: record.digest, head: null },
+    // A conflict against the moved main discards the parent's run (c3c69c57); the parent pin is cached.
+    ...forkRaceReason(
+      await loadLandingAttempt(ctx, { projectId: input.projectId, attemptId: current.state.attemptId }),
+      { main: input.main },
+      'text-conflict',
+    ),
   };
   await insertLandingAttempt(ctx, attempt);
   await writeLanding(

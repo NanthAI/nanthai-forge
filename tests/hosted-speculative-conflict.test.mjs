@@ -13,6 +13,7 @@ import {
   landingBodyCounts,
   observerProjectionBudget,
 } from './observer-projection-budget.mjs';
+import { assertForkRacesNamed } from './fork-race-names.mjs';
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 const conflictStore = await import(moduleUrl('../convex/projectHostedLandingBatchConflict.ts'));
 const sync = await import(moduleUrl('../convex/projectHostedSync.ts'));
@@ -226,6 +227,8 @@ test('predecessor landing rechecks a speculative rejection on real main and repo
   );
   await finishGood(f);
   assert.equal(states(f).filter(state => state.phase === 'landed').length, 9);
+  // c3c69c57: no unnamed main race; the rejected member forks from an unchecked attempt.
+  assertForkRacesNamed(f, null);
 });
 
 test('a conflict against already-landed main stays immediately terminal without a speculative wait or another CI result', async t => {

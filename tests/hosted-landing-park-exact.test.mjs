@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { api } from './hosted-finish-fixture.mjs';
+import { assertForkRacesNamed } from './fork-race-names.mjs';
 const mainAudit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
 const screen = await import(moduleUrl('../convex/projectFailureCause.ts'));
 const attemptRead = await import(moduleUrl('../convex/projectHostedLandingAttemptRead.ts'));
@@ -110,6 +111,26 @@ test('incident 687d1eda: a cohort failing only on main red tests parks every mem
   assert(f.runs().length >= 2, 'their check ran again on green main');
   const files = JSON.parse(f.c.objects.get(f.currentMain().head)).files.map(file => file.path);
   for (let i = 0; i < 4; i++) assert(files.includes(`member-${i}`), 'every change is on main');
+});
+
+test('c3c69c57: a cohort composed on a moved main that parks on main red names the race main-red', async t => {
+  process.env[SWITCH] = '1';
+  const f = await fixture(t, { count: 2 });
+  // Main moves after submission: the cohort checks on the new main, its members' own attempts
+  // keep the old one, so parking each back on its own attempt discards the shared run.
+  f.moveMain();
+  f.setRed();
+  await f.drain();
+  assert.equal(f.runs().length, 1, 'one shared check for the cohort');
+  await failRun(f, f.runs()[0].id);
+  await f.drain();
+  assert.equal(parked(f).length, 2, 'every member waits under the main-red hold');
+  // Before: the parked attempts carried no reason, so the metrics main-race row was unnamed.
+  assertForkRacesNamed(f, 'main-red');
+  await f.green();
+  await passAll(f);
+  assert(states(f).every(state => state.phase === 'landed'));
+  assertForkRacesNamed(f, 'main-red');
 });
 
 test('687d1eda: with the queue-check switch off a red-only cohort failure still splits as on main', async t => {

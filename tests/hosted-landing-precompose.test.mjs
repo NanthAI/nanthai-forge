@@ -9,6 +9,7 @@ import { hostedRecordSchema } from '../dist/hosted-records.js';
 import { hostedFinishSchema } from '../dist/hosted-finish.js';
 import { moduleUrl } from './convex-module.mjs';
 import { compose, isFinishWake, records, runFinishWake } from './hosted-finish-fixture.mjs';
+import { assertForkRacesNamed } from './fork-race-names.mjs';
 const precompose = await import(moduleUrl('../convex/projectHostedLandingPrecompose.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 const conflictPeers = await import(moduleUrl('../convex/projectHostedLandingConflictPeers.ts'));
@@ -161,6 +162,9 @@ for (const grouped of [false, true, 'pipeline']) {
           .map(({ documents, writes, readBytes }) => ({ documents, writes, readBytes })),
       }),
     );
+    // c3c69c57: no unnamed main race. These conflicts fork from a deferred attempt (no run, no
+    // runner minutes), so nothing needs a name here.
+    assertForkRacesNamed(f, null);
   });
 }
 

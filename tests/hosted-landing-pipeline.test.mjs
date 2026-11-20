@@ -7,6 +7,7 @@ import { policyPreset } from '../dist/autonomy-policy.js';
 import { landingObservation } from '../dist/hosted-landing.js';
 import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
+import { assertForkRacesNamed } from './fork-race-names.mjs';
 const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
 const acceptance = await import(moduleUrl('../convex/projectHostedAcceptance.ts'));
 const pipelineEnv = { ...synthetic, FORGE_HOSTED_CHECK_KEY_SYNTHETIC: 'synthetic-admission-pipeline' };
@@ -391,6 +392,8 @@ test('a failing predecessor discards speculative descendants, returns the bad me
       discardedInitialRuns: initial.length - 1,
     }),
   );
+  // c3c69c57: every fork onto a moved main names its reason.
+  assertForkRacesNamed(f, 'retired-running');
 });
 
 // A full pre-queue admission can reserve the exact first head without holding

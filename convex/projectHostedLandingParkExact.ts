@@ -20,7 +20,8 @@ import {
   landingQueue,
   type LandingRow,
 } from './projectHostedLandingStore';
-import { deferredOrigin } from './projectHostedLandingAttemptRead';
+import { deferredOrigin, loadLandingAttempt } from './projectHostedLandingAttemptRead';
+import { forkRaceReason } from '../src/fallback-reasons';
 import type { Id } from './_generated/dataModel';
 import { parkLanding, parkedMessage, redOnlyFailure } from './projectHostedLandingPark';
 import {
@@ -53,13 +54,14 @@ async function parkEntry(
     crossHeadProof: _proof,
     check: _check,
     recheckReason: _reason,
+    forkReason: _fork,
     scopedFallback: _scoped,
     recheck: _recheck,
     memberCandidate: _member,
     platformRetries: _retries,
     ...pins
   } = own;
-  void [_proof, _check, _reason, _scoped, _recheck, _member, _retries];
+  void [_proof, _check, _reason, _fork, _scoped, _recheck, _member, _retries];
   const attempt = {
     ...pins,
     // A cohort-installed attempt checks the shared tree; the entry's own Candidate is its member one.
@@ -68,6 +70,12 @@ async function parkEntry(
     check: null,
     deferredCheck: true as const,
     operations: { check: crypto.randomUUID(), accept: crypto.randomUUID() },
+    // Back on its own original main, the parked row names main red (c3c69c57); the parent pin is cached.
+    ...forkRaceReason(
+      await loadLandingAttempt(ctx, { projectId: entry.row.projectId, attemptId: entry.state.attemptId }),
+      pins,
+      'main-red',
+    ),
   };
   await insertLandingAttempt(ctx, attempt);
   // A red-only failure is no evidence against the entry: no stale diagnostic follows it into

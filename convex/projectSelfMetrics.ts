@@ -438,7 +438,7 @@ export const page = query({
               mainHead: attempt.main?.head ?? null,
               inputPin: (attempt.memberCandidate ?? attempt.candidate)?.inputs ?? null,
               runId: attempt.check?.runId ?? null,
-              recheckReason: attempt.recheckReason ?? null,
+              recheckReason: attempt.recheckReason ?? attempt.forkReason ?? null,
               scopedFallback: attempt.scopedFallback ?? null,
               actorKind: attempt.actor?.kind ?? null,
             };

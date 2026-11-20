@@ -38,6 +38,7 @@ import { validCrossHeadProof, type CrossHeadProof } from '../src/hosted-cross-he
 import { carriedCostCounts } from '../src/landing-speed-alerts';
 import { invalidatePipeline } from './projectHostedLandingPipeline';
 import { scopedRecheckBasis, scopedRecheckFallback } from './projectHostedScopedRecheck';
+import { forkRaceReason } from '../src/fallback-reasons';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 import type { HostedCheckRun } from '../src/hosted-check';
 async function wakeAfterPrecompose(
@@ -425,6 +426,15 @@ export async function installFinishCompose(
         operations: { check: pending.operations.check, accept: pending.operations.accept },
         retainedSelection: original.candidate,
       });
+      // A conflict against the moved main discards the parent's run (c3c69c57); the parent pin is cached.
+      Object.assign(
+        attempt,
+        forkRaceReason(
+          await loadLandingAttempt(ctx, { projectId: row.projectId, attemptId: state.attemptId }),
+          attempt,
+          'text-conflict',
+        ),
+      );
       await insertLandingAttempt(ctx, attempt);
       await writeLanding(
         ctx,

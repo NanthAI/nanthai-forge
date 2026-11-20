@@ -361,11 +361,12 @@ export async function bindAdmissionProof(
     deferredCheck: _deferred,
     memberCandidate: _member,
     recheckReason: _reason,
+    forkReason: _fork,
     scopedFallback: _scoped,
     ...pins
   } = original;
   void _deferred;
-  void [_member, _reason, _scoped];
+  void [_member, _reason, _fork, _scoped];
   const next = {
     ...pins,
     operations: {

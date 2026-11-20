@@ -8,6 +8,7 @@ import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixt
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { batchEligible } from '../dist/hosted-landing-batch.js';
 import { landingApi, compose, isFinishWake } from './hosted-finish-fixture.mjs';
+import { assertForkRacesNamed } from './fork-race-names.mjs';
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -200,6 +201,8 @@ test('a main receipt race recomposes the whole cohort without transferring evide
   assert(receipts.every(r => r.check.runId !== f.runs()[0].id));
   assert.equal(new Set(receipts.map(r => r.check.runId)).size, 1);
   assert(JSON.parse(f.c.objects.get(f.currentMain().head)).files.some(f => f.path === 'accepted.txt'));
+  // c3c69c57: every fork onto a moved main names its reason.
+  assertForkRacesNamed(f, 'cohort');
 });
 
 test('a replaced check attempt starts with empty progress, not the previous attempt test counts (9f94c28a)', async t => {

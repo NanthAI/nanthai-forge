@@ -8,6 +8,7 @@ import { cancelUnneededHostedCheck } from './projectHostedCheckCancel';
 import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 import { landingObservation } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
+import { forkRaceReason } from '../src/fallback-reasons';
 // The writer supplies its store operations so invalidation can run inside every
 // generation transition without a store -> pipeline -> store import cycle.
 type PipelineStore = Pick<
@@ -110,12 +111,16 @@ async function invalidatePipelineOnce(
         );
         continue;
       }
+      const { forkReason: _fork, ...kept } = original;
+      void _fork;
       const attempt = {
-        ...original,
+        ...kept,
         ...(await forkLandingAttempt(ctx, state)),
         check: null,
         deferredCheck: true as const,
         operations: { check: crypto.randomUUID(), accept: crypto.randomUUID() },
+        // Its predicted-head run is retired with the stack; on a moved main the row names it (c3c69c57).
+        ...forkRaceReason(parent, kept, 'retired-running'),
       };
       await insertLandingAttempt(ctx, attempt);
       const { batchId: _batch, ...rest } = state;

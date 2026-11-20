@@ -35,13 +35,25 @@ export function metricAttemptRow(attempt: import('../src/hosted-landing').Hosted
     attempt.scopedFallback ?? null,
     attempt.actor?.kind ?? null,
     attempt.memberCandidate?.inputs ?? null,
+    // Metrics-only fork name (c3c69c57), after the slots stats reads: slot 4 stays the queue's
+    // recheckReason, so public stats never counts a fork as a main race (review f86cb784).
+    ...(attempt.forkReason ? [attempt.forkReason] : []),
   ];
 }
 export function readMetricAttempt(row: import('./_generated/dataModel').Doc<'projectFinishReadRows'>) {
   const value = JSON.parse(row.value);
   const attempt = JSON.parse(value.value);
-  const [at, parentAttemptId, mainHead, runId, recheckReason, scopedFallback, actorKind, memberInputs] =
-    attempt.metric;
+  const [
+    at,
+    parentAttemptId,
+    mainHead,
+    runId,
+    recheckReason,
+    scopedFallback,
+    actorKind,
+    memberInputs,
+    forkReason,
+  ] = attempt.metric;
   return {
     id: value.attemptId,
     submissionId: value.submissionId,
@@ -50,7 +62,7 @@ export function readMetricAttempt(row: import('./_generated/dataModel').Doc<'pro
     mainHead,
     inputPin: memberInputs ?? attempt.candidate.inputs,
     runId,
-    recheckReason,
+    recheckReason: recheckReason ?? forkReason ?? null,
     scopedFallback,
     actorKind,
   };

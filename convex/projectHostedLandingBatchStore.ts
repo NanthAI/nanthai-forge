@@ -33,6 +33,7 @@ import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 import { retainLandingTrain } from './projectHostedLandingWake';
 import { invariant } from '../src/errors';
 import { scopedRecheckPairs, type ScopedRecheckBasis } from '../src/scoped-recheck-policy';
+import { forkRaceReason } from '../src/fallback-reasons';
 
 export {
   batchSchema,
@@ -286,8 +287,14 @@ export async function installBatchAttempt(
   const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
   const parent = await loadLandingAttempt(ctx, { projectId: input.projectId, attemptId: state.attemptId });
   // A retry or cohort pin is a new attempt: it never inherits the original's race reasons (7c2e69e1).
-  const { deferredCheck: _deferred, recheckReason: _reason, scopedFallback: _scoped, ...pins } = original;
-  void [_deferred, _reason, _scoped];
+  const {
+    deferredCheck: _deferred,
+    recheckReason: _reason,
+    forkReason: _fork,
+    scopedFallback: _scoped,
+    ...pins
+  } = original;
+  void [_deferred, _reason, _fork, _scoped];
   const attempt = {
     ...pins,
     ...(input.main ? { main: input.main } : {}),
@@ -303,6 +310,8 @@ export async function installBatchAttempt(
     ...(await forkLandingAttempt(ctx, state)),
     check: input.check,
     ...(input.candidate ? { candidate: input.candidate, memberCandidate: original.candidate } : {}),
+    // The cohort's next generation on a moved main discards the parent's shared run (c3c69c57).
+    ...forkRaceReason(parent, { main: input.main ?? pins.main }, 'cohort'),
   };
   await insertLandingAttempt(ctx, attempt);
   await writeLanding(

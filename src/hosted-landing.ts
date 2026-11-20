@@ -103,6 +103,9 @@ export const hostedLandingAttemptSchema = z
     /** Why this main-race attempt rechecked instead of carrying its parent's check across
      * heads, and why that recheck could not be scoped (src/fallback-reasons.ts, 7c2e69e1). */
     recheckReason: z.string().min(1).max(64).optional(),
+    /** Why a fork outside the finish install moved this attempt onto another main than its
+     * checked parent (`forkRaceReason`, Item c3c69c57). Metrics only: never unseals order. */
+    forkReason: z.string().min(1).max(64).optional(),
     scopedFallback: z.string().min(1).max(64).optional(),
     semanticPlan: semanticPlanSchema.optional(),
     deferredCheck: z.literal(true).optional(),

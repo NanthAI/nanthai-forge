@@ -3,7 +3,13 @@
 // `not-eligible` (dogfood 2026-11-17: 139 main-race attempts, 1,667 min under that one code).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { attemptCarryRefusal, fallbackKind, landingCarryRefusal } from '../dist/fallback-reasons.js';
+import { readdirSync, readFileSync } from 'node:fs';
+import {
+  attemptCarryRefusal,
+  fallbackKind,
+  forkRaceReason,
+  landingCarryRefusal,
+} from '../dist/fallback-reasons.js';
 import { batchesFixture, synthetic, states } from './hosted-landing-batches-fixture.mjs';
 import { fixture, current, drain, settle } from './hosted-stale-check-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -160,4 +166,69 @@ test('c3c69c57: named refusals refuse exactly the inputs the catch-all refused',
         cases++;
       }
   assert.equal(cases, 6 * 64 + 12);
+});
+
+// Re-check gap (lead read 2026-11-20): forks outside the finish install wrote child attempts on a
+// moved main with no reason. Each insert site is either named here as same-main (with why) or names
+// its race, so a new fork path cannot reopen the gap unnoticed.
+test('c3c69c57 guard: every landing-attempt insert names a race onto a moved main or is same-main', () => {
+  const sameMain = {
+    'projectHostedLanding.ts': 'the first attempt has no parent',
+    'projectHostedLandingStaleChecks.ts': 'the stale-check retire forks the current attempt on its own main',
+    // Its proof requires the original's main to be current main, so only a stacked group of one differs.
+    'projectHostedLandingAdmission.ts': 'binds the original to its admission proof on current main',
+  };
+  const dir = new URL('../convex/', import.meta.url);
+  const inserting = readdirSync(dir)
+    .filter(name => name.endsWith('.ts'))
+    .filter(name => /\binsertLandingAttempt\(ctx,/.test(readFileSync(new URL(name, dir), 'utf8')));
+  assert.deepEqual(
+    Object.keys(sameMain).filter(name => !inserting.includes(name)),
+    [],
+    'a listed same-main site still inserts attempts',
+  );
+  for (const name of inserting) {
+    if (sameMain[name]) continue;
+    const source = readFileSync(new URL(name, dir), 'utf8');
+    assert.ok(/forkRaceReason\(|attempt\.recheckReason = /.test(source), `${name} names its main race`);
+  }
+});
+
+test('c3c69c57: a fork names its race only when it moves a checked parent onto another main', () => {
+  const on = (head, check = { runId: 'run' }) => ({ main: { head }, check });
+  // Metrics-only `forkReason`: the queue's `recheckReason` also unseals order (review 85fb41bc).
+  assert.deepEqual(forkRaceReason(on('a'), on('b'), 'cohort'), { forkReason: 'cohort' });
+  // A same-main fork is no race: one race counts once.
+  assert.deepEqual(forkRaceReason(on('a'), on('a'), 'cohort'), {});
+  // A deferred parent discarded no run: its cohort join stays byte-identical.
+  assert.deepEqual(forkRaceReason(on('a', null), on('b'), 'cohort'), {});
+});
+
+// Review f86cb784: public stats reads compact metric slot 4 as "main race"; a fork's name must
+// reach metrics without turning a failed cohort run into a merge-queue failure on stats.
+test('c3c69c57: a fork name reaches metrics from the compact row but never stats slot 4', async () => {
+  const projection = await import(moduleUrl('../convex/projectMetricReadProjection.ts'));
+  const attempt = {
+    at: '2026-11-20T00:00:00.000Z',
+    parentAttemptId: 'parent',
+    main: { head: 'h' },
+    check: { runId: 'run' },
+    forkReason: 'cohort',
+    actor: { kind: 'agent' },
+    candidate: { inputs: { sha256: 'i', size: 1 } },
+  };
+  const metric = projection.metricAttemptRow(attempt);
+  assert.equal(metric[4], null, 'stats reads slot 4: a fork is not a main race there');
+  const row = (value, extra = {}) => ({
+    value: JSON.stringify({
+      attemptId: 'a',
+      submissionId: 's',
+      value: JSON.stringify({ candidate: attempt.candidate, metric: value, ...extra }),
+    }),
+  });
+  assert.equal(projection.readMetricAttempt(row(metric)).recheckReason, 'cohort');
+  // A row without a fork name keeps its eight slots, so its bytes do not change.
+  const plain = projection.metricAttemptRow({ ...attempt, forkReason: undefined });
+  assert.equal(plain.length, 8);
+  assert.equal(projection.readMetricAttempt(row(plain)).recheckReason, null);
 });

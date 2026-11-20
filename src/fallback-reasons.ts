@@ -133,6 +133,22 @@ export function attemptCarryRefusal(previous: {
   return undefined;
 }
 
+/** A child attempt pinned to another main than its parent is a main-race row in `metrics`, whatever
+ * path forks it (Item c3c69c57): the cohort's next generation, a retired pipeline descendant, a
+ * main-red park, a conflict against the moved main. That writer names why with one named code, on
+ * the attempt insert it already makes, as `forkReason`: `metrics` reads it, the queue does not
+ * (`recheckReason` also unseals landing order, and these forks say nothing about whether the next
+ * pass can carry). Only a parent with a check discarded a run; a same-main fork or one from a
+ * deferred parent records nothing, so one race counts once and the common cohort join is
+ * byte-identical. Pure: both attempts are already loaded. */
+export function forkRaceReason(
+  parent: { main: { head: string }; check: unknown },
+  child: { main: { head: string } },
+  reason: 'cohort' | 'retired-running' | 'main-red' | 'text-conflict',
+): { forkReason?: string } {
+  return parent.check && parent.main.head !== child.main.head ? { forkReason: reason } : {};
+}
+
 /** Runner side, on the selection it already pins: why the configured command could not be
  * narrowed or skipped. Explicit codes from the selector win; the rest follow from the gate. */
 export function selectionFallback(input: {
