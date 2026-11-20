@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import { randomUUID } from 'node:crypto';
+import { sourceTimingMax } from '../dist/hosted-source-retry.js';
 import { composeFixture, api as composeApi, jobApi as composeJobs } from './hosted-compose-fixture.mjs';
 import { syncFixture, api as syncApi, jobApi as syncJobs } from './hosted-sync-fixture.mjs';
 
@@ -110,4 +111,70 @@ test('one selected progress read stays constant at dogfood history size and writ
       peakRss: process.resourceUsage().maxRSS * 1024,
     }),
   );
+});
+
+test('stalled fan-out progress reports the sampled children within the source diagnostics byte budget', async () => {
+  const s = await composeFixture();
+  const lane = await s.lane(s.baseline);
+  const selection = s.selection([lane]);
+  await s.prepare(selection);
+  await s.stage(selection);
+  const submitted = await s.submit(selection);
+  const job = await s.activate(submitted.jobId);
+  const step = Number.MAX_SAFE_INTEGER;
+  const generation = Number.MAX_SAFE_INTEGER;
+  const batchId = s.insert('projectSourceBatches', {
+    projectId: s.projectId,
+    jobId: job.id,
+    step,
+    kind: 'calculate',
+    end: 800,
+    total: 800,
+    next: 800,
+    completed: 796,
+    status: 'waiting',
+    failure: 'SOURCE_JOB_FENCED',
+  });
+  const summary = {
+    startupMs: sourceTimingMax,
+    readMs: sourceTimingMax,
+    writeMs: sourceTimingMax,
+    computeMs: sourceTimingMax,
+    convexMs: sourceTimingMax,
+    gets: sourceTimingMax,
+    puts: sourceTimingMax,
+    heads: sourceTimingMax,
+  };
+  const timing = { queuedAt: Date.now(), scheduledAt: Date.now(), steps: [], summary };
+  const current = [...s.tables.projectSourceSteps.values()].find(row => row.jobId === job.id);
+  if (current) s.patch('projectSourceSteps', current._id, { step, batchId, timing });
+  else
+    s.insert('projectSourceSteps', {
+      projectId: s.projectId,
+      jobId: job.id,
+      dispatch: 'synthetic',
+      executionId: 'synthetic-execution',
+      cursor: null,
+      step,
+      batchId,
+      timing,
+    });
+
+  const samples = [];
+  for (let index = 796; index < 800; index++) {
+    samples.push([index, generation, 'startup']);
+    await s.callback(job, {
+      status: 'heartbeat',
+      sequence: index - 795,
+      renewal: { step, index, generation, phase: 'startup' },
+    });
+  }
+
+  const result = await s.progress(selection);
+  assert.equal(result.status, 'retryable');
+  const { jobId, status, phase, workerUntil, ...diagnostics } = result.source;
+  assert.deepEqual([jobId, status, phase], [job.id, 'running', `source-step:${step}`]);
+  assert(Number.isFinite(workerUntil));
+  assert.deepEqual(diagnostics, { slowTasks: { step, samples } });
+  assert(Buffer.byteLength(JSON.stringify(diagnostics)) <= 200);
 });

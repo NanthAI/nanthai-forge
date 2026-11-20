@@ -35,11 +35,9 @@ export async function sourceProgress(
   const cause = control.failureCause ?? currentFailure;
   const timing = cause?.timing ?? step?.timing?.summary;
   const slowestPhase = cause?.slowestPhase;
+  const sourceState = { jobId, status: job.status, phase, workerUntil: deadline };
   const source = {
-    jobId,
-    status: job.status,
-    phase,
-    workerUntil: deadline,
+    ...sourceState,
     ...(timing ? { timing } : {}),
     ...(slowestPhase ? { slowestPhase } : {}),
   };
@@ -86,12 +84,11 @@ export async function sourceProgress(
     return {
       status: 'retryable',
       jobId,
-      source: {
-        ...source,
-        ...(stalled?.timing ? { timing: stalled.timing } : {}),
-        ...(stalled?.slowestPhase ? { slowestPhase: stalled.slowestPhase } : {}),
-        ...(slowTasks ? { slowTasks } : {}),
-      },
+      // A fan-out stall reports the sampled children. Its preceding step totals
+      // describe earlier work and would put both diagnostics over the reply budget.
+      source: slowTasks
+        ? { ...sourceState, slowTasks }
+        : { ...source, ...(stalled?.slowestPhase ? { slowestPhase: stalled.slowestPhase } : {}) },
       failedPhase: phase,
       error: {
         code: batch?.failure ?? (stopped ? 'SOURCE_WORKER_STEP_FAILED' : 'SOURCE_JOB_STALLED'),

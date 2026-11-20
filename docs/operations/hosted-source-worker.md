@@ -304,10 +304,11 @@ parallel child actions, so the totals can exceed elapsed time. A failed source
 attempt names its longest measured phase. After the existing 20-second quantum
 budget, an already scheduled lease renewal can carry a slow sample into a stall
 record. The sample is tied to the step and generation, and fan-out samples also
-identify the child index. A Node action delegated by V8 uses its caller's lease.
-If it stops before returning, that lease cannot report the Node action's phase.
-The diagnostic adds no requests,
-scheduled functions or database reads and uses no new table.
+identify the child index. Stalled fan-out progress shows the sampled children
+when available and leaves the preceding step totals in the execution record.
+A Node action delegated by V8 uses its caller's lease. If it stops before
+returning, that lease cannot report the Node action's phase. The diagnostic
+adds no requests, scheduled functions or database reads and uses no new table.
 
 ## Source-step cost evidence
 
