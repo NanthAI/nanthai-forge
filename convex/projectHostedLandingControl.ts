@@ -39,7 +39,7 @@ import {
   type HostedLandingState,
 } from '../src/hosted-landing';
 import { ForgeError, invariant } from '../src/errors';
-import { finishRow } from './projectHostedFinishWake';
+import { finishRow, passParkedFollowers, wakeLandingOrderWaiters } from './projectHostedFinishWake';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { claimFinishPrecompose } from './projectHostedFinishPrecompose';
 import { alertExhausted, exhaustLanding, exhaustedReason } from './projectHostedLandingExhaust';
@@ -396,17 +396,38 @@ export async function claimReadyLanding(
     (await reservationAhead(ctx, row, state, now)) ?? (await olderLandingAhead(ctx, row, state, now, spent));
   if (ahead) {
     if (row.alarm) await cancelPendingTask(ctx, row.alarm.taskId);
-    const parked = row.orderWait !== ahead.row.submissionId;
+    // A handed entry (`orderWaitHanded`) has no wait of its own yet: this claim decides it.
+    const parked = row.orderWait !== ahead.row.submissionId || row.orderWaitHanded !== undefined;
     if (parked || row.alarm)
       await ctx.db.patch(row._id, {
         orderWait: ahead.row.submissionId,
         alarm: null,
-        ...(parked ? { orderWaits: recordOrderWait(row.orderWaits, ahead) } : {}),
+        ...(parked ? { orderWaits: recordOrderWait(row.orderWaits, ahead), orderWaitHanded: undefined } : {}),
+        ...(parked && 'ownRisk' in ahead && ahead.ownRisk && !row.ownGlobalRisk
+          ? { ownGlobalRisk: true as const }
+          : {}),
       });
     if (!ahead.row.orderWaited) await ctx.db.patch(ahead.row._id, { orderWaited: true });
+    // The holder waits for an entry that cannot land before it, and may not overtake it (they
+    // overlap): its reservation can only deadlock (43b51a5e), so it ends now and its waiters get
+    // their turn. Once per reservation: an ended reservation never closes a cycle again.
+    if ('cycle' in ahead && ahead.cycle) {
+      await ctx.db.patch(row._id, { reservedUntil: now });
+      await wakeLandingOrderWaiters(ctx, row);
+    }
+    // A park that lasts a check (the holder is not about to land) never holds the Ready followers
+    // handed to this entry: they get their own claim (baton, incident 43b51a5e case 2).
+    if (
+      parked &&
+      row.orderWaited &&
+      ahead.held !== 'composing' &&
+      (ahead.row.phase !== 'ready' || Boolean(ahead.row.orderWait))
+    )
+      await passParkedFollowers(ctx, row);
     return { waitingFor: ahead.row.submissionId, until: ahead.until, ahead: ahead.row };
   }
-  if (row.orderWait) await ctx.db.patch(row._id, { orderWait: undefined });
+  if (row.orderWait || row.orderWaitHanded)
+    await ctx.db.patch(row._id, { orderWait: undefined, orderWaitHanded: undefined });
   if (leased) return null;
   if (row.priority !== 'urgent') {
     const [urgent] = await ctx.db

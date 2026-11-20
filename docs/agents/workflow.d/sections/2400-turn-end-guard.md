@@ -88,7 +88,8 @@ Every `land`, `wait` and `finish` reply, `queue` entry and native `wait`
 submission also carries `landingState {state,label,nextStep}` (additive; existing
 fields are unchanged); the compact wait line carries only the state name as
 `landingState`. `state` is one of `queued`, `checking`,
-`waiting-for-runner`, `landing`, `held-review`, `held-dependency`, `held-main-red`,
+`waiting-for-runner`, `landing`, `waiting-for-order` (passed, parked behind the older
+submission its `nextStep` names), `held-review`, `held-dependency`, `held-main-red`,
 `landed`, `conflict`, `check-failed`, `not-run`, `cancelled`, `stale-head`,
 `rejected`, `superseded` or `unknown`; `label` is the word the web shows for the
 same state (stale-head and rejected both read `Not landed`) and `nextStep` the same

@@ -21,6 +21,7 @@ import type { QueueStatusKey } from '../src/hosted-queue-status';
 import { QUEUE_VIEW_LIMIT, QUEUE_VIEW_PAGES } from '../src/hosted-queue-view';
 import { auditRow, mainRedField } from './projectHostedMainAuditState';
 import { usualCheck } from './projectFailureCause';
+import { landingOrderWaitForReader } from './projectHostedLandingOrder';
 
 /** One bounded read of the landing queue (09e637f7 minimal slice): who is in it,
  * in dispatch order, with Lane, Intent title, phase, last failing test files
@@ -104,7 +105,11 @@ export const read = query({
         entries.push({
           // A held entry has no queue position: main-red included (B3), whose directory key predates it.
           position: hold ? null : (key.position ?? null),
-          landingState: landingStateField(state, laneId ?? undefined),
+          // A passed entry parked behind an older one says so, naming it (43b51a5e): from the row in hand.
+          landingState: landingStateField(
+            { ...state, orderWait: landingOrderWaitForReader(row, state) },
+            laneId ?? undefined,
+          ),
           submissionId: state.id,
           laneId,
           ...(lanes.length > 1 ? { moreLanes: true } : {}),

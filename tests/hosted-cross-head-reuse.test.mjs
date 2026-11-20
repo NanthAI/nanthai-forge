@@ -301,7 +301,9 @@ for (const [path, checkEntries, reason] of [
   ['.gitignore', [], 'global-risk'],
   ['pkg/.env.test', [], 'global-risk'],
   ['pkg/tsconfig.json', [], 'order-sensitive'],
-  ['.github/workflows/check.yml', [], 'order-sensitive'],
+  // Rule v7 (43b51a5e): the check workflow and actions stay CI risk; other workflows do not.
+  ['.github/workflows/forge-check.yml', [], 'order-sensitive'],
+  ['.github/actions/setup/action.yml', [], 'order-sensitive'],
   ['ci/check.sh', ['ci/check.sh'], 'order-sensitive'],
   ['config/budget.json', ['config/**'], 'order-sensitive'],
   ['db/migrations/001.sql', [], 'order-sensitive'],

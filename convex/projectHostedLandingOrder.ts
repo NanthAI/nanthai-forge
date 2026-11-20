@@ -10,12 +10,24 @@ import { hostedLandingProgressAt, retainedStallOwner } from '../src/hosted-landi
 import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
 import { stackedBehind } from './projectHostedLandingSuffix';
 import { batchRow, batchSchema } from './projectHostedLandingBatchState';
-import { overtakeOlder, sealedOlder, unrelatedChanges } from '../src/landing-overtake';
+import {
+  olderRiskOnly,
+  overtakeOlder,
+  overtakeRiskOnly,
+  ownGlobalRisk,
+  sealedOlder,
+  unrelatedChanges,
+  waitFootprints,
+} from '../src/landing-overtake';
 import { landingChangedPaths, overtakingSide } from './projectHostedLandingOvertake';
 import { landingSuspect } from '../src/hosted-landing-suspect';
 import { effectiveAgentDefaults, urgentAllowed, urgentRefusal } from '../src/agent-parallel-defaults';
 import { HOSTED_RESERVATION_MS } from '../src/landing-reservation';
-import { heldBackByReservation } from './projectHostedLandingReservation';
+import {
+  heldBackByReservation,
+  RESERVATION_CHAIN_READS,
+  waitsOnReservation,
+} from './projectHostedLandingReservation';
 
 /** Queue jumping: the project owner only, further limited by agentDefaults.urgentRoles. */
 export function landingPriority(
@@ -119,7 +131,9 @@ export type OrderHeld =
  * across a moved main (graph-sealed, `sealedOlder`, Issue c6b81429); otherwise it
  * takes main ahead of an unrelated one that has not given up its place yet
  * (`overtakeOlder`, Issue 7d98c7da) and entries it overtakes at a cost are pushed
- * to `spent` for the caller to mark when it takes main. A combined group, or one
+ * to `spent` for the caller to mark when it takes main; so is an older entry linked only by its own
+ * global risk (`olderRiskOnly`, Issue 43b51a5e), a Ready one parked behind an older submission
+ * included (`overtakeRiskOnly`). A combined group, or one
  * checked on a predecessor group's predicted head, overtakes nothing. A queued entry no dispatcher owns (its compose
  * or cohort still preparing) holds its place for the train hold only, as the
  * train does: a dead compose never stops the queue. `until` names the one wake
@@ -166,6 +180,7 @@ export async function olderLandingAhead(
     paths: async () =>
       reserved === undefined ? (reserved = await landingChangedPaths(ctx, row, state)) : reserved,
   };
+  const chain = { reads: RESERVATION_CHAIN_READS };
   const older = await ctx.db
     .query('projectHostedLandingRequests')
     .withIndex('by_project_and_channel_and_orderLive_and_sequence', q =>
@@ -185,13 +200,19 @@ export async function olderLandingAhead(
     // A live reservation holder goes ahead of an older entry it holds back (10d253c6).
     if (row.reservedUntil !== undefined && (await heldBackByReservation(ctx, holder, other, value, now)))
       continue;
+    // The older entry's changed paths: one Candidate read at most, shared by every rule below.
+    let theirs: string[] | null | undefined;
+    const pathsOf = async () =>
+      theirs === undefined ? (theirs = await landingChangedPaths(ctx, other, value)) : theirs;
+    let cycle = false;
     // Only an entry that entered the queue late (pre-queue Lane check, refused proof)
     // can be stacked behind a younger group; others cost no extra read.
     if (other.admission?.full && (await stackedBehind(ctx, row, state, value))) continue;
     let held: OrderHeld = 'combined';
     let independent: boolean | null | undefined;
+    let footprints: 'overlap' | 'disjoint' | 'unknown' | undefined;
     if (canOvertake) {
-      const overtake = overtakeOlder({
+      const generation = {
         phase: other.phase as 'queued' | 'checking' | 'ready',
         priority: other.priority,
         attemptId: other.attemptId,
@@ -200,7 +221,10 @@ export async function olderLandingAhead(
           other.admission?.full && other.admission.status === 'passed' && !other.admission.reuse,
         ),
         ...(other.overtaken !== undefined ? { overtaken: other.overtaken } : {}),
-      });
+      };
+      const overtake = overtakeOlder(generation);
+      // Taken only when the older entry's own global risk is the sole link (43b51a5e).
+      const riskStep = overtakeRiskOnly({ ...generation, parked: Boolean(other.orderWait) });
       const target = {
         phase: other.phase as 'queued' | 'checking' | 'ready',
         priority: other.priority,
@@ -210,18 +234,29 @@ export async function olderLandingAhead(
         ...(other.unsealed !== undefined ? { unsealed: other.unsealed } : {}),
       };
       // Paths are read only for an entry a rule could skip: one Candidate read each.
-      if (overtake !== 'hold' || sealedOlder({ ...target, proofs: true })) {
+      if (overtake !== 'hold' || riskStep !== 'hold' || sealedOlder({ ...target, proofs: true })) {
         const me = await side();
-        independent = me
-          ? unrelatedChanges(me.paths, await landingChangedPaths(ctx, other, value), me.checkEntries)
-          : null;
+        const paths = me ? await pathsOf() : null;
+        independent = me ? unrelatedChanges(me.paths, paths, me.checkEntries) : null;
+        const riskOnly = Boolean(me && !independent && olderRiskOnly(me.paths, paths, me.checkEntries));
+        footprints = me ? (independent || riskOnly ? 'disjoint' : 'overlap') : 'unknown';
         if (independent && me && sealedOlder({ ...target, proofs: me.proofs })) continue;
-        if (independent && overtake !== 'hold') {
-          if (overtake === 'spend') spent!.push(other);
+        // Its own global risk alone (43b51a5e) also takes the bounded step, never the sealed one,
+        // and from a Ready entry that is itself parked (case 2) as from a checking one.
+        const step = independent ? overtake : riskOnly ? riskStep : 'hold';
+        if (step !== 'hold') {
+          if (step === 'spend') spent!.push(other);
           continue;
         }
-        held =
-          independent === null
+        // A risk-only link is no dependency: the receipt says the bounded step is spent (or the
+        // entry is urgent, or Ready and about to land).
+        held = riskOnly
+          ? other.priority === 'urgent'
+            ? 'urgent'
+            : other.phase === 'ready' && !other.orderWait
+              ? 'accepting'
+              : 'overtaken'
+          : independent === null
             ? 'unknown-paths'
             : !independent
               ? 'dependent'
@@ -229,35 +264,59 @@ export async function olderLandingAhead(
                 ? 'no-proof'
                 : 'unsealed';
       } else
-        held =
-          other.priority === 'urgent'
-            ? 'urgent'
-            : other.phase === 'ready'
-              ? 'accepting'
-              : other.unsealed !== undefined
-                ? 'unsealed'
-                : 'overtaken';
+        // Not Ready and not urgent, yet the bounded step holds: it was spent for an earlier
+        // generation (`overtaken`), whether or not its pass could carry (43b51a5e, review 8c3f272f).
+        held = other.priority === 'urgent' ? 'urgent' : other.phase === 'ready' ? 'accepting' : 'overtaken';
     }
     const wait = async () => ({
       row: other,
       state: value,
       held,
+      ...(cycle ? { cycle } : {}),
       // The receipt says whether the two footprints overlapped; read once, for a new wait.
       footprints:
-        independent === undefined && row.orderWait !== other.submissionId && spent
-          ? await footprintsOf(ctx, other, value, side)
-          : footprintLabel(independent),
+        footprints ??
+        (independent === undefined && row.orderWait !== other.submissionId && spent
+          ? await footprintsOf(pathsOf, side)
+          : footprintLabel(independent)),
     });
+    let until: number | null = null;
+    let composing = false;
     if (other.phase === 'ready' && !value.request.finish)
-      return { ...(await wait()), until: Date.parse(value.timing?.settlementStartedAt ?? value.at) + 60_000 };
-    if (other.phase !== 'queued' || other.runnable) return { ...(await wait()), until: null };
-    const until =
-      Math.max(
-        Date.parse(value.at),
-        Date.parse(value.timing?.composeStartedAt ?? value.at),
-        Date.parse(value.timing?.selectedAt ?? value.at),
-      ) + HOSTED_TRAIN_HOLD_MS;
-    if (until > now) return { ...(await wait()), held: 'composing' as OrderHeld, until };
+      until = Date.parse(value.timing?.settlementStartedAt ?? value.at) + 60_000;
+    else if (other.phase === 'queued' && !other.runnable) {
+      until =
+        Math.max(
+          Date.parse(value.at),
+          Date.parse(value.timing?.composeStartedAt ?? value.at),
+          Date.parse(value.timing?.selectedAt ?? value.at),
+        ) + HOSTED_TRAIN_HOLD_MS;
+      if (until <= now) continue;
+      composing = true;
+    }
+    // This is the entry the holder would wait on. A live reservation holder never parks on one
+    // whose chain of waits leads back to a waiter on its reservation (43b51a5e case 3): it cannot
+    // take main first. A solo holder that may overtake goes ahead of it when their footprints are
+    // disjoint; otherwise (an overlap, a combined group, a pipelined successor) its reservation is
+    // void and the claim ends it (`cycle`). The walk runs here only, so skipped entries spend none
+    // of its read budget.
+    if (
+      row.reservedUntil !== undefined &&
+      row.reservedUntil > now &&
+      other.orderWait &&
+      (await waitsOnReservation(ctx, row, other, chain))
+    ) {
+      const me = canOvertake ? await side() : null;
+      if (me && waitFootprints(me.paths, await pathsOf(), me.checkEntries) === 'disjoint') continue;
+      cycle = true;
+    }
+    // Its own global risk, from the paths this claim already read (none read for it).
+    const ahead = {
+      ...(await wait()),
+      until,
+      ownRisk: Boolean(mine && ownGlobalRisk(mine.paths, mine.checkEntries)),
+    };
+    return composing ? { ...ahead, held: 'composing' as OrderHeld } : ahead;
   }
   return null;
 }
@@ -288,15 +347,11 @@ const footprintLabel = (independent: boolean | null | undefined) =>
       ? ('overlap' as const)
       : ('unknown' as const);
 async function footprintsOf(
-  ctx: QueryCtx | MutationCtx,
-  other: LandingRow,
-  value: HostedLandingState,
+  paths: () => Promise<string[] | null>,
   side: () => Promise<Awaited<ReturnType<typeof overtakingSide>>>,
 ) {
   const me = await side();
-  return footprintLabel(
-    me ? unrelatedChanges(me.paths, await landingChangedPaths(ctx, other, value), me.checkEntries) : null,
-  );
+  return me ? waitFootprints(me.paths, await paths(), me.checkEntries) : footprintLabel(null);
 }
 /** A passed entry parked behind an older live submission (claimReadyLanding sets the
  * server-only `orderWait`). Readers name it so the wait has a visible reason (19328518:

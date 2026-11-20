@@ -178,6 +178,19 @@ test('red main holds ready contract attempt and releases queue without polling o
   assert.equal(f.queue().lease, null);
   assert.equal(f.tables.projectHostedAcceptances.size, 0);
 });
+// Review 14cf6d7e F3 (43b51a5e): a held entry gives up its landing reservation, as a parked one does.
+// Kept, its woken waiters re-parked on it until the reservation's time bound.
+test('a main-red publication hold ends the landing reservation', async () => {
+  const { f, state } = await ready();
+  const audit = [...f.tables.projectHostedMainAudits.values()][0];
+  f.patch('projectHostedMainAudits', audit._id, { red: { since: at, head: hash, runId: randomUUID() } });
+  const before = [...f.tables.projectHostedLandingRequests.values()][0];
+  f.patch('projectHostedLandingRequests', before._id, { reservedUntil: Date.now() + 30 * 60_000 });
+  assert.equal((await f.commit(await f.claimAcceptance(state))).request.error.code, 'MAIN_RED');
+  const row = [...f.tables.projectHostedLandingRequests.values()][0];
+  assert.equal(row.hold, 'main-red');
+  assert.equal(row.reservedUntil, undefined, 'a held entry holds no reservation');
+});
 test('enqueue ignores client gate and stamps current contract from the already-read Intent', async () => {
   const f = await checksFixture();
   const candidate = {

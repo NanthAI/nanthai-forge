@@ -169,6 +169,41 @@ export async function heldBackByReservation(
   );
 }
 
+/** Indexed reads one claim may spend following wait chains (`waitsOnReservation`). */
+export const RESERVATION_CHAIN_READS = 8;
+/** Whether an older entry cannot take main before a reservation holder because its chain of parked
+ * order waits (`orderWait` of Ready rows, a handed link included: a handed row moves only when the
+ * entry it was handed to moves) reaches a landing older than the holder that is parked on the
+ * holder, a waiter on its reservation (core-claim incident
+ * 43b51a5e, 2026-11-19 17:54-18:24Z: the holder waited for an older Ready entry that waited for a
+ * waiter on the holder's reservation, and ten passed landings sat behind the three until expiry).
+ * At most `budget.reads` indexed reads per claim, spent only on the entry the holder would
+ * otherwise wait on, and only for a holder with a live reservation and an older entry that is
+ * itself parked. */
+export async function waitsOnReservation(
+  ctx: QueryCtx | MutationCtx,
+  holder: Pick<LandingRow, 'projectId' | 'submissionId' | 'sequence'>,
+  other: LandingRow,
+  budget: { reads: number },
+) {
+  const seen = new Set([holder.submissionId]);
+  let at: LandingRow | null = other;
+  while (at?.phase === 'ready' && at.orderWait) {
+    if (at.orderWait === holder.submissionId) return at.sequence < holder.sequence;
+    if (seen.has(at.submissionId) || budget.reads <= 0) return false;
+    seen.add(at.submissionId);
+    budget.reads--;
+    const next: string = at.orderWait;
+    at = await ctx.db
+      .query('projectHostedLandingRequests')
+      .withIndex('by_project_and_submission', q =>
+        q.eq('projectId', holder.projectId).eq('submissionId', next),
+      )
+      .unique();
+  }
+  return false;
+}
+
 /** Status for readers, from the row already loaded: no extra read. */
 export function landingReservationForReader(
   row: Pick<LandingRow, 'reservedUntil' | 'superseded' | 'phase'> | null | undefined,

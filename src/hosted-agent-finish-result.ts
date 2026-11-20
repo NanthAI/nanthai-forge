@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { checkTerminal, checkUnsuccessful } from './check-run-state.js';
 import { landingStateField, type LandingRecord } from './landing-state.js';
+import { orderWaitOf } from './hosted-wait-line.js';
 import { shellQuote } from './shell-quote.js';
 import { operationWait } from './agent-operation-wait.js';
 import { landingHold } from './hosted-landing-hold.js';
@@ -100,7 +101,10 @@ export function withFinishLandingState(selection: Reply, result: Reply, reply: R
       : typeof selection.laneId === 'string'
         ? selection.laneId
         : undefined;
-  return { ...reply, landingState: landingStateField(submission, laneId) };
+  return {
+    ...reply,
+    landingState: landingStateField({ ...submission, orderWait: orderWaitOf(result.orderWait) }, laneId),
+  };
 }
 /** Identity-preserving: returns `result` itself when nothing was observed to normalize. */
 export function normalizeObservedFinish(root: string, selection: Reply, result: Reply): Reply {

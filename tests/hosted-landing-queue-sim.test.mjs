@@ -280,3 +280,28 @@ test('687d1eda L1 source mutants: each finding-4 regression strands a follower t
     assert.equal(code, 0, `${name}: the mutant child exits cleanly\n${stdout.slice(-4000)}`);
   }
 });
+
+// Incident 43b51a5e case 3 (Guard 2): a reservation holder, an older Ready waiter on its reservation
+// and an entry between them that waits for that waiter. No stored order-wait cycle (S6) at any step,
+// and no landing waits for the reservation's time bound.
+for (const variant of ['live', 'spent', 'overlap', 'budget', 'handed'])
+  test(`43b51a5e reservation cycle (${variant}): no stored wait cycle, no wait for the time bound`, async t => {
+    const shapes = await import('./queue-sim/reservation-cycle.mjs');
+    const { inspectQueue } = await import('./queue-sim/invariants.mjs');
+    const cycles = new Set();
+    const run =
+      variant === 'budget'
+        ? shapes.reservationBudget
+        : variant === 'handed'
+          ? shapes.reservationHanded
+          : shapes.reservationCycle;
+    const r = await run(t, {
+      variant,
+      afterStep: async f => {
+        for (const issue of await inspectQueue(f))
+          if (issue.id === 'S6' && issue.detail.startsWith('cycle')) cycles.add(issue.submission);
+      },
+    });
+    assert.deepEqual([...cycles], [], 'no stored order-wait cycle');
+    assert(!r.expired, 'no landing waited for the reservation to end');
+  });

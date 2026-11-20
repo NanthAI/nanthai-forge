@@ -190,8 +190,11 @@ test('687d1eda: a landing that changes which tests run never earns main green fr
   assert.equal(state.coverageLanding(coverage.run, null), true);
   assert.equal(state.coverageLanding(coverage.run, undefined), false);
   assert.equal(state.coverageLanding(coverage.run, ['src/server.ts', 'docs/status.md']), false);
-  // Review follow-up: only workflows and actions under .github/ change what runs.
-  assert.equal(state.coverageLanding(coverage.run, ['.github/workflows/check.yml']), true);
+  // Review follow-up, narrowed by Issue 43b51a5e (rule v7): under .github/ only what the check runs
+  // changes what runs: its own workflow and actions, not another workflow (a nightly job).
+  assert.equal(state.coverageLanding(coverage.run, ['.github/workflows/forge-check.yml']), true);
+  assert.equal(state.coverageLanding(coverage.run, ['.github/actions/setup/action.yml']), true);
+  assert.equal(state.coverageLanding(coverage.run, ['.github/workflows/check.yml']), false);
   assert.equal(
     state.coverageLanding(coverage.run, ['.github/ISSUE_TEMPLATE/bug.md', '.github/CODEOWNERS']),
     false,

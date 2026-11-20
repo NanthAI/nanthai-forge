@@ -193,10 +193,52 @@ export function bindsNewRun(
     }) === 'spend',
   );
 }
+/** The waiter touches a global-risk file itself (`ownGlobalRisk`: every older live entry holds it,
+ * whatever the holder), or its latest claim found its footprints overlap the entry it then waited
+ * for: on `holder` itself, or on a former holder that landed and left it unhanded (main moved under
+ * its files, so its pass is stale). Its paths hold it, not order: only its holder's exit wake releases it, and neither
+ * the new-run wake nor a baton drives it (8 concurrent finishes on hot files: +15 scheduled steps and
+ * +35 calls without this rule, 43b51a5e landing check). Exact holder only (review 14cf6d7e F1): a
+ * waiter handed to `holder` by a former holder that withdrew, failed or parked keeps a valid pass and
+ * stays eligible. A full receipt list (HOSTED_ORDER_WAITS) may hide a later wait: unknown, never held.
+ * A waiter holding a live landing reservation is never held this way: it goes ahead of the older
+ * entries its reservation holds back, which may be parked on it (case 3 shape, review 012bd638). */
+const heldByPaths = (waiter: Doc<'projectHostedLandingRequests'>, holder: string) => {
+  if (waiter.reservedUntil !== undefined && waiter.reservedUntil > Date.now()) return false;
+  const waits = waiter.orderWaits ?? [];
+  const last = waits[waits.length - 1];
+  return (
+    waiter.ownGlobalRisk === true ||
+    (waits.length < HOSTED_ORDER_WAITS &&
+      last?.footprints === 'overlap' &&
+      (last.submissionId === holder || waiter.orderWaitHanded !== holder))
+  );
+};
+/** A waiter handed to `next`, which takes main before it, is marked as handed to it
+ * (`orderWaitHanded`), so the new-run wake finds it if `next` re-checks instead. Incident 43b51a5e
+ * case 2: handed waiters kept a wait naming a former holder, the new-run wake never found them, and
+ * disjoint passed landings waited out each head's whole re-check. The receipt list (`orderWaits`)
+ * keeps only waits a claim decided; the waiter's next claim clears the mark. No mark only when the
+ * holder `from` landed on the waiter's files (`heldByPaths`): its pass cannot carry anyway. */
+const handedTo = (
+  waiter: Doc<'projectHostedLandingRequests'>,
+  next: Doc<'projectHostedLandingRequests'>,
+  from: Doc<'projectHostedLandingRequests'>,
+  landed: boolean,
+) => ({
+  orderWait: next.submissionId,
+  orderWaitHanded:
+    waiter.phase === 'ready' && next.phase === 'ready' && !(landed && heldByPaths(waiter, from.submissionId))
+      ? next.submissionId
+      : undefined,
+});
 /** A Ready follower whose latest recorded wait is on `holder` itself, held only because the
  * holder was about to land, on footprints not known to overlap. A full receipt list stops
  * recording (HOSTED_ORDER_WAITS), so its latest entry may name a former holder: skip it. */
 const passedFollower = (waiter: Doc<'projectHostedLandingRequests'>, holder: string) => {
+  // Handed to this holder by a wake and not claimed since: it waits only because the holder takes
+  // main first, so its own claim decides (43b51a5e case 2; c6953f0b's evidence rule is unchanged).
+  if (waiter.phase === 'ready' && waiter.orderWaitHanded === holder) return !heldByPaths(waiter, holder);
   const waits = waiter.orderWaits ?? [];
   const last = waits[waits.length - 1];
   return (
@@ -224,7 +266,7 @@ export async function wakeNewRunFollower(ctx: MutationCtx, row: Doc<'projectHost
   for (const waiter of waiters) {
     if (!passedFollower(waiter, row.submissionId)) continue;
     if (woken) {
-      await ctx.db.patch(waiter._id, { orderWait: woken.submissionId });
+      await ctx.db.patch(waiter._id, handedTo(waiter, woken, row, false));
       if (!woken.orderWaited) await ctx.db.patch(woken._id, { orderWaited: (woken.orderWaited = true) });
       continue;
     }
@@ -237,7 +279,11 @@ export async function wakeNewRunFollower(ctx: MutationCtx, row: Doc<'projectHost
           waiter,
           hostedLandingProgressAt(hostedLandingStateSchema.parse(JSON.parse(waiter.value))),
         );
-    await ctx.db.patch(waiter._id, { orderWait: undefined, ...(alarm ? { alarm } : {}) });
+    await ctx.db.patch(waiter._id, {
+      orderWait: undefined,
+      orderWaitHanded: undefined,
+      ...(alarm ? { alarm } : {}),
+    });
     // Review d4f55e9f F3: a parked finish has no IO in flight, so its wake is a mutation.
     await scheduleFinish(ctx, finish, 0, true, true);
     if (!waiter.orderLive) return;
@@ -253,9 +299,14 @@ export async function wakeLandingOrderWaiters(
   ctx: MutationCtx,
   row: Doc<'projectHostedLandingRequests'>,
   speculativeOnly = false,
+  readyOnly = false,
+  landed = false,
 ) {
   let next: Doc<'projectHostedLandingRequests'> | null = null;
-  let after = -1;
+  // A baton wakes only younger waiters: an older one waits here only for a live reservation
+  // (`reservationAhead`), and waking it back could cycle (A -> reserved R -> B -> A) at 0 ms until
+  // the reservation ends. The reservation holder's own exit still wakes it.
+  let after = readyOnly ? row.sequence : -1;
   for (;;) {
     const waiters = await ctx.db
       .query('projectHostedLandingRequests')
@@ -266,6 +317,7 @@ export async function wakeLandingOrderWaiters(
       .take(32);
     for (const waiter of waiters) {
       after = waiter.sequence;
+      if (readyOnly && (waiter.phase !== 'ready' || heldByPaths(waiter, row.submissionId))) continue;
       // A re-pin retires speculative source generations, but this predecessor
       // still owns its ordinary place in acceptance order. Only parked conflict
       // cohorts and exact early resolutions need another compose before settlement.
@@ -283,7 +335,7 @@ export async function wakeLandingOrderWaiters(
       )
         continue;
       if (next) {
-        await ctx.db.patch(waiter._id, { orderWait: next.submissionId });
+        await ctx.db.patch(waiter._id, handedTo(waiter, next, row, landed));
         if (!next.orderWaited) await ctx.db.patch(next._id, { orderWaited: (next.orderWaited = true) });
         continue;
       }
@@ -304,6 +356,7 @@ export async function wakeLandingOrderWaiters(
           : undefined;
       await ctx.db.patch(waiter._id, {
         orderWait: undefined,
+        orderWaitHanded: undefined,
         ...(early ? { runnable: true } : {}),
         ...(alarm ? { alarm } : {}),
       });
@@ -319,9 +372,21 @@ export async function wakeLandingOrderWaiters(
       // followers handed to it would wait on a row nothing writes again (review e7137e30 4a).
       if (waiter.orderLive && (drive || early)) next = waiter;
     }
-    if (waiters.length < 32) return;
+    // A baton reads one page: waiters past it stay here and this entry's own exit releases them.
+    if (readyOnly || waiters.length < 32) return;
   }
 }
+/** Baton (incident 43b51a5e case 2): Ready followers parked on `row` wait because it takes main
+ * before them. When `row` itself parks for a hold that lasts a check (its holder is not about to
+ * land), they would wait out that check whatever their paths. Drive the oldest younger one (its own
+ * claim decides, with its stall alarm armed) and hand the other Ready followers to it, as an exit
+ * wake does. Bounded: one index page (32 rows, one patch each) per long park, strictly increasing in
+ * sequence, so baton chains end; waiters that are not Ready or are held by their paths
+ * (`heldByPaths`), older ones and those past the page stay with `row`. It runs before the claim's early stale-proof refusal (`refuseStaleLaneProofNow`): when
+ * that refusal then recomposes `row`, its followers are already handed on, so its exit wake finds
+ * none, and the cohort cap still bounds only that refusal chain. */
+export const passParkedFollowers = (ctx: MutationCtx, row: Doc<'projectHostedLandingRequests'>) =>
+  wakeLandingOrderWaiters(ctx, row, false, true);
 export async function notifyFinishCompose(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,

@@ -142,7 +142,8 @@ export function laneState(mark: LaneMark, landing?: CurrentLanding | null): Lane
       kind: 'waiting',
       glyph: 'Waiting its turn',
       word: stopWords.ready,
-      why: 'lands next',
+      // A passed entry parked behind an older one does not land next (43b51a5e).
+      why: landing?.state === 'waiting-for-order' ? 'waits for an older landing' : 'lands next',
       note: null,
     };
   if (mark.overlap)
@@ -187,7 +188,7 @@ export function landingOf(entry: {
   };
 }
 
-const pending = new Set<string>(['queued', 'checking', 'waiting-for-runner', 'landing']);
+const pending = new Set<string>(['queued', 'checking', 'waiting-for-runner', 'landing', 'waiting-for-order']);
 /** A queue row's state: the line's mark when the feed has the Lane, else the stop and hold its own submission implies.
  * An entry out of the order is held only when it is held or ended; one still preparing is not a failed check. */
 export function queueEntryState(
@@ -195,7 +196,8 @@ export function queueEntryState(
   mark?: LaneMark | null,
 ) {
   const landing = landingOf(entry);
-  const ready = entry.phase === 'ready' || landing?.state === 'landing';
+  const ready =
+    entry.phase === 'ready' || landing?.state === 'landing' || landing?.state === 'waiting-for-order';
   return laneState(
     mark ?? {
       stage: ready ? 'ready' : 'checking',

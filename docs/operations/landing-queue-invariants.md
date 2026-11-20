@@ -6,10 +6,10 @@ Targets; violations remain.
 | --- | --- |
 | S1 | Current lease/fence and previous head+receipt compare before publication. |
 | S2 | Exact pass, carry proof, or accepted predecessor pin before acceptance. |
-| S3 | Pass older work only with unrelated known footprints and the sealed/bounded rule. |
+| S3 | Pass older work only with unrelated known footprints and the sealed/bounded rule, or bounded only when the older side's own global risk is the sole link, a parked Ready entry included (`43b51a5e`). |
 | S4 | Lifetime: one generation lost solely to newer entries; two after a wrong sealed guess. |
 | S5 | Three main-race recompositions, then strict order. Exclude platform retries and batch fallback. |
-| S6 | Decide and record every wait in its writing transaction; no cycles. |
+| S6 | Decide and record every wait in its writing transaction; no cycles: a reservation holder never parks on an entry whose wait chain leads back to a waiter on its reservation (`43b51a5e`). |
 | S7 | Parking and reclaim preserve passed evidence. |
 | S8 | Shared acceptance includes every member; speculative failures settle no member. |
 | S9 | Invalidate pinned descendants, preserving unrelated groups. |
@@ -36,7 +36,7 @@ Calibration is stopped; retained results are unqualified. Sequence: foundation, 
 Each runtime rule has a documented switch, deleted after proof. The new-run wake (N1) has no
 switch: an order holder that starts checking a run it can be charged for (`overtakeOlder` is `spend`; never while merely queued, which
 is a free overtake that records no mark) drives one Ready follower whose latest receipt wait names
-that holder as `accepting`/`unsealed` without overlapping footprints (a full receipt list is skipped).
+that holder as `accepting`/`unsealed` without overlapping footprints (a full receipt list is skipped), or one a wake handed to that holder and that has not claimed since (`orderWaitHanded`, incident `43b51a5e` case 2).
 The woken claim records the lifetime mark, so the holder re-checks at most once for followers.
 Carry re-pins, parking and metadata writes wake nobody. Skip failing targets with `5e3c3a3c` until
 their rule lands. No parked entry (`orderWaited` unset): calls, reads and writes stay unchanged; a holder whose waiters all cancelled keeps the marker and can pay one empty indexed read.

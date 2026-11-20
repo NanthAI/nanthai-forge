@@ -3,6 +3,17 @@ import { landingHold } from './hosted-landing-hold.js';
 import { landingStateOf, type LandingRecord } from './landing-state.js';
 type Json = Record<string, unknown>;
 const obj = (value: unknown): Json => (value && typeof value === 'object' ? (value as Json) : {});
+/** A reply's `orderWait` (convex/projectHostedLandingOrder.ts landingOrderWaitForReader), as the landing
+ * state reads it: a passed entry waiting for an older one is not being accepted (43b51a5e). */
+export const orderWaitOf = (value: unknown): { submissionId: string; message?: string } | null => {
+  const wait = obj(value);
+  return typeof wait.submissionId === 'string'
+    ? {
+        submissionId: wait.submissionId,
+        ...(typeof wait.message === 'string' ? { message: wait.message } : {}),
+      }
+    : null;
+};
 const scalar = (value: unknown) => value === null || ['string', 'number', 'boolean'].includes(typeof value);
 const defined = (value: Json): Json =>
   Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined));
@@ -43,7 +54,9 @@ export function waitEventLine(event: unknown): { line: Json; key: string } | und
       ranInFull: submission.ranInFull,
       // The shared state name (src/landing-state.ts); the line stays compact, so the word and next
       // step ride on the full reply (and a hold's next step on `hold`).
-      landingState: e.submission ? landingStateOf(submission as LandingRecord).state : undefined,
+      landingState: e.submission
+        ? landingStateOf({ ...(submission as LandingRecord), orderWait: orderWaitOf(e.orderWait) }).state
+        : undefined,
       terminal: e.terminal,
       ok: e.ok,
     });

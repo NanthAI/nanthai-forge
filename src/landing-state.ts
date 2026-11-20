@@ -14,6 +14,7 @@ export type LandingStateName =
   | 'checking'
   | 'waiting-for-runner'
   | 'landing'
+  | 'waiting-for-order'
   | 'held-review'
   | 'held-dependency'
   | 'held-main-red'
@@ -51,6 +52,13 @@ const views = {
     tone: 'running',
     pending: true,
     nextStep: 'The check passed; it is being accepted into main. Wait.',
+  },
+  'waiting-for-order': {
+    label: 'Waiting for an older landing',
+    tone: 'waiting',
+    pending: true,
+    nextStep:
+      'The check passed; an older submission takes main first, then this one lands by itself. Nothing to do.',
   },
   'held-review': {
     label: 'Waiting for review',
@@ -130,6 +138,9 @@ export type LandingRecord = {
   phase?: string | null;
   observation?: { state?: string; pendingReason?: string | null; cause?: string | null } | null;
   error?: { code?: string; message?: string } | null;
+  /** The older submission a passed (Ready) entry waits for (`landingOrderWaitForReader`), when the reader
+   * holds it: the queue view, observe and the Lane read. */
+  orderWait?: { submissionId: string; message?: string } | null;
   /** Projection-shaped records (src/landing-submission-state.ts) carry these at the top level. */
   state?: string;
   pendingReason?: string | null;
@@ -137,7 +148,11 @@ export type LandingRecord = {
 };
 export type LandingView = View & { state: LandingStateName; hold: LandingHold | null };
 
-function pendingState(reason: string | null | undefined, phase: string | null | undefined): LandingStateName {
+function pendingState(
+  reason: string | null | undefined,
+  phase: string | null | undefined,
+  waiting: boolean,
+): LandingStateName {
   switch (reason) {
     case 'pending-infra':
       return 'waiting-for-runner';
@@ -150,7 +165,7 @@ function pendingState(reason: string | null | undefined, phase: string | null | 
     case 'queued':
     case null:
     case undefined:
-      return phase === 'ready' ? 'landing' : 'queued';
+      return phase !== 'ready' ? 'queued' : waiting ? 'waiting-for-order' : 'landing';
     default:
       return 'unknown';
   }
@@ -166,7 +181,10 @@ function stateOf(record: LandingRecord): LandingStateName {
       return 'superseded';
     case 'pending':
       // The gate parks a ready entry while main is red (B2/B3): held, not landing or queued.
-      return code === 'MAIN_RED' ? 'held-main-red' : pendingState(observed.pendingReason, record.phase);
+      // A passed entry parked behind an older one is not being accepted (core-claim incident 43b51a5e).
+      return code === 'MAIN_RED'
+        ? 'held-main-red'
+        : pendingState(observed.pendingReason, record.phase, Boolean(record.orderWait));
     case 'terminal-failed': {
       const cause = observed.cause;
       if (cause === 'conflict' || code === 'COMPOSITION_CONFLICT') return 'conflict';
@@ -190,7 +208,11 @@ export function landingStateOf(record: LandingRecord | null | undefined, laneId?
       ? `Split the repository. ${sourceSizeDocs}`
       : record?.phase === 'composing' && record.observation?.state === 'pending'
         ? 'Preparing source before queue admission; waiting for the server source/landing controller. No queue position is assigned yet.'
-        : (hold?.next ?? view.nextStep);
+        : (hold?.next ??
+          (state === 'waiting-for-order' && record?.orderWait
+            ? (record.orderWait.message ??
+              `The check passed; older submission ${record.orderWait.submissionId} takes main first, then this one lands by itself. Nothing to do.`)
+            : view.nextStep));
   return { state, ...view, nextStep, hold };
 }
 

@@ -23,6 +23,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import type { QueryCtx } from './server';
 import type { Id } from './_generated/dataModel';
+import { landingOrderWaitForReader } from './projectHostedLandingOrder';
 
 const intentTitle = z.looseObject({ outcome: z.string() });
 /** States where the check has not answered yet, so the screen says when it usually does. */
@@ -112,7 +113,8 @@ export const forLane = query({
         });
       const { state, row } = await loadLanding(ctx, { projectId, submissionId: request.submissionId });
       const { summary, step } = await landingRun(ctx, projectId, row, state);
-      const landing = landingStateOf(state, laneId);
+      // A passed entry parked behind an older one names it, from the row in hand (43b51a5e).
+      const landing = landingStateOf({ ...state, orderWait: landingOrderWaitForReader(row, state) }, laneId);
       const cause = causeFrom({ state, laneId, summary, step, lane, main });
       const expected = unanswered.has(landing.state) ? await expectedCheck(ctx, projectId) : null;
       return canonicalPayload({

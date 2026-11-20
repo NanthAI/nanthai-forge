@@ -13,6 +13,8 @@ export type LandingRead = {
   ahead: string | null;
   reverseCandidateId?: string | null;
   message?: string | null;
+  /** The older submission a passed entry waits for (convex/projectHostedLanding.ts read). */
+  orderWait?: { submissionId: string; message?: string } | null;
 };
 export type LandingState = {
   title: string;
@@ -37,6 +39,7 @@ const kinds = {
   checking: 'pending',
   'waiting-for-runner': 'pending',
   landing: 'pending',
+  'waiting-for-order': 'pending',
   'held-review': 'pending',
   'held-dependency': 'pending',
   'held-main-red': 'pending',
@@ -73,7 +76,7 @@ export function landingState(
     const tone = checkStatus === 'passed' ? 'passed' : checkStatus === 'failed' ? 'failed' : 'waiting';
     return { title: 'Your decision', label, tone, pending: false, kind: 'ready', state: null };
   }
-  const view = landingStateOf(read.request);
+  const view = landingStateOf({ ...read.request, orderWait: read.orderWait ?? null });
   const kind = kinds[view.state];
   return {
     title: kind === 'landed' ? 'Landed' : view.pending ? 'Landing' : 'Not landed',

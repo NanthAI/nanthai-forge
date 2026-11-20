@@ -314,6 +314,96 @@
       "test": "incident 687d1eda D: a landing failing only on main red tests parks, then re-lands once main is green"
     },
     {
+      "incident": "43b51a5e",
+      "what": "Queue stall 2026-11-19: an older entry changing only a nightly workflow counted as CI configuration; 9 passed landings waited up to 80 min behind it as dependent and it re-checked on every main move",
+      "file": "tests/hosted-landing-overtake.test.mjs",
+      "test": "incident replay 43b51a5e: an older workflow-only check never holds 9 passed landings"
+    },
+    {
+      "incident": "43b51a5e",
+      "what": "Same stall: an older entry linked to passed landings only by its own global risk held them as dependent instead of being overtaken once",
+      "file": "tests/hosted-landing-overtake.test.mjs",
+      "test": "43b51a5e: an older entry linked only by its own global risk is overtaken once, not a dependent hold"
+    },
+    {
+      "incident": "43b51a5e",
+      "what": "Same stall: the queue view labelled the 9 parked passed entries \"being accepted into main\", hiding the wait",
+      "file": "tests/hosted-queue-view.test.mjs",
+      "test": "queue view 43b51a5e: a passed entry parked behind an older one says it waits for it, never \"being accepted\""
+    },
+    {
+      "incident": "43b51a5e",
+      "what": "Case 2, 16:53-17:16Z: passed landings handed from one waited-on entry to the next kept a wait naming a former holder, so the new-run wake never found them, and an entry that could not overtake held the ones handed to it; 12 passes waited out each head's re-check in a chain",
+      "file": "tests/hosted-landing-handoff.test.mjs",
+      "test": "incident replay 43b51a5e case 2: followers handed to a re-checking entry take main during its re-check"
+    },
+    {
+      "incident": "43b51a5e",
+      "what": "Case 2: passes parked on an older entry linked only by its own global risk recorded overlap footprints, so the new-run wake skipped them while that entry re-checked",
+      "file": "tests/hosted-landing-handoff.test.mjs",
+      "test": "43b51a5e case 2: followers parked on an older-risk entry are woken when it re-checks"
+    },
+    {
+      "incident": "43b51a5e",
+      "what": "Case 3, 17:54-18:24Z: a reservation holder parked on an older Ready entry (a CI-workflow change) that waited for a waiter on the holder's reservation; the three waited for each other until the time bound with ten passes behind them",
+      "file": "tests/hosted-landing-reservation-cycle.test.mjs",
+      "test": "incident replay 43b51a5e case 3 (live): the reservation holder goes ahead of a disjoint entry that waits for its own waiter"
+    },
+    {
+      "incident": "43b51a5e",
+      "what": "Case 3 with the entry's bounded step already spent: only the wait-chain rule releases the holder",
+      "file": "tests/hosted-landing-reservation-cycle.test.mjs",
+      "test": "incident replay 43b51a5e case 3 (spent): the reservation holder goes ahead of a disjoint entry that waits for its own waiter"
+    },
+    {
+      "incident": "43b51a5e",
+      "what": "Case 3 when the holder may not go ahead (its own global risk links it to the entry): the reservation ends instead of deadlocking",
+      "file": "tests/hosted-landing-reservation-cycle.test.mjs",
+      "test": "43b51a5e case 3 (overlap): a holder that may not go ahead of the entry waiting for its waiter ends its reservation"
+    },
+    {
+      "incident": "43b51a5e",
+      "what": "Review 8c3f272f, re-shaped by 14cf6d7e F2: a pairwise-overlapping chain hands followers past the receipt list through new-run wakes and batons; handoffs are marks, not recorded waits, so followers stay eligible",
+      "file": "tests/hosted-landing-handoff.test.mjs",
+      "test": "43b51a5e case 2: a wave deeper than ten handoffs keeps followers eligible and receipts true"
+    },
+    {
+      "incident": "43b51a5e",
+      "what": "Review 14cf6d7e F1: a follower whose last wait overlapped a holder that was withdrawn (main unmoved) is handed to a disjoint holder that parks; the baton must drive it on its own pass",
+      "file": "tests/hosted-landing-handoff.test.mjs",
+      "test": "43b51a5e F1: a follower overlapping a withdrawn holder takes main on its own pass"
+    },
+    {
+      "incident": "43b51a5e",
+      "what": "Review 8c3f272f: overlapping, newer-risk and late disjoint followers handed on together keep their own rules and the second-generation bound",
+      "file": "tests/hosted-landing-handoff.test.mjs",
+      "test": "43b51a5e case 2: mixed handed followers keep their own rules and the second-generation bound"
+    },
+    {
+      "incident": "43b51a5e",
+      "what": "Re-check 120fcc09 finding 1: sealed parked entries ahead of the cycle entry spent the chain walk's 8 reads, so the holder parked on the cycle entry until the reservation ended",
+      "file": "tests/hosted-landing-reservation-cycle.test.mjs",
+      "test": "43b51a5e case 3 (budget): sealed parked entries ahead of the cycle entry spend none of the walk"
+    },
+    {
+      "incident": "43b51a5e",
+      "what": "Re-check 120fcc09 finding 2: the chain walk stopped at a handed link, so the holder parked on a handed entry nothing drove",
+      "file": "tests/hosted-landing-reservation-cycle.test.mjs",
+      "test": "43b51a5e case 3 (handed): the walk follows a handed link to the waiter on the reservation"
+    },
+    {
+      "incident": "43b51a5e",
+      "what": "Re-check 120fcc09 finding 3: a combined-group or pipelined holder skipped the cycle entry without the overtake rule; it now ends its reservation",
+      "file": "tests/hosted-landing-reservation-cycle.test.mjs",
+      "test": "43b51a5e case 3 (combined, pipelined): a holder that may not overtake ends its reservation instead"
+    },
+    {
+      "incident": "43b51a5e",
+      "what": "Review 012bd638: a reservation holder with its own global-risk file was never driven (ownGlobalRisk) while an older entry it holds back parked on its reservation, so both waited for the reservation to end",
+      "file": "tests/hosted-landing-reservation-cycle.test.mjs",
+      "test": "43b51a5e case 3 (own risk): a reservation holder with its own global risk is driven, not held"
+    },
+    {
       "incident": "fa2c1383",
       "what": "On 2026-11-17 main moves cancelled 57 running checks of landed work (2,977 job-min modelled) although some could still carry or seed a scoped recheck that pays; the 11-17 trace replays today's sweep against the keep rule with recorded queue waits kept",
       "file": "tests/keep-the-run-replay.test.mjs",

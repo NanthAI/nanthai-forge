@@ -36,6 +36,7 @@ import {
 } from '../src/landing-mode';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { checkRunEntryPaths, coverageChangePaths } from '../src/first-check-risk';
+import { runnerEntryPaths } from '../src/ci-status';
 import { isStandardForgeCheck, STANDARD_SELECTION_INPUTS } from '../src/standard-check';
 
 export const auditRow = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) =>
@@ -315,6 +316,7 @@ export function coverageLanding(run: HostedCheckRun, paths: readonly string[] | 
   if (paths === null) return true;
   const entries = [
     ...checkRunEntryPaths(run.check),
+    ...runnerEntryPaths(run.configuration),
     ...(isStandardForgeCheck(run.check) ? STANDARD_SELECTION_INPUTS : []),
   ];
   return coverageChangePaths(paths, entries).length > 0;

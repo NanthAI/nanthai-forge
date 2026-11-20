@@ -386,13 +386,15 @@ export async function writeLanding(
       (speculative && !retireAdvice)
         ? row.orderWait
         : undefined,
+    // A handoff mark lasts only while the entry is a Ready waiter (43b51a5e case 2).
+    orderWaitHanded: state.phase === 'ready' ? row.orderWaitHanded : undefined,
     orderWaited: orderLive || reserving || admissionHolds ? row.orderWaited : undefined,
     value: semanticPayload(state),
   });
   if (row.admitting && !admitting) await releaseAdmissionWaiters(ctx, row.projectId);
   if (row.deciding !== undefined && deciding === undefined) await releaseCohortHolds(ctx, row.projectId);
   if (row.orderWaited && ((!orderLive && !reserving && !admissionHolds) || retiresSolo))
-    await wakeLandingOrderWaiters(ctx, row, orderLive);
+    await wakeLandingOrderWaiters(ctx, row, orderLive, false, state.phase === 'landed');
   if (bindsNewRun(row, previous, state, runId, orderLive)) await wakeNewRunFollower(ctx, row);
   if (
     releaseRun &&

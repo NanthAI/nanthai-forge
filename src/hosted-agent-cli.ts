@@ -16,6 +16,7 @@ import { landExitsFailed, landSummary } from './hosted-land-summary.js';
 import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
 import { holdLines, landingHold } from './hosted-landing-hold.js';
 import { landingStateField } from './landing-state.js';
+import { orderWaitOf } from './hosted-wait-line.js';
 import { learnFromLanding } from './preflight-learned.js';
 import { operationLine } from './hosted-land-wait.js';
 import { AGENT_WAIT_SECONDS, interruptedWait, operationWait } from './agent-operation-wait.js';
@@ -323,6 +324,7 @@ async function dispatchHostedAgentCli(
           submission: { phase?: string } & Parameters<typeof landingHold>[0];
           recovery?: unknown;
           conflict?: unknown;
+          orderWait?: unknown;
         }[];
         status: string;
         run?: { status?: string } | null;
@@ -332,7 +334,12 @@ async function dispatchHostedAgentCli(
       // The same state word and next step people see (src/landing-state.ts); additive.
       const landing =
         submissions?.length === 1
-          ? { landingState: landingStateField(submissions[0]!.submission, laneId) }
+          ? {
+              landingState: landingStateField(
+                { ...submissions[0]!.submission, orderWait: orderWaitOf(submissions[0]!.orderWait) },
+                laneId,
+              ),
+            }
           : {};
       const held = hold ? { hold, ...landing } : landing;
       if (hold && status !== 'terminal') process.stderr.write(`${holdLines(hold).join('\n')}\n`);

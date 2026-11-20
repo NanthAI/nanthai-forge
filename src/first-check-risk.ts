@@ -17,8 +17,9 @@ import { HARNESS_RISK_V4, MOBILE_BUILD_RISK_V6, proseRootText } from './first-ch
  * adds test-harness, runner and build files of every ecosystem by shape (src/first-check-risk-v4.ts)
  * and counts a root `.txt` as prose only by name; v5 adds shared fixture and snapshot folders to the
  * sequence-folder rule (Issue c6b81429); v6 adds Xcode project, Gradle script and Swift/Dart tool
- * configuration files (src/first-check-risk-v4.ts, Issue 870791c3). Declared `globalRiskPaths` join
- * the check entries. */
+ * configuration files (src/first-check-risk-v4.ts, Issue 870791c3); v7 counts a `.github/` file as CI
+ * configuration only when the check can run it (`githubCi`, Issue 43b51a5e). Declared `globalRiskPaths`
+ * join the check entries. */
 export const FIRST_CHECK_RISK_RULES = [
   'first-check-risk-v1',
   'first-check-risk-v2',
@@ -26,14 +27,17 @@ export const FIRST_CHECK_RISK_RULES = [
   'first-check-risk-v4',
   'first-check-risk-v5',
   'first-check-risk-v6',
+  'first-check-risk-v7',
 ] as const;
 export type FirstCheckRiskRule = (typeof FIRST_CHECK_RISK_RULES)[number];
-export const FIRST_CHECK_RISK_RULE: FirstCheckRiskRule = 'first-check-risk-v6';
+export const FIRST_CHECK_RISK_RULE: FirstCheckRiskRule = 'first-check-risk-v7';
 /** True when `rule` is `from` or a later rule. */
 export const riskRuleSince = (rule: FirstCheckRiskRule, from: FirstCheckRiskRule) =>
   FIRST_CHECK_RISK_RULES.indexOf(rule) >= FIRST_CHECK_RISK_RULES.indexOf(from);
 const since = riskRuleSince;
-const patterns: { reason: string; test: RegExp; since?: FirstCheckRiskRule }[] = [
+type Pattern = { reason: string; test: RegExp; since?: FirstCheckRiskRule };
+/** Matched before `.github/` CI configuration (`githubCi`), so a reason keeps its earlier precedence. */
+const firstPatterns: Pattern[] = [
   // Package manifests and lockfiles, for the common ecosystems.
   {
     reason: 'package manifest or lockfile',
@@ -44,10 +48,12 @@ const patterns: { reason: string; test: RegExp; since?: FirstCheckRiskRule }[] =
     reason: 'build, lint or test configuration',
     test: /(?:^|\/)(?:tsconfig[^/]*\.json|jsconfig\.json|[^/]+\.config\.[cm]?[jt]s|\.oxlintrc[^/]*|\.oxfmtrc[^/]*|\.eslintrc[^/]*|eslint\.config\.[^/]+|\.prettierrc[^/]*|\.babelrc[^/]*|babel\.config\.[^/]+|\.swcrc|\.editorconfig|\.nvmrc|\.node-version|\.tool-versions|Makefile|Dockerfile)$/,
   },
-  // CI configuration, on any provider.
+];
+const patterns: Pattern[] = [
+  // CI configuration, on any provider (`.github/` is `githubCi`, matched before this list).
   {
     reason: 'CI configuration',
-    test: /^(?:\.github\/|\.gitlab-ci\.yml$|\.gitlab\/|\.circleci\/|\.buildkite\/|\.forgejo\/|\.woodpecker|Jenkinsfile$|azure-pipelines\.yml$|bitbucket-pipelines\.yml$)/,
+    test: /^(?:\.gitlab-ci\.yml$|\.gitlab\/|\.circleci\/|\.buildkite\/|\.forgejo\/|\.woodpecker|Jenkinsfile$|azure-pipelines\.yml$|bitbucket-pipelines\.yml$)/,
   },
   // The check contract Forge's Actions executor reads from every Candidate, before any check
   // command (scripts/check-contract.mjs, CHECK_CONTRACT_MISMATCH), whatever the repository.
@@ -128,6 +134,25 @@ const rootConfig = (path: string, rule: FirstCheckRiskRule) =>
   !/\.md$/i.test(path) &&
   !(/\.txt$/i.test(path) && (!since(rule, 'first-check-risk-v4') || proseRootText(path)));
 
+/** The files a check runs, compiled once per call. `projectWorkflow`: a check entry is a GitHub workflow
+ * (a ci-status runner's CI file, or a declared `.github/` path), so the project's own CI runs the check. */
+type Entries = { matchers: ((path: string) => boolean)[]; projectWorkflow: boolean };
+const compile = (checkEntries: readonly string[]): Entries => ({
+  matchers: checkEntries.map(entryMatcher),
+  projectWorkflow: checkEntries.some(entry => entry.startsWith('.github/')),
+});
+/** The GitHub files Forge's Actions executor runs for every check: its entry workflow, which it
+ * dispatches, and local actions a workflow can use. */
+const ACTIONS_EXECUTOR = /^\.github\/(?:workflows\/forge-check\.ya?ml$|actions\/)/;
+/** A `.github/` file is CI configuration (Issue 43b51a5e). Before v7 every one was. From v7 only when the
+ * check can run it: Forge's Actions entry workflow and local actions, or any `.github/` file when the
+ * project's own workflow runs the check (it may call any other workflow or action). Other workflows
+ * (nightly, release, deploy), templates and settings never run in the check: a scheduled workflow file
+ * held 9 passed landings for 80 min as order-sensitive CI configuration. */
+const githubCi = (path: string, entries: Entries, rule: FirstCheckRiskRule) =>
+  path.startsWith('.github/') &&
+  (!since(rule, 'first-check-risk-v7') || entries.projectWorkflow || ACTIONS_EXECUTOR.test(path));
+
 /** Reason the path is global-risk, or null. `checkEntries` are the files the
  * project's check definition runs (its own data, any runner). */
 export function firstCheckRisk(
@@ -135,19 +160,19 @@ export function firstCheckRisk(
   checkEntries: readonly string[] = [],
   rule: FirstCheckRiskRule = FIRST_CHECK_RISK_RULE,
 ): string | null {
-  return riskOf(path, checkEntries.map(entryMatcher), rule);
+  return riskOf(path, compile(checkEntries), rule);
 }
 const CI_CONFIGURATION = patterns.find(pattern => pattern.reason === 'CI configuration')!.test;
-function riskOf(
-  path: string,
-  entries: ((path: string) => boolean)[],
-  rule: FirstCheckRiskRule,
-): string | null {
-  if (entries.some(entry => entry(path))) return 'check script or check contract';
+function riskOf(path: string, entries: Entries, rule: FirstCheckRiskRule): string | null {
+  if (entries.matchers.some(entry => entry(path))) return 'check script or check contract';
   if (rootConfig(path, rule)) return 'root configuration';
+  const match = (list: Pattern[]) =>
+    list.find(pattern => (!pattern.since || since(rule, pattern.since)) && pattern.test.test(path))?.reason;
   return (
-    patterns.find(pattern => (!pattern.since || since(rule, pattern.since)) && pattern.test.test(path))
-      ?.reason ?? null
+    match(firstPatterns) ??
+    (githubCi(path, entries, rule) ? 'CI configuration' : null) ??
+    match(patterns) ??
+    null
   );
 }
 
@@ -155,13 +180,15 @@ function riskOf(
  * and contract files (with its selection inputs) and CI configuration. A landing with one does not
  * earn main's green from its own check, which still ran under the old selection or executor. */
 export function coverageChangePaths(paths: readonly string[], checkEntries: readonly string[] = []) {
-  const entries = checkEntries.map(entryMatcher);
+  const entries = compile(checkEntries);
   return paths.filter(path => {
     if (riskOf(path, entries, FIRST_CHECK_RISK_RULE) === 'check script or check contract') return true;
-    // CI configuration on any provider, even where a root-config rule names it first. Under .github/
-    // only workflows and actions run checks; templates or CODEOWNERS change no test (review 3287896a).
-    if (!CI_CONFIGURATION.test(path)) return false;
-    return !path.startsWith('.github/') || /^\.github\/(?:workflows|actions)\//.test(path);
+    // CI configuration on any provider, even where a root-config rule names it first (`.gitlab-ci.yml`).
+    // Under `.github/` only what the check runs (`githubCi`): templates, CODEOWNERS and other
+    // workflows change no test (review 3287896a, Issue 43b51a5e).
+    return path.startsWith('.github/')
+      ? githubCi(path, entries, FIRST_CHECK_RISK_RULE)
+      : CI_CONFIGURATION.test(path);
   });
 }
 
@@ -237,7 +264,7 @@ export function firstCheckRiskPaths(
   checkEntries: readonly string[] = [],
   rule: FirstCheckRiskRule = FIRST_CHECK_RISK_RULE,
 ) {
-  const entries = checkEntries.map(entryMatcher);
+  const entries = compile(checkEntries);
   return paths.filter(path => riskOf(path, entries, rule) !== null);
 }
 
@@ -261,7 +288,7 @@ export function orderSensitiveRisk(
   checkEntries: readonly string[] = [],
   rule: FirstCheckRiskRule = FIRST_CHECK_RISK_RULE,
 ): string[] {
-  const entries = checkEntries.map(entryMatcher);
+  const entries = compile(checkEntries);
   const sensitive = [...candidatePaths, ...mainPaths].filter(path => {
     const reason = riskOf(path, entries, rule);
     return reason !== null && (ORDER_SENSITIVE_REASONS.has(reason) || RULE_CONFIG.test(path));

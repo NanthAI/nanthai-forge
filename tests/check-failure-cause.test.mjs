@@ -132,3 +132,8 @@ test('the agent field carries the same cause, recovery and suspects in a compact
   assert.equal(field.mainFailingSince, 't');
   assert.equal(failureCauseField(null), null);
 });
+
+test('43b51a5e: a passed landing waiting for an older one to take main has no failure cause', () => {
+  assert.equal(failureCause({ landing: { state: 'waiting-for-order' }, run: { status: 'passed' } }), null);
+  assert.equal(failureCause({ landing: { state: 'waiting-for-order' } }), null);
+});

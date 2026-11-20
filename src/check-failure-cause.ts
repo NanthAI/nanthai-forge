@@ -116,6 +116,7 @@ const notFailure = new Set<LandingStateName>([
   'queued',
   'checking',
   'landing',
+  'waiting-for-order',
   'held-review',
   'held-dependency',
   'landed',

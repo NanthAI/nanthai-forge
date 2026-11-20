@@ -79,3 +79,35 @@ test('queue view: one bounded read lists entries with Lane, Intent, phase, faili
   assert.equal(f.pending().length, pending);
   assert.equal(JSON.stringify(states(f)), snapshot);
 });
+
+const runOwner = (f, run) =>
+  [...f.tables.projectHostedLandingAttempts.values()].find(
+    row => JSON.parse(row.value).check?.runId === run.id,
+  )?.submissionId;
+/** Core-claim incident 43b51a5e (2026-11-19): 9 passed entries parked behind an older submission
+ * read "Landing: The check passed; it is being accepted into main" in the queue view for up to 80 min,
+ * while observe said they waited for order. A Ready row with an order wait names the older one. */
+test('queue view 43b51a5e: a passed entry parked behind an older one says it waits for it, never "being accepted"', async t => {
+  const f = await batchesFixture(t, { count: 2, batching: false, requestCheck: true });
+  const [older, newer] = f.entries.map(entry => entry.state);
+  let seen = null;
+  for (let tick = 0; tick < 400 && !seen; tick++) {
+    if ([...f.tables.projectHostedLandingRequests.values()].some(row => row.orderWait))
+      seen = JSON.parse(await f.c.run('queueView', view.read, { projectId: f.projectId }));
+    for (const run of f.runs().filter(run => run.status === 'queued'))
+      // The older check stays running until the newer one has passed and parked.
+      if (runOwner(f, run) !== older.id) await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+    const task = f.pending().find(task => !task.name.startsWith('projectHostedLandingStall'));
+    if (!task) break;
+    if (!seen) await f.execute(task);
+  }
+  assert(seen, 'the newer passed entry parked behind the older one');
+  const parked = seen.entries.find(entry => entry.submissionId === newer.id);
+  assert.equal(parked.phase, 'ready');
+  assert.equal(parked.landingState.state, 'waiting-for-order');
+  assert.equal(parked.landingState.label, 'Waiting for an older landing');
+  assert.doesNotMatch(parked.landingState.nextStep, /being accepted into main/);
+  assert.match(parked.landingState.nextStep, new RegExp(`older submission ${older.id}`));
+  const ahead = seen.entries.find(entry => entry.submissionId === older.id);
+  assert.notEqual(ahead.landingState.state, 'waiting-for-order', 'the entry it waits for is not parked');
+});

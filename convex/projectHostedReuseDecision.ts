@@ -15,6 +15,7 @@ import { effectivePolicy } from '../src/autonomy-policy';
 import { ForgeError } from '../src/errors';
 import { fullGate, docsGate } from '../src/main-audit';
 import { checkRunEntryPaths } from '../src/first-check-risk';
+import { runnerEntryPaths } from '../src/ci-status';
 import { reducedEvidenceActor } from '../src/contract-gate-policy';
 import { trustGateReader } from './projectHostedTrust';
 import type { HostedCheckRun } from '../src/hosted-check';
@@ -203,8 +204,9 @@ export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingI
     landing.pipelineRetiredAttemptId === state.attemptId
       ? { exactTreeOnly: true }
       : {}),
-    // The project's own check and setup-action entry files are global-risk (any runner).
-    checkEntries: checkRunEntryPaths(run.check),
+    // The project's own check and setup-action entry files, and a ci-status runner's CI file, are
+    // global-risk (any runner).
+    checkEntries: [...checkRunEntryPaths(run.check), ...runnerEntryPaths(run.configuration)],
     // Fast landing mode: the policy asks for it, the breaker is clear, the audit is fresh.
     fast: fastEffective(
       policy.acceptance.landingMode,

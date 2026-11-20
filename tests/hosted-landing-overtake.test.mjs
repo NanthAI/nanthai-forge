@@ -3,7 +3,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-const { overtakeOlder, overtakeMark, sealedOlder, unsealedBy } = await import(
+import { drive, overlapBase, overlapEdits } from './queue-sim/overtake-drive.mjs';
+const { overtakeOlder, overtakeMark, sealedOlder, unsealedBy, olderRiskOnly } = await import(
   moduleUrl('../src/landing-overtake.ts')
 );
 const { recordOrderWait, HOSTED_ORDER_WAITS } = await import(
@@ -15,11 +16,6 @@ const env = {
   FORGE_HOSTED_CHECK_KEY_SYNTHETIC: 'synthetic-overtake',
 };
 const prior = Object.fromEntries(Object.keys(env).map(k => [k, process.env[k]]));
-const overlapBase = 'export const a = 0;\n// gap\nexport const b = 0;\n';
-const overlapEdits = [
-  'export const a = 1;\n// gap\nexport const b = 0;\n',
-  'export const a = 0;\n// gap\nexport const b = 1;\n',
-];
 test.before(() => Object.assign(process.env, env));
 test.after(() => {
   for (const [k, v] of Object.entries(prior)) {
@@ -202,96 +198,6 @@ test('recordOrderWait: one row per new wait, bounded', () => {
   assert.equal(list.length, HOSTED_ORDER_WAITS);
 });
 
-const receipts = f =>
-  [...f.tables.projectHostedAcceptances.values()]
-    .map(r => JSON.parse(r.value))
-    .sort((a, b) => a.snapshot.revision - b.snapshot.revision);
-
-/** Drive a wave of pre-queue-checked landings to the end. `duration(index, nth)` is the ticks the
- * nth check of entry `index` takes; `pick` chooses which due task runs next (scheduling order is not
- * fixed in a real deployment). Returns landing ticks, run counts and receipts by entry. */
-async function drive(
-  t,
-  {
-    memberPaths,
-    memberContents,
-    baselineFiles = [],
-    duration,
-    pick = tasks => tasks[0],
-    unknownAdmissionRisk = false,
-  },
-) {
-  const f = await batchesFixture(t, {
-    batchMaxSize: null,
-    admissionCheck: 'full',
-    memberPaths,
-    memberContents,
-    baselineFiles,
-    fileCount: 2,
-    count: 0,
-  });
-  const entries = f.tables.hostedProjects.get(f.projectId).checkEntries;
-  for (let i = 0; i < memberPaths.length; i++) {
-    if (unknownAdmissionRisk) f.patch('hostedProjects', f.projectId, { checkEntries: undefined });
-    await f.add(i);
-  }
-  if (unknownAdmissionRisk) f.patch('hostedProjects', f.projectId, { checkEntries: entries });
-  f.rawChecks.setPlanSelection(JSON.stringify({ scope: 'full', tests: [] }));
-  const ids = f.entries.map(e => e.state.id);
-  const rows = () => [...f.tables.projectHostedLandingRequests.values()];
-  const runOwner = run =>
-    [...f.tables.projectHostedLandingAttempts.values()].find(
-      row => JSON.parse(row.value).check?.runId === run.id,
-    )?.submissionId;
-  const owner = run =>
-    rows().find(r => r.admission?.runId === run.id || r.runId === run.id)?.submissionId ?? runOwner(run);
-  const due = new Map(),
-    landedAt = new Map(),
-    runsOf = new Map(ids.map(id => [id, new Set()]));
-  for (let tick = 0; states(f).some(s => s.phase !== 'landed' && s.phase !== 'terminal-failed'); tick++) {
-    assert(tick < 20000, JSON.stringify(states(f).map(s => [s.sequence, s.phase])));
-    for (const run of f.runs().filter(run => run.status === 'queued' && run.gate?.mode !== 'audit')) {
-      const id = owner(run);
-      runsOf.get(id)?.add(run.id);
-      if (!due.has(run.id)) due.set(run.id, tick + duration(ids.indexOf(id), runsOf.get(id)?.size ?? 1));
-      if (due.get(run.id) <= tick) await f.rawChecks.pass(await f.rawChecks.activate(run.id));
-    }
-    const tasks = f.pending().filter(t => !/MainAudit:start|LandingStall/.test(t.name));
-    if (!tasks.length) {
-      if (f.runs().some(run => run.status === 'queued' && run.gate?.mode !== 'audit')) continue;
-      break;
-    }
-    const before = new Set(
-      states(f)
-        .filter(s => s.phase === 'landed')
-        .map(s => s.id),
-    );
-    await f.execute(pick(tasks, ids));
-    for (const s of states(f)) if (s.phase === 'landed' && !before.has(s.id)) landedAt.set(s.id, tick);
-  }
-  for (let step = 0; step < 100; step++) {
-    const task = f.pending().find(task => !/MainAudit:start|LandingStall/.test(task.name));
-    if (!task) break;
-    await f.execute(task);
-  }
-  const byId = new Map(receipts(f).map(r => [r.submissionId, r]));
-  const result = {
-    ids,
-    landedAt: ids.map(id => landedAt.get(id)),
-    runs: ids.map(id => runsOf.get(id)?.size ?? 0),
-    orderWaits: ids.map(id => byId.get(id)?.orderWaits ?? []),
-    calls: f.counts.length,
-    readBytes: f.counts.reduce((n, c) => n + c.readBytes, 0),
-    writeBytes: f.counts.reduce((n, c) => n + c.writeBytes, 0),
-    idle: f.pending().filter(task => !/MainAudit:start|LandingStall/.test(task.name)).length,
-  };
-  t.diagnostic(JSON.stringify({ ...result, ids: undefined, firstCheck: f.reuseDecisions }));
-  assert(
-    states(f).every(s => s.phase === 'landed'),
-    JSON.stringify(states(f).map(s => [s.sequence, s.phase])),
-  );
-  return result;
-}
 /** An entry's waits that are order holds against an independent entry. Waiting for an older passed
  * entry that is taking main (`accepting`) is the one acceptance slot, not order. */
 const independentWaits = waits => waits.filter(w => w.footprints !== 'overlap' && w.held !== 'accepting');
@@ -403,7 +309,9 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // DB reads 1,896,315 -> 1,897,683 (Item 42200ce4, pass-to-land stamp): every landing row read after its first
   // pass now carries passedAt (about 17 B), the only state the queue health alarm needs. About 700 B per landing,
   // under $0.001 per 1,000 landings; no new call or write.
-  const baseline = { calls: 121, readBytes: 1_897_683, writeBytes: 676_662 };
+  // DB reads 1,897,683 -> 1,897,704 (Item 43b51a5e, queue-stall fix: handoff mark, own-risk flag and
+  // reservation-cycle fields on landing rows): 21 B per pair, no new call or write.
+  const baseline = { calls: 121, readBytes: 1_897_704, writeBytes: 676_662 };
   assert(pair.calls <= baseline.calls, `Convex transactions ${baseline.calls} -> ${pair.calls}`);
   assert(pair.readBytes <= baseline.readBytes, `DB reads ${baseline.readBytes} -> ${pair.readBytes}`);
   assert(pair.writeBytes <= baseline.writeBytes, `DB writes ${baseline.writeBytes} -> ${pair.writeBytes}`);
@@ -433,7 +341,8 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // files. The live unknown-risk arm now benefits from early retirement too.
   // DB reads 1,827,467 -> 1,901,561 (Item 9a04d916, compose settle; owner-approved +$0.02/1k), as in the small replay.
   // DB reads 1,901,561 -> 1,902,948 (Item 42200ce4, pass-to-land stamp on landing rows), as in the small replay.
-  const baseline = { calls: 121, readBytes: 1_902_948, writeBytes: 679_017 };
+  // DB reads 1,902,948 -> 1,902,970 (Item 43b51a5e, queue-stall fix), as in the small replay.
+  const baseline = { calls: 121, readBytes: 1_902_970, writeBytes: 679_017 };
   assert(after.calls <= baseline.calls, `transactions ${baseline.calls} -> ${after.calls}`);
   assert(after.readBytes <= baseline.readBytes, `DB reads ${baseline.readBytes} -> ${after.readBytes}`);
   assert(after.writeBytes <= baseline.writeBytes, `DB writes ${baseline.writeBytes} -> ${after.writeBytes}`);
@@ -450,4 +359,78 @@ test('70a9bd2f: a follower that finishes before its predecessor keeps the exact 
   assert(pair.landedAt[1] > pair.landedAt[0], 'A is the accepted predecessor even when C finishes first');
   assert(pair.landedAt[1] <= solo.landedAt[0] * 1.5);
   assert.equal(pair.idle, 0);
+});
+
+test("olderRiskOnly: only the older side's own global risk links two disjoint changes", () => {
+  const mine = ['src/a.ts'];
+  for (const theirs of [
+    ['convex/schema.ts'],
+    ['.github/workflows/forge-check.yml', 'src/b.ts'],
+    ['build.rs'],
+  ])
+    assert.equal(olderRiskOnly(mine, theirs, []), true, theirs.join());
+  assert.equal(olderRiskOnly(mine, ['ci/check.sh'], ['ci/check.sh']), true, 'a check entry');
+  assert.equal(olderRiskOnly(mine, ['src/b.ts'], []), false, 'no risk: unrelatedChanges decides');
+  assert.equal(
+    olderRiskOnly(['package.json'], ['convex/schema.ts'], []),
+    false,
+    'the passed side is risky too',
+  );
+  assert.equal(olderRiskOnly(['ci/check.sh'], ['convex/schema.ts'], ['ci/check.sh']), false);
+  assert.equal(olderRiskOnly(['src/a.ts'], ['src/a.ts', 'convex/schema.ts'], []), false, 'overlapping paths');
+  assert.equal(olderRiskOnly(['src'], ['src/a.ts', 'convex/schema.ts'], []), false, 'a containing path');
+  assert.equal(
+    olderRiskOnly(['db/migrate/2_b.rb'], ['db/migrate/2_a.rb', 'convex/schema.ts'], []),
+    false,
+    'a sequence folder both changed',
+  );
+  assert.equal(olderRiskOnly(null, ['convex/schema.ts'], []), false, 'unknown paths');
+  assert.equal(olderRiskOnly(mine, null, []), false, 'unknown paths');
+  assert.equal(olderRiskOnly(mine, [], []), false);
+});
+
+/** Core-claim incident 43b51a5e (dogfood 2026-11-19 15:03-16:28Z): an older entry that changed one
+ * global-risk file was checking in the queue, and every newer passed landing waited behind it as
+ * `dependent` (disjoint paths; only the older side's own risk linked them): 9 passed landings waited
+ * up to 80 min, and the older entry re-checked on every main move. Replay on the dogfood queue shape
+ * (each agent's check starts at submission): entry 0 lands at once and moves main; the older entry O
+ * checks for SLOW ticks; 9 newer changes with disjoint paths pass after RISK_LANE ticks. They take
+ * main without a dependent hold, and O re-checks at most once more for them. The project lets agents
+ * change workflow files without review (an explicit protected-path list), as on the dogfood project. */
+const RISK_N = 9,
+  RISK_LANE = 150;
+async function riskOnlyReplay(t, olderPath) {
+  const r = await drive(t, {
+    memberPaths: ['src/first.ts', olderPath, ...Array.from({ length: RISK_N }, (_, i) => `src/r${i}.ts`)],
+    ownerApprovalPaths: ['scripts/deploy*'],
+    fixture: { admissionCheck: false, requestCheck: true, batching: false },
+    duration: i => (i === 0 ? 0 : i === 1 ? SLOW : RISK_LANE),
+  });
+  const older = r.ids[1];
+  const readyLanded = Math.max(...r.landedAt.slice(2));
+  assert(readyLanded < RISK_LANE + SLOW / 4, `the passed landings reached main by tick ${readyLanded}`);
+  for (const [i, waits] of r.orderWaits.slice(2).entries())
+    assert.deepEqual(
+      waits.filter(w => w.submissionId === older && w.held === 'dependent'),
+      [],
+      `entry ${i + 2} never waits as dependent on the older entry`,
+    );
+  for (const [i, runs] of r.runs.slice(2).entries())
+    assert.equal(runs, 1, `entry ${i + 2} ran only its own check`);
+  // Its own check, plus at most one more because the passed ones took main.
+  assert(r.runs[1] <= 2, `the older entry re-checks at most once (${r.runs[1]} runs)`);
+  assert.equal(r.idle, 0, 'the drained queue has no idle work');
+  return r;
+}
+test('incident replay 43b51a5e: an older workflow-only check never holds 9 passed landings', async t => {
+  const r = await riskOnlyReplay(t, '.github/workflows/contracts-nightly.yml');
+  // Measured on this replay before the fix (9 dependent holds, 9 re-checks): fewer calls now.
+  const baseline = { calls: 695 };
+  assert(r.calls <= baseline.calls, `Convex transactions ${baseline.calls} -> ${r.calls}`);
+});
+test('43b51a5e: an older entry linked only by its own global risk is overtaken once, not a dependent hold', async t => {
+  const r = await riskOnlyReplay(t, 'convex/schema.ts');
+  assert.equal(r.runs[1], 2, 'the older entry was overtaken once and re-checked once');
+  const baseline = { calls: 695 };
+  assert(r.calls <= baseline.calls, `Convex transactions ${baseline.calls} -> ${r.calls}`);
 });

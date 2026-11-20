@@ -239,6 +239,12 @@ export const hostedLandingTables = {
     orderWait: v.optional(v.string()),
     /** Set on the older submission when a newer one waits for it, so only then its exit wakes waiters. */
     orderWaited: v.optional(v.literal(true)),
+    /** The holder a wake handed this passed entry to (it takes main first), until the entry's own
+     * claim decides a wait: the new-run wake may then drive it (incident 43b51a5e case 2). */
+    orderWaitHanded: v.optional(v.string()),
+    /** Set by a claim that found this change touches a global-risk file: every older live entry
+     * holds it, so the new-run wake and batons never drive it (43b51a5e). Its paths are pinned. */
+    ownGlobalRisk: v.optional(v.literal(true)),
     /** The check generation a newer passed entry overtook (`overtakeMark`); later ones hold order. */
     overtaken: v.optional(v.string()),
     /** Why this entry's pass cannot be carried across a moved main (scoped re-check, or a proof

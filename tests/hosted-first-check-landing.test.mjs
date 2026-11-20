@@ -317,7 +317,8 @@ test('Issue 1018d0f8 / 5d690345: a docs-covered main keeps zero discarded passed
 for (const [path, reason] of [
   ['package.json', 'global-risk'],
   ['fixture/0', 'order-sensitive'],
-  ['.github/workflows/check.yml', 'order-sensitive'],
+  // CI configuration the check runs (rule v7: other workflows are ordinary files, Issue 43b51a5e).
+  ['.github/workflows/forge-check.yml', 'order-sensitive'],
 ])
   test(`identical shared ${path} falls back to a real composed check before acceptance`, async t => {
     const f = await wave(t, {
@@ -346,7 +347,7 @@ for (const [path, reason] of [
 // `global-risk` is what an effective fast landing mode carries.
 for (const [name, memberPaths, reason] of [
   ['the change (type rules)', ['src/a.ts', 'web/tsconfig.json'], 'order-sensitive'],
-  ['main (CI configuration)', ['.github/workflows/check.yml', 'src/b.ts'], 'order-sensitive'],
+  ['main (CI configuration)', ['.github/workflows/forge-check.yml', 'src/b.ts'], 'order-sensitive'],
   ['the change (a package manifest)', ['src/a.ts', 'package.json'], 'global-risk'],
 ])
   test(`a global-risk file in ${name} rechecks as ${reason}`, async t => {
@@ -947,7 +948,8 @@ test('the global-risk list is path-only and any listed file rechecks', () => {
     'web/tsconfig.app.json',
     'vite.config.ts',
     '.oxlintrc.json',
-    '.github/workflows/check.yml',
+    '.github/workflows/forge-check.yml',
+    '.github/actions/setup/action.yml',
     '.gitlab-ci.yml',
     'scripts/check-contract.mjs',
     'convex/schema.ts',

@@ -194,11 +194,14 @@ export async function inspectQueue(f) {
       seen.add(next);
     }
     const last = row.orderWaits?.at(-1);
-    if ((row.orderWaits?.length ?? 0) < 8 && last?.submissionId !== row.orderWait)
+    // A wake handed this Ready waiter on (`orderWaitHanded`, 43b51a5e): a mark, not a recorded wait.
+    // Its next claim records the wait, so until then only the holder must match the decision.
+    const handed = row.orderWaitHanded !== undefined && row.orderWaitHanded === row.orderWait;
+    if ((row.orderWaits?.length ?? 0) < 8 && last?.submissionId !== row.orderWait && !handed)
       add('S6', row, 'stored holder absent from latest recorded wait');
     const ahead = await decide(f, row);
     if (
-      (ahead?.row.submissionId !== row.orderWait || ahead?.held !== last?.held) &&
+      (ahead?.row.submissionId !== row.orderWait || (!handed && ahead?.held !== last?.held)) &&
       !pendingClaim(f, row.submissionId)
     )
       add('L2', row, `stale edge: stored ${last?.held ?? 'unrecorded'}, current ${ahead?.held ?? 'none'}`);

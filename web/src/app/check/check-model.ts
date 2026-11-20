@@ -66,7 +66,12 @@ export function verdictState(read: CheckRead): { st: StateKind; word: string } {
   if (!read.landing) return { st: 'stale', word: 'No landing yet' };
   if (state === 'landed') return { st: 'passed', word: 'Landed' };
   if (state === 'checking' || state === 'landing') return { st: 'active', word: read.landing.label };
-  if (state === 'queued' || state === 'held-review' || state === 'held-dependency')
+  if (
+    state === 'queued' ||
+    state === 'waiting-for-order' ||
+    state === 'held-review' ||
+    state === 'held-dependency'
+  )
     return { st: 'waiting', word: read.landing.label };
   if (state === 'held-main-red') return { st: 'waiting', word: 'Held: main is failing' };
   if (state === 'waiting-for-runner') return { st: 'stale', word: 'Not started' };

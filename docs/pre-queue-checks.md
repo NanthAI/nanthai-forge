@@ -165,13 +165,21 @@ is enabled; the measured comparison below explains the default.
      files it changes for 30 minutes: a passed landing that changes any of them
      waits for it (order wait `reason:"reservation"`) instead of taking main
      first, and the holder never waits for an older entry its reservation holds
-     back. The reservation ends when its landing lands or fails, or at its time,
-     whichever is first; nothing extends it. Urgent owner landings, members of the
+     back, nor for one whose chain of parked waits leads back to such a waiter
+     (incident 43b51a5e: three landings waited for each other until the time
+     bound): it goes ahead of that entry when the two are disjoint, and otherwise
+     its reservation ends, since it could only deadlock. The reservation ends when
+     its landing lands or fails, at that point, or at its time, whichever is
+     first; nothing extends it. Urgent owner landings, members of the
      holder's own group and an earlier holder never wait; unknown paths count as
      overlapping. `status`, the finish wait and the land summary show
      `reservation {until, live, superseded}`. Cost: the count and the end are
      stored on the new submission's own row (no extra write); a claim reads one
-     indexed window of live reservations and, only while one is live, the paths.
+     indexed window of live reservations and, only while one is live, the paths;
+     a holder's claim follows the wait chain (handed links included) of the one
+     entry it would wait on, for at most 8 indexed reads. Only a solo holder that
+     may overtake goes ahead of such an entry; a combined group or a pipelined
+     successor ends its reservation instead.
      The landing-queue model checks it (`reserve`, `reserve-fixed`: within two
      attempts, no deadlock, every reservation ends).
    When main accepts while a Lane check is still running, the existing first
@@ -247,8 +255,8 @@ is enabled; the measured comparison below explains the default.
 
 ### Global-risk files
 
-One list, in `src/first-check-risk.ts` (rule `first-check-risk-v6`; a proof pins the
-rule it was decided under, so older receipts keep their v1 to v5 decisions). The
+One list, in `src/first-check-risk.ts` (rule `first-check-risk-v7`; a proof pins the
+rule it was decided under, so older receipts keep their v1 to v6 decisions). The
 same list decides which older landing a newer one may overtake. A change or a main
 delta touching any of these always rechecks, except a placed manifest (below). When a
 shape is in doubt it is on the list: a wrong match costs one recheck, a miss lands a
@@ -261,7 +269,13 @@ change on a check that never ran the new harness.
   `.editorconfig`, `.nvmrc`, `.node-version`, `.tool-versions`, `Makefile`,
   `Dockerfile`);
 - CI configuration on any provider (`.github/`, GitLab, CircleCI, Buildkite,
-  Forgejo, Woodpecker, Jenkins, Azure Pipelines, Bitbucket Pipelines);
+  Forgejo, Woodpecker, Jenkins, Azure Pipelines, Bitbucket Pipelines). From v7 a
+  `.github/` file is CI configuration only when the check can run it: Forge's Actions
+  entry workflow `.github/workflows/forge-check.yml` and local actions
+  (`.github/actions/**`), or every `.github/` file when a check entry is a GitHub
+  workflow (a CI-status project's own workflow may call any other). Other workflows
+  (nightly, release, deploy), templates and settings are ordinary files (incident
+  `43b51a5e`);
 - every repository file the project's check command or its Actions setup command
   (`actions.setup`) names: its executable, its arguments and any path inside a shell
   string such as `bash -c "./ci/run.sh"` (the check contract's own entry points;

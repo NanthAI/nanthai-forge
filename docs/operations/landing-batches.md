@@ -157,11 +157,38 @@ Related or unknown footprints keep strict order; combined and predicted-head gro
 An unrelated solo pass may bypass graph-sealed work. Sealing requires reusable full evidence and
 `auto-on-pass` reuse policy. Scoped or non-dependent proof refusals mark `unsealed` for life.
 Otherwise `overtaken` spends one generation; the next check holds order. A wrong sealed prediction
-allows at most one additional lost generation.
+allows at most one additional lost generation. An older entry linked to a disjoint pass only by its
+own global risk (the pass touches no risk file and no shared sequence or test folder) is never
+sealed, since its pass cannot carry, but takes the same one-generation overtake instead of a
+`dependent` hold (incident `43b51a5e`: one workflow file held 9 passes for 80 min). A Ready
+entry parked behind an older submission is not about to land, so it takes that overtake too,
+once for its passed generation.
 
 `orderWaits` records up to eight holders with `held` reason and `footprints` classification,
-reading Candidates only for a new comparison. Current parking clears the waiter's alarm and
-hands remaining waiters to the oldest wake; incident `5e3c3a3c` exposes stale edges in that path.
+reading Candidates only for a new comparison; a link made only by the older side's own global
+risk counts as `disjoint`. Current parking clears the waiter's alarm and hands remaining waiters
+to the oldest wake; incident `5e3c3a3c` exposes stale edges in that path. A handed Ready waiter is marked as handed to
+the entry it now waits for (`orderWaitHanded`; its own next claim clears the mark and records its
+real wait), so the new-run wake finds it if that entry re-checks instead. A waiter whose latest
+claim recorded an overlap with the holder that then landed gets no mark (main moved under its
+files, so its pass cannot carry); neither the new-run wake nor a baton drives a waiter whose latest
+claim overlaps the exact entry it waits on, one that was left unmarked that way, or one whose own
+change touches a global-risk file (`ownGlobalRisk`, set by its claim from paths it already read:
+every older live entry holds it, so a drive only parks it again). A holder that leaves
+without landing (withdrawn, failed, parked on red main) hands its waiters on marked: their passes
+still carry (review `14cf6d7e` F1). A full receipt list is unknown and never held this way. A
+publication hold on red main ends the entry's reservation, as parking does. An entry that parks for a
+hold lasting a check (its holder is not a Ready entry about to land) passes the Ready followers
+handed to it on: it drives the oldest younger one and hands it the rest, one index page per park
+and only towards higher sequence, so a reservation wait can never close a wake cycle (incident
+`43b51a5e` case 2: 12 passes waited out each head's re-check in a chain). A reservation holder
+never parks on an older entry whose chain of parked waits leads back to a waiter on its own
+reservation (handed links included; the chain is read, at most 8 rows, only for the entry it
+would wait on): a solo holder that may overtake goes ahead of that entry when their footprints are
+disjoint; otherwise (an overlap, a combined group, a pipelined successor) its reservation ends and
+its waiters are woken (`43b51a5e` case 3: three landings and ten passes
+behind them waited for each other until the reservation's time bound). A spent bounded step is
+recorded as `overtaken` whether or not the older entry's pass could carry.
 The [queue invariants](landing-queue-invariants.md) distinguish current defects from target
 wake/deadline guarantees and describe the replay gate. `CHANNEL_CHANGED` retains which older
 or newer landings moved main; a recheck count alone does not establish starvation.

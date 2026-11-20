@@ -444,3 +444,40 @@ test('d4b68402: the usual check time is the check-p50 speed budget', () => {
   assert.equal(p50.unit, 'min');
   assert.equal(state.USUAL_CHECK_MS, p50.max * 60_000);
 });
+
+/** Core-claim incident 43b51a5e: a passed entry parked behind an older submission read "being accepted
+ * into main". Every reader that holds the order wait says it waits, and for whom: CLI land and wait
+ * replies, the compact wait line and the web queue row. */
+test('43b51a5e: a parked passed entry reads waiting-for-order on CLI replies, the wait line and the queue row', async () => {
+  const { withFinishLandingState } = await import(moduleUrl('../src/hosted-agent-finish-result.ts'));
+  const { waitEventLine } = await import(moduleUrl('../src/hosted-wait-line.ts'));
+  const older = '190baa00-9c92-429d-8d69-b6fee834155e';
+  const submission = { phase: 'ready', observation: { state: 'pending', pendingReason: null, cause: null } };
+  const orderWait = {
+    submissionId: older,
+    message: `Check passed; waiting for older submission ${older} to take main first (submission order).`,
+  };
+  const field = landingStateField({ ...submission, orderWait });
+  assert.equal(field.state, 'waiting-for-order');
+  assert.equal(field.nextStep, orderWait.message);
+  assert.equal(landingStateField(submission).state, 'landing', 'without a wait it is being accepted');
+  assert.equal(
+    landingStateField({ ...submission, phase: 'checking', orderWait }).state,
+    'queued',
+    'only a Ready entry waits for order',
+  );
+  const reply = withFinishLandingState({}, { submission, orderWait });
+  assert.equal(reply.landingState.state, 'waiting-for-order');
+  assert.doesNotMatch(reply.landingState.nextStep, /being accepted/);
+  const line = waitEventLine({ type: 'submission', operationId: 'op', submission, orderWait });
+  assert.equal(line.line.landingState, 'waiting-for-order');
+  assert.equal(line.line.waitingFor, older);
+  const row = state.queueEntryState({ phase: 'ready', landingState: field }, null);
+  assert.equal(row.stage, 'ready');
+  assert.equal(row.held, false, 'waiting for order is not a hold');
+  assert.equal(row.why, 'waits for an older landing');
+  assert.equal(
+    state.queueEntryState({ phase: 'ready', landingState: landingStateField(submission) }).why,
+    'lands next',
+  );
+});

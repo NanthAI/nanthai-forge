@@ -307,3 +307,8 @@ export function candidatePublishable(input: {
 export function ciStatusEntryPaths(provider: CiStatusProvider) {
   return [provider.adapter === 'github-actions' ? provider.workflow : provider.ciFile];
 }
+/** A run's runner's CI file (ci-status only), beside `checkRunEntryPaths(run.check)`: readers that hold the
+ * run rather than the project row's folded entries still count the workflow that ran the check as an entry
+ * (src/first-check-risk.ts, `githubCi`, Issue 43b51a5e). */
+export const runnerEntryPaths = (configuration: { provider: string; ci?: CiStatusProvider }) =>
+  configuration.provider === 'ci-status' && configuration.ci ? ciStatusEntryPaths(configuration.ci) : [];

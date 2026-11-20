@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { pathsOverlap } from './hosted-cross-head-proof.js';
-import { globalRiskBetween } from './first-check-risk.js';
+import { firstCheckRiskPaths, globalRiskBetween, sharedSequenceFolders } from './first-check-risk.js';
 
 /** The older live entry a passed (Ready) landing is about to wait for. */
 export type OvertakeTarget = {
@@ -106,4 +106,57 @@ export function unrelatedChanges(
     !pathsOverlap([...mine], [...theirs]) &&
     !globalRiskBetween(mine, theirs, checkEntries),
   );
+}
+
+/** The only link between two changes is the older side's own global risk (core-claim incident
+ * 43b51a5e, 2026-11-19): the paths are disjoint, no sequence or shared test folder joins them and the
+ * passed newer change touches no global-risk file. Such an older entry's pass can never carry across a
+ * moved main, so it re-checks whenever any landing moves main; holding the newer one as `dependent`
+ * protects nothing and made 9 passed landings wait 80 min. The newer one may take the bounded
+ * `overtakeOlder` step (once per check generation of the older entry), never the sealed one: the older
+ * entry pays at most one re-check, then holds strict order again. Unknown paths are never this. Pure. */
+export function olderRiskOnly(
+  mine: readonly string[] | null,
+  theirs: readonly string[] | null,
+  checkEntries: readonly string[],
+) {
+  return Boolean(
+    mine?.length &&
+    theirs?.length &&
+    !pathsOverlap([...mine], [...theirs]) &&
+    !firstCheckRiskPaths(mine, checkEntries).length &&
+    !sharedSequenceFolders(mine, theirs).length &&
+    globalRiskBetween(mine, theirs, checkEntries),
+  );
+}
+
+/** The bounded step for an older entry linked only by its own global risk (`olderRiskOnly`). As
+ * `overtakeOlder`, except that a Ready entry parked behind an older submission (`orderWait`) is not
+ * about to land, so it is overtaken like a checking one (incident 43b51a5e case 2: a parked Ready
+ * entry with a CI-workflow change held every disjoint passed landing through two heads' re-checks).
+ * The mark is its passed generation: once overtaken it re-checks, and from that check on it holds
+ * strict order again. Pure. */
+export function overtakeRiskOnly(target: OvertakeTarget & { parked: boolean }) {
+  return overtakeOlder(target.phase === 'ready' && target.parked ? { ...target, phase: 'checking' } : target);
+}
+
+/** The change itself touches a global-risk file: its pass never carries across a moved main and
+ * every older live entry holds it (`waitFootprints` is `overlap` whatever the holder), so a wake that
+ * drives it while it still waits only makes it park again (43b51a5e, 8 concurrent finishes on hot
+ * files). Unknown paths are not this. Pure. */
+export function ownGlobalRisk(mine: readonly string[] | null, checkEntries: readonly string[]) {
+  return Boolean(mine?.length && firstCheckRiskPaths(mine, checkEntries).length);
+}
+
+/** Receipt footprints of a wait (`orderWaits`): `disjoint` when the two changes are unrelated or
+ * linked only by the older side's own global risk (a risk file is not a footprint overlap, and the
+ * new-run wake relies on this label to find followers that can overtake), `overlap` otherwise. */
+export function waitFootprints(
+  mine: readonly string[] | null,
+  theirs: readonly string[] | null,
+  checkEntries: readonly string[],
+) {
+  return unrelatedChanges(mine, theirs, checkEntries) || olderRiskOnly(mine, theirs, checkEntries)
+    ? ('disjoint' as const)
+    : ('overlap' as const);
 }

@@ -7,11 +7,15 @@ import assert from 'node:assert/strict';
 import {
   checkEntryPaths,
   checkRunEntryPaths,
+  coverageChangePaths,
   FIRST_CHECK_RISK_RULE,
   firstCheckRisk,
   globalRiskBetween,
+  orderSensitiveRisk,
+  riskRuleSince,
   sharedSequenceFolders,
 } from '../dist/first-check-risk.js';
+import { runnerEntryPaths } from '../dist/ci-status.js';
 import { validCrossHeadProof } from '../dist/hosted-cross-head-proof.js';
 import { unrelatedChanges } from '../dist/landing-overtake.js';
 import { hostedCheckDefinition } from '../dist/hosted-check.js';
@@ -205,7 +209,7 @@ test('v5: both sides changing the same fixture or snapshot folder is risk; apart
 
 // Issue 870791c3: Xcode project contents, Gradle script plugins and Swift/Dart tool configuration.
 test('v6: Xcode, Gradle script and Dart tool configuration are risk; v5 proofs keep their decision', () => {
-  assert.equal(FIRST_CHECK_RISK_RULE, 'first-check-risk-v6');
+  assert(riskRuleSince(FIRST_CHECK_RISK_RULE, 'first-check-risk-v6'));
   for (const path of [
     'App/App.xcodeproj/project.pbxproj',
     'App.xcworkspace/contents.xcworkspacedata',
@@ -232,4 +236,69 @@ test('v6: Xcode, Gradle script and Dart tool configuration are risk; v5 proofs k
   });
   assert.equal(validCrossHeadProof(proof('first-check-risk-v5')), true);
   assert.equal(validCrossHeadProof(proof('first-check-risk-v6')), false);
+});
+
+/** Core-claim incident 43b51a5e (2026-11-19): an older entry that changed only
+ * `.github/workflows/contracts-nightly.yml` counted as order-sensitive CI configuration, so 9 passed
+ * landings waited 80 min behind it and it re-checked on every main move (4,872 runner-seconds). From v7
+ * a `.github/` file is CI configuration only when the check can run it. */
+test('v7: a workflow the check never runs is an ordinary file; the entry workflow, local actions and a project CI stay risk', () => {
+  assert.equal(FIRST_CHECK_RISK_RULE, 'first-check-risk-v7');
+  const other = ['src/cart.ts'];
+  for (const path of [
+    '.github/workflows/contracts-nightly.yml',
+    '.github/workflows/release-sign.yml',
+    '.github/dependabot.yml',
+    '.github/CODEOWNERS',
+    '.github/ISSUE_TEMPLATE/bug.md',
+  ]) {
+    assert.equal(firstCheckRisk(path), null, path);
+    assert.equal(globalRiskBetween([path], other), false, path);
+    assert.deepEqual(orderSensitiveRisk([path], other), [], path);
+    assert.deepEqual(coverageChangePaths([path]), [], `${path} changes no test selection`);
+    // v6 receipts keep their decision.
+    assert.equal(firstCheckRisk(path, [], 'first-check-risk-v6'), 'CI configuration', `v6 ${path}`);
+  }
+  // Forge's Actions executor dispatches forge-check.yml; a workflow may use any local action.
+  for (const path of ['.github/workflows/forge-check.yml', '.github/actions/setup/action.yml']) {
+    assert.equal(firstCheckRisk(path), 'CI configuration', path);
+    assert.deepEqual(orderSensitiveRisk([path], other), [path], path);
+    assert.deepEqual(coverageChangePaths([path]), [path], path);
+  }
+  // A project whose own workflow runs the check (ci-status): it may call any workflow or action.
+  const ci = runnerEntryPaths({
+    provider: 'ci-status',
+    ci: { adapter: 'github-actions', repository: 'acme/app', workflow: '.github/workflows/ci.yml' },
+  });
+  assert.deepEqual(ci, ['.github/workflows/ci.yml']);
+  assert.deepEqual(runnerEntryPaths({ provider: 'github-actions', repository: 'acme/app' }), []);
+  assert.equal(firstCheckRisk('.github/workflows/ci.yml', ci), 'check script or check contract');
+  for (const path of ['.github/workflows/reusable-tests.yml', '.github/dependabot.yml']) {
+    assert.equal(firstCheckRisk(path, ci), 'CI configuration', path);
+    assert.deepEqual(orderSensitiveRisk([path], other, ci), [path], path);
+  }
+  // A root CI file changes coverage even though root configuration names it first.
+  assert.deepEqual(coverageChangePaths(['.gitlab-ci.yml', 'README.md']), ['.gitlab-ci.yml']);
+  // Other providers are unchanged, and earlier rules keep their reason order.
+  assert.equal(firstCheckRisk('.gitlab/ci/test.yml'), 'CI configuration');
+  assert.equal(firstCheckRisk('.circleci/config.yml'), 'CI configuration');
+  assert.equal(
+    firstCheckRisk('.github/tools/package.json', [], 'first-check-risk-v6'),
+    'package manifest or lockfile',
+  );
+  const proof = riskRule => ({
+    algorithm: 'clean-disjoint-v2',
+    candidatePaths: ['.github/workflows/contracts-nightly.yml'],
+    mainPaths: ['src/cart.ts'],
+    docsOverlap: [],
+    checkEntries: [],
+    riskRule,
+  });
+  assert.equal(validCrossHeadProof(proof('first-check-risk-v7')), true);
+  assert.equal(validCrossHeadProof(proof('first-check-risk-v6')), false);
+  assert.equal(
+    validCrossHeadProof({ ...proof('first-check-risk-v7'), checkEntries: ci }),
+    false,
+    "a project's own CI keeps every workflow risk",
+  );
 });
