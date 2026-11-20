@@ -2204,7 +2204,16 @@ write. A resubmission's carried seconds arrive with its insert, which is no
 transition, so they never count again; any other failed end (superseded,
 cancelled, stalled) counts none, since its check may have passed and a
 resubmission that reuses it counts it when it lands. A predecessor's last check that its successor does
-not reuse is not counted, so CI minutes stay a lower bound. Readers work out "today" and
+not reuse is not counted, so CI minutes stay a lower bound. The landing also judges
+whether it was a [first try](concepts.md#core-model) and adds it to `flow.first`
+(hour, first tries, landings judged) in that same write: a submission that ends
+without landing marks its bound Lanes `retried` on the patch that end already makes
+(an end that moves nothing else patches for it alone), the next binding page copies
+the mark, and the landing reads it from the page it already reads, with its own
+`supersedes` and discarded-check counts. The top bar, `nforge status` (`mainToday`; a bare status
+asks for the stored day, `mainDay`, on the capability or clone main read it already makes, and works out the figure
+on its own clock, so a cached query never serves yesterday's)
+and `flow` read the UTC day from it. Readers work out "today" and
 elapsed times themselves; `nforge agent ROOT flow` renders the same feed as text. Ordinary writes initialize legacy Lanes; untouched Lanes
 remain uncounted, and reads never backfill. Legacy main uses exact Channel/receipt
 lookups until publication installs its summary.

@@ -8,7 +8,7 @@ import { keptApplyEnvelope } from './hosted-apply-kept.js';
 import { cliBuildCommit } from './cli-installation.js';
 import { describeIssues, missingObserveId, retryReasonHint } from './argument-errors.js';
 import { liveLanes } from './hosted-live-lanes.js';
-import { cloneFreshness, mainCheckoutTransport, pullHostedProject } from './hosted-pull.js';
+import { cloneFreshness, mainCheckoutTransport, mainTodayFrom, pullHostedProject } from './hosted-pull.js';
 import { readHostedMainSelection } from './hosted-main-marker.js';
 import {
   diffHostedSource,
@@ -144,7 +144,7 @@ import {
 } from './hosted-changed-paths.js';
 import { publishClientSourcePack } from './source-pack-client.js';
 import { missingRequiredFeatures } from './hosted-contract-features.js';
-import { capabilityOptions, takeEarlyCapabilities } from './hosted-capabilities-early.js';
+import { bareStatus, capabilityOptions, takeEarlyCapabilities } from './hosted-capabilities-early.js';
 import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
 import { selectHostedFinish, unsavedFiles } from './hosted-agent-finish-identity.js';
 import {
@@ -893,13 +893,17 @@ export class HostedAgentTransport {
         return this.response(
           action,
           null,
-          await cloneFreshness(this.root, mainCheckoutTransport(this.root, this.address, this.exchange)),
+          await cloneFreshness(
+            this.root,
+            mainCheckoutTransport(this.root, this.address, this.exchange),
+            true,
+          ),
         );
       const settling = backgroundSaveOperation(this.root);
       let discovery: unknown;
       let guardAsked = false;
       try {
-        let options = capabilityOptions(this.root);
+        let options = capabilityOptions(this.root, bareStatus(action, input));
         // The project's learned preflight guard set (13ea93bf) rides on this read for the commands
         // that preflight a checkout a start may not have reached on this machine; fresh copies skip it.
         const guardRevision = guardAsking.has(action)
@@ -1140,6 +1144,7 @@ export class HostedAgentTransport {
           {
             needsFix: capabilities.needsFix ?? [],
             ...(capabilities.githubMirror !== undefined ? { githubMirror: capabilities.githubMirror } : {}),
+            ...(capabilities.mainDay ? { mainToday: await mainTodayFrom(capabilities.mainDay) } : {}),
           },
           capabilities.overlapVersion === 1 ? readHostedLaneCheckout(this.root)?.selection.laneId : undefined,
         );

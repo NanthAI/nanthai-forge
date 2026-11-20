@@ -23,6 +23,9 @@ export const liveLineTables = {
     check: v.optional(v.string()),
     /** Held only because main is failing: no person is asked (Item 85f456c1). */
     mainRed: v.optional(v.literal(true)),
+    /** A submission of this Lane ended without landing since the Lane last landed: its next landing is not a first
+     * try (Item 32e8de50). Rides the patch that end already makes; never read by the line feed. */
+    retried: v.optional(v.literal(true)),
   })
     .index('by_project_and_lane', ['projectId', 'laneId'])
     .index('by_project_and_held', ['projectId', 'held'])

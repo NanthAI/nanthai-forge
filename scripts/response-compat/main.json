@@ -492,6 +492,36 @@
             }
           ]
         },
+        "mainDay": {
+          "type": "object",
+          "properties": {
+            "hours": {
+              "maxItems": 48,
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              }
+            },
+            "first": {
+              "maxItems": 48,
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "required": [
+            "hours",
+            "first"
+          ],
+          "additionalProperties": false
+        },
         "schema": {
           "type": "number",
           "const": 1

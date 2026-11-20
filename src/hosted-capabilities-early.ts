@@ -8,13 +8,18 @@ import { backgroundSaveOperation } from './hosted-save-pending.js';
 import { readHostedMainSelection } from './hosted-main-marker.js';
 import { noteEarlyCapabilities } from './hosted-capabilities-carried-main.js';
 
+/** A bare `status {}`: the one command that asks for the top bar's main figure (Item 32e8de50). */
+export const bareStatus = (action: string, input: Record<string, unknown>) =>
+  action === 'status' && Object.keys(input).every(key => ['url', 'projectId', 'action'].includes(key));
 /** The capability discovery request of an agent command (one read). `settling` names this
  * checkout's save that returned before its settle (fea47345 C); the reply carries its outcome. */
-export function capabilityOptions(root: string): Record<string, unknown> {
+export function capabilityOptions(root: string, status = false): Record<string, unknown> {
   const settling = backgroundSaveOperation(root);
   return {
     // Named contract features (a83b6fd5): the reply lists the ones this server implements.
-    features: [...hostedContractFeatures],
+    features: status
+      ? [...hostedContractFeatures]
+      : hostedContractFeatures.filter(feature => feature !== 'main-today'),
     noticeVersion: 1,
     resolveVersion: 1,
     overlapVersion: 1,
@@ -59,14 +64,14 @@ const started = new Map<string, Promise<unknown>>();
  * dispatch makes; that dispatch takes the reply (`takeEarlyCapabilities`), so a command makes no
  * extra call. A command that stops at the release gate (its child process on the new build runs it)
  * leaves one unused read. Nothing else reads the reply, and nothing is written before the gate. */
-export function startEarlyCapabilities(root: string, address: HostedAgentAddress) {
+export function startEarlyCapabilities(root: string, address: HostedAgentAddress, status = false) {
   let exchange: ConvexExchange;
   try {
     exchange = new ConvexExchange(address.url, process.env.FORGE_AUTH_TOKEN, address.projectId, '', null);
   } catch {
     return; // No credential: the dispatch reports it in its own words.
   }
-  const args = { clientVersion: CUTOVER_CLI_VERSION, ...capabilityOptions(root) };
+  const args = { clientVersion: CUTOVER_CLI_VERSION, ...capabilityOptions(root, status) };
   // Each command reads afresh: an earlier command's untaken read (it stopped at its gate) is replaced.
   const call = exchange.client
     .query(makeFunctionReference<'query'>('projectHostedAgent:capabilities'), {

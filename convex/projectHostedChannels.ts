@@ -12,6 +12,7 @@ import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operat
 import { beginHostedOperation, finishHostedOperation } from './projectHostedOperations';
 import { invariant } from '../src/errors';
 import { findObject } from './projectObjectFind';
+import { readMainDay } from './projectLiveLineStore';
 
 export const channelRow = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) =>
   ctx.db
@@ -123,7 +124,8 @@ export const seed = internalMutation({
 
 /** Version-2 start observation, separate from legacy projectMain generation reads. */
 export const current = query({
-  args: { projectId: v.id('hostedProjects') },
+  /** `today: 1`: a clone's bare status also wants the top bar's main figure (Item 32e8de50). */
+  args: { projectId: v.id('hostedProjects'), today: v.optional(v.literal(1)) },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
@@ -139,7 +141,9 @@ export const current = query({
         'SOURCE_AUTHORITY_CHANGED',
         'Hosted main and project authority differ.',
       );
-      return canonicalPayload(main);
+      return canonicalPayload(
+        input.today ? { ...main, mainDay: await readMainDay(ctx.db, input.projectId) } : main,
+      );
     } catch (error) {
       return report(error);
     }

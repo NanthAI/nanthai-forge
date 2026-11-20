@@ -4,7 +4,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { lineOwner, detachLineOwner } from './projectLiveLineOwners';
 import { internal } from './_generated/api';
 import { nextActivityHour } from './accountProjectOrderHour';
-import { flowMain, stepFlow, type FlowStep } from '../src/flow-day';
+import { flowDay, flowMain, stepFlow, type FlowStep } from '../src/flow-day';
 
 type Db = MutationCtx['db'];
 type Mark = Doc<'projectLiveLineLanes'>;
@@ -16,6 +16,14 @@ export const lineSummary = (db: Pick<Db, 'query'>, projectId: Id<'hostedProjects
     .query('projectFinishReadRows')
     .withIndex('by_kind_and_source', q => q.eq('kind', summaryKind).eq('sourceId', projectId))
     .unique();
+/** The top bar's main figure for agents (Item 32e8de50): one read of the summary row the top bar already reads,
+ * made only by a bare status that asks for it. The rolling day's landing and first-try rows (at most a day of each),
+ * not a figure: the caller works out "today" with its own clock, so a cached query never serves yesterday's. */
+export async function readMainDay(db: Pick<Db, 'query'>, projectId: Id<'hostedProjects'>) {
+  const summary = await lineSummary(db, projectId);
+  const day = flowDay(summary ? JSON.parse(summary.value).flow : undefined);
+  return { hours: day.hours.slice(-24), first: (day.first ?? []).slice(-24) };
+}
 /** Only an explicit removal updates the small latest-exit snapshot. A landing or failed check that writes it also
  * steps the Flow view's day (src/flow-day.ts) in the same write; `step` alone writes only when it counts something. */
 export async function lineExit(

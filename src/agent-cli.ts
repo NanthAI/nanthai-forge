@@ -7,7 +7,11 @@ import { hostedAgentHelp, hostedHelpFor } from './hosted-agent-help.js';
 import { helpTopicIndex, helpTopicText, isHelpTopic } from './help-topics.js';
 import { addressOnlyRoot, hostedAgentAddress } from './hosted-agent-address.js';
 import { FOLDER_ACTIONS, laneCheckoutRoot, laneSuccessor } from './hosted-lane-location.js';
-import { discoversCapabilitiesFirst, startEarlyCapabilities } from './hosted-capabilities-early.js';
+import {
+  bareStatus,
+  discoversCapabilitiesFirst,
+  startEarlyCapabilities,
+} from './hosted-capabilities-early.js';
 import { hostedAgentRoot } from './hosted-agent-journal.js';
 import { LAND_CHILD_ENV } from './hosted-land-child-env.js';
 import { canonicalOperationIds } from './operation-id-case.js';
@@ -323,7 +327,7 @@ async function runAgentCli(
       if (options.beforeDispatch) {
         validateHostedCliCommand(here, action, command);
         if (discoversCapabilitiesFirst(hostedAgentRoot(here), action, command))
-          startEarlyCapabilities(hostedAgentRoot(here), hosted);
+          startEarlyCapabilities(hostedAgentRoot(here), hosted, bareStatus(action, command));
         if (!(await options.beforeDispatch(stdin === undefined ? undefined : { stdin }))) return;
       }
       const [{ hostedAgentCli }, { hostedLandCli }, { HostedAgentTransport }] = await modules;

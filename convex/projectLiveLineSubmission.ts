@@ -4,9 +4,12 @@ import type { Id } from './_generated/dataModel';
 import type { HostedLandingState } from '../src/hosted-landing';
 import { changeLineMark, lineExit } from './projectLiveLineStore';
 import { lineOwner, detachLineOwner, type LineBinding, type LineOwnerValue } from './projectLiveLineOwners';
+import type { FlowStep } from '../src/flow-day';
 
 type LineState = Pick<HostedLandingState, 'id' | 'projectId' | 'phase'> &
-  Partial<Pick<HostedLandingState, 'observation' | 'error' | 'batchId' | 'timing' | 'counts' | 'at'>> & {
+  Partial<
+    Pick<HostedLandingState, 'observation' | 'error' | 'batchId' | 'timing' | 'counts' | 'at' | 'supersedes'>
+  > & {
     held?: boolean;
     hold?: string | null;
   };
@@ -41,7 +44,7 @@ const seconds = (n: number | undefined) => (n && Number.isFinite(n) && n > 0 ? n
  * resubmission may reuse it, which counts it then. A write that both binds a reused check and discards another sees
  * only the net change, so it can undercount, never overcount: CI minutes are a lower bound. Reverts and fixes on
  * top count once per red episode, when main turns green (projectLiveLineStore). */
-function flowStep(before: LineState, state: LineState) {
+function flowStep(before: LineState, state: LineState): FlowStep | null {
   const discarded =
     seconds(state.counts?.discardedRunnerSeconds) - seconds(before.counts?.discardedRunnerSeconds);
   const dropped = discarded > 0 ? { ciSeconds: discarded, lostSeconds: discarded } : null;
@@ -90,7 +93,13 @@ export async function bindLineInputs(
       continue;
     await detachLineOwner(ctx.db, owner);
     await changeLineMark(ctx.db, mark, selection(state));
-    bindings.push({ laneId: mark.laneId, markId: mark._id, ownerId: owner._id, head: metadata.head });
+    bindings.push({
+      laneId: mark.laneId,
+      markId: mark._id,
+      ownerId: owner._id,
+      head: metadata.head,
+      ...(mark.retried ? { retried: true as const } : {}),
+    });
   }
   if (bindings.length) {
     const pageId = await ctx.db.insert('projectFinishReadRows', {
@@ -148,7 +157,11 @@ export async function transitionLineSubmission(
 ) {
   const prior = selection(before),
     next = selection(state);
+  // An end without landing marks its Lanes retried (Item 32e8de50), in the patch that end makes anyway; only an end
+  // that moves nothing else (a withdrawal before any check, a decline while held) writes for it alone.
+  const retried = state.phase === 'terminal-failed' && before.phase !== 'terminal-failed';
   const moved =
+    retried ||
     prior.stage !== next.stage ||
     prior.held !== next.held ||
     prior.check !== next.check ||
@@ -163,6 +176,7 @@ export async function transitionLineSubmission(
   let cursor: string | null = null;
   let removed = 0;
   let last: string | undefined;
+  let boundRetried = false;
   do {
     const page = await ctx.db
       .query('projectFinishReadRows')
@@ -178,10 +192,12 @@ export async function transitionLineSubmission(
           await ctx.db.delete(entry.ownerId);
           removed++;
           last = entry.laneId;
+          if (entry.retried) boundRetried = true;
         } else if (moved) {
           await ctx.db.patch(entry.markId, {
             ...next,
             ...(prior.stage !== next.stage ? { changedAt: Date.now() } : {}),
+            ...(retried ? { retried: true as const } : {}),
           });
         }
       }
@@ -192,6 +208,15 @@ export async function transitionLineSubmission(
     if (page.isDone) break;
     cursor = state.phase === 'landed' ? null : page.continueCursor;
   } while (true);
+  // First try (docs/concepts.md#first-try, the rule of src/stats-estimate.ts#firstTry, live and per Lane): none of the
+  // landing's Lanes had a submission end without landing since they last landed, it replaced no earlier attempt, and
+  // no check of it was thrown away. Judged on the landing's own write: no read is added.
+  if (step?.landed)
+    step.first =
+      !boundRetried &&
+      !state.supersedes &&
+      !(seconds(state.counts?.discardedRunnerSeconds) > 0) &&
+      !state.counts?.discardedRunnerUnknown;
   // One summary write: the exit a landing already writes, carrying the Flow day's step. A landing with no bound
   // mark, or a failed check, writes the step alone.
   if (removed || step)

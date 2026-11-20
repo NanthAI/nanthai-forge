@@ -207,6 +207,9 @@ export const hostedContractFeatures = [
    * queue answers projectHostedQueueRoom:room (ad80e037); the switch FORGE_QUEUE_LAND_WHEN_ROOM decides
    * whether it is honoured. Without the feature the CLI refuses `land {maxChecks}` itself. */
   'land-when-room',
+  /** Capabilities carry `mainToday` (Item 32e8de50): the top bar's landings today and first-try share. Asked only by
+   * a bare status (hosted-capabilities-early.ts `capabilityOptions`), so no other command reads the summary row. */
+  'main-today',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

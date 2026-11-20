@@ -21,6 +21,10 @@ export type FlowDay = {
   took: Array<[number, number]>;
   /** main's audit verdict as the line last heard it: failing or passing, and since when (ms). */
   main?: { red: boolean; since: number };
+  /** [hour, first-try landings, landings judged] (Item 32e8de50): a landing is judged when its landing write
+   * knows whether it was a first try (docs/concepts.md#first-try). Hours before this field have none, so the share
+   * covers only the landings judged, never counts an unjudged one as a first try. */
+  first?: Array<[number, number, number]>;
 };
 export type FlowStep = Partial<{
   landed: number;
@@ -31,6 +35,8 @@ export type FlowStep = Partial<{
   lostSeconds: number;
   /** Seconds from submission to main of one landing. */
   took: number;
+  /** A landing (with `landed`) that was a first try (true) or not (false). */
+  first: boolean;
 }>;
 
 const hourOf = (at: number) => Math.floor(at / HOUR_MS);
@@ -47,6 +53,9 @@ export function flowDay(value: unknown): FlowDay {
     took: day.took.filter(row => numbers(row, 2)) as Array<[number, number]>,
     ...(day.main && typeof day.main.since === 'number'
       ? { main: { red: !!day.main.red, since: day.main.since } }
+      : {}),
+    ...(Array.isArray(day.first)
+      ? { first: day.first.filter(row => numbers(row, 3)) as Array<[number, number, number]> }
       : {}),
   };
 }
@@ -75,10 +84,20 @@ export function stepFlow(value: unknown, at: number, step: FlowStep): FlowDay {
   const took = day.took.filter(sample => sample[0] > keep);
   if (step.took !== undefined && Number.isFinite(step.took) && step.took >= 0)
     took.push([hour, Math.round(step.took)]);
+  const first = (day.first ?? [])
+    .filter(row => row[0] > keep)
+    .map(row => [...row] as [number, number, number]);
+  if (step.landed && step.first !== undefined) {
+    let tries = first.find(entry => entry[0] === hour);
+    if (!tries) first.push((tries = [hour, 0, 0]));
+    if (step.first) tries[1]++;
+    tries[2]++;
+  }
   return {
     hours: hours.filter(entry => entry.slice(1).some(n => n > 0)),
     took: took.slice(-FLOW_TOOK),
     ...(day.main ? { main: day.main } : {}),
+    ...(first.length ? { first: first.sort((a, b) => a[0] - b[0]) } : {}),
   };
 }
 
@@ -107,6 +126,10 @@ export type FlowToday = {
   fixedOnTop: number;
   ciMinutes: number;
   lostMinutes: number;
+  /** First-try landings of the landings judged today, and their share (0 to 1); null with none judged. */
+  firstTry: number;
+  judged: number;
+  firstTryShare: number | null;
 };
 
 /** Today's figures from `dayStart` (the reader's local midnight, ms) to `now`. */
@@ -123,6 +146,13 @@ export function flowToday(value: unknown, now: number, dayStart: number): FlowTo
     byHour[row[0] - from] = row[1];
     for (let i = 1; i < 7; i++) sum[i] = sum[i]! + row[i]!;
   }
+  let firstTry = 0,
+    judged = 0;
+  for (const [hour, ok, of] of day.first ?? [])
+    if (hour >= from && hour <= last) {
+      firstTry += ok;
+      judged += of;
+    }
   const took = day.took
     .filter(([hour]) => hour >= from && hour <= last)
     .map(([, seconds]) => seconds)
@@ -139,5 +169,39 @@ export function flowToday(value: unknown, now: number, dayStart: number): FlowTo
     fixedOnTop: sum[4]!,
     ciMinutes: Math.round(sum[5]! / 60),
     lostMinutes: Math.round(sum[6]! / 60),
+    firstTry,
+    judged,
+    firstTryShare: judged ? firstTry / judged : null,
   };
+}
+
+/** The project day is the UTC day, as on Stats: its start (ms) for a time. */
+export const utcDayStart = (now: number) => Math.floor(now / 86_400_000) * 86_400_000;
+
+/** The top bar's main figure and the one agents read (Item 32e8de50): landings on main today (the UTC project day)
+ * and the share of today's judged landings that were a first try. One source: the line feed's Flow day. */
+export type MainToday = { landed: number; firstTry: number; judged: number; share: number | null };
+export function mainToday(value: unknown, now: number): MainToday & { words: string } {
+  const today = flowToday(value, now, utcDayStart(now));
+  const figure = {
+    landed: today.landed,
+    firstTry: today.firstTry,
+    judged: today.judged,
+    share: today.firstTryShare,
+  };
+  return { ...figure, words: mainTodayWords(figure) };
+}
+
+/** Whole percent, never rounded up to 100 % or down to 0 % unless every or no judged landing was a first try. */
+export function firstTryPercent(today: Pick<MainToday, 'firstTry' | 'judged'>): number | null {
+  if (!today.judged) return null;
+  if (today.firstTry === today.judged) return 100;
+  if (!today.firstTry) return 0;
+  return Math.min(99, Math.max(1, Math.round((today.firstTry / today.judged) * 100)));
+}
+/** "N today · X% first try", or "N today" when no landing today was judged. */
+export function mainTodayWords(today: MainToday): string {
+  const n = today.landed.toLocaleString('en-US');
+  const pct = firstTryPercent(today);
+  return pct === null ? `${n} today` : `${n} today · ${pct}% first try`;
 }

@@ -47,6 +47,8 @@ export const liveLineResult = v.object({
       hours: v.array(v.array(v.number())),
       took: v.array(v.array(v.number())),
       main: v.optional(v.object({ red: v.boolean(), since: v.number() })),
+      /** [hour, first-try landings, landings judged] (Item 32e8de50). */
+      first: v.optional(v.array(v.array(v.number()))),
     }),
   ),
 });

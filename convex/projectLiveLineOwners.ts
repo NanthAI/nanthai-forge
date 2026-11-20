@@ -11,6 +11,8 @@ export type LineBinding = {
   laneId: string;
   markId: Id<'projectLiveLineLanes'>;
   ownerId: Id<'projectFinishReadRows'>;
+  /** The mark's `retried` when this submission bound it (Item 32e8de50). */
+  retried?: true;
 };
 export type LineOwnerValue = {
   markId: Id<'projectLiveLineLanes'>;

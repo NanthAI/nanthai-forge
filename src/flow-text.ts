@@ -5,7 +5,7 @@
  * One line per stop with open, held, the longest wait and the held Lanes by id, then the ways back, the checks and
  * the next step. Pure and read-free; elapsed times come from the feed's timestamps and the caller's clock.
  */
-import { FLOW_TOOK, flowToday, type FlowDay } from './flow-day.js';
+import { FLOW_TOOK, firstTryPercent, flowToday, utcDayStart, type FlowDay } from './flow-day.js';
 
 /** A Lane's stage in the feed. */
 type FlowStage = 'editing' | 'saved' | 'queued' | 'checking' | 'ready';
@@ -25,7 +25,9 @@ export type FlowFeed = {
   more: number;
   moreIsLowerBound: boolean;
   main: { head: string; at?: string } | null;
-  flow?: FlowDay | { hours: number[][]; took: number[][]; main?: { red: boolean; since: number } };
+  flow?:
+    | FlowDay
+    | { hours: number[][]; took: number[][]; main?: { red: boolean; since: number }; first?: number[][] };
 };
 
 /** The line's stops and the stages each counts (web/src/app/Line.tsx `lineStops`): one vocabulary and one count
@@ -83,7 +85,7 @@ export function flowStations(feed: FlowFeed, now: number) {
 /** The picture as text, plus the same figures as fields. `root` is the agent ROOT for the next-step command. */
 export function flowText(feed: FlowFeed, now: number, root = '.') {
   const stations = flowStations(feed, now);
-  const dayStart = Math.floor(now / 86_400_000) * 86_400_000;
+  const dayStart = utcDayStart(now);
   const today = flowToday(feed.flow, now, dayStart);
   const red = feed.flow?.main?.red === true;
   const open = feed.lanes.length + feed.more;
@@ -111,8 +113,9 @@ export function flowText(feed: FlowFeed, now: number, root = '.') {
       `${' '.repeat(width)}  +${feed.more}${feed.moreIsLowerBound ? ' or more' : ''} open Lanes past the first ${feed.lanes.length}, not by stop`,
     );
   const since = feed.flow?.main ? ` since ${clock(feed.flow.main.since, dayStart)}` : '';
+  const pct = firstTryPercent(today);
   lines.push(
-    `${'main'.padEnd(width)}  ${String(today.landed).padStart(3)}   landed today (UTC), ${today.thisHour} this hour; ${red ? `failing${since}` : feed.flow?.main ? `passing${since}` : 'passing or failing not reported yet'}`,
+    `${'main'.padEnd(width)}  ${String(today.landed).padStart(3)}   landed today (UTC), ${today.thisHour} this hour${pct === null ? '' : `, ${pct}% first try`}; ${red ? `failing${since}` : feed.flow?.main ? `passing${since}` : 'passing or failing not reported yet'}`,
   );
   lines.push(
     `Ways back: needs fix ${today.fix} today; main failed ${today.reverted + today.fixedOnTop} today (${today.reverted} reverted, ${today.fixedOnTop} fixed on top)${red ? '; main is failing now' : ''}`,
@@ -145,6 +148,9 @@ export function flowText(feed: FlowFeed, now: number, root = '.') {
       landToMain: today.samples
         ? { middle: today.middle, nineInTen: today.nineInTen, samples: today.samples }
         : null,
+      firstTry: today.firstTry,
+      judged: today.judged,
+      firstTryShare: today.firstTryShare,
       needsFix: today.fix,
       reverted: today.reverted,
       fixedOnTop: today.fixedOnTop,

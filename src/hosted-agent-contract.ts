@@ -9,7 +9,7 @@ import { predecessorPinSchema } from './early-resolution.js';
 import { landingMessageSchema } from './landing-message.js';
 import { githubActionsRunsOnSchema } from './github-actions-runner-label.js';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
-import { hostedMainV2Schema } from './hosted-main.js';
+import { hostedMainV2Schema, mainDaySchema } from './hosted-main.js';
 import { revertTargetSchema } from './hosted-sync.js';
 import { saveExpectedSchema } from './hosted-save.js';
 import { snapshotsCommandSchema } from './lane-snapshot-contract.js';
@@ -136,6 +136,8 @@ export const hostedAgentCapabilitiesSchema = z
     agentDefaults: effectiveAgentDefaultsWireSchema.optional(),
     needsFix: z.array(z.record(z.string(), z.json())).optional(),
     githubMirror: hostedMirrorStatusSchema.nullable().optional(),
+    /** The rolling day behind the top bar's main figure (Item 32e8de50), on a bare status only. */
+    mainDay: mainDaySchema.optional(),
     schema: z.literal(1),
     projectId: z.string(),
     actor: z.string(),

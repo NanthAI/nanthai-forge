@@ -6,6 +6,7 @@
 // ('ready') counts at Checking, so the line, the picture and Lanes count every stop alike (`lineStops`).
 import { hrefFor } from './paths';
 import { followLink } from './router';
+import { firstTryPercent, mainToday } from '../../../src/flow-day';
 
 export type LineStage = 'editing' | 'saved' | 'queued' | 'checking' | 'ready';
 /** A stop on the line: the stages it counts. */
@@ -97,16 +98,49 @@ export function Line({
           </a>
         );
       })}
-      <a
+      <MainStop
+        feed={feed}
+        phone={phone}
         href={hrefFor({ frame: 'project', handle, project, place: 'code', section: '', rest: '' })}
-        onClick={followLink}
-        className="stop tomain"
-        aria-label={feed?.main ? 'main' : 'main, nothing landed yet'}
-      >
-        <span className="lbl" aria-hidden="true">
-          main
-        </span>
-      </a>
+      />
     </nav>
+  );
+}
+
+/** The main segment (Item 32e8de50): "main · N today · X% first try" from the feed's Flow day; on a phone
+ * "main · N · X%". Its name starts with the words it shows, then says them in full. "Today" is the UTC project day
+ * at draw time, as on the Flow view: no timer, so a tab left open moves to the new day on its next feed update.
+ * Its numbers are `.fig`, not a stop's `.n` count. */
+function MainStop({ feed, href, phone }: { feed: LineFeed | undefined; href: string; phone: boolean }) {
+  const today = feed ? mainToday(feed.flow, Date.now()) : null;
+  const pct = today ? firstTryPercent(today) : null;
+  const n = today?.landed.toLocaleString('en-US');
+  const shown = !today
+    ? 'main'
+    : `main · ${n}${phone ? '' : ' today'}${pct === null ? '' : ` · ${pct}%${phone ? '' : ' first try'}`}`;
+  const label = !today
+    ? 'main, not loaded yet'
+    : `${shown}${phone ? `, ${n} landing${today.landed === 1 ? '' : 's'} today${pct === null ? '' : `, ${pct}% first try`}` : ''}${!feed?.main && !today.landed ? ', nothing landed yet' : ''} (UTC day)`;
+  return (
+    <a href={href} onClick={followLink} className="stop tomain" aria-label={label}>
+      {/* Two unbreakable groups, so a narrow line wraps it to two rows at most: "main · N today", "· X% first try". */}
+      <span className="g" aria-hidden="true">
+        <span className="lbl">main</span>
+        {today ? (
+          <>
+            {' · '}
+            <span className="fig">{n}</span>
+            {phone ? null : ' today'}
+          </>
+        ) : null}
+      </span>
+      {pct === null ? null : (
+        <span className="g" aria-hidden="true">
+          {' · '}
+          <span className="fig">{pct}%</span>
+          {phone ? null : ' first try'}
+        </span>
+      )}
+    </a>
   );
 }

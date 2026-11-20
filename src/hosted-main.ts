@@ -49,3 +49,12 @@ export const mainExpectationSchema = z
   })
   .strict();
 export type MainExpectation = z.infer<typeof mainExpectationSchema>;
+/** The line feed's rolling day as a bare status reads it (Item 32e8de50): its hour rows and [hour, first tries,
+ * landings judged] rows (src/flow-day.ts `FlowDay`), at most a day of each. The CLI works out today's figure with src/flow-day.ts `mainToday`. */
+export const mainDaySchema = z
+  .object({
+    hours: z.array(z.array(z.number())).max(48),
+    first: z.array(z.array(z.number())).max(48),
+  })
+  .strict();
+export type MainDay = z.infer<typeof mainDaySchema>;

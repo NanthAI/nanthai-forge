@@ -13,6 +13,7 @@ export async function readHostedCliStatus(root: string, supplied?: Pick<HostedAg
     clone?: { status: string; sourceRevisionsBehind: number | null; next: string | null };
     githubMirror?: HostedMirrorStatus | null;
     needsFix?: unknown[];
+    mainToday?: { words: string };
   };
   const hooks = hookHealth(root);
   const hookText = hookHealthText(hooks);
@@ -23,8 +24,10 @@ export async function readHostedCliStatus(root: string, supplied?: Pick<HostedAg
     : result.githubMirror
       ? hostedMirrorStatusText(result.githubMirror, Date.now())
       : 'Hosted status: GitHub mirror status unavailable.';
+  // The top bar's main figure (Item 32e8de50), from the same summary row; the project day is the UTC day.
+  const main = result.mainToday ? `\nmain: ${result.mainToday.words} (UTC day)` : '';
   return {
     value: { transport: 'hosted', ...result, hooks },
-    text: hookText ? `${text}\n${hookText}` : text,
+    text: `${text}${main}${hookText ? `\n${hookText}` : ''}`,
   };
 }

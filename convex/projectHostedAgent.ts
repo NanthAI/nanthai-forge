@@ -25,6 +25,7 @@ import { effectivePolicy, snapshotIntervalMinutes } from '../src/autonomy-policy
 import { effectiveAgentDefaults, wireAgentDefaults } from '../src/agent-parallel-defaults';
 import { advertisedFeatures, MAX_CONTRACT_FEATURES } from '../src/hosted-contract-features';
 import { guardSetField } from './projectLandingSpeed';
+import { readMainDay } from './projectLiveLineStore';
 /** Discovery is a current-authority read, never a worker wake or an availability promise. */
 /** The caller's own save outcome by operation id, or null terminal when it is still settling or
  * cannot be read here (the client then reads its progress as before). */
@@ -182,6 +183,8 @@ export const capabilities = query({
               }
             : {}),
           ...(noticeVersion === 1 ? { needsFix: needsFix(project) } : {}),
+          // Only a bare status asks (Item 32e8de50), so other commands read no summary row.
+          ...(features?.includes('main-today') ? { mainDay: await readMainDay(ctx.db, projectId) } : {}),
           ...(mirrorVersion === 1 ? { githubMirror: await githubMirrorStatus(ctx, project) } : {}),
           ...(settling !== undefined
             ? { settledSave: await settledSave(ctx, projectId, user.subject, settling) }

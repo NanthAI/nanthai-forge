@@ -158,7 +158,8 @@ export function ProjectFrame({
 }) {
   const held = needs?.n;
   const needsLabel =
-    held === undefined ? 'Needs you' : `Needs you: ${needs?.atLeast ? 'at least ' : ''}${held}`;
+    // The name starts with the words shown ("Needs you 3"), so speech and voice control match the screen.
+    held === undefined ? 'Needs you' : `Needs you ${held}${needs?.atLeast ? ' or more' : ''}`;
   const pickerItems: MenuAction[] = [
     ...(projects ?? [])
       .filter(item => !(item.handle === route.handle && item.slug === route.project))
@@ -193,6 +194,8 @@ export function ProjectFrame({
         <End handle={controls.viewerHandle} onPalette={controls.onPalette} onKeys={controls.onKeys}>
           <A className="needs" href={placeHref(route, 'needs')} aria-label={needsLabel}>
             <span className="hide-ph">Needs you</span>
+            {/* A space, so the shown text reads "Needs you 3" like its name (the flex row drops it). */}
+            {held === undefined ? null : ' '}
             {held === undefined ? null : <Count n={held} hot={held > 0} />}
           </A>
         </End>
