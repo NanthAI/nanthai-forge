@@ -9,6 +9,8 @@ MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
 - `diff {laneId,paths?,byteBudget?,cursor?}` pins base/saved-head R2 States.
   Defaults: 48,000 source/hunk bytes plus path metadata, 50 paths/page. Continue
   `result.nextCursor` with the same Lane/paths, retaining the pair after saves.
+  A page that is not the last says so in `more` (the paths shown, the total) and
+  carries the next-page `command` and `next`.
   `omitted`/`requiredByteBudget` and `truncated` disclose shortened output;
   increase the budget or use exact show for remaining bytes. `from` compares an
   older saved State with the saved head instead of the pinned base: a full State id

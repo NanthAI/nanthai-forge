@@ -26,6 +26,7 @@ import { hostedLaneHistorySchema } from './hosted-agent-lane-history.js';
 import { liveLanesInput } from './hosted-live-lanes.js';
 import { hostedBoardSchemas } from './hosted-board.js';
 import { SELECT_LANE } from './hosted-lane-location.js';
+import { shellQuote } from './shell-quote.js';
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const hostedPeersSchema = z
   .object({
@@ -152,6 +153,29 @@ export const hostedClientReadSchemas = {
   /** The board verbs are client actions too: `board --post`/`--reply` write one note each, `--resolve` withdraws one. */
   ...hostedBoardSchemas,
 } as const;
+/** A diff page that is not the last says so and gives the next-page command (ad80e037): agents
+ * read `more`, not only `nextCursor`. Formatting only. */
+function diffMore(
+  root: string,
+  command: z.infer<typeof hostedDiffSchema>,
+  next: { laneId: string } | null,
+  shown: { from: number; to: number; total: number },
+) {
+  if (!next) return {};
+  const input = {
+    laneId: next.laneId,
+    ...(command.paths ? { paths: command.paths } : {}),
+    ...(command.summary ? { summary: true } : {}),
+    ...(command.byteBudget !== 48000 ? { byteBudget: command.byteBudget } : {}),
+    cursor: next,
+  };
+  const nextCommand = `nforge agent ${shellQuote(root)} diff ${shellQuote(JSON.stringify(input))}`;
+  return {
+    more: `This page shows changed paths ${shown.from + 1}-${shown.to} of ${shown.total}; more pages follow. Next page: ${nextCommand}`,
+    next: { action: 'diff', ...input },
+    command: nextCommand,
+  };
+}
 /** Immutable manifests and selected blobs live in R2, never in a Convex response. */
 export async function diffHostedSource(transport: HostedAgentTransport, input: unknown) {
   const parsed = hostedDiffSchema.safeParse(input);
@@ -228,6 +252,7 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
         total: changes.length,
         nextCursor: next,
         truncated: next !== null,
+        ...diffMore(transport.root, command, next, { from: offset, to: page.end, total: changes.length }),
         cost: {
           sourceBytes: 0,
           outputBytes: page.outputBytes,
@@ -331,6 +356,7 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
       total: changes.length,
       nextCursor,
       truncated: omitted.length > 0 || items.some(item => item.truncated) || nextCursor !== null,
+      ...diffMore(transport.root, command, nextCursor, { from: offset, to: end, total: changes.length }),
       cost: {
         sourceBytes,
         outputBytes,

@@ -55,6 +55,16 @@ for (const count of [3000, 29000])
     assert.equal(result.base, f.lane.base.head);
     assert.equal(result.total, count);
     assert(result.nextCursor && result.truncated);
+    // ad80e037: a page that is not the last says so and gives the next-page command.
+    assert.match(
+      result.more,
+      new RegExp(
+        `^This page shows changed paths 1-${result.nextCursor.offset} of ${count}; more pages follow\\. Next page: nforge agent `,
+      ),
+    );
+    assert.deepEqual(result.next.cursor, result.nextCursor);
+    assert.equal(result.next.action, 'diff');
+    assert(result.command.includes(' diff ') && result.more.endsWith(result.command));
     assert(result.items.length > 0);
     assert(result.items.some(item => item.hunks?.length));
     assert(result.cost.sourceBytes <= command.byteBudget);
@@ -68,7 +78,8 @@ for (const count of [3000, 29000])
     );
     const pinned = result.head;
     f.lane.head = f.lane.base.head;
-    const continued = await transport.dispatch('diff', { ...command, cursor: result.nextCursor });
+    const { action: _diff, ...nextInput } = result.next;
+    const continued = await transport.dispatch('diff', nextInput);
     assert.equal(continued.result.head, pinned, 'a save cannot substitute new source into continuation');
     assert.equal(
       continued.result.items[0].path,
