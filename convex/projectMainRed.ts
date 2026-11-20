@@ -4,10 +4,10 @@
 // candidates), and how it ended (passed again by a revert or a fix, counted as flaky, or still red). The web's
 // Main broke view and the agent's `status {"main":…}` read this one query; nothing here writes.
 //
-// Budget per open: project access (2); the red event (one index range at its sequence, at most 4 rows); the events
+// Budget per open: project access (2); the red event (one index range at its sequence, at most MAIN_RED_AT rows); the events
 // around it (two index ranges of at most MAIN_RED_EVENTS rows each); main's audit row (1); the failed run row (1);
 // the landings since the last green (one range of at most MAIN_RED_LANDINGS + 1 receipts); a culprit outside that
-// page (1); and only once it passed again, the landings that ended it (one range of at most MAIN_RED_RECOVERY + 1
+// page (1); a coverage landing outside that page (1); and only once it passed again, the landings that ended it (one range of at most MAIN_RED_RECOVERY + 1
 // receipts plus one landing row each, for a revert). Reds are rare (a few a day) and the page reads this only on open:
 // idle costs nothing and the FYI list reads none of it.
 import { v } from 'convex/values';
@@ -24,6 +24,8 @@ import { report } from './errors';
 export const MAIN_RED_EVENTS = 20;
 export const MAIN_RED_LANDINGS = 20;
 const MAIN_RED_RECOVERY = 10;
+/** Events read at one red's sequence: the red, stall retries, and a culprit or coverage event naming that head. */
+const MAIN_RED_AT = 8;
 
 type Event = Doc<'projectHostedMainAuditEvents'>;
 type Receipt = { id: string; at: string; message?: string; actor?: { id: string; kind: string } };
@@ -90,13 +92,13 @@ function endOf(red: Pick<Event, '_id' | 'at' | 'sequence'>, events: readonly Eve
     ),
   );
 }
-/**
- * The landing the bisect proved broke this red, or null (pure). The FYI row and this view use the same rule: the
- * oldest culprit event written after the red and before it ended, naming a landing at or below the red's sequence.
- * Nothing else is ever called the culprit.
- */
-export function culpritOf(red: Pick<Event, '_id' | 'at' | 'sequence' | 'culprit'>, events: readonly Event[]) {
-  if (red.culprit) return red.culprit;
+/** The oldest culprit-kind event carrying `field`, written after the red and before it ended, naming a landing
+ * at or below the red's sequence (pure). */
+function namedBy(
+  red: Pick<Event, '_id' | 'at' | 'sequence'>,
+  events: readonly Event[],
+  field: 'culprit' | 'covered',
+) {
   const redAt = Date.parse(red.at);
   const end = endOf(red, events);
   const until = end ? Date.parse(end.at) : Infinity;
@@ -105,14 +107,25 @@ export function culpritOf(red: Pick<Event, '_id' | 'at' | 'sequence' | 'culprit'
       events.filter(
         row =>
           row.kind === 'culprit' &&
-          row.culprit &&
+          row[field] &&
           row.sequence <= red.sequence &&
           Date.parse(row.at) >= redAt &&
           Date.parse(row.at) <= until,
       ),
-    )?.culprit ?? null
+    )?.[field] ?? null
   );
 }
+/**
+ * The landing the bisect proved broke this red, or null (pure). The FYI row and this view use the same rule: the
+ * oldest culprit event written after the red and before it ended, naming a landing at or below the red's sequence.
+ * Nothing else is ever called the culprit: a coverage event (`covered`, no `culprit`) never is.
+ */
+export function culpritOf(red: Pick<Event, '_id' | 'at' | 'sequence' | 'culprit'>, events: readonly Event[]) {
+  return red.culprit ?? namedBy(red, events, 'culprit');
+}
+/** The landing that made a newly covered red's tests run (Item 687d1eda), by the same rule (pure). */
+export const coveredOf = (red: Pick<Event, '_id' | 'at' | 'sequence'>, events: readonly Event[]) =>
+  namedBy(red, events, 'covered');
 
 async function redAt(ctx: QueryCtx, projectId: Id<'hostedProjects'>, sequence: number | undefined) {
   if (sequence !== undefined) {
@@ -120,7 +133,7 @@ async function redAt(ctx: QueryCtx, projectId: Id<'hostedProjects'>, sequence: n
       .query('projectHostedMainAuditEvents')
       .withIndex('by_project_and_sequence', q => q.eq('projectId', projectId).eq('sequence', sequence))
       .order('desc')
-      .take(4);
+      .take(MAIN_RED_AT);
     return rows.find(row => row.kind === 'red') ?? null;
   }
   // The newest red: reds are rare among audit events, so one bounded page finds it or says there is none.
@@ -211,6 +224,8 @@ export const read = query({
       const live =
         audit?.red && !ended && Date.parse(audit.red.since) <= Date.parse(red.at) ? audit.red : null;
       const culprit = culpritOf(red, events) ?? live?.culprit ?? null;
+      // While red, main's audit row names it; after recovery, the coverage event written once does.
+      const covered = coveredOf(red, events) ?? live?.covered ?? null;
       const event = before.find(row => row.kind === 'green') ?? null;
       const kept =
         live && audit?.lastGreen && audit.lastGreen.sequence < red.sequence ? audit.lastGreen : null;
@@ -244,14 +259,18 @@ export const read = query({
         .order('desc')
         .take(MAIN_RED_LANDINGS + 1);
       const landings = landingRows.slice(0, MAIN_RED_LANDINGS).map(landingOf);
-      let culpritLanding = culprit ? (landings.find(row => row.receiptId === culprit) ?? null) : null;
-      if (culprit && !culpritLanding) {
+      // A named landing outside the page costs one indexed read.
+      const named = async (receiptId: string | null) => {
+        if (!receiptId) return null;
+        const listed = landings.find(row => row.receiptId === receiptId);
+        if (listed) return listed;
         const row = await ctx.db
           .query('projectHostedAcceptances')
-          .withIndex('by_project_and_receipt', q => q.eq('projectId', projectId).eq('receiptId', culprit))
+          .withIndex('by_project_and_receipt', q => q.eq('projectId', projectId).eq('receiptId', receiptId))
           .unique();
-        culpritLanding = row ? landingOf(row) : null;
-      }
+        return row ? landingOf(row) : null;
+      };
+      const [culpritLanding, coveredLanding] = await Promise.all([named(culprit), named(covered)]);
       // A run row that no longer parses (retired fields) leaves the rest of the answer: "not reported", not an error.
       const parsed = runRow ? hostedCheckRunSchema.safeParse(JSON.parse(runRow.value)) : null;
       const run = parsed?.success ? parsed.data : null;
@@ -292,6 +311,9 @@ export const read = query({
          * than the events read: the list is the newest MAIN_RED_LANDINGS. */
         landingsMore: landingRows.length > MAIN_RED_LANDINGS || since === null,
         culprit: culprit ? { receiptId: culprit, landing: culpritLanding } : null,
+        /** The landing that made the failing tests run (they had no pass on the last green main): named, never
+         * reverted, never the culprit (Item 687d1eda). */
+        newlyCoveredBy: covered ? { receiptId: covered, landing: coveredLanding } : null,
         end,
       });
     } catch (error) {

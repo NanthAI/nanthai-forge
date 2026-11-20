@@ -416,9 +416,15 @@ mixed red, recovery bisects the failing tests that passed on the last green main
 the rest as newly covered; a reverse that cannot pass while they fail is named, not widened.
 Until that coverage landing's prompt audit passes, its own run is no reuse baseline. A
 docs-only audit never clears red. While main is red, `queue` replies carry `mainRed`: the
-failing tests (first 20), the reason, the fix Intent, and the named culprit or coverage
-landing. Landing replies mark `culprit` only on the receipt the culprit event names; other
-receipts in the red range show `in-red-range`.
+failing tests (first 20), the reason, the fix Intent, the named culprit or coverage
+landing (`newlyCoveredBy`), the `branch` recovery runs (`classifying`, `reverting`,
+`reverse-held` when the prepared reverse waits for a person, or `fix-forward`, which a revert
+decision replaces), and `next`, which names that branch and says a
+landing failing only on these tests waits when either park switch is on, or to land it again
+once main passes. Recovery writes one coverage event the first time a red names its coverage
+landing, so `status {"main":…}` and the Main broke view still name it after main recovers.
+Landing replies mark `culprit` only on the receipt the culprit event names, `made-tests-run`
+on the receipt a coverage event names; other receipts in the red range show `in-red-range`.
 
 With `FORGE_NEEDS_FIX_CLEAR_ON_GREEN=1` (Item 593fc2d7, off by default), a **Fix needed** notice
 clears itself once main passes a full check (a full audit or a full-gated landing) at or after the

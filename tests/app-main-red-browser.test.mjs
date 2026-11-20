@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // One main red in a browser (Item ae068e0c): the real red view with synthetic reads. With a proven culprit the head
 // names it and links its receipt, and only it is marked; with candidates only, no landing is
-// called the cause; still red, it says so with the live reason and failing files; the log is read once, on the press,
+// called the cause; a landing that made never-passed tests run is named as that; still red, it says so with the live
+// reason and failing files; the log is read once, on the press,
 // for that red's own run. Each layout passes axe in both themes at 1440 and 390 px without sideways scroll.
 import test from 'node:test';
 import { settleBrowserPage } from './browser-runtime.mjs';
@@ -56,6 +57,7 @@ test('a main red says what failed, which landing broke it or which are candidate
       culprit: { ...base, culprit: { receiptId: culprit.receiptId, landing: culprit }, end: { how: 'recovered', at: T + 20 * 60000, runId: 'run-g2', head: 'c'.repeat(64), reverted: true, by: { kind: 'revert', landing: landing(10, 'Revert “Parser: stream chunks”'), of: 1 } } },
       candidates: { ...base, run: { ...run, failed: [], files: { total: null, failed: null, flaky: null }, failureReason: 'The runner lost its connection.' }, runLink: null, landingsMore: true, culprit: null, end: { how: 'flaky', at: T + 12 * 60000, runId: 'run-p' } },
       red: { ...base, run: null, culprit: null, end: { how: 'red', reason: 'The newest audit failed on tests/parser-stream.test.mjs.', tests: ['tests/parser-stream.test.mjs'], moreTests: 3 } },
+      covered: { ...base, culprit: null, newlyCoveredBy: { receiptId: culprit.receiptId, landing: culprit }, end: { how: 'recovered', at: T + 40 * 60000, runId: 'run-g3', head: 'c'.repeat(64), reverted: false, by: { kind: 'fix', landing: landing(11, 'Lane review: fit 390 px'), of: 1 } } },
     };
     const read = reads[q.get('case') ?? 'culprit'];
     window.calls = [];
@@ -196,5 +198,22 @@ test('a main red says what failed, which landing broke it or which are candidate
   assert.match(await page.locator('.red-end').textContent(), /Still failing/);
   assert.match(await page.getByRole('region', { name: 'What failed' }).textContent(), /parser-stream/);
   await layouts('still-red');
+
+  // Incident 687d1eda: tests a landing made run for the first time. After recovery the view still names that landing,
+  // marks only it, and never calls it the one that broke main.
+  await page.goto('https://forge.test/fixture.html?case=covered');
+  await page.getByText('made these tests run; they had no pass on the last green main').waitFor();
+  assert.deepEqual(
+    await side()
+      .locator('a.red-landing')
+      .evaluateAll(rows => rows.map(row => row.lastElementChild.textContent)),
+    ['', 'Made tests run', ''],
+  );
+  assert.equal(await page.getByText('Broke main').count(), 0);
+  assert.equal(
+    await page.getByRole('link', { name: 'Open the landing that made tests run' }).getAttribute('href'),
+    '/-/example/parser/code/r7-0000-4000-8000-000000000000',
+  );
+  await layouts('covered');
   assert.deepEqual(errors, []);
 });

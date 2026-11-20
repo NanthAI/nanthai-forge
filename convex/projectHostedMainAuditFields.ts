@@ -66,6 +66,8 @@ export const mainAuditFields = {
       reason: v.optional(v.string()),
       intentId: v.optional(v.string()),
       covered: v.optional(v.string()),
+      /** The prepared reverse of the culprit waits for a person to accept it (autoRevertHold): nothing reverts on its own. */
+      held: v.optional(v.boolean()),
       /** The failed audit the reason was decided for; a later failed audit in the episode marks it older. */
       reasonRunId: v.optional(v.string()),
     }),
@@ -137,6 +139,9 @@ export const hostedMainAuditTables = {
     runId: v.string(),
     sequence: v.number(),
     culprit: v.optional(v.string()),
+    /** On a 'culprit'-kind event with no `culprit`: the receipt that made a newly covered red's tests
+     * run (Item 687d1eda). Written once per episode, so the name survives recovery; never a culprit. */
+    covered: v.optional(v.string()),
     /** Confirmed compensation on the green verdict; absent on legacy events. */
     reverted: v.optional(v.boolean()),
     /** On the red an owner's drill claimed, and on the verdict that ended it: its start, red,

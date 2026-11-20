@@ -159,8 +159,8 @@ test('a red counted as flaky ends there; the read stays bounded on a long histor
     ['Flaky neighbour'],
   );
   const meter = f.s.counts.slice(before).at(-1);
-  // Access (2), the red (4), two event pages, the audit and run rows, the landings page and the recovery (none here).
-  const budget = 2 + 4 + 2 * red.MAIN_RED_EVENTS + 2 + red.MAIN_RED_LANDINGS + 1;
+  // Access (2), the red (at most 8 at its sequence), two event pages, the audit and run rows, the landings page and the recovery (none here).
+  const budget = 2 + 8 + 2 * red.MAIN_RED_EVENTS + 2 + red.MAIN_RED_LANDINGS + 1;
   assert.ok(meter.documents <= budget, `${meter.documents} documents read, budget ${budget}`);
   assert.equal(meter.writes, 0, 'reading why main failed writes nothing');
 });
@@ -240,5 +240,53 @@ test('review ae068e0c: the revert of the culprit is named as the recovery even b
   assert.deepEqual(
     [view.end.by.kind, view.end.by.landing.receiptId, view.end.by.of, view.end.by.more],
     ['revert', revert, 2, false],
+  );
+});
+
+test('incident 687d1eda: a newly covered red names the landing that made its tests run, while red and after green', async () => {
+  // 11-19: a coverage landing made browser tests run; one of them had never passed. The view listed every landing
+  // as a candidate and, once main recovered, nothing said which landing made the test run.
+  const f = fixture();
+  f.accept(1, 'Docs: tidy');
+  f.event('green', 1, 1);
+  const coverage = f.accept(2, 'Checks: run browser tests in the landing check');
+  f.accept(3, 'Plan: unrelated');
+  f.event('red', 3, 4);
+  // Recovery (projectHostedCulprit fixForward) names it on main's audit row and in one event, at its sequence.
+  const audit = f.s.insert('projectHostedMainAudits', {
+    projectId: f.projectId,
+    red: {
+      since: at(4),
+      head: 'r'.repeat(64),
+      runId: 'red-run-3-4',
+      tests: ['tests/lane-review-browser.test.mjs'],
+      reason: 'Newly covered: tests/lane-review-browser.test.mjs had no pass on the last green main.',
+      covered: coverage,
+      intentId: 'fix-intent',
+    },
+  });
+  const whileRed = await f.read(3);
+  assert.equal(whileRed.newlyCoveredBy?.receiptId, coverage, 'while red: main’s audit row names it');
+  assert.equal(whileRed.newlyCoveredBy.landing.title, 'Checks: run browser tests in the landing check');
+  assert.equal(whileRed.culprit, null, 'a coverage landing is never the culprit');
+  f.event('culprit', 2, 5, { covered: coverage });
+  assert.equal((await f.read(3)).culprit, null, 'its event names no culprit either');
+  // The fix lands; main passes; the audit row's red is gone.
+  f.accept(4, 'Lane review: fit 390 px');
+  f.event('green', 4, 9);
+  f.s.patch('projectHostedMainAudits', audit, { red: undefined });
+  const after = await f.read(3);
+  assert.equal(after.end.how, 'recovered');
+  assert.equal(
+    after.newlyCoveredBy?.receiptId,
+    coverage,
+    'after green: the event written once still names it',
+  );
+  assert.equal(after.culprit, null);
+  const list = JSON.parse(await f.s.call('fyiRead', fyi.read, { projectId: f.projectId }, 'owner'));
+  assert.deepEqual(
+    list.broke.map(row => [row.sequence, row.culprit]),
+    [[3, null]],
+    'the FYI row never calls it the culprit',
   );
 });

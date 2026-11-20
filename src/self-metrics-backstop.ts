@@ -25,7 +25,8 @@ export function calculateBackstopMetrics(records: MetricRecords, period: MetricP
   const events = audits?.events ?? [];
   const of = (kind: string) => events.filter(e => e.kind === kind && during(e.at));
   const red = of('red'),
-    culprits = of('culprit');
+    // A coverage event (Item 687d1eda) is a culprit-kind event that names no culprit.
+    culprits = of('culprit').filter(e => e.culprit);
   const greens = events.filter(e => e.kind === 'green' || e.kind === 'flake');
   const revisions = reused.flatMap(m => (m.revision === undefined ? [] : [m.revision]));
   // A red episode audited every receipt after the last green/flake before it.

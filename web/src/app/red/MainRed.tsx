@@ -22,6 +22,7 @@ import {
   clock,
   endLine,
   endState,
+  named,
   plural,
   redSentence,
   short,
@@ -109,6 +110,10 @@ export function RedView({
         {read.culprit ? (
           <A className="btn sm" href={receipt(read.culprit.receiptId)}>
             Open the landing that broke it
+          </A>
+        ) : read.newlyCoveredBy ? (
+          <A className="btn sm" href={receipt(read.newlyCoveredBy.receiptId)}>
+            Open the landing that made tests run
           </A>
         ) : null}
         <Key kind="ghost" aria-expanded={log !== null} onClick={readLog}>
@@ -213,12 +218,20 @@ function Failed({ read }: { read: RedRead }) {
 function Landings({ read, receipt }: { read: RedRead; receipt: (id: string) => string }) {
   const landings = read.landings ?? [];
   const culprit = read.culprit?.receiptId ?? null;
+  const covered = read.newlyCoveredBy?.receiptId ?? null;
+  const known = culprit ?? covered;
   return (
     <Region
-      title={culprit ? 'Since main last passed' : 'Candidates'}
+      title={known ? 'Since main last passed' : 'Candidates'}
       count={landings.length}
       hint={
-        culprit ? 'the bisect proved which one' : read.landingsMore ? 'not proven; the newest' : 'not proven'
+        culprit
+          ? 'the bisect proved which one'
+          : covered
+            ? 'one made the tests run'
+            : read.landingsMore
+              ? 'not proven; the newest'
+              : 'not proven'
       }
     >
       {landings.length ? (
@@ -236,8 +249,10 @@ function Landings({ read, receipt }: { read: RedRead; receipt: (id: string) => s
               </span>
               {broke ? (
                 <State word="Check failed">Broke main</State>
+              ) : landing.receiptId === covered ? (
+                <span className="t2">Made tests run</span>
               ) : (
-                <span className="t2">{culprit ? '' : 'Candidate'}</span>
+                <span className="t2">{known ? '' : 'Candidate'}</span>
               )}
             </A>
           );
@@ -252,6 +267,12 @@ function Landings({ read, receipt }: { read: RedRead; receipt: (id: string) => s
             {read.culprit.landing ? `“${titleOf(read.culprit.landing)}”` : read.culprit.receiptId.slice(0, 8)}
           </A>{' '}
           broke it.
+        </p>
+      ) : null}
+      {read.newlyCoveredBy && !landings.some(landing => landing.receiptId === covered) ? (
+        <p className="quietline">
+          <A href={receipt(read.newlyCoveredBy.receiptId)}>{named(read.newlyCoveredBy)}</A> made the failing
+          tests run.
         </p>
       ) : null}
     </Region>

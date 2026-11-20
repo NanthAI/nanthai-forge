@@ -966,3 +966,39 @@ test('687d1eda: a red reason decided for an earlier failed audit says so; the ne
     delete process.env.FORGE_QUEUE_PARK_ON_MAIN_RED;
   }
 });
+
+test('687d1eda (analyst d975f2d7): the main-red reply says which branch runs, and waits under the exact park switch alone', async () => {
+  const { moduleUrl } = await import('./convex-module.mjs');
+  const state = await import(moduleUrl('../convex/projectHostedMainAuditState.ts'));
+  const red = { since: '2026-11-19T12:00:00.000Z', runId: 'audit-1', tests: ['tests/a.test.mjs'] };
+  const classifying = state.mainRedField(red);
+  assert.equal(classifying.branch, 'classifying');
+  assert.match(classifying.next, /^Classifying:/);
+  const reverting = state.mainRedField({ ...red, reason: 'Receipt r1: reverse it.', culprit: 'r1' });
+  assert.equal(reverting.branch, 'reverting');
+  assert.match(reverting.next, /^Reverting receipt r1\./);
+  const covered = {
+    ...red,
+    reason: 'Newly covered: tests/a.test.mjs had no pass on the last green main.',
+    intentId: 'fix-1',
+    covered: 'r2',
+  };
+  assert.equal(state.mainRedField(covered).branch, 'fix-forward');
+  assert.match(
+    state.mainRedField(covered).next,
+    /^Fix forward: receipt r2 made these tests run; nothing is reverted\./,
+  );
+  // Automatic revert off after a culprit: fix forward, even with the culprit named.
+  assert.equal(
+    state.mainRedField({ ...red, reason: 'off', culprit: 'r1', intentId: 'fix-1' }).branch,
+    'fix-forward',
+  );
+  assert.match(state.mainRedField(covered).next, /land it again once main passes/);
+  // Incident 687d1eda: with only FORGE_QUEUE_PARK_EXACT_ON_MAIN_RED on, the queue parks, so the reply must say it waits.
+  process.env.FORGE_QUEUE_PARK_EXACT_ON_MAIN_RED = '1';
+  try {
+    assert.match(state.mainRedField(covered).next, /waits and joins the queue again once main passes/);
+  } finally {
+    delete process.env.FORGE_QUEUE_PARK_EXACT_ON_MAIN_RED;
+  }
+});

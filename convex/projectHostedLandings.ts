@@ -57,17 +57,25 @@ function heldAfterCheck(attempts: HostedLandingAttempt[], progress: Array<Attemp
   }
   return held;
 }
+/** Audit events read at a landing's following sequence: the red, stalls, and the event naming that receipt. */
+const LANDINGS_AUDIT_EVENTS = 4;
 const AUDIT_VERDICT: Record<string, string> = { green: 'passed', red: 'failed', stalled: 'stalled' };
 /** One culprit event names one receipt (Item 687d1eda): the landings below it are in the red range,
- * never culprits themselves. */
-export const followingAuditVerdict = (audit: { kind: string; culprit?: string }, receiptId: string) =>
+ * never culprits themselves. A coverage event names the receipt that made the failing tests run. */
+export const followingAuditVerdict = (
+  audit: { kind: string; culprit?: string; covered?: string },
+  receiptId: string,
+) =>
   audit.kind === 'culprit'
     ? audit.culprit === receiptId
       ? 'culprit'
-      : 'in-red-range'
+      : audit.covered === receiptId
+        ? 'made-tests-run'
+        : 'in-red-range'
     : (AUDIT_VERDICT[audit.kind] ?? audit.kind);
 const iso = (ms: number | undefined) => (ms === undefined ? null : new Date(ms).toISOString());
-/** One landing's evidence from rows already stored. Five indexed reads beyond the receipt itself. */
+/** One landing's evidence from rows already stored. Five indexed reads beyond the receipt itself (the audit
+ * events one page of at most LANDINGS_AUDIT_EVENTS rows). */
 async function evidence(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
@@ -144,15 +152,19 @@ async function evidence(
       ),
     ),
   ];
-  // The first stored main-audit event at or after this landing's sequence: the audit run that covered it.
-  const audit = (
-    await ctx.db
-      .query('projectHostedMainAuditEvents')
-      .withIndex('by_project_and_sequence', q => q.eq('projectId', projectId).gte('sequence', sequence))
-      .order('asc')
-      .take(1)
-  )[0];
-  bytes += audit ? 160 : 0;
+  // The first stored main-audit event at or after this landing's sequence: the audit run that covered it. Several
+  // can share that sequence (the red, then a culprit or coverage event naming the audited head): one bounded page
+  // of the same range, preferring the event that names this receipt.
+  const near = await ctx.db
+    .query('projectHostedMainAuditEvents')
+    .withIndex('by_project_and_sequence', q => q.eq('projectId', projectId).gte('sequence', sequence))
+    .order('asc')
+    .take(LANDINGS_AUDIT_EVENTS);
+  const first = near.filter(row => row.sequence === near[0]?.sequence);
+  const audit =
+    first.find(row => row.kind === 'culprit' && (row.culprit === receipt.id || row.covered === receipt.id)) ??
+    first[0];
+  bytes += near.length * 160;
   const admissionBase = attempts[0]?.main ?? null;
   const landedBase = receipt.previous;
   return {

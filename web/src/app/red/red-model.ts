@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // One main red's words (Item ae068e0c), from convex/projectMainRed.ts read. Pure: the screen renders what this returns;
-// tests/app-main-red-browser.test.mjs drives it. A culprit the bisect proved is named as the landing that broke main; without
-// one, the landings since the last green are candidates and are never called the cause.
+// tests/app-main-red-browser.test.mjs drives it. A culprit the bisect proved is named as the landing that broke main; a
+// landing that made never-passed tests run is named as that, never as the culprit; without either, the landings since
+// the last green are candidates and are never called the cause.
 import type { StateKind, StateWord } from '../../ds';
 
 type RedLanding = {
@@ -46,6 +47,8 @@ export type RedRead = {
   landings?: RedLanding[];
   landingsMore?: boolean;
   culprit?: { receiptId: string; landing: RedLanding | null } | null;
+  /** The landing that made the failing tests run: they had no pass on the last green main (Item 687d1eda). */
+  newlyCoveredBy?: { receiptId: string; landing: RedLanding | null } | null;
   end?: RedEnd;
 };
 
@@ -56,6 +59,9 @@ export const titleOf = (landing: Pick<RedLanding, 'title' | 'receiptId'>) =>
   landing.title ?? `Landing ${landing.receiptId.slice(0, 8)}`;
 export const whoOf = (landing: Pick<RedLanding, 'actor' | 'agent'>) =>
   landing.actor ? (landing.agent ? landing.actor : `@${landing.actor.replace(/^@/, '')}`) : null;
+/** A named landing in a sentence: its title, or its short receipt when it is not on record. */
+export const named = (ref: { receiptId: string; landing: RedLanding | null }) =>
+  ref.landing ? `“${titleOf(ref.landing)}”` : `Landing ${ref.receiptId.slice(0, 8)}`;
 /** The time, with the day when it is not today: an old red never reads as this morning's. */
 export function clock(at: number, now = Date.now()) {
   const day = new Date(at);
@@ -87,7 +93,12 @@ export function redSentence(read: RedRead): { lead: string; rest: string } {
   if (read.culprit)
     return {
       lead,
-      rest: `${read.culprit.landing ? `“${titleOf(read.culprit.landing)}”` : `Landing ${read.culprit.receiptId.slice(0, 8)}`} broke it; the bisect proved it.`,
+      rest: `${named(read.culprit)} broke it; the bisect proved it.`,
+    };
+  if (read.newlyCoveredBy)
+    return {
+      lead,
+      rest: `${named(read.newlyCoveredBy)} made these tests run; they had no pass on the last green main.`,
     };
   // Once a red ended only audit passes are on record: a landing a full check passed later can still be listed.
   const since = read.lastGreen?.audited ? 'the last audit pass' : 'main last passed';

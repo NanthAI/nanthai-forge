@@ -434,7 +434,9 @@ summary, a link to the full log at the CI when it has one, the last pass (main's
 the red is open; once it ended, the newest audit pass, `audited:true`, so landings that passed a
 full check after it can still be listed), the landings since
 it (newest 20; `landingsMore` when there were more), the `culprit` receipt when the bisect
-proved one (otherwise those landings are only candidates), and `end`: `red` (with the live
+proved one (otherwise those landings are only candidates), `newlyCoveredBy` when the failing
+tests had no pass on the last green main and a landing made them run (named, never reverted,
+never the culprit; kept after main recovers), and `end`: `red` (with the live
 reason and failing files), `flaky`, `recovered` (by a `revert` or a `fix`, with its receipt)
 or `not-reported`. It reads only on request and writes nothing.
 

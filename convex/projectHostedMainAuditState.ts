@@ -481,6 +481,12 @@ export function redTests(run: HostedCheckRun) {
 /** Main red in one reply (Item 687d1eda): since when, the failing files, why, the fix Intent, and the
  * receipt named as culprit or as the change that made the tests run. */
 export function mainRedField(red: NonNullable<Doc<'projectHostedMainAudits'>['red']>) {
+  const branch = redBranch(red);
+  // Either park switch holds a landing that fails only on main's red (Item 687d1eda).
+  const after =
+    parkOnMainRed() || parkExactOnMainRed()
+      ? 'A landing that fails only on these tests is not at fault; it waits and joins the queue again once main passes.'
+      : 'A landing that fails only on these tests is not at fault; land it again once main passes.';
   return {
     since: red.since,
     runId: red.runId,
@@ -494,10 +500,29 @@ export function mainRedField(red: NonNullable<Doc<'projectHostedMainAudits'>['re
     ...(red.intentId ? { fixIntentId: red.intentId } : {}),
     ...(red.culprit ? { culprit: red.culprit } : {}),
     ...(red.covered ? { newlyCoveredBy: red.covered } : {}),
-    next: parkOnMainRed()
-      ? 'A landing that fails only on these tests is not at fault; it waits and joins the queue again once main passes.'
-      : 'A landing that fails only on these tests is not at fault; land it again once main passes.',
+    branch,
+    next: `${
+      branch === 'reverting'
+        ? red.culprit
+          ? `Reverting receipt ${red.culprit}.`
+          : 'Reverting the interacting landings the reason names.'
+        : branch === 'reverse-held'
+          ? 'Reverse held: the prepared reverse waits for a person to accept it; nothing reverts on its own.'
+          : branch === 'fix-forward'
+            ? red.covered
+              ? `Fix forward: receipt ${red.covered} made these tests run; nothing is reverted.`
+              : 'Fix forward: nothing is reverted.'
+            : 'Classifying: recovery has not decided between a revert and a fix forward yet.'
+    } ${after}`,
   };
+}
+/** Which recovery branch runs (Item 687d1eda). No reason yet: classifying. A fix Intent: fix forward (a
+ * revert decision clears it, convex/projectHostedCulprit.ts). A reverse a person must accept: held.
+ * Otherwise a revert is running. */
+function redBranch(red: NonNullable<Doc<'projectHostedMainAudits'>['red']>) {
+  if (!red.reason) return 'classifying' as const;
+  if (red.intentId) return 'fix-forward' as const;
+  return red.held ? ('reverse-held' as const) : ('reverting' as const);
 }
 function withoutTests(red: Doc<'projectHostedMainAudits'>['red']) {
   if (!red) return {};
@@ -528,10 +553,10 @@ export async function noteRedCause(
   episode: (red: NonNullable<Doc<'projectHostedMainAudits'>['red']>) => boolean,
   /** `runId`: the failed audit recovery decided this reason for; a later failed audit of the same
    * episode may already have replaced `red.runId`. */
-  cause: { reason: string; runId: string; intentId?: string; covered?: string },
-) {
+  cause: { reason: string; runId: string; intentId?: string; covered?: string; held?: boolean },
+): Promise<boolean> {
   const row = await auditRow(ctx, projectId);
-  if (!row?.red || !episode(row.red)) return;
+  if (!row?.red || !episode(row.red)) return false;
   await ctx.db.patch(row._id, {
     red: {
       ...row.red,
@@ -539,8 +564,11 @@ export async function noteRedCause(
       reasonRunId: cause.runId,
       ...(cause.intentId ? { intentId: cause.intentId } : {}),
       ...(cause.covered ? { covered: cause.covered } : {}),
+      held: cause.held || undefined,
     },
   });
+  // True only the first time this episode names its coverage landing: its event is written once.
+  return Boolean(cause.covered) && row.red.covered !== cause.covered;
 }
 /** An unaudited first-check landing is newer than the last green main. */
 export const promptAudit = (row: { firstCheck?: number; lastGreen?: { sequence: number } }) =>

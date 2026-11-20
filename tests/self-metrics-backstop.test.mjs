@@ -92,6 +92,17 @@ test('reuse acceptances and later main-audit failures are counted with no extra 
   );
 });
 
+test('687d1eda: a coverage event (a culprit-kind event naming no culprit) is never counted as a culprit', async () => {
+  const f = fixture();
+  event(f, 'green', -60, 1);
+  accept(f, 'coverage', 10, 2);
+  event(f, 'red', 30, 2);
+  event(f, 'culprit', 40, 2); // the coverage landing named once; no culprit field
+  const { records } = await readHostedMetricPages(f.query, period);
+  const totals = metricsSurface(records, period).totals.B;
+  assert.deepEqual([totals.mainCheckFailures, totals.culprits], [1, 0]);
+});
+
 test('an old server without the projection reports unknown, never zero', async () => {
   const f = fixture();
   f.landing('old', at(10), at(10));

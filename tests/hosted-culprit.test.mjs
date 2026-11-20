@@ -487,6 +487,31 @@ test('incident 687d1eda: a newly covered failure names the coverage landing, rev
   assert.equal(red.covered, f.receipts[572].id);
   assert.equal(red.intentId, state.intentId);
   assert.match(red.reason, /Newly covered/);
+  // Its name outlives the red (analyst d975f2d7): one coverage event at its sequence, never a culprit.
+  const events = () => [...f.tables.projectHostedMainAuditEvents.values()].filter(e => e.kind === 'culprit');
+  assert.deepEqual(
+    events().map(e => [e.covered, e.culprit, e.sequence]),
+    [[f.receipts[572].id, undefined, 573]],
+  );
+  // A later decision for the same episode naming it again writes no second event.
+  const auditState = await import(moduleUrl('../convex/projectHostedMainAuditState.ts'));
+  const again = await f.transaction(
+    'noteAgain',
+    {
+      _handler: ctx =>
+        auditState.noteRedCause(ctx, f.projectId, () => true, {
+          reason: red.reason,
+          runId: f.audit.id,
+          covered: f.receipts[572].id,
+        }),
+    },
+    {},
+  );
+  assert.equal(again, false, 'already named: the caller writes no event');
+  assert.equal(events().length, 1);
+  const field = auditState.mainRedField(red);
+  assert.equal(field.branch, 'fix-forward');
+  assert.match(field.next, new RegExp(`^Fix forward: receipt ${f.receipts[572].id} made these tests run`));
   const intent = await f.readIntent(state.intentId);
   assert.equal(intent.needsFix.state, 'needs-fix');
   assert.equal(intent.needsFix.receiptId, f.receipts[572].id);
@@ -1423,6 +1448,10 @@ async function replaySystemReverse(
     assert.equal(intent.needsFix.state, 'needs-fix');
     assert.match(intent.needsFix.summary, new RegExp(`Candidate ${compose.candidateId} but not landed`));
     assert.equal(culprit.needsFix(f.tables.hostedProjects.get(f.projectId)).length, 1);
+    // Item 687d1eda review: the queue reply says the reverse waits for a person, never that it is reverting.
+    const reply = mainAuditState.mainRedField(f.tables.projectHostedMainAudits.get(f.auditRow).red);
+    assert.equal(reply.branch, 'reverse-held');
+    assert.match(reply.next, /^Reverse held: the prepared reverse waits for a person/);
     // A retried continuation changes nothing and sends no second notice.
     const before = JSON.stringify([...f.tables.projectHostedRecordHeads.values()]);
     await f.transaction('replayHeld', culprit.advance, { projectId: f.projectId, runId: f.recoveryId() });

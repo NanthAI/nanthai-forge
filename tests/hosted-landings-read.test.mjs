@@ -287,6 +287,49 @@ test('687d1eda: landings marks culprit only on the receipt the culprit event nam
   );
 });
 
+test('687d1eda: landings marks the receipt a coverage event names as the one that made tests run', async () => {
+  const f = fixture();
+  for (let n = 1; n <= 3; n++) f.landing(n, { at: n * 10 });
+  // Incident 687d1eda: receipt 2 made browser tests run; every receipt read 'failed' and nothing named it.
+  f.tables.projectHostedMainAuditEvents.push({
+    projectId: 'project',
+    kind: 'culprit',
+    at: iso(minute(30)),
+    head: 'h2',
+    runId: 'audit-3',
+    sequence: 2,
+    covered: id('receipt', 2),
+  });
+  const rows = (await f.read()).landings;
+  assert.deepEqual(
+    rows.map(row => row.followingAudit?.verdict),
+    ['in-red-range', 'made-tests-run', undefined],
+  );
+});
+
+test('687d1eda review: a landing that is the audited head gets the verdict its own event names, not the red', async () => {
+  const f = fixture();
+  for (let n = 1; n <= 3; n++) f.landing(n, { at: n * 10 });
+  // The red at receipt 3's sequence is written first; the coverage event naming receipt 3 follows at that sequence.
+  const event = (kind, extra) =>
+    f.tables.projectHostedMainAuditEvents.push({
+      projectId: 'project',
+      kind,
+      at: iso(minute(30)),
+      head: 'h3',
+      runId: 'audit-3',
+      sequence: 3,
+      ...extra,
+    });
+  event('red', {});
+  event('culprit', { covered: id('receipt', 3) });
+  const rows = (await f.read()).landings;
+  assert.deepEqual(
+    rows.map(row => row.followingAudit?.verdict),
+    ['failed', 'failed', 'made-tests-run'],
+  );
+});
+
 test('landings: pages resume exactly, stay under limit, and read nothing outside indexed ranges', async () => {
   const f = fixture();
   for (let n = 1; n <= 45; n++) f.landing(n, { at: n * 10 });

@@ -317,12 +317,25 @@ async function fixForward(
   state.reason = reason;
   state.intentId = intentId;
   // The queue states why main is red from this one row (Item 687d1eda).
-  await noteRedCause(ctx, project._id, red => sameEpisode(red, state), {
+  const named = await noteRedCause(ctx, project._id, red => sameEpisode(red, state), {
     reason,
     runId: state.audit.id,
     intentId,
     ...(covered ? { covered } : {}),
   });
+  // The coverage landing's name outlives the episode (status main, Main broke view): one event, written
+  // the first time this red names it, at that landing's sequence. Never a culprit.
+  const coverage = named ? state.range.find(item => item.receipt.id === covered) : undefined;
+  if (coverage)
+    await ctx.db.insert('projectHostedMainAuditEvents', {
+      projectId: project._id,
+      kind: 'culprit',
+      at: state.audit.endedAt!,
+      head: coverage.receipt.candidate.head,
+      runId: state.audit.id,
+      sequence: coverage.sequence,
+      covered: coverage.receipt.id,
+    });
   const target = state.target ?? state.range.at(-1)?.receipt;
   const old = await readHostedRecord(ctx, {
     projectId: project._id,
@@ -864,6 +877,9 @@ async function classify(
       culprit: state.target.id,
       reason: `Receipt ${state.target.id}: ${state.reason}`,
       reasonRunId: state.audit.id,
+      // The newest decision is a revert: an earlier fix-forward Intent no longer says what runs (mainRedField).
+      intentId: undefined,
+      held: undefined,
     },
   });
   await ctx.db.insert('projectHostedMainAuditEvents', {
@@ -930,7 +946,9 @@ async function widenRevert(
       red: {
         ...audit.red,
         culprit: undefined,
-        ...(sameEpisode(audit.red, state) ? { reason: state.reason, reasonRunId: state.audit.id } : {}),
+        ...(sameEpisode(audit.red, state)
+          ? { reason: state.reason, reasonRunId: state.audit.id, intentId: undefined, held: undefined }
+          : {}),
       },
     });
   // Reuse already prepared reverses; widening reads only the newly selected transition.
@@ -1167,6 +1185,12 @@ async function finishSystemRevert(
     // on the culprit's Intent. No check is spent and nothing is enqueued.
     state.held = { candidateId: candidate.id, reason: held };
     state.reason = `The reverse was prepared as Candidate ${candidate.id} but not landed: ${held}. A person reviews and accepts it; it needs its full check first. Nothing in main changed.`;
+    // The queue reply says the reverse waits for a person, not that it is reverting (Item 687d1eda review).
+    await noteRedCause(ctx, project._id, red => sameEpisode(red, state), {
+      reason: state.reason,
+      runId: state.audit.id,
+      held: true,
+    });
     for (const target of state.targets ?? [state.target!]) {
       const original = await candidateIntent(ctx, project, target);
       if (original) await notice(ctx, project, original, report(state, target, 'needs-fix'));

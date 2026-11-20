@@ -819,7 +819,8 @@ layer out of both first paints.
   broke or Drill row names the culprit the bisect proved (from the audit events
   the read already holds) and its Why opens that red at `code/red/<sequence>`
   (`web/src/app/red/`): what failed, the log one press away, main's head, the
-  landings since the last pass (candidates until the bisect proves one) and how
+  landings since the last pass (candidates until the bisect proves one, or the
+  landing that made never-passed tests run) and how
   it ended, from one read on open (`projectMainRed:read`, bounded: one event at
   the sequence, two pages of at most 20 events, the audit and run rows, at most
   21 receipts, and once it passed again at most 10 receipts and their landing
