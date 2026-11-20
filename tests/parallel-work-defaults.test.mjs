@@ -77,6 +77,7 @@ test('client settings default on, persist per machine and explain their source',
     activeLanePruneHours: 168,
     idleLaneHours: 1,
     localHeavySlots: 'auto',
+    localHeavyMaxMinutes: 60,
     shareDependencies: true,
     installScripts: false,
     clientCacheMaxGB: 2,
@@ -91,6 +92,8 @@ test('client settings default on, persist per machine and explain their source',
   assert.equal(clientSettingsCli(['landWait', '--reset']).settings.landWait.source, 'default');
   assert.throws(() => clientSettingsCli(['unknown', '1']), { code: 'BAD_ARGUMENT' });
   assert.throws(() => clientSettingsCli(['autoPruneHours', '-1']), { code: 'BAD_ARGUMENT' });
+  // A heavy bound past a day (and past what a timer holds) is refused, not fired at once (593fc2d7).
+  assert.throws(() => clientSettingsCli(['localHeavyMaxMinutes', '40000']), { code: 'BAD_ARGUMENT' });
   // Auto slots: 16 GB / 8 cores -> 3 (the measured limit for the shared MacBook Air); never below 1.
   assert.equal(heavySlots('auto', 16 * 2 ** 30, 8), 3);
   assert.equal(heavySlots('auto', 4 * 2 ** 30, 2), 1);

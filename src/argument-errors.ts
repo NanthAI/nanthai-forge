@@ -81,3 +81,36 @@ export function actionableNotFound(error: unknown, action: string, command: Reco
     error.recovery,
   );
 }
+
+/** observe or status named no id (593fc2d7: from the project folder it was a dead end). Names the ids
+ * it takes and lists the landings this machine submitted for the project and has not seen settle,
+ * newest first, from the local Lane registry. No network. */
+export function missingObserveId(address: { url: string; projectId: string }) {
+  const live = listLanes()
+    .flatMap(entry =>
+      entry.landing && entry.projectId === address.projectId && (!entry.url || entry.url === address.url)
+        ? [{ laneId: entry.laneId, operationId: entry.landing.operationId, at: entry.landing.at }]
+        : [],
+    )
+    .sort((a, b) => b.at - a.at)
+    .slice(0, 5);
+  const ids =
+    'observe needs one id: operationId (the original landing or source operation), submissionId or runId; status also accepts laneId.';
+  return new ForgeError(
+    'BAD_ARGUMENT',
+    live.length
+      ? `${ids} Landings this machine submitted and has not seen settle: ${live.map(item => `Lane ${item.laneId.slice(0, 8)} operationId ${item.operationId}`).join('; ')}. Next: nforge agent ROOT observe '{"operationId":"${live[0]!.operationId}"}'.`
+      : `${ids} This machine has no landing in flight for this project: nforge agent ROOT lanes '{}' lists your Lanes, and nforge agent ROOT queue '{}' the project's landings with their ids.`,
+    undefined,
+    live.length
+      ? { candidates: live.map(({ laneId, operationId }) => ({ laneId, operationId })) }
+      : undefined,
+  );
+}
+
+/** `reason` is the retry code of a re-submission; agents sending urgent priority often put their case
+ * for urgency there (593fc2d7). */
+export const retryReasonHint = (input: Record<string, unknown>) =>
+  input.reason !== undefined && !['flake', 'main-moved', 'infra', 'other'].includes(String(input.reason))
+    ? ` reason is the retry code for retry:true, one of flake|main-moved|infra|other${input.priority === 'urgent' ? '; it is not why the landing is urgent: priority "urgent" takes no reason, so say why in the landing message' : ''}.`
+    : '';

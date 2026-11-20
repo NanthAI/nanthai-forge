@@ -27,7 +27,11 @@ type ConflictContext = {
   finishParameters?: Record<string, unknown> | undefined;
   /** Set when this folder itself became the resolution Lane of its own conflicted Lane. */
   originLaneId?: string | undefined;
+  /** The head the sync merged in (main, or the stack parent), and the resolution Lane's recorded base
+   * at that time: its own change is measured from the merged head, not from that older base. */
+  merged?: { head: string; base: string } | undefined;
 };
+const sha256 = /^[a-f0-9]{64}$/;
 function context(root: string, laneId?: string): ConflictContext | undefined {
   try {
     const saved = JSON.parse(readFileSync(pathFor(root), 'utf8'));
@@ -65,6 +69,10 @@ function context(root: string, laneId?: string): ConflictContext | undefined {
           ? saved.finishParameters
           : undefined,
       originLaneId: z.uuid().safeParse(saved.originLaneId).success ? saved.originLaneId : undefined,
+      merged:
+        sha256.test(saved.merged?.head) && sha256.test(saved.merged?.base)
+          ? { head: saved.merged.head, base: saved.merged.base }
+          : undefined,
     };
   } catch {
     return undefined;
@@ -77,6 +85,7 @@ export function rememberConflictPaths(
   resolveParameters?: ResolveParameters,
   replaceOperation = false,
   originLaneId?: string,
+  merged?: { head: string; base: string },
 ) {
   const prior = context(root, laneId);
   resolveParameters = (!replaceOperation && prior?.resolveParameters) || resolveParameters;
@@ -90,8 +99,17 @@ export function rememberConflictPaths(
       finishOptions: prior?.finishOptions,
       finishParameters: prior?.finishParameters,
       originLaneId: originLaneId ?? prior?.originLaneId,
+      merged: merged ?? prior?.merged,
     }),
   );
+}
+/** The State a Lane's own change is measured from (preflight selection, weakened tests). A resolution
+ * Lane a sync made keeps its conflicted Lane's older base, so measured from there all of main since
+ * would count as its change (593fc2d7: 582 unrunnable tests, 18 main test edits flagged). While that
+ * base is unchanged, it is the head the sync merged in. Local read only. */
+export function laneChangeBase(root: string, selection: { laneId: string; base: { head: string } }) {
+  const merged = context(root, selection.laneId)?.merged;
+  return merged && merged.base === selection.base.head ? merged.head : selection.base.head;
 }
 /** The original Lane this folder's retained resolution was made for, when known. */
 export function inPlaceOrigin(root: string) {

@@ -88,4 +88,12 @@ To answer, post a new batch with `replyTo` set to the original comment id, retai
 
 The web Item discussion draws valid version-1 batches as findings and keeps their complete JSON under **Exact review record**. The CLI, exports and older readers retain the same text. Unknown versions or incomplete batches remain ordinary comments; no write is blocked by the display parser. These are attributed reviewer reports: Forge does not verify their claims, source pins or outcomes, and severity adds no acceptance gate. New saves never automatically clear findings or move anchors. Automatic cross-save anchoring and review enforcement are not decided yet; this format does not decide them.
 
+A comment survives the run that sends it. `comment-planning-item` keeps the write on the machine before
+any call (under `$XDG_STATE_HOME/forge/comment-outbox`, user-only, removed once the server answers).
+When a run ends mid-write (a reviewer whose run stops while its verdict comment is still sending),
+the next `planning` read or comment for that project on the same machine posts it under its original
+operation id and under the author and agent of the run that wrote it, so the server records it once
+and a verdict keeps its reviewer, and says so (`recoveredComments`). An entry stays while the network,
+sign-in or service is out; entries older than 24 hours are dropped.
+
 This reuses the existing comment permissions, idempotent writes, pages and retention. One batch is one comment write, not a write per finding; viewing it adds no query. The existing comment/page bounds apply, with no new quota or idle work. Review text is member data, never instructions.

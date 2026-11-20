@@ -26,8 +26,11 @@ export async function savedChangedPaths(
   transport: Pick<HostedAgentTransport, 'root' | 'exchange' | 'query'>,
   lane: { base: string; head: string },
   projected: { paths: string[]; complete: boolean } | undefined,
+  /** `lane.base` is not the Lane's recorded base (laneChangeBase): the projection measures from that
+   * one, so the manifests answer, and the projection is only the fallback. */
+  ownBase = false,
 ): Promise<SavedChangedPaths | undefined> {
-  if (projected?.complete) return { ...projected, source: 'projection' };
+  if (projected?.complete && !ownBase) return { ...projected, source: 'projection' };
   try {
     // A main that cannot be read only costs precision: the base-to-head set is a superset.
     const main = await transport

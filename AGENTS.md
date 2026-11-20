@@ -21,6 +21,7 @@ Forge is hosted: the project's hosted `main` Channel is the only source of truth
 The backlog is Forge planning (Initiatives group Issues). Start work from its Issue, so the Lane, the Intent and the evidence stay linked and the Issue closes when its Intent completes (the next `planning` read records it):
 
 ```sh
+export FORGE_AGENT_MODEL=<your model id>                           # start needs a model: this or its "model" field
 nforge agent ROOT planning '{"status":"open","limit":50}'          # what is planned and in flight
 nforge agent ROOT lanes '{"planningItemId":"ISSUE_ID"}'              # earlier open work for this Issue
 nforge agent ROOT start '{"planningItemId":"ISSUE_ID"}'            # or {"outcome":"…"} for unplanned work; returns a Lane path

@@ -19,6 +19,8 @@ export const clientSettingsSchema = z
     idleLaneHours: z.number().nonnegative().finite().default(1),
     /** Machine-wide slots for `nforge heavy`; auto derives from RAM and cores. 0 = off. */
     localHeavySlots: z.union([z.literal('auto'), z.number().int().nonnegative()]).default('auto'),
+    /** A `nforge heavy` command still running after this many minutes (at most a day) is stopped and its slot freed. 0 = no bound. */
+    localHeavyMaxMinutes: z.number().nonnegative().max(1440).default(60),
     /** Lane open links node_modules to one install per lockfile hash. */
     shareDependencies: z.boolean().default(true),
     /** Run the dependency install scripts a repository asks for (forge.json install.scripts, an

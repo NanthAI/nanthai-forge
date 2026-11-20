@@ -15,6 +15,7 @@ import { hostedLaneDirty } from '../dist/hosted-lane-dirty.js';
 import { ForgeError } from '../dist/errors.js';
 import { getFunctionName } from 'convex/server';
 import { keptCopies, resolutionFolderReason, workInLine } from '../dist/hosted-resolution-placement.js';
+import { laneChangeBase } from '../dist/hosted-conflict-precheck.js';
 
 const strip = ({ action, ...parameters }) => [action, parameters];
 
@@ -85,6 +86,23 @@ test('mid-work sync conflict resolves in the same folder, keeps unsaved edits, t
     .filter(call => call.name === 'projectHostedSync:prepare')
     .map(call => JSON.parse(call.args.request).kind);
   assert.deepEqual(prepares, ['sync', 'resolve'], 'one resolution draft, never a second');
+});
+
+test('593fc2d7: a sync conflict records the merged head, so the resolution Lane preflights against it', async t => {
+  const s = await resolutionFixture(t, { overlap: true }),
+    f = s.f;
+  f.moveMain({ overlap: true });
+  const root = s.root;
+  await s.transport(root).dispatch('open', { laneId: f.lane.laneId });
+  const conflict = (await s.transport(root).dispatch('sync', { laneId: f.lane.laneId })).result.conflict;
+  const selection = readHostedLaneCheckout(root).selection;
+  const { resolution } = await f.readLane(conflict.laneId);
+  assert.notEqual(
+    selection.base.head,
+    resolution.right,
+    "the resolution Lane keeps the conflicted Lane's base",
+  );
+  assert.equal(laneChangeBase(root, selection), resolution.right);
 });
 
 test('ad80e037: a sync rerun from a folder that is already the resolution Lane still names the set-aside copies', async t => {

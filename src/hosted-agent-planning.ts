@@ -2,6 +2,9 @@
 import { memberDataNotice, systemCommentNotice } from './member-data-notice.js';
 import { planningSummary, planningSearchTerms } from './planning-search.js';
 import { createHash } from 'node:crypto';
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { laneRegistryDirectory } from './lane-registry.js';
 import { makeFunctionReference } from 'convex/server';
 import { HostedAgentJournal } from './hosted-agent-journal.js';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
@@ -801,14 +804,131 @@ function flattenModelFields(port: PlanningPort, input: Record<string, unknown>) 
   return { ...rest, ...fields };
 }
 
+/** A comment write in flight, kept on this machine until the server answers (593fc2d7: a reviewer's
+ * run ended while its GO/NO-GO comment command ran, and the verdict was lost). The entry is the first
+ * durable step, written before any call; a live process removes it however its write ends. One a
+ * killed process left is posted by the next planning read or comment for the same project on this
+ * machine, under its original operationId, so the server records it once, and under the author and
+ * agent of the run that wrote it, never the run that posts it. Local files only. */
+type CommentAuthor = { authorLabel: string; agent?: string; agentClient?: string };
+type OutboxEntry = {
+  url: string;
+  projectId: string;
+  operationId: string;
+  input: Record<string, unknown>;
+  author: CommentAuthor;
+  pid: number;
+  at: number;
+};
+const OUTBOX_MAX_AGE_MS = 24 * 3_600_000;
+const OUTBOX_PASSING =
+  /^(WORK_BUSY|WORK_CHANGED_DURING_PUSH|HOSTED_CONFLICT|HOSTED_ACTION_FAILED|HOSTED_REQUEST_FAILED|LEGACY_STORAGE_WRITES_PAUSED)$/;
+const outboxDirectory = () =>
+  Boolean(process.env.NODE_TEST_CONTEXT) && !process.env.XDG_STATE_HOME
+    ? null
+    : join(dirname(laneRegistryDirectory()), 'comment-outbox');
+function keepComment(entry: OutboxEntry) {
+  const directory = outboxDirectory();
+  if (!directory) return () => {};
+  const path = join(directory, `${entry.operationId}.json`);
+  try {
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    writeFileSync(`${path}.${process.pid}.tmp`, JSON.stringify(entry), { mode: 0o600 });
+    renameSync(`${path}.${process.pid}.tmp`, path);
+  } catch {
+    return () => {}; // Best effort: the write itself still runs.
+  }
+  return () => rmSync(path, { force: true });
+}
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
+let flushing = false;
+/** Post the comments ended runs left unsent for this project (at most 5 per call), oldest first. */
+async function flushComments(port: PlanningPort, actor: string) {
+  const directory = outboxDirectory();
+  if (!directory || flushing) return [];
+  let names: string[];
+  try {
+    names = readdirSync(directory);
+    // A write cut between its temp file and the rename leaves the temp file: drop it with the old entries.
+    for (const name of names.filter(name => name.endsWith('.tmp')))
+      try {
+        if (Date.now() - statSync(join(directory, name)).mtimeMs > OUTBOX_MAX_AGE_MS)
+          rmSync(join(directory, name), { force: true });
+      } catch {}
+    names = names.filter(name => /^[0-9a-f-]{36}\.json$/i.test(name)); // uuidgen prints uppercase
+  } catch {
+    return [];
+  }
+  const entries = names.flatMap(name => {
+    try {
+      const entry = JSON.parse(readFileSync(join(directory, name), 'utf8')) as OutboxEntry;
+      if (Date.now() - entry.at > OUTBOX_MAX_AGE_MS || !entry.author)
+        rmSync(join(directory, name), { force: true });
+      else if (
+        entry.url === port.address.url &&
+        entry.projectId === port.address.projectId &&
+        !alive(entry.pid)
+      )
+        return [{ entry, path: join(directory, name) }];
+    } catch {}
+    return [];
+  });
+  const posted: { itemId: string; commentId: string }[] = [];
+  flushing = true;
+  try {
+    for (const { entry, path } of entries.sort((a, b) => a.entry.at - b.entry.at).slice(0, 5)) {
+      try {
+        const sent = await executeHostedPlanning(
+          port,
+          actor,
+          'comment-planning-item',
+          entry.input,
+          entry.operationId,
+          entry.author,
+        );
+        const { itemId, commentId } = sent.result as { itemId: string; commentId: string };
+        posted.push({ itemId, commentId });
+      } catch (error) {
+        // The network, the sign-in or the service is out: keep this and the rest for the next read.
+        if (
+          !(error instanceof ForgeError) ||
+          /^(AUTH_|EXCHANGE_|RATE_LIMITED$)|NETWORK|TIMEOUT|UNAVAILABLE/.test(error.code)
+        )
+          break;
+        // This write is refused for now (busy, conflicting, paused): keep it and try the next one. A
+        // refusal (no access, a changed or spent operation) will not change on a retry, so it goes.
+        if (error.recovery?.retryable === true || OUTBOX_PASSING.test(error.code)) continue;
+      }
+      rmSync(path, { force: true });
+    }
+  } finally {
+    flushing = false;
+  }
+  if (posted.length)
+    process.stderr.write(
+      `Posted ${posted.length} comment(s) an ended run left unsent: ${posted.map(item => `${item.commentId} on Item ${item.itemId.slice(0, 8)}`).join(', ')}.\n`,
+    );
+  return posted;
+}
+
 export async function executeHostedPlanning(
   port: PlanningPort,
   actor: string,
   action: 'planning' | 'put-planning-item' | 'comment-planning-item',
   input: Record<string, unknown>,
   operationId: string | undefined,
+  /** A comment the outbox posts again: the author it was written under. */
+  replayAuthor?: CommentAuthor,
 ) {
   input = planningIssueArguments(action, input);
+  const recovered = action === 'put-planning-item' ? [] : await flushComments(port, actor);
   if (action === 'planning' && input.transfer !== undefined) {
     const { importPlanning } = await import('./hosted-agent-planning-import.js');
     const imported = await importPlanning(port, actor, input, operationId);
@@ -816,35 +936,59 @@ export async function executeHostedPlanning(
   }
   if (action === 'planning') {
     const read = hostedAgentCommandSchemas.planning.parse(input);
-    return { operationId: null, result: marked(await readPlanning(port, read)) };
+    const result = marked(await readPlanning(port, read));
+    return {
+      operationId: null,
+      result: recovered.length ? { ...result, recoveredComments: recovered } : result,
+    };
   }
   const journal = new HostedAgentJournal(port.root, port.address, actor, action, input, operationId);
   port.retainOperation?.(journal.operationId);
   if (action === 'comment-planning-item') {
     const comment = hostedAgentCommandSchemas['comment-planning-item'].parse(input);
-    const itemId = await resolvePlanningId(port, comment.itemId!, journal);
-    const revision = await writePlanning(
-      port,
-      {
-        action,
-        operationId: journal.operationId,
-        ...comment,
-        itemId,
-        authorLabel: comment.authorLabel || process.env.FORGE_AGENT_NAME || process.env.FORGE_ACTOR || '',
-        ...port.commentAgent?.(),
-      },
-      journal,
-    ).catch(async error => {
-      throw (await frictionCommentPointer(port, itemId, error)) ?? error;
-    });
-    return {
-      operationId: journal.operationId,
-      result: {
-        itemId,
-        commentId: journal.operationId,
-        workRevision: revision,
-      },
+    const author: CommentAuthor = replayAuthor ?? {
+      authorLabel: comment.authorLabel || process.env.FORGE_AGENT_NAME || process.env.FORGE_ACTOR || '',
+      ...port.commentAgent?.(),
     };
+    // A replayed comment already has its entry; the flush removes it once the server answers.
+    const done = replayAuthor
+      ? () => {}
+      : keepComment({
+          url: port.address.url,
+          projectId: port.address.projectId,
+          operationId: journal.operationId,
+          input,
+          author,
+          pid: process.pid,
+          at: Date.now(),
+        });
+    try {
+      const itemId = await resolvePlanningId(port, comment.itemId!, journal);
+      const revision = await writePlanning(
+        port,
+        {
+          action,
+          operationId: journal.operationId,
+          ...comment,
+          itemId,
+          ...author,
+        },
+        journal,
+      ).catch(async error => {
+        throw (await frictionCommentPointer(port, itemId, error)) ?? error;
+      });
+      return {
+        operationId: journal.operationId,
+        result: {
+          itemId,
+          commentId: journal.operationId,
+          workRevision: revision,
+          ...(recovered.length ? { recoveredComments: recovered } : {}),
+        },
+      };
+    } finally {
+      done();
+    }
   }
   if (input.batch !== undefined) {
     const { batch } = hostedAgentCommandSchemas['put-planning-item'].parse(input);

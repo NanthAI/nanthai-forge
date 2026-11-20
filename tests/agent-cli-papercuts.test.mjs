@@ -188,3 +188,68 @@ test('593fc2d7: an agent action typed as a top-level command names the agent com
     assert.equal(result.stdout, '');
   }
 });
+
+test("593fc2d7: observe with no id names the ids it takes and lists this machine's landings in flight", async t => {
+  const state = mkdtempSync(join(tmpdir(), 'forge-observe-state-')),
+    previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = state;
+  t.after(() => {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+    rmSync(state, { recursive: true, force: true });
+  });
+  const s = agentFixture(t);
+  const observe = () => s.transport().dispatch('observe', {});
+  await assert.rejects(observe, error => {
+    assert.equal(error.code, 'BAD_ARGUMENT');
+    assert.match(error.message, /^observe needs one id: operationId .* submissionId or runId/);
+    assert.match(
+      error.message,
+      /no landing in flight for this project: nforge agent ROOT lanes '\{\}' .* queue '\{\}'/,
+    );
+    return true;
+  });
+  const { recordLane } = await import('../dist/lane-registry.js');
+  const operationId = randomUUID();
+  recordLane({
+    laneId: s.lane.laneId,
+    root: s.root,
+    url: 'https://fixture.invalid',
+    projectId: 'project',
+    landing: { operationId, at: Date.now() },
+  });
+  // Another project's landing is not offered.
+  recordLane({
+    laneId: randomUUID(),
+    root: join(state, 'other'),
+    url: 'https://fixture.invalid',
+    projectId: 'other-project',
+    landing: { operationId: randomUUID(), at: Date.now() + 1 },
+  });
+  await assert.rejects(observe, error => {
+    assert.match(
+      error.message,
+      new RegExp(
+        `Lane ${s.lane.laneId.slice(0, 8)} operationId ${operationId}\\. Next: nforge agent ROOT observe '\\{"operationId":"${operationId}"\\}'`,
+      ),
+    );
+    assert.deepEqual(error.recovery, { candidates: [{ laneId: s.lane.laneId, operationId }] });
+    return true;
+  });
+});
+
+test('593fc2d7: a land reason that is not a retry code names the codes, and with urgent says urgency takes no reason', async t => {
+  const s = agentFixture(t);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const before = s.calls.length;
+  await assert.rejects(
+    s.transport().dispatch('finish', { laneId: s.lane.laneId, priority: 'urgent', reason: 'red main fix' }),
+    error =>
+      error.code === 'BAD_ARGUMENT' &&
+      /reason: one of flake\|main-moved\|infra\|other/.test(error.message) &&
+      /reason is the retry code for retry:true, .*it is not why the landing is urgent: priority "urgent" takes no reason, so say why in the landing message/.test(
+        error.message,
+      ),
+  );
+  assert.equal(s.calls.length, before, 'refused before any call');
+});

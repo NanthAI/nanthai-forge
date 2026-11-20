@@ -7,6 +7,7 @@ import { savedChangedPaths } from '../dist/hosted-changed-paths.js';
 import { preflightPlan, readPreflightReceipt } from '../dist/agent-preflight.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
+import { laneChangeBase, rememberConflictPaths } from '../dist/hosted-conflict-precheck.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -198,4 +199,75 @@ test('preflight "retry":true plans exactly the files the last run stopped for ti
   const response = await transport.dispatch('preflight', { laneId, retry: true, run: false });
   assert.deepEqual(response.result.plan.tests, ['tests/b.test.mjs']);
   assert.ok(response.result.plan.deferredTests.includes('tests/a.test.mjs'));
+});
+
+test('593fc2d7: a resolution Lane made by sync preflights against the head the sync merged in, not its older base', async t => {
+  const { f } = fixture(t);
+  const put = bytes => {
+    const id = digest(bytes);
+    f.objects.set(id, bytes);
+    return id;
+  };
+  const state = files =>
+    put(
+      Buffer.from(
+        JSON.stringify({
+          schema: 1,
+          kind: 'forge-source-state',
+          parents: [],
+          files: Object.entries(files).map(([path, text]) => ({
+            path,
+            blob: put(Buffer.from(text)),
+            mode: 'file',
+          })),
+          at: '2026-01-01T00:00:00.000Z',
+          message: 'Synthetic',
+        }),
+      ),
+    );
+  const test2 =
+    "import assert from 'node:assert/strict';\nimport test from 'node:test';\ntest('m', () => {\n  assert.equal(1, 1);\n  assert.equal(2, 2);\n});\n";
+  const test1 =
+    "import assert from 'node:assert/strict';\nimport test from 'node:test';\ntest('m', () => {\n  assert.equal(1, 1);\n});\n";
+  const common = { 'package.json': '{"type":"module"}', 'scripts/forge-check.mjs': '' };
+  // The conflicted Lane's base, from before main moved on.
+  const base = state({ ...common, 'src/a.ts': 'a1', 'tests/m.test.mjs': test2 });
+  // Main as the sync merged it: main's own landings changed a test and added b.ts.
+  const merged = state({ ...common, 'src/a.ts': 'a1', 'tests/m.test.mjs': test1, 'src/b.ts': 'b1' });
+  // The resolution: main's files plus the Lane's one change.
+  const head = state({ ...common, 'src/a.ts': 'a2', 'tests/m.test.mjs': test1, 'src/b.ts': 'b1' });
+  // Main moved again after the sync, so b.ts no longer equals main.
+  f.main.head = state({ ...common, 'src/a.ts': 'a1', 'tests/m.test.mjs': test1, 'src/b.ts': 'b2' });
+  f.lane.base.head = base;
+  f.lane.head = head;
+  f.caps.agentDefaults = effectiveAgentDefaults();
+  const transport = f.transport();
+  await transport.dispatch('open', { laneId: f.lane.laneId });
+  const store = join(clientCacheRoot(f.root), 'objects');
+  mkdirSync(store, { recursive: true });
+  for (const [id, bytes] of f.objects) writeFileSync(join(store, id), bytes, { mode: 0o600 });
+  // What the sync conflict records in the folder that became the resolution Lane.
+  rememberConflictPaths(f.root, f.lane.laneId, [], undefined, false, undefined, { head: merged, base });
+  assert.equal(laneChangeBase(f.root, { laneId: f.lane.laneId, base: { head: base } }), merged);
+  // Once the Lane's own base moves (a later clean sync), the record no longer applies.
+  assert.equal(laneChangeBase(f.root, { laneId: f.lane.laneId, base: { head: f.main.head } }), f.main.head);
+  // Even a server projection measured from the older base is not used as the Lane's change.
+  assert.deepEqual(
+    await savedChangedPaths(
+      transport,
+      { base: merged, head },
+      { paths: ['src/a.ts', 'src/b.ts', 'tests/m.test.mjs'], complete: true },
+      true,
+    ),
+    { paths: ['src/a.ts'], complete: true, source: 'manifests' },
+  );
+  const response = await transport.dispatch('preflight', { laneId: f.lane.laneId, run: false });
+  assert.equal(response.result.plan.status, 'planned');
+  assert.equal(response.result.plan.changedPathsFrom, 'manifests');
+  assert.equal(
+    response.result.defaults?.weakenedTests,
+    undefined,
+    "main's own test edit is not flagged as the Lane's",
+  );
+  assert.equal(response.result.weakenedTests, undefined);
 });

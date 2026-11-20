@@ -47,7 +47,33 @@ const holderAlive = (slot: string, pid: number, deep: boolean) => {
   } catch {}
   return processAlive({ pid, startTime });
 };
-/** One attempt over all slots; a slot whose holder died is reclaimed. */
+/** Default hold bound (client setting localHeavyMaxMinutes): a hung command frees its slot. Holds on
+ * this machine take seconds to about 10 min, so an hour is far past any live build or test batch. */
+export const HEAVY_MAX_MS = 60 * 60_000;
+/** A holder past its bound by this much did not stop itself (a CLI from before the bound, or a wedged
+ * holder): the next waiter frees the slot without signalling the process. */
+export const HEAVY_OVERDUE_GRACE_MS = 5 * 60_000;
+/** The holder's declared bound and start (holder.json); older holders declare no bound. */
+function holderBound(slot: string): { startedAt?: number; maxMs: number } {
+  try {
+    const record = JSON.parse(readFileSync(join(slot, 'holder.json'), 'utf8')) as {
+      startedAt?: unknown;
+      maxMs?: unknown;
+    };
+    return {
+      ...(typeof record.startedAt === 'number' ? { startedAt: record.startedAt } : {}),
+      maxMs: typeof record.maxMs === 'number' && record.maxMs >= 0 ? record.maxMs : HEAVY_MAX_MS,
+    };
+  } catch {
+    return { maxMs: HEAVY_MAX_MS };
+  }
+}
+/** A live holder still running past its own bound plus the grace (0 = unbounded, never overdue). */
+export const holderOverdue = (slot: string, now = Date.now()) => {
+  const { startedAt, maxMs } = holderBound(slot);
+  return startedAt !== undefined && maxMs > 0 && now - startedAt > maxMs + HEAVY_OVERDUE_GRACE_MS;
+};
+/** One attempt over all slots; a slot whose holder died, or ran far past its bound, is reclaimed. */
 export function tryHeavySlot(
   directory: string,
   slots: number,
@@ -73,9 +99,10 @@ export function tryHeavySlot(
       holder = Number(readFileSync(join(slot, 'pid'), 'utf8'));
     } catch {}
     // A slot without a pid file is still being claimed, unless its claimer died a minute ago.
+    // An overdue holder is not signalled: its process may still be someone's live work.
     const dead =
       Number.isSafeInteger(holder) && holder > 0
-        ? !holderAlive(slot, holder, deep)
+        ? !holderAlive(slot, holder, deep) || holderOverdue(slot)
         : Date.now() - claimedAt > 60_000;
     if (dead) {
       rmSync(slot, { recursive: true, force: true });
@@ -177,6 +204,17 @@ export function acquireHeavySlot(
   });
 }
 
+/** How long a stopped command may take to exit before heavy kills it. */
+export const HEAVY_KILL_GRACE_MS = 10_000;
+/** This process still holds the slot (a waiter may have freed it as overdue since). */
+function ownsSlot(slot: string) {
+  try {
+    return readFileSync(join(slot, 'pid'), 'utf8') === String(process.pid);
+  } catch {
+    return false;
+  }
+}
+
 const WAKE = 'slots-changed';
 /** Touch the slot directory so every waiter re-runs its attempt now (its watcher fires) and reads
  * the slot count again; local only, nothing is created where no one has waited. */
@@ -198,6 +236,9 @@ Nested commands reuse their live parent slot; project-declared static commands r
 Callers wait first come, first served; a waiting caller prints its queue position and an estimate.
 --status lists the holders and the queue by Lane, command and time, never folders or arguments,
 and sums the last day of holds (per kind, busiest Lanes, CPU and load peaks).
+A command still running after localHeavyMaxMinutes (nforge settings; default 60, 0 = no bound) is
+stopped (exit 124) and frees its slot; a signal to heavy reaches the command, which is killed if it
+has not exited 10 s later. A holder that never stopped itself is freed 5 min past its bound, unsignalled.
 Run long-lived servers (Vite/dev servers) directly, outside heavy.
 node --test with no test file path is refused (Node would run the whole suite); name the files.
 `;
@@ -209,21 +250,24 @@ export function heavyStatus(directory: string, slots: number, cwd = process.cwd(
     try {
       const pid = Number(readFileSync(join(slot, 'pid'), 'utf8'));
       if (!Number.isSafeInteger(pid) || pid <= 0 || !holderAlive(slot, pid, true)) continue;
-      let metadata: { cwd?: string; startedAt?: number; command?: string } = {};
+      let metadata: { cwd?: string; startedAt?: number; command?: string; maxMs?: number } = {};
       try {
         metadata = JSON.parse(readFileSync(join(slot, 'holder.json'), 'utf8'));
       } catch {}
       const folder = typeof metadata.cwd === 'string' ? metadata.cwd : null;
+      const elapsedMs = Math.max(
+        0,
+        Date.now() - (typeof metadata.startedAt === 'number' ? metadata.startedAt : statSync(slot).mtimeMs),
+      );
+      const maxMs = typeof metadata.maxMs === 'number' ? metadata.maxMs : HEAVY_MAX_MS;
       holders.push({
         slot: index,
         pid,
         lane: laneOf(folder),
-        elapsedMs: Math.max(
-          0,
-          Date.now() - (typeof metadata.startedAt === 'number' ? metadata.startedAt : statSync(slot).mtimeMs),
-        ),
+        elapsedMs,
         command: typeof metadata.command === 'string' ? basename(metadata.command) : null,
         selfHeld: folder !== null && canonicalRoot(folder) === canonicalRoot(cwd),
+        ...(maxMs > 0 && elapsedMs > maxMs ? { overBound: true } : {}),
       });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -434,6 +478,8 @@ export async function heavyCli(
           { command: args[0]!, cwd: process.cwd() },
         );
   const heldSince = Date.now();
+  // Only the slot's own holder bounds the command; a nested command runs inside its parent's bound.
+  const maxMs = slot ? Math.round(readClientSettings().localHeavyMaxMinutes * 60_000) : 0;
   // One compiled-module cache for every test file this command runs (Item dceb1bef): helpers that
   // read FORGE_TEST_MODULE_DIRECTORY reuse content-addressed outputs instead of each file
   // recompiling. Created on first use; an inherited directory belongs to the command that set it.
@@ -447,7 +493,8 @@ export async function heavyCli(
   Object.assign(process.env, cap.env);
   let sampler: ReturnType<typeof sampleHold> | undefined;
   const release = () => {
-    if (slot) rmSync(slot, { recursive: true, force: true });
+    // A waiter may have freed this slot as overdue and another caller taken it: never remove theirs.
+    if (slot && ownsSlot(slot)) rmSync(slot, { recursive: true, force: true });
     if (moduleCache) rmSync(moduleCache, { recursive: true, force: true, maxRetries: 3 });
     // An in-process caller keeps its own environment, never a removed preload.
     for (const [name, value] of before)
@@ -456,18 +503,22 @@ export async function heavyCli(
     cap.dispose();
   };
   process.once('exit', release);
+  const writeHolder = () =>
+    slot &&
+    writeFileSync(
+      join(slot, 'holder.json'),
+      JSON.stringify({ cwd: process.cwd(), startedAt: Date.now(), command: basename(args[0]!), maxMs }),
+    );
   try {
-    if (slot)
-      writeFileSync(
-        join(slot, 'holder.json'),
-        JSON.stringify({ cwd: process.cwd(), startedAt: Date.now(), command: basename(args[0]!) }),
-      );
+    writeHolder();
     // Inside the slot, so builds stay bounded; a fresh dist/ costs one stat pass (friction 6288d0c2).
     if (nodeTestPathCount(args) && !noBuild) {
       const built = await ensureCoreBuild(process.cwd());
       if (built !== 0) return built;
       const missing = missingTestPreloads(args, process.cwd());
       if (missing.length) process.stderr.write(preloadNotice(missing));
+      // The bound runs from the command's start: a waiter's overdue clock restarts with it.
+      writeHolder();
     }
     return await new Promise<number>((resolve, reject) => {
       const held = slot ?? inherited;
@@ -488,16 +539,36 @@ export async function heavyCli(
             : '',
         },
       });
-      const forward = (signal: NodeJS.Signals) => () => child.kill(signal);
+      // A command that ignores the stop signal is killed after the grace, so the slot is freed
+      // (a finished reviewer's hung test held one for 71 min, 593fc2d7).
+      const grace = maxMs > 0 ? Math.min(HEAVY_KILL_GRACE_MS, Math.max(500, maxMs / 4)) : HEAVY_KILL_GRACE_MS;
+      let kill: NodeJS.Timeout | undefined,
+        timedOut = false;
+      const stop = (signal: NodeJS.Signals) => {
+        child.kill(signal);
+        kill ??= setTimeout(() => child.kill('SIGKILL'), grace);
+      };
+      const bound =
+        maxMs > 0
+          ? setTimeout(() => {
+              timedOut = true;
+              process.stderr.write(
+                `heavy: ${basename(args[0]!)} still running after ${minutes(maxMs)} (localHeavyMaxMinutes); stopping it to free its slot. For a longer command: nforge settings localHeavyMaxMinutes N (0 = no bound).\n`,
+              );
+              stop('SIGTERM');
+            }, maxMs)
+          : undefined;
       const handlers = (['SIGINT', 'SIGTERM', 'SIGHUP'] as const).map(
-        signal => [signal, forward(signal)] as const,
+        signal => [signal, () => stop(signal)] as const,
       );
       for (const [signal, handler] of handlers) process.on(signal, handler);
       if (slot && child.pid) sampler = sampleHold(child.pid);
       child.once('error', reject);
       child.once('exit', (code, signal) => {
         for (const [name, handler] of handlers) process.removeListener(name, handler);
-        resolve(code ?? 128 + (signal ? constants.signals[signal] : 0));
+        clearTimeout(bound);
+        clearTimeout(kill);
+        resolve(timedOut ? 124 : (code ?? 128 + (signal ? constants.signals[signal] : 0)));
       });
     });
   } finally {

@@ -60,6 +60,9 @@ const completed = (value: unknown) => {
     .safeParse(value);
   return parsed.success && parsed.data.outcome.status === 'completed' ? parsed.data.outcome.result : null;
 };
+/** What the sync merged the conflicted head with, and the resolution Lane's base it keeps meanwhile. */
+const mergedOnto = (source: { lane: { base: { head: string } }; resolution: { right: string } | null }) =>
+  source.resolution ? { head: source.resolution.right, base: source.lane.base.head } : undefined;
 /** Conflict metadata is paged; only the affected files are materialized. The
  * response caps paths and inline bytes, never the editable checkout or resolution. */
 export async function guideHostedSync(session: HostedAgentSession, value: unknown, apply = true) {
@@ -85,7 +88,7 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     const root = hostedRootLanePath(session.root, session.address, source.lane.laneId);
     // The open step creates the folder; its client record must exist before then.
     mkdirSync(clientCacheRoot(root), { recursive: true, mode: 0o700 });
-    rememberConflictPaths(root, source.lane.laneId, paths);
+    rememberConflictPaths(root, source.lane.laneId, paths, undefined, false, undefined, mergedOnto(source));
     rememberConflictFinishOptions(root, source.lane.laneId, session.journal.get('resolution-finish-options'));
     const next = { laneId: source.lane.laneId };
     return {
@@ -153,6 +156,7 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     command,
     false,
     'origin' in placed ? placed.origin : undefined,
+    mergedOnto(source),
   );
   rememberConflictFinishOptions(root, source.lane.laneId, session.journal.get('resolution-finish-options'));
   const shown = reasons.slice(0, 100);

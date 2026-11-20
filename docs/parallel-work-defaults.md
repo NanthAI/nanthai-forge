@@ -15,6 +15,7 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 | `activeLanePruneHours` | `168` | A builder waiting on a long landing or review must keep its Lane folder; a 3-hour limit removed idle open Lanes. An open (`active`) Lane's root is removed only after this long with no Forge action and no unsaved edits. | `nforge settings activeLanePruneHours 0` never removes an open Lane's root. |
 | `idleLaneHours` | `1` | Agents forgot open Lanes, which kept counting as active work and kept their disk. `start` lists the open Lanes this agent run started on this machine that have had no Forge action for this long. | `nforge settings idleLaneHours 0` stops the list. |
 | `localHeavySlots` | `auto` | About 20 agents shared a 16 GB laptop. Unlimited parallel builds and test runs swapped the machine; 3 at a time kept it responsive. `auto` allows one heavy command per 5 GB of RAM, capped at half the cores and never below 1 (16 GB with 8 cores gives 3). | A number sets the slots; `0` turns the limit off. |
+| `localHeavyMaxMinutes` | `60` | A finished reviewer's hung test held one of the machine's slots for 71 min (Item 593fc2d7). Heavy holds on the dogfood Mac take seconds to about 10 min, so a command still running after an hour is stopped (`SIGTERM`, then `SIGKILL` 10 s later; exit 124) and its slot freed. | A number of minutes, at most `1440` (a day), sets the bound; `0` removes it. |
 | `shareDependencies` | `true` | Each Lane needs `node_modules` (261 MB for Forge itself), and every agent ran the install. When a Lane opens, its `node_modules` becomes a link to one install per exact lockfile and package manager (npm, pnpm, yarn or bun). | `nforge settings shareDependencies false`. |
 | `installScripts` | `false` | A repository's own files could switch on dependency install scripts at `start`, so opening a Lane ran code its authors chose. A repository's declaration is a request: `start` shows it, and only you decide. | `nforge settings installScripts true` accepts repository requests on this machine; `start {"installScripts":true}` runs all scripts for one Lane. |
 | `clientCacheMaxGB` | `2` | `ROOT.forge-client/lanes` collected full ~100 MB copies of other Lanes that nothing removed (262 copies, 5.8 GB in one client directory). They are a cache now: past this size, the least recently used copies are removed (never an open Lane checkout). | `nforge settings clientCacheMaxGB 0` removes the size cap. |
@@ -135,10 +136,18 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   `nforge heavy` calls reuse it. Wrapped in `nforge heavy`, it reuses that slot instead of taking a
   second one. Its tests run `--test-concurrency=1`, one group at a time, under the cap. A preflight
   that a test runs on a fixture takes no slot (the test already runs in one).
-- `nforge heavy --status` lists holders and waiters by Lane id, executable name and time; it never
-  prints folders, arguments or environment. Its `today` field sums the last 24 hours: holds and
-  minutes per kind, the three busiest Lanes, and the hold with the highest CPU and with the highest
-  load (when, which Lane, what kind), so a load spike can be explained afterwards.
+- A slot is never held by a command nobody waits for. A signal to heavy (an agent run ending, Ctrl-C)
+  reaches the command; one that has not exited 10 s later is killed and the slot freed. A command
+  still running after `localHeavyMaxMinutes` is stopped by its own heavy (exit 124). A holder that
+  never stopped itself (a CLI from before the bound, or a wedged holder) is detected by its start time
+  in the slot record: 5 min past its bound, the next waiter frees the slot without signalling the
+  process. Waiters never kill another holder, and a holder whose slot was freed that way leaves the
+  new holder's slot alone.
+- `nforge heavy --status` lists holders and waiters by Lane id, executable name and time
+  (`overBound` marks one past its bound); it never prints folders, arguments or environment. Its
+  `today` field sums the last 24 hours: holds and minutes per kind, the three busiest Lanes, and the
+  hold with the highest CPU and with the highest load (when, which Lane, what kind), so a load spike
+  can be explained afterwards.
 - Every hold appends one line to the hold history: when the slot was taken, wall time, Lane, kind
   (test, typecheck, build or other, from the command words, which are not stored), peak CPU of the
   command's process tree in cores and peak 1-minute load. CPU comes from one `ps` per 10 seconds

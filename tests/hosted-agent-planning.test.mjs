@@ -242,6 +242,141 @@ test('an agent comment is one revision-free mutation and its replay adds no seco
   );
 });
 
+// 593fc2d7: a reviewer's run ended while its GO/NO-GO comment command was still running, and the
+// verdict was lost (seen twice on 2026-11-20). The comment is kept on the machine before any call, and
+// one a killed process left is posted once by the next planning read.
+test('593fc2d7: a comment whose run ended mid-write is posted once by the next planning read', async t => {
+  const { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { spawnSync } = await import('node:child_process');
+  const state = mkdtempSync(join(tmpdir(), 'forge-outbox-')),
+    previous = process.env.XDG_STATE_HOME,
+    previousName = process.env.FORGE_AGENT_NAME;
+  process.env.XDG_STATE_HOME = state;
+  t.after(() => {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+    if (previousName === undefined) delete process.env.FORGE_AGENT_NAME;
+    else process.env.FORGE_AGENT_NAME = previousName;
+    rmSync(state, { recursive: true, force: true });
+  });
+  const outbox = join(state, 'forge', 'comment-outbox');
+  const s = await setup(t),
+    p = port(s);
+  const issue = (await put(p, { kind: 'issue', title: 'Reviewed' })).result;
+  // The write is on disk before the server is called, and gone once the call ends.
+  const mutation = p.mutation;
+  let kept;
+  p.mutation = async (name, args) => {
+    kept = readdirSync(outbox).map(name => JSON.parse(readFileSync(join(outbox, name), 'utf8')));
+    return mutation(name, args);
+  };
+  const verdict = 'Opus review of Lane 00000000@00000000: GO';
+  const operationId = randomUUID();
+  // The reviewer writes; a builder on another model later posts what the reviewer left.
+  const reviewer = { agent: 'quiet-fox', agentClient: 'claude-code:reviewer-model' };
+  p.commentAgent = () => reviewer;
+  process.env.FORGE_AGENT_NAME = 'Reviewer';
+  await run(p, 'comment-planning-item', { itemId: issue.itemId, text: verdict }, operationId);
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].operationId, operationId);
+  assert.equal(kept[0].input.text, verdict);
+  assert.deepEqual(kept[0].author, { authorLabel: 'Reviewer', ...reviewer });
+  assert.deepEqual(readdirSync(outbox), [], 'a finished write leaves nothing behind');
+  // A run killed mid-write leaves its entry, with a process that no longer exists.
+  const dead = spawnSync(process.execPath, ['-e', '0']).pid;
+  const lost = {
+    ...kept[0],
+    operationId: randomUUID(),
+    pid: dead,
+    input: { ...kept[0].input, text: `${verdict} (lost)` },
+  };
+  writeFileSync(join(outbox, `${lost.operationId}.json`), JSON.stringify(lost));
+  // One from a process still running is its own: left alone.
+  const live = { ...lost, operationId: randomUUID(), pid: process.pid };
+  writeFileSync(join(outbox, `${live.operationId}.json`), JSON.stringify(live));
+  const sent = [];
+  p.mutation = async (name, args) => {
+    sent.push(JSON.stringify(args));
+    return mutation(name, args);
+  };
+  p.commentAgent = () => ({ agent: 'busy-owl', agentClient: 'claude-code:builder-model' });
+  process.env.FORGE_AGENT_NAME = 'Builder';
+  const read = await list(p, { id: issue.itemId, reconcile: false });
+  assert.deepEqual(read.recoveredComments, [{ itemId: issue.itemId, commentId: lost.operationId }]);
+  assert.deepEqual(readdirSync(outbox), [`${live.operationId}.json`]);
+  const again = await list(p, { id: issue.itemId, reconcile: false });
+  assert.equal(again.recoveredComments, undefined);
+  assert.deepEqual(
+    again.comments.map(comment => comment.text),
+    [verdict, `${verdict} (lost)`],
+    'each verdict once',
+  );
+  // Posted under the run that wrote it, not the run that posted it.
+  const write = sent
+    .map(args => JSON.parse(JSON.parse(args).command ?? '{}'))
+    .find(c => c.text?.endsWith('(lost)'));
+  assert.deepEqual(
+    { authorLabel: write.authorLabel, agent: write.agent, agentClient: write.agentClient },
+    { authorLabel: 'Reviewer', ...reviewer },
+  );
+  // A passing refusal (rate limit) keeps the entry for the next read; a temp file a cut write left
+  // is dropped once it is a day old.
+  const limited = {
+    ...lost,
+    operationId: randomUUID(),
+    input: { ...lost.input, text: `${verdict} (limited)` },
+  };
+  writeFileSync(join(outbox, `${limited.operationId}.json`), JSON.stringify(limited));
+  const cut = join(outbox, `${randomUUID()}.json.1.tmp`);
+  writeFileSync(cut, '{');
+  const { utimesSync } = await import('node:fs');
+  utimesSync(cut, new Date(Date.now() - 25 * 3_600_000), new Date(Date.now() - 25 * 3_600_000));
+  p.mutation = async () => {
+    throw new ForgeError('RATE_LIMITED', 'Slow down.');
+  };
+  const refused = await list(p, { id: issue.itemId, reconcile: false });
+  assert.equal(refused.recoveredComments, undefined);
+  assert.deepEqual(
+    readdirSync(outbox).sort(),
+    [`${limited.operationId}.json`, `${live.operationId}.json`].sort(),
+  );
+  p.mutation = mutation;
+  assert.deepEqual((await list(p, { id: issue.itemId, reconcile: false })).recoveredComments, [
+    { itemId: issue.itemId, commentId: limited.operationId },
+  ]);
+  // One write the server keeps refusing does not hold back newer ones: it stays, the next is posted.
+  const stuck = {
+    ...lost,
+    operationId: randomUUID(),
+    at: Date.now() - 60_000,
+    input: { ...lost.input, text: 'stuck' },
+  };
+  const fresh = {
+    ...lost,
+    operationId: randomUUID(),
+    at: Date.now(),
+    input: { ...lost.input, text: 'fresh' },
+  };
+  for (const entry of [stuck, fresh])
+    writeFileSync(join(outbox, `${entry.operationId}.json`), JSON.stringify(entry));
+  const recent = join(outbox, `${randomUUID()}.json.1.tmp`);
+  writeFileSync(recent, '{');
+  p.mutation = async (name, args) => {
+    if (JSON.stringify(args).includes('stuck')) throw new ForgeError('HOSTED_ACTION_FAILED', 'Try again.');
+    return mutation(name, args);
+  };
+  assert.deepEqual((await list(p, { id: issue.itemId, reconcile: false })).recoveredComments, [
+    { itemId: issue.itemId, commentId: fresh.operationId },
+  ]);
+  assert.deepEqual(
+    readdirSync(outbox).sort(),
+    [`${stuck.operationId}.json`, `${live.operationId}.json`, recent.split('/').pop()].sort(),
+    'the refused write and a temp file under a day old stay',
+  );
+  p.mutation = mutation;
+});
+
 test('agents create an Initiative and Issue, comment, and read them filtered and paged', async t => {
   const s = await setup(t),
     p = port(s);

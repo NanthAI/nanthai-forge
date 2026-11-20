@@ -6,7 +6,7 @@ import { agentClient, agentAuthorship } from './agent-turn-work.js';
 import { suppliedLandingMessage } from './landing-message.js';
 import { keptApplyEnvelope } from './hosted-apply-kept.js';
 import { cliBuildCommit } from './cli-installation.js';
-import { describeIssues } from './argument-errors.js';
+import { describeIssues, missingObserveId, retryReasonHint } from './argument-errors.js';
 import { liveLanes } from './hosted-live-lanes.js';
 import { cloneFreshness, mainCheckoutTransport, pullHostedProject } from './hosted-pull.js';
 import { readHostedMainSelection } from './hosted-main-marker.js';
@@ -20,6 +20,7 @@ import {
   requireResolution,
   pendingConflictPaths,
   resolutionContinuation,
+  laneChangeBase,
 } from './hosted-conflict-precheck.js';
 import { clientCacheRoot, rootSibling } from './root-paths.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -793,7 +794,7 @@ export class HostedAgentTransport {
       invariant(
         command.success,
         'BAD_ARGUMENT',
-        `Invalid hosted ${requestedAction} parameters. ${command.success ? '' : describeIssues(command.error.issues, observation ? input : parameters)}. Run nforge agent ROOT ${requestedAction} --help.`,
+        `Invalid hosted ${requestedAction} parameters. ${command.success ? '' : describeIssues(command.error.issues, observation ? input : parameters)}.${requestedAction === 'finish' ? retryReasonHint(parameters) : ''} Run nforge agent ROOT ${requestedAction} --help.`,
       );
       if (!observation && operationId !== undefined)
         invariant(z.uuid().safeParse(operationId).success, 'BAD_ARGUMENT', 'operationId must be a UUID.');
@@ -1333,14 +1334,16 @@ export class HostedAgentTransport {
           await this.protectedNotice(readHostedLaneCheckout(root));
           const read = await this.overlapAdvice(laneId, capabilities.agentDefaults?.preflight !== 'off');
           const selected = readHostedLaneCheckout(root)?.selection;
+          const changeBase = selected ? laneChangeBase(root, selected) : undefined;
           const advice =
             capabilities.agentDefaults?.preflight !== 'off' && selected?.laneId === laneId
               ? {
                   ...read,
                   changedPaths: await savedChangedPaths(
                     this,
-                    { base: selected.base.head, head },
+                    { base: changeBase!, head },
                     read.changedPaths,
+                    changeBase !== selected.base.head,
                   ),
                 }
               : read;
@@ -1374,7 +1377,7 @@ export class HostedAgentTransport {
             const weakened = laneWeakenedTestsReply(
               weakenedReads,
               root,
-              checkout.selection.base.head,
+              laneChangeBase(root, checkout.selection),
               checkout.state.files,
               message,
             );
@@ -2050,27 +2053,25 @@ export class HostedAgentTransport {
       'The last preflight of this Lane stopped no file for time; run preflight without "retry".',
     );
     const advice = await readHostedOverlapAdvice(this, laneId, true);
+    // A resolution Lane a sync made is measured from the head the sync merged in (593fc2d7).
+    const base = laneChangeBase(root, marker.selection);
     const changed = await savedChangedPaths(
       this,
-      { base: marker.selection.base.head, head: marker.selection.head },
+      { base, head: marker.selection.head },
       advice.changedPaths,
+      base !== marker.selection.base.head,
     );
     if (changed?.complete) this.protectedPaths(changed.paths);
     const plan = preflightPlan(
       root,
       changed,
-      { laneId, files: marker.state.files, base: marker.selection.base.head },
+      { laneId, files: marker.state.files, base },
       { budgetSeconds: command.budgetSeconds, trim: command.trim, only: stopped },
     );
     const head = marker.selection.head;
     // Removed or loosened assertions, added skips, changed inputs: flags by file and test, local only.
     const { laneWeakenedTestsReply } = await import('./preflight-weakened-tests.js');
-    const weakened = laneWeakenedTestsReply(
-      weakenedReads,
-      root,
-      marker.selection.base.head,
-      marker.state.files,
-    );
+    const weakened = laneWeakenedTestsReply(weakenedReads, root, base, marker.state.files);
     const weakenedTests = weakened ? { weakenedTests: weakened } : {};
     const landNext = {
       next: { action: 'land', mode: 'save', laneId },
@@ -2303,8 +2304,11 @@ export class HostedAgentTransport {
       return this.query('projectMainRed:read', main === true ? {} : { sequence: main });
     }
     invariant(!summary || runId, 'BAD_ARGUMENT', 'summary:true reads one check run: pass runId.');
+    const ids = [laneId, operationId, submissionId, runId].filter(Boolean).length;
+    // A bare status is the project status (handled before this); an observe with no id lists landings.
+    if (!ids) throw missingObserveId(this.address);
     invariant(
-      [laneId, operationId, submissionId, runId].filter(Boolean).length === 1,
+      ids === 1,
       'BAD_ARGUMENT',
       'Choose exactly one operationId (original landing or source operation), submissionId or runId; status also accepts laneId.',
     );
