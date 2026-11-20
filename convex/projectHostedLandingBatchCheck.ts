@@ -3,6 +3,8 @@ import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 import { diagnoseBatchFailure } from '../src/hosted-batch-diagnosis';
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
 import { isolateFailedBatch } from './projectHostedLandingIsolation';
+import { failsOnlyMainRed } from './projectHostedLandingPark';
+import { parkExactOnMainRed, parkFailedBatch } from './projectHostedLandingParkExact';
 import { passedAlone } from '../src/hosted-landing-suspect';
 import { checkFailureStep } from './projectHostedCheckFailure';
 import { checkFailureKind } from '../src/hosted-landing-admission';
@@ -158,7 +160,6 @@ async function prepareLandingCheckOnce(
             );
           }
         } else {
-          await recordCohortOutcome(ctx, key, batch, false);
           // At most eight exact metadata reads in this mutation, only after a
           // failed shared check. Large source path lists never enter batch state.
           const originals = await Promise.all(
@@ -180,6 +181,7 @@ async function prepareLandingCheckOnce(
               return {
                 ...member,
                 paths: candidate.governance?.paths ?? member.paths,
+                pathsKnown: Boolean(candidate.governance?.paths),
               };
             }),
           );
@@ -198,18 +200,62 @@ async function prepareLandingCheckOnce(
           // summaries (bounded, failure-only, no fetch). Wave 1: build:web budget.
           const step = await checkFailureStep(ctx, claim.projectId, run);
           const failure = diagnoseBatchFailure(originals, run, semantic, previous, step);
-          if (
-            !(await isolateFailedBatch(
-              ctx,
-              key,
-              batch,
-              failure,
-              attempt,
+          // Item 687d1eda: a shared run that failed only on main's red tests, naming no member,
+          // parks the cohort instead of splitting it into re-checks on red main (switch, off by
+          // default). A member's earlier failure on those same red tests (a split child after a
+          // run that failed before main's audit marked them red) is main's, not a repeat offence.
+          const red =
+            parkExactOnMainRed() &&
+            !batch.predecessor &&
+            !semantic.conflicts.length &&
+            !semantic.overBudget &&
+            originals.length === included.length &&
+            originals.every(member => member.pathsKnown)
+              ? await failsOnlyMainRed(ctx, claim.projectId, run)
+              : null;
+          const redOnly =
+            red &&
+            !diagnoseBatchFailure(
+              originals,
               run,
-              semantic.conflicts.length > 0 || Boolean(semantic.overBudget),
-            ))
-          )
-            await splitLandingBatch(ctx, key, batch, failure);
+              semantic,
+              Object.fromEntries(
+                Object.entries(previous).map(([id, tests]) => [
+                  id,
+                  tests.filter(test => !red.includes(test)),
+                ]),
+              ),
+              step,
+            ).suspects.length
+              ? red
+              : null;
+          if (redOnly) {
+            const pending = [];
+            for (const original of included) {
+              const current = await loadLanding(ctx, {
+                projectId: claim.projectId,
+                submissionId: original.submissionId,
+              });
+              if (current.state.phase !== 'terminal-failed' && current.state.phase !== 'landed')
+                pending.push({ ...current, original });
+            }
+            await parkFailedBatch(ctx, key, batch, failure, run, pending, redOnly);
+          } else {
+            // A main-red park is no cohort failure: only a failure that splits counts.
+            await recordCohortOutcome(ctx, key, batch, false);
+            if (
+              !(await isolateFailedBatch(
+                ctx,
+                key,
+                batch,
+                failure,
+                attempt,
+                run,
+                semantic.conflicts.length > 0 || Boolean(semantic.overBudget),
+              ))
+            )
+              await splitLandingBatch(ctx, key, batch, failure);
+          }
         }
       } else {
         // Progress may have made this request temporarily queued. Evaluation

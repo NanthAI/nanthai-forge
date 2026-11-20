@@ -9,6 +9,7 @@ import { loadFinish } from './projectHostedFinishStore';
 import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { writeBatch, type BatchIdentity, type LandingBatch } from './projectHostedLandingBatchStore';
 import { orderHostedLandingRows } from './projectHostedLandingOrder';
+import { parkedEntry } from './projectHostedLandingPark';
 
 /** One bounded window, no function calls per member and no diagnostic checks.
  * Diagnoses survive terminal outcomes so either member can read a named pair. */
@@ -27,7 +28,13 @@ export async function advanceBatchFallback(
       loadLanding(ctx, { projectId: input.projectId, submissionId: member.submissionId }),
     ),
   );
-  const pending = current.filter(member => !['landed', 'terminal-failed'].includes(member.state.phase));
+  // A member parked on main's red (Item 687d1eda) left the line, also once it is released on green
+  // and queues on its own: it is no longer this cohort's (no batchId or batchOriginId of it).
+  const left = (member: (typeof current)[number]) =>
+    parkedEntry(member.row) || (member.state.batchId ?? member.state.batchOriginId) !== batch.id;
+  const pending = current.filter(
+    member => !['landed', 'terminal-failed'].includes(member.state.phase) && !left(member),
+  );
   for (const member of pending) {
     if (!member.state.batchNeedsSoloCompose || !member.row.runId) continue;
     const original = batch.members.find(entry => entry.submissionId === member.state.id)!;
@@ -90,7 +97,7 @@ export async function advanceBatchFallback(
       )?.member;
   }
   for (const member of current) {
-    if (member.state.phase === 'landed' && !member.state.batchSolo) continue;
+    if ((member.state.phase === 'landed' && !member.state.batchSolo) || left(member)) continue;
     const diagnostic = batchMemberDiagnostic(
       batch.memberDetails ?? [],
       batch.failure,

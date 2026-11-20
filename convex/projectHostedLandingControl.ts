@@ -29,6 +29,7 @@ import { reservationAhead } from './projectHostedLandingReservation';
 import { overtakeMark } from '../src/landing-overtake';
 import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
 import { retrySoloLandingCheck } from './projectHostedLandingCheckRetry';
+import { parkExactOnMainRed, parkRedOnlyEntry } from './projectHostedLandingParkExact';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 import { hostedCheckTerminal } from '../src/hosted-check';
@@ -271,6 +272,13 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
         state.semanticConflicts = semantic.conflicts;
         error = { code: 'INTENT_SEMANTIC_CONFLICT', message: semanticConflictMessage(semantic.conflicts) };
       } else if (hostedCheckTerminal(run) && (await retrySoloLandingCheck(ctx, claim, attempt, run))) {
+        await releaseLandingQueue(ctx, held, now);
+        return (await loadLanding(ctx, claim)).state;
+      } else if (
+        run.status === 'failed' &&
+        parkExactOnMainRed() &&
+        (await parkRedOnlyEntry(ctx, claim, { row, state, attempt }, run))
+      ) {
         await releaseLandingQueue(ctx, held, now);
         return (await loadLanding(ctx, claim)).state;
       } else if (!hostedCheckTerminal(run)) {

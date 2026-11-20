@@ -55,6 +55,25 @@ test('main failing on a file this Lane does not touch says so with the time main
   assert.equal(verdicts(cause).main, 'yes');
 });
 
+test('687d1eda: a landing that failed on main red is told the one command that re-lands it once both park switches are on', () => {
+  const evidence = {
+    landing: { state: 'check-failed' },
+    run: failedRun([{ file: 'tests/lane-review-browser.test.mjs', firstError: '398 > 390' }]),
+    lane,
+    main: { result: 'failed', redSince: '2026-11-19T10:41:00.000Z' },
+  };
+  const parks = failureCause({ ...evidence, parksOnMainRed: true });
+  assert.equal(parks.next.recovery, 'wait-for-main');
+  assert.match(
+    parks.next.agent,
+    /run land --save again now; while main is red it waits and lands once main passes/,
+  );
+  // Without parking, a re-land on red main fails again: the reply must not promise that it waits.
+  const fails = failureCause(evidence);
+  assert.doesNotMatch(fails.next.agent, /again now/);
+  assert.match(fails.next.agent, /land --save again once main passes/);
+});
+
 test('a landing held while main is red is main, never the change', () => {
   const cause = failureCause({
     landing: { state: 'held-main-red' },

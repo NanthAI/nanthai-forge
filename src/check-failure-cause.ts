@@ -58,6 +58,9 @@ export type FailureEvidence = {
   lane?: { paths: readonly string[]; tests?: readonly string[] | undefined } | null | undefined;
   /** main's audit (convex/projectHostedMainAuditState.ts mainAuditStatus subset). */
   main?: { result: string | null; redSince: string | null } | null | undefined;
+  /** Every check that fails only on main's red tests parks and re-lands on green (both park
+   * switches, Item 687d1eda), so landing again now is the one command that waits for main. */
+  parksOnMainRed?: boolean | undefined;
 };
 export type SuspectReading = { suspect: FailureSuspect; verdict: SuspectVerdict; evidence: string[] };
 export type FailureCause = {
@@ -100,7 +103,7 @@ export const recoveryText: Record<FailureRecovery, { label: string; agent: strin
   },
   'wait-for-main': {
     label: 'Keep waiting',
-    // Until fix D (Item 687d1eda) parks failed landings, only a main-red hold continues by itself.
+    // Without both park switches (Item 687d1eda) only a held landing continues by itself.
     agent:
       "Do not change your code: a landing that fails only on main's failing tests is not at fault. A held landing continues once main passes; a failed one needs land --save again once main passes.",
   },
@@ -111,6 +114,10 @@ export const recoveryText: Record<FailureRecovery, { label: string; agent: strin
       'Forge could not tell the cause; read the check log, then fix in this Lane or retry with a reason.',
   },
 };
+
+/** wait-for-main when every red-only failure parks: one command re-lands, with no wait for main first. */
+const RELAND_PARKS =
+  "Do not change your code: a landing that fails only on main's failing tests is not at fault. A held landing continues once main passes. A failed one: run land --save again now; while main is red it waits and lands once main passes.";
 
 const notFailure = new Set<LandingStateName>([
   'queued',
@@ -166,7 +173,12 @@ export function failureCause(evidence: FailureEvidence): FailureCause | null {
     schema: FAILURE_CAUSE_SCHEMA,
     cause,
     sentence,
-    next: { recovery, ...recoveryText[recovery], ...(retryReason ? { retryReason } : {}) },
+    next: {
+      recovery,
+      ...recoveryText[recovery],
+      ...(recovery === 'wait-for-main' && evidence.parksOnMainRed ? { agent: RELAND_PARKS } : {}),
+      ...(retryReason ? { retryReason } : {}),
+    },
     suspects: failureSuspects.map(name => suspects.find(item => item.suspect === name)!),
     mainFailingSince: mainSince,
     failing: failed.map(item => ({

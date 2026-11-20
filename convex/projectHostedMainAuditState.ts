@@ -234,7 +234,8 @@ export async function releaseMainHolds(ctx: MutationCtx, projectId: Id<'hostedPr
     ctx.db
       .query('projectHostedLandingRequests')
       .withIndex('by_project_and_hold', q => q.eq('projectId', projectId).eq('hold', 'main-red'));
-  const park = parkOnMainRed();
+  // Either park switch can hold many entries (Item 687d1eda fix D, and its queue-check follow-up).
+  const park = parkOnMainRed() || parkExactOnMainRed();
   if (park && !scheduled) {
     if (await held().first())
       await ctx.scheduler.runAfter(
@@ -505,6 +506,9 @@ function withoutTests(red: Doc<'projectHostedMainAudits'>['red']) {
 }
 /** Switch FORGE_QUEUE_PARK_ON_MAIN_RED (Item 687d1eda fix D, off by default; queue-regression guard). */
 export const parkOnMainRed = () => process.env.FORGE_QUEUE_PARK_ON_MAIN_RED === '1';
+/** Switch FORGE_QUEUE_PARK_EXACT_ON_MAIN_RED (Item 687d1eda: queue checks, not only admission, park
+ * on main's red; off by default; queue-regression guard). */
+export const parkExactOnMainRed = () => process.env.FORGE_QUEUE_PARK_EXACT_ON_MAIN_RED === '1';
 /** Records why main is red on the current episode's row, once recovery decides (Item 687d1eda). */
 export async function noteRedCause(
   ctx: MutationCtx,

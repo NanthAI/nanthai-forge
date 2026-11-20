@@ -166,7 +166,11 @@ export async function writeLanding(
   // written with this transition differ from the previous attempt's and stay.
   if (state.attemptId !== previous.attemptId) {
     if (state.checkProgress === previous.checkProgress) delete state.checkProgress;
-    if (state.testFiles && canonicalPayload(state.testFiles) === canonicalPayload(previous.testFiles))
+    if (
+      state.testFiles &&
+      previous.testFiles &&
+      canonicalPayload(state.testFiles) === canonicalPayload(previous.testFiles)
+    )
       delete state.testFiles;
     if (state.ranInFull === previous.ranInFull) delete state.ranInFull;
   }

@@ -10,7 +10,7 @@ import { composeRow } from './projectHostedComposeStore';
 import { landingAttemptRow, loadLandingAttempt } from './projectHostedLandingAttemptRead';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { checkFailureStep } from './projectHostedCheckFailure';
-import { auditRow } from './projectHostedMainAuditState';
+import { auditRow, parkExactOnMainRed, parkOnMainRed } from './projectHostedMainAuditState';
 import { summarizeCheckRun } from '../src/hosted-check-summary';
 import { failureCause, failureCauseField } from '../src/check-failure-cause';
 import { landingStateOf } from '../src/landing-state';
@@ -94,7 +94,27 @@ export async function landingRun(
   const summary = loaded ? summarizeCheckRun(loaded.run) : null;
   const step =
     loaded && loaded.run.status === 'failed' ? await checkFailureStep(ctx, projectId, loaded.run) : null;
-  return { summary, step };
+  return { summary, step, reDefers: await reDefers(ctx, projectId, state, attempt) };
+}
+
+/** Whether a fresh land of this change would be deferred again, so a check failing only on main's
+ * red parks it (Item 687d1eda): its request could be deferred and its attempt chain was. Free
+ * request fields first; then at most one parent-attempt read, only while both park switches are
+ * on. Unknown means no: the advice falls back to landing again once main passes. */
+async function reDefers(
+  ctx: QueryCtx,
+  projectId: Project,
+  state: HostedLandingState,
+  attempt: Awaited<ReturnType<typeof loadLandingAttempt>> | null,
+) {
+  const { request } = state;
+  if (!parkOnMainRed() || !parkExactOnMainRed() || !attempt) return false;
+  if (!request.finish || request.finish.after || request.revertOf || request.check?.kind !== 'request')
+    return false;
+  if (attempt.deferredCheck) return true;
+  if (!attempt.parentAttemptId) return false;
+  const parent = await loadLandingAttempt(ctx, { projectId, attemptId: attempt.parentAttemptId });
+  return parent.deferredCheck === true;
 }
 
 type Evidence = {
@@ -104,9 +124,11 @@ type Evidence = {
   step: Awaited<ReturnType<typeof checkFailureStep>>;
   lane: { paths: string[]; complete: boolean } | null;
   main: Awaited<ReturnType<typeof mainEvidence>>;
+  /** landingRun's reDefers: a fresh land would park on main's red. */
+  reDefers?: boolean;
 };
 /** The contract's cause from evidence already read. No reads. */
-export function causeFrom({ state, laneId, summary, step, lane, main }: Evidence) {
+export function causeFrom({ state, laneId, summary, step, lane, main, reDefers = false }: Evidence) {
   return failureCause({
     landing: { state: landingStateOf(state, laneId).state, code: state.error?.code },
     run: summary
@@ -120,6 +142,7 @@ export function causeFrom({ state, laneId, summary, step, lane, main }: Evidence
       : null,
     lane: lane?.complete ? lane : null,
     main,
+    parksOnMainRed: reDefers,
   });
 }
 
@@ -160,10 +183,10 @@ export async function failureCauseReply(
     : laneId
       ? lanePaths(await laneOverlap(ctx, projectId, laneId)).lane
       : null;
-  const { summary, step } = await landingRun(ctx, projectId, row, state);
+  const { summary, step, reDefers } = await landingRun(ctx, projectId, row, state);
   const main = await mainEvidence(ctx, projectId);
   const field = failureCauseField(
-    causeFrom({ state, laneId: laneId ?? undefined, summary, step, lane, main }),
+    causeFrom({ state, laneId: laneId ?? undefined, summary, step, lane, main, reDefers }),
   );
   return field ? { failureCause: field } : {};
 }

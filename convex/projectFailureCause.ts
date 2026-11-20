@@ -112,10 +112,10 @@ export const forLane = query({
           expected: null,
         });
       const { state, row } = await loadLanding(ctx, { projectId, submissionId: request.submissionId });
-      const { summary, step } = await landingRun(ctx, projectId, row, state);
+      const { summary, step, reDefers } = await landingRun(ctx, projectId, row, state);
       // A passed entry parked behind an older one names it, from the row in hand (43b51a5e).
       const landing = landingStateOf({ ...state, orderWait: landingOrderWaitForReader(row, state) }, laneId);
-      const cause = causeFrom({ state, laneId, summary, step, lane, main });
+      const cause = causeFrom({ state, laneId, summary, step, lane, main, reDefers });
       const expected = unanswered.has(landing.state) ? await expectedCheck(ctx, projectId) : null;
       return canonicalPayload({
         laneId,

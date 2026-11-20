@@ -416,6 +416,12 @@
       "test": "43b51a5e case 3 (own risk): a reservation holder with its own global risk is driven, not held"
     },
     {
+      "incident": "687d1eda",
+      "what": "Same incident, queue checks (analysis c305fff6 on 13ea93bf: 10 failures, 302 min wait): cohorts that failed only on main's red test split into solo re-checks on red main, each a full run that failed the same way, and every landing ended CHECK_FAILED (switch FORGE_QUEUE_PARK_EXACT_ON_MAIN_RED)",
+      "file": "tests/hosted-landing-park-exact.test.mjs",
+      "test": "incident 687d1eda: a cohort failing only on main red tests parks every member, no solo re-checks, and re-lands on green"
+    },
+    {
       "incident": "fa2c1383",
       "what": "On 2026-11-17 main moves cancelled 57 running checks of landed work (2,977 job-min modelled) although some could still carry or seed a scoped recheck that pays; the 11-17 trace replays today's sweep against the keep rule with recorded queue waits kept",
       "file": "tests/keep-the-run-replay.test.mjs",

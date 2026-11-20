@@ -52,11 +52,8 @@ export async function redOnlyFailure(
   attempt: HostedLandingAttempt,
   run: HostedCheckRun,
 ) {
-  const own = redTests(run);
-  if (!own.tests.length || own.moreTests || !onlyTestsFailed(run)) return null;
-  const red = (await auditRow(ctx, projectId))?.red;
-  if (!red?.tests?.length || red.moreTests || !own.tests.every(file => red.tests!.includes(file)))
-    return null;
+  const own = await failsOnlyMainRed(ctx, projectId, run);
+  if (!own) return null;
   let record;
   try {
     record = await readHostedRecord(ctx, {
@@ -76,7 +73,23 @@ export async function redOnlyFailure(
   // Unknown paths cannot clear this landing of its own failure.
   if (!paths) return null;
   const member = { paths, tests: declaredTests(candidate.intentId, run, attempt, candidate) };
-  if (own.tests.some(file => memberExplainsFailure(member, file, firstError(run, file)))) return null;
+  if (own.some(file => memberExplainsFailure(member, file, firstError(run, file)))) return null;
+  return own;
+}
+
+/** The failing files when the run failed on test files alone and every one is a file main's red
+ * audit fails too, both lists complete; otherwise null. Attribution to the change is the caller's.
+ * Free run-field checks first, then one indexed audit-row read, only for a failed run. */
+export async function failsOnlyMainRed(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  run: HostedCheckRun,
+) {
+  const own = redTests(run);
+  if (!own.tests.length || own.moreTests || !onlyTestsFailed(run)) return null;
+  const red = (await auditRow(ctx, projectId))?.red;
+  if (!red?.tests?.length || red.moreTests || !own.tests.every(file => red.tests!.includes(file)))
+    return null;
   return own.tests;
 }
 
@@ -95,6 +108,10 @@ function declaredTests(
       if (member.intentId === intentId) for (const test of member.tests) tests.add(test.path);
   return [...tests];
 }
+
+/** A parked queued entry (any park path). Publication holds stay `ready`, so this is never one. */
+export const parkedEntry = (row: { hold?: string | undefined; phase: string }) =>
+  row.hold === 'main-red' && row.phase === 'queued';
 
 export const parkedMessage = (files: readonly string[]) =>
   `Not this change: its check failed only on tests main fails too (${files.slice(0, 3).join(', ')}${
