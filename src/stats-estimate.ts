@@ -31,6 +31,8 @@ export type StatsLanding = {
   attempts: number | null;
   /** The accepted check ran the project's whole check command (the replay's cost per run). */
   ranInFull: boolean;
+  /** Tokens the agent reported for this landing (`land` tokens); absent or null when it reported none. */
+  tokens?: number | null;
 };
 
 /** A replay of a window this small moves too much between days to be worth a headline. */
@@ -173,6 +175,12 @@ const statsDayV2Schema = statsDayV1Schema
     /** The close stopped writing people's days before it had written them all (the transaction's meter): some people's
      * work of this close's window is not on their profile. */
     peoplePartial: z.literal(true).optional(),
+    /** Agent-reported tokens (Item a61d3c91): how many of the day's landings reported and their sum. Absent when none
+     * did, so a day without reports stores nothing more. */
+    tokens: z
+      .object({ reported: z.number().int().positive(), total: z.number().int().nonnegative() })
+      .strict()
+      .optional(),
   })
   .strict();
 /** Forge's one "first try" (owner 2026-11-19, Item a61d3c91): a change landed with no resubmission and no discarded
@@ -259,6 +267,7 @@ export function statsDay(
   const ranked = [...tally].sort((a, b) => b[1][0] - a[1][0] || a[0].localeCompare(b[0]));
   const counted = landings.filter(l => l.attempts !== null);
   const priced = landings.filter(l => known(l.runnerSeconds) && known(l.discardedRunnerSeconds));
+  const reported = landings.filter(l => known(l.tokens ?? null)).map(l => Math.round(l.tokens!));
   const solo = runs?.solo ?? { runnerSeconds: [], wallSeconds: [] };
   const wallSeconds = median(solo.wallSeconds) ?? carry.wallSeconds;
   const failures = runs?.queueFailures ?? [];
@@ -329,6 +338,9 @@ export function statsDay(
     },
     who: ranked.slice(0, STATS_DAY_MAX_WHO).map(([who, [n, first, counted]]) => [who, n, first, counted]),
     others: ranked.slice(STATS_DAY_MAX_WHO).reduce((s, [, [n]]) => s + n, 0),
+    ...(reported.length
+      ? { tokens: { reported: reported.length, total: reported.reduce((s, n) => s + n, 0) } }
+      : {}),
   }) as StatsDayV2;
 }
 
@@ -407,6 +419,8 @@ export type StatsTotals = {
   discardedSeconds: number;
   who: Array<[string, number, number, number]>;
   others: number;
+  /** Landings that reported agent tokens, and their sum. Optional: month rollups written before it lack it. */
+  tokens?: { reported: number; total: number } | undefined;
   toMain: StatsDist[];
   stops: { queue: StatsDist[]; check: StatsDist[]; land: StatsDist[] };
   /** Days closed by this method with every run read (`d.ci`). */
@@ -449,6 +463,7 @@ export const noTotals = (): StatsTotals => ({
   discardedSeconds: 0,
   who: [],
   others: 0,
+  tokens: { reported: 0, total: 0 },
   toMain: [],
   stops: { queue: [], check: [], land: [] },
   ci: { days: 0, landings: 0, all: tally(), unlinked: tally(), discarded: causes() },
@@ -487,6 +502,7 @@ export function dayTotals(d: StatsDay): StatsTotals {
   t.discardedSeconds = d.runner.discardedSeconds;
   t.who = d.who.map(row => [...row]);
   t.others = d.others;
+  if (d.schema === 2 && d.tokens) t.tokens = { ...d.tokens };
   t.toMain = exactDist(d.toMain);
   t.stops = {
     queue: exactDist(d.stops.queue),
@@ -552,6 +568,10 @@ export function addTotals(a: StatsTotals, b: StatsTotals): StatsTotals {
     discardedSeconds: a.discardedSeconds + b.discardedSeconds,
     who: [...who].map(([name, row]) => [name, ...row]),
     others: a.others + b.others,
+    tokens: {
+      reported: (a.tokens?.reported ?? 0) + (b.tokens?.reported ?? 0),
+      total: (a.tokens?.total ?? 0) + (b.tokens?.total ?? 0),
+    },
     toMain: [...a.toMain, ...b.toMain],
     stops: {
       queue: [...a.stops.queue, ...b.stops.queue],
@@ -683,6 +703,16 @@ export function statsFigures(t: StatsTotals) {
       discarded: ci.days ? discarded : null,
       firstTryRate: t.counted ? t.first / t.counted : null,
       firstTryCounted: t.counted,
+      /** Agent-reported tokens (Item a61d3c91), measured from `reported` of `landings`; null until one reports. Never a
+       * GitHub comparison: the page links the published benchmark for that. */
+      tokens: t.tokens?.reported
+        ? {
+            reported: t.tokens.reported,
+            landings: t.landings,
+            total: t.tokens.total,
+            perLanding: t.tokens.total / t.tokens.reported,
+          }
+        : null,
       toMainSeconds: distMedian(t.toMain),
       stops: {
         queue: distMedian(t.stops.queue),

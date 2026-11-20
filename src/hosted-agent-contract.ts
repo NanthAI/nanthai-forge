@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { finishRetryReasonSchema } from './hosted-landing.js';
+import { finishRetryReasonSchema, landingTokensSchema } from './hosted-landing.js';
 import { effectiveAgentDefaultsWireSchema } from './agent-parallel-defaults.js';
 import { hostedRecordCommands } from './hosted-record-input.js';
 import { hostedMirrorStatusSchema } from './hosted-github-mirror-status.js';
@@ -294,6 +294,11 @@ export const hostedAgentCommandSchemas = {
           'Boolean: true closes this Lane’s Intent under project policy; false keeps it open. It is not a list of Issue ids.',
         ),
       priority: z.enum(['urgent', 'normal']).optional(),
+      tokens: landingTokensSchema
+        .optional()
+        .describe(
+          'Optional: tokens your own work on this landing used, as your harness counts them (whole number, at most 1e9). Stats shows the measured total; never billed.',
+        ),
       /** Land a Lane whose saved head changes nothing against its base (otherwise refused). */
       allowEmpty: z.boolean().optional(),
       retry: z.boolean().optional(),

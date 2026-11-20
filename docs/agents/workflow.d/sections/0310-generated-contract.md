@@ -17,7 +17,7 @@
 | `recover-apply` | `applyOperationId, operationId?` |
 | `resolve` | `laneId?, message?, keep?, operationId?` |
 | `save --check` | `checkId, expectedDefinition?, expectedConfiguration?, expectedEnvironment?, candidateId, expectedHead?, operationId?` |
-| `land --save` | `model?, laneId?, message?, intentId?, inputs?, dependencies?, check?, candidateId?, composeOperationId?, after?, accept?, keepOpen?, closes?, priority?, allowEmpty?, retry?, reason?, operationId?` |
+| `land --save` | `model?, laneId?, message?, intentId?, inputs?, dependencies?, check?, candidateId?, composeOperationId?, after?, accept?, keepOpen?, closes?, priority?, tokens?, allowEmpty?, retry?, reason?, operationId?` |
 | `x prioritize` | `submissionId, priority, asOwner?, operationId?` |
 | `preflight` | `laneId?, run?, budgetSeconds?, trim?, retry?, message?, operationId?` |
 | `x source-pack` | `operationId?` |

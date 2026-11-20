@@ -91,8 +91,7 @@ export function registerHostedAgentWorkflow(
   const groups = [
     {
       name: 'forge_task',
-      short:
-        'Lane writes/setup. Land: wait until terminal. Unknown reply: replay same UUID. Help: forge_task.',
+      short: 'Lane writes/setup. Land: wait until terminal. Unknown reply: replay same UUID.',
       actions: [
         'start',
         'open',

@@ -105,6 +105,7 @@ const totalsSchema = z
     discardedSeconds: z.number().nonnegative(),
     who: z.array(z.tuple([z.string(), int, int, int])).max(STATS_MONTH_MAX_WHO),
     others: int,
+    tokens: z.object({ reported: int, total: int }).strict().optional(),
     toMain: dists,
     stops: z.object({ queue: dists, check: dists, land: dists }).strict(),
     ci: z.object({ days: int, landings: int, all: tally, unlinked: tally, discarded: causes }).strict(),
@@ -159,13 +160,15 @@ export function statsMonth(month: string, rows: readonly StatsDay[]): StatsMonth
   const days = rows.filter(d => d.day.startsWith(month));
   const t = days.filter(d => !notMeasured(d)).reduce((s, d) => addTotals(s, dayTotals(d)), noTotals());
   const ranked = [...t.who].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  const { cmp } = t;
+  const { cmp, tokens, ...rest } = t;
   return statsMonthSchema.parse({
     schema: 1,
     month,
     cover: coverOf(days),
     totals: {
-      ...t,
+      ...rest,
+      // A month without reports stores nothing more, as a day does (review 23927f12 finding 2).
+      ...(tokens?.reported ? { tokens } : {}),
       who: ranked.slice(0, STATS_MONTH_MAX_WHO),
       others: t.others + ranked.slice(STATS_MONTH_MAX_WHO).reduce((s, [, n]) => s + n, 0),
       toMain: one(t.toMain),

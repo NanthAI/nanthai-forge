@@ -13,6 +13,8 @@ Lifecycle verbs: `start`, `save`, `land`. Use `land --save` to save, update from
 
 Before picking what to land next, `lanes {"view":"tree"}` shows stacks, overlaps, each Lane's state and its next step in one read.
 
+Optionally send `tokens` with `land --save`: a whole number, the tokens your own work on this landing used as your harness counts them. Stats shows the measured figure from the landings that report it; it is never billed.
+
 ## Hosted checkouts
 
 - Start with a fresh operation id; edit only its returned Lane path. A new Lane that replaces one of the Issue's `openLanes` (for example a resolution Lane) abandons the old one: `x abandon {laneId,reason:"Replaced by Lane NEW"}`. Save after meaningful steps. Read `behindMain`, presence and `conflictNotice`: saves trial-merge against main and peers, but unsaved peer edits are excluded. `peers {laneId,path?,detail?}` reads saved overlap evidence; missing evidence never proves independence.

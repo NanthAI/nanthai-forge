@@ -12,6 +12,7 @@ const keys = [
   'closes',
   'retry',
   'reason',
+  'tokens',
 ] as const;
 export type ConflictFinishOptions = Pick<
   z.infer<typeof hostedAgentCommandSchemas.finish>,

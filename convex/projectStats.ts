@@ -72,6 +72,8 @@ export function statsLanding(
   pending = 0,
   /** An earlier submission of the same Intent ended without landing before this one (metrics 5.1's retry rule). */
   resubmitted = false,
+  /** The landing row's agent-reported tokens (`agentTokens`), if any. */
+  tokens?: number,
 ): StatsLanding {
   const landedAt = ms(state?.timing?.committedAt) ?? ms(receipt.at)!;
   const runner = state?.counts?.runnerSeconds ?? null,
@@ -101,6 +103,7 @@ export function statsLanding(
       known: discarded !== null,
     }),
     ranInFull: Boolean(state?.ranInFull),
+    ...(tokens === undefined ? {} : { tokens }),
   };
 }
 
@@ -342,7 +345,9 @@ export const closeDay = internalMutation({
       if (state) landedAttemptIds.add(state.attemptId);
       const resubmitted = request ? await resubmittedBefore(ctx, projectId, request) : false;
       if (resubmitted) resubmissions.add(landings.length);
-      landings.push(statsLanding(receipt, state, request?.runnerAccounting?.pending, resubmitted));
+      landings.push(
+        statsLanding(receipt, state, request?.runnerAccounting?.pending, resubmitted, request?.agentTokens),
+      );
       contributions.push(...landingContributions(receipt, state));
     }
     let planningPartial =

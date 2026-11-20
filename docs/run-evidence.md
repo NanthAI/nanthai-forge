@@ -74,6 +74,7 @@ Facts from the project's check runs and accepted landings, each with its unit:
 | CI minutes per landing | Runner minutes of every check run started on the days shown, divided by the landings. Failed, cancelled and discarded runs count; main audits do not. Beside it, the landed path alone: a landing's accepted check plus the checks it discarded. |
 | First try | Share of landings that landed with no resubmission and no discarded check (`src/stats-estimate.ts#firstTry`, the one rule metrics 5.1 uses too). A resubmission is an earlier submission of the same Intent that ended without landing since the Intent's previous landing, or a `supersedes` link; a failure before that landing counts against that landing only. A discarded check whose minutes are not known yet still counts as discarded. |
 | Time to main | Median from "land" to on main, observed by Forge, with its stops: in queue, checking, landing. |
+| Agent tokens | Shown only once an agent reported: the tokens agents reported with `land` (an optional whole number, at most 1e9, kept as one column on the landing row; never billed), per reporting landing, "measured from N of M landings". Summed by the day close from the landing rows it already reads (about 40 B more on a day row with reports, nothing on one without). Never a per-project GitHub comparison: the page links the published benchmark for that. |
 | Discarded checks | Runner minutes of every run that did not land, by cause: main moved (Forge rechecked the same save), failed, cancelled, superseded (replaced or withdrawn). A run still waiting when the day closed is counted, not discarded. A run no landing attempt names (run by hand, or a pre-queue check its landing did not reuse) is counted on Forge's side as "not tied to a landing", never discarded. |
 
 A run whose runner minutes are unknown is counted and adds nothing ("12 runs without minutes", by
@@ -157,7 +158,7 @@ shows only the measured figures.
 
 - `StatsLanding`: one accepted landing from fields its receipt and landing row already hold
   (`submittedAt`, `landedAt`, check start and end, `runnerSeconds`, `discardedRunnerSeconds`,
-  `attempts`, `ranInFull`, `who`). `null` means unknown.
+  `attempts`, `ranInFull`, `who`, and the agent-reported `tokens` when it sent any). `null` means unknown.
 - `classifyRuns({runs, attempts, landedAttemptIds, pendingSubmissionIds, unreadSubmissionIds, partial})`:
   every run of a day by what became of it, its solo full checks (passed, the whole command or no gate,
   one change, minutes known), its rechecks that failed after main moved and its runs without minutes.

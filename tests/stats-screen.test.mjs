@@ -42,7 +42,8 @@ async function fixture(out) {
         const at = start + 8 * 3600000 + i * 4 * min;
         return {id: 'l' + start + '-' + i, who: agents[i % agents.length], submittedAt: at, landedAt: at + 6 * min + (i % 3) * min,
           checkStartedAt: at + 40000, checkEndedAt: at + 40000 + 302000, runnerSeconds: i % 17 === 0 ? null : 250,
-          discardedRunnerSeconds: i % 17 === 0 ? null : (i % 11 === 0 ? 250 : 0), attempts: i % 11 === 0 ? 2 : 1, ranInFull: i % 4 === 0};
+          discardedRunnerSeconds: i % 17 === 0 ? null : (i % 11 === 0 ? 250 : 0), attempts: i % 11 === 0 ? 2 : 1, ranInFull: i % 4 === 0,
+          ...(sample === 'tokens' && i % 3 === 0 ? {tokens: 2000000 + i * 1000} : {})};
       });
     }
     // Samples, as [UTC start of day, landings]: November so far with one October day; two days; one day; a full
@@ -68,6 +69,8 @@ async function fixture(out) {
       // Landings read in part, every check run read (review d6b0f1aa finding 1); and a day whose close did not finish
       // between two closed days (finding 5).
       landingsCut: [[base, 30], [base + 86400000, 30]],
+      // A third of the landings report their agent's tokens (Item a61d3c91).
+      tokens: nov,
       notMeasured: [[dayAt(2026, 9, 31), 30], [base, 30], [base + 86400000, 30]],
     }[sample ?? 'now'];
     // Every check run of a day: each landing's own solo run, a recheck after main moved for every 11th, a failed earlier
@@ -225,6 +228,24 @@ test('stats: own-history comparison headline, stated assumptions, left-out landi
   );
   assert.doesNotMatch(main, /Wasted/, '"Wasted CI minutes" is now "Discarded checks"');
   assert.doesNotMatch(main, /Agent tokens/, 'no token tile until there is measured data');
+  // Once agents report tokens at landing, the measured figure shows from N of M landings, with the benchmark for the
+  // GitHub comparison (never a per-project estimate).
+  const reported = await open(1440, 'tokens');
+  assert.match(
+    await reported.locator('main').textContent(),
+    /Agent tokens[\d,]+ per landing reported by agents, measured from [1-9][\d,]* of [\d,]+ landings\. The benchmark compares tokens with a GitHub flow\./,
+  );
+  assert.equal(
+    await reported.getByRole('link', { name: 'The benchmark' }).getAttribute('href'),
+    '/docs/research/p6-exit-bench-results/',
+  );
+  // A link inside a sentence is underlined, not muted text like its sentence (review 23927f12 finding 1).
+  assert.equal(
+    await reported
+      .getByRole('link', { name: 'The benchmark' })
+      .evaluate(a => getComputedStyle(a).textDecorationLine),
+    'underline',
+  );
   await page.getByRole('button', { name: 'How this is worked out' }).click();
   const how = await page.locator('#stats-how').textContent();
   assert.match(how, /Nothing here comes from a benchmark/);
@@ -437,6 +458,7 @@ test('stats: own-history comparison headline, stated assumptions, left-out landi
     ['two', ''],
     ['none', ''],
     ['unrecorded', ''],
+    ['tokens', ''],
   ])
     for (const width of [1440, 390])
       for (const theme of ['dark', 'light']) {

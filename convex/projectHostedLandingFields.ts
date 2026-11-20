@@ -85,6 +85,8 @@ export const hostedLandingTables = {
     agentRun: v.optional(v.string()),
     /** Its client: harness and declared model (81d12a32); copied to the landing row. */
     agentClient: v.optional(v.string()),
+    /** Tokens the agent reported for this landing (feature landing-tokens, Item a61d3c91); copied to the landing row. */
+    agentTokens: v.optional(v.number()),
     /** Guard-set evidence from the land gate (13ea93bf); copied to the landing row. */
     preflightRan: v.optional(v.string()),
     preflightRuns: v.optional(v.number()),
@@ -170,6 +172,9 @@ export const hostedLandingTables = {
     agentRun: v.optional(v.string()),
     /** Its client: harness and declared model (81d12a32); the receipt records it. */
     agentClient: v.optional(v.string()),
+    /** Tokens the agent reported for this landing (Item a61d3c91): display-only, never billing; the Stats day close sums
+     * them. */
+    agentTokens: v.optional(v.number()),
     /** Test files the landing's preflight ran (`ranKey`s) and its local runs (land gate, 13ea93bf);
      * server-only, read once if its check fails, to learn the preflight guard set. */
     preflightRan: v.optional(v.string()),

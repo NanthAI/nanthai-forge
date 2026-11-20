@@ -60,6 +60,7 @@ import {
   hostedLandingCancelSchema,
   hostedLandingStateSchema,
   landingObservation,
+  landingTokensColumn,
 } from '../src/hosted-landing';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
@@ -100,10 +101,13 @@ export const enqueue = receiptMutation({
     agentClient: v.optional(v.string()),
     /** The CLI's land gate result (feature land-gates, Issue 029138ef); not part of the request. */
     gates: v.optional(v.string()),
+    /** The agent's own reported tokens (feature landing-tokens, Item a61d3c91); not part of the request. */
+    tokens: v.optional(v.number()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
+      const tokens = landingTokensColumn(input.tokens);
       const request = hostedLandingRequestSchema.parse(JSON.parse(input.request));
       const actor = await acceptanceActor(ctx, request.agent);
       return canonicalPayload(
@@ -113,6 +117,7 @@ export const enqueue = receiptMutation({
             projectId: input.projectId,
             ...landingAgentRun(input.agent),
             ...landingAgentClient(input.agentClient),
+            ...tokens,
             gates: { value: input.gates },
           },
           request,
@@ -303,6 +308,8 @@ export async function enqueueHostedLanding(
     projectId: import('./_generated/dataModel').Id<'hostedProjects'>;
     agentRun?: string | undefined;
     agentClient?: string | undefined;
+    /** The agent's reported tokens (Item a61d3c91), range-checked by the public mutation. */
+    agentTokens?: number | undefined;
     /** Guard-set evidence a desired landing kept from its gate (13ea93bf). */
     preflightRan?: string | undefined;
     preflightRuns?: number | undefined;
@@ -482,6 +489,7 @@ export async function enqueueHostedLanding(
     candidateId: request.candidateId,
     ...(input.agentRun ? { agentRun: input.agentRun } : {}),
     ...(input.agentClient ? { agentClient: input.agentClient } : {}),
+    ...(input.agentTokens === undefined ? {} : { agentTokens: input.agentTokens }),
     ...(input.gates
       ? landGateGuardEvidence(input.gates.value)
       : {

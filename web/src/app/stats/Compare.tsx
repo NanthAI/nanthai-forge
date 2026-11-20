@@ -299,6 +299,22 @@ export function Measured({ w }: { w: StatsWindow }) {
         <dd>
           {duration(m.toMainSeconds)} <span className="t3">median, observed by Forge</span>
         </dd>
+        {m.tokens ? (
+          <>
+            <dt>Agent tokens</dt>
+            <dd>
+              {int(Math.round(m.tokens.perLanding))} per landing{' '}
+              <span className="t3">
+                reported by agents, measured from {int(m.tokens.reported)} of{' '}
+                {plural(m.tokens.landings, 'landing')}.{' '}
+                <a className="lk" href="/docs/research/p6-exit-bench-results/">
+                  The benchmark
+                </a>{' '}
+                compares tokens with a GitHub flow.
+              </span>
+            </dd>
+          </>
+        ) : null}
         <dt>Discarded checks</dt>
         {d === null ? (
           <dd>

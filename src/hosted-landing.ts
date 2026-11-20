@@ -24,6 +24,21 @@ import { landingAcceptedBySchema } from './landing-accepted-by.js';
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const finishRetryReasonSchema = z.enum(['flake', 'main-moved', 'infra', 'other']);
+/** Agent-reported tokens at landing (Item a61d3c91): the tokens the agent's own work on this landing used, as its
+ * harness counts them. Optional, display-only (Stats), never billing; the server refuses anything else. */
+export const LANDING_TOKENS_MAX = 1_000_000_000;
+export const landingTokensSchema = z.number().int().min(0).max(LANDING_TOKENS_MAX);
+/** The landing row's column for the `tokens` a submit mutation took (feature landing-tokens): refused unless a whole
+ * number in range, before anything is written. */
+export function landingTokensColumn(tokens: number | undefined) {
+  if (tokens === undefined) return {};
+  invariant(
+    landingTokensSchema.safeParse(tokens).success,
+    'BAD_ARGUMENT',
+    `tokens: send a whole number from 0 to ${LANDING_TOKENS_MAX}, the tokens your own work on this landing used.`,
+  );
+  return { agentTokens: tokens };
+}
 const object = z.object({ sha256: hash, size: checkNumber }).strict();
 export const landingCheckSelectionSchema = z.union([
   z.object({ kind: z.literal('run'), runId: z.uuid() }).strict(),

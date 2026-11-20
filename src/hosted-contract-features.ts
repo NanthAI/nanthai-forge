@@ -130,6 +130,9 @@ export const hostedContractFeatures = [
   /** Final save submission takes clientMs; its receipt returns durationMs. Land gates carry
    * saveMs/preflightMs into landing timing, using existing calls only. */
   'save-preflight-timing',
+  /** projectHostedLanding:enqueue and projectHostedLandingDesired:submit take `tokens`, the agent's own reported
+   * token use (Item a61d3c91), kept on the landing row for Stats. Without it the CLI sends none. */
+  'landing-tokens',
   /** Unsaved-work snapshots (Issue 7ac4e32f): projectLaneSnapshots:* exist and capabilities carry
    * `laneSnapshots` (policy autoSnapshot). Without it the CLI takes no snapshot and refuses
    * `x snapshots`. */

@@ -1260,6 +1260,7 @@ export class HostedAgentTransport {
               agentClient()
             ? { landingClient: agentClient()! }
             : {}),
+        ...(this.serverFeatures?.includes('landing-tokens') ? { landingTokens: true as const } : {}),
         query: this.query.bind(this),
         mutation: this.mutation.bind(this),
         action: this.action.bind(this),
@@ -2336,6 +2337,8 @@ export type HostedAgentSession = {
   /** The agent client (harness and declared model) for landing receipts, when the server records
    * it (feature landing-agent-client, 81d12a32). */
   landingClient?: string;
+  /** The server records agent-reported tokens at landing (feature landing-tokens, Item a61d3c91). */
+  landingTokens?: true;
   waitSource: (
     operationId: string,
     initial: unknown,

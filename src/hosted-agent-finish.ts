@@ -58,6 +58,12 @@ const landGatesArg = (session: HostedAgentSession) => {
   const gates = session.journal.get<string | null>('finish-gates');
   return gates ? { gates } : {};
 };
+/** The agent's reported tokens (feature landing-tokens, Item a61d3c91), outside the request like `gates`; a replay
+ * sends the same. */
+const tokensArg = (session: HostedAgentSession) => {
+  const tokens = session.landingTokens ? session.journal.get<number>('finish-tokens') : undefined;
+  return typeof tokens === 'number' ? { tokens } : {};
+};
 async function retainLandGates(session: HostedAgentSession, composeOperationId: string) {
   if (session.landGates)
     await session.journal.retain('finish-gates', async () => session.landGates!(composeOperationId) ?? null);
@@ -69,6 +75,7 @@ async function enqueueLanding(session: HostedAgentSession, request: unknown, pin
       ...(session.landingAgent ? { agent: session.landingAgent } : {}),
       ...(session.landingClient ? { agentClient: session.landingClient } : {}),
       ...landGatesArg(session),
+      ...tokensArg(session),
     });
   } catch (error) {
     if (pinnedCandidate || !mainPinRefusal(error, 'finish')) throw error;
@@ -95,6 +102,7 @@ async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolea
       ...(session.landingAgent ? { agent: session.landingAgent } : {}),
       ...(session.landingClient ? { agentClient: session.landingClient } : {}),
       ...landGatesArg(session),
+      ...tokensArg(session),
     });
     // Only a still-preparing submission needs source recovery. Terminal replay
     // remains discovery plus the original admission, without probing old jobs.
@@ -331,6 +339,8 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   const command = hostedAgentCommandSchemas.finish.parse(context?.command ?? input);
   // A Candidate the caller named is its pin; one this finish composed is rebuilt when main moves.
   const pinnedCandidate = command.candidateId !== undefined;
+  if (command.tokens !== undefined && session.landingTokens)
+    await session.journal.retain('finish-tokens', async () => command.tokens!);
   const replayed = await replayFinish(session, pinnedCandidate);
   if (replayed) return replayed;
   // A new landing of the origin Lane after an edited, unsaved in-place resolution: refuse before
@@ -539,6 +549,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         ...(session.landingAgent ? { agent: session.landingAgent } : {}),
         ...(session.landingClient ? { agentClient: session.landingClient } : {}),
         ...landGatesArg(session),
+        ...tokensArg(session),
       });
       markLandStep('submitted');
       return {

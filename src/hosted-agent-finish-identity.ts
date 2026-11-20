@@ -194,7 +194,7 @@ export async function selectHostedFinish(
   const directory = hostedAgentDirectory(root);
   const source = Object.fromEntries(
     Object.entries(command).filter(
-      ([key]) => !['accept', 'message', 'retry', 'reason', 'priority'].includes(key),
+      ([key]) => !['accept', 'message', 'retry', 'reason', 'priority', 'tokens'].includes(key),
     ),
   );
   const index = join(directory, `finish-${digest(canonicalPayload({ root, address, actor, source }))}.json`);

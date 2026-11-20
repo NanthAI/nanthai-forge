@@ -25,7 +25,7 @@ import { failedLanding, landingRow } from './projectHostedLandingStore';
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
 import { enforceLandGates } from './projectHostedLandGates';
 import { hostedLandingDesiredSchema } from '../src/hosted-landing-desired';
-import { hostedLandingStateSchema, landingObservation } from '../src/hosted-landing';
+import { hostedLandingStateSchema, landingObservation, landingTokensColumn } from '../src/hosted-landing';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { sanitizeOutside, declarationIdentity } from '../src/run-evidence';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -46,10 +46,13 @@ export const submit = receiptMutation({
     agentClient: v.optional(v.string()),
     /** The CLI's land gate result (feature land-gates, Issue 029138ef); not part of the request. */
     gates: v.optional(v.string()),
+    /** The agent's own reported tokens (feature landing-tokens, Item a61d3c91); not part of the request. */
+    tokens: v.optional(v.number()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
+      const tokens = landingTokensColumn(input.tokens);
       const command = hostedLandingDesiredSchema.parse(JSON.parse(input.request));
       const actor = await acceptanceActor(ctx, true);
       return await submitDesiredLanding(
@@ -60,6 +63,7 @@ export const submit = receiptMutation({
         input.agent,
         input.agentClient,
         { value: input.gates },
+        tokens.agentTokens,
       );
     } catch (error) {
       return report(error);
@@ -77,6 +81,8 @@ export async function submitDesiredLanding(
   agentClient?: string,
   /** Public submit only: judge the project land gates (two-way GitHub sync is not an agent landing). */
   gates?: { value: string | undefined },
+  /** Public submit only: the agent's reported tokens, already range-checked (landingTokensColumn). */
+  agentTokens?: number,
 ): Promise<string> {
   if (command.outside !== undefined) command = { ...command, outside: sanitizeOutside(command.outside) };
   const input = { projectId, agent, agentClient };
@@ -285,6 +291,7 @@ export async function submitDesiredLanding(
     // The enqueue below receives this row as its input and copies the run to the landing row.
     ...landingAgentRun(input.agent),
     ...landingAgentClient(input.agentClient),
+    ...(agentTokens === undefined ? {} : { agentTokens }),
     ...landGateGuardEvidence(gates?.value),
     wake: null,
   });
