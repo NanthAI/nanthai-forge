@@ -440,3 +440,88 @@ test('a save that parks waits for its own settlement, then parks: the save lands
   assert.equal(f.overlap().head, saveHead, 'the Lane is on the saved head');
   assert.equal(f.overlap().park?.reason, 'Waits for the lead.', 'and it is parked');
 });
+
+// Review e09e956c (1): a save still settling when its wait ends sends no park (the park would fail it as stale). The
+// reply says so; once the save has landed, the same save {park} parks, and the checkout follows the park's version.
+test('a save that parks but is still settling when its wait ends sends no park; the same command after it lands parks', async t => {
+  const f = await setup(t),
+    address = { url: 'https://fixture.invalid', projectId: f.s.projectId },
+    transport = new HostedAgentTransport(f.root, address, f.exchange),
+    originalWait = sourceWaitHooks.wait,
+    oldExit = process.exitCode;
+  t.after(() => {
+    process.exitCode = oldExit;
+    sourceWaitHooks.wait = originalWait;
+  });
+  t.mock.method(process.stderr, 'write', () => true);
+  // The server takes the save as background work and the wait's budget ends before it settles.
+  const action = f.exchange.client.action;
+  f.exchange.client.action = async (ref, args) =>
+    action(
+      ref,
+      getFunctionName(ref) === 'projectSourceRun:submit' ? { ...args, settle: 'background' } : args,
+    );
+  transport.waitUntil = Date.now();
+  const command = { message: 'park after this save', park: { reason: 'Waits for the lead.' } };
+  const pending = await hostedAgentCli(f.root, 'save', command, address, transport);
+  assert.match(pending.result.parkNotSent, /not sent/);
+  assert.equal(pending.result.park, undefined);
+  assert.equal(count(f.c.calls, 'projectHostedLanePark:set'), 0, 'no park while the save settles');
+  assert.equal(process.exitCode, 3, 'the save is still in progress');
+  process.exitCode = oldExit;
+  const dispatch = f.scheduled.find(item => item.name === 'projectConvexSource:dispatch');
+  await f.settle(dispatch.args.jobId);
+  f.exchange.client.action = action;
+  transport.waitUntil = undefined;
+  // From here a wait sees the settled save, as a real one would.
+  sourceWaitHooks.wait = async (_address, operationId) =>
+    JSON.parse(
+      await f.c.client.query(makeFunctionReference('projectHostedSaves:progress'), {
+        projectId: f.s.projectId,
+        operationId,
+      }),
+    ).terminal;
+  const again = await hostedAgentCli(f.root, 'save', command, address, transport);
+  assert.equal(again.result.park.reason, 'Waits for the lead.');
+  assert.equal(f.overlap().park?.reason, 'Waits for the lead.');
+  assert.notEqual(f.overlap().head, f.entry.head, 'the saved edits are on the Lane');
+  const marker = readHostedLaneCheckout(f.root).selection;
+  assert.equal(marker.head, f.overlap().head);
+  assert.equal(marker.version, f.overlap().recordVersion, 'the checkout follows the version the park wrote');
+});
+
+// Review c343b42c follow-up: a save whose source worker passed its lease without progress comes back stalled
+// (retryable, no outcome yet). It sends no park either: the replay that reconciles the save must not meet a Lane
+// version the park moved.
+test('a save that parks but comes back stalled (retryable) sends no park', async t => {
+  const f = await setup(t),
+    address = { url: 'https://fixture.invalid', projectId: f.s.projectId },
+    transport = new HostedAgentTransport(f.root, address, f.exchange),
+    oldExit = process.exitCode;
+  t.after(() => {
+    process.exitCode = oldExit;
+  });
+  t.mock.method(process.stderr, 'write', () => true);
+  // The server takes the save as background work, and its worker's lease has already passed.
+  const action = f.exchange.client.action;
+  f.exchange.client.action = async (ref, args) => {
+    if (getFunctionName(ref) !== 'projectSourceRun:submit') return action(ref, args);
+    const reply = JSON.parse(await action(ref, { ...args, settle: 'background' }));
+    return JSON.stringify(
+      reply.status === 'submitted'
+        ? { ...reply, source: { ...reply.source, jobId: reply.jobId, status: 'running', workerUntil: 1 } }
+        : reply,
+    );
+  };
+  const saved = await hostedAgentCli(
+    f.root,
+    'save',
+    { message: 'park after this save', park: { reason: 'Waits for the lead.' } },
+    address,
+    transport,
+  );
+  assert.equal(saved.result.status, 'retryable', 'the save came back stalled');
+  assert.match(saved.result.parkNotSent ?? '', /not sent/);
+  assert.equal(count(f.c.calls, 'projectHostedLanePark:set'), 0, 'no park on a stalled save');
+  assert.equal(f.overlap().park, undefined);
+});

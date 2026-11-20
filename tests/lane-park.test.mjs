@@ -12,6 +12,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolutionFixture } from './hosted-agent-resolution-fixture.mjs';
+import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 const needs = await import(moduleUrl('../convex/projectNeedsMe.ts'));
 const park = await import(moduleUrl('../convex/projectHostedLanePark.ts'));
 const lanes = await import(moduleUrl('../convex/projectHostedLiveLanes.ts'));
@@ -271,6 +272,13 @@ test('save {park} parks through the CLI, a later save keeps it, and a repeat on 
   const parked = await s.transport().dispatch('save', { park: { reason: 'Waits for the lead.' } });
   assert.equal(parked.result.park.reason, 'Waits for the lead.');
   assert.equal((await f.readLane(laneId)).park.reason, 'Waits for the lead.');
+  // Review e09e956c (2): the park moved only the Lane's version, and the checkout follows it, so the next save is
+  // not refused as stale first (3 extra calls).
+  assert.equal(
+    readHostedLaneCheckout(s.root).selection.version,
+    (await f.readLane(laneId)).version,
+    'the checkout records the version the park wrote',
+  );
   writeFileSync(join(s.root, 'second.txt'), 'second edit');
   await s.transport().dispatch('save', {});
   assert.equal((await f.readLane(laneId)).park?.reason, 'Waits for the lead.', 'a later save keeps the park');

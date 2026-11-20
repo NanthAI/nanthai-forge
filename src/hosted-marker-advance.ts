@@ -6,6 +6,8 @@ import { durableReplace } from './state/durability.js';
 import { workLocked } from './work-lock.js';
 import { settlePendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 import { hostedLaneCheckoutMarkerSchema, readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
+import { pendingSavePath } from './hosted-save-pending.js';
+import { checkoutPathExists } from './hosted-checkout-files.js';
 
 /** The Lane fields a metadata advance may copy from the server. */
 export type LaneMetadata = {
@@ -45,6 +47,34 @@ export function advanceMarkerMetadata(root: string, laneId: string, lane: LaneMe
         lifecycleVersion: lane.lifecycleVersion,
         state: lane.state,
       },
+    });
+    durableReplace(join(root, '.forge/hosted-lane.json'), JSON.stringify(next));
+    return true;
+  });
+}
+
+/** A Lane record write by this checkout that moved only the Lane's version (a park, Item e1633718): the marker
+ * follows when it sits on exactly the version that write read (`from`), so the next save is not refused as stale.
+ * A marker on any other version (a newer save, a sync) or another Lane is left alone. Local reads and one durable
+ * write; no call. */
+export function advanceMarkerVersion(root: string, laneId: string, from: number, to: number): boolean {
+  root = realpathSync(root);
+  return workLocked(join(clientCacheRoot(root), 'lock'), () => {
+    settlePendingCheckoutDelta(root);
+    const marker = readHostedLaneCheckout(root);
+    // A save still pending against this marker is keyed by it: moving the version would hide that save from its own
+    // reconcile, so the marker stays and the next save rebases as before.
+    if (
+      !marker ||
+      marker.selection.laneId !== laneId ||
+      marker.selection.version !== from ||
+      to <= from ||
+      checkoutPathExists(pendingSavePath(root, marker))
+    )
+      return false;
+    const next = hostedLaneCheckoutMarkerSchema.parse({
+      ...marker,
+      selection: { ...marker.selection, version: to },
     });
     durableReplace(join(root, '.forge/hosted-lane.json'), JSON.stringify(next));
     return true;

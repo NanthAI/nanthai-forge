@@ -71,6 +71,7 @@ import { recordLane, readLaneEntry } from './lane-registry.js';
 import { saveExpectedSchema } from './hosted-save.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 import { parseHostedResponse } from './hosted-response.js';
+import { advanceMarkerVersion } from './hosted-marker-advance.js';
 const pinResultSchema = z
   .object({
     laneId: z.uuid(),
@@ -663,6 +664,8 @@ export async function executeHostedAgent(
           park: command.park,
         }),
       );
+      // The park moved only the Lane's version: this checkout follows it, so the next save is not refused as stale.
+      if (parked.changed) advanceMarkerVersion(session.root, laneId, parked.version - 1, parked.version);
       return { park: parked.park };
     };
     const timing = syncTiming();
@@ -723,7 +726,15 @@ export async function executeHostedAgent(
     const outcome = await awaitSaveOutcome(session, operationId, saved, timing),
       split = timing.value();
     if (!outcome || typeof outcome !== 'object') return outcome;
-    const parked = await parkLane();
+    // Park only on a save known to have completed (every completed reply carries its outcome). A save still settling
+    // when the wait ended, stalled (retryable) or failed gets no park: the park's Lane record write would fail that
+    // save, or its replay, as stale.
+    const parked =
+      command.park === undefined
+        ? {}
+        : agentSourceOutcome(outcome)?.status === 'completed'
+          ? await parkLane()
+          : { parkNotSent: PARK_NOT_SENT };
     // The invocation that saw the outcome keeps its split in the operation journal (marked when it was
     // a replay of an unfinished save); a replay answered from the settled receipt returns that split.
     const kept = await keptSaveTiming(session.journal, {
@@ -1059,6 +1070,8 @@ export async function executeHostedAgent(
   return executeHostedFinish(session, input);
 }
 
+const PARK_NOT_SENT =
+  'The park was not sent because this save has not completed. Once it reports completed (after its wait, or after you run it again following a failure), run the same save {park} again.';
 const savePending = (value: unknown) => {
   const reply = value as { status?: unknown; jobId?: unknown } | null;
   return reply?.status === 'submitted' && typeof reply.jobId === 'string';
