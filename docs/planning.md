@@ -107,7 +107,10 @@ Intent and every successor Intent a later start continued it on: the head become
 keeps status and Lane pin, and every older version is purged; the chain ends at a successor id that names an Issue of
 its own), the outcome copy on each of their Lanes' overlap rows, lifecycle plan reasons and their copies in
 lifecycle events, and the store fingerprints.
-The purge checkpoints its archived command selection by page and reads one verified segment at a time. It replaces only segments
+The purge checkpoints its verified event segment position by page. Publication of new segments leaves that
+position intact. Before the tombstone transaction, the purge catches up to the latest event segment. Rewriting
+earlier event bytes invalidates that selection. Selection and rewrites read small batches of verified segments,
+and long scans schedule a continuation from their saved position. The purge replaces only segments
 that contain affected rows, keeps their logical positions, and deletes their superseded R2 objects and fragments
 before reporting completion. The completion revision invalidates Work exports and recovery selections that carried
 older bytes. A stopped purge resumes selection or retirement using the original operation id. Superseded Intent

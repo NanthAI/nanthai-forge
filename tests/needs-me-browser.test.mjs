@@ -348,6 +348,7 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
         const copied = (await page.evaluate(() => window.writes)).at(-1);
         assert.equal(copied[0], 'copy');
         assert.match(copied[1], /nforge agent \. lanes '\{"view":"loose-ends"\}'/);
+        assert.match(copied[1], /groups\.stopped\.continueCursor.*"cursor".*all stopped rows/);
         // A reader who folds it is remembered: the next visit starts folded and reads nothing.
         await fold.click();
         await page.reload();

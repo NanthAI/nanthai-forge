@@ -50,13 +50,18 @@ export async function getLandingCapsule(
   return body === null ? null : decodeLandingCapsule(body, pointer, projectId, submissionId);
 }
 /** Shared private transport; a caller must verify its envelope after byte verification. */
-export async function getArchiveObject(objectKey: string, pointer: LandingCapsulePointer, optional = false) {
+export async function getArchiveObject(
+  objectKey: string,
+  pointer: LandingCapsulePointer,
+  optional = false,
+  signal?: AbortSignal,
+) {
   invariant(/^[a-f0-9]{64}$/.test(pointer.sha256), 'EVIDENCE_CHANGED', 'Archive content pin is invalid.');
   const url = await presignGet(r2Config(), objectKey);
   const body = await exchangeRequest(
     'Archive read',
     url,
-    { headers: { 'accept-encoding': 'identity' } },
+    { headers: { 'accept-encoding': 'identity' }, signal },
     (response, progressed) =>
       optional && response.status === 404
         ? Promise.resolve(null)
@@ -67,8 +72,9 @@ export async function getArchiveObject(objectKey: string, pointer: LandingCapsul
 export async function putArchiveObject(
   objectKey: string,
   encoded: { body: Uint8Array; pointer: LandingCapsulePointer },
+  signal?: AbortSignal,
 ) {
-  let stored = await getArchiveObject(objectKey, encoded.pointer, true);
+  let stored = await getArchiveObject(objectKey, encoded.pointer, true, signal);
   if (!stored) {
     const target = await presignPut(r2Config(), objectKey, {
       digest: encoded.pointer.sha256,
@@ -77,7 +83,7 @@ export async function putArchiveObject(
     await exchangeRequest(
       'Archive write',
       target.url,
-      { method: 'PUT', headers: target.headers, body: new Uint8Array(encoded.body) },
+      { method: 'PUT', headers: target.headers, body: new Uint8Array(encoded.body), signal },
       async response => {
         invariant(
           response.ok || response.status === 412,
@@ -87,7 +93,7 @@ export async function putArchiveObject(
       },
       { retries: 0 },
     );
-    stored = await getArchiveObject(objectKey, encoded.pointer);
+    stored = await getArchiveObject(objectKey, encoded.pointer, false, signal);
   }
   invariant(stored !== null, 'SOURCE_UNAVAILABLE', 'Verified archive bytes are unavailable.');
   return stored;

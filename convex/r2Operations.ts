@@ -13,11 +13,12 @@ const endpoint = (config: R2Config, key = '') => ({
   expires: 60,
 });
 /** Idempotent, signed delete; never reports the URL or provider body. */
-export async function deleteR2Object(config: R2Config, key: string) {
+export async function deleteR2Object(config: R2Config, key: string, signal?: AbortSignal) {
   let ok = false;
   try {
     const response = await convexFetch(await presign({ method: 'DELETE', ...endpoint(config, key) }), {
       method: 'DELETE',
+      signal,
     });
     ok = response.ok || response.status === 404;
     await response.body?.cancel();

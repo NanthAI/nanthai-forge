@@ -48,13 +48,13 @@ function executor(s, crash = Infinity, beforeCall) {
   const calls = { query: 0, mutation: 0, redact: 0, action: 0 };
   const route = kind => {
     const original = s.ctx[kind];
-    return (ref, args) => {
+    return async (ref, args) => {
       const [module, name] = getFunctionName(ref).split(':');
       const target = modules[module]?.[name];
       if (!target) return original(ref, args);
       calls[kind.slice(3).toLowerCase()]++;
       if (name === 'redact' && ++calls.redact > crash) throw new Error('executor stopped');
-      beforeCall?.(module, name, args);
+      await beforeCall?.(module, name, args);
       return target._handler(kind === 'runAction' ? ctx : s.ctx, args);
     };
   };
@@ -748,7 +748,8 @@ function storage(t) {
   const objects = new Map(),
     requests = [];
   let failDeletion = false,
-    losePut = false;
+    losePut = false,
+    onRead;
   const keys = ['R2_ACCOUNT_ID', 'R2_BUCKET', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'];
   const prior = new Map(keys.map(key => [key, process.env[key]]));
   for (const key of keys) process.env[key] = 'synthetic';
@@ -772,6 +773,7 @@ function storage(t) {
       }
       return new Response(null, { status: 200 });
     }
+    if (method === 'GET') onRead?.();
     if (method === 'DELETE') {
       if (failDeletion) return new Response(null, { status: 403 });
       objects.delete(key);
@@ -787,6 +789,9 @@ function storage(t) {
     },
     loseNextPut: () => {
       losePut = true;
+    },
+    onRead: hook => {
+      onRead = hook;
     },
   };
 }
@@ -932,6 +937,7 @@ test('purge rewrites only the affected archive objects, preserves original event
       sampledRss: process.memoryUsage().rss,
     }),
   );
+  assert.equal(s.tables.hostedProjects.get(s.projectId).journalEventRewriteRevision, 1);
   const retired = new Set([...old.keys, eventKey]);
   assert.deepEqual(new Set(r2.requests.filter(row => row.method === 'DELETE').map(row => row.key)), retired);
   assert.equal(r2.requests.filter(row => row.method === 'PUT').length, 2);
@@ -1211,6 +1217,10 @@ async function archiveOneNote(s, r2, itemId) {
     { action: 'note', kind: 'comment', intentId: itemId, text: `Archived ${SECRET}` },
     journalRevision(s),
   );
+  return relocateNote(s, r2);
+}
+
+async function relocateNote(s, r2) {
   const row = structuredClone(
     [...s.tables.projectHostedRecordBodies.values()].find(value =>
       value.command?.includes(`Archived ${SECRET}`),
@@ -1259,11 +1269,15 @@ test('journal export refuses old author text collected before purge completion',
   assert.equal(current.includes(SECRET), false);
 });
 
-test('an interrupted archive selection resumes from its saved page and consumes the cursor with the tombstone', async t => {
-  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
-  const r2 = storage(t);
-  for (let i = 0; i < 16; i++)
-    await putSegment(s, r2, 'events', 20_000 + i, {
+async function fillArchivePage(s, r2, keep, count) {
+  const keys = [];
+  for (let i = 0; i < count; i++) {
+    await s.send(
+      { action: 'note', intentId: keep.itemId, text: 'Unrelated', kind: 'comment' },
+      journalRevision(s),
+    );
+    const revision = journalRevision(s);
+    const [key] = await putSegment(s, r2, 'events', revision, {
       projectHostedRecordBodies: [
         canonicalPayload({
           _id: 'unrelated-event-' + i,
@@ -1272,12 +1286,123 @@ test('an interrupted archive selection resumes from its saved page and consumes 
         }),
       ],
     });
+    keys.push(key);
+  }
+  s.tables.hostedProjects.get(s.projectId).journalRevision = keys.length;
+  return keys;
+}
+
+test('a publish between selection pages keeps verified progress and adds the matching archived row', async t => {
+  const { s, itemId, keep } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const old = await fillArchivePage(s, r2, keep, 17);
+  const operationId = randomUUID();
+  let eventKey;
+  const worker = executor(s, Infinity, async (module, name) => {
+    if (module === 'projectPlanningPurgeArchiveSelection' && name === 'checkpoint' && !eventKey) {
+      eventKey = await archiveOneNote(s, r2, itemId);
+      s.tables.hostedProjects.get(s.projectId).journalRevision++;
+    }
+    if (module === 'projectPlanningPurge' && name === 'begin') {
+      const keys = r2.requests.map(row => row.key);
+      assert.equal(keys.length, old.length + 1);
+      assert.deepEqual(new Set(keys), new Set([...old, eventKey]));
+    }
+  });
+  const done = await worker.run(itemId, operationId);
+  assert.ok(done.purgedAt);
+  assert.equal(done.rows, 8);
+  assert.equal(r2.objects.has(eventKey), false, 'the newly appended matching segment was rewritten');
+  assert.deepEqual(secretRows(s), []);
+});
+
+test('the tombstone retries an appended archive tail and lists a relocated command once', async t => {
+  const { s, itemId, keep } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const [first] = await fillArchivePage(s, r2, keep, 1);
+  const operationId = randomUUID();
+  let appended;
+  await workStore.setMode._handler(s.ctx, {
+    projectId: s.projectId,
+    mode: 'records',
+    writers: ['planning', 'note'],
+  });
+  await s.send(
+    { action: 'note', kind: 'comment', intentId: itemId, text: `Archived ${SECRET}` },
+    journalRevision(s),
+  );
+  const worker = executor(s, Infinity, async (module, name) => {
+    if (module === 'projectPlanningPurge' && name === 'begin') {
+      if (!appended) {
+        appended = await relocateNote(s, r2);
+        s.tables.hostedProjects.get(s.projectId).journalRevision++;
+      } else
+        assert.deepEqual(r2.requests, [
+          { key: first, method: 'GET' },
+          { key: appended, method: 'GET' },
+        ]);
+    }
+  });
+  const done = await worker.run(itemId, operationId);
+  assert.ok(done.purgedAt);
+  assert.equal(done.rows, 8);
+  assert.equal(r2.objects.has(appended), false);
+});
+
+test('a rewrite of an earlier verified segment refuses the in-flight selection and restarts it on retry', async t => {
+  const { s, itemId, keep } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const keys = await fillArchivePage(s, r2, keep, 17);
+  const operationId = randomUUID();
+  let replacement;
+  const worker = executor(s, Infinity, async (module, name) => {
+    if (
+      module === 'projectPlanningPurgeArchiveSelection' &&
+      name === 'page' &&
+      r2.requests.length === 16 &&
+      !replacement
+    ) {
+      const row = [...s.tables.projectJournalSegments.values()].find(row => row.key === keys[0]);
+      const index = JSON.parse(row.value);
+      const segment = JSON.parse(gunzipSync(r2.objects.get(keys[0])));
+      segment.tables.projectHostedRecordBodies[0] = canonicalPayload({
+        ...JSON.parse(segment.tables.projectHostedRecordBodies[0]),
+        value: 'Rewritten',
+      });
+      const { pointer, body } = encodeArchiveBytes(
+        journalSegmentText(segment),
+        index.through,
+        journalTablePins(segment.tables),
+      );
+      replacement = pointer.sha256;
+      r2.objects.set(replacement, body);
+      r2.objects.delete(keys[0]);
+      await s.ctx.db.patch(row._id, { value: canonicalPayload({ ...index, pointer }) });
+      const project = s.tables.hostedProjects.get(s.projectId);
+      project.journalRevision++;
+      project.journalEventRewriteRevision = 1;
+    }
+  });
+  await assert.rejects(worker.run(itemId, operationId), code('WORK_STALE'));
+  assert.equal(s.tables.hostedProjects.get(s.projectId).itemPurges, undefined);
+  r2.requests.length = 0;
+  const retried = await executor(s, Infinity, (module, name) => {
+    if (module === 'projectPlanningPurge' && name === 'begin')
+      assert.deepEqual(new Set(r2.requests.map(row => row.key)), new Set([replacement, ...keys.slice(1)]));
+  }).run(itemId, operationId);
+  assert.ok(retried.purgedAt);
+});
+
+test('an interrupted archive selection resumes from its saved page and consumes the cursor with the tombstone', async t => {
+  const { s, itemId, keep } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  await fillArchivePage(s, r2, keep, 16);
   const eventKey = await archiveOneNote(s, r2, itemId);
-  s.tables.hostedProjects.get(s.projectId).journalRevision = 17;
+  s.tables.hostedProjects.get(s.projectId).journalRevision++;
   const operationId = randomUUID();
   let pages = 0;
   const stopped = executor(s, Infinity, (module, name) => {
-    if (module === 'projectPlanningPurgeSegments' && name === 'page' && ++pages === 2)
+    if (module === 'projectPlanningPurgeArchiveSelection' && name === 'page' && ++pages === 2)
       throw new Error('selection stopped after one page');
   });
   await assert.rejects(stopped.run(itemId, operationId), /selection stopped/);
@@ -1296,4 +1421,77 @@ test('an interrupted archive selection resumes from its saved page and consumes 
       row => row.operationId !== 'purge-selection:' + operationId,
     ),
   );
+});
+
+test('each purge phase resumes from verified progress when the action slice ends', async t => {
+  const { s, itemId, keep } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const keys = await fillArchivePage(s, r2, keep, 17);
+  const operationId = randomUUID();
+  let now = Date.now();
+  const stop = () => {
+    now += 180_000;
+  };
+  t.mock.method(Date, 'now', () => now);
+  const scheduled = () => s.scheduled.filter(row => getFunctionName(row.fn) === 'projectPlanningPurge:run');
+  const runScheduled = (index, worker) =>
+    modules.projectPlanningPurge.run._handler(worker.ctx, scheduled()[index].args);
+
+  // Stop after the first batch, before the provider page finishes.
+  r2.onRead(() => {
+    if (r2.requests.length === 8) stop();
+  });
+  assert.equal(await executor(s).run(itemId, operationId), null);
+  assert.equal(r2.requests.length, 8);
+  assert.equal(scheduled().length, 1);
+
+  r2.onRead(undefined);
+  const hot = executor(s, Infinity, (module, name) => {
+    if (module === 'projectPlanningPurgeSelect' && name === 'selectPage') stop();
+  });
+  assert.equal(await runScheduled(0, hot), null);
+  assert.equal(scheduled().length, 2);
+  assert.equal(r2.requests.length, keys.length);
+  assert.deepEqual(new Set(r2.requests.map(row => row.key)), new Set(keys));
+
+  const firstRedaction = executor(s, Infinity, (module, name) => {
+    if (module === 'projectPlanningPurge' && name === 'redact') stop();
+  });
+  const started = await runScheduled(1, firstRedaction);
+  assert.equal(started.purgedAt, undefined);
+  assert.equal(scheduled().length, 3);
+
+  r2.onRead(() => {
+    if (r2.requests.length === keys.length + 8) stop();
+  });
+  const sweep = executor(s, Infinity, (module, name, args) => {
+    assert.ok(
+      module !== 'projectPlanningPurge' || name !== 'redact' || args.step !== 'journal',
+      'the journal redaction already finished',
+    );
+  });
+  const pending = await runScheduled(2, sweep);
+  assert.ok(pending.segmentSweep.after);
+  assert.ok(!pending.segmentSweep.claim);
+  assert.equal(pending.purgedAt, undefined);
+  assert.equal(scheduled().length, 4);
+
+  r2.onRead(undefined);
+  const firstCheck = executor(s, Infinity, (module, name) => {
+    if (module === 'projectPlanningPurge' && name === 'check') stop();
+  });
+  const checked = await runScheduled(3, firstCheck);
+  assert.ok(checked.segmentSweep.done);
+  assert.equal(checked.purgedAt, undefined);
+  assert.equal(scheduled().length, 5);
+
+  const remaining = executor(s, Infinity, (module, name, args) => {
+    assert.ok(
+      module !== 'projectPlanningPurge' || name !== 'check' || args.step !== 'journal',
+      'the journal check already finished',
+    );
+  });
+  const done = await runScheduled(4, remaining);
+  assert.ok(done.purgedAt);
+  assert.equal(r2.requests.length, keys.length * 2, 'each segment is opened once in each phase');
 });

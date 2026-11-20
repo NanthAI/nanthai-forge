@@ -24,8 +24,8 @@
     "cliAgentLandCpuModules": 177
   },
   "calibration": {
-    "cpuMs": 52,
-    "basis": "Issue 10fbb67b, 2026-11-20: CPU (user+sys) of the fixed synthetic module graph in check-agent-weight.mjs (100 modules, own warm compile cache, 7 samples interleaved with the batches) on the reference runner, the one the CPU ceilings describe. 52 ms is the low end of local Node 24.22.1 darwin arm64 samples (51-58 ms at load 7-11; loaded samples reach 98 ms). GitHub-hosted fast runners are estimated at about 49 ms (version probe 32-38 ms times the local calibration/version ratio of about 1.44); the slow class (version 48-62 ms, land 501-552 ms) is then about 1.5 times slower. Re-record from the calibrationCpuMs and runnerScale that every smoke:package failure prints."
+    "cpuMs": 64.8545,
+    "basis": "Issue 10fbb67b. CPU (user+sys) of the fixed synthetic graph in check-agent-weight.mjs (100 ESM modules, independent warm compile cache, seven interleaved samples per run). Median 64.8545 ms, min–max 40.989–78.313 ms from 20 distinct GitHub Actions ubuntu-latest runs on Node 24.22.1. Sources: 16 Forge static passes, 2 public Verify Forge static passes, and 2 retained agent-weight reports from unrelated MCP module-count failures. NanthAI/nanthai-forge Actions runs: 44790499782, 44797202243, 44822686892, 44823904704, 44825271124, 44826605232, 44826618374, 44826638931, 44826648736, 44826857825, 44827424562, 44827981189, 44827997311, 44828000336, 44828495401, 44829003126, 44829015035, 44830312766, 44830565550, 44830644247."
   },
   "boundary": [
     "@lezer/common",

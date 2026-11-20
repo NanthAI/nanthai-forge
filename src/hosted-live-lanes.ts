@@ -11,6 +11,7 @@ const issueRef = z.string().refine(isPlanningRef, `expected ${planningIdHelp}`);
 import { shellQuote } from './shell-quote.js';
 import { hostedAgentRoot } from './hosted-agent-journal.js';
 import { backgroundSave } from './hosted-save-pending.js';
+const isStoppedCursor = (value: string) => value.startsWith('forge-loose-ends-stopped-v1:');
 export const liveLanesInput = z
   .object({
     planningItemId: issueRef
@@ -27,7 +28,12 @@ export const liveLanesInput = z
     state: z.enum(['open', 'all']).optional(),
     cursor: z
       .string()
-      .refine(value => value.startsWith('forge-lanes-v1:') || value.startsWith('forge-item-work-v1:'))
+      .refine(
+        value =>
+          value.startsWith('forge-lanes-v1:') ||
+          value.startsWith('forge-item-work-v1:') ||
+          isStoppedCursor(value),
+      )
       .nullable()
       .default(null),
     /** Page size: 50 by default (20 for state "all"), at most 100 (50 for state "all"). */
@@ -35,7 +41,8 @@ export const liveLanesInput = z
     /** `live` hides dormant Lanes; `dormant` lists only them, each with `abandonable`; default lists all.
      * `loose-ends` is one compact read of five groups (dormant, stopped, checked never landed, leftover projects,
      * dated checks), each listed or marked not reported with the reason; a quiet Lane beside a live Lane of the same
-     * Issue carries `replacedBy` and the abandon command as `next`. `tree` adds a compact text `tree`: which Lanes
+     * Issue carries `replacedBy` and the abandon command as `next`. Pass `groups.stopped.continueCursor` as `cursor`
+     * with the same view to read the next stopped page. `tree` adds a compact text `tree`: which Lanes
      * stack on which, which overlap, and each Lane's state and next step, from the same one page read. */
     // A checked string, not an enum, so the per-session MCP tool listing names `view` without its values
     // (tests/mcp-tool-list.test.mjs budget); help and docs list them.
@@ -49,6 +56,10 @@ export const liveLanesInput = z
   .strict()
   .refine(input => input.state !== 'all' || (input.planningItemId && !input.intentId && !input.view), {
     message: 'state "all" reads one Issue: pass planningItemId (no intentId or view).',
+  })
+  .refine(input => input.cursor === null || isStoppedCursor(input.cursor) === (input.view === 'loose-ends'), {
+    path: ['cursor'],
+    message: 'Use the cursor returned for this lanes view, or omit the cursor to start over.',
   });
 /** The read returns canonical JSON text; the hosted transport already decodes JSON replies, so the reply may arrive as
  * the object itself (a second JSON.parse made every `view:"loose-ends"` read fail). */
@@ -148,7 +159,9 @@ export async function liveLanes(transport: HostedAgentTransport, input: Record<s
         state === 'all'
           ? await itemLanes(transport, input.planningItemId!, input)
           : input.view === 'loose-ends'
-            ? looseEnds(await transport.query('projectLooseEnds:read', {}))
+            ? looseEnds(
+                await transport.query('projectLooseEnds:read', input.cursor ? { cursor: input.cursor } : {}),
+              )
             : input.view === 'tree'
               ? await laneTree(transport, input)
               : {

@@ -61,6 +61,7 @@ async function purge(
     projectId,
     itemId,
     operationId: itemRetentionOperation(projectId, itemId, version),
+    expectedVersion: version,
   });
   const purgedAt: number | null = entry?.purgedAt ?? null;
   if (purgedAt !== null) await ctx.runMutation(internal.projectItemRetention.settle, { ...input, purgedAt });

@@ -5,14 +5,16 @@
 // anything: setting a Lane aside goes through the existing dormant sweep (projectHostedDormant:abandon), which re-checks
 // each Lane and skips one that gained a save meanwhile.
 import { v } from 'convex/values';
+import { streamQuery } from 'convex-helpers/server/pagination';
 import { query } from './cliServer';
+import schema from './schema';
 import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 import { accessibleProject } from './projectAuthority';
 import { dormantCutoff } from './projectHostedDormancy';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { sourceAuthority } from '../src/hosted-source-authority';
-import { invariant } from '../src/errors';
+import { ForgeError, invariant } from '../src/errors';
 import { QUIET_MS } from '../src/lane-quiet';
 import { report } from './errors';
 import { hostedRecordBody } from './projectHostedRecords';
@@ -28,8 +30,42 @@ const resolutionOrigin = (value: string): string | undefined => {
   }
 };
 
-/** Rows per group; a group with more says how many more were seen (at least one). */
-export const LOOSE_ENDS_LIMIT = 25;
+/** Rows per group. */
+const LOOSE_ENDS_LIMIT = 25;
+const stoppedCursorPrefix = 'forge-loose-ends-stopped-v1:';
+const badCursor = () =>
+  new ForgeError(
+    'BAD_ARGUMENT',
+    'Use the stopped group\'s continueCursor. Run nforge agent ROOT lanes \'{"view":"loose-ends"}\' to start over.',
+  );
+
+type StoppedCursor = {
+  projectId: Id<'hostedProjects'>;
+  upTo: number;
+  after: [at: number, creationTime: number, id: Id<'projectHostedPresence'>];
+};
+
+function stoppedPosition(projectId: Id<'hostedProjects'>, token: string): StoppedCursor {
+  if (!token.startsWith(stoppedCursorPrefix)) throw badCursor();
+  let position: StoppedCursor | null;
+  try {
+    position = JSON.parse(token.slice(stoppedCursorPrefix.length));
+  } catch {
+    throw badCursor();
+  }
+  if (
+    position?.projectId !== projectId ||
+    !Number.isFinite(position.upTo) ||
+    !Array.isArray(position.after) ||
+    position.after.length !== 3 ||
+    !Number.isFinite(position.after[0]) ||
+    position.after[0] > position.upTo ||
+    !Number.isFinite(position.after[1]) ||
+    typeof position.after[2] !== 'string'
+  )
+    throw badCursor();
+  return position;
+}
 
 /** Open Lanes read per Item to find the one that replaced a quiet Lane (Item d9e1ac62). */
 const SIBLINGS_PER_ITEM = 6;
@@ -117,12 +153,7 @@ async function replacements(
 }
 const notReported = (why: string) => ({ reported: false as const, why });
 
-async function presenceBetween(
-  ctx: QueryCtx,
-  projectId: Id<'hostedProjects'>,
-  after: number | null,
-  upTo: number,
-) {
+function presenceBetween(ctx: QueryCtx, projectId: Id<'hostedProjects'>, after: number | null, upTo: number) {
   return ctx.db
     .query('projectHostedPresence')
     .withIndex('by_project_and_at', q =>
@@ -133,45 +164,80 @@ async function presenceBetween(
     .take(LOOSE_ENDS_LIMIT + 1);
 }
 
+/** Resume strictly after an index key, even if the Lane at that key was removed or saved meanwhile. */
+async function continueStopped(ctx: QueryCtx, { projectId, upTo, after }: StoppedCursor) {
+  const rows: Presence[] = [];
+  for await (const [presence] of streamQuery(ctx, {
+    table: 'projectHostedPresence',
+    index: 'by_project_and_at',
+    schema,
+    startIndexKey: [projectId, ...after],
+    endIndexKey: [projectId, upTo],
+  })) {
+    rows.push(presence);
+    if (rows.length > LOOSE_ENDS_LIMIT) break;
+  }
+  return rows;
+}
+
 /** Any member's read. Costs: the project row, then at most two indexed presence ranges of 26 rows each (oldest first),
+ * or one stopped page over at most three disjoint index ranges (26 rows total) for a continuation,
  * and per distinct Item among them one Lane-head read of at most 6 rows, a Lane-record point read per listed quiet
  * Lane of an Item with several open Lanes and several listed quiet Lanes (at most 52, about 1 KB each), plus a presence point read per other Lane until a live one is
  * found. Re-runs only when a Lane in those ranges, or
  * an open Lane of their Items, is written; nothing polls and nothing is scheduled. */
 export const read = query({
-  args: { projectId: v.id('hostedProjects') },
+  args: { projectId: v.id('hostedProjects'), cursor: v.optional(v.string()) },
   returns: v.string(),
-  handler: async (ctx, { projectId }) => {
+  handler: async (ctx, { projectId, cursor }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read loose ends.');
       const project = await accessibleProject(ctx, projectId, user.subject);
       const now = Date.now();
-      const cutoff = dormantCutoff(project, now);
       const quietFrom = now - QUIET_MS;
+      const position = cursor === undefined ? null : stoppedPosition(projectId, cursor);
+      const cutoff = position ? null : dormantCutoff(project, now);
+      const upTo = position?.upTo ?? quietFrom;
       const [idle, stopped] = await Promise.all([
         cutoff === null ? null : presenceBetween(ctx, projectId, null, cutoff),
-        cutoff !== null && cutoff >= quietFrom ? [] : presenceBetween(ctx, projectId, cutoff, quietFrom),
+        position
+          ? continueStopped(ctx, position)
+          : cutoff !== null && cutoff >= quietFrom
+            ? []
+            : presenceBetween(ctx, projectId, cutoff, quietFrom),
       ]);
       const quiet = [...(idle ?? []), ...stopped];
       const replacedBy = quiet.length
         ? await replacements(ctx, projectId, quiet, quietFrom)
         : new Map<string, string>();
+      const boundary = stopped.length > LOOSE_ENDS_LIMIT ? stopped[LOOSE_ENDS_LIMIT - 1] : undefined;
+      const stoppedGroup = {
+        ...listed(stopped, replacedBy),
+        continueCursor: boundary
+          ? stoppedCursorPrefix +
+            canonicalPayload({ projectId, upTo, after: [boundary.at, boundary._creationTime, boundary._id] })
+          : null,
+      };
       return canonicalPayload({
         at: now,
         // The owner sets Lanes aside through projectHostedDormant:abandon, which needs the current authority epoch.
         setAside: project.owner === user.subject ? { authorityEpoch: sourceAuthority(project).epoch } : null,
-        groups: {
-          idle: idle
-            ? listed(idle, replacedBy)
-            : notReported('This project turned dormant Lanes off (agentDefaults.dormantAfterDays 0).'),
-          stopped: listed(stopped, replacedBy),
-          checked: notReported('A passed check that nobody asked to land is not recorded per Lane yet.'),
-          projects: notReported(
-            'Projects with no landing for 30 days need an account-wide read; it is not built yet.',
-          ),
-          dated: notReported('Done-when lines carry no date yet; that needs the planning contract change.'),
-        },
+        groups: position
+          ? { stopped: stoppedGroup }
+          : {
+              idle: idle
+                ? listed(idle, replacedBy)
+                : notReported('This project turned dormant Lanes off (agentDefaults.dormantAfterDays 0).'),
+              stopped: stoppedGroup,
+              checked: notReported('A passed check that nobody asked to land is not recorded per Lane yet.'),
+              projects: notReported(
+                'Projects with no landing for 30 days need an account-wide read; it is not built yet.',
+              ),
+              dated: notReported(
+                'Done-when lines carry no date yet; that needs the planning contract change.',
+              ),
+            },
       });
     } catch (error) {
       return report(error);

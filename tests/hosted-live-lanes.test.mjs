@@ -372,6 +372,19 @@ test('the CLI Loose ends view reads the reply the hosted transport already decod
   }
 });
 
+test('a Loose ends cursor cannot restart the flat list or continue from a different view', async () => {
+  const { liveLanes } = await import('../dist/hosted-live-lanes.js');
+  const transport = {
+    query: async () => assert.fail('a cursor from a different view must not query the server'),
+  };
+  for (const args of [
+    { view: 'all', cursor: 'forge-loose-ends-stopped-v1:page' },
+    { view: 'loose-ends', cursor: 'forge-lanes-v1:page' },
+  ]) {
+    await assert.rejects(liveLanes(transport, args), error => error.code === 'BAD_ARGUMENT');
+  }
+});
+
 test('the Lanes page reads one page as wide as the line feed: bytes at 60 and at 100 open Lanes (6ebb58ab)', async t => {
   // At 60 a busy project's older Lanes had no title or person on the page ("Lane <id> · not reported"). The page now
   // reads the feed's 100; one bounded read, no extra call. Dogfood-shaped: each Lane saved once, one Intent each.

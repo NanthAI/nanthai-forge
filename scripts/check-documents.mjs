@@ -5,6 +5,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { packageDocuments, packageDocumentData, packageDocumentFragments } from './package-documents.mjs';
 import { componentManifestSha256, backendLicenseSha256 } from './selfhost-notices.mjs';
+import { llmDocuments, llmsFullSizeReport } from './llm-documents.mjs';
 const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
 for (const path of [...packageDocuments, ...packageDocumentData]) {
   assert.ok(existsSync(path), `Missing packaged document: ${path}`);
@@ -47,3 +48,8 @@ for (const item of components.originals)
 console.log(
   `Packaged documentation inventory and ${components.originals.length} original notice hashes verified.`,
 );
+
+// Docs-only interaction checks can skip the web build. Exercise the same generator against
+// the merged source so that discovery drift and size are visible in those checks too.
+const full = llmDocuments(process.cwd()).find(asset => asset.fileName === 'llms-full.txt');
+console.log(llmsFullSizeReport(full.source).message);

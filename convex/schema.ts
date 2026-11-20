@@ -358,6 +358,8 @@ const projectFields = {
   ),
   /** Physical history relocation fence, independent of logical Work revision. */
   journalRevision: v.optional(v.number()),
+  /** Purge selection pins event bytes independently of append-only journal publication. */
+  journalEventRewriteRevision: v.optional(v.number()),
   journalRecordReceipts: v.optional(v.literal(true)),
   /** Flip 5 Work store mode (Issue 0695ab24): absent = journal only; dual = planning writes also store
    * their Issue version, comment or note record in the same mutation; records = dual, and the planning

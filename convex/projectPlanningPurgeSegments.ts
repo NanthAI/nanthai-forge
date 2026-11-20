@@ -30,10 +30,13 @@ async function sweepEntry(ctx: MutationCtx, input: Identity) {
     purge,
     purges,
     sweep,
-    save: (next: Sweep, journalRevision?: number) =>
+    save: (next: Sweep, rewrite?: 'events' | 'record') =>
       ctx.db.patch(input.projectId, {
         itemPurges: purges.map(entry => (entry === purge ? { ...purge, segmentSweep: next } : entry)),
-        ...(journalRevision !== undefined ? { journalRevision } : {}),
+        ...(rewrite ? { journalRevision: (project.journalRevision ?? 0) + 1 } : {}),
+        ...(rewrite === 'events'
+          ? { journalEventRewriteRevision: (project.journalEventRewriteRevision ?? 0) + 1 }
+          : {}),
       }),
   };
 }
@@ -47,22 +50,15 @@ export const page = internalQuery({
   args: {
     projectId: v.id('hostedProjects'),
     after: v.union(v.string(), v.null()),
-    events: v.optional(v.boolean()),
   },
   returns: v.any(),
   handler: async (ctx, input) => {
-    const query = ctx.db.query('projectJournalSegments');
-    // Selection needs only archived commands; the rewrite also walks canonical version segments.
-    const selected = input.events
-      ? query.withIndex('by_project_and_category_and_first', q =>
-          q.eq('projectId', input.projectId).eq('category', 'events'),
-        )
-      : query.withIndex('by_project_and_key', q => {
-          const project = q.eq('projectId', input.projectId);
-          return input.after === null ? project : project.gt('key', input.after);
-        });
+    const selected = ctx.db.query('projectJournalSegments').withIndex('by_project_and_key', q => {
+      const project = q.eq('projectId', input.projectId);
+      return input.after === null ? project : project.gt('key', input.after);
+    });
     const result = await selected.paginate({
-      cursor: input.events ? input.after : null,
+      cursor: null,
       numItems: 16,
       maximumRowsRead: 16,
       maximumBytesRead: 256 * 1024,
@@ -71,7 +67,7 @@ export const page = internalQuery({
       entries: result.page
         .filter(row => row.category === 'record' || row.category === 'events')
         .map(row => ({ key: row.key, index: JSON.parse(row.value) as JournalIndex })),
-      after: input.events ? result.continueCursor : (result.page.at(-1)?.key ?? input.after),
+      after: result.page.at(-1)?.key ?? input.after,
       done: result.isDone,
     };
   },
@@ -189,7 +185,7 @@ export const publish = internalMutation({
   },
   returns: v.array(v.string()),
   handler: async (ctx, input) => {
-    const { project, sweep, save } = await sweepEntry(ctx, input);
+    const { sweep, save } = await sweepEntry(ctx, input);
     requireClaim(sweep, input.claim);
     invariant(sweep.pending?.key === input.key, 'WORK_STALE', 'Journal rewrite was not staged.');
     if (sweep.pending.retire) return sweep.pending.retire;
@@ -233,7 +229,10 @@ export const publish = internalMutation({
     const retire = [current.pointer, ...(current.parts ?? [])]
       .map(pin => pin.sha256)
       .filter(key => !active.has(key));
-    await save({ ...sweep, pending: { key: input.key, retire } }, (project.journalRevision ?? 0) + 1);
+    await save(
+      { ...sweep, pending: { key: input.key, retire } },
+      row!.category === 'events' ? 'events' : 'record',
+    );
     return retire;
   },
 });

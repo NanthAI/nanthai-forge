@@ -9,10 +9,10 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 export const journalObjectKey = (projectId: string, sha256: string) =>
   `v1/p/${projectId}/journal-segments/${sha256}`;
-export async function getJournalSegment(projectId: string, index: JournalIndex) {
+export async function getJournalSegment(projectId: string, index: JournalIndex, signal?: AbortSignal) {
   const selected = [];
   for (const pointer of [index.pointer, ...(index.parts ?? [])]) {
-    const body = await getArchiveObject(journalObjectKey(projectId, pointer.sha256), pointer);
+    const body = await getArchiveObject(journalObjectKey(projectId, pointer.sha256), pointer, false, signal);
     invariant(body, 'SOURCE_UNAVAILABLE', 'Selected journal segment is unavailable.');
     selected.push(readJournalSegment(decodeArchiveBytes(body, pointer), pointer, projectId, index));
   }

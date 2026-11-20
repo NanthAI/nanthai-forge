@@ -23,7 +23,6 @@ import {
   purgeIntentChain,
   purgeTarget,
   selectRows,
-  selectEventRows,
 } from './projectPlanningPurgeSelect';
 import {
   partitionsOf,
@@ -37,19 +36,29 @@ import {
 import { selectedGeneration } from './projectWorkIndexStore';
 import { pendingIntentArchives } from './projectJournalArchivePlan';
 import { journalEnabled } from './projectJournalMaintenance';
-import { clearArchiveSelection } from './projectPlanningPurgeArchiveSelection';
+import {
+  archivePin,
+  archiveSelectionCurrent,
+  archiveSelectionValues,
+  clearArchiveSelection,
+  type ArchiveSelection,
+} from './projectPlanningPurgeArchiveSelection';
+import { itemRetentionOperation } from './projectItemRetentionStore';
+import { purgeWalk, walkPurge } from './projectPlanningPurgeWalk';
 
 const LATE_ROW_BLOCK =
   'A note reached this Item’s Intent after its purge began; its words are not on the purge’s list, so the purge stays open (not done). Nothing more was purged.';
 /** Finished purges kept on the project (newest first); unfinished ones always stay. */
 const KEPT_FINISHED = 20;
+const throughRevisions = v.object({ projectWorkEvents: v.number(), projectHostedRecordBodies: v.number() });
 const selection = v.object({
   ids: v.array(v.string()),
-  created: v.number(),
+  created: v.union(v.number(), v.null()),
+  creates: v.boolean(),
   rows: v.array(v.array(v.string())),
   decisions: v.array(v.array(v.string())),
-  journalRevision: v.number(),
-  through: v.object({ projectWorkEvents: v.number(), projectHostedRecordBodies: v.number() }),
+  archive: v.optional(archivePin),
+  through: throughRevisions,
 });
 const stepName = v.union(...purgeSteps.map(step => v.literal(step)));
 
@@ -76,19 +85,38 @@ export const status = internalQuery({
  * then the purge command and tombstone (one mutation, executeCommand) and this purge's progress entry. A replay of
  * the same operation returns the recorded entry. */
 export const begin = internalMutation({
-  args: { projectId: v.id('hostedProjects'), itemId: v.string(), operationId: v.string(), selection },
-  returns: v.null(),
+  args: {
+    projectId: v.id('hostedProjects'),
+    itemId: v.string(),
+    operationId: v.string(),
+    expectedVersion: v.number(),
+    selection,
+  },
+  returns: v.union(v.literal('begun'), v.literal('appended'), v.literal('base')),
   handler: async (ctx, input) => {
     const project = await ctx.db.get(input.projectId);
     invariant(project, 'PROJECT_UNAVAILABLE', 'Select an existing Forge project.');
-    if (project.itemPurges?.some(item => item.operationId === input.operationId)) return null;
-    invariant(
-      (project.journalRevision ?? 0) === input.selection.journalRevision,
-      'WORK_STALE',
-      'The archived Work journal changed while selecting the Item. Run the same purge again to resume.',
-    );
+    if (project.itemPurges?.some(item => item.operationId === input.operationId)) return 'begun';
+    if (!(await archiveSelectionCurrent(ctx, project, input.selection.archive))) return 'appended';
     const target = await purgeTarget(ctx, input.projectId, input.itemId);
-    invariant(input.selection.created > baseRevision(project, target.generation), 'BAD_ARGUMENT', BASE_BLOCK);
+    invariant(
+      target.item.version === input.expectedVersion,
+      'WORK_STALE',
+      'The Item changed before its purge began.',
+    );
+    if (
+      !input.selection.creates ||
+      input.selection.created === null ||
+      input.selection.created <= baseRevision(project, target.generation)
+    ) {
+      if (input.selection.archive) await clearArchiveSelection(ctx, input.projectId, input.operationId);
+      return 'base';
+    }
+    invariant(
+      input.selection.rows.length <= PURGE_ROW_LIMIT,
+      'BAD_ARGUMENT',
+      `This Item has more than ${PURGE_ROW_LIMIT} Work rows; a purge removes at most ${PURGE_ROW_LIMIT}.`,
+    );
     // The store's Intent chain and every reader's purged-version check start from the Item id (purgedIntentKeys).
     invariant(
       !target.intentId || target.intentId === target.historyId,
@@ -149,13 +177,13 @@ export const begin = internalMutation({
       startedAt: Date.now(),
       ...(project.journalRevision || journalEnabled() ? { segmentSweep: { after: null, done: false } } : {}),
     };
-    if (input.selection.journalRevision) await clearArchiveSelection(ctx, input.projectId, input.operationId);
+    if (input.selection.archive) await clearArchiveSelection(ctx, input.projectId, input.operationId);
     const others = project.itemPurges ?? [];
     const finished = others.filter(item => item.purgedAt !== undefined).slice(0, KEPT_FINISHED - 1);
     await ctx.db.patch(input.projectId, {
       itemPurges: [started, ...others.filter(item => item.purgedAt === undefined), ...finished],
     });
-    return null;
+    return 'begun';
   },
 });
 
@@ -271,122 +299,180 @@ export const finish = internalMutation({
   },
 });
 
-/** Run (or resume) the purge of one Deleted Item. Returns the progress entry; `purgedAt` is set only when done. */
+/** A bounded invocation leaves enough time to checkpoint a page before yielding the action. */
+const PURGE_SLICE_MS = 120_000;
+const hotCheckpoint = v.object({
+  ids: v.array(v.string()),
+  table: v.number(),
+  through: throughRevisions,
+  selected: archiveSelectionValues,
+});
+const runArgs = {
+  projectId: v.id('hostedProjects'),
+  itemId: v.string(),
+  operationId: v.string(),
+  expectedVersion: v.optional(v.number()),
+  continued: v.optional(v.literal(true)),
+  hot: v.optional(hotCheckpoint),
+  walk: v.optional(purgeWalk),
+};
+
+/** Run or resume one Deleted Item's purge. An unfinished archive slice schedules its own continuation. */
 export const run = internalAction({
-  args: { projectId: v.id('hostedProjects'), itemId: v.string(), operationId: v.string() },
+  args: runArgs,
   returns: v.any(),
   handler: async (ctx, input): Promise<ItemPurge | null> => {
+    const deadline = Date.now() + PURGE_SLICE_MS;
     const ref = internal.projectPlanningPurge;
     const id = { projectId: input.projectId, operationId: input.operationId };
+    const resume = (
+      expectedVersion: number,
+      next: { hot?: typeof hotCheckpoint.type; walk?: typeof purgeWalk.type },
+    ) =>
+      ctx.scheduler.runAfter(0, ref.run, {
+        ...id,
+        itemId: input.itemId,
+        expectedVersion,
+        continued: true,
+        ...next,
+      });
+    const settled = async (purge: ItemPurge | null) => {
+      if (
+        input.continued &&
+        purge?.purgedAt !== undefined &&
+        input.operationId === itemRetentionOperation(input.projectId, input.itemId, purge.version)
+      )
+        await ctx.runMutation(internal.projectItemRetention.settle, {
+          projectId: input.projectId,
+          itemId: input.itemId,
+          version: purge.version,
+          purgedAt: purge.purgedAt,
+        });
+      return purge;
+    };
     let purge: ItemPurge | null = await ctx.runQuery(ref.status, id);
     if (!purge) {
-      const preflightArgs = { projectId: input.projectId, itemId: input.itemId };
-      const preflight = await ctx.runQuery(internal.projectPlanningPurgeSelect.preflight, preflightArgs);
+      const preflight = await ctx.runQuery(internal.projectPlanningPurgeSelect.preflight, {
+        projectId: input.projectId,
+        itemId: input.itemId,
+      });
+      const expectedVersion = input.expectedVersion ?? preflight.version;
+      invariant(
+        preflight.version === expectedVersion,
+        'ITEM_CHANGED',
+        'The Item changed before its purge began.',
+      );
       invariant(!preflight.blocked, 'BAD_ARGUMENT', preflight.blocked ?? '');
       for (const pending of preflight.pendingArchives)
         if (pending.availableAt <= Date.now())
           await ctx.runAction(internal.projectJournalRun.pack, { ...pending.input, discardExpired: true });
-      const rows: [number, string, string][] = [],
-        decisions: string[][] = [];
-      const through = { projectWorkEvents: -1, projectHostedRecordBodies: -1 };
-      let created: number | null = null,
-        creates = false;
-      for (const table of purgeJournalTables)
-        for (;;) {
-          const page = await ctx.runQuery(internal.projectPlanningPurgeSelect.selectPage, {
-            projectId: input.projectId,
-            table,
-            ids: preflight.ids,
-            after: through[table],
-          });
-          rows.push(
-            ...page.rows.map(
-              (row: { revision: number; operationId: string; digest: string }) =>
-                [row.revision, row.operationId, row.digest] as [number, string, string],
-            ),
-          );
-          decisions.push(...page.decisions);
-          if (page.created !== null) created = Math.min(created ?? page.created, page.created);
-          creates ||= page.creates;
-          through[table] = page.after;
-          invariant(
-            rows.length <= PURGE_ROW_LIMIT,
-            'BAD_ARGUMENT',
-            `This Item has more than ${PURGE_ROW_LIMIT} Work rows; a purge removes at most ${PURGE_ROW_LIMIT}.`,
-          );
-          if (page.done) break;
-        }
-      if (preflight.journalRevision) {
-        const archived: ReturnType<typeof selectEventRows> = await ctx.runAction(
-          internal.projectPlanningPurgeSegmentRun.select,
-          { ...input, ids: preflight.ids, journalRevision: preflight.journalRevision },
-        );
-        for (const row of archived.rows) rows.push([row.revision, row.operationId, row.digest]);
-        decisions.push(...archived.decisions);
-        if (archived.created !== null) created = Math.min(created ?? archived.created, archived.created);
-        creates ||= archived.creates;
-      }
-      const validBase = creates && created !== null && created > preflight.initialRevision;
-      if (preflight.journalRevision && (rows.length > PURGE_ROW_LIMIT || !validBase))
-        await ctx.runMutation(internal.projectPlanningPurgeArchiveSelection.discard, id);
-      invariant(
-        rows.length <= PURGE_ROW_LIMIT,
-        'BAD_ARGUMENT',
-        `This Item has more than ${PURGE_ROW_LIMIT} Work rows; a purge removes at most ${PURGE_ROW_LIMIT}.`,
-      );
-      // An Item with no creation row after the base checkpoint is in the stored archive: a rebuild would read it.
-      // Every row of the Item, its Intent's included, must come after the stored base, and the put that created it
-      // must be there: otherwise a base archive holds some of its words and a rebuild reads them again.
-      invariant(validBase, 'BAD_ARGUMENT', BASE_BLOCK);
-      rows.sort((a, b) => a[0] - b[0]);
-      await ctx.runMutation(ref.begin, {
-        ...input,
-        selection: {
+      const selectArchive = () =>
+        ctx.runAction(internal.projectPlanningPurgeSegmentRun.select, {
+          ...id,
+          itemId: input.itemId,
           ids: preflight.ids,
-          created: created!,
-          rows: rows.map(([, operationId, digest]) => [operationId, digest]),
-          decisions,
-          through,
-          journalRevision: preflight.journalRevision,
-        },
-      });
+          deadline,
+        });
+      let archived = preflight.journalRevision ? await selectArchive() : undefined;
+      if (archived && !archived.done) {
+        await resume(expectedVersion, { hot: input.hot });
+        return null;
+      }
+      // Keep only verified command facts in the scheduled continuation, never source text.
+      const hot =
+        input.hot && JSON.stringify(input.hot.ids) === JSON.stringify(preflight.ids)
+          ? input.hot
+          : {
+              ids: preflight.ids,
+              table: 0,
+              through: { projectWorkEvents: -1, projectHostedRecordBodies: -1 },
+              selected: { rows: [], decisions: [], created: null, creates: false } as ArchiveSelection,
+            };
+      while (hot.table < purgeJournalTables.length) {
+        if (Date.now() >= deadline) {
+          await resume(expectedVersion, { hot });
+          return null;
+        }
+        const table = purgeJournalTables[hot.table]!;
+        const page = await ctx.runQuery(internal.projectPlanningPurgeSelect.selectPage, {
+          projectId: input.projectId,
+          table,
+          ids: preflight.ids,
+          after: hot.through[table],
+        });
+        hot.selected.rows.push(...page.rows);
+        hot.selected.decisions.push(...page.decisions);
+        if (page.created !== null)
+          hot.selected.created = Math.min(hot.selected.created ?? page.created, page.created);
+        hot.selected.creates ||= page.creates;
+        hot.through[table] = page.after;
+        invariant(
+          hot.selected.rows.length <= PURGE_ROW_LIMIT,
+          'BAD_ARGUMENT',
+          `This Item has more than ${PURGE_ROW_LIMIT} Work rows; a purge removes at most ${PURGE_ROW_LIMIT}.`,
+        );
+        if (page.done) hot.table++;
+      }
+      for (;;) {
+        if (Date.now() >= deadline) {
+          await resume(expectedVersion, { hot });
+          return null;
+        }
+        const selected = mergeSelection(hot.selected, archived?.selected);
+        if (selected.rows.length > PURGE_ROW_LIMIT && archived)
+          await ctx.runMutation(internal.projectPlanningPurgeArchiveSelection.discard, id);
+        const result = await ctx.runMutation(ref.begin, {
+          ...id,
+          itemId: input.itemId,
+          expectedVersion,
+          selection: {
+            ids: preflight.ids,
+            created: selected.created,
+            creates: selected.creates,
+            rows: selected.rows.map(({ operationId, digest }) => [operationId, digest]),
+            decisions: selected.decisions,
+            through: hot.through,
+            archive: archived?.pin,
+          },
+        });
+        invariant(result !== 'base', 'BAD_ARGUMENT', BASE_BLOCK);
+        if (result === 'begun') break;
+        archived = await selectArchive();
+        if (!archived.done) {
+          await resume(expectedVersion, { hot });
+          return null;
+        }
+      }
       purge = await ctx.runQuery(ref.status, id);
     }
-    if (purge!.purgedAt !== undefined) return purge;
-    // Redact, then check; a page the check still finds dirty (a rebuild landed in between) gets another round.
-    for (let round = 0; round < 3; round++) {
-      for (const step of purgeSteps) {
-        let after: string | null = null;
-        do after = (await ctx.runMutation(ref.redact, { ...id, step, after })).after;
-        while (after !== null);
-      }
-      if (purge!.segmentSweep && !purge!.segmentSweep.done)
-        await ctx.runAction(internal.projectPlanningPurgeSegmentRun.run, id);
-      let dirty = 0,
-        generationId: string | undefined,
-        partitions: string | undefined;
-      for (const step of purgeSteps) {
-        let after: string | null = null;
-        do {
-          const page: { changes: number; after: string | null; generationId: string; partitions: string } =
-            await ctx.runQuery(ref.check, { ...id, step, after });
-          dirty += page.changes;
-          invariant(
-            !generationId || generationId === page.generationId,
-            'WORK_STALE',
-            'The Work index changed.',
-          );
-          generationId = page.generationId;
-          invariant(!partitions || partitions === page.partitions, 'WORK_STALE', 'The Work index changed.');
-          partitions = page.partitions;
-          after = page.after;
-        } while (after !== null);
-      }
-      if (dirty === 0) {
-        await ctx.runMutation(ref.finish, { ...id, generationId: generationId!, partitions: partitions! });
-        return ctx.runQuery(ref.status, id);
-      }
+    if (purge!.purgedAt !== undefined) return settled(purge);
+    const result = await walkPurge(ctx, id, purge!, deadline, input.walk);
+    if (!result.done) {
+      await resume(input.expectedVersion ?? purge!.version, { walk: result.walk });
+      return ctx.runQuery(ref.status, id);
     }
-    return ctx.runQuery(ref.status, id);
+    return settled(await ctx.runQuery(ref.status, id));
   },
 });
+
+/** A legacy command relocated between the hot and archived reads can appear in both. */
+function mergeSelection(hot: ArchiveSelection, archive?: ArchiveSelection): ArchiveSelection {
+  const rows = new Map<string, ArchiveSelection['rows'][number]>();
+  for (const row of [...hot.rows, ...(archive?.rows ?? [])]) {
+    const old = rows.get(row.operationId);
+    invariant(
+      !old || (old.revision === row.revision && old.request === row.request && old.digest === row.digest),
+      'INVALID_WORK_JOURNAL',
+      'An archived Work row differs from its selected live command.',
+    );
+    rows.set(row.operationId, row);
+  }
+  const decisions = new Map([...hot.decisions, ...(archive?.decisions ?? [])].map(row => [row[0], row]));
+  const created = [hot.created, archive?.created].filter((value): value is number => value != null);
+  return {
+    rows: [...rows.values()].sort((a, b) => a.revision - b.revision),
+    decisions: [...decisions.values()],
+    created: created.length ? Math.min(...created) : null,
+    creates: hot.creates || !!archive?.creates,
+  };
+}

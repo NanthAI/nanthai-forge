@@ -174,26 +174,44 @@ test('CLI uses supplied exact PR pins for documentation scope output', t => {
   assert.equal(readFileSync(output, 'utf8'), 'scope=docs\nbrowser_paths=["docs/notes.md"]\n');
 });
 
-test('docs checks preserve package inventory and original-notice validation without building', t => {
+test('docs checks regenerate LLM discovery and reject drift without a web build', t => {
   const cwd = mkdtempSync(join(tmpdir(), 'forge-documents-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   cpSync(new URL('../docs/', import.meta.url), join(cwd, 'docs'), { recursive: true });
+  cpSync(new URL('../README.md', import.meta.url), join(cwd, 'README.md'));
+  cpSync(new URL('../skills/forge-agent/', import.meta.url), join(cwd, 'skills/forge-agent'), {
+    recursive: true,
+  });
   writeFileSync(join(cwd, 'package.json'), readFileSync(new URL('../package.json', import.meta.url)));
   const check = () =>
     execFileSync(process.execPath, [new URL('../scripts/check-documents.mjs', import.meta.url).pathname], {
       cwd,
       stdio: 'pipe',
     });
-  assert.match(check().toString(), /original notice hashes verified/);
+  const first = check().toString();
+  assert.match(first, /original notice hashes verified/);
+  const fullSize = output => Number(/llms-full\.txt: (\d+) bytes/.exec(output)?.[1]);
+  const concepts = join(cwd, 'docs/concepts.md');
+  const source = readFileSync(concepts, 'utf8');
+  const addition = '\nA synthetic docs edit for the next check.\n';
+  assert.ok(fullSize(first) > 0);
+  writeFileSync(concepts, source + addition);
+  assert.equal(fullSize(check().toString()), fullSize(first) + Buffer.byteLength(addition));
+  writeFileSync(concepts, source);
+  const skill = join(cwd, 'skills/forge-agent/SKILL.md');
+  const skillSource = readFileSync(skill, 'utf8');
+  writeFileSync(skill, skillSource.replace('<!-- agent-workflow:start -->', '<!-- stale workflow -->'));
+  assert.throws(check, /Regenerate the forge-agent workflow block from the CLI verb contract/);
+  writeFileSync(skill, skillSource);
   writeFileSync(join(cwd, 'docs/unlisted.md'), 'Unlisted packaged prose\n');
   assert.throws(
     check,
     /Unlisted packaged document: docs\/unlisted\.md\. Add its manifest under scripts\/package-documents\//,
   );
   rmSync(join(cwd, 'docs/unlisted.md'));
-  rmSync(join(cwd, 'docs/concepts.md'));
+  rmSync(concepts);
   assert.throws(check, /Missing packaged document/);
-  writeFileSync(join(cwd, 'docs/concepts.md'), readFileSync(new URL('../docs/concepts.md', import.meta.url)));
+  writeFileSync(concepts, source);
   writeFileSync(join(cwd, 'docs/vendor-notices/convex-backend-LICENSE.md'), 'Changed original bytes\n');
   assert.throws(check, /AssertionError/);
 });

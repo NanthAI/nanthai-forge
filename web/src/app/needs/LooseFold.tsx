@@ -20,9 +20,9 @@ const looseRead = makeFunctionReference<'query', { projectId: Id<'hostedProjects
 );
 export type SetAside = (authorityEpoch: number, laneIds: string[]) => Promise<string>;
 
-/** What an agent is asked to do: the existing read, each row's own `next`, and nothing past it. */
+/** What an agent is asked to do: read the full stopped group, then follow each row's own `next`. */
 export const TIDY_TEXT =
-  'Tidy up this Forge project\'s loose ends: run nforge agent . lanes \'{"view":"loose-ends"}\' and, for each row that has a next command, run it. Leave rows without one alone and list them for me.';
+  'Tidy up this Forge project\'s loose ends: run nforge agent . lanes \'{"view":"loose-ends"}\'. While groups.stopped.continueCursor is set, run the same command with that value as "cursor" to read all stopped rows. Then run each row\'s next command. Leave rows without one alone and list them for me.';
 
 export function LooseFold({
   projectId,

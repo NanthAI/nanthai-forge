@@ -826,7 +826,11 @@ layer out of both first paints.
   21 receipts, and once it passed again at most 10 receipts and their landing
   rows to find a revert). Every Review and Why on Needs me opens the thing it
   names. Loose ends reads `projectLooseEnds:read` only while unfolded. Idle
-  costs nothing.
+  costs nothing. The CLI starts a tidy pass with
+  `nforge agent . lanes '{"view":"loose-ends"}'`. Follow
+  `groups.stopped.continueCursor` by passing it as `cursor` with the same view.
+  Each continuation reads only the stopped group, up to 25 rows in activity order
+  within the first page's time bounds. A null cursor ends the pass.
 - Plan (`web/src/app/plan/`) is the hand-ordered list grouped by Initiative
   ([planning model](planning.md)). It adds one read, `projectPlanView:read`:
   the Initiatives, every live Item (at most 500 per status) and each live
@@ -1401,6 +1405,10 @@ time; there is no checked-in reference copy to drift. A missing source or nav
 page fails the build. Docs tests guard generated command/tool coverage, safe
 Markdown rendering, links, keyboard interaction and both themes and widths.
 `/llms.txt`, `/llms-full.txt` and crawler rules include the docs destination.
+The static docs check runs the same discovery generator as the hosted build,
+including when a docs-only landing skips the web build. It checks for source
+drift and reports the full-text size. Sizes above 409,600 bytes emit a warning
+and can still land.
 
 This delivery does not change docs-only preflight or admission: configured
 `docsPaths` keep their existing cheap path. The full suite belongs to the

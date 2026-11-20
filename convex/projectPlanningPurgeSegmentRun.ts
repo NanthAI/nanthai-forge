@@ -28,15 +28,71 @@ import { getJournalSegment, journalObjectKey } from './projectJournalObject';
 import { putArchiveObject } from './projectLandingCapsuleObject';
 import { deleteR2Object } from './r2Operations';
 import { r2Config } from './r2';
+import { networkTimeout } from './networkFetch';
 import { selectEventRows } from './projectPlanningPurgeSelect';
 import { purgeSegmentIdentity } from './projectPlanningPurgeSegments';
 import type { ItemPurge } from './projectPlanningPurgeRedact';
-import type { ArchiveSelection } from './projectPlanningPurgeArchiveSelection';
+import type { ArchivePin, ArchiveSelection, SelectionProgress } from './projectPlanningPurgeArchiveSelection';
 
 type Entry = { key: string; index: JournalIndex };
 type Page = { entries: Entry[]; after: string | null; done: boolean };
 
 type Identity = { projectId: Id<'hostedProjects'>; operationId: string };
+const archiveBatch = 8;
+const metrics = () => ({ segments: 0, gets: 0, storedBytes: 0, rawBytes: 0 });
+type Metrics = ReturnType<typeof metrics>;
+
+async function* verifiedEntries<T extends { index: JournalIndex }>(
+  id: Identity,
+  entries: T[],
+  tally: Metrics,
+  deadline: number,
+  signal: AbortSignal,
+) {
+  for (let i = 0; i < entries.length && Date.now() < deadline; i += archiveBatch) {
+    // Wait for every started read, then expose only the ordered verified prefix.
+    const results = await Promise.allSettled(
+      entries.slice(i, i + archiveBatch).map(async entry => {
+        const segment = await getJournalSegment(id.projectId, entry.index, signal);
+        tally.segments++;
+        for (const pin of [entry.index.pointer, ...(entry.index.parts ?? [])]) {
+          tally.gets++;
+          tally.storedBytes += pin.size;
+          tally.rawBytes += pin.rawSize;
+        }
+        return { entry, segment };
+      }),
+    );
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        if (signal.aborted || Date.now() >= deadline) return;
+        throw result.reason;
+      }
+      yield result.value;
+    }
+  }
+}
+
+function reportSlice(
+  id: Identity,
+  phase: 'selection' | 'sweep',
+  tally: Metrics,
+  started: number,
+  done: boolean,
+) {
+  if (tally.segments)
+    console.log(
+      `FORGE_ITEM_PURGE_ARCHIVE ${JSON.stringify({
+        projectId: id.projectId,
+        operationId: id.operationId,
+        phase,
+        ...tally,
+        wallMs: Math.round(performance.now() - started),
+        sampledRss: process.memoryUsage().rss,
+        done,
+      })}`,
+    );
+}
 const store = internal.projectPlanningPurgeSegments;
 
 /** Select archived commands while they are whole. An interrupted action resumes at its last verified page. */
@@ -45,59 +101,74 @@ export const select = internalAction({
     ...purgeSegmentIdentity,
     itemId: v.string(),
     ids: v.array(v.string()),
-    journalRevision: v.number(),
+    deadline: v.number(),
   },
   returns: v.any(),
-  handler: async (ctx, input): Promise<ArchiveSelection> => {
+  handler: async (ctx, input): Promise<{ done: boolean; selected: ArchiveSelection; pin: ArchivePin }> => {
     const selection = internal.projectPlanningPurgeArchiveSelection;
-    let progress = await ctx.runQuery(selection.resume, input);
-    while (!progress.done) {
-      const page: Page = await ctx.runQuery(store.page, {
-        projectId: input.projectId,
-        after: progress.cursor,
-        events: true,
-      });
-      const selected: ArchiveSelection = { rows: [], decisions: [], created: null, creates: false };
-      for (const entry of page.entries) {
-        const segment = await getJournalSegment(input.projectId, entry.index);
-        const matched = selectEventRows(
-          (segment.tables.projectHostedRecordBodies ?? []).map(row => JSON.parse(row)),
-          input.ids,
-        );
-        selected.rows.push(...matched.rows);
-        selected.decisions.push(...matched.decisions);
-        selected.creates ||= matched.creates;
-        if (matched.created !== null)
-          selected.created = Math.min(selected.created ?? matched.created, matched.created);
-      }
-      if (progress.selected.rows.length + selected.rows.length > PURGE_ROW_LIMIT) {
-        await ctx.runMutation(selection.discard, {
+    const { deadline, ...request } = input;
+    const started = performance.now();
+    const tally = metrics();
+    const signal = networkTimeout(Math.max(1, deadline - Date.now()));
+    let progress: SelectionProgress = await ctx.runQuery(selection.resume, request);
+    try {
+      while (!progress.done && Date.now() < deadline) {
+        const page = await ctx.runQuery(selection.page, {
           projectId: input.projectId,
-          operationId: input.operationId,
+          after: progress.frontier,
         });
-        invariant(
-          false,
-          'BAD_ARGUMENT',
-          `This Item has more than ${PURGE_ROW_LIMIT} Work rows; a purge removes at most ${PURGE_ROW_LIMIT}.`,
-        );
+        const selected: ArchiveSelection = { rows: [], decisions: [], created: null, creates: false };
+        let scanned = 0;
+        for await (const { segment } of verifiedEntries(input, page.entries, tally, deadline, signal)) {
+          const matched = selectEventRows(
+            (segment.tables.projectHostedRecordBodies ?? []).map(row => JSON.parse(row)),
+            input.ids,
+          );
+          selected.rows.push(...matched.rows);
+          selected.decisions.push(...matched.decisions);
+          selected.creates ||= matched.creates;
+          if (matched.created !== null)
+            selected.created = Math.min(selected.created ?? matched.created, matched.created);
+          scanned++;
+        }
+        if (progress.selected.rows.length + selected.rows.length > PURGE_ROW_LIMIT) {
+          await ctx.runMutation(selection.discard, {
+            projectId: input.projectId,
+            operationId: input.operationId,
+          });
+          invariant(
+            false,
+            'BAD_ARGUMENT',
+            `This Item has more than ${PURGE_ROW_LIMIT} Work rows; a purge removes at most ${PURGE_ROW_LIMIT}.`,
+          );
+        }
+        if (scanned || !page.entries.length)
+          progress = await ctx.runMutation(selection.checkpoint, {
+            ...request,
+            expected: { frontier: progress.frontier, rewriteRevision: progress.rewriteRevision },
+            next: page.entries[scanned - 1]?.pin ?? progress.frontier,
+            done: page.done && scanned === page.entries.length,
+            selected,
+          });
+        if (scanned < page.entries.length) break;
       }
-      progress = await ctx.runMutation(selection.checkpoint, {
-        ...input,
-        expected: progress.cursor,
-        next: page.after,
-        done: page.done,
-        selected,
-      });
+    } finally {
+      reportSlice(input, 'selection', tally, started, progress.done);
     }
-    return progress.selected;
+    return {
+      done: progress.done,
+      selected: progress.selected,
+      pin: { frontier: progress.frontier, rewriteRevision: progress.rewriteRevision },
+    };
   },
 });
 
 /** Resume the durable index frontier, or retire the superseded objects of an already-published rewrite. */
 export const run = internalAction({
-  args: purgeSegmentIdentity,
-  returns: v.null(),
-  handler: async (ctx, input) => {
+  args: { ...purgeSegmentIdentity, deadline: v.number() },
+  returns: v.boolean(),
+  handler: async (ctx, { deadline, ...input }) => {
+    if (Date.now() >= deadline) return false;
     const id = { ...input, claim: crypto.randomUUID() };
     type State = {
       purge: ItemPurge;
@@ -105,9 +176,13 @@ export const run = internalAction({
       rows: [string, string][];
     };
     const state: State | null = await ctx.runMutation(store.claim, id);
-    if (!state) return null;
+    if (!state) return true;
+    const started = performance.now();
+    const tally = metrics();
+    const signal = networkTimeout(Math.max(1, deadline - Date.now()));
     const retire = async (key: string, hashes: string[]) => {
-      for (const hash of hashes) await deleteR2Object(r2Config(), journalObjectKey(input.projectId, hash));
+      for (const hash of hashes)
+        await deleteR2Object(r2Config(), journalObjectKey(input.projectId, hash), signal);
       await ctx.runMutation(store.progress, { ...id, advance: { after: key, done: false } });
     };
     let completed = false;
@@ -118,20 +193,45 @@ export const run = internalAction({
         after = state.sweep.pending.key;
       }
       const rows = new Map(state.rows);
-      for (;;) {
+      while (Date.now() < deadline) {
         const page: Page = await ctx.runQuery(store.page, { projectId: input.projectId, after });
-        for (const entry of page.entries) {
-          const hashes = await rewrite(ctx, id, entry, state.purge, rows);
-          if (hashes) await retire(entry.key, hashes);
+        let scanned = 0;
+        for await (const { entry, segment } of verifiedEntries(
+          input,
+          page.entries,
+          tally,
+          deadline,
+          signal,
+        )) {
+          const redacted = redactSegment(segment, state.purge, rows);
+          if (redacted.next !== segment) {
+            if (signal.aborted || Date.now() >= deadline) break;
+            const hashes = await rewrite(ctx, id, entry, redacted, signal);
+            await retire(entry.key, hashes);
+          }
+          scanned++;
+        }
+        if (scanned < page.entries.length) {
+          if (scanned)
+            await ctx.runMutation(store.progress, {
+              ...id,
+              advance: { after: page.entries[scanned - 1]!.key, done: false },
+            });
+          return false;
         }
         await ctx.runMutation(store.progress, { ...id, advance: { after: page.after, done: page.done } });
         if (page.done) {
           completed = true;
-          return null;
+          return true;
         }
         after = page.after;
       }
+      return false;
+    } catch (error) {
+      if (!signal.aborted) throw error;
+      return false;
     } finally {
+      reportSlice(input, 'sweep', tally, started, completed);
       if (!completed) await ctx.runMutation(store.progress, { ...id, release: true });
     }
   },
@@ -141,12 +241,9 @@ async function rewrite(
   ctx: ActionCtx,
   id: Identity & { claim: string },
   entry: Entry,
-  purge: ItemPurge,
-  operations: ReadonlyMap<string, string>,
+  { next, events }: ReturnType<typeof redactSegment>,
+  signal: AbortSignal,
 ) {
-  const segment = await getJournalSegment(id.projectId, entry.index);
-  const { next, events } = redactSegment(segment, purge, operations);
-  if (next === segment) return null;
   const expected = entry.index.pointer.sha256;
   const text = canonicalPayload(next);
   const physical =
@@ -160,12 +257,17 @@ async function rewrite(
   const stage = { ...id, key: entry.key, expected, planned: pointers.map(pin => pin.sha256) };
   const discarded = await ctx.runMutation(store.stage, stage);
   if (discarded.length) {
-    for (const hash of discarded) await deleteR2Object(r2Config(), journalObjectKey(id.projectId, hash));
+    for (const hash of discarded)
+      await deleteR2Object(r2Config(), journalObjectKey(id.projectId, hash), signal);
     const remaining = await ctx.runMutation(store.stage, { ...stage, discarded });
     invariant(!remaining.length, 'WORK_STALE', 'Staged replacement pins changed.');
   }
   for (const [i, value] of encoded.entries()) {
-    const stored = await putArchiveObject(journalObjectKey(id.projectId, value.pointer.sha256), value);
+    const stored = await putArchiveObject(
+      journalObjectKey(id.projectId, value.pointer.sha256),
+      value,
+      signal,
+    );
     invariant(
       decodeArchiveBytes(stored, value.pointer) === physical[i],
       'EVIDENCE_CHANGED',
