@@ -414,6 +414,8 @@ export async function publishAcceptance(
       ...(receipt.check ? { check: 'passed' } : {}),
     },
     1,
+    main.receipt.kind === 'server' && main.receipt.previousReceiptId !== null,
+    receipt.snapshot.revision,
   );
   await ctx.db.insert('projectHostedAcceptanceSnapshots', {
     projectId: claim.projectId,

@@ -72,14 +72,16 @@ export function FlowRegion({
   const open = feed ? feed.lanes.length + feed.more : undefined;
   const checking = stations.find(station => station.stop === 'checking')!;
   const waiting = stations.flatMap(s => s.held).filter(block => block.colour === 'failed').length;
-  const since = day.since === null ? null : clock(day.since, drawnAt);
+  const since = day.verdict?.since == null ? null : clock(day.verdict.since, drawnAt);
+  const checked = day.verdict?.checkedAt == null ? null : clock(day.verdict.checkedAt, drawnAt);
+  const partial = new Set(day.partial);
   const facts: PictureFacts = {
     today: day.landed,
-    hasMain: !!feed?.main || day.landed > 0 || !!feed?.flow?.main,
+    hasMain: !!feed?.main || day.landed > 0 || !!day.verdict,
     hours: day.byHour,
     red: day.red,
     stationFacts: stations.map(stationFact),
-    mainFact: feed?.flow?.main ? { word: day.red ? 'Failing' : 'Passing', since } : null,
+    mainFact: day.verdict ? { word: day.red ? 'Failing' : 'Passing', since } : null,
     fix: { n: day.fix, waiting },
     failed: { n: day.reverted + day.fixedOnTop, reverted: day.reverted, fixedOnTop: day.fixedOnTop },
   };
@@ -163,7 +165,7 @@ export function FlowRegion({
               </span>
             </button>
             <span className="w">
-              {feed?.flow?.main ? (
+              {day.verdict ? (
                 <span className="st" data-st={day.red ? 'failed' : 'passed'}>
                   <Glyph of={day.red ? 'failed' : 'passed'} />
                   {day.red ? 'Failing' : 'Passing'}
@@ -193,7 +195,7 @@ export function FlowRegion({
       {feed ? (
         <>
           <nav className="flow-figs" aria-label="Today">
-            <A href={hrefs.stats}>
+            <A href={hrefs.stats} title={partial.has('landed') ? 'Partial landing count' : undefined}>
               <span className="k">Landed this hour</span>
               <b className="num">{day.thisHour.toLocaleString('en')}</b>
               <span className="flow-spark" role="img" aria-label="Landings per hour, the last 12 hours">
@@ -216,18 +218,26 @@ export function FlowRegion({
                 {day.samples ? (
                   <>
                     9 in 10 under <b>{duration(day.nineInTen!)}</b>
+                    {partial.has('took') ? ' · partial sample' : ''}
                   </>
+                ) : day.landed || partial.has('took') ? (
+                  'No timing samples'
                 ) : (
                   'nothing landed today'
                 )}
               </span>
             </A>
-            <A href={hrefs.lanes}>
+            <A href={hrefs.lanes} title={partial.has('needsFix') ? 'Partial needs-fix count' : undefined}>
               <span className="k">Needs fix today</span>
               <b className="num">{day.fix.toLocaleString('en')}</b>
               <span className="s">{waiting ? `${waiting} waiting` : 'none waiting'}</span>
             </A>
-            <A href={hrefs.code}>
+            <A
+              href={hrefs.code}
+              title={
+                partial.has('reverted') || partial.has('fixedOnTop') ? 'Partial recovery counts' : undefined
+              }
+            >
               <span className="k">Reverted today</span>
               <b className="num">{day.reverted.toLocaleString('en')}</b>
               <span className="s">
@@ -237,7 +247,7 @@ export function FlowRegion({
             <A href={hrefs.code}>
               <span className="k">main</span>
               <b>
-                {feed?.flow?.main ? (
+                {day.verdict ? (
                   <span className="st" data-st={day.red ? 'failed' : 'passed'}>
                     <Glyph of={day.red ? 'failed' : 'passed'} />
                     {day.red ? 'Failing' : 'Passing'}
@@ -246,7 +256,15 @@ export function FlowRegion({
                   <span className="nr">not reported</span>
                 )}
               </b>
-              <span className="s">{since ? <>since {<b>{since}</b>}</> : 'no verdict yet today'}</span>
+              <span className="s">
+                {since ? (
+                  <>since {<b>{since}</b>}</>
+                ) : checked ? (
+                  <>Checked {<b>{checked}</b>}</>
+                ) : day.verdict ? null : (
+                  'Waiting for a conclusive main check'
+                )}
+              </span>
             </A>
           </nav>
           <button
@@ -264,8 +282,18 @@ export function FlowRegion({
             </span>
             {checking.checks.length ? <span className="prop">Shards · proposed</span> : null}
             <span className="ci">
-              <b>{day.ciMinutes.toLocaleString('en')}</b> CI min today,{' '}
-              <b>{day.lostMinutes.toLocaleString('en')}</b> on checks that did not land
+              <b title={partial.has('ciMinutes') ? 'Partial CI coverage' : undefined}>
+                {day.ciMinutes.toLocaleString('en')}
+              </b>{' '}
+              CI min today,{' '}
+              <b
+                title={
+                  partial.has('lostMinutes') ? 'Partial coverage of checks that did not land' : undefined
+                }
+              >
+                {day.lostMinutes.toLocaleString('en')}
+              </b>{' '}
+              on checks that did not land
             </span>
           </button>
         </>

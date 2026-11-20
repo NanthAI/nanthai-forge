@@ -6,7 +6,7 @@
 // ('ready') counts at Checking, so the line, the picture and Lanes count every stop alike (`lineStops`).
 import { hrefFor } from './paths';
 import { followLink } from './router';
-import { firstTryPercent, mainToday } from '../../../src/flow-day';
+import { firstTryPercent, flowVerdict, mainToday, type FlowDayFeed } from '../../../src/flow-day';
 
 export type LineStage = 'editing' | 'saved' | 'queued' | 'checking' | 'ready';
 /** A stop on the line: the stages it counts. */
@@ -30,7 +30,7 @@ export type LineFeed = {
   /** The last Lane that left the line, and how. */
   exit?: { laneId: string; kind: 'landed' | 'set-aside'; at: number } | null;
   /** The Flow view's running day (src/flow-day.ts `FlowDay`); read it with `flowToday`. */
-  flow?: { hours: number[][]; took: number[][]; main?: { red: boolean; since: number } };
+  flow?: FlowDayFeed;
 };
 
 /** The line's stops in order, each with the stages it counts. One list for the top bar, the Flow picture and the
@@ -114,11 +114,13 @@ function MainStop({ feed, href, phone }: { feed: LineFeed | undefined; href: str
   const shown = !today
     ? 'main'
     : `main · ${n}${phone ? '' : ' today'}${pct === null ? '' : ` · ${pct}%${phone ? '' : ' first try'}`}`;
+  const verdict = flowVerdict(feed?.flow);
+  const state = verdict ? (verdict.red ? 'Main failing' : 'Main passing') : undefined;
   const label = !today
     ? 'main, not loaded yet'
-    : `${shown}${phone ? `, ${n} landing${today.landed === 1 ? '' : 's'} today${pct === null ? '' : `, ${pct}% first try`}` : ''}${!feed?.main && !today.landed ? ', nothing landed yet' : ''} (UTC day)`;
+    : `${shown}${phone ? `, ${n} landing${today.landed === 1 ? '' : 's'} today${pct === null ? '' : `, ${pct}% first try`}` : ''}${!feed?.main && !today.landed ? ', nothing landed yet' : ''} (UTC day)${state ? `, ${state.toLowerCase()}` : ''}`;
   return (
-    <a href={href} onClick={followLink} className="stop tomain" aria-label={label}>
+    <a href={href} onClick={followLink} className="stop tomain" aria-label={label} title={state}>
       {/* Two unbreakable groups, so a narrow line wraps it to two rows at most: "main · N today", "· X% first try". */}
       <span className="g" aria-hidden="true">
         <span className="lbl">main</span>

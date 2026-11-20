@@ -130,6 +130,21 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
   const region = (page, name) => page.locator(`section.region[aria-label="${name}"]`);
   const box = async (page, name) => (await region(page, name).boundingBox()) ?? assert.fail(`no ${name}`);
   try {
+    await t.test('a receipt-only day shows its count, partial timing and retained main verdict', async t => {
+      for (const measured of [false, true]) {
+        const page = await open(t, 1440, measured ? 'partial-measured' : 'partial-empty');
+        const figures = page.locator('.flow-figs');
+        assert.match(
+          await figures.getByRole('link', { name: /Land to main/ }).textContent(),
+          measured ? /partial sample/ : /No timing samples/,
+        );
+        assert.match(await figures.getByRole('link', { name: /main Passing/ }).textContent(), /Checked/);
+        assert.equal(await page.locator('header.top .line .tomain').getAttribute('title'), 'Main passing');
+      }
+      const phone = await open(t, 390, 'partial-empty');
+      assert.match(await phone.locator('.flow-rows > li').last().textContent(), /Passing/);
+    });
+
     await t.test('every stop counts what the top bar counts, block for block (one source)', async t => {
       for (const data of ['busy', 'calm', 'worst']) {
         const page = await open(t, 1440, data);

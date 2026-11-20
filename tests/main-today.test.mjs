@@ -49,7 +49,17 @@ const bind = (f, s) =>
     {},
   );
 const move = (f, before, after) =>
-  f.tx('mainTodayMove', { _handler: ctx => sub.transitionLineSubmission(ctx, before, after) }, {});
+  f.tx(
+    'mainTodayMove',
+    {
+      _handler: async ctx => {
+        if (before.phase !== 'landed' && after.phase === 'landed')
+          await store.writeLineMain(ctx, f.projectId, { head: after.id, at: new Date().toISOString() }, 1);
+        await sub.transitionLineSubmission(ctx, before, after);
+      },
+    },
+    {},
+  );
 function countSummaryWrites(f) {
   const rows = f.tables.projectFinishReadRows;
   const counter = { n: 0 };
@@ -62,13 +72,13 @@ function countSummaryWrites(f) {
 }
 const today = async f => day.mainToday((await read(f)).flow, Date.now());
 
-test('a Lane that lands on its first submission is a first try, in the landing’s one summary write', async t => {
+test('a first submission lands first try, within the existing publication and exit writes', async t => {
   const f = await finishFixture(t);
   const a = state(f, randomUUID(), 'checking');
   await bind(f, a);
   const summary = countSummaryWrites(f);
   await move(f, a, { ...a, phase: 'landed' });
-  assert.equal(summary.n, 1, 'the exit write carries the judgement: no second summary write');
+  assert.equal(summary.n, 2, 'publication and exit carry the count and judgement: no extra summary write');
   assert.deepEqual(await today(f), {
     landed: 1,
     firstTry: 1,

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { flowText, flowStations } from '../dist/flow-text.js';
-import { stepFlow, flowMain } from '../dist/flow-day.js';
+import { stepFlow, flowMain, rebuildFlowLandings, utcDayStart } from '../dist/flow-day.js';
 
 const now = Date.parse('2026-11-20T14:05:00Z');
 const lane = (stage, extra = {}) => ({
@@ -122,4 +122,21 @@ test('flow takes no parameters', async t => {
     f.transport().dispatch('flow', { laneId: randomUUID() }),
     e => e.code === 'BAD_ARGUMENT',
   );
+});
+
+test('the Flow text distinguishes reconstructed landings, partial coverage and a retained pass', () => {
+  const start = utcDayStart(now);
+  const flow = {
+    ...rebuildFlowLandings({ hours: [], took: [] }, start, [3], true),
+    audit: { red: false, at: now },
+  };
+  const feed = { lanes: [], more: 0, moreIsLowerBound: false, main: null, flow };
+  const rebuilt = flowText(feed, now);
+  assert.match(rebuilt.text, /3 +landed today .*passing \(checked at 14:05 UTC\)/);
+  assert.match(rebuilt.text, /no timing samples recorded today/);
+  assert.match(rebuilt.text, /Partial coverage today: land-to-main times, first try/);
+  const measured = flowText({ ...feed, flow: stepFlow(flow, now, { landed: 1, took: 400 }) }, now);
+  assert.match(measured.text, /4 +landed today/);
+  assert.match(measured.text, /middle 6 min/);
+  assert.match(measured.text, /Partial coverage today: land-to-main times/);
 });

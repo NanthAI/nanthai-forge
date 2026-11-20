@@ -348,6 +348,7 @@ const heldAt = {
 };
 // Today on the line: landings per hour since 06:00, a needs fix, a revert, CI minutes (src/flow-day.ts).
 const hourOf = (minutes: number) => Math.floor(ago(minutes) / 3_600_000);
+const partial = params.get('data')?.startsWith('partial-');
 const flow: NonNullable<LineFeed['flow']> = {
   hours: Array.from({ length: 9 }, (_, i) => [
     hourOf((8 - i) * 60),
@@ -358,8 +359,19 @@ const flow: NonNullable<LineFeed['flow']> = {
     3600 + i * 600,
     i === 5 ? 1200 : 0,
   ]),
-  took: Array.from({ length: 20 }, (_, i) => [hourOf(i * 20), 240 + ((i * 97) % 600)]),
-  main: { red: false, since: ago(400) },
+  ...(partial
+    ? {
+        took: params.get('data') === 'partial-measured' ? [[hourOf(2), 400]] : [],
+        audit: { red: false, at: ago(20) },
+        repair: {
+          day: Math.floor(NOW / 86_400_000) * 86_400_000,
+          partial: ['took', 'needsFix', 'ciMinutes'],
+        },
+      }
+    : {
+        took: Array.from({ length: 20 }, (_, i) => [hourOf(i * 20), 240 + ((i * 97) % 600)]),
+        main: { red: false, since: ago(400) },
+      }),
 };
 const busyLanes: Mark[] = [
   ...read.held.map(row => ({

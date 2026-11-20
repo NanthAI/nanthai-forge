@@ -3,6 +3,7 @@ import { v } from 'convex/values';
 import { finishQuery } from './cliServer';
 import { accessibleProject } from './projectAuthority';
 import { lineSummary } from './projectLiveLineStore';
+import { retainedMainVerdict } from './projectLiveLineRecovery';
 import { legacyLineMain } from './projectLiveLineLegacy';
 import { finishReadSourceDb } from './projectFinishReadReader';
 import { liveLineStage } from './projectLiveLineFields';
@@ -47,6 +48,8 @@ export const liveLineResult = v.object({
       hours: v.array(v.array(v.number())),
       took: v.array(v.array(v.number())),
       main: v.optional(v.object({ red: v.boolean(), since: v.number() })),
+      audit: v.optional(v.object({ red: v.boolean(), at: v.optional(v.number()) })),
+      repair: v.optional(v.object({ day: v.number(), partial: v.array(v.string()) })),
       /** [hour, first-try landings, landings judged] (Item 32e8de50). */
       first: v.optional(v.array(v.array(v.number()))),
     }),
@@ -115,6 +118,9 @@ export const read = finishQuery({
         if (original?.work?.generationId)
           main = await legacyLineMain(sourceDb, projectId, original.work.generationId);
       }
+      const flow = flowDay(value.flow);
+      if (!flow.main && !flow.audit && main)
+        Object.assign(flow, await retainedMainVerdict(ctx.db, projectId));
       return {
         lanes: marks.slice(0, 60).map(({ laneId, stage, held, overlap, changedAt, check, mainRed }) => ({
           laneId,
@@ -129,7 +135,7 @@ export const read = finishQuery({
         moreIsLowerBound: marks.length === 101,
         main,
         exit: value.exit ?? null,
-        ...(value.flow ? { flow: flowDay(value.flow) } : {}),
+        ...(value.flow || flow.main || flow.audit ? { flow } : {}),
       };
     } catch (error) {
       return report(error);

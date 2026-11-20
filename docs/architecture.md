@@ -2192,11 +2192,16 @@ while it is checked (Lanes checked together share it) and `mainRed` while the
 gate parks it for a red main; both go in the stage/held patch that already
 happens. The summary's `flow` field (`src/flow-day.ts`) keeps one rolling day of
 hour buckets (landed, needs fix, reverted, fixed on top, CI seconds, seconds on
-checks that did not land) and the last 48 land-to-main times. A landing steps it
-in the summary write its exit already makes (a landing with no mark on the line,
-which wrote none before, now writes the step alone), a failed check in one summary write,
-and main's audit verdict only when it flips; a red episode counts once when it
-ends, as reverted or fixed on top by the audit's recovery verdict. CI seconds count
+checks that did not land) and the last 48 land-to-main times. Publication counts
+every accepted receipt in the existing main snapshot write. The exit write adds
+the landing's duration, CI time and first-try judgement. A failed check uses one
+summary write. The first conclusive main audit and later flips publish a verdict.
+Legacy flows without a projected verdict read the retained audit state. A
+retained full pass gives the time it ran when that evidence is available. A
+recorded state change gives the start of the streak. An inconclusive audit
+leaves the previous verdict in force, if there is one. A red
+episode counts once when it ends, as reverted or fixed on top by the audit's
+recovery verdict. CI seconds count
 each check once: a submission's latest check (a batch member's share) when it
 lands or its check fails, and a check it discards (a failed shared check, a cancelled run)
 when a write moves those seconds into its own discarded seconds, in one summary
@@ -2215,8 +2220,19 @@ asks for the stored day, `mainDay`, on the capability or clone main read it alre
 on its own clock, so a cached query never serves yesterday's)
 and `flow` read the UTC day from it. Readers work out "today" and
 elapsed times themselves; `nforge agent ROOT flow` renders the same feed as text. Ordinary writes initialize legacy Lanes; untouched Lanes
-remain uncounted, and reads never backfill. Legacy main uses exact Channel/receipt
-lookups until publication installs its summary.
+remain uncounted. Legacy main uses exact Channel/receipt lookups until
+publication installs its summary.
+
+Publication seeds a missing legacy UTC day from the same receipt window as
+`landings`. The operator can also run `projectLiveLineRepair:backfill` with
+`{projectId, dayStart}` (UTC midnight in milliseconds) once per project/day.
+The replay reads up to three pages of 100 receipts with a 1 MiB read limit
+per page. It replaces only that day's landing buckets. A capped replay
+preserves larger live counts and marks landings partial unless the current
+Channel proves that a full final page reached the end. Receipt-only replay leaves recorded durations, first tries,
+needs-fix outcomes, reverts, fixes on top, CI minutes and lost minutes intact
+and marks those fields partial. A retry makes no receipt reads. A normal
+landing makes no extra writes, and subscribing never triggers a rebuild.
 
 `useLiveLine` sleeps after the existing hidden/idle grace and catches up once on
 return, including after idle sleep. HostedStrip replaces its Work-history hooks;

@@ -5,7 +5,14 @@
  * One line per stop with open, held, the longest wait and the held Lanes by id, then the ways back, the checks and
  * the next step. Pure and read-free; elapsed times come from the feed's timestamps and the caller's clock.
  */
-import { FLOW_TOOK, firstTryPercent, flowToday, utcDayStart, type FlowDay } from './flow-day.js';
+import {
+  FLOW_TOOK,
+  firstTryPercent,
+  flowToday,
+  flowVerdict,
+  utcDayStart,
+  type FlowDayFeed,
+} from './flow-day.js';
 
 /** A Lane's stage in the feed. */
 type FlowStage = 'editing' | 'saved' | 'queued' | 'checking' | 'ready';
@@ -25,9 +32,7 @@ export type FlowFeed = {
   more: number;
   moreIsLowerBound: boolean;
   main: { head: string; at?: string } | null;
-  flow?:
-    | FlowDay
-    | { hours: number[][]; took: number[][]; main?: { red: boolean; since: number }; first?: number[][] };
+  flow?: FlowDayFeed;
 };
 
 /** The line's stops and the stages each counts (web/src/app/Line.tsx `lineStops`): one vocabulary and one count
@@ -87,7 +92,8 @@ export function flowText(feed: FlowFeed, now: number, root = '.') {
   const stations = flowStations(feed, now);
   const dayStart = utcDayStart(now);
   const today = flowToday(feed.flow, now, dayStart);
-  const red = feed.flow?.main?.red === true;
+  const verdict = flowVerdict(feed.flow);
+  const red = verdict?.red === true;
   const open = feed.lanes.length + feed.more;
   const needs = stations.reduce((n, s) => n + s.needsYou, 0);
   const width = Math.max(...flowStops.map(s => s.word.length));
@@ -112,10 +118,12 @@ export function flowText(feed: FlowFeed, now: number, root = '.') {
     lines.push(
       `${' '.repeat(width)}  +${feed.more}${feed.moreIsLowerBound ? ' or more' : ''} open Lanes past the first ${feed.lanes.length}, not by stop`,
     );
-  const since = feed.flow?.main ? ` since ${clock(feed.flow.main.since, dayStart)}` : '';
+  const since = verdict?.since == null ? '' : ` since ${clock(verdict.since, dayStart)}`;
+  const checked = verdict?.checkedAt == null ? '' : ` (checked at ${clock(verdict.checkedAt, dayStart)})`;
+  const partial = new Set(today.partial);
   const pct = firstTryPercent(today);
   lines.push(
-    `${'main'.padEnd(width)}  ${String(today.landed).padStart(3)}   landed today (UTC), ${today.thisHour} this hour${pct === null ? '' : `, ${pct}% first try`}; ${red ? `failing${since}` : feed.flow?.main ? `passing${since}` : 'passing or failing not reported yet'}`,
+    `${'main'.padEnd(width)}  ${String(today.landed).padStart(3)}${partial.has('landed') ? '+' : ''}   landed today (UTC), ${today.thisHour} this hour${pct === null ? '' : `, ${pct}% first try`}; ${verdict ? `${red ? 'failing' : 'passing'}${since}${checked}` : 'waiting for a conclusive main check'}`,
   );
   lines.push(
     `Ways back: needs fix ${today.fix} today; main failed ${today.reverted + today.fixedOnTop} today (${today.reverted} reverted, ${today.fixedOnTop} fixed on top)${red ? '; main is failing now' : ''}`,
@@ -128,6 +136,20 @@ export function flowText(feed: FlowFeed, now: number, root = '.') {
     lines.push(
       `Land to main: middle ${flowDuration(today.middle! * 1000)}, 9 in 10 under ${flowDuration(today.nineInTen! * 1000)} (${today.samples >= FLOW_TOOK ? `the last ${today.samples} landings` : plural(today.samples, 'landing')} today)`,
     );
+  else if (today.landed) lines.push('Land to main: no timing samples recorded today');
+  if (partial.size) {
+    const labels = {
+      landed: 'landings',
+      took: 'land-to-main times',
+      firstTry: 'first try',
+      needsFix: 'needs fix',
+      reverted: 'reverts',
+      fixedOnTop: 'fixes on top',
+      ciMinutes: 'CI minutes',
+      lostMinutes: 'lost minutes',
+    };
+    lines.push(`Partial coverage today: ${today.partial.map(figure => labels[figure]).join(', ')}.`);
+  }
   const person = stations.flatMap(s => s.heldLanes).find(lane => lane.why !== 'main is failing');
   const next = red
     ? `main is failing: Lanes held for it land when it passes again. Read nforge agent ${root} queue '{}' for the order.`
@@ -142,6 +164,7 @@ export function flowText(feed: FlowFeed, now: number, root = '.') {
     stops: stations.map(({ checks: _checks, ...s }) => s),
     checks: checking.checks,
     today: {
+      ...(today.partial.length ? { partial: today.partial } : {}),
       landed: today.landed,
       thisHour: today.thisHour,
       byHour: today.byHour,
@@ -157,7 +180,12 @@ export function flowText(feed: FlowFeed, now: number, root = '.') {
       ciMinutes: today.ciMinutes,
       lostMinutes: today.lostMinutes,
     },
-    main: { red, since: feed.flow?.main?.since ?? null, head: feed.main?.head ?? null },
+    main: {
+      red,
+      since: verdict?.since ?? null,
+      ...(verdict?.checkedAt != null ? { checkedAt: verdict.checkedAt } : {}),
+      head: feed.main?.head ?? null,
+    },
     more: feed.more,
     next,
   };

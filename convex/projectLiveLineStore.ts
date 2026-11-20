@@ -4,7 +4,8 @@ import type { Doc, Id } from './_generated/dataModel';
 import { lineOwner, detachLineOwner } from './projectLiveLineOwners';
 import { internal } from './_generated/api';
 import { nextActivityHour } from './accountProjectOrderHour';
-import { flowDay, flowMain, stepFlow, type FlowStep } from '../src/flow-day';
+import { readFlowLandings } from './projectLiveLineRecovery';
+import { flowDay, flowMain, HOUR_MS, stepFlow, utcDayStart, type FlowStep } from '../src/flow-day';
 
 type Db = MutationCtx['db'];
 type Mark = Doc<'projectLiveLineLanes'>;
@@ -192,14 +193,21 @@ export async function writeLineMain(
   projectId: Id<'hostedProjects'>,
   main: { head: string; at?: string; actor?: string; automatic?: boolean; check?: string },
   landings = 0,
+  priorServerReceipt = false,
+  firstSequence?: number,
 ) {
   const old = await lineSummary(ctx.db, projectId);
   const value = old ? JSON.parse(old.value) : {};
-  if (JSON.stringify(value.main) === JSON.stringify(main)) return;
+  if (firstSequence !== undefined && (value.landingSequence ?? -1) >= firstSequence) return;
+  if (firstSequence === undefined && JSON.stringify(value.main) === JSON.stringify(main)) return;
   // Seven UTC day buckets share this existing read/write. Replays and check-display patches do not count twice.
   // A new landing moves the head or, for a batch whose receipts leave main's tree as it was, the time: either counts.
   // A replay sends the same snapshot and returned above; a check-display patch keeps head and time.
-  if (landings > 0 && main.at && (value.main?.head !== main.head || value.main?.at !== main.at)) {
+  if (
+    landings > 0 &&
+    main.at &&
+    (firstSequence !== undefined || value.main?.head !== main.head || value.main?.at !== main.at)
+  ) {
     const at = Date.parse(main.at);
     if (Number.isFinite(at)) {
       const day = Math.floor(at / 86_400_000);
@@ -208,6 +216,27 @@ export async function writeLineMain(
         (row: { day: number }) => row.day >= day - 6 && row.day <= day,
       );
       const today = days.find(row => row.day === day);
+      // Receipt creationTime is the time of this database write; the supplied
+      // publication timestamp can have been captured before entering the mutation.
+      const now = Date.now();
+      const dayStart = utcDayStart(now);
+      const flow = flowDay(value.flow);
+      const dayHour = dayStart / HOUR_MS;
+      const priorLanded = flow.hours.reduce((count, row) => count + (row[0] >= dayHour ? row[1] : 0), 0);
+      const previousAt = Date.parse(value.main?.at ?? '');
+      // A legacy snapshot may outlive its missing or incomplete Flow day. Seed from the same
+      // receipt replay as the operator repair. Append this transaction's own receipts once below.
+      // Once seeded, the current day only steps the count; ordinary publications read no receipts.
+      const missing =
+        flow.repair?.day !== dayStart &&
+        ((dayStart === utcDayStart(at) && (today?.count ?? 0) > priorLanded) ||
+          (priorServerReceipt &&
+            (value.landingSequence === undefined ||
+              !value.main ||
+              (!priorLanded && previousAt >= dayStart && previousAt <= now))));
+      const base = missing ? (await readFlowLandings(ctx.db, projectId, now, flow, firstSequence)).day : flow;
+      value.flow = stepFlow(base, now, { landed: landings });
+      if (firstSequence !== undefined) value.landingSequence = firstSequence + landings - 1;
       if (today) today.count += landings;
       else days.push({ day, count: landings });
       value.publicWeek = { since: week.since, lastAt: at, days };

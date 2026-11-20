@@ -176,14 +176,14 @@ export async function auditEvent(
     ...(drill ? { drill } : {}),
     ...(reverted !== undefined ? { reverted } : {}),
   });
-  // `row` is the audit before this verdict: only a flip reaches the line's summary (Flow view, Item 85f456c1).
+  // `row` is the audit before this verdict: the first conclusive audit and later flips reach the line.
   if (kind === 'red' && !row.red) await lineMainState(ctx.db, row.projectId, { red: true, at });
-  else if (kind === 'green' && row.red)
+  else if (kind === 'green' && (row.red || !row.lastGreen))
     await lineMainState(ctx.db, row.projectId, {
       red: false,
       at,
       // The event's own `reverted`, as Needs me's Main broke row reads it (convex/projectMainRed.ts).
-      ended: reverted === true ? 'reverted' : 'fixed-on-top',
+      ...(row.red ? { ended: reverted === true ? ('reverted' as const) : ('fixed-on-top' as const) } : {}),
     });
 }
 type DrillRecord = NonNullable<Doc<'projectHostedMainAuditEvents'>['drill']>;

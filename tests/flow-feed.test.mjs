@@ -142,7 +142,17 @@ test('CI seconds count each check once: a discarded shared check, then the membe
     ...extra,
   });
   const move = (before, after) =>
-    f.tx('flowMove', { _handler: ctx => sub.transitionLineSubmission(ctx, before, after) }, {});
+    f.tx(
+      'flowMove',
+      {
+        _handler: async ctx => {
+          if (after.phase === 'landed')
+            await store.writeLineMain(ctx, f.projectId, { head: after.id, at: new Date().toISOString() }, 1);
+          await sub.transitionLineSubmission(ctx, before, after);
+        },
+      },
+      {},
+    );
   const [a, b] = ['a', 'b'].map(c => c.repeat(8) + '-0000-4000-8000-000000000000');
   // A shared batch check of 300 s fails; the failure loop moves each member's 150 s share to its own discarded
   // seconds on a write that keeps the phase.
@@ -201,8 +211,8 @@ test('CI seconds count each check once: a discarded shared check, then the membe
   assert.equal(today.fix, 0);
   assert.equal(
     summary.n,
-    6,
-    'one summary write per discarded share and per landing; none for an end whose check did not fail',
+    10,
+    'two discarded shares and two writes per publication and exit; no writes for a cancelled pass',
   );
 });
 

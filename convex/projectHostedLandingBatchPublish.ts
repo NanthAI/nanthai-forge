@@ -471,6 +471,8 @@ export async function publishLandingBatch(
     claim.projectId,
     { head, at: last.at, actor: last.actor.id, automatic: true, check: 'passed' },
     receipts.length,
+    main.receipt.kind === 'server' && main.receipt.previousReceiptId !== null,
+    receipts[0]!.snapshot.revision,
   );
   await ctx.db.patch(channel._id, {
     operationId: last.id,

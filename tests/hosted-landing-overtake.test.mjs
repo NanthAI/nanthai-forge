@@ -289,6 +289,14 @@ test('c6b81429: an accepting wait ends when that entry re-checks instead', async
 
 // Zoo timing incident 70a9bd2f: a build input and disjoint source arrive together.
 // The required combined check must fit within 1.5 solo check durations.
+// Flow's receipt sequence and its earlier landing bucket add 122 read B and 144 write B
+// per pair (85f456c1). Keep this measured delta separate from other writers' exact bases.
+const withoutFlowReceiptBytes = ({ calls, readBytes, writeBytes }) => ({
+  calls,
+  readBytes: readBytes - 122,
+  writeBytes: writeBytes - 144,
+});
+
 test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5x solo timing bar', async t => {
   storageClock(t, { elapsed: true });
   const CHECK = 1000;
@@ -334,7 +342,7 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // `first` row rides the landing's summary write; no call or write added, about 25 B per landing.
   // Reads 1,895,434 -> 1,896,106 B, writes 607,376 -> 608,297 B (Item 85f456c1, In-queue writer and batch truth gap): the In-queue binding write (+1 write
   // per submitted Lane, owner-accepted) and the batch publish's line-summary update; no call, about 0.8 KB per landing.
-  const measured = { calls: pair.calls, readBytes: pair.readBytes, writeBytes: pair.writeBytes };
+  const measured = withoutFlowReceiptBytes(pair);
   assert.deepEqual(
     measured,
     { calls: 111, readBytes: 1_896_487, writeBytes: 608_528 },
@@ -380,7 +388,7 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // replay; no call.
   // Reads 1,900,686 -> 1,901,360 B, writes 609,872 -> 610,798 B (Item 85f456c1, In-queue writer and batch truth gap): the In-queue binding write, as in the
   // small replay; no call.
-  const measured = { calls: after.calls, readBytes: after.readBytes, writeBytes: after.writeBytes };
+  const measured = withoutFlowReceiptBytes(after);
   assert.deepEqual(
     measured,
     { calls: 111, readBytes: 1_901_741, writeBytes: 611_029 },

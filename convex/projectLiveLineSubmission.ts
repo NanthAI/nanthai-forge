@@ -59,7 +59,6 @@ function flowStep(before: LineState, state: LineState): FlowStep | null {
     const runner = seconds(state.counts?.runnerSeconds);
     const submitted = Date.parse(state.timing?.submittedAt ?? state.at ?? '');
     return {
-      landed: 1,
       ciSeconds: runner + lost,
       lostSeconds: lost,
       ...(Number.isFinite(submitted) ? { took: Math.max(0, (Date.now() - submitted) / 1000) } : {}),
@@ -216,14 +215,14 @@ export async function transitionLineSubmission(
   // First try (docs/concepts.md#first-try, the rule of src/stats-estimate.ts#firstTry, live and per Lane): none of the
   // landing's Lanes had a submission end without landing since they last landed, it replaced no earlier attempt, and
   // no check of it was thrown away. Judged on the landing's own write: no read is added.
-  if (step?.landed)
+  if (step && state.phase === 'landed' && before.phase !== 'landed')
     step.first =
       !boundRetried &&
       !state.supersedes &&
       !(seconds(state.counts?.discardedRunnerSeconds) > 0) &&
       !state.counts?.discardedRunnerUnknown;
-  // One summary write: the exit a landing already writes, carrying the Flow day's step. A landing with no bound
-  // mark, or a failed check, writes the step alone.
+  // One summary write: the exit a landing already writes, carrying duration, check time and first try.
+  // Publication counts the receipts separately in its existing main snapshot write.
   if (removed || step)
     await lineExit(
       ctx.db,
