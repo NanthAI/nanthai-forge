@@ -407,7 +407,10 @@ compatibility reply: nothing is scheduled and the window stays unchanged.
 
 **Coverage changes and newly covered tests.** A landing that changes which tests run (the
 check script or contract, CI configuration, or the standard browser-selection files) never
-earns main green from its own full check; its audit runs promptly. Before it lands, its check is
+earns main green from its own full check; its audit runs promptly. On a project whose checks
+run with no gate (machine runners, credentialed Actions), which keeps no audit bookkeeping, it is
+only marked, so its own run carries no other landing; the next landing's full run does. Before it
+lands, its check is
 main's full check plus a trial of its own definition
 ([definition trial](operations/github-actions-checks.md#definition-trial)). When a red audit's failing
 tests had no pass on the last green main (skipped or not run), recovery names the landing that

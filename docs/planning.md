@@ -84,7 +84,26 @@ Anything else is `INVALID_WORK_JOURNAL`, so a row cannot vouch for its own struc
 redacted command and the purge as the tombstone, with the same checks as the first run, so a rebuild keeps every
 Item that names the purged one and cannot bring the text back; in a full replay (load, export, recovery) the purge also replaces
 the words of every earlier version and comment of the Item, including those from the base checkpoint; the hosted
-index keeps them until the purge executor redacts its records. A purged decision
+index keeps them until the purge executor redacts its records. The executor (`projectPlanningPurge.run`, internal;
+purge Lane 4 calls it) runs a read-only preflight, selects every journal row of the Item under any of its ids (notes
+included, at most 1,000 rows, else refused with nothing written), appends the purge and the tombstone in one mutation
+(refused if a row of the Item was appended after the selection read), then redacts in bounded pages: journal rows,
+the Work index of every record partition, kept or retired ones included (events, versions, comments, notes,
+lifecycle, the Intent, the Item's root, Initiative record and search row, and stale payload chunks), the work store's
+issue and comment versions, bodies and heads, and the store fingerprints. Aliases have no index by Intent, so a purge
+reads all of the project's aliases and refuses a project with more than 8,000 (nothing written); the preflight also
+refuses an Item with a work-store version in a journal segment, an Item in a stored base (no creation row after the
+backup's revision or a record-detail catalog's: the archive keeps its words and a load or rebuild reads it again, so a
+base scrub must come first; a detail migration is refused while a purge is open) and an Intent
+with Lane handoff summaries (purge Lane 3). The last step also refuses while a Work index build runs or the set of
+record partitions differs from the one the check walked. The same pages
+run read-only as the completeness check; the purge's `purgedAt` (project `itemPurges`) is set only when the check
+finds nothing left on the generation still selected. A stopped purge resumes by running again with the same
+operation id, also after an index rebuild. Issue, comment and Intent record versions never enter a journal segment.
+Intent record versions in the work store (every Issue's Intent copy, kept in dual and records mode), the store's
+lifecycle versions (a put's reason) and the Intent's handoff summaries are purge Lane 3's:
+until it lands, the preflight refuses an Item whose Intent has work-store versions with nothing written, and the last
+step refuses to set `purgedAt` while any remain, so such a purge never reports done. A purged decision
 comment's own body version replays under a request derived from the comment's (`purgedDecisionRequest`), since the
 body it hashed is gone. A put that newly names a tombstone as its Initiative, parent, linked Intent or relation is
 refused with `PLANNING_ITEM_PURGED`; links an Item already has stay, so it can still be edited. A retry of a purged
@@ -95,7 +114,9 @@ legacy source-return whose pinned Work digest a purged row makes unreproducible 
 only, and the export's coverage says so. Healthy rows cost nothing extra; a page with purged rows looks each distinct
 purge up once (up to two indexed reads). A put that newly names a link, parent, relation or Initiative
 reads those Items' latest versions (and their alias and Intent) after its other rows, so the live write refuses a
-tombstone exactly as a full replay does; a put that names no new link reads nothing more. Schema 16+ only: older
+tombstone exactly as a full replay does; a put that names no new link reads nothing more. That check asks for each key
+once (a key that came back empty is not asked again), and every large Intent's payload is read in the same batched
+lookups (100 keys per call), so linking k Items costs about three lookup calls, not one per Intent. Schema 16+ only: older
 reducers do not check links.
 
 ### Versions

@@ -67,7 +67,7 @@ export async function materializeLifecycleLane(
     .unique();
   if (head?.recordId !== overlay.pointer.baseRecordId) return;
   const row = overlay.row;
-  await readyJournalRecord(ctx, projectId, head.recordId);
+  await readyJournalRecord(ctx, projectId, head.recordId, head.kind);
   if (['completed', 'abandoned'].includes(row.status))
     await wakeJournal(
       ctx,

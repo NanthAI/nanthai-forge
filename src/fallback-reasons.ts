@@ -38,6 +38,7 @@ const REUSE = {
   'text-conflict': G,
   'check-evidence': L,
   'audit-baseline': L,
+  'coverage-landing': G,
   'path-overlap': G,
   'tested-doc': G,
   'global-risk': G,

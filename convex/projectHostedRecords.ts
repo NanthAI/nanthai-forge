@@ -227,7 +227,7 @@ export async function writeHostedRecord(
   });
   const pointer = { ...identity, ...indexed, recordId: id };
   if (head) {
-    await readyJournalRecord(ctx, input.projectId, head.recordId);
+    await readyJournalRecord(ctx, input.projectId, head.recordId, head.kind);
     await ctx.db.replace(head._id, pointer);
   } else await ctx.db.insert('projectHostedRecordHeads', pointer);
   if (record.kind === 'intent')

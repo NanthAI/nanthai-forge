@@ -346,7 +346,8 @@ recheck), `retired-running` (main moved under a running check and Forge retired 
 `no-check` (main moved before the landing had a check), `semantic-plan` (the composition
 carries semantic merge members), `recovery` (culprit recovery or its fix Lane), `revert`,
 `reuse-policy`, `main-red`,
-`audit-debt`, `text-conflict`, `check-evidence`, `audit-baseline`, `path-overlap`,
+`audit-debt`, `text-conflict`, `check-evidence`, `audit-baseline`, `coverage-landing` (main's
+newest landing changed which tests run and no audit vouches for it yet), `path-overlap`,
 `tested-doc`, `global-risk`, `order-sensitive` (global risk that the
 [fast landing mode](pre-queue-checks.md#landing-modes) never relaxes), `composition-not-exact`, `unsupported-mode`,
 `checked-not-full`, `audit-not-full`, `source-unavailable`, `analysis-expired`.

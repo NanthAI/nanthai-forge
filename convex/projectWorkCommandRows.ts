@@ -16,34 +16,46 @@ export const commandValues = (rows: Rows, collection: string) =>
       ),
     );
 
-/** Only selected record attributes hydrate; note/checkpoint/history collections stay paged. */
+/** Only selected record attributes hydrate; note/checkpoint/history collections stay paged. Every row that needs its
+ * payload is hydrated in the same batched lookups (100 keys per call), so k large Intents cost ceil(parts/100) calls,
+ * not one call per Intent (review r1). */
 export async function commandPayloadRows(rows: Rows, lookup: CommandLookup) {
-  for (const row of [...rows]) {
+  const pending: { row: IndexEntry; header: Record<string, unknown> & IndexHeader; keys: Key[] }[] = [];
+  for (const row of rows) {
     if (
       !row ||
       !['intents', 'initiatives', 'planningItems'].includes(row.collection) ||
-      rows.some(item => item?.collection === `${row.collection}:attributes` && item.key === row.key)
+      rows.some(item => item?.collection === `${row.collection}:attributes` && item.key === row.key) ||
+      pending.some(item => item.row.collection === row.collection && item.row.key === row.key)
     )
       continue;
     const header = JSON.parse(row.value) as Record<string, unknown> & IndexHeader;
     if (!header.payloadKey) continue;
-    const parts: IndexEntry[] = [];
-    for (let offset = 0; offset < header.payloadParts!; offset += 100) {
-      const selected = await lookup(
-        Array.from({ length: Math.min(100, header.payloadParts! - offset) }, (_, i) => ({
-          collection: `${row.collection}:payload`,
-          key: `${header.payloadKey}:${offset + i}`,
-        })),
-      );
-      for (const part of selected) {
-        invariant(part, 'WORK_STALE', 'This Work record changed while reading its attributes.');
-        parts.push(part);
-      }
-    }
+    pending.push({
+      row,
+      header,
+      keys: Array.from({ length: header.payloadParts! }, (_, i) => ({
+        collection: `${row.collection}:payload`,
+        key: `${header.payloadKey}:${i}`,
+      })),
+    });
+  }
+  const keys = pending.flatMap(item => item.keys),
+    parts: (IndexEntry | null)[] = [];
+  for (let offset = 0; offset < keys.length; offset += 100)
+    parts.push(...(await lookup(keys.slice(offset, offset + 100))));
+  let at = 0;
+  for (const { row, header, keys: own } of pending) {
+    const selected = parts.slice(at, (at += own.length));
+    invariant(
+      selected.every(part => part),
+      'WORK_STALE',
+      'This Work record changed while reading its attributes.',
+    );
     rows.push({
       ...row,
       collection: `${row.collection}:attributes`,
-      value: JSON.stringify(assembleIndexValue(row.collection, header, parts)),
+      value: JSON.stringify(assembleIndexValue(row.collection, header, selected as IndexEntry[])),
     });
   }
 }
@@ -94,9 +106,13 @@ export async function commandPlanningRows(
   const current = commandValues(rows, 'planningItems').find(item => item.id === currentId);
   const before = new Set(planningLinkIds(current));
   const named = [...new Set(planningLinkIds(command))].filter(id => !before.has(id));
+  // A key looked up once is never asked again, also when it came back empty (review r1).
+  const asked = new Set<string>();
   const has = (collection: string, key: string) =>
-    rows.some(row => row?.collection === collection && row.key === key);
-  const load = async (keys: Key[]) => {
+    asked.has(`${collection}\n${key}`) || rows.some(row => row?.collection === collection && row.key === key);
+  const load = async (wanted: Key[]) => {
+    const keys = wanted.filter(({ collection, key }) => !asked.has(`${collection}\n${key}`));
+    for (const { collection, key } of keys) asked.add(`${collection}\n${key}`);
     for (let offset = 0; offset < keys.length; offset += 100)
       rows.push(...(await lookup(keys.slice(offset, offset + 100))));
   };

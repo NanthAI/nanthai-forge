@@ -16,6 +16,7 @@ import { emptyTrust } from '../dist/agent-trust.js';
 const reuse = await import(moduleUrl('../convex/projectHostedReuseStore.ts'));
 const mainAudit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
 const reuseAction = await import(moduleUrl('../convex/projectHostedReuse.ts'));
+const auditState = await import(moduleUrl('../convex/projectHostedMainAuditState.ts'));
 useSyntheticHostedEnv(test);
 const baselineFiles = [
   ['package.json', '{"scripts":{}}'],
@@ -700,7 +701,7 @@ test('687d1eda: a coverage landing on main is no reuse baseline until its prompt
     n++
   )
     await f.execute();
-  // The decision refuses before any source analysis (audit-baseline): no proof, a replacement check.
+  // The decision refuses before any source analysis (coverage-landing): no proof, a replacement check.
   assert.deepEqual(f.reuseDecisions, []);
   assert.notEqual((await f.current(state.id)).submission.phase, 'landed');
   assert(f.tables.projectHostedCheckRuns.size > 2, 'the Candidate is checked again on current main');
@@ -754,7 +755,7 @@ test('687d1eda review 0594f115 F1: with no lastGreen yet, a coverage landing is 
     n++
   )
     await f.execute();
-  assert.deepEqual(f.reuseDecisions, [], 'refused before any source analysis (audit-baseline)');
+  assert.deepEqual(f.reuseDecisions, [], 'refused before any source analysis (coverage-landing)');
   assert.notEqual((await f.current(state.id)).submission.phase, 'landed');
   assert(f.tables.projectHostedCheckRuns.size > 2, 'the Candidate is checked again on current main');
 });
@@ -785,6 +786,120 @@ test('687d1eda review 0594f115 F3: publication refuses a main-receipt baseline p
     'never published on the coverage landing own run',
   );
 });
+for (const [name, paths, coverage] of [
+  ['a coverage landing is no baseline', ['.gitlab-ci.yml'], true],
+  ['an ordinary landing keeps no bookkeeping and stays the baseline', ['src/native-projection.ts'], false],
+])
+  test(`687d1eda review 0594f115 F4: on an ungated project (no run.gate), ${name}`, async t => {
+    // Machine runners and credentialed Actions run no gate, so fullGate trusts the run. A landing
+    // that changed which tests run still must not prove itself: noteMainLanding pins firstCheck
+    // (and nothing else). Before the fix it returned early, so the racing landing reused the
+    // coverage landing's own run ('main-receipt') and landed.
+    const { f, state, parent } = await readyRace(t);
+    assert.equal(parent.gate, undefined, 'the main run is ungated');
+    const main = f.currentMain();
+    const receipt = JSON.parse(
+      [...f.tables.projectHostedAcceptances.values()].find(row => row.receiptId === main.receipt.id).value,
+    );
+    assert.equal(f.tables.projectHostedMainAudits.size, 0, 'no audit bookkeeping before this landing');
+    await f.transaction(
+      'ungatedMainLanding',
+      {
+        _handler: async ctx =>
+          auditState.noteMainLanding(ctx, {
+            project: await ctx.db.get(f.projectId),
+            receipt,
+            run: parent,
+            paths,
+          }),
+      },
+      {},
+    );
+    const audit = [...f.tables.projectHostedMainAudits.values()][0];
+    if (coverage) {
+      assert.equal(audit.firstCheck, main.sourceRevision, 'firstCheck pinned at the coverage landing');
+      assert.equal(audit.lastGreen, undefined, 'its own run never earns main green');
+      // Ungated: nothing counted, no audit armed, so nothing can strand red or debt.
+      assert.equal(audit.unaudited, undefined);
+      assert.equal(audit.wake, undefined);
+    } else assert.equal(audit, undefined, 'an ordinary ungated landing writes nothing');
+    for (
+      let n = 0;
+      n < 80 && f.pending().length && (await f.current(state.id)).submission.phase !== 'landed';
+      n++
+    ) {
+      await f.execute();
+    }
+    if (coverage) {
+      assert.deepEqual(f.reuseDecisions, [], 'refused before any source analysis (coverage-landing)');
+      assert.notEqual((await f.current(state.id)).submission.phase, 'landed');
+      assert(f.tables.projectHostedCheckRuns.size > 2, 'the Candidate is checked again on current main');
+    } else {
+      assert.equal((await f.current(state.id)).submission.phase, 'landed');
+      assert.equal((await f.status(state.id)).attempt.crossHeadProof.audit.source, 'main-receipt');
+    }
+  });
+for (const [name, pending] of [
+  ['an ungated coverage landing no pending audit covers cannot ride an older lastGreen', 0],
+  ['a counted coverage landing (gated, audit pending) still rides the older lastGreen and its debt', 1],
+])
+  test(`687d1eda F4: ${name}`, async t => {
+    // A project with audit history (cross-head landings) keeps an older lastGreen. The ungated coverage
+    // landing is pinned but never counted, so no audit will verify it: the older green is no baseline
+    // either. Before the fix that green carried the racing landing ('audit' source) and it landed.
+    const { f, state, parent } = await readyRace(t);
+    const main = f.currentMain();
+    const queued = await f.rawChecks.enqueue(
+      f.rawChecks.selection({
+        candidateId: parent.request.candidateId,
+        expectedHead: main.head,
+        expectedConfiguration: f.rawChecks.configuration.digest,
+      }),
+    );
+    const audited = await passWithSelection(f, queued.id, parent.plan.selection);
+    // Older in sequence than the coverage landing; `pending` is what a gated project counts for it,
+    // so its prompt audit will cover it and the older green with its debt stays the baseline.
+    const lastGreen = { sequence: main.sourceRevision - 1, head: main.head, runId: audited.id };
+    f.insert('projectHostedMainAudits', {
+      projectId: f.projectId,
+      lastGreen,
+      unaudited: { count: pending, firstAt: pending ? new Date().toISOString() : null },
+    });
+    const receipt = JSON.parse(
+      [...f.tables.projectHostedAcceptances.values()].find(row => row.receiptId === main.receipt.id).value,
+    );
+    await f.transaction(
+      'ungatedMainLanding',
+      {
+        _handler: async ctx =>
+          auditState.noteMainLanding(ctx, {
+            project: await ctx.db.get(f.projectId),
+            receipt,
+            run: parent,
+            paths: ['.gitlab-ci.yml'],
+          }),
+      },
+      {},
+    );
+    const audit = [...f.tables.projectHostedMainAudits.values()][0];
+    assert.equal(audit.firstCheck, main.sourceRevision);
+    assert.deepEqual(audit.lastGreen, lastGreen, 'the older green is kept, not replaced');
+    for (
+      let n = 0;
+      n < 80 && f.pending().length && (await f.current(state.id)).submission.phase !== 'landed';
+      n++
+    )
+      await f.execute();
+    if (pending) {
+      assert.equal((await f.current(state.id)).submission.phase, 'landed');
+      assert.deepEqual(f.reuseDecisions, ['proof']);
+      assert.equal((await f.status(state.id)).attempt.crossHeadProof.audit.runId, audited.id);
+    } else {
+      assert.deepEqual(f.reuseDecisions, [], 'refused before any source analysis (coverage-landing)');
+      assert.notEqual((await f.current(state.id)).submission.phase, 'landed');
+      assert(f.tables.projectHostedCheckRuns.size > 3, 'the Candidate is checked again on current main');
+    }
+  });
 test('a text conflict with main never lands on the first check', async t => {
   const { f, state } = await readyRace(t, {
     mainFiles: [['convex/projectConvexSourceOutput.ts', 'export const cost = 3;']],

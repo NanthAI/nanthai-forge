@@ -177,6 +177,7 @@ test('unsealedBy: only refusals no dependent change caused, and scoped re-checks
     'path-overlap',
     'global-risk',
     'order-sensitive',
+    'coverage-landing',
     'tested-doc',
     'composition-not-exact',
     'text-conflict',

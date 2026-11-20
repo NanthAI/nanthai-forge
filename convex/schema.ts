@@ -387,6 +387,26 @@ const projectFields = {
   retention: v.optional(projectRetention),
   /** Paged permanent purge receipt: operation id and progress for the owner. */
   purge: v.optional(projectPurge),
+  /** Item purges (Item 4c9e961e, convex/projectPlanningPurge.ts): one entry per purge, ids and decision requests the
+   * redaction needs, `purgedAt` only once the completeness check found no words left. Bounded: an unfinished purge
+   * stays until it finishes; finished ones keep the newest few. */
+  itemPurges: v.optional(
+    v.array(
+      v.object({
+        operationId: v.string(),
+        itemId: v.string(),
+        ids: v.array(v.string()),
+        intentId: v.optional(v.string()),
+        version: v.number(),
+        decisions: v.array(v.array(v.string())),
+        rows: v.number(),
+        // Revision of the Item's creation row: it must stay after the stored base until the purge is done.
+        created: v.optional(v.number()),
+        startedAt: v.number(),
+        purgedAt: v.optional(v.number()),
+      }),
+    ),
+  ),
   r2Purge: v.optional(
     v.object({ generation: v.number(), cursor: v.union(v.string(), v.null()), failures: v.number() }),
   ),

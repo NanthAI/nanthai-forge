@@ -109,6 +109,13 @@ export const publish = internalMutation({
       'INVALID_WORK_STORE',
       'Complete both detail collections before publication.',
     );
+    // A purge open now, or started after this migration began reading, may have rows this snapshot read whole: a new
+    // stored base must not keep them. Run the migration again after the purge.
+    invariant(
+      !project.itemPurges?.some(item => item.purgedAt === undefined || item.startedAt >= saved._creationTime),
+      'WORK_STALE',
+      'An Item purge is still running on this project. Publish the detail migration after it finishes.',
+    );
     await ctx.db.patch(saved._id, { root: input.root });
     await ctx.db.patch(project._id, {
       work: {

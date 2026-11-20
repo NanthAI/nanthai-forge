@@ -345,7 +345,24 @@ export async function noteMainLanding(
   },
 ): Promise<void> {
   const { receipt, run } = input;
-  if (!run || (!run.gate && !receipt.crossHeadProof) || run.status !== 'passed') return;
+  if (!run || (!run.gate && !receipt.crossHeadProof) || run.status !== 'passed') {
+    // An ungated run (no run.gate: machine runners, credentialed Actions) keeps no audit bookkeeping:
+    // nothing counts it, audits it or clears a red with it. A coverage landing only pins firstCheck,
+    // so reuse never takes its own run as main's baseline (Item 687d1eda, review 0594f115 F4); the
+    // next landing's own full run, under the new selection, is the next baseline. coverageLanding
+    // reads only the paths the caller already has: an ordinary ungated landing still reads nothing.
+    if (run?.status === 'passed' && coverageLanding(run, input.paths)) {
+      const row = await auditRow(ctx, input.project._id);
+      if (!row)
+        await ctx.db.insert('projectHostedMainAudits', {
+          projectId: input.project._id,
+          firstCheck: receipt.snapshot.revision,
+        });
+      else if (row.firstCheck !== receipt.snapshot.revision)
+        await ctx.db.patch(row._id, { firstCheck: receipt.snapshot.revision });
+    }
+    return;
+  }
   const projectId = input.project._id;
   let row = await auditRow(ctx, projectId);
   if (!row) {

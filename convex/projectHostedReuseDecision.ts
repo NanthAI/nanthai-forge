@@ -31,7 +31,8 @@ export type ReuseIneligible =
   | 'audit-debt'
   | 'text-conflict'
   | 'check-evidence'
-  | 'audit-baseline';
+  | 'audit-baseline'
+  | 'coverage-landing';
 const bestTrust = { level: 'autonomous', reason: 'upper bound' } as const;
 const no = (reason: ReuseIneligible) => ({ reason }) as const;
 /** Transaction-local canonical reads; never part of the reuse action response. */
@@ -123,7 +124,8 @@ export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingI
   // is not even read (review 0594f115): the audit row's lastGreen and its debt decide while the
   // audit is pending, the audit's own run once it passed on this head (review 3287896a), and with
   // no lastGreen yet there is no baseline (audit-baseline). firstCheck stays pinned after the
-  // audit, and only a coverage landing or a cross-head first check (no receipt run) sets it.
+  // audit, and only a coverage landing or a cross-head first check (no receipt run) sets it, on
+  // gated and ungated projects alike (review 0594f115 F4), so this check needs no paths read.
   const coverageReceipt = !!receipt && !!savedAudit && savedAudit.firstCheck === receipt.snapshot.revision;
   const currentRun =
     receipt?.check && !receipt.crossHeadProof && !coverageReceipt
@@ -136,6 +138,17 @@ export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingI
   // only when the audit row agrees. Zero extra reads: savedAudit and receipt are already loaded.
   const preferReceipt = currentRun && fullGate(currentRun) && !docsGate(currentRun);
   const green = preferReceipt ? undefined : savedAudit?.lastGreen;
+  // Main's newest landing is a coverage landing (firstCheck) and nothing else vouches for it: no
+  // lastGreen yet (review 0594f115 F1), or, on an ungated project, which pins but never counts it
+  // (noteMainLanding), only an older lastGreen with no pending audit to cover it (F4). A gated one is
+  // counted until an audit at or past it passes. That landing causes the refusal, so it is genuine
+  // and dependent (`coverage-landing`), like the order-sensitive risk analysis finds for a check
+  // entry or CI file. Rows already read.
+  if (
+    coverageReceipt &&
+    (!green || (green.sequence < receipt!.snapshot.revision && !savedAudit!.unaudited?.count))
+  )
+    return no('coverage-landing');
   const sourceKind = green ? ('audit' as const) : ('main-receipt' as const);
   // currentRun is null for a coverage receipt, so it never falls back to its own run.
   const auditId = green?.runId ?? currentRun?.id ?? null;

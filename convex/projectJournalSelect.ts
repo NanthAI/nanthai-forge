@@ -8,7 +8,7 @@ import { canonicalPayload, HOSTED_OPERATION_RETENTION_MS } from '../src/hosted-s
 import { invariant } from '../src/errors';
 import { digest } from '../src/state/hash';
 import { coordinationJournalKey } from './projectJournalCoordinationRows';
-import { journalGraceMs } from './projectJournalWake';
+import { journalGraceMs, wordsKinds } from './projectJournalWake';
 const wordsActions = new Set([
   'put-planning-item',
   'comment-planning-item',
@@ -139,7 +139,12 @@ export async function selectJournal(
     const selected: [Pending['refs'][number]['table'], JournalRow][] = [];
     if (phase === 0) {
       const record = row as Doc<'projectHostedRecords'>;
-      if (!record.journalSegment && !record.lifecyclePlanId) {
+      // Issue, comment and Intent versions hold an Item's words: a purge must reach them in Convex, so they never
+      // enter a segment (Item 4c9e961e). One that was marked ready leaves the ready index instead of being rescanned.
+      if (wordsKinds.has(record.kind)) {
+        if (record.journalReadyAt !== undefined)
+          await ctx.db.patch(record._id, { journalReadyAt: undefined });
+      } else if (!record.journalSegment && !record.lifecyclePlanId) {
         const head = await headFor(ctx, record);
         if (head) bytes += size(head);
         if (head && head.recordId !== record._id) {

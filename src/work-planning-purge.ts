@@ -121,3 +121,93 @@ export function checkPurgedJournal(events: readonly HostedEvent[]) {
     );
   });
 }
+
+/** The purge executor's form of one Work index record of a purged Item (convex/projectPlanningPurge*.ts): the same
+ * value with every word replaced, as a replay of the purged rows would write it. A fixed point, so the executor's
+ * completeness check is "this record equals its purged form". `events` rows take the reducer form of a purged row
+ * (purgedPlanningRowSchema) when they hold a purgeable command; other commands, and every other collection, keep
+ * their structure (ids, versions, status, links, positions). */
+export function purgedIndexValue(
+  collection: string,
+  value: unknown,
+  purgeOperationId: string,
+  decisionRequests: ReadonlyMap<string, string> = new Map(),
+): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const row = { ...(value as Record<string, unknown>) };
+  const drop = (...keys: string[]) => keys.forEach(key => delete row[key]);
+  // A purged decision comment's derived body version replays under purgedDecisionRequest (src/work-planning-state.ts);
+  // the live version, the Intent and its lifecycle move get the same request so live and rebuilt indexes agree.
+  const request = (operationId: unknown) => decisionRequests.get(String(operationId));
+  if (collection === 'planningVersions' || collection === 'planningItems' || collection === 'initiatives') {
+    if (row.purged !== undefined) return value;
+    Object.assign(row, { title: PURGED_ITEM_TITLE, body: '' });
+    // A large record's header also carries its body's length, Done-when flag and the file paths it names.
+    if ('bodyLength' in row) Object.assign(row, { bodyLength: 0, hasDoneWhen: false });
+    drop('reason', 'type', 'owner', 'imported', 'paths');
+    if (request(row.operationId)) row.request = request(row.operationId);
+  } else if (collection === 'planningSearch') {
+    // The search preview (src/planning-search.ts planningSearchEntry): the same fields as the tombstone's row.
+    Object.assign(row, {
+      title: PURGED_ITEM_TITLE,
+      titleLength: PURGED_ITEM_TITLE.length,
+      body: '',
+      bodyLength: 0,
+      hasDoneWhen: false,
+    });
+    drop(
+      'titleTruncated',
+      'bodyTruncated',
+      'doneWhen',
+      'type',
+      'owner',
+      'imported',
+      'payloadKey',
+      'payloadParts',
+    );
+  } else if (collection === 'planningComments')
+    Object.assign(row, { text: 'Deleted comment', authorLabel: '' });
+  else if (collection === 'notes') {
+    row.text = 'Deleted note';
+    drop('anchor');
+  } else if (collection === 'lifecycle') return lifecycleEntry(row, request);
+  else if (collection === 'intents') {
+    for (const key of ['title', 'outcome'] as const) if (key in row) row[key] = PURGED_ITEM_TITLE;
+    for (const key of ['description', 'constraints'] as const) if (key in row) row[key] = '';
+    if (request(row.operationId)) row.request = request(row.operationId);
+    if (Array.isArray(row.lifecycle))
+      row.lifecycle = row.lifecycle.map(entry => lifecycleEntry(entry as Record<string, unknown>, request));
+  } else if (collection === 'events') {
+    const facts = purgeableCommandSchema.safeParse(row.command);
+    if (facts.success)
+      row.command = {
+        action: 'purged-planning-row',
+        purgeOperationId,
+        command: redactPlanningWrite(facts.data),
+      };
+  }
+  return row;
+}
+
+function lifecycleEntry(
+  entry: Record<string, unknown>,
+  request: (operationId: unknown) => string | undefined,
+) {
+  const rest = { ...entry };
+  delete rest.reason;
+  const operation = rest.operation as { id?: string; request?: string } | undefined;
+  if (operation && request(operation.id)) rest.operation = { ...operation, request: request(operation.id) };
+  return rest;
+}
+
+/** The Item a journal command writes to, by the id it names (selection and the completeness check): a put or comment
+ * names the Item (or an alias), a note its Intent, an intent row is its own operation. */
+export function purgeableRowTarget(operationId: string, command: unknown) {
+  const parsed = purgeableCommandSchema.safeParse(command);
+  if (!parsed.success) return undefined;
+  const data = parsed.data;
+  return {
+    command: data,
+    id: data.action === 'intent' ? operationId : data.action === 'note' ? data.intentId : data.itemId,
+  };
+}

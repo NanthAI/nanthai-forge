@@ -149,8 +149,9 @@ const scenarios = [
     }),
   ],
   [
+    // The entry lands first: main is a coverage landing, refused before analysis (687d1eda F4).
     'a change to the check entry rechecks',
-    ['order-sensitive'],
+    [],
     check => ({
       memberPaths: [entry(check), 'packages/b/src/b.ts'],
       fileCount: 2,
@@ -241,8 +242,9 @@ test('parity: the setup action entry is global-risk like the check entry', async
     fileCount: 2,
     ownerReview: true,
   });
-  assert.deepEqual(outcome.decisions, ['order-sensitive']);
-  assert.deepEqual(outcome.firstCheck[1], { landedOn: 'recheck', reason: 'order-sensitive' });
+  // Main is a coverage landing (687d1eda F4): refused before analysis, never carried.
+  assert.deepEqual(outcome.decisions, []);
+  assert.deepEqual(outcome.firstCheck[1], { landedOn: 'recheck', reason: 'coverage-landing' });
   // Listed difference: the standard check's extra inputs are its own; the project's are what it names.
   assert.deepEqual(checkRunEntryPaths(project), ['ci/check.sh', 'ci/setup.sh']);
   assert(checkRunEntryPaths(standard).includes('scripts/forge-check.mjs'));

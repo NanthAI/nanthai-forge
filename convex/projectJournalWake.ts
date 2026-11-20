@@ -36,12 +36,16 @@ export async function wakeJournal(ctx: MutationCtx, input: JournalRunInput, dueA
   );
 }
 /** Attached to the existing supersession write; no added RPC and no idle wake. */
+/** Work store record kinds that hold an Item's words (purge executor, convex/projectPlanningPurgeRedact.ts): their
+ * superseded versions never enter a journal segment, so they are never marked ready. */
+export const wordsKinds = new Set(['issue', 'comment', 'intent']);
 export async function readyJournalRecord(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   id: Id<'projectHostedRecords'>,
+  kind: string,
 ) {
-  if (process.env.FORGE_JOURNAL_SEGMENTS !== '1') return;
+  if (process.env.FORGE_JOURNAL_SEGMENTS !== '1' || wordsKinds.has(kind)) return;
   void projectId;
   await ctx.db.patch(id, { journalReadyAt: Date.now() + journalGraceMs });
 }

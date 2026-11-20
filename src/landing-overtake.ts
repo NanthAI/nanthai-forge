@@ -79,6 +79,8 @@ const DEPENDENT_REFUSALS = new Set([
   'path-overlap',
   'global-risk',
   'order-sensitive',
+  // Main's coverage landing changed which tests run (Item 687d1eda).
+  'coverage-landing',
   'tested-doc',
   'composition-not-exact',
   'text-conflict',

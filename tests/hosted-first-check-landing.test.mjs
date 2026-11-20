@@ -314,11 +314,17 @@ test('Issue 1018d0f8 / 5d690345: a docs-covered main keeps zero discarded passed
   t.diagnostic(`docs-covered reuse ${JSON.stringify(reused)}; exact recheck ${JSON.stringify(rechecked)}`);
 });
 
+// Main's newest landing changed which tests run, so no audit vouches for it yet and the reuse
+// decision refuses before any source analysis (Item 687d1eda, review 0594f115 F4).
+const COVERAGE = 'coverage-landing';
+const analysed = reason => (reason === COVERAGE ? [] : [reason]);
 for (const [path, reason] of [
   ['package.json', 'global-risk'],
   ['fixture/0', 'order-sensitive'],
   // CI configuration the check runs (rule v7: other workflows are ordinary files, Issue 43b51a5e).
-  ['.github/workflows/forge-check.yml', 'order-sensitive'],
+  // On main that is a coverage landing: its own run vouches for nothing (687d1eda F4), so the
+  // racer is refused before analysis, as the main side's change.
+  ['.github/workflows/forge-check.yml', COVERAGE],
 ])
   test(`identical shared ${path} falls back to a real composed check before acceptance`, async t => {
     const f = await wave(t, {
@@ -334,7 +340,7 @@ for (const [path, reason] of [
       states(f).map(s => s.phase),
       ['landed', 'landed'],
     );
-    assert.deepEqual(f.reuseDecisions, [reason]);
+    assert.deepEqual(f.reuseDecisions, analysed(reason));
     const second = receipts(f)[1];
     assert.deepEqual(second.firstCheck, { landedOn: 'recheck', reason });
     assert.equal(second.crossHeadProof, undefined);
@@ -347,7 +353,8 @@ for (const [path, reason] of [
 // `global-risk` is what an effective fast landing mode carries.
 for (const [name, memberPaths, reason] of [
   ['the change (type rules)', ['src/a.ts', 'web/tsconfig.json'], 'order-sensitive'],
-  ['main (CI configuration)', ['.github/workflows/forge-check.yml', 'src/b.ts'], 'order-sensitive'],
+  // Main's CI change is a coverage landing (687d1eda F4): refused before analysis.
+  ['main (CI configuration)', ['.github/workflows/forge-check.yml', 'src/b.ts'], COVERAGE],
   ['the change (a package manifest)', ['src/a.ts', 'package.json'], 'global-risk'],
 ])
   test(`a global-risk file in ${name} rechecks as ${reason}`, async t => {
@@ -356,7 +363,7 @@ for (const [name, memberPaths, reason] of [
       states(f).map(s => s.phase),
       ['landed', 'landed'],
     );
-    assert.deepEqual(f.reuseDecisions, [reason]);
+    assert.deepEqual(f.reuseDecisions, analysed(reason));
     assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason });
     assert.equal(runCount(f), 3);
   });
@@ -691,8 +698,9 @@ test('own check command: the file the command names is global-risk and rechecks'
     states(f).map(s => s.phase),
     ['landed', 'landed'],
   );
-  assert.deepEqual(f.reuseDecisions, [ORDERED]);
-  assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: ORDERED });
+  // The check entry landed first, so main is a coverage landing (687d1eda F4).
+  assert.deepEqual(f.reuseDecisions, []);
+  assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: COVERAGE });
   assert.equal(runCount(f), 3);
 });
 
@@ -715,8 +723,9 @@ test('own check command: the file its Actions setup command names is global-risk
     states(f).map(s => s.phase),
     ['landed', 'landed'],
   );
-  assert.deepEqual(f.reuseDecisions, [ORDERED]);
-  assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: ORDERED });
+  // The check entry landed first, so main is a coverage landing (687d1eda F4).
+  assert.deepEqual(f.reuseDecisions, []);
+  assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: COVERAGE });
   assert.equal(runCount(f), 3);
   // A disjoint overtake still lands on its admission run, and the proof names both entries.
   const clean = await wave(t, { ...disjoint, ...withSetup });
