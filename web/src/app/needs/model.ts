@@ -211,11 +211,13 @@ export function needsView(read: NeedsRead): NeedsView {
       word: aheadWord(request),
       tag: request.membership
         ? 'Access'
-        : request.kind === 'setting'
-          ? 'Setting'
-          : request.kind === 'fork'
-            ? 'Fork run'
-            : 'Request',
+        : request.setting?.origin === 'github-connect'
+          ? 'GitHub'
+          : request.kind === 'setting'
+            ? 'Setting'
+            : request.kind === 'fork'
+              ? 'Fork run'
+              : 'Request',
       question: aheadHead(request),
       who: whoOf(request.requester, request.agent),
     }));

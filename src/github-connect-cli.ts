@@ -130,13 +130,14 @@ export async function githubConnectCli(
       cursor: { type: 'string' },
       'no-mirror': { type: 'boolean' },
       'no-browser': { type: 'boolean' },
+      reason: { type: 'string' },
       help: { type: 'boolean' },
     },
   });
   if (values.help)
     return {
       usage:
-        'nforge github connect|status|disconnect|resume PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID] [--cursor CURSOR] [--no-mirror] [--no-browser]',
+        'nforge github connect|status|disconnect|resume PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID] [--cursor CURSOR] [--no-mirror] [--no-browser] [--reason TEXT]',
     };
   const [command, project] = positionals;
   invariant(
@@ -220,14 +221,22 @@ export async function githubConnectCli(
       repository,
       ...(values['no-mirror'] ? { mirror: false } : {}),
       ...(values['one-way'] && !values['no-mirror'] ? { oneWay: true } : {}),
+      ...(values.reason ? { reason: values.reason } : {}),
     },
   );
   const started = z
-    .object({ authorizeUrl: z.url(), status: z.string() })
+    .object({
+      authorizeUrl: z.url(),
+      status: z.string(),
+      // Item c63c2171: an agent's connect is the owner's decision on Forge first (absent for a person, older servers).
+      approval: z.object({ url: z.url().nullable(), next: z.string() }).passthrough().optional(),
+    })
     .parse(typeof result === 'string' ? JSON.parse(result) : result);
   process.stdout.write(`${JSON.stringify({ operationId: journal.operationId, ...started })}\n`);
-  if (started.status === 'waiting')
-    (dependencies.approve ?? browserApproval)(started.authorizeUrl, values['no-browser']);
+  const link = started.approval ? started.approval.url : started.authorizeUrl;
+  if (started.approval) process.stderr.write(`${started.approval.next}\n`);
+  if (started.status === 'waiting' && link)
+    (dependencies.approve ?? browserApproval)(link, values['no-browser']);
   else process.stderr.write(`GitHub connection: ${started.status}; waiting for its result.\n`);
   const controller = new AbortController(),
     stop = () => controller.abort();

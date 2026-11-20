@@ -15,6 +15,7 @@ import type { LooseEndsRead } from '../../web/src/app/needs/loose-ends';
 const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
 const first = params.get('data') === 'first';
+const connect = params.get('data') === 'connect';
 const writes: unknown[] = [];
 (window as unknown as { writes: unknown[] }).writes = writes;
 
@@ -46,7 +47,7 @@ const approval = (laneId: string, reason: string, minutes: number) => ({
   at: new Date(ago(minutes)).toISOString(),
 });
 
-const read: NeedsRead = first
+const baseRead: NeedsRead = first
   ? {
       held: [lane(1, 'review', 6, { title: 'Stream parser: handle split UTF-8', agent: 'amber-fox' })],
       more: 0,
@@ -195,6 +196,30 @@ const loose: LooseEndsRead = {
   },
 };
 
+// `?data=connect` (Item c63c2171): an agent's GitHub connect asked ahead, in its words; its grant continues to GitHub.
+const read: NeedsRead = connect
+  ? {
+      held: [],
+      more: 0,
+      moreIsLowerBound: false,
+      approvals: JSON.stringify({
+        requests: [
+          {
+            ...approval(
+              'setting:github-connect',
+              'Mirror main to synthetic/repo so reviewers on GitHub see each landing.',
+              4,
+            ),
+            kind: 'setting',
+            setting: { origin: 'github-connect' },
+          },
+        ],
+        complete: true,
+      }),
+      canDecide: true,
+      asks: [],
+    }
+  : baseRead;
 const feed: LineFeed = {
   lanes: [
     ...read.held.map(row => ({
@@ -224,6 +249,12 @@ const record =
   (name: string) =>
   async (input: unknown): Promise<string> => {
     writes.push([name, input]);
+    // The server's grant of a connect names GitHub's authorization (projectHostedApprovals:decide → grantConnect).
+    if (connect && name === 'decide')
+      return JSON.stringify({
+        approval: { status: 'granted' },
+        applied: { authorizeUrl: 'https://github.com/login/oauth/authorize?state=synthetic' },
+      });
     return JSON.stringify({ before: fyi.state, changed: true });
   };
 

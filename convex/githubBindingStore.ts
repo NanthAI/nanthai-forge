@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { internalMutation, internalQuery } from './server';
-import { mutation, query, type QueryCtx, type MutationCtx } from './cliServer';
+import { mutation, query, isDeviceIdentity, type QueryCtx, type MutationCtx } from './cliServer';
 import { accessibleProject, activeOwnedProject } from './projectAuthority';
 import { requireOwnerPerson } from './ownerPerson';
 import { bindingInstallation } from './githubBindingAccess';
@@ -10,6 +10,7 @@ import { enableConnectedMirror, disconnectMirrorPolicy } from './projectAutonomy
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { z } from 'zod';
+import { connectApproval, holdConnect, settleConnect } from './githubConnectRequest';
 const projectId = v.id('hostedProjects');
 async function owner(ctx: QueryCtx | MutationCtx, id: import('./_generated/dataModel').Id<'hostedProjects'>) {
   const user = await ctx.auth.getUserIdentity();
@@ -28,9 +29,11 @@ export const start = internalMutation({
     authorizeUrl: v.string(),
     mirror: v.optional(v.boolean()),
     oneWay: v.optional(v.boolean()),
+    /** Item c63c2171: the agent's words for the owner, shown on the decision (agents only). */
+    reason: v.optional(v.string()),
   },
   returns: v.string(),
-  handler: async (ctx, input) => {
+  handler: async (ctx, { reason, ...input }) => {
     const actor = await owner(ctx, input.projectId);
     invariant(z.uuid().safeParse(input.operationId).success, 'BAD_ARGUMENT', 'Use an operation UUID.');
     invariant(
@@ -50,26 +53,35 @@ export const start = internalMutation({
         'WORK_OPERATION_CHANGED',
         'Retry the original connection.',
       );
-      return JSON.stringify({
-        operationId: prior.operationId,
-        authorizeUrl: prior.authorizeUrl,
-        status: prior.status,
-      });
+      return startReply(prior, await connectApproval(ctx, prior));
     }
     const identity = await ctx.auth.getUserIdentity();
+    // An agent (any device sign-in) asks the owner on Forge first; a person's connect goes straight to GitHub.
+    const asked = Boolean(identity && isDeviceIdentity(identity));
     await ctx.db.insert('githubBindingOperations', {
       ...input,
       actor,
       status: 'waiting',
       ...(typeof identity?.forgeAuthSession === 'string' ? { authOwner: actor } : {}),
+      ...(asked ? { asked: true as const } : {}),
     });
-    return JSON.stringify({
-      operationId: input.operationId,
-      authorizeUrl: input.authorizeUrl,
-      status: 'waiting',
-    });
+    const approval = asked
+      ? await holdConnect(ctx, { ...input, actor, ...(reason ? { reason } : {}) })
+      : null;
+    return startReply({ ...input, status: 'waiting' }, approval);
   },
 });
+function startReply(
+  op: { operationId: string; authorizeUrl: string; status: string },
+  approval: Awaited<ReturnType<typeof connectApproval>>,
+) {
+  return JSON.stringify({
+    operationId: op.operationId,
+    authorizeUrl: op.authorizeUrl,
+    status: op.status,
+    ...(approval ? { approval } : {}),
+  });
+}
 export const consume = internalMutation({
   args: { state: v.string() },
   returns: v.string(),
@@ -197,6 +209,7 @@ export const complete = internalMutation({
       verifier: '',
       ...(mirrorResult ? { mirrorResult } : {}),
     });
+    await settleConnect(ctx, op);
     return mirrorResult;
   },
 });
@@ -208,8 +221,10 @@ export const fail = internalMutation({
       .query('githubBindingOperations')
       .withIndex('by_state', q => q.eq('state', input.state))
       .unique();
-    if (op?.status === 'processing')
+    if (op?.status === 'processing') {
       await ctx.db.patch(op._id, { status: 'failed', code: input.code, verifier: '' });
+      await settleConnect(ctx, op);
+    }
     return null;
   },
 });
@@ -434,11 +449,7 @@ export const authorize = internalQuery({
       'WORK_OPERATION_CHANGED',
       'Retry the original connection.',
     );
-    return JSON.stringify({
-      operationId: prior.operationId,
-      authorizeUrl: prior.authorizeUrl,
-      status: prior.status,
-    });
+    return startReply(prior, await connectApproval(ctx, prior));
   },
 });
 export const refreshName = internalMutation({

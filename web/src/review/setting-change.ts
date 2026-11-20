@@ -11,7 +11,8 @@ export type SettingOriginName =
   | 'runner'
   | 'main-audit'
   | 'membership'
-  | 'address';
+  | 'address'
+  | 'github-connect';
 export type SettingCompare = { subject?: string; before: unknown; after: unknown };
 type ChangeRow = {
   path: string;
@@ -59,6 +60,7 @@ const WHAT: Record<SettingOriginName, string> = {
   'main-audit': 'Main audit',
   membership: 'Project membership',
   address: 'Project address',
+  'github-connect': 'GitHub connection',
 };
 /** Top-level request fields that say how the request is applied, not what it changes: shown only behind "Details".
  * Only at the top: a nested field with one of these names is part of the setting and shows when it changes. */

@@ -47,3 +47,13 @@ export function inboundMessage(input: { commit: string; message: string; reposit
   const subject = input.message.split('\n', 1)[0]!.trim().slice(0, 200) || 'GitHub change';
   return `${subject}\n\nBrought in from GitHub ${input.repository} main at ${input.commit}.\nGitHub-Commit: ${input.commit}`;
 }
+/** Item c63c2171: what the author of a GitHub commit that did not land on Forge reads on that commit,
+ * before Forge's next push takes it out of main. Public fields only: the refusal code, never its detail. */
+export function pusherNotice(commit: string, laneId: string, error: string | null, link: string | null) {
+  const code = error?.match(/^[A-Z][A-Z0-9_]*/)?.[0];
+  const lane = laneId.slice(0, 8);
+  return [
+    `This commit did not land on Forge${code ? ` (${code})` : ''}, so Forge’s next push takes it out of main here. Forge owns main for this repository and never rewrites history: ${commit.slice(0, 12)} stays in the history, and a new commit on top removes its change.`,
+    `To keep the change, fix it in Lane ${lane} on Forge and land it${link ? `: ${link}` : '.'}`,
+  ].join('\n\n');
+}

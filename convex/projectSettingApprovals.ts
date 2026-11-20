@@ -38,7 +38,9 @@ export type SettingOrigin =
   | 'main-audit'
   | 'membership'
   /** Item eb631a53: the project's name and address. */
-  | 'address';
+  | 'address'
+  /** Item c63c2171: an agent's GitHub connect, which the owner person allows before authorizing on GitHub. */
+  | 'github-connect';
 
 /** Settings requests share the approvals table under a `setting:` key, one row per setting. Like fork
  * PR requests they are never `live` (they hold no landing, so the landing gate's read never sees

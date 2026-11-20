@@ -125,6 +125,80 @@ for (const tty of [true, false])
       assert(!existsSync(join(directory, 'opaque-project-id.forge-client')));
     });
 
+// Item c63c2171: an agent's connect is the owner's decision on Forge; the CLI prints and opens that link, not GitHub's.
+test('github connect from an agent prints and opens the Forge approval link and sends the agent words', async t => {
+  const directory = temporaryDirectory(t, 'forge-connect-cli-');
+  const previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = directory;
+  t.after(() => {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+  });
+  const opened = [],
+    lines = [],
+    stdout = [],
+    stderr = [];
+  t.mock.method(process.stdout, 'write', value => (stdout.push(value), true));
+  t.mock.method(process.stderr, 'write', value => (stderr.push(value), true));
+  const github = 'https://github.com/login/oauth/authorize?state=synthetic';
+  const forge = 'https://forge.example/approve?project=p&lane=setting%3Agithub-connect';
+  let operationId, sent;
+  await githubConnectCli(
+    [
+      'connect',
+      'opaque-project-id',
+      '--url',
+      'https://forge.example',
+      '--repo',
+      'example/repo',
+      '--reason',
+      'Mirror main so reviewers on GitHub see it.',
+    ],
+    {
+      transport: () => ({
+        dispatch: async () => ({ result: { actor: 'river' } }),
+        action: async () => ({ protected: true }),
+        exchange: {
+          client: {
+            action: async (_ref, input) => {
+              ({ operationId } = input);
+              sent = input;
+              return {
+                status: 'waiting',
+                authorizeUrl: github,
+                approval: {
+                  id: 'setting:github-connect',
+                  status: 'requested',
+                  url: forge,
+                  next: 'Connecting GitHub needs the project owner.',
+                },
+              };
+            },
+          },
+        },
+      }),
+      subscribe: () => ({
+        onUpdate: (_ref, _args, update) => {
+          queueMicrotask(() => update({ operationId, status: 'completed', repoId: 42, code: null }));
+          return () => {};
+        },
+        close: async () => {},
+      }),
+      approve: (link, disabled) =>
+        browserApproval(link, disabled, {
+          tty: true,
+          open: value => opened.push(value),
+          write: value => lines.push(value),
+        }),
+    },
+  );
+  assert.deepEqual(opened, [forge], 'the owner opens the Forge decision, not GitHub');
+  assert(lines.join('').includes(forge));
+  assert.equal(JSON.parse(stdout.join('')).approval.url, forge);
+  assert.match(stderr.join(''), /needs the project owner/);
+  assert.equal(sent.reason, 'Mirror main so reviewers on GitHub see it.');
+});
+
 test('browser approval never launches a non-web protocol from a malformed service reply', () => {
   assert.throws(
     () =>

@@ -48,7 +48,28 @@ export type MirrorSeed = {
   /** A Candidate branch (src/ci-status.ts) instead of main: always from a verified binding, created
    * once and never moved; the same commit already there is a replay. */
   branch?: string;
+  /** Item c63c2171: this publish takes a failed inbound GitHub commit out of main. Before main moves,
+   * one comment on that commit tells its author what happened and why (pinned with the seed). */
+  notice?: { commit: string; text: string };
 };
+/** Marks Forge's notice so a replayed step finds it instead of posting twice. */
+export const pusherNoticeMarker = '<!-- forge:inbound-notice -->';
+/** One comment on the GitHub commit a repair publish takes out of main, before main moves: one
+ * comments read, then (once) one commit read for its author and one comment post. */
+export async function tellPusher(
+  repository: string,
+  notice: NonNullable<MirrorSeed['notice']>,
+  io: MirrorIO,
+) {
+  const path = `/repos/${repository}/commits/${notice.commit}`;
+  const comments = await io.api<{ body?: string }[]>(`${path}/comments?per_page=100`);
+  if (comments.some(comment => comment.body?.includes(pusherNoticeMarker))) return;
+  // `per_page=1` keeps GitHub's file list out of the reply; only the author's login is read.
+  const commit = await io.api<{ author?: { login?: string } | null }>(`${path}?per_page=1`);
+  const login = commit.author?.login;
+  const to = login && /^[A-Za-z0-9-]{1,39}$/.test(login) ? `@${login} ` : '';
+  await io.api(`${path}/comments`, 'POST', { body: `${to}${notice.text}\n\n${pusherNoticeMarker}` });
+}
 export type MirrorPlan = {
   seed: MirrorSeed;
   parent: string;
@@ -483,6 +504,7 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
         : 'GitHub main moved unexpectedly. Mirror stopped without changing its ref.',
     );
     if (current?.object.sha !== commit) {
+      if (seed.notice && !branch) await tellPusher(seed.repository, seed.notice, io);
       const date = new Date(entry.seconds * 1000).toISOString();
       const created = await io.api<{ sha: string }>(`${prefix}/commits`, 'POST', {
         tree,

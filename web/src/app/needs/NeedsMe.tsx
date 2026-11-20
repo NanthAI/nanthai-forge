@@ -545,6 +545,7 @@ function Ahead({
   announce: (text: string) => void;
 }) {
   const { run, busy } = useDecideRun(decide, announce);
+  const connect = row.setting?.origin === 'github-connect';
   const asked = Date.parse(row.at);
   const [open, setOpen] = useState(false);
   return (
@@ -571,9 +572,16 @@ function Ahead({
           <div className="btns">
             <Key
               disabled={busy !== null}
-              onClick={() => run(row.laneId, { head: row.head }, 'grant', 'Approved. It is in the log.')}
+              onClick={() =>
+                run(
+                  row.laneId,
+                  { head: row.head },
+                  'grant',
+                  connect ? 'Allowed. Opening GitHub to authorize.' : 'Approved. It is in the log.',
+                )
+              }
             >
-              Approve
+              {connect ? 'Allow on GitHub' : 'Approve'}
             </Key>
             <Key
               disabled={busy !== null}

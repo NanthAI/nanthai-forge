@@ -89,12 +89,14 @@ export const connect = action({
     mirror: v.optional(v.boolean()),
     /** With the mirror: one-way, Forge to GitHub; pushes made on GitHub are not taken in. */
     oneWay: v.optional(v.boolean()),
+    /** Item c63c2171: an agent's words for the owner, shown on the Forge decision it asks for. */
+    reason: v.optional(v.string()),
   },
   returns: v.string(),
   handler: async (ctx, input): Promise<string> => {
     try {
       const repository = input.repository.toLowerCase();
-      const { mirror, oneWay, ...identity } = input;
+      const { mirror, oneWay, reason, ...identity } = input;
       const replay: string | null = await ctx.runQuery(
         makeFunctionReference<'query'>('githubBindingStore:authorize'),
         { ...identity, repository },
@@ -126,6 +128,7 @@ export const connect = action({
         ...identity,
         mirror: mirror !== false,
         ...(oneWay && mirror !== false ? { oneWay: true } : {}),
+        ...(reason ? { reason } : {}),
         repository,
         githubAccounts,
         state,

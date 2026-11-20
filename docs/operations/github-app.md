@@ -96,7 +96,16 @@ nforge github resume PROJECT_ID --url https://DEPLOYMENT.convex.cloud   # a stop
 A hosted Lane checkout path can replace `PROJECT_ID` and its `--url` argument.
 Without `--repo`, connect uses the configured runner or mirror repository, then
 asks in an interactive terminal if neither exists. Only the Forge project owner
-can connect repositories. Pause, un-pause and Disconnect require the owner person
+can connect repositories. When an agent (any device sign-in) runs connect, Forge
+first holds it as the owner's decision: one `setting:github-connect` request in
+Needs me and on the approve link, which connect prints (JSON `approval.url` on
+stdout, the next step on stderr) and opens instead of GitHub's page. The request
+quotes the agent's `--reason TEXT` (up to 500 characters). Allow on GitHub sends
+the owner person on to GitHub's authorization, which still proves repository
+access; Decline ends the connect (`REVIEW_DECLINED`) and the waiting
+command returns. Authorizing straight from the printed GitHub link also ends the
+request. Cost: two indexed reads and one write to hold it, one read when that
+connect completes or fails; a person's own connect asks and costs nothing extra. Pause, un-pause and Disconnect require the owner person
 in web Settings → GitHub mirror; owner CLI recovery remains available while the
 mirror is enabled. After a completed connect, and in status
 on a two-way project, the result carries `protection` for `main`
@@ -336,7 +345,15 @@ first pull request or push is seen at once; no landing has to come first.
   job fails with `GITHUB_INBOUND_FAILED` and the mirror status names the Lane.
   Nothing is held: the next Forge landing publishes Forge `main` over the GitHub
   commit, and its commit message says which GitHub commit it takes out. Fix and
-  land that Lane to bring the change back.
+  land that Lane to bring the change back. **Before** that publish moves GitHub
+  `main`, Forge comments once on the GitHub commit, mentioning its author: it did
+  not land on Forge (the refusal code only, never the detail), the next push takes
+  it out of `main`, its history stays, and the Lane link to keep the change. The
+  comment uses the publish step's existing Contents token; a replayed step finds
+  its marker and posts nothing again. Cost: one comments read, one commit read and
+  one post, only on that one publish; normal publishes make no extra call. The
+  author is the commit's GitHub author: for a merge made in GitHub's web page,
+  the person who merged.
 - **When it lands:** the GitHub commit becomes the mirror's recorded commit for
   that tree, and the next publish builds on it, so GitHub history is kept.
 - **Cost:** idle is zero. One push costs a handful of Convex mutations plus one

@@ -64,6 +64,7 @@ export const hostedApprovalTables = {
           v.literal('main-audit'),
           v.literal('membership'),
           v.literal('address'),
+          v.literal('github-connect'),
         ),
         /** The original request, applied verbatim on a grant. */
         request: v.string(),

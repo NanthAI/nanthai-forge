@@ -25,7 +25,16 @@ export type LaneApprovalRead = {
   landing: { submissionId: string; held: boolean } | null;
   /** Issue 470ef29b: a held settings change from an agent sign-in, not a Lane. */
   membership?: boolean;
-  setting?: { origin: 'policy' | 'check-definition' | 'check-import' | 'runner' | 'main-audit' | 'address' };
+  setting?: {
+    origin:
+      | 'policy'
+      | 'check-definition'
+      | 'check-import'
+      | 'runner'
+      | 'main-audit'
+      | 'address'
+      | 'github-connect';
+  };
   /** The change as the agent sent it (the owner's read only). */
   change?: unknown;
   /** Item 16093ed1: the setting now and as granted (an open request, the owner's read only). */
@@ -58,6 +67,7 @@ const SETTING_LABEL: Record<NonNullable<LaneApprovalRead['setting']>['origin'], 
   runner: 'check runner',
   'main-audit': 'main audit setting',
   address: 'project name and address',
+  'github-connect': 'GitHub connection',
 };
 export type LaneApprovalPhase =
   | { kind: 'loading' }
@@ -163,7 +173,37 @@ export function LaneApproval({
         })()
       );
   }
+  function connectBody(approval: LaneApprovalRead, who: string) {
+    const state = deriveApproval(approval).state;
+    if (state === 'granted' || state === 'applied' || state === 'landed')
+      return head('Allowed', 'The connection finishes once you authorize Forge on GitHub.', 'passed');
+    if (state === 'declined') return head('Declined', 'GitHub was not connected.', 'plain');
+    if (state !== 'requested') return head('Request closed', 'This connection request ended.', 'plain');
+    const asked = approval.change as { repository?: unknown } | undefined;
+    const repository = typeof asked?.repository === 'string' ? asked.repository : 'a GitHub repository';
+    return (
+      <>
+        {head(`Connect ${repository}?`, `Requested by ${who}, signed in as an agent.`)}
+        <p className="fx-dv-lead fx-dv-untrusted" dir="auto">
+          “{approval.reason}”
+        </p>
+        <div className="fx-dv-untrusted">
+          <SettingChange origin="github-connect" compare={approval.compare} change={approval.change} />
+        </div>
+        <OwnerReviewActions
+          review={{ ...review, labels: { accept: 'Allow on GitHub', decline: 'Decline' } }}
+        />
+      </>
+    );
+  }
   function settingBody(approval: LaneApprovalRead) {
+    if (approval.setting?.origin === 'github-connect')
+      return connectBody(
+        approval,
+        approval.requester
+          ? `@${approval.requester}${approval.agent ? `/${approval.agent}` : ''}`
+          : 'an agent',
+      );
     const what = approval.membership ? 'project membership' : SETTING_LABEL[approval.setting!.origin];
     const who = approval.requester
       ? `@${approval.requester}${approval.agent ? `/${approval.agent}` : ''}`

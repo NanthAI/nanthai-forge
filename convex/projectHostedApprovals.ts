@@ -30,6 +30,7 @@ import {
   type ApprovalRow,
 } from './projectHostedApprovalStore';
 import { notifyPullApproval } from './projectGithubPullQueue';
+import { declineConnect, grantConnect } from './githubConnectRequest';
 import { settingCompare } from './projectSettingCompare';
 import { isAgentSlug } from '../src/agent-slug';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -234,6 +235,8 @@ async function decideSetting(
   );
   const reason = text(input.reason) || undefined;
   const result = input.decision === 'grant' ? await applySetting(ctx, row) : null;
+  if (input.decision === 'decline' && row.setting?.origin === 'github-connect')
+    await declineConnect(ctx, row);
   // A grant ends the request; a declined one stays open (and read as declined) until reopened.
   await writeApproval(ctx, row, {
     status: input.decision === 'grant' ? 'granted' : 'declined',
@@ -265,6 +268,8 @@ function applySetting(ctx: MutationCtx, row: ApprovalRow) {
       return applyApprovedPolicy(ctx, row.projectId, request, setting.base);
     case 'check-import':
       return importCheckFromWork(ctx, row.projectId, request, true).then(text => JSON.parse(text) as unknown);
+    case 'github-connect':
+      return grantConnect(ctx, row);
     case 'main-audit':
       return configureMainAudit(ctx, row.projectId, request, true).then(text => JSON.parse(text) as unknown);
     default:

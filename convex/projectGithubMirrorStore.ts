@@ -16,7 +16,8 @@ import { mirrorPublishMessage } from './projectGithubMirrorMessage';
 import { missingObjectDelays, transientMirrorCodes } from '../src/hosted-github-retry';
 import { inboundBegin } from './projectGithubInbound';
 import { finish, inboundOutcomeSchema, yieldToInbound } from './projectGithubInboundQueue';
-import { settlePull } from './projectGithubPullQueue';
+import { projectLink, settlePull } from './projectGithubPullQueue';
+import { pusherNotice } from '../src/github-inbound-job';
 import { effectivePolicy } from '../src/autonomy-policy';
 const identity = { jobId: v.id('projectGithubMirrorJobs'), step: v.number() };
 async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJobs'>; step: number }) {
@@ -85,6 +86,19 @@ async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJob
     outcome?.note &&
     `This publish takes GitHub commit ${outcome.commit.slice(0, 12)} out of main: it did not land on Forge (Lane ${outcome.laneId.slice(0, 8)}). Fix and land that Lane to bring it back.`;
   const message = note ? noteMessage(published, note) : published;
+  // Item c63c2171: the same repair tells the commit's author on GitHub first (pinned below), in
+  // public words only: the refusal code, the Lane and its Forge link, never the refusal detail.
+  const notice = note
+    ? {
+        commit: outcome.commit,
+        text: pusherNotice(
+          outcome.commit,
+          outcome.laneId,
+          outcome.error ?? null,
+          await projectLink(ctx, project, outcome.laneId),
+        ),
+      }
+    : undefined;
   // No mapping yet: the import row (one indexed read, first job only) says which GitHub commit
   // and Forge State the project began from, so a mirror turned on after landings can catch up.
   const imported = binding
@@ -111,6 +125,7 @@ async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJob
       ...(imported?.publication
         ? { import: { commit: imported.commit, state: imported.publication.head } }
         : {}),
+      ...(notice ? { notice } : {}),
     },
   };
   // Pin mutable Intent prose and configured identity before any GitHub IO.

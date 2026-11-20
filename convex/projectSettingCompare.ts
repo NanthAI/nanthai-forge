@@ -95,9 +95,10 @@ export async function settingCompare(
         after: checkFields(pinned),
       };
     }
-    case 'membership': {
+    case 'membership':
+    case 'github-connect':
+      // Item c63c2171: a connect has no "before"; the repository and mirror direction it asks for.
       return { before: null, after: without(change, ['operationId']) };
-    }
     case 'address':
       // Exactly what the grant applies: the name and address when the request was made, and the result.
       return { before: record(change.before), after: record(change.after) };

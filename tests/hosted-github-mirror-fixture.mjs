@@ -24,7 +24,9 @@ export function mirrorFixture({
     states = new Map(),
     commits = new Map(),
     trees = new Map(),
-    githubBlobs = new Map();
+    githubBlobs = new Map(),
+    /** Commit comments by commit sha (Item c63c2171's notice to a dropped commit's author). */
+    comments = new Map();
   const calls = [],
     windows = [],
     reads = [],
@@ -101,7 +103,16 @@ export function mirrorFixture({
     let result;
     if (remote === null && path.includes('/git/'))
       throw new GithubMirrorApiError(409, `${method} git`, 0, undefined, 'Git Repository is empty.');
-    if (path === '/repos/synthetic/mirror/branches?per_page=1') result = remote === null ? [] : [{}];
+    const commented = path.match(
+      /^\/repos\/synthetic\/mirror\/commits\/([0-9a-f]{40})(\/comments)?(\?per_page=\d+)?$/,
+    );
+    if (commented && commented[2]) {
+      const list = comments.get(commented[1]) ?? [];
+      if (method === 'POST') list.push({ body: body.body, beforeMain: remote });
+      comments.set(commented[1], list);
+      result = method === 'POST' ? { id: list.length } : list.map(({ body }) => ({ body }));
+    } else if (commented) result = { sha: commented[1], author: { login: 'synthetic-pusher' } };
+    else if (path === '/repos/synthetic/mirror/branches?per_page=1') result = remote === null ? [] : [{}];
     else if (path.startsWith('/repos/synthetic/mirror/contents/') && method === 'PUT') {
       assert.equal(remote, null, 'the Contents API only seeds an empty repository');
       assert.equal(body.branch, 'main');
@@ -209,6 +220,7 @@ export function mirrorFixture({
     commits,
     trees,
     githubBlobs,
+    comments,
     root,
     head,
     remote: () => remote,

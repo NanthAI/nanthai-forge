@@ -171,6 +171,7 @@ const settingLabel: Record<SettingOrigin, string> = {
   'check-import': 'Check definition import',
   runner: 'Runner configuration',
   'main-audit': 'Main audit setting',
+  'github-connect': 'GitHub connection',
 };
 /** True when a check-settings reply is a held request (nothing changed yet). */
 export const heldSettingReply = (text: string) => (JSON.parse(text) as { rule?: string }).rule === 'held';

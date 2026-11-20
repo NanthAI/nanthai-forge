@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { Key } from '../../ds';
 import type { Decide, DecideTarget } from './decide';
+import { githubContinue } from '../../review/github-continue';
 
 export function useDecideRun(decide: Decide, announce: (text: string) => void) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -15,6 +16,9 @@ export function useDecideRun(decide: Decide, announce: (text: string) => void) {
         ? (JSON.parse(reply).error?.message as string | undefined)
         : undefined;
       announce(failed ? `Not done: ${failed}` : done);
+      // Item c63c2171: an allowed GitHub connect goes on to GitHub's authorization.
+      const github = failed ? null : githubContinue(JSON.parse(reply));
+      if (github) location.assign(github);
     } catch {
       announce('Not done: Forge could not be reached. Nothing changed; try again.');
     } finally {

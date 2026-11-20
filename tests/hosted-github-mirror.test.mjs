@@ -779,3 +779,30 @@ test('two-way: an inbound push with Git LFS pointers lands the real objects, onc
   await assert.rejects(huge.applied, error => error.code === 'GITHUB_LFS_LIMIT');
   assert.equal(huge.seen.batch, 0, 'refused from the pointers before any LFS request');
 });
+test('a repair publish tells the dropped commit’s author once, before GitHub main moves', async () => {
+  for (const route of [null, 'refs/heads/main']) {
+    const f = mirrorFixture();
+    const dropped = f.root.commit;
+    const seed = { ...f.seed, notice: { commit: dropped, text: 'This commit did not land on Forge.' } };
+    const initial = await prepareMirror(seed, f.io);
+    if (route) {
+      // The ref reply is lost after the notice: the replayed step finds it and posts nothing again.
+      f.lose(route);
+      await assert.rejects(stepMirror(structuredClone(initial), f.io), /lost reply/);
+    }
+    const plan = await drain(f, initial);
+    const notes = f.comments.get(dropped);
+    assert.equal(notes.length, 1, 'one notice, never one per attempt');
+    assert.equal(notes[0].beforeMain, dropped, 'posted while GitHub main still held the commit');
+    assert.match(notes[0].body, /^@synthetic-pusher This commit did not land on Forge\./);
+    assert(notes[0].body.includes('<!-- forge:inbound-notice -->'));
+    const posted = f.calls.findIndex(c => c.method === 'POST' && c.path.endsWith('/comments'));
+    const moved = f.calls.findIndex(c => c.method === 'PATCH');
+    assert(posted >= 0 && posted < moved, 'the notice precedes the ref update');
+    assert.equal(plan.entry.commit, f.remote());
+  }
+  const plain = mirrorFixture();
+  await drain(plain);
+  assert.equal(plain.comments.size, 0, 'an ordinary publish makes no comment call');
+  assert(!plain.calls.some(c => c.path.includes('/comments')));
+});

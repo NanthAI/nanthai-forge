@@ -229,8 +229,34 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
         }
     });
 
+    // Item c63c2171: an agent's GitHub connect is a Forge decision in the agent's words; Allow goes on to GitHub.
+    await t.test(
+      'an agent GitHub connect asks in its words; Allow opens the GitHub authorization',
+      async t => {
+        const page = await open(t, PHONE, 'connect');
+        const row = page.locator('details.sumdec');
+        assert.equal(await row.count(), 1);
+        assert.equal(
+          (await row.locator('summary .ttl').textContent()).trim(),
+          'Mirror main to synthetic/repo so reviewers on GitHub see each landing.',
+        );
+        assert.match(await row.locator('summary').textContent(), /GitHub/);
+        await row.locator('summary').click();
+        const allow = row.getByRole('button', { name: 'Allow on GitHub' });
+        await allow.waitFor();
+        await page.route('https://github.com/**', route =>
+          route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>GitHub</title>' }),
+        );
+        await Promise.all([
+          page.waitForURL(/^https:\/\/github\.com\/login\/oauth\/authorize/),
+          allow.click(),
+        ]);
+        assert.equal(new URL(page.url()).searchParams.get('state'), 'synthetic');
+      },
+    );
+
     await t.test('axe and widths: busy and first day, both themes, desk and phone', async t => {
-      for (const data of ['busy', 'first'])
+      for (const data of ['busy', 'first', 'connect'])
         for (const viewport of [DESK, PHONE]) {
           const page = await open(t, viewport, data); // Loose ends is open by default
           await page.addScriptTag({ path: axePath });

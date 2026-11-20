@@ -12,6 +12,7 @@ import { landingBrowserIO } from './lane/landing-browser-io';
 import { ownerApprove, ownerDecline } from './lane/owner-review-api';
 import { OwnerApproval, type OwnerApprovalPhase } from './review/OwnerApproval';
 import { LaneApproval, type LaneApprovalPhase, type LaneApprovalRead } from './review/LaneApproval';
+import { githubContinue } from './review/github-continue';
 import type { HostedLandingAttempt, HostedLandingState } from '../../src/hosted-landing';
 
 type Read = { request: HostedLandingState; attempt: HostedLandingAttempt };
@@ -76,7 +77,7 @@ function LaneApprove() {
     setBusy(true);
     setError('');
     try {
-      await io.mutation('projectHostedApprovals:decide', {
+      const reply = await io.mutation('projectHostedApprovals:decide', {
         operationId: attempt.current.operationId,
         laneId,
         decision,
@@ -84,6 +85,9 @@ function LaneApprove() {
         ...(why.trim() ? { reason: why.trim() } : {}),
       });
       attempt.current = null;
+      // Item c63c2171: an allowed GitHub connect goes on to GitHub's authorization.
+      const github = githubContinue(reply);
+      if (github) location.assign(github);
     } catch (e) {
       setError(hostedError(e));
     } finally {
