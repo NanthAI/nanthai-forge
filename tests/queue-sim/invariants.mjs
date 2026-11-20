@@ -82,18 +82,16 @@ function driver(f, row, queue, now) {
   if (row.runnable && (armed(f, queue?.wake?.taskId) || (queue?.lease?.until ?? 0) > now)) return 'queue';
   return null;
 }
-/** A live landing reservation still parks same-file landings (reservationAhead's holder rules and
- * writeLanding's `reserving`): unexpired, not held for red main, finish-driven, not stalled and not
+/** A landing reservation still parks same-file landings (reservationAhead's holder rules and
+ * writeLanding's `reserving`): set, not held for red main, finish-driven, not stalled and not
  * waiting for review. A dependency wait, a suspect or an error do not end it (review a66aa1ce 3). */
-function holdsReservation(row, state, now) {
-  return (
-    !row.hold &&
-    (row.reservedUntil ?? 0) > now &&
-    Boolean(state.request.finish) &&
-    !state.observation.stall &&
-    state.observation.pendingReason !== 'waiting-for-review'
-  );
-}
+const reserving = (row, state) =>
+  !row.hold &&
+  row.reservedUntil !== undefined &&
+  Boolean(state.request.finish) &&
+  !state.observation.stall &&
+  state.observation.pendingReason !== 'waiting-for-review';
+const holdsReservation = (row, state, now) => reserving(row, state) && row.reservedUntil > now;
 /** Follow stored `orderWait` edges to the first unparked entry. A terminal, missing or looping
  * end, or a hop that no longer holds the order, is dead whatever any claim says (lead, review
  * e7137e30 finding 2). */
@@ -114,8 +112,20 @@ export function parkedChainEnd(f, row, byId, queue, now = Date.now(), depth = 0)
     // no longer holds the order (held for red main, stalled, failed) owes its waiters nothing more,
     // unless it still holds a live landing reservation, which keeps same-file waiters parked.
     const state = ticketState(f, next);
-    if (!holdsLandingOrder(next, state, now) && !holdsReservation(next, state, now))
+    if (!holdsLandingOrder(next, state, now) && !holdsReservation(next, state, now)) {
+      // Past its expiry a reservation that writeLanding still keeps (`reserving` ignores expiry)
+      // parks its direct waiter until that waiter's reservation-expiry claim (due at reservedUntil)
+      // re-claims and reservationAhead skips it; order waiters on it wait for its exit wake. So
+      // the hop is an end: live if it is driven itself, else excused only by the direct waiter's
+      // own claim (review be5ac889 finding 2).
+      if (reserving(next, state)) {
+        const why = entryLive(f, next, byId, queue, now, depth);
+        return why
+          ? { end: next, live: true, dead: false, why }
+          : { end: next, live: false, dead: false, why: `${next.phase}, reservation expired`, claimant: end };
+      }
       return { end: next, live: false, dead: true, why: `${next.phase}, holds no order` };
+    }
     end = next;
   }
   const why = entryLive(f, end, byId, queue, now, depth);
@@ -161,7 +171,8 @@ export function l1Issue(f, row, byId, queue, now = Date.now()) {
   if (row.orderWait) {
     const chain = parkedChainEnd(f, row, byId, queue, now);
     if (chain.live) return null;
-    if (!chain.dead && claimDue(f, row.submissionId, now + CHECK_WALL_MS)) return null;
+    const claimant = (chain.claimant ?? row).submissionId;
+    if (!chain.dead && claimDue(f, claimant, now + CHECK_WALL_MS)) return null;
     return `parked chain ends at ${chain.end?.submissionId ?? 'nothing'} (${chain.why}): no alarm, wake or live check`;
   }
   const waiting = row.hold === 'main-red' || finishOf(f, row.submissionId)?.waiting;

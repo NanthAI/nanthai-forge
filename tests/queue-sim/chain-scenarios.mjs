@@ -23,16 +23,24 @@ export const CHAIN_MUTANTS = {
   queuedWaiterLosesWake: [
     {
       file: 'convex/projectHostedFinishWake.ts',
-      find: '        drive && !waiter.alarm\n',
+      find: "        (drive || early || (!finish && waiter.phase === 'ready')) && !waiter.alarm\n",
       replace: "        drive && !waiter.alarm && waiter.phase === 'ready'\n",
     },
   ],
-  // 4a: followers were handed to a woken waiter nothing drives.
+  // 4a: followers were handed to a woken waiter nothing drives. Since review e49ffe91 F2 that
+  // manual waiter's own stall alarm would release them 15 minutes later (a delay, not a strand;
+  // the chain-liveness replay guards the handoff itself), so the mutant drops that alarm too, as
+  // the code was when 4a was found.
   handoffToUndrivenWaiter: [
     {
       file: 'convex/projectHostedFinishWake.ts',
       find: '      if (waiter.orderLive && (drive || early)) next = waiter;',
       replace: '      if (waiter.orderLive) next = waiter;',
+    },
+    {
+      file: 'convex/projectHostedFinishWake.ts',
+      find: "        (drive || early || (!finish && waiter.phase === 'ready')) && !waiter.alarm\n",
+      replace: '        (drive || early) && !waiter.alarm\n',
     },
   ],
   // 4b: a landing held for red main kept its reservation, and a held holder still reserved.

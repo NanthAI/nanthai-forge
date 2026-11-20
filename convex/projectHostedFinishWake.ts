@@ -375,9 +375,14 @@ export async function wakeLandingOrderWaiters(
       // only wake and it can fail (OCC exhaustion). Arm the waiter's stall alarm
       // in this same transaction; landing or a later park cancels it. A queued
       // waiter (a speculative-conflict member, whose alarm went to the predecessor)
-      // needs it as much as a ready one (687d1eda review e7137e30 4a).
+      // needs it as much as a ready one (687d1eda review e7137e30 4a). So does an early waiter
+      // with no drivable finish: its only wake is the queue wake below (review e49ffe91 F3). And
+      // a manual Ready waiter (no finish row) that nothing else writes: the alarm is what lets the
+      // supervisor drop it at the deadline (repairStalledLanding), as before it parked (F2). A
+      // manual waiter never becomes `next`, so each one on this page is released with its alarm.
+      // Not a Ready waiter whose finish IO is in flight: that finish claims again by itself.
       const alarm =
-        drive && !waiter.alarm
+        (drive || early || (!finish && waiter.phase === 'ready')) && !waiter.alarm
           ? await armLandingAlarm(
               ctx,
               waiter,

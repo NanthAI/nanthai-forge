@@ -5,14 +5,18 @@
 // runs the production function that hands the chain on; before its fix each one strands the chain.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { batchesFixture, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { armed, pendingClaim } from './queue-sim/invariants.mjs';
 import { hostedLandingStall } from '../dist/hosted-landing-stall.js';
+import { LANDING_DROP_MS, LANDING_STALL_MS } from '../dist/landing-stall.js';
+import { patchTicketState, ticketState } from './landing-ticket-fixture.mjs';
 const wake = await import(moduleUrl('../convex/projectHostedFinishWake.ts'));
 const gate = await import(moduleUrl('../convex/projectHostedGate.ts'));
 const reservation = await import(moduleUrl('../convex/projectHostedLandingReservation.ts'));
 const store = await import(moduleUrl('../convex/projectHostedLandingStore.ts'));
+const stall = await import(moduleUrl('../convex/projectHostedLandingStall.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -174,4 +178,76 @@ test('4c replay: an admission that stalls releases the landings parked on it', a
       `${id} is released from the stalled admission`,
     );
   assert(pendingClaim(f, followers[0]), 'the oldest follower is driven');
+});
+
+test('e49ffe91 F3 replay: a woken early waiter with no drivable finish gets its stall alarm', async t => {
+  // A queued waiter with an exact early resolution is made runnable and its only wake is the one
+  // queue wake (the c329d191 lost-single-wake class). With no drivable finish row nothing else
+  // arms its alarm, so a lost queue wake left it queued with no owner.
+  const { f, head, followers } = await parkedBehindHead(t);
+  const [waiter] = followers;
+  const at = new Date().toISOString();
+  const predecessor = { submissionId: head, head: 'a'.repeat(64), receiptId: randomUUID() };
+  const earlyResolutions = [
+    { predecessor, laneId: randomUUID(), originalHead: 'b'.repeat(64), startedAt: at },
+  ];
+  const attemptId = JSON.parse(row(f, waiter).value).attemptId;
+  const attempt = [...f.tables.projectHostedLandingAttempts.values()].find(
+    r => JSON.parse(r.value).id === attemptId,
+  );
+  // Its finish has IO in flight (`pending`), so the exit wake cannot drive it.
+  const finish = [...f.tables.projectHostedFinishes.values()].find(r => r.submissionId === waiter);
+  const value = JSON.parse(finish.value);
+  f.patch('projectHostedFinishes', finish._id, {
+    value: JSON.stringify({ ...value, pending: value.pending ?? { operations: { compose: randomUUID() } } }),
+  });
+  f.patch('projectHostedLandingRequests', row(f, waiter)._id, {
+    phase: 'queued',
+    alarm: null,
+    orderLive: true,
+    batchSelection: JSON.stringify({ ...JSON.parse(attempt.value), earlyResolutions }),
+  });
+  await exitWake(f, head);
+  assert.equal(row(f, waiter).orderWait, undefined);
+  assert.equal(row(f, waiter).runnable, true, 'the early waiter is made runnable for the queue wake');
+  assert(armed(f, row(f, waiter).alarm?.taskId), 'and has its stall alarm, should that one wake be lost');
+});
+
+test('e49ffe91 F2 replay: a woken manual Ready waiter keeps the alarm that drops it at the deadline', async t => {
+  // A manual request (no finish controller) parked on the head; its claim cancelled its alarm at
+  // park. The exit wake only clears its wait, so without an alarm repairStalledLanding never ran
+  // its manual drop and the stale Ready row stayed forever (clutter).
+  const { f, head, followers } = await parkedBehindHead(t);
+  const [manual] = followers;
+  const finish = [...f.tables.projectHostedFinishes.values()].find(r => r.submissionId === manual);
+  f.tables.projectHostedFinishes.delete(finish._id);
+  const state = ticketState(f, row(f, manual));
+  delete state.request.finish;
+  patchTicketState(f, row(f, manual), state);
+  f.patch('projectHostedLandingRequests', row(f, manual)._id, { orderLive: true, alarm: null });
+  await exitWake(f, head);
+  assert.equal(row(f, manual).orderWait, undefined);
+  const alarm = row(f, manual).alarm;
+  assert(armed(f, alarm?.taskId), 'the woken manual waiter has its stall alarm');
+  // The alarm fires once stalled; its supervisor round then drops the manual row at the deadline.
+  const token = { projectId: f.projectId, submissionId: manual, lastProgressAt: alarm.lastProgressAt };
+  const progressAt = Date.parse(alarm.lastProgressAt);
+  await f.runAcceptance(
+    'manualAlarm',
+    ctx => stall.raiseLandingAlarm(ctx, token, progressAt + LANDING_STALL_MS + 1000),
+    {},
+  );
+  const raised = JSON.parse(row(f, manual).value).observation.stall?.lastProgressAt;
+  assert(raised, 'the alarm raises the stall');
+  await f.runAcceptance(
+    'manualDrop',
+    ctx =>
+      stall.resolveStalledLanding(
+        ctx,
+        { ...token, lastProgressAt: raised, attempt: 0 },
+        progressAt + LANDING_DROP_MS + 1000,
+      ),
+    {},
+  );
+  assert.notEqual(row(f, manual).phase, 'ready', 'the supervisor dropped the stale manual row');
 });

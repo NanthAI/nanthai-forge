@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { synthetic } from './hosted-landing-batches-fixture.mjs';
 import { l1Issue, liveCheck, requestRows, STALL_MS, CHECK_WALL_MS } from './queue-sim/invariants.mjs';
 import { parkedBehindHead, setMainRed } from './queue-sim/chain-scenarios.mjs';
+import { patchTicketState, ticketState } from './landing-ticket-fixture.mjs';
 const environment = { ...synthetic, FORGE_HOSTED_CHECK_KEY_SYNTHETIC: 'synthetic-l1-invariant' };
 const prior = Object.fromEntries(Object.keys(environment).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, environment));
@@ -120,8 +121,9 @@ test('L1 liveCheck: only a checking entry whose run has a bounded driver', async
   assert.equal(liveCheck(f, row(f, head)), false, 'an expiry for another fence');
   task(f, 'projectHostedCheckLease:expire', { runId: run.id, fence: 7, until });
   assert.equal(liveCheck(f, row(f, head)), true, 'the lease with its exact armed expiry');
-  setRun(f, head, value => (value.lease = { until: Date.now() - 1 }));
-  task(f, 'projectHostedCheckLease:expire', { runId: run.id, fence: 7, until: Date.now() - 1 });
+  const past = Date.now() - 1;
+  setRun(f, head, value => (value.lease = { until: past }));
+  task(f, 'projectHostedCheckLease:expire', { runId: run.id, fence: 7, until: past });
   assert.equal(liveCheck(f, row(f, head)), true, 'just past until, the armed expiry still owns the lease');
 });
 
@@ -152,17 +154,41 @@ test('L1 chain ends: a dead end fails whatever the claim; only a near claim excu
   assert.match(l1(f, waiter), /holds no order/, 'an end held for red main, though itself live');
 });
 
-test('L1 hops: a live landing reservation still parks waiters; an expired or held one does not', async t => {
+test('L1 hops: a live landing reservation still parks waiters; an expired one waits for the waiter claim; a held one does not', async t => {
   const { f, head, waiter } = await undrivenChain(t);
+  const live = () =>
+    f.patch('projectHostedLandingRequests', row(f, head)._id, { reservedUntil: Date.now() + 10 * 60_000 });
   setAlarm(f, head, task(f, 'projectHostedLandingStall:raise', {}, Date.now() + STALL_MS));
   f.patch('projectHostedLandingRequests', row(f, head)._id, { reservedUntil: undefined });
   assert.equal(l1(f, waiter), null, 'control: the driven head holds the order');
   setState(f, head, state => (state.observation.pendingReason = 'waiting-for-dependency'));
   assert.match(l1(f, waiter), /holds no order/, 'a dependency wait gives up its order place');
-  f.patch('projectHostedLandingRequests', row(f, head)._id, { reservedUntil: Date.now() + 10 * 60_000 });
+  live();
   assert.equal(l1(f, waiter), null, 'its live reservation still parks same-file waiters');
+  // Each reservation clause the holder filter checks (reservationAhead, writeLanding `reserving`).
+  setState(f, head, state => (state.observation.stall = { lastProgressAt: state.at }));
+  assert.match(l1(f, waiter), /holds no order/, 'a stalled holder reserves nothing');
+  setState(f, head, state => delete state.observation.stall);
+  setState(f, head, state => (state.observation.pendingReason = 'waiting-for-review'));
+  assert.match(l1(f, waiter), /holds no order/, 'a holder waiting for review reserves nothing');
+  setState(f, head, state => (state.observation.pendingReason = 'waiting-for-dependency'));
+  const request = ticketState(f, row(f, head)).request;
+  patchTicketState(f, row(f, head), {
+    ...ticketState(f, row(f, head)),
+    request: { ...request, finish: undefined },
+  });
+  assert.match(l1(f, waiter), /holds no order/, 'a manual holder (no finish) reserves nothing');
+  patchTicketState(f, row(f, head), { ...ticketState(f, row(f, head)), request });
+  assert.equal(l1(f, waiter), null, 'control: the reservation again');
+  // Expired: production keeps the waiter parked until its own reservation-expiry claim.
   f.patch('projectHostedLandingRequests', row(f, head)._id, { reservedUntil: Date.now() - 1 });
-  assert.match(l1(f, waiter), /holds no order/, 'an expired reservation');
+  assert.equal(l1(f, waiter), null, 'an expired reservation whose holder is driven itself');
+  quiet(f, head);
+  assert.match(l1(f, waiter), /reservation expired/, 'an expired, undriven reservation and no waiter claim');
+  setWake(f, waiter, task(f, 'projectHostedFinishDriver:wake', {}, Date.now()));
+  assert.equal(l1(f, waiter), null, "an expired reservation and the waiter's own due claim");
+  quiet(f, waiter);
+  live();
   f.patch('projectHostedLandingRequests', row(f, head)._id, {
     reservedUntil: Date.now() + 10 * 60_000,
     hold: 'main-red',
