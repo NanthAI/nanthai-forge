@@ -7,7 +7,7 @@
   .top { display: flex; align-items: stretch; height: var(--top-h); background: var(--surface); border-bottom: var(--rule) solid var(--line); min-width: 0; }
   .top .brand { width: var(--rail-w); flex: none; display: flex; align-items: center; gap: 9px; padding: 0 14px; font: var(--w-bold) 16px/1 var(--font-sans); letter-spacing: var(--head-track); }
   .top .brand svg { width: 20px; height: 20px; }
-  .top .proj { display: flex; align-items: center; gap: 6px; padding: 0 14px; border: 0; border-left: var(--rule) solid var(--line); background: transparent; font-weight: var(--w-strong); white-space: nowrap; }
+  .top .proj { display: flex; align-items: center; gap: 6px; padding: 0 14px; border: 0; border-left: var(--rule) solid var(--line); background: transparent; font-weight: var(--w-strong); white-space: nowrap; min-width: 0; }
   .top .end { display: flex; align-items: center; gap: var(--s-1); padding: 0 10px; flex: none; }
   .top .needs { display: inline-flex; align-items: center; gap: 7px; height: var(--ctl-h); padding: 0 10px; font-weight: var(--w-strong); white-space: nowrap; }
   .mk-f .stem { fill: currentColor; }
@@ -19,13 +19,14 @@
   .line .stop { position: relative; display: flex; align-items: center; gap: var(--s-2); padding: 0 10px 6px 12px; color: var(--text-2); font-size: 13px; white-space: nowrap; min-width: 0; }
   .line .stop::before { content: ""; position: absolute; left: 0; bottom: 0; width: 1px; height: 11px; background: var(--text-3); }
   .line .stop .lbl { overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
-  .line .stop .n, .line .tomain .fig { color: var(--text); font: var(--w-strong) 13px/1 var(--font-mono); font-variant-numeric: tabular-nums; flex: none; }
+  .line .stop .n, .line .tomain .main-number { color: var(--text); font: var(--w-strong) 13px/1 var(--font-mono); font-variant-numeric: tabular-nums; flex: none; }
   .line .stop[data-stop] .n { order: 3; min-width: 2.6ch; text-align: right; }
   .line .stop .slot { flex: 1 1 0; min-width: 0; align-self: stretch; }
   .line .stop.zero { color: var(--text-3); }
   .line .stop.here { color: var(--text); font-weight: var(--w-bold); box-shadow: inset 0 -2px 0 var(--st, var(--text)); }
   .line .tomain { color: var(--text); gap: 0 var(--s-1); }
   .line .tomain .g { flex: none; color: var(--text-2); white-space: nowrap; }
+  .line .tomain .compact-context { display: none; }
   .line .tomain .lbl { color: var(--text); }
   .line .tomain::before { background: var(--passed); width: 3px; height: 14px; transform-origin: 50% 100%; }
   .line .tomain.ring::before { animation: ds-ring var(--d-ring) var(--ease-out); }
@@ -48,11 +49,19 @@
   /* Narrow: each count sits right after its own word ("Saved 16"), never at the cell's far edge beside the next one. */
   @container (max-width: 760px) {
     .line .stop { flex-wrap: wrap; align-items: baseline; align-content: flex-start; gap: 0 var(--s-1); padding: 6px 4px 9px 9px; font-size: var(--t-micro); }
-    .line .stop .slot { display: none; } .line .tomain .lbl.t2 { display: none; }
+    .line .stop .slot { display: none; }
     .line .stop[data-stop] .n { order: 0; min-width: 0; text-align: left; font-size: var(--t-micro); }
-    .line .tomain { padding-right: 0; padding-left: 6px; } .line .tomain .fig { font-size: var(--t-micro); }
+    .line .tomain { padding-right: 0; padding-left: 6px; } .line .tomain .main-number { font-size: var(--t-micro); }
   }
-  .line.phone { grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(max-content, 1.1fr); height: 46px; border: 0; border-bottom: var(--rule) solid var(--line); background-color: var(--surface); background-size: 10px 4px; }
+  /* The line compacts against the space the project name and the controls actually leave it. */
+  @container (max-width: 450px) {
+    .line .tomain .words { display: none; }
+    .line .tomain .compact-context { display: inline; }
+  }
+  @container (max-width: 380px) {
+    .line:not(.phone) .tomain .share { display: none; }
+  }
+  .line.phone { grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(max-content, 1.1fr); height: var(--line-phone-h); border: 0; border-bottom: var(--rule) solid var(--line); background-color: var(--surface); background-size: 10px 4px; }
   .rail { background: var(--surface); border-right: var(--rule) solid var(--line); display: flex; flex-direction: column; padding: var(--s-2) 0; min-height: 0; }
   .rail a { display: grid; grid-template-columns: 18px 1fr auto; gap: 10px; align-items: center; height: 36px; padding: 0 14px; color: var(--text-2); font-weight: var(--w-medium); }
   .rail a[aria-current] { color: var(--text); background: var(--surface-3); font-weight: var(--w-bold); box-shadow: inset 2px 0 0 var(--brand); }
@@ -172,6 +181,8 @@
   .shell > .rail { grid-area: rail; }
   .shell > main, .shell > .main { grid-area: main; min-width: 0; }
   .shell > .line.phone, .shell > .tabs { display: none; }
+  /* Keep four readable stops even when the project name is long. */
+  .shell > .top .line { min-width: 360px; }
   .shell[data-frame="bare"] { grid-template: "top" var(--top-h) "main" minmax(0, 1fr) / minmax(0, 1fr); }
   .shell[data-frame="bare"] > .rail { display: none; }
   .top .owner { display: flex; align-items: center; gap: var(--s-2); padding: 0 14px; border: 0; border-left: var(--rule) solid var(--line); background: transparent; font-weight: var(--w-strong); white-space: nowrap; min-width: 0; }
@@ -196,7 +207,8 @@
     .shell { display: block; padding-bottom: calc(var(--tabs-h) + env(safe-area-inset-bottom, 0px)); }
     .shell[data-frame="bare"] { padding-bottom: 0; }
     .shell > .rail, .shell > .top .line, .shell > .top .fill { display: none; }
-    .shell > .line.phone { display: grid; }
+    .shell > .line.phone { display: grid; position: sticky; top: var(--stick-top); z-index: 19; }
+    .shell[data-frame="project"] > main { --stick-top: calc(var(--top-h) + env(safe-area-inset-top, 0px) + var(--line-phone-h)); }
     .shell { --stick-top: calc(var(--top-h) + env(safe-area-inset-top, 0px)); }
     .shell > .tabs { display: grid; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; height: calc(var(--tabs-h) + env(safe-area-inset-bottom, 0px)); }
     /* The bar is exactly the height the page leaves clear: a tab's count sits on its icon, never in a row of its own. */

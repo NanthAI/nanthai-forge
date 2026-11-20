@@ -5,8 +5,8 @@
 
 [data-ds] {
   .lane-p { grid-template-columns: minmax(0, 1fr) 400px; align-items: start; }
-  .lane-p > .pane { align-self: stretch; }
-  .lane-p > .side { position: sticky; top: 0; }
+  .lane-p > .pane:not(.side) { align-self: stretch; }
+  .lane-p > .side { position: sticky; top: var(--stick-top, 0px); }
   @media (max-width: 1100px) { .lane-p { grid-template-columns: minmax(0, 1fr) 320px; } }
   @media (max-width: 860px) {
     .lane-p { display: flex; flex-direction: column; background: transparent; }

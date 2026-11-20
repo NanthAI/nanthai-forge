@@ -6,6 +6,8 @@
 // held Lane also parked on a named holder (Item e1633718); `?s=landed` and `?s=abandoned` are the Lane once review is
 // over. Each file carries the +/- counts its save recorded (c2388099), except docs/parser.md and the fixture, which
 // stand for an older save that recorded none.
+import type { ReactNode } from 'react';
+import { ProjectFrame } from '../../web/src/app/frames';
 import { createRoot } from 'react-dom/client';
 import { ConvexProvider, type ConvexReactClient } from 'convex/react';
 import { getFunctionName } from 'convex/server';
@@ -246,10 +248,26 @@ const feed = {
   main: { head: BASE },
 };
 
+function Frame({ children }: { children: ReactNode }) {
+  if (!params.has('frame')) return <main id="main">{children}</main>;
+  return (
+    <ProjectFrame
+      route={route}
+      name="tide-pool"
+      feed={feed}
+      needs={{ n: 1, atLeast: false }}
+      projects={null}
+      controls={{ viewerHandle: 'sample-owner', onPicker() {}, onPalette() {}, onKeys() {} }}
+    >
+      {children}
+    </ProjectFrame>
+  );
+}
+
 void reply().then(data =>
   createRoot(document.getElementById('root')!).render(
     <ConvexProvider client={client}>
-      <main id="main">
+      <Frame>
         <ReviewPage
           reply={data}
           files={data.files.items}
@@ -266,7 +284,7 @@ void reply().then(data =>
           onMore={() => undefined}
           loader={null}
         />
-      </main>
+      </Frame>
     </ConvexProvider>,
   ),
 );

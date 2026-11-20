@@ -2,7 +2,7 @@
 // Screen registration (Item 84125787, run C2): each screen folder registers its own addresses in `<folder>/route.ts`,
 // so a new screen adds files and edits no shared one. A route file must never import its screen eagerly (that would
 // put the screen in the first paint), every address keeps the screen it had in the shared registry, and the top-bar
-// line's accessible names start with the words each stop shows (axe label-content-name-mismatch).
+// lane-stop names start with the words each stop shows. The CSS-responsive main name is checked in the browser.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -124,7 +124,7 @@ const names = markup =>
       .trim(),
   }));
 
-test('each stop of the line, desktop and phone, is named starting with the words it shows', () => {
+test('the Lane stops, desktop and phone, are named starting with the words they show', () => {
   const feed = {
     lanes: [
       { laneId: 'a', stage: 'editing', held: false, overlap: false, changedAt: 1 },
@@ -137,10 +137,12 @@ test('each stop of the line, desktop and phone, is named starting with the words
   };
   for (const phone of [false, true])
     for (const value of [feed, undefined]) {
-      const stops = names(
-        renderToStaticMarkup(createElement(Line, { feed: value, handle: 'm', project: 'p', phone })),
+      const markup = renderToStaticMarkup(
+        createElement(Line, { feed: value, handle: 'm', project: 'p', phone }),
       );
-      assert.equal(stops.length, 5);
+      assert.equal([...markup.matchAll(/<a href=/g)].length, 5);
+      const stops = names(markup);
+      assert.equal(stops.length, 4);
       for (const { name, shown } of stops)
         assert.ok(name.toLowerCase().startsWith(shown.toLowerCase()), `"${name}" must start with "${shown}"`);
     }
@@ -148,13 +150,7 @@ test('each stop of the line, desktop and phone, is named starting with the words
   assert.deepEqual(
     desktop.map(stop => stop.name),
     // The Flow view's stops (Item 85f456c1): a passed check ('ready') counts at Checking.
-    [
-      'Editing 1 Lane',
-      'Saved 0 Lanes',
-      'In queue 0 Lanes',
-      'Checking 2 Lanes, 1 held',
-      'main · 0 today (UTC day)',
-    ],
+    ['Editing 1 Lane', 'Saved 0 Lanes', 'In queue 0 Lanes', 'Checking 2 Lanes, 1 held'],
   );
   const phone = names(
     renderToStaticMarkup(createElement(Line, { feed, handle: 'm', project: 'p', phone: true })),

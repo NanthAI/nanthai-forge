@@ -106,39 +106,47 @@ export function Line({
 /** The main segment (Item 32e8de50): "main · N today · X% first try" from the feed's Flow day; on a phone
  * "main · N · X%". Its name starts with the words it shows, then says them in full. "Today" is the UTC project day
  * at draw time, as on the Flow view: no timer, so a tab left open moves to the new day on its next feed update.
- * Its numbers are `.fig`, not a stop's `.n` count. */
+ * Compact widths keep the full name when the visible line drops words. */
 function MainStop({ feed, href, phone }: { feed: LineFeed | undefined; href: string; phone: boolean }) {
   const today = feed ? mainToday(feed.flow, Date.now()) : null;
   const pct = today ? firstTryPercent(today) : null;
   const n = today?.landed.toLocaleString('en-US');
-  const shown = !today
-    ? 'main'
-    : `main · ${n}${phone ? '' : ' today'}${pct === null ? '' : ` · ${pct}%${phone ? '' : ' first try'}`}`;
   const verdict = flowVerdict(feed?.flow);
   const state = verdict ? (verdict.red ? 'Main failing' : 'Main passing') : undefined;
-  const label = !today
-    ? 'main, not loaded yet'
-    : `${shown}${phone ? `, ${n} landing${today.landed === 1 ? '' : 's'} today${pct === null ? '' : `, ${pct}% first try`}` : ''}${!feed?.main && !today.landed ? ', nothing landed yet' : ''} (UTC day)${state ? `, ${state.toLowerCase()}` : ''}`;
   return (
-    <a href={href} onClick={followLink} className="stop tomain" aria-label={label} title={state}>
+    <a href={href} onClick={followLink} className="stop tomain" title={state}>
       {/* Two unbreakable groups, so a narrow line wraps it to two rows at most: "main · N today", "· X% first try". */}
-      <span className="g" aria-hidden="true">
+      <span className="g">
         <span className="lbl">main</span>
         {today ? (
           <>
             {' · '}
-            <span className="fig">{n}</span>
-            {phone ? null : ' today'}
+            <span className="main-number">{n}</span>
+            {phone ? null : <span className="words"> today</span>}
           </>
         ) : null}
       </span>
       {pct === null ? null : (
-        <span className="g" aria-hidden="true">
+        <span className="g share">
           {' · '}
-          <span className="fig">{pct}%</span>
-          {phone ? null : ' first try'}
+          <span className="main-number">{pct}%</span>
+          {phone ? null : <span className="words"> first try</span>}
         </span>
       )}
+      <span className="sr">
+        {today ? (
+          <>
+            <span className={phone ? undefined : 'compact-context'}>
+              {`, ${n} landing${today.landed === 1 ? '' : 's'} today${pct === null ? '' : `, ${pct}% first try`}`}
+            </span>
+            {!feed?.main && !today.landed ? ', nothing landed yet' : ''}
+            {' (UTC day)'}
+            {state ? `, ${state.toLowerCase()}` : ''}
+          </>
+        ) : (
+          ', not loaded yet'
+        )}
+      </span>
     </a>
   );
 }

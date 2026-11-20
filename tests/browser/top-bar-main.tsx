@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// The top bar's main segment (Item 32e8de50) on synthetic data, through the real project frame: `?land=0|1|300`
-// sets today's landings on main (300 with 261 first tries), with a few Lanes at each stop and a long project name.
+// The top bar on synthetic data through the real project frame. `?land=` sets today's landings on main,
+// and `?name=` can stress the space that the project picker leaves to the line.
 import { createRoot } from 'react-dom/client';
 import '../../web/src/ds';
 import '../../web/src/app/app.css';
@@ -11,7 +11,7 @@ const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
 const landed = Number(params.get('land') ?? '0');
 const hour = Math.floor(Date.now() / 3_600_000);
-const first = landed === 300 ? 261 : landed;
+const first = landed === 300 ? 261 : landed === 101 ? 28 : landed === 1284 ? 360 : landed;
 const uuid = (n: number) => `5d1c7a0e-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const lane = (n: number, stage: LineFeed['lanes'][number]['stage'], held = false) => ({
   laneId: uuid(n),
@@ -55,6 +55,8 @@ const controls = { onPalette: () => {}, onKeys: () => {}, viewerHandle: 'sample-
 const content = (
   <section className="region" aria-label="Page">
     <h1>Top bar fixture</h1>
+    <div className="bulk">Selected rows</div>
+    <div style={{ height: 2400 }} />
   </section>
 );
 createRoot(document.getElementById('root')!).render(
@@ -65,9 +67,9 @@ createRoot(document.getElementById('root')!).render(
   ) : (
     <ProjectFrame
       route={route}
-      name="tidepool-ingest"
-      feed={feed}
-      needs={{ n: 3, atLeast: false }}
+      name={params.get('name') ?? 'tidepool-ingest'}
+      feed={params.has('unloaded') ? undefined : feed}
+      needs={{ n: landed === 1284 ? 1284 : 3, atLeast: false }}
       projects={null}
       controls={{ ...controls, onPicker: () => {} }}
     >

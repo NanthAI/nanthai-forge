@@ -237,6 +237,20 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
       );
     });
 
+    await t.test('the Lane sidebar stays pinned below the project bar', async t => {
+      const page = await open(t, { width: 1000, height: 540 }, 's=review&frame');
+      const change = page.getByRole('region', { name: 'The change' });
+      await change.evaluate(pane => (pane.style.minHeight = '1800px'));
+      const side = page.getByRole('region', { name: 'About this Lane' });
+      const bar = page.locator('header.top');
+      for (const distance of [450, 650]) {
+        await page.evaluate(y => window.scrollTo(0, y), distance);
+        assert.equal(await page.evaluate(() => window.scrollY), distance);
+        const bounds = await bar.boundingBox();
+        assert.equal((await side.boundingBox()).y, bounds.y + bounds.height);
+      }
+    });
+
     await t.test('axe and widths: both themes, desk and phone', async t => {
       for (const viewport of [DESK, PHONE])
         for (const s of ['review', 'combined', 'parked']) {
