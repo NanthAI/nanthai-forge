@@ -1,0 +1,3928 @@
+{
+  "schema": 1,
+  "scope": {
+    "authorityFrom": "2026-10-28T08:08:57.812000Z",
+    "analysisTo": "2026-11-20T21:45:00Z",
+    "receiptReadRequestedFrom": "2026-10-01",
+    "receiptReadRequestedTo": "2026-11-21",
+    "receiptPages": 49,
+    "receiptBytesReadReported": 26169156,
+    "uniqueReceiptsRead": 1418,
+    "includedReceipts": 1415,
+    "firstReceipt": "1862a699-ab00-4937-aea7-466155f00c29",
+    "lastReceipt": "e3bbad0f-e679-4372-94b1-a0cb547868e3",
+    "failurePages": 2,
+    "failedCheckRowsReturned": 130,
+    "metricsCliVersion": "0.3.1",
+    "metricsHistoryContextDays": 2,
+    "receiptReadFromHistoryAuthorityGap": {
+      "legacyOwnerHistoryAvailable": false
+    },
+    "lastDayMetricsWallSeconds": 33.68,
+    "lastDayMetricsPeakRssBytes": 185040896,
+    "missingExecutionDurationsFullMetricRead": 815,
+    "metricSources": [
+      {
+        "from": "2026-10-01",
+        "to": "2026-11-21",
+        "use": "dated totals and acceptance paths prior to the last partial UTC day"
+      },
+      {
+        "from": "2026-11-20",
+        "to": "2026-11-20T21:45:00Z",
+        "use": "last partial UTC day"
+      }
+    ]
+  },
+  "definitions": {
+    "firstTry": "Current Metrics 5.1 by receipt ID. First-try and reused-after-race over classified ordinary accepts. Unclassified includes compensating receipts.",
+    "receiptCheckLinks": "Each distinct visible run contributes one unit total, split evenly among receipts that name it. Counts linked runs, including closed admission and attempt bindings. Earlier rejected operations and audit runs are outside this measure. Capped histories are partial.",
+    "acceptedRunnerMinutes": "Known receipt accepted runner stamps. Equal accepting stamps for the same batch and commit share one cost. Coverage is per receipt.",
+    "discardedRunnerMinutes": "Known receipt discarded runner stamps. No reliable execution-ID allocation for shared discarded runs. From landed submissions only. Missing, pending and unreported accounting may change coverage.",
+    "linkedRedAuditCount": "Distinct following-audit run IDs ever labelled failed, culprit, in-red-range or made-tests-run within the retained receipt cohort. Assigned to earliest associated acceptance, which may precede audit. Includes subsequently flake-cleared runs. Incomplete coverage.",
+    "mainCheckFailuresInAuditExport": "Metrics B red events by audit timestamp from the bounded newest-100 audit projection. An observed zero lacks historical completeness.",
+    "requestToEndCheckMinutes": "Metrics 5.6 request-to-end sum, not test execution wall time; completed duration gap and all-start count retained separately.",
+    "windows": "Reported pins and uniformly recomputed receipts are retained separately. Submit-to-commit percentiles linearly interpolate (n-1)p."
+  },
+  "weekly": [
+    {
+      "from": "2026-10-28T08:08:57.812000Z",
+      "to": "2026-11-02T00:00:00Z",
+      "hours": 111.85060777777778,
+      "landingsPerHour": 1.3231935251889109,
+      "landingsPer24Hours": 31.75664460453386,
+      "receipts": 148,
+      "mainTransitions": 148,
+      "finishToMainMinutes": {
+        "n": 148,
+        "p50": 16.56750833193461,
+        "p90": 76.54270166754725
+      },
+      "firstTry": {
+        "first": 71,
+        "classified": 147,
+        "shareOfClassified": 0.48299319727891155,
+        "paths": {
+          "after-fixer": 35,
+          "after-recompose": 18,
+          "after-retry": 23,
+          "first-try": 71,
+          "unknown": 1
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 211.99999999999994,
+        "perLanding": 1.432432432432432,
+        "partialReceipts": 2
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 148,
+        "sum": 124,
+        "perLanding": 0.8378378378378378
+      },
+      "mainMoved": {
+        "count": 77,
+        "known": 148
+      },
+      "submitToAdmissionMinutes": {
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "overlappedMainTransition": 0
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {},
+      "metrics": {
+        "landings": 148,
+        "checkStarts": 479,
+        "requestToEndCheckMinutes": 8472.546383333332,
+        "knownExecutionRunnerMinutes": 5360.177433333334,
+        "unknownExecutionRuns": 385,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "startsPerLanding": 3.2364864864864864
+      }
+    },
+    {
+      "from": "2026-11-02T00:00:00Z",
+      "to": "2026-11-09T00:00:00Z",
+      "hours": 168.0,
+      "landingsPerHour": 2.3273809523809526,
+      "landingsPer24Hours": 55.857142857142854,
+      "receipts": 391,
+      "mainTransitions": 348,
+      "finishToMainMinutes": {
+        "n": 391,
+        "p50": 14.19375,
+        "p90": 39.34121666351954
+      },
+      "firstTry": {
+        "first": 161,
+        "classified": 390,
+        "shareOfClassified": 0.4128205128205128,
+        "paths": {
+          "after-fixer": 84,
+          "after-recompose": 126,
+          "after-retry": 19,
+          "first-try": 111,
+          "reused-after-race": 50,
+          "unclassified": 1
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 566.9999999999995,
+        "perLanding": 1.4501278772378505,
+        "partialReceipts": 6
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 391,
+        "sum": 418,
+        "perLanding": 1.0690537084398977
+      },
+      "mainMoved": {
+        "count": 244,
+        "known": 391
+      },
+      "submitToAdmissionMinutes": {
+        "n": 306,
+        "p50": 8.516483332713445,
+        "p90": 9.669408333301543,
+        "overlappedMainTransition": 161
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 133,
+        "ATTEMPT_REPLACED": 1,
+        "landed": 25
+      },
+      "metrics": {
+        "landings": 390,
+        "checkStarts": 903,
+        "requestToEndCheckMinutes": 8205.277733333332,
+        "knownExecutionRunnerMinutes": 56208.26434999998,
+        "unknownExecutionRuns": 100,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "startsPerLanding": 2.3153846153846156
+      }
+    },
+    {
+      "from": "2026-11-09T00:00:00Z",
+      "to": "2026-11-16T00:00:00Z",
+      "hours": 168.0,
+      "landingsPerHour": 2.738095238095238,
+      "landingsPer24Hours": 65.71428571428571,
+      "receipts": 460,
+      "mainTransitions": 428,
+      "finishToMainMinutes": {
+        "n": 460,
+        "p50": 10.057466665903728,
+        "p90": 27.127718333800647
+      },
+      "firstTry": {
+        "first": 244,
+        "classified": 459,
+        "shareOfClassified": 0.5315904139433552,
+        "paths": {
+          "after-fixer": 80,
+          "after-recompose": 118,
+          "after-retry": 17,
+          "first-try": 141,
+          "reused-after-race": 103,
+          "unknown": 1
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 615.0,
+        "perLanding": 1.3369565217391304,
+        "partialReceipts": 2
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 239,
+        "totalKnownMinutes": 13966.083333333334,
+        "perLandingKnownMinutes": 30.361050724637682,
+        "meanOverStamped": 58.43549511854951
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 253,
+        "totalKnownMinutes": 3436.383333333333,
+        "perLandingKnownMinutes": 7.470398550724638,
+        "meanOverStamped": 13.582542819499341
+      },
+      "recomposes": {
+        "stampedReceipts": 460,
+        "sum": 393,
+        "perLanding": 0.8543478260869565
+      },
+      "mainMoved": {
+        "count": 275,
+        "known": 460
+      },
+      "submitToAdmissionMinutes": {
+        "n": 446,
+        "p50": 8.062708334128061,
+        "p90": 11.574791665871938,
+        "overlappedMainTransition": 230
+      },
+      "linkedRedAuditCount": 4,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 84,
+        "landed": 15
+      },
+      "metrics": {
+        "landings": 460,
+        "checkStarts": 947,
+        "requestToEndCheckMinutes": 7659.513033333334,
+        "knownExecutionRunnerMinutes": 57508.03029999999,
+        "unknownExecutionRuns": 63,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "startsPerLanding": 2.0586956521739133
+      }
+    },
+    {
+      "from": "2026-11-16T00:00:00Z",
+      "to": "2026-11-20T21:45:00Z",
+      "hours": 117.75,
+      "landingsPerHour": 3.5329087048832273,
+      "landingsPer24Hours": 84.78980891719745,
+      "receipts": 416,
+      "mainTransitions": 385,
+      "finishToMainMinutes": {
+        "n": 416,
+        "p50": 22.183841669559477,
+        "p90": 88.4003583351771
+      },
+      "firstTry": {
+        "first": 208,
+        "classified": 416,
+        "shareOfClassified": 0.5,
+        "paths": {
+          "after-fixer": 86,
+          "after-recompose": 85,
+          "after-retry": 37,
+          "first-try": 104,
+          "reused-after-race": 104
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 739.9999999999998,
+        "perLanding": 1.7788461538461533,
+        "partialReceipts": 9
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 413,
+        "totalKnownMinutes": 32729.15,
+        "perLandingKnownMinutes": 78.67584134615385,
+        "meanOverStamped": 79.24733656174334
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 404,
+        "totalKnownMinutes": 21665.533333333333,
+        "perLandingKnownMinutes": 52.080608974358974,
+        "meanOverStamped": 53.62755775577558
+      },
+      "recomposes": {
+        "stampedReceipts": 416,
+        "sum": 646,
+        "perLanding": 1.5528846153846154
+      },
+      "mainMoved": {
+        "count": 330,
+        "known": 416
+      },
+      "submitToAdmissionMinutes": {
+        "n": 253,
+        "p50": 11.462949999173482,
+        "p90": 16.281186667283375,
+        "overlappedMainTransition": 128
+      },
+      "linkedRedAuditCount": 8,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 185,
+        "landed": 54
+      },
+      "metrics": {
+        "landings": 416,
+        "checkStarts": 1319,
+        "requestToEndCheckMinutes": 13520.6705,
+        "knownExecutionRunnerMinutes": 93019.54986666667,
+        "unknownExecutionRuns": 263,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 6,
+        "flakeClearEventsInAuditExport": 2,
+        "startsPerLanding": 3.170673076923077
+      }
+    }
+  ],
+  "daily": [
+    {
+      "from": "2026-10-28T08:08:57.812000Z",
+      "to": "2026-10-29T00:00:00Z",
+      "hours": 15.850607777777778,
+      "landingsPerHour": 0.12617812692355926,
+      "landingsPer24Hours": 3.028275046165422,
+      "receipts": 2,
+      "mainTransitions": 2,
+      "finishToMainMinutes": {
+        "n": 2,
+        "p50": 73.68662499984106,
+        "p90": 74.07183166742325
+      },
+      "firstTry": {
+        "first": 0,
+        "classified": 2,
+        "shareOfClassified": 0.0,
+        "paths": {
+          "after-fixer": 2
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 2.0,
+        "perLanding": 1.0,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 2,
+        "sum": 0,
+        "perLanding": 0.0
+      },
+      "mainMoved": {
+        "count": 0,
+        "known": 2
+      },
+      "submitToAdmissionMinutes": {
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "overlappedMainTransition": 0
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {},
+      "metrics": {
+        "landings": 2,
+        "firstTry": {
+          "landings": 2,
+          "first": 0
+        },
+        "checkStarts": 7,
+        "startsPerLanding": 3.5,
+        "requestToEndCheckMinutes": 516.0935166666667,
+        "knownExecutionRunnerMinutes": null,
+        "unknownExecutionRuns": 7,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": null,
+        "passedCheckBudgetP90Minutes": null
+      }
+    },
+    {
+      "from": "2026-10-29T00:00:00Z",
+      "to": "2026-10-30T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 1.2916666666666667,
+      "landingsPer24Hours": 31.0,
+      "receipts": 31,
+      "mainTransitions": 31,
+      "finishToMainMinutes": {
+        "n": 31,
+        "p50": 14.660216665267944,
+        "p90": 40.87739999691645
+      },
+      "firstTry": {
+        "first": 16,
+        "classified": 31,
+        "shareOfClassified": 0.5161290322580645,
+        "paths": {
+          "after-fixer": 4,
+          "after-recompose": 9,
+          "after-retry": 2,
+          "first-try": 16
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 43.0,
+        "perLanding": 1.3870967741935485,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 31,
+        "sum": 13,
+        "perLanding": 0.41935483870967744
+      },
+      "mainMoved": {
+        "count": 10,
+        "known": 31
+      },
+      "submitToAdmissionMinutes": {
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "overlappedMainTransition": 0
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {},
+      "metrics": {
+        "landings": 31,
+        "firstTry": {
+          "landings": 31,
+          "first": 16
+        },
+        "checkStarts": 105,
+        "startsPerLanding": 3.3870967741935485,
+        "requestToEndCheckMinutes": 2203.17495,
+        "knownExecutionRunnerMinutes": null,
+        "unknownExecutionRuns": 105,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 25.8,
+        "passedCheckBudgetP90Minutes": 51.7
+      }
+    },
+    {
+      "from": "2026-10-30T00:00:00Z",
+      "to": "2026-10-31T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 2.625,
+      "landingsPer24Hours": 63.0,
+      "receipts": 63,
+      "mainTransitions": 63,
+      "finishToMainMinutes": {
+        "n": 63,
+        "p50": 40.48151666720708,
+        "p90": 117.9836066691081
+      },
+      "firstTry": {
+        "first": 21,
+        "classified": 63,
+        "shareOfClassified": 0.3333333333333333,
+        "paths": {
+          "after-fixer": 18,
+          "after-recompose": 8,
+          "after-retry": 16,
+          "first-try": 21
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 113.00000000000001,
+        "perLanding": 1.793650793650794,
+        "partialReceipts": 2
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 63,
+        "sum": 92,
+        "perLanding": 1.4603174603174602
+      },
+      "mainMoved": {
+        "count": 48,
+        "known": 63
+      },
+      "submitToAdmissionMinutes": {
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "overlappedMainTransition": 0
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {},
+      "metrics": {
+        "landings": 63,
+        "firstTry": {
+          "landings": 63,
+          "first": 21
+        },
+        "checkStarts": 284,
+        "startsPerLanding": 4.507936507936508,
+        "requestToEndCheckMinutes": 5095.611416666665,
+        "knownExecutionRunnerMinutes": 849.3008500000001,
+        "unknownExecutionRuns": 270,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 10.7,
+        "passedCheckBudgetP90Minutes": 11.7
+      }
+    },
+    {
+      "from": "2026-10-31T00:00:00Z",
+      "to": "2026-11-01T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 1.0,
+      "landingsPer24Hours": 24.0,
+      "receipts": 24,
+      "mainTransitions": 24,
+      "finishToMainMinutes": {
+        "n": 24,
+        "p50": 12.56399166782697,
+        "p90": 29.187556668122607
+      },
+      "firstTry": {
+        "first": 16,
+        "classified": 23,
+        "shareOfClassified": 0.6956521739130435,
+        "paths": {
+          "after-fixer": 5,
+          "after-retry": 2,
+          "first-try": 16,
+          "unknown": 1
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 25.0,
+        "perLanding": 1.0416666666666667,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 24,
+        "sum": 9,
+        "perLanding": 0.375
+      },
+      "mainMoved": {
+        "count": 9,
+        "known": 24
+      },
+      "submitToAdmissionMinutes": {
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "overlappedMainTransition": 0
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {},
+      "metrics": {
+        "landings": 24,
+        "firstTry": {
+          "landings": 23,
+          "first": 16
+        },
+        "checkStarts": 35,
+        "startsPerLanding": 1.4583333333333333,
+        "requestToEndCheckMinutes": 292.3232333333333,
+        "knownExecutionRunnerMinutes": 1961.0933833333333,
+        "unknownExecutionRuns": 1,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 7.6,
+        "passedCheckBudgetP90Minutes": 10.8
+      }
+    },
+    {
+      "from": "2026-11-01T00:00:00Z",
+      "to": "2026-11-02T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 1.1666666666666667,
+      "landingsPer24Hours": 28.0,
+      "receipts": 28,
+      "mainTransitions": 28,
+      "finishToMainMinutes": {
+        "n": 28,
+        "p50": 7.980508333444596,
+        "p90": 15.864671664237978
+      },
+      "firstTry": {
+        "first": 18,
+        "classified": 28,
+        "shareOfClassified": 0.6428571428571429,
+        "paths": {
+          "after-fixer": 6,
+          "after-recompose": 1,
+          "after-retry": 3,
+          "first-try": 18
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 29.0,
+        "perLanding": 1.0357142857142858,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 28,
+        "sum": 10,
+        "perLanding": 0.35714285714285715
+      },
+      "mainMoved": {
+        "count": 10,
+        "known": 28
+      },
+      "submitToAdmissionMinutes": {
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "overlappedMainTransition": 0
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {},
+      "metrics": {
+        "landings": 28,
+        "firstTry": {
+          "landings": 28,
+          "first": 18
+        },
+        "checkStarts": 48,
+        "startsPerLanding": 1.7142857142857142,
+        "requestToEndCheckMinutes": 365.3432666666667,
+        "knownExecutionRunnerMinutes": 2549.7832000000003,
+        "unknownExecutionRuns": 2,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 7.5,
+        "passedCheckBudgetP90Minutes": 7.7
+      }
+    },
+    {
+      "from": "2026-11-02T00:00:00Z",
+      "to": "2026-11-03T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 1.0,
+      "landingsPer24Hours": 24.0,
+      "receipts": 24,
+      "mainTransitions": 24,
+      "finishToMainMinutes": {
+        "n": 24,
+        "p50": 9.491058333714804,
+        "p90": 14.744056666692098
+      },
+      "firstTry": {
+        "first": 13,
+        "classified": 24,
+        "shareOfClassified": 0.5416666666666666,
+        "paths": {
+          "after-fixer": 8,
+          "after-recompose": 1,
+          "after-retry": 2,
+          "first-try": 13
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 26.0,
+        "perLanding": 1.0833333333333333,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 24,
+        "sum": 6,
+        "perLanding": 0.25
+      },
+      "mainMoved": {
+        "count": 6,
+        "known": 24
+      },
+      "submitToAdmissionMinutes": {
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "overlappedMainTransition": 0
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {},
+      "metrics": {
+        "landings": 24,
+        "firstTry": {
+          "landings": 24,
+          "first": 13
+        },
+        "checkStarts": 42,
+        "startsPerLanding": 1.75,
+        "requestToEndCheckMinutes": 359.56028333333336,
+        "knownExecutionRunnerMinutes": 2517.0889333333334,
+        "unknownExecutionRuns": 3,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 8.6,
+        "passedCheckBudgetP90Minutes": 9.9
+      }
+    },
+    {
+      "from": "2026-11-03T00:00:00Z",
+      "to": "2026-11-04T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 0.5416666666666666,
+      "landingsPer24Hours": 13.0,
+      "receipts": 13,
+      "mainTransitions": 13,
+      "finishToMainMinutes": {
+        "n": 13,
+        "p50": 9.250399998823802,
+        "p90": 11.530956664880119
+      },
+      "firstTry": {
+        "first": 8,
+        "classified": 13,
+        "shareOfClassified": 0.6153846153846154,
+        "paths": {
+          "after-fixer": 3,
+          "after-retry": 2,
+          "first-try": 8
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 14.0,
+        "perLanding": 1.0769230769230769,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 13,
+        "sum": 2,
+        "perLanding": 0.15384615384615385
+      },
+      "mainMoved": {
+        "count": 0,
+        "known": 13
+      },
+      "submitToAdmissionMinutes": {
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "overlappedMainTransition": 0
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {},
+      "metrics": {
+        "landings": 13,
+        "firstTry": {
+          "landings": 13,
+          "first": 8
+        },
+        "checkStarts": 20,
+        "startsPerLanding": 1.5384615384615385,
+        "requestToEndCheckMinutes": 155.46248333333332,
+        "knownExecutionRunnerMinutes": 1270.2708666666667,
+        "unknownExecutionRuns": 0,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": null,
+        "passedCheckBudgetP90Minutes": null
+      }
+    },
+    {
+      "from": "2026-11-04T00:00:00Z",
+      "to": "2026-11-05T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 1.0,
+      "landingsPer24Hours": 24.0,
+      "receipts": 24,
+      "mainTransitions": 24,
+      "finishToMainMinutes": {
+        "n": 24,
+        "p50": 11.700558332602183,
+        "p90": 32.18706333359082
+      },
+      "firstTry": {
+        "first": 14,
+        "classified": 24,
+        "shareOfClassified": 0.5833333333333334,
+        "paths": {
+          "after-fixer": 8,
+          "after-recompose": 2,
+          "first-try": 14
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 39.0,
+        "perLanding": 1.625,
+        "partialReceipts": 1
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 24,
+        "sum": 30,
+        "perLanding": 1.25
+      },
+      "mainMoved": {
+        "count": 14,
+        "known": 24
+      },
+      "submitToAdmissionMinutes": {
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "overlappedMainTransition": 0
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 3,
+        "ATTEMPT_REPLACED": 1
+      },
+      "metrics": {
+        "landings": 24,
+        "firstTry": {
+          "landings": 24,
+          "first": 14
+        },
+        "checkStarts": 68,
+        "startsPerLanding": 2.8333333333333335,
+        "requestToEndCheckMinutes": 516.3455500000001,
+        "knownExecutionRunnerMinutes": 2588.3048500000004,
+        "unknownExecutionRuns": 15,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 9.7,
+        "passedCheckBudgetP90Minutes": 17.2
+      }
+    },
+    {
+      "from": "2026-11-05T00:00:00Z",
+      "to": "2026-11-06T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 3.125,
+      "landingsPer24Hours": 75.0,
+      "receipts": 75,
+      "mainTransitions": 65,
+      "finishToMainMinutes": {
+        "n": 75,
+        "p50": 23.237916668256123,
+        "p90": 53.601896668275266
+      },
+      "firstTry": {
+        "first": 13,
+        "classified": 75,
+        "shareOfClassified": 0.17333333333333334,
+        "paths": {
+          "after-fixer": 28,
+          "after-recompose": 30,
+          "after-retry": 4,
+          "first-try": 13
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 137.0,
+        "perLanding": 1.8266666666666667,
+        "partialReceipts": 5
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 75,
+        "sum": 112,
+        "perLanding": 1.4933333333333334
+      },
+      "mainMoved": {
+        "count": 54,
+        "known": 75
+      },
+      "submitToAdmissionMinutes": {
+        "n": 55,
+        "p50": 8.82063333193461,
+        "p90": 9.921553332805635,
+        "overlappedMainTransition": 29
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {
+        "landed": 3,
+        "CHANNEL_CHANGED": 33
+      },
+      "metrics": {
+        "landings": 75,
+        "firstTry": {
+          "landings": 75,
+          "first": 13
+        },
+        "checkStarts": 240,
+        "startsPerLanding": 3.2,
+        "requestToEndCheckMinutes": 2378.998133333335,
+        "knownExecutionRunnerMinutes": 13913.40281666666,
+        "unknownExecutionRuns": 44,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 8.4,
+        "passedCheckBudgetP90Minutes": 9.6
+      }
+    },
+    {
+      "from": "2026-11-06T00:00:00Z",
+      "to": "2026-11-07T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 3.2083333333333335,
+      "landingsPer24Hours": 77.0,
+      "receipts": 77,
+      "mainTransitions": 73,
+      "finishToMainMinutes": {
+        "n": 77,
+        "p50": 8.89031666914622,
+        "p90": 21.553626665274304
+      },
+      "firstTry": {
+        "first": 36,
+        "classified": 77,
+        "shareOfClassified": 0.4675324675324675,
+        "paths": {
+          "after-fixer": 13,
+          "after-recompose": 26,
+          "after-retry": 2,
+          "first-try": 27,
+          "reused-after-race": 9
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 105.0,
+        "perLanding": 1.3636363636363635,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 77,
+        "sum": 53,
+        "perLanding": 0.6883116883116883
+      },
+      "mainMoved": {
+        "count": 42,
+        "known": 77
+      },
+      "submitToAdmissionMinutes": {
+        "n": 77,
+        "p50": 8.45453333457311,
+        "p90": 8.882426665623983,
+        "overlappedMainTransition": 35
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 11
+      },
+      "metrics": {
+        "landings": 77,
+        "firstTry": {
+          "landings": 77,
+          "first": 36
+        },
+        "checkStarts": 141,
+        "startsPerLanding": 1.8311688311688312,
+        "requestToEndCheckMinutes": 1131.924683333333,
+        "knownExecutionRunnerMinutes": 9993.245983333334,
+        "unknownExecutionRuns": 1,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 8.2,
+        "passedCheckBudgetP90Minutes": 8.7
+      }
+    },
+    {
+      "from": "2026-11-07T00:00:00Z",
+      "to": "2026-11-08T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 3.4583333333333335,
+      "landingsPer24Hours": 83.0,
+      "receipts": 83,
+      "mainTransitions": 68,
+      "finishToMainMinutes": {
+        "n": 83,
+        "p50": 12.752649998664856,
+        "p90": 26.738293333053587
+      },
+      "firstTry": {
+        "first": 39,
+        "classified": 83,
+        "shareOfClassified": 0.46987951807228917,
+        "paths": {
+          "after-fixer": 7,
+          "after-recompose": 35,
+          "after-retry": 2,
+          "first-try": 17,
+          "reused-after-race": 22
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 106.99999999999996,
+        "perLanding": 1.2891566265060235,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 83,
+        "sum": 91,
+        "perLanding": 1.0963855421686748
+      },
+      "mainMoved": {
+        "count": 61,
+        "known": 83
+      },
+      "submitToAdmissionMinutes": {
+        "n": 81,
+        "p50": 8.46185000340144,
+        "p90": 9.555133334795634,
+        "overlappedMainTransition": 51
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 35,
+        "landed": 8
+      },
+      "metrics": {
+        "landings": 83,
+        "firstTry": {
+          "landings": 83,
+          "first": 39
+        },
+        "checkStarts": 137,
+        "startsPerLanding": 1.6506024096385543,
+        "requestToEndCheckMinutes": 1131.6402833333334,
+        "knownExecutionRunnerMinutes": 9822.779583333333,
+        "unknownExecutionRuns": 1,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 8.2,
+        "passedCheckBudgetP90Minutes": 8.8
+      }
+    },
+    {
+      "from": "2026-11-08T00:00:00Z",
+      "to": "2026-11-09T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 3.9583333333333335,
+      "landingsPer24Hours": 95.0,
+      "receipts": 95,
+      "mainTransitions": 81,
+      "finishToMainMinutes": {
+        "n": 95,
+        "p50": 17.762316664059956,
+        "p90": 46.66841333150867
+      },
+      "firstTry": {
+        "first": 38,
+        "classified": 94,
+        "shareOfClassified": 0.40425531914893614,
+        "paths": {
+          "after-fixer": 17,
+          "after-recompose": 32,
+          "after-retry": 7,
+          "first-try": 19,
+          "reused-after-race": 19,
+          "unclassified": 1
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 139.00000000000003,
+        "perLanding": 1.4631578947368424,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 95,
+        "sum": 124,
+        "perLanding": 1.305263157894737
+      },
+      "mainMoved": {
+        "count": 67,
+        "known": 95
+      },
+      "submitToAdmissionMinutes": {
+        "n": 93,
+        "p50": 8.515433331330618,
+        "p90": 10.490970000425971,
+        "overlappedMainTransition": 46
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 51,
+        "landed": 14
+      },
+      "metrics": {
+        "landings": 94,
+        "firstTry": {
+          "landings": 94,
+          "first": 38
+        },
+        "checkStarts": 255,
+        "startsPerLanding": 2.7127659574468086,
+        "requestToEndCheckMinutes": 2531.346316666665,
+        "knownExecutionRunnerMinutes": 16103.17131666666,
+        "unknownExecutionRuns": 36,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 8.7,
+        "passedCheckBudgetP90Minutes": 12
+      }
+    },
+    {
+      "from": "2026-11-09T00:00:00Z",
+      "to": "2026-11-10T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 5.416666666666667,
+      "landingsPer24Hours": 130.0,
+      "receipts": 130,
+      "mainTransitions": 115,
+      "finishToMainMinutes": {
+        "n": 130,
+        "p50": 16.73716666897138,
+        "p90": 31.651810000737512
+      },
+      "firstTry": {
+        "first": 51,
+        "classified": 130,
+        "shareOfClassified": 0.3923076923076923,
+        "paths": {
+          "after-fixer": 17,
+          "after-recompose": 53,
+          "after-retry": 9,
+          "first-try": 17,
+          "reused-after-race": 34
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 200.0,
+        "perLanding": 1.5384615384615385,
+        "partialReceipts": 2
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 130,
+        "sum": 162,
+        "perLanding": 1.2461538461538462
+      },
+      "mainMoved": {
+        "count": 105,
+        "known": 130
+      },
+      "submitToAdmissionMinutes": {
+        "n": 126,
+        "p50": 9.300841667254765,
+        "p90": 13.089966666698455,
+        "overlappedMainTransition": 86
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 45,
+        "landed": 5
+      },
+      "metrics": {
+        "landings": 130,
+        "firstTry": {
+          "landings": 130,
+          "first": 51
+        },
+        "checkStarts": 314,
+        "startsPerLanding": 2.4153846153846152,
+        "requestToEndCheckMinutes": 2714.88666666667,
+        "knownExecutionRunnerMinutes": 20755.393549999997,
+        "unknownExecutionRuns": 33,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 8.7,
+        "passedCheckBudgetP90Minutes": 9.6
+      }
+    },
+    {
+      "from": "2026-11-10T00:00:00Z",
+      "to": "2026-11-11T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 7.125,
+      "landingsPer24Hours": 171.0,
+      "receipts": 171,
+      "mainTransitions": 157,
+      "finishToMainMinutes": {
+        "n": 171,
+        "p50": 7.162516665458679,
+        "p90": 27.783266667524973
+      },
+      "firstTry": {
+        "first": 96,
+        "classified": 171,
+        "shareOfClassified": 0.5614035087719298,
+        "paths": {
+          "after-fixer": 31,
+          "after-recompose": 39,
+          "after-retry": 5,
+          "first-try": 47,
+          "reused-after-race": 49
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 219.00000000000006,
+        "perLanding": 1.2807017543859653,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 89,
+        "totalKnownMinutes": 4538.45,
+        "perLandingKnownMinutes": 26.5406432748538,
+        "meanOverStamped": 50.9938202247191
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 95,
+        "totalKnownMinutes": 1356.8166666666666,
+        "perLandingKnownMinutes": 7.934600389863547,
+        "meanOverStamped": 14.282280701754386
+      },
+      "recomposes": {
+        "stampedReceipts": 171,
+        "sum": 158,
+        "perLanding": 0.9239766081871345
+      },
+      "mainMoved": {
+        "count": 113,
+        "known": 171
+      },
+      "submitToAdmissionMinutes": {
+        "n": 168,
+        "p50": 6.705141667524973,
+        "p90": 9.785534999370576,
+        "overlappedMainTransition": 97
+      },
+      "linkedRedAuditCount": 3,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 30,
+        "landed": 7
+      },
+      "metrics": {
+        "landings": 171,
+        "firstTry": {
+          "landings": 171,
+          "first": 96
+        },
+        "checkStarts": 350,
+        "startsPerLanding": 2.046783625730994,
+        "requestToEndCheckMinutes": 2515.335633333331,
+        "knownExecutionRunnerMinutes": 19802.70701666666,
+        "unknownExecutionRuns": 4,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 6.6,
+        "passedCheckBudgetP90Minutes": 7.3
+      }
+    },
+    {
+      "from": "2026-11-11T00:00:00Z",
+      "to": "2026-11-12T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 3.5,
+      "landingsPer24Hours": 84.0,
+      "receipts": 84,
+      "mainTransitions": 82,
+      "finishToMainMinutes": {
+        "n": 84,
+        "p50": 8.466391666730246,
+        "p90": 20.96342333316803
+      },
+      "firstTry": {
+        "first": 48,
+        "classified": 83,
+        "shareOfClassified": 0.5783132530120482,
+        "paths": {
+          "after-fixer": 10,
+          "after-recompose": 23,
+          "after-retry": 2,
+          "first-try": 31,
+          "reused-after-race": 17,
+          "unknown": 1
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 113.0,
+        "perLanding": 1.3452380952380953,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 77,
+        "totalKnownMinutes": 3694.0833333333335,
+        "perLandingKnownMinutes": 43.977182539682545,
+        "meanOverStamped": 47.97510822510822
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 84,
+        "totalKnownMinutes": 1619.8833333333334,
+        "perLandingKnownMinutes": 19.2843253968254,
+        "meanOverStamped": 19.2843253968254
+      },
+      "recomposes": {
+        "stampedReceipts": 84,
+        "sum": 58,
+        "perLanding": 0.6904761904761905
+      },
+      "mainMoved": {
+        "count": 45,
+        "known": 84
+      },
+      "submitToAdmissionMinutes": {
+        "n": 83,
+        "p50": 7.0827833334604895,
+        "p90": 9.475549999078114,
+        "overlappedMainTransition": 40
+      },
+      "linkedRedAuditCount": 1,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 7,
+        "landed": 1
+      },
+      "metrics": {
+        "landings": 84,
+        "firstTry": {
+          "landings": 83,
+          "first": 48
+        },
+        "checkStarts": 165,
+        "startsPerLanding": 1.9642857142857142,
+        "requestToEndCheckMinutes": 1246.6390666666662,
+        "knownExecutionRunnerMinutes": 7997.465483333333,
+        "unknownExecutionRuns": 15,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 9.1,
+        "passedCheckBudgetP90Minutes": 10
+      }
+    },
+    {
+      "from": "2026-11-12T00:00:00Z",
+      "to": "2026-11-13T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 1.0833333333333333,
+      "landingsPer24Hours": 26.0,
+      "receipts": 26,
+      "mainTransitions": 26,
+      "finishToMainMinutes": {
+        "n": 26,
+        "p50": 10.332416665554046,
+        "p90": 12.578691665331522
+      },
+      "firstTry": {
+        "first": 18,
+        "classified": 26,
+        "shareOfClassified": 0.6923076923076923,
+        "paths": {
+          "after-fixer": 8,
+          "first-try": 18
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 27.0,
+        "perLanding": 1.0384615384615385,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 26,
+        "totalKnownMinutes": 1727.6,
+        "perLandingKnownMinutes": 66.44615384615385,
+        "meanOverStamped": 66.44615384615385
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 26,
+        "totalKnownMinutes": 82.58333333333333,
+        "perLandingKnownMinutes": 3.176282051282051,
+        "meanOverStamped": 3.176282051282051
+      },
+      "recomposes": {
+        "stampedReceipts": 26,
+        "sum": 1,
+        "perLanding": 0.038461538461538464
+      },
+      "mainMoved": {
+        "count": 1,
+        "known": 26
+      },
+      "submitToAdmissionMinutes": {
+        "n": 25,
+        "p50": 10.066933333873749,
+        "p90": 11.751163334846497,
+        "overlappedMainTransition": 1
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {
+        "landed": 1
+      },
+      "metrics": {
+        "landings": 26,
+        "firstTry": {
+          "landings": 26,
+          "first": 18
+        },
+        "checkStarts": 37,
+        "startsPerLanding": 1.4230769230769231,
+        "requestToEndCheckMinutes": 366.6975166666667,
+        "knownExecutionRunnerMinutes": 2579.229016666666,
+        "unknownExecutionRuns": 2,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 10.3,
+        "passedCheckBudgetP90Minutes": 11.8
+      }
+    },
+    {
+      "from": "2026-11-13T00:00:00Z",
+      "to": "2026-11-14T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 0.6666666666666666,
+      "landingsPer24Hours": 16.0,
+      "receipts": 16,
+      "mainTransitions": 16,
+      "finishToMainMinutes": {
+        "n": 16,
+        "p50": 11.165291666984558,
+        "p90": 12.373858334620794
+      },
+      "firstTry": {
+        "first": 11,
+        "classified": 16,
+        "shareOfClassified": 0.6875,
+        "paths": {
+          "after-fixer": 4,
+          "after-retry": 1,
+          "first-try": 8,
+          "reused-after-race": 3
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 17.0,
+        "perLanding": 1.0625,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 16,
+        "totalKnownMinutes": 1416.8666666666668,
+        "perLandingKnownMinutes": 88.55416666666667,
+        "meanOverStamped": 88.55416666666667
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 15,
+        "totalKnownMinutes": 0,
+        "perLandingKnownMinutes": 0.0,
+        "meanOverStamped": 0
+      },
+      "recomposes": {
+        "stampedReceipts": 16,
+        "sum": 4,
+        "perLanding": 0.25
+      },
+      "mainMoved": {
+        "count": 4,
+        "known": 16
+      },
+      "submitToAdmissionMinutes": {
+        "n": 15,
+        "p50": 10.60135000149409,
+        "p90": 11.961756668090821,
+        "overlappedMainTransition": 3
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {},
+      "metrics": {
+        "landings": 16,
+        "firstTry": {
+          "landings": 16,
+          "first": 11
+        },
+        "checkStarts": 27,
+        "startsPerLanding": 1.6875,
+        "requestToEndCheckMinutes": 273.52763333333337,
+        "knownExecutionRunnerMinutes": 2151.9063333333334,
+        "unknownExecutionRuns": 3,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": null,
+        "passedCheckBudgetP90Minutes": null
+      }
+    },
+    {
+      "from": "2026-11-14T00:00:00Z",
+      "to": "2026-11-15T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 0.20833333333333334,
+      "landingsPer24Hours": 5.0,
+      "receipts": 5,
+      "mainTransitions": 5,
+      "finishToMainMinutes": {
+        "n": 5,
+        "p50": 11.242850001653036,
+        "p90": 11.680706667105357
+      },
+      "firstTry": {
+        "first": 1,
+        "classified": 5,
+        "shareOfClassified": 0.2,
+        "paths": {
+          "after-fixer": 4,
+          "first-try": 1
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 5.0,
+        "perLanding": 1.0,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 5,
+        "totalKnownMinutes": 459.85,
+        "perLandingKnownMinutes": 91.97,
+        "meanOverStamped": 91.97
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 5,
+        "totalKnownMinutes": 0,
+        "perLandingKnownMinutes": 0.0,
+        "meanOverStamped": 0
+      },
+      "recomposes": {
+        "stampedReceipts": 5,
+        "sum": 0,
+        "perLanding": 0.0
+      },
+      "mainMoved": {
+        "count": 0,
+        "known": 5
+      },
+      "submitToAdmissionMinutes": {
+        "n": 5,
+        "p50": 11.19056666692098,
+        "p90": 11.628960001468657,
+        "overlappedMainTransition": 0
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {},
+      "metrics": {
+        "landings": 5,
+        "firstTry": {
+          "landings": 5,
+          "first": 1
+        },
+        "checkStarts": 9,
+        "startsPerLanding": 1.8,
+        "requestToEndCheckMinutes": 97.30635,
+        "knownExecutionRunnerMinutes": 847.87325,
+        "unknownExecutionRuns": 0,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": null,
+        "passedCheckBudgetP90Minutes": null
+      }
+    },
+    {
+      "from": "2026-11-15T00:00:00Z",
+      "to": "2026-11-16T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 1.1666666666666667,
+      "landingsPer24Hours": 28.0,
+      "receipts": 28,
+      "mainTransitions": 27,
+      "finishToMainMinutes": {
+        "n": 28,
+        "p50": 11.088924998044966,
+        "p90": 22.512004997730255
+      },
+      "firstTry": {
+        "first": 19,
+        "classified": 28,
+        "shareOfClassified": 0.6785714285714286,
+        "paths": {
+          "after-fixer": 6,
+          "after-recompose": 3,
+          "first-try": 19
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 34.0,
+        "perLanding": 1.2142857142857142,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 26,
+        "totalKnownMinutes": 2129.233333333333,
+        "perLandingKnownMinutes": 76.04404761904762,
+        "meanOverStamped": 81.89358974358974
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 28,
+        "totalKnownMinutes": 377.1,
+        "perLandingKnownMinutes": 13.467857142857143,
+        "meanOverStamped": 13.467857142857143
+      },
+      "recomposes": {
+        "stampedReceipts": 28,
+        "sum": 10,
+        "perLanding": 0.35714285714285715
+      },
+      "mainMoved": {
+        "count": 7,
+        "known": 28
+      },
+      "submitToAdmissionMinutes": {
+        "n": 24,
+        "p50": 10.561475000778834,
+        "p90": 12.496348334153494,
+        "overlappedMainTransition": 3
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {
+        "landed": 1,
+        "CHANNEL_CHANGED": 2
+      },
+      "metrics": {
+        "landings": 28,
+        "firstTry": {
+          "landings": 28,
+          "first": 19
+        },
+        "checkStarts": 45,
+        "startsPerLanding": 1.6071428571428572,
+        "requestToEndCheckMinutes": 445.1201666666667,
+        "knownExecutionRunnerMinutes": 3373.455650000001,
+        "unknownExecutionRuns": 6,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 10.5,
+        "passedCheckBudgetP90Minutes": 12.8
+      }
+    },
+    {
+      "from": "2026-11-16T00:00:00Z",
+      "to": "2026-11-17T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 1.4583333333333333,
+      "landingsPer24Hours": 35.0,
+      "receipts": 35,
+      "mainTransitions": 35,
+      "finishToMainMinutes": {
+        "n": 35,
+        "p50": 11.972716665267944,
+        "p90": 35.81776000181835
+      },
+      "firstTry": {
+        "first": 23,
+        "classified": 35,
+        "shareOfClassified": 0.6571428571428571,
+        "paths": {
+          "after-fixer": 7,
+          "after-recompose": 5,
+          "first-try": 18,
+          "reused-after-race": 5
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 47.0,
+        "perLanding": 1.3428571428571427,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 34,
+        "totalKnownMinutes": 3011.5666666666666,
+        "perLandingKnownMinutes": 86.0447619047619,
+        "meanOverStamped": 88.57549019607843
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 35,
+        "totalKnownMinutes": 392.25,
+        "perLandingKnownMinutes": 11.207142857142857,
+        "meanOverStamped": 11.207142857142857
+      },
+      "recomposes": {
+        "stampedReceipts": 35,
+        "sum": 19,
+        "perLanding": 0.5428571428571428
+      },
+      "mainMoved": {
+        "count": 14,
+        "known": 35
+      },
+      "submitToAdmissionMinutes": {
+        "n": 27,
+        "p50": 11.152733333905537,
+        "p90": 12.847836668491363,
+        "overlappedMainTransition": 2
+      },
+      "linkedRedAuditCount": 1,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 6,
+        "landed": 2
+      },
+      "metrics": {
+        "landings": 35,
+        "firstTry": {
+          "landings": 35,
+          "first": 23
+        },
+        "checkStarts": 75,
+        "startsPerLanding": 2.142857142857143,
+        "requestToEndCheckMinutes": 849.1950333333331,
+        "knownExecutionRunnerMinutes": 5228.121583333333,
+        "unknownExecutionRuns": 15,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 11.9,
+        "passedCheckBudgetP90Minutes": 13.3
+      }
+    },
+    {
+      "from": "2026-11-17T00:00:00Z",
+      "to": "2026-11-18T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 4.75,
+      "landingsPer24Hours": 114.0,
+      "receipts": 114,
+      "mainTransitions": 101,
+      "finishToMainMinutes": {
+        "n": 114,
+        "p50": 37.46428333322207,
+        "p90": 95.76535500129064
+      },
+      "firstTry": {
+        "first": 38,
+        "classified": 114,
+        "shareOfClassified": 0.3333333333333333,
+        "paths": {
+          "after-fixer": 34,
+          "after-recompose": 27,
+          "after-retry": 15,
+          "first-try": 21,
+          "reused-after-race": 17
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 247.00000000000003,
+        "perLanding": 2.166666666666667,
+        "partialReceipts": 5
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 112,
+        "totalKnownMinutes": 9003.166666666666,
+        "perLandingKnownMinutes": 78.9751461988304,
+        "meanOverStamped": 80.38541666666667
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 114,
+        "totalKnownMinutes": 6612.816666666667,
+        "perLandingKnownMinutes": 58.00716374269006,
+        "meanOverStamped": 58.00716374269006
+      },
+      "recomposes": {
+        "stampedReceipts": 114,
+        "sum": 238,
+        "perLanding": 2.087719298245614
+      },
+      "mainMoved": {
+        "count": 103,
+        "known": 114
+      },
+      "submitToAdmissionMinutes": {
+        "n": 50,
+        "p50": 13.994666667779288,
+        "p90": 20.99221000154813,
+        "overlappedMainTransition": 24
+      },
+      "linkedRedAuditCount": 1,
+      "recordedHoldsAtLeastOneMinute": {
+        "landed": 19,
+        "CHANNEL_CHANGED": 62
+      },
+      "metrics": {
+        "landings": 114,
+        "firstTry": {
+          "landings": 114,
+          "first": 38
+        },
+        "checkStarts": 490,
+        "startsPerLanding": 4.298245614035087,
+        "requestToEndCheckMinutes": 5591.911466666665,
+        "knownExecutionRunnerMinutes": 31949.473899999975,
+        "unknownExecutionRuns": 175,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 12.7,
+        "passedCheckBudgetP90Minutes": 14.8
+      }
+    },
+    {
+      "from": "2026-11-18T00:00:00Z",
+      "to": "2026-11-19T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 1.875,
+      "landingsPer24Hours": 45.0,
+      "receipts": 45,
+      "mainTransitions": 42,
+      "finishToMainMinutes": {
+        "n": 45,
+        "p50": 15.684016664822897,
+        "p90": 30.259806667168935
+      },
+      "firstTry": {
+        "first": 31,
+        "classified": 45,
+        "shareOfClassified": 0.6888888888888889,
+        "paths": {
+          "after-fixer": 6,
+          "after-recompose": 6,
+          "after-retry": 2,
+          "first-try": 17,
+          "reused-after-race": 14
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 62.00000000000001,
+        "perLanding": 1.377777777777778,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 45,
+        "totalKnownMinutes": 4331.816666666667,
+        "perLandingKnownMinutes": 96.2625925925926,
+        "meanOverStamped": 96.2625925925926
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 43,
+        "totalKnownMinutes": 1339.3666666666666,
+        "perLandingKnownMinutes": 29.7637037037037,
+        "meanOverStamped": 31.148062015503875
+      },
+      "recomposes": {
+        "stampedReceipts": 45,
+        "sum": 44,
+        "perLanding": 0.9777777777777777
+      },
+      "mainMoved": {
+        "count": 30,
+        "known": 45
+      },
+      "submitToAdmissionMinutes": {
+        "n": 32,
+        "p50": 14.1654999991258,
+        "p90": 15.61329166650772,
+        "overlappedMainTransition": 15
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {
+        "landed": 3,
+        "CHANNEL_CHANGED": 5
+      },
+      "metrics": {
+        "landings": 45,
+        "firstTry": {
+          "landings": 45,
+          "first": 31
+        },
+        "checkStarts": 90,
+        "startsPerLanding": 2,
+        "requestToEndCheckMinutes": 1093.88685,
+        "knownExecutionRunnerMinutes": 9104.292783333332,
+        "unknownExecutionRuns": 1,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 0,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 15,
+        "passedCheckBudgetP90Minutes": 15.6
+      }
+    },
+    {
+      "from": "2026-11-19T00:00:00Z",
+      "to": "2026-11-20T00:00:00Z",
+      "hours": 24.0,
+      "landingsPerHour": 5.0,
+      "landingsPer24Hours": 120.0,
+      "receipts": 120,
+      "mainTransitions": 109,
+      "finishToMainMinutes": {
+        "n": 120,
+        "p50": 44.1903333346049,
+        "p90": 102.08973500053088
+      },
+      "firstTry": {
+        "first": 61,
+        "classified": 120,
+        "shareOfClassified": 0.5083333333333333,
+        "paths": {
+          "after-fixer": 16,
+          "after-recompose": 35,
+          "after-retry": 8,
+          "first-try": 19,
+          "reused-after-race": 42
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 234.0,
+        "perLanding": 1.95,
+        "partialReceipts": 4
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 120,
+        "totalKnownMinutes": 9019.966666666667,
+        "perLandingKnownMinutes": 75.16638888888889,
+        "meanOverStamped": 75.16638888888889
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 117,
+        "totalKnownMinutes": 10169.816666666668,
+        "perLandingKnownMinutes": 84.74847222222223,
+        "meanOverStamped": 86.92150997150998
+      },
+      "recomposes": {
+        "stampedReceipts": 120,
+        "sum": 228,
+        "perLanding": 1.9
+      },
+      "mainMoved": {
+        "count": 111,
+        "known": 120
+      },
+      "submitToAdmissionMinutes": {
+        "n": 77,
+        "p50": 11.462949999173482,
+        "p90": 16.23915999809901,
+        "overlappedMainTransition": 53
+      },
+      "linkedRedAuditCount": 3,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 90,
+        "landed": 24
+      },
+      "metrics": {
+        "landings": 120,
+        "firstTry": {
+          "landings": 120,
+          "first": 61
+        },
+        "checkStarts": 365,
+        "startsPerLanding": 3.0416666666666665,
+        "requestToEndCheckMinutes": 3796.9245666666684,
+        "knownExecutionRunnerMinutes": 30362.426650000016,
+        "unknownExecutionRuns": 2,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 3,
+        "flakeClearEventsInAuditExport": 0,
+        "passedCheckBudgetP50Minutes": 9,
+        "passedCheckBudgetP90Minutes": 10
+      }
+    },
+    {
+      "from": "2026-11-20T00:00:00Z",
+      "to": "2026-11-20T21:45:00Z",
+      "hours": 21.75,
+      "landingsPerHour": 4.689655172413793,
+      "landingsPer24Hours": 112.55172413793103,
+      "receipts": 102,
+      "mainTransitions": 98,
+      "finishToMainMinutes": {
+        "n": 102,
+        "p50": 10.835474999745687,
+        "p90": 35.11137499849002
+      },
+      "firstTry": {
+        "first": 55,
+        "classified": 102,
+        "shareOfClassified": 0.5392156862745098,
+        "paths": {
+          "after-fixer": 23,
+          "after-recompose": 12,
+          "after-retry": 12,
+          "first-try": 29,
+          "reused-after-race": 26
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 150.0,
+        "perLanding": 1.4705882352941178,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 102,
+        "totalKnownMinutes": 7362.633333333333,
+        "perLandingKnownMinutes": 72.18267973856209,
+        "meanOverStamped": 72.18267973856209
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 95,
+        "totalKnownMinutes": 3151.2833333333333,
+        "perLandingKnownMinutes": 30.894934640522877,
+        "meanOverStamped": 33.17140350877193
+      },
+      "recomposes": {
+        "stampedReceipts": 102,
+        "sum": 117,
+        "perLanding": 1.1470588235294117
+      },
+      "mainMoved": {
+        "count": 72,
+        "known": 102
+      },
+      "submitToAdmissionMinutes": {
+        "n": 67,
+        "p50": 9.352299996217091,
+        "p90": 10.923856667677562,
+        "overlappedMainTransition": 34
+      },
+      "linkedRedAuditCount": 3,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 22,
+        "landed": 6
+      },
+      "metrics": {
+        "landings": 102,
+        "firstTry": {
+          "landings": 102,
+          "first": 55
+        },
+        "checkStarts": 299,
+        "startsPerLanding": 2.9313725490196076,
+        "requestToEndCheckMinutes": 2188.7525833333348,
+        "knownExecutionRunnerMinutes": 16375.23495000001,
+        "unknownExecutionRuns": 70,
+        "unknownWallRuns": 0,
+        "mainCheckFailuresInAuditExport": 3,
+        "flakeClearEventsInAuditExport": 2,
+        "passedCheckBudgetP50Minutes": 8.9,
+        "passedCheckBudgetP90Minutes": 9.9
+      }
+    }
+  ],
+  "hourly": [
+    ["2026-10-28T08:08:57.812000Z", 0.8506077777777779, 0, 0],
+    ["2026-10-28T09:00:00Z", 1.0, 0, 0],
+    ["2026-10-28T10:00:00Z", 1.0, 0, 0],
+    ["2026-10-28T11:00:00Z", 1.0, 0, 0],
+    ["2026-10-28T12:00:00Z", 1.0, 0, 0],
+    ["2026-10-28T13:00:00Z", 1.0, 0, 0],
+    ["2026-10-28T14:00:00Z", 1.0, 0, 0],
+    ["2026-10-28T15:00:00Z", 1.0, 0, 0],
+    ["2026-10-28T16:00:00Z", 1.0, 0, 0],
+    ["2026-10-28T17:00:00Z", 1.0, 0, 0],
+    ["2026-10-28T18:00:00Z", 1.0, 0, 0],
+    ["2026-10-28T19:00:00Z", 1.0, 1, 1],
+    ["2026-10-28T20:00:00Z", 1.0, 0, 0],
+    ["2026-10-28T21:00:00Z", 1.0, 0, 0],
+    ["2026-10-28T22:00:00Z", 1.0, 0, 0],
+    ["2026-10-28T23:00:00Z", 1.0, 1, 1],
+    ["2026-10-29T00:00:00Z", 1.0, 0, 0],
+    ["2026-10-29T01:00:00Z", 1.0, 0, 0],
+    ["2026-10-29T02:00:00Z", 1.0, 2, 2],
+    ["2026-10-29T03:00:00Z", 1.0, 0, 0],
+    ["2026-10-29T04:00:00Z", 1.0, 0, 0],
+    ["2026-10-29T05:00:00Z", 1.0, 0, 0],
+    ["2026-10-29T06:00:00Z", 1.0, 1, 1],
+    ["2026-10-29T07:00:00Z", 1.0, 1, 1],
+    ["2026-10-29T08:00:00Z", 1.0, 0, 0],
+    ["2026-10-29T09:00:00Z", 1.0, 0, 0],
+    ["2026-10-29T10:00:00Z", 1.0, 3, 3],
+    ["2026-10-29T11:00:00Z", 1.0, 3, 3],
+    ["2026-10-29T12:00:00Z", 1.0, 2, 2],
+    ["2026-10-29T13:00:00Z", 1.0, 2, 2],
+    ["2026-10-29T14:00:00Z", 1.0, 2, 2],
+    ["2026-10-29T15:00:00Z", 1.0, 3, 3],
+    ["2026-10-29T16:00:00Z", 1.0, 2, 2],
+    ["2026-10-29T17:00:00Z", 1.0, 2, 2],
+    ["2026-10-29T18:00:00Z", 1.0, 3, 3],
+    ["2026-10-29T19:00:00Z", 1.0, 0, 0],
+    ["2026-10-29T20:00:00Z", 1.0, 1, 1],
+    ["2026-10-29T21:00:00Z", 1.0, 1, 1],
+    ["2026-10-29T22:00:00Z", 1.0, 1, 1],
+    ["2026-10-29T23:00:00Z", 1.0, 2, 2],
+    ["2026-10-30T00:00:00Z", 1.0, 1, 1],
+    ["2026-10-30T01:00:00Z", 1.0, 1, 1],
+    ["2026-10-30T02:00:00Z", 1.0, 1, 1],
+    ["2026-10-30T03:00:00Z", 1.0, 4, 4],
+    ["2026-10-30T04:00:00Z", 1.0, 5, 5],
+    ["2026-10-30T05:00:00Z", 1.0, 5, 5],
+    ["2026-10-30T06:00:00Z", 1.0, 4, 4],
+    ["2026-10-30T07:00:00Z", 1.0, 5, 5],
+    ["2026-10-30T08:00:00Z", 1.0, 3, 3],
+    ["2026-10-30T09:00:00Z", 1.0, 4, 4],
+    ["2026-10-30T10:00:00Z", 1.0, 2, 2],
+    ["2026-10-30T11:00:00Z", 1.0, 1, 1],
+    ["2026-10-30T12:00:00Z", 1.0, 3, 3],
+    ["2026-10-30T13:00:00Z", 1.0, 3, 3],
+    ["2026-10-30T14:00:00Z", 1.0, 3, 3],
+    ["2026-10-30T15:00:00Z", 1.0, 4, 4],
+    ["2026-10-30T16:00:00Z", 1.0, 1, 1],
+    ["2026-10-30T17:00:00Z", 1.0, 0, 0],
+    ["2026-10-30T18:00:00Z", 1.0, 0, 0],
+    ["2026-10-30T19:00:00Z", 1.0, 0, 0],
+    ["2026-10-30T20:00:00Z", 1.0, 0, 0],
+    ["2026-10-30T21:00:00Z", 1.0, 5, 5],
+    ["2026-10-30T22:00:00Z", 1.0, 3, 3],
+    ["2026-10-30T23:00:00Z", 1.0, 5, 5],
+    ["2026-10-31T00:00:00Z", 1.0, 2, 2],
+    ["2026-10-31T01:00:00Z", 1.0, 0, 0],
+    ["2026-10-31T02:00:00Z", 1.0, 1, 1],
+    ["2026-10-31T03:00:00Z", 1.0, 1, 1],
+    ["2026-10-31T04:00:00Z", 1.0, 0, 0],
+    ["2026-10-31T05:00:00Z", 1.0, 0, 0],
+    ["2026-10-31T06:00:00Z", 1.0, 0, 0],
+    ["2026-10-31T07:00:00Z", 1.0, 0, 0],
+    ["2026-10-31T08:00:00Z", 1.0, 0, 0],
+    ["2026-10-31T09:00:00Z", 1.0, 0, 0],
+    ["2026-10-31T10:00:00Z", 1.0, 1, 1],
+    ["2026-10-31T11:00:00Z", 1.0, 2, 2],
+    ["2026-10-31T12:00:00Z", 1.0, 0, 0],
+    ["2026-10-31T13:00:00Z", 1.0, 1, 1],
+    ["2026-10-31T14:00:00Z", 1.0, 2, 2],
+    ["2026-10-31T15:00:00Z", 1.0, 2, 2],
+    ["2026-10-31T16:00:00Z", 1.0, 0, 0],
+    ["2026-10-31T17:00:00Z", 1.0, 0, 0],
+    ["2026-10-31T18:00:00Z", 1.0, 0, 0],
+    ["2026-10-31T19:00:00Z", 1.0, 1, 1],
+    ["2026-10-31T20:00:00Z", 1.0, 6, 6],
+    ["2026-10-31T21:00:00Z", 1.0, 3, 3],
+    ["2026-10-31T22:00:00Z", 1.0, 1, 1],
+    ["2026-10-31T23:00:00Z", 1.0, 1, 1],
+    ["2026-11-01T00:00:00Z", 1.0, 1, 1],
+    ["2026-11-01T01:00:00Z", 1.0, 0, 0],
+    ["2026-11-01T02:00:00Z", 1.0, 1, 1],
+    ["2026-11-01T03:00:00Z", 1.0, 1, 1],
+    ["2026-11-01T04:00:00Z", 1.0, 0, 0],
+    ["2026-11-01T05:00:00Z", 1.0, 0, 0],
+    ["2026-11-01T06:00:00Z", 1.0, 0, 0],
+    ["2026-11-01T07:00:00Z", 1.0, 1, 1],
+    ["2026-11-01T08:00:00Z", 1.0, 2, 2],
+    ["2026-11-01T09:00:00Z", 1.0, 2, 2],
+    ["2026-11-01T10:00:00Z", 1.0, 6, 6],
+    ["2026-11-01T11:00:00Z", 1.0, 1, 1],
+    ["2026-11-01T12:00:00Z", 1.0, 1, 1],
+    ["2026-11-01T13:00:00Z", 1.0, 2, 2],
+    ["2026-11-01T14:00:00Z", 1.0, 1, 1],
+    ["2026-11-01T15:00:00Z", 1.0, 0, 0],
+    ["2026-11-01T16:00:00Z", 1.0, 0, 0],
+    ["2026-11-01T17:00:00Z", 1.0, 0, 0],
+    ["2026-11-01T18:00:00Z", 1.0, 1, 1],
+    ["2026-11-01T19:00:00Z", 1.0, 5, 5],
+    ["2026-11-01T20:00:00Z", 1.0, 1, 1],
+    ["2026-11-01T21:00:00Z", 1.0, 2, 2],
+    ["2026-11-01T22:00:00Z", 1.0, 0, 0],
+    ["2026-11-01T23:00:00Z", 1.0, 0, 0],
+    ["2026-11-02T00:00:00Z", 1.0, 1, 1],
+    ["2026-11-02T01:00:00Z", 1.0, 4, 4],
+    ["2026-11-02T02:00:00Z", 1.0, 0, 0],
+    ["2026-11-02T03:00:00Z", 1.0, 3, 3],
+    ["2026-11-02T04:00:00Z", 1.0, 2, 2],
+    ["2026-11-02T05:00:00Z", 1.0, 0, 0],
+    ["2026-11-02T06:00:00Z", 1.0, 2, 2],
+    ["2026-11-02T07:00:00Z", 1.0, 1, 1],
+    ["2026-11-02T08:00:00Z", 1.0, 2, 2],
+    ["2026-11-02T09:00:00Z", 1.0, 0, 0],
+    ["2026-11-02T10:00:00Z", 1.0, 0, 0],
+    ["2026-11-02T11:00:00Z", 1.0, 0, 0],
+    ["2026-11-02T12:00:00Z", 1.0, 0, 0],
+    ["2026-11-02T13:00:00Z", 1.0, 1, 1],
+    ["2026-11-02T14:00:00Z", 1.0, 0, 0],
+    ["2026-11-02T15:00:00Z", 1.0, 2, 2],
+    ["2026-11-02T16:00:00Z", 1.0, 0, 0],
+    ["2026-11-02T17:00:00Z", 1.0, 0, 0],
+    ["2026-11-02T18:00:00Z", 1.0, 3, 3],
+    ["2026-11-02T19:00:00Z", 1.0, 0, 0],
+    ["2026-11-02T20:00:00Z", 1.0, 1, 1],
+    ["2026-11-02T21:00:00Z", 1.0, 0, 0],
+    ["2026-11-02T22:00:00Z", 1.0, 1, 1],
+    ["2026-11-02T23:00:00Z", 1.0, 1, 1],
+    ["2026-11-03T00:00:00Z", 1.0, 1, 1],
+    ["2026-11-03T01:00:00Z", 1.0, 2, 2],
+    ["2026-11-03T02:00:00Z", 1.0, 0, 0],
+    ["2026-11-03T03:00:00Z", 1.0, 1, 1],
+    ["2026-11-03T04:00:00Z", 1.0, 1, 1],
+    ["2026-11-03T05:00:00Z", 1.0, 0, 0],
+    ["2026-11-03T06:00:00Z", 1.0, 0, 0],
+    ["2026-11-03T07:00:00Z", 1.0, 0, 0],
+    ["2026-11-03T08:00:00Z", 1.0, 2, 2],
+    ["2026-11-03T09:00:00Z", 1.0, 0, 0],
+    ["2026-11-03T10:00:00Z", 1.0, 1, 1],
+    ["2026-11-03T11:00:00Z", 1.0, 0, 0],
+    ["2026-11-03T12:00:00Z", 1.0, 0, 0],
+    ["2026-11-03T13:00:00Z", 1.0, 0, 0],
+    ["2026-11-03T14:00:00Z", 1.0, 0, 0],
+    ["2026-11-03T15:00:00Z", 1.0, 1, 1],
+    ["2026-11-03T16:00:00Z", 1.0, 2, 2],
+    ["2026-11-03T17:00:00Z", 1.0, 0, 0],
+    ["2026-11-03T18:00:00Z", 1.0, 0, 0],
+    ["2026-11-03T19:00:00Z", 1.0, 1, 1],
+    ["2026-11-03T20:00:00Z", 1.0, 0, 0],
+    ["2026-11-03T21:00:00Z", 1.0, 0, 0],
+    ["2026-11-03T22:00:00Z", 1.0, 1, 1],
+    ["2026-11-03T23:00:00Z", 1.0, 0, 0],
+    ["2026-11-04T00:00:00Z", 1.0, 0, 0],
+    ["2026-11-04T01:00:00Z", 1.0, 0, 0],
+    ["2026-11-04T02:00:00Z", 1.0, 0, 0],
+    ["2026-11-04T03:00:00Z", 1.0, 0, 0],
+    ["2026-11-04T04:00:00Z", 1.0, 0, 0],
+    ["2026-11-04T05:00:00Z", 1.0, 0, 0],
+    ["2026-11-04T06:00:00Z", 1.0, 0, 0],
+    ["2026-11-04T07:00:00Z", 1.0, 0, 0],
+    ["2026-11-04T08:00:00Z", 1.0, 0, 0],
+    ["2026-11-04T09:00:00Z", 1.0, 0, 0],
+    ["2026-11-04T10:00:00Z", 1.0, 0, 0],
+    ["2026-11-04T11:00:00Z", 1.0, 0, 0],
+    ["2026-11-04T12:00:00Z", 1.0, 0, 0],
+    ["2026-11-04T13:00:00Z", 1.0, 1, 1],
+    ["2026-11-04T14:00:00Z", 1.0, 1, 1],
+    ["2026-11-04T15:00:00Z", 1.0, 1, 1],
+    ["2026-11-04T16:00:00Z", 1.0, 0, 0],
+    ["2026-11-04T17:00:00Z", 1.0, 1, 1],
+    ["2026-11-04T18:00:00Z", 1.0, 3, 3],
+    ["2026-11-04T19:00:00Z", 1.0, 2, 2],
+    ["2026-11-04T20:00:00Z", 1.0, 6, 6],
+    ["2026-11-04T21:00:00Z", 1.0, 6, 6],
+    ["2026-11-04T22:00:00Z", 1.0, 2, 2],
+    ["2026-11-04T23:00:00Z", 1.0, 1, 1],
+    ["2026-11-05T00:00:00Z", 1.0, 0, 0],
+    ["2026-11-05T01:00:00Z", 1.0, 1, 1],
+    ["2026-11-05T02:00:00Z", 1.0, 0, 0],
+    ["2026-11-05T03:00:00Z", 1.0, 2, 2],
+    ["2026-11-05T04:00:00Z", 1.0, 1, 1],
+    ["2026-11-05T05:00:00Z", 1.0, 0, 0],
+    ["2026-11-05T06:00:00Z", 1.0, 1, 1],
+    ["2026-11-05T07:00:00Z", 1.0, 4, 4],
+    ["2026-11-05T08:00:00Z", 1.0, 6, 6],
+    ["2026-11-05T09:00:00Z", 1.0, 1, 1],
+    ["2026-11-05T10:00:00Z", 1.0, 4, 4],
+    ["2026-11-05T11:00:00Z", 1.0, 1, 1],
+    ["2026-11-05T12:00:00Z", 1.0, 1, 1],
+    ["2026-11-05T13:00:00Z", 1.0, 5, 5],
+    ["2026-11-05T14:00:00Z", 1.0, 5, 5],
+    ["2026-11-05T15:00:00Z", 1.0, 4, 4],
+    ["2026-11-05T16:00:00Z", 1.0, 4, 4],
+    ["2026-11-05T17:00:00Z", 1.0, 4, 3],
+    ["2026-11-05T18:00:00Z", 1.0, 6, 4],
+    ["2026-11-05T19:00:00Z", 1.0, 0, 0],
+    ["2026-11-05T20:00:00Z", 1.0, 3, 3],
+    ["2026-11-05T21:00:00Z", 1.0, 8, 6],
+    ["2026-11-05T22:00:00Z", 1.0, 7, 4],
+    ["2026-11-05T23:00:00Z", 1.0, 7, 5],
+    ["2026-11-06T00:00:00Z", 1.0, 2, 2],
+    ["2026-11-06T01:00:00Z", 1.0, 4, 4],
+    ["2026-11-06T02:00:00Z", 1.0, 4, 3],
+    ["2026-11-06T03:00:00Z", 1.0, 6, 5],
+    ["2026-11-06T04:00:00Z", 1.0, 5, 5],
+    ["2026-11-06T05:00:00Z", 1.0, 4, 4],
+    ["2026-11-06T06:00:00Z", 1.0, 4, 4],
+    ["2026-11-06T07:00:00Z", 1.0, 8, 6],
+    ["2026-11-06T08:00:00Z", 1.0, 5, 5],
+    ["2026-11-06T09:00:00Z", 1.0, 0, 0],
+    ["2026-11-06T10:00:00Z", 1.0, 0, 0],
+    ["2026-11-06T11:00:00Z", 1.0, 4, 4],
+    ["2026-11-06T12:00:00Z", 1.0, 4, 4],
+    ["2026-11-06T13:00:00Z", 1.0, 4, 4],
+    ["2026-11-06T14:00:00Z", 1.0, 5, 5],
+    ["2026-11-06T15:00:00Z", 1.0, 1, 1],
+    ["2026-11-06T16:00:00Z", 1.0, 0, 0],
+    ["2026-11-06T17:00:00Z", 1.0, 3, 3],
+    ["2026-11-06T18:00:00Z", 1.0, 2, 2],
+    ["2026-11-06T19:00:00Z", 1.0, 1, 1],
+    ["2026-11-06T20:00:00Z", 1.0, 1, 1],
+    ["2026-11-06T21:00:00Z", 1.0, 4, 4],
+    ["2026-11-06T22:00:00Z", 1.0, 3, 3],
+    ["2026-11-06T23:00:00Z", 1.0, 3, 3],
+    ["2026-11-07T00:00:00Z", 1.0, 0, 0],
+    ["2026-11-07T01:00:00Z", 1.0, 3, 3],
+    ["2026-11-07T02:00:00Z", 1.0, 1, 1],
+    ["2026-11-07T03:00:00Z", 1.0, 1, 1],
+    ["2026-11-07T04:00:00Z", 1.0, 1, 1],
+    ["2026-11-07T05:00:00Z", 1.0, 1, 1],
+    ["2026-11-07T06:00:00Z", 1.0, 1, 1],
+    ["2026-11-07T07:00:00Z", 1.0, 1, 1],
+    ["2026-11-07T08:00:00Z", 1.0, 0, 0],
+    ["2026-11-07T09:00:00Z", 1.0, 1, 1],
+    ["2026-11-07T10:00:00Z", 1.0, 1, 1],
+    ["2026-11-07T11:00:00Z", 1.0, 1, 1],
+    ["2026-11-07T12:00:00Z", 1.0, 1, 1],
+    ["2026-11-07T13:00:00Z", 1.0, 0, 0],
+    ["2026-11-07T14:00:00Z", 1.0, 0, 0],
+    ["2026-11-07T15:00:00Z", 1.0, 0, 0],
+    ["2026-11-07T16:00:00Z", 1.0, 3, 3],
+    ["2026-11-07T17:00:00Z", 1.0, 16, 9],
+    ["2026-11-07T18:00:00Z", 1.0, 10, 10],
+    ["2026-11-07T19:00:00Z", 1.0, 8, 6],
+    ["2026-11-07T20:00:00Z", 1.0, 10, 8],
+    ["2026-11-07T21:00:00Z", 1.0, 8, 6],
+    ["2026-11-07T22:00:00Z", 1.0, 1, 1],
+    ["2026-11-07T23:00:00Z", 1.0, 14, 12],
+    ["2026-11-08T00:00:00Z", 1.0, 8, 8],
+    ["2026-11-08T01:00:00Z", 1.0, 8, 8],
+    ["2026-11-08T02:00:00Z", 1.0, 2, 2],
+    ["2026-11-08T03:00:00Z", 1.0, 2, 2],
+    ["2026-11-08T04:00:00Z", 1.0, 1, 1],
+    ["2026-11-08T05:00:00Z", 1.0, 2, 2],
+    ["2026-11-08T06:00:00Z", 1.0, 1, 1],
+    ["2026-11-08T07:00:00Z", 1.0, 1, 1],
+    ["2026-11-08T08:00:00Z", 1.0, 0, 0],
+    ["2026-11-08T09:00:00Z", 1.0, 2, 2],
+    ["2026-11-08T10:00:00Z", 1.0, 1, 1],
+    ["2026-11-08T11:00:00Z", 1.0, 0, 0],
+    ["2026-11-08T12:00:00Z", 1.0, 0, 0],
+    ["2026-11-08T13:00:00Z", 1.0, 2, 2],
+    ["2026-11-08T14:00:00Z", 1.0, 0, 0],
+    ["2026-11-08T15:00:00Z", 1.0, 7, 6],
+    ["2026-11-08T16:00:00Z", 1.0, 7, 7],
+    ["2026-11-08T17:00:00Z", 1.0, 7, 4],
+    ["2026-11-08T18:00:00Z", 1.0, 7, 6],
+    ["2026-11-08T19:00:00Z", 1.0, 8, 4],
+    ["2026-11-08T20:00:00Z", 1.0, 5, 4],
+    ["2026-11-08T21:00:00Z", 1.0, 6, 6],
+    ["2026-11-08T22:00:00Z", 1.0, 9, 7],
+    ["2026-11-08T23:00:00Z", 1.0, 9, 7],
+    ["2026-11-09T00:00:00Z", 1.0, 1, 1],
+    ["2026-11-09T01:00:00Z", 1.0, 11, 7],
+    ["2026-11-09T02:00:00Z", 1.0, 7, 7],
+    ["2026-11-09T03:00:00Z", 1.0, 1, 1],
+    ["2026-11-09T04:00:00Z", 1.0, 0, 0],
+    ["2026-11-09T05:00:00Z", 1.0, 7, 6],
+    ["2026-11-09T06:00:00Z", 1.0, 10, 8],
+    ["2026-11-09T07:00:00Z", 1.0, 5, 5],
+    ["2026-11-09T08:00:00Z", 1.0, 7, 7],
+    ["2026-11-09T09:00:00Z", 1.0, 7, 5],
+    ["2026-11-09T10:00:00Z", 1.0, 2, 2],
+    ["2026-11-09T11:00:00Z", 1.0, 6, 6],
+    ["2026-11-09T12:00:00Z", 1.0, 5, 3],
+    ["2026-11-09T13:00:00Z", 1.0, 8, 7],
+    ["2026-11-09T14:00:00Z", 1.0, 9, 9],
+    ["2026-11-09T15:00:00Z", 1.0, 12, 10],
+    ["2026-11-09T16:00:00Z", 1.0, 0, 0],
+    ["2026-11-09T17:00:00Z", 1.0, 4, 4],
+    ["2026-11-09T18:00:00Z", 1.0, 3, 3],
+    ["2026-11-09T19:00:00Z", 1.0, 10, 9],
+    ["2026-11-09T20:00:00Z", 1.0, 3, 3],
+    ["2026-11-09T21:00:00Z", 1.0, 2, 2],
+    ["2026-11-09T22:00:00Z", 1.0, 3, 3],
+    ["2026-11-09T23:00:00Z", 1.0, 7, 7],
+    ["2026-11-10T00:00:00Z", 1.0, 4, 3],
+    ["2026-11-10T01:00:00Z", 1.0, 12, 8],
+    ["2026-11-10T02:00:00Z", 1.0, 9, 6],
+    ["2026-11-10T03:00:00Z", 1.0, 8, 7],
+    ["2026-11-10T04:00:00Z", 1.0, 9, 9],
+    ["2026-11-10T05:00:00Z", 1.0, 6, 6],
+    ["2026-11-10T06:00:00Z", 1.0, 7, 7],
+    ["2026-11-10T07:00:00Z", 1.0, 7, 7],
+    ["2026-11-10T08:00:00Z", 1.0, 7, 7],
+    ["2026-11-10T09:00:00Z", 1.0, 6, 6],
+    ["2026-11-10T10:00:00Z", 1.0, 9, 8],
+    ["2026-11-10T11:00:00Z", 1.0, 5, 5],
+    ["2026-11-10T12:00:00Z", 1.0, 14, 14],
+    ["2026-11-10T13:00:00Z", 1.0, 9, 9],
+    ["2026-11-10T14:00:00Z", 1.0, 8, 6],
+    ["2026-11-10T15:00:00Z", 1.0, 6, 4],
+    ["2026-11-10T16:00:00Z", 1.0, 2, 2],
+    ["2026-11-10T17:00:00Z", 1.0, 6, 6],
+    ["2026-11-10T18:00:00Z", 1.0, 7, 7],
+    ["2026-11-10T19:00:00Z", 1.0, 3, 3],
+    ["2026-11-10T20:00:00Z", 1.0, 4, 4],
+    ["2026-11-10T21:00:00Z", 1.0, 9, 9],
+    ["2026-11-10T22:00:00Z", 1.0, 6, 6],
+    ["2026-11-10T23:00:00Z", 1.0, 8, 8],
+    ["2026-11-11T00:00:00Z", 1.0, 3, 3],
+    ["2026-11-11T01:00:00Z", 1.0, 0, 0],
+    ["2026-11-11T02:00:00Z", 1.0, 0, 0],
+    ["2026-11-11T03:00:00Z", 1.0, 0, 0],
+    ["2026-11-11T04:00:00Z", 1.0, 0, 0],
+    ["2026-11-11T05:00:00Z", 1.0, 0, 0],
+    ["2026-11-11T06:00:00Z", 1.0, 0, 0],
+    ["2026-11-11T07:00:00Z", 1.0, 7, 7],
+    ["2026-11-11T08:00:00Z", 1.0, 9, 9],
+    ["2026-11-11T09:00:00Z", 1.0, 9, 9],
+    ["2026-11-11T10:00:00Z", 1.0, 8, 8],
+    ["2026-11-11T11:00:00Z", 1.0, 9, 8],
+    ["2026-11-11T12:00:00Z", 1.0, 4, 4],
+    ["2026-11-11T13:00:00Z", 1.0, 5, 5],
+    ["2026-11-11T14:00:00Z", 1.0, 4, 4],
+    ["2026-11-11T15:00:00Z", 1.0, 4, 4],
+    ["2026-11-11T16:00:00Z", 1.0, 4, 4],
+    ["2026-11-11T17:00:00Z", 1.0, 5, 4],
+    ["2026-11-11T18:00:00Z", 1.0, 1, 1],
+    ["2026-11-11T19:00:00Z", 1.0, 2, 2],
+    ["2026-11-11T20:00:00Z", 1.0, 2, 2],
+    ["2026-11-11T21:00:00Z", 1.0, 2, 2],
+    ["2026-11-11T22:00:00Z", 1.0, 3, 3],
+    ["2026-11-11T23:00:00Z", 1.0, 3, 3],
+    ["2026-11-12T00:00:00Z", 1.0, 1, 1],
+    ["2026-11-12T01:00:00Z", 1.0, 0, 0],
+    ["2026-11-12T02:00:00Z", 1.0, 0, 0],
+    ["2026-11-12T03:00:00Z", 1.0, 0, 0],
+    ["2026-11-12T04:00:00Z", 1.0, 1, 1],
+    ["2026-11-12T05:00:00Z", 1.0, 0, 0],
+    ["2026-11-12T06:00:00Z", 1.0, 1, 1],
+    ["2026-11-12T07:00:00Z", 1.0, 0, 0],
+    ["2026-11-12T08:00:00Z", 1.0, 2, 2],
+    ["2026-11-12T09:00:00Z", 1.0, 2, 2],
+    ["2026-11-12T10:00:00Z", 1.0, 1, 1],
+    ["2026-11-12T11:00:00Z", 1.0, 2, 2],
+    ["2026-11-12T12:00:00Z", 1.0, 1, 1],
+    ["2026-11-12T13:00:00Z", 1.0, 2, 2],
+    ["2026-11-12T14:00:00Z", 1.0, 1, 1],
+    ["2026-11-12T15:00:00Z", 1.0, 1, 1],
+    ["2026-11-12T16:00:00Z", 1.0, 1, 1],
+    ["2026-11-12T17:00:00Z", 1.0, 1, 1],
+    ["2026-11-12T18:00:00Z", 1.0, 1, 1],
+    ["2026-11-12T19:00:00Z", 1.0, 0, 0],
+    ["2026-11-12T20:00:00Z", 1.0, 3, 3],
+    ["2026-11-12T21:00:00Z", 1.0, 1, 1],
+    ["2026-11-12T22:00:00Z", 1.0, 1, 1],
+    ["2026-11-12T23:00:00Z", 1.0, 3, 3],
+    ["2026-11-13T00:00:00Z", 1.0, 2, 2],
+    ["2026-11-13T01:00:00Z", 1.0, 0, 0],
+    ["2026-11-13T02:00:00Z", 1.0, 1, 1],
+    ["2026-11-13T03:00:00Z", 1.0, 0, 0],
+    ["2026-11-13T04:00:00Z", 1.0, 0, 0],
+    ["2026-11-13T05:00:00Z", 1.0, 0, 0],
+    ["2026-11-13T06:00:00Z", 1.0, 0, 0],
+    ["2026-11-13T07:00:00Z", 1.0, 1, 1],
+    ["2026-11-13T08:00:00Z", 1.0, 4, 4],
+    ["2026-11-13T09:00:00Z", 1.0, 2, 2],
+    ["2026-11-13T10:00:00Z", 1.0, 2, 2],
+    ["2026-11-13T11:00:00Z", 1.0, 1, 1],
+    ["2026-11-13T12:00:00Z", 1.0, 0, 0],
+    ["2026-11-13T13:00:00Z", 1.0, 1, 1],
+    ["2026-11-13T14:00:00Z", 1.0, 0, 0],
+    ["2026-11-13T15:00:00Z", 1.0, 0, 0],
+    ["2026-11-13T16:00:00Z", 1.0, 0, 0],
+    ["2026-11-13T17:00:00Z", 1.0, 0, 0],
+    ["2026-11-13T18:00:00Z", 1.0, 0, 0],
+    ["2026-11-13T19:00:00Z", 1.0, 1, 1],
+    ["2026-11-13T20:00:00Z", 1.0, 1, 1],
+    ["2026-11-13T21:00:00Z", 1.0, 0, 0],
+    ["2026-11-13T22:00:00Z", 1.0, 0, 0],
+    ["2026-11-13T23:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T00:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T01:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T02:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T03:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T04:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T05:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T06:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T07:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T08:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T09:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T10:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T11:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T12:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T13:00:00Z", 1.0, 2, 2],
+    ["2026-11-14T14:00:00Z", 1.0, 1, 1],
+    ["2026-11-14T15:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T16:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T17:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T18:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T19:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T20:00:00Z", 1.0, 0, 0],
+    ["2026-11-14T21:00:00Z", 1.0, 1, 1],
+    ["2026-11-14T22:00:00Z", 1.0, 1, 1],
+    ["2026-11-14T23:00:00Z", 1.0, 0, 0],
+    ["2026-11-15T00:00:00Z", 1.0, 0, 0],
+    ["2026-11-15T01:00:00Z", 1.0, 0, 0],
+    ["2026-11-15T02:00:00Z", 1.0, 0, 0],
+    ["2026-11-15T03:00:00Z", 1.0, 1, 1],
+    ["2026-11-15T04:00:00Z", 1.0, 0, 0],
+    ["2026-11-15T05:00:00Z", 1.0, 1, 1],
+    ["2026-11-15T06:00:00Z", 1.0, 4, 4],
+    ["2026-11-15T07:00:00Z", 1.0, 2, 2],
+    ["2026-11-15T08:00:00Z", 1.0, 1, 1],
+    ["2026-11-15T09:00:00Z", 1.0, 1, 1],
+    ["2026-11-15T10:00:00Z", 1.0, 2, 2],
+    ["2026-11-15T11:00:00Z", 1.0, 0, 0],
+    ["2026-11-15T12:00:00Z", 1.0, 0, 0],
+    ["2026-11-15T13:00:00Z", 1.0, 0, 0],
+    ["2026-11-15T14:00:00Z", 1.0, 2, 2],
+    ["2026-11-15T15:00:00Z", 1.0, 5, 4],
+    ["2026-11-15T16:00:00Z", 1.0, 3, 3],
+    ["2026-11-15T17:00:00Z", 1.0, 1, 1],
+    ["2026-11-15T18:00:00Z", 1.0, 0, 0],
+    ["2026-11-15T19:00:00Z", 1.0, 1, 1],
+    ["2026-11-15T20:00:00Z", 1.0, 1, 1],
+    ["2026-11-15T21:00:00Z", 1.0, 0, 0],
+    ["2026-11-15T22:00:00Z", 1.0, 3, 3],
+    ["2026-11-15T23:00:00Z", 1.0, 0, 0],
+    ["2026-11-16T00:00:00Z", 1.0, 2, 2],
+    ["2026-11-16T01:00:00Z", 1.0, 2, 2],
+    ["2026-11-16T02:00:00Z", 1.0, 1, 1],
+    ["2026-11-16T03:00:00Z", 1.0, 0, 0],
+    ["2026-11-16T04:00:00Z", 1.0, 0, 0],
+    ["2026-11-16T05:00:00Z", 1.0, 0, 0],
+    ["2026-11-16T06:00:00Z", 1.0, 0, 0],
+    ["2026-11-16T07:00:00Z", 1.0, 0, 0],
+    ["2026-11-16T08:00:00Z", 1.0, 0, 0],
+    ["2026-11-16T09:00:00Z", 1.0, 0, 0],
+    ["2026-11-16T10:00:00Z", 1.0, 1, 1],
+    ["2026-11-16T11:00:00Z", 1.0, 5, 5],
+    ["2026-11-16T12:00:00Z", 1.0, 4, 4],
+    ["2026-11-16T13:00:00Z", 1.0, 0, 0],
+    ["2026-11-16T14:00:00Z", 1.0, 2, 2],
+    ["2026-11-16T15:00:00Z", 1.0, 3, 3],
+    ["2026-11-16T16:00:00Z", 1.0, 2, 2],
+    ["2026-11-16T17:00:00Z", 1.0, 2, 2],
+    ["2026-11-16T18:00:00Z", 1.0, 0, 0],
+    ["2026-11-16T19:00:00Z", 1.0, 0, 0],
+    ["2026-11-16T20:00:00Z", 1.0, 2, 2],
+    ["2026-11-16T21:00:00Z", 1.0, 4, 4],
+    ["2026-11-16T22:00:00Z", 1.0, 2, 2],
+    ["2026-11-16T23:00:00Z", 1.0, 3, 3],
+    ["2026-11-17T00:00:00Z", 1.0, 1, 1],
+    ["2026-11-17T01:00:00Z", 1.0, 5, 5],
+    ["2026-11-17T02:00:00Z", 1.0, 3, 3],
+    ["2026-11-17T03:00:00Z", 1.0, 6, 5],
+    ["2026-11-17T04:00:00Z", 1.0, 8, 8],
+    ["2026-11-17T05:00:00Z", 1.0, 3, 3],
+    ["2026-11-17T06:00:00Z", 1.0, 1, 1],
+    ["2026-11-17T07:00:00Z", 1.0, 8, 8],
+    ["2026-11-17T08:00:00Z", 1.0, 7, 7],
+    ["2026-11-17T09:00:00Z", 1.0, 9, 6],
+    ["2026-11-17T10:00:00Z", 1.0, 5, 3],
+    ["2026-11-17T11:00:00Z", 1.0, 6, 6],
+    ["2026-11-17T12:00:00Z", 1.0, 5, 4],
+    ["2026-11-17T13:00:00Z", 1.0, 5, 4],
+    ["2026-11-17T14:00:00Z", 1.0, 3, 3],
+    ["2026-11-17T15:00:00Z", 1.0, 5, 5],
+    ["2026-11-17T16:00:00Z", 1.0, 5, 4],
+    ["2026-11-17T17:00:00Z", 1.0, 3, 2],
+    ["2026-11-17T18:00:00Z", 1.0, 8, 6],
+    ["2026-11-17T19:00:00Z", 1.0, 2, 2],
+    ["2026-11-17T20:00:00Z", 1.0, 7, 6],
+    ["2026-11-17T21:00:00Z", 1.0, 4, 4],
+    ["2026-11-17T22:00:00Z", 1.0, 4, 4],
+    ["2026-11-17T23:00:00Z", 1.0, 1, 1],
+    ["2026-11-18T00:00:00Z", 1.0, 2, 2],
+    ["2026-11-18T01:00:00Z", 1.0, 1, 1],
+    ["2026-11-18T02:00:00Z", 1.0, 0, 0],
+    ["2026-11-18T03:00:00Z", 1.0, 0, 0],
+    ["2026-11-18T04:00:00Z", 1.0, 0, 0],
+    ["2026-11-18T05:00:00Z", 1.0, 0, 0],
+    ["2026-11-18T06:00:00Z", 1.0, 0, 0],
+    ["2026-11-18T07:00:00Z", 1.0, 1, 1],
+    ["2026-11-18T08:00:00Z", 1.0, 0, 0],
+    ["2026-11-18T09:00:00Z", 1.0, 0, 0],
+    ["2026-11-18T10:00:00Z", 1.0, 0, 0],
+    ["2026-11-18T11:00:00Z", 1.0, 0, 0],
+    ["2026-11-18T12:00:00Z", 1.0, 1, 1],
+    ["2026-11-18T13:00:00Z", 1.0, 1, 1],
+    ["2026-11-18T14:00:00Z", 1.0, 0, 0],
+    ["2026-11-18T15:00:00Z", 1.0, 0, 0],
+    ["2026-11-18T16:00:00Z", 1.0, 2, 2],
+    ["2026-11-18T17:00:00Z", 1.0, 2, 2],
+    ["2026-11-18T18:00:00Z", 1.0, 8, 7],
+    ["2026-11-18T19:00:00Z", 1.0, 3, 3],
+    ["2026-11-18T20:00:00Z", 1.0, 8, 6],
+    ["2026-11-18T21:00:00Z", 1.0, 7, 7],
+    ["2026-11-18T22:00:00Z", 1.0, 4, 4],
+    ["2026-11-18T23:00:00Z", 1.0, 5, 5],
+    ["2026-11-19T00:00:00Z", 1.0, 0, 0],
+    ["2026-11-19T01:00:00Z", 1.0, 0, 0],
+    ["2026-11-19T02:00:00Z", 1.0, 0, 0],
+    ["2026-11-19T03:00:00Z", 1.0, 0, 0],
+    ["2026-11-19T04:00:00Z", 1.0, 0, 0],
+    ["2026-11-19T05:00:00Z", 1.0, 0, 0],
+    ["2026-11-19T06:00:00Z", 1.0, 0, 0],
+    ["2026-11-19T07:00:00Z", 1.0, 1, 1],
+    ["2026-11-19T08:00:00Z", 1.0, 5, 5],
+    ["2026-11-19T09:00:00Z", 1.0, 7, 6],
+    ["2026-11-19T10:00:00Z", 1.0, 3, 3],
+    ["2026-11-19T11:00:00Z", 1.0, 11, 11],
+    ["2026-11-19T12:00:00Z", 1.0, 8, 8],
+    ["2026-11-19T13:00:00Z", 1.0, 5, 5],
+    ["2026-11-19T14:00:00Z", 1.0, 10, 6],
+    ["2026-11-19T15:00:00Z", 1.0, 4, 3],
+    ["2026-11-19T16:00:00Z", 1.0, 7, 7],
+    ["2026-11-19T17:00:00Z", 1.0, 5, 5],
+    ["2026-11-19T18:00:00Z", 1.0, 9, 8],
+    ["2026-11-19T19:00:00Z", 1.0, 14, 12],
+    ["2026-11-19T20:00:00Z", 1.0, 8, 8],
+    ["2026-11-19T21:00:00Z", 1.0, 7, 6],
+    ["2026-11-19T22:00:00Z", 1.0, 4, 3],
+    ["2026-11-19T23:00:00Z", 1.0, 12, 12],
+    ["2026-11-20T00:00:00Z", 1.0, 13, 12],
+    ["2026-11-20T01:00:00Z", 1.0, 6, 6],
+    ["2026-11-20T02:00:00Z", 1.0, 3, 3],
+    ["2026-11-20T03:00:00Z", 1.0, 2, 2],
+    ["2026-11-20T04:00:00Z", 1.0, 2, 2],
+    ["2026-11-20T05:00:00Z", 1.0, 1, 1],
+    ["2026-11-20T06:00:00Z", 1.0, 2, 2],
+    ["2026-11-20T07:00:00Z", 1.0, 2, 2],
+    ["2026-11-20T08:00:00Z", 1.0, 7, 7],
+    ["2026-11-20T09:00:00Z", 1.0, 8, 7],
+    ["2026-11-20T10:00:00Z", 1.0, 1, 1],
+    ["2026-11-20T11:00:00Z", 1.0, 2, 2],
+    ["2026-11-20T12:00:00Z", 1.0, 1, 1],
+    ["2026-11-20T13:00:00Z", 1.0, 2, 2],
+    ["2026-11-20T14:00:00Z", 1.0, 6, 6],
+    ["2026-11-20T15:00:00Z", 1.0, 7, 7],
+    ["2026-11-20T16:00:00Z", 1.0, 5, 4],
+    ["2026-11-20T17:00:00Z", 1.0, 7, 7],
+    ["2026-11-20T18:00:00Z", 1.0, 7, 6],
+    ["2026-11-20T19:00:00Z", 1.0, 7, 7],
+    ["2026-11-20T20:00:00Z", 1.0, 8, 8],
+    ["2026-11-20T21:00:00Z", 0.75, 3, 3]
+  ],
+  "hourlyColumns": [
+    "from",
+    "hoursObserved",
+    "receipts",
+    "mainTransitions"
+  ],
+  "fixedLoadBuckets": [
+    {
+      "period": "P5 hosted",
+      "minLandingsInHour": 1,
+      "maxLandingsInHour": 2,
+      "hourCount": 71,
+      "receipts": 96,
+      "mainTransitions": 96,
+      "finishToMainMinutes": {
+        "n": 96,
+        "p50": 9.650641667842866,
+        "p90": 35.09400833447774
+      },
+      "firstTry": {
+        "first": 55,
+        "classified": 95,
+        "shareOfClassified": 0.5789473684210527,
+        "paths": {
+          "after-fixer": 26,
+          "after-recompose": 6,
+          "after-retry": 8,
+          "first-try": 55,
+          "unknown": 1
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 118.0,
+        "perLanding": 1.2291666666666667,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 96,
+        "sum": 33,
+        "perLanding": 0.34375
+      },
+      "mainMoved": {
+        "count": 17,
+        "known": 96
+      },
+      "submitToAdmissionMinutes": {
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "overlappedMainTransition": 0
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {}
+    },
+    {
+      "period": "P5 hosted",
+      "minLandingsInHour": 3,
+      "maxLandingsInHour": 5,
+      "hourCount": 24,
+      "receipts": 89,
+      "mainTransitions": 89,
+      "finishToMainMinutes": {
+        "n": 89,
+        "p50": 22.836733333269756,
+        "p90": 87.4569533332189
+      },
+      "firstTry": {
+        "first": 38,
+        "classified": 89,
+        "shareOfClassified": 0.42696629213483145,
+        "paths": {
+          "after-fixer": 22,
+          "after-recompose": 13,
+          "after-retry": 16,
+          "first-try": 38
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 136.0,
+        "perLanding": 1.5280898876404494,
+        "partialReceipts": 2
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 89,
+        "sum": 98,
+        "perLanding": 1.101123595505618
+      },
+      "mainMoved": {
+        "count": 61,
+        "known": 89
+      },
+      "submitToAdmissionMinutes": {
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "overlappedMainTransition": 0
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {}
+    },
+    {
+      "period": "P5 hosted",
+      "minLandingsInHour": 6,
+      "maxLandingsInHour": 7,
+      "hourCount": 4,
+      "receipts": 24,
+      "mainTransitions": 24,
+      "finishToMainMinutes": {
+        "n": 24,
+        "p50": 16.393024998903275,
+        "p90": 35.88970166921616
+      },
+      "firstTry": {
+        "first": 13,
+        "classified": 24,
+        "shareOfClassified": 0.5416666666666666,
+        "paths": {
+          "after-fixer": 6,
+          "after-recompose": 2,
+          "after-retry": 3,
+          "first-try": 13
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 37.0,
+        "perLanding": 1.5416666666666667,
+        "partialReceipts": 1
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 24,
+        "sum": 31,
+        "perLanding": 1.2916666666666667
+      },
+      "mainMoved": {
+        "count": 19,
+        "known": 24
+      },
+      "submitToAdmissionMinutes": {
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "overlappedMainTransition": 0
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 3,
+        "ATTEMPT_REPLACED": 1
+      }
+    },
+    {
+      "period": "P5 hosted",
+      "minLandingsInHour": 8,
+      "maxLandingsInHour": null,
+      "hourCount": 0,
+      "receipts": 0,
+      "mainTransitions": 0,
+      "finishToMainMinutes": {
+        "n": 0,
+        "p50": null,
+        "p90": null
+      },
+      "firstTry": {
+        "first": 0,
+        "classified": 0,
+        "shareOfClassified": null,
+        "paths": {}
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 0,
+        "perLanding": null,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 0,
+        "totalKnownMinutes": null,
+        "perLandingKnownMinutes": null,
+        "meanOverStamped": null
+      },
+      "recomposes": {
+        "stampedReceipts": 0,
+        "sum": 0,
+        "perLanding": null
+      },
+      "mainMoved": {
+        "count": 0,
+        "known": 0
+      },
+      "submitToAdmissionMinutes": {
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "overlappedMainTransition": 0
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {}
+    },
+    {
+      "period": "P6",
+      "minLandingsInHour": 1,
+      "maxLandingsInHour": 2,
+      "hourCount": 80,
+      "receipts": 105,
+      "mainTransitions": 105,
+      "finishToMainMinutes": {
+        "n": 105,
+        "p50": 9.535083333651224,
+        "p90": 15.971250000794731
+      },
+      "firstTry": {
+        "first": 67,
+        "classified": 104,
+        "shareOfClassified": 0.6442307692307693,
+        "paths": {
+          "after-fixer": 33,
+          "after-recompose": 2,
+          "after-retry": 2,
+          "first-try": 63,
+          "reused-after-race": 4,
+          "unknown": 1
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 116.0,
+        "perLanding": 1.1047619047619048,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 59,
+        "totalKnownMinutes": 4638.116666666667,
+        "perLandingKnownMinutes": 44.172539682539686,
+        "meanOverStamped": 78.61214689265537
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 58,
+        "totalKnownMinutes": 179.11666666666667,
+        "perLandingKnownMinutes": 1.705873015873016,
+        "meanOverStamped": 3.0882183908045975
+      },
+      "recomposes": {
+        "stampedReceipts": 105,
+        "sum": 17,
+        "perLanding": 0.1619047619047619
+      },
+      "mainMoved": {
+        "count": 10,
+        "known": 105
+      },
+      "submitToAdmissionMinutes": {
+        "n": 96,
+        "p50": 9.058074998855592,
+        "p90": 11.87994999885559,
+        "overlappedMainTransition": 9
+      },
+      "linkedRedAuditCount": 0,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 2,
+        "landed": 3
+      }
+    },
+    {
+      "period": "P6",
+      "minLandingsInHour": 3,
+      "maxLandingsInHour": 5,
+      "hourCount": 51,
+      "receipts": 199,
+      "mainTransitions": 191,
+      "finishToMainMinutes": {
+        "n": 199,
+        "p50": 9.721533330281575,
+        "p90": 30.550749999682115
+      },
+      "firstTry": {
+        "first": 99,
+        "classified": 199,
+        "shareOfClassified": 0.49748743718592964,
+        "paths": {
+          "after-fixer": 39,
+          "after-recompose": 50,
+          "after-retry": 11,
+          "first-try": 76,
+          "reused-after-race": 23
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 292.0,
+        "perLanding": 1.4673366834170853,
+        "partialReceipts": 7
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 68,
+        "totalKnownMinutes": 4068.4,
+        "perLandingKnownMinutes": 20.44422110552764,
+        "meanOverStamped": 59.82941176470588
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 72,
+        "totalKnownMinutes": 916.2166666666667,
+        "perLandingKnownMinutes": 4.604103852596315,
+        "meanOverStamped": 12.725231481481481
+      },
+      "recomposes": {
+        "stampedReceipts": 199,
+        "sum": 163,
+        "perLanding": 0.8190954773869347
+      },
+      "mainMoved": {
+        "count": 104,
+        "known": 199
+      },
+      "submitToAdmissionMinutes": {
+        "n": 187,
+        "p50": 8.560416666666667,
+        "p90": 10.270213336149851,
+        "overlappedMainTransition": 72
+      },
+      "linkedRedAuditCount": 1,
+      "recordedHoldsAtLeastOneMinute": {
+        "landed": 4,
+        "CHANNEL_CHANGED": 35
+      }
+    },
+    {
+      "period": "P6",
+      "minLandingsInHour": 6,
+      "maxLandingsInHour": 7,
+      "hourCount": 26,
+      "receipts": 172,
+      "mainTransitions": 154,
+      "finishToMainMinutes": {
+        "n": 172,
+        "p50": 12.921566667159398,
+        "p90": 36.79435666521391
+      },
+      "firstTry": {
+        "first": 77,
+        "classified": 172,
+        "shareOfClassified": 0.4476744186046512,
+        "paths": {
+          "after-fixer": 32,
+          "after-recompose": 54,
+          "after-retry": 9,
+          "first-try": 35,
+          "reused-after-race": 42
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 242.50000000000006,
+        "perLanding": 1.4098837209302328,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 30,
+        "totalKnownMinutes": 1520.1166666666666,
+        "perLandingKnownMinutes": 8.837887596899224,
+        "meanOverStamped": 50.67055555555556
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 33,
+        "totalKnownMinutes": 479.51666666666665,
+        "perLandingKnownMinutes": 2.7878875968992247,
+        "meanOverStamped": 14.53080808080808
+      },
+      "recomposes": {
+        "stampedReceipts": 172,
+        "sum": 186,
+        "perLanding": 1.0813953488372092
+      },
+      "mainMoved": {
+        "count": 128,
+        "known": 172
+      },
+      "submitToAdmissionMinutes": {
+        "n": 162,
+        "p50": 7.902074998617172,
+        "p90": 9.738325000206629,
+        "overlappedMainTransition": 99
+      },
+      "linkedRedAuditCount": 1,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 51,
+        "landed": 12
+      }
+    },
+    {
+      "period": "P6",
+      "minLandingsInHour": 8,
+      "maxLandingsInHour": null,
+      "hourCount": 33,
+      "receipts": 314,
+      "mainTransitions": 265,
+      "finishToMainMinutes": {
+        "n": 314,
+        "p50": 14.375608332951863,
+        "p90": 32.09240833083788
+      },
+      "firstTry": {
+        "first": 127,
+        "classified": 313,
+        "shareOfClassified": 0.4057507987220447,
+        "paths": {
+          "after-fixer": 41,
+          "after-recompose": 135,
+          "after-retry": 10,
+          "first-try": 43,
+          "reused-after-race": 84,
+          "unclassified": 1
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 452.4999999999997,
+        "perLanding": 1.4410828025477698,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 82,
+        "totalKnownMinutes": 3739.45,
+        "perLandingKnownMinutes": 11.909076433121019,
+        "meanOverStamped": 45.6030487804878
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 90,
+        "totalKnownMinutes": 1861.5333333333333,
+        "perLandingKnownMinutes": 5.928450106157112,
+        "meanOverStamped": 20.683703703703703
+      },
+      "recomposes": {
+        "stampedReceipts": 314,
+        "sum": 407,
+        "perLanding": 1.2961783439490446
+      },
+      "mainMoved": {
+        "count": 257,
+        "known": 314
+      },
+      "submitToAdmissionMinutes": {
+        "n": 307,
+        "p50": 8.32321666876475,
+        "p90": 10.71658666610718,
+        "overlappedMainTransition": 211
+      },
+      "linkedRedAuditCount": 2,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 126,
+        "landed": 21
+      }
+    },
+    {
+      "period": "P7",
+      "minLandingsInHour": 1,
+      "maxLandingsInHour": 2,
+      "hourCount": 30,
+      "receipts": 47,
+      "mainTransitions": 47,
+      "finishToMainMinutes": {
+        "n": 47,
+        "p50": 12.772400001684824,
+        "p90": 43.04155333360032
+      },
+      "firstTry": {
+        "first": 29,
+        "classified": 47,
+        "shareOfClassified": 0.6170212765957447,
+        "paths": {
+          "after-fixer": 9,
+          "after-recompose": 4,
+          "after-retry": 5,
+          "first-try": 26,
+          "reused-after-race": 3
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 59.0,
+        "perLanding": 1.2553191489361701,
+        "partialReceipts": 0
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 46,
+        "totalKnownMinutes": 4340.533333333334,
+        "perLandingKnownMinutes": 92.3517730496454,
+        "meanOverStamped": 94.35942028985508
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 43,
+        "totalKnownMinutes": 648.0833333333334,
+        "perLandingKnownMinutes": 13.789007092198583,
+        "meanOverStamped": 15.071705426356589
+      },
+      "recomposes": {
+        "stampedReceipts": 47,
+        "sum": 20,
+        "perLanding": 0.425531914893617
+      },
+      "mainMoved": {
+        "count": 11,
+        "known": 47
+      },
+      "submitToAdmissionMinutes": {
+        "n": 44,
+        "p50": 12.155600001414617,
+        "p90": 15.924076666037243,
+        "overlappedMainTransition": 7
+      },
+      "linkedRedAuditCount": 1,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 3
+      }
+    },
+    {
+      "period": "P7",
+      "minLandingsInHour": 3,
+      "maxLandingsInHour": 5,
+      "hourCount": 28,
+      "receipts": 115,
+      "mainTransitions": 106,
+      "finishToMainMinutes": {
+        "n": 115,
+        "p50": 24.872450002034505,
+        "p90": 82.55254666725797
+      },
+      "firstTry": {
+        "first": 52,
+        "classified": 115,
+        "shareOfClassified": 0.45217391304347826,
+        "paths": {
+          "after-fixer": 25,
+          "after-recompose": 24,
+          "after-retry": 14,
+          "first-try": 32,
+          "reused-after-race": 20
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 218.0,
+        "perLanding": 1.8956521739130434,
+        "partialReceipts": 3
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 115,
+        "totalKnownMinutes": 9979.166666666666,
+        "perLandingKnownMinutes": 86.77536231884058,
+        "meanOverStamped": 86.77536231884058
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 114,
+        "totalKnownMinutes": 6232.916666666667,
+        "perLandingKnownMinutes": 54.19927536231884,
+        "meanOverStamped": 54.67470760233918
+      },
+      "recomposes": {
+        "stampedReceipts": 115,
+        "sum": 184,
+        "perLanding": 1.6
+      },
+      "mainMoved": {
+        "count": 89,
+        "known": 115
+      },
+      "submitToAdmissionMinutes": {
+        "n": 58,
+        "p50": 12.738541666666666,
+        "p90": 15.546854999462765,
+        "overlappedMainTransition": 21
+      },
+      "linkedRedAuditCount": 3,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 39,
+        "landed": 11
+      }
+    },
+    {
+      "period": "P7",
+      "minLandingsInHour": 6,
+      "maxLandingsInHour": 7,
+      "hourCount": 15,
+      "receipts": 101,
+      "mainTransitions": 96,
+      "finishToMainMinutes": {
+        "n": 101,
+        "p50": 21.18105000257492,
+        "p90": 96.14195000330606
+      },
+      "firstTry": {
+        "first": 45,
+        "classified": 101,
+        "shareOfClassified": 0.44554455445544555,
+        "paths": {
+          "after-fixer": 31,
+          "after-recompose": 18,
+          "after-retry": 7,
+          "first-try": 16,
+          "reused-after-race": 29
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 185.0,
+        "perLanding": 1.8316831683168318,
+        "partialReceipts": 3
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 99,
+        "totalKnownMinutes": 7758.783333333334,
+        "perLandingKnownMinutes": 76.81963696369637,
+        "meanOverStamped": 78.37154882154883
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 98,
+        "totalKnownMinutes": 5360.8,
+        "perLandingKnownMinutes": 53.07722772277228,
+        "meanOverStamped": 54.70204081632653
+      },
+      "recomposes": {
+        "stampedReceipts": 101,
+        "sum": 169,
+        "perLanding": 1.6732673267326732
+      },
+      "mainMoved": {
+        "count": 86,
+        "known": 101
+      },
+      "submitToAdmissionMinutes": {
+        "n": 60,
+        "p50": 9.914341666301091,
+        "p90": 16.23667833447456,
+        "overlappedMainTransition": 36
+      },
+      "linkedRedAuditCount": 3,
+      "recordedHoldsAtLeastOneMinute": {
+        "CHANNEL_CHANGED": 52,
+        "landed": 14
+      }
+    },
+    {
+      "period": "P7",
+      "minLandingsInHour": 8,
+      "maxLandingsInHour": null,
+      "hourCount": 16,
+      "receipts": 150,
+      "mainTransitions": 133,
+      "finishToMainMinutes": {
+        "n": 150,
+        "p50": 29.609908334414165,
+        "p90": 82.09411333362259
+      },
+      "firstTry": {
+        "first": 79,
+        "classified": 150,
+        "shareOfClassified": 0.5266666666666666,
+        "paths": {
+          "after-fixer": 21,
+          "after-recompose": 39,
+          "after-retry": 11,
+          "first-try": 28,
+          "reused-after-race": 51
+        }
+      },
+      "receiptCheckLinks": {
+        "weightedDistinct": 274.0,
+        "perLanding": 1.8266666666666667,
+        "partialReceipts": 3
+      },
+      "acceptedRunnerMinutes": {
+        "stampedReceipts": 150,
+        "totalKnownMinutes": 10499.266666666666,
+        "perLandingKnownMinutes": 69.99511111111111,
+        "meanOverStamped": 69.99511111111111
+      },
+      "discardedRunnerMinutes": {
+        "stampedReceipts": 146,
+        "totalKnownMinutes": 9383.966666666667,
+        "perLandingKnownMinutes": 62.55977777777778,
+        "meanOverStamped": 64.27374429223744
+      },
+      "recomposes": {
+        "stampedReceipts": 150,
+        "sum": 271,
+        "perLanding": 1.8066666666666666
+      },
+      "mainMoved": {
+        "count": 142,
+        "known": 150
+      },
+      "submitToAdmissionMinutes": {
+        "n": 89,
+        "p50": 12.208833332856496,
+        "p90": 18.309013335704808,
+        "overlappedMainTransition": 63
+      },
+      "linkedRedAuditCount": 1,
+      "recordedHoldsAtLeastOneMinute": {
+        "landed": 29,
+        "CHANNEL_CHANGED": 91
+      }
+    }
+  ],
+  "historicalWindows": [
+    {
+      "name": "Oct baseline",
+      "source": "bet2-metrics.md",
+      "receiptsRecomputed": {
+        "from": "2026-10-29T11:00:00Z",
+        "to": "2026-10-30T11:00:00Z",
+        "hours": 24.0,
+        "landingsPerHour": 2.4583333333333335,
+        "landingsPer24Hours": 59.0,
+        "receipts": 59,
+        "mainTransitions": 59,
+        "finishToMainMinutes": {
+          "n": 59,
+          "p50": 23.45146666765213,
+          "p90": 67.78275333325071
+        },
+        "firstTry": {
+          "first": 23,
+          "classified": 59,
+          "shareOfClassified": 0.3898305084745763,
+          "paths": {
+            "after-fixer": 14,
+            "after-recompose": 13,
+            "after-retry": 9,
+            "first-try": 23
+          }
+        },
+        "receiptCheckLinks": {
+          "weightedDistinct": 116.0,
+          "perLanding": 1.9661016949152543,
+          "partialReceipts": 2
+        },
+        "acceptedRunnerMinutes": {
+          "stampedReceipts": 0,
+          "totalKnownMinutes": null,
+          "perLandingKnownMinutes": null,
+          "meanOverStamped": null
+        },
+        "discardedRunnerMinutes": {
+          "stampedReceipts": 0,
+          "totalKnownMinutes": null,
+          "perLandingKnownMinutes": null,
+          "meanOverStamped": null
+        },
+        "recomposes": {
+          "stampedReceipts": 59,
+          "sum": 70,
+          "perLanding": 1.1864406779661016
+        },
+        "mainMoved": {
+          "count": 34,
+          "known": 59
+        },
+        "submitToAdmissionMinutes": {
+          "n": 0,
+          "p50": null,
+          "p90": null,
+          "overlappedMainTransition": 0
+        },
+        "linkedRedAuditCount": 0,
+        "recordedHoldsAtLeastOneMinute": {}
+      },
+      "reported": {
+        "landings": 59,
+        "firstTryCount": 16,
+        "checkStarts": 322,
+        "mainRaceAttempts": 179,
+        "mainRaceAttemptElapsedMinutes": 4003.1,
+        "finishToMainP50Minutes": 23.5,
+        "finishToMainP90Minutes": 67.8,
+        "knownExecutionRunnerMinutes": null,
+        "unknownExecutionRuns": 322,
+        "meanRequestToEndCheckMinutes": 19.9
+      }
+    },
+    {
+      "name": "After E",
+      "source": "bet2-metrics.md",
+      "receiptsRecomputed": {
+        "from": "2026-10-30T23:40:26Z",
+        "to": "2026-10-31T19:44:10Z",
+        "hours": 20.06222222222222,
+        "landingsPerHour": 0.6978289765175011,
+        "landingsPer24Hours": 16.747895436420027,
+        "receipts": 14,
+        "mainTransitions": 14,
+        "finishToMainMinutes": {
+          "n": 14,
+          "p50": 12.56399166782697,
+          "p90": 22.384951666593558
+        },
+        "firstTry": {
+          "first": 13,
+          "classified": 14,
+          "shareOfClassified": 0.9285714285714286,
+          "paths": {
+            "after-fixer": 1,
+            "first-try": 13
+          }
+        },
+        "receiptCheckLinks": {
+          "weightedDistinct": 15.0,
+          "perLanding": 1.0714285714285714,
+          "partialReceipts": 0
+        },
+        "acceptedRunnerMinutes": {
+          "stampedReceipts": 0,
+          "totalKnownMinutes": null,
+          "perLandingKnownMinutes": null,
+          "meanOverStamped": null
+        },
+        "discardedRunnerMinutes": {
+          "stampedReceipts": 0,
+          "totalKnownMinutes": null,
+          "perLandingKnownMinutes": null,
+          "meanOverStamped": null
+        },
+        "recomposes": {
+          "stampedReceipts": 14,
+          "sum": 4,
+          "perLanding": 0.2857142857142857
+        },
+        "mainMoved": {
+          "count": 4,
+          "known": 14
+        },
+        "submitToAdmissionMinutes": {
+          "n": 0,
+          "p50": null,
+          "p90": null,
+          "overlappedMainTransition": 0
+        },
+        "linkedRedAuditCount": 0,
+        "recordedHoldsAtLeastOneMinute": {}
+      },
+      "reported": {
+        "landings": 14,
+        "firstTryCount": 10,
+        "checkStarts": 18,
+        "mainRaceAttempts": 5,
+        "mainRaceAttemptElapsedMinutes": 38.2,
+        "finishToMainP50Minutes": 12.5,
+        "finishToMainP90Minutes": 22.4,
+        "knownExecutionRunnerMinutes": 1028,
+        "unknownExecutionRuns": 0,
+        "meanRequestToEndCheckMinutes": 9.7
+      }
+    },
+    {
+      "name": "Nov 17 incident",
+      "source": "45f49fb7:267c62dd,f1187576",
+      "receiptsRecomputed": {
+        "from": "2026-11-17T00:00:00Z",
+        "to": "2026-11-18T00:00:00Z",
+        "hours": 24.0,
+        "landingsPerHour": 4.75,
+        "landingsPer24Hours": 114.0,
+        "receipts": 114,
+        "mainTransitions": 101,
+        "finishToMainMinutes": {
+          "n": 114,
+          "p50": 37.46428333322207,
+          "p90": 95.76535500129064
+        },
+        "firstTry": {
+          "first": 38,
+          "classified": 114,
+          "shareOfClassified": 0.3333333333333333,
+          "paths": {
+            "after-fixer": 34,
+            "after-recompose": 27,
+            "after-retry": 15,
+            "first-try": 21,
+            "reused-after-race": 17
+          }
+        },
+        "receiptCheckLinks": {
+          "weightedDistinct": 247.00000000000003,
+          "perLanding": 2.166666666666667,
+          "partialReceipts": 5
+        },
+        "acceptedRunnerMinutes": {
+          "stampedReceipts": 112,
+          "totalKnownMinutes": 9003.166666666666,
+          "perLandingKnownMinutes": 78.9751461988304,
+          "meanOverStamped": 80.38541666666667
+        },
+        "discardedRunnerMinutes": {
+          "stampedReceipts": 114,
+          "totalKnownMinutes": 6612.816666666667,
+          "perLandingKnownMinutes": 58.00716374269006,
+          "meanOverStamped": 58.00716374269006
+        },
+        "recomposes": {
+          "stampedReceipts": 114,
+          "sum": 238,
+          "perLanding": 2.087719298245614
+        },
+        "mainMoved": {
+          "count": 103,
+          "known": 114
+        },
+        "submitToAdmissionMinutes": {
+          "n": 50,
+          "p50": 13.994666667779288,
+          "p90": 20.99221000154813,
+          "overlappedMainTransition": 24
+        },
+        "linkedRedAuditCount": 1,
+        "recordedHoldsAtLeastOneMinute": {
+          "landed": 19,
+          "CHANNEL_CHANGED": 62
+        }
+      },
+      "reported": {
+        "landings": 114,
+        "firstTryCount": 15,
+        "checkStarts": 490,
+        "mainRaceAttempts": 402,
+        "mainRaceAttemptElapsedMinutes": 4161,
+        "finishToMainP50Minutes": 37.3,
+        "finishToMainP90Minutes": 95.8,
+        "knownExecutionRunnerMinutes": null,
+        "unknownExecutionRuns": null,
+        "meanRequestToEndCheckMinutes": 11.4
+      }
+    },
+    {
+      "name": "Nov 18–19 matched",
+      "source": "45f49fb7:c210073c",
+      "receiptsRecomputed": {
+        "from": "2026-11-18T11:15:00Z",
+        "to": "2026-11-19T11:15:00Z",
+        "hours": 24.0,
+        "landingsPerHour": 2.4583333333333335,
+        "landingsPer24Hours": 59.0,
+        "receipts": 59,
+        "mainTransitions": 55,
+        "finishToMainMinutes": {
+          "n": 59,
+          "p50": 16.03948333263397,
+          "p90": 35.96327333450318
+        },
+        "firstTry": {
+          "first": 43,
+          "classified": 59,
+          "shareOfClassified": 0.7288135593220338,
+          "paths": {
+            "after-fixer": 5,
+            "after-recompose": 8,
+            "after-retry": 3,
+            "first-try": 20,
+            "reused-after-race": 23
+          }
+        },
+        "receiptCheckLinks": {
+          "weightedDistinct": 85.0,
+          "perLanding": 1.4406779661016949,
+          "partialReceipts": 0
+        },
+        "acceptedRunnerMinutes": {
+          "stampedReceipts": 59,
+          "totalKnownMinutes": 5505.5,
+          "perLandingKnownMinutes": 93.3135593220339,
+          "meanOverStamped": 93.3135593220339
+        },
+        "discardedRunnerMinutes": {
+          "stampedReceipts": 57,
+          "totalKnownMinutes": 2173.383333333333,
+          "perLandingKnownMinutes": 36.83700564971751,
+          "meanOverStamped": 38.12953216374269
+        },
+        "recomposes": {
+          "stampedReceipts": 59,
+          "sum": 67,
+          "perLanding": 1.1355932203389831
+        },
+        "mainMoved": {
+          "count": 44,
+          "known": 59
+        },
+        "submitToAdmissionMinutes": {
+          "n": 39,
+          "p50": 14.395666666825612,
+          "p90": 15.721366665363313,
+          "overlappedMainTransition": 22
+        },
+        "linkedRedAuditCount": 1,
+        "recordedHoldsAtLeastOneMinute": {
+          "landed": 7,
+          "CHANNEL_CHANGED": 11
+        }
+      },
+      "reported": {
+        "landings": 59,
+        "firstTryCount": 43,
+        "checkStarts": 145,
+        "mainRaceAttempts": 97,
+        "mainRaceAttemptElapsedMinutes": 671.9,
+        "finishToMainP50Minutes": 16,
+        "finishToMainP90Minutes": 36,
+        "knownExecutionRunnerMinutes": 14510.3,
+        "unknownExecutionRuns": 1,
+        "meanRequestToEndCheckMinutes": null
+      }
+    },
+    {
+      "name": "Nov 19–20 busy",
+      "source": "45f49fb7:ae49c3b1,35d85e04",
+      "receiptsRecomputed": {
+        "from": "2026-11-19T21:45:00Z",
+        "to": "2026-11-20T21:45:00Z",
+        "hours": 24.0,
+        "landingsPerHour": 5.041666666666667,
+        "landingsPer24Hours": 121.0,
+        "receipts": 121,
+        "mainTransitions": 116,
+        "finishToMainMinutes": {
+          "n": 121,
+          "p50": 12.600250001748403,
+          "p90": 52.88845000267029
+        },
+        "firstTry": {
+          "first": 64,
+          "classified": 121,
+          "shareOfClassified": 0.5289256198347108,
+          "paths": {
+            "after-fixer": 27,
+            "after-recompose": 17,
+            "after-retry": 13,
+            "first-try": 31,
+            "reused-after-race": 33
+          }
+        },
+        "receiptCheckLinks": {
+          "weightedDistinct": 194.0,
+          "perLanding": 1.603305785123967,
+          "partialReceipts": 2
+        },
+        "acceptedRunnerMinutes": {
+          "stampedReceipts": 121,
+          "totalKnownMinutes": 8756.183333333332,
+          "perLandingKnownMinutes": 72.36515151515151,
+          "meanOverStamped": 72.36515151515151
+        },
+        "discardedRunnerMinutes": {
+          "stampedReceipts": 114,
+          "totalKnownMinutes": 5376.016666666666,
+          "perLandingKnownMinutes": 44.42988980716253,
+          "meanOverStamped": 47.15804093567252
+        },
+        "recomposes": {
+          "stampedReceipts": 121,
+          "sum": 165,
+          "perLanding": 1.3636363636363635
+        },
+        "mainMoved": {
+          "count": 91,
+          "known": 121
+        },
+        "submitToAdmissionMinutes": {
+          "n": 79,
+          "p50": 9.31721666653951,
+          "p90": 11.130330001513165,
+          "overlappedMainTransition": 40
+        },
+        "linkedRedAuditCount": 4,
+        "recordedHoldsAtLeastOneMinute": {
+          "CHANNEL_CHANGED": 45,
+          "landed": 14
+        }
+      },
+      "reported": {
+        "landings": 121,
+        "firstTryCount": 64,
+        "checkStarts": 351,
+        "mainRaceAttempts": 190,
+        "mainRaceAttemptElapsedMinutes": 1545.4,
+        "finishToMainP50Minutes": 12.6,
+        "finishToMainP90Minutes": 52.9,
+        "knownExecutionRunnerMinutes": 19930.7,
+        "unknownExecutionRuns": 71,
+        "meanRequestToEndCheckMinutes": null
+      }
+    }
+  ],
+  "failedCheckOutcomesByUtcDayAndNoise": {
+    "2026-11-20": {
+      "real": 29,
+      "budget": 3,
+      "flake": 2,
+      "runner": 10
+    },
+    "2026-11-19": {
+      "budget": 13,
+      "real": 30
+    },
+    "2026-11-18": {
+      "real": 8,
+      "budget": 2
+    },
+    "2026-11-17": {
+      "real": 28,
+      "budget": 4,
+      "flake": 1
+    }
+  }
+}
