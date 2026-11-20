@@ -154,7 +154,7 @@ export function fixture() {
           },
           async first() {
             assert(selected);
-            return read(selected.slice(0, 1))[0] ?? null;
+            return read((descending ? selected.toReversed() : selected).slice(0, 1))[0] ?? null;
           },
           async unique() {
             assert(selected);

@@ -165,7 +165,11 @@ day. A day where more than half the landings have no discarded-minutes stamp yet
 close's read cap) cannot be compared with a line set from whole days: it sends one "not enough data" note and is
 not judged. Late usage that arrives after a day closed corrects Stats, not the judged day. Checks of work that
 never landed (withdrawn) are on Stats' discarded tally, not here. The file max (2,100 min, about $17 a day at list
-price) is the per-landing discarded budget (12 min) × the busiest day's 171 landings.
+price) is the per-landing discarded budget (12 min) × the busiest day's 171 landings. `nforge metrics` takes the
+automatic line and the held days left from the newest Stats day row (one indexed read on the first metrics page;
+the landing row never holds them) and says which closed day that state is from. Only the file max fails the row,
+the same as the close: a day over a tightened line but under the file max undoes the ratchet with a message, and
+the row says so.
 
 ## Check time per landing
 
@@ -188,11 +192,16 @@ seeded runs at 30 and 100 edited files name 0). A file the history has timed in 
 as new (the history entry carries `n` until then), so the change's own failed or discarded attempts, which
 also feed the history, do not hide it.
 
-Whole runs and contract-selected runs are judged. A contract-selected run skips files on purpose, so it cannot
-tell a deleted file from an unselected one: it names new test files only, never files it no longer ran. Nothing
-is lost: a deleted or renamed path selects the whole run (`classifyCheckPath` returns no scope for it), and a
-changed test file is always in the selection, so the files that could offset a new one are judged on a whole
-run. Of 60 replayed landings, 22 were contract-selected and named nothing before. A main-race scoped recheck
+Whole runs and contract-selected runs of Forge's own check recipe (`isStandardForgeCheck`) are judged. A
+contract-selected run skips files on purpose, so it cannot tell a deleted file from an unselected one: it names
+new test files only, never files it no longer ran. Nothing is lost: with Forge's own recipe a deleted or renamed
+path selects the whole run (`classifyCheckPath` returns no scope for it), and a changed test file is always in
+the selection, so the files that could offset a new one are judged on a whole run. A configured (BYO CI) command
+that declares `selection: changed-paths` scopes without that rule, so a rename would read as an added file: its
+selected runs record nothing, and its whole runs are judged like any other. A selected run needs 20 established
+timed files (a whole run 5) before its speed and spread are trusted, because its matched files are mostly the
+change's own impacted tests. A net that rounds to 0 s is never named. Of 60 replayed landings, 22 were
+contract-selected and named nothing before. A main-race scoped recheck
 and a scoped plan are never judged. A batch's shared run names the stacked change on main's (last) receipt. Timings that
 arrive in several argument pages, or through the scheduled legacy timing path, leave the run without the
 record. The seconds are runner seconds summed over shards, the unit of the budget above; wall time is about

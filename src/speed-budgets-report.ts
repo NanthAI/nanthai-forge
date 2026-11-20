@@ -121,12 +121,13 @@ export function speedBudgetRows(
         note: WHERE[b.measuredBy as keyof typeof WHERE],
       };
     const rows = samples(b.metric as LandingMetric);
-    // The automatic setting beside the file line (Issue a217b83e): live ratchet state, hosted only.
+    // The automatic setting beside the file line (Issue a217b83e): live ratchet state, hosted only. A day
+    // budget's state lives on the newest Stats day row, never on the landing row (review d2d1a7e8).
     const live = records.landingSpeed;
     if (b.stat === 'day')
       return {
         ...base,
-        ...dayRow(landingSamples, period, b.max, live?.ratchet?.[b.id], b.ratchet === false),
+        ...dayRow(landingSamples, period, b.max, records.dayBudgets, b.id, b.ratchet === false),
       };
     const auto =
       live && b.stat !== 'mean' ? ratchetStatus(live.ratchet?.[b.id], b.max, b.ratchet === false) : null;
@@ -177,15 +178,19 @@ export function speedBudgetRows(
   });
 }
 
-/** A day budget (the waste tripwire): the newest UTC day the period holds whole, as the landing path judges it
- * when that day closes; the worst whole day beside it. A day missing more than half its stamps is not judged. */
+/** A day budget (the waste tripwire): the newest UTC day the period holds whole, as the Stats day close judges
+ * it; the worst whole day beside it. A day missing more than half its stamps is not judged. The automatic line
+ * and its days left come from the Stats day row's state. Status agrees with the close's P0: a day over a
+ * tightened line but under the file max undoes the ratchet (a message), so only the file max fails. */
 function dayRow(
   samples: LandingSpeedState['samples'],
   period: MetricPeriod,
   max: number,
-  entry: Parameters<typeof ratchetStatus>[0],
+  kept: MetricRecords['dayBudgets'],
+  id: string,
   pinned: boolean,
 ): Pick<SpeedBudgetRow, 'value' | 'status' | 'note' | 'line'> {
+  const entry = kept?.ratchet[id];
   const days = new Map<string, { seconds: number; unknown: number; landings: number }>();
   const end = Date.parse(period.to);
   for (const row of samples) {
@@ -206,11 +211,13 @@ function dayRow(
   const line = auto && auto.line < max ? { line: auto.line } : {};
   const ratchet = !auto
     ? ''
-    : auto.line < max
-      ? `; automatic line ${auto.line} (ratcheted ${auto.since?.slice(0, 10) ?? ''})`
-      : auto.daysLeft
-        ? `; next ratchet check in ${auto.daysLeft} held day${auto.daysLeft === 1 ? '' : 's'}`
-        : '';
+    : (auto.line < max
+        ? `; automatic line ${auto.line} (ratcheted ${auto.since?.slice(0, 10) ?? ''})`
+        : auto.pinned
+          ? '; pinned to the file max'
+          : auto.daysLeft
+            ? `; next ratchet check in ${auto.daysLeft} held day${auto.daysLeft === 1 ? '' : 's'}`
+            : '') + (entry && kept ? `; kept by the Stats day close through ${kept.day}` : '');
   const newest = judged.at(-1);
   if (!newest)
     return {
@@ -222,13 +229,17 @@ function dayRow(
   const minutes = (d: { seconds: number }) => Math.round(d.seconds / 6) / 10;
   const worst = judged.reduce((a, b) => (minutes(b[1]) > minutes(a[1]) ? b : a));
   const value = minutes(newest[1]);
+  const over =
+    auto && auto.line < max && value > auto.line && value <= max
+      ? `; over the automatic line: the day close undoes the ratchet (a message, no P0 under the file max)`
+      : '';
   return {
     ...line,
     value,
     status: value > max ? 'fail' : 'pass',
     note:
       `UTC day ${newest[0]}: ${newest[1].landings} landings${newest[1].unknown ? `, ${newest[1].unknown} unknown (excluded, never zero)` : ''}; ` +
-      `worst whole day in the period ${worst[0]} ${minutes(worst[1])} min over ${judged.length} judged day${judged.length === 1 ? '' : 's'}${ratchet}`,
+      `worst whole day in the period ${worst[0]} ${minutes(worst[1])} min over ${judged.length} judged day${judged.length === 1 ? '' : 's'}${ratchet}${over}`,
   };
 }
 

@@ -29,6 +29,13 @@ test.after(() => {
   }
 });
 
+/** Forge's own check recipe (src/standard-check.ts): the only one whose selector sends deletions to a full run. */
+const forgeCheck = {
+  name: 'forge',
+  executable: 'node',
+  args: ['scripts/forge-check.mjs'],
+  environmentLabel: 'clean',
+};
 /** Deterministic noise in [-1, 1]. */
 const jitter = i => Math.sin(i * 12.9898) * 0.5 + Math.sin(i * 78.233) * 0.5;
 /** 300 synthetic established test files of 1 to 120 s, as the history's EWMA milliseconds. */
@@ -273,7 +280,7 @@ test('contract-selected runs name new test files too (22 of 60 replayed landings
     contractVersion: 1,
     effective: 'contract',
   };
-  const accepted = result(selectedRun, 10, { gate: contract });
+  const accepted = result(selectedRun, 10, { gate: contract, check: forgeCheck });
   await record(accepted);
   assert(accepted.checkTime, 'a contract-selected run carries evidence');
   assert(accepted.checkTime.files.every(([, , base]) => base === null));
@@ -294,6 +301,95 @@ test('contract-selected runs name new test files too (22 of 60 replayed landings
   );
   await record(docs);
   assert.equal(docs.checkTime, undefined, 'a docs run is never judged');
+});
+
+test("review d2d1a7e8: a BYO CI changed-paths command's contract run never reads a renamed 60 s test as added", async () => {
+  // Only Forge's own recipe sends a deleted or renamed path to a full run. A configured command that declares
+  // `selection: changed-paths` scopes its contract gate without that rule, so its renamed file looks new while
+  // the old path, merely unselected, is never netted out.
+  const old = 'tests/a_test.py',
+    renamed = 'tests/b_test.py',
+    paths = [old, renamed];
+  const skipped = Object.keys(ms).slice(100);
+  const durations = run(1, 80, { [renamed]: 60_000 }, () => 1, skipped);
+  const history60 = history({ [old]: { durationMs: 60_000, updatedAt: at(1) } });
+  // The trap the guard closes: judged as a selected run, the rename reads as about 60 s added.
+  const trap = attributeCheckTime(checkTimeEvidence(history60, durations, false), paths);
+  assert(trap && Math.abs(trap.seconds - 60) <= 5, `the rename reads as added, got ${trap?.seconds}`);
+
+  const s = lanesFixture(),
+    projectId = s.insert('hostedProjects', {
+      owner: 'synthetic',
+      key: randomUUID(),
+      name: 'Synthetic configured check time',
+      currentBackup: null,
+      revision: 0,
+    });
+  const result = (durations, i, extra = {}) => ({
+    id: randomUUID(),
+    status: 'passed',
+    endedAt: `2026-11-19T02:${String(i).padStart(2, '0')}:00Z`,
+    contractReports: Object.fromEntries(
+      Object.entries(durations).map(([file, d]) => [file, { durationMs: d }]),
+    ),
+    ...extra,
+  });
+  const record = r =>
+    s.transaction('record', { _handler: ctx => recordHostedTestTimings(ctx, projectId, r) }, {});
+  const byoci = {
+    name: 'ci',
+    executable: 'bash',
+    args: ['ci/check.sh'],
+    environmentLabel: 'clean',
+    selection: { scope: 'changed-paths' },
+  };
+  for (let i = 0; i < 6; i++) await record(result(run(1, 90 + i, { [old]: 60_000 }), i, { check: byoci }));
+  const gate = { mode: 'contract', tests: [renamed], contractVersion: 1, effective: 'contract' };
+  const configured = result(durations, 10, { gate, check: byoci });
+  await record(configured);
+  assert.equal(configured.checkTime, undefined, "a configured command's selected run carries no evidence");
+  assert.equal(attributeCheckTime(configured.checkTime, paths), null, 'its receipt never says "adds 60 s"');
+  // Its whole runs still name new files: the selection rule matters only when files are skipped.
+  const whole = result(run(1, 99, { [old]: 60_000, 'tests/c_test.py': 90_000 }), 11, { check: byoci });
+  await record(whole);
+  assert(attributeCheckTime(whole.checkTime, ['tests/c_test.py']), 'a whole BYO CI run is judged as before');
+});
+
+test('review d2d1a7e8: a selected run needs more established files before it judges, and nothing reads "adds 0 s"', () => {
+  // A selected run's matched files are mostly the change's own impacted tests: too few say nothing.
+  const files = Object.keys(ms).slice(0, 12);
+  const few = Object.fromEntries(files.map(file => [file, ms[file]]));
+  const withNew = { ...few, 'tests/new-slow.test.mjs': 90_000 };
+  assert(checkTimeEvidence(prior, withNew, true), 'a whole run may judge on 12 established files');
+  assert.equal(checkTimeEvidence(prior, withNew, false), null, 'a selected run on 12 files says nothing');
+  const enough = Object.fromEntries(
+    Object.keys(ms)
+      .slice(0, 40)
+      .map(file => [file, ms[file]]),
+  );
+  const time = attributeCheckTime(
+    checkTimeEvidence(prior, { ...enough, 'tests/new-slow.test.mjs': 90_000 }, false),
+    ['tests/new-slow.test.mjs'],
+  );
+  assert(time && Math.abs(time.seconds - 90) <= 5, `40 files are enough, got ${time?.seconds}`);
+  // Exact timings make the spread 0, so the noise floor is 0: a 0.3 s new file would round to "adds 0 s".
+  const tiny = checkTimeEvidence(prior, { ...enough, 'tests/new-tiny.test.mjs': 300 }, false);
+  assert.equal(tiny.spread, 0);
+  assert.equal(attributeCheckTime(tiny, ['tests/new-tiny.test.mjs']), null, 'never "adds 0 s"');
+  const split = {
+    factor: 0,
+    spread: 0,
+    typical: 30,
+    files: [
+      ['tests/new-tiny.test.mjs', 0.7, null],
+      ['tests/old-tiny.test.mjs', -0.3, 0.3],
+    ],
+  };
+  assert.equal(
+    attributeCheckTime(split, ['tests/old-tiny.test.mjs', 'tests/new-tiny.test.mjs']),
+    null,
+    'a net under half a second is not named either',
+  );
 });
 
 /** A runner whose whole run times the change's new test file: the evidence the timing write stamps. */

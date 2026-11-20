@@ -20,7 +20,11 @@ import { metricRunsPage } from './projectMetricReadRuns';
 import { report } from './errors';
 import { metricReceiptCoverage } from '../src/self-metric-receipts';
 import { landingCosts } from '../src/hosted-landings-view';
-import { landingSpeedSample, landingSpeedStateSchema } from '../src/landing-speed-alerts';
+import {
+  dayBudgetStateSchema,
+  landingSpeedSample,
+  landingSpeedStateSchema,
+} from '../src/landing-speed-alerts';
 
 const tables = {
   acceptances: 'projectHostedAcceptances',
@@ -64,13 +68,30 @@ async function landingSpeedSummary(ctx: QueryCtx, projectId: Id<'hostedProjects'
     .withIndex('by_project', q => q.eq('projectId', projectId))
     .unique();
   const parsed = row ? landingSpeedStateSchema.safeParse(JSON.parse(row.value)) : null;
-  if (!parsed?.success || (!parsed.data.ratchet && !parsed.data.short)) return {};
   return {
-    landingSpeed: {
-      ...(parsed.data.ratchet ? { ratchet: parsed.data.ratchet } : {}),
-      ...(parsed.data.short ? { short: parsed.data.short } : {}),
-    },
+    ...(!parsed?.success || (!parsed.data.ratchet && !parsed.data.short)
+      ? {}
+      : {
+          landingSpeed: {
+            ...(parsed.data.ratchet ? { ratchet: parsed.data.ratchet } : {}),
+            ...(parsed.data.short ? { short: parsed.data.short } : {}),
+          },
+        }),
+    ...(await dayBudgetSummary(ctx, projectId)),
   };
+}
+/** The day budgets' ratchet (the daily waste tripwire) lives on the newest Stats day row, never on the
+ * landing row: one indexed read of that row, beside the one above (review d2d1a7e8). */
+async function dayBudgetSummary(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
+  const row = await ctx.db
+    .query('projectStatsDays')
+    .withIndex('by_project_and_day', q => q.eq('projectId', projectId))
+    .order('desc')
+    .first();
+  const parsed = row?.budgets ? dayBudgetStateSchema.safeParse(JSON.parse(row.budgets)) : null;
+  return parsed?.success && parsed.data.ratchet
+    ? { dayBudgets: { day: row!.day, ratchet: parsed.data.ratchet } }
+    : {};
 }
 
 async function mainAuditEvents(ctx: QueryCtx, projectId: Id<'hostedProjects'>, from: number, to: number) {

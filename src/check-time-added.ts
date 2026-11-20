@@ -5,12 +5,16 @@ import { checkTimeSchema, type CheckTime, type CheckTimeEvidence } from './hoste
  * planner's timing history (the same mutation that already reads and writes that row), the run keeps a
  * small `checkTime` record: the seconds of each test file that is new to the history, after dividing out
  * the run's own speed (runner hardware), and, for a whole run, the history seconds of files it no longer
- * runs. A contract-selected run skips files on purpose, so it cannot tell a deleted file from one it did not
- * select: it records new files only. That loses nothing, because the selector runs a change's own test
- * files (mandatory tier) and sends any change that deletes or renames a path to a full run
- * (scripts/check-path-scopes.mjs: an unknown or deleted path selects everything), so a change accepted on a
- * contract-selected run deletes no test file to net. A main-race scoped recheck selects by shared impact, not
- * by the change's own tests, so it records nothing. Acceptance, which already holds the run and the change's
+ * runs. A contract-selected run of Forge's own check recipe (src/standard-check.ts) skips files on purpose, so
+ * it cannot tell a deleted file from one it did not select: it records new files only. That loses nothing,
+ * because that recipe's selector runs a change's own test files (mandatory tier) and sends any change that
+ * deletes or renames a path to a full run (scripts/check-path-scopes.mjs: an unknown or deleted path selects
+ * everything), so a change accepted on such a run deletes no test file to net. A configured (BYO CI) command
+ * that declares `selection: changed-paths` has no such rule, so its selected runs record nothing; its whole
+ * runs are judged like any other (review d2d1a7e8). A selected run's established files are mostly the
+ * change's own impacted tests, so it needs MIN_MATCHED_SELECTED of them before its speed and spread are
+ * trusted. A main-race scoped recheck selects by shared impact, not by the change's own tests, so it records
+ * nothing. Acceptance, which already holds the run and the change's
  * paths, names the change's new test files when they add seconds beyond timing noise, net of test files it
  * deletes or renames. A change that only deletes test files is not named. It never blocks.
  *
@@ -26,6 +30,9 @@ import { checkTimeSchema, type CheckTime, type CheckTimeEvidence } from './hoste
 const CHECK_TIME_FILES = 12;
 /** Established files needed to measure a run's own speed and spread. */
 const MIN_MATCHED = 5;
+/** The same on a selected run, whose matched files are biased to the change's impacted tests: with 5 to 8
+ * of them the spread can come out near 0 and any new file would be named (review d2d1a7e8). */
+const MIN_MATCHED_SELECTED = 20;
 
 const median = (values: number[]) => {
   const sorted = [...values].sort((a, b) => a - b),
@@ -47,7 +54,7 @@ export function checkTimeEvidence(
   const timed = Object.entries(durations).filter(([, ms]) => Number.isFinite(ms) && ms > 0);
   const known = (file: string) => prior[file]!.durationMs > 0 && prior[file]!.n === undefined;
   const matched = timed.filter(([file]) => Object.hasOwn(prior, file) && known(file));
-  if (matched.length < MIN_MATCHED) return null;
+  if (matched.length < (whole ? MIN_MATCHED : MIN_MATCHED_SELECTED)) return null;
   const logs = matched.map(([file, ms]) => Math.log(ms / prior[file]!.durationMs));
   const factor = median(logs),
     spread = 1.4826 * median(logs.map(value => Math.abs(value - factor)));
@@ -91,7 +98,12 @@ export function attributeCheckTime(
     const noise = Math.sqrt(
       tests.reduce((sum, [, delta, base]) => sum + (evidence.spread * (base ?? Math.abs(delta))) ** 2, 0),
     );
-    if (!(Math.abs(total) > 3 * noise) || Math.abs(total) < 3 * evidence.spread * evidence.typical)
+    // A net that rounds to 0 s is never named ("adds 0 s"), whatever the noise floor says.
+    if (
+      !(Math.abs(total) > 3 * noise) ||
+      Math.abs(total) < 3 * evidence.spread * evidence.typical ||
+      Math.round(total) === 0
+    )
       return null;
     const time = {
       seconds: Math.round(total),

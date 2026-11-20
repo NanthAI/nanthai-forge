@@ -22,6 +22,8 @@ import {
 } from '../dist/landing-speed-alerts.js';
 import { speedBudgets as budgets } from '../dist/speed-budgets.js';
 import { speedBudgetRows } from '../dist/speed-budgets-report.js';
+import { readHostedMetricPages } from '../dist/self-metrics-hosted-pages.js';
+import { fixture, period as metricPeriod, at as metricAt } from './self-metrics-hosted-fixture.mjs';
 
 const replayData = JSON.parse(
   readFileSync(new URL('./fixtures/speed-budget-replay-2026-11-19.json', import.meta.url), 'utf8'),
@@ -373,4 +375,103 @@ test('nforge metrics judges the newest whole UTC day, names the worst, and says 
   const early = row('2026-11-09T00:00:00.000Z', '2026-11-10T00:00:00.000Z');
   assert.equal(early.status, 'unrun');
   assert.match(early.note, /not enough data/);
+});
+
+test('review d2d1a7e8: nforge metrics reads the daily line from the Stats day row and agrees with the close on every P0', () => {
+  // The day state lives on the newest Stats day row (the landing row never holds it). Eight quiet days
+  // tighten the line at the 12-07 close; 12-08 holds it.
+  const quiet = Object.fromEntries(
+    Array.from({ length: 8 }, (_, d) => [
+      `2026-12-${String(d + 1).padStart(2, '0')}`,
+      [100, 120 + d * 5, 90],
+    ]),
+  );
+  const { state } = closeDays(undefined, wasteDays(quiet));
+  const line = state.ratchet[waste.id].line;
+  assert(line < waste.max, 'the line tightened');
+  const kept = { day: '2026-12-08', ratchet: state.ratchet };
+  const timings = days =>
+    Object.entries(days).flatMap(([d, values]) =>
+      values.map((minutes, i) => ({
+        id: `${d}-${i}`,
+        at: new Date(Date.parse(`${d}T00:00:00.000Z`) + (i + 1) * 60_000).toISOString(),
+        minutes: 20,
+        costs: { runnerDiscarded: minutes },
+      })),
+    );
+  const row = (days, dayBudgets, to = '2026-12-10T00:00:00.000Z') =>
+    speedBudgetRows(
+      { finishTimings: timings(days), runs: [], ...(dayBudgets ? { dayBudgets } : {}) },
+      { from: '2026-12-01T00:00:00.000Z', to },
+      budgets,
+    ).find(r => r.id === waste.id);
+  // Held: the automatic line shows, with the row that keeps it.
+  const held = row(quiet, kept, '2026-12-09T00:00:00.000Z');
+  assert.equal(held.line, line);
+  assert.match(held.note, new RegExp(`automatic line ${line} \\(ratcheted 2026-12-07\\)`));
+  assert.match(held.note, /kept by the Stats day close through 2026-12-08/);
+  assert.equal(held.status, 'pass');
+  // Before the 7th held day: the days left show.
+  const early = closeDays(undefined, wasteDays(Object.fromEntries(Object.entries(quiet).slice(0, 3)))).state;
+  const waiting = row(quiet, { day: '2026-12-03', ratchet: early.ratchet }, '2026-12-04T00:00:00.000Z');
+  assert.equal(waiting.line, undefined);
+  assert.match(
+    waiting.note,
+    /next ratchet check in 4 held days; kept by the Stats day close through 2026-12-03/,
+  );
+  // A landing-row ratchet entry for the same id is never read for a day budget.
+  const stray = speedBudgetRows(
+    { finishTimings: timings(quiet), runs: [], landingSpeed: { ratchet: state.ratchet } },
+    { from: '2026-12-01T00:00:00.000Z', to: '2026-12-09T00:00:00.000Z' },
+    budgets,
+  ).find(r => r.id === waste.id);
+  assert.equal(stray.line, undefined, 'the day line comes from the Stats day row only');
+  // Each next day, metrics and the close agree on the P0: under the line, over it (undo, no P0), over the max.
+  for (const minutes of [Math.floor(line) - 50, Math.ceil(line) + 50, waste.max - 10, waste.max + 50]) {
+    const next = { ...quiet, '2026-12-09': [minutes] };
+    const closed = judgeClosedDay(state, wasteDays({ '2026-12-09': [minutes] })[0], budgets);
+    const p0 = closed.events.some(e => e.budget.id === waste.id && e.kind === 'broken');
+    const metrics = row(next, kept);
+    assert.equal(
+      metrics.status,
+      p0 ? 'fail' : 'pass',
+      `${minutes} min: metrics ${metrics.status}, close P0 ${p0}`,
+    );
+    if (minutes > line && minutes <= waste.max) {
+      assert(
+        closed.events.some(e => e.kind === 'undone'),
+        'over the tightened line the close undoes it',
+      );
+      assert.match(metrics.note, /over the automatic line: the day close undoes the ratchet/);
+    }
+  }
+});
+
+test('review d2d1a7e8: the metrics read takes the day line from the newest Stats day row, on the first acceptances page only', async () => {
+  const f = fixture();
+  f.landing('one', metricAt(10), metricAt(10));
+  const quiet = Object.fromEntries(
+    Array.from({ length: 8 }, (_, d) => [`2026-12-${String(d + 1).padStart(2, '0')}`, [100, 90]]),
+  );
+  const older = closeDays(undefined, wasteDays(Object.fromEntries(Object.entries(quiet).slice(0, 2)))).state;
+  const newer = closeDays(undefined, wasteDays(quiet)).state;
+  const stats = (day, state) =>
+    f.put(
+      'projectStatsDays',
+      { projectId: 'project', day, value: '{}', budgets: JSON.stringify(state) },
+      `${day}T00:10:00.000Z`,
+    );
+  stats('2026-12-08', newer);
+  stats('2026-12-02', older);
+  const first = JSON.parse(
+    await f.query('projectSelfMetrics:page', { stream: 'acceptances', ...metricPeriod, cursor: null }),
+  );
+  assert.deepEqual(first.dayBudgets, { day: '2026-12-08', ratchet: newer.ratchet }, 'the newest day row');
+  const runs = JSON.parse(
+    await f.query('projectSelfMetrics:page', { stream: 'runs', ...metricPeriod, cursor: null }),
+  );
+  assert.equal(runs.dayBudgets, undefined, 'it rides only on the first acceptances page');
+  const { records } = await readHostedMetricPages(f.query, metricPeriod);
+  assert.deepEqual(records.dayBudgets, first.dayBudgets);
+  assert.equal(f.meter.writes, 0);
 });

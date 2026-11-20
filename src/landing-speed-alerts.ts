@@ -807,6 +807,11 @@ export const dayBudgetStateSchema = landingSpeedStateSchema
   .partial()
   .strict();
 export type DayBudgetState = z.infer<typeof dayBudgetStateSchema>;
+/** What a metrics read returns of the day budgets' state: the newest Stats day row's ratchet and its day. */
+export const dayBudgetSummarySchema = z.object({
+  day: z.string(),
+  ratchet: z.record(z.string(), ratchetEntrySchema),
+});
 /** One closed UTC day, as the Stats day close counts it from the receipts and landing rows it already
  * reads: known discarded runner seconds, landings with an unknown stamp, landings, and the landing with
  * the most discarded seconds. */

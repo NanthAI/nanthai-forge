@@ -19,6 +19,7 @@ import { hostedCheckRunSchema } from '../src/hosted-check';
 import { parseTimingHistory, updateHostedTimingHistory } from '../src/hosted-test-timings';
 import { checkTimeEvidence } from '../src/check-time-added';
 import { isScopedRecheck } from '../src/scoped-recheck-policy';
+import { isStandardForgeCheck } from '../src/standard-check';
 
 /** Same advisory JSON/EWMA as the native owner's .forge/work/test-timings.json.
  * One indexed document, read/written inside existing authorized transactions.
@@ -119,10 +120,16 @@ export async function recordHostedTestTimings(
   }
   // Check-time evidence (Issue a217b83e): this run's files against the history already read, once, for a
   // run whose timings arrive in one final part. The caller's existing run write keeps it. A whole run also
-  // names files it no longer runs; a contract-selected run (never a main-race scoped recheck) names new
-  // files only (src/check-time-added.ts says why nothing is lost).
+  // names files it no longer runs; a contract-selected run of Forge's own check recipe (never a main-race
+  // scoped recheck) names new files only (src/check-time-added.ts says why nothing is lost). Only that
+  // recipe's selector sends a deleted or renamed path to a full run: a configured (BYO CI) command that
+  // declares `selection: changed-paths` scopes without it, so its selected runs are not judged (review d2d1a7e8).
   const whole = (run.gate === undefined || run.gate.effective === 'full') && !run.plan?.scoped;
-  const selected = run.gate?.effective === 'contract' && !run.plan?.scoped && !isScopedRecheck(run.gate);
+  const selected =
+    run.gate?.effective === 'contract' &&
+    !run.plan?.scoped &&
+    !isScopedRecheck(run.gate) &&
+    isStandardForgeCheck(run.check);
   const evidence =
     (whole || selected) && final && !transport?.timingParts?.length
       ? checkTimeEvidence(history.files, durations ?? reportDurations(run), whole)

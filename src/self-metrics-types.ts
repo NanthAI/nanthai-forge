@@ -154,6 +154,8 @@ export type MetricRecords = {
   mainAudits?: { events: MetricMainAuditEvent[]; complete: boolean };
   /** The live speed-budget row's ratchet and too-little-data state (hosted only). */
   landingSpeed?: Pick<LandingSpeedState, 'ratchet' | 'short'>;
+  /** The day budgets' ratchet as the Stats day close keeps it, after its newest closed `day` (hosted only). */
+  dayBudgets?: { day: string; ratchet: NonNullable<LandingSpeedState['ratchet']> };
   /** A hosted acceptances page predates the reuse projection. */
   reuseUnprojected?: boolean;
   /** A hosted page predates the fallback-reason projection (7c2e69e1). */
