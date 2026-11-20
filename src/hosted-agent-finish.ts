@@ -6,7 +6,7 @@ import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { hostedLandingDesiredSchema } from './hosted-landing-desired.js';
 import { hostedLandingRequestSchema, type HostedLandingState } from './hosted-landing.js';
 import { sourceWaitSnapshot } from './hosted-agent-source-wait.js';
-import { hostedCheckRequestSchema } from './hosted-check.js';
+import { hostedCheckRequestSchema, hostedCheckTerminal, type HostedCheckRun } from './hosted-check.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { saveContract, saveHostedLane } from './hosted-save-client.js';
 import { capturedNotSaved, type NotSaved } from './save-not-saved.js';
@@ -127,6 +127,22 @@ async function enqueueLanding(session: HostedAgentSession, request: unknown, pin
   }
 }
 
+/** A check-only finish's check request, as enqueueLanding's landing request: the server checks its
+ * epoch only for a new operation, so one refused at an older epoch began nothing. It is dropped and
+ * this finish composes again at the current epoch (N3). */
+async function enqueueCheck(session: HostedAgentSession, request: unknown, pinnedCandidate: boolean) {
+  try {
+    return await session.mutation<HostedCheckRun>('projectHostedChecks:enqueue', {
+      request: canonicalPayload(request),
+    });
+  } catch (error) {
+    if (!olderEpochPin(session, error, request)) throw error;
+    if (pinnedCandidate) session.journal.forget('finish-request');
+    else forgetFinishSource(session, 'finish-request');
+    throw new AuthorityPinRefused(error);
+  }
+}
+
 async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolean, command: FinishCommand) {
   const composeOperationId =
     session.journal.get<string>('finish-compose-operation') ?? session.journal.get<string>('id:compose');
@@ -198,7 +214,23 @@ async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolea
   const request = session.journal.get<Record<string, unknown>>('finish-request');
   if (!request) return null;
   if (!request.channel) {
-    const run = await session.mutation('projectHostedChecks:enqueue', { request: canonicalPayload(request) });
+    let run: HostedCheckRun;
+    try {
+      run = await enqueueCheck(session, request, pinnedCandidate);
+    } catch (error) {
+      // The retained check request was older than this epoch and is dropped: compose again.
+      if (error instanceof AuthorityPinRefused) return null;
+      throw error;
+    }
+    // Began at an older epoch: after the cutover every runner write to this run is refused, so a
+    // still-running one never ends, and a wait on it would never return. Name a new finish (N3).
+    const began = (request as { authorityEpoch?: number }).authorityEpoch,
+      epoch = session.capabilities.authority.epoch;
+    if (began !== undefined && began !== epoch && !hostedCheckTerminal(run))
+      throw olderEpochRefusal(session.root, 'SOURCE_AUTHORITY_CHANGED', "This finish's check", began, epoch, {
+        action: 'finish',
+        parameters: freshFinish(command),
+      });
     await session.journal.retain('finish-check-run', () => run);
     return { phase: 'check', composeOperationId, run };
   }
@@ -706,7 +738,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     });
   });
   if (command.accept === false) {
-    const run = await session.mutation('projectHostedChecks:enqueue', { request: canonicalPayload(request) });
+    const run = await enqueueCheck(session, request, pinnedCandidate);
     markLandStep('submitted');
     await session.journal.retain('finish-check-run', () => run);
     return { phase: 'check', composeOperationId, run };

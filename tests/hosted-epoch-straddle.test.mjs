@@ -296,6 +296,9 @@ test('a new save after a save that began at the old epoch saves its edits (revie
   assert.equal(outcome(saved), 'completed');
   const lane = await s.f.readLane(s.f.lane.laneId);
   assert.notEqual(lane.head, s.f.lane.head, 'the Lane moved');
+  // Review b5e08676 low 1: the dropped save's edit is captured by the new save, not lost.
+  assert.equal(s.f.text(lane.head, 'a.txt'), 'left pending across a cutover\n');
+  assert.equal(s.f.text(lane.head, 'b.txt'), 'saved after the cutover\n');
   const again = await s.transport().dispatch('save', { message: 'Nothing new', operationId: randomUUID() });
   assert.notEqual(again.result?.code, 'SOURCE_AUTHORITY_CHANGED', 'no later save replays the dropped one');
 });
@@ -343,4 +346,116 @@ test('a finish with its own compose operation that began at the old epoch names 
   assert.equal(parameters.composeOperationId, undefined, 'the dead compose is not named again');
   const landed = await s.transport().dispatch('finish', parameters);
   assert(landed.result.submission, 'the named finish submitted its landing');
+});
+
+// Review b5e08676 low 2: a resolution sync (a Candidate's) whose job was submitted at the old epoch.
+test('a resolution sync that began at the old epoch is refused naming sync, and that sync opens the resolution Lane (review b5e08676 low 2)', async t => {
+  const s = await resolutionFixture(t, { overlap: true }),
+    f = s.f;
+  f.moveMain({ overlap: true });
+  const first = await s.transport().dispatch('finish', { laneId: f.lane.laneId });
+  const candidateId = first.result.candidateId;
+  assert(candidateId, 'a conflicted Candidate');
+  dropFirst(s, 'projectHostedSyncJobs:submit');
+  const command = { candidateId, operationId: randomUUID() };
+  await assert.rejects(s.transport().dispatch('sync', command));
+  nextEpoch(f);
+  const refused = await s
+    .transport()
+    .dispatch('sync', command)
+    .catch(error => error);
+  const parameters = namesNext(refused, 'sync', command.operationId);
+  assert.equal(parameters.candidateId, candidateId, 'the named sync keeps its Candidate');
+  const synced = await s.transport().dispatch('sync', parameters);
+  assert.equal(synced.operationId, parameters.operationId);
+  assert(synced.result.conflict.root, 'the resolution Lane opened');
+});
+
+// Review 85381d50 low 2: the resolve's own sync began at the old epoch.
+test('a resolve whose sync began at the old epoch is refused naming resolve, and that resolve resolves (review 85381d50 low 2)', async t => {
+  const s = await resolutionFixture(t, { overlap: true }),
+    f = s.f;
+  f.moveMain({ overlap: true });
+  await s.transport().dispatch('open', { laneId: f.lane.laneId });
+  const conflict = (await s.transport().dispatch('sync', { laneId: f.lane.laneId })).result.conflict;
+  writeFileSync(join(conflict.root, 'a.txt'), 'chosen\nb\nc\n');
+  dropFirst(s, 'projectHostedSyncJobs:submit');
+  const command = { laneId: conflict.laneId, operationId: randomUUID() };
+  await assert.rejects(s.transport(conflict.root).dispatch('resolve', command));
+  nextEpoch(f);
+  const refused = await s
+    .transport(conflict.root)
+    .dispatch('resolve', command)
+    .catch(error => error);
+  const parameters = namesNext(refused, 'resolve', command.operationId);
+  const fixed = await s.transport(conflict.root).dispatch('resolve', parameters);
+  assert.equal(fixed.result.source.outcome.result.status, 'resolved');
+});
+
+// Review b5e08676 low 3, decided: keep the rebuild. A save that never began (lost before the server
+// ran its prepare), then a cutover. A next save's settle reads NOT_FOUND and drops it (its edits
+// are in the checkout). A finish or preflight reconciles it instead: an unknown reply resumes the
+// original operation, and at a newer epoch that is the N3 rule, rebuilt once under its id.
+test('a finish after a save that never began before a cutover rebuilds that save at the new epoch under its id and lands both edits (review b5e08676 low 3)', async t => {
+  const s = await resolutionFixture(t),
+    f = s.f;
+  await s.transport().dispatch('open', { laneId: f.lane.laneId });
+  writeFileSync(join(s.root, 'a.txt'), 'never began before a cutover\n');
+  dropFirst(s, 'projectHostedSaves:prepare');
+  const lost = { message: 'Never began', operationId: randomUUID() };
+  await assert.rejects(s.transport().dispatch('save', lost), { code: 'HOSTED_ACTION_FAILED' });
+  const epoch = nextEpoch(f);
+  writeFileSync(join(s.root, 'b.txt'), 'edited after the cutover\n');
+  const landed = await s.transport().dispatch('finish', { laneId: f.lane.laneId, operationId: randomUUID() });
+  assert(landed.result.submission, 'the landing was submitted');
+  assert.deepEqual(
+    requests(s, 'projectHostedSaves:prepare')
+      .filter(request => request.operationId === lost.operationId)
+      .map(request => request.authorityEpoch),
+    [epoch - 1, epoch],
+    'refused once at its old epoch (nothing began), rebuilt once at the new one',
+  );
+  const lane = await f.readLane(f.lane.laneId);
+  assert.equal(f.text(lane.head, 'a.txt'), 'never began before a cutover\n');
+  assert.equal(f.text(lane.head, 'b.txt'), 'edited after the cutover\n');
+});
+
+// The check-only finish (land --save --check-only) retains its check request like a landing does.
+test('a check-only finish whose check request never began rebuilds at the new epoch under the same finish (1d69905b check-only)', async t => {
+  const s = await resolutionFixture(t),
+    f = s.f;
+  dropFirst(s, 'projectHostedChecks:enqueue');
+  const command = { laneId: f.lane.laneId, accept: false, operationId: randomUUID() };
+  await assert.rejects(s.transport().dispatch('finish', command), { code: 'HOSTED_ACTION_FAILED' });
+  const epoch = nextEpoch(f);
+  const checked = await s.transport().dispatch('finish', command);
+  assert.equal(checked.operationId, command.operationId);
+  assert.equal(checked.result.phase, 'check');
+  assert.equal(typeof checked.result.run.id, 'string');
+  assert.deepEqual(
+    requests(s, 'projectHostedChecks:enqueue').map(request => request.authorityEpoch),
+    [epoch - 1, epoch],
+  );
+});
+
+// Review a81344b8 finding 1: a check-only run enqueued at the old epoch is still running at the
+// cutover. Every runner write to it is refused from then on, so it never ends: the replay names a
+// new finish instead of waiting on it, and that finish checks at the new epoch.
+test('a check-only finish whose check began at the old epoch is refused naming finish, and that finish checks again (review a81344b8 1)', async t => {
+  const s = await resolutionFixture(t),
+    f = s.f;
+  const command = { laneId: f.lane.laneId, accept: false, operationId: randomUUID() };
+  const first = await s.transport().dispatch('finish', command);
+  assert.equal(first.result.phase, 'check');
+  const epoch = nextEpoch(f);
+  const refused = await s
+    .transport()
+    .dispatch('finish', command)
+    .catch(error => error);
+  const parameters = namesNext(refused, 'finish', command.operationId);
+  assert.equal(parameters.accept, false, 'the named finish is check-only too');
+  const checked = await s.transport().dispatch('finish', parameters);
+  assert.equal(checked.result.phase, 'check');
+  assert.notEqual(checked.result.run.id, first.result.run.id, 'a new check run');
+  assert.equal(requests(s, 'projectHostedChecks:enqueue').at(-1).authorityEpoch, epoch);
 });

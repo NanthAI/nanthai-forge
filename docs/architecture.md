@@ -1455,21 +1455,29 @@ replies `{terminal, state}` (the receipt and its server timing), so the CLI open
 When the server advertises `save-then-resolve`, a resolve's save request names the sync that
 follows it (`then`: its operation id, authority epoch, lifecycle version and message); the CLI
 retains `then` in its journal before the save and builds its own resolve request from that value.
-Every kept request (start, save and its `then`, plain, resolution and resolve sync, compose,
-desired landing, landing request, lifecycle) pins the authority epoch its command discovered, not
-the one recorded when the Lane opened. The server checks that epoch only while beginning a new
-operation id (the desired-landing submit answers an existing record first, too), so after a source
-cutover a retained request refused for its older epoch began nothing: the CLI drops it and rebuilds
-it once at the current epoch under the same operation. A finish also composes again under a new
-compose operation, so its landing and its Candidate share an epoch. An operation that already began
-at the older epoch can never finish (each later write and job callback re-checks its pin). Its replay
-stops at the replayed prepare, before any upload or submit, so a wait on it ends, and the CLI names
-the one next command: the same action under a fresh operation (a finish's named compose operation
-is left out, so that finish composes again). A save is also dropped from the checkout, including
-one the next save, finish, sync, lifecycle change or preflight would settle first: that command
-goes on, and its capture keeps the dropped save's edits. A finish whose compose began there composes
-again instead, and a sync or resolve refused this way leaves no handoff for a later land to wait
-on. The same-epoch path is unchanged: identical request bytes and no added call.
+Every kept request (start, save and its `then`, plain, resolution and resolve sync, compose, desired
+landing, landing request, a check-only finish's check request, lifecycle) pins the authority epoch
+its command discovered, not the one recorded when the Lane opened. The server checks that epoch only
+while beginning a new operation id (the desired-landing submit answers an existing record first,
+too), so after a source cutover a retained request refused for its older epoch began nothing: the
+CLI drops it and rebuilds it once at the current epoch under the same operation. A finish also
+composes again under a new compose operation, so its landing and its Candidate share an epoch. An
+operation that already began at the older epoch can never finish (each later write and job callback
+re-checks its pin). Its replay stops at the replayed prepare, before any upload or submit, so a wait
+on it ends, and the CLI names the one next command: the same action under a fresh operation (a
+finish's named compose operation is left out, so that finish composes again). A replay of a
+check-only finish whose check run is still running from the older epoch is refused the same way (the
+cutover drains landings, not check runs; a wait on the run itself does not yet end). A save is also
+dropped from the checkout, including one the next save, finish, sync, lifecycle change or preflight
+would settle first: that command goes on, and its capture keeps the dropped save's edits. A finish
+whose compose began there composes again instead, and a sync or resolve refused this way leaves no
+handoff for a later land to wait on. A save that never began (lost before its prepare ran) is
+dropped by the next save's settle, which finds no server operation; a finish or preflight instead
+resumes it, as for any unknown reply, so at a newer epoch it is rebuilt once under its own id and
+message. A desired landing replayed after the cutover (or on a native-owner project) still
+reschedules a failed wake once: that wake's advance is refused and records the landing
+terminal-failed, which ends it and tells its stacked Lanes. The same-epoch path is unchanged:
+identical request bytes and no added call.
 When the save's step publishes inside `projectSourceRun:submit`, the same action runs the chain
 and adds it to its reply as `chain` (the resolve receipt, or `submitted` while it continues).
 Node delegation preserves that inline-chain option. A verified one-page plan whose baseline,
