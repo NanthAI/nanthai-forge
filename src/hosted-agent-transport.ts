@@ -1411,9 +1411,11 @@ export class HostedAgentTransport {
             const receipt = readPreflightReceipt(root, laneId);
             const saveMs = savedDuration(root, laneId, head);
             if (saveMs !== undefined) gatedLane.saveMs = saveMs;
+            // Land's quick head run is reported in its own advisory, not as a preflight's duration.
             if (
               receipt &&
               !receipt.staticOnly &&
+              !receipt.quick &&
               (receipt.tree && tree ? receipt.tree === tree : receipt.head === head)
             )
               gatedLane.preflightMs = Math.round(receipt.durationMs);

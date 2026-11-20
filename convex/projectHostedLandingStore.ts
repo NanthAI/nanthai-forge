@@ -39,7 +39,8 @@ import {
   wakeNewRunFollower,
 } from './projectHostedFinishWake';
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
-import { recordGuardFailure, recordLandingSpeed } from './projectLandingSpeed';
+import { recordLandingSpeed } from './projectLandingSpeed';
+import { recordGuardFailureOffMainRed } from './projectGuardMainRed';
 import { PASS_HELD, keepsPassStamp } from '../src/landing-speed-alerts';
 import { failureDetail, recordFailure } from './projectFailureLog';
 import { bindRunnerAccounting, bindSupersededCheck } from './projectHostedLandingRunnerCosts';
@@ -538,7 +539,7 @@ export async function failedLanding(ctx: MutationCtx, state: HostedLandingState)
     detail: failureDetail({ testFiles: state.testFiles, error: state.error }),
   });
   // Once per failed check (the failure row dedupes): it teaches the preflight guard set (13ea93bf).
-  if (recorded && state.error.code === 'CHECK_FAILED') await recordGuardFailure(ctx, state);
+  if (recorded && state.error.code === 'CHECK_FAILED') await recordGuardFailureOffMainRed(ctx, state);
 }
 
 /** Mutable evidence is separate from immutable attempt/source/operation pins. A

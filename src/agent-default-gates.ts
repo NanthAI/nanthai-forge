@@ -3,6 +3,7 @@ import { ForgeError } from './errors.js';
 import { shellQuote } from './shell-quote.js';
 import { preflightOutcome } from './agent-preflight-incomplete.js';
 import {
+  planWithBudget,
   preflightPlan,
   readPreflightReceipt,
   runPreflight,
@@ -12,6 +13,23 @@ import type { EffectiveAgentDefaults } from './agent-parallel-defaults.js';
 import type { readHostedOverlapAdvice } from './hosted-overlap-client.js';
 
 type Advice = Awaited<ReturnType<typeof readHostedOverlapAdvice>>;
+/** Land's quick head run (13ea93bf, lead decision 2026-11-20): when the plan is over the gate's
+ * minutes, so land would run no test, it still runs the top of the same run order (fast repo-wide
+ * guards, declared and learned guards, the change's own tests, then the tests that load a changed
+ * module) for this many seconds of test time. A failure refuses the land; the rest is advised. */
+export const LAND_QUICK_SECONDS = 90;
+/** The quick run in one line of the advisory: its budget, how many files ran and how many it left. */
+const quickSummary = (
+  quick: { tests: number; testMs?: number | undefined; outcome?: string | undefined },
+  planned: number,
+) => ({
+  budgetSeconds: LAND_QUICK_SECONDS,
+  ran: quick.tests,
+  // Every planned file it did not run: stopped for time, or not run here (a missing runner).
+  notStarted: Math.max(0, planned - quick.tests),
+  ...(quick.testMs !== undefined ? { seconds: Math.round(quick.testMs / 1000) } : {}),
+  ...(quick.outcome ? { outcome: quick.outcome } : {}),
+});
 const command = (root: string, verb: string, body: Record<string, unknown>) =>
   `nforge agent ${shellQuote(root)} ${verb} ${shellQuote(JSON.stringify(body))}`;
 
@@ -32,6 +50,8 @@ export function finishGates(
     const sameSource =
       receipt?.laneId === lane.laneId &&
       (receipt.tree && lane.tree ? receipt.tree === lane.tree : receipt.head === lane.head);
+    // A full preflight run of this head: neither static-only nor land's quick head run.
+    const fullRun = sameSource && receipt && !receipt.staticOnly && !receipt.quick ? receipt : null;
     const run = command(root, 'preflight', { laneId: lane.laneId });
     const refuseStaticFailure = (result: typeof receipt) => {
       const failed = result?.static?.filter(check => check.outcome === 'failed');
@@ -51,53 +71,43 @@ export function finishGates(
       );
     };
     if (sameSource) refuseStaticFailure(receipt);
-    if (
-      sameSource &&
-      !receipt?.staticOnly &&
-      receipt?.environment &&
-      preflightOutcome(receipt) === 'environment'
-    )
+    if (fullRun?.environment && preflightOutcome(fullRun) === 'environment')
       advisories.preflight = {
         status: 'environment',
-        ...receipt.environment,
-        tests: receipt.tests,
-        ...(receipt.exitCode ? { exitCode: receipt.exitCode } : {}),
-        at: receipt.at,
+        ...fullRun.environment,
+        tests: fullRun.tests,
+        ...(fullRun.exitCode ? { exitCode: fullRun.exitCode } : {}),
+        at: fullRun.at,
       };
     // Must-run files the budget did not start: never shown as a pass, never refused as a failure
     // (the landing check runs them); the receipt's one command finishes them first.
-    else if (
-      sameSource &&
-      !receipt?.staticOnly &&
-      receipt?.incomplete &&
-      preflightOutcome(receipt) === 'incomplete'
-    )
+    else if (fullRun?.incomplete && preflightOutcome(fullRun) === 'incomplete')
       advisories.preflight = {
         status: 'incomplete',
-        tests: receipt.tests,
-        mustRunNotRun: receipt.incomplete.mustRun,
+        tests: fullRun.tests,
+        mustRunNotRun: fullRun.incomplete.mustRun,
         // Absent when the rest outlives one agent wait: an undefined field would fail the
         // retained land payload, so land itself refused (friction ad80e037, 2026-11-19).
-        ...(receipt.incomplete.finish ? { finish: receipt.incomplete.finish } : {}),
-        estimateMinutes: receipt.incomplete.estimateMinutes,
-        reason: receipt.incomplete.mustRun
-          ? `NOT COMPLETE: ${receipt.incomplete.mustRun} must-run test file(s) did not run locally; only the landing check runs them unless you finish them first.`
-          : `NOT COMPLETE: ${receipt.incomplete.needs?.files.length ?? 0} test file(s) skipped: needs ${receipt.incomplete.needs?.runtime ?? 'a runtime'}; only the landing check runs them unless you install it (${receipt.incomplete.needs?.next ?? 'see the receipt'}).`,
-        deferredTests: receipt.deferredTests ?? 0,
-        at: receipt.at,
+        ...(fullRun.incomplete.finish ? { finish: fullRun.incomplete.finish } : {}),
+        estimateMinutes: fullRun.incomplete.estimateMinutes,
+        reason: fullRun.incomplete.mustRun
+          ? `NOT COMPLETE: ${fullRun.incomplete.mustRun} must-run test file(s) did not run locally; only the landing check runs them unless you finish them first.`
+          : `NOT COMPLETE: ${fullRun.incomplete.needs?.files.length ?? 0} test file(s) skipped: needs ${fullRun.incomplete.needs?.runtime ?? 'a runtime'}; only the landing check runs them unless you install it (${fullRun.incomplete.needs?.next ?? 'see the receipt'}).`,
+        deferredTests: fullRun.deferredTests ?? 0,
+        at: fullRun.at,
       };
-    else if (sameSource && receipt && !receipt.staticOnly && preflightOutcome(receipt) === 'passed')
+    else if (fullRun && preflightOutcome(fullRun) === 'passed')
       advisories.preflight = {
         status: 'passed',
-        tests: receipt.tests,
-        at: receipt.at,
-        deferredTests: receipt.deferredTests ?? 0,
-        reusedTests: receipt.reusedTests ?? 0,
-        ...(receipt.rule ? { rule: receipt.rule } : {}),
-        ...(receipt.trimmedTiers ? { trimmedTiers: receipt.trimmedTiers } : {}),
-        ...(receipt.deferredTo ? { deferredTo: receipt.deferredTo } : {}),
-        ...(receipt.testMs !== undefined ? { testSeconds: Math.round(receipt.testMs / 1000) } : {}),
-        ...(receipt.peakRssMb !== undefined ? { peakRssMb: receipt.peakRssMb } : {}),
+        tests: fullRun.tests,
+        at: fullRun.at,
+        deferredTests: fullRun.deferredTests ?? 0,
+        reusedTests: fullRun.reusedTests ?? 0,
+        ...(fullRun.rule ? { rule: fullRun.rule } : {}),
+        ...(fullRun.trimmedTiers ? { trimmedTiers: fullRun.trimmedTiers } : {}),
+        ...(fullRun.deferredTo ? { deferredTo: fullRun.deferredTo } : {}),
+        ...(fullRun.testMs !== undefined ? { testSeconds: Math.round(fullRun.testMs / 1000) } : {}),
+        ...(fullRun.peakRssMb !== undefined ? { peakRssMb: fullRun.peakRssMb } : {}),
       };
     else {
       const plan = preflightPlan(root, advice?.changedPaths);
@@ -143,6 +153,54 @@ export function finishGates(
         receipt = runPreflight(root, lane.laneId, lane.head, staticPlan, lane.tree, true, changed);
         refuseStaticFailure(receipt);
       }
+      // Land would run no test because the plan is over the gate's minutes: after the static checks
+      // pass, it runs the top of the same run order for LAND_QUICK_SECONDS, once per head.
+      // Only under require: a quick failure cached before the project switched to advise refuses nothing.
+      let quick = sameSource && receipt?.quick && defaults.preflight === 'require' ? receipt : null;
+      // Not when this head already has a full run (it failed: its advice stands), nor for a plan with
+      // no local wall-time budget (a package-graph plan, trim:false), which only the ceiling bounds.
+      if (
+        runRequired &&
+        !quick &&
+        !fullRun &&
+        plan.status === 'planned' &&
+        plan.tests.length > 0 &&
+        plan.local &&
+        plan.local.trim !== false &&
+        defaults.preflight === 'require' &&
+        !plan.advisory &&
+        gateMinutes > defaults.preflightMaxMinutes
+      ) {
+        if (typeof runRequired === 'function') runRequired();
+        // This head's static results just ran (or ran before): the quick run reuses them.
+        const staticDone =
+          receipt?.laneId === lane.laneId && receipt.head === lane.head ? receipt.static : undefined;
+        // The plan land just made, in its run order, with only the budget cut: re-planning would cost
+        // as much again (about 12 s on Forge itself) for the same head.
+        receipt = quick = runPreflight(
+          root,
+          lane.laneId,
+          lane.head,
+          planWithBudget(plan, LAND_QUICK_SECONDS),
+          lane.tree,
+          false,
+          changed,
+          { heavySlot: true, quick: true, ...(staticDone ? { staticDone } : {}) },
+        );
+      }
+      if (quick) {
+        refuseStaticFailure(quick);
+        if (preflightOutcome(quick) === 'failed')
+          throw new ForgeError(
+            'PREFLIGHT_REQUIRED',
+            `Inline preflight failed for saved head ${lane.head.slice(0, 12)}: the plan is over ${defaults.preflightMaxMinutes} min, so land ran its top-ranked tests for ${LAND_QUICK_SECONDS} s, and ${quick.failure?.files.length ? quick.failure.files.join(', ') : 'one'} failed.${quick.failure ? ` ${quick.failure.excerpt}` : ''} Fix it, save, then run land --save with the same options and a fresh operationId.`,
+            undefined,
+            {
+              command: run,
+              quick: quickSummary(quick, plan.status === 'planned' ? plan.tests.length : quick.tests),
+            },
+          );
+      }
       if (plan.status === 'unavailable')
         advisories.preflight = { status: 'unavailable', reason: plan.reason };
       else if (plan.tests.length) {
@@ -158,13 +216,13 @@ export function finishGates(
         // A failed run names its cause (exit code, files, the start of its error output) and the two
         // ways forward, never a bare "failed" (9ab983fd).
         const failed =
-          sameSource && receipt && !receipt.staticOnly && !receipt.passed
+          fullRun && !fullRun.passed
             ? ` Its last run failed.${
-                receipt.exitCode || receipt.failure
+                fullRun.exitCode || fullRun.failure
                   ? ` ${[
-                      receipt.exitCode ? `Exit ${receipt.exitCode}` : '',
-                      receipt.failure
-                        ? `on ${receipt.failure.files.join(', ') || 'the selected tests'}: ${receipt.failure.excerpt}`
+                      fullRun.exitCode ? `Exit ${fullRun.exitCode}` : '',
+                      fullRun.failure
+                        ? `on ${fullRun.failure.files.join(', ') || 'the selected tests'}: ${fullRun.failure.excerpt}`
                         : '',
                     ]
                       .filter(Boolean)
@@ -177,8 +235,8 @@ export function finishGates(
         // A command Forge inferred (no declared runner) is advice: it can need setup only the
         // project's CI does, so its result is reported and never required.
         const lastRun =
-          sameSource && receipt && !receipt.staticOnly && !receipt.passed
-            ? { lastRun: { passed: false, exitCode: receipt.exitCode, at: receipt.at } }
+          fullRun && !fullRun.passed
+            ? { lastRun: { passed: false, exitCode: fullRun.exitCode, at: fullRun.at } }
             : {};
         if (requireTests) {
           if (runRequired) {
@@ -212,6 +270,7 @@ export function finishGates(
           status: 'advised',
           ...summary,
           ...lastRun,
+          ...(quick ? { quick: quickSummary(quick, plan.tests.length) } : {}),
           ...(plan.advisory
             ? { reason: plan.advisory }
             : defaults.preflight === 'require'

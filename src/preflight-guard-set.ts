@@ -85,14 +85,15 @@ function preflightCovered(root: string, laneId: string): Set<string> | null {
 export function guardGateFields(
   root: string,
   laneId: string,
-  receipt: { staticOnly?: boolean | undefined } | null,
+  receipt: { staticOnly?: boolean | undefined; ran?: string | undefined } | null,
   current: boolean,
 ): { ran?: string; runs: number } {
   const runs = preflightRuns(root, laneId);
   if (!receipt || !current || !/^[0-9a-f-]{36}$/.test(laneId)) return { runs };
   if (receipt.staticOnly) return { ran: '', runs };
   const covered = preflightCovered(root, laneId);
-  const ran = covered ? ranEvidence(covered) : undefined;
+  // A run with no evidence file (land's own inline or quick run) records its keys on the receipt.
+  const ran = covered ? ranEvidence(covered) : receipt.ran;
   return ran === undefined ? { runs } : { ran, runs };
 }
 

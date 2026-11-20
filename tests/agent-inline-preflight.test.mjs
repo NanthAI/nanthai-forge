@@ -205,7 +205,7 @@ test('protected-path approval is printed before required inline preflight spends
 });
 
 // A project's own formatter, lint command and test inventory, with no Forge-specific command names.
-const staticProject = bad => ({
+const staticProject = (bad, readers = 'throw') => ({
   'README.md': bad ? 'After  \n' : 'After\n',
   'forge.json': JSON.stringify({
     preflight: {
@@ -229,7 +229,9 @@ const staticProject = bad => ({
   ...Object.fromEntries(
     Array.from({ length: 151 }, (_, i) => [
       `tests/reader-${i}.test.mjs`,
-      "import test from 'node:test'; import fs from 'node:fs'; test('document reader must stay advised', () => { fs.readFileSync(new URL('../README.md', import.meta.url)); throw Error('tests should not run'); });\n",
+      readers === 'throw'
+        ? "import test from 'node:test'; import fs from 'node:fs'; test('document reader must stay advised', () => { fs.readFileSync(new URL('../README.md', import.meta.url)); throw Error('tests should not run'); });\n"
+        : "import test from 'node:test'; import fs from 'node:fs'; test('document reader', () => { fs.readFileSync(new URL('../README.md', import.meta.url)); });\n",
     ]),
   ),
 });
@@ -273,11 +275,17 @@ test('incident 229147a2: over-budget land with a format error refuses locally be
 
 test('an over-budget static pass remains advised on land and replay, adding zero Convex calls', async t => {
   const counts = [];
-  for (const withStatic of [false, true]) {
-    const files = staticProject(false);
+  for (const [withStatic, policy] of [
+    [false, 'require'],
+    [true, 'require'],
+    [true, 'advise'],
+  ]) {
+    // Under require the readers pass: an over-budget land runs its top-ranked tests for the quick
+    // budget (13ea93bf). Under advise land runs static checks only, and its readers throw if started.
+    const files = staticProject(false, policy === 'require' ? 'pass' : 'throw');
     if (!withStatic) delete files['forge.json'];
-    const s = await fixture(t, 'require', undefined, files);
-    s.caps.features.push('save-preflight-timing');
+    const s = await fixture(t, policy, undefined, files);
+    s.caps.features.push('save-preflight-timing', 'preflight-guard-set');
     const before = s.calls.length;
     const result = await submitHostedLand(
       s.root,
@@ -286,21 +294,31 @@ test('an over-budget static pass remains advised on land and replay, adding zero
       s.transport(),
     );
     assert.equal(result.result.submission.phase, 'landed');
-    counts.push(s.calls.slice(before).map(c => c.name));
+    if (policy === 'require') counts.push(s.calls.slice(before).map(c => c.name));
     const gate = JSON.parse(s.calls.find(c => c.name === 'projectHostedLanding:enqueue').args.gates).lanes[0];
     assert.equal(gate.preflight, 'advised');
-    if (withStatic) {
-      const receipt = readPreflightReceipt(s.root, s.lane.laneId);
+    const receipt = readPreflightReceipt(s.root, s.lane.laneId);
+    assert.equal(
+      gate.preflightMs,
+      undefined,
+      'neither a static-only pass nor the quick run enters the preflight speed metric',
+    );
+    if (policy === 'advise') {
       assert.equal(receipt.staticOnly, true);
-      assert.equal(
-        gate.preflightMs,
-        undefined,
-        'static-only duration never enters the test preflight speed metric',
-      );
-      assert.deepEqual(result.result.defaults.preflight.static, receipt.static);
-      assert.equal(result.result.defaults.preflight.status, 'advised');
       assert.equal(receipt.tests, 0);
       assert.equal(receipt.evidence, undefined, 'a static pass creates no test-coverage evidence');
+      assert.equal(gate.ran, '', 'a static-only pass ran no test file');
+      continue;
+    }
+    assert.equal(receipt.quick, true, 'the over-budget land ran its quick head run');
+    assert.equal(result.result.defaults.preflight.quick.budgetSeconds, 90);
+    assert.equal(result.result.defaults.preflight.quick.ran, receipt.tests);
+    assert.ok(receipt.tests > 0);
+    // What the quick run ran reaches the guard-set learner, 4 characters per file.
+    assert.equal(gate.ran.length, 4 * receipt.tests);
+    if (withStatic) {
+      assert.deepEqual(result.result.defaults.preflight.static, receipt.static);
+      assert.equal(result.result.defaults.preflight.status, 'advised');
       const replay = finishGates(
         s.root,
         s.caps.agentDefaults,
@@ -308,7 +326,7 @@ test('an over-budget static pass remains advised on land and replay, adding zero
         { changedPaths: { paths: ['README.md'], complete: true } },
         true,
       );
-      assert.equal(replay.preflight.status, 'advised', 'a cached static pass never satisfies tests');
+      assert.equal(replay.preflight.status, 'advised', 'a cached quick run never satisfies tests');
       assert.equal(replay.preflight.reason, 'over 10 min');
       assert.deepEqual(
         replay.preflight.static.map(c => c.outcome),

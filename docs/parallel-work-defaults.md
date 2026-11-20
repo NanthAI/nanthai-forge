@@ -322,7 +322,7 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
 | Setting | Default | Why | Change |
 | --- | --- | --- | --- |
 | `preflight` | `require` | About 30% of first landing checks failed (2026-10-30), and every failure costs a full landing round on the project runner. A local run of the affected tests catches most of them first. | `advise` leaves tests advisory; static failures still refuse. `off` removes preflight. |
-| `preflightMaxMinutes` | `10` | A large affected set would make preflight slower than the landing check it saves. Above this estimate, tests are advice only; static checks still run. | Any whole number of minutes; `0` makes every set advisory. |
+| `preflightMaxMinutes` | `10` | A large affected set would make preflight slower than the landing check it saves. Above this estimate, tests are advice only; static checks still run, and `land --save` still runs the top of the run order for a fixed 90 s (below). | Any whole number of minutes; `0` makes every set advisory. |
 | `urgentRoles` | `["owner"]` | Builders marked routine landings urgent, which pushed every other landing back. Urgent is for a red main or an incident the owner names. | `["owner","agents"]` lets agents on the owner's login use it again. An urgent request it turns down queues at normal and says so: `land` prints "Urgent not applied; landing at normal priority" with the reason and how the owner grants it, and the land and wait replies and `queue` entries carry it as `urgentNotApplied`. |
 | `autoClaim` | `true` | An agent's unsaved edits were invisible to others ("unsaved edits unavailable"), and a clash on one file cost about an hour (2026-11-05). The first-write hook records "touching PATH" on the agent board so other agents' first writes to that file show it. | `false` stops new automatic claims and hides live ones. |
 | `checkpointNudgeMinutes` | `30` | A builder that stops unexpectedly loses everything unsaved. Saves take under a minute. | Any number of minutes; `0` turns the nudge off. |
@@ -388,6 +388,14 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   them so that a source-only change skips the Convex runtime guard unless a changed path can touch its
   graph and the graph's files still match the last full pass, scans only the changed files for the
   per-file foundation rules and the format and lint tools, and runs the cross-file rules in full.
+- **Quick head run on large sets.** Under `require`, when the estimate is over `preflightMaxMinutes`
+  so the gate would run no test, `land --save` runs the top of the same run order (fast repo-wide
+  guards, declared and learned guards, the change's own tests, then the tests that load a changed
+  module) for 90 s of test time after the static checks pass, once per saved head (a replay reuses
+  it; a head whose full preflight already ran keeps that result instead). The budget is a hard cap: unlike a full run, declared guards that do not fit are left too, and the run is kept out of the preflight-time median. The reply's `defaults.preflight.quick` states the budget, the files it ran and the files it
+  left. A failure refuses the land with the file and its error; otherwise the gate stays `advised`,
+  and the run never counts as a pass. On 11-18 to 11-20, 60 of 264 lands ran no test this way and
+  10 then failed the landing check on a named file.
 - **Test runner, per project.** Preflight, the `tests` read, Intent contract tests and semantic
   union tests use the project's own runner. Declare it as `preflight.tests`:
   `{glob: string | [glob, ...], command: [program, ...args]}`, where an argument `{files}` becomes

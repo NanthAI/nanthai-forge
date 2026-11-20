@@ -9,7 +9,14 @@ import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { digest } from '../dist/state/hash.js';
-import { addGuardFailure, guardCandidates, ranEvidence, ranKey } from '../dist/preflight-guard-learning.js';
+import {
+  addGuardFailure,
+  forgetMainRedFiles,
+  guardCandidates,
+  withoutMainRed,
+  ranEvidence,
+  ranKey,
+} from '../dist/preflight-guard-learning.js';
 import { guardGateFields, learnGuardSet, recordPreflightRun } from '../dist/preflight-guard-set.js';
 import {
   cachedGuardRevision,
@@ -80,6 +87,50 @@ test('a failed check records only failing test files its preflight did not run, 
   assert.ok(big.length <= 4 * 1024 && kept.length < 50 && kept.every(f => f[5].length === 8));
   const aged = addGuardFailure(doc, check(GUARD), { ran: '' }, now + 8 * 24 * 3600 * 1000);
   assert.equal(JSON.parse(aged).failures.length, 1, 'a week-old failure leaves');
+});
+
+test("main-red: a file main's red audit fails is never learned as the Lane's failure (13ea93bf)", () => {
+  const RED = 'tests/lane-review-browser.test.mjs';
+  const files = doc => JSON.parse(doc).failures.map(failure => failure[5].map(([file]) => file));
+  const learnAt = (doc, state, red, at = now) => {
+    const lane = withoutMainRed(state, red);
+    return lane ? addGuardFailure(doc, lane, { ran: '' }, at) : (doc ?? null);
+  };
+  // At the verdict main is red on RED: the Lane's own skipped GUARD is learned, RED is not.
+  const named = learnAt(undefined, check(RED, GUARD), { tests: [RED] });
+  assert.deepEqual(files(named), [[GUARD]]);
+  // Main explains every failing file: the check failed on main's breakage, so nothing is recorded.
+  assert.equal(learnAt(named, check(RED), { tests: [RED] }, now + 1), named);
+  // Main red with failing files it does not name (moreTests): any file could be main's, so nothing.
+  assert.equal(learnAt(named, check(GUARD), { tests: [RED], moreTests: 3 }, now + 1), named);
+  // Main red on no test file (a static job): this check's failure may be that job too, so nothing.
+  assert.equal(learnAt(undefined, check(GUARD), { tests: [] }), null);
+  // Green main (no red): unchanged behaviour.
+  assert.deepEqual(files(learnAt(undefined, check(RED), null)), [[RED]]);
+
+  // Learned before the audit saw main red: the failed audit strips RED from failures since the first
+  // landing it covers; earlier ones (before the breakage could have landed) keep it.
+  const before = failures(
+    [check(RED), { ran: '' }],
+    [check(RED, GUARD), { ran: '' }],
+    [check(RED), { ran: '' }],
+  );
+  const since = now - 2000;
+  const after = forgetMainRedFiles(before, { tests: [RED] }, since);
+  assert.deepEqual(files(after), [[RED], [GUARD], []]);
+  assert.equal(JSON.parse(after).failures.length, 3, 'the failures still count as outcomes');
+  assert.equal(
+    guardCandidates(
+      after,
+      [1, 2, 3, 4, 5].map(i => now - 10_000 - i),
+      now + 1,
+    ).files.length,
+    0,
+  );
+  assert.equal(forgetMainRedFiles(after, { tests: [RED] }, since), null, 'nothing left to strip: no write');
+  assert.equal(forgetMainRedFiles('{not json', { tests: [RED] }, since), null);
+  // Main fails more than it names: every file learned since the first unaudited landing may be main's.
+  assert.deepEqual(files(forgetMainRedFiles(before, { tests: [RED], moreTests: 4 }, since)), [[RED], [], []]);
 });
 
 test('the ran evidence is compact and only ever hides a failure', () => {

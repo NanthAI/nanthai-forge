@@ -139,6 +139,80 @@ test('a failed check learns the test files its preflight skipped; landings and c
   );
 });
 
+test("main-red: a check that fails on a file main's red audit fails teaches nothing (13ea93bf)", async t => {
+  const f = await batchesFixture(t, { batchMaxSize: null, count: 0 });
+  const speedRow = () => [...f.tables.projectLandingSpeed.values()][0];
+  for (const i of [0, 1, 2, 3, 4]) {
+    await f.add(i, { enqueue: gated(ranEvidence([])) });
+    await settle(f);
+  }
+  const red = { since: new Date().toISOString(), head: 'b'.repeat(64), runId: 'red-run', tests: [GUARD] };
+  const audit = [...(f.tables.projectHostedMainAudits?.values() ?? [])][0];
+  if (audit) f.patch('projectHostedMainAudits', audit._id, { red });
+  else f.insert('projectHostedMainAudits', { projectId: f.projectId, red });
+  for (const i of [5, 6]) {
+    await f.add(i, { enqueue: gated(ranEvidence([])) });
+    await settle(f, GUARD);
+  }
+  assert.deepEqual(
+    states(f)
+      .slice(5)
+      .map(s => s.error?.code),
+    ['CHECK_FAILED', 'CHECK_FAILED'],
+  );
+  assert.equal(speedRow().guards, undefined, "main's failing file is never the Lane's: nothing recorded");
+  assert.deepEqual(
+    (await f.tx('reply', { _handler: ctx => guardSetReply(ctx, f.projectId, '') }, {})).files,
+    [],
+  );
+});
+
+test('main-red: a failed main audit strips its failing files from failures learned since its first unaudited landing', async () => {
+  const { auditFixture } = await import('./hosted-main-audit-fixture.mjs');
+  const { addGuardFailure } = await import('../dist/preflight-guard-learning.js');
+  const f = await auditFixture();
+  await f.land('full');
+  const at = new Date(Date.now() - 3600_000).toISOString();
+  await f.land('contract', { at });
+  // Two Lanes failed on GUARD while main was already broken but not yet audited, and one, earlier,
+  // before the breakage could have landed (older than the first unaudited landing).
+  const failed = (id, file) => ({ id, testFiles: { failed: [{ file, report: { durationMs: 2000 } }] } });
+  let guards;
+  for (const [id, ms] of [
+    ['before', Date.parse(at) - 60_000],
+    ['after-1', Date.parse(at) + 60_000],
+    ['after-2', Date.parse(at) + 120_000],
+  ])
+    guards = addGuardFailure(guards, failed(id, GUARD), { ran: '' }, ms);
+  const samples = [0, 1, 2, 3, 4].map(i => [Date.parse(at) - 600_000 - i, 1, 1, `landed-${i}`]);
+  const speed = f.insert('projectLandingSpeed', {
+    projectId: f.projectId,
+    value: JSON.stringify({ schema: 2, samples, broken: {} }),
+    guards,
+  });
+  await f.start();
+  await f.terminal('failed', {
+    ...f.currentRun(),
+    testFiles: {
+      counts: { total: 1, failed: 1, flaky: 0 },
+      failed: [{ file: GUARD, report: { failed: true } }],
+      flaky: [],
+    },
+  });
+  assert.deepEqual(f.row().red.tests, [GUARD]);
+  assert.deepEqual(
+    JSON.parse(f.tables.projectLandingSpeed.get(speed).guards).failures.map(failure => [
+      failure[0],
+      failure[5].map(([file]) => file),
+    ]),
+    [
+      ['before', [GUARD]],
+      ['after-1', []],
+      ['after-2', []],
+    ],
+  );
+});
+
 test('a Lane start delivers the project candidates only to a CLI that asks, and only when they changed', async () => {
   const { lanesFixture } = await import('./hosted-lanes-fixture.mjs');
   const channels = await import(moduleUrl('../convex/projectHostedChannels.ts'));

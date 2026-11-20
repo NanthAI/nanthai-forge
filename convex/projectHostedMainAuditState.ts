@@ -25,6 +25,7 @@ import { holdsLandingOrder } from './projectHostedLandingOrder';
 import { armLandingAlarm } from './projectHostedLandingStallWake';
 import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 import { recordAuditRunnerSeconds } from './projectLandingSpeed';
+import { forgetMainRedGuards } from './projectGuardMainRed';
 import { lineMainState } from './projectLiveLineStore';
 import {
   drillClaims,
@@ -721,6 +722,9 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
         ? meta.firstAt
         : row.unaudited!.firstAt;
     await ctx.db.patch(row._id, { unaudited: { count: row.unaudited!.count, firstAt } });
+    // Main's own failures never teach the preflight guard set (13ea93bf), even ones learned before this
+    // audit saw them: from the first landing it covers, the earliest the breakage could have landed.
+    await forgetMainRedGuards(ctx, projectId, redTests(run), firstAt);
     // An armed owner drill claims the first red in its window; a later red finds it expired (fe7d67a8).
     const claims = !row.red && drillClaims(row.drill, at);
     await ctx.db.patch(row._id, {

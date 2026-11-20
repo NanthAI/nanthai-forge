@@ -33,6 +33,7 @@ import { learnFailures, learnedTests, recentFailedTests, recordedFailures } from
 import { protectedRunOrder } from './preflight-run-order.js';
 import { cachedGuardCandidates } from './preflight-guard-cache.js';
 import { type GuardSetReport, planGuardSet, recordPreflightRun } from './preflight-guard-set.js';
+import { ranEvidence } from './preflight-guard-learning.js';
 export { guardGateFields } from './preflight-guard-set.js';
 import { commentOnlyPaths } from './preflight-comment-only.js';
 import { spawnCaptured, failureExcerpt } from './agent-preflight-capture.js';
@@ -159,6 +160,17 @@ export const preflightReceiptSchema = z
     tests: z.number().int().nonnegative(),
     /** Only static commands ran; this receipt never satisfies the test gate. */
     staticOnly: z.literal(true).optional(),
+    /** Land's quick head run of a plan over the gate's minutes (src/agent-default-gates.ts): a short
+     * budget of the top-ranked tests. Its failure refuses the land; otherwise it never satisfies the
+     * test gate, as staticOnly. */
+    quick: z.literal(true).optional(),
+    /** The test files this run passed or reused, as the land gate's 4-character keys (13ea93bf), when
+     * no evidence file records them (a land gate's own run plans without the checkout's file list). */
+    ran: z
+      .string()
+      .max(1024)
+      .regex(/^(?:[A-Za-z0-9_-]{4})*$/)
+      .optional(),
     selection: z.string(),
     exitCode: z.number().int().nullable(),
     passed: z.boolean(),
@@ -341,6 +353,20 @@ const preparedEvidence = new WeakMap<PreflightPlan, PreflightEvidence>();
 const plannedPaths = new WeakMap<PreflightPlan, string[]>();
 const receiptPath = (root: string, laneId: string) =>
   join(clientCacheRoot(root), 'agent', 'preflight', `${laneId}.json`);
+/** The same plan, run order and evidence with a different wall-time budget (land's quick head run):
+ * no re-plan, and the run still records what it ran for the guard-set learner. */
+export function planWithBudget(
+  plan: PreflightPlan & { status: 'planned' },
+  budgetSeconds: number,
+): PreflightPlan & { status: 'planned' } {
+  if (!plan.local) return plan;
+  const copy = { ...plan, local: { ...plan.local, budgetSeconds } };
+  const evidence = preparedEvidence.get(plan);
+  if (evidence) preparedEvidence.set(copy, evidence);
+  const paths = plannedPaths.get(plan);
+  if (paths) plannedPaths.set(copy, paths);
+  return copy;
+}
 
 export function readPreflightReceipt(root: string, laneId: string): PreflightReceipt | null {
   try {
@@ -1531,7 +1557,12 @@ export function runPreflight(
   changed?: string[] | null,
   /** Hold one `nforge heavy` slot for the build and tests (c180152a). The preflight action and the
    * land gate's inline run set it; a fixture run inside a test (already in its runner's slot) does not. */
-  options: { heavySlot?: boolean } = {},
+  options: {
+    heavySlot?: boolean;
+    quick?: boolean;
+    /** This head's static results from the run just before: kept, not run again (land's quick run). */
+    staticDone?: NonNullable<PreflightReceipt['static']>;
+  } = {},
 ) {
   const started = Date.now();
   // Before anything runs: a long run must never be silent about what it is doing and why.
@@ -1577,7 +1608,11 @@ export function runPreflight(
   const needsBrowser: string[] = [];
   let heavy: HeldHeavySlot | null = null;
   try {
-    if (plan.static?.selected.length) {
+    if (options.staticDone) {
+      // The receipt kept every field the earlier run returned.
+      staticResults = options.staticDone as StaticCheckResult[];
+      if (staticResults.some(result => result.outcome === 'failed')) exitCode = 1;
+    } else if (plan.static?.selected.length) {
       const checks = plan.static.selected.map(check => ({ ...check, inputs: null }));
       const scope = changed === undefined ? undefined : staticScope(root, changed);
       staticResults = runStaticChecks(
@@ -1660,8 +1695,11 @@ export function runPreflight(
           );
         }
         const queue = plan.tests.filter(test => !absentBrowser.has(test));
-        // Declared guards are never stopped for time (docs/workflows.md#local-preflight-guards).
-        const guardTests = new Set(plan.local?.guards?.flatMap(guard => guard.tests) ?? []);
+        // Declared guards are never stopped for time (docs/workflows.md#local-preflight-guards), except
+        // in land's quick head run, whose budget is a hard cap.
+        const guardTests = new Set(
+          options.quick ? [] : (plan.local?.guards?.flatMap(guard => guard.tests) ?? []),
+        );
         let ran = 0;
         let index = 0;
         const runGroup = (group: string[]) => {
@@ -1727,11 +1765,29 @@ export function runPreflight(
                 '--test-reporter-destination=stdout',
                 ...testArgs(root, group),
               ];
-          const run = spawnCaptured(argv[0]!, argv.slice(1), {
-            cwd: root,
-            env: { ...env, FORGE_PREFLIGHT_REPORT: report },
-            stdio: ['ignore', 2, 2],
-          });
+          // Land's quick head run is a hard cap: a group still running at the budget (plus a short
+          // grace) is stopped, its files left to the landing check (incomplete, never failed).
+          const left = options.quick
+            ? testStarted + budgetMs + Math.min(10_000, budgetMs) - Date.now()
+            : null;
+          const run = spawnCaptured(
+            argv[0]!,
+            argv.slice(1),
+            {
+              cwd: root,
+              env: { ...env, FORGE_PREFLIGHT_REPORT: report },
+              stdio: ['ignore', 2, 2],
+              ...(left !== null ? { timeout: Math.max(1_000, left) } : {}),
+            },
+            left === null,
+          );
+          if (left !== null && run.errorCode === 'ETIMEDOUT') {
+            notRun.push(...group);
+            process.stderr.write(
+              `preflight: the quick run reached its ${budgetMs / 1000} s cap; ${group.length} file(s) left\n`,
+            );
+            return Date.now() - groupStarted;
+          }
           if (plan.runner && missingProgramExit(run.status, run.errorCode)) {
             // The runner's program is not installed here: these files are the landing check's.
             missingPrograms.push(argv[0]!);
@@ -1887,6 +1943,7 @@ export function runPreflight(
     ...(tree ? { tree } : {}),
     tests: staticOnly ? 0 : plan.tests.length - skipped,
     ...(staticOnly ? { staticOnly: true as const } : {}),
+    ...(options.quick && !staticOnly ? { quick: true as const } : {}),
     ...(!staticOnly && evidence && tree === sourceTree(evidence.files)
       ? {
           evidence: writePreflightEvidence(root, {
@@ -1894,6 +1951,12 @@ export function runPreflight(
             covered: [...passedTests, ...(plan.reusedTests ?? [])].sort(),
           }),
         }
+      : {}),
+    ...(!staticOnly && !(evidence && tree === sourceTree(evidence.files)) && plan.tests.length
+      ? (() => {
+          const ran = ranEvidence([...passedTests, ...(plan.reusedTests ?? [])]);
+          return ran === undefined ? {} : { ran };
+        })()
       : {}),
     ...(!staticOnly && plan.reusedTests?.length
       ? { reusedTests: plan.reusedTests.length, reusedFrom: plan.reusedFrom }

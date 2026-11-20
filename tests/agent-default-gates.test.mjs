@@ -6,13 +6,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sourceTree } from '../dist/source-tree.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
-import { checkpointNudge, finishGates, unsavedMinutes } from '../dist/agent-default-gates.js';
+import {
+  checkpointNudge,
+  finishGates,
+  LAND_QUICK_SECONDS,
+  unsavedMinutes,
+} from '../dist/agent-default-gates.js';
 import { liveLanding, ownsLiveLanding } from '../dist/landing-freeze.js';
 import { digest } from '../dist/hash.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { recordTurnWork, settleTurnWork } from '../dist/agent-turn-work.js';
 import {
+  planWithBudget,
   preflightPlan,
   readPreflightReceipt,
   runPreflight,
@@ -564,7 +570,11 @@ test('a static-only pass never satisfies required tests after a policy change; p
   const staticPass = finishGates(root, defaults({ preflightMaxMinutes: 0 }), lane, advice(), true);
   assert.equal(staticPass.preflight.status, 'advised');
   assert.equal(staticPass.preflight.static[0].outcome, 'passed');
-  assert.equal(readPreflightReceipt(root, lane.laneId).staticOnly, true);
+  // The over-budget land then ran its quick head run (13ea93bf), which keeps the static results and,
+  // like a static-only pass, never satisfies the test gate.
+  const receipt = readPreflightReceipt(root, lane.laneId);
+  assert.equal(receipt.quick, true);
+  assert.equal(receipt.static[0].outcome, 'passed');
   assert.throws(() => finishGates(root, defaults({}), lane, advice()), code('PREFLIGHT_REQUIRED'));
   assert.deepEqual(finishGates(root, defaults({ preflight: 'off' }), lane, advice(), true), {});
 });
@@ -620,4 +630,108 @@ test('a static refusal without a declared fix asks for source repair and a fresh
       return true;
     },
   );
+});
+
+// Lead decision 2026-11-20 (Item 13ea93bf, receipt d1b8e3f5 analysis): 60 of 264 lands had a plan
+// over the 10-minute gate, so land ran no test, and 10 of them then failed the landing check on a
+// named file. Land now runs the top of the same run order for a small fixed budget instead.
+test('an over-budget land runs its top-ranked tests within the stated quick budget, once per head, never as a pass', t => {
+  const root = repo(t);
+  // Without the inline run (a plain finish read), nothing runs: the advice is unchanged.
+  const advisedOnly = finishGates(root, defaults({ preflightMaxMinutes: 0 }), lane, advice());
+  assert.equal(advisedOnly.preflight.quick, undefined);
+  assert.equal(readPreflightReceipt(root, lane.laneId), null);
+
+  const result = finishGates(root, defaults({ preflightMaxMinutes: 0 }), lane, advice(), true);
+  assert.equal(result.preflight.status, 'advised', 'a short run of an over-budget plan is never a pass');
+  assert.equal(result.preflight.reason, 'over 0 min');
+  assert.deepEqual(
+    { ...result.preflight.quick, seconds: undefined },
+    { budgetSeconds: LAND_QUICK_SECONDS, ran: 1, notStarted: 0, outcome: 'passed', seconds: undefined },
+  );
+  const receipt = readPreflightReceipt(root, lane.laneId);
+  assert.equal(receipt.quick, true);
+  assert.equal(receipt.budgetSeconds, LAND_QUICK_SECONDS);
+  assert.equal(receipt.tests, 1);
+
+  // A replay of the same land reuses this head's quick run: no second run, still advised.
+  const replay = finishGates(root, defaults({ preflightMaxMinutes: 0 }), lane, advice(), true);
+  assert.equal(replay.preflight.status, 'advised');
+  assert.equal(replay.preflight.quick.ran, 1);
+  assert.equal(readPreflightReceipt(root, lane.laneId).at, receipt.at);
+  // A policy change back under the gate: the quick run never satisfies the required tests.
+  assert.throws(() => finishGates(root, defaults({}), lane, advice()), code('PREFLIGHT_REQUIRED'));
+  // advise and off run nothing on land.
+  const other = repo(t);
+  finishGates(other, defaults({ preflight: 'advise', preflightMaxMinutes: 0 }), lane, advice(), true);
+  assert.equal(readPreflightReceipt(other, lane.laneId), null);
+});
+
+test('a failing top-ranked test refuses the over-budget land with the file, on the run and on its replay', t => {
+  const root = repo(t, {
+    'tests/b.test.mjs':
+      "import test from 'node:test';\ntest('b', () => { throw new Error('the change broke b'); });\n",
+  });
+  const refused = error => {
+    assert.equal(error.code, 'PREFLIGHT_REQUIRED');
+    assert.match(error.message, /top-ranked tests for 90 s, and tests\/b\.test\.mjs failed/);
+    assert.match(error.message, /save, then run land --save with the same options and a fresh operationId/);
+    assert.equal(error.recovery.quick.budgetSeconds, LAND_QUICK_SECONDS);
+    return true;
+  };
+  assert.throws(() => finishGates(root, defaults({ preflightMaxMinutes: 0 }), lane, advice(), true), refused);
+  const at = readPreflightReceipt(root, lane.laneId).at;
+  assert.throws(() => finishGates(root, defaults({ preflightMaxMinutes: 0 }), lane, advice(), true), refused);
+  assert.equal(readPreflightReceipt(root, lane.laneId).at, at, 'the replay judges the same run');
+
+  // The project switched to advise: the cached quick failure refuses nothing.
+  const advised = finishGates(
+    root,
+    defaults({ preflight: 'advise', preflightMaxMinutes: 0 }),
+    lane,
+    advice(),
+    true,
+  );
+  assert.equal(advised.preflight.status, 'advised');
+  assert.equal(advised.preflight.quick, undefined);
+});
+
+test('the quick run is a hard cap: a test still running at its budget is stopped and left, never failed', t => {
+  const root = repo(t, {
+    'tests/b.test.mjs':
+      "import test from 'node:test';\ntest('b', () => new Promise(() => setInterval(() => {}, 1000)));\n", // test-signal: allow a fixture test that never ends, so the cap must stop it
+  });
+  const plan = preflightPlan(root, advice().changedPaths);
+  const receipt = runPreflight(
+    root,
+    lane.laneId,
+    lane.head,
+    planWithBudget(plan, 1),
+    undefined,
+    false,
+    undefined,
+    {
+      quick: true,
+    },
+  );
+  assert.equal(receipt.quick, true);
+  assert.notEqual(receipt.outcome, 'failed');
+  assert.equal(receipt.tests, 0);
+  assert.ok(receipt.stoppedForTime >= 1 && receipt.stopped.includes('tests/b.test.mjs'));
+});
+
+test('a head whose full preflight failed keeps that advice on an over-budget land: no quick run hides it', t => {
+  const root = repo(t, {
+    'tests/b.test.mjs':
+      "import test from 'node:test';\ntest('b', () => { throw new Error('the change broke b'); });\n",
+  });
+  const plan = preflightPlan(root, advice().changedPaths);
+  runPreflight(root, lane.laneId, lane.head, plan);
+  const before = readPreflightReceipt(root, lane.laneId);
+  assert.equal(before.outcome, 'failed');
+  const result = finishGates(root, defaults({ preflightMaxMinutes: 0 }), lane, advice(), true);
+  assert.equal(result.preflight.status, 'advised');
+  assert.equal(result.preflight.lastRun.passed, false);
+  assert.equal(result.preflight.quick, undefined);
+  assert.equal(readPreflightReceipt(root, lane.laneId).at, before.at, 'the failed run is kept');
 });

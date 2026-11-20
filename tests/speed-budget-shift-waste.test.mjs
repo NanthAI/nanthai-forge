@@ -347,6 +347,7 @@ test('0 outcomes changed holds only while no landing path reads a speed line: ev
     .sort();
   assert.deepEqual(readers, [
     'projectFailureCause.ts', // expected check time shown on the check screen
+    'projectGuardMainRed.ts', // main-red strip of the learned guard set (13ea93bf): the guards field only, never a speed line
     // Keep the run (fa2c1383): measured check costs from the row's samples, never a speed line.
     'projectHostedLandingKeep.ts',
     'projectLandingSpeed.ts', // the alert path itself

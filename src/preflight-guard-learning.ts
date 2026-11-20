@@ -106,6 +106,42 @@ export function addGuardFailure(
   return JSON.stringify({ v: 1, failures: kept });
 }
 
+/** Main's red audit at the verdict: the files main itself fails (at most 20) and whether it names
+ * them all. Those are main's failures, never the Lane's (13ea93bf main-red line). */
+export type MainRed = { tests?: string[] | undefined; moreTests?: number | undefined } | null | undefined;
+/** What a failed check may teach while main is red: its failing test files without the ones main
+ * fails too. Null (record nothing) when main explains every failing file, or while main fails
+ * something it does not name (more files than it lists, or no test file: a static job), since any
+ * of it could be main's. Unchanged on a green main or a check that failed on no test file. */
+export function withoutMainRed<S extends FailedCheck>(state: S, red: MainRed): S | null {
+  if (!red) return state;
+  if (red.moreTests || !red.tests?.length) return null;
+  if (!state.testFiles?.failed.length) return state;
+  const tests = new Set(red.tests);
+  const failed = state.testFiles.failed.filter(item => !tests.has(item.file));
+  return failed.length ? { ...state, testFiles: { ...state.testFiles, failed } } : null;
+}
+
+/** Main's audit turned red on `red.tests`: failures recorded since `since` (ms; the first landing the
+ * audit had not covered, so the earliest the breakage could have landed) stop naming them, since
+ * they were main's and not their Lanes'; all their files, when main fails more than it names or no
+ * test file (as at the verdict, withoutMainRed). The failures themselves stay (they still count as
+ * failed outcomes). Null when nothing changes. */
+export function forgetMainRedFiles(text: string | undefined, red: MainRed, since: number): string | null {
+  const all = !red?.tests?.length || Boolean(red.moreTests);
+  const named = new Set(red?.tests ?? []);
+  const failures = readDoc(text);
+  let changed = false;
+  for (const failure of failures) {
+    if (failure[1] < since) continue;
+    const kept = all ? [] : failure[5].filter(([file]) => !named.has(file));
+    if (kept.length === failure[5].length) continue;
+    failure[5] = kept;
+    changed = true;
+  }
+  return changed ? JSON.stringify({ v: 1, failures }) : null;
+}
+
 const median = (values: number[]) => {
   const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
   return sorted.length ? sorted[sorted.length >> 1]! : null;
