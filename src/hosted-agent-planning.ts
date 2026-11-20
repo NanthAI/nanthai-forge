@@ -12,6 +12,7 @@ import { isPlanningPrefix, planningIdMaxCandidates } from './planning-id.js';
 import { planningIssueArguments } from './planning-issue-arguments.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 import {
+  isShelved,
   planningCommentCommandSchema,
   planningPutAgentFields,
   planningPutSchema,
@@ -721,17 +722,19 @@ async function readPlanning(
     cursor = result.continueCursor;
     matches = [
       ...(input.schedule ? matches : []),
-      ...result.page
-        .map(parseRow)
-        .filter(
-          item =>
-            (!input.kind || item.kind === input.kind) &&
-            (!input.status ||
-              input.status === 'all' ||
-              (input.status === 'active' ? open.includes(item.status) : item.status === input.status)) &&
-            (!input.initiativeId || item.initiativeId === input.initiativeId) &&
-            keep(item),
-        ),
+      ...result.page.map(parseRow).filter(
+        item =>
+          (!input.kind || item.kind === input.kind) &&
+          // No status: everything but Archived and Deleted, which are listed only when asked (Item 4c9e961e).
+          (input.status === 'all' ||
+            (input.status === undefined
+              ? !isShelved(item.status)
+              : input.status === 'active'
+                ? open.includes(item.status)
+                : item.status === input.status)) &&
+          (!input.initiativeId || item.initiativeId === input.initiativeId) &&
+          keep(item),
+      ),
     ];
   }
   const issues = matches.filter(item => item.kind === 'issue' && open.includes(item.status));
@@ -959,6 +962,14 @@ export async function markPlanningStarted(
       return {
         updated: false,
         error: { code: 'NOT_FOUND', message: 'Planning item not found.' },
+      };
+    // A start never brings an Archived or Deleted Item back (Item 4c9e961e): it writes no status and claims nothing.
+    // The start itself already holds its Lane; bringing the Item back is the owner's explicit Unarchive or Restore.
+    if (isShelved(item.status))
+      return {
+        updated: false,
+        status: item.status,
+        note: `Still ${item.status}: a start does not bring it back. To show it again, put status "${item.was ?? 'open'}" on it (Unarchive or Restore).`,
       };
     const claim =
       !item.owner &&

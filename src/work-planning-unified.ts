@@ -3,7 +3,12 @@ import { planningIntentStatus } from './work-planning-lifecycle.js';
 import { invariant, itemChanged } from './errors.js';
 import { discussionFields, resolvePlanningPut } from './work-planning-put.js';
 import { resolveIntentId, type IntentAlias } from './work-intent-local.js';
-import { planningModelPutKeys, type PlanningItem, type PlanningWrite } from './work-planning-types.js';
+import {
+  isShelved,
+  planningModelPutKeys,
+  type PlanningItem,
+  type PlanningWrite,
+} from './work-planning-types.js';
 import type { WorkData } from './work-types.js';
 import type { UnifiedIntent, UnifiedWorkData } from './work-unified-types.js';
 
@@ -140,6 +145,7 @@ export function applyUnifiedPlanning(
       // A cleared model field must not survive on the record.
       for (const key of planningModelPutKeys)
         if (key !== 'parentId') delete (target.initiative as Partial<PlanningItem>)[key];
+      delete (target.initiative as Partial<PlanningItem>).was;
       Object.assign(target.initiative, item, { kind: 'initiative' });
     } else data.initiatives.push({ ...item, kind: 'initiative' });
     placeMemberships(data, item.id, item.id, linked);
@@ -174,7 +180,8 @@ export function applyUnifiedPlanning(
     updatedAt: at,
   });
   // Once a Lane captured an execution pin, execution lifecycle owns status; the planning word stays history.
-  if (!intent.base) {
+  // Archive and Delete hide the Item, never end its work: the Intent keeps its status (Item 4c9e961e).
+  if (!intent.base && !isShelved(item.status)) {
     const status = planningIntentStatus(item.status);
     if (intent.status !== status) {
       (intent.lifecycle ??= []).push({

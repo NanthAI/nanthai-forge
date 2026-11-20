@@ -110,6 +110,8 @@ export function PlanningIntentPage({
   const [draft, setDraft] = useState<PlanningItem>();
   const [title, setTitle] = useState(current.title);
   const [error, setError] = useState('');
+  // Someone else saved this Item while it was being edited (Item 4c9e961e): the typed text stays in the form.
+  const [clashed, setClashed] = useState(false);
   const [working, setWorking] = useState(false);
   const [abandoning, setAbandoning] = useState(false);
   const [reason, setReason] = useState('');
@@ -132,17 +134,19 @@ export function PlanningIntentPage({
     saved && saved.version > item.version ? saved : loadItem ? loadItem() : current;
   async function write(
     changes: Partial<Pick<PlanningItem, 'title' | 'body' | 'initiativeId' | 'status' | 'reason'>>,
+    base?: PlanningItem,
   ) {
     if (!act) return 'Editing is not available for this Intent.';
     setWorking(true);
     try {
       const input = JSON.stringify(changes);
       const full =
-        pending.current && pendingInput.current === input && pendingFull.current
+        base ??
+        (pending.current && pendingInput.current === input && pendingFull.current
           ? pendingFull.current
           : changes.title !== undefined && draft
             ? draft
-            : await fullItem();
+            : await fullItem());
       const next = { ...full, ...changes };
       const payload = {
         action: 'put-planning-item' as const,
@@ -179,14 +183,39 @@ export function PlanningIntentPage({
         at: new Date().toISOString(),
       });
       setEditing(false);
+      setClashed(false);
       setError('');
       return null;
     } catch (error) {
-      return (error as Error).message;
+      const message = (error as Error).message;
+      if (changes.title !== undefined && /ITEM_CHANGED|is at version \d+, not \d+/.test(message)) {
+        pending.current = undefined;
+        setClashed(true);
+        return 'Not saved: someone changed this Item meanwhile. Your text is kept here; nothing is lost.';
+      }
+      return message;
     } finally {
       setWorking(false);
     }
   }
+  /** The newest saved version, read again after a clash. */
+  const latest = async () => (loadItem ? loadItem() : fullItem());
+  const clash = clashed
+    ? {
+        // Yours becomes the next version on top of theirs; theirs stays in Versions to compare.
+        keepBoth: async (mine: { title: string; body: string; initiativeId: string }) => {
+          const theirs = await latest();
+          setDraft(theirs);
+          return write(mine, theirs);
+        },
+        takeTheirs: async () => {
+          const theirs = await latest();
+          setDraft(theirs);
+          setTitle(theirs.title);
+          setClashed(false);
+        },
+      }
+    : undefined;
   async function edit() {
     setWorking(true);
     try {
@@ -303,6 +332,8 @@ export function PlanningIntentPage({
         editor={
           editing && draft ? (
             <IntentEditForm
+              key={draft.version}
+              clash={clash}
               title={title}
               body={draft.body}
               initiativeId={draft.initiativeId}

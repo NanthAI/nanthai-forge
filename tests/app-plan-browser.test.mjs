@@ -53,6 +53,11 @@ const rows = [launch, docs, big,
 const read = { rows: JSON.stringify(rows), more: false, settled: [{ initiativeId: launch.id, done: 4, dropped: 1, atLeast: false }, { initiativeId: docs.id, done: 0, dropped: 0, atLeast: false }, { initiativeId: big.id, done: 123, dropped: 7, atLeast: false }], canEdit: true };
 const settledRows = [item(20, { title: 'Old reader removed', status: 'closed', initiativeId: launch.id }), item(21, { title: 'Ship a second parser', status: 'abandoned' })];
 const settled = { rows: settledRows, more: false, loading: false, failed: false, loadMore() {} };
+// Archive and Deleted (Item 4c9e961e): each row says when it went and the status it left.
+const shelfRows = {
+  archived: [item(30, { title: 'Browser bundle size budget', status: 'archived', was: 'proposed', at: '2026-10-02T09:00:00.000Z', version: 4 })],
+  deleted: [item(31, { title: 'Benchmark against the v1 parser', status: 'deleted', was: 'in-progress', at: '2026-11-01T09:00:00.000Z', version: 3 })],
+};
 window.calls = [];
 const run = async writes => {
   window.calls.push(writes);
@@ -85,9 +90,10 @@ function Fixture() {
   return <ProjectFrame route={route} name="Synthetic project" feed={feed}
     needs={window.heldFeed ? { n: 1, atLeast: false } : undefined} projects={null}
     controls={{ viewerHandle: 'example-builder', onPicker() {}, onPalette() {}, onKeys() {} }}>
-    <React.Suspense fallback={<h1>Loading</h1>}><PlanScreenView route={route} projectId="synthetic" projectName="Synthetic project" feed={undefined} read={read}
+    <React.Suspense fallback={<h1>Loading</h1>}><PlanScreenView route={route} projectId={rest === uuid(16) ? undefined : "synthetic"} projectName="Synthetic project" feed={undefined} read={read}
       put={put} run={run} reads={reads} query={query} go={go} viewer="example-builder"
-      closed={query.scope === 'open' && !rest ? undefined : settled} showDone={id => window.doneFor.push(id)} /></React.Suspense>
+      closed={query.scope === 'open' && !rest ? undefined : settled}
+      shelved={shelfRows[query.scope] ? { ...settled, rows: shelfRows[query.scope] } : undefined} showDone={id => window.doneFor.push(id)} /></React.Suspense>
   </ProjectFrame>;
 }
 createRoot(document.getElementById('root')).render(<Fixture />);
@@ -126,7 +132,11 @@ test('plan views and bulk bar: real components keep the view in the address and 
     rmSync(temp, { recursive: true, force: true });
   });
   const open = async (width, theme, search = '', held = false) => {
-    const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 } });
+    // One locale on every machine, so dates read the same locally and on the runner ("1 Nov", never "Nov 1" or "1 ott").
+    const context = await browser.newContext({
+      locale: 'en-GB',
+      viewport: { width, height: width === 390 ? 844 : 1000 },
+    });
     if (held) await context.addInitScript(() => (window.heldFeed = true));
     // Every layout shift from the first paint on, for the no-shift check below.
     await context.addInitScript(() => {
@@ -629,11 +639,61 @@ test('plan views and bulk bar: real components keep the view in the address and 
       assert.deepEqual(errors, []);
       await context.close();
     });
+  // Archive and Deleted (Item 4c9e961e): a shelved row comes back to the status it left in one batch write with Undo,
+  // and the Item page sends an Item to Deleted the same way.
+  {
+    const { page, errors, context } = await open(1440, 'dark', '?scope=deleted');
+    const list = page.getByRole('list', { name: 'Deleted Items' });
+    assert.match(
+      await list.textContent(),
+      /Benchmark against the v1 parser.*deleted 1 nov.*was In progress/i,
+    );
+    const before = await page.evaluate(() => window.calls.length);
+    await list.getByRole('button', { name: 'Restore' }).click();
+    await page.waitForFunction(n => window.calls.length === n + 1, before);
+    assert.deepEqual(await page.evaluate(() => window.calls.at(-1)), [
+      {
+        action: 'put-planning-item',
+        itemId: '00000000-0000-4000-8000-000000000031',
+        expectedVersion: 3,
+        status: 'in-progress',
+      },
+    ]);
+    await page.getByRole('status').getByRole('button', { name: 'Undo' }).waitFor();
+    assert.deepEqual(errors, []);
+    await context.close();
+  }
+  {
+    // The fixture has no Convex client, so this Item page is drawn without a project id (no comment reads).
+    const tidy = '00000000-0000-4000-8000-000000000016';
+    const { page, errors, context } = await open(1440, 'light', `/${tidy}`);
+    const before = await page.evaluate(() => window.calls.length);
+    await page.getByRole('button', { name: 'More actions' }).click();
+    await page.getByRole('menuitem', { name: 'Delete' }).click();
+    await page.waitForFunction(n => window.calls.length === n + 1, before);
+    assert.deepEqual(await page.evaluate(() => window.calls.at(-1)), [
+      { action: 'put-planning-item', itemId: tidy, expectedVersion: 2, status: 'deleted' },
+    ]);
+    assert.match(await page.locator('.toast').textContent(), /Deleted “Tidy the old notes”\./);
+    await page.getByRole('status').getByRole('button', { name: 'Undo' }).click();
+    await page.waitForFunction(n => window.calls.length === n + 2, before);
+    assert.deepEqual(await page.evaluate(() => window.calls.at(-1)), [
+      { action: 'put-planning-item', itemId: tidy, expectedVersion: 3, status: 'open' },
+    ]);
+    await check(page, 'item page after delete and undo');
+    assert.deepEqual(errors, []);
+    await context.close();
+  }
   for (const [name, search] of [
     ['list', ''],
     ['tree', '?view=tree'],
     ['board', '?scope=all&view=board'],
     ['closed', '?scope=closed&sort=title'],
+    ['archive', '?scope=archived'],
+    ['deleted', '?scope=deleted'],
+    // Find and the Item page (Item 4c9e961e): the same width and theme checks as the plan views.
+    ['find', '?q=parser'],
+    ['item', '/00000000-0000-4000-8000-000000000016'],
   ])
     for (const width of [1440, 390])
       for (const theme of ['dark', 'light'])

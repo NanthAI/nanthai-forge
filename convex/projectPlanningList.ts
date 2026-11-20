@@ -17,6 +17,8 @@ export const planningFilter = v.object({
       v.literal('in-progress'),
       v.literal('closed'),
       v.literal('abandoned'),
+      v.literal('archived'),
+      v.literal('deleted'),
     ),
   ),
   initiativeId: v.optional(v.string()),
@@ -107,7 +109,7 @@ export async function planningPage(
       maximumRowsRead: input.counts ? 1000 : 100,
       maximumBytesRead: 1000000,
     });
-  const counts = { proposed: 0, open: 0, 'in-progress': 0, closed: 0, abandoned: 0 };
+  const counts = { proposed: 0, open: 0, 'in-progress': 0, closed: 0, abandoned: 0, archived: 0, deleted: 0 };
   const rows: { id: string; position: number; value: unknown }[] = [];
   for (const root of page.page) {
     if (input.counts) {
@@ -129,7 +131,12 @@ export async function planningPage(
     page: rows,
     ...(input.counts
       ? {
-          counts,
+          // Archived and Deleted keys appear only when counted, so older replies stay byte-identical.
+          counts: Object.fromEntries(
+            Object.entries(counts).filter(
+              ([status, count]) => count > 0 || (status !== 'archived' && status !== 'deleted'),
+            ),
+          ),
           ...(generation.planningSearchVersion === 2 ? {} : { coverage: 'partial-needs-preparation' }),
         }
       : {}),

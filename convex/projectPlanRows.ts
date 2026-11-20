@@ -54,10 +54,14 @@ export function decodePlanPage(value: string, parent: string): PlanRow[] {
 
 const text = (value: unknown) => (typeof value === 'string' && value ? value : undefined);
 /** A planning search root's value as the screen's row: the model fields and counts, never the body. */
-export function planViewRow(value: Record<string, unknown>, position: number): PlanRow | null {
+export function planViewRow(value: Record<string, unknown>, position: number, shelf = false): PlanRow | null {
   const { id, kind, title, status } = value;
   if (typeof id !== 'string' || (kind !== 'issue' && kind !== 'initiative') || typeof title !== 'string')
     return null;
+  // Archived and Deleted Items are out of every plan page, settled list and count (Item 4c9e961e); only the Archive
+  // and Deleted lists ask for them, with the status each left and when.
+  const shelved = status === 'archived' || status === 'deleted';
+  if (shelved !== shelf) return null;
   const relations = Array.isArray(value.relations) ? (value.relations as PlanRow['relations']) : undefined;
   const doneWhen =
     Array.isArray(value.doneWhen) && value.doneWhen.length === 2
@@ -79,5 +83,7 @@ export function planViewRow(value: Record<string, unknown>, position: number): P
     ...(value.hidden === true ? { hidden: true } : {}),
     ...(value.inLane === true ? { inLane: true } : {}),
     ...(doneWhen ? { doneWhen } : {}),
+    ...(shelved && text(value.was) ? { was: text(value.was) as PlanRow['was'] } : {}),
+    ...(shelved && text(value.at) ? { at: text(value.at) } : {}),
   };
 }

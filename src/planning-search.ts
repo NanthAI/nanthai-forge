@@ -24,6 +24,7 @@ export const planningModelRow = (item: Partial<PlanningItem>) => ({
   ...(item.relations?.length ? { relations: item.relations } : {}),
   ...(item.hidden ? { hidden: true as const } : {}),
   ...(item.imported ? { imported: item.imported } : {}),
+  ...(item.was ? { was: item.was } : {}),
 });
 
 export const planningSummary = (

@@ -28,10 +28,38 @@ Stored status words never change. Screens and agent replies show the visible wor
 | `in-progress` | In progress |
 | `closed` | Done |
 | `abandoned` | Abandoned (one-press reasons: won't do, duplicate, superseded) |
+| `archived` | Archived |
+| `deleted` | Deleted |
 
 Status follows real work: starting a Lane from an Item moves it to In progress, and landing with its Done-when lines
 met closes it. Done-when lines are the body's Markdown task lines (`- [ ]` and `- [x]`); planning rows carry their
 count as `doneWhen: [ticked, total]`.
+
+### Archive and Deleted
+
+Archive and Delete are two different places an Item can be sent and brought back from. Both hide the Item from every
+plan view, count, agent list and public read; its links, Lanes, landings and comments stay, and so does its Intent's
+state. Archive has no time limit. The project owner archives, deletes and brings Items back (planning writes are
+owner-only).
+
+Each move is an ordinary put (`put-planning-item` with `"status":"archived"` or `"deleted"`), retry-safe by its
+operation id. That version stores `was`, the status the Item left; moving between the two keeps it. Unarchive and
+Restore put `was` back, which adds a version and keeps the history. The web sends each move through the batch call,
+so every one has the 10-second Undo.
+
+Reads list them only when asked: `planning {"status":"archived"}` or `{"status":"deleted"}`, or `"all"`. A read with no
+status, or `"active"`, leaves them out. The Plan screen has Archive and Deleted views, one bounded page of 50 at a
+time from the search roots (`projectPlanSettled:page`), read only while the view is open.
+
+Storage: no new table, index or row kind. A move costs what a status change costs today: one version row and one
+search-root rewrite. `was` adds about 15 bytes to that version and its root, and only on shelved Items.
+
+### Versions
+
+The Item page compares any two versions by line, marking the changed words inside a rewritten line, and restores one
+as a new version (`reason: "Restored version N"`), with Undo. A restore at a stale version is refused with
+`ITEM_CHANGED` and overwrites nothing. When a body edit clashes with someone else's save, the editor keeps your
+text: Keep both saves it as the next version over theirs (theirs stays in Versions), Take theirs drops it.
 
 ## Hand order
 
@@ -97,7 +125,7 @@ Reads filter by type, owner and relation with one rule ([`src/planning-filter.ts
 well as by kind, status and Initiative. `owner: "none"` matches Items with no owner, and a person's handle also
 matches the agents working for them (`handle/agent`). `relation` is a relation kind (`depends-on`, `duplicate-of`,
 `related`) or `"none"`. `status: "active"` is open work (Proposed, Planned and In progress), the Plan screen's
-default scope; `"all"` adds done and dropped Items. The web Plan screen keeps the same fields in its address, and a
+default scope; `"all"` adds done, dropped, archived and deleted Items. The web Plan screen keeps the same fields in its address, and a
 saved view is a personal shortcut to them.
 
 ## Progress

@@ -16,16 +16,22 @@ export const planningIntentStatus = (
 export const plannedLinkIds = (item: Pick<PlanningItem, 'id' | 'kind' | 'intentIds'>): string[] =>
   item.kind === 'issue' ? [...new Set([item.id, ...item.intentIds])] : [...item.intentIds];
 export const planningLabel = (status: PlanningItem['status']) =>
-  status === 'closed'
-    ? 'Done'
-    : status === 'abandoned'
-      ? 'Abandoned'
-      : status === 'proposed'
-        ? 'Proposed'
-        : 'Planned';
+  status === 'archived'
+    ? 'Archived'
+    : status === 'deleted'
+      ? 'Deleted'
+      : status === 'closed'
+        ? 'Done'
+        : status === 'abandoned'
+          ? 'Abandoned'
+          : status === 'proposed'
+            ? 'Proposed'
+            : 'Planned';
 export function planningVersionLabel(item: PlanningItem, previous?: PlanningItem) {
   return item.version === 1 ||
-    (previous ? previous.status !== item.status : ['proposed', 'closed', 'abandoned'].includes(item.status))
+    (previous
+      ? previous.status !== item.status
+      : ['proposed', 'closed', 'abandoned', 'archived', 'deleted'].includes(item.status))
     ? planningLabel(item.status)
     : 'Details edited';
 }

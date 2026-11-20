@@ -1,29 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
-// An Item's versions (Item 4c9e961e): compare any two by line and restore one, which writes a new version with that
-// title and body; no version is ever removed. Mounted only while the sheet is open, so its pages are read on demand
-// and an idle Item page reads nothing more. Text is shown as plain text, never rendered.
+// An Item's versions (Item 4c9e961e): compare any two by line and word, and restore one, which writes a new version
+// with that title and body through the batch call (retry-safe, with the 10-second Undo); no version is ever removed.
+// The server allows it to the project owner only, and refuses it when the Item changed meanwhile. Mounted only while
+// the sheet is open, so its pages are read on demand and an idle Item page reads nothing more. Text is shown as plain
+// text, never rendered.
 import { useState } from 'react';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { Key, Sheet } from '../../ds';
 import type { PlanningItem } from '../../../../src/work-planning-types';
 import { useResolvedWorkValue, useWorkIndex, useWorkRecords } from '../../hosted-work-index';
 import { lineDiff } from './diff';
-import type { Put } from './Plan';
+import type { BatchOutcome } from './batch';
+import type { BatchWrite } from '../../../../src/planning-batch';
 
 export function Versions({
   projectId,
   itemId,
-  canEdit,
-  put,
+  restore: apply,
   onOpenChange,
-  announce,
 }: {
   projectId: Id<'hostedProjects'>;
   itemId: string;
-  canEdit: boolean;
-  put: Put;
+  /** Present only when the reader may edit: runs the restore and shows its Undo. */
+  restore: ((writes: BatchWrite[], words: string) => Promise<BatchOutcome>) | undefined;
   onOpenChange: (open: boolean) => void;
-  announce: (text: string) => void;
 }) {
   const { workspace } = useWorkIndex(projectId);
   const versions = useWorkRecords<PlanningItem>(projectId, workspace, 'planningVersions', itemId);
@@ -39,26 +39,33 @@ export function Versions({
   const [error, setError] = useState('');
   const current = useResolvedWorkValue(projectId, workspace, 'planningVersions', latest ?? null);
   const restore = async () => {
-    if (!a || !latest || !current) return;
+    if (!a || !latest || !current || !apply) return;
     setBusy(true);
     setError('');
     try {
-      await put({
-        itemId,
-        expectedVersion: latest.version,
-        title: a.title,
-        body: a.body,
-        reason: `Restored version ${a.version}`,
-      });
-      announce(`Version ${a.version} restored as a new version.`);
-      onOpenChange(false);
-    } catch (failure) {
-      const changed = failure instanceof Error && /ITEM_CHANGED|changed/i.test(failure.message);
-      setError(
-        changed
-          ? 'Someone changed this Item meanwhile. Nothing was overwritten; compare again with their version.'
-          : 'Forge could not restore it; nothing changed.',
+      const outcome = await apply(
+        [
+          {
+            action: 'put-planning-item',
+            itemId,
+            expectedVersion: latest.version,
+            title: a.title,
+            body: a.body,
+            reason: `Restored version ${a.version}`,
+          },
+        ],
+        `Restored version ${a.version} as version ${latest.version + 1}.`,
       );
+      const refused = outcome.results.find(result => result.outcome === 'refused');
+      if (!refused) onOpenChange(false);
+      else
+        setError(
+          refused.code === 'ITEM_CHANGED'
+            ? 'Someone changed this Item meanwhile. Nothing was overwritten; compare again with their version.'
+            : (refused.message ?? 'Forge could not restore it; nothing changed.'),
+        );
+    } catch {
+      setError('Forge could not restore it; nothing changed.');
     } finally {
       setBusy(false);
     }
@@ -85,8 +92,13 @@ export function Versions({
       footer={
         <>
           <Key onClick={() => onOpenChange(false)}>Close</Key>
-          {canEdit && a && latest && a.version !== latest.version ? (
-            <Key kind="primary" onClick={() => void restore()} disabled={busy || !current}>
+          {apply && a && latest && a.version !== latest.version ? (
+            <Key
+              kind="primary"
+              onClick={() => void restore()}
+              disabled={busy || !current}
+              title="Adds a version with this text; no version is removed"
+            >
               Restore version {a.version}
             </Key>
           ) : null}
@@ -106,12 +118,21 @@ export function Versions({
               {pick(older?.version ?? null, setLeft, 'Older')}
               {pick(newer?.version ?? null, setRight, 'Newer')}
             </div>
-            <p className="t2">Restoring adds a version. It never removes one.</p>
             <pre className="plan-diff" aria-label="Changes between the two versions">
               {diff.map((line, index) => (
-                <span key={index} className={line.kind}>
+                <span key={index} className={line.words ? `${line.kind} wd` : line.kind}>
                   {line.kind === 'old' ? '− ' : line.kind === 'new' ? '+ ' : '  '}
-                  {line.text}
+                  {line.words
+                    ? line.words.map((part, at) =>
+                        part.kind === 'same' ? (
+                          part.text
+                        ) : (
+                          <span key={at} className="w">
+                            {part.text}
+                          </span>
+                        ),
+                      )
+                    : line.text}
                   {'\n'}
                 </span>
               ))}

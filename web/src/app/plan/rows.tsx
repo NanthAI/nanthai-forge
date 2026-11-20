@@ -2,7 +2,7 @@
 // The cells of one plan row and the Initiative roll-up (Items d3357f40, b7a0dff1, f49e3a5c), shared by the backlog
 // and the Initiative page. Pure drawing: no reads, no state.
 import { Fragment } from 'react';
-import type { PlanRow } from '../../../../src/planning-model';
+import { itemStatusLabel, type PlanRow } from '../../../../src/planning-model';
 import { ItemState, State, Who } from '../../ds';
 import { A } from '../frames';
 import { breakdownTotal, breakdownWords, type Breakdown } from '../progress';
@@ -18,7 +18,7 @@ export function Status({ row }: { row: PlanRow }) {
   const status = statusOf(row);
   if (status === 'proposed' || status === 'planned') return <ItemState of={status} />;
   if (status === 'in-progress') return <State word="In progress" />;
-  return <State word={status === 'done' ? 'Done' : 'Abandoned'} />;
+  return <State word={itemStatusLabel[status] as 'Done' | 'Abandoned' | 'Archived' | 'Deleted'} />;
 }
 
 export function DoneWhen({ row }: { row: PlanRow }) {

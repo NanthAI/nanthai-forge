@@ -161,7 +161,15 @@ export const hostedAgentCapabilitiesSchema = z
   })
   .strict();
 export type HostedAgentCapabilities = z.infer<typeof hostedAgentCapabilitiesSchema>;
-const planningStatuses = ['proposed', 'open', 'in-progress', 'closed', 'abandoned'] as const;
+const planningStatuses = [
+  'proposed',
+  'open',
+  'in-progress',
+  'closed',
+  'abandoned',
+  'archived',
+  'deleted',
+] as const;
 const uuid = z.uuid(),
   hash = z.string().regex(/^[0-9a-f]{64}$/);
 const lane = { laneId: uuid.optional() };

@@ -5,11 +5,17 @@ import { AGENT_CLIENT } from './agent-slug.js';
 const id = z.string().uuid();
 const oid = z.string().regex(/^[0-9a-f]{40,64}$/);
 const agentSlugShape = /^[a-z]{2,10}-[a-z]{2,10}$/;
+/** Stored status words (Item 4c9e961e adds the two shelves). Archived and Deleted Items are out of every view, count
+ * and agent list unless asked for by status; their version records the status they left in `was`. */
+const unshelvedStatuses = ['proposed', 'open', 'in-progress', 'closed', 'abandoned'] as const;
+const shelfStatuses = ['archived', 'deleted'] as const;
+const planningStatuses = [...unshelvedStatuses, ...shelfStatuses] as const;
+export const isShelved = (status: string) => status === 'archived' || status === 'deleted';
 const planningFields = {
   kind: z.enum(['issue', 'initiative']),
   title: z.string().trim().min(1),
   body: z.string().default(''),
-  status: z.enum(['proposed', 'open', 'in-progress', 'closed', 'abandoned']).default('open'),
+  status: z.enum(planningStatuses).default('open'),
   reason: z.string().optional(),
   intentIds: z.array(id).default([]),
   initiativeId: id.optional(),
@@ -49,6 +55,9 @@ const modelFields = {
   /** Hidden from public reads of a public plan (with its sub-items, or an Initiative's Items). Stored only when true. */
   hidden: z.literal(true).optional(),
   imported: planningImportSchema.optional(),
+  /** On an Archived or Deleted version only: the status it left, which Unarchive and Restore put back. Set by the
+   * reducer, never sent by a client. */
+  was: z.enum(unshelvedStatuses).optional(),
 };
 /** Model fields of a put: omitted keeps, null (relations [], hidden false) clears. */
 const modelPutFields = {
@@ -74,7 +83,7 @@ const planningPutFields = {
   kind: planningFields.kind.optional(),
   title: planningFields.title.optional(),
   body: z.string().optional(),
-  status: z.enum(['proposed', 'open', 'in-progress', 'closed', 'abandoned']).optional(),
+  status: z.enum(planningStatuses).optional(),
   reason: planningFields.reason,
   intentIds: z.array(id).optional(),
   initiativeId: id.nullable().optional(),

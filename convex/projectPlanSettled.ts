@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Done and dropped Items for the Plan screen's Closed and All scopes (Item e0a23825) and an Initiative page (Item
+// Done and dropped Items for the Plan screen's Closed and All scopes (Item e0a23825), Archived and Deleted ones for its
+// Archive and Deleted lists (Item 4c9e961e), and an Initiative page (Item
 // 4df3ee17): one bounded page per call from the planning search roots on the existing by_planning_kind_and_status
 // index, or by_planning_initiativeId_and_kind_and_status for one Initiative; no body and no new row. The Open scope
 // never subscribes to this; a page re-runs only on planning writes inside the range it read.
@@ -21,7 +22,7 @@ export const PLAN_SETTLED_PAGE = 50;
 export async function settledPage(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
-  status: 'closed' | 'abandoned',
+  status: 'closed' | 'abandoned' | 'archived' | 'deleted',
   paginationOpts: PaginationOptions,
   initiativeId?: string,
 ) {
@@ -65,7 +66,11 @@ export async function settledPage(
   const rows: string[] = [];
   for (const root of result.page) {
     try {
-      const row = planViewRow(JSON.parse(root.value), root.position);
+      const row = planViewRow(
+        JSON.parse(root.value),
+        root.position,
+        status === 'archived' || status === 'deleted',
+      );
       if (row) rows.push(JSON.stringify(row));
     } catch {
       /* A root that does not parse is skipped, as in the open read. */
@@ -77,7 +82,7 @@ export async function settledPage(
 export const page = query({
   args: {
     projectId: v.id('hostedProjects'),
-    status: v.union(v.literal('closed'), v.literal('abandoned')),
+    status: v.union(v.literal('closed'), v.literal('abandoned'), v.literal('archived'), v.literal('deleted')),
     initiativeId: v.optional(v.string()),
     paginationOpts: paginationOptsValidator,
   },

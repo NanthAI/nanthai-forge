@@ -57,6 +57,8 @@ function views(props: ViewsProps) {
     { name: 'No owner', query: writeQuery({ owner: 'none' }), n: props.counts.unowned },
     { name: 'Closed', query: writeQuery({ scope: 'closed' }) },
     { name: 'Everything', query: writeQuery({ scope: 'all' }) },
+    { name: 'Archive', query: writeQuery({ scope: 'archived' }) },
+    { name: 'Deleted', query: writeQuery({ scope: 'deleted' }) },
   ];
 }
 

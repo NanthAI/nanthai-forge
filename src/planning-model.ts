@@ -13,8 +13,22 @@
 // (src/work-planning-types.ts) and the search rows (src/planning-search.ts) keep their own copies of the rank pattern,
 // relation kinds and Done-when counter, so the CLI loads no extra module; tests/planning-model.test.mjs ties them.
 
-export type StoredStatus = 'proposed' | 'open' | 'in-progress' | 'closed' | 'abandoned';
-export type ItemStatus = 'proposed' | 'planned' | 'in-progress' | 'done' | 'abandoned';
+export type StoredStatus =
+  | 'proposed'
+  | 'open'
+  | 'in-progress'
+  | 'closed'
+  | 'abandoned'
+  | 'archived'
+  | 'deleted';
+export type ItemStatus =
+  | 'proposed'
+  | 'planned'
+  | 'in-progress'
+  | 'done'
+  | 'abandoned'
+  | 'archived'
+  | 'deleted';
 
 /** The visible status of a stored status word. Stored words never change: old operations replay exactly. */
 export const itemStatus: Record<StoredStatus, ItemStatus> = {
@@ -23,6 +37,8 @@ export const itemStatus: Record<StoredStatus, ItemStatus> = {
   'in-progress': 'in-progress',
   closed: 'done',
   abandoned: 'abandoned',
+  archived: 'archived',
+  deleted: 'deleted',
 };
 export const itemStatusLabel: Record<ItemStatus, string> = {
   proposed: 'Proposed',
@@ -30,6 +46,8 @@ export const itemStatusLabel: Record<ItemStatus, string> = {
   'in-progress': 'In progress',
   done: 'Done',
   abandoned: 'Abandoned',
+  archived: 'Archived',
+  deleted: 'Deleted',
 };
 /** The visible noun of each stored kind. "Issue" stays only as a help-search alias. */
 export const kindLabel = { issue: 'Item', initiative: 'Initiative' } as const;
@@ -123,6 +141,9 @@ export type PlanRow = {
   doneWhen?: readonly [number, number] | null;
   /** A Lane serves this Item (a started Intent that has not finished). */
   inLane?: boolean;
+  /** Archived and Deleted rows only (Item 4c9e961e): the status it left, and when this version was written. */
+  was?: StoredStatus;
+  at?: string;
 };
 
 const live = (status: StoredStatus) => status === 'proposed' || status === 'open' || status === 'in-progress';
@@ -207,12 +228,17 @@ export function nextItem(rows: readonly PlanRow[], limitSkipped = 10) {
 /** Counted progress of a set of Items (an Initiative's children with their sub-items): one tick per Item. */
 export function progress(rows: readonly Pick<PlanRow, 'status'>[]) {
   const counts = { done: 0, inProgress: 0, notStarted: 0, dropped: 0 };
-  for (const row of rows)
+  let total = 0;
+  for (const row of rows) {
+    // Archived and Deleted Items are out of every count (Item 4c9e961e).
+    if (row.status === 'archived' || row.status === 'deleted') continue;
+    total++;
     if (row.status === 'closed') counts.done++;
     else if (row.status === 'in-progress') counts.inProgress++;
     else if (row.status === 'abandoned') counts.dropped++;
     else counts.notStarted++;
-  return { ...counts, live: counts.inProgress + counts.notStarted, total: rows.length };
+  }
+  return { ...counts, live: counts.inProgress + counts.notStarted, total };
 }
 
 /** Done-when lines are the body's Markdown task lines ("- [ ]", "- [x]"): [ticked, total], or null when none. */
@@ -239,24 +265,28 @@ export type PlanVisibility = 'public' | 'members';
 export function publicPlanVisible(input: {
   projectVisibility: 'public' | 'private';
   planVisibility?: PlanVisibility;
-  item: Pick<PlanRow, 'hidden' | 'initiativeId' | 'parentId'>;
-  initiative?: Pick<PlanRow, 'hidden'> | null;
-  parent?: Pick<PlanRow, 'hidden' | 'initiativeId'> | null;
-  parentInitiative?: Pick<PlanRow, 'hidden'> | null;
+  item: Pick<PlanRow, 'hidden' | 'initiativeId' | 'parentId'> & { status?: string | undefined };
+  initiative?: (Pick<PlanRow, 'hidden'> & { status?: string | undefined }) | null;
+  parent?: (Pick<PlanRow, 'hidden' | 'initiativeId'> & { status?: string | undefined }) | null;
+  parentInitiative?: (Pick<PlanRow, 'hidden'> & { status?: string | undefined }) | null;
 }): boolean {
   if (input.projectVisibility !== 'public' || input.planVisibility === 'members') return false;
-  if (input.item.hidden) return false;
-  if (input.item.initiativeId && (input.initiative === undefined || input.initiative?.hidden)) return false;
+  if (concealed(input.item)) return false;
+  if (input.item.initiativeId && (input.initiative === undefined || concealed(input.initiative)))
+    return false;
   if (input.item.parentId) {
-    if (input.parent === undefined || input.parent?.hidden) return false;
+    if (input.parent === undefined || concealed(input.parent)) return false;
     if (
       input.parent?.initiativeId &&
-      (input.parentInitiative === undefined || input.parentInitiative?.hidden)
+      (input.parentInitiative === undefined || concealed(input.parentInitiative))
     )
       return false;
   }
   return true;
 }
+/** Hidden, Archived and Deleted rows are never public, and neither is anything inside them (Item 4c9e961e). */
+const concealed = (row: { hidden?: boolean | undefined; status?: string | undefined } | null) =>
+  Boolean(row?.hidden || row?.status === 'archived' || row?.status === 'deleted');
 
 // ---- Agent list rows --------------------------------------------------------------------------------------------
 /** What an agent list reply carries per Item: order, id, status, owner, Done-when and title, without bodies. */

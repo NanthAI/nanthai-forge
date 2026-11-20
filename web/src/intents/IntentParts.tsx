@@ -354,6 +354,7 @@ export function IntentEditForm({
   onTitle,
   save,
   cancel,
+  clash,
 }: {
   title: string;
   body: string;
@@ -363,6 +364,13 @@ export function IntentEditForm({
   onTitle: (title: string) => void;
   save: (draft: { title: string; body: string; initiativeId: string }) => Promise<string | null>;
   cancel: () => void;
+  /** Set after an edit clash: keep this text as the next version over theirs, or drop it and take theirs. */
+  clash?:
+    | {
+        keepBoth: (draft: { title: string; body: string; initiativeId: string }) => Promise<string | null>;
+        takeTheirs: () => Promise<void>;
+      }
+    | undefined;
 }) {
   const [initialTitle] = useState(title);
   const [details, setDetails] = useState(body);
@@ -410,6 +418,32 @@ export function IntentEditForm({
         <Button variant="ghost" onClick={cancel}>
           Cancel
         </Button>
+        {clash ? (
+          <>
+            <Button
+              variant="secondary"
+              disabled={busy || saving}
+              title="Save your text as the next version; theirs stays in Versions"
+              onClick={() => {
+                setSaving(true);
+                void clash
+                  .keepBoth({ title, body: details, initiativeId: parent })
+                  .then(problem => setError(problem ?? ''))
+                  .catch(error => setError((error as Error).message))
+                  .finally(() => setSaving(false));
+              }}
+            >
+              Keep both
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={busy || saving}
+              onClick={() => void clash.takeTheirs().catch(error => setError((error as Error).message))}
+            >
+              Take theirs
+            </Button>
+          </>
+        ) : null}
       </div>
       <ErrorToast error={error} />
     </form>

@@ -20,7 +20,7 @@ export const isPublicProject = (project: ProjectVisibility | null | undefined): 
 
 import { publicPlanVisible } from '../src/planning-model';
 export { publicPlanVisible } from '../src/planning-model';
-type Hideable = { hidden?: boolean; initiativeId?: string | null; parentId?: string | null };
+type Hideable = { hidden?: boolean; status?: string; initiativeId?: string | null; parentId?: string | null };
 
 export type PlanRow = Hideable & { id: string; kind: string };
 /** The plan rows a visitor may see, in their given order. `known` holds every looked-up row by id (Initiatives and

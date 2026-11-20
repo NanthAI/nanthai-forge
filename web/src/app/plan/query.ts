@@ -5,7 +5,7 @@
 import { planFilterMatch, type PlanFilter } from '../../../../src/planning-filter';
 import type { PlanRow } from '../../../../src/planning-model';
 
-export type Scope = 'open' | 'closed' | 'all';
+export type Scope = 'open' | 'closed' | 'all' | 'archived' | 'deleted';
 export type Sort = 'hand' | 'title' | 'status' | 'owner' | 'type';
 export type Layout = 'list' | 'tree' | 'board';
 export type PlanQuery = PlanFilter & {
@@ -16,7 +16,7 @@ export type PlanQuery = PlanFilter & {
   find: string;
 };
 
-const scopes: readonly Scope[] = ['open', 'closed', 'all'];
+const scopes: readonly Scope[] = ['open', 'closed', 'all', 'archived', 'deleted'];
 const sorts: readonly Sort[] = ['hand', 'title', 'status', 'owner', 'type'];
 const layouts: readonly Layout[] = ['list', 'tree', 'board'];
 const relations = ['depends-on', 'duplicate-of', 'related', 'none'] as const;
@@ -62,7 +62,12 @@ export const filtered = (query: PlanQuery) =>
 /** The agent read a view is a shortcut to (saved views stay a web shortcut to this call). */
 export function agentRead(query: PlanQuery) {
   const input: Record<string, unknown> = {
-    status: query.scope === 'open' ? 'active' : query.scope === 'closed' ? 'closed' : 'all',
+    status:
+      query.scope === 'open'
+        ? 'active'
+        : query.scope === 'closed' || query.scope === 'archived' || query.scope === 'deleted'
+          ? query.scope
+          : 'all',
   };
   if (query.type) input.type = query.type;
   if (query.owner) input.owner = query.owner;
@@ -78,6 +83,8 @@ const statusRank: Record<PlanRow['status'], number> = {
   proposed: 2,
   closed: 3,
   abandoned: 4,
+  archived: 5,
+  deleted: 6,
 };
 /** Rows the filters keep (find and Initiative are checked by the caller with its own match rules). */
 export const keeps = (row: PlanRow, query: PlanQuery) =>

@@ -159,12 +159,13 @@ test('public plan: members-only and private hide everything; hiding an Item or I
   assert.equal(publicPlanVisible({ ...sub, parent: { initiativeId: 'i' }, parentInitiative: {} }), true);
 });
 
-test('the vocabulary is the owner-decided one: Idea/Task/Bug, five statuses, three abandon reasons', () => {
-  // Owner 2026-11-12 (types) and the approved naming of 2026-11-14 / lead sweep 2026-11-16 (statuses, reasons).
+test('the vocabulary is the owner-decided one: Idea/Task/Bug, five statuses and two shelves, three abandon reasons', () => {
+  // Owner 2026-11-12 (types) and the approved naming of 2026-11-14 / lead sweep 2026-11-16 (statuses, reasons); the
+  // Archive and Deleted shelves are the owner's backlog decision 1.7 and lead decision 1838183c (Item 4c9e961e).
   assert.deepEqual([...defaultItemTypes], ['idea', 'task', 'bug']);
   assert.deepEqual(
     Object.keys(itemStatus).map(stored => itemStatusLabel[itemStatus[stored]]),
-    ['Proposed', 'Planned', 'In progress', 'Done', 'Abandoned'],
+    ['Proposed', 'Planned', 'In progress', 'Done', 'Abandoned', 'Archived', 'Deleted'],
   );
   assert.deepEqual(Object.values(abandonReasons), ["Won't do", 'Duplicate', 'Superseded']);
   assert.equal(inverseRelationLabel['depends-on'], 'Blocks');

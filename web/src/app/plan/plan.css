@@ -75,6 +75,10 @@
   .plan-diff { margin: 0; max-height: 50vh; overflow: auto; padding: var(--s-2); border: var(--rule) solid var(--line); border-radius: var(--r); font: var(--t-meta)/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
   .plan-diff .old { color: var(--text-2); background: var(--del-bg); }
   .plan-diff .new { color: var(--text); background: var(--add-bg); }
+  /* A rewritten line: only its changed words are tinted, struck through when removed and underlined when added. */
+  .plan-diff :is(.old, .new).wd { background: none; }
+  .plan-diff .old .w { background: var(--del-bg); text-decoration: line-through; }
+  .plan-diff .new .w { background: var(--add-bg); text-decoration: underline; }
   @media (max-width: 860px) {
     .plan .plan-body { grid-template-columns: minmax(0, 1fr); }
     .plan .plan-views { display: none; }

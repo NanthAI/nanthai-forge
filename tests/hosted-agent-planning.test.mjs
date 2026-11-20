@@ -886,6 +886,36 @@ test('an Issue whose Intent completed is closed by the next read, with undo name
   });
 });
 
+test('a start keeps an archived Item archived and a deleted Item deleted: no status write, the reply says how to bring it back (4c9e961e)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  for (const [shelf, from] of [
+    ['archived', 'open'],
+    ['deleted', 'proposed'],
+  ]) {
+    const id = (await put(p, { kind: 'issue', title: `On the ${shelf} shelf`, status: from })).result.itemId;
+    const before = (await list(p, { id, reconcile: false })).item;
+    await put(p, { itemId: id, expectedVersion: before.version, status: shelf });
+    const events = s.tables.projectWorkEvents.size;
+    const startOperation = randomUUID();
+    // With a claim offered: the shelf check runs before the claim, so nobody becomes the owner of a shelved Item.
+    const marked = await markPlanningStarted(p, id, startOperation, 'synthetic-owner/amber-fox');
+    assert.deepEqual(marked, {
+      updated: false,
+      status: shelf,
+      note: `Still ${shelf}: a start does not bring it back. To show it again, put status "${from}" on it (Unarchive or Restore).`,
+    });
+    // A replay of the same start is the same no-op.
+    assert.deepEqual(await markPlanningStarted(p, id, startOperation, 'synthetic-owner/amber-fox'), marked);
+    assert.equal(s.tables.projectWorkEvents.size, events, `${shelf}: nothing written`);
+    const item = (await list(p, { id, reconcile: false })).item;
+    assert.deepEqual(
+      [item.status, item.was, item.version, item.owner],
+      [shelf, from, before.version + 1, undefined],
+    );
+  }
+});
+
 test('builders claim the Item they start (d3357f40): an unowned Item takes the starter’s public identity once; a set owner is kept', async t => {
   const s = await setup(t),
     p = port(s);
@@ -1068,15 +1098,30 @@ test('the server move after a member start: open Issues only, this project, the 
     });
   const status = async id => (await list(p, { id, reconcile: false })).item.status;
   const events = () => s.tables.projectWorkEvents.size;
-  // Proposed waits for the owner; abandoned stays; an Initiative (any kind but issue) never moves.
+  // Proposed waits for the owner; abandoned stays; Archived and Deleted stay on their shelf (4c9e961e); an Initiative
+  // (any kind but issue) never moves.
   const proposed = (await put(p, { kind: 'issue', title: 'Proposed', status: 'proposed' })).result.itemId;
   const abandoned = (await put(p, { kind: 'issue', title: 'Dropped', status: 'abandoned' })).result.itemId;
+  // An Item is created first, then shelved (a new Item cannot start Archived or Deleted).
+  const shelve = async (title, shelf) => {
+    const id = (await put(p, { kind: 'issue', title })).result.itemId;
+    await put(p, { itemId: id, expectedVersion: 1, status: shelf });
+    return id;
+  };
+  const archived = await shelve('Archived', 'archived');
+  const deleted = await shelve('Deleted', 'deleted');
   const initiative = (await put(p, { kind: 'initiative', title: 'Group' })).result.itemId;
   const before = events();
-  for (const id of [proposed, abandoned, initiative]) await serverMove(id);
+  for (const id of [proposed, abandoned, archived, deleted, initiative]) await serverMove(id);
   assert.deepEqual(
-    [await status(proposed), await status(abandoned), await status(initiative)],
-    ['proposed', 'abandoned', 'open'],
+    [
+      await status(proposed),
+      await status(abandoned),
+      await status(archived),
+      await status(deleted),
+      await status(initiative),
+    ],
+    ['proposed', 'abandoned', 'archived', 'deleted', 'open'],
   );
   assert.equal(events(), before, 'nothing written');
   // An Item of another project: the lookup is scoped to the start's project, so nothing there is found or written.
@@ -1119,9 +1164,9 @@ test('the server move after a member start: open Issues only, this project, the 
   };
   const moved = await racing(issue, { title: 'Edited meanwhile' });
   assert.deepEqual([moved.status, moved.title], ['in-progress', 'Edited meanwhile']);
-  // The owner changes the status meanwhile (closes it, or sends it back to proposed): the read-again sees it, and the
-  // move writes nothing over the owner's choice.
-  for (const status of ['closed', 'proposed']) {
+  // The owner changes the status meanwhile (closes, archives or deletes it, or sends it back to proposed): the
+  // read-again sees it, and the move writes nothing over the owner's choice.
+  for (const status of ['closed', 'proposed', 'archived', 'deleted']) {
     const id = (await put(p, { kind: 'issue', title: `Raced to ${status}` })).result.itemId;
     const raced = await racing(id, { status });
     assert.equal(raced.status, status);

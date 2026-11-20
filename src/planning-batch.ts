@@ -10,7 +10,14 @@
 /** Writes in one batch: a page of selected rows, or one split or merge with its carried comments. */
 export const planningBatchLimit = 100;
 
-export type BatchStatus = 'proposed' | 'open' | 'in-progress' | 'closed' | 'abandoned';
+export type BatchStatus =
+  | 'proposed'
+  | 'open'
+  | 'in-progress'
+  | 'closed'
+  | 'abandoned'
+  | 'archived'
+  | 'deleted';
 export type BatchRelation = { kind: 'depends-on' | 'duplicate-of' | 'related'; id: string };
 /** The fields a batch put may name; omitted keeps, null clears (docs/planning.md "Fields"). */
 export type BatchFields = {

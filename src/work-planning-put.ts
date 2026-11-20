@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Pure: also runs in the Convex non-Node runtime.
 import { invariant } from './errors.js';
-import { planningModelPutKeys, type PlanningItem, type PlanningWrite } from './work-planning-types.js';
+import {
+  isShelved,
+  planningModelPutKeys,
+  type PlanningItem,
+  type PlanningWrite,
+} from './work-planning-types.js';
 import { AGENT_CLIENT, isAgentSlug } from './agent-slug.js';
 import { digest } from './state/hash.js';
 
@@ -22,23 +27,33 @@ export type PlanningPut = Extract<PlanningWrite, { action: 'put-planning-item' }
 export function resolvePlanningPut(
   command: PlanningPut,
   current?: Pick<PlanningItem, 'kind' | 'title' | 'body' | 'status' | 'intentIds' | 'initiativeId'> &
-    Partial<Pick<PlanningItem, (typeof planningModelPutKeys)[number]>>,
+    Partial<Pick<PlanningItem, (typeof planningModelPutKeys)[number] | 'was'>>,
 ) {
   invariant(
     current || (command.kind && command.title),
     'BAD_ARGUMENT',
     'Creating a planning item needs `kind` and `title`.',
   );
+  const status = command.status ?? current?.status ?? 'open';
+  invariant(current || !isShelved(status), 'BAD_ARGUMENT', 'Create an Item before archiving or deleting it.');
   return {
     kind: (command.kind ?? current?.kind)!,
     title: (command.title ?? current?.title)!,
     body: command.body ?? current?.body ?? '',
-    status: command.status ?? current?.status ?? 'open',
+    status,
     intentIds: [...new Set(command.intentIds ?? current?.intentIds ?? [])].sort(),
     initiativeId: command.initiativeId === null ? undefined : (command.initiativeId ?? current?.initiativeId),
     reason: command.reason,
-    model: resolveModelFields(command, current),
+    model: { ...resolveModelFields(command, current), ...shelfFrom(status, current) },
   };
+}
+
+/** Archive and Delete remember the status they left (Item 4c9e961e); moving between the two shelves keeps it, and
+ * any other status clears it, so Unarchive and Restore are an ordinary put of `was` that adds a version. */
+function shelfFrom(status: string, current?: Partial<Pick<PlanningItem, 'status' | 'was'>>) {
+  if (!isShelved(status)) return {};
+  const was = current?.status && !isShelved(current.status) ? current.status : current?.was;
+  return was ? { was: was as NonNullable<PlanningItem['was']> } : {};
 }
 
 const keep = <T>(next: T | null | undefined, stored: T | undefined) =>

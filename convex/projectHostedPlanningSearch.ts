@@ -24,6 +24,8 @@ export const searchFields = {
     v.literal('in-progress'),
     v.literal('closed'),
     v.literal('abandoned'),
+    v.literal('archived'),
+    v.literal('deleted'),
   ),
   kind: v.optional(v.union(v.literal('issue'), v.literal('initiative'))),
   initiativeId: v.optional(v.string()),

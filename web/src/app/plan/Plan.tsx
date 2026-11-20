@@ -4,9 +4,10 @@
 // (src/planning-model.ts nextItem), never stored. The view (scope, filters, order, list / tree / board, find) lives
 // in the address; ticked rows change together in one batch with one Undo. Loaded with its route only.
 // Reads: projectPlanView:read, one subscription, re-run only by planning writes in the ranges it read; the Closed and
-// Everything scopes add one bounded page each of done and dropped Items (projectPlanSettled:page); who works on an
-// unowned Item is one bounded one-shot read by Intent (projectPlanWorkers:read, workers.ts), again only when the
-// in-progress Items change or a hidden tab is shown again. Writes:
+// Everything scopes add one bounded page each of done and dropped Items, and the Archive and Deleted views one page of
+// theirs (projectPlanSettled:page); who works on an unowned Item is one bounded one-shot read by Intent
+// (projectPlanWorkers:read, workers.ts), again only when the in-progress Items change or a hidden tab is shown again.
+// Writes:
 // projectWorkCommand:command for one row, projectPlanningBatch:apply for a selection, each retry-safe by its
 // operation id.
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -14,7 +15,7 @@ import { useConvex, useMutation } from 'convex/react';
 import { makeFunctionReference, type PaginationResult } from 'convex/server';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
-import { Band, Key, Region, Row, Standing } from '../../ds';
+import { Band, Key, Menu, Region, Row, Standing } from '../../ds';
 import { Announcer, useAnnounce } from '../../ds/behaviour/announce';
 import { inverseRelationLabel, isLive, itemStatusLabel } from '../../../../src/planning-model';
 import type { PlanRow } from '../../../../src/planning-model';
@@ -36,6 +37,8 @@ import { COLS, DoneWhen, Line, Owner, Status } from './rows';
 import { useWorkers, type ActiveLane, type Workers } from './workers';
 import { Tick, type Ticker } from './Tick';
 import { Versions } from './Versions';
+import { isShelf, shelfWords, shelve, ShelfList, unshelve, type Shelf } from './Shelf';
+import type { BatchPut } from '../../../../src/planning-batch';
 import { BulkBar, SplitSheet, UndoToast, outcomeWords, type Reads } from './Bulk';
 import {
   matches,
@@ -65,7 +68,7 @@ const settledPage = makeFunctionReference<
   'query',
   {
     projectId: Id<'hostedProjects'>;
-    status: 'closed' | 'abandoned';
+    status: 'closed' | 'abandoned' | Shelf;
     initiativeId?: string;
     paginationOpts: { cursor: string | null; numItems: number };
   },
@@ -84,7 +87,7 @@ export default function Plan(props: PlaceProps) {
  * an Initiative, only its Items, read by the server's Initiative index. */
 function useSettled(
   projectId: Id<'hostedProjects'>,
-  status: 'closed' | 'abandoned',
+  status: 'closed' | 'abandoned' | Shelf,
   on: boolean,
   initiativeId: string | undefined,
 ) {
@@ -127,10 +130,12 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
   const read = live.value ?? last.current;
   // An Initiative page asks for its own done and dropped Items while that fold is open.
   const [doneFor, showDone] = useState<string | null>(null);
-  const settledOn = query.scope !== 'open' || doneFor !== null;
+  const settledOn = query.scope === 'closed' || query.scope === 'all' || doneFor !== null;
   const settledIn = doneFor ?? query.initiative;
   const closed = useSettled(projectId, 'closed', settledOn, settledIn);
   const dropped = useSettled(projectId, 'abandoned', settledOn, settledIn);
+  const shelfScope = isShelf(query.scope) ? query.scope : null;
+  const shelved = useSettled(projectId, shelfScope ?? 'archived', shelfScope !== null, undefined);
   const mutate = useMutation(api.projectWorkCommand.command);
   const apply = useMutation(batchApply);
   const client = useConvex();
@@ -176,6 +181,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
       viewer={viewerHandle}
       closed={closed}
       dropped={dropped}
+      shelved={shelved}
       showDone={showDone}
       progress={counts.value}
     />
@@ -189,7 +195,13 @@ const noSettled: Settled = {
   failed: false,
   loadMore: () => undefined,
 };
-const scopeWords = { open: 'Open work', closed: 'Done and dropped', all: 'Everything' } as const;
+const scopeWords = {
+  open: 'Open work',
+  closed: 'Done and dropped',
+  all: 'Everything',
+  archived: 'Archive',
+  deleted: 'Deleted',
+} as const;
 const ownerOf = (owner: string | null | undefined) => owner?.replace(/^@/, '').split('/')[0];
 
 /** The screen from its read; an `undefined` read draws as loading. */
@@ -208,6 +220,7 @@ export function PlanScreenView({
   viewer,
   closed = noSettled,
   dropped = noSettled,
+  shelved = noSettled,
   showDone = () => undefined,
   progress: progressRead,
 }: Pick<PlaceProps, 'route' | 'projectName' | 'feed'> & {
@@ -225,6 +238,8 @@ export function PlanScreenView({
   viewer?: string | undefined;
   closed?: Settled;
   dropped?: Settled;
+  /** The Archive or Deleted view's rows, read only while that view is open. */
+  shelved?: Settled;
   /** The Initiative page's done and dropped fold: subscribe for one Initiative, or drop it (null). */
   showDone?: (initiativeId: string | null) => void;
 }) {
@@ -235,6 +250,8 @@ export function PlanScreenView({
   const [error, setError] = useState('');
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [toast, setToast] = useState<{ outcome: BatchOutcome; words: string } | null>(null);
+  // The Item just archived or deleted from its page, so the page can say where it went and bring it back.
+  const [sent, setSent] = useState<{ row: PlanRow; shelf: Shelf; version: number } | null>(null);
   const [message, announce] = useAnnounce();
   const { folds, toggle: toggleFold, setAll: setFolds } = usePlanFolds(projectId ?? '');
   const savedViews = useSavedViews(projectId ?? '');
@@ -279,9 +296,25 @@ export function PlanScreenView({
   );
   const byId = useMemo(() => {
     const map = new Map(view?.byId ?? []);
-    for (const row of [...closed.rows, ...dropped.rows]) map.set(row.id, row);
+    for (const row of [...closed.rows, ...dropped.rows, ...shelved.rows]) map.set(row.id, row);
+    if (sent) map.set(sent.row.id, sent.row);
     return map;
-  }, [view, closed.rows, dropped.rows]);
+  }, [view, closed.rows, dropped.rows, shelved.rows, sent]);
+  /** One Item to a shelf or back, through the batch call: retry-safe, one version, and the 10-second Undo. */
+  const shelfMove = async (writes: BatchPut[], row: PlanRow, to: Shelf | null) => {
+    if (!run) return;
+    setError('');
+    try {
+      const outcome = await run(writes);
+      const applied = outcome.results.find(result => result.outcome !== 'refused');
+      setSent(to && applied?.version ? { row, shelf: to, version: applied.version } : null);
+      const text = to && applied ? `${shelfWords[to].done} “${row.title}”.` : outcomeWords(outcome, byId);
+      setToast({ outcome, words: text });
+      announce(text);
+    } catch {
+      setError(`Forge could not change ${row.title}; nothing changed.`);
+    }
+  };
   if (route.rest && !initiativeRow)
     return (
       <ItemPage
@@ -293,6 +326,19 @@ export function PlanScreenView({
         projectId={projectId}
         onSplit={whole?.canEdit && reads && run ? () => setSplit(true) : undefined}
         onVersions={projectId ? () => setVersions(true) : undefined}
+        onShelve={whole?.canEdit && run ? (row, to) => void shelfMove(shelve([row], to), row, to) : undefined}
+        sent={sent}
+        onBack={
+          sent && run
+            ? () =>
+                void shelfMove(
+                  [unshelve({ ...sent.row, version: sent.version, was: sent.row.status })],
+                  sent.row,
+                  null,
+                )
+            : undefined
+        }
+        error={error}
         versions={
           versions && projectId ? (
             <Versions
@@ -301,10 +347,20 @@ export function PlanScreenView({
                 [...(whole?.byId.values() ?? [])].find(entry => entry.id.startsWith(route.rest))?.id ??
                 route.rest
               }
-              canEdit={Boolean(whole?.canEdit)}
-              put={put}
+              restore={
+                whole?.canEdit && run
+                  ? async (writes, words) => {
+                      const outcome = await run(writes);
+                      const text = outcome.results.some(result => result.outcome === 'refused')
+                        ? outcomeWords(outcome, byId)
+                        : words;
+                      setToast({ outcome, words: text });
+                      announce(text);
+                      return outcome;
+                    }
+                  : undefined
+              }
               onOpenChange={setVersions}
-              announce={announce}
             />
           ) : null
         }
@@ -342,12 +398,17 @@ export function PlanScreenView({
   const sentence = view ? planSentence(view) : null;
   const lanesOpen = feed ? feed.lanes.length + feed.more : null;
   const byHand = query.sort === 'hand' && !filtered(query);
-  const openShown = query.scope !== 'closed';
+  const shelfScope = isShelf(query.scope) ? query.scope : null;
+  const openShown = query.scope === 'open' || query.scope === 'all';
+  const settledShown = query.scope === 'closed' || query.scope === 'all';
+  const shelfRows = shelfScope
+    ? shelved.rows.filter(row => keep(row) && (!find.trim() || matches(row, find.trim())))
+    : [];
   const liveShown = view ? view.groups.reduce((sum, group) => sum + group.lines.length, 0) : 0;
-  const shown = (openShown ? liveShown : 0) + (query.scope === 'open' ? 0 : settledRows.length);
+  const shown = (openShown ? liveShown : 0) + (settledShown ? settledRows.length : 0) + shelfRows.length;
   const loadedIds = [
     ...(openShown && view ? view.groups.flatMap(group => group.lines.map(line => line.row.id)) : []),
-    ...(query.scope === 'open' ? [] : settledRows.map(row => row.id)),
+    ...(settledShown ? settledRows.map(row => row.id) : []),
   ];
   const selected = [...picked].map(id => byId.get(id)).filter((row): row is PlanRow => Boolean(row));
   const canEdit = Boolean(view?.canEdit) && Boolean(run);
@@ -533,7 +594,7 @@ export function PlanScreenView({
               ? words.length
                 ? words.join(', ')
                 : query.sort === 'hand'
-                  ? query.scope === 'closed'
+                  ? query.scope !== 'open' && query.scope !== 'all'
                     ? 'newest first'
                     : 'in the order set by hand'
                   : `by ${query.sort}; order numbers and dragging are off`
@@ -552,7 +613,7 @@ export function PlanScreenView({
             folds={foldKeys()}
             count={
               view
-                ? `${shown.toLocaleString()} ${shown === 1 ? 'Item' : 'Items'}${closed.more || dropped.more || view.more ? '+' : ''}`
+                ? `${shown.toLocaleString()} ${shown === 1 ? 'Item' : 'Items'}${closed.more || dropped.more || shelved.more || view.more ? '+' : ''}`
                 : ''
             }
           />
@@ -585,17 +646,25 @@ export function PlanScreenView({
             <div className="quietline" aria-busy="true">
               Loading the plan…
             </div>
+          ) : shelfScope ? (
+            <ShelfList
+              shelf={shelfScope}
+              rows={shelfRows}
+              at={at}
+              run={canEdit ? run : undefined}
+              onDone={done}
+            />
           ) : query.layout === 'board' ? (
             <Board
               rows={[
                 ...(openShown ? view.groups.flatMap(group => group.lines.map(line => line.row)) : []),
-                ...(query.scope === 'open' ? [] : settledRows),
+                ...(settledShown ? settledRows : []),
               ]}
               sort={query.sort}
               byId={byId}
               at={at}
               ticker={ticker}
-              settled={query.scope !== 'open'}
+              settled={settledShown}
               workers={workers}
             />
           ) : (
@@ -642,10 +711,17 @@ export function PlanScreenView({
               ) : null}
             </>
           )}
-          {query.scope !== 'open' && query.layout !== 'board' ? (
+          {settledShown && query.layout !== 'board' ? (
             <SettledList rows={settledRows} sort={query.sort} at={at} ticker={ticker} />
           ) : null}
-          {query.scope !== 'open' ? <SettledPager closed={closed} dropped={dropped} /> : null}
+          {settledShown ? <SettledPager closed={closed} dropped={dropped} /> : null}
+          {shelfScope ? (
+            <SettledPager
+              closed={shelved}
+              dropped={noSettled}
+              what={shelfWords[shelfScope].done.toLowerCase()}
+            />
+          ) : null}
         </Region>
       </div>
       {captureSheet}
@@ -712,18 +788,22 @@ function SettledList({
   );
 }
 
-function SettledPager({ closed, dropped }: { closed: Settled; dropped: Settled }) {
+function SettledPager({
+  closed,
+  dropped,
+  what = 'done and dropped',
+}: {
+  closed: Settled;
+  dropped: Settled;
+  what?: string;
+}) {
   const loading = closed.loading || dropped.loading;
   const failed = closed.failed || dropped.failed;
   if (!loading && !failed && !closed.more && !dropped.more) return null;
   return (
     <div className="pager">
       <span className="n">
-        {loading
-          ? 'Loading done and dropped Items…'
-          : failed
-            ? 'A page could not be read; the rows above stay.'
-            : ''}
+        {loading ? `Loading ${what} Items…` : failed ? 'A page could not be read; the rows above stay.' : ''}
       </span>
       {closed.more || dropped.more ? (
         <Key
@@ -752,6 +832,10 @@ function ItemPage({
   projectId,
   onSplit,
   onVersions,
+  onShelve,
+  sent,
+  onBack,
+  error,
   split,
   versions,
   toast,
@@ -764,6 +848,12 @@ function ItemPage({
   projectId: Id<'hostedProjects'> | undefined;
   onSplit?: (() => void) | undefined;
   onVersions?: (() => void) | undefined;
+  /** Archive or Delete this Item (the owner only). */
+  onShelve?: ((row: PlanRow, to: Shelf) => void) | undefined;
+  /** The Item this page just sent to a shelf, and its way back. */
+  sent?: { row: PlanRow; shelf: Shelf } | null;
+  onBack?: (() => void) | undefined;
+  error?: string;
   versions?: ReactNode;
   split?: ReactNode;
   toast?: ReactNode;
@@ -829,7 +919,25 @@ function ItemPage({
             Open the full Item
           </a>
         ) : null}
+        {row && onShelve && row.kind === 'issue' ? (
+          <Menu
+            label="More actions"
+            className="btn ghost sm"
+            items={(['archived', 'deleted'] as const).map(to => ({
+              id: to,
+              label: shelfWords[to].send,
+              onAction: () => onShelve(row, to),
+            }))}
+          >
+            ⋯
+          </Menu>
+        ) : null}
       </Head>
+      {error ? (
+        <div className="pf" role="alert">
+          {error}
+        </div>
+      ) : null}
       {split}
       {versions}
       {toast}
@@ -870,10 +978,24 @@ function ItemPage({
             </Suspense>
           ) : null}
         </Region>
+      ) : row === null && sent && sent.row.id.startsWith(route.rest) ? (
+        <Region title="Item">
+          <div className="quietline" role="status">
+            <b dir="auto">{sent.row.title}</b> is {shelfWords[sent.shelf].done.toLowerCase()}: out of every
+            view, count and agent list. Its Lanes, landings and comments stay.{' '}
+            {onBack ? (
+              <Key size="sm" onClick={onBack}>
+                {shelfWords[sent.shelf].back}
+              </Key>
+            ) : null}
+          </div>
+        </Region>
       ) : row === null ? (
         <Region title="Item">
           <div className="quietline">
-            It may be done or abandoned. <A href={at({})}>Back to the plan</A>
+            It may be done, abandoned, archived or deleted. <A href={at({})}>Back to the plan</A>,{' '}
+            <A href={`${at({})}?scope=archived`}>Archive</A> or{' '}
+            <A href={`${at({})}?scope=deleted`}>Deleted</A>
           </div>
         </Region>
       ) : null}

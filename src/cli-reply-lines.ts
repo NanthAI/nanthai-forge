@@ -28,6 +28,8 @@ const words: Record<string, string> = {
   closed: 'Done',
   completed: 'Done',
   abandoned: 'Abandoned',
+  archived: 'Archived',
+  deleted: 'Deleted',
 };
 const state = (value: unknown) => words[text(value)] ?? (text(value) || 'state unknown');
 

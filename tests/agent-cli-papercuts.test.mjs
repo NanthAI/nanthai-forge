@@ -113,9 +113,10 @@ const refused = (action, command) => {
 
 test('593fc2d7: an enum refusal names the field and its allowed values at the start', () => {
   const message = refused('put-planning-item', { itemId: randomUUID(), status: 'done' });
+  // The whole refusal fits the first 140 characters (132 since Archive and Deleted joined the statuses, 4c9e961e).
   assert.match(
-    message.slice(0, 120),
-    /status: one of proposed\|open\|in-progress\|closed\|abandoned \(got "done"\)/,
+    message.slice(0, 140),
+    /status: one of proposed\|open\|in-progress\|closed\|abandoned\|archived\|deleted \(got "done"\)/,
   );
   // land's retry reason: the allowed values in the error, and in land help.
   assert.match(

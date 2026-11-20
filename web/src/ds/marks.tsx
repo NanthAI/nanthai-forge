@@ -46,6 +46,8 @@ export const stateWords = {
   'In progress': 'active',
   Left: 'stale',
   Abandoned: 'stale',
+  Archived: 'stale',
+  Deleted: 'stale',
   'Not run': 'stale',
   Stopped: 'stale',
   'No Lane': 'stale',
