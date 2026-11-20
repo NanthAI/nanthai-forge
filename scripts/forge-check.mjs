@@ -5,8 +5,9 @@
 import { supportedNode, nodeRequirement } from './node-runtime.mjs';
 import { execFileSync } from 'node:child_process';
 import { runDocumentationChecks } from './check-documentation.mjs';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { existsSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 if (!supportedNode()) throw Object.assign(new Error(nodeRequirement), { code: 'UNSUPPORTED_NODE' });
@@ -26,10 +27,69 @@ function findNpmCli() {
   return found;
 }
 
-if (process.env.FORGE_ACTIONS_PLAN) {
+/** This entry runs the definition trial (src/check-definition-trial.ts reads this line as data). */
+export const CHECK_DEFINITION_TRIAL = 1;
+
+/** Definition trial (docs/operations/github-actions-checks.md#definition-trial): main's executor already
+ * ran main's plan (FORGE_ACTIONS_PLAN) on this Candidate. This runs what this tree's own definition
+ * selects beyond it, with this tree's own executor. It adds tests; it never replaces main's. */
+async function definitionTrial() {
+  // This tree's executor loads first: a change that breaks it fails here, not on every later check.
   const { runActionsCheck } = await import('./github-actions-check.mjs');
+  const { standardSelection, sourceFiles } = await import('./test-impact.mjs');
+  const { browserSelection, isBrowserTest } = await import('./browser-test-policy.mjs');
+  const plan = JSON.parse(readFileSync(process.env.FORGE_ACTIONS_PLAN, 'utf8'));
+  const files = sourceFiles();
+  const own = browserSelection(
+    standardSelection({ files, env: { FORGE_CHECK_FULL: '1' } }),
+    undefined,
+    files,
+  );
+  const planned = new Set(plan.groups.flat());
+  const extra = own.tests.filter(
+    test => !planned.has(test) || (isBrowserTest(test) && own.browser && !plan.selection?.browser),
+  );
+  const named = extra.slice(0, 20).join(', ') + (extra.length > 20 ? ', ...' : '');
+  console.log(
+    `Definition trial: this tree's definition selects ${own.tests.length} test files; ${extra.length} beyond main's plan${extra.length ? `: ${named}` : ''}.`,
+  );
+  if (!extra.length) return;
+  const folder = mkdtempSync(join(tmpdir(), 'forge-definition-trial-'));
+  const trialPlan = join(folder, 'plan.json');
+  writeFileSync(
+    trialPlan,
+    JSON.stringify({
+      ...plan,
+      pool: undefined,
+      selection: {
+        ...plan.selection,
+        scope: 'scoped',
+        reason: 'Definition trial',
+        tests: extra,
+        browser: own.browser,
+      },
+      groups: [extra],
+    }),
+  );
+  // A test job already built this Candidate; the static job did not.
+  const build = process.env.FORGE_ACTIONS_SHARD === 'static';
+  Object.assign(process.env, { FORGE_ACTIONS_PLAN: trialPlan, FORGE_ACTIONS_SHARD: '0' });
+  delete process.env.FORGE_ACTIONS_POOL_PART;
   try {
-    runActionsCheck();
+    runActionsCheck(execFileSync, { install: false, build, coverage: false });
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+}
+
+if (process.env.FORGE_ACTIONS_PLAN) {
+  // The trial child (FORGE_CHECK_TRIAL=1) is set only by the fixed supervisor, beside main's own job.
+  const check =
+    process.env.FORGE_CHECK_TRIAL === '1'
+      ? definitionTrial
+      : (await import('./github-actions-check.mjs')).runActionsCheck;
+  try {
+    await check();
   } catch (error) {
     // A failed child already printed its own output; anything else would otherwise exit silently.
     if (error.status == null && !error.signal) console.error(error);

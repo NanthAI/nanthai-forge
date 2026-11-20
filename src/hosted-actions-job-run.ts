@@ -40,6 +40,13 @@ import { secretScanFailureCommand, type SecretScanResult } from './secret-scan.j
 import { junitDirEnv } from './junit-report.js';
 import { junitDirectory, mergeJunitReports, readJunitReports } from './junit-report-files.js';
 import { writeCheckPackages } from './package-graph-checkout.js';
+import {
+  DEFINITION_TRIAL_ENV,
+  declaresDefinitionTrial,
+  definitionTrialShard,
+  runDefinitionTrial,
+} from './check-definition-trial.js';
+import { STANDARD_CHECK_ENTRY } from './standard-check.js';
 /** A failing command that names the pinned plan refusal's code and message. */
 export function planErrorCommand(executable: string, error: { code: string; message: string }) {
   return [
@@ -220,6 +227,9 @@ async function executeActiveActionsJob(
       "console.error('SOURCE_HASH_MISMATCH: Actions setup verification failed.'); process.exitCode = 1;",
     ];
   }
+  // A check-definition change's trial job reads the verified Candidate's entry as data, before its code runs.
+  const trialJob = definitionTrialShard(recipe) === index;
+  const trialDeclared = trialJob && !setupFailed && declaresDefinitionTrial(directory);
   // A secret the plan step found fails the static job before project code runs.
   const secretScan = recipe.selection?.secretScan as
     | Pick<SecretScanResult, 'findings' | 'more' | 'selfAllowed'>
@@ -298,8 +308,9 @@ async function executeActiveActionsJob(
           inputs: packages ? [packages.folder] : [],
         })
       : undefined;
-  /** One executor process. `part` is the shard pool part: kept files, or one unit (tests only). */
-  const spawnPart = (part?: string) => {
+  /** One executor process. `part` is the shard pool part: kept files, or one unit (tests only).
+   * `trial` runs the Candidate's own check entry instead; its output is log only, never evidence. */
+  const spawnPart = (part?: string, trial = false) => {
     const env: Record<string, string> = {
       ...(childEnv({
         allow: [
@@ -319,10 +330,11 @@ async function executeActiveActionsJob(
       ...(part ? { FORGE_ACTIONS_POOL_PART: part } : {}),
       ...(packages ? { FORGE_CHECK_PACKAGES: packages.path } : {}),
       ...(packages?.run ? { FORGE_CHECK_PACKAGES_RUN: packages.run } : {}),
-      [junitDirEnv]: junit.directory,
+      ...(trial ? { [DEFINITION_TRIAL_ENV]: '1' } : { [junitDirEnv]: junit.directory }),
       FORGE_TEST_MODULE_DIRECTORY: modules,
     };
-    const argv = isolation.mode === 'user' ? isolation.command(command, env, directory, paths) : command;
+    const launch = trial ? [process.execPath, STANDARD_CHECK_ENTRY] : command;
+    const argv = isolation.mode === 'user' ? isolation.command(launch, env, directory, paths) : launch;
     const child = spawn(argv[0]!, argv.slice(1), {
       cwd: directory,
       shell: false,
@@ -334,7 +346,7 @@ async function executeActiveActionsJob(
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (text: string) => {
       process.stdout.write(text);
-      reports.accept(text);
+      if (!trial) reports.accept(text);
       access?.accept(text);
       observe(Buffer.from(text));
     });
@@ -420,6 +432,13 @@ async function executeActiveActionsJob(
     } else if (exitCode && browserShard && !browserCachePresent(browserCache))
       // The provider-stage guard fails before any test reports: still say why.
       note(`Forge: browser tests did not run. ${cause}`);
+    if (trialJob)
+      exitCode ||= await runDefinitionTrial({
+        declared: trialDeclared,
+        failed: Boolean(exitCode) || setupFailed,
+        spawn: () => spawnPart(undefined, true),
+        note,
+      });
   } finally {
     if (isolation.mode === 'user') for (const path of [junit.directory, modules]) isolation.remove(path);
     else {

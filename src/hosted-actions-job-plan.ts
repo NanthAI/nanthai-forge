@@ -46,6 +46,7 @@ import { isStandardForgeCheck } from './standard-check.js';
 import { commandSelection, commandShardCount, commandShardGroups } from './check-command-scope.js';
 import { lockfileDigest } from './project-lockfile.js';
 import { graphShareFor, isGraphFirstGate } from './graph-first-check.js';
+import { definitionTrialPaths, definitionTrialSelection } from './check-definition-trial.js';
 /** The base (main) allow file's bytes. Usually cached already (unchanged, or from the base
  * pack); otherwise one small object read, only when the base has the file. Unreadable
  * means no allow entries: findings then fail, never pass. */
@@ -163,6 +164,8 @@ export async function prepareActionsJob(
     tests: selected.tests,
     ...(standard ? { browser: Boolean('browser' in selected && selected.browser) } : {}),
     ...('fallback' in selected && selected.fallback ? { fallback: selected.fallback } : {}),
+    // A check-definition change's trial: the browser job (else static) also runs its own definition.
+    ...('trial' in selected && selected.trial ? { trial: selected.trial } : {}),
     ...(docs ? { testedDocs: docs } : {}),
     // The checked head's manifest package graph: the first-check proof places in-package manifests by it.
     ...checkedPackagePlacement(files.keys(), path => files.get(path)),
@@ -361,7 +364,20 @@ export function actionsGateSelection(
   members: RecheckMembers = null,
   graphCache: object = {},
 ) {
-  const raw = gateSelection(run, paths, files, standard, mainPaths, members, graphCache);
+  const gated = gateSelection(run, paths, files, standard, mainPaths, members, graphCache);
+  // A change to the check definition runs main's full check plus a trial of its own (src/check-definition-trial.ts).
+  const trial = standard ? definitionTrialPaths(run.check, run.gate, paths) : null;
+  const raw = trial
+    ? definitionTrialSelection(gated, trial, () =>
+        standardSelection({
+          paths,
+          files,
+          semanticTests: semanticTests(run.semanticPlan),
+          env: { FORGE_CHECK_FULL: '1' },
+          graphCache,
+        }),
+      )
+    : gated;
   // Gate probes, contract unions and rechecks can select nothing; that must never pass.
   const selected = standard ? guardedSelection(raw, { files, paths }) : raw;
   // Why the command could not be narrowed or skipped, pinned with the selection (7c2e69e1).

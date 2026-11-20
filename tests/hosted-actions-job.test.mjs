@@ -1495,6 +1495,73 @@ test('Issue 3b67363d: the supervisor drops the runner tokens from its environmen
   // Embedding callers that never requested a Candidate user keep running, and say so.
   assert.equal(job.posting().result.isolation, 'shared');
 });
+/** Item 687d1eda: a static job (shared mode) on a Candidate that adds `changed`. A changed
+ * scripts/forge-check.mjs is a stub entry recording that the trial ran, and printing a test report.
+ * The caller silences stdout once per test (a second mock of the same method would outlive the test). */
+async function definitionTrialJob(t, { changed, exit = 0, declared = true }) {
+  const s = fixture(t);
+  const marker = join(s.directory, 'trial-ran');
+  const stub =
+    (declared ? 'export const CHECK_DEFINITION_TRIAL = 1;\n' : '') +
+    "import { writeFileSync } from 'node:fs';\n" +
+    `writeFileSync(${JSON.stringify(marker)}, [process.env.FORGE_CHECK_TRIAL, process.env.FORGE_JUNIT_DIR ?? 'no-junit'].join(' '));\n` +
+    "console.log('__FORGE_TESTS__' + JSON.stringify({ file: 'tests/trial-only.test.mjs', complete: true, durationMs: 5, results: [{ passed: true }] }));\n" +
+    `process.exitCode = ${exit};\n`;
+  const candidateState = s.state([
+    ...s.files,
+    s.entry('tests/a.test.mjs', ''),
+    s.entry(changed, changed === 'scripts/forge-check.mjs' ? stub : 'export const changed = 1;\n'),
+  ]);
+  s.run.request.expectedHead = candidateState.sha256;
+  const candidate = join(s.directory, 'candidate'),
+    prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+  const path = join(s.directory, 'plan.json');
+  writeFileSync(path, JSON.stringify(prepared.recipe));
+  isolateCandidates({ mode: 'shared', reason: 'synthetic runner' });
+  t.after(() => isolateCandidates(null));
+  s.client.run.configuration = { ...s.client.run.configuration, isolation: 'shared' };
+  const posted = [];
+  const realCall = s.client.call.bind(s.client);
+  s.client.call = async command => {
+    if (command.kind !== 'result') return realCall(command);
+    posted.push(command);
+    return {};
+  };
+  const code = await executeActionsJob(s.client, candidate, path, 'static', [process.execPath, '--eval', '']);
+  const [{ result, logBytes }] = posted;
+  return {
+    code,
+    recipe: prepared.recipe,
+    result,
+    log: Buffer.from(logBytes ?? '', 'base64').toString(),
+    ran: existsSync(marker) ? readFileSync(marker, 'utf8') : null,
+  };
+}
+test('Item 687d1eda: a check-definition change runs its own entry beside main’s job; its reports are never evidence', async t => {
+  t.mock.method(process.stdout, 'write', () => true);
+  const passed = await definitionTrialJob(t, { changed: 'scripts/forge-check.mjs' });
+  assert.equal(passed.recipe.selection.scope, 'full');
+  assert.deepEqual(passed.recipe.selection.trial, { paths: ['scripts/forge-check.mjs'] });
+  assert.equal(passed.code, 0);
+  assert.equal(passed.ran, '1 no-junit', 'the trial child gets FORGE_CHECK_TRIAL and no JUnit folder');
+  assert.equal(passed.result.contractReports['tests/trial-only.test.mjs'], undefined);
+  assert.match(passed.log, /Definition trial passed/);
+  const failed = await definitionTrialJob(t, { changed: 'scripts/forge-check.mjs', exit: 3 });
+  assert.equal(failed.code, 1);
+  assert.equal(failed.result.exitCode, 1);
+  assert.match(failed.log, /Definition trial failed \(exit 3\): main's check passed/);
+  const dropped = await definitionTrialJob(t, { changed: 'scripts/forge-check.mjs', declared: false });
+  assert.equal(dropped.code, 1);
+  assert.equal(dropped.ran, null, 'an entry without the declaration never runs as the trial');
+  assert.match(dropped.log, /no longer declares CHECK_DEFINITION_TRIAL/);
+});
+test('Item 687d1eda: a change outside the check definition pins no trial and runs none', async t => {
+  t.mock.method(process.stdout, 'write', () => true);
+  const ordinary = await definitionTrialJob(t, { changed: 'src/changed.ts' });
+  assert.equal(ordinary.recipe.selection.trial, undefined);
+  assert.equal(ordinary.code, 0);
+  assert.doesNotMatch(ordinary.log, /Definition trial/);
+});
 const withoutInlineLog = hostedActionsCapabilities.filter(value => value !== actionsInlineLogCapability);
 test('fixed supervisor records actual child exit, strips OIDC env and posts bounded output', async t => {
   const s = fixture(t, { capabilities: withoutInlineLog }),

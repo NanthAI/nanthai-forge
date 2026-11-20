@@ -447,6 +447,57 @@ private repository in about 29 s end to end (one static job).
 This sends only synthetic source, creates a run-owned ref, dispatches one tiny job
 and removes the ref after recording success. It does not land Forge source.
 
+### Definition trial
+
+A hosted check always runs main's check definition: the pinned control checkout's workflow,
+planner and executor. So a Lane that changes that definition is judged by main's version,
+never its own, and its own version never ran before it lands (Item 687d1eda: a landing that made
+landing checks run browser tests landed on main's selection, and the tests it enabled were already
+red). Forge handles this the way a pull request that edits a workflow runs its own copy, without
+letting the edit judge itself:
+
+- **The rule.** A Lane that changes the check definition is checked by main's full definition, plus
+  one trial of its own definition beside it. The trial runs in addition to main's check, never
+  instead of it.
+- **What counts as the definition.** For Forge's standard check (`node scripts/forge-check.mjs`):
+  its entry and inputs (`STANDARD_CHECK_INPUTS`), its selection inputs
+  (`STANDARD_SELECTION_INPUTS`, both in `src/standard-check.ts`), the check contract and Forge's
+  Actions workflow and local actions (`.github/workflows/forge-check.yml`, `.github/actions/`). The
+  same coverage paths name a culprit landing (`coverageChangePaths` in `src/first-check-risk.ts`).
+  Other `.github/` files, a main audit and a failed-file probe get no trial.
+- **Main's side.** The planner, reading paths only, widens such a Lane to main's full selection
+  (with every browser test) and pins `selection.trial` (the definition paths) in the plan
+  (`src/check-definition-trial.ts`). It never narrows: a gate that already chose full keeps its
+  selection. A Lane whose own selector claims nothing runs, or that deletes a check, is still judged by
+  main's full selection.
+- **The trial.** After its own command passes, the browser job (else the static job) runs the
+  Candidate's `scripts/forge-check.mjs` once more with `FORGE_CHECK_TRIAL=1`, as the same Candidate
+  user. That entry loads this tree's own executor, computes this tree's own full selection, and runs,
+  with its own executor, every test it selects that main's plan did not run (none, usually; a new
+  kind of check test, or browser tests main left out). The trial's output goes to the job log only:
+  its test reports and JUnit files are never check evidence. Its failure fails the job; its pass
+  decides nothing.
+- **It is not dropped by accident.** The supervisor reads `export const CHECK_DEFINITION_TRIAL = 1;`
+  from the Candidate's entry as data before any Candidate code runs. An entry without it fails the
+  trial job. This catches a definition change that loses the trial; it is not a guard against a
+  hostile Lane, which could keep the line and make its trial run nothing. That is harmless: the
+  trial only adds work, main's full check still judges the Lane, and `scripts/forge-check.mjs` is a
+  protected path that needs a person's approval to land.
+- **Cost.** A Lane that changes no definition path pins nothing new and runs no trial: the same
+  recipe, Convex calls and runner minutes as before. A definition Lane pays main's full check (most
+  already ran full) plus a few seconds of trial selection, more only when the trial finds tests to
+  run. No Convex call is added.
+
+What the trial does not cover: the Candidate's own workflow YAML and its TypeScript planner and
+supervisor do not run until they are on main's control checkout (running them before landing would
+need a pushed Candidate ref with the runner repository's secrets). Their unit tests run in main's
+full check, and the main audit after landing names the definition landing as the culprit if a newly
+run test fails ([culprit attribution](../pre-queue-checks.md)). Tests that main's plan already
+ran are not rerun under the Candidate's executor. When there is nothing extra to run, the Candidate's executor is only
+loaded. Modules that `scripts/test-impact.mjs` imports but `STANDARD_SELECTION_INPUTS` does not
+list are not yet definition paths. If the Candidate's own browser policy finds browser tests main's
+plan left out, the trial runs them in the static job, which fails closed when it has no browser.
+
 ### JUnit XML reports from any check
 
 Forge's own check prints `__FORGE_TESTS__` markers. Any other check command can instead
