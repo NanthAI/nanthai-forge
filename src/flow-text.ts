@@ -7,12 +7,15 @@
  */
 import { FLOW_TOOK, flowToday, type FlowDay } from './flow-day.js';
 
-export type FlowStop = 'editing' | 'saved' | 'checking' | 'ready';
+/** A Lane's stage in the feed. */
+type FlowStage = 'editing' | 'saved' | 'queued' | 'checking' | 'ready';
+/** A stop on the line; 'ready' (its check passed) counts at Checking. */
+export type FlowStop = 'editing' | 'saved' | 'queued' | 'checking';
 /** The line feed's reply, as this module reads it. */
 export type FlowFeed = {
   lanes: readonly {
     laneId: string;
-    stage: FlowStop;
+    stage: FlowStage;
     held: boolean;
     overlap: boolean;
     changedAt: number;
@@ -25,12 +28,13 @@ export type FlowFeed = {
   flow?: FlowDay | { hours: number[][]; took: number[][]; main?: { red: boolean; since: number } };
 };
 
-/** The line's stop words (web/src/app/Line.tsx, lane-state.ts `stopWords`): one vocabulary everywhere. */
-export const flowStops: readonly { stop: FlowStop; word: string }[] = [
-  { stop: 'editing', word: 'Editing' },
-  { stop: 'saved', word: 'Saved' },
-  { stop: 'checking', word: 'Checking' },
-  { stop: 'ready', word: 'Ready to land' },
+/** The line's stops and the stages each counts (web/src/app/Line.tsx `lineStops`): one vocabulary and one count
+ * everywhere. A Lane whose check passed ('ready') counts at Checking, as passed. */
+export const flowStops: readonly { stop: FlowStop; word: string; of: readonly FlowStage[] }[] = [
+  { stop: 'editing', word: 'Editing', of: ['editing'] },
+  { stop: 'saved', word: 'Saved', of: ['saved'] },
+  { stop: 'queued', word: 'In queue', of: ['queued'] },
+  { stop: 'checking', word: 'Checking', of: ['checking', 'ready'] },
 ];
 /** Held Lanes named per stop; the rest are counted. */
 const NAMED = 3;
@@ -51,8 +55,8 @@ const clock = (ms: number, day?: number) =>
 /** One stop's figures, as the picture and the text both read them. A Lane held only because main is failing
  * waits on no person, so it is held but not "needs you". */
 export function flowStations(feed: FlowFeed, now: number) {
-  return flowStops.map(({ stop, word }) => {
-    const at = feed.lanes.filter(lane => lane.stage === stop);
+  return flowStops.map(({ stop, word, of }) => {
+    const at = feed.lanes.filter(lane => of.includes(lane.stage));
     const held = at.filter(lane => lane.held);
     const checks = new Map<string, number>();
     for (const lane of at) if (lane.check) checks.set(lane.check, (checks.get(lane.check) ?? 0) + 1);
@@ -61,6 +65,8 @@ export function flowStations(feed: FlowFeed, now: number) {
       word,
       open: at.length,
       held: held.length,
+      /** Checks that passed and wait to land (stage 'ready'). */
+      passed: at.filter(lane => lane.stage === 'ready' && !lane.held).length,
       needsYou: held.filter(lane => !lane.mainRed).length,
       mainRed: held.filter(lane => lane.mainRed).length,
       longestMs: at.length ? Math.max(...at.map(lane => now - lane.changedAt)) : null,
@@ -89,6 +95,7 @@ export function flowText(feed: FlowFeed, now: number, root = '.') {
   for (const s of stations) {
     const parts = [`${s.word.padEnd(width)}  ${String(s.open).padStart(3)}`];
     if (s.checks.length) parts.push(`in ${plural(s.checks.length, 'check')} (${s.checks.join(', ')})`);
+    if (s.passed) parts.push(`${s.passed} passed, landing`);
     if (s.held) {
       const named = s.heldLanes
         .slice(0, NAMED)

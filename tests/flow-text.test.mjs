@@ -30,6 +30,8 @@ test('flow is one line feed read and draws each stop with the top bar’s counts
     lane('checking', { check: 'aaaaaaaa' }),
     lane('checking', { check: 'aaaaaaaa' }),
     lane('checking', { check: 'bbbbbbbb' }),
+    lane('queued'),
+    lane('ready'),
   ];
   let day = stepFlow(undefined, now - 3_600_000, { landed: 3, took: 300, ciSeconds: 600 });
   day = stepFlow(day, now, { landed: 1, fix: 1, took: 900, ciSeconds: 120, lostSeconds: 120 });
@@ -43,11 +45,17 @@ test('flow is one line feed read and draws each stop with the top bar’s counts
     'one read: the same feed the top bar subscribes to',
   );
   const { result } = reply;
-  // One source: every stop's count is the feed's Lanes at that stop, as the top bar line counts them.
+  // One source: every stop's count is the feed's Lanes at that stop, as the top bar line counts them; a passed check
+  // ('ready') counts at Checking, and In queue is its own stop (Item 85f456c1 lead decision).
+  const of = { editing: ['editing'], saved: ['saved'], queued: ['queued'], checking: ['checking', 'ready'] };
+  assert.deepEqual(
+    result.stops.map(s => s.stop),
+    ['editing', 'saved', 'queued', 'checking'],
+  );
   for (const stop of result.stops)
-    assert.equal(stop.open, lanes.filter(l => l.stage === stop.stop).length, stop.stop);
+    assert.equal(stop.open, lanes.filter(l => of[stop.stop].includes(l.stage)).length, stop.stop);
   const lines = result.text.split('\n');
-  assert.match(lines[0], /8 open Lanes, 1 needs a person/, 'a main-red hold asks no person');
+  assert.match(lines[0], /10 open Lanes, 1 needs a person/, 'a main-red hold asks no person');
   assert.match(
     lines.find(l => l.startsWith('Editing')),
     /longest 1 h 15 min/,
@@ -58,11 +66,11 @@ test('flow is one line feed read and draws each stop with the top bar’s counts
   );
   assert.match(
     lines.find(l => l.startsWith('Checking')),
-    /in 2 checks \(2, 1\)/,
+    /in 2 checks \(2, 1\) +1 passed, landing +1 held: .* \(main is failing\)/,
   );
   assert.match(
-    lines.find(l => l.startsWith('Ready to land')),
-    /\(main is failing\)/,
+    lines.find(l => l.startsWith('In queue')),
+    /^In queue +1 /,
   );
   assert.match(
     lines.find(l => l.startsWith('main')),
@@ -104,6 +112,7 @@ test('flow says when main is failing, counts Lanes past the feed’s page and is
   assert.deepEqual(
     flowStations({ lanes: [], more: 0, moreIsLowerBound: false, main: null }, now).map(s => s.open),
     [0, 0, 0, 0],
+    'four stops: Editing, Saved, In queue, Checking',
   );
 });
 

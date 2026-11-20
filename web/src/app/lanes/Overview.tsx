@@ -18,7 +18,7 @@ import {
   sharedFiles,
   sharesByLane,
   situation,
-  stopWords,
+  stopLabel,
   yardReady,
   type Filter,
 } from './model';
@@ -85,7 +85,7 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
               ? 'loading'
               : shown.length === yard.rows.length
                 ? 'stuck work first'
-                : `${shown.length.toLocaleString()} of ${yard.rows.length.toLocaleString()} shown${stop && stop in stopWords ? `, at ${stopWords[stop as keyof typeof stopWords]}` : ''}`
+                : `${shown.length.toLocaleString()} of ${yard.rows.length.toLocaleString()} shown${stopLabel(stop)}`
           }
         >
           {!yard ? (

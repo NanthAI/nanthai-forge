@@ -126,6 +126,7 @@ export function entriesOf(reply: Reply, files: readonly ReviewFile[]): Entry[] {
 export const STOPS: readonly { stage: LineStage | 'main'; label: string }[] = [
   { stage: 'editing', label: 'Editing' },
   { stage: 'saved', label: 'Saved' },
+  { stage: 'queued', label: 'In queue' },
   { stage: 'checking', label: 'Checking' },
   { stage: 'ready', label: 'Ready to land' },
   { stage: 'main', label: 'main' },

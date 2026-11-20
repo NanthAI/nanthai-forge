@@ -2163,6 +2163,13 @@ marks, main and an overflow count: exact through 100 initialized Lanes,
 time in `projectLiveLineLanes`. Saved-head ownership and hundred-mark transition
 pages stay outside the subscription in `projectFinishReadRows`.
 
+The line has four stops, each counting stages: Editing, Saved, In queue
+(`queued`: submitted, waiting for its check) and Checking (`checking`, and
+`ready` once its check passed). The top bar, the Flow picture on Needs me, the
+Lanes `?stop=` filter, the public project page and `nforge agent ROOT flow` all
+count stops from this one list (`lineStops` in `web/src/app/Line.tsx`, mirrored
+by `flowStops` in `src/flow-text.ts`), so a stop's count is the same everywhere.
+
 Existing writes update changed marks atomically, including main-red holds.
 Heartbeat/holder/name/device changes leave marks alone. Holds and overlaps keep
 stage time; resolving the last conflict clears both flags. Closed/landed marks

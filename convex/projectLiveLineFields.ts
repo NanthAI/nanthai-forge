@@ -4,6 +4,8 @@ import { v } from 'convex/values';
 export const liveLineStage = v.union(
   v.literal('editing'),
   v.literal('saved'),
+  /** Submitted, waiting for its check (Item 85f456c1): set from the submission's phase on the patch it already writes. */
+  v.literal('queued'),
   v.literal('checking'),
   v.literal('ready'),
 );

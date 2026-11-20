@@ -3,7 +3,9 @@
 // body: `?data=busy` holds a protected-path approval and a question, with an agent's conflict, a refusal and a
 // person's own failed check under FYI beside landings and a settings change, plus Lanes parked for the reader (Item
 // e1633718): one named to them, one with no one named idle 5 h (shown) and one idle 1 h (not yet); `?data=first` is a
-// first day with one approval.
+// first day with one approval. The Flow picture (Item 85f456c1) draws the line feed: `busy` holds its held Lanes at
+// Saved, In queue and Checking among moving work; `?data=calm` is the same project with nothing waiting on the reader;
+// `?data=worst` is 56 open Lanes with long handles, right-to-left and 50+ character titles and a request asked ahead.
 // The shell's Needs you count comes from the same rule as the page (needs/count.ts).
 import { createRoot } from 'react-dom/client';
 import '../../web/src/ds';
@@ -18,6 +20,8 @@ const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
 const first = params.get('data') === 'first';
 const connect = params.get('data') === 'connect';
+const calm = params.get('data') === 'calm';
+const worst = params.get('data') === 'worst';
 const writes: unknown[] = [];
 (window as unknown as { writes: unknown[] }).writes = writes;
 
@@ -239,44 +243,138 @@ const loose: LooseEndsRead = {
 };
 
 // `?data=connect` (Item c63c2171): an agent's GitHub connect asked ahead, in its words; its grant continues to GitHub.
-const read: NeedsRead = connect
-  ? {
-      held: [],
-      more: 0,
-      moreIsLowerBound: false,
-      approvals: JSON.stringify({
-        requests: [
-          {
-            ...approval(
-              'setting:github-connect',
-              'Mirror main to synthetic/repo so reviewers on GitHub see each landing.',
-              4,
-            ),
-            kind: 'setting',
-            setting: { origin: 'github-connect' },
-          },
-        ],
-        complete: true,
-      }),
-      canDecide: true,
-      asks: [],
-    }
-  : baseRead;
-const feed: LineFeed = {
-  lanes: [
-    ...read.held.map(row => ({
-      laneId: row.laneId,
-      stage: 'saved' as const,
-      held: true,
-      overlap: false,
-      changedAt: row.since,
-    })),
-    { laneId: uuid(80), stage: 'checking', held: false, overlap: false, changedAt: ago(3) },
-    { laneId: uuid(81), stage: 'editing', held: false, overlap: false, changedAt: ago(1) },
+const LONG = 'a-handle-much-longer-than-any-real-one/an-agent-name-longer-still-for-tags';
+const RTL = 'تحديث مكتبة الاختبار لدعم البث المتقطع في المحولات الجديدة';
+const worstRead: NeedsRead = {
+  held: [
+    lane(1, 'review', 14, { title: RTL, actor: LONG.split('/')[0], agent: LONG.split('/')[1] }),
+    lane(2, 'review', 9, {
+      title: 'Streaming adapters: retry with backoff, jitter and a per-host budget for every transport',
+      agent: LONG.split('/')[1],
+    }),
+    lane(3, 'conflict', 6, {
+      title: 'Docs: الأسئلة الشائعة about queue limits and fairness',
+      agent: 'still-heron',
+    }),
   ],
   more: 0,
   moreIsLowerBound: false,
+  approvals: JSON.stringify({
+    requests: [
+      approval(uuid(2), 'Changes .github/workflows/release.yml, a protected path.', 9),
+      approval(uuid(1), `${RTL}: changes a protected path.`, 14),
+      {
+        ...approval('setting:runner', '', 31),
+        kind: 'setting',
+        reason: `${LONG.split('/')[1]} asks to let 8 checks run at once: ${RTL}`,
+        setting: { origin: 'runner' },
+      },
+    ],
+    complete: true,
+  }),
+  canDecide: true,
+  asks: [],
+};
+const read: NeedsRead = worst
+  ? worstRead
+  : calm
+    ? {
+        held: [],
+        more: 0,
+        moreIsLowerBound: false,
+        approvals: JSON.stringify({ requests: [], complete: true }),
+        canDecide: true,
+        asks: [],
+      }
+    : connect
+      ? {
+          held: [],
+          more: 0,
+          moreIsLowerBound: false,
+          approvals: JSON.stringify({
+            requests: [
+              {
+                ...approval(
+                  'setting:github-connect',
+                  'Mirror main to synthetic/repo so reviewers on GitHub see each landing.',
+                  4,
+                ),
+                kind: 'setting',
+                setting: { origin: 'github-connect' },
+              },
+            ],
+            complete: true,
+          }),
+          canDecide: true,
+          asks: [],
+        }
+      : baseRead;
+type Mark = LineFeed['lanes'][number];
+const moving = (n: number, stage: Mark['stage'], minutes: number, check?: string): Mark => ({
+  laneId: uuid(400 + n),
+  stage,
+  held: false,
+  overlap: false,
+  changedAt: ago(minutes),
+  ...(check ? { check } : {}),
+});
+// Where each held Lane stands: the failed check back at Saved, a refusal in the queue, an approval at Checking.
+const heldAt = {
+  'check-failed': 'saved',
+  conflict: 'saved',
+  rejected: 'queued',
+  review: 'ready',
+  unknown: 'ready',
+};
+// Today on the line: landings per hour since 06:00, a needs fix, a revert, CI minutes (src/flow-day.ts).
+const hourOf = (minutes: number) => Math.floor(ago(minutes) / 3_600_000);
+const flow: NonNullable<LineFeed['flow']> = {
+  hours: Array.from({ length: 9 }, (_, i) => [
+    hourOf((8 - i) * 60),
+    [4, 9, 12, 7, 11, 14, 10, 13, 12][i]!,
+    i === 5 ? 2 : i === 7 ? 1 : 0,
+    i === 6 ? 1 : 0,
+    0,
+    3600 + i * 600,
+    i === 5 ? 1200 : 0,
+  ]),
+  took: Array.from({ length: 20 }, (_, i) => [hourOf(i * 20), 240 + ((i * 97) % 600)]),
+  main: { red: false, since: ago(400) },
+};
+const busyLanes: Mark[] = [
+  ...read.held.map(row => ({
+    laneId: row.laneId,
+    stage: (heldAt[row.why as keyof typeof heldAt] ?? 'saved') as Mark['stage'],
+    held: true,
+    overlap: row.why === 'conflict',
+    changedAt: row.since,
+  })),
+  ...Array.from({ length: 6 }, (_, i) => moving(i, 'editing', 5 + i * 7)),
+  ...Array.from({ length: 3 }, (_, i) => moving(10 + i, 'saved', 3 + i)),
+  ...Array.from({ length: 3 }, (_, i) => moving(20 + i, 'queued', 2 + i)),
+  moving(30, 'checking', 4, 'c0ffee01'),
+  moving(31, 'checking', 4, 'c0ffee01'),
+  moving(32, 'checking', 2, 'c0ffee02'),
+  moving(33, 'ready', 1),
+];
+// 56 open Lanes: the held three among 53 moving ones across the stops.
+const worstLanes: Mark[] = [
+  ...busyLanes.filter(mark => mark.held),
+  ...Array.from({ length: 53 }, (_, i) =>
+    moving(
+      100 + i,
+      (['editing', 'editing', 'saved', 'queued', 'checking'] as const)[i % 5]!,
+      1 + i,
+      i % 5 === 4 ? `c0ffee0${i % 3}` : undefined,
+    ),
+  ),
+];
+const feed: LineFeed = {
+  lanes: first || connect ? [moving(81, 'editing', 1)] : worst ? worstLanes : busyLanes,
+  more: 0,
+  moreIsLowerBound: false,
   main: { head: 'b'.repeat(64), at: new Date(ago(62)).toISOString() },
+  ...(first || connect ? {} : { flow }),
 };
 
 const route = {

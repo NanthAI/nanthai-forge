@@ -36,6 +36,7 @@ export type LaneState = {
 export const stopWords: Record<LineStage, string> = {
   editing: 'Editing',
   saved: 'Saved',
+  queued: 'In queue',
   checking: 'Checking',
   ready: 'Ready to land',
 };
@@ -134,6 +135,15 @@ export function laneState(mark: LaneMark, landing?: CurrentLanding | null): Lane
           : landing?.state === 'queued'
             ? 'waiting for its turn'
             : 'its check is running',
+      note: null,
+    };
+  if (mark.stage === 'queued')
+    return {
+      ...base,
+      kind: 'waiting',
+      glyph: 'Waiting its turn',
+      word: stopWords.queued,
+      why: 'waits for its check',
       note: null,
     };
   if (mark.stage === 'ready')

@@ -2,10 +2,14 @@
 // The line's slot in the top bar (Item 18af654d owns the marks, their motion and the feed). The frame draws the stops
 // and their counts from the feed's shared contract (convex/projectLiveLine.ts `liveLineResult`); until the feed
 // arrives it draws the stops with no counts, so nothing moves when it does. Each stop links to Lanes at that stop.
+// The stops are the Flow picture's (Item 85f456c1): Editing, Saved, In queue, Checking; a Lane whose check passed
+// ('ready') counts at Checking, so the line, the picture and Lanes count every stop alike (`lineStops`).
 import { hrefFor } from './paths';
 import { followLink } from './router';
 
-export type LineStage = 'editing' | 'saved' | 'checking' | 'ready';
+export type LineStage = 'editing' | 'saved' | 'queued' | 'checking' | 'ready';
+/** A stop on the line: the stages it counts. */
+export type LineStop = 'editing' | 'saved' | 'queued' | 'checking';
 /** The feed's shape (liveLineResult), restated so the frame does not import Convex server code. */
 export type LineFeed = {
   lanes: readonly {
@@ -28,11 +32,18 @@ export type LineFeed = {
   flow?: { hours: number[][]; took: number[][]; main?: { red: boolean; since: number } };
 };
 
-const stops: readonly { stage: LineStage; label: string; short: string }[] = [
-  { stage: 'editing', label: 'Editing', short: 'Edit' },
-  { stage: 'saved', label: 'Saved', short: 'Saved' },
-  { stage: 'checking', label: 'Checking', short: 'Check' },
-  { stage: 'ready', label: 'Ready to land', short: 'Ready' },
+/** The line's stops in order, each with the stages it counts. One list for the top bar, the Flow picture and the
+ * Lanes filter (`?stop=`), so every count of a stop is the same count. */
+export const lineStops: readonly {
+  stage: LineStop;
+  label: string;
+  short: string;
+  of: readonly LineStage[];
+}[] = [
+  { stage: 'editing', label: 'Editing', short: 'Edit', of: ['editing'] },
+  { stage: 'saved', label: 'Saved', short: 'Saved', of: ['saved'] },
+  { stage: 'queued', label: 'In queue', short: 'Queue', of: ['queued'] },
+  { stage: 'checking', label: 'Checking', short: 'Check', of: ['checking', 'ready'] },
 ];
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -55,8 +66,8 @@ export function Line({
       aria-label="Where work is"
       aria-busy={feed ? undefined : true}
     >
-      {stops.map(stop => {
-        const at = feed?.lanes.filter(lane => lane.stage === stop.stage) ?? [];
+      {lineStops.map(stop => {
+        const at = feed?.lanes.filter(lane => stop.of.includes(lane.stage)) ?? [];
         const held = at.filter(lane => lane.held).length;
         const shown = phone ? stop.short : stop.label;
         // The name starts with what the stop shows ("Editing 1"), so speech and voice control match the screen.

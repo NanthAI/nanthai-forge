@@ -18,8 +18,9 @@ const shots = process.env.FORGE_LANE_SHOTS || null;
 const DESK = { width: 1440, height: 1000 };
 const PHONE = { width: 390, height: 844 };
 const FIXTURE = 'tests/browser/lanes-progress.tsx';
-// The Checking stop runs 2 to 3 on a track of 0 to 4; a running check goes from 2.1 to 2.9 (model.ts CHECK_FROM/TO).
-const placeAt = minutes => 2.1 + 0.8 * Math.min(1, minutes / 10);
+// The Checking stop runs 3 to 4 on a track of 0 to 4 (the line's stops: Editing, Saved, In queue, Checking); a running
+// check goes from 3.1 to 3.7 (model.ts CHECK_FROM/TO) and a passed one rests at 3.85 (Item 85f456c1).
+const placeAt = minutes => 3.1 + 0.6 * Math.min(1, minutes / 10);
 
 async function buildFixture(out) {
   const { build } = await import(pathToFileURL(join(root, 'node_modules/vite/dist/node/index.js')).href);
@@ -115,14 +116,14 @@ test('the yard: a running check says its time, sits by elapsed / usual and glide
         ['Checking', 'waiting', 'overdue: over 18 min usually about 10 min'],
         'past the usual slowest: overdue in the warning tone',
       );
-      assert.ok(Math.abs(overdue.at - 2.9) < 0.02 && !overdue.moving, 'overdue holds at the end of the stop');
+      assert.ok(Math.abs(overdue.at - 3.7) < 0.02 && !overdue.moving, 'overdue holds at the end of the stop');
       const passed = row(all, 'Account Projects');
       assert.equal(passed.word, 'Ready to land');
-      assert.ok(Math.abs(passed.at - 3.5) < 0.02, 'a pass rests on the ready stop');
+      assert.ok(Math.abs(passed.at - 3.85) < 0.02, 'a pass rests at the end of Checking');
       const failed = row(all, 'Public pages');
       assert.deepEqual([failed.word, failed.tone], ['Check failed', 'failed']);
       assert.ok(
-        !failed.moving && Math.abs(failed.at - 2.5) < 0.02,
+        !failed.moving && Math.abs(failed.at - 3.4) < 0.02,
         'a failure rests in its stop, not moving',
       );
     });

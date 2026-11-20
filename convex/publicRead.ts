@@ -151,7 +151,7 @@ async function lanesOf(
     .query('projectLiveLineLanes')
     .withIndex('by_project_and_held', q => q.eq('projectId', project._id))
     .take(101);
-  const stops = { editing: 0, saved: 0, checking: 0, ready: 0 };
+  const stops = { editing: 0, saved: 0, queued: 0, checking: 0, ready: 0 };
   let held = 0,
     overlap = 0;
   for (const mark of marks) {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// The yard (DESIGN.md figures): every open Lane on the shell's four stops and main, in bands, stuck work first. The
+// The yard (DESIGN.md figures): every open Lane on the shell's four stops (Editing, Saved, In queue, Checking) and main, in bands, stuck work first. The
 // counts per stop are the shell strip's alone, never repeated here (owner dogfood 2026-11-17). Each
 // row is a link to its Lane; the band that waits on the reader is the first stop. Static markup: no behaviour layer.
 // A running check (Item ecd6e610) says how long it has run against the project's usual check, and its mark glides
@@ -25,8 +25,15 @@ import {
   type YardRow,
 } from './model';
 
-/** Where on the track a Lane sits: the middle of its stop (0 to 4, main at 4). */
-const place: Record<LineStage, number> = { editing: 0.5, saved: 1.5, checking: 2.5, ready: 3.5 };
+/** Where on the track a Lane sits: the middle of its stop on the line's four stops (0 to 4, main at 4). A passed
+ * check ('ready') counts at Checking (Line.tsx `lineStops`) and rests near its end, past a running check. */
+const place: Record<LineStage, number> = {
+  editing: 0.5,
+  saved: 1.5,
+  queued: 2.5,
+  checking: 3.4,
+  ready: 3.85,
+};
 const order: readonly BandName[] = ['needs', 'queue', 'work', 'quiet'];
 
 export function Yard({

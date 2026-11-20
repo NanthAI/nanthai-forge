@@ -14,7 +14,7 @@ import { Avatar, Glyph, Sheet, Standing, State, initials } from '../ds';
 import { ForgeMark } from '../shell/brand';
 import { followLink } from '../app/router';
 import { stopWords } from '../app/lane-state';
-import type { LineStage } from '../app/Line';
+import { lineStops, type LineStage } from '../app/Line';
 import { hrefFor, type AppRoute } from '../app/paths';
 import {
   usePublicRead,
@@ -500,10 +500,8 @@ function Profile({ handle, signedIn }: { handle: string; signedIn: boolean }) {
 
 /* ---------- a public project's front page ---------- */
 
-/** The app's stop words (lane-state.ts), so a visitor and a member name a Lane's place the same way. */
-const STOPS = (['editing', 'saved', 'checking', 'ready'] as const).map(
-  stop => [stop, stopWords[stop]] as const,
-);
+/** The line's stops (Line.tsx `lineStops`), so a visitor and a member name and count a Lane's place the same way. */
+const STOPS = lineStops.map(stop => [stop.stage, stop.label, stop.of] as const);
 const isStop = (stage: string): stage is LineStage => stage in stopWords;
 
 function Project({ handle, slug }: { handle: string; slug: string }) {
@@ -602,12 +600,15 @@ function Project({ handle, slug }: { handle: string; slug: string }) {
               <span className="hint">where each one is on its way to main</span>
             </div>
             <div className="pstops">
-              {STOPS.map(([stop, label]) => (
-                <div key={stop} className={lanes[stop] ? undefined : 'z'}>
-                  {label}
-                  <b>{nf.format(lanes[stop])}</b>
-                </div>
-              ))}
+              {STOPS.map(([stop, label, of]) => {
+                const n = of.reduce((sum, stage) => sum + (lanes[stage] ?? 0), 0);
+                return (
+                  <div key={stop} className={n ? undefined : 'z'}>
+                    {label}
+                    <b>{nf.format(n)}</b>
+                  </div>
+                );
+              })}
               <div className="mn">
                 {activity.recordedSince ? 'Recorded' : 'Landed'}
                 <b

@@ -59,6 +59,8 @@ export type ProjectPage = {
     more: boolean;
     editing: number;
     saved: number;
+    /** Absent from a page cached before the In queue stop (Item 85f456c1). */
+    queued?: number;
     checking: number;
     ready: number;
     held: number;

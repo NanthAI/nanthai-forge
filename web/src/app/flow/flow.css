@@ -1,0 +1,124 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* The Flow picture on Needs me (Item 85f456c1, direction B): flat fills in the state tokens, no glow, gradient or
+   shadow; labels sit on the plain page. Every colour, font, radius and duration is a token. Nothing here loops. */
+[data-ds] {
+  .flow { position: relative; background: var(--bg); }
+  .fv-pic { position: relative; background: var(--bg); overflow: hidden; }
+  .fv-pic > svg { display: block; position: absolute; left: 0; top: 0; overflow: visible; }
+
+  /* platforms, tracks, the ways back */
+  .fv-track { fill: none; stroke: var(--key-edge); stroke-width: 2; }
+  .fv-rail { fill: none; stroke: var(--text-3); stroke-width: 1.2; stroke-dasharray: 2 4; }
+  .fv-rail.live { stroke: var(--failed); stroke-dasharray: none; }
+  .fv-arrow { fill: var(--text-3); }
+  .fv-arrow.live { fill: var(--failed); }
+  .fv-plat .top { fill: var(--surface-2); stroke: var(--line-strong); stroke-width: 1; }
+  .fv-plat .l { fill: var(--surface-3); }
+  .fv-plat .r { fill: var(--surface); stroke: var(--line); stroke-width: 1; }
+  .fv-plat.zero .top { fill: var(--surface); stroke-dasharray: 3 4; }
+
+  /* a block per open Lane, in its state's colour; the glyph on top says why it is held */
+  .fv-cube { color: var(--st, var(--text-3)); }
+  .fv-cube .t { fill: currentColor; }
+  .fv-cube .l { fill: color-mix(in srgb, currentColor 64%, var(--bg)); }
+  .fv-cube .r { fill: color-mix(in srgb, currentColor 40%, var(--bg)); }
+  .fv-cube path { stroke: var(--bg); stroke-width: 1; stroke-linejoin: round; }
+  .fv-cube .g { fill: none; stroke: var(--bg); stroke-width: 1.8; stroke-linecap: round; }
+  .fv-cube .hole { fill: var(--bg); stroke: none; }
+
+  /* main: today's landings, hour by hour */
+  .fv-strata .l { fill: var(--surface-3); }
+  .fv-strata .r { fill: var(--surface-2); }
+  .fv-strata path { stroke: var(--line-strong); stroke-width: 1; stroke-linejoin: round; }
+  .fv-strata .seam { fill: none; }
+  .fv-strata .t { fill: var(--passed); }
+  .fv-strata.red .t { fill: var(--failed); }
+  .fv-strata .g { fill: none; stroke: var(--bg); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* a stop's label: name and count; at full size beside its platform, smaller above or below it */
+  .fv-stn { position: absolute; display: grid; gap: 1px; padding: 6px var(--s-2); border-radius: var(--r); color: var(--text-2); min-width: 0; }
+  .fv-stn .n { font: var(--w-strong) var(--t-meta)/1.3 var(--font-sans); color: var(--text-2); white-space: nowrap; }
+  .fv-stn .c { font: var(--w-bold) 30px/1 var(--font-sans); letter-spacing: var(--head-track); font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; }
+  .fv-stn .c small { font: var(--w-regular) var(--t-meta)/1 var(--font-sans); letter-spacing: 0; color: var(--text-2); margin-left: 5px; }
+  .fv-stn .f { display: flex; flex-wrap: wrap; gap: 2px 6px; font-size: var(--t-meta); line-height: 1.35; color: var(--text-3); max-width: 21ch; overflow-wrap: anywhere; }
+  .fv-stn .f .st { font-size: inherit; }
+  .fv-stn.zero .c { color: var(--text-3); }
+  .fv-stn.r { text-align: right; justify-items: end; }
+  .fv-stn.inl { grid-template-columns: auto auto; align-items: baseline; justify-content: end; column-gap: 7px; padding: 3px 6px; }
+  .fv-stn.inl .f, .fv-stn.inl .tags { grid-column: 1 / -1; }
+  .fv-stn.inl.up { transform: translateX(-50%); justify-content: center; text-align: center; }
+  .fv-stn .tags { display: grid; gap: 4px; justify-items: end; margin-top: 4px; min-width: 0; }
+  .fv-stn.up .tags { justify-items: center; }
+  .fv-stn .more { font-size: var(--t-micro); color: var(--text-3); }
+  .fv-pic[data-tier="1"] .fv-stn .c { font-size: 24px; }
+  .fv-pic[data-tier="0"] .fv-stn .c { font-size: 20px; }
+
+  /* a held block's tag: its state word and its agent; it goes to the Lane's row under Needs you */
+  .fv-tag { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; height: 20px; padding: 0 6px; background: var(--bg); border: var(--rule) solid var(--st); border-radius: var(--r); color: var(--st); font: var(--w-strong) var(--t-micro)/1 var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none; }
+  .fv-pic > .fv-tag { position: absolute; max-width: 240px; }
+  .fv-tag svg { flex: none; }
+  .fv-tag span { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); font-weight: var(--w-regular); font-family: var(--font-mono); }
+  a.fv-tag:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  @media (hover: hover) and (pointer: fine) { a.fv-tag:hover { background: var(--st); color: var(--bg); } a.fv-tag:hover span { color: inherit; } }
+
+  .fv-back { position: absolute; display: inline-flex; align-items: baseline; gap: 6px; padding: 0 6px; background: var(--bg); color: var(--text-2); font-size: var(--t-meta); white-space: nowrap; }
+  .fv-back b { color: var(--text); font-family: var(--font-mono); font-size: calc(1em * var(--mono-scale)); font-weight: var(--w-strong); }
+  .fv-back.hot b { color: var(--failed); }
+  .fv-pic[data-tier="0"] .fv-back { font-size: var(--t-micro); }
+
+  /* the five figures, then one line for checks */
+  .flow-figs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: var(--surface); border-top: var(--rule) solid var(--line); }
+  .flow-figs > * { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 var(--s-2); align-content: start; padding: var(--s-2) var(--gut); border-left: var(--rule) solid var(--line); min-width: 0; color: inherit; text-decoration: none; }
+  .flow-figs > :first-child { border-left: 0; }
+  @media (hover: hover) and (pointer: fine) { .flow-figs > a:hover { background: var(--hover); } }
+  .flow-figs > a:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .flow-figs .k { grid-column: 1 / -1; color: var(--text-2); font-size: var(--t-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .flow-figs > a > b { font: var(--w-bold) var(--t-lead)/var(--lh-head) var(--font-sans); letter-spacing: var(--head-track); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .flow-figs > a > b .st { font-size: inherit; font-weight: inherit; }
+  .flow-figs > a > b .nr { color: var(--text-3); font-size: var(--t-small); font-weight: var(--w-regular); }
+  .flow-figs .s { grid-column: 1 / -1; color: var(--text-3); font-size: var(--t-meta); min-width: 0; overflow-wrap: anywhere; }
+  .flow-figs .s b { font-family: var(--font-mono); font-size: calc(1em * var(--mono-scale)); font-weight: var(--w-medium); color: var(--text-2); }
+  .flow-spark { display: flex; align-items: flex-end; gap: 2px; height: 20px; align-self: end; }
+  .flow-spark i { width: 4px; background: var(--text-3); border-radius: var(--r-bar) var(--r-bar) 0 0; min-height: 1px; }
+  .flow-spark i.now { background: var(--text); }
+  @container (max-width: 700px) {
+    .flow-figs { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .flow-figs > * { grid-column: span 2; }
+    .flow-figs > :nth-child(n + 4) { grid-column: span 3; border-top: var(--rule) solid var(--line); }
+    .flow-figs > :nth-child(4) { border-left: 0; }
+    .flow-spark { display: none; }
+    .flow-chk .ci { margin-left: 0; flex-basis: 100%; }
+  }
+  @container (max-width: 420px) {
+    .flow-figs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .flow-figs > *, .flow-figs > :nth-child(n + 4) { grid-column: auto; }
+    .flow-figs > * { border-top: var(--rule) solid var(--line); }
+    .flow-figs > :nth-child(-n + 2) { border-top: 0; }
+    .flow-figs > :nth-child(odd) { border-left: 0; }
+    .flow-figs > :nth-child(4) { border-left: var(--rule) solid var(--line); }
+    .flow-figs > :last-child { grid-column: 1 / -1; }
+  }
+  .flow-chk { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--s-3); min-height: var(--row-h); padding: var(--s-2) var(--gut); border-top: var(--rule) solid var(--line); background: var(--surface); color: var(--text-2); font-size: var(--t-meta); }
+  .flow-chk > b { color: var(--text); font-size: var(--t-small); font-weight: var(--w-strong); }
+  .flow-chk .ci { margin-left: auto; }
+  .flow-chk .ci b { color: var(--text); font-family: var(--font-mono); font-size: calc(1em * var(--mono-scale)); font-weight: var(--w-strong); }
+
+  /* below desk width the stops are flat rows (the phone's picture) */
+  .flow-rows { display: none; margin: 0; padding: 0; list-style: none; }
+  .flow-row { display: grid; grid-template-columns: 84px minmax(0, 1fr); grid-template-areas: "n w" "c w"; column-gap: var(--s-3); align-items: center; min-height: 56px; padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); }
+  .flow-row .n { grid-area: n; align-self: end; font: var(--w-strong) var(--t-meta)/1.3 var(--font-sans); color: var(--text-2); }
+  .flow-row .c { grid-area: c; align-self: start; font: var(--w-bold) 22px/1.1 var(--font-sans); letter-spacing: var(--head-track); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .flow-row .c small { font: var(--w-regular) var(--t-micro)/1 var(--font-sans); letter-spacing: 0; color: var(--text-2); margin-left: 4px; }
+  .flow-row.zero .c { color: var(--text-3); }
+  .flow-row .w { grid-area: w; display: flex; flex-wrap: wrap; gap: 4px var(--s-2); align-items: center; min-width: 0; }
+  .flow-row .f { font-size: var(--t-meta); color: var(--text-3); min-width: 0; overflow-wrap: anywhere; }
+  @media (max-width: 860px) {
+    .flow-desk { display: none; }
+    .flow-rows { display: block; }
+    .flow-chk .ci { margin-left: 0; flex-basis: 100%; }
+  }
+
+  /* a row under Needs you reached from a tag marks itself once */
+  .flow-here { animation: ds-settle var(--d-travel) var(--ease-out); }
+  @media (prefers-reduced-motion: reduce) { .flow-here { animation: none; } }
+}

@@ -160,7 +160,8 @@ test('a running check says its time against the usual check, overdue past the sl
   const bare = model.checkProgress({ ...clock, usualMs: null, slowMs: null }, start + 5 * min, time);
   assert.deepEqual(
     [bare.why, bare.detail, bare.at, bare.nextAt],
-    ['started 10:00', 'usual time not reported yet', 2.5, Infinity],
+    // The middle of a running check's span on Checking (CHECK_FROM to CHECK_TO), wherever the stop sits.
+    ['started 10:00', 'usual time not reported yet', (model.CHECK_FROM + model.CHECK_TO) / 2, Infinity],
   );
   // Waiting for a runner is said first, the time beside it.
   const runner = model.checkProgress({ ...clock, note: 'waiting for a runner' }, start + 3 * min, time);

@@ -3,7 +3,7 @@
 // yard's words and counts are the shell's; the existing Lane page, queue view and overlap view add the title, the
 // person, the reason it is held and the queue order. Pure and read-free: every count here comes from rows in hand and
 // says when the rows are not all of them.
-import type { LineFeed, LineStage } from '../Line';
+import { lineStops, type LineFeed, type LineStage } from '../Line';
 import type { StateKind, StateWord } from '../../ds';
 import { QUIET_MS } from '../../../../src/lane-quiet';
 import { currentEntries, landingOf, laneState, notLandedWhy, stopWords, waitLine } from '../lane-state';
@@ -121,10 +121,11 @@ export type CheckClock = {
   note: string | null;
 };
 
-/** Where on the Checking stop a running check sits (the track runs 0 to 4, main at 4): from just inside its start
- * to just inside its end, so the mark never sits on a stop's edge. */
-export const CHECK_FROM = 2.1;
-export const CHECK_TO = 2.9;
+/** Where on the Checking stop a running check sits (the track runs 0 to 4 over the line's four stops, main at 4):
+ * from just inside its start to short of where a passed check rests (Yard.tsx `place.ready`), so the mark never sits
+ * on a stop's edge. */
+export const CHECK_FROM = 3.1;
+export const CHECK_TO = 3.7;
 const MINUTE = 60_000;
 const minutes = (ms: number) => Math.max(1, Math.round(ms / MINUTE));
 
@@ -262,7 +263,11 @@ export function buildYard(
       const lane = meta.get(mark.laneId);
       if (!lane) return [];
       const inFlight =
-        entries.has(mark.laneId) || mark.held || mark.stage === 'checking' || mark.stage === 'ready';
+        entries.has(mark.laneId) ||
+        mark.held ||
+        mark.stage === 'queued' ||
+        mark.stage === 'checking' ||
+        mark.stage === 'ready';
       return [
         {
           laneId: mark.laneId,
@@ -361,7 +366,7 @@ export function buildYard(
     return {
       ...base,
       check,
-      band: mark.stage === 'checking' || mark.stage === 'ready' ? 'queue' : 'work',
+      band: mark.stage === 'queued' || mark.stage === 'checking' || mark.stage === 'ready' ? 'queue' : 'work',
       // "no save yet" only when the Lane read says so; a Lane outside that read says nothing it does not know.
       why:
         said.why ||
@@ -441,9 +446,16 @@ export function filterRows(rows: readonly YardRow[], filter: Filter, viewer: str
   return rows;
 }
 
+/** ", at In queue" for a stop picked on the top bar; nothing for none. */
+export const stopLabel = (stop: string | null) => {
+  const at = lineStops.find(entry => entry.stage === stop);
+  return at ? `, at ${at.label}` : '';
+};
+
 /** A stop picked on the top bar (`?stop=`) narrows the yard to the Lanes at that stop. */
 export function atStop(rows: readonly YardRow[], stop: string | null) {
-  return stop && stop in stopWords ? rows.filter(row => row.stage === stop) : rows;
+  const at = lineStops.find(entry => entry.stage === stop);
+  return at ? rows.filter(row => at.of.includes(row.stage)) : rows;
 }
 
 export type SharedFile = { path: string; laneIds: string[] };

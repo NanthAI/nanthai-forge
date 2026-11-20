@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Needs me (Items 9e748e41, 12fde646, 48049998), the project's front page, in three sections and nothing else:
+// Needs me (Items 9e748e41, 12fde646, 48049998, 85f456c1), the project's front page, in four sections and nothing else:
+// - On the way to main (watch weight, flow/Flow.tsx): the Flow picture of every open Lane, the day's figures and one
+//   line for checks, from the shell's line feed and the Needs you rows below (no read of its own). It replaced
+//   "Moving without you". Left column; while Needs you holds anything the picture gives it width (1 : 1.1).
 // - Needs you (the one first stop, act weight): what waits on the reader, longest held first, with one-click answers;
 //   requests asked ahead are listed under it and not counted. The count is the shell's (count.ts).
 // - FYI (watch weight): what the reader may want to know but need not act on, newest first, with figures for the
@@ -8,7 +11,7 @@
 //   folded region reads nothing.
 // Reads, sent together: projectNeedsMe:read (shared with the shell's count), projectNeedsFyi:read and the planning
 // counts; Loose ends while open. All re-run only on server writes; idle and hidden tabs cost nothing.
-import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { api } from '../../../../convex/_generated/api';
@@ -34,6 +37,7 @@ import { Head, Placeholder, crumbsFor } from '../Place';
 import { progressCells, progressOf, type PlanCountsRead } from '../progress';
 import type { PlaceProps } from '../screens';
 import GettingStarted from '../start/GettingStarted';
+import { FlowRegion } from '../flow/Flow';
 import { needsRead } from './count';
 import {
   fyiSum,
@@ -75,7 +79,8 @@ const dormantAbandon = makeFunctionReference<
   { projectId: Id<'hostedProjects'>; authorityEpoch: number; abandon: string[] },
   string
 >('projectHostedDormant:abandon');
-const LAYOUT: DockLayout = { top: ['needs'], a: ['fyi'], b: ['loose'] };
+/** The approved home (Item 85f456c1): the picture and FYI on the left, Needs you and Loose ends on the right. */
+const LAYOUT: DockLayout = { top: [], a: ['flow', 'fyi'], b: ['needs', 'loose'] };
 /** Shown at most this many per band; the rest open in place, oldest last (DESIGN.md rule 43). */
 const CAP = 4;
 /** FYI rows shown before "Show more". */
@@ -188,7 +193,8 @@ export function NeedsMeView({
 }) {
   // Drawn times are relative to when the view was drawn; nothing ticks (idle costs nothing). A Lane parked with no one
   // named shows once 4 h idle by this same time (count.ts parkShown).
-  const drawnAt = useMemo(() => now ?? Date.now(), [read, fyi, now]);
+  // The line feed draws the picture's day, so a new landing redraws against a new time too.
+  const drawnAt = useMemo(() => now ?? Date.now(), [read, fyi, feed, now]);
   const view = useMemo(() => (read ? needsView(read, drawnAt) : null), [read, drawnAt]);
   const items = progressOf(counts);
   const [layout, setLayout, resetLayout] = useDockLayout('needs-me', LAYOUT);
@@ -201,7 +207,35 @@ export function NeedsMeView({
   const lanesOpen = feed ? feed.lanes.length + feed.more : null;
   const waiting = view ? view.now.length + view.asks.length + view.parked.length : 0;
 
+  // The picture's column is wide (1.6 : 1) until something waits on the reader, then gives Needs you the width
+  // (1 : 1.1); nothing changes place (approved home mock). The rule follows whichever column holds the picture.
+  const flowZone = layout.a.includes('flow') ? 'a' : layout.b.includes('flow') ? 'b' : null;
+  const held = !!view?.count;
+  const ratio = flowZone
+    ? ({
+        [`--col-${flowZone}`]: held ? '1fr' : '1.6fr',
+        [`--col-${flowZone === 'a' ? 'b' : 'a'}`]: held ? '1.1fr' : '1fr',
+      } as CSSProperties)
+    : undefined;
   const regions = [
+    {
+      id: 'flow',
+      title: 'On the way to main',
+      render: (handle: ReactNode) => (
+        <FlowRegion
+          feed={feed}
+          rows={view?.now ?? []}
+          needsYou={held}
+          handle={handle}
+          drawnAt={drawnAt}
+          hrefs={{
+            stats: at({ place: 'stats' }),
+            lanes: at({ place: 'lanes' }),
+            code: at({ place: 'code' }),
+          }}
+        />
+      ),
+    },
     {
       id: 'needs',
       title: 'Needs you',
@@ -341,7 +375,7 @@ export function NeedsMeView({
   ];
 
   return (
-    <div className="needs-me">
+    <div className="needs-me" data-held={held ? '' : undefined} style={ratio}>
       <Head
         trail={crumbsFor(route, projectName)}
         sentence={
@@ -463,7 +497,7 @@ function Held({
         ? 'What failed'
         : 'Open the Lane';
   return (
-    <div className="dec" data-st={row.word === 'Conflict' ? 'conflict' : undefined}>
+    <div className="dec" id={`d-${row.laneId}`} data-st={row.word === 'Conflict' ? 'conflict' : undefined}>
       <div className="dtop">
         <State word={row.word}>{row.tag}</State>
         <span>
