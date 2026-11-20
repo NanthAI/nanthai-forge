@@ -82,11 +82,14 @@ async function hear(page, scope, act) {
 async function tabTo(page, label) {
   const wanted = [label].flat();
   await page.locator('h1').click();
+  const visited = [];
   for (let i = 0; i < 60; i++) {
     await page.keyboard.press('Tab');
-    if (wanted.includes(await active(page))) return;
+    const label = await active(page);
+    if (wanted.includes(label)) return;
+    visited.push(label.slice(0, 80));
   }
-  assert.fail(`Tab never reached ${wanted.join(' or ')}`);
+  assert.fail(`Tab never reached ${wanted.join(' or ')}. Visited: ${visited.join(' | ')}`);
 }
 
 /** The list as drawn: row names top to bottom, the numbers shown, and where the targeted drop line sits. */
@@ -188,7 +191,10 @@ test('the reference surface: reorder, dock, late layer, axe and widths in both t
       return route.fulfill({ contentType, body: readFileSync(file) });
     });
     await page.goto('https://forge.test/ds.html');
-    if (!hold) await page.locator('.ds-list[role=grid]').waitFor();
+    if (!hold) {
+      await page.locator(`${DOCK} .ds-region`).first().waitFor();
+      await page.locator('.ds-list[role=grid] > .ds-row').first().waitFor();
+    }
     t.after(async () => {
       await context.close();
       assert.deepEqual(errors, [], 'no page errors');
@@ -220,14 +226,48 @@ test('the reference surface: reorder, dock, late layer, axe and widths in both t
       },
     );
 
+    await t.test('a Dock grip keeps a press through behaviour attachment and opens one menu', async t => {
+      for (const viewport of [DESK, PHONE]) {
+        const { page, release } = await open(t, viewport, { hold: true });
+        const notes = page.getByRole('button', { name: 'Move Notes', exact: true });
+        await notes.hover();
+        await page.mouse.down();
+        release();
+        await page.locator('.ds-list[role=grid]').waitFor();
+        assert.equal(await page.locator(DOCK).count(), 0, 'the Dock grip does not swap during its press');
+        await page.mouse.up();
+        const wide = page.getByRole('menuitem', { name: 'Full width' });
+        await hear(page, DOCK, () => wide.click());
+        assert.deepEqual((await zones(page)).top, ['needs', 'notes']);
+        assert.equal(await page.getByRole('menu').count(), 0, 'the move does not reopen the initial menu');
+      }
+    });
+
+    await t.test('a touch press opens the desktop Dock grip menu on a hybrid device', async t => {
+      const { page } = await open(t);
+      const notes = page.locator(`${DOCK} .ds-drag[aria-label="Move Notes"]`);
+      await notes.scrollIntoViewIfNeeded();
+      const bounds = await notes.boundingBox();
+      assert.ok(bounds, 'the desktop grip is visible with a fine pointer');
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchStart',
+        touchPoints: [{ x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }],
+      });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await hear(page, DOCK, () => page.getByRole('menuitem', { name: 'Full width' }).click());
+      assert.deepEqual((await zones(page)).top, ['needs', 'notes']);
+    });
+
     await t.test(
       'keyboard reorder: the drop line, the screen and the announcement agree after every move',
       async t => {
-        const { page } = await open(t);
         const moving = PLAN[1];
         for (const name of ['dark', 'light']) {
+          // Start each theme with a fresh grid, before another drag can leave its grip focused.
+          const { page } = await open(t);
           await theme(page, name);
-          await tabTo(page, PLAN); // a list is one Tab stop that remembers its row; Home goes to the first
+          await tabTo(page, PLAN);
           await page.keyboard.press('Home');
           assert.equal(await active(page), PLAN[0]);
           await page.keyboard.press('ArrowDown');
@@ -279,7 +319,7 @@ test('the reference surface: reorder, dock, late layer, axe and widths in both t
           assert.equal(await said(page, LIST), quiet);
           assert.equal(await active(page), `Move ${moving}`, 'focus is back on the handle');
 
-          // back to the start for the other theme, by the same keys
+          // Return the row to its original place using the same keys.
           await page.keyboard.press('Enter');
           await waitForDropTarget(page);
           const home = `${moving}, ${ordinal(start.indexOf(moving) + 1)}`;
@@ -341,6 +381,53 @@ test('the reference surface: reorder, dock, late layer, axe and widths in both t
       assert.deepEqual(await zones(phone), { top: ['notes', 'needs'], a: ['plan', 'lanes'], b: ['checks'] });
       assert.equal(await menu('Plan, in order', 'Reset layout'), 'Layout reset.');
       assert.deepEqual(await zones(phone), LAYOUT);
+    });
+
+    await t.test('keyboard Undo stays actionable at expiry and returns focus to the moved grip', async t => {
+      const { page } = await open(t);
+      await page.clock.install();
+      const moveChecks = async () => {
+        await page.locator(`${DOCK} .ds-drag[aria-label="Move Checks"]`).focus();
+        await page.keyboard.press('Enter');
+        await waitForDropTarget(page);
+        await page.keyboard.press('Tab');
+        await hear(page, DOCK, () => page.keyboard.press('Enter'));
+        assert.deepEqual((await zones(page)).top, ['needs', 'checks']);
+        // Finish the grid's post-drop focus handoff before moving focus to a toast action.
+        await page.clock.runFor(100);
+      };
+      const toast = page.locator('.dock-toast');
+      const activate = async name => {
+        await toast.getByRole('button', { name }).focus();
+        await page.clock.fastForward(10_000);
+        assert.equal(await active(page), name, 'the toast stays while its button has focus');
+        await hear(page, DOCK, () => page.keyboard.press('Enter'));
+        assert.deepEqual(await zones(page), LAYOUT);
+        await page.clock.runFor(100);
+        assert.equal(await active(page), 'Move Checks', 'focus returns to the grip after the layout changes');
+      };
+      await moveChecks();
+      await activate('Undo');
+      await moveChecks();
+      await activate('Reset layout');
+    });
+
+    await t.test('a saved Dock layout stays with its viewer on the same browser', async t => {
+      const { page } = await open(t);
+      const show = async viewer => {
+        await page.goto(`https://forge.test/ds.html?viewer=${viewer}`);
+        await page.locator('.ds-list[role=grid]').waitFor();
+        return zones(page);
+      };
+      assert.deepEqual(await show('sample-one'), LAYOUT);
+      await page.locator(`${DOCK} .ds-drag[aria-label="Move Notes"]`).click();
+      await hear(page, DOCK, () => page.getByRole('menuitem', { name: 'Full width' }).click());
+      assert.deepEqual(await show('sample-two'), LAYOUT);
+      assert.deepEqual(await show('sample-one'), {
+        top: ['needs', 'notes'],
+        a: ['plan', 'lanes'],
+        b: ['checks'],
+      });
     });
 
     await t.test(

@@ -24,6 +24,7 @@ const layout: DockLayout = {
   a: ['projects', 'months'],
   b: ['plan', 'next', 'pay', 'invoices'],
 };
+const memberLayout: DockLayout = { ...layout, b: ['plan'] };
 const skeleton = (
   <div className="billing-loading" aria-hidden="true">
     {[0, 1, 2, 3].map(n => (
@@ -58,9 +59,9 @@ export default function Billing() {
 
 function BillingHome({ state, snapshot, sample, view }: ScreenProps) {
   const [asTable, setAsTable] = useState(false);
-  const [arrangement, setArrangement, reset] = useDockLayout(
+  const [arrangement, setArrangement, reset, moved] = useDockLayout(
     `billing.${snapshot?.pool.owner.handle ?? 'sample'}.${view}`,
-    layout,
+    view === 'member' ? memberLayout : layout,
   );
   const owner = snapshot?.pool.owner.handle ?? '@sample-owner';
   const usage = snapshot ? poolUsage(snapshot.pool) : null;
@@ -161,10 +162,6 @@ function BillingHome({ state, snapshot, sample, view }: ScreenProps) {
       snapshot?.invoices?.total,
     ),
   ].filter(r => view !== 'member' || !['next', 'pay', 'invoices'].includes(r.id));
-  const currentLayout =
-    view === 'member'
-      ? { ...arrangement, b: arrangement.b.filter(id => !['next', 'pay', 'invoices'].includes(id)) }
-      : arrangement;
   return (
     <>
       <BillingHead
@@ -180,11 +177,18 @@ function BillingHome({ state, snapshot, sample, view }: ScreenProps) {
             : null
         }
         tools={
-          view === 'owner' || view === 'manager' ? (
-            <A className="btn" href={billingHref('plan', sample, view)}>
-              Change plan
-            </A>
-          ) : null
+          <>
+            {moved ? (
+              <Key kind="ghost" size="sm" onClick={reset}>
+                Reset layout
+              </Key>
+            ) : null}
+            {view === 'owner' || view === 'manager' ? (
+              <A className="btn" href={billingHref('plan', sample, view)}>
+                Change plan
+              </A>
+            ) : null}
+          </>
         }
       />
       {state.status === 'error' ? (
@@ -215,7 +219,7 @@ function BillingHome({ state, snapshot, sample, view }: ScreenProps) {
         <Dock
           label="Billing regions"
           regions={regions}
-          layout={currentLayout}
+          layout={arrangement}
           onLayout={setArrangement}
           onReset={reset}
         />

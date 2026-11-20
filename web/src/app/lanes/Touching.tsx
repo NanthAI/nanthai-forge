@@ -42,7 +42,7 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
   const { lanes, error: laneError } = useLaneMeta(projectId);
   const { queue, error: queueError } = useQueue(projectId);
   const shared = useSharedFiles(projectId);
-  const [layout, setLayout, resetLayout] = useDockLayout('touching', LAYOUT);
+  const [layout, setLayout, resetLayout, moved] = useDockLayout('touching', LAYOUT);
   const now = Date.now();
   const yard = useMemo(
     () =>
@@ -262,7 +262,6 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
       ),
     },
   ];
-  const moved = JSON.stringify(layout) !== JSON.stringify(LAYOUT);
   return (
     <>
       <Head

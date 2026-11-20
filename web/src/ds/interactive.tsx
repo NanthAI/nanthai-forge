@@ -2,7 +2,18 @@
 // The interactive parts as screens use them. Each draws its resting shape at first paint without the behaviour layer,
 // asks for the layer on the first press or focus (or once when idle), and swaps to the layer's part when it arrives,
 // keeping focus on the same control. A press made before the layer arrived is carried out when it does.
-import { useLayoutEffect, useRef, useState, type FocusEvent } from 'react';
+import {
+  createContext,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FocusEvent,
+  type MouseEventHandler,
+  type PointerEventHandler,
+} from 'react';
+import { createPortal } from 'react-dom';
 import type {
   ActionMenuProps,
   DockLayout,
@@ -13,9 +24,13 @@ import type {
   SheetProps,
 } from './behaviour';
 import { loadLayer, useLayer } from './layer';
+import { DockMount, useDockRegions, useHeldGrip } from './dock-regions';
 
 /** Same as the layer's default (behaviour/ReorderList.tsx), so the first-paint rows line up with the swapped ones. */
 const LIST_COLS = 'auto auto minmax(0, 1fr) auto';
+export const DockPerson = createContext<string | null | undefined>(undefined);
+
+const DOCK_ZONES = ['top', 'a', 'b'] as const;
 
 export type {
   DockLayout,
@@ -126,7 +141,17 @@ export function Palette(props: PaletteProps) {
   return layer ? <layer.Palette {...props} /> : null;
 }
 
-function Grip({ label, focusKey }: { label: string; focusKey: string }) {
+function Grip({
+  label,
+  focusKey,
+  onClick,
+  onPointerDown,
+}: {
+  label: string;
+  focusKey: string;
+  onClick?: MouseEventHandler<HTMLButtonElement>;
+  onPointerDown?: PointerEventHandler<HTMLButtonElement>;
+}) {
   return (
     <button
       type="button"
@@ -134,10 +159,15 @@ function Grip({ label, focusKey }: { label: string; focusKey: string }) {
       aria-label={label}
       data-focus-key={focusKey}
       onFocus={ask}
-      onPointerDown={ask}
+      onPointerEnter={onClick ? ask : undefined}
+      onPointerDown={event => {
+        onPointerDown?.(event);
+        ask();
+      }}
       onClick={event => {
         // Kept until the layer arrives, then carried out on the same handle (useSwapFocus).
-        markPress(event.currentTarget, focusKey);
+        if (onClick) onClick(event);
+        else markPress(event.currentTarget, focusKey);
         ask();
       }}
     >
@@ -181,74 +211,113 @@ export function ReorderList<T extends ReorderItem>(props: ReorderListProps<T>) {
 /** A screen's regions: a full-width row and two columns, each region moved by its handle. */
 export function Dock(props: DockProps) {
   const layer = useLayer();
-  const { box, onFocus } = useSwapFocus(!!layer);
-  const byId = new Map(props.regions.map(region => [region.id, region] as const));
+  const grip = useHeldGrip();
+  const activeLayer = grip.held ? null : layer;
+  const [initialMenu, setInitialMenu] = useState<string>();
+  const { box, onFocus } = useSwapFocus(!!activeLayer);
+  const shown = new Set(DOCK_ZONES.flatMap(zone => props.layout[zone]));
+  const byId = new Map(
+    props.regions.filter(region => shown.has(region.id)).map(region => [region.id, region]),
+  );
+  const regions = [...byId.values()];
+  const { hosts, content, onAttach } = useDockRegions(regions);
   return (
     <div ref={box} onFocus={onFocus} className="ds-swap">
-      {layer ? (
-        <layer.Dock {...props} />
+      {activeLayer ? (
+        <activeLayer.Dock
+          {...props}
+          regions={regions}
+          hosts={hosts}
+          onAttach={onAttach}
+          initialMenu={initialMenu}
+        />
       ) : (
         <div
           className="dock"
           role="group"
           aria-label={props.label}
-          data-shut={
-            (['top', 'a', 'b'] as const).filter(zone => !props.layout[zone].length).join(' ') || undefined
-          }
+          data-shut={DOCK_ZONES.filter(zone => !props.layout[zone].length).join(' ') || undefined}
         >
-          {(['top', 'a', 'b'] as const).map(zone => (
+          {DOCK_ZONES.map(zone => (
             <div key={zone} className="zone" data-zone={zone}>
               {props.layout[zone].map(id => {
                 const region = byId.get(id);
-                return region ? (
+                const host = hosts.get(id);
+                if (!region || !host) return null;
+                return (
                   <div key={id} className="ds-region">
-                    {region.render(<Grip label={`Move ${region.title}`} focusKey={`drag-${id}`} />)}
+                    <DockMount host={host.body} onAttach={onAttach} />
+                    {createPortal(
+                      <Grip
+                        label={`Move ${region.title}`}
+                        focusKey={`drag-${id}`}
+                        onPointerDown={grip.hold}
+                        onClick={event => {
+                          if (event.detail > 0 || matchMedia('(max-width: 860px), (pointer: coarse)').matches)
+                            setInitialMenu(id);
+                          else markPress(event.currentTarget, `drag-${id}`);
+                          grip.release();
+                        }}
+                      />,
+                      host.grip,
+                    )}
                   </div>
-                ) : null;
+                );
               })}
             </div>
           ))}
         </div>
       )}
+      {content}
     </div>
   );
 }
 
-/** A saved layout is kept only while it names exactly the screen's regions: one that names a removed region (or
- * misses a new one) gives way to the screen's own layout. */
+const sameOrder = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((id, index) => id === b[index]);
+
+/** Keep a saved layout only while it names exactly the screen's regions. */
 export function keptLayout(saved: DockLayout | null, initial: DockLayout): DockLayout {
-  const ids = (l: DockLayout) => [...l.top, ...l.a, ...l.b].sort().join();
-  return saved && ids(saved) === ids(initial) ? saved : initial;
+  if (!saved || !DOCK_ZONES.every(zone => Array.isArray(saved[zone]))) return initial;
+  const ids = (layout: DockLayout) => DOCK_ZONES.flatMap(zone => layout[zone]).sort();
+  return sameOrder(ids(saved), ids(initial)) ? saved : initial;
 }
 
-/** Layout of a dock kept on this browser per screen; written only when the reader moves a region. */
+/** Remember a dock on this browser per person and screen. Moves and resets each touch local storage once. */
 export function useDockLayout(
   screen: string,
   initial: DockLayout,
-): [DockLayout, (next: DockLayout) => void, () => void] {
-  const key = `forge.dock.${screen}`;
-  const [layout, setLayout] = useState<DockLayout>(() => {
+): [DockLayout, (next: DockLayout) => void, () => void, boolean] {
+  const person = useContext(DockPerson);
+  const key =
+    person === null
+      ? null
+      : person
+        ? `forge.dock.person:${encodeURIComponent(person)}:${screen}`
+        : `forge.dock.${screen}`;
+  const stored = useMemo(() => {
+    if (key === null) return null;
     try {
-      return keptLayout(JSON.parse(localStorage.getItem(key) ?? 'null') as DockLayout | null, initial);
+      return JSON.parse(localStorage.getItem(key) ?? 'null') as DockLayout | null;
     } catch {
-      return initial;
+      return null;
     }
-  });
-  const save = (next: DockLayout) => {
-    setLayout(next);
+  }, [key]);
+  const [edited, setEdited] = useState<{ key: string | null; layout: DockLayout | null } | null>(null);
+  const layout = useMemo(
+    () => keptLayout(edited?.key === key ? edited.layout : stored, initial),
+    [edited, initial, key, stored],
+  );
+  const save = (next: DockLayout | null) => {
+    setEdited({ key, layout: next });
+    if (key === null) return;
     try {
-      localStorage.setItem(key, JSON.stringify(next));
+      if (next) localStorage.setItem(key, JSON.stringify(next));
+      else localStorage.removeItem(key);
     } catch {
       // kept for this visit only
     }
   };
-  const reset = () => {
-    setLayout(initial);
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      // nothing stored
-    }
-  };
-  return [layout, save, reset];
+  const moved = DOCK_ZONES.some(zone => !sameOrder(layout[zone], initial[zone]));
+  return [layout, save, () => save(null), moved];
 }

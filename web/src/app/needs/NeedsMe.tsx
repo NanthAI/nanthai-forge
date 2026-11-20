@@ -64,7 +64,6 @@ import {
 } from './fyi';
 import { HeldSetting } from './HeldSetting';
 import { LooseFold } from './LooseFold';
-import { PhoneDock } from './PhoneDock';
 import {
   needsSentence,
   needsView,
@@ -95,6 +94,7 @@ const dormantAbandon = makeFunctionReference<
 >('projectHostedDormant:abandon');
 /** The approved home (Item 85f456c1): the picture and FYI on the left, Needs you and Loose ends on the right. */
 const LAYOUT: DockLayout = { top: [], a: ['flow', 'fyi'], b: ['needs', 'loose'] };
+const PHONE_LAYOUT: DockLayout = { top: ['needs', 'flow', 'fyi', 'loose'], a: [], b: [] };
 const PHONE = '(max-width: 860px)';
 function watchPhone(change: () => void) {
   const query = matchMedia(PHONE);
@@ -229,7 +229,10 @@ export function NeedsMeView({
     () => matchMedia(PHONE).matches,
     () => false,
   );
-  const [layout, setLayout, resetLayout] = useDockLayout('needs-me', LAYOUT);
+  const [layout, setLayout, resetLayout, moved] = useDockLayout(
+    phone ? 'needs-me-phone' : 'needs-me',
+    phone ? PHONE_LAYOUT : LAYOUT,
+  );
   const [message, announce] = useAnnounce();
   const list = useMemo(() => (fyi && view ? fyiView(fyi, view.fyi, drawnAt) : null), [fyi, view, drawnAt]);
   // Open by default (owner 2026-11-19): a folded Loose ends left an empty-looking box beside FYI.
@@ -481,7 +484,13 @@ export function NeedsMeView({
             'Loading what needs you…'
           )
         }
-      />
+      >
+        {moved ? (
+          <Key kind="ghost" size="sm" onClick={resetLayout}>
+            Reset layout
+          </Key>
+        ) : null}
+      </Head>
       <LaneHelp />
       {setup && view && !view.count ? setup : null}
       <Standing
@@ -498,17 +507,14 @@ export function NeedsMeView({
           },
         })}
       />
-      {phone ? (
-        <PhoneDock label="Regions on Needs me" regions={regions} />
-      ) : (
-        <Dock
-          label="Regions on Needs me"
-          regions={regions}
-          layout={layout}
-          onLayout={setLayout}
-          onReset={resetLayout}
-        />
-      )}
+      <Dock
+        label="Regions on Needs me"
+        regions={regions}
+        layout={layout}
+        onLayout={setLayout}
+        onReset={resetLayout}
+        singleColumn={phone}
+      />
       <Announcer message={message} />
     </div>
   );

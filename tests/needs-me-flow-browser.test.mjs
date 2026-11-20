@@ -91,7 +91,7 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
         };
         try {
           localStorage.setItem('forge.firstRun.lane', '1');
-          if (dock) localStorage.setItem('forge.dock.needs-me', dock);
+          if (dock) localStorage.setItem('forge.dock.person:sample-one:needs-me', dock);
         } catch {}
       },
       layout && JSON.stringify(layout),

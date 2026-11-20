@@ -4,7 +4,7 @@
 // public bar and column. Every control at first paint is a plain link or button; menus and sheets attach with the
 // behaviour layer (decisions.md, shared-base rule 3). Each frame has a skip link, one main landmark and the phone tabs.
 import type { ReactNode } from 'react';
-import { Avatar, Count, Menu, State, initials, type MenuAction } from '../ds';
+import { Avatar, Count, DockPerson, Menu, State, initials, type MenuAction } from '../ds';
 import { ForgeMark } from '../shell/brand';
 import { Line, type LineFeed } from './Line';
 import { useMark } from './mark';
@@ -217,7 +217,7 @@ export function ProjectFrame({
       </nav>
       <main id="main" tabIndex={-1}>
         <Strip route={route} />
-        {children}
+        <DockPerson value={controls.viewerHandle ?? null}>{children}</DockPerson>
       </main>
       <nav className="tabs" aria-label="Project">
         {tabPlaces.map(place => (
@@ -292,7 +292,7 @@ export function AccountFrame({
         ) : null}
       </nav>
       <main id="main" tabIndex={-1}>
-        {children}
+        <DockPerson value={controls.viewerHandle ?? null}>{children}</DockPerson>
       </main>
       <nav className="tabs" aria-label="Account" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
         {tabPlaces.map(name => (

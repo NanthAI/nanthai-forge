@@ -42,7 +42,7 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
   const { lanes, error: laneError } = useLaneMeta(projectId);
   const { queue, error: queueError } = useQueue(projectId);
   const shared = useSharedFiles(projectId);
-  const [layout, setLayout, resetLayout] = useDockLayout('lanes', LAYOUT);
+  const [layout, setLayout, resetLayout, moved] = useDockLayout('lanes', LAYOUT);
   // Ages ("saved 4 min ago") are worked out when the data changes, never on a timer. Rows wait for all three reads, so
   // a reload never paints titles, people or states that change a moment later (Item 31328be4).
   const yard = useMemo(
@@ -67,7 +67,6 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
   const shares = sharesByLane(files.files);
   const touching = hrefFor({ ...route, section: 'touching', rest: '' });
   const touchingFor = (laneId: string) => laneFocusHref(touching, laneId);
-  const moved = JSON.stringify(layout) !== JSON.stringify(LAYOUT);
 
   const regions = [
     {

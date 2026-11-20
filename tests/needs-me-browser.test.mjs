@@ -14,14 +14,18 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { chromium } from 'playwright';
+import { chromium, firefox, webkit } from 'playwright';
+import { checkDesktopDock, checkPhoneDock } from './browser/needs-me-dock.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const axePath = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
 const shots = process.env.FORGE_NEEDS_SHOTS || null;
 const DESK = { width: 1440, height: 1000 };
 const PHONE = { width: 390, height: 844 };
-const FIXTURE = 'tests/browser/needs-me.tsx';
+const FIXTURES = {
+  '/needs.html': 'tests/browser/needs-me.tsx',
+  '/dock-subscription.html': 'tests/browser/dock-subscription.tsx',
+};
 
 async function buildFixture(out) {
   const { build } = await import(pathToFileURL(join(root, 'node_modules/vite/dist/node/index.js')).href);
@@ -30,35 +34,66 @@ async function buildFixture(out) {
     root: join(root, 'web'),
     mode: 'hosted',
     logLevel: 'error',
-    build: { outDir: out, emptyOutDir: true, rolldownOptions: { input: { fixture: join(root, FIXTURE) } } },
+    build: {
+      outDir: out,
+      emptyOutDir: true,
+      rolldownOptions: {
+        input: Object.fromEntries(
+          Object.entries(FIXTURES).map(([url, file]) => [url.slice(1, -5), join(root, file)]),
+        ),
+      },
+    },
   });
   const output = (Array.isArray(result) ? result[0] : result).output;
-  const entry = output.find(item => item.isEntry && item.facadeModuleId?.endsWith(FIXTURE));
   const chunks = new Map(output.map(item => [item.fileName, item]));
-  const css = new Set();
-  const seen = new Set();
-  const walk = name => {
-    if (seen.has(name)) return;
-    seen.add(name);
-    const chunk = chunks.get(name);
-    for (const file of chunk?.viteMetadata?.importedCss ?? []) css.add(file);
-    for (const next of [...(chunk?.imports ?? []), ...(chunk?.dynamicImports ?? [])]) walk(next);
-  };
-  walk(entry.fileName);
-  return `<!doctype html><html lang="en" data-ds data-theme="dark"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Needs me fixture</title>${[...css].map(file => `<link rel="stylesheet" href="/${file}">`).join('')}</head><body><div id="root"></div><script type="module" src="/${entry.fileName}"></script></body></html>`;
+  return Object.fromEntries(
+    Object.entries(FIXTURES).map(([url, path]) => {
+      const entry = output.find(item => item.isEntry && item.facadeModuleId?.endsWith(path));
+      const css = new Set();
+      const seen = new Set();
+      const walk = name => {
+        if (seen.has(name)) return;
+        seen.add(name);
+        const chunk = chunks.get(name);
+        for (const file of chunk?.viteMetadata?.importedCss ?? []) css.add(file);
+        for (const next of [...(chunk?.imports ?? []), ...(chunk?.dynamicImports ?? [])]) walk(next);
+      };
+      walk(entry.fileName);
+      const html = `<!doctype html><html lang="en" data-ds data-theme="dark"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Needs me fixture</title>${[...css].map(file => `<link rel="stylesheet" href="/${file}">`).join('')}</head><body><div id="root"></div><script type="module" src="/${entry.fileName}"></script></body></html>`;
+      return [url, html];
+    }),
+  );
 }
 
 test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and widths in both themes', async t => {
   if (!existsSync(chromium.executablePath())) return t.skip('Playwright Chromium is not installed.');
   const out = mkdtempSync(join(tmpdir(), 'forge-needs-me-'));
+  t.after(() => rmSync(out, { recursive: true, force: true }));
   if (shots) mkdirSync(shots, { recursive: true });
   const html = await buildFixture(out);
   const browser = await chromium.launch();
-  async function open(t, viewport, data = 'busy', theme = 'dark') {
-    const context = await browser.newContext({ viewport });
+  async function open(
+    t,
+    viewport,
+    data = 'busy',
+    theme = 'dark',
+    { engine = browser, hasTouch = false, fixture = '/needs.html' } = {},
+  ) {
+    const context = await engine.newContext({ viewport, hasTouch });
     await context.addInitScript(() => {
       // Idle costs nothing: count every repeating timer the page sets.
       window.intervals = 0;
+      window.dockWrites = [];
+      for (const [method, kind] of [
+        ['setItem', 'set'],
+        ['removeItem', 'remove'],
+      ]) {
+        const write = Storage.prototype[method];
+        Storage.prototype[method] = function (key, ...args) {
+          if (this === localStorage && key.startsWith('forge.dock.')) window.dockWrites.push(kind);
+          return write.call(this, key, ...args);
+        };
+      }
       const original = window.setInterval;
       window.setInterval = (...args) => {
         window.intervals++;
@@ -76,7 +111,7 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       const url = new URL(route.request().url());
       if (url.protocol === 'data:') return route.continue();
       if (url.hostname !== 'forge.test') return route.abort();
-      if (url.pathname === '/needs.html') return route.fulfill({ contentType: 'text/html', body: html });
+      if (html[url.pathname]) return route.fulfill({ contentType: 'text/html', body: html[url.pathname] });
       const file = join(out, url.pathname.slice(1));
       if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
       const contentType = file.endsWith('.js')
@@ -86,9 +121,8 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
           : 'text/html';
       return route.fulfill({ contentType, body: readFileSync(file) });
     });
-    await page.goto(`https://forge.test/needs.html?data=${data}&theme=${theme}`);
-    // The behaviour layer's Dock (data-dock) replaces the static one and remounts every region: wait for it, so a
-    // test never holds a node the swap is about to detach.
+    await page.goto(`https://forge.test${fixture}?data=${data}&theme=${theme}`);
+    // Wait until the grips have attached, so a test can start an actual drag or click a move option.
     await page
       .locator('.dock[data-dock] .region')
       .first()
@@ -102,6 +136,58 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
   }
   const region = (page, name) => page.locator(`section.region[aria-label="${name}"]`);
   try {
+    for (const type of [chromium, webkit, firefox]) {
+      if (type !== chromium && !existsSync(type.executablePath())) {
+        t.diagnostic(`Playwright ${type.name()} is absent; the hosted cache supplies Chromium.`);
+        continue;
+      }
+      await t.test(`Dock: ${type.name()} mouse drops, persistence, menu, Undo and Reset`, async t => {
+        const engine = type === chromium ? browser : await type.launch();
+        if (engine !== browser) t.after(() => engine.close());
+        const page = await open(t, { ...DESK, height: 1500 }, 'busy', 'dark', { engine });
+        await checkDesktopDock(page);
+      });
+    }
+    await t.test('Dock: moving Loose ends keeps the active query and its open content', async t => {
+      const page = await open(t, DESK, 'busy', 'dark', { fixture: '/dock-subscription.html' });
+      const changes = () => page.evaluate(() => window.dockSubscriptions);
+      const initial = ['subscribe projectLooseEnds:read'];
+      assert.deepEqual(
+        await changes(),
+        initial,
+        'one subscription across first paint and behaviour attachment',
+      );
+      await page.getByText('Checked items', { exact: true }).click();
+      await region(page, 'Loose ends').getByRole('button', { name: 'Move Loose ends' }).click();
+      await page.getByRole('menuitem', { name: 'Into the right column' }).click();
+      const moved = page.locator('[data-zone=b]').getByRole('region', { name: 'Loose ends' });
+      await moved.waitFor();
+      assert.ok(await moved.getByText('Checked for a holder.').isVisible(), 'the open disclosure stays open');
+      assert.deepEqual(
+        await changes(),
+        initial,
+        'moving the active region does not replace its query subscription',
+      );
+    });
+
+    await t.test(
+      'Dock: a region can measure its real width on first mount with a cold or warm layer',
+      async t => {
+        for (const data of ['cold', 'warm']) {
+          const page = await open(t, DESK, data, 'dark', { fixture: '/dock-subscription.html' });
+          const firstWidth = await region(page, 'Loose ends')
+            .locator('details')
+            .getAttribute('data-first-width');
+          assert.ok(Number(firstWidth) > 0, `${data} layer: the region is connected and measurable at mount`);
+        }
+      },
+    );
+
+    await t.test('Dock: touch menu changes the drawn phone order, and reset restores it', async t => {
+      const page = await open(t, PHONE, 'busy', 'dark', { hasTouch: true });
+      await checkPhoneDock(page);
+    });
+
     await t.test('Needs you holds what waits on a person; agent conflicts and refusals are FYI', async t => {
       const page = await open(t, DESK);
       const shell = await page.locator('header.top a.needs .cnt').textContent();
@@ -315,6 +401,5 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
     });
   } finally {
     await browser.close();
-    rmSync(out, { recursive: true, force: true });
   }
 });
