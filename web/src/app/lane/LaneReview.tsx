@@ -38,6 +38,7 @@ import { takenOutText, useTakeOut } from '../take-out';
 import { heldWhyState, laneState } from '../lane-state';
 import { LaneDecision, useHeldView } from '../needs/LaneDecision';
 import { holdLine, parkLine } from '../needs/model';
+import { uniqueBy } from '../../ui/unique';
 import './lane.css';
 
 type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
@@ -233,8 +234,8 @@ export function ReviewPage({
           ? 'Saved. The changed files of this save are not recorded yet.'
           : `${isHeld ? `${holdLine(heldView?.view, lane.laneId, Date.now())} ` : ''}${
               eyes
-                ? `${eyes.toLocaleString()} of ${nextOffset === null ? '' : 'the first '}${plural(files.length, 'file')} need your eyes.`
-                : `${nextOffset === null ? '' : 'The first '}${plural(files.length, 'file')}, none with an overlap or a protected path.`
+                ? `${eyes.toLocaleString()} of ${nextOffset === null ? '' : 'the first '}${plural(entries.length, 'file')} need your eyes.`
+                : `${nextOffset === null ? '' : 'The first '}${plural(entries.length, 'file')}, none with an overlap or a protected path.`
             }`;
   const command = `nforge agent . diff ${q({ laneId: lane.laneId, summary: true })}`;
   return (
@@ -925,13 +926,14 @@ function Side({
                     : peer
                       ? handleOf(peer, short(conflict.with))
                       : short(conflict.with);
+                const crossed = uniqueBy(conflict.files, file => file.path).length;
                 return (
                   <li key={index}>
                     {conflict.with === 'main' ? (
-                      `main: same lines in ${plural(conflict.files.length, 'file')}`
+                      `main: same lines in ${plural(crossed, 'file')}`
                     ) : (
                       <A className="lk" href={laneHref(conflict.with)}>
-                        {name}: same lines in {plural(conflict.files.length, 'file')}
+                        {name}: same lines in {plural(crossed, 'file')}
                       </A>
                     )}
                   </li>
@@ -1078,7 +1080,7 @@ function Crossing({
     conflict.with === 'main' ? 'main' : peer ? handleOf(peer, short(conflict.with)) : short(conflict.with);
   return (
     <>
-      {conflict.files.map(file => {
+      {uniqueBy(conflict.files, file => file.path).map(file => {
         const mine = bounds(file.mine),
           theirs = bounds(file.theirs);
         const end = Math.max(mine?.[1] ?? 1, theirs?.[1] ?? 1, 2);

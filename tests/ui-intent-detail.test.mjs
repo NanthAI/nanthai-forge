@@ -88,7 +88,7 @@ test('single-Lane Candidate, check and acceptance keep the Lane origin', () => {
     channelMoves: [{ channel: 'main', status: 'accepted', viewId: 'v', at: at(2) }],
   };
   const events = intentTimeline(work, 'i');
-  for (const id of ['run:r', 'candidate:v', `accepted:v:${at(2)}`])
+  for (const id of ['run:r', 'candidate:v', `accepted:v:main:${at(2)}`])
     assert.equal(events.find(e => e.id === id).lane.id, 'a');
 });
 

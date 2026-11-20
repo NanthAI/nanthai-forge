@@ -9,6 +9,7 @@ import { age } from '../ui/status';
 import { ErrorToast } from '../ui/Toast';
 import './lane-saves.css';
 import { Menu } from '../ui/Menu';
+import { uniqueBy } from '../ui/unique';
 
 export type Save = Lane['checkpoints'][number];
 type DisplaySave = Pick<Save, 'head' | 'message' | 'at'> & Partial<Pick<Save, 'parent'>>;
@@ -143,7 +144,12 @@ export function LaneSaves({
   /** The Lane's current Candidate, when the page knows it. */
   candidate?: ReactNode;
 }) {
-  const visible = saves.length ? saves.slice(-5).reverse() : lastSave ? [lastSave] : [];
+  // A save repeated with the same head is one snapshot: the newest row for it is listed, once (f9309eec).
+  const visible = saves.length
+    ? uniqueBy([...saves].reverse(), save => save.head).slice(0, 5)
+    : lastSave
+      ? [lastSave]
+      : [];
   const exact = [
     ...visible.map(save => [save.message.trim() || 'Saved changes', save.head] as const),
     ['Base', base] as const,

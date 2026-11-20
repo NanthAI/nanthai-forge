@@ -52,6 +52,7 @@ import { LaneHeader, NextStep, nextStep } from './LaneParts';
 import { eventAnchor } from '../cockpit/Feed';
 import { WorkDetailLayout, CollapseSideButton } from '../shell/WorkDetailLayout';
 import { laneTimeline } from './timeline';
+import { uniqueBy } from '../ui/unique';
 import { laneFacts } from '../ui/lane-facts';
 
 type Records = CockpitWork;
@@ -100,7 +101,7 @@ export function HostedLaneView({
   laneId,
   records,
   sessions,
-  events,
+  events: readEvents,
   now,
   changes,
   send,
@@ -123,6 +124,8 @@ export function HostedLaneView({
 }) {
   const [dismissedReview, setDismissedReview] = useState<string | null>(null);
   const attention = useAttention();
+  // A page read twice can hand over one operation twice; the timeline and thread list each once (f9309eec).
+  const events = useMemo(() => uniqueBy(readEvents, event => event.operationId), [readEvents]);
   const lane = useMemo(
     () =>
       withSessions(cockpitLanes(records, attention?.queue), sessions, now).find(item => item.id === laneId),

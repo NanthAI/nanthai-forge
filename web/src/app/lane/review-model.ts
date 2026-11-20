@@ -6,6 +6,7 @@ import { documentationPath } from '../../../../src/prose-paths';
 import { reviewEntry, type ReviewEntry, type ReviewFacts } from '../../../../src/review-order';
 import type { LineFeed, LineStage } from '../Line';
 import type { Park } from '../needs/count';
+import { uniqueBy } from '../../ui/unique';
 
 export type Side = { blob: string; mode: string } | null;
 export type ReviewFile = {
@@ -106,7 +107,9 @@ export function entriesOf(reply: Reply, files: readonly ReviewFile[]): Entry[] {
       });
       crossing.set(file.path, list);
     }
-  return files.map(file => {
+  // Files are read in pages at offsets, so a save made between two reads can send one path twice; it lists once
+  // (f9309eec). The caller's next offset still counts every row it read.
+  return uniqueBy(files, file => file.path).map(file => {
     const facts: ReviewFacts = {
       path: file.path,
       doc: documentationPath(file.path),
