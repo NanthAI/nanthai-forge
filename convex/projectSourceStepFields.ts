@@ -76,6 +76,8 @@ export const sourceStepTables = {
     inlineFallback: v.optional(v.boolean()),
     /** The delayed fallback found the inline run possibly still going and re-armed once (R1). */
     inlineRearmed: v.optional(v.boolean()),
+    /** The step's repair wake at its worker lease's end (armSourceWake); its commit or fork cancels it. */
+    repairWakeId: v.optional(v.id('_scheduled_functions')),
     step: v.number(),
     cursor: v.union(v.string(), v.null()),
     batchId: v.optional(v.id('projectSourceBatches')),

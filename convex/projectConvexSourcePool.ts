@@ -8,7 +8,8 @@ import {
   sourceFailureUpdate,
   sourceRetryExpired,
 } from './projectConvexSourceFailure';
-import { sourceStep } from './projectConvexSourceActive';
+import { moveSourceWake, sourceStep } from './projectConvexSourceActive';
+import { saveSourceJob } from './projectSourceJobs';
 import { SOURCE_MAX_FAILED_ATTEMPTS, unknownSourceFailure } from '../src/hosted-source-retry';
 import { invariant } from '../src/errors';
 export type SourceBatchValidator = (batch: Doc<'projectSourceBatches'>) => Promise<boolean>;
@@ -256,14 +257,19 @@ export async function requeueSourceBatch(ctx: MutationCtx, batch: Doc<'projectSo
 }
 
 /** The only replacement path for a failed child, including failures discovered
- * by unrelated pool activity. Scheduling and accounting share one row write. */
+ * by unrelated pool activity. Scheduling and accounting share one row write. Like a step's retry,
+ * it renews the worker lease from the retry's start (review eee8011f): a task fenced by an expired
+ * lease must not have its retry's begin fence the whole batch on that same lease. */
 export async function retrySourceTask(
   ctx: MutationCtx,
   task: Doc<'projectSourceTasks'>,
   cause = unknownSourceFailure('scheduled-task'),
-  validated = false,
+  validated: boolean | NonNullable<Awaited<ReturnType<typeof sourceStep>>> = false,
 ) {
-  if (!validated && !(await sourceStep(ctx, task, false))) return null;
+  // `validated` is the caller's own live step (a failed task's report), or true when the pool drain
+  // validated the batch itself.
+  const active = validated === true ? null : validated || (await sourceStep(ctx, task, false));
+  if (!validated && !active) return null;
   const update = sourceFailureUpdate(task, cause, task.retryUntil);
   if (
     update.failedAttempts >= SOURCE_MAX_FAILED_ATTEMPTS ||
@@ -272,6 +278,23 @@ export async function retrySourceTask(
     await ctx.db.patch(task._id, update);
     await exhaustSourceExecution(ctx, task, update.lastFailure, task._id);
     return null;
+  }
+  // A failed task whose retry would start with under half a lease left renews the lease from that
+  // start, with the step's wake behind it; one with more left changes nothing. A retry the pool drain
+  // found relies on the wake if the lease lapses first.
+  const job = active?.job,
+    now = Date.now(),
+    start = Math.max(now, update.retryAt),
+    until = start + (job?.control.workerLeaseMs ?? 0);
+  if (active && job && job.control.workerUntil - start < job.control.workerLeaseMs / 2) {
+    await saveSourceJob(
+      ctx,
+      task.projectId,
+      job,
+      { ...job, control: { ...job.control, workerUntil: until } },
+      now,
+    );
+    await moveSourceWake(ctx, active.row, { step: task.step, generation: 0 }, until - now, true);
   }
   return scheduleSourceTask(ctx, task, true, update);
 }

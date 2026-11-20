@@ -20,7 +20,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { ForgeError, invariant } from '../src/errors';
 import { exhaustSourceExecution, sourceRetryExpired } from './projectConvexSourceFailure';
 import { sourceFailureSchema } from '../src/hosted-source-retry';
-import { sourceStep } from './projectConvexSourceActive';
+import { moveSourceWake, sourceStep } from './projectConvexSourceActive';
 import { sourceMutation } from './projectConvexSourceErrors';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string(), step: v.number() };
 const taskIdentity = { ...identity, index: v.number(), generation: v.number() };
@@ -124,6 +124,9 @@ export const fork = sourceMutation({
       timing: recordSourceStep(active.row.timing, args.timing, Date.now(), false),
     });
     await heartbeat(ctx, active);
+    // The batch keeps the step's repair wake: a batch whose tasks died, or that waits behind another
+    // project's slots past its lease, is repaired at the lease end (e62d834b).
+    await moveSourceWake(ctx, active.row, { step, generation: 0 }, active.job.control.workerLeaseMs, true);
     await drainSourcePool(ctx, batch => validSourceBatch(ctx, batch));
     return null;
   },
@@ -207,6 +210,14 @@ export const complete = sourceMutation({
     }
     if (!args.failure) await recordSourceStateSizes(ctx, args.projectId, args.stateSizes);
     await heartbeat(ctx, active);
+    // The renewed lease moves the batch's repair wake; the join's step keeps the same wake target.
+    await moveSourceWake(
+      ctx,
+      active.row,
+      { step: args.step, generation: 0 },
+      active.job.control.workerLeaseMs,
+      true,
+    );
     if (!args.done && !args.failure) {
       await ctx.db.patch(task._id, {
         generation: task.generation + 1,
@@ -344,7 +355,7 @@ export const failed = sourceMutation({
     }
     const task = await taskRow(ctx, active.row.batchId, args.index);
     if (!task || task.status !== 'running' || task.generation !== args.generation) return null;
-    const scheduledId = await retrySourceTask(ctx, task, sourceFailureSchema.parse(args.cause), true);
+    const scheduledId = await retrySourceTask(ctx, task, sourceFailureSchema.parse(args.cause), active);
     if (!scheduledId) await retireSourceTask(ctx, args);
     return null;
   },

@@ -33,6 +33,7 @@ import { poolClaimBody, poolClaimExpirySeconds, poolClaimKey, poolUnits } from '
 import { submoduleReadTokens, type SubmodulePolicy } from './githubAppToken';
 import type { RunnerScope } from './githubBindingAccess';
 import { convexFetch } from './networkFetch';
+import { networkFailure } from '../src/network-fetch';
 /** Refused writes that resolve on their own: the runner keeps its result and
  * retries the same request (Issue 72d50375). */
 // EXCHANGE_REQUEST_*: convexFetch transport faults (deadline or lost connection).
@@ -104,7 +105,11 @@ export const handle = httpAction(async (ctx, request) => {
     reason = 'authorization';
     let value: unknown;
     if (command.kind === 'source' && command.state) {
-      value = await runnerStateSource(ctx, input, { ...command, state: command.state });
+      // A slow or failed object-storage read (its request budget included) names its cause: 503 storage.
+      value = await runnerStateSource(ctx, input, { ...command, state: command.state }).catch(error => {
+        if (networkFailure(error)) reason = 'storage';
+        throw error;
+      });
     } else if (command.kind === 'source') {
       const reply = await ctx.runMutation(
         makeFunctionReference<'mutation'>('projectHostedActionsSource:resolve'),

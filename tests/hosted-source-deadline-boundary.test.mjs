@@ -86,7 +86,9 @@ for (const watchdogFirst of [false, true])
     const x = await fixture(t),
       { f, state, row, load } = x;
     const { original, deadline } = await nearDeadline(x);
-    const watch = f.pending().find(x => x.name === 'projectHostedFinishDriver:drive');
+    // The finish watchdog by name: the step's lease-end repair wake is also due after the jump.
+    const watch = f.pending().find(x => /^projectHostedFinishDriver:(drive|retry)$/.test(x.name));
+    assert(watch, 'the finish watchdog is pending');
     let commits = 0,
       watchedJob;
     x.boundary(async (name, args) => {

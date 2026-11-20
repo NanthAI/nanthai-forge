@@ -554,6 +554,59 @@ test('08169467: queue lists preparation without inventing a dispatch position or
   assert.equal([...f.tables.projectHostedLandingDesired.values()][0].preparing, undefined);
 });
 
+test('incident replay e62d834b (dceb1bef): the queue and a stalled wait name the failed source step and its cause', async t => {
+  const f = await finishFixture(t),
+    command = request(f),
+    resume = pauseSource(f);
+  const state = await submit(f, command);
+  const compose = [...f.tables.projectHostedComposes.values()].find(
+    row => row.operationId === command.composeOperationId,
+  );
+  assert(compose, 'the landing has its compose');
+  const failure = {
+    failedAttempts: 2,
+    lastFailure: {
+      stage: 'small-save',
+      exception: 'ForgeError',
+      code: 'SOURCE_JOB_FENCED',
+      elapsedMs: 60_200,
+      httpStatus: null,
+    },
+    lastFailureAt: Date.now(),
+    retryAt: Date.now() + 4_000,
+  };
+  const existing = [...f.tables.projectSourceSteps.values()].find(row => row.jobId === compose.jobId);
+  if (existing) f.patch('projectSourceSteps', existing._id, { step: 1, ...failure });
+  else
+    f.insert('projectSourceSteps', {
+      projectId: f.projectId,
+      jobId: compose.jobId,
+      dispatch: 'synthetic',
+      executionId: 'synthetic',
+      step: 1,
+      cursor: null,
+      ...failure,
+    });
+  const view = await import(moduleUrl('../convex/projectHostedQueueView.ts'));
+  const queue = JSON.parse(await f.tx('preparingQueue', view.read, { projectId: f.projectId }));
+  const waiting = queue.entries[0].waitingOn;
+  assert.equal(waiting.kind, 'source-preparation');
+  assert.equal(waiting.sourceFailure?.code, 'SOURCE_JOB_FENCED', 'the queue names the cause');
+  assert.equal(waiting.sourceFailure.step, 1);
+  assert.equal(waiting.sourceFailure.attempts, 2);
+  assert.equal(waiting.sourceFailure.stage, 'small-save');
+  // A wait reads the step only once the landing stalled: a healthy wait page has no extra read.
+  assert.equal((await read(f, state.operationId)).sourceFailure, undefined);
+  const start = Date.now();
+  while (Date.now() < start + 15 * 60_000) {
+    await f.execute();
+    if (f.metrics.ticks > 100) assert.fail('no hot watchdog loop');
+  }
+  const stalled = await read(f, state.operationId);
+  assert.equal(stalled.submission.observation.stall.step, 'composing');
+  assert.equal(stalled.sourceFailure?.code, 'SOURCE_JOB_FENCED', 'the stalled wait names the cause');
+  resume();
+});
 test('desired preparation budget: one server goal lands with no idle tasks or replacement calls', async t => {
   const f = await finishFixture(t),
     command = request(f);

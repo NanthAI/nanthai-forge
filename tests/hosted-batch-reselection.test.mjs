@@ -254,10 +254,11 @@ test('incident replay: fallback detaches and requeues all three members atomical
   // capsule wake per landed member; no call or read. 1367 or 1368 run to run: the high reading
   // has one more transaction (+1 call, read and write), which points at a wall-clock bucket;
   // b05d588e's fixed fixture start should remove it.
+  // Controller writes 1368 -> 1370 (1369 measured, plus the same run-to-run transaction): source repair wakes (e62d834b, review 308f217c): each scheduled source step arms a wake at its lease end that its commit cancels (a scheduler insert, a status read and a cancel), and a job that fails or is cancelled outside a commit reads its step row to cancel any wake left; no call.
   assert(
     cost.calls < 220 &&
       cost.reads < 4500 &&
-      cost.writes - cost.liveLineWrites - cost.listingWriteAllowance - cost.stateSizeWrites <= 1368,
+      cost.writes - cost.liveLineWrites - cost.listingWriteAllowance - cost.stateSizeWrites <= 1370,
     JSON.stringify(cost),
   );
   t.diagnostic(JSON.stringify({ members: 3, unrelatedIntents: 600, retainedReceipts: 575, ...cost }));

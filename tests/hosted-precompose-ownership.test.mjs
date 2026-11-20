@@ -123,10 +123,11 @@ for (const history of [575, 1150])
     // Reads 1354 -> 1364, writes 414 -> 446 (Item 9a04d916, compose settle; owner-approved
     // +$0.02/1k): each finish wake with no IO in flight is the settle mutation, and a step that needs IO hands it to one drive action (an acceptance page or cohort plan steps once more there). Calls stay under their ceiling.
     // Writes 446 -> 448: the always-on S1 writer (b149b16b, merged from main) arms one capsule wake per landed member; no call or read.
+    // Reads 1364 -> 1370, writes 448 -> 454: source repair wakes (e62d834b, review 308f217c): each scheduled source step arms a wake at its lease end that its commit cancels (a scheduler insert, a status read and a cancel), and a job that fails or is cancelled outside a commit reads its step row to cancel any wake left; no call.
     assert(
       budget.calls <= 71 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 1364 &&
-        source.reduce((n, c) => n + c.writes, 0) <= 448,
+        source.reduce((n, c) => n + c.documents, 0) <= 1370 &&
+        source.reduce((n, c) => n + c.writes, 0) <= 454,
       JSON.stringify({
         ...budget,
         sourceReads: source.reduce((n, c) => n + c.documents, 0),

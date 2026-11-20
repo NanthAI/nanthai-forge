@@ -9,6 +9,8 @@ import { landingOrderWaitForReader, landingStateForReader } from './projectHoste
 import { landingReservationForReader } from './projectHostedLandingReservation';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
+import { preparingSourceStep } from './projectHostedPreparingSource';
+import { sourceStepFailureField } from '../src/hosted-source-retry';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { withLandingCapsule } from './projectLandingCapsuleStore';
 import { capsuleHistoryContext } from './projectLandingCapsuleContext';
@@ -119,7 +121,14 @@ async function observePage(
     if (!rows.length && desired) {
       stage = 'desired';
       const state = hostedLandingStateSchema.parse(JSON.parse(desired.value));
+      // A stalled preparation names its failed or fenced source step and cause (incident e62d834b).
+      // Read only once stalled, so a healthy wait's subscription never follows the step row. The
+      // compose id comes from the parsed request: the projected desired row carries no compose column.
+      const compose = state.observation.stall ? state.request.finish?.composeOperationId : undefined;
+      const step = compose ? await preparingSourceStep(ctx, input.projectId, desired.actor, compose) : null;
+      const sourceFailure = step ? sourceStepFailureField(step) : undefined;
       return canonicalPayload({
+        ...(sourceFailure ? { sourceFailure } : {}),
         projectId: input.projectId,
         operationId: input.operationId,
         canonicalOperationId: state.operationId,

@@ -14,6 +14,7 @@ import { INCIDENTS, LANDING_STEPS, PERMANENT, SCENARIOS, runLanding } from './la
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { CHECK_WALL_MS } from './queue-sim/invariants.mjs';
 import { LANDING_STALL_MS } from '../dist/landing-stall.js';
+import { HOSTED_FINISH_COMPOSE_WATCHDOG_MS } from '../dist/hosted-finish.js';
 import { normalizeHostedFinishResult } from '../dist/hosted-agent-finish-result.js';
 import { networkContinuation } from '../dist/network-continuation.js';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
@@ -227,13 +228,21 @@ test('incident 9a04d916 F1: a lost source action and its lost 120 s watchdog res
     for (const source of ['projectConvexSource:step@compose', 'projectConvexSource:dispatch@compose']) {
       const f = await batchesFixture(t, options);
       let lostAt = null,
-        watchdog = null;
+        watchdog = null,
+        repaired = null;
       const run = await runLanding(f, key => {
         if (lostAt === null) {
           if (key !== source) return false;
           lostAt = Date.now();
           return true;
         }
+        // e62d834b: a lost step action is first owned by the step's own repair wake (a mutation, due at the
+        // worker lease end), before the 120 s compose watchdog; the finish wakes after it are its progress.
+        if (!watchdog && !repaired && key.startsWith('projectConvexSourceLease:expired')) {
+          repaired = { key, afterMs: f.pending()[0].scheduledTime - lostAt };
+          return false;
+        }
+        if (repaired) return false;
         // The finish wake due after the loss is the watchdog. An action can be lost; a
         // mutation is not (Convex retries its internal errors).
         if (watchdog || !key.startsWith('projectHostedFinishDriver:') || !key.endsWith('@compose'))
@@ -246,15 +255,21 @@ test('incident 9a04d916 F1: a lost source action and its lost 120 s watchdog res
       assertOutcome(f, run, [], label);
       if (lostAt === null) continue;
       covered++;
-      assert(watchdog, `${label}: a watchdog owned the lost source action`);
+      assert(watchdog || repaired, `${label}: a watchdog owned the lost source action`);
       const supervisor = [...run.keys.keys()].filter(key => SUPERVISOR.some(p => key.startsWith(p)));
       assert.deepEqual(supervisor, [], `${label}: a mutation owned the entry, not the 15-minute alarm`);
       assert(run.elapsedMs < CHECK_WALL_MS, `${label}: resumed after ${run.elapsedMs / 1000} s`);
-      assert.equal(
-        watchdog,
-        'projectHostedFinishDriver:retry@compose',
-        `${label}: the watchdog is a mutation`,
-      );
+      if (repaired)
+        assert(
+          repaired.afterMs < HOSTED_FINISH_COMPOSE_WATCHDOG_MS,
+          `${label}: the step's repair wake (a mutation) owned the lost action before the compose watchdog`,
+        );
+      else
+        assert.equal(
+          watchdog,
+          'projectHostedFinishDriver:retry@compose',
+          `${label}: the watchdog is a mutation`,
+        );
       assert(
         states(f).every(s => s.phase === 'landed'),
         label,

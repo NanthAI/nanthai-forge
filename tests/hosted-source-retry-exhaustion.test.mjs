@@ -201,6 +201,10 @@ test('four poisoned slots reach six failed attempts, settle visibly, and release
       .find(x => x.name === action.name && x.args[0].jobId === step.jobId && x.args[0].index === index);
     if (replacement) delays.push(replacement.scheduledTime - Date.now());
     assert([...f.tables.projectSourcePools.values()][0].active.length <= 4);
+    // A task retry keeps the lease alive (e62d834b), so the other project queues behind the four
+    // reserved slots here rather than only after a lapsed lease.
+    if (!other && [...f.tables.projectSourcePools.values()][0].active.length === 4)
+      other = await queuedProject(f);
     await f.tx('unrelatedPoolActivity', fanout.drain, {});
     assert.equal(
       [...f.tables.projectSourceTasks.values()].find(x => x._id === task._id).failedAttempts,
@@ -559,4 +563,32 @@ test('the watch settles a reserved source job before any provider step exists', 
   );
   assert.equal((await f.current(state.id)).submission.error.code, 'SOURCE_RETRY_EXHAUSTED');
   assert.equal(f.pending().length, 0);
+});
+
+test('incident replay e62d834b (review eee8011f): a fan-out task that fails near its lease end renews the lease for its retry, so the retry does not fence the batch', async t => {
+  const { f, step, load } = await fixture(t);
+  const action = f
+    .pending()
+    .find(x => x.name === 'projectConvexSourceTask:run' && x.args[0].jobId === step.jobId);
+  assert(action);
+  // One second of the worker lease is left when the task fails: its retry starts after the 2 s backoff.
+  f.advanceClock(Math.max(0, (await load()).control.workerUntil - Date.now() - 1_000));
+  const recover = failingReads(t);
+  await assert.rejects(f.execute(action), { name: 'SourceIoError' });
+  recover();
+  const replacement = f
+    .pending()
+    .find(
+      x =>
+        x.name === action.name && x.args[0].jobId === step.jobId && x.args[0].index === action.args[0].index,
+    );
+  assert(replacement, 'the failed task was rescheduled');
+  const renewed = await load();
+  assert(
+    renewed.control.workerUntil >= replacement.scheduledTime + renewed.control.workerLeaseMs,
+    'the retry starts inside a renewed lease',
+  );
+  await f.execute(replacement);
+  const batch = [...f.tables.projectSourceBatches.values()].find(row => row.jobId === step.jobId);
+  assert.notEqual(batch.status, 'fenced', 'the retry ran its task instead of fencing the batch');
 });

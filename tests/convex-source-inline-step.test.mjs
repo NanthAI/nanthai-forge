@@ -166,3 +166,25 @@ test('a fallback that runs the step after the inline lease renews the worker lea
     s.restore();
   }
 });
+
+test('a fallback that takes the step over and then fails is retried on the normal schedule (review eee8011f)', async t => {
+  const expected = await scheduledOutput();
+  const s = await scaleFixture();
+  try {
+    const { jobId } = await inlineJob(s);
+    const lease = (await s.job(jobId)).control.workerLeaseMs,
+      real = Date.now.bind(Date);
+    // The submitting action died and the fallback starts after its lease, so it takes the step over;
+    // then the fallback's own step fails on a lost storage read.
+    t.mock.method(Date, 'now', () => real() + lease + 1_000);
+    s.failRequestOnce.push(message => message.kind === 'fetch');
+    await s.drain();
+    assert.equal((await row(s, jobId)).failedAttempts, undefined, 'the retry committed the step');
+    const job = await s.job(jobId);
+    assert.equal(job.status, 'completed', 'a failed fallback is not left with nothing scheduled');
+    assert.deepEqual(job.output, expected);
+    assert.equal(commits(s), 1);
+  } finally {
+    s.restore();
+  }
+});

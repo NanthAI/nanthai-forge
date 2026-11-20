@@ -769,6 +769,10 @@ Replays retain serialized bodies and run/fence pins: session/source are reads,
 plan uses digest CAS, results dedupe by run/index/digest, and output/pack PUTs use
 checksum-bound create-only keys. Unknown replies never repeat project execution.
 Site storage/key-lookup/service faults return 503; permanent refusals stay 403.
+A source request's object-storage reads share a 24 s budget under the runner's 30 s
+reply timeout: each read gets at most the time left (20 s at most), and slow storage
+answers 503 `reason: storage` inside the timeout rather than a second slow read (a
+catalog fallback) running past it, so the runner's retry starts at once.
 Exhaustion throws sanitized `RUNNER_UNAVAILABLE`; the webhook classifies failure
 when a job cannot send a callback. Result and output delivery (Issue 72d50375)
 outlives a write outage: the same body is resent with 1, 2, 4 … 60 s backoff for

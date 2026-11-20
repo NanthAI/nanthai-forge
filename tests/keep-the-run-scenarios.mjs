@@ -106,11 +106,12 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 /** The wired keep against the retire it replaces on the same scenario, switch on against off: fixture
  * calls and DB bytes from the mover's pass until every landing settles (the "line 3" rows of
  * tests/hosted-landing-keep-the-run.test.mjs hold the wiring to these). They include the hold-order write
- * and the gate reads; the fixture's runner reports in few calls and resolves no source. */
+ * and the gate reads; the fixture's runner reports in few calls and resolves no source. Bytes moved by a few
+ * (carry, scoped recheck) and about 1 KB (red, which retires more source work) with the source repair wakes (e62d834b, review 308f217c): each scheduled source step arms a wake at its lease end that its commit cancels (a scheduler insert, a status read and a cancel), and a job that fails or is cancelled outside a commit reads its step row to cancel any wake left; no call. */
 export const WIRED = {
-  carry: { calls: 7, readBytes: 404_024, writeBytes: 74_743 },
-  'scoped-recheck': { calls: 17, readBytes: 533_143, writeBytes: 143_005 },
-  red: { calls: -18, readBytes: -394_996, writeBytes: -143_562 },
+  carry: { calls: 7, readBytes: 404_022, writeBytes: 74_741 },
+  'scoped-recheck': { calls: 17, readBytes: 533_139, writeBytes: 143_001 },
+  red: { calls: -18, readBytes: -395_740, writeBytes: -144_139 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */

@@ -108,3 +108,26 @@ export function sourceRetryFailureMessage(cause?: SourceFailure) {
     (cause ? ` Last bounded cause: ${JSON.stringify(sourceFailureSchema.parse(cause))}` : '')
   );
 }
+/** A preparing landing's failed or fenced source step and its cause (incident e62d834b: the queue and
+ * `wait` said only "composing"). Built from the step row its reader already holds; no extra read. The
+ * step retries itself up to `maxAttempts`; `retryAt` is when the next attempt may start. */
+export function sourceStepFailureField(row: {
+  step: number;
+  failedAttempts?: number;
+  lastFailure?: SourceFailure;
+  lastFailureAt?: number;
+  retryAt?: number;
+}) {
+  if (!row.lastFailure) return undefined;
+  const { code, stage, exception } = row.lastFailure;
+  return {
+    step: row.step,
+    code: code ?? 'SOURCE_RUNTIME_ERROR',
+    stage,
+    exception,
+    attempts: row.failedAttempts ?? 1,
+    maxAttempts: SOURCE_MAX_FAILED_ATTEMPTS,
+    ...(row.lastFailureAt !== undefined ? { at: new Date(row.lastFailureAt).toISOString() } : {}),
+    ...(row.retryAt !== undefined ? { retryAt: new Date(row.retryAt).toISOString() } : {}),
+  };
+}

@@ -46,10 +46,15 @@ test('incident replay 2026-10-30: a batch compose step that dies on fetch failed
     assert.equal(row.phase, 'queued');
     assert.equal(row.runnable, false);
   }
-  assert(
-    !f
-      .pending()
-      .some(t => t.name.startsWith('projectConvexSource') || t.name === 'projectHostedLandingDriver:drive'),
+  // e62d834b: the dead step's only own re-driver is its repair wake at the worker lease end (a
+  // mutation); no other source task or landing drive is pending.
+  const [sourceRow] = f.tables.projectSourceSteps.values();
+  const drivers = f
+    .pending()
+    .filter(t => t.name.startsWith('projectConvexSource') || t.name === 'projectHostedLandingDriver:drive');
+  assert.deepEqual(
+    drivers.map(t => [t.name, t.args[0].jobId]),
+    [['projectConvexSourceLease:expired', sourceRow.jobId]],
     'nothing else re-drives the dead source step',
   );
   const [watchdog] = finishWakes(f, batch.leaderId);

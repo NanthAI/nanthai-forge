@@ -12,7 +12,7 @@ import { hostedWaitSchema } from './hosted-wait-schema.js';
 import { invariant } from './errors.js';
 import { recordLaneHold, withLaneCommand } from './lane-registry.js';
 import { markerIdentity } from './lane-prune.js';
-import { landExitsFailed, landSummary, selfReviewLine } from './hosted-land-summary.js';
+import { landExitsFailed, landingStallReport, landSummary, selfReviewLine } from './hosted-land-summary.js';
 import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
 import { holdLines, landingHold } from './hosted-landing-hold.js';
 import { landingStateField } from './landing-state.js';
@@ -325,6 +325,7 @@ async function dispatchHostedAgentCli(
           recovery?: unknown;
           conflict?: unknown;
           orderWait?: unknown;
+          sourceFailure?: unknown;
         }[];
         status: string;
         run?: { status?: string } | null;
@@ -341,8 +342,23 @@ async function dispatchHostedAgentCli(
               ),
             }
           : {};
-      const held = hold ? { hold, ...landing } : landing;
+      // A stalled landing says so, with its source failure and replay, on every unfinished return
+      // (friction c7f3afac: a wait stayed silent for 2 h on a failed compose step).
+      const waitedOn = selectedWait.operationIds?.length === 1 ? selectedWait.operationIds[0]! : undefined;
+      const retained = waitedOn ? retainedHostedOperation(root, waitedOn) : null;
+      const stalled =
+        submissions?.length === 1 && status !== 'terminal'
+          ? landingStallReport(
+              submissions[0]!,
+              retained && waitedOn ? { root, ...retained, operationId: waitedOn } : undefined,
+            )
+          : undefined;
+      const held = {
+        ...(hold ? { hold, ...landing } : landing),
+        ...(stalled ? { stall: stalled.stall } : {}),
+      };
       if (hold && status !== 'terminal') process.stderr.write(`${holdLines(hold).join('\n')}\n`);
+      if (stalled) process.stderr.write(`${stalled.lines.join('\n')}\n`);
       if (selectedWait.operationIds?.length === 1)
         recordLaneHold(laneId, selectedWait.operationIds[0]!, status === 'terminal' ? null : hold);
       if (status === 'message' && board) {

@@ -9,7 +9,13 @@ import { stateCatalogReader, catalogSourceRow } from './projectStateSourceCatalo
 import { stateRecipePins } from './projectStateSourceRecipe';
 import { prepareStateRecipes } from './projectStateSourcePreparation';
 import { directSourceBatch, sourceWindowOrder } from '../src/hosted-actions-direct';
-import { stateSourceReader, readSignedPhysical } from './projectStateSourceReader';
+import {
+  stateSourceReader,
+  readSignedPhysical,
+  sourceBudgetSpent,
+  type SourceReadBudget,
+} from './projectStateSourceReader';
+import { networkFailure } from '../src/network-fetch';
 import type { ObjectLocation } from './projectConvexSourceTransport';
 import type { Id } from './_generated/dataModel';
 const refreshManifest = Symbol('refresh selected physical manifest');
@@ -25,6 +31,8 @@ async function buildStateSourceGrants(
     closures?: boolean | undefined;
     preparation?: boolean | undefined;
     fallback?: boolean | undefined;
+    /** The caller's time budget for storage reads (the runner's request timeout). */
+    budget?: SourceReadBudget | undefined;
     select: () => Promise<ObjectLocation>;
     catalog: (ids: string[], raw?: boolean) => Promise<unknown[]>;
     log: (message: string) => void;
@@ -32,7 +40,7 @@ async function buildStateSourceGrants(
   retryInvalid = false,
 ) {
   const location = await options.select(),
-    source = stateSourceReader(options.projectId),
+    source = stateSourceReader(options.projectId, options.budget),
     readRecipePin = stateCatalogReader(source.read, options.catalog);
   invariant(
     location.descriptor.object.sha256 === options.state,
@@ -60,7 +68,10 @@ async function buildStateSourceGrants(
     try {
       reader = await source.open(options.state, location.statePhysical);
       if (!options.all) entries = await reader.lookup(options.object ? [options.object] : options.digests);
-    } catch {
+    } catch (error) {
+      // Storage that is too slow for this request is not an invalid manifest: the fallback's reads
+      // would only run past the caller's timeout, so the request fails with its storage cause.
+      if (networkFailure(error) && sourceBudgetSpent(options.budget)) throw error;
       if (retryInvalid) throw refreshManifest;
       options.log('source bindings: catalog (physical manifest invalid or unavailable)');
       reader = null;
@@ -70,7 +81,8 @@ async function buildStateSourceGrants(
     let runs;
     try {
       runs = await physicalRuns(reader.all(false));
-    } catch {
+    } catch (error) {
+      if (networkFailure(error) && sourceBudgetSpent(options.budget)) throw error;
       if (retryInvalid) throw refreshManifest;
       options.log('source bindings: catalog (physical manifest invalid or unavailable)');
     }
@@ -164,6 +176,7 @@ async function buildStateSourceGrants(
             : {}),
         },
         leaf.url,
+        options.budget,
       );
       invariant(
         offset + part.length <= bytes.length,
@@ -205,6 +218,7 @@ async function buildStateSourceGrants(
           : {}),
       },
       location.url,
+      options.budget,
     );
   }
   invariant(
@@ -260,7 +274,7 @@ export async function stateSourceGrants(options: Parameters<typeof buildStateSou
       value.rows = await prepareStateRecipes(
         value.rows,
         ids => options.catalog(ids, true),
-        stateSourceReader(options.projectId).read,
+        stateSourceReader(options.projectId, options.budget).read,
       );
     return value;
   };

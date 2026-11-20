@@ -114,18 +114,26 @@ time it has left, measured on the server clock, so the step never compares the
 server's deadline with its own clock. The step (and each fan-out task) renews it from
 inside itself through the existing heartbeat, first once it has used half that time
 (30 s on a fresh 60 s lease) and then every third of the lease (20 s), so a step that
-finishes inside the first half makes no extra call and one lost renewal is tolerated. Only
+finishes inside the first half makes no extra call. A renewal the server refused or lost is
+tried again after a sixth of the lease (10 s), still inside it. Only
 the current step, generation and live lease renew; a replaced or expired step is
 refused and stops renewing, and renewal ends at the 10-minute action limit. A step
 that is still fenced (a lost renewal) records its failure like any platform error.
 The recorded failure schedules the same step's next generation itself, after the
 failure backoff, with the lease renewed from that start; no client lookup is needed.
 A worker that dies without recording anything (a killed action) is resumed by the
-same repair a lookup runs, which the desired-landing watchdog also runs on each wake
-while its compose is not terminal, but only once the job's worker lease has expired:
-a dead worker stops renewing, so its lease lapses within one lease length. A running
-or pending step holds a live lease and is never touched; the watchdog then reads only
-the step row and the job.
+same repair a lookup runs, at the end of its lease. Every scheduled step, and every
+fan-out batch, holds one repair wake: a scheduled mutation 5 s after its worker lease
+ends. A renewal moves the wake to the new lease end once it is due within half a lease
+(so a fan-out moves it about once per 30 s, not once per task), and the step's commit
+cancels it, so a healthy step never runs it. A wake that finds the lease expired runs
+the repair at once: a dead or fenced step is retried as its next generation, and a
+batch fenced or queued behind other projects' slots past its lease is renewed and
+requeued. A wake that finds the step still pending, running or renewed looks once more
+at the lease end. An execution that settles cancels its wake. The desired-landing
+watchdog still runs the same repair on its own wakes, only once the lease has expired,
+reading only the step row and the job; it is a backstop, not the repair path. A
+retried fan-out task renews the lease from its retry's start, as a retried step does.
 
 Each bounded quantum has a persisted failed-attempt count, separate from its
 successful continuation generation and the source job's business `attempt`.

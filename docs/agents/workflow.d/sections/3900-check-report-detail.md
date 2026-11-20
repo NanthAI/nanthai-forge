@@ -20,5 +20,9 @@ existing check-log retention and cleanup. Legacy row removal is tracked by Issue
 Preparing landings appear in `queue` after admitted entries, with `position:null` and
 `waitingOn.kind:"source-preparation"`. They wait for their server source/landing
 controller, not another queue entry; dispatch rank is assigned at admission.
+`waitingOn.sourceStep` names the source step in progress, and a step whose last
+attempt failed adds `waitingOn.sourceFailure:{step,code,stage,attempts,maxAttempts,retryAt}`;
+the server retries it by itself. A `wait` on a stalled landing prints the stall, that
+failure, the original land replay and, for a Lane far behind main, the sync to run.
 Replaying the original land request repairs a failed preparation wake under the same
 submission and operation identity. A running wake is fenced, never cancelled.

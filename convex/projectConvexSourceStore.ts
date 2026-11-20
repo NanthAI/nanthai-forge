@@ -23,6 +23,7 @@ import {
   activeStep,
   sourceStep,
   rowFor,
+  armSourceWake,
   type LoadedSourceJob,
   type StepGate,
 } from './projectConvexSourceActive';
@@ -122,7 +123,15 @@ export async function startConvexSource(
     ),
     { projectId: args.projectId, jobId: args.jobId, step: 0 },
   );
-  await ctx.db.patch(rowId, { scheduledId, ...(inline ? { inlineFallback: true } : {}) });
+  // An inline first step has its delayed fallback instead; every other step gets its repair wake.
+  await ctx.db.patch(rowId, {
+    scheduledId,
+    ...(inline
+      ? { inlineFallback: true }
+      : {
+          repairWakeId: await armSourceWake(ctx, args, { step: 0, generation: 0 }, job.control.workerLeaseMs),
+        }),
+  });
   if (inline) inline.started = true;
   return canonicalPayload({ status: 'accepted', executionId });
 }
@@ -141,23 +150,24 @@ export async function lookupConvexSource(
 }
 /** Resumes the execution's current step when nothing is running it: a batch fenced by lease expiry,
  * or a step whose scheduled action failed, was cancelled or aged out (Convex never retries a scheduled
- * action). A client lookup and the landing watchdog both run it (incident e62d834b), so a dead or
- * fenced worker is retried without a client. A running or pending step is left alone. Reads the step
- * row, the job and one scheduler entry; writes only when it resumes something. `expiredOnly` (the
- * watchdog) stops after the job read while the worker lease is still live. */
+ * action). The step's own repair wake, a client lookup and the landing watchdog all run it (incident
+ * e62d834b), so a dead or fenced worker is retried without a client. A running or pending step is left
+ * alone. Reads the step row, the job and one scheduler entry; writes only when it resumes something.
+ * `expiredOnly` (the watchdog) stops after the job read while the worker lease is still live. Says
+ * whether it resumed the step, left it to a live (pending or running) action, or found nothing to do. */
 export async function repairConvexSource(
   ctx: MutationCtx,
   args: { projectId: Id<'hostedProjects'>; jobId: string },
   options: { expiredOnly?: boolean } = {},
-) {
+): Promise<'resumed' | 'live' | 'none'> {
   const row = await rowFor(ctx, args.projectId, args.jobId);
-  if (!row) return;
+  if (!row) return 'none';
   const job = await loadSourceJob(ctx, args.projectId, args.jobId);
-  if (sourceJobTerminal(job)) return;
+  if (sourceJobTerminal(job)) return 'none';
   // The landing watchdog repairs only a job whose worker lease has really expired: a healthy step,
   // running or waiting for its retry, holds a live lease, so the watchdog leaves it alone with no
   // scheduler read. A dead or fenced worker stops renewing, so its lease lapses within one lease.
-  if (options.expiredOnly && job.control.workerUntil > Date.now()) return;
+  if (options.expiredOnly && job.control.workerUntil > Date.now()) return 'live';
   const batch = row.batchId ? await ctx.db.get(row.batchId) : null;
   if (batch && batch.status !== 'done') {
     // A batch fenced only by lease expiry (for example queued behind another
@@ -177,14 +187,15 @@ export async function repairConvexSource(
         throw error;
       }
     });
-    return;
+    return 'none';
   }
-  if (!row.scheduledId) return;
+  if (!row.scheduledId) return 'none';
   // Scheduled actions are never retried by Convex. Only a step whose action
   // failed, was cancelled or aged out of the system table is resumed.
   const scheduled = await ctx.db.system.get(row.scheduledId);
   if (scheduled?.state.kind === 'pending' && job.control.workerUntil <= Date.now())
     await renewConvexSource(ctx, { ...args, step: row.step });
+  if (scheduled?.state.kind === 'pending' || scheduled?.state.kind === 'inProgress') return 'live';
   if (
     (!scheduled || scheduled.state.kind === 'failed' || scheduled.state.kind === 'canceled') &&
     (await renewConvexSource(ctx, { ...args, step: row.step }))
@@ -195,24 +206,30 @@ export async function repairConvexSource(
         : sourceFailureUpdate(row, unknownSourceFailure('scheduled-step'), job.control.retryUntil);
     const failures = update.failedAttempts ?? row.failedAttempts ?? 0;
     const current = await sourceStep(ctx, { ...args, step: row.step }, false);
-    if (!current) return;
+    if (!current) return 'none';
     if (failures >= SOURCE_MAX_FAILED_ATTEMPTS || sourceRetryExpired(current)) {
       if (update.failedAttempts) await ctx.db.patch(row._id, update);
       await exhaustSourceExecution(ctx, { ...args, step: row.step }, update.lastFailure ?? row.lastFailure);
-      return;
+      return 'none';
     }
     await retrySourceStep(ctx, args, row, current.job, update);
+    return 'resumed';
   }
+  return 'none';
 }
 /** Schedules the SAME execution's step again as its next generation, after the failure backoff
  * (`retryAt`), and renews the worker lease from that start, so the retry's begin is not fenced by
- * its own wait. Older generations' calls are refused by the generation fence. */
+ * its own wait. Older generations' calls are refused by the generation fence. The retry gets its own
+ * repair wake at the end of that lease. */
 async function retrySourceStep(
   ctx: MutationCtx,
   args: { projectId: Id<'hostedProjects'>; jobId: string },
   row: NonNullable<Awaited<ReturnType<typeof rowFor>>>,
   job: LoadedSourceJob,
-  update: Partial<ReturnType<typeof sourceFailureUpdate>>,
+  update: Partial<ReturnType<typeof sourceFailureUpdate>> & {
+    inlineFallback?: undefined;
+    inlineRearmed?: undefined;
+  },
 ) {
   const now = Date.now(),
     startAt = Math.max(now, update.retryAt ?? row.retryAt ?? 0),
@@ -235,7 +252,10 @@ async function retrySourceStep(
     ),
     { projectId: args.projectId, jobId: args.jobId, step: row.step, generation },
   );
-  await ctx.db.patch(row._id, { ...update, generation, scheduledId });
+  const repairWakeId = row.physicalSeed
+    ? undefined
+    : await armSourceWake(ctx, row, { step: row.step, generation }, startAt + control.workerLeaseMs - now);
+  await ctx.db.patch(row._id, { ...update, generation, scheduledId, repairWakeId });
 }
 /** Explicit recovery only. The scheduler reports authoritatively that the
  * execution's one step action is not running, so resuming it renews the SAME
@@ -357,6 +377,18 @@ async function inlineFallbackGate(
     await ctx.db.patch(row._id, { scheduledId, inlineRearmed: true });
     return null;
   }
+  // The fallback takes the step over: from here it is an ordinary step, with the normal retry and its
+  // own repair wake (review eee8011f: a failed fallback otherwise scheduled nothing).
+  await ctx.db.patch(row._id, {
+    inlineFallback: undefined,
+    inlineRearmed: undefined,
+    repairWakeId: await armSourceWake(
+      ctx,
+      row,
+      { step: args.step, generation: row.generation ?? 0 },
+      leaseMs,
+    ),
+  });
   const control = { ...job.control, workerUntil: now + leaseMs };
   return { ...(await saveSourceJob(ctx, args.projectId, job, { ...job, control }, now)), control };
 }
@@ -400,6 +432,8 @@ export const commit = sourceMutation({
     if (active.row.inlineFallback && active.row.scheduledId) {
       await cancelPendingTask(ctx, active.row.scheduledId);
     }
+    // The step ended: its repair wake is not needed (the next step gets its own below).
+    await cancelPendingTask(ctx, active.row.repairWakeId);
     const callback = {
       ...JSON.parse(active.row.dispatch),
       executionId: active.row.executionId,
@@ -424,6 +458,7 @@ export const commit = sourceMutation({
       cursor: args.cursor,
       inlineFallback: undefined,
       inlineRearmed: undefined,
+      repairWakeId: undefined,
       batchId: undefined,
       generation: undefined,
       failedAttempts: undefined,
@@ -482,7 +517,16 @@ export const commit = sourceMutation({
         makeFunctionReference<'action'>('projectConvexSourceNode:step'),
         { projectId: args.projectId, jobId: args.jobId, step: args.step + 1 },
       );
-      await ctx.db.patch(active.row._id, { scheduledId });
+      // The commit's heartbeat renewed the lease for a full term from now.
+      const repairWakeId = active.row.physicalSeed
+        ? undefined
+        : await armSourceWake(
+            ctx,
+            { projectId: args.projectId, jobId: args.jobId },
+            { step: args.step + 1, generation: 0 },
+            active.job.control.workerLeaseMs,
+          );
+      await ctx.db.patch(active.row._id, { scheduledId, repairWakeId });
     }
     return null;
   },
@@ -607,21 +651,14 @@ export const failed = sourceMutation({
       );
       await ctx.db.patch(active.row._id, { generation, scheduledId, seedWatchId });
     } else if (active.row.inlineFallback && active.row.scheduledId) {
-      // The submitting action's inline step failed: retry on the normal schedule, not the fallback's.
+      // The submitting action's inline step failed: retry on the normal schedule, not the fallback's,
+      // with the lease renewed from the retry's start (review eee8011f). A fallback already running
+      // owns the step (it takes it over in its begin); one that is pending, or died, is replaced.
       const fallback = await ctx.db.system.get(active.row.scheduledId);
-      if (fallback?.state.kind === 'pending') {
+      if (fallback?.state.kind !== 'inProgress') {
         await cancelPendingTask(ctx, active.row.scheduledId, fallback);
-        const generation = args.generation + 1;
-        const scheduledId = await ctx.scheduler.runAfter(
-          Math.max(0, (update.retryAt ?? 0) - Date.now()),
-          makeFunctionReference<'action'>(
-            args.step === 0 ? 'projectConvexSource:step' : 'projectConvexSourceNode:step',
-          ),
-          { projectId: args.projectId, jobId: args.jobId, step: args.step, generation },
-        );
-        await ctx.db.patch(active.row._id, {
-          generation,
-          scheduledId,
+        await retrySourceStep(ctx, args, active.row, active.job, {
+          ...update,
           inlineFallback: undefined,
           inlineRearmed: undefined,
         });

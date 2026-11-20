@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { scheduleSourceExpiry } from './projectOperationalExpirySchedule';
+import { cancelPendingTask } from './schedulerCancel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { z } from 'zod';
@@ -57,8 +58,20 @@ export async function saveSourceJob(
     expectedVersion: old.version,
     record: { ...next, version: old.version + 1, at: new Date(now).toISOString() },
   });
-  if (!sourceJobTerminal(old) && sourceJobTerminal(next) && next.control?.provider === 'convex')
+  if (!sourceJobTerminal(old) && sourceJobTerminal(next) && next.control?.provider === 'convex') {
     await scheduleSourceExpiry(ctx, projectId, next.id, now);
+    // Settled work owns no timer (incident e62d834b). A completed job passed through its final commit,
+    // which cancelled the wake, so a healthy landing reads nothing more; a job that failed or was
+    // cancelled any other way (retry exhaustion, a cancel, an operator, a worker-reported failure)
+    // cancels its step's repair wake here.
+    if (next.status !== 'completed') {
+      const step = await ctx.db
+        .query('projectSourceSteps')
+        .withIndex('by_project_and_job', q => q.eq('projectId', projectId).eq('jobId', next.id))
+        .unique();
+      await cancelPendingTask(ctx, step?.repairWakeId);
+    }
+  }
   return { ...next, version: old.version + 1, at: new Date(now).toISOString() };
 }
 

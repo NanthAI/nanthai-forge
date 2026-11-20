@@ -486,6 +486,42 @@
       "what": "Review 01a38b28 F1: a normal Ready entry gave way to an urgent one parked on another entry's check and re-polled through that whole check; it takes main instead",
       "file": "tests/hosted-landing-urgent-yield.test.mjs",
       "test": "43b51a5e 01a38b28 F1: a normal entry does not wait out a check for an urgent one parked on another entry"
+    },
+    {
+      "incident": "e62d834b",
+      "what": "Source steps fenced at the 60 s lease sat up to 60 min after the fix deployed (66edd19a, 20ad8233, 2026-11-20): the step's own wake repairs a dead worker at its lease end, not the desired-landing watchdog's backoff",
+      "file": "tests/source-lease-incident.test.mjs",
+      "test": "incident replay e62d834b (66edd19a, 20ad8233): a dead worker is repaired by its own wake at the lease end, not the hourly watchdog"
+    },
+    {
+      "incident": "e62d834b",
+      "what": "The step repair wake (e62d834b) costs no call on a healthy job: every renewal moves it and the commit cancels it",
+      "file": "tests/source-lease-incident.test.mjs",
+      "test": "incident replay e62d834b: a healthy job never runs a repair wake, even when a step outlives its lease"
+    },
+    {
+      "incident": "e62d834b",
+      "what": "A fan-out task retried near its lease end fenced its whole batch on that lease (review eee8011f of e62d834b)",
+      "file": "tests/hosted-source-retry-exhaustion.test.mjs",
+      "test": "incident replay e62d834b (review eee8011f): a fan-out task that fails near its lease end renews the lease for its retry, so the retry does not fence the batch"
+    },
+    {
+      "incident": "e62d834b",
+      "what": "Every check failed RUNNER_UNAVAILABLE 05:27-06:41Z on 2026-11-20: slow object-storage reads in the runner source call ran past the runner's 30 s timeout (20 s reads plus a catalog fallback)",
+      "file": "tests/runner-source-read-budget.test.mjs",
+      "test": "incident replay e62d834b (incident 2, 2026-11-20): slow object storage fails the runner source call with its storage cause inside the runner 30 s timeout"
+    },
+    {
+      "incident": "e62d834b",
+      "what": "A landing showed only 'composing' for 1 h 50 min while its source step failed (dceb1bef builder, 2026-11-20); the queue and a stalled wait now name the step and cause",
+      "file": "tests/hosted-landing-desired.test.mjs",
+      "test": "incident replay e62d834b (dceb1bef): the queue and a stalled wait name the failed source step and its cause"
+    },
+    {
+      "incident": "e62d834b",
+      "what": "A landing wait stayed silent for 2 h while its compose step failed (friction c7f3afac, 2026-11-20): the wait reports LANDING_STALLED with the cause and the replay",
+      "file": "tests/hosted-landing-stall-report.test.mjs",
+      "test": "incident replay e62d834b (friction c7f3afac): a stalled landing wait names the stall, the failed source step and the replay"
     }
   ]
 }

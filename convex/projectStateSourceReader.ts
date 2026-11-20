@@ -2,6 +2,7 @@
 import type { Id } from './_generated/dataModel';
 import { r2Config, r2Key, presignGet } from './r2';
 import { convexFetch, networkTimeout } from './networkFetch';
+import { NetworkTransportError } from '../src/network-fetch';
 import { sha256Hex } from '../src/verified-blob';
 import { physicalKey } from '../src/physical-manifest-binary';
 import { invariant } from '../src/errors';
@@ -16,8 +17,25 @@ export type PhysicalGrantPlan = {
   root: string;
   chunks: SignedPhysicalRun[];
 };
+/** One request's storage-read budget (incident e62d834b, 2026-11-20): every read gets at most the
+ * time left, so slow object storage fails the request with a storage cause before its caller's own
+ * timeout, instead of several 20 s reads in a row outliving it. Without a budget, each read keeps
+ * its own 20 s bound. */
+export type SourceReadBudget = { readonly deadline: number };
+const READ_MS = 20_000,
+  READ_FLOOR_MS = 1_000;
+export const sourceBudgetSpent = (budget?: SourceReadBudget) =>
+  !!budget && budget.deadline - Date.now() < READ_FLOOR_MS;
+function readSignal(budget?: SourceReadBudget) {
+  if (sourceBudgetSpent(budget))
+    throw new NetworkTransportError(
+      'EXCHANGE_REQUEST_TIMEOUT',
+      "Source storage reads used this request's time budget.",
+    );
+  return networkTimeout(budget ? Math.min(READ_MS, budget.deadline - Date.now()) : READ_MS);
+}
 /** Access is checked by the enclosing selector on every request. No repository URL or key enters this reader. */
-export function stateSourceReader(projectId: Id<'hostedProjects'>) {
+export function stateSourceReader(projectId: Id<'hostedProjects'>, budget?: SourceReadBudget) {
   const bodies = new Map<string, Promise<Uint8Array>>();
   const raw = (pin: { sha256: string; size: number; nonce?: string }) => {
     const key = physicalKey(pin.sha256, pin.nonce);
@@ -26,7 +44,7 @@ export function stateSourceReader(projectId: Id<'hostedProjects'>) {
       promise = (async () => {
         const response = await convexFetch(await presignGet(r2Config(), r2Key(projectId, key)), {
           redirect: 'error',
-          signal: networkTimeout(20_000),
+          signal: readSignal(budget),
           headers: { 'accept-encoding': 'identity' },
         });
         invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Pinned physical source is unavailable.');
@@ -84,11 +102,11 @@ export function stateSourceReader(projectId: Id<'hostedProjects'>) {
   };
 }
 /** Downloaded metadata uses the same hash, size and exact-range verifier as source bodies. */
-export async function readSignedPhysical(pin: PhysicalPin, url: string) {
+export async function readSignedPhysical(pin: PhysicalPin, url: string, budget?: SourceReadBudget) {
   const range = pin.pack && { offset: pin.pack.offset, total: pin.pack.size };
   const response = await convexFetch(url, {
     redirect: 'error',
-    signal: networkTimeout(20_000),
+    signal: readSignal(budget),
     headers: { 'accept-encoding': 'identity', ...packHeaders(range, pin.size) },
   });
   invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Selected State source is unavailable.');

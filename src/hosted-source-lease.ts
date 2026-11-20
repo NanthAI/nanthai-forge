@@ -11,13 +11,15 @@ const sourceLeaseRenewLimitMs = 600_000;
  * every third of the lease, so one renewal can be late or lost without fencing the step. A step that
  * finishes inside that first half makes no call. Renewal stops when the step ends (the returned
  * stop), when the server refuses it (the step is no longer current: `renew` resolved false), or
- * after the action time limit. A failed renewal call tries again at the next interval. */
+ * after the action time limit. A renewal call that fails tries again after a sixth of the lease, so a
+ * failed first renewal (at half the lease) still has a second try well inside it (review d5614319). */
 export function keepSourceLease(
   renew: () => Promise<boolean>,
   lease: SourceStepLease | undefined,
 ): () => Promise<void> {
   if (!lease || !(lease.ms > 0) || !(lease.remainingMs > 0)) return async () => {};
   const every = Math.max(1, Math.floor(lease.ms / 3)),
+    again = Math.max(1, Math.floor(lease.ms / 6)),
     stopAt = performance.now() + sourceLeaseRenewLimitMs;
   let timer: ReturnType<typeof setTimeout> | undefined,
     stopped = false,
@@ -30,7 +32,7 @@ export function keepSourceLease(
         kept => {
           if (kept) arm(every);
         },
-        () => arm(every),
+        () => arm(again),
       );
     }, ms);
   };

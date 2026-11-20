@@ -84,10 +84,23 @@ export async function scaleFixture({
   ctx.scheduler = {
     runAfter: async (delayMs, ref, args) => {
       const id = `scheduled-${++serial}`,
-        item = { id, name: getFunctionName(ref), args, delayMs, state: { kind: 'pending' } };
+        item = {
+          id,
+          name: getFunctionName(ref),
+          args,
+          delayMs,
+          scheduledTime: Date.now() + delayMs,
+          state: { kind: 'pending' },
+        };
       scheduled.set(id, item);
-      // Expiry is due a week after this execution, outside a source-job measurement.
-      if (!item.name.startsWith('projectOperationalExpiry:')) ready.push(item);
+      // Expiry is due a week after this execution, outside a source-job measurement. A step's repair
+      // wake is due after its worker lease ends: a healthy step cancels it first, and only a test that
+      // lets the lease lapse fires it (incident e62d834b).
+      if (
+        !item.name.startsWith('projectOperationalExpiry:') &&
+        item.name !== 'projectConvexSourceLease:expired'
+      )
+        ready.push(item);
       return id;
     },
     cancel: async id => {

@@ -17,6 +17,8 @@ import { landingHold } from '../src/hosted-landing-hold';
 import { landingStateField } from '../src/landing-state';
 import { urgentNotApplied } from '../src/receipt-slim';
 import { invariant } from '../src/errors';
+import { sourceStepFailureField } from '../src/hosted-source-retry';
+import { preparingSourceStep } from './projectHostedPreparingSource';
 import type { QueueStatusKey } from '../src/hosted-queue-status';
 import { QUEUE_VIEW_LIMIT, QUEUE_VIEW_PAGES } from '../src/hosted-queue-view';
 import { auditRow, mainRedField } from './projectHostedMainAuditState';
@@ -174,19 +176,9 @@ export const read = query({
           )
           .take(2);
         // Source progress (incident e62d834b): the source step and its last commit, two indexed reads.
-        const compose = await ctx.db
-          .query('projectHostedComposes')
-          .withIndex('by_project_and_actor_and_operation', q =>
-            q.eq('projectId', projectId).eq('actor', row.actor).eq('operationId', row.composeOperationId),
-          )
-          .unique();
-        const step = compose
-          ? await ctx.db
-              .query('projectSourceSteps')
-              .withIndex('by_project_and_job', q => q.eq('projectId', projectId).eq('jobId', compose.jobId))
-              .unique()
-          : null;
+        const step = await preparingSourceStep(ctx, projectId, row.actor, row.composeOperationId);
         const progressAt = step?.timing?.scheduledAt;
+        const sourceFailure = step ? sourceStepFailureField(step) : undefined;
         preparationEntries.push({
           position: null,
           landingState: landingStateField(state),
@@ -198,6 +190,8 @@ export const read = query({
             kind: 'source-preparation',
             composeOperationId: row.composeOperationId,
             ...(step ? { sourceStep: step.step } : {}),
+            // A failed or fenced step and its cause, from the same row (no extra read).
+            ...(sourceFailure ? { sourceFailure } : {}),
           },
           submittedAt: state.at,
           lastProgressAt:

@@ -18,7 +18,10 @@ export async function saveFixture(originalText = 'original', originalPath = 'a.t
   const s = lanesFixture(),
     objects = new Map(),
     scheduled = [],
-    expiryWakes = [];
+    expiryWakes = [],
+    // A source step's lease-end repair wake (e62d834b): recorded apart from step work, never run.
+    sourceWakes = [],
+    cancelled = [];
   const projectId = s.insert('hostedProjects', {
     key: 'synthetic',
     name: 'Synthetic',
@@ -38,12 +41,20 @@ export async function saveFixture(originalText = 'original', originalPath = 'a.t
             ctx.scheduler = {
               runAfter: async (delay, ref, args) => {
                 const name = getFunctionName(ref);
-                (name.startsWith('projectOperationalExpiry:') ? expiryWakes : scheduled).push({
+                (name.startsWith('projectOperationalExpiry:')
+                  ? expiryWakes
+                  : name === 'projectConvexSourceLease:expired'
+                    ? sourceWakes
+                    : scheduled
+                ).push({
                   name,
                   args,
                   delay,
                 });
                 return 'task';
+              },
+              cancel: async id => {
+                cancelled.push(id);
               },
             };
             return fn._handler(ctx, input);
@@ -279,5 +290,7 @@ export async function saveFixture(originalText = 'original', originalPath = 'a.t
     change,
     scheduled,
     expiryWakes,
+    sourceWakes,
+    cancelled,
   };
 }

@@ -10,6 +10,9 @@ import { compactSourceGrants } from '../src/source-grant-wire';
 import { directSourceBatch } from '../src/hosted-actions-direct';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+/** Storage-read budget of one runner source request, under the runner's 30 s header timeout with
+ * room for the selection and catalog mutations around the reads (incident e62d834b, 2026-11-20). */
+export const RUNNER_SOURCE_READ_BUDGET_MS = 24_000;
 export async function runnerStateSource(
   ctx: ActionCtx,
   input: SessionInput,
@@ -29,6 +32,8 @@ export async function runnerStateSource(
     await stateSourceGrants({
       ...command,
       projectId: input.projectId,
+      // The runner waits 30 s for this reply: slow storage answers 503 (reason storage) inside it.
+      budget: { deadline: Date.now() + RUNNER_SOURCE_READ_BUDGET_MS },
       select: async () =>
         JSON.parse(
           await ctx.runMutation(makeFunctionReference<'mutation'>('projectStateSourceSelection:runner'), {

@@ -11,6 +11,7 @@ import { holdLines, landingHold } from './hosted-landing-hold.js';
 import { syncRequiredSummary } from './hosted-would-conflict.js';
 import { acceptedByLine } from './landing-accepted-by.js';
 import type { CheckTime } from './hosted-check.js';
+import type { LandingStall } from './landing-stall.js';
 
 /** The self-review step a passed preflight names before land (593fc2d7): what will land, by path then hunk. */
 export function selfReviewLine(root: string) {
@@ -36,7 +37,7 @@ type Result = {
   submission?: {
     id?: string;
     phase?: string;
-    observation?: { state: string; pendingReason?: string | null };
+    observation?: { state: string; pendingReason?: string | null; stall?: LandingStall };
     error?: { code: string; message: string } | null;
     acceptance?: {
       receiptId: string;
@@ -68,6 +69,8 @@ type Result = {
   reservation?: { until?: string; live?: boolean };
   /** The owner accepted public check logs on this runner: said on every outcome. */
   checkLogs?: string;
+  /** A stalled preparation's failed or fenced source step (wait observation). */
+  sourceFailure?: unknown;
 };
 export const resultOf = (response: HostedAgentResponse) => (response.result ?? {}) as Result;
 export function landPhase(response: HostedAgentResponse): string | undefined {
@@ -187,7 +190,11 @@ function classifyLand(response: HostedAgentResponse): { kind: LandOutcomeKind; l
     lines.push('FAILED COMPOSITION_CONFLICT');
   }
   if (!lines.length && submission?.observation?.state === 'pending' && !recovery)
-    return out('pending', [`${pendingLabel(submission.observation.pendingReason)}; not landed yet`]);
+    return out('pending', [
+      `${pendingLabel(submission.observation.pendingReason)}; not landed yet`,
+      // A stalled landing names the stall and its source failure (friction c7f3afac).
+      ...(landingStallReport(result)?.lines ?? []),
+    ]);
   // One line: which folder to work in now, and why (the same folder after an in-place resolution).
   const workIn = result.recovery?.conflict?.workIn ?? result.conflict?.workIn;
   if (workIn) lines.push(workIn);
@@ -235,4 +242,59 @@ export function landTerminal(response: HostedAgentResponse) {
   if (result.phase === 'check') return checkTerminal(result.run?.status ?? '');
   if (result.submission?.observation) return result.submission.observation.state !== 'pending';
   return terminalPhases.has(landPhase(response) ?? '');
+}
+
+type SourceFailure = {
+  step?: number;
+  code?: string;
+  stage?: string;
+  attempts?: number;
+  maxAttempts?: number;
+  retryAt?: string;
+};
+/** What a waiting agent is told about a stalled landing (friction c7f3afac: a landing wait stayed
+ * silent for 2 h while its compose step had failed). The stall, the source step's recorded failure
+ * when the server sent one, and, for a stalled preparation, the replay of the original land request
+ * (same operationId), which reports or continues its source recovery, and the sync that shortens a
+ * far-behind Lane's merge. Formatting only; no reads. */
+export function landingStallReport(
+  entry: { submission?: unknown; sourceFailure?: unknown },
+  replay?: { root: string; action: string; command: Record<string, unknown>; operationId: string },
+) {
+  const stall = (entry.submission as { observation?: { stall?: LandingStall } | null } | null | undefined)
+    ?.observation?.stall;
+  if (!stall) return undefined;
+  const failure = (entry.sourceFailure ?? undefined) as SourceFailure | undefined;
+  const replayCommand =
+    replay && stall.step === 'composing'
+      ? `nforge agent ${shellQuote(replay.root)} ${replay.action} ${shellQuote(
+          JSON.stringify({ ...replay.command, operationId: replay.operationId }),
+        )}`
+      : undefined;
+  const lines = [`STALLED ${stall.code}: ${stall.message}`];
+  if (failure?.code)
+    lines.push(
+      `Source step ${failure.step ?? '?'} failed: ${failure.code}${failure.stage ? ` at ${failure.stage}` : ''}` +
+        (failure.attempts ? ` (attempt ${failure.attempts} of ${failure.maxAttempts ?? '?'})` : '') +
+        (failure.retryAt ? `; next try from ${failure.retryAt}` : '') +
+        '. The server retries it by itself.',
+    );
+  if (replayCommand)
+    lines.push(`Replay the original land request to see or continue its recovery: ${replayCommand}`);
+  // A Lane far behind main composes a large merge, which slow storage stalls first (Item e62d834b).
+  const laneId = replay && stall.step === 'composing' ? replay.command.laneId : undefined;
+  if (typeof laneId === 'string')
+    lines.push(
+      `If the Lane is far behind main, sync it onto main and land again: nforge agent ${shellQuote(
+        replay!.root,
+      )} sync ${shellQuote(JSON.stringify({ laneId }))}`,
+    );
+  return {
+    lines,
+    stall: {
+      ...stall,
+      ...(failure ? { sourceFailure: failure } : {}),
+      ...(replayCommand ? { replayCommand } : {}),
+    },
+  };
 }

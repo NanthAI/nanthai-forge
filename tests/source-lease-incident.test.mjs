@@ -134,3 +134,72 @@ test('a step that finishes inside the first half of its lease makes no renewal c
   assert.equal(calls, 2);
   await late();
 });
+
+const wakes = s => [...s.scheduled.values()].filter(item => item.name === 'projectConvexSourceLease:expired');
+
+test('incident replay e62d834b (66edd19a, 20ad8233): a dead worker is repaired by its own wake at the lease end, not the hourly watchdog', async () => {
+  const s = await scaleFixture({ workerLeaseMs: LEASE_MS });
+  const real = Date.now;
+  let offset = 0;
+  Date.now = () => real() + offset;
+  try {
+    const jobId = await s.enqueue(await saveInput(s, 2));
+    // The step action dies before it records anything (a killed or timed-out action).
+    s.failOnce.push(item => /^projectConvexSource(Node)?:step$/.test(item.name));
+    await s.drain();
+    assert.equal((await s.job(jobId)).status, 'running', 'the dead step left its job running');
+    // The step's own wake was armed with the step, just after its lease ends: nothing waits for the
+    // landing watchdog, whose backoff reaches one wake per hour.
+    const [wake] = wakes(s).filter(item => item.state.kind === 'pending');
+    assert(wake, 'the step armed its own repair wake');
+    assert(wake.delayMs > LEASE_MS && wake.delayMs <= LEASE_MS + 5_000, `wake at ${wake.delayMs} ms`);
+    offset += wake.delayMs;
+    s.ready.push(wake);
+    await s.drain();
+    assert(!s.calls.includes('projectConvexSourceStore:lookup'), 'no client lookup ran');
+    const job = await s.job(jobId);
+    assert.equal(job.status, 'completed', 'the wake retried the dead step');
+    assert.equal(s.tables.projectSourceSteps.size, 1, 'the same source execution resumed');
+    assert.equal((await row(s, jobId)).repairWakeId, undefined, 'the finished job keeps no wake');
+  } finally {
+    Date.now = real;
+    s.restore();
+  }
+});
+
+test('incident replay e62d834b: a healthy job never runs a repair wake, even when a step outlives its lease', async () => {
+  const s = await scaleFixture({ workerLeaseMs: LEASE_MS, delay: READ_DELAY_MS });
+  try {
+    const jobId = await s.enqueue(await saveInput(s, 2));
+    await s.drain();
+    assert.equal((await s.job(jobId)).status, 'completed');
+    assert(wakes(s).length > 0, 'every step was covered by a wake');
+    // Each commit cancelled its step's wake and each renewal moved it: a healthy job adds no calls.
+    assert(
+      wakes(s).every(item => item.state.kind === 'canceled'),
+      wakes(s)
+        .map(item => item.state.kind)
+        .join(),
+    );
+    assert(!s.calls.includes('projectConvexSourceLease:expired'));
+  } finally {
+    s.restore();
+  }
+});
+
+test('incident replay e62d834b (review d5614319 a): a failed first renewal tries again after a sixth of the lease, inside the lease', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let calls = 0;
+  const renew = async () => {
+    if (++calls === 1) throw new Error('renewal lost');
+    return true;
+  };
+  const stop = keepSourceLease(renew, { ms: 60_000, remainingMs: 60_000 });
+  t.mock.timers.tick(30_000);
+  assert.equal(calls, 1, 'the first renewal is due at half the lease');
+  await Promise.resolve();
+  await Promise.resolve();
+  t.mock.timers.tick(10_000);
+  assert.equal(calls, 2, 'the failed renewal is retried 10 s later, 20 s before the lease ends');
+  await stop();
+});

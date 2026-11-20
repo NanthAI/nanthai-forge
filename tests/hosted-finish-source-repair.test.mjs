@@ -77,7 +77,9 @@ for (const fenced of [false, true]) {
     assert(watchdog);
     assert.equal(HOSTED_FINISH_COMPOSE_WATCHDOG_MS, 120000);
     if (fenced) {
-      f.advanceClock(61000);
+      // Each failed quantum's retry renewed the lease from its own start (review eee8011f), so the
+      // lease lapses one lease after the latest retry start, not 60 s after the failures.
+      f.advanceClock(70000);
       for (const retry of f.pending().filter(x => x.name === 'projectConvexSourceTask:run'))
         await f.execute(retry);
       await f.tx('otherProjectCompletionDrain', fanout.drain, {});
