@@ -25,14 +25,18 @@ export async function hostedWriteProject(
   actor: string,
   epoch: number,
 ) {
-  const project = await activeProject(ctx, projectId, actor),
-    authority = sourceAuthority(project);
+  const project = await activeProject(ctx, projectId, actor);
+  requireWriteEpoch(project, epoch);
+  return project;
+}
+/** hostedWriteProject's authority check on an already-read project (no read). */
+export function requireWriteEpoch(project: Parameters<typeof sourceAuthority>[0], epoch: number) {
+  const authority = sourceAuthority(project);
   invariant(
     authority.mode !== 'native-owner' && authority.epoch === epoch,
     'SOURCE_AUTHORITY_CHANGED',
     'Hosted source authority changed.',
   );
-  return project;
 }
 export async function recordHead(
   ctx: QueryCtx | MutationCtx,

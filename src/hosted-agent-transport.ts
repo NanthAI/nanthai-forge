@@ -1077,7 +1077,11 @@ export class HostedAgentTransport {
         );
       }
       if (action === 'preflight')
-        return await this.clientAction(action, command.data as Record<string, unknown>);
+        return await this.clientAction(
+          action,
+          command.data as Record<string, unknown>,
+          capabilities.authority.epoch,
+        );
       if (action === 'check-settings')
         return this.response(action, null, await hostedCheckSettings(this.query.bind(this), capabilities));
       if (observation && action === 'status' && (command.data as { whoami?: boolean }).whoami) {
@@ -1147,7 +1151,9 @@ export class HostedAgentTransport {
       if (pendingSync)
         return this.response(action, typeof operationId === 'string' ? operationId : null, pendingSync);
       const pendingSave =
-        action === 'finish' && !replaying ? await reconcileHostedSave(root, this.exchange) : null;
+        action === 'finish' && !replaying
+          ? await reconcileHostedSave(root, this.exchange, capabilities.authority.epoch)
+          : null;
       if (pendingSave)
         return this.response(action, typeof operationId === 'string' ? operationId : null, pendingSave);
       // An identical start replays only within the agent session that made it (issue b6ba9219).
@@ -1997,7 +2003,7 @@ export class HostedAgentTransport {
       throw error;
     }
   }
-  private async clientAction(action: 'preflight', input: Record<string, unknown>) {
+  private async clientAction(action: 'preflight', input: Record<string, unknown>, epoch: number) {
     const root = hostedAgentRoot(this.root);
     // A save the client returned as pending may have completed on the server while the marker still
     // names the earlier head. Settle that original operation (no new save) before anything pins the
@@ -2005,7 +2011,7 @@ export class HostedAgentTransport {
     // An interrupted local apply leaves the marker describing other bytes; finish it first.
     finishPendingCheckoutDelta(root);
     await this.refreshDependencies(root);
-    const pendingSave = await reconcileHostedSave(root, this.exchange);
+    const pendingSave = await reconcileHostedSave(root, this.exchange, epoch);
     if (pendingSave) return this.response(action, null, pendingSave);
     const marker = readHostedLaneCheckout(root);
     const laneId = (input.laneId as string | undefined) ?? marker?.selection.laneId;

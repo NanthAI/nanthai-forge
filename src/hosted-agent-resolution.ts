@@ -33,7 +33,7 @@ import { chainSettle, resolveSyncRequest } from './hosted-resolve-chain.js';
 import { syncTiming } from './sync-timing.js';
 import { applyObservedSaveOutcome, saveContract, saveHostedLane } from './hosted-save-client.js';
 import { driveAgentSource, syncAgentSource } from './hosted-agent-source.js';
-import { AuthorityPinRefused, authorityPinRefusal } from './hosted-main-pin.js';
+import { AuthorityPinRefused, authorityPinRefusal, olderEpochRefusal } from './hosted-main-pin.js';
 import type { SaveThen } from './hosted-save.js';
 import { hostedRootLanePath } from './hosted-root-checkout.js';
 import { placeResolution } from './hosted-resolution-placement.js';
@@ -477,14 +477,12 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     // The resolve sync began at an older epoch: every later write to it is refused, so only a new
     // operation can finish (N3). Name it; a replay of this one would be refused the same way.
     if (sent !== epoch && authorityPinRefusal(safe, 'resolution')) {
-      const fresh = { ...command, operationId: randomUUID() };
-      const next = hostedRecoveryCommand(session.root, 'resolve', fresh);
-      throw new ForgeError(
-        safe.code,
-        `This resolve's sync began at source authority epoch ${sent}, and the project is now at epoch ${epoch}, so it can never finish. Run the resolve again as a new operation: ${next}`,
-        undefined,
-        { root: session.root, next: { action: 'resolve', ...fresh }, command: next },
-      );
+      // It can never install anything: a later land must not wait on its handoff.
+      clearSyncHandoff(session.root, session.journal.operationId);
+      throw olderEpochRefusal(session.root, safe.code, "This resolve's sync", sent, epoch, {
+        action: 'resolve',
+        parameters: command,
+      });
     }
     if (safe.code !== 'HOSTED_ACTION_FAILED' || safe.recovery) throw safe;
     throw new ForgeError(

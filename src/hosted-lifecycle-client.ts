@@ -62,7 +62,14 @@ export async function transitionHostedLane(
     path = join(directory, `${parsed.operationId}.json`);
   finishPendingCheckoutDelta(root);
   // A save whose reply was never seen must not read as unsaved edits or pin a stale baseline.
-  if (!checkoutPathExists(path)) await settlePriorHostedSave(root, null, exchange);
+  if (!checkoutPathExists(path))
+    await settlePriorHostedSave(
+      root,
+      null,
+      exchange,
+      undefined,
+      saveFeatures ? saveFeatures.authorityEpoch : undefined,
+    );
   const original = workLocked(lock, () => {
     const identity = { root, projectId: exchange.projectId, ...parsed };
     if (checkoutPathExists(path)) {
@@ -118,6 +125,12 @@ export async function transitionHostedLane(
         }),
       ),
     );
+  // A save-first that began at an older authority epoch names this abandon, not its inner save, as
+  // the next command (review f08934a5 low 2).
+  const abandonContinuation = {
+    action: 'abandon' as const,
+    parameters: { reason: parsed.reason, saveFirst: parsed.saveFirst },
+  };
   let childProgress: Awaited<ReturnType<typeof saveHostedLane>> | null = null;
   if (original.request && parsed.action === 'abandon' && parsed.saveFirst)
     childProgress = await saveHostedLane(
@@ -130,6 +143,7 @@ export async function transitionHostedLane(
       exchange,
       saveFeatures,
       true,
+      abandonContinuation,
     );
   if (!original.request) {
     const marker = readHostedLaneCheckout(root);
@@ -184,6 +198,7 @@ export async function transitionHostedLane(
           exchange,
           saveFeatures,
           true,
+          abandonContinuation,
         );
         if ('outcome' in childProgress && childProgress.outcome.status === 'failed')
           return {
@@ -211,7 +226,11 @@ export async function transitionHostedLane(
       operationId: parsed.operationId,
       action: parsed.action,
       reason: parsed.reason,
-      authorityEpoch: (selected ?? original.selection).authority.epoch,
+      // The epoch this command discovered, as a save pins it: the marker's is set at open and never
+      // refreshed, so after a cutover it refused every new lifecycle request (N3). Same bytes otherwise.
+      authorityEpoch:
+        (saveFeatures ? saveFeatures.authorityEpoch : undefined) ??
+        (selected ?? original.selection).authority.epoch,
       target: {
         kind: 'lane',
         laneId: original.selection.laneId,

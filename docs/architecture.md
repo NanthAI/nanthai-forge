@@ -1455,12 +1455,21 @@ replies `{terminal, state}` (the receipt and its server timing), so the CLI open
 When the server advertises `save-then-resolve`, a resolve's save request names the sync that
 follows it (`then`: its operation id, authority epoch, lifecycle version and message); the CLI
 retains `then` in its journal before the save and builds its own resolve request from that value.
-A save request pins the authority epoch its command discovered, not the one recorded when the Lane
-opened. The server checks a request's epoch only while beginning its operation, so after a source
-cutover a retained save, `then` or resolve request refused for its older epoch began nothing: the
-CLI drops it and rebuilds it once at the current epoch under the same operation. An operation that
-already began at the older epoch can never finish (each later write re-checks its pin), so the CLI
-drops its retained save and names the one next command, the same action under a fresh operation.
+Every kept request (start, save and its `then`, plain, resolution and resolve sync, compose,
+desired landing, landing request, lifecycle) pins the authority epoch its command discovered, not
+the one recorded when the Lane opened. The server checks that epoch only while beginning a new
+operation id (the desired-landing submit answers an existing record first, too), so after a source
+cutover a retained request refused for its older epoch began nothing: the CLI drops it and rebuilds
+it once at the current epoch under the same operation. A finish also composes again under a new
+compose operation, so its landing and its Candidate share an epoch. An operation that already began
+at the older epoch can never finish (each later write and job callback re-checks its pin). Its replay
+stops at the replayed prepare, before any upload or submit, so a wait on it ends, and the CLI names
+the one next command: the same action under a fresh operation (a finish's named compose operation
+is left out, so that finish composes again). A save is also dropped from the checkout, including
+one the next save, finish, sync, lifecycle change or preflight would settle first: that command
+goes on, and its capture keeps the dropped save's edits. A finish whose compose began there composes
+again instead, and a sync or resolve refused this way leaves no handoff for a later land to wait
+on. The same-epoch path is unchanged: identical request bytes and no added call.
 When the save's step publishes inside `projectSourceRun:submit`, the same action runs the chain
 and adds it to its reply as `chain` (the resolve receipt, or `submitted` while it continues).
 Node delegation preserves that inline-chain option. A verified one-page plan whose baseline,

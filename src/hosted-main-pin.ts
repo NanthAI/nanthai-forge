@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { randomUUID } from 'node:crypto';
 import { ForgeError } from './errors.js';
+import { shellQuote } from './shell-quote.js';
 import { hostedActionError } from './hosted-action-error.js';
 import type { HostedAgentJournal } from './hosted-agent-journal.js';
 
@@ -30,8 +32,65 @@ export class AuthorityPinRefused extends Error {
 
 /** True for an authority-epoch refusal of a prepare (review b1448b61 N3). */
 export function authorityPinRefusal(error: unknown, phase: string) {
-  const code = hostedActionError(error, phase).code;
-  return code === 'SOURCE_AUTHORITY_CHANGED' || code === 'SOURCE_AUTHORITY_STALE';
+  return authorityCode(hostedActionError(error, phase).code);
+}
+/** An authority-epoch refusal code, as a recorded failure carries it. */
+export const authorityCode = (code: unknown) =>
+  code === 'SOURCE_AUTHORITY_CHANGED' || code === 'SOURCE_AUTHORITY_STALE';
+
+/** The refusal of the one transaction that would begin a pinned request, as the signal its sender
+ * rebuilds on (nothing began): a moved main or an older authority epoch. Any other error unchanged. */
+export function pinRefused(error: unknown, phase: string): unknown {
+  if (mainPinRefusal(error, phase)) return new MainPinRefused(error);
+  if (authorityPinRefusal(error, phase)) return new AuthorityPinRefused(error);
+  return error;
+}
+
+/**
+ * The N3 rule, began half (review b1448b61, Item 1d69905b). An operation that began at an older
+ * source authority epoch can never finish: the server checks its pinned epoch on every later write to
+ * it (stage, submit, job claims and callbacks, publication), and epochs only rise. It published
+ * nothing. Its retained request is useless to a replay, so the caller names the one next command: the
+ * same action under a fresh operation id. True only for an unfinished operation whose epoch this
+ * command can compare; the normal path (same epoch) costs nothing.
+ */
+export function beganAtOlderEpoch(began: number | undefined, epoch: number, terminal: unknown) {
+  return began !== undefined && began !== epoch && !terminal;
+}
+
+/** The one refusal for an operation that began at an older epoch: names the same action with a fresh
+ * operation id (`next`, `command`). `subject` reads as the start of a sentence ("This sync"). */
+export function olderEpochRefusal(
+  root: string,
+  code: string,
+  subject: string,
+  began: number,
+  epoch: number,
+  continuation: { action: string; parameters: Record<string, unknown> },
+  dropped = '',
+) {
+  const parameters = { ...continuation.parameters, operationId: randomUUID() };
+  const command = `nforge agent ${shellQuote(root)} ${continuation.action} ${shellQuote(JSON.stringify(parameters))}`;
+  return new ForgeError(
+    code,
+    `${subject} began at source authority epoch ${began}, and the project is now at epoch ${epoch}, so it can never finish. It published nothing${dropped}. Run it again as a new operation: ${command}`,
+    undefined,
+    { root, next: { action: continuation.action, ...parameters }, command },
+  );
+}
+
+/** Thrown by a source drive whose replayed operation began at an older epoch (beganAtOlderEpoch);
+ * its caller turns it into olderEpochRefusal with its own continuation. */
+export class BeganAtOlderEpoch extends ForgeError {
+  constructor(
+    readonly began: number,
+    readonly epoch: number,
+  ) {
+    super(
+      'SOURCE_AUTHORITY_CHANGED',
+      `This operation began at source authority epoch ${began}, and the project is now at epoch ${epoch}, so it can never finish. Run it again as a new operation.`,
+    );
+  }
 }
 
 /**
@@ -43,6 +102,11 @@ export function authorityPinRefusal(error: unknown, phase: string) {
  * land --save returned CHANNEL_CHANGED because the retained compose request kept the old head).
  * `build` reads main again; `send` throws MainPinRefused only for a refusal that began nothing.
  * A request pinned by the caller (an explicit target) is never rebuilt: `rebuild` is false.
+ *
+ * The same holds for the source authority epoch (`authority`: this command's epoch and the one a
+ * request pins). The server checks it only when beginning a new operation id (beginHostedOperation),
+ * so an AuthorityPinRefused began nothing: the N3 rule's other half, rebuild under the same id. The
+ * epoch is never a caller pin, so this rebuild ignores `rebuild`.
  */
 export async function sendMainPinned<R, T>(
   journal: HostedAgentJournal,
@@ -50,12 +114,20 @@ export async function sendMainPinned<R, T>(
   build: () => Promise<R>,
   send: (request: R) => Promise<T>,
   rebuild = true,
+  authority?: { epoch: number; of: (request: R) => number },
 ): Promise<T> {
   for (let tries = 1; ; tries++) {
     const request = await journal.retain(key, build);
     try {
       return await send(request);
     } catch (error) {
+      if (error instanceof AuthorityPinRefused && authority) {
+        // Stale for good either way. Refused at this command's own epoch: the epoch moved after this
+        // command discovered it, and a replay rediscovers it and rebuilds.
+        journal.forget(key);
+        if (authority.of(request) === authority.epoch) throw error.refusal;
+        continue;
+      }
       if (!(error instanceof MainPinRefused)) throw error;
       // Stale for good: a replay of this operation must rebuild, never resend it.
       journal.forget(key);

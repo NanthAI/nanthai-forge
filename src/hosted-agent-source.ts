@@ -22,9 +22,12 @@ import { parseHostedResponse } from './hosted-response.js';
 import { advanceMarkerMetadata } from './hosted-marker-advance.js';
 import {
   AuthorityPinRefused,
+  BeganAtOlderEpoch,
   MainPinRefused,
   authorityPinRefusal,
+  beganAtOlderEpoch,
   mainPinRefusal,
+  olderEpochRefusal,
   sendMainPinned,
 } from './hosted-main-pin.js';
 import { SELECT_LANE } from './hosted-lane-location.js';
@@ -73,7 +76,8 @@ export async function driveAgentSource(
   refusable = false,
   /** Report a CHANNEL_CHANGED prepare refusal as MainPinRefused (the caller rebuilds on main). */
   mainPinned = false,
-  /** Report an authority-epoch prepare refusal as AuthorityPinRefused (the caller rebuilds). */
+  /** Report an authority-epoch prepare refusal as AuthorityPinRefused (the caller rebuilds), and a
+   * replayed operation that began at an older epoch as BeganAtOlderEpoch (N3). */
   authorityPinned = false,
 ) {
   const features = session.capabilities.features ?? [],
@@ -104,6 +108,14 @@ export async function driveAgentSource(
     throw error;
   }
   if (prepared.terminal) return prepared.terminal;
+  // N3, began half: this replay's operation began at an older epoch and can never finish, even when
+  // its job was already submitted (every later write and job callback is refused). Stop before any
+  // stage, upload or submit, so a wait on it ends. No call: both epochs are in hand.
+  if (authorityPinned) {
+    const began = (request as { authorityEpoch?: number }).authorityEpoch,
+      epoch = session.capabilities.authority.epoch;
+    if (beganAtOlderEpoch(began, epoch, prepared.terminal)) throw new BeganAtOlderEpoch(began!, epoch);
+  }
   for (const page of pages) {
     await session.exchange.upload(page.pin, Buffer.from(saveBytes(page.value)));
     await session.mutation(`projectHosted${kind}:stage`, {
@@ -163,10 +175,23 @@ export async function driveAgentSource(
       ),
   );
 }
+/** The command a refusal of an operation that began at an older epoch names (N3). `false`: the
+ * caller handles BeganAtOlderEpoch itself (finish composes again under a new compose operation). */
+type SourceContinuation = { action: string; parameters: Record<string, unknown> } | false;
+function namedOlderEpoch(
+  session: HostedAgentSession,
+  subject: string,
+  continuation: SourceContinuation,
+  error: unknown,
+): unknown {
+  if (!(error instanceof BeganAtOlderEpoch) || continuation === false) return error;
+  return olderEpochRefusal(session.root, error.code, subject, error.began, error.epoch, continuation);
+}
 export async function composeAgentSource(
   session: HostedAgentSession,
   command: z.infer<typeof hostedAgentCommandSchemas.compose>,
   operationId: string,
+  continuation: SourceContinuation = { action: 'compose', parameters: command },
 ) {
   const build = async () => {
     const main = await session.main();
@@ -225,10 +250,30 @@ export async function composeAgentSource(
     const revertOf = reverts.length === 1 && !dependencies.length ? reverts[0] : undefined;
     return { request, pages, ...(revertOf ? { revertOf } : {}) };
   };
-  // The request pins main as observed now; a moved main drops and rebuilds it (b8c0a4f6).
-  return sendMainPinned(session.journal, `compose:${operationId}`, build, prepared =>
-    driveAgentSource(session, 'Compose', operationId, prepared.request, prepared.pages, false, true),
-  );
+  // The request pins main and the authority epoch as observed now; a moved main or a newer epoch
+  // drops and rebuilds it (b8c0a4f6, N3).
+  try {
+    return await sendMainPinned(
+      session.journal,
+      `compose:${operationId}`,
+      build,
+      prepared =>
+        driveAgentSource(
+          session,
+          'Compose',
+          operationId,
+          prepared.request,
+          prepared.pages,
+          false,
+          true,
+          true,
+        ),
+      true,
+      { epoch: session.capabilities.authority.epoch, of: prepared => prepared.request.authorityEpoch },
+    );
+  } catch (error) {
+    throw namedOlderEpoch(session, 'This compose', continuation, error);
+  }
 }
 /** The receipt a composed revert Lane compensates, from the retained compose selection (no call). */
 export function composedRevertOf(session: HostedAgentSession, operationId: string) {
@@ -261,6 +306,19 @@ export class PrepareRefused extends Error {
  * began (the Lane moved: a save finished after this request was retained), the retained request is
  * dropped and rebuilt once from current pins; it is never replayed stale again. */
 export async function syncAgentSource(
+  session: HostedAgentSession,
+  command: z.infer<typeof hostedAgentCommandSchemas.sync>,
+  operationId: string,
+  refreshPins?: () => Promise<void>,
+) {
+  try {
+    return await syncAgentSourceRefreshed(session, command, operationId, refreshPins);
+  } catch (error) {
+    // Kept retained: a replay of this operation is refused the same way, after one prepare.
+    throw namedOlderEpoch(session, 'This sync', { action: 'sync', parameters: command }, error);
+  }
+}
+async function syncAgentSourceRefreshed(
   session: HostedAgentSession,
   command: z.infer<typeof hostedAgentCommandSchemas.sync>,
   operationId: string,
@@ -377,11 +435,13 @@ async function syncAgentSourceOnce(
     });
   };
   // Only a main target this request observed is rebuilt; an explicit target stays the caller's.
+  // Any sync (plain or resolution) rebuilds for a newer authority epoch (N3).
   return sendMainPinned(
     session.journal,
     `sync:${operationId}`,
     build,
-    request => driveAgentSource(session, 'Sync', operationId, request, [], true, true),
+    request => driveAgentSource(session, 'Sync', operationId, request, [], true, true, true),
     !command.candidateId && !command.target,
+    { epoch: session.capabilities.authority.epoch, of: request => request.authorityEpoch },
   );
 }

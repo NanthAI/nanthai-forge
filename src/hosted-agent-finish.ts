@@ -42,7 +42,16 @@ import {
 } from './hosted-finish-guard.js';
 import { syncRequiredAdvice, syncRequiredContinuation, type WouldConflict } from './hosted-would-conflict.js';
 import type { HostedAgentResponse, HostedAgentSession } from './hosted-agent-transport.js';
-import { MAIN_PIN_TRIES, MainPinRefused, mainPinRefusal } from './hosted-main-pin.js';
+import {
+  AuthorityPinRefused,
+  BeganAtOlderEpoch,
+  MAIN_PIN_TRIES,
+  MainPinRefused,
+  authorityCode,
+  authorityPinRefusal,
+  mainPinRefusal,
+  olderEpochRefusal,
+} from './hosted-main-pin.js';
 
 const finishNotSavedKey = 'finish-not-saved';
 
@@ -69,6 +78,32 @@ async function retainLandGates(session: HostedAgentSession, composeOperationId: 
   if (session.landGates)
     await session.journal.retain('finish-gates', async () => session.landGates!(composeOperationId) ?? null);
 }
+/** The new finish an older-epoch refusal names (N3): the same command without its compose
+ * operation, which can never finish at the new epoch, so the new finish composes again. */
+function freshFinish<T extends { composeOperationId?: string | undefined }>(command: T) {
+  const { composeOperationId: _never, ...fresh } = command;
+  void _never;
+  return fresh;
+}
+
+/** Forget this finish's compose and the request built on it, so the next pass composes again under a
+ * new compose operation (the old Candidate stays, unlanded). */
+function forgetFinishSource(session: HostedAgentSession, request: string) {
+  const composeOperationId =
+    session.journal.get<string>('finish-compose-operation') ?? session.journal.get<string>('id:compose');
+  for (const key of [
+    request,
+    'finish-compose-operation',
+    'id:compose',
+    ...(composeOperationId ? [`compose:${composeOperationId}`] : []),
+  ])
+    session.journal.forget(key);
+}
+/** N3, refused before it began: the server checks a landing request's (or desired landing's) epoch
+ * only for one it has not seen, so a refusal of an older epoch than this command's began nothing. */
+const olderEpochPin = (session: HostedAgentSession, error: unknown, request: unknown) =>
+  authorityPinRefusal(error, 'finish') &&
+  (request as { authorityEpoch?: number }).authorityEpoch !== session.capabilities.authority.epoch;
 async function enqueueLanding(session: HostedAgentSession, request: unknown, pinnedCandidate: boolean) {
   try {
     return await session.mutation<HostedLandingState>('projectHostedLanding:enqueue', {
@@ -79,32 +114,55 @@ async function enqueueLanding(session: HostedAgentSession, request: unknown, pin
       ...tokensArg(session),
     });
   } catch (error) {
+    // An older epoch: the request rebuilds at this command's epoch; one this finish composed is
+    // composed again first, so the landing and its Candidate share an epoch (a named one is kept).
+    if (olderEpochPin(session, error, request)) {
+      if (pinnedCandidate) session.journal.forget('finish-request');
+      else forgetFinishSource(session, 'finish-request');
+      throw new AuthorityPinRefused(error);
+    }
     if (pinnedCandidate || !mainPinRefusal(error, 'finish')) throw error;
-    const composeOperationId =
-      session.journal.get<string>('finish-compose-operation') ?? session.journal.get<string>('id:compose');
-    for (const key of [
-      'finish-request',
-      'finish-compose-operation',
-      'id:compose',
-      ...(composeOperationId ? [`compose:${composeOperationId}`] : []),
-    ])
-      session.journal.forget(key);
+    forgetFinishSource(session, 'finish-request');
     throw new MainPinRefused(error);
   }
 }
 
-async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolean) {
+async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolean, command: FinishCommand) {
   const composeOperationId =
     session.journal.get<string>('finish-compose-operation') ?? session.journal.get<string>('id:compose');
-  const desired = session.journal.get('desired-landing');
+  const desired = session.journal.get<{ authorityEpoch: number }>('desired-landing');
   if (desired) {
-    const submission = await session.mutation<HostedLandingState>('projectHostedLandingDesired:submit', {
-      request: canonicalPayload(desired),
-      ...(session.landingAgent ? { agent: session.landingAgent } : {}),
-      ...(session.landingClient ? { agentClient: session.landingClient } : {}),
-      ...landGatesArg(session),
-      ...tokensArg(session),
-    });
+    let submission: HostedLandingState;
+    try {
+      submission = await session.mutation<HostedLandingState>('projectHostedLandingDesired:submit', {
+        request: canonicalPayload(desired),
+        ...(session.landingAgent ? { agent: session.landingAgent } : {}),
+        ...(session.landingClient ? { agentClient: session.landingClient } : {}),
+        ...landGatesArg(session),
+        ...tokensArg(session),
+      });
+    } catch (error) {
+      if (!olderEpochPin(session, error, desired)) throw error;
+      // Never began, and its compose shares its older epoch: this pass composes again (N3).
+      forgetFinishSource(session, 'desired-landing');
+      return null;
+    }
+    // Began at an older epoch: a desired landing still composing can never be admitted (its compose
+    // and enqueue are refused), and the cutover drained every queued one. Name a new finish (N3).
+    const epoch = session.capabilities.authority.epoch;
+    if (
+      desired.authorityEpoch !== epoch &&
+      (submission.phase === 'composing' ||
+        (submission.phase === 'terminal-failed' && authorityCode(submission.error?.code)))
+    )
+      throw olderEpochRefusal(
+        session.root,
+        'SOURCE_AUTHORITY_CHANGED',
+        'This landing',
+        desired.authorityEpoch,
+        epoch,
+        { action: 'finish', parameters: freshFinish(command) },
+      );
     // Only a still-preparing submission needs source recovery. Terminal replay
     // remains discovery plus the original admission, without probing old jobs.
     let progress: unknown;
@@ -148,8 +206,8 @@ async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolea
   try {
     submission = await enqueueLanding(session, request, pinnedCandidate);
   } catch (error) {
-    // The retained request was stale and is dropped: this pass composes on the current main.
-    if (error instanceof MainPinRefused) return null;
+    // The retained request was stale and is dropped: this pass composes on the current main and epoch.
+    if (error instanceof MainPinRefused || error instanceof AuthorityPinRefused) return null;
     throw error;
   }
   return {
@@ -252,8 +310,9 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
       result = await executeFinishWork(session, input);
       break;
     } catch (error) {
-      // Main moved before the landing began: the stale request is dropped, compose again (b8c0a4f6).
-      if (error instanceof MainPinRefused) {
+      // Main moved, or the epoch rose, before the landing began: the stale request is dropped, compose
+      // again (b8c0a4f6, N3).
+      if (error instanceof MainPinRefused || error instanceof AuthorityPinRefused) {
         if (tries < MAIN_PIN_TRIES) continue;
         throw new ForgeError(
           'CHANNEL_CHANGED',
@@ -357,7 +416,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   const pinnedCandidate = command.candidateId !== undefined;
   if (command.tokens !== undefined && session.landingTokens)
     await session.journal.retain('finish-tokens', async () => command.tokens!);
-  const replayed = await replayFinish(session, pinnedCandidate);
+  const replayed = await replayFinish(session, pinnedCandidate, command);
   if (replayed) return replayed;
   // A new landing of the origin Lane after an edited, unsaved in-place resolution: refuse before
   // any hosted call (41fc0c29). An operation that already ran keeps following its own recovery.
@@ -520,17 +579,33 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   await session.journal.retain('finish-compose-operation', () => composeOperationId);
   let candidateId = command.candidateId;
   if (!candidateId) {
-    let progress = await composeAgentSource(
-      session,
-      hostedAgentCommandSchemas.compose.parse({
-        ...(command.laneId ? { laneId: command.laneId } : {}),
-        ...(command.intentId ? { intentId: command.intentId } : {}),
-        ...(command.inputs ? { inputs: command.inputs } : {}),
-        dependencies: command.dependencies,
-        message: command.message ?? 'Agent change',
-      }),
-      composeOperationId,
-    );
+    let progress;
+    try {
+      progress = await composeAgentSource(
+        session,
+        hostedAgentCommandSchemas.compose.parse({
+          ...(command.laneId ? { laneId: command.laneId } : {}),
+          ...(command.intentId ? { intentId: command.intentId } : {}),
+          ...(command.inputs ? { inputs: command.inputs } : {}),
+          dependencies: command.dependencies,
+          message: command.message ?? 'Agent change',
+        }),
+        composeOperationId,
+        false,
+      );
+    } catch (error) {
+      if (!(error instanceof BeganAtOlderEpoch)) throw error;
+      // This finish's compose began at an older epoch and can never finish. Nothing of the landing
+      // began (replayFinish found no request), so compose again under a new compose operation (N3);
+      // a compose operation the caller named cannot change, so that one names a new finish without it.
+      if (command.composeOperationId)
+        throw olderEpochRefusal(session.root, error.code, "This finish's compose", error.began, error.epoch, {
+          action: 'finish',
+          parameters: freshFinish(context?.command ?? hostedAgentCommandSchemas.finish.parse(input)),
+        });
+      forgetFinishSource(session, 'finish-request');
+      throw new AuthorityPinRefused(error);
+    }
     if (command.accept === false)
       progress = await settleCheckOnlyCompose(session, composeOperationId, progress);
     markLandStep('composed');

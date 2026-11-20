@@ -45,9 +45,13 @@ import type { SaveChange, SaveRequest } from './hosted-save.js';
 import type { ContentPin } from './native-exchange.js';
 import { markLandStep, saveTimingMs } from './land-timing.js';
 import { buildUploadPack, uploadPackMembers } from './object-pack-upload.js';
-import { AuthorityPinRefused, authorityPinRefusal } from './hosted-main-pin.js';
-import { randomUUID } from 'node:crypto';
-import { shellQuote } from './shell-quote.js';
+import {
+  AuthorityPinRefused,
+  BeganAtOlderEpoch,
+  authorityPinRefusal,
+  beganAtOlderEpoch,
+  olderEpochRefusal,
+} from './hosted-main-pin.js';
 import type { StepTimer } from './sync-timing.js';
 import { operationWait } from './agent-operation-wait.js';
 import { parseHostedResponse } from './hosted-response.js';
@@ -252,7 +256,7 @@ async function saveOnce(
   // An earlier save whose reply was not seen pins this baseline. Settle it first,
   // or every new save captures against the old head and the server refuses it.
   if (!checkoutPathExists(capturePath))
-    await settlePriorHostedSave(root, command.operationId, exchange, waitPrior);
+    await settlePriorHostedSave(root, command.operationId, exchange, waitPrior, contract.authorityEpoch);
   timing?.mark('settle');
   const capture: Awaited<ReturnType<typeof captureHostedSave>> = checkoutPathExists(capturePath)
     ? JSON.parse(readFileSync(capturePath, 'utf8'))
@@ -302,6 +306,12 @@ async function saveOnce(
         rmSync(join(directory, backgroundSaveName), { force: true });
         return progress.terminal;
       }
+      // Its job was submitted at an older epoch: every callback is refused, so it never settles (N3).
+      if (
+        contract.authorityEpoch !== undefined &&
+        beganAtOlderEpoch(request.authorityEpoch, contract.authorityEpoch, undefined)
+      )
+        throw new BeganAtOlderEpoch(request.authorityEpoch, contract.authorityEpoch);
       const snapshot = sourceWaitSnapshot(progress) as { status?: string; jobId?: string } | null;
       if (snapshot?.status === 'submitted' && typeof snapshot.jobId === 'string') return snapshot;
     }
@@ -457,6 +467,13 @@ async function saveOnce(
     throw error;
   }
   timing?.mark('prepare');
+  // A replayed save that began at an older epoch can never finish, even when its job was already
+  // submitted (its callbacks are refused): refuse before any upload, so a wait on it ends (N3).
+  if (
+    contract.authorityEpoch !== undefined &&
+    beganAtOlderEpoch(request.authorityEpoch, contract.authorityEpoch, prepared.terminal)
+  )
+    throw new BeganAtOlderEpoch(request.authorityEpoch, contract.authorityEpoch);
   if (prepared.terminal) {
     writeFileSync(acknowledged, '', { mode: 0o600 });
     dropStagedBlobs(directory);
@@ -767,7 +784,12 @@ function settleSave(root: string, operationId: string, terminal: unknown) {
 /** Reconcile the one save pinned to this marker without scanning history or
  * installing working files. Unknown preparation/submission replies resume the
  * original operation; completed async checkpoints only advance their marker. */
-export async function reconcileHostedSave(root: string, exchange: Parameters<typeof saveHostedLane>[2]) {
+export async function reconcileHostedSave(
+  root: string,
+  exchange: Parameters<typeof saveHostedLane>[2],
+  /** This command's source authority epoch: a save that began at an older one is dropped (N3). */
+  epoch?: number,
+) {
   const marker = readHostedLaneCheckout(root);
   if (!marker) return null;
   const pending = pendingSavePath(root, marker);
@@ -794,16 +816,8 @@ export async function reconcileHostedSave(root: string, exchange: Parameters<typ
   }
   // The checkpoint may have stopped before preparation or job submission.
   // Resume its retained bytes and operation rather than waiting for an unscheduled job.
-  const resumed = await saveHostedLane(
-    root,
-    {
-      operationId: command.operationId,
-      message: command.message,
-      ...(command.supersedeFinish ? { supersedeFinish: true } : {}),
-    },
-    exchange,
-  );
-  if (resumed.outcome) return null;
+  const resumed = await resumeRetainedSave(root, command, exchange, epoch);
+  if (!resumed || resumed.outcome) return null;
   return { phase: 'save', saveOperationId: command.operationId, progress: resumed };
 }
 
@@ -818,6 +832,8 @@ export async function settlePriorHostedSave(
   exchange: SaveExchange,
   /** Callers that pin the marker (sync) wait on the earlier save's own progress instead of refusing. */
   wait?: (operationId: string, pending: unknown) => Promise<unknown>,
+  /** This command's source authority epoch: a save that began at an older one is dropped (N3). */
+  epoch?: number,
 ): Promise<void> {
   const marker = readHostedLaneCheckout(root);
   if (!marker) return;
@@ -853,15 +869,8 @@ export async function settlePriorHostedSave(
     reportBackgroundSave(root, prior.operationId, progress.terminal);
     return;
   }
-  const resumed = await saveHostedLane(
-    root,
-    {
-      operationId: prior.operationId,
-      message: prior.message,
-      ...(prior.supersedeFinish ? { supersedeFinish: true } : {}),
-    },
-    exchange,
-  );
+  const resumed = await resumeRetainedSave(root, prior, exchange, epoch);
+  if (!resumed) return;
   if (resumed.outcome) {
     reportBackgroundSave(root, prior.operationId, resumed);
     return;
@@ -878,6 +887,34 @@ export async function settlePriorHostedSave(
     'SAVE_PENDING',
     `The earlier save ${prior.operationId} is still publishing. Nothing new was captured. Wait for it with ${operationWait(root, { operationIds: [prior.operationId] }).waitCommand}, then retry this same command; it then works on top of it.`,
   );
+}
+
+/** Resume the retained save pinned to this baseline under its original operation. Given the
+ * command's epoch, one that began at an older epoch can never finish (N3): the save client drops
+ * it and this returns null, so the caller's new capture supersedes its bytes (still in the
+ * checkout) instead of every later command replaying it. The same-epoch path reads nothing more. */
+async function resumeRetainedSave(
+  root: string,
+  prior: { operationId: string; message: string; supersedeFinish?: boolean | undefined },
+  exchange: SaveExchange,
+  epoch: number | undefined,
+) {
+  try {
+    return await saveHostedLane(
+      root,
+      {
+        operationId: prior.operationId,
+        message: prior.message,
+        ...(prior.supersedeFinish ? { supersedeFinish: true } : {}),
+      },
+      exchange,
+      epoch === undefined ? false : { overlapEvidence: false, submitPage: false, authorityEpoch: epoch },
+    );
+  } catch (error) {
+    const dropped = !checkoutPathExists(join(clientCacheRoot(root), `saves/${prior.operationId}`));
+    if (epoch !== undefined && dropped && authorityPinRefusal(error, 'save')) return null;
+    throw error;
+  }
 }
 
 /** Apply the outcome of the save that returned before its settle and, when it did not complete,
@@ -976,13 +1013,13 @@ function staleEpochSaveRefusal(
   if (began === epoch) return error;
   const marker = readHostedLaneCheckout(root);
   dropRetainedSave(root, operationId, marker ? pendingSavePath(root, marker) : undefined);
-  const next = { action: continuation.action, ...continuation.parameters, operationId: randomUUID() };
-  const { action, ...parameters } = next;
-  const command = `nforge agent ${shellQuote(root)} ${action} ${shellQuote(JSON.stringify(parameters))}`;
-  return new ForgeError(
+  return olderEpochRefusal(
+    root,
     hostedActionError(error, 'save').code,
-    `This ${action} began its save at source authority epoch ${began}, and the project is now at epoch ${epoch}, so that save can never finish. Nothing was published by it, and this checkout no longer replays it. Run it again as a new operation: ${command}`,
-    undefined,
-    { root, next, command },
+    `This ${continuation.action}'s save`,
+    began,
+    epoch,
+    continuation,
+    ', and this checkout no longer replays it',
   );
 }

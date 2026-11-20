@@ -16,7 +16,7 @@ import type { z } from 'zod';
 import { acceptanceActor } from './projectAutonomy';
 import { landingAgentClient, landingAgentRun } from '../src/agent-slug';
 import { activeProject } from './projectAuthority';
-import { hostedWriteProject } from './projectHostedRecords';
+import { requireWriteEpoch } from './projectHostedRecords';
 import { loadCompose } from './projectHostedComposeStore';
 import { enqueueHostedLanding } from './projectHostedLanding';
 import { replaceOwnerlessLanding } from './projectHostedLaneFinish';
@@ -91,7 +91,10 @@ export async function submitDesiredLanding(
     'BAD_ARGUMENT',
     'A person stamp has no model or run.',
   );
-  const project = await hostedWriteProject(ctx, input.projectId, actor.id, command.authorityEpoch);
+  // The epoch is checked only for a new desired landing, as beginHostedOperation does: a replay of
+  // one that began at an older epoch reads its record back instead of a refusal on every try (N3,
+  // Item 1d69905b). The project read and its access check stay first.
+  const project = await activeProject(ctx, input.projectId, actor.id);
   const request = canonicalPayload(withoutAuthorship(command));
   const old = await ctx.db
     .query('projectHostedLandingDesired')
@@ -124,6 +127,7 @@ export async function submitDesiredLanding(
     invariant(canonical || desired, 'SOURCE_UNAVAILABLE', 'Original desired landing is unavailable.');
     return canonical?.value ?? desired!.value;
   }
+  requireWriteEpoch(project, command.authorityEpoch);
   // Fresh goals and fresh aliases charge once; canonical admission retains this reservation.
   await chargeMemberWork(ctx, project, actor.id, 'submissions');
   const source = await loadCompose(ctx, {

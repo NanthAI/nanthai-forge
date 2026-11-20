@@ -51,7 +51,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { syncRequestSchema, syncResultSchema } from './hosted-sync.js';
 import { applyHostedSync } from './hosted-sync-client.js';
 import { markerAt, retainedLocalApplyBlocked } from './hosted-apply-recovery-records.js';
-import { MainPinRefused, mainPinRefusal, sendMainPinned } from './hosted-main-pin.js';
+import { authorityPinRefusal, pinRefused, sendMainPinned } from './hosted-main-pin.js';
 import {
   composeAgentSource,
   driveAgentSource,
@@ -591,15 +591,22 @@ export async function executeHostedAgent(
               },
       });
     };
-    // The start transaction checks the main pin before anything begins: a moved main rebuilds it.
-    const started = await sendMainPinned(session.journal, 'start-request', build, async request => {
-      try {
-        return await session.mutation('projectHostedStart:start', request);
-      } catch (error) {
-        if (mainPinRefusal(error, 'start')) throw new MainPinRefused(error);
-        throw error;
-      }
-    });
+    // The start transaction checks the main pin and the authority epoch before anything begins, and a
+    // start is one transaction: a moved main or a newer epoch rebuilds it under this id (N3).
+    const started = await sendMainPinned(
+      session.journal,
+      'start-request',
+      build,
+      async request => {
+        try {
+          return await session.mutation('projectHostedStart:start', request);
+        } catch (error) {
+          throw pinRefused(error, 'start');
+        }
+      },
+      true,
+      { epoch, of: request => request.authorityEpoch },
+    );
     const { guardSet, ...result } = parseHostedResponse(hostedStartResultSchema, started);
     if (session.capabilities.features?.includes('preflight-guard-set'))
       (await import('./preflight-guard-cache.js')).storeGuardCandidates(
@@ -760,8 +767,12 @@ export async function executeHostedAgent(
       session.marker() &&
       (!command.laneId || command.laneId === session.marker()!.selection.laneId)
     )
-      await settlePriorHostedSave(session.root, null, session.exchange, (id, pending) =>
-        waitSaveUntil(session, id, pending),
+      await settlePriorHostedSave(
+        session.root,
+        null,
+        session.exchange,
+        (id, pending) => waitSaveUntil(session, id, pending),
+        session.capabilities.authority.epoch,
       );
     if (command.apply && !markerAt(session.root)) {
       const blocked = retainedLocalApplyBlocked(
@@ -778,8 +789,12 @@ export async function executeHostedAgent(
     let prepared;
     const prepare = () =>
       syncAgentSource(session, command, operationId, () =>
-        settlePriorHostedSave(session.root, null, session.exchange, (id, pending) =>
-          waitSaveUntil(session, id, pending),
+        settlePriorHostedSave(
+          session.root,
+          null,
+          session.exchange,
+          (id, pending) => waitSaveUntil(session, id, pending),
+          session.capabilities.authority.epoch,
         ),
       );
     try {
@@ -797,8 +812,11 @@ export async function executeHostedAgent(
         prepared = await prepare();
       }
     } catch (error) {
-      // Refused before any server operation began: nothing is left to install on a later land.
-      if (error instanceof SyncPinsStale && handoff) clearSyncHandoff(session.root, operationId);
+      // Refused before any server operation began, or refused for its source authority epoch (an
+      // operation pinned to another epoch can never finish, N3): nothing is left to install on a
+      // later land.
+      if (handoff && (error instanceof SyncPinsStale || authorityPinRefusal(error, 'sync')))
+        clearSyncHandoff(session.root, operationId);
       throw error;
     }
     timing.mark('submit');

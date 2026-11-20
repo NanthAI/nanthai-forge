@@ -135,3 +135,23 @@ export async function resolutionFixture(t, options = {}) {
     },
   };
 }
+/** A source cutover: the project and its main move to the next authority epoch. */
+export function nextEpoch(f) {
+  const project = f.tables.hostedProjects.get(f.projectId);
+  project.sourceAuthority = { ...project.sourceAuthority, epoch: project.sourceAuthority.epoch + 1 };
+  const main = JSON.parse(f.tables.projectHostedChannels.get(f.mainId).selection);
+  f.patch('projectHostedChannels', f.mainId, {
+    selection: JSON.stringify({ ...main, authority: { ...main.authority, epoch: main.authority.epoch + 1 } }),
+  });
+  return project.sourceAuthority.epoch;
+}
+/** The client loses its connection on the first call to `name`, before the server runs it. */
+export function dropFirst(s, name) {
+  const client = s.exchange.client,
+    mutation = client.mutation;
+  client.mutation = async (ref, args) => {
+    if (getFunctionName(ref) !== name) return mutation(ref, args);
+    client.mutation = mutation;
+    throw new TypeError('fetch failed');
+  };
+}
