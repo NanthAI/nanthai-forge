@@ -9,6 +9,7 @@ import {
   type PlanningPurge,
 } from './work-planning-types.js';
 import type { HostedEvent, WorkData } from './work-types.js';
+import { purgeableCommandSchema, purgedFactsDigest, redactPlanningWrite } from './work-intent-types.js';
 import { isUnifiedWork } from './work-unified-types.js';
 import { planningTarget, type UnifiedPlanningData } from './work-planning-unified.js';
 
@@ -56,6 +57,7 @@ export function applyPlanningPurge(
     provenance: 'user-declared-local',
     purged: { operationId: event.id, deletedAt: command.deletedAt, by: event.actor },
   };
+  scrubItemWords(data, historyId);
   data.planningItems.push(tombstone);
   const initiative = target?.initiative;
   if (initiative) {
@@ -68,19 +70,52 @@ export function applyPlanningPurge(
   return tombstone;
 }
 
-/** The journal half of the one reader rule, for a whole journal in memory (export, local recovery): every purged
- * row names a purge of the same Item that comes later. The server's page readers also check each against its row. */
+/** Replace the words of every retained version and comment of the Item in this Work, whatever wrote them (the base
+ * checkpoint, a whole row of an unfinished purge, a purged row). This reaches a full replay (load, export, recovery);
+ * the hosted projection and index rebuild hold only the rows a command loads, so their earlier versions are the purge
+ * executor's to redact. Intent copy and notes are left to their own rows (and purge Lane 3). */
+function scrubItemWords(data: WorkData, historyId: string) {
+  for (const item of data.planningItems) {
+    if (item.id !== historyId) continue;
+    item.title = PURGED_ITEM_TITLE;
+    item.body = '';
+    for (const key of ['reason', 'type', 'owner', 'imported'] as const) delete item[key];
+  }
+  for (const comment of data.planningComments)
+    if (comment.itemId === historyId) Object.assign(comment, { text: 'Deleted comment', authorLabel: '' });
+}
+
+/** The journal half of the one reader rule, for a whole journal in memory (export, local recovery). A purge lists
+ * every row of its Item with the digest of its redacted facts, recorded while the rows were whole
+ * (planning-purge-v2): each listed row comes earlier, and its facts, purged or still whole, redact to that digest.
+ * Every purged row is listed by a later purge. The server's page readers check each purged row against its purge. */
 export function checkPurgedJournal(events: readonly HostedEvent[]) {
-  const purges = new Map<string, { at: number; itemId: string }>();
+  const purges = new Map<string, { at: number; rows: Map<string, string> }>();
+  const listed = new Map<string, { at: number; digest: string }>();
   events.forEach((event, at) => {
-    if (event.command.action === 'purge-planning-item')
-      purges.set(event.id, { at, itemId: event.command.itemId });
+    if (event.command.action !== 'purge-planning-item') return;
+    const rows = new Map(event.command.rows);
+    purges.set(event.id, { at, rows });
+    for (const [row, digest] of rows) listed.set(row, { at, digest });
   });
   events.forEach((event, at) => {
-    if (event.command.action !== 'purged-planning-row') return;
-    const purge = purges.get(event.command.purgeOperationId);
+    const command = event.command;
+    let entry: { at: number; digest: string | undefined } | undefined, facts;
+    if (command.action === 'purged-planning-row') {
+      const purge = purges.get(command.purgeOperationId);
+      entry = purge && { at: purge.at, digest: purge.rows.get(event.id) };
+      facts = command.command;
+    } else {
+      entry = listed.get(event.id);
+      if (!entry) return;
+      facts = purgeableCommandSchema.safeParse(command).data;
+    }
     invariant(
-      purge && purge.at > at && purge.itemId === event.command.command.itemId,
+      entry &&
+        entry.at > at &&
+        facts !== undefined &&
+        purgedFactsDigest(redactPlanningWrite(facts)) === entry.digest &&
+        (!('operationId' in facts) || facts.operationId === event.id),
       'INVALID_WORK_JOURNAL',
       'A purged Work row names no later purge of its Item.',
     );

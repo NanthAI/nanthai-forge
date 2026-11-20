@@ -9,6 +9,21 @@ import { invariant } from '../src/errors';
 import { digest } from '../src/state/hash';
 import { coordinationJournalKey } from './projectJournalCoordinationRows';
 import { journalGraceMs } from './projectJournalWake';
+const wordsActions = new Set([
+  'put-planning-item',
+  'comment-planning-item',
+  'intent',
+  'note',
+  'purge-planning-item',
+]);
+/** A journal row a purge may redact or read: kept out of journal segments. A row that does not parse stays too. */
+export function wordsRow(command: string) {
+  try {
+    return wordsActions.has(JSON.parse(command).action);
+  } catch {
+    return true;
+  }
+}
 import {
   type JournalRunInput,
   type JournalRow,
@@ -236,7 +251,9 @@ export async function selectJournal(
       }
     } else if (phase === 3) {
       const body = row as Doc<'projectHostedRecordBodies'>;
-      if (body.command && !body.journalSegment) {
+      // Planning, Intent and note rows hold Item words a purge must reach in Convex, so they never enter an R2
+      // journal segment (purge Lane 2); nor does a purge, so its row list stays whole for every reader.
+      if (body.command && !body.journalSegment && !wordsRow(body.command)) {
         if (body._creationTime + journalGraceMs > now) {
           later(3, body._creationTime + journalGraceMs);
           done = true;

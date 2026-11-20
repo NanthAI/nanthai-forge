@@ -82,9 +82,13 @@ export const commandNode = internalAction({
   handler: async (ctx, { owner, ...input }): Promise<StoredWorkEvent> => nodeCommand(ctx, input, owner),
 });
 export const exportJournal = action({
-  // purgedRows (contract feature planning-purge-v1): the caller replays purged rows. Without it a journal that
-  // has one is refused with CLI_UPGRADE_REQUIRED, so an older CLI never meets a row form it cannot read.
-  args: { projectId: v.id('hostedProjects'), purgedRows: v.optional(v.literal(true)) },
+  // purgedRows: 2 (contract feature planning-purge-v2): the caller replays purged rows, including an Intent's and
+  // its notes, and purges that list their rows. Without it (or with v1's `true`) a journal that has a purge is
+  // refused with CLI_UPGRADE_REQUIRED, so an older CLI never meets a row form it cannot read.
+  args: {
+    projectId: v.id('hostedProjects'),
+    purgedRows: v.optional(v.union(v.literal(true), v.literal(2))),
+  },
   returns: v.string(),
   handler: async (ctx, { projectId, purgedRows }): Promise<string> => {
     try {
@@ -94,7 +98,7 @@ export const exportJournal = action({
       const purged = snapshot.events.filter(event => event.command.action === 'purged-planning-row').length;
       // A purge command alone (before its rows are redacted) is also a form an older CLI cannot replay.
       invariant(
-        purgedRows ||
+        purgedRows === 2 ||
           !snapshot.events.some(
             event =>
               event.command.action === 'purged-planning-row' ||

@@ -63,8 +63,6 @@ export async function applyJournal(ctx: MutationCtx, pending: Pending, rows: Jou
             action: command.action,
             ...(command.base ? { base: command.base } : {}),
             ...(command.intentIds ? { intentIds: command.intentIds } : {}),
-            // A purge keeps its Item when archived, so purged rows can still be checked against it.
-            ...(command.action === 'purge-planning-item' ? { itemId: command.itemId } : {}),
           };
         await ctx.db.patch(body._id, {
           command: undefined,

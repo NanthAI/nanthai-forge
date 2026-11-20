@@ -32,6 +32,39 @@ export function refusePurged(item: Pick<PlanningItem, 'id' | 'purged'> | undefin
   if (item?.purged) throw planningPurged(item.id, item.purged.operationId);
 }
 
+/** A put may not newly name a purged Item as its Initiative, parent, linked Intent or relation (purge Lane 2,
+ * follow-up f): links to a tombstone would point at nothing. An id the current version already names, as written,
+ * stays, so a purged Initiative's child or a purged Issue's linker can still be edited. `historyId` maps a named id to
+ * the Item that holds its versions; `latest` returns an Item's latest version. The hosted command path loads exactly
+ * these Items (convex/projectWorkCommandRows.ts), so a live write and a full replay decide the same way. */
+export function refuseTombstoneLinks(
+  current: Partial<Pick<PlanningItem, 'intentIds' | 'initiativeId' | 'parentId' | 'relations'>> | undefined,
+  command: {
+    intentIds?: readonly string[] | undefined;
+    initiativeId?: string | null | undefined;
+    parentId?: string | null | undefined;
+    relations?: readonly { id: string }[] | undefined;
+  },
+  latest: (itemId: string) => Pick<PlanningItem, 'id' | 'purged'> | undefined,
+  historyId: (id: string) => string,
+) {
+  const ids = (item: typeof command | undefined) => [
+    ...(item?.intentIds ?? []),
+    ...(item?.initiativeId ? [item.initiativeId] : []),
+    ...(item?.parentId ? [item.parentId] : []),
+    ...(item?.relations ?? []).map(relation => relation.id),
+  ];
+  const before = new Set(ids(current));
+  for (const id of new Set(ids(command))) if (!before.has(id)) refusePurged(latest(historyId(id)));
+}
+
+/** An Item's latest version in retained history (newest last), scanning from the end. */
+export function latestVersion<T extends { id: string }>(items: readonly T[], itemId: string) {
+  for (let index = items.length - 1; index >= 0; index--)
+    if (items[index]!.id === itemId) return items[index];
+  return undefined;
+}
+
 export type PlanningPut = Extract<PlanningWrite, { action: 'put-planning-item' }>;
 
 /**

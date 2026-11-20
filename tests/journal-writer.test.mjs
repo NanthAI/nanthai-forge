@@ -61,6 +61,17 @@ test('existing-row phases 1, 2 and 3 publish archives and archived receipts answ
     revision: 1,
     at: new Date().toISOString(),
     value: '[]',
+    command: canonicalPayload({ action: 'intent-status', intentId: randomUUID(), status: 'ready' }),
+  });
+  // Purge Lane 2 (Item 4c9e961e): a row with Item words (a note) stays in Convex, where a purge can reach it.
+  const wordsId = await w.insert('projectHostedRecordBodies', {
+    projectId: w.f.projectId,
+    actor: 'owner',
+    operationId: randomUUID(),
+    request: 'c'.repeat(64),
+    revision: 2,
+    at: new Date().toISOString(),
+    value: '[]',
     command: canonicalPayload({ action: 'note', kind: 'comment', text: 'Original rationale' }),
   });
   w.f.advanceClock(8 * 86_400_000);
@@ -81,6 +92,8 @@ test('existing-row phases 1, 2 and 3 publish archives and archived receipts answ
   }
   assert(!w.f.tables.projectHostedSavePages.has(pageId));
   assert(w.f.tables.projectHostedRecordBodies.get(eventId).journalSegment);
+  const words = w.f.tables.projectHostedRecordBodies.get(wordsId);
+  assert(!words.journalSegment && words.command, 'a planning, Intent or note row never enters a segment');
   assert.deepEqual(await restored(w), before);
   const operations = await import(moduleUrl('../convex/projectHostedOperations.ts'));
   for (const original of originals) {

@@ -82,4 +82,64 @@ export async function commandPlanningRows(
   for (let offset = 0; offset < keys.length; offset += 100)
     rows.push(...(await lookup(keys.slice(offset, offset + 100))));
   await commandPayloadRows(rows, lookup);
+  // A put that newly names an Item as a link, parent, relation or Initiative reads that Item's latest version, so
+  // a tombstone is refused here exactly as a full replay refuses it (purge Lane 2, refuseTombstoneLinks). Only ids the
+  // current version does not already name, after hydration and spreading: an unchanged put reads nothing more, and
+  // a tombstone is small enough to be whole.
+  if (command.action !== 'put-planning-item') return;
+  // The reducer's target (planningTarget): an Initiative's own id, else the Intent's first history Item or the Intent.
+  const currentId = commandValues(rows, 'initiatives').some(item => item.id === command.itemId)
+    ? command.itemId
+    : (historyId ?? targetId);
+  const current = commandValues(rows, 'planningItems').find(item => item.id === currentId);
+  const before = new Set(planningLinkIds(current));
+  const named = [...new Set(planningLinkIds(command))].filter(id => !before.has(id));
+  const has = (collection: string, key: string) =>
+    rows.some(row => row?.collection === collection && row.key === key);
+  const load = async (keys: Key[]) => {
+    for (let offset = 0; offset < keys.length; offset += 100)
+      rows.push(...(await lookup(keys.slice(offset, offset + 100))));
+  };
+  // Resolve each newly named id the way the reducer does: its alias, then its Intent's history Item.
+  await load(
+    named.flatMap(id => [
+      ...(has('intentAliases', id) ? [] : [{ collection: 'intentAliases', key: id }]),
+      ...(has('intents', id) ? [] : [{ collection: 'intents', key: id }]),
+    ]),
+  );
+  const aliasOf = (id: string) =>
+    commandValues(rows, 'intentAliases').find(alias => alias.aliasId === id)?.intentId ?? id;
+  await load(
+    [...new Set(named.map(aliasOf))]
+      .filter(id => !has('intents', id))
+      .map(key => ({ collection: 'intents', key })),
+  );
+  // A large Intent's header lacks its history refs; hydrate the newly read ones (already hydrated rows are skipped).
+  await commandPayloadRows(rows, lookup);
+  const linkKeys: Key[] = [];
+  for (const id of named) {
+    const intentId = aliasOf(id);
+    const itemId =
+      commandValues(rows, 'intents').find(intent => intent.id === intentId)?.historyRefs?.[0]?.itemId ??
+      intentId;
+    if (!has('planningItems', itemId) && !linkKeys.some(key => key.key === itemId))
+      linkKeys.push({ collection: 'planningItems', key: itemId });
+  }
+  await load(linkKeys);
 }
+/** The Item ids a planning version or put names as links, Initiative, parent or relations, as written. */
+const planningLinkIds = (
+  item:
+    | {
+        intentIds?: string[] | undefined;
+        initiativeId?: string | null | undefined;
+        parentId?: string | null | undefined;
+        relations?: { id: string }[] | undefined;
+      }
+    | undefined,
+) => [
+  ...(item?.intentIds ?? []),
+  ...(item?.initiativeId ? [item.initiativeId] : []),
+  ...(item?.parentId ? [item.parentId] : []),
+  ...(item?.relations ?? []).map(relation => relation.id),
+];

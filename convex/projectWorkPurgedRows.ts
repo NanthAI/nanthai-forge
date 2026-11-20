@@ -1,20 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
-// Purged Work journal rows (Item 4c9e961e, purge Lane 1). A purged row keeps its envelope (operation id, revision,
-// actor, time, request hash) and, as its facts, its own command with every word replaced (redactPlanningWrite); it
-// has no segment. Every reader accepts a row under one rule: it hashes to its request, or it names a purge command
-// that exists, is itself whole, comes later in the journal and names the same Item. Healthy rows cost nothing extra;
-// purged rows cost at most two indexed reads (two tables) per distinct purge in a page.
+// Purged Work journal rows (Item 4c9e961e, purge Lanes 1 and 2). A purged row keeps its envelope (operation id,
+// revision, actor, time, request hash) and, as its facts, its own command with every word replaced
+// (redactPlanningWrite); it has no segment. Every reader accepts a row under one rule: it hashes to its request, or it
+// names a purge command that exists, is itself whole, comes later in the journal and lists the row with the digest of
+// its facts (planning-purge-v2: the purge step recorded that list while the rows were whole, so alias, Intent and note
+// rows of the Item are covered and no row can vouch for itself). Healthy rows cost nothing extra; purged rows cost
+// at most two indexed reads (two tables) per distinct purge in a page.
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
-import {
-  planningPurgeSchema,
-  purgedPlanningRowSchema,
-  type PurgedPlanningRow,
-} from '../src/work-planning-types';
+import { planningPurgeSchema } from '../src/work-planning-types';
+import { purgedFactsDigest, purgedPlanningRowSchema, type PurgedPlanningRow } from '../src/work-intent-types';
 import { metadataRequest } from '../src/work-metadata';
 
-type Purge = { revision: number; itemId: string } | null;
+type Purge = { revision: number; itemId: string; rows: Map<string, string> } | null;
 type PurgeCache = Map<string, Purge>;
 
 /** The redacted command a purged row keeps, or a journal refusal when it is malformed or still holds words. */
@@ -63,27 +62,22 @@ async function purgeCommand(
   const row = event ?? body;
   if (!row || row.purged !== undefined || row.revision === undefined || row.request === undefined)
     return null;
-  // An archived purge keeps {action, itemId} as its facts (convex/projectJournalEffects.ts); a whole one must
-  // still hash to its request.
-  const text = row.command ?? (body?.journalSegment ? body.journalCommand : undefined);
-  if (text === undefined) return null;
+  // A purge never enters a journal segment (convex/projectJournalSelect.ts wordsRow), so it is always whole.
+  if (row.command === undefined) return null;
   let raw;
   try {
-    raw = JSON.parse(text);
+    raw = JSON.parse(row.command);
   } catch {
     return null;
   }
-  if (raw?.action !== 'purge-planning-item' || typeof raw.itemId !== 'string') return null;
-  if (row.command !== undefined) {
-    const command = planningPurgeSchema.safeParse(raw);
-    if (!command.success || command.data.operationId !== operationId) return null;
-    if (metadataRequest(command.data) !== row.request) return null;
-  }
-  return { revision: row.revision, itemId: raw.itemId };
+  const command = planningPurgeSchema.safeParse(raw);
+  if (!command.success || command.data.operationId !== operationId) return null;
+  if (metadataRequest(command.data) !== row.request) return null;
+  return { revision: row.revision, itemId: command.data.itemId, rows: new Map(command.data.rows) };
 }
 
 /** Refuses a purged row unless its redacted command is its own operation's and the purge it names exists, is
- * whole, is later and names the same Item. */
+ * whole, is later and lists the row with the digest of these facts. Returns the facts and the purged Item. */
 export async function verifyPurgedRow(
   ctx: QueryCtx | MutationCtx,
   projectId: Id<'hostedProjects'>,
@@ -92,18 +86,18 @@ export async function verifyPurgedRow(
 ) {
   const facts = purgedFacts(row.command, row.purged);
   invariant(
-    facts.operationId === row.operationId,
+    !('operationId' in facts) || facts.operationId === row.operationId,
     'INVALID_WORK_JOURNAL',
     'A purged Work row holds another operation’s command.',
   );
   if (!cache.has(row.purged)) cache.set(row.purged, await purgeCommand(ctx, projectId, row.purged));
   const purge = cache.get(row.purged)!;
   invariant(
-    purge && purge.revision > row.revision && purge.itemId === facts.itemId,
+    purge && purge.revision > row.revision && purge.rows.get(row.operationId) === purgedFactsDigest(facts),
     'INVALID_WORK_JOURNAL',
     'A purged Work row names no later purge of its Item.',
   );
-  return facts;
+  return { facts, itemId: purge.itemId };
 }
 
 /** Verify every purged row of one event page (one lookup per distinct purge; none when no row is purged). */

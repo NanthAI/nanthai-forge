@@ -10,7 +10,9 @@ import { workRecordRows } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { metadataRequest, applyHostedEvent } from '../dist/work-metadata.js';
 import { parseWork } from '../dist/work-unified-types.js';
-import { planningWriteSchema, redactPlanningWrite } from '../dist/work-planning-types.js';
+import { planningWriteSchema } from '../dist/work-planning-types.js';
+import { purgedFactsDigest, redactPlanningWrite } from '../dist/work-intent-types.js';
+import { itemRows, markPurged, purgeList } from './planning-purge-fixture.mjs';
 import { ConvexExchange } from '../dist/exchange-client.js';
 import { testDeploymentOrigin } from './trusted-origin.mjs';
 
@@ -19,8 +21,9 @@ const SECRET = 'zebra-purge-fixture';
 const { purgeFromServer } = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 const redacted = command => redactPlanningWrite(planningWriteSchema.parse(command));
 
-/** Append a purge of a Deleted Item the way the server's purge step does: with its projection, in one mutation. */
-async function purgeItem(s, itemId, kind, expectedVersion) {
+/** Append a purge of a Deleted Item the way the server's purge step does: with its projection, in one mutation,
+ * listing every row of the Item (planning-purge-v2). */
+async function purgeItem(s, itemId, kind, expectedVersion, ids = [itemId]) {
   const purge = {
     action: 'purge-planning-item',
     operationId: randomUUID(),
@@ -28,6 +31,7 @@ async function purgeItem(s, itemId, kind, expectedVersion) {
     kind,
     expectedVersion,
     deletedAt: '2026-11-20T00:00:00.000Z',
+    rows: purgeList(itemRows(s.tables.projectWorkEvents.values(), ids)),
   };
   await purgeFromServer._handler(s.ctx, {
     projectId: s.projectId,
@@ -38,15 +42,14 @@ async function purgeItem(s, itemId, kind, expectedVersion) {
   return purge;
 }
 
-/** Turn every planning row of one Item into the purged form Lane 2 will write: envelope and request hash kept, the
+/** Turn every row the purge lists into the purged form the executor writes: envelope and request hash kept, the
  * command replaced by its redacted copy (words gone, structure kept), marked with the purge. */
-function purgeRows(s, itemId, purge) {
-  for (const row of s.tables.projectWorkEvents.values()) {
-    const command = planningWriteSchema.safeParse(JSON.parse(row.command));
-    if (!command.success || command.data.itemId !== itemId) continue;
-    row.command = JSON.stringify(redactPlanningWrite(command.data));
-    row.purged = purge.operationId;
-  }
+function purgeRows(s, _itemId, purge) {
+  const listed = new Set(purge.rows.map(([row]) => row));
+  markPurged(
+    [...s.tables.projectWorkEvents.values()].filter(row => listed.has(row.operationId)),
+    purge.operationId,
+  );
 }
 
 const deleted = (s, itemId, expectedVersion) => {
@@ -325,7 +328,7 @@ test('writes, comments and restores on a tombstone are refused with PLANNING_ITE
   assert.equal(data.schema >= 16, true, 'the fixture runs the unified (schema 16+) reducer');
 });
 
-test('exportJournal refuses purged rows to a caller without planning-purge-v1 and names them to one with it', async t => {
+test('exportJournal refuses purged rows to a caller without planning-purge-v2 and names them to one with it', async t => {
   const s = await setup(t);
   const item = s.item();
   await s.send(item);
@@ -341,8 +344,13 @@ test('exportJournal refuses purged rows to a caller without planning-purge-v1 an
     actions.exportJournal._handler(p.s.ctx, { projectId: p.s.projectId }),
     code('CLI_UPGRADE_REQUIRED'),
   );
+  await assert.rejects(
+    actions.exportJournal._handler(p.s.ctx, { projectId: p.s.projectId, purgedRows: true }),
+    code('CLI_UPGRADE_REQUIRED'),
+    'a planning-purge-v1 CLI cannot replay v2 purges',
+  );
   const journal = JSON.parse(
-    await actions.exportJournal._handler(p.s.ctx, { projectId: p.s.projectId, purgedRows: true }),
+    await actions.exportJournal._handler(p.s.ctx, { projectId: p.s.projectId, purgedRows: 2 }),
   );
   assert.match(journal.coverage, /3 purged row\(s\) keep their operation envelope and structure/);
   assert.equal(JSON.stringify(journal).includes(SECRET), false);
@@ -398,11 +406,19 @@ test('a stored-body purged row reuses the archived envelope and answers like a l
     actor: 'owner',
     at: '2026-11-20T00:00:00.000Z',
     journalCommand: JSON.stringify(redacted(command)),
-    purged: p.purge.operationId,
   };
-  const id = await p.s.ctx.db.insert('projectHostedRecordBodies', fields);
-  // A whole purge row in the work-store table reads like any whole row, and vouches for rows of its own Item.
-  const storedPurge = { ...p.purge, operationId: randomUUID(), itemId: p.keep.itemId },
+  // A whole purge row in the work-store table reads like any whole row, and vouches for the rows it lists.
+  const keptOperation = randomUUID(),
+    keptFacts = redacted({ ...p.keep, operationId: keptOperation });
+  const storedPurge = {
+      ...p.purge,
+      operationId: randomUUID(),
+      itemId: p.keep.itemId,
+      rows: [
+        [operationId, purgedFactsDigest(redacted(command))],
+        [keptOperation, purgedFactsDigest(keptFacts)],
+      ],
+    },
     purgeFields = {
       projectId: p.s.projectId,
       value: '',
@@ -414,16 +430,17 @@ test('a stored-body purged row reuses the archived envelope and answers like a l
       command: JSON.stringify(storedPurge),
     };
   const purgeId = await p.s.ctx.db.insert('projectHostedRecordBodies', purgeFields);
+  fields.purged = storedPurge.operationId;
+  const id = await p.s.ctx.db.insert('projectHostedRecordBodies', fields);
   assert.equal(
     JSON.parse(events.eventDocument({ ...purgeFields, _id: purgeId, _creationTime: 1 }).command).action,
     'purge-planning-item',
   );
   const { verifyPurgedEvents } = await import(moduleUrl('../convex/projectWorkPurgedRows.ts'));
-  const keptOperation = randomUUID();
   const keptRow = {
     operationId: keptOperation,
     revision: 2,
-    command: JSON.stringify(redacted({ ...p.keep, operationId: keptOperation })),
+    command: JSON.stringify(keptFacts),
     purged: storedPurge.operationId,
   };
   await verifyPurgedEvents(p.s.ctx, p.s.projectId, [keptRow]);
@@ -432,7 +449,7 @@ test('a stored-body purged row reuses the archived envelope and answers like a l
     code('INVALID_WORK_JOURNAL'),
   );
   const document = events.eventDocument({ ...fields, _id: id, _creationTime: 1 });
-  assert.equal(document.purged, p.purge.operationId);
+  assert.equal(document.purged, storedPurge.operationId);
   assert.equal(document.command, fields.journalCommand);
   await assert.rejects(
     events.findWorkEvent(p.s.ctx, p.s.projectId, operationId, { command: JSON.stringify(command) }),
@@ -492,6 +509,7 @@ test('the reducer purges only a Deleted Item at its version, once', () => {
     kind: 'issue',
     expectedVersion,
     deletedAt: '2026-11-20T00:00:00.000Z',
+    rows: [],
   });
   assert.throws(() => apply(purge(1)), code('BAD_ARGUMENT'), 'an open Item is not purged');
   apply(put({ expectedVersion: 1, status: 'deleted' }));
@@ -578,11 +596,11 @@ test('the CLI asks for purged rows in its one journal read, and drops the argume
     return 'journal';
   });
   assert.equal(await exchange.journal(), 'journal');
-  assert.deepEqual(calls, [{ projectId: 'project', purgedRows: true }], 'one call on a current server');
+  assert.deepEqual(calls, [{ projectId: 'project', purgedRows: 2 }], 'one call on a current server');
   older = true;
   calls.length = 0;
   assert.equal(await exchange.journal(), 'journal');
-  assert.deepEqual(calls, [{ projectId: 'project', purgedRows: true }, { projectId: 'project' }]);
+  assert.deepEqual(calls, [{ projectId: 'project', purgedRows: 2 }, { projectId: 'project' }]);
 });
 
 async function actionsCommand(s, command) {

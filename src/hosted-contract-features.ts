@@ -76,10 +76,13 @@ export const hostedContractFeatures = [
   'landing-capsules-v1',
   'journal-segments-v1',
   /** Purged Work journal rows (Item 4c9e961e): event pages and exportJournal may carry a purge-planning-item
-   * tombstone and purged rows (envelope plus their own command with every word replaced) that name it. exportJournal
-   * refuses a journal with either unless the caller sends `purgedRows: true`, so an older CLI's local recovery gets
-   * CLI_UPGRADE_REQUIRED instead of a row form it cannot replay. */
+   * tombstone and purged rows (envelope plus their own command with every word replaced) that name it. */
   'planning-purge-v1',
+  /** Purge v2 (purge Lane 2): a purge lists every row of its Item (with the digest of its redacted facts), and
+   * purged rows include an Intent-born Item's intent and note rows and writes through an alias. exportJournal
+   * refuses a journal with a purge unless the caller sends `purgedRows: 2`, so a v1 or older CLI's local recovery
+   * gets CLI_UPGRADE_REQUIRED instead of a row form it cannot replay. */
+  'planning-purge-v2',
   /** Revert provenance on CLI landings (Issue 8dbccdfb): projectHostedComposeSelection:page names a
    * revert Lane's `revertOf`, and projectHostedLandingDesired:submit takes `revertOf`, so a landed
    * revert is recorded as compensating and tells the reverted Lane. Without it the CLI sends none. */

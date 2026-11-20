@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { planningIntentStatus } from './work-planning-lifecycle.js';
 import { invariant, itemChanged } from './errors.js';
-import { discussionFields, refusePurged, resolvePlanningPut } from './work-planning-put.js';
+import {
+  discussionFields,
+  refusePurged,
+  latestVersion,
+  refuseTombstoneLinks,
+  resolvePlanningPut,
+} from './work-planning-put.js';
 import { resolveIntentId, type IntentAlias } from './work-intent-local.js';
 import {
   isShelved,
@@ -110,6 +116,15 @@ export function applyUnifiedPlanning(
     put.kind === 'initiative' ? !target.intent : !target.initiative,
     'BAD_ARGUMENT',
     'Retain the item’s original Issue or Initiative identity.',
+  );
+  refuseTombstoneLinks(
+    current,
+    command,
+    itemId => latestVersion(data.planningItems, itemId),
+    id => {
+      const intentId = resolveIntentId(data.intentAliases, id);
+      return data.intents.find(item => item.id === intentId)?.historyRefs?.[0]?.itemId ?? intentId;
+    },
   );
   const linked = [...new Set(put.intentIds.map(id => resolveIntentId(data.intentAliases, id)))].sort();
   invariant(

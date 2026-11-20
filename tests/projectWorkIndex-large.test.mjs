@@ -244,7 +244,7 @@ test('record rebuild replays journal events with original identities and timesta
 test('record rebuild replays purged rows as their redacted commands and keeps the Items that name them', async t => {
   const f = await setup(t);
   const { purgeFromServer } = await import(moduleUrl('../convex/projectWorkCommand.ts'));
-  const { planningWriteSchema, redactPlanningWrite } = await import('../dist/work-planning-types.js');
+  const { itemRows, markPurged, purgeList } = await import('./planning-purge-fixture.mjs');
   const ensure = () =>
     continueLongAction('Synthetic index', randomUUID(), continuation =>
       actions.ensure._handler(f.s.ctx, { rebuild: true, projectId: 'project', continuation }),
@@ -272,6 +272,7 @@ test('record rebuild replays purged rows as their redacted commands and keeps th
     kind: 'initiative',
     expectedVersion: 2,
     deletedAt: '2026-11-20T00:00:00.000Z',
+    rows: purgeList(itemRows(f.s.tables.projectWorkEvents.values(), [initiative.itemId])),
   };
   await purgeFromServer._handler(f.s.ctx, {
     projectId: 'project',
@@ -280,12 +281,7 @@ test('record rebuild replays purged rows as their redacted commands and keeps th
     owner: 'owner',
   });
   // The rows Lane 2 will write: the Initiative's words gone, its structure and envelope kept.
-  for (const row of f.s.tables.projectWorkEvents.values()) {
-    const command = planningWriteSchema.safeParse(JSON.parse(row.command));
-    if (!command.success || command.data.itemId !== initiative.itemId) continue;
-    row.command = JSON.stringify(redactPlanningWrite(command.data));
-    row.purged = purge.operationId;
-  }
+  markPurged(itemRows(f.s.tables.projectWorkEvents.values(), [initiative.itemId]), purge.operationId);
   f.s.tables.projectWorkGenerations.get(first).format = 3;
   const second = await ensure();
   assert.notEqual(first, second);

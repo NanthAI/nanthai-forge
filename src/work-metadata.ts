@@ -196,7 +196,7 @@ export function applyHostedEvent(
         )
       : undefined;
   const creatingId =
-    event.command.action === 'intent'
+    planning.action === 'intent'
       ? event.id
       : planningIntentId && !data.intents.some(intent => intent.id === planningIntentId)
         ? planningIntentId
@@ -245,12 +245,8 @@ export function applyHostedEvent(
       'Planning identity differs from its original hosted operation.',
     );
     applyPlanningPurge(data, event.command, event);
-  } else if (
-    event.command.action === 'purged-planning-row' ||
-    event.command.action === 'put-planning-item' ||
-    event.command.action === 'comment-planning-item'
-  ) {
-    const write = event.command.action === 'purged-planning-row' ? event.command.command : event.command;
+  } else if (planning.action === 'put-planning-item' || planning.action === 'comment-planning-item') {
+    const write = planning;
     invariant(
       write.operationId === event.id,
       'INVALID_WORK_JOURNAL',
@@ -261,7 +257,18 @@ export function applyHostedEvent(
     // A purged row's version keeps the original request hash, as the live write recorded it.
     applyPlanningMetadata(data, write, event.at, purgedRow ? event.request : undefined);
     stampPlanningAuthor(data, count, write, event.actor, comments);
-  } else applyIntentMetadata(data, event.command, { id: event.id, at: event.at, ...options });
+  }
+  // A purged intent or note row (planning-purge-v2) replays as its redacted command, like a whole one.
+  else
+    applyIntentMetadata(
+      data,
+      planning as Extract<typeof planning, { action: 'intent' | 'note' | 'intent-status' }>,
+      {
+        id: event.id,
+        at: event.at,
+        ...options,
+      },
+    );
   if (isUnifiedWork(data) && creatingId) {
     const created = data.intents.find(intent => intent.id === creatingId);
     if (created) (created as Record<string, unknown>).creatorAccountId = event.actor;

@@ -42,8 +42,15 @@ export function retainedPlanning(data: WorkData, command: PlanningWrite) {
   }
   return retained;
 }
+/** A purged decision comment's derived body version (purge Lane 2, follow-up e). Its live request hashed the body
+ * with the decision's words; a replay of the purged comment cannot rebuild that body, so the version's request is
+ * derived from the comment's own (kept) request instead. The purge executor must write the same value into the live
+ * version (and the Intent's request) when it redacts them, so the live and rebuilt indexes agree. */
+export const purgedDecisionRequest = (commentRequest: string) =>
+  digest(`planning-purged-decision:${commentRequest}`);
 /** Data-only reducer shared by local Work and the original hosted journal replay. A decision comment also appends
- * its line to the Item body as the next version, in the same write (src/work-planning-put.ts). */
+ * its line to the Item body as the next version, in the same write (src/work-planning-put.ts). `request` is passed
+ * only for a purged row (its original request hash, kept on the row). */
 export function applyPlanningMetadata(data: WorkData, command: PlanningWrite, at: string, request?: string) {
   const retained = retainedPlanning(data, command);
   if (retained) return retained;
@@ -67,6 +74,7 @@ export function applyPlanningMetadata(data: WorkData, command: PlanningWrite, at
       }),
     },
     at,
+    request === undefined ? undefined : purgedDecisionRequest(request),
   );
   return written;
 }

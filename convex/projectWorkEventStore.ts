@@ -126,7 +126,7 @@ async function purgedReplay(
   event: StoredWorkEvent,
   replay?: { command: string } | { authority: true },
 ): Promise<StoredWorkEvent> {
-  const facts = await verifyPurgedRow(ctx, projectId, { ...event, purged: event.purged! });
+  const { itemId } = await verifyPurgedRow(ctx, projectId, { ...event, purged: event.purged! });
   if (replay && 'command' in replay) {
     const command = journalCommandSchema.parse(JSON.parse(replay.command));
     invariant(
@@ -136,5 +136,5 @@ async function purgedReplay(
     );
   }
   if (replay && 'authority' in replay) return event;
-  throw planningPurged(facts.itemId, event.purged);
+  throw planningPurged(itemId, event.purged);
 }

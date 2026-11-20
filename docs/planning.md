@@ -68,20 +68,35 @@ or links and `purged` naming the purge operation, the deletion time and who purg
 appends it (`projectWorkCommand.purgeFromServer`, with its projection in the same mutation); no client entry accepts
 it. Every later put, comment or restore on the tombstone is refused with `PLANNING_ITEM_PURGED`.
 
-A purged journal row keeps its envelope (operation id, revision, actor, time, request hash) and, as its facts, its
-own command with every word replaced (`redactPlanningWrite`: title "Deleted Item", empty body, no reason, comment
-text "Deleted comment") and every structural field kept (kind, status, versions, links, Initiative, thread). It has
-no segment. A purged issue, comment or Intent version keeps its header and digest. Readers accept a journal row under
-one rule: it hashes to its request, or it names a purge command that exists, is itself whole, comes later and names
-the same Item, and its facts are its own operation's command with no words left. Anything else is
-`INVALID_WORK_JOURNAL`. Replay runs a purged row as its redacted command and the purge as the tombstone, with the
-same checks as the first run, so a rebuild keeps every Item that names the purged one and cannot bring the text
-back. A retry of a purged operation answers `PLANNING_ITEM_PURGED`; the same operation id with other inputs stays
-`WORK_OPERATION_CHANGED`. A purged record version answers `PLANNING_ITEM_PURGED` instead of a digest failure.
-`exportJournal` refuses a journal with purged rows to a CLI without the `planning-purge-v1` contract feature
-(`CLI_UPGRADE_REQUIRED`); a legacy source-return whose pinned Work digest a purged row makes unreproducible is
-checked by envelope continuity only, and the export's coverage says so. Healthy rows cost nothing extra; a page with
-purged rows looks each distinct purge up once (up to two indexed reads).
+A purge lists every journal row of its Item (`rows`: operation id and the digest of the row's redacted facts),
+recorded while the rows are still whole. That covers the Item's puts and comments, writes made through an alias or
+its Intent id, and an Intent-born Item's `intent` row and Lane `note` rows. A purged journal row keeps its envelope
+(operation id, revision, actor, time, request hash) and, as its facts, its own command reduced to a keep-list of
+structural fields (`redactPlanningWrite` in `src/work-intent-types.ts`: kind, status, versions, links, Initiative,
+parent, thread, base), with the words replaced (title and outcome "Deleted Item", empty body and constraints,
+comment text "Deleted comment", note text "Deleted note") and free text or attribution dropped (reason, type
+label, owner, import facts, note anchor). A field a schema gains is dropped until it is classified, and a test fails
+until it is. It has no segment: planning, Intent, note and purge journal rows never enter a journal segment, so a purge can
+reach them in Convex (older record versions are not yet covered; the executor's preflight checks segments are off). A purged issue, comment or Intent version keeps its header and digest. Readers accept a
+journal row under one rule: it hashes to its request, or it names a purge command that exists, is itself whole,
+comes later and lists the row with the digest of its facts, parsed strictly (no unknown key) and holding no words.
+Anything else is `INVALID_WORK_JOURNAL`, so a row cannot vouch for its own structure. Replay runs a purged row as its
+redacted command and the purge as the tombstone, with the same checks as the first run, so a rebuild keeps every
+Item that names the purged one and cannot bring the text back; in a full replay (load, export, recovery) the purge also replaces
+the words of every earlier version and comment of the Item, including those from the base checkpoint; the hosted
+index keeps them until the purge executor redacts its records. A purged decision
+comment's own body version replays under a request derived from the comment's (`purgedDecisionRequest`), since the
+body it hashed is gone. A put that newly names a tombstone as its Initiative, parent, linked Intent or relation is
+refused with `PLANNING_ITEM_PURGED`; links an Item already has stay, so it can still be edited. A retry of a purged
+operation answers `PLANNING_ITEM_PURGED`; the same operation id with other inputs stays `WORK_OPERATION_CHANGED`. A
+purged record version answers `PLANNING_ITEM_PURGED` instead of a digest failure. `exportJournal` refuses a journal
+with a purge to a CLI without the `planning-purge-v2` contract feature (`CLI_UPGRADE_REQUIRED`, also for v1 CLIs); a
+legacy source-return whose pinned Work digest a purged row makes unreproducible is checked by envelope continuity
+only, and the export's coverage says so. Healthy rows cost nothing extra; a page with purged rows looks each distinct
+purge up once (up to two indexed reads). A put that newly names a link, parent, relation or Initiative
+reads those Items' latest versions (and their alias and Intent) after its other rows, so the live write refuses a
+tombstone exactly as a full replay does; a put that names no new link reads nothing more. Schema 16+ only: older
+reducers do not check links.
 
 ### Versions
 
