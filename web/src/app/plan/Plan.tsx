@@ -11,7 +11,7 @@
 // Writes:
 // projectWorkCommand:command for one row, projectPlanningBatch:apply for a selection, each retry-safe by its
 // operation id.
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAction, useConvex, useMutation } from 'convex/react';
 import { makeFunctionReference, type PaginationResult } from 'convex/server';
 import { api } from '../../../../convex/_generated/api';
@@ -57,6 +57,7 @@ import {
 } from './model';
 import { filtered, keeps, readQuery, sortRows, writeQuery, type PlanQuery } from './query';
 import { Toolbar, useSavedViews, viewList, ViewsColumn } from './Views';
+import { ItemWork, type ReadItemWork } from './ItemWork';
 import './plan.css';
 
 const planRead = makeFunctionReference<'query', { projectId: Id<'hostedProjects'> }, PlanRead>(
@@ -163,6 +164,10 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
   const deleteForever = useAction(api.projectItemRetention.deleteForever);
   const apply = useMutation(batchApply);
   const client = useConvex();
+  const readItemWork = useCallback<ReadItemWork>(
+    (itemId, cursor) => client.query(api.projectItemWork.read, { projectId, itemId, limit: 10, cursor }),
+    [client, projectId],
+  );
   const put: Put = command => {
     const operationId = crypto.randomUUID();
     return mutate({
@@ -201,6 +206,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
       run={run}
       purge={input => deleteForever({ projectId, ...input })}
       reads={reads}
+      readItemWork={readItemWork}
       query={query}
       go={go}
       viewer={viewerHandle}
@@ -243,6 +249,7 @@ export function PlanScreenView({
   run,
   purge,
   reads,
+  readItemWork,
   query = readQuery(new URLSearchParams()),
   go = () => undefined,
   viewer,
@@ -267,6 +274,7 @@ export function PlanScreenView({
   run?: RunBatch;
   purge?: PurgeItem;
   reads?: Reads;
+  readItemWork?: ReadItemWork | undefined;
   query?: PlanQuery;
   go?: (patch: Partial<PlanQuery>) => void;
   viewer?: string | undefined;
@@ -393,6 +401,7 @@ export function PlanScreenView({
         workers={workers}
         at={at}
         projectId={projectId}
+        readItemWork={readItemWork}
         onSplit={whole?.canEdit && reads && run ? () => setSplit(true) : undefined}
         onVersions={projectId ? () => setVersions(true) : undefined}
         onShelve={whole?.canEdit && run ? (row, to) => void shelfMove(shelve([row], to), row, to) : undefined}
@@ -903,6 +912,7 @@ function ItemPage({
   workers,
   at,
   projectId,
+  readItemWork,
   onSplit,
   onVersions,
   onShelve,
@@ -924,6 +934,7 @@ function ItemPage({
   workers: Workers;
   at: (patch: Partial<PlaceProps['route']>) => string;
   projectId: Id<'hostedProjects'> | undefined;
+  readItemWork?: ReadItemWork | undefined;
   onSplit?: (() => void) | undefined;
   onVersions?: (() => void) | undefined;
   /** Archive or Delete this Item (the owner only). */
@@ -946,6 +957,7 @@ function ItemPage({
       (looking ? undefined : null))
     : undefined;
   const legacy = currentScreenHref(route);
+  const workItem = row?.id ?? (row === null ? shelved?.row.id : undefined);
   const full = legacy && row ? `${legacy}?planningItem=${encodeURIComponent(row.id)}` : legacy;
   const group = row
     ? view?.groups.find(entry => entry.lines.some(line => line.row.id === row.id))
@@ -1100,6 +1112,9 @@ function ItemPage({
             <A href={`${at({})}?scope=deleted`}>Deleted</A>
           </div>
         </Region>
+      ) : null}
+      {workItem && readItemWork ? (
+        <ItemWork key={`${projectId}:${workItem}`} itemId={workItem} read={readItemWork} at={at} />
       ) : null}
     </div>
   );

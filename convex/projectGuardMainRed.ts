@@ -1,9 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
+import type { HostedCheckRun } from '../src/hosted-check';
 import type { HostedLandingState } from '../src/hosted-landing';
 import { forgetMainRedFiles, withoutMainRed } from '../src/preflight-guard-learning';
 import { recordGuardFailure } from './projectLandingSpeed';
+
+/** Keep only the last red's guard evidence in the existing green write. An incomplete list
+ * already means the learner must disregard the whole verdict, so keep only that signal. */
+export function recoveredRed(
+  red: NonNullable<Doc<'projectHostedMainAudits'>['red']>,
+  greenHead: string,
+  at: string,
+) {
+  // The time cutoff is needed when the same source goes green (a flake or rerun).
+  // A stale retry on a red head that was replaced can still fail on the old bug.
+  const pin = { head: red.head, ...(greenHead === red.head ? { passedAt: at } : {}) };
+  if (red.moreTests || !red.tests?.length) return pin;
+  const lastRed = { ...pin, tests: red.tests };
+  return new TextEncoder().encode(JSON.stringify({ lastRed })).length <= 1000 ? lastRed : pin;
+}
+
+// Reuse the failing check that queue/admission settlement already read. The current
+// attempt may carry an older reservation timestamp or a different base after recomposition.
+const guardChecks = new WeakMap<MutationCtx, Map<string, { head: string; at: string }>>();
+export function rememberGuardCheck(ctx: MutationCtx, submissionId: string, run: HostedCheckRun) {
+  let checks = guardChecks.get(ctx);
+  if (!checks) guardChecks.set(ctx, (checks = new Map()));
+  checks.set(submissionId, { head: run.candidate.base.head, at: run.at });
+}
 
 /** Main's own failures are never a Lane's (13ea93bf main-red line). A failed check reads main's audit
  * row once (one indexed read, check failures only, about 1 landing in 10) and hands the guard learner
@@ -17,6 +42,15 @@ export async function recordGuardFailureOffMainRed(ctx: MutationCtx, state: Host
       .withIndex('by_project', q => q.eq('projectId', state.projectId as Id<'hostedProjects'>))
       .unique();
     lane = withoutMainRed(state, audit?.red);
+    const last = audit?.lastRed;
+    const check = guardChecks.get(ctx)?.get(state.id);
+    if (
+      lane &&
+      last &&
+      check?.head === last.head &&
+      (!last.passedAt || Date.parse(check.at) <= Date.parse(last.passedAt))
+    )
+      lane = withoutMainRed(lane, last);
   } catch {
     // An unreadable audit row teaches nothing rather than main's failures.
     lane = null;

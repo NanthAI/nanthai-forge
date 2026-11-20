@@ -14,6 +14,7 @@ import {
 import { loadLanding, settleLandingOperation, writeLanding } from './projectHostedLandingStore';
 import { predecessorStatus } from './projectHostedLandingPipeline';
 import { hostedStartMain } from './projectHostedChannels';
+import { rememberGuardCheck } from './projectGuardMainRed';
 import { CHECK_FAILED_NEXT, checkFailureDetail } from '../src/check-failure-detail';
 
 /** Queue throughput after a failed combined generation (51bbbd00). Runs inside
@@ -102,6 +103,7 @@ export async function isolateFailedBatch(
       },
     };
     await writeLanding(ctx, member.row, next, false);
+    rememberGuardCheck(ctx, next.id, run);
     await settleLandingOperation(ctx, next);
     return true;
   }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { providerAckMs, providerStartupUnavailable } from '../src/ci-provider-recovery';
+import { prePlanFailureReason, providerAckMs, providerStartupUnavailable } from '../src/ci-provider-recovery';
+import { checkFailureKind } from '../src/hosted-landing-admission';
 import { convexFetch } from './networkFetch';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
@@ -414,7 +415,13 @@ export const pendingReconcile = internalMutation({
  * then refused by run id: no session, result or webhook binds it. */
 export async function reconcileDirectActions(
   ctx: MutationCtx,
-  input: CheckIdentity & { fence: number; executionId?: string; lookup: string; conclusion?: string },
+  input: CheckIdentity & {
+    fence: number;
+    executionId?: string;
+    lookup: string;
+    conclusion?: string;
+    firstAttempt?: true;
+  },
 ) {
   const selected = await writableHostedCheck(ctx, input),
     { row, run } = selected;
@@ -437,6 +444,19 @@ export async function reconcileDirectActions(
       'EVIDENCE_CHANGED',
       'Actions execution changed.',
     );
+    // A credentialed read of the already-bound execution can replace a lost completion event.
+    // A by-name lookup can adopt an execution, but it cannot settle this new failure path.
+    if (run.executionId && input.lookup === 'found' && input.firstAttempt && input.conclusion === 'failure') {
+      const reason = prePlanFailureReason(
+        {
+          failed: true,
+          conclusion: input.conclusion,
+          checkFailed: checkFailureKind(run, { conflicts: [] }) === 'tests',
+        },
+        { recorded: Boolean(run.plan), previousReason: run.failureReason },
+      );
+      if (reason) return settleDirectActions(ctx, selected, 'runner-unavailable', reason);
+    }
     run.executionId = input.executionId;
     actions.outcome = 'accepted';
     if (!run.plan) run.status = 'preparing';
@@ -471,6 +491,7 @@ export const reconciled = internalMutation({
     executionId: v.optional(v.string()),
     lookup: v.string(),
     conclusion: v.optional(v.string()),
+    firstAttempt: v.optional(v.literal(true)),
   },
   returns: v.null(),
   handler: async (ctx, input) => {
@@ -497,6 +518,7 @@ export const reconcile = internalAction({
     if (!pending) return null;
     let executionId: string | undefined,
       conclusion: string | undefined,
+      firstAttempt = false,
       lookup = 'skipped';
     let lookupStatus: number | undefined;
     if (pending.lookup)
@@ -517,8 +539,14 @@ export const reconcile = internalAction({
         const body = (await response.json()) as {
           id?: number;
           conclusion?: unknown;
+          run_attempt?: number;
           total_count?: number;
-          workflow_runs?: { id?: number; display_title?: string; conclusion?: unknown }[];
+          workflow_runs?: {
+            id?: number;
+            display_title?: string;
+            conclusion?: unknown;
+            run_attempt?: number;
+          }[];
         };
         invariant(
           pending.executionId ? Number.isSafeInteger(body.id) : Array.isArray(body.workflow_runs),
@@ -535,6 +563,7 @@ export const reconcile = internalAction({
             : 'absent';
         if (found && Number.isSafeInteger(found.id) && found.id! > 0) executionId = String(found.id);
         if (typeof found?.conclusion === 'string') conclusion = found.conclusion.slice(0, 40);
+        firstAttempt = found?.run_attempt === 1;
       } catch (error) {
         lookup = lookupStatus === 404 ? 'absent' : `failed ${timedOut(error) ? 'timeout' : 'error'}`;
       }
@@ -543,6 +572,7 @@ export const reconcile = internalAction({
       lookup,
       ...(conclusion ? { conclusion } : {}),
       ...(executionId ? { executionId } : {}),
+      ...(firstAttempt ? { firstAttempt: true } : {}),
     });
     return null;
   },

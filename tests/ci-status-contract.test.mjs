@@ -179,6 +179,85 @@ for (const [name, a] of Object.entries(adapters)) {
   });
 }
 
+test('gitlab-ci: a bound pipeline that fails before its expected Forge plan retries, then trips the CI-down hold', async t => {
+  const { batchesFixture, checkStore, states, synthetic } =
+    await import('./hosted-landing-batches-fixture.mjs');
+  const { settleCiStatusVerdict } = await import(moduleUrl('../convex/projectCiStatusLifecycle.ts'));
+  const { CI_DOWN_STREAK } = await import(moduleUrl('../convex/projectHostedLandingCiDown.ts'));
+  const { landingStateOf } = await import('../dist/landing-state.js');
+  const { provider, record } = adapters['gitlab-ci'];
+  const env = { ...synthetic, FORGE_QUEUE_HOLD_ON_CI_DOWN: '1' };
+  const prior = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
+  Object.assign(process.env, env);
+  t.after(() => {
+    for (const [key, value] of Object.entries(prior))
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+  });
+
+  const probe = 'projectHostedLandingCiDown:probe';
+  const f = await batchesFixture(t, { count: 1 });
+  const settle = async () => {
+    for (let n = 0; n < 50; n++) {
+      const task = f.pending().find(task => task.name !== probe);
+      if (!task) return;
+      await f.execute(task);
+    }
+    assert.fail('landing tasks did not settle');
+  };
+  await settle();
+  for (let n = 0; n < CI_DOWN_STREAK; n++) {
+    const queued = f.runs().filter(run => run.status === 'queued');
+    assert.equal(queued.length, 1, 'one exact check per attempt');
+    const [next] = queued;
+    const evidence = record({ result: 'failed', ref: candidateBranch(next.id) });
+    const binding = bound({ runId: next.id, executionId: '101' });
+    // A standalone pipeline failure remains a verdict. Only a Forge-managed
+    // execution with a missing expected plan is a job-API infrastructure end.
+    assert.equal(ciStatusVerdict(provider, binding, evidence).status, 'failed');
+    assert.equal(ciStatusVerdict(provider, binding, evidence, true).status, 'failed');
+    await f.transaction(
+      'gitlab-provider-result',
+      {
+        _handler: async ctx => {
+          const selected = await checkStore.writableHostedCheck(ctx, {
+            projectId: f.projectId,
+            runId: next.id,
+          });
+          const { run } = selected;
+          run.configuration = {
+            provider: 'ci-status',
+            ci: provider,
+            runtime: run.configuration.runtime,
+            environmentFingerprint: run.configuration.environmentFingerprint,
+          };
+          run.ci = { branch: candidateBranch(run.id), commit, link: null };
+          const verdict = ciStatusVerdict(provider, binding, evidence, Boolean(run.plan));
+          await settleCiStatusVerdict(ctx, selected, verdict);
+        },
+      },
+      {},
+    );
+    await settle();
+    const done = f.runs().find(run => run.id === next.id);
+    assert.equal(done.status, 'runner-unavailable');
+    assert.match(done.failureReason, /runner ended \(failed\) before Forge recorded its plan/);
+    if (n === 0) {
+      const retry = f.runs().find(run => run.status === 'queued');
+      const landing = states(f)[0];
+      assert.equal(landing.observation.pendingReason, 'pending-infra');
+      assert.match(
+        landingStateOf({ ...landing, providerDelay: retry.failureReason }).label,
+        /^Waiting for check infrastructure since \d\d:\d\dZ$/,
+      );
+    }
+  }
+  const [held] = states(f);
+  assert.equal(held.error?.code, 'CI_DOWN');
+  assert.match(landingStateOf(held).label, /^Waiting for check infrastructure since \d\d:\d\dZ$/);
+  assert.equal(f.pending().filter(task => task.name === probe).length, 1, 'one probe for the project');
+});
+
 test('github-actions: an unsigned event never carries a run result', () => {
   const { provider, record } = adapters['github-actions'];
   assert.equal(ciStatusVerdict(provider, bound(), { ...record(), signed: false }).outcome, 'refused');

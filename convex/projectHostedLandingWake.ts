@@ -19,6 +19,7 @@ import { landingRow, writeLanding } from './projectHostedLandingStore';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { hostedCheckTerminal } from '../src/hosted-check';
 import { settleLandingAdmission } from './projectHostedLandingAdmission';
+import { rememberGuardCheck } from './projectGuardMainRed';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { nextLandingRow, nextReadyLandingRow, orderHostedLandingRows } from './projectHostedLandingOrder';
 import { loadBatch } from './projectHostedLandingBatchState';
@@ -289,6 +290,7 @@ async function wakeLandingCheckPage(
       run ??= (await loadHostedCheck(ctx, input)).run;
       if (hostedCheckTerminal(run)) {
         // A parked entry (fix D) is an event wait: it needs no queue tick, unless it held order.
+        if (run.status !== 'passed') rememberGuardCheck(ctx, row.submissionId, run);
         if (await settleLandingAdmission(ctx, row, run)) woken = true;
       } else if (
         run.failureReason?.startsWith('provider-delayed:') ||

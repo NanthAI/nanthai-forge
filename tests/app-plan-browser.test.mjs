@@ -17,6 +17,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { chromium } from 'playwright';
+import { itemWorkFixture } from './item-work-fixture.mjs';
 const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL('../', import.meta.url));
 const shots = process.env.FORGE_PLAN_SHOTS;
@@ -26,6 +27,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { ConvexProvider } from ${JSON.stringify(join(root, 'node_modules/convex/dist/esm/react/index.js'))};
 import { fakeConvex } from ${JSON.stringify(join(root, 'tests/convex-fake.mjs'))};
+import { getFunctionName } from ${JSON.stringify(join(root, 'node_modules/convex/dist/esm/server/index.js'))};
 // Loaded lazily, as the app loads the screen with its route (the first-paint chunk never carries it).
 const PlanScreenView = React.lazy(() =>
   import(${JSON.stringify(join(root, 'web/src/app/plan/Plan.tsx'))}).then(m => ({ default: m.PlanScreenView })),
@@ -73,10 +75,20 @@ const linkBackend = fakeConvex({
       return { id: row.id, row: row.status === 'deleted' ? JSON.stringify(row) : null };
     }
     if (name === 'projectPlanWorkers:read') return '{"lanes":[]}';
+    if (name === 'projectItemWork:read') return window.readItemWork?.(args) ?? '{"role":false}';
     if (args.paginationOpts) return { page: [], isDone: true, continueCursor: '' };
     return null;
   },
 });
+if (window.readItemWork) {
+  const query = linkBackend.client.query;
+  window.planQueries = [];
+  linkBackend.client.query = (ref, args) => {
+    window.planQueries.push(getFunctionName(ref));
+    return query(ref, args);
+  };
+  window.planSubscriptions = () => [...linkBackend.live.values()].map(entry => entry.name);
+}
 window.calls = [];
 const run = async writes => {
   window.calls.push(writes);
@@ -156,7 +168,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
     await browser.close();
     rmSync(temp, { recursive: true, force: true });
   });
-  const open = async (width, theme, search = '', held = false, livePlan = false) => {
+  const open = async (width, theme, search = '', held = false, livePlan = false, readItemWork) => {
     // One locale on every machine, so dates read the same locally and on the runner ("1 Nov", never "Nov 1" or "1 ott").
     const context = await browser.newContext({
       locale: 'en-GB',
@@ -164,6 +176,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
     });
     if (held) await context.addInitScript(() => (window.heldFeed = true));
     if (livePlan) await context.addInitScript(() => (window.livePlan = true));
+    if (readItemWork) await context.exposeFunction('readItemWork', readItemWork);
     // Every layout shift from the first paint on, for the no-shift check below.
     await context.addInitScript(() => {
       window.shifts = [];
@@ -757,6 +770,91 @@ test('plan views and bulk bar: real components keep the view in the address and 
     await page.locator('main .head .sit').filter({ hasText: words }).waitFor();
     assert.deepEqual(errors, []);
     await context.close();
+  }
+  // The browser dispatches the production query to the real handler through the indexed records fixture.
+  // The same Item has 12 Lanes in both cases, so unrelated project history cannot change either page's cost.
+  const workFixture = await itemWorkFixture({ itemId: '00000000-0000-4000-8000-000000000010', extra: 8 });
+  const { itemId } = workFixture;
+  let workCosts;
+  for (const unrelated of [0, 10_000]) {
+    await t.test(`Item Work reads one bounded page on open with ${unrelated} unrelated Lanes`, async t => {
+      await workFixture.addUnrelatedLanes(unrelated);
+      const calls = [];
+      const costs = [];
+      for (const [width, theme] of unrelated
+        ? [
+            [1440, 'dark'],
+            [390, 'light'],
+          ]
+        : [
+            [1440, 'light'],
+            [390, 'dark'],
+          ]) {
+        const { page, context, errors } = await open(width, theme, `/${itemId}`, false, true, async args => {
+          calls.push(args);
+          const start = performance.now();
+          const reply = await workFixture.readRaw({ cursor: args.cursor, limit: args.limit });
+          const { name, ...cost } = workFixture.counts.at(-1);
+          costs.push({ ...cost, responseBytes: Buffer.byteLength(reply) });
+          t.diagnostic(
+            `${width} ${theme}: ${JSON.stringify(costs.at(-1))}, handler ${(performance.now() - start).toFixed(1)} ms`,
+          );
+          return reply;
+        });
+        try {
+          const work = page.getByRole('region', { name: 'Work', exact: true });
+          const more = work.getByRole('button', { name: 'Show more Lanes' });
+          await more.waitFor();
+          const lanes = work.getByRole('link', { name: /^Lane / });
+          const landings = work.getByRole('link', { name: /^Landing / });
+          assert.equal(await lanes.count(), 10);
+          assert.equal(
+            await lanes.first().getAttribute('href'),
+            `/-/example-builder/synthetic/lanes/${workFixture.open.id}`,
+          );
+          assert.equal(await landings.count(), 1);
+          assert.equal(
+            await landings.first().getAttribute('href'),
+            `/-/example-builder/synthetic/code/files?at=${'c'.repeat(64)}`,
+          );
+          assert.deepEqual(calls.slice(-1), [{ itemId, projectId: 'synthetic', limit: 10, cursor: null }]);
+          await check(page, `Item Work ${width} ${theme}`);
+          if (shots)
+            await page.screenshot({ path: join(shots, `item-work-${width}-${theme}.png`), fullPage: true });
+          assert.deepEqual(await page.evaluate(() => window.planQueries), ['projectItemWork:read']);
+          assert.deepEqual((await page.evaluate(() => window.planSubscriptions())).sort(), [
+            'projectPlanCounts:read',
+            'projectPlanView:read',
+            'projectWorkIndex:workspace',
+          ]);
+          await more.click();
+          await work.getByRole('link', { name: `Lane ${workFixture.abandoned.id.slice(0, 8)}` }).waitFor();
+          assert.equal(await lanes.count(), 12);
+          assert.equal(await landings.count(), 2);
+          assert.equal(await more.count(), 0);
+          assert.deepEqual(await page.evaluate(() => window.planQueries), [
+            'projectItemWork:read',
+            'projectItemWork:read',
+          ]);
+          assert.deepEqual(calls.slice(-1), [
+            { itemId, projectId: 'synthetic', limit: 10, cursor: 'forge-item-work-v1:10' },
+          ]);
+          assert.deepEqual(errors, []);
+        } finally {
+          await context.close();
+        }
+      }
+      assert.equal(calls.length, 4);
+      for (const cost of costs) {
+        assert.equal(cost.writes, 0);
+        assert(cost.ranges <= 64, JSON.stringify(cost));
+        assert(cost.documents <= 80, JSON.stringify(cost));
+        assert(cost.readBytes < 24 * 1024, JSON.stringify(cost));
+      }
+      if (unrelated)
+        assert.deepEqual(costs, workCosts, 'unrelated Lane heads add no database I/O or response bytes');
+      else workCosts = costs;
+    });
   }
   for (const [name, search] of [
     ['list', ''],

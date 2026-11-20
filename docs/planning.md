@@ -249,6 +249,7 @@ Lanes, each Intent of a list such as the related coordination feed), live or fro
 without a role as for an id no record has, cursors, totals and errors included, unless the id is a visible Item (an
 Item's first Intent shares its id). A Lane row names a hidden Item by no field: a stand-in id takes its place. A follow-up Intent
 cannot be tied to its Item without reading the plan, so a filter by one answers as absent: filter by the Item instead.
+
 On a public plan, a hidden Item still leaves a visitor's settled, list or search page shorter than asked, and a
 search cursor can show that a term matched more than one page, and its Lanes stay listed without title, under a
 stand-in Intent id, so they can be counted; no Item, title or id of it reaches the reply, and a page left empty is
@@ -257,6 +258,10 @@ is not one, for every viewer (`BAD_ARGUMENT`). Archived and Deleted Items are ne
 public and members-only (`publicDiscovery:setSettings`, next to the Lane-title opt-in); there is no web control for
 it yet.
 `tests/public-plan-access-matrix.test.mjs` checks every viewer against every setting on these reads.
+
+When Plan resolves an Item page, Work opens with one page of 10 Lanes from `projectItemWork:read`, the same
+reader agents use. Work shows the Lane count and links the receipts on those Lanes to Code at the landed State.
+Show more Lanes requests the next page using the returned cursor. Work stays idle between requests.
 
 Who wrote a comment comes from the sign-in, never from typed text: a browser sign-in is the person, a device
 credential is an agent run (its session slug, and the model its launcher declared in `FORGE_AGENT_MODEL`, stored as

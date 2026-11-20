@@ -167,6 +167,116 @@ test("main-red: a check that fails on a file main's red audit fails teaches noth
   );
 });
 
+async function recoverCheckBase(f, late) {
+  const { onGateRunTerminal } = await import(moduleUrl('../convex/projectHostedMainAuditState.ts'));
+  const { auditReason } = await import('../dist/main-audit.js');
+  const head = late.candidate.base.head;
+  const runId = 'green-audit';
+  const sequence = f.currentMain().sourceRevision;
+  const auditId = f.insert('projectHostedMainAudits', {
+    projectId: f.projectId,
+    red: { head, tests: [GUARD], since: late.at, runId: 'red-audit' },
+    audit: { head, runId, sequence, status: 'running' },
+  });
+
+  await f.tx(
+    'greenAudit',
+    {
+      _handler: ctx =>
+        onGateRunTerminal(ctx, {
+          ...late,
+          id: runId,
+          request: { ...late.request, expectedHead: head },
+          gate: {
+            mode: 'audit',
+            effective: 'full',
+            reason: auditReason({ sequence, count: 0, key: runId, attempt: 0 }),
+          },
+          status: 'passed',
+          endedAt: new Date().toISOString(),
+        }),
+    },
+    {},
+  );
+  const audit = f.tables.projectHostedMainAudits.get(auditId);
+  assert.equal(audit.red, undefined);
+  assert.equal(audit.lastGreen.head, head);
+}
+
+test("main-red: a verdict after recovery cannot teach the red head's failing test (13ea93bf)", async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 10, 20, 5, 27) });
+  const f = await batchesFixture(t, { batchMaxSize: null, count: 0 });
+  await f.add(0, { enqueue: gated(ranEvidence([])) });
+  await settle(f);
+  await f.add(1, { enqueue: gated(ranEvidence([])) });
+  await f.drain();
+
+  const late = f.runs().find(run => run.status === 'queued');
+  assert.ok(late, 'the landing is still checking the red head');
+  t.mock.timers.tick(60_000);
+  await recoverCheckBase(f, late);
+
+  const guards = () => [...f.tables.projectLandingSpeed.values()][0].guards;
+  await settle(f, GUARD);
+  assert.equal(states(f)[1].error?.code, 'CHECK_FAILED');
+  assert.equal(guards(), undefined, 'the late red-head verdict teaches nothing');
+
+  // The recovered audit may pass the same source. A check started after that
+  // verdict can still teach a genuine Lane failure on that same base.
+  t.mock.timers.tick(60_000);
+  await f.add(2, { enqueue: gated(ranEvidence([])) });
+  await settle(f, GUARD);
+  assert.equal(states(f)[2]?.error?.code, 'CHECK_FAILED', JSON.stringify(states(f)[2]?.error));
+  assert.ok(guards(), 'a failure after main passes on the same source can teach the file');
+  assert.deepEqual(
+    JSON.parse(guards()).failures.map(failure => failure[5].map(([file]) => file)),
+    [[GUARD]],
+  );
+});
+
+test('main-red: a retry started after same-head recovery can still teach a Lane failure', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 10, 20, 5, 27) });
+  const f = await batchesFixture(t, { batchMaxSize: null, count: 0 });
+  await f.add(0, { enqueue: gated(ranEvidence([])) });
+  await settle(f);
+  await f.add(1, { enqueue: gated(ranEvidence([])) });
+  await f.drain();
+
+  const late = f.runs().find(run => run.status === 'queued');
+  assert.ok(late, 'the landing is still checking the red head');
+  t.mock.timers.tick(60_000);
+  await recoverCheckBase(f, late);
+
+  // Infrastructure ended the original check. The retry keeps its source, but
+  // it was reserved after the same red head passed its audit.
+  t.mock.timers.tick(60_000);
+  await f.rawChecks.callback(f.rawChecks.complete(await f.rawChecks.activate(late.id), 'runner-unavailable'));
+  await f.drain();
+  const retry = f.runs().find(run => run.status === 'queued');
+  assert.ok(retry && retry.id !== late.id);
+  assert.equal(retry.candidate.base.head, late.candidate.base.head);
+  await settle(f, GUARD);
+  assert.equal(states(f)[1].error?.code, 'CHECK_FAILED');
+  const guards = [...f.tables.projectLandingSpeed.values()][0].guards;
+  assert.deepEqual(
+    JSON.parse(guards).failures.map(failure => failure[5].map(([file]) => file)),
+    [[GUARD]],
+  );
+});
+
+test('main-red guard evidence stays within 1 KiB even for long Unicode test paths', async () => {
+  const { recoveredRed } = await import(moduleUrl('../convex/projectGuardMainRed.ts'));
+  const head = 'a'.repeat(64);
+  const red = { head, runId: 'red-audit', since: '2026-11-20T05:27:00.000Z' };
+  const at = '2026-11-20T05:37:00.000Z';
+  for (const tests of [[GUARD], Array.from({ length: 20 }, (_, i) => `tests/${'界'.repeat(92)}${i}.mjs`)]) {
+    const lastRed = recoveredRed({ ...red, tests }, head, at);
+    assert.ok(Buffer.byteLength(JSON.stringify({ lastRed })) <= 1024);
+    assert.deepEqual(lastRed.tests, tests.length === 1 ? tests : undefined);
+    assert.equal(lastRed.head, head);
+  }
+});
+
 test('main-red: a failed main audit strips its failing files from failures learned since its first unaudited landing', async () => {
   const { auditFixture } = await import('./hosted-main-audit-fixture.mjs');
   const { addGuardFailure } = await import('../dist/preflight-guard-learning.js');

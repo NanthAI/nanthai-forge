@@ -5,6 +5,8 @@ import { completeHostedCheck, writableHostedCheck, writeHostedCheck } from './pr
 import { checkPin, hostedCheckTerminal, type HostedCheckRun } from '../src/hosted-check';
 import { requireStoredRepositoryBinding, type RunnerScope } from './githubBindingAccess';
 import { ForgeError } from '../src/errors';
+import { ciStatusEntryPaths, type CiVerdict } from '../src/ci-status';
+import { infraWaitSince, jobApiReason } from '../src/ci-provider-recovery';
 
 /** The project role of one account: anyone who is neither the owner nor a contributor is outside. */
 export async function roleOf(
@@ -49,6 +51,26 @@ export async function settleCiStatus(
   });
   await completeHostedCheck(ctx, run);
   await writeHostedCheck(ctx, row._id, run, status === 'passed');
+}
+
+/** Consumes the same already authenticated adapter verdict on the webhook or provider API path. */
+export async function settleCiStatusVerdict(
+  ctx: MutationCtx,
+  selected: Awaited<ReturnType<typeof writableHostedCheck>>,
+  verdict: Extract<CiVerdict, { outcome: 'terminal' }>,
+) {
+  const { run } = selected;
+  if (hostedCheckTerminal(run) || run.configuration.provider !== 'ci-status' || !run.ci) return;
+  run.executionId = verdict.executionId;
+  run.ci.link = verdict.link;
+  await settleCiStatus(
+    ctx,
+    selected,
+    verdict.status,
+    verdict.beforeJobPlan
+      ? jobApiReason(verdict.conclusion, infraWaitSince(run.failureReason))
+      : `${ciStatusEntryPaths(run.configuration.ci)[0]} concluded ${verdict.conclusion}${verdict.link ? ` (${verdict.link})` : ''}.`,
+  );
 }
 
 /** Private IO instruction returned to the signed webhook action, never to a Candidate job. */

@@ -3440,6 +3440,55 @@ test('incident 238b3573 replay: accepted startup failure without a webhook gets 
   }
 });
 
+for (const [returnedId, attempt, expected] of [
+  [123, 1, 'settles the bound pre-plan failure once'],
+  [456, 1, 'refuses a failure from a different execution'],
+  [123, 2, 'retains the original verdict when it reads a later provider attempt'],
+])
+  test(`incident 0d8a85a3: recovery ${expected} after a lost webhook`, async t => {
+    const s = await fixture(t);
+    variables(t, {
+      GITHUB_APP_ID: '12345',
+      GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+    });
+    let reads = 0;
+    t.mock.method(globalThis, 'fetch', async url => {
+      if (url.endsWith('/installation')) return Response.json({ id: 9 });
+      if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+      const visibility = repositoryRead(url);
+      if (visibility) return visibility;
+      if (url.endsWith('/dispatches')) return Response.json({ workflow_run_id: 123 });
+      assert.match(url, /\/actions\/runs\/123$/);
+      reads++;
+      return Response.json({
+        id: returnedId,
+        run_attempt: attempt,
+        status: 'completed',
+        conclusion: 'failure',
+      });
+    });
+    const ctx = { runMutation: (ref, input) => s.raw(direct, getFunctionName(ref).split(':')[1], input) };
+    await direct.dispatch._handler(ctx, s.id);
+    const [task] = reconcileTasks(s);
+    if (returnedId !== 123) {
+      await assert.rejects(direct.reconcile._handler(ctx, task.input), code('EVIDENCE_CHANGED'));
+      const run = await s.status(s.run.id);
+      assert.equal(run.executionId, '123');
+      assert.equal(run.status, 'preparing');
+      return;
+    }
+    await direct.reconcile._handler(ctx, task.input);
+    const run = await s.status(s.run.id);
+    if (attempt === 2) {
+      assert.equal(run.status, 'preparing');
+      return;
+    }
+    assert.equal(run.status, 'runner-unavailable');
+    assert.match(run.failureReason, /runner ended \(failure\) before Forge recorded its plan/);
+    await direct.reconcile._handler(ctx, task.input);
+    assert.equal(reads, 1, 'recovery uses the already-budgeted lookup and replays as a no-op');
+  });
+
 test('incident 238b3573 replay: signed passes and completed provider steps settle at thirty minutes despite in-progress jobs', async t => {
   variables(t, {
     GITHUB_APP_ID: '12345',

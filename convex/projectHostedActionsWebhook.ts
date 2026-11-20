@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { infraWaitSince, jobApiReason } from '../src/ci-provider-recovery';
+import { prePlanFailureReason } from '../src/ci-provider-recovery';
 import { cancelledUsageTarget } from './projectCancelledRunUsage';
 import { prepareReportCollection } from './projectHostedReportCollection';
 import { resultBatchIndex } from '../src/hosted-actions-result-batch';
@@ -151,15 +151,16 @@ export const receive = internalMutation({
       // Workflow failure is not Candidate evidence: OIDC/source/setup can fail
       // before tests run. Only an authenticated failed shard proves a check failed.
       const testsFailed = run.counts.failed > 0 || checkFailureKind(run, { conflicts: [] }) === 'tests';
-      // The runner ran but Forge never took its plan: check infrastructure, not runner capacity
-      // (0d8a85a3). An earlier retry's wait start carries over to the next retry's label.
+      const infrastructureReason = prePlanFailureReason(
+        { failed: conclusion === 'failure', conclusion, checkFailed: testsFailed },
+        { recorded: Boolean(run.plan), previousReason: run.failureReason },
+      );
       await settleDirectActions(
         ctx,
         selected,
         conclusion === 'cancelled' ? 'cancelled' : testsFailed ? 'failed' : 'runner-unavailable',
-        conclusion === 'failure' && !testsFailed && !run.plan
-          ? jobApiReason(conclusion, infraWaitSince(run.failureReason))
-          : `Actions completed (${conclusion ?? 'unknown'}) without complete job evidence.`,
+        infrastructureReason ??
+          `Actions completed (${conclusion ?? 'unknown'}) without complete job evidence.`,
       );
     } else {
       await writeHostedCheck(ctx, selected.row._id, run);

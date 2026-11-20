@@ -72,6 +72,14 @@ export const mainAuditFields = {
       reasonRunId: v.optional(v.string()),
     }),
   ),
+  /** The last recovered episode's test evidence, kept for checks still pinned to its red head. */
+  lastRed: v.optional(
+    v.object({
+      head: v.string(),
+      passedAt: v.optional(v.string()),
+      tests: v.optional(v.array(v.string())),
+    }),
+  ),
   debt: v.optional(v.boolean()),
   /** Newest main revision that landed on its first check (7fe54c7c); audited promptly. */
   firstCheck: v.optional(v.number()),

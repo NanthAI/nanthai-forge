@@ -751,9 +751,11 @@ attempts. Exhaustion is infrastructure `CHECK_NOT_PASSED`; genuine failures rema
 results. Accepted dispatches without an authenticated execution acknowledgement or
 shard result also have a +5 minute, one-lookup startup deadline: a missing run,
 `startup_failure` or cancellation goes through the same bounded platform retry
-with a provider-outage reason. Healthy startup cancels that deadline in its existing write. There are no project scans, active-run pollers, or idle scheduled functions.
+with a provider-outage reason. The same lookup can settle an already-bound first execution
+that failed before Forge took its plan, including when its completion webhook was lost.
+Healthy startup cancels that deadline in its existing write. There are no project scans, active-run pollers, or idle scheduled functions.
 
-A run GitHub ran (conclusion `failure`) that ended before Forge recorded its plan is check
+When a CI adapter reports a failed run and Forge's expected job plan is missing, the result is check
 infrastructure (runner setup, OIDC or Forge's job API), not runner capacity and not the code: it
 settles `runner-unavailable` (so the same platform retry and budget apply) with the reason `Check
 infrastructure: the runner ended (failure) before Forge recorded its plan` (Item 0d8a85a3, the

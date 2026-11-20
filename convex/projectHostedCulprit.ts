@@ -23,6 +23,7 @@ import {
   coverageLanding,
   noteRedCause,
 } from './projectHostedMainAuditState';
+import { recoveredRed } from './projectGuardMainRed';
 import { auditMetadata, auditDebt, auditDue } from '../src/main-audit';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { autoRevertEnabled, autoRevertHold } from '../src/auto-revert-policy';
@@ -757,6 +758,7 @@ async function classify(
       await ctx.db.patch(auditRow._id, {
         ...(drill ? { drill: undefined } : {}),
         red: undefined,
+        lastRed: recoveredRed(auditRow.red, run.request.expectedHead, run.endedAt!),
         lastGreen: { sequence: state.range.at(-1)!.sequence, head: run.request.expectedHead, runId: run.id },
         unaudited: { count, firstAt },
         debt: count ? auditDebt(count, firstAt, settings) : false,

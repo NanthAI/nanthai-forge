@@ -11,14 +11,13 @@ import {
   CANDIDATE_BRANCH_PREFIX,
   candidateBranch,
   candidatePublishable,
-  ciStatusEntryPaths,
   ciStatusVerdict,
   type CiStatusProvider,
 } from '../src/ci-status';
 import type { Id } from './_generated/dataModel';
 import { requireStoredRepositoryBinding } from './githubBindingAccess';
 import { requestCiCancel } from './projectCiStatusCancel';
-import { roleOf, settleCiStatus, ciBranchCleanup } from './projectCiStatusLifecycle';
+import { roleOf, settleCiStatus, settleCiStatusVerdict, ciBranchCleanup } from './projectCiStatusLifecycle';
 import { invariant } from '../src/errors';
 
 /**
@@ -272,18 +271,12 @@ export async function receiveCiStatus(
     return true;
   }
   const changed = run.executionId !== verdict.executionId;
-  run.executionId = verdict.executionId;
   if (verdict.outcome === 'pending') {
+    run.executionId = verdict.executionId;
     if (changed) await writeHostedCheck(ctx, selected.row._id, run);
     return true;
   }
-  run.ci = { ...run.ci, link: verdict.link };
-  await settleCiStatus(
-    ctx,
-    selected,
-    verdict.status,
-    `${ciStatusEntryPaths(ci.ci)[0]} concluded ${verdict.conclusion}${verdict.link ? ` (${verdict.link})` : ''}.`,
-  );
+  await settleCiStatusVerdict(ctx, selected, verdict);
   const cleanup = await ciBranchCleanup(ctx, run);
   const cancelledUsage = await cancelledUsageTarget(ctx, selected);
   return cancelledUsage ? { ...(cleanup === true ? {} : cleanup), cancelledUsage } : cleanup;

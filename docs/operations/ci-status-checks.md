@@ -87,6 +87,10 @@ reports its own status never passes a check, and a job report can only ask Forge
 provider record. Changing the CI file needs the owner's review, as changing a check script does:
 the file is a protected check entry.
 
+For an adapter execution that expects a Forge job API plan, a failed provider record
+before that plan is recorded uses the shared check-infrastructure retry and CI-down hold.
+A standalone workflow that supplies its own verdict needs no Forge job API plan.
+
 ## Outside contributors
 
 The workflow runs with the mirror repository's secrets. Forge publishes only Candidates whose

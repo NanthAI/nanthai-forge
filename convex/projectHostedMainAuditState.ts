@@ -25,7 +25,7 @@ import { holdsLandingOrder } from './projectHostedLandingOrder';
 import { armLandingAlarm } from './projectHostedLandingStallWake';
 import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 import { recordAuditRunnerSeconds } from './projectLandingSpeed';
-import { forgetMainRedGuards } from './projectGuardMainRed';
+import { forgetMainRedGuards, recoveredRed } from './projectGuardMainRed';
 import { lineMainState } from './projectLiveLineStore';
 import {
   drillClaims,
@@ -222,6 +222,7 @@ export async function closeDrill(
 async function recovery(
   ctx: MutationCtx,
   row: Doc<'projectHostedMainAudits'>,
+  head: string,
   at: string,
   sequence: number,
   reverted = revertDecided(row.red),
@@ -230,7 +231,7 @@ async function recovery(
   const drill = drillOf(row);
   return {
     recovered: { at, sequence, reverted, ...(drill ? { drill } : {}) },
-    patch: row.drill ? { drill: undefined } : {},
+    patch: { ...(row.drill ? { drill: undefined } : {}), lastRed: recoveredRed(row.red, head, at) },
     record: await closeDrill(ctx, row, at),
   };
 }
@@ -423,6 +424,7 @@ export async function noteMainLanding(
     const ended = await recovery(
       ctx,
       row,
+      receipt.candidate.head,
       receipt.at,
       receipt.snapshot.revision,
       Boolean(run.gate?.reason?.startsWith('culprit-revert:')) || revertDecided(row.red),
@@ -675,7 +677,7 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
   if (run.status === 'passed' && fullAudit) {
     const count = Math.max(0, (row.unaudited?.count ?? 0) - meta.count);
     const firstAt = count ? row.unaudited!.firstAt : null;
-    const ended = await recovery(ctx, row, at, meta.sequence);
+    const ended = await recovery(ctx, row, run.request.expectedHead, at, meta.sequence);
     await ctx.db.patch(row._id, {
       ...ended.patch,
       lastGreen: { sequence: meta.sequence, head: run.request.expectedHead, runId: run.id },
@@ -724,7 +726,8 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
     await ctx.db.patch(row._id, { unaudited: { count: row.unaudited!.count, firstAt } });
     // Main's own failures never teach the preflight guard set (13ea93bf), even ones learned before this
     // audit saw them: from the first landing it covers, the earliest the breakage could have landed.
-    await forgetMainRedGuards(ctx, projectId, redTests(run), firstAt);
+    const tests = redTests(run);
+    await forgetMainRedGuards(ctx, projectId, tests, firstAt);
     // An armed owner drill claims the first red in its window; a later red finds it expired (fe7d67a8).
     const claims = !row.red && drillClaims(row.drill, at);
     await ctx.db.patch(row._id, {
@@ -734,7 +737,7 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
         since: row.red?.since ?? at,
         head: run.request.expectedHead,
         runId: run.id,
-        ...redTests(run),
+        ...tests,
       },
       window: auditWindow(row.window, {
         verdict: claims || row.drill?.red ? 'drill' : 'red',

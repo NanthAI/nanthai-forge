@@ -35,6 +35,7 @@ import { parkExactOnMainRed, parkRedOnlyEntry } from './projectHostedLandingPark
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 import { hostedCheckTerminal } from '../src/hosted-check';
+import { rememberGuardCheck } from './projectGuardMainRed';
 import {
   HOSTED_LANDING_LEASE_MS,
   hostedLandingStateSchema,
@@ -303,6 +304,7 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
           ? { state: 'pending', pendingReason: 'pending-infra', cause: null }
           : landingObservation('checking');
       } else if (run.status !== 'passed') {
+        if (run.status === 'failed') rememberGuardCheck(ctx, state.id, run);
         phase = 'terminal-failed';
         observation = landingObservation(run.status);
         error = {

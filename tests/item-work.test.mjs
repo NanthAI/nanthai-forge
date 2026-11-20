@@ -6,100 +6,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { recordsFixture } from './hosted-records-fixture.mjs';
+import { itemWorkFixture as fixture } from './item-work-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
-const work = await import(moduleUrl('../convex/projectItemWork.ts'));
 const { liveLanes } = await import(moduleUrl('../src/hosted-live-lanes.ts'));
-const hash = 'a'.repeat(64),
-  other = 'b'.repeat(64),
-  at = '2026-01-01T00:00:00.000Z';
-
-async function fixture({ extra = 0 } = {}) {
-  const s = recordsFixture(),
-    auth = await s.setup();
-  const as = subject => {
-    s.ctx.auth = { getUserIdentity: async () => (subject ? { subject } : null) };
-  };
-  as('owner');
-  await s.ctx.db.insert('forgeAccounts', { owner: 'owner', handle: 'synthetic-owner' });
-  await s.ctx.db.insert('accountHandles', { owner: 'owner', handle: 'synthetic-owner' });
-  const put = record =>
-    s.run('put', () => records.writeHostedRecord(s.ctx, { ...auth, record, expectedVersion: null }));
-  const itemId = randomUUID();
-  await put({
-    kind: 'intent',
-    id: itemId,
-    version: 0,
-    at,
-    outcome: 'Synthetic outcome',
-    constraints: '',
-    creatorAccountId: 'owner',
-    assigneeAccountIds: [],
-    base: { head: hash, receiptId: randomUUID() },
-    status: 'active',
-  });
-  const lane = async state => {
-    const record = {
-      kind: 'lane',
-      id: randomUUID(),
-      version: 0,
-      at,
-      intentId: itemId,
-      actor: 'owner',
-      base: { head: hash, receiptId: randomUUID() },
-      head: other,
-      sourceVersion: 0,
-      lifecycleVersion: 0,
-      state,
-      authorityEpoch: 1,
-    };
-    await put(record);
-    return record;
-  };
-  const abandoned = await lane('abandoned');
-  const stamped = await lane('completed');
-  for (let i = 0; i < extra; i++) await lane('abandoned');
-  const noted = await lane('completed');
-  const open = await lane('active');
-  // A landing since 3a733ee8 writes a note per Intent; an older one left only the overlap row's stamp.
-  const noteReceipt = randomUUID(),
-    stampReceipt = randomUUID();
-  await s.ctx.db.insert('projectIntentLandingNotes', {
-    projectId: auth.projectId,
-    intentId: itemId,
-    receiptId: noteReceipt,
-    kind: 'landed',
-    at,
-    laneIds: [noted.id],
-    commit: 'c'.repeat(40),
-    sequence: 42,
-    actor: 'owner',
-    landedBy: { by: 'queue', review: 'none' },
-  });
-  const overlap = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === stamped.id);
-  const stamp = { landed: { receiptId: stampReceipt, commit: 'd'.repeat(40), laneHead: other, at } };
-  if (overlap) await s.ctx.db.patch(overlap._id, stamp);
-  else
-    await s.ctx.db.insert('projectHostedOverlapLanes', {
-      projectId: auth.projectId,
-      laneId: stamped.id,
-      intentId: itemId,
-      actor: 'owner',
-      head: other,
-      baseHead: hash,
-      baseReceiptId: randomUUID(),
-      baseSequence: 1,
-      recordVersion: 0,
-      open: false,
-      changes: '[]',
-      complete: true,
-      ...stamp,
-    });
-  const read = async (args = {}, name = 'read') =>
-    JSON.parse(await s.call(name, work.read, { projectId: auth.projectId, itemId, ...args }));
-  return { ...s, auth, as, itemId, open, noted, stamped, abandoned, noteReceipt, stampReceipt, read };
-}
+const other = 'b'.repeat(64);
+const at = '2026-01-01T00:00:00.000Z';
 
 /** A live submission of the Item's Intent: its newest Candidate head and that Candidate's landing request. */
 async function submit(s, patch = {}) {
@@ -147,12 +58,12 @@ test('an Item read lists its Lanes in every state, landed ones with receipt, com
   assert.equal(byLane[s.abandoned.id].receipt, undefined);
   assert.deepEqual(byLane[s.noted.id].receipt, {
     receiptId: s.noteReceipt,
-    commit: 'c'.repeat(40),
+    commit: 'c'.repeat(64),
     at,
     sequence: 42,
     landedBy: 'queue',
   });
-  assert.deepEqual(byLane[s.stamped.id].receipt, { receiptId: s.stampReceipt, commit: 'd'.repeat(40), at });
+  assert.deepEqual(byLane[s.stamped.id].receipt, { receiptId: s.stampReceipt, commit: 'd'.repeat(64), at });
   assert.equal(byLane[s.open.id].actor, 'synthetic-owner', 'writers see the handle, never the account id');
   const count = s.counts.at(-1);
   t.diagnostic(JSON.stringify(count));
@@ -278,8 +189,7 @@ test('lanes {state:"all"} pages the same read and accepts the 8-character Item i
       calls.push(name);
       if (name === 'projectHostedPlanning:resolveId')
         return { ids: args.prefix === s.itemId.slice(0, 8) ? [s.itemId] : [], more: false };
-      if (name === 'projectItemWork:read')
-        return JSON.parse(await s.call(name, work.read, { projectId: s.auth.projectId, ...args }));
+      if (name === 'projectItemWork:read') return s.read(args, name);
       if (name === 'projectHostedLiveLanes:list') return { page: [], isDone: true, args };
       throw new Error(`unexpected ${name}`);
     },

@@ -89,9 +89,20 @@ export type CiVerdict =
       executionId: string;
       link: string | null;
       conclusion: string;
+      /** The provider ran and ended before the Forge job API recorded an expected plan. */
+      beforeJobPlan?: true;
     };
 
 const refuse = (reason: string): CiVerdict => ({ outcome: 'refused', code: 'EVIDENCE_CHANGED', reason });
+
+/** Provider adapters normalize the terminal status. Only a failed execution with an
+ * expected but missing job plan and no authenticated check failure is unjudged. */
+export function failedBeforeJobPlan(
+  end: { failed: boolean; checkFailed?: boolean },
+  jobPlanRecorded: boolean | undefined,
+) {
+  return end.failed && !end.checkFailed && jobPlanRecorded === false;
+}
 
 /** The pass rule shared by every adapter: a provider record of the bound run, never a job's word. */
 function decide(
@@ -102,14 +113,16 @@ function decide(
     link: string | null;
     conclusion: string;
   },
+  jobPlanRecorded: boolean | undefined,
 ): CiVerdict {
   if (binding.executionId && binding.executionId !== run.executionId)
     return refuse(`Execution ${run.executionId} is not the run Forge bound (${binding.executionId}).`);
   if (run.status === 'pending') return { outcome: 'pending', executionId: run.executionId };
+  const beforeJobPlan = failedBeforeJobPlan({ failed: run.status === 'failed' }, jobPlanRecorded);
   const status =
     run.status === 'success'
       ? 'passed'
-      : run.status === 'failed'
+      : run.status === 'failed' && !beforeJobPlan
         ? 'failed'
         : run.status === 'cancelled'
           ? 'cancelled'
@@ -121,6 +134,7 @@ function decide(
     // The provider record's own link, kept only when it is https (review R-09).
     link: httpsLink(run.link),
     conclusion: run.conclusion,
+    ...(beforeJobPlan ? { beforeJobPlan: true } : {}),
   };
 }
 
@@ -156,6 +170,7 @@ function githubActions(
   provider: Extract<CiStatusProvider, { adapter: 'github-actions' }>,
   binding: CandidateBinding,
   evidence: CiEvidence,
+  jobPlanRecorded?: boolean,
 ): CiVerdict {
   const branch = candidateBranch(binding.runId);
   if (evidence.source === 'job-report') {
@@ -189,21 +204,25 @@ function githubActions(
     return refuse('The run checked another branch or commit than the published Candidate.');
   if (run.run_attempt !== 1) return refuse('A re-run attempt is not the run Forge bound.');
   const conclusion = run.status === 'completed' ? (run.conclusion ?? 'unknown') : 'pending';
-  return decide(binding, {
-    executionId: String(run.id),
-    status:
-      run.status !== 'completed'
-        ? 'pending'
-        : conclusion === 'success'
-          ? 'success'
-          : conclusion === 'failure' || conclusion === 'timed_out'
-            ? 'failed'
-            : conclusion === 'cancelled'
-              ? 'cancelled'
-              : 'other',
-    link: run.html_url ?? null,
-    conclusion: conclusion.slice(0, 40),
-  });
+  return decide(
+    binding,
+    {
+      executionId: String(run.id),
+      status:
+        run.status !== 'completed'
+          ? 'pending'
+          : conclusion === 'success'
+            ? 'success'
+            : conclusion === 'failure' || conclusion === 'timed_out'
+              ? 'failed'
+              : conclusion === 'cancelled'
+                ? 'cancelled'
+                : 'other',
+      link: run.html_url ?? null,
+      conclusion: conclusion.slice(0, 40),
+    },
+    jobPlanRecorded,
+  );
 }
 
 const gitlabPipeline = z.object({
@@ -230,6 +249,7 @@ function gitlabCi(
   provider: Extract<CiStatusProvider, { adapter: 'gitlab-ci' }>,
   binding: CandidateBinding,
   evidence: CiEvidence,
+  jobPlanRecorded?: boolean,
 ): CiVerdict {
   const branch = candidateBranch(binding.runId);
   if (evidence.source === 'job-report') {
@@ -253,20 +273,24 @@ function gitlabCi(
   if (p.source !== 'push') return refuse(`The pipeline was started by ${p.source}, not by Forge's push.`);
   if (p.ref !== branch || p.sha !== binding.commit)
     return refuse('The pipeline checked another branch or commit than the published Candidate.');
-  return decide(binding, {
-    executionId: String(p.id),
-    status: gitlabPending.has(p.status)
-      ? 'pending'
-      : p.status === 'success'
-        ? 'success'
-        : p.status === 'failed'
-          ? 'failed'
-          : p.status === 'canceled'
-            ? 'cancelled'
-            : 'other',
-    link: p.web_url ?? null,
-    conclusion: p.status.slice(0, 40),
-  });
+  return decide(
+    binding,
+    {
+      executionId: String(p.id),
+      status: gitlabPending.has(p.status)
+        ? 'pending'
+        : p.status === 'success'
+          ? 'success'
+          : p.status === 'failed'
+            ? 'failed'
+            : p.status === 'canceled'
+              ? 'cancelled'
+              : 'other',
+      link: p.web_url ?? null,
+      conclusion: p.status.slice(0, 40),
+    },
+    jobPlanRecorded,
+  );
 }
 
 /** One adapter's verdict on one piece of evidence for one bound Candidate run. */
@@ -274,10 +298,11 @@ export function ciStatusVerdict(
   provider: CiStatusProvider,
   binding: CandidateBinding,
   evidence: CiEvidence,
+  jobPlanRecorded?: boolean,
 ): CiVerdict {
   return provider.adapter === 'github-actions'
-    ? githubActions(provider, binding, evidence)
-    : gitlabCi(provider, binding, evidence);
+    ? githubActions(provider, binding, evidence, jobPlanRecorded)
+    : gitlabCi(provider, binding, evidence, jobPlanRecorded);
 }
 
 /** The provider read Forge makes itself (fixed paths from the setting and the binding, never from a
