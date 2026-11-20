@@ -237,3 +237,85 @@ test('e62d834b line 5: a lost probe wake is armed again by the redrive backstop'
   assert.equal(f.probes().length, 1, 'a fresh probe is armed');
   assertHeldLive(f);
 });
+
+// Item 0d8a85a3 line 4: the 05:27-06:37Z timeouts came through the webhook as a job-API failure (the
+// runner ended before Forge took its plan), not as runner-unavailable from the runner itself.
+const checkStore = await import(moduleUrl('../convex/projectHostedCheckStore.ts'));
+const direct = await import(moduleUrl('../convex/projectHostedActionsDirect.ts'));
+const { jobApiReason, infraWaitSince } = await import(moduleUrl('../src/ci-provider-recovery.ts'));
+const { landingStateOf } = await import(moduleUrl('../src/landing-state.ts'));
+/** CI's job API hangs: every check the webhook settles ends with the job-API reason. */
+async function jobApiOutage(f) {
+  for (let round = 0; round < 20 && f.queued().length; round++) {
+    for (const run of f.queued()) {
+      await f.rawChecks.activate(run.id);
+      await f.transaction(
+        'job-api-timeout',
+        {
+          _handler: async ctx => {
+            const selected = await checkStore.writableHostedCheck(ctx, {
+              projectId: f.projectId,
+              runId: run.id,
+            });
+            await direct.settleDirectActions(
+              ctx,
+              selected,
+              'runner-unavailable',
+              jobApiReason('failure', infraWaitSince(selected.run.failureReason)),
+            );
+          },
+        },
+        {},
+      );
+    }
+    await f.settle();
+  }
+}
+for (const on of [false, true])
+  test(`incident replay 0d8a85a3 line 4: job-API timeouts ${on ? 'trip the CI-down hold, wait since its start and land on recovery' : 'without the hold fail every landing after its retries'}`, async t => {
+    if (on) process.env[SWITCH] = '1';
+    const f = await fixture(t, { count: 3 });
+    await f.settle();
+    await jobApiOutage(f);
+    assert.equal(f.runs().length, CI_DOWN_STREAK, 'the shared check and its two platform retries');
+    assert(
+      f.runs().every(run => run.failureReason?.startsWith('Check infrastructure:')),
+      'the cause is named',
+    );
+    if (!on) {
+      assert(
+        states(f).every(state => state.phase === 'terminal-failed'),
+        phases(f),
+      );
+      return;
+    }
+    assert.equal(held(f).length, 3, phases(f));
+    const since = infraWaitSince(states(f)[0].error.message);
+    assert.match(since, /^\d\d:\d\dZ$/);
+    for (const state of states(f))
+      assert.equal(landingStateOf(state).label, `Waiting for check infrastructure since ${since}`);
+    const view = JSON.parse(await f.transaction('queue-view', queueView.read, { projectId: f.projectId }));
+    assert(
+      view.entries.length &&
+        view.entries.every(e => e.landingState.label === `Waiting for check infrastructure since ${since}`),
+      'the Lanes page and cockpit read the same since from the queue reply',
+    );
+    // Still down at the first probe: one probe run, parked again; the start does not move.
+    await f.fireProbe();
+    await jobApiOutage(f);
+    assert.equal(held(f).length, 3);
+    assert.equal(infraWaitSince(states(f)[0].error.message), since);
+    // Recovery: the next probe's check passes and every landing goes in, one check after recovery.
+    await f.fireProbe();
+    await f.passAll();
+    assert(
+      states(f).every(state => state.phase === 'landed'),
+      phases(f),
+    );
+    assert.equal(
+      f.runs().length,
+      CI_DOWN_STREAK + 3,
+      'streak + one failed probe + the passing probe + one shared check for the released rest',
+    );
+    assert.equal(f.probes().length, 0);
+  });

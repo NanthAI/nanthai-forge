@@ -122,8 +122,8 @@ export function LandingProgress({
             {state.state === 'waiting-for-runner' && (
               <>
                 <p>
-                  {run?.configuration.provider === 'github-actions' ? 'GitHub-hosted · ' : ''}no runner has
-                  started it
+                  {run?.configuration.provider === 'github-actions' ? 'GitHub-hosted · ' : ''}the check has
+                  not run yet; Forge retries
                 </p>
                 <a href={hostedHref({ projectTab: 'checks' })}>Checks settings</a>
               </>

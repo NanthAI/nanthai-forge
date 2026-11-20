@@ -20,7 +20,7 @@ for (const name of variants)
       '02-accepting': '3 of 8 shards',
       '02b-behind': 'waits for Candidate 3',
       '02c-landing': 'Land on main',
-      '02d-runner': 'Waiting for a runner',
+      '02d-runner': 'Waiting for check infrastructure',
       '03-landed': 'Landed',
       '04-failed': 'verify failed · exit 1',
       '04b-conflict': 'Resolve in Lane',

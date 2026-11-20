@@ -662,6 +662,74 @@ test('webhook backstops cancellation, failure, timeout and missing evidence; doe
     assert.equal(s.cancelled.length, 2);
   }
 });
+test('incident replay 0d8a85a3: GitHub ran the job but Forge never took its plan: check infrastructure, not runner capacity', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  await s.call(webhooks, 'receive', { payload: JSON.stringify(webhook(s, 'completed', 'failure')) });
+  const run = await s.status(s.run.id);
+  assert.equal(
+    run.status,
+    'runner-unavailable',
+    'still a platform end: the platform retry and its budget apply',
+  );
+  assert.match(
+    run.failureReason,
+    /^Check infrastructure: the runner ended \(failure\) before Forge recorded its plan \(runner setup, OIDC or Forge's job API\)/,
+  );
+  // A platform retry waits labelled through GitHub's requested/in_progress events (the jobs ran in
+  // the outage; the job API did not): the wait ends when Forge takes the plan, and its start carries over.
+  const retry = await fixture(t);
+  const row = [...retry.tables.projectHostedCheckRuns.values()].find(r => r.runId === retry.run.id);
+  const waiting = JSON.parse(row.value);
+  waiting.failureReason = 'provider-delayed: waiting for check infrastructure since 05:27Z; retrying after x';
+  retry.patch('projectHostedCheckRuns', row._id, { value: JSON.stringify(waiting) });
+  await retry.bind();
+  await retry.call(webhooks, 'receive', { payload: JSON.stringify(webhook(retry, 'in_progress', null)) });
+  assert.match(
+    (await retry.status(retry.run.id)).failureReason,
+    /since 05:27Z/,
+    'still waiting while the job runs',
+  );
+  await retry.call(webhooks, 'receive', { payload: JSON.stringify(webhook(retry, 'completed', 'failure')) });
+  assert.match(
+    (await retry.status(retry.run.id)).failureReason,
+    /Waiting for check infrastructure since 05:27Z\.$/,
+    'the next retry keeps the first start',
+  );
+  const planDone = await fixture(t);
+  const planRow = [...planDone.tables.projectHostedCheckRuns.values()].find(r => r.runId === planDone.run.id);
+  const planWaiting = JSON.parse(planRow.value);
+  planWaiting.failureReason =
+    'provider-delayed: waiting for check infrastructure since 05:27Z; retrying after x';
+  planDone.patch('projectHostedCheckRuns', planRow._id, { value: JSON.stringify(planWaiting) });
+  await planDone.bind();
+  await planDone.prepare();
+  assert.equal((await planDone.status(planDone.run.id)).failureReason, undefined, 'the plan ends the wait');
+  // Cancelled before its plan: it settles without retrying, so it no longer says it waits.
+  const cancelled = await fixture(t);
+  const cancelRow = [...cancelled.tables.projectHostedCheckRuns.values()].find(
+    r => r.runId === cancelled.run.id,
+  );
+  const cancelWaiting = JSON.parse(cancelRow.value);
+  cancelWaiting.failureReason =
+    'provider-delayed: waiting for check infrastructure since 05:27Z; retrying after x';
+  cancelled.patch('projectHostedCheckRuns', cancelRow._id, { value: JSON.stringify(cancelWaiting) });
+  await cancelled.bind();
+  await cancelled.call(webhooks, 'receive', {
+    payload: JSON.stringify(webhook(cancelled, 'completed', 'cancelled')),
+  });
+  const settled = await cancelled.status(cancelled.run.id);
+  assert.equal(settled.status, 'cancelled');
+  assert.doesNotMatch(settled.failureReason ?? '', /waiting for check infrastructure/);
+  // Once Forge took the plan, missing evidence keeps its old reason.
+  const planned = await fixture(t);
+  await planned.bind();
+  await planned.prepare();
+  await planned.call(webhooks, 'receive', {
+    payload: JSON.stringify(webhook(planned, 'completed', 'failure')),
+  });
+  assert.match((await planned.status(planned.run.id)).failureReason, /without complete job evidence/);
+});
 const passAll = async s => {
   await s.bind();
   await s.prepare();

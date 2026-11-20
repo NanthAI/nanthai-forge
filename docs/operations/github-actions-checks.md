@@ -753,6 +753,19 @@ shard result also have a +5 minute, one-lookup startup deadline: a missing run,
 `startup_failure` or cancellation goes through the same bounded platform retry
 with a provider-outage reason. Healthy startup cancels that deadline in its existing write. There are no project scans, active-run pollers, or idle scheduled functions.
 
+A run GitHub ran (conclusion `failure`) that ended before Forge recorded its plan is check
+infrastructure (runner setup, OIDC or Forge's job API), not runner capacity and not the code: it
+settles `runner-unavailable` (so the same platform retry and budget apply) with the reason `Check
+infrastructure: the runner ended (failure) before Forge recorded its plan` (Item 0d8a85a3, the
+2026-11-20 05:27-06:37Z job-API outage). Every platform retry's run carries `provider-delayed:
+waiting for check infrastructure since HH:MMZ; retrying after <reason>` (a provider outage keeps its
+own words; a later retry keeps the first start), so its landing reads `pending-infra`, "Waiting for
+check infrastructure since HH:MMZ", on land, status, the Lane page and the Lanes page instead of
+Checking. The wait ends when Forge takes the retry's plan, not on GitHub's `requested` or
+`in_progress` event (in the outage the jobs ran; the job API did not); an adapter without a plan
+step ends it once the run runs. A CI-down hold's landing reads the hold's own start. Healthy checks
+read nothing new: the label comes from the run reason status already reads for a waiting check.
+
 For legacy 400-descriptor servers, success uses
 `17 + 2 * ceil(sourceObjects / 400) + 6 * jobs` Convex calls,
 including HTTP/nested calls, enqueue, dispatch, webhook and Candidate/base manifest.

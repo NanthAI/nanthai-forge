@@ -42,10 +42,11 @@ const views = {
     nextStep: 'The check is running on this Candidate; wait for its result.',
   },
   'waiting-for-runner': {
-    label: 'Waiting for a runner',
+    label: 'Waiting for check infrastructure',
     tone: 'waiting',
     pending: true,
-    nextStep: 'No check machine has picked it up yet; the code was not judged. Wait; Forge retries.',
+    nextStep:
+      'The check could not run (no runner started it, or Forge’s check path did not answer); the code was not judged. Wait; Forge retries, and dispatches waiting checks once checks work again.',
   },
   landing: {
     label: 'Landing',
@@ -138,6 +139,9 @@ export type LandingRecord = {
   phase?: string | null;
   observation?: { state?: string; pendingReason?: string | null; cause?: string | null } | null;
   error?: { code?: string; message?: string } | null;
+  /** The waiting check's provider-delayed reason (`readProviderDelay`), when the reply carries it:
+   * a check-infrastructure wait names since when from it (Item 0d8a85a3). */
+  providerDelay?: string | undefined;
   /** The older submission a passed (Ready) entry waits for (`landingOrderWaitForReader`), when the reader
    * holds it: the queue view, observe and the Lane read. */
   orderWait?: { submissionId: string; message?: string } | null;
@@ -216,7 +220,14 @@ export function landingStateOf(record: LandingRecord | null | undefined, laneId?
             ? (record.orderWait.message ??
               `The check passed; older submission ${record.orderWait.submissionId} takes main first, then this one lands by itself. Nothing to do.`)
             : view.nextStep));
-  return { state, ...view, nextStep, hold };
+  // Every platform retry says since when it waits (Item 0d8a85a3), in UTC like the server's reasons.
+  // A CI-down hold (e62d834b) names its own start in its message.
+  const since =
+    state === 'waiting-for-runner'
+      ? (infraWaitSince(record?.providerDelay) ??
+        (record?.error?.code === 'CI_DOWN' ? infraWaitSince(record.error.message) : undefined))
+      : undefined;
+  return { state, ...view, ...(since ? { label: `${view.label} since ${since}` } : {}), nextStep, hold };
 }
 
 /** Additive JSON for CLI and MCP replies: the same state word and next step people see. */
@@ -236,3 +247,12 @@ export const supersededOutcome = {
   pendingReason: PendingReason | null;
   cause: SubmissionCause;
 };
+
+/** The HH:MMZ a check-infrastructure wait or CI-down hold began, read from its own text. */
+export function infraWaitSince(text: string | null | undefined) {
+  const at =
+    /(?:waiting for check infrastructure|CI is failing for every check).*? since (?:\d{4}-\d\d-\d\dT)?(\d\d:\d\d)/i.exec(
+      text ?? '',
+    )?.[1];
+  return at ? `${at}Z` : undefined;
+}

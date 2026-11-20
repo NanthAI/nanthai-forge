@@ -238,12 +238,12 @@ export function queueFacts(
             state: 'machine',
             tone: view.tone,
             label: view.label,
-            text: `Waiting for a machine${last}`,
-            tip: 'No check machine has picked this up yet. Not a failure of the code.',
+            text: `${view.label}${last}`,
+            tip: 'The check could not run yet (no runner, or Forge’s check path is not answering). Not a failure of the code.',
             step: {
               tone: 'waiting',
               glyph: 'waiting',
-              title: 'Waiting for a machine',
+              title: view.label,
               body: `${event ? `Last event ${clock(event)}. ` : ''}The code has not been judged.`,
             },
           });

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { infraWaitSince } from './landing-state.js';
+export { infraWaitSince };
 /** Provider-neutral recovery contract. Adapters normalize records read with their own
  * credential; job reports alone never satisfy it. No timers or IO live here. */
 export const providerAckMs = 5 * 60_000;
@@ -45,9 +47,25 @@ export function delayedProviderVerdict(input: {
     : 'provider-delayed';
 }
 
-/** Keep the outage visible while the existing platform retry starts its replacement. */
-export function providerRetryDelay(reason: string | undefined): string | undefined {
-  return reason?.startsWith('Provider outage:')
-    ? `provider-delayed: retrying after ${reason}`.slice(0, 300)
-    : undefined;
+/** The run reason every platform retry shows while its landing waits (`pending-infra`, Item
+ * 0d8a85a3); the landing word adds since when. A provider outage keeps its own words. */
+export const infraWaitPrefix = 'provider-delayed: waiting for check infrastructure';
+/** A later retry keeps the first wait's start when the failed run's reason carries it. */
+export function providerRetryDelay(reason: string | undefined, now = Date.now()): string {
+  const since = infraWaitSince(reason) ?? `${new Date(now).toISOString().slice(11, 16)}Z`;
+  return (
+    reason?.startsWith('Provider outage:')
+      ? `provider-delayed: retrying after ${reason}`
+      : `${infraWaitPrefix} since ${since}; retrying after ${reason ?? 'a check that ended without a verdict'}`
+  ).slice(0, 300);
+}
+/** "HH:MMZ" a check-infrastructure wait started, from a platform retry's provider-delayed reason
+ * or a CI-down hold's message ("… since 2026-11-20T05:27:00.000Z. …"); undefined for other text. */
+/** Item 0d8a85a3 (2026-11-20 05:27-06:37Z): GitHub ran the job, but it ended before Forge took its
+ * plan (there, Forge's job API timed out). Not runner capacity, and not the code: runner setup, OIDC
+ * or Forge's job API. `waitingSince` keeps an earlier retry's wait start. */
+export function jobApiReason(conclusion: string | null | undefined, waitingSince?: string) {
+  return `Check infrastructure: the runner ended (${conclusion ?? 'unknown'}) before Forge recorded its plan (runner setup, OIDC or Forge's job API); the code was not judged.${
+    waitingSince ? ` Waiting for check infrastructure since ${waitingSince}.` : ''
+  }`;
 }

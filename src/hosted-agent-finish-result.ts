@@ -120,7 +120,14 @@ export function withFinishLandingState(selection: Reply, result: Reply, reply: R
         : undefined;
   return {
     ...reply,
-    landingState: landingStateField({ ...submission, orderWait: orderWaitOf(result.orderWait) }, laneId),
+    landingState: landingStateField(
+      {
+        ...submission,
+        orderWait: orderWaitOf(result.orderWait),
+        ...(typeof result.providerDelay === 'string' ? { providerDelay: result.providerDelay } : {}),
+      },
+      laneId,
+    ),
   };
 }
 /** Identity-preserving: returns `result` itself when nothing was observed to normalize. */

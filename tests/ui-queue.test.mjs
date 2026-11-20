@@ -59,7 +59,7 @@ test('state table distinguishes waiting, review, infrastructure, unknown outcome
       ['queued', 'Queued', 'waiting'],
       ['checking', 'Checking', 'running'],
       ['review', 'Waiting for review', 'passed'],
-      ['machine', 'Waiting for a runner', 'waiting'],
+      ['machine', 'Waiting for check infrastructure', 'waiting'],
       ['failed', 'Check failed', 'failed'],
       ['infra', 'Not run', 'plain'],
       ['unknown', 'Not run', 'plain'],

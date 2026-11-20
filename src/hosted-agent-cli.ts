@@ -326,6 +326,7 @@ async function dispatchHostedAgentCli(
           conflict?: unknown;
           orderWait?: unknown;
           sourceFailure?: unknown;
+          providerDelay?: string;
         }[];
         status: string;
         run?: { status?: string } | null;
@@ -337,7 +338,11 @@ async function dispatchHostedAgentCli(
         submissions?.length === 1
           ? {
               landingState: landingStateField(
-                { ...submissions[0]!.submission, orderWait: orderWaitOf(submissions[0]!.orderWait) },
+                {
+                  ...submissions[0]!.submission,
+                  orderWait: orderWaitOf(submissions[0]!.orderWait),
+                  providerDelay: submissions[0]!.providerDelay,
+                },
                 laneId,
               ),
             }

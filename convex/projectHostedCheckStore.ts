@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { infraWaitPrefix } from '../src/ci-provider-recovery';
 import { deferCancelledRunWrite } from './projectCancelledRunWrites';
 import { markCancelledRunPending } from './projectCancelledRunOwners';
 import { cancelPendingTask } from './schedulerCancel';
@@ -172,13 +173,20 @@ export async function writeHostedCheck(
   providerAttested = false,
 ) {
   const providerDelayChanged = run.failureReason?.startsWith('provider-delayed:') === true;
+  // A platform retry's check-infrastructure wait (0d8a85a3) ends once Forge takes the run's plan,
+  // not on GitHub's requested/in_progress event (the 05:27Z outage: jobs ran, the job API did not);
+  // an adapter without a plan step ends it once the run runs. A provider delay ends on startup.
+  const infraWait = run.failureReason?.startsWith(infraWaitPrefix) === true;
   if (
     !hostedCheckTerminal(run) &&
-    !run.actions?.verdictPending &&
-    run.actions?.workflowSha &&
-    run.failureReason?.startsWith('provider-delayed:')
+    run.failureReason?.startsWith('provider-delayed:') &&
+    (infraWait
+      ? Boolean(run.plan) || (!run.actions && run.status === 'running')
+      : !run.actions?.verdictPending && run.actions?.workflowSha)
   )
     delete run.failureReason;
+  // A run that settles without retrying (cancelled before its plan) does not say it waits.
+  else if (infraWait && hostedCheckTerminal(run)) delete run.failureReason;
   if (
     run.actions?.confirm &&
     (hostedCheckTerminal(run) ||

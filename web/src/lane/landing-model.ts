@@ -76,7 +76,12 @@ export function landingState(
     const tone = checkStatus === 'passed' ? 'passed' : checkStatus === 'failed' ? 'failed' : 'waiting';
     return { title: 'Your decision', label, tone, pending: false, kind: 'ready', state: null };
   }
-  const view = landingStateOf({ ...read.request, orderWait: read.orderWait ?? null });
+  // The run in hand names since when a check-infrastructure wait started (Item 0d8a85a3).
+  const view = landingStateOf({
+    ...read.request,
+    orderWait: read.orderWait ?? null,
+    providerDelay: read.run?.failureReason,
+  });
   const kind = kinds[view.state];
   return {
     title: kind === 'landed' ? 'Landed' : view.pending ? 'Landing' : 'Not landed',

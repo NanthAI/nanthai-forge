@@ -25,6 +25,7 @@ import { QUEUE_VIEW_LIMIT, QUEUE_VIEW_PAGES } from '../src/hosted-queue-view';
 import { auditRow, mainRedField } from './projectHostedMainAuditState';
 import { usualCheck } from './projectFailureCause';
 import { landingOrderWaitForReader } from './projectHostedLandingOrder';
+import { readProviderDelay } from './projectHostedLandingCheckProgress';
 
 /** One bounded read of the landing queue (09e637f7 minimal slice): who is in it,
  * in dispatch order, with Lane, Intent title, phase, last failing test files
@@ -109,8 +110,13 @@ export const read = query({
           // A held entry has no queue position: main-red included (B3), whose directory key predates it.
           position: hold ? null : (key.position ?? null),
           // A passed entry parked behind an older one says so, naming it (43b51a5e): from the row in hand.
+          // A check-infrastructure wait says since when (0d8a85a3): one run read, pending-infra entries only.
           landingState: landingStateField(
-            { ...state, orderWait: landingOrderWaitForReader(row, state) },
+            {
+              ...state,
+              orderWait: landingOrderWaitForReader(row, state),
+              ...(await readProviderDelay(ctx, row, state)),
+            },
             laneId ?? undefined,
           ),
           submissionId: state.id,

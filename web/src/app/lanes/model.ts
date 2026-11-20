@@ -117,7 +117,7 @@ export type CheckClock = {
   startedAt: number;
   usualMs: number | null;
   slowMs: number | null;
-  /** What it waits on before it runs ("waiting for a runner"), said first; null while it runs. */
+  /** What it waits on before it runs ("waiting for check infrastructure since 05:55Z"), said first; null while it runs. */
   note: string | null;
 };
 

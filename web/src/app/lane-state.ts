@@ -13,6 +13,8 @@ export type LaneMark = { stage: LineStage | 'main'; held: boolean; overlap?: boo
 /** What a reader knows of the Lane's current submission. */
 export type CurrentLanding = {
   state: LandingStateName;
+  /** The server's word for that state (src/landing-state.ts), when the read carries it. */
+  label?: string;
   failing?: readonly string[];
   moreFailing?: number;
   /** Protected paths a review hold names, when the hold names them. */
@@ -139,7 +141,10 @@ export function laneState(mark: LaneMark, landing?: CurrentLanding | null): Lane
       word: stopWords.checking,
       why:
         landing?.state === 'waiting-for-runner'
-          ? 'waiting for a runner'
+          ? // The server's label names since when (Item 0d8a85a3): "waiting for check infrastructure since 05:55Z".
+            landing.label
+            ? landing.label[0]!.toLowerCase() + landing.label.slice(1)
+            : 'waiting for check infrastructure'
           : landing?.state === 'queued'
             ? 'waiting for its turn'
             : 'its check is running',
@@ -193,7 +198,7 @@ export function currentEntries<T extends { laneId: string | null; submittedAt: s
 
 /** The queue entry's current submission, as `laneState` reads it. */
 export function landingOf(entry: {
-  landingState?: { state: string } | null;
+  landingState?: { state: string; label?: string } | null;
   lastFailingTests?: string[];
   moreFailingTests?: number;
   hold?: { paths: string[] | null } | null;
@@ -201,6 +206,7 @@ export function landingOf(entry: {
   if (!entry.landingState) return null;
   return {
     state: entry.landingState.state as LandingStateName,
+    ...(entry.landingState.label ? { label: entry.landingState.label } : {}),
     failing: entry.lastFailingTests ?? [],
     moreFailing: entry.moreFailingTests ?? 0,
     protectedPaths: entry.hold?.paths?.length ?? null,
