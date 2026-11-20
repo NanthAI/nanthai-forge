@@ -33,7 +33,10 @@ export async function validSourceBatch(ctx: MutationCtx, batch: Doc<'projectSour
     throw error;
   }
 }
-async function heartbeat(ctx: MutationCtx, active: NonNullable<Awaited<ReturnType<typeof activeStep>>>) {
+export async function heartbeat(
+  ctx: MutationCtx,
+  active: NonNullable<Awaited<ReturnType<typeof activeStep>>>,
+) {
   const body: Partial<ReturnType<typeof sourceDispatch>> = sourceDispatch(active.row.projectId, active.job);
   // Dispatch-only fields do not belong to the existing terminal manifest.
   delete body.jobKind;
@@ -45,7 +48,7 @@ async function heartbeat(ctx: MutationCtx, active: NonNullable<Awaited<ReturnTyp
     result: { status: 'heartbeat', sequence: active.job.control.heartbeat + 1 },
   });
 }
-const taskRow = (ctx: MutationCtx, batchId: Id<'projectSourceBatches'>, index: number) =>
+export const taskRow = (ctx: MutationCtx, batchId: Id<'projectSourceBatches'>, index: number) =>
   ctx.db
     .query('projectSourceTasks')
     .withIndex('by_batch_and_index', q => q.eq('batchId', batchId).eq('index', index))
@@ -163,7 +166,15 @@ export const begin = sourceMutation({
       await retireSourceTask(ctx, args);
       return null;
     }
-    return canonicalPayload({ input: task.input, progress: task.progress, jobKind: active.job.jobKind });
+    return canonicalPayload({
+      input: task.input,
+      progress: task.progress,
+      jobKind: active.job.jobKind,
+      lease: {
+        ms: active.job.control.workerLeaseMs,
+        remainingMs: active.job.control.workerUntil - Date.now(),
+      },
+    });
   },
 });
 export const complete = sourceMutation({

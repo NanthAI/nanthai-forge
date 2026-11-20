@@ -173,6 +173,20 @@ export const read = query({
               .eq('kind', 'inputs'),
           )
           .take(2);
+        // Source progress (incident e62d834b): the source step and its last commit, two indexed reads.
+        const compose = await ctx.db
+          .query('projectHostedComposes')
+          .withIndex('by_project_and_actor_and_operation', q =>
+            q.eq('projectId', projectId).eq('actor', row.actor).eq('operationId', row.composeOperationId),
+          )
+          .unique();
+        const step = compose
+          ? await ctx.db
+              .query('projectSourceSteps')
+              .withIndex('by_project_and_job', q => q.eq('projectId', projectId).eq('jobId', compose.jobId))
+              .unique()
+          : null;
+        const progressAt = step?.timing?.scheduledAt;
         preparationEntries.push({
           position: null,
           landingState: landingStateField(state),
@@ -180,9 +194,16 @@ export const read = query({
           operationId: state.operationId,
           laneId: inputs.length === 1 ? inputs[0]!.key : null,
           phase: state.phase,
-          waitingOn: { kind: 'source-preparation', composeOperationId: row.composeOperationId },
+          waitingOn: {
+            kind: 'source-preparation',
+            composeOperationId: row.composeOperationId,
+            ...(step ? { sourceStep: step.step } : {}),
+          },
           submittedAt: state.at,
-          lastProgressAt: state.at,
+          lastProgressAt:
+            progressAt !== undefined && progressAt > Date.parse(state.at)
+              ? new Date(progressAt).toISOString()
+              : state.at,
         });
       }
       // The gate parks main-red entries without rewriting the directory, so the listed rows say so (B3).

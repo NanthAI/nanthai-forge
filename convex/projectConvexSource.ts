@@ -9,6 +9,7 @@ import { runSmallSourceCompose } from '../src/hosted-source-small-compose';
 import { runSmallSourceSave } from '../src/hosted-source-small-save';
 import { sourceDomainError } from './projectConvexSourceErrors';
 import { logSourceFailure, logSourceStep, withSourceFailureLog } from '../src/hosted-source-io-error';
+import { keepSourceLease } from '../src/hosted-source-lease';
 export { dispatch } from './projectConvexSourceStore';
 export { convexSourceTransport } from './projectConvexSourceTransport';
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
@@ -73,105 +74,123 @@ export async function runConvexSourceStep(
       const state = JSON.parse(loaded);
       generation = state.generation ?? generation;
       input = { ...input, generation };
-      const transport = convexSourceTransport(ctx, input, state.locations, undefined, {
-        overlapWrites: true,
-        preloaded: options.preloaded,
-        bindings: options.bindings,
-        physicalManifests: state.physicalManifests === true,
-        sourceKind: state.jobKind,
-      });
-      let output;
+      // Also covers a step delegated to the Node runtime: this action awaits it.
+      const stopLease = keepSourceLease(
+        () =>
+          ctx.runMutation(reference('projectConvexSourceLease:renew'), {
+            projectId: input.projectId,
+            jobId: input.jobId,
+            step: input.step,
+            generation,
+          }),
+        state.lease,
+      );
       try {
-        if (state.jobKind === 'save' && !state.cursor && !state.batchId)
-          output = await runSmallSourceSave(
-            state.input,
-            transport.io,
-            state.locations
-              .slice(1)
-              .map(
-                (location: { descriptor: { object: { sha256: string; size: number } } }) =>
-                  location.descriptor.object,
-              ),
-            options.verified,
-          );
-        else if (state.jobKind === 'compose' && !state.cursor && !state.batchId)
-          output = await runSmallSourceCompose(state.input, transport.io);
-        if (!output) {
-          // Reuse the already-authorized begin and bounded descriptors on fallback.
-          delegated = true;
+        const transport = convexSourceTransport(ctx, input, state.locations, undefined, {
+          overlapWrites: true,
+          preloaded: options.preloaded,
+          bindings: options.bindings,
+          physicalManifests: state.physicalManifests === true,
+          sourceKind: state.jobKind,
+        });
+        let output;
+        try {
+          if (state.jobKind === 'save' && !state.cursor && !state.batchId)
+            output = await runSmallSourceSave(
+              state.input,
+              transport.io,
+              state.locations
+                .slice(1)
+                .map(
+                  (location: { descriptor: { object: { sha256: string; size: number } } }) =>
+                    location.descriptor.object,
+                ),
+              options.verified,
+            );
+          else if (state.jobKind === 'compose' && !state.cursor && !state.batchId)
+            output = await runSmallSourceCompose(state.input, transport.io);
+          if (!output) {
+            // Reuse the already-authorized begin and bounded descriptors on fallback.
+            delegated = true;
+            await transport.settle();
+            return await ctx.runAction(makeFunctionReference<'action'>('projectConvexSourceNode:step'), {
+              ...input,
+              loaded: JSON.stringify({
+                ...state,
+                locations: [...transport.locations.values()],
+                preloaded: transport.preloaded(),
+                ...(options.bindings ? { bindings: options.bindings } : {}),
+                observedStates: transport.observedStates(),
+                ...(options.chain ? { chain: true } : {}),
+              }),
+              delegatedAt: Date.now(),
+            });
+          }
           await transport.settle();
-          return await ctx.runAction(makeFunctionReference<'action'>('projectConvexSourceNode:step'), {
-            ...input,
-            loaded: JSON.stringify({
-              ...state,
-              locations: [...transport.locations.values()],
-              preloaded: transport.preloaded(),
-              ...(options.bindings ? { bindings: options.bindings } : {}),
-              observedStates: transport.observedStates(),
+          const outputCount = transport.outputs.length;
+          for (;;) {
+            const objects = takeSourceOutputs(transport.outputs, true);
+            if (!objects.length) break;
+            await transport.clock.call(() =>
+              ctx.runMutation(reference('projectConvexSourceStore:stage'), { ...input, objects }),
+            );
+          }
+          const resultText = transport.smallOutput(output);
+          const published: string | null = await ctx.runMutation(
+            reference('projectConvexSourceStore:commit'),
+            {
+              ...input,
+              cursor: null,
+              objects: transport.outputs,
+              output,
+              failure: null,
+              stateSizes: transport.observedStates(),
+              timing: { ...transport.clock.value(), phase: 'input>done', stop: 'done' },
+              ...(resultText === null ? {} : { result: resultText }),
               ...(options.chain ? { chain: true } : {}),
-            }),
-            delegatedAt: Date.now(),
-          });
-        }
-        await transport.settle();
-        const outputCount = transport.outputs.length;
-        for (;;) {
-          const objects = takeSourceOutputs(transport.outputs, true);
-          if (!objects.length) break;
-          await transport.clock.call(() =>
-            ctx.runMutation(reference('projectConvexSourceStore:stage'), { ...input, objects }),
+            },
           );
+          logSourceStep(input, {
+            runtime: 'v8',
+            kind: state.jobKind ?? null,
+            from: 'input',
+            to: 'done',
+            objects: transport.reads.objects,
+            bytes: transport.reads.bytes,
+            outputs: outputCount,
+            putBytes: transport.putMetrics.snapshot(output),
+            started,
+          });
+          return published;
+        } catch (error) {
+          if (delegated) throw error;
+          logSourceStep(input, {
+            runtime: 'v8',
+            kind: state.jobKind ?? null,
+            from: 'input',
+            to: null,
+            objects: transport.reads.objects,
+            bytes: transport.reads.bytes,
+            outputs: transport.outputs.length,
+            started,
+            outcome: 'failed',
+            putBytes: transport.putMetrics.snapshot(),
+          });
+          const domain = sourceDomainError(error);
+          if (!domain || domain.code === 'SOURCE_JOB_FENCED') throw error;
+          logSourceFailure(error, input, 'small-save', started);
+          await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
+            ...input,
+            cursor: state.cursor,
+            objects: [],
+            output: null,
+            failure: domain.code,
+            ...(domain.code === 'SOURCE_STATE_TOO_LARGE' ? { failureReason: domain.message } : {}),
+          });
+          return null;
         }
-        const resultText = transport.smallOutput(output);
-        const published: string | null = await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
-          ...input,
-          cursor: null,
-          objects: transport.outputs,
-          output,
-          failure: null,
-          stateSizes: transport.observedStates(),
-          timing: { ...transport.clock.value(), phase: 'input>done', stop: 'done' },
-          ...(resultText === null ? {} : { result: resultText }),
-          ...(options.chain ? { chain: true } : {}),
-        });
-        logSourceStep(input, {
-          runtime: 'v8',
-          kind: state.jobKind ?? null,
-          from: 'input',
-          to: 'done',
-          objects: transport.reads.objects,
-          bytes: transport.reads.bytes,
-          outputs: outputCount,
-          putBytes: transport.putMetrics.snapshot(output),
-          started,
-        });
-        return published;
-      } catch (error) {
-        if (delegated) throw error;
-        logSourceStep(input, {
-          runtime: 'v8',
-          kind: state.jobKind ?? null,
-          from: 'input',
-          to: null,
-          objects: transport.reads.objects,
-          bytes: transport.reads.bytes,
-          outputs: transport.outputs.length,
-          started,
-          outcome: 'failed',
-          putBytes: transport.putMetrics.snapshot(),
-        });
-        const domain = sourceDomainError(error);
-        if (!domain || domain.code === 'SOURCE_JOB_FENCED') throw error;
-        logSourceFailure(error, input, 'small-save', started);
-        await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
-          ...input,
-          cursor: state.cursor,
-          objects: [],
-          output: null,
-          failure: domain.code,
-          ...(domain.code === 'SOURCE_STATE_TOO_LARGE' ? { failureReason: domain.message } : {}),
-        });
-        return null;
+      } finally {
+        await stopLease();
       }
     },
     cause =>

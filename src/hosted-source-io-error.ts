@@ -184,7 +184,9 @@ export async function withSourceFailureLog<T>(
     logSourceFailure(error, identity, stage, started);
     const cause = { ...sourceFailureCause(error, stage, started), step: identity.step };
     try {
-      if (cause.code !== 'SOURCE_JOB_FENCED') await failed?.(cause);
+      // A fenced step is recorded too (incident e62d834b): the server decides whether it is still the
+      // current attempt (then it is retried) or was superseded (then recording is a no-op).
+      await failed?.(cause);
     } catch (recordingError) {
       // A lost accounting reply is repaired from the scheduler's stopped run.
       // Its raw exception is never attached to the action rejection either.

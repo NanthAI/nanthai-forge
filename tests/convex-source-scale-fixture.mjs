@@ -18,6 +18,7 @@ const names = [
   'projectConvexSourceStore',
   'projectConvexSourceObjects',
   'projectConvexSourceFanout',
+  'projectConvexSourceLease',
   'projectSourceJobs',
 ];
 const modules = Object.fromEntries(
@@ -38,6 +39,8 @@ export async function scaleFixture({
   afterAction,
   nodeStepUrl,
   measureStateWork = false,
+  /** A shorter worker lease, so a step can outlive it in test time (incident e62d834b). */
+  workerLeaseMs,
 } = {}) {
   const f = recordsFixture(),
     { projectId } = await f.setup(),
@@ -154,7 +157,13 @@ export async function scaleFixture({
     const jobId = randomUUID(),
       operationId = randomUUID(),
       expected = { authorityEpoch: 1, head: input.sha256, receiptId: 'synthetic' };
-    const payload = { jobKind: 'register-state', input, inputDigest: input.sha256, ...sourceWorkerPlan({}) };
+    const payload = {
+      jobKind: 'register-state',
+      input,
+      inputDigest: input.sha256,
+      ...sourceWorkerPlan({}),
+      ...(workerLeaseMs ? { workerLeaseMs } : {}),
+    };
     await f.run('enqueue-scale-worker', () =>
       modules.projectSourceJobs.enqueueSourceJob(ctx, {
         projectId,

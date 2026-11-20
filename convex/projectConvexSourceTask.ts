@@ -12,6 +12,7 @@ import { sourceDomainError } from './projectConvexSourceErrors';
 import { sourceStorage } from './projectConvexSourceStorage';
 import { logSourceFailure, withSourceFailureLog, sourceCall } from '../src/hosted-source-io-error';
 import { parseSourceTaskInput } from '../src/hosted-source-task-schema';
+import { keepSourceLease } from '../src/hosted-source-lease';
 import { sourceValidation } from '../src/hosted-source-validation';
 const args = {
   projectId: v.id('hostedProjects'),
@@ -38,60 +39,68 @@ export const run = internalAction({
             hash: nativeDigest,
           });
         const { read, store } = sourceStorage(ctx, input.projectId, nativeDigest);
-        let result: Awaited<ReturnType<typeof runSourceTask>>;
+        const stopLease = keepSourceLease(
+          () => ctx.runMutation(makeFunctionReference<'mutation'>('projectConvexSourceLease:renew'), input),
+          state.lease,
+        );
         try {
-          io.setSourceSizePhase?.(
-            state.jobKind === 'compose' ? 'compose' : state.jobKind === 'sync' ? 'sync' : 'save',
-          );
-          const previous = state.progress
-            ? await sourceCall('task-progress-read', () => loadTaskData(state.progress, read))
-            : null;
-          const taskInput = parseSourceTaskInput(
-            sourceValidation('SOURCE_JOB_INVALID', () => JSON.parse(state.input) as SourceTaskInput),
-          );
-          result = await sourceCall('task-run', () => runSourceTask(taskInput, previous, io), {
-            objects: taskInput.refs.length,
-            size: taskInput.refs.reduce((n, r) => n + r.object.size, 0),
-          });
-          while (outputs.length)
-            await sourceCall('task-stage', () =>
-              ctx.runMutation(makeFunctionReference<'mutation'>('projectConvexSourceStore:stage'), {
-                projectId: input.projectId,
-                jobId: input.jobId,
-                step: input.step,
-                objects: takeSourceOutputs(outputs),
+          let result: Awaited<ReturnType<typeof runSourceTask>>;
+          try {
+            io.setSourceSizePhase?.(
+              state.jobKind === 'compose' ? 'compose' : state.jobKind === 'sync' ? 'sync' : 'save',
+            );
+            const previous = state.progress
+              ? await sourceCall('task-progress-read', () => loadTaskData(state.progress, read))
+              : null;
+            const taskInput = parseSourceTaskInput(
+              sourceValidation('SOURCE_JOB_INVALID', () => JSON.parse(state.input) as SourceTaskInput),
+            );
+            result = await sourceCall('task-run', () => runSourceTask(taskInput, previous, io), {
+              objects: taskInput.refs.length,
+              size: taskInput.refs.reduce((n, r) => n + r.object.size, 0),
+            });
+            while (outputs.length)
+              await sourceCall('task-stage', () =>
+                ctx.runMutation(makeFunctionReference<'mutation'>('projectConvexSourceStore:stage'), {
+                  projectId: input.projectId,
+                  jobId: input.jobId,
+                  step: input.step,
+                  objects: takeSourceOutputs(outputs),
+                }),
+              );
+            const saved =
+              result.done && result.progress.states.length === 0 && !result.progress.calculations?.length
+                ? null
+                : await sourceCall('task-progress-store', () => storeTaskData(result.progress, store));
+            await sourceCall('task-complete', () =>
+              ctx.runMutation(makeFunctionReference<'mutation'>('projectConvexSourceFanout:complete'), {
+                ...input,
+                done: result.done,
+                progress: result.done ? null : saved,
+                output: result.done ? saved : null,
+                failure: null,
+                stateSizes: observedStates(),
               }),
             );
-          const saved =
-            result.done && result.progress.states.length === 0 && !result.progress.calculations?.length
-              ? null
-              : await sourceCall('task-progress-store', () => storeTaskData(result.progress, store));
-          await sourceCall('task-complete', () =>
-            ctx.runMutation(makeFunctionReference<'mutation'>('projectConvexSourceFanout:complete'), {
-              ...input,
-              done: result.done,
-              progress: result.done ? null : saved,
-              output: result.done ? saved : null,
-              failure: null,
-              stateSizes: observedStates(),
-            }),
-          );
-          return null;
-        } catch (error) {
-          const domain = sourceDomainError(error);
-          if (!domain || domain.code === 'SOURCE_JOB_FENCED') throw error;
-          logSourceFailure(error, input, 'task', started);
-          await sourceCall('task-complete', () =>
-            ctx.runMutation(makeFunctionReference<'mutation'>('projectConvexSourceFanout:complete'), {
-              ...input,
-              done: true,
-              progress: null,
-              output: null,
-              failure: domain.code,
-              ...(domain.code === 'SOURCE_STATE_TOO_LARGE' ? { failureReason: domain.message } : {}),
-            }),
-          );
-          return null;
+            return null;
+          } catch (error) {
+            const domain = sourceDomainError(error);
+            if (!domain || domain.code === 'SOURCE_JOB_FENCED') throw error;
+            logSourceFailure(error, input, 'task', started);
+            await sourceCall('task-complete', () =>
+              ctx.runMutation(makeFunctionReference<'mutation'>('projectConvexSourceFanout:complete'), {
+                ...input,
+                done: true,
+                progress: null,
+                output: null,
+                failure: domain.code,
+                ...(domain.code === 'SOURCE_STATE_TOO_LARGE' ? { failureReason: domain.message } : {}),
+              }),
+            );
+            return null;
+          }
+        } finally {
+          await stopLease();
         }
       },
       cause =>

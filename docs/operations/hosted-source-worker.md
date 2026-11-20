@@ -109,6 +109,24 @@ same source work without a client replay. Direct save/compose/sync callers follo
 the original-operation continuation. No additional timer, poller or execution is
 created, and terminal operation receipts remain immutable.
 
+A step keeps its worker lease while it works. Begin returns the lease length and the
+time it has left, measured on the server clock, so the step never compares the
+server's deadline with its own clock. The step (and each fan-out task) renews it from
+inside itself through the existing heartbeat, first once it has used half that time
+(30 s on a fresh 60 s lease) and then every third of the lease (20 s), so a step that
+finishes inside the first half makes no extra call and one lost renewal is tolerated. Only
+the current step, generation and live lease renew; a replaced or expired step is
+refused and stops renewing, and renewal ends at the 10-minute action limit. A step
+that is still fenced (a lost renewal) records its failure like any platform error.
+The recorded failure schedules the same step's next generation itself, after the
+failure backoff, with the lease renewed from that start; no client lookup is needed.
+A worker that dies without recording anything (a killed action) is resumed by the
+same repair a lookup runs, which the desired-landing watchdog also runs on each wake
+while its compose is not terminal, but only once the job's worker lease has expired:
+a dead worker stops renewing, so its lease lapses within one lease length. A running
+or pending step holds a live lease and is never touched; the watchdog then reads only
+the step row and the job.
+
 Each bounded quantum has a persisted failed-attempt count, separate from its
 successful continuation generation and the source job's business `attempt`.
 Failure accounting and pool rescheduling share the task-row write. Replacement

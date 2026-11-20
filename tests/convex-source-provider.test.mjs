@@ -375,10 +375,7 @@ test('the storage fake rejects a Blob without a content type, like Convex in the
   assert.equal((await convexStoreBlob(typed, { sha256: digest(Buffer.from('x')) })).toString(), 'x');
   await assert.rejects(convexStoreBlob(typed, { sha256: 'a'.repeat(64) }), /sha256/);
 });
-test('a step that failed on a platform error is retried after the 60 s lease expired and completes under the same execution', async () => {
-  const real = Date.now;
-  let offset = 0;
-  Date.now = () => real() + offset;
+test('a step that failed on a platform error schedules its own retry under the same execution and completes (incident e62d834b)', async () => {
   const s = await fixture();
   try {
     await s.submit();
@@ -388,13 +385,21 @@ test('a step that failed on a platform error is retried after the 60 s lease exp
       job = await s.load();
     s.hooks.failStore = true;
     await assert.rejects(s.execute(step), { name: 'SourceIoError', stage: 'source-put' });
-    offset += 61000;
-    assert(job.control.workerUntil <= Date.now(), 'the dead execution expired');
-    await assert.rejects(
-      s.call('expiredBegin', store.begin, step.args),
-      e => e.data?.code === 'SOURCE_JOB_FENCED',
-      'nothing from the dead attempt can run before an explicit recovery',
+    // The recorded failure schedules the retry itself: no client replay is needed (incident e62d834b).
+    assert.equal(s.scheduled.length, 1);
+    assert.deepEqual(
+      s.scheduled[0].args,
+      { ...step.args, generation: 1 },
+      'the same step resumes with a fenced repair generation',
     );
+    const renewed = await s.load();
+    assert.equal(renewed.executionId, job.executionId);
+    assert.equal(renewed.attempt, job.attempt);
+    assert.equal(renewed.fence, job.fence);
+    assert(renewed.control.workerUntil > Date.now(), 'the retry starts inside a renewed lease');
+    // Nothing from the dead attempt's generation can run any more.
+    const dead = await s.call('deadBegin', store.begin, step.args).catch(e => e.data?.code);
+    assert(dead === null || dead === 'SOURCE_JOB_FENCED', String(dead));
     // A stale step number neither commits nor extends the lease.
     await s.call('staleCommit', store.commit, {
       ...step.args,
@@ -404,7 +409,60 @@ test('a step that failed on a platform error is retried after the 60 s lease exp
       output: null,
       failure: null,
     });
-    assert.equal((await s.load()).version, job.version);
+    assert.equal((await s.load()).version, renewed.version);
+    // A replay while that retry is pending schedules nothing more.
+    await s.submit();
+    await s.execute(s.scheduled.pop());
+    assert.equal(s.scheduled.length, 1, 'recovery happens once');
+    await s.execute(s.scheduled.shift());
+    const done = await s.load();
+    assert.equal(done.status, 'completed');
+    assert.equal(done.executionId, job.executionId);
+    assert.equal(s.tables.projectSourceSteps.size, 1, 'one execution');
+    assert.equal((await savedProgress(s)).terminal.outcome.status, 'completed', 'published in the commit');
+  } finally {
+    s.restore();
+  }
+});
+
+test('a step that failed on a platform error is retried after the 60 s lease expired and completes under the same execution', async () => {
+  const real = Date.now;
+  let offset = 0;
+  Date.now = () => real() + offset;
+  const s = await fixture();
+  try {
+    await s.submit();
+    await s.execute(s.scheduled.shift());
+    const step = s.scheduled.shift(),
+      job = await s.load();
+    s.hooks.failStore = true;
+    await assert.rejects(s.execute(step), { name: 'SourceIoError', stage: 'source-put' });
+    // The failure's own retry (incident e62d834b) is lost: its scheduled action fails on the platform
+    // and never begins, so nothing renews the lease.
+    const lost = s.scheduled.shift();
+    assert.deepEqual(lost.args, { ...step.args, generation: 1 });
+    assert.equal(s.scheduled.length, 0);
+    // Past that retry's lease too: it opened at the retry's start, after the 2 s first backoff.
+    offset += 63000;
+    assert((await s.load()).control.workerUntil <= Date.now(), 'the dead execution expired');
+    await assert.rejects(
+      s.call('expiredBegin', store.begin, lost.args),
+      e => e.data?.code === 'SOURCE_JOB_FENCED',
+      'nothing from the dead attempt can run before an explicit recovery',
+    );
+    const dead = await s.call('deadBegin', store.begin, step.args).catch(e => e.data?.code);
+    assert(dead === null || dead === 'SOURCE_JOB_FENCED', String(dead));
+    const expired = await s.load();
+    // A stale step number neither commits nor extends the lease.
+    await s.call('staleCommit', store.commit, {
+      ...step.args,
+      step: step.args.step + 7,
+      cursor: null,
+      objects: [],
+      output: null,
+      failure: null,
+    });
+    assert.equal((await s.load()).version, expired.version);
     // The lead replays the finish: submit schedules the controller, whose lookup
     // sees the failed step action and resumes it under the same execution.
     await s.submit();
@@ -418,7 +476,7 @@ test('a step that failed on a platform error is retried after the 60 s lease exp
     assert.equal(s.scheduled.length, 1);
     assert.deepEqual(
       s.scheduled[0].args,
-      { ...step.args, generation: 1 },
+      { ...step.args, generation: 2 },
       'the same step resumes with a fenced repair generation',
     );
     // A second trigger while that step is pending schedules nothing more.
@@ -459,8 +517,10 @@ test('a thrown worker failure is public and replayable before and after lease ex
     assert.equal(failed.error.code, 'SOURCE_WORKER_STEP_FAILED');
     assert.equal(failed.failedPhase, `source-step:${step.args.step}`);
     assert.equal(failed.jobId, job.id);
-    assert.equal(s.scheduled.length, 0, 'observation never schedules recovery');
-    offset += 61000;
+    // Only the failure's own retry is pending (incident e62d834b); observation schedules nothing.
+    assert.equal(s.scheduled.length, 1, 'observation never schedules recovery');
+    // Past the retry's lease too: it opens when the retry starts, after the 2 s first backoff.
+    offset += 63000;
     const expired = JSON.parse(await s.call('expiredProgress', saveApi.progress, args));
     assert.equal(expired.status, 'retryable');
     assert.equal(expired.error.code, 'SOURCE_JOB_STALLED');
@@ -468,8 +528,9 @@ test('a thrown worker failure is public and replayable before and after lease ex
     const replay = JSON.parse(await s.submit());
     assert.equal(replay.status, 'retryable', 'same-operation replay returns the stalled state immediately');
     assert.equal(replay.jobId, job.id);
-    s.hooks.scheduled = 'failed';
-    await s.execute(s.scheduled.shift());
+    // The replay's controller finds that retry still pending: it renews its lapsed lease in place.
+    await s.execute(s.scheduled.pop());
+    assert.equal(s.scheduled.length, 1, 'no duplicate retry');
     await s.execute(s.scheduled.shift());
     assert.equal((await s.load()).status, 'completed');
     assert.equal((await s.load()).executionId, job.executionId);

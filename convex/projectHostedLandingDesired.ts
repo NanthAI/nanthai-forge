@@ -18,6 +18,7 @@ import { landingAgentClient, landingAgentRun } from '../src/agent-slug';
 import { activeProject } from './projectAuthority';
 import { requireWriteEpoch } from './projectHostedRecords';
 import { loadCompose } from './projectHostedComposeStore';
+import { repairConvexSource } from './projectConvexSourceStore';
 import { enqueueHostedLanding } from './projectHostedLanding';
 import { replaceOwnerlessLanding } from './projectHostedLaneFinish';
 import { landingAlias } from './projectHostedLandingIdentity';
@@ -341,7 +342,13 @@ export const advance = internalMutation({
         operationId: row.composeOperationId,
       });
       const terminal = source.operation.terminal;
-      if (!terminal) return null;
+      if (!terminal) {
+        // The watchdog resumes a source step whose worker died or was fenced (incident e62d834b),
+        // only once its worker lease has expired; a running or pending step holds a live lease and is
+        // left alone. It never fails this goal: the next wake retries.
+        if (source.row.jobId) await repairSource(ctx, row.projectId, source.row.jobId);
+        return null;
+      }
       if (terminal.outcome.status === 'failed')
         throw new ForgeError(terminal.outcome.error.code, terminal.outcome.error.message);
       const candidate = hostedRecordSchema.options[3].parse(terminal.outcome.result);
@@ -380,6 +387,13 @@ export const advance = internalMutation({
     }
   },
 });
+async function repairSource(ctx: MutationCtx, projectId: Id<'hostedProjects'>, jobId: string) {
+  try {
+    await repairConvexSource(ctx, { projectId, jobId }, { expiredOnly: true });
+  } catch (error) {
+    if (!(error instanceof ForgeError)) throw error;
+  }
+}
 /** Admission failures roll back their whole transaction before this independent
  * failure publication. A failed check reservation cannot leave a partial queue. */
 export const fail = internalMutation({
