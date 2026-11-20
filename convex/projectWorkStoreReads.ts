@@ -160,6 +160,9 @@ export async function storeReadOf(
   const head = await recordHead(ctx, projectId, kind, id);
   if (!head) return null;
   const read = await headValue(ctx, collection, head),
-    stored = journalValue(collection, await body(ctx, await ctx.db.get(head.recordId)));
+    row = await ctx.db.get(head.recordId);
+  // A purged version keeps no body: its head's purged form is all there is to compare (Item 4c9e961e).
+  if (row?.purged !== undefined) return read;
+  const stored = journalValue(collection, await body(ctx, row));
   return sameValue(read, stored) ? read : { read, stored };
 }

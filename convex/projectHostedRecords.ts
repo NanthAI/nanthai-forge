@@ -91,12 +91,9 @@ export async function recordVersion(
 export async function hostedRecordBody(ctx: QueryCtx | MutationCtx, row: Doc<'projectHostedRecords'>) {
   // A purged version answers purged, never a digest failure; a marker naming no purge of its Item stays a failure.
   if (row.purged !== undefined) {
-    invariant(
-      await verifiedPurgedRecord(ctx, { ...row, purged: row.purged }),
-      'SOURCE_UNAVAILABLE',
-      'Exact canonical record bytes are unavailable.',
-    );
-    throw planningPurged(row.kind === 'comment' ? row.parent : row.key, row.purged);
+    const itemId = await verifiedPurgedRecord(ctx, { ...row, purged: row.purged });
+    invariant(itemId, 'SOURCE_UNAVAILABLE', 'Exact canonical record bytes are unavailable.');
+    throw planningPurged(itemId, row.purged);
   }
   if (row.inline !== undefined) {
     invariant(

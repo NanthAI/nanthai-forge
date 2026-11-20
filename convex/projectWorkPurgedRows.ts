@@ -12,6 +12,7 @@ import { invariant } from '../src/errors';
 import { planningPurgeSchema } from '../src/work-planning-types';
 import { purgedFactsDigest, purgedPlanningRowSchema, type PurgedPlanningRow } from '../src/work-intent-types';
 import { metadataRequest } from '../src/work-metadata';
+import { purgedIntentKeys } from '../src/work-planning-purge';
 
 type Purge = { revision: number; itemId: string; rows: Map<string, string> } | null;
 type PurgeCache = Map<string, Purge>;
@@ -112,13 +113,19 @@ export async function verifyPurgedEvents(
       await verifyPurgedRow(ctx, projectId, { ...event, purged: event.purged }, cache);
 }
 
-/** A purged issue, comment or Intent version keeps its header and digest. It reads as purged only when the purge
- * it names exists and is for the Item the version belongs to; otherwise it stays the integrity failure it is. */
+/** A purged issue, comment, Intent or lifecycle version keeps its header and digest. It reads as purged only when the
+ * purge it names exists and is for the Item the version belongs to (an Intent or lifecycle version: the Item's Intent or
+ * a successor of it, purgedIntentKeys); otherwise it stays the integrity failure it is. Returns the purged Item's id. */
 export async function verifiedPurgedRecord(
   ctx: QueryCtx | MutationCtx,
   row: { projectId: Id<'hostedProjects'>; kind: string; key: string; parent: string; purged: string },
 ) {
   const purge = await purgeCommand(ctx, row.projectId, row.purged);
+  if (!purge) return null;
+  if (row.kind === 'intent' || row.kind === 'lifecycle')
+    return purgedIntentKeys(purge.itemId).includes(row.kind === 'intent' ? row.key : row.parent)
+      ? purge.itemId
+      : null;
   const itemId = row.kind === 'comment' ? row.parent : row.key;
-  return !!purge && ['issue', 'comment', 'intent'].includes(row.kind) && purge.itemId === itemId;
+  return ['issue', 'comment'].includes(row.kind) && purge.itemId === itemId ? itemId : null;
 }

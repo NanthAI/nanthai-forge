@@ -24,8 +24,10 @@ export async function writeFingerprint(
   position: number,
   value: unknown,
 ) {
+  // Read and insert in the same table (fingerprints are `_workStore*` collections: projectWorkDataRecords).
+  const table = await workRecordTable(ctx, partition, collection);
   const row = await ctx.db
-    .query(await workRecordTable(ctx, partition, collection))
+    .query(table)
     .withIndex('by_generation_and_collection_and_key', q =>
       q.eq('generationId', partition).eq('collection', collection).eq('key', key),
     )
@@ -35,7 +37,7 @@ export async function writeFingerprint(
     if (row.value !== entry.value || row.position !== position) await ctx.db.patch(row._id, entry);
     return;
   }
-  await ctx.db.insert('projectWorkRecords', {
+  await ctx.db.insert(table, {
     projectId,
     generationId: partition,
     collection,

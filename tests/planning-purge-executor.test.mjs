@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Purge executor (Item 4c9e961e, purge Lane 2): selection, the atomic first step, redaction of every store, the
-// completeness check before purgedAt, resume after a crash and after an index rebuild, and the row limit.
+// Purge executor (Item 4c9e961e, purge Lanes 2 and 3): selection, the atomic first step, redaction of every store
+// (the work store's Intent versions, lifecycle versions and handoff summaries included), the completeness check before
+// purgedAt, resume after a crash and after an index rebuild, and the row limit.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -20,6 +21,8 @@ const { purgeSteps, partitionsOf } = await import(moduleUrl('../convex/projectPl
 const workStore = await import(moduleUrl('../convex/projectWorkStore.ts'));
 const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const { commandPlanningRows } = await import(moduleUrl('../convex/projectWorkCommandRows.ts'));
+const hostedRecords = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+const { successorIntentId } = await import('../dist/hosted-intent-chain.js');
 const { dispatchHostedWork } = await import('../dist/hosted-work-client.js');
 const { indexedRecord } = await import('../dist/work-hosted-index.js');
 
@@ -387,16 +390,8 @@ test('records mode (work store primary): a purge of an Item with an alias-writte
   assert.equal(s.tables.hostedProjects.get(s.projectId).workStore, 'records');
   const stored = [...s.tables.projectHostedRecords.values()].filter(row => row.kind === 'comment');
   assert.ok(stored.length >= 3, 'the store holds the comments and the note');
-  // Every Issue is also an Intent, and the store keeps that Intent's versions (the Item's Intent copy). Purge Lane 3
-  // redacts them; until then the executor refuses (next test). Remove them here as Lane 3 will, to prove the
-  // executor leaves no words in any other store.
-  for (const [id, row] of s.tables.projectHostedRecords)
-    if (row.kind === 'intent' && row.key === itemId) {
-      s.tables.projectHostedRecordBodies.delete(row.bodyId);
-      s.tables.projectHostedRecords.delete(id);
-    }
-  for (const [id, head] of s.tables.projectHostedRecordHeads)
-    if (head.kind === 'intent' && head.key === itemId) s.tables.projectHostedRecordHeads.delete(id);
+  // Every Issue is also an Intent, and the store keeps that Intent's versions (the Item's Intent copy).
+  assert.ok(storeIntents(s, itemId).length > 1, 'the store keeps several Intent versions');
   const done = await executor(s).run(itemId, randomUUID());
   assert.equal(typeof done.purgedAt, 'number');
   assert.deepEqual(done.ids, [itemId, alias].sort(), 'the Item id and its alias');
@@ -426,39 +421,256 @@ test('records mode (work store primary): a purge of an Item with an alias-writte
   assert.ok(reads[0].page.some(row => row.id === keep.itemId));
 });
 
-test('records mode: an Item whose Intent versions are in the work store is refused before any write and never marked done (purge Lane 3)', async t => {
-  const { s, itemId } = await deletedItem(t, { records: true });
-  const intentVersions = [...s.tables.projectHostedRecords.values()].filter(
-    row => row.kind === 'intent' && row.key === itemId,
+const journalRevision = s =>
+  Math.max(
+    ...[...s.tables.projectWorkEvents.values(), ...s.tables.projectHostedRecordBodies.values()].map(
+      row => row.revision ?? 0,
+    ),
   );
-  assert.ok(intentVersions.length > 0, 'the store keeps the Intent versions (purge Lane 3 removes them)');
-  const before = s.tables.projectWorkEvents.size;
-  await assert.rejects(executor(s).run(itemId, randomUUID()), /purge Lane 3/);
-  assert.equal(s.tables.projectWorkEvents.size, before, 'no purge row');
-  assert.equal(s.tables.hostedProjects.get(s.projectId).itemPurges, undefined, 'no progress entry');
-  // A purge that got past the first step (the store gained Intent versions after it) still cannot finish.
-  const purge = {
-    operationId: randomUUID(),
-    itemId,
-    ids: [itemId],
-    intentId: itemId,
-    version: 1,
-    decisions: [],
-    rows: 0,
-    startedAt: 1,
-  };
-  s.tables.hostedProjects.get(s.projectId).itemPurges = [purge];
-  const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
-  await assert.rejects(
-    modules.projectPlanningPurge.finish._handler(s.ctx, {
+/** The work store's versions of one Intent, oldest first. */
+const storeIntents = (s, key) =>
+  [...s.tables.projectHostedRecords.values()]
+    .filter(row => row.kind === 'intent' && row.key === key)
+    .sort((a, b) => a.version - b.version);
+const readIntent = (s, key, version) =>
+  hostedRecords.readHostedRecord(s.ctx, {
+    projectId: s.projectId,
+    actor: 'owner',
+    kind: 'intent',
+    key,
+    version,
+  });
+
+/** A Lane pins the Item's Intent (a hosted version, as projectHostedStart writes it) and, once it finished, a later
+ * start continues the Item on its successor Intent, which copies the outcome. */
+async function pinAndContinue(s, itemId) {
+  const head = (await readIntent(s, itemId)) ?? assert.fail('the store keeps the Intent');
+  const stored = JSON.parse(head.value);
+  const write = (record, expectedVersion) =>
+    hostedRecords.writeHostedRecord(s.ctx, {
       projectId: s.projectId,
-      operationId: purge.operationId,
-      generationId,
-      partitions: (await partitionsOf(s.ctx, s.projectId)).join(','),
-    }),
-    /purge Lane 3/,
+      actor: 'owner',
+      authorityEpoch: 1,
+      record,
+      expectedVersion,
+    });
+  const base = { head: 'b'.repeat(64), receiptId: 'receipt-1' };
+  await write({ ...stored, version: head.version + 1, base, status: 'active' }, head.version);
+  await write({ ...stored, version: head.version + 2, base, status: 'completed' }, head.version + 1);
+  const successor = successorIntentId(itemId);
+  await write(
+    {
+      kind: 'intent',
+      id: successor,
+      version: 0,
+      at: stored.at,
+      outcome: `Successor ${SECRET}`,
+      constraints: `Successor constraints ${SECRET}`,
+      creatorAccountId: 'owner',
+      assigneeAccountIds: [],
+      base,
+      status: 'active',
+    },
+    null,
   );
-  assert.equal(s.tables.hostedProjects.get(s.projectId).itemPurges[0].purgedAt, undefined);
+  return successor;
+}
+
+test('purge Lane 3, records mode: an Intent-born Item (Lane-pinned, continued on a successor, with a handoff) ends with a Deleted Item Intent version, every older version purged, and its words in no table', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true });
+  const successor = await pinAndContinue(s, itemId);
+  // A legacy handoff note: the Intent header lists its summary and the note keeps the handoff's free text.
+  const project = s.tables.hostedProjects.get(s.projectId);
+  for (const row of workRecordRows(s.tables))
+    if (
+      row.generationId === project.work.generationId &&
+      row.collection === 'intents' &&
+      row.key === itemId
+    ) {
+      const value = JSON.parse(row.value);
+      value.handoffs = [{ laneId: randomUUID(), summary: `Handoff ${SECRET}` }];
+      row.value = JSON.stringify(value);
+    } else if (row.collection === 'notes' && row.parent === itemId) {
+      const value = JSON.parse(row.value);
+      value.handoff = { laneId: randomUUID(), summary: `Handoff note ${SECRET}` };
+      row.value = JSON.stringify(value);
+    }
+  // The Lane on the Intent keeps the outcome on its overlap row (review finding 2).
+  const laneId = randomUUID();
+  await s.ctx.db.insert('projectHostedRecordHeads', {
+    projectId: s.projectId,
+    kind: 'lane',
+    key: laneId,
+    parent: itemId,
+    status: 'completed',
+    version: 0,
+    recordId: 'lane-record',
+  });
+  await s.ctx.db.insert('projectHostedOverlapLanes', {
+    projectId: s.projectId,
+    laneId,
+    intentId: itemId,
+    actor: 'owner',
+    intent: `Title ${SECRET}`,
+    head: 'h',
+    baseHead: 'h',
+    baseReceiptId: 'receipt-1',
+    baseSequence: null,
+    recordVersion: 0,
+    open: false,
+    changes: '[]',
+    complete: true,
+  });
+  const before = storeIntents(s, itemId);
+  assert.ok(before.length >= 3 && storeIntents(s, successor).length === 1);
+  const done = await executor(s).run(itemId, randomUUID());
+  assert.equal(
+    typeof done.purgedAt,
+    'number',
+    'marked done: nothing blocks an Item whose Intent is in the store',
+  );
+  assert.deepEqual(
+    secretRows(s),
+    [],
+    'no table holds the words: Intent versions, successor and handoffs included',
+  );
+  for (const key of [itemId, successor]) {
+    const versions = storeIntents(s, key),
+      head = versions.at(-1);
+    // The Intent copy reads 'Deleted Item' in a new version (its head), and keeps its status and base.
+    const current = await readIntent(s, key);
+    assert.equal(current.version, head.version);
+    const value = JSON.parse(current.value);
+    assert.deepEqual([value.outcome, value.constraints], ['Deleted Item', '']);
+    assert.equal(value.base.receiptId, 'receipt-1', 'a Lane-pinned Intent stays pinned');
+    // Every older version is purged: a read by version answers that the Item was deleted permanently.
+    for (const old of versions.slice(0, -1)) {
+      assert.equal(old.purged, done.operationId);
+      await assert.rejects(readIntent(s, key, old.version), error => {
+        assert.equal(error.code ?? error.data?.code, 'PLANNING_ITEM_PURGED');
+        assert.equal(error.recovery.itemId, itemId, 'a successor Intent names the purged Item');
+        return true;
+      });
+    }
+  }
+  assert.equal(
+    storeIntents(s, itemId).length,
+    before.length + 1,
+    'one Deleted Item version, nothing removed',
+  );
+  // Running the purge again changes nothing: the Deleted Item version is a fixed point.
+  const rows = s.tables.projectHostedRecords.size;
+  await executor(s).run(itemId, done.operationId);
+  assert.equal(s.tables.projectHostedRecords.size, rows);
+});
+
+test('review (Lane 3) finding 3: a successor id that names an Issue of its own ends the Intent chain; that Issue keeps its words', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true });
+  const other = successorIntentId(itemId);
+  // The alias lives in the index only, so this write passes the journal's revision (as deletedItem does).
+  await s.send(s.item({ itemId: other, title: 'Unrelated Issue' }), journalRevision(s));
+  const kept = storeIntents(s, other);
+  assert.ok(kept.length > 0, 'the unrelated Issue has its own Intent versions');
+  const done = await executor(s).run(itemId, randomUUID());
+  assert.equal(typeof done.purgedAt, 'number');
+  assert.ok(storeIntents(s, other).every(row => row.purged === undefined));
+  assert.equal(JSON.parse((await readIntent(s, other)).value).outcome, 'Unrelated Issue');
+});
+
+test('review (Lane 3) finding 4: a note reaching the Intent after the first step keeps the purge from finishing', async t => {
+  const { s, itemId } = await deletedItem(t);
+  const operationId = randomUUID();
+  await assert.rejects(executor(s, 1).run(itemId, operationId), /executor stopped/);
+  await s.send({ action: 'note', intentId: itemId, text: `Late note ${SECRET}`, kind: 'comment' });
+  await assert.rejects(executor(s).run(itemId, operationId), /after its purge began/);
+  assert.equal(
+    s.tables.hostedProjects.get(s.projectId).itemPurges[0].purgedAt,
+    undefined,
+    'never reported done',
+  );
+});
+
+test('review (Lane 3) finding 5: a body another live record shares keeps its bytes; the purged version still reads purged', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true });
+  const [old] = storeIntents(s, itemId);
+  const value = s.tables.projectHostedRecordBodies.get(old.bodyId).value;
+  const live = await s.ctx.db.insert('projectHostedRecords', {
+    ...old,
+    _id: undefined,
+    _creationTime: undefined,
+    key: randomUUID(),
+  });
+  const done = await executor(s).run(itemId, randomUUID());
+  assert.equal(typeof done.purgedAt, 'number');
+  assert.equal(s.tables.projectHostedRecords.get(old._id).purged, done.operationId);
+  assert.equal(
+    s.tables.projectHostedRecordBodies.get(old.bodyId).value,
+    value,
+    'the live owner can still verify its body',
+  );
+  assert.equal(s.tables.projectHostedRecords.get(live).purged, undefined);
+});
+
+test('purge Lane 3: a work-store lifecycle version (a status move, with its reason) is purged and its head keeps the purged form', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true });
+  const lifecycle = () =>
+    [...s.tables.projectHostedRecords.values()].filter(
+      row => row.kind === 'lifecycle' && row.parent === itemId,
+    );
+  // A moved status records a lifecycle entry with the put's reason (a Deleted put moves the Item too).
+  if (!lifecycle().length) {
+    const { workStoreRecord } = await import('../dist/work-store-records.js');
+    const { hostedRecordValue } = await import('../dist/hosted-records.js');
+    const { storeVersion } = workStore;
+    await storeVersion(
+      s.ctx,
+      s.projectId,
+      hostedRecordValue(
+        workStoreRecord('lifecycle', {
+          intentId: itemId,
+          index: 0,
+          from: 'open',
+          to: 'deleted',
+          at: '2026-11-20T00:00:00.000Z',
+          reason: `Why ${SECRET}`,
+        }),
+      ),
+    );
+  }
+  assert.ok(lifecycle().length > 0 && secretRows(s).some(row => row.startsWith('projectHostedRecord')));
+  const done = await executor(s).run(itemId, randomUUID());
+  assert.equal(typeof done.purgedAt, 'number');
+  assert.ok(lifecycle().every(row => row.purged === done.operationId));
+  assert.deepEqual(secretRows(s), []);
+});
+
+test('purge Lane 3: a project with hosted display snapshots (copies of record bodies) is refused with nothing written, and one made during a purge keeps it from finishing', async t => {
+  const { s, itemId } = await deletedItem(t);
+  const display = () =>
+    s.ctx.db.insert('projectHostedDisplayRecords', {
+      projectId: s.projectId,
+      snapshotId: 'snapshot',
+      kind: 'intent',
+      key: itemId,
+      version: 0,
+      parent: 'owner',
+      status: 'active',
+      value: `{"outcome":"${SECRET}"}`,
+    });
+  const id = await display();
+  const before = s.tables.projectWorkEvents.size;
+  await assert.rejects(executor(s).run(itemId, randomUUID()), /display snapshots/);
+  assert.equal(s.tables.projectWorkEvents.size, before, 'no purge row');
+  s.tables.projectHostedDisplayRecords.delete(id);
+  const operationId = randomUUID();
+  await assert.rejects(executor(s, 1).run(itemId, operationId), /executor stopped/);
+  await display();
+  await assert.rejects(executor(s).run(itemId, operationId), /display snapshots/);
+  assert.equal(
+    s.tables.hostedProjects.get(s.projectId).itemPurges[0].purgedAt,
+    undefined,
+    'never reported done',
+  );
 });
 
 test('review r1: a put linking large Intents through parents and relations hydrates them in one call and never repeats an empty key', async () => {

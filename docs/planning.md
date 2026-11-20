@@ -89,21 +89,25 @@ purge Lane 4 calls it) runs a read-only preflight, selects every journal row of 
 included, at most 1,000 rows, else refused with nothing written), appends the purge and the tombstone in one mutation
 (refused if a row of the Item was appended after the selection read), then redacts in bounded pages: journal rows,
 the Work index of every record partition, kept or retired ones included (events, versions, comments, notes,
-lifecycle, the Intent, the Item's root, Initiative record and search row, and stale payload chunks), the work store's
-issue and comment versions, bodies and heads, and the store fingerprints. Aliases have no index by Intent, so a purge
+lifecycle, the Intent with its handoff summaries, the Item's root, Initiative record and search row, and stale payload
+chunks), the work store's issue, comment and lifecycle versions, bodies and heads, its Intent versions (the Item's
+Intent and every successor Intent a later start continued it on: the head becomes a new 'Deleted Item' version that
+keeps status and Lane pin, and every older version is purged; the chain ends at a successor id that names an Issue of
+its own), the outcome copy on each of their Lanes' overlap rows, and the store fingerprints. Lane records, receipts and
+Lane lifecycle plans (with an abandon reason a member wrote) are Lane history and stay, like commit messages. Aliases have no index by Intent, so a purge
 reads all of the project's aliases and refuses a project with more than 8,000 (nothing written); the preflight also
-refuses an Item with a work-store version in a journal segment, an Item in a stored base (no creation row after the
+refuses an Item with a work-store version (its Intents' included) in a journal segment, a project that keeps hosted
+display snapshots (they copy record bodies under no index by Item), an Item whose Intent has an id of its own, an Item
+in a stored base (no creation row after the
 backup's revision or a record-detail catalog's: the archive keeps its words and a load or rebuild reads it again, so a
-base scrub must come first; a detail migration is refused while a purge is open) and an Intent
-with Lane handoff summaries (purge Lane 3). The last step also refuses while a Work index build runs or the set of
+base scrub must come first; a detail migration is refused while a purge is open). The last step also refuses while a Work index build runs or the set of
 record partitions differs from the one the check walked. The same pages
 run read-only as the completeness check; the purge's `purgedAt` (project `itemPurges`) is set only when the check
 finds nothing left on the generation still selected. A stopped purge resumes by running again with the same
 operation id, also after an index rebuild. Issue, comment and Intent record versions never enter a journal segment.
-Intent record versions in the work store (every Issue's Intent copy, kept in dual and records mode), the store's
-lifecycle versions (a put's reason) and the Intent's handoff summaries are purge Lane 3's:
-until it lands, the preflight refuses an Item whose Intent has work-store versions with nothing written, and the last
-step refuses to set `purgedAt` while any remain, so such a purge never reports done. A purged decision
+A purged Intent or lifecycle version, read by version, answers `PLANNING_ITEM_PURGED` naming the Item. A note or
+status change on the Item's Intent is still accepted after the first step (refusing it would cost every note write a
+read); the last step refuses to finish while such a note exists, so the purge never reports done over it. A purged decision
 comment's own body version replays under a request derived from the comment's (`purgedDecisionRequest`), since the
 body it hashed is gone. A put that newly names a tombstone as its Initiative, parent, linked Intent or relation is
 refused with `PLANNING_ITEM_PURGED`; links an Item already has stay, so it can still be edited. A retry of a purged

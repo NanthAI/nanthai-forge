@@ -12,6 +12,7 @@ import type { HostedEvent, WorkData } from './work-types.js';
 import { purgeableCommandSchema, purgedFactsDigest, redactPlanningWrite } from './work-intent-types.js';
 import { isUnifiedWork } from './work-unified-types.js';
 import { planningTarget, type UnifiedPlanningData } from './work-planning-unified.js';
+import { maxIntentChain, successorIntentId } from './hosted-intent-chain.js';
 
 /**
  * Append the id-only tombstone for a purge. The Item must exist, be Deleted and be at `expectedVersion`, on the
@@ -169,12 +170,15 @@ export function purgedIndexValue(
     Object.assign(row, { text: 'Deleted comment', authorLabel: '' });
   else if (collection === 'notes') {
     row.text = 'Deleted note';
-    drop('anchor');
+    // A Lane handoff note's summary, tests and next steps are free text too; a replayed purged note has none.
+    drop('anchor', 'handoff');
   } else if (collection === 'lifecycle') return lifecycleEntry(row, request);
   else if (collection === 'intents') {
     for (const key of ['title', 'outcome'] as const) if (key in row) row[key] = PURGED_ITEM_TITLE;
     for (const key of ['description', 'constraints'] as const) if (key in row) row[key] = '';
     if (request(row.operationId)) row.request = request(row.operationId);
+    // Handoff summaries come from the Intent's handoff notes, which a purged note no longer has (src/work-hosted-index.ts).
+    if (Array.isArray(row.handoffs)) row.handoffs = [];
     if (Array.isArray(row.lifecycle))
       row.lifecycle = row.lifecycle.map(entry => lifecycleEntry(entry as Record<string, unknown>, request));
   } else if (collection === 'events') {
@@ -187,6 +191,28 @@ export function purgedIndexValue(
       };
   }
   return row;
+}
+
+/** The ids of every Intent a purged Item's words reach in the work store: its own Intent (an Issue's Intent shares its
+ * id) and the successor chain later starts continue it on (src/hosted-intent-chain.ts), which copies its outcome. Pure,
+ * so a reader checks a purged Intent or lifecycle version against its purge with no read. */
+export function purgedIntentKeys(itemId: string) {
+  const keys = [itemId];
+  while (keys.length <= maxIntentChain) keys.push(successorIntentId(keys.at(-1)!));
+  return keys;
+}
+
+/** The 'Deleted Item' Intent version a purge writes over a work-store Intent record (journal copy or hosted): the
+ * same record with its words replaced, as the store would copy the purged index Intent. A fixed point. */
+export function purgedIntentRecord(
+  record: Record<string, unknown>,
+  purgeOperationId: string,
+  decisionRequests: ReadonlyMap<string, string> = new Map(),
+) {
+  const out: Record<string, unknown> = { ...record, outcome: PURGED_ITEM_TITLE, constraints: '' };
+  if (record.journal && typeof record.journal === 'object')
+    out.journal = purgedIndexValue('intents', record.journal, purgeOperationId, decisionRequests);
+  return out;
 }
 
 function lifecycleEntry(

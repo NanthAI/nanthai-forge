@@ -3,7 +3,7 @@
 // page of one store into its purged form, and the same code with `apply` false is the completeness check (it counts
 // what a step would still change). Stores, in order (the Item purge inventory, `planningPurgeStores`):
 // journal rows, the Work index (events, versions, comments, notes, lifecycle, Intent, search root), the work store
-// (issue and comment versions, their bodies and heads) and the store fingerprints.
+// (issue, comment, lifecycle and Intent versions, their bodies and heads) and the store fingerprints.
 import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { invariant } from '../src/errors';
@@ -13,11 +13,14 @@ import {
   purgedFactsText,
   redactPlanningWrite,
 } from '../src/work-intent-types';
-import { purgedIndexValue } from '../src/work-planning-purge';
+import { purgedIndexValue, purgedIntentKeys, purgedIntentRecord } from '../src/work-planning-purge';
+import { hostedRecordIndex, hostedRecordValue } from '../src/hosted-records';
 import { PURGED_ITEM_TITLE } from '../src/work-planning-types';
 import { indexedRecord } from '../src/work-hosted-index';
 import { splitRecordTable } from './projectWorkRecordTables';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
+import { hostedRecordBody, recordHead, recordVersion } from './projectHostedRecords';
+import { fingerprintHostedIntent } from './projectWorkStoreFingerprintWrites';
 
 /** Every store an Item purge redacts, and how. The end-to-end test (tests/planning-purge-executor.test.mjs) searches
  * every table for the purged words, so a new store that keeps them fails the build. */
@@ -26,15 +29,16 @@ export const planningPurgeStores = {
   projectHostedRecordBodies:
     'journal row: facts in `journalCommand`, no `command`, `purged`; record body emptied',
   projectHostedRecords:
-    'issue and comment versions: `purged` marker, no `inline` (Intent versions: purge Lane 3)',
-  projectHostedRecordHeads: 'comment, note and lifecycle heads: inline value in its purged form',
+    "issue, comment and lifecycle versions: `purged` marker, no `inline`; the Item's Intent and its successors: a new 'Deleted Item' version (head), every older version purged",
+  projectHostedRecordHeads:
+    "comment, note and lifecycle heads: inline value in its purged form; Intent heads: the 'Deleted Item' version",
   projectPlanningRecords:
     'versions, comments, Item root and search row on every record partition: purged form (the selected root is the tombstone)',
   projectWorkRecords:
     'events, notes, lifecycle, Intent, Initiative root: purged form; store fingerprints of the Item deleted',
   projectWorkDataRecords: 'payload chunks of the above: rewritten from the purged value, stale ones deleted',
-  // Purge Lane 3 (the preflight and finish refuse while the store holds the Item's Intent versions): the Intent
-  // versions, the work store's lifecycle versions (a put's reason) and handoff summaries on the Intent.
+  projectHostedOverlapLanes:
+    "overlap rows of the Lanes on the Item's Intents: the outcome copy reads 'Deleted Item'",
 } as const;
 
 export type ItemPurge = NonNullable<Doc<'hostedProjects'>['itemPurges']>[number];
@@ -57,6 +61,9 @@ export const purgeSteps = [
   'storeIssues',
   'storeComments',
   'storeNotes',
+  'storeLifecycle',
+  'storeIntents',
+  'overlapLanes',
   'storeHeads',
 ] as const;
 export type PurgeStep = (typeof purgeSteps)[number];
@@ -69,6 +76,14 @@ export async function purgeRows(ctx: Ctx, projectId: Id<'hostedProjects'>, opera
     (await byOperation(ctx, 'projectHostedRecordBodies', projectId, operationId));
   invariant(row?.command, 'NOT_FOUND', 'The purge has not been recorded yet.');
   return (JSON.parse(row.command) as { rows: [string, string][] }).rows;
+}
+/** The journal revision of the purge's own row: rows of the Item after it were written after the first step. */
+export async function purgeRevision(ctx: Ctx, projectId: Id<'hostedProjects'>, operationId: string) {
+  const row =
+    (await byOperation(ctx, 'projectWorkEvents', projectId, operationId)) ??
+    (await byOperation(ctx, 'projectHostedRecordBodies', projectId, operationId));
+  invariant(row?.revision !== undefined, 'NOT_FOUND', 'The purge has not been recorded yet.');
+  return row.revision;
 }
 async function byOperation(
   ctx: Ctx,
@@ -153,7 +168,7 @@ async function pageOf(
     return { changes, after: start + PURGE_PAGE < rows.length ? String(start + PURGE_PAGE) : null };
   }
   if (input.step === 'intents') {
-    if (purge.intentId && partition)
+    if (purge.intentId && partition) {
       changes += await indexRecord(
         ctx,
         write,
@@ -163,6 +178,8 @@ async function pageOf(
         purge.operationId,
         decisions,
       );
+      changes += await dropFingerprint(ctx, write, partition, fingerprint('intents'), purge.intentId);
+    }
     return { changes, after: null };
   }
   if (input.step === 'roots') {
@@ -185,6 +202,8 @@ async function pageOf(
   }
   if (input.step === 'payloads') return stalePayloads(ctx, write, partition!, purge, input.after);
   if (input.step === 'storeHeads') return storeHeads(ctx, write, input.projectId, purge, input.after);
+  if (input.step === 'storeIntents') return storeIntents(ctx, write, input.projectId, purge, input.after);
+  if (input.step === 'overlapLanes') return overlapLanes(ctx, write, input.projectId, purge, input.after);
   const parentStep = parentSteps.find(([collection]) => collection === input.step);
   if (parentStep) {
     const [collection, which] = parentStep;
@@ -212,13 +231,15 @@ async function pageOf(
     }
     return { changes, after: page.length === PURGE_PAGE ? String(page.at(-1)!.position) : null };
   }
-  // The work store: issue versions by key, comment and note versions by parent.
+  // The work store: issue versions by key, comment, note and lifecycle versions by parent.
   const [kind, field, key] =
     input.step === 'storeIssues'
       ? (['issue', 'key', purge.itemId] as const)
       : input.step === 'storeComments'
         ? (['comment', 'parent', purge.itemId] as const)
-        : (['comment', 'parent', purge.intentId] as const);
+        : input.step === 'storeLifecycle'
+          ? (['lifecycle', 'parent', purge.intentId] as const)
+          : (['comment', 'parent', purge.intentId] as const);
   if (!key || (input.step === 'storeNotes' && key === purge.itemId)) return { changes, after: null };
   // Paged with the index's own cursor: several versions can share a key's version (one per lifecycle plan) or a
   // creation time, so a value cursor could skip rows at a page boundary.
@@ -286,8 +307,8 @@ async function journalRow(
       command: undefined,
       journalCommand: purgedFactsText(facts),
       purged: purgeOperationId,
-      // An Intent row's body is its Intent record version: purge Lane 3 redacts it with a new version.
-      ...(facts.action === 'intent' ? {} : { value: '' }),
+      // An Intent row's body can hold its Intent record version: the storeIntents step purges that version.
+      value: '',
     });
   return 1;
 }
@@ -411,13 +432,156 @@ async function storeRecord(
   row: Doc<'projectHostedRecords'>,
   purge: ItemPurge,
 ) {
-  if (row.purged !== undefined || (row.kind === 'issue' && row.version === purge.version + 1)) return 0;
-  invariant(!row.journalSegment, 'WORK_STALE', 'A version of this Item sits in a journal segment.');
+  if (row.kind === 'issue' && row.version === purge.version + 1) return 0;
+  // A journal row's body is redacted by the journal step (it keeps its envelope); a plain body is emptied here, once
+  // every version that shares it is purged (the last one empties it, and the check finds one left non-empty).
   const body = await ctx.db.get(row.bodyId);
+  const plain = body && body.operationId === undefined && body.value !== '' ? body : null;
+  if (row.purged !== undefined && !plain) return 0;
+  invariant(!row.journalSegment, 'WORK_STALE', 'A version of this Item sits in a journal segment.');
+  let emptied = false;
+  if (plain) {
+    const owners = await ctx.db
+      .query('projectHostedRecords')
+      .withIndex('by_project_and_body', q => q.eq('projectId', row.projectId).eq('bodyId', row.bodyId))
+      .take(BODY_OWNER_LIMIT + 1);
+    invariant(
+      owners.length <= BODY_OWNER_LIMIT,
+      'WORK_STALE',
+      'A version of this Item shares its body with too many records to check.',
+    );
+    emptied = owners.every(owner => owner._id === row._id || owner.purged !== undefined);
+  }
+  if (row.purged !== undefined && !emptied) return 0;
   if (!write) return 1;
-  await write.patch(row._id, { purged: purge.operationId, inline: undefined });
-  // A journal row's body is redacted by the journal step (it keeps its envelope); a plain body is emptied here.
-  if (body && body.operationId === undefined && body.value !== '') await write.patch(body._id, { value: '' });
+  if (row.purged === undefined) await write.patch(row._id, { purged: purge.operationId, inline: undefined });
+  if (emptied) await write.patch(plain!._id, { value: '' });
+  return 1;
+}
+const BODY_OWNER_LIMIT = 16;
+
+/** The work store's versions of the Item's Intent and of each successor Intent a later start continued it on (they
+ * copy its outcome): the head becomes a new 'Deleted Item' version (purgedIntentRecord) and every older version is
+ * purged (marker, no inline, body emptied), journal copies and Lane-pinned versions alike. One page of one Intent;
+ * the chain ends at the first id with no record. Cursor: "<chain index>|<index cursor>". */
+async function storeIntents(
+  ctx: Ctx,
+  write: MutationCtx['db'] | undefined,
+  projectId: Id<'hostedProjects'>,
+  purge: ItemPurge,
+  after: string | null,
+) {
+  const at = after === null ? 0 : Number(after.split('|')[0]),
+    cursor = after === null ? null : after.slice(after.indexOf('|') + 1) || null;
+  const { key, keys } = await chainKey(ctx, projectId, purge, at);
+  let head = key === null ? null : await recordHead(ctx, projectId, 'intent', key);
+  if (!head || key === null) return { changes: 0, after: null };
+  let changes = 0;
+  if (cursor === null) {
+    const deleted = await deletedIntentVersion(ctx, write, projectId, purge, head);
+    changes += deleted;
+    if (deleted && write) head = (await recordHead(ctx, projectId, 'intent', key))!;
+  }
+  const page = await ctx.db
+    .query('projectHostedRecords')
+    .withIndex('by_project_and_kind_and_key_and_version_and_plan', q =>
+      q.eq('projectId', projectId).eq('kind', 'intent').eq('key', key),
+    )
+    .paginate({ cursor, numItems: PURGE_PAGE });
+  for (const row of page.page)
+    if (row._id !== head.recordId) changes += await storeRecord(ctx, write, row, purge);
+  return {
+    changes,
+    after: !page.isDone ? `${at}|${page.continueCursor}` : at + 1 < keys.length ? `${at + 1}|` : null,
+  };
+}
+
+/** The chain's Intent id at `at`, or null where the chain ends: a successor id that names a planning Item of its own
+ * (an Issue someone created under that id) is that Issue's, never this one's. One indexed read per successor. */
+async function chainKey(ctx: Ctx, projectId: Id<'hostedProjects'>, purge: ItemPurge, at: number) {
+  const keys = purgedIntentKeys(purge.itemId),
+    key = keys[at]!;
+  if (at === 0) return { key, keys };
+  const project = await ctx.db.get(projectId);
+  const generation = project && (await selectedGeneration(ctx, project));
+  invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index before purging.');
+  const own = await record(ctx, recordPartition(generation), 'planningItems', key);
+  return { key: own ? null : key, keys };
+}
+
+/** Each Lane on the Item's Intents keeps the Intent's outcome (cut to 160 characters) on its overlap row, for overlap
+ * and presence notices (convex/projectHostedOverlapStore.ts): it takes the 'Deleted Item' form. One page of Lane
+ * heads of one chain Intent. Cursor: "<chain index>|<index cursor>". */
+async function overlapLanes(
+  ctx: Ctx,
+  write: MutationCtx['db'] | undefined,
+  projectId: Id<'hostedProjects'>,
+  purge: ItemPurge,
+  after: string | null,
+) {
+  const at = after === null ? 0 : Number(after.split('|')[0]),
+    cursor = after === null ? null : after.slice(after.indexOf('|') + 1) || null;
+  const { key, keys } = await chainKey(ctx, projectId, purge, at);
+  if (key === null || !(await recordHead(ctx, projectId, 'intent', key))) return { changes: 0, after: null };
+  const page = await ctx.db
+    .query('projectHostedRecordHeads')
+    .withIndex('by_project_and_kind_and_parent', q =>
+      q.eq('projectId', projectId).eq('kind', 'lane').eq('parent', key),
+    )
+    .paginate({ cursor, numItems: PURGE_PAGE });
+  let changes = 0;
+  for (const lane of page.page) {
+    const row = await ctx.db
+      .query('projectHostedOverlapLanes')
+      .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', lane.key))
+      .unique();
+    if (!row || row.intent === PURGED_ITEM_TITLE) continue;
+    changes++;
+    if (write) await write.patch(row._id, { intent: PURGED_ITEM_TITLE });
+  }
+  return {
+    changes,
+    after: !page.isDone ? `${at}|${page.continueCursor}` : at + 1 < keys.length ? `${at + 1}|` : null,
+  };
+}
+
+/** Write the head's 'Deleted Item' version unless the head already is one (1 when it was, or would be, written). */
+async function deletedIntentVersion(
+  ctx: Ctx,
+  write: MutationCtx['db'] | undefined,
+  projectId: Id<'hostedProjects'>,
+  purge: ItemPurge,
+  head: Doc<'projectHostedRecordHeads'>,
+) {
+  const row = await ctx.db.get(head.recordId);
+  invariant(row && row.purged === undefined, 'SOURCE_UNAVAILABLE', 'The Intent head version is unavailable.');
+  const stored = JSON.parse(await hostedRecordBody(ctx, row)) as Record<string, unknown>;
+  const decisions = new Map(purge.decisions as [string, string][]);
+  const purged = purgedIntentRecord(stored, purge.operationId, decisions);
+  if (JSON.stringify(purged) === JSON.stringify(stored)) return 0;
+  if (!write) return 1;
+  const { record, ref, value } = hostedRecordValue({ ...purged, version: head.version + 1 });
+  invariant(
+    !(await recordVersion(ctx, projectId, 'intent', record.id, record.version)),
+    'WORK_STALE',
+    'The Intent changed during the purge. Run the purge again to resume.',
+  );
+  invariant(record.kind === 'intent', 'SOURCE_UNAVAILABLE', 'The Intent head version is unavailable.');
+  const identity = { projectId, kind: 'intent' as const, key: record.id },
+    indexed = { ...hostedRecordIndex(record), version: record.version };
+  const bodyId = await write.insert('projectHostedRecordBodies', { projectId, value });
+  const recordId = await write.insert('projectHostedRecords', {
+    ...identity,
+    ...indexed,
+    bodyId,
+    digest: ref.digest,
+    bytes: ref.bytes,
+  });
+  await write.replace(head._id, { ...identity, ...indexed, recordId });
+  // The same store fingerprint a hosted Intent write keeps (convex/projectHostedRecords.ts writeHostedRecord).
+  const project = await ctx.db.get(projectId);
+  if (project)
+    await fingerprintHostedIntent(ctx as MutationCtx, project, ref, head._creationTime, indexed.status);
   return 1;
 }
 

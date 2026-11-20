@@ -17,24 +17,25 @@ import { executeCommand } from './projectWorkCommand';
 import {
   BASE_BLOCK,
   baseRevision,
-  HANDOFF_BLOCK,
-  intentHandoffs,
+  DISPLAY_BLOCK,
+  displaySnapshots,
   purgeJournalTables,
   purgeTarget,
   selectRows,
-  STORE_INTENT_BLOCK,
-  storeIntentVersions,
 } from './projectPlanningPurgeSelect';
 import {
   partitionsOf,
+  purgeRevision,
   purgeStep,
   purgeSteps,
   type ItemPurge,
   type PurgeStep,
 } from './projectPlanningPurgeRedact';
 
-import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
+import { selectedGeneration } from './projectWorkIndexStore';
 
+const LATE_ROW_BLOCK =
+  'A note reached this Item’s Intent after its purge began; its words are not on the purge’s list, so the purge stays open (not done). Nothing more was purged.';
 /** Finished purges kept on the project (newest first); unfinished ones always stay. */
 const KEPT_FINISHED = 20;
 const selection = v.object({
@@ -72,6 +73,12 @@ export const begin = internalMutation({
     if (project.itemPurges?.some(item => item.operationId === input.operationId)) return null;
     const target = await purgeTarget(ctx, input.projectId, input.itemId);
     invariant(input.selection.created > baseRevision(project, target.generation), 'BAD_ARGUMENT', BASE_BLOCK);
+    // The store's Intent chain and every reader's purged-version check start from the Item id (purgedIntentKeys).
+    invariant(
+      !target.intentId || target.intentId === target.historyId,
+      'BAD_ARGUMENT',
+      'This Item’s Intent has an id of its own; a purge cannot follow it yet. Nothing was purged.',
+    );
     // The selection walked the journal under these ids; a new alias since then would hide its earlier rows.
     invariant(
       JSON.stringify(target.ids) === JSON.stringify(input.selection.ids),
@@ -200,23 +207,24 @@ export const finish = internalMutation({
       'WORK_STALE',
       'The Work index changed during the completeness check. Run the purge again to resume.',
     );
-    invariant(
-      !(await intentHandoffs(ctx, recordPartition(generation!), purge.intentId)),
-      'BAD_ARGUMENT',
-      HANDOFF_BLOCK,
-    );
     // A stored base cut since begin (a record-detail migration) may hold the Item's words again.
     invariant(
       purge.created === undefined || purge.created > baseRevision(project, generation!),
       'BAD_ARGUMENT',
       BASE_BLOCK,
     );
-    // Words the redaction steps cannot reach yet keep the purge open (never done with words left).
-    invariant(
-      !(await storeIntentVersions(ctx, input.projectId, purge.intentId)),
-      'BAD_ARGUMENT',
-      STORE_INTENT_BLOCK,
-    );
+    // Copies the redaction steps cannot reach keep the purge open (never done with words left).
+    invariant(!(await displaySnapshots(ctx, input.projectId)), 'BAD_ARGUMENT', DISPLAY_BLOCK);
+    // A note on the Item's Intent is still accepted after the first step (refusing it would cost every note write a
+    // read). Its row is not on the purge's list, so no reader would accept it purged: the purge never finishes over it.
+    const since = await purgeRevision(ctx, input.projectId, input.operationId);
+    for (const table of purgeJournalTables)
+      for (let after = since; ;) {
+        const tail = await selectRows(ctx, { projectId: input.projectId, table, ids: purge.ids, after });
+        invariant(!tail.rows.length, 'WORK_STALE', LATE_ROW_BLOCK);
+        if (tail.done) break;
+        after = tail.after;
+      }
     const purgedAt = Date.now();
     await ctx.db.patch(input.projectId, {
       // A finished entry keeps no decision list: the project document stays small on every later read.

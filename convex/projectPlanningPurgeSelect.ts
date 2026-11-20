@@ -8,7 +8,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { PURGE_ROW_LIMIT } from '../src/work-planning-types';
 import { purgedFactsDigest, redactPlanningWrite } from '../src/work-intent-types';
-import { purgeableRowTarget } from '../src/work-planning-purge';
+import { purgeableRowTarget, purgedIntentKeys } from '../src/work-planning-purge';
 import { decisionOperationId } from '../src/work-planning-put';
 import { purgedDecisionRequest } from '../src/work-planning-state';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
@@ -76,23 +76,19 @@ export async function purgeTarget(ctx: QueryCtx, projectId: Id<'hostedProjects'>
   };
 }
 
-/** Whether the work store keeps Intent record versions of this Intent (dual or records mode). Their bodies hold the
- * Intent's words and only purge Lane 3 (a 'Deleted Item' Intent version) redacts them, so until then a purge of such an
- * Item is refused before it writes and can never be marked done. One indexed read. */
-export async function storeIntentVersions(ctx: QueryCtx, projectId: Id<'hostedProjects'>, intentId?: string) {
-  if (!intentId) return false;
-  const versions = await ctx.db
-    .query('projectHostedRecords')
-    .withIndex('by_project_and_kind_and_key_and_version_and_plan', q =>
-      q.eq('projectId', projectId).eq('kind', 'intent').eq('key', intentId),
-    )
-    .take(1);
-  return versions.length > 0;
-}
-/** Whether a work-store issue or comment version of the Item sits in a journal segment (stored before segments
- * stopped taking them): its words are in R2, so the redaction step would refuse it after the tombstone. */
-async function segmentedVersions(ctx: QueryCtx, projectId: Id<'hostedProjects'>, ids: string[]) {
+/** Whether a work-store version the purge must redact sits in a journal segment (stored before segments stopped taking
+ * it): its words are in R2, so the redaction step would refuse it after the tombstone. Issue and comment versions of
+ * the Item's ids, and every version of its Intent and successor Intents (purgedIntentKeys; the chain ends at the
+ * first id with no record). */
+async function segmentedVersions(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  ids: string[],
+  itemId: string,
+  partition: Id<'projectWorkGenerations'>,
+) {
   const records = ctx.db.query('projectHostedRecords');
+  const segmented = (rows: Doc<'projectHostedRecords'>[]) => rows.some(row => row.journalSegment);
   for (const key of ids) {
     const versions = await records
       .withIndex('by_project_and_kind_and_key_and_version_and_plan', q =>
@@ -105,7 +101,19 @@ async function segmentedVersions(ctx: QueryCtx, projectId: Id<'hostedProjects'>,
         q.eq('projectId', projectId).eq('kind', 'comment').eq('parent', key),
       )
       .take(PURGE_ROW_LIMIT + 1);
-    if ([...versions, ...comments].some(row => row.journalSegment)) return true;
+    if (segmented([...versions, ...comments])) return true;
+  }
+  for (const [at, key] of purgedIntentKeys(itemId).entries()) {
+    // A successor id that names a planning Item of its own is that Issue's (the executor's chain ends there too).
+    if (at > 0 && (await record(ctx, partition, 'planningItems', key))) break;
+    const versions = await ctx.db
+      .query('projectHostedRecords')
+      .withIndex('by_project_and_kind_and_key_and_version_and_plan', q =>
+        q.eq('projectId', projectId).eq('kind', 'intent').eq('key', key),
+      )
+      .take(PURGE_ROW_LIMIT + 1);
+    if (!versions.length) break;
+    if (segmented(versions)) return true;
   }
   return false;
 }
@@ -120,24 +128,26 @@ export function baseRevision(project: Doc<'hostedProjects'>, generation: { initi
 }
 export const BASE_BLOCK =
   'This Item is in the base checkpoint (created before it, or imported); its words are in the stored archive, which a rebuild reads again. A base-checkpoint scrub must come first. Nothing was purged.';
-export const HANDOFF_BLOCK =
-  'Lane handoffs on this Item’s Intent keep their summaries; purge Lane 3 removes them. Nothing was purged.';
-/** Whether the Intent's index header still lists Lane handoff summaries (built from handoff notes). */
-export async function intentHandoffs(
-  ctx: QueryCtx,
-  partition: Id<'projectWorkGenerations'>,
-  intentId?: string,
-) {
-  const row = intentId ? await record(ctx, partition, 'intents', intentId) : null;
-  const handoffs = row ? (JSON.parse(row.value) as { handoffs?: unknown[] }).handoffs : undefined;
-  return Array.isArray(handoffs) && handoffs.length > 0;
+/** Hosted display snapshots (projectHostedProjection) copy record bodies, the Item's included, under no index the
+ * purge can page by Item. One indexed read; dogfood keeps none. */
+export const DISPLAY_BLOCK =
+  'This project keeps hosted display snapshots, which copy record bodies the purge cannot reach. Nothing was purged.';
+export async function displaySnapshots(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
+  return (
+    (
+      await ctx.db
+        .query('projectHostedDisplayRecords')
+        .withIndex('by_project', q => q.eq('projectId', projectId))
+        .take(1)
+    ).length > 0
+  );
 }
-export const STORE_INTENT_BLOCK =
-  'This Item’s Intent has versions in the work store; purge Lane 3 removes their words. Nothing was purged.';
 
 /** Read-only preflight the lead runs before a purge: what will be selected and whether anything blocks it. Blocks:
- * the Item is not Deleted (and not already this purge's tombstone), its Intent has work-store versions (purge Lane 3),
- * or (at selection) a planning row sits in a journal segment (its words are in R2, out of the purge's reach). Reports the index generation and the work-store mode. */
+ * the Item is not Deleted (and not already this purge's tombstone), its Intent id is not its own (the store's Intent
+ * chain and the readers' check start from the Item id), the project keeps display snapshots, a work-store version of
+ * the Item or its Intents sits in a journal segment, or (at selection) a planning row does (its words are in R2, out
+ * of the purge's reach). Reports the index generation and the work-store mode. */
 export const preflight = internalQuery({
   args: { projectId: v.id('hostedProjects'), itemId: v.string() },
   returns: v.any(),
@@ -160,14 +170,17 @@ export const preflight = internalQuery({
       blocked:
         target.item.status !== 'deleted'
           ? 'Only a Deleted Item can be deleted permanently.'
-          : (await storeIntentVersions(ctx, projectId, target.intentId))
-            ? STORE_INTENT_BLOCK
-            : (await intentHandoffs(ctx, target.partition, target.intentId))
-              ? HANDOFF_BLOCK
-              : (await segmentedVersions(ctx, projectId, [
+          : target.intentId && target.intentId !== target.historyId
+            ? 'This Item’s Intent has an id of its own; a purge cannot follow it yet. Nothing was purged.'
+            : (await displaySnapshots(ctx, projectId))
+              ? DISPLAY_BLOCK
+              : (await segmentedVersions(
+                    ctx,
+                    projectId,
+                    [target.historyId],
                     target.historyId,
-                    ...(target.intentId ? [target.intentId] : []),
-                  ]))
+                    target.partition,
+                  ))
                 ? 'A work-store version of this Item sits in a journal segment; its words are out of the purge’s reach.'
                 : null,
     };
