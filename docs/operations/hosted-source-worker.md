@@ -130,7 +130,13 @@ cancels it, so a healthy step never runs it. A wake that finds the lease expired
 the repair at once: a dead or fenced step is retried as its next generation, and a
 batch fenced or queued behind other projects' slots past its lease is renewed and
 requeued. A wake that finds the step still pending, running or renewed looks once more
-at the lease end. An execution that settles cancels its wake. The desired-landing
+at the lease end. A repair refused part-way (a Forge error after it renewed the lease)
+keeps that renewal, so the wake watches the renewed lease to its end once; a second
+refusal in a row ends the watch. An expired lease that nothing renewed (an authority
+fence) is watched only while the step's own action is still pending or running, so the
+wake never polls a stuck job. An execution that settles
+cancels its wake. The wake's own modules (projectConvexSourceLease, ...SourceActive,
+projectSourceJobs) are core queue paths (Guard 4). The desired-landing
 watchdog still runs the same repair on its own wakes, only once the lease has expired,
 reading only the step row and the job; it is a backstop, not the repair path. A
 retried fan-out task renews the lease from its retry's start, as a retried step does.

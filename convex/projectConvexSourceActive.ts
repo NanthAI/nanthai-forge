@@ -29,12 +29,20 @@ export async function armSourceWake(
   target: { step: number; generation: number },
   leaseLeftMs: number,
   knownWake?: { state: { kind: string } } | null,
+  /** The wake re-armed after a refused repair (expired): one more refusal ends its watch. */
+  refused?: true,
 ) {
   if (row.repairWakeId) await cancelPendingTask(ctx, row.repairWakeId, knownWake);
   return ctx.scheduler.runAfter(
     Math.max(0, leaseLeftMs) + SOURCE_WAKE_SLACK_MS,
     makeFunctionReference<'mutation'>('projectConvexSourceLease:expired'),
-    { projectId: row.projectId, jobId: row.jobId, step: target.step, generation: target.generation },
+    {
+      projectId: row.projectId,
+      jobId: row.jobId,
+      step: target.step,
+      generation: target.generation,
+      ...(refused ? { refused } : {}),
+    },
   );
 }
 /** After a renewal of the job's lease to `leaseLeftMs` from now: moves the row's wake to the new

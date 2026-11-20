@@ -15,6 +15,8 @@ import { agentFixture } from './hosted-agent-fixture.mjs';
 import { CHECK_WALL_MS } from './queue-sim/invariants.mjs';
 import { LANDING_STALL_MS } from '../dist/landing-stall.js';
 import { HOSTED_FINISH_COMPOSE_WATCHDOG_MS } from '../dist/hosted-finish.js';
+import { sourceWorkerPlan } from '../dist/convex-source-provider.js';
+import { moduleUrl } from './convex-module.mjs';
 import { normalizeHostedFinishResult } from '../dist/hosted-agent-finish-result.js';
 import { networkContinuation } from '../dist/network-continuation.js';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
@@ -37,6 +39,7 @@ test.after(() => {
  * Split cohort halves run their ladders one after another. */
 const TRANSIENT_MS = 2 * LANDING_STALL_MS + 5 * 60_000;
 const permanentMs = entries => (4 * entries + 2) * LANDING_STALL_MS;
+const { SOURCE_WAKE_SLACK_MS } = await import(moduleUrl('../convex/projectConvexSourceActive.ts'));
 const SUPERVISOR = [
   'projectHostedLandingStall:',
   'projectHostedLandingStallAlert:',
@@ -221,25 +224,33 @@ test('double loss: a lost IO drive and its lost retry resume without the stall s
 // mid-action), then the 120 s compose watchdog that owns it. The watchdog was a drive
 // action, so losing it too left the entry to the 15-minute alarm. It is the `retry`
 // mutation, which Convex runs exactly once: the entry resumes within one check wall and
-// the supervisor never runs.
-test('incident 9a04d916 F1: a lost source action and its lost 120 s watchdog resume without the stall supervisor', async t => {
+// the supervisor never runs. Since e62d834b a lost step action is owned first by the step's
+// own repair wake, also a mutation, so no watchdog is lost in that case; a lost dispatch is
+// still owned by the compose watchdog.
+test('incident 9a04d916 F1: a lost source action resumes through a mutation (its repair wake or the 120 s watchdog), without the stall supervisor', async t => {
   let covered = 0;
   for (const [scenario, options] of Object.entries(SCENARIOS))
     for (const source of ['projectConvexSource:step@compose', 'projectConvexSource:dispatch@compose']) {
       const f = await batchesFixture(t, options);
       let lostAt = null,
+        lostJob = null,
         watchdog = null,
         repaired = null;
       const run = await runLanding(f, key => {
         if (lostAt === null) {
           if (key !== source) return false;
           lostAt = Date.now();
+          lostJob = f.pending()[0].args[0]?.jobId ?? null;
           return true;
         }
         // e62d834b: a lost step action is first owned by the step's own repair wake (a mutation, due at the
         // worker lease end), before the 120 s compose watchdog; the finish wakes after it are its progress.
         if (!watchdog && !repaired && key.startsWith('projectConvexSourceLease:expired')) {
-          repaired = { key, afterMs: f.pending()[0].scheduledTime - lostAt };
+          repaired = {
+            key,
+            jobId: f.pending()[0].args[0]?.jobId,
+            afterMs: f.pending()[0].scheduledTime - lostAt,
+          };
           return false;
         }
         if (repaired) return false;
@@ -259,12 +270,16 @@ test('incident 9a04d916 F1: a lost source action and its lost 120 s watchdog res
       const supervisor = [...run.keys.keys()].filter(key => SUPERVISOR.some(p => key.startsWith(p)));
       assert.deepEqual(supervisor, [], `${label}: a mutation owned the entry, not the 15-minute alarm`);
       assert(run.elapsedMs < CHECK_WALL_MS, `${label}: resumed after ${run.elapsedMs / 1000} s`);
-      if (repaired)
+      if (repaired) {
+        assert(lostJob, `${label}: the lost action names its source job`);
+        assert.equal(repaired.jobId, lostJob, `${label}: the repair wake is the lost step's own`);
+        const due = sourceWorkerPlan({}).workerLeaseMs + SOURCE_WAKE_SLACK_MS;
+        assert(due < HOSTED_FINISH_COMPOSE_WATCHDOG_MS, 'the wake is due before the compose watchdog');
         assert(
-          repaired.afterMs < HOSTED_FINISH_COMPOSE_WATCHDOG_MS,
-          `${label}: the step's repair wake (a mutation) owned the lost action before the compose watchdog`,
+          repaired.afterMs <= due,
+          `${label}: the step's repair wake owned the lost action at its lease end (${repaired.afterMs} ms)`,
         );
-      else
+      } else
         assert.equal(
           watchdog,
           'projectHostedFinishDriver:retry@compose',

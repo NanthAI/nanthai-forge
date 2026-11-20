@@ -54,6 +54,10 @@ test('core queue paths are classified by path: queue, finish, acceptance and lan
     'convex/projectHostedCheckDispatch.ts',
     'src/landing-overtake.ts',
     'src/hosted-landing-admission.ts',
+    // The source step repair wake (e62d834b, review 308f217c).
+    'convex/projectConvexSourceLease.ts',
+    'convex/projectConvexSourceActive.ts',
+    'convex/projectSourceJobs.ts',
   ])
     assert(coreQueuePath(path), path);
   for (const path of [

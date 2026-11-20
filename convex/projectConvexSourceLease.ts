@@ -56,16 +56,19 @@ export const renew = internalMutation({
  * it acts on the row's current step (a fork keeps the wake), and a settled job is left alone. An
  * expired lease is repaired at once (repairConvexSource: a dead or fenced step is retried as its next
  * generation, which arms its own wake; a fan-out batch fenced or queued past its lease is renewed and
- * requeued). Whatever is still this step's work afterwards (an action still pending or running, a
- * batch in flight, a lease some other path renewed) gets one wake at its lease end, which the
- * platform's action time limit and the job's retry window bound. Never runs for a healthy step, and
- * never polls an idle project. */
+ * requeued). Whatever is still this step's work afterwards gets one wake at its lease end: a live
+ * lease (renewed by the repair or another path), or an expired one only while the step's own action
+ * is still pending or running, which the platform's action time limit bounds. A lease that nothing
+ * renewed and no action holds (an authority fence) is not watched, and a repair refused twice in a
+ * row ends the watch, so the wake never polls a stuck job (review 82171a53). Never runs for a healthy
+ * step, and never polls an idle project. */
 export const expired = internalMutation({
   args: {
     projectId: v.id('hostedProjects'),
     jobId: v.string(),
     step: v.number(),
     generation: v.number(),
+    refused: v.optional(v.literal(true)),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -77,24 +80,38 @@ export const expired = internalMutation({
     };
     const before = await current();
     if (!before) return null;
+    let refused = false;
     if (before.job.control.workerUntil <= Date.now())
       try {
         await repairConvexSource(ctx, { projectId: args.projectId, jobId: args.jobId });
       } catch (error) {
         if (!(error instanceof ForgeError)) throw error;
-        return null;
+        refused = true;
       }
     const after = await current();
     // A retry or a moved lease armed its own wake already.
     if (!after || after.row.repairWakeId !== before.row.repairWakeId) return null;
     const target = { step: after.row.step, generation: after.row.generation ?? 0 };
     const left = after.job.control.workerUntil - Date.now();
+    // Every re-arm needs live work to watch, or the wake would poll a stuck job (review 82171a53).
+    // A refused repair (a ForgeError, review 308f217c) keeps the writes made before it threw: a lease
+    // it renewed first is watched to its end once, and a second refusal ends the watch.
+    if (refused && (left <= 0 || args.refused)) return null;
+    // A lease nobody renewed (an authority fence: renewConvexSource refuses it without throwing) is
+    // watched only while the step's own action is still pending or running; that action's end commits,
+    // fails or forks, and the platform's action time limit bounds it.
+    if (left <= 0) {
+      const scheduled = after.row.scheduledId ? await ctx.db.system.get(after.row.scheduledId) : null;
+      if (scheduled?.state.kind !== 'pending' && scheduled?.state.kind !== 'inProgress') return null;
+    }
     await ctx.db.patch(after.row._id, {
       repairWakeId: await armSourceWake(
         ctx,
         after.row,
         target,
         left > 0 ? left : after.job.control.workerLeaseMs,
+        undefined,
+        refused ? true : undefined,
       ),
     });
     return null;

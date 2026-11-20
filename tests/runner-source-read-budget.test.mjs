@@ -2,6 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { physicalStateSourceFixture } from './physical-state-source-fixture.mjs';
+import { moduleUrl } from './convex-module.mjs';
+const { RUNNER_SOURCE_READ_BUDGET_MS } = await import(moduleUrl('../convex/projectStateSourceApi.ts'));
 
 /** Object storage that never answers a GET: each read ends only when its own deadline aborts it. */
 function hangingReads() {
@@ -36,12 +38,15 @@ test('incident replay e62d834b (incident 2, 2026-11-20): slow object storage fai
       for (let i = 0; i < 50 && !outcome; i++) await new Promise(resolve => setImmediate(resolve));
       if (!outcome) t.mock.timers.runAll();
     }
+    assert(outcome, 'the call ended inside the simulated clock rounds');
     await call;
     const elapsed = Date.now() - start;
     assert(storage.reads() > 0, 'the call read object storage');
     assert(outcome?.error, 'storage that never answers cannot produce source grants');
     // test-signal: allow elapsed is mocked-clock time (t.mock.timers), the budget under test
     assert(elapsed < 30_000, `the call ended before the runner's 30 s timeout (${elapsed} ms)`);
+    // test-signal: allow elapsed is mocked-clock time (t.mock.timers), the budget under test
+    assert(elapsed <= RUNNER_SOURCE_READ_BUDGET_MS, `the reads kept to their budget (${elapsed} ms)`);
     assert.equal(outcome.error.code, 'EXCHANGE_REQUEST_TIMEOUT', 'the cause is a storage read timeout');
   } finally {
     storage.restore();

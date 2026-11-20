@@ -8,6 +8,10 @@
 const CORE = [
   /^convex\/projectHosted(?:Landing|Finish|Acceptance|Queue|Compose|Gate|Check|Batch|ScopedRecheck|LandGates|Reuse|EarlyResolution|MainAudit|ActionsWake|ActionsDirect|ActionsReports|Holders|Superseded|LaneFinish|OwnerReview|OwnerGrant|Keep)[^/]*\.ts$/,
   /^convex\/(?:projectAcceptance|projectLandingProof|schedulerCancel)[^/]*\.ts$/,
+  // The source step repair wake (incident e62d834b, review 308f217c): its arm, move, expiry and terminal
+  // cancel. The source store, pool and fan-out only call these at their own scheduling points; their
+  // scheduling is covered by the source worker tests, and a change to the wake itself lands here.
+  /^convex\/(?:projectConvexSourceLease|projectConvexSourceActive|projectSourceJobs)\.ts$/,
   /^src\/(?:landing-(?!capsule|accepted-by|message|preview-records)|hosted-landing|hosted-finish|hosted-acceptance|hosted-batch|hosted-compose|hosted-cross-head|hosted-would-conflict|hosted-land-gates|hosted-queue-status|scoped-recheck|check-reuse|queue-|first-check-risk)[^/]*\.ts$/,
   /^src\/hosted-check(?:-evidence|-verdict|-controller|-only-compose)?\.ts$/,
 ];

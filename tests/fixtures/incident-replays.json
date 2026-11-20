@@ -311,7 +311,7 @@
       "incident": "9a04d916",
       "what": "Same incident, compose double loss (review d4f55e9f F1): the recompose's source action and then its 120 s compose watchdog action both lost left the entry to the 15-minute stall alarm",
       "file": "tests/landing-failure-injection.test.mjs",
-      "test": "incident 9a04d916 F1: a lost source action and its lost 120 s watchdog resume without the stall supervisor"
+      "test": "incident 9a04d916 F1: a lost source action resumes through a mutation (its repair wake or the 120 s watchdog), without the stall supervisor"
     },
     {
       "incident": "687d1eda",
@@ -504,6 +504,24 @@
       "what": "Source steps fenced at the 60 s lease sat up to 60 min after the fix deployed (66edd19a, 20ad8233, 2026-11-20): the step's own wake repairs a dead worker at its lease end, not the desired-landing watchdog's backoff",
       "file": "tests/source-lease-incident.test.mjs",
       "test": "incident replay e62d834b (66edd19a, 20ad8233): a dead worker is repaired by its own wake at the lease end, not the hourly watchdog"
+    },
+    {
+      "incident": "e62d834b",
+      "what": "A repair wake refused by a ForgeError after it renewed the lease left that lease with no wake, so the job waited for a client lookup or the watchdog backstop (review 308f217c)",
+      "file": "tests/source-lease-incident.test.mjs",
+      "test": "incident replay e62d834b (review 308f217c 1): a repair wake refused after it renewed the lease watches that lease to its end"
+    },
+    {
+      "incident": "e62d834b",
+      "what": "A repair refused on every wake re-armed its wake forever, about one call per 65 s per stuck job (review 82171a53 of the 308f217c follow-up)",
+      "file": "tests/source-lease-incident.test.mjs",
+      "test": "incident replay e62d834b (review 82171a53 1): a repair refused on every wake stops watching after one re-arm"
+    },
+    {
+      "incident": "e62d834b",
+      "what": "A dead step under a changed source authority re-armed its repair wake forever: the fence is refused inside the repair without a throw (review 82171a53)",
+      "file": "tests/source-lease-incident.test.mjs",
+      "test": "incident replay e62d834b (review 82171a53 2): a dead step under a changed source authority is not polled by its wake"
     },
     {
       "incident": "e62d834b",

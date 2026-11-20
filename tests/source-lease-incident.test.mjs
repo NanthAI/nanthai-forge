@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { scaleFixture, saveInput } from './convex-source-scale-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { ForgeError } from '../dist/errors.js';
 const store = await import(moduleUrl('../convex/projectConvexSourceStore.ts'));
 const active = await import(moduleUrl('../convex/projectConvexSourceActive.ts'));
 const { keepSourceLease } = await import(moduleUrl('../src/hosted-source-lease.ts'));
@@ -161,6 +162,107 @@ test('incident replay e62d834b (66edd19a, 20ad8233): a dead worker is repaired b
     assert.equal(job.status, 'completed', 'the wake retried the dead step');
     assert.equal(s.tables.projectSourceSteps.size, 1, 'the same source execution resumed');
     assert.equal((await row(s, jobId)).repairWakeId, undefined, 'the finished job keeps no wake');
+  } finally {
+    Date.now = real;
+    s.restore();
+  }
+});
+
+test('incident replay e62d834b (review 308f217c 1): a repair wake refused after it renewed the lease watches that lease to its end', async () => {
+  const s = await scaleFixture({ workerLeaseMs: LEASE_MS });
+  const real = Date.now;
+  let offset = 0;
+  Date.now = () => real() + offset;
+  try {
+    const jobId = await s.enqueue(await saveInput(s, 2));
+    s.failOnce.push(item => /^projectConvexSource(Node)?:step$/.test(item.name));
+    await s.drain();
+    const fire = async () => {
+      const [wake] = wakes(s).filter(item => item.state.kind === 'pending');
+      assert(wake, 'a pending repair wake watches the job');
+      offset += wake.delayMs;
+      s.ready.push(wake);
+      await s.drain();
+    };
+    // The wake's repair renews the lease, then a ForgeError ends it before it schedules the retry, as one
+    // raised by the batch requeue or the pool drain after the renewal does. Convex keeps those writes.
+    const schedule = s.ctx.scheduler.runAfter;
+    let refusals = 0;
+    s.ctx.scheduler.runAfter = async (delayMs, ref, args) => {
+      if (!refusals && (args?.generation ?? 0) > 0) {
+        refusals++;
+        throw new ForgeError('SOURCE_JOB_FENCED', 'refused after the lease renewal');
+      }
+      return schedule(delayMs, ref, args);
+    };
+    await fire();
+    assert.equal(refusals, 1, 'the repair was refused after it renewed the lease');
+    assert.equal((await s.job(jobId)).status, 'running');
+    assert((await s.job(jobId)).control.workerUntil > Date.now(), 'the refused repair renewed the lease');
+    // Nothing else owns that renewed lease: without a wake at its end the job waits for a client lookup.
+    await fire();
+    assert(!s.calls.includes('projectConvexSourceStore:lookup'), 'no client lookup ran');
+    assert.equal((await s.job(jobId)).status, 'completed', 'the next wake retried the dead step');
+  } finally {
+    Date.now = real;
+    s.restore();
+  }
+});
+
+/** Fires each pending repair wake in turn, up to `max`; the count that fired. */
+async function fireWakes(s, advance, max) {
+  let fired = 0;
+  for (; fired < max; fired++) {
+    const [wake] = wakes(s).filter(item => item.state.kind === 'pending');
+    if (!wake) break;
+    advance(wake.delayMs);
+    s.ready.push(wake);
+    await s.drain();
+  }
+  return fired;
+}
+
+test('incident replay e62d834b (review 82171a53 1): a repair refused on every wake stops watching after one re-arm', async () => {
+  const s = await scaleFixture({ workerLeaseMs: LEASE_MS });
+  const real = Date.now;
+  let offset = 0;
+  Date.now = () => real() + offset;
+  try {
+    const jobId = await s.enqueue(await saveInput(s, 2));
+    s.failOnce.push(item => /^projectConvexSource(Node)?:step$/.test(item.name));
+    await s.drain();
+    // Every repair renews the lease, then is refused before it schedules the retry.
+    const schedule = s.ctx.scheduler.runAfter;
+    s.ctx.scheduler.runAfter = async (delayMs, ref, args) => {
+      if ((args?.generation ?? 0) > 0)
+        throw new ForgeError('SOURCE_JOB_FENCED', 'refused after the lease renewal');
+      return schedule(delayMs, ref, args);
+    };
+    const fired = await fireWakes(s, ms => (offset += ms), 8);
+    assert.equal(fired, 2, 'the first refusal re-arms once; the second ends the watch');
+    assert.equal((await s.job(jobId)).status, 'running');
+    assert.equal(wakes(s).filter(item => item.state.kind === 'pending').length, 0, 'no wake polls the job');
+  } finally {
+    Date.now = real;
+    s.restore();
+  }
+});
+
+test('incident replay e62d834b (review 82171a53 2): a dead step under a changed source authority is not polled by its wake', async () => {
+  const s = await scaleFixture({ workerLeaseMs: LEASE_MS });
+  const real = Date.now;
+  let offset = 0;
+  Date.now = () => real() + offset;
+  try {
+    const jobId = await s.enqueue(await saveInput(s, 2));
+    s.failOnce.push(item => /^projectConvexSource(Node)?:step$/.test(item.name));
+    await s.drain();
+    // The authority moved on: renewConvexSource refuses the lease without throwing.
+    await s.ctx.db.patch(s.projectId, { sourceAuthority: { mode: 'server', epoch: 2 } });
+    const fired = await fireWakes(s, ms => (offset += ms), 8);
+    assert.equal(fired, 1, 'one wake found nothing it may repair or watch');
+    assert.equal((await s.job(jobId)).status, 'running');
+    assert.equal(wakes(s).filter(item => item.state.kind === 'pending').length, 0, 'no wake polls the job');
   } finally {
     Date.now = real;
     s.restore();
