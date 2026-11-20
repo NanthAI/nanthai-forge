@@ -447,6 +447,81 @@ test('8dbd2683: a 601 s test phase stops at the default 600 s ceiling; a 900 s o
   assert.equal(ran.passed, true);
 });
 
+/** Test files that mark they ran; from the first mark on, this process's clock reads `seconds` later,
+ * so the first group looks like it took that much wall time. Returns the captured stderr. */
+function slowFirstGroup(t, f, seconds, names) {
+  const marker = join(f.root, '..', 'ran');
+  const marks = `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, '');`;
+  // tests/a and tests/b keep importing src/a.ts and src/b.ts, so the changed paths still select them.
+  for (const name of names) {
+    const uses = ['a', 'b'].includes(name) ? `import {n} from '../src/${name}.ts'; ` : '';
+    f.put(
+      `tests/${name}.test.mjs`,
+      `${marks} ${uses}import test from 'node:test'; test('${name}', () => {});`,
+    );
+  }
+  const now = Date.now;
+  t.mock.method(Date, 'now', () => now.call(Date) + (existsSync(marker) ? seconds * 1000 : 0));
+  const said = [];
+  const write = process.stderr.write.bind(process.stderr);
+  t.mock.method(process.stderr, 'write', (chunk, ...rest) => {
+    said.push(String(chunk));
+    return write(chunk, ...rest);
+  });
+  return said;
+}
+
+test('8dbd2683 (review 4dd9fefc): the 600 s ceiling stops a declared guard the spent budget would still start', t => {
+  const f = fixture(t);
+  f.put(
+    'package.json',
+    JSON.stringify({
+      type: 'module',
+      scripts: {},
+      forge: {
+        preflight: {
+          guards: [
+            { name: 'pins', tests: ['tests/z-pin.test.mjs', 'tests/y-pin.test.mjs'], inputs: ['src/b.ts'] },
+          ],
+        },
+      },
+    }),
+  );
+  const said = slowFirstGroup(t, f, 601, ['a', 'b', 'y-pin', 'z-pin']);
+  const plan = f.plan();
+  assert.deepEqual(plan.tests.slice(0, 2), ['tests/z-pin.test.mjs', 'tests/y-pin.test.mjs']);
+  // One file per group, so the run re-checks the clock after the first guard. At 601 s the 180 s budget
+  // is spent too, which alone would still start the second guard (537e73d9); the ceiling must not.
+  plan.local.secondsPerFile = 20;
+  const receipt = f.run(plan);
+  assert.deepEqual(receipt.ceiling, { seconds: 600, reached: true });
+  assert.equal(receipt.tests, 1, 'only the first guard ran');
+  assert.ok(receipt.stopped.includes('tests/y-pin.test.mjs'), 'the second guard is stopped and named');
+  assert.equal(receipt.exitCode, 0, 'nothing failed');
+  assert.equal(receipt.passed, false, 'a stopped guard is never a pass');
+  assert.equal(receipt.deferredTo, 'pre-queue', 'the landing check runs it');
+  assert.match(said.join(''), /the 600 s run ceiling was reached/);
+});
+
+test('8dbd2683 (review 4dd9fefc): an override ceiling is reached, stops the run and is named as the override', t => {
+  const f = fixture(t);
+  const said = slowFirstGroup(t, f, 901, ['a', 'b']);
+  const plan = f.plan([], { budgetSeconds: 900, trim: false });
+  assert.deepEqual(plan.local.ceiling, { seconds: 900, override: true });
+  assert.equal(plan.tests.length, 2);
+  plan.local.secondsPerFile = 20;
+  const receipt = f.run(plan);
+  assert.deepEqual(receipt.ceiling, { seconds: 900, override: true, reached: true });
+  assert.deepEqual(receipt.stopped, [plan.tests[1]]);
+  assert.equal(receipt.exitCode, 0, 'nothing failed');
+  assert.equal(receipt.passed, false, 'a stopped must-run file is never a pass');
+  assert.equal(receipt.deferredTo, 'pre-queue', 'the rest goes to the landing check');
+  const reply = said.join('');
+  assert.match(reply, /0 failed: the 900 s budgetSeconds override was reached/);
+  // The override already is the larger budget: the reply does not tell the agent to pass one.
+  assert.doesNotMatch(reply, /run ceiling was reached|pass a larger budgetSeconds/);
+});
+
 test('timing estimates average the last runs instead of trusting one sample', t => {
   const f = fixture(t);
   assert.deepEqual(preflightSecondsPerFile(f.root), { secondsPerFile: 4, basis: 'default' });
