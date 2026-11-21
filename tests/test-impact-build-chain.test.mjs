@@ -27,6 +27,16 @@ const fixture = (extra = {}) =>
 const selected = (files, path) => selectTests({ files, paths: [path] });
 const edge = (graph, from, to) => graph.evidence.get(from)?.get(to);
 
+test('relative imports from a locked installed package keep repository selection precise', () => {
+  const files = fixture({
+    'package-lock.json': '{"packages":{"node_modules/@acme/component":{}}}',
+    'src/a.ts': "export { a } from '../node_modules/@acme/component/dist/a.js';",
+  });
+  assert.equal(selected(files, 'src/a.ts').scope, 'scoped');
+  files.set('package-lock.json', '{"packages":{"node_modules/@acme/other":{}}}');
+  assert.equal(selected(files, 'src/a.ts').scope, 'full');
+});
+
 test('package smoke loads the package by its own name, not every file in the tree', () => {
   const files = fixture({
     'scripts/package-smoke.mjs': `import { createRequire } from 'node:module';

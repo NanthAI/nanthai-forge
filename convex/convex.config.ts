@@ -3,8 +3,8 @@ import { defineApp } from 'convex/server';
 import { v } from 'convex/values';
 import auth from '@convex-dev/auth/convex.config.js';
 import github from '@convex-dev/auth/components/github/convex.config.js';
-import passkey from '@convex-dev/auth/components/passkey/convex.config.js';
 import username from '@convex-dev/auth/components/username/convex.config.js';
+import passkey from './components/authPasskey/convex.config.js';
 
 const app = defineApp({
   env: {

@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { build } from 'esbuild';
 
@@ -18,13 +19,14 @@ async function application(env = {}) {
       {
         name: 'component-definition-paths',
         setup(builder) {
-          builder.onLoad({ filter: /node_modules\/.*\/convex\.config\.js$/ }, async ({ path }) => {
+          builder.onLoad({ filter: /\/convex\.config\.[jt]s$/ }, async ({ path }) => {
+            if (path === resolve('convex/convex.config.ts')) return;
             const source = await readFile(path, 'utf8');
             return {
               contents:
                 source.replace('export default ', 'const testDefinition = ') +
                 `\ntestDefinition.componentDefinitionPath = ${JSON.stringify(path)}; testDefinition.defaultName = testDefinition._name; export default testDefinition;`,
-              loader: 'js',
+              loader: path.endsWith('.ts') ? 'ts' : 'js',
             };
           });
         },

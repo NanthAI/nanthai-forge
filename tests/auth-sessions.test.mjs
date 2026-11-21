@@ -5,8 +5,56 @@ import { getFunctionAddress } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { fixture as accountFixture, assertion, refused, users, auth } from './auth-links-fixture.mjs';
 const sessionsApi = await import(moduleUrl('../convex/authSessions.ts'));
+const passkeyPages = await import(moduleUrl('../convex/components/authPasskey/accountPasskeys.ts'));
 const first = await import(moduleUrl('../convex/authFirstPasskey.ts'));
 const policy = await import(moduleUrl('../convex/accessPolicy.ts'));
+
+function passkeyStore(keys) {
+  let reads = 0;
+  const db = {
+    query(table) {
+      assert.equal(table, 'passkeys');
+      return {
+        withIndex(index, select) {
+          assert.equal(index, 'by_userId');
+          const filters = [];
+          const bounds = {
+            eq: (field, value) => (filters.push(row => row[field] === value), bounds),
+            gt: (field, value) => (filters.push(row => row[field] > value), bounds),
+            gte: (field, value) => (filters.push(row => row[field] >= value), bounds),
+            lt: (field, value) => (filters.push(row => row[field] < value), bounds),
+            lte: (field, value) => (filters.push(row => row[field] <= value), bounds),
+          };
+          select(bounds);
+          const rows = () =>
+            keys
+              .map(key => ({
+                ...key,
+                _id: key._id ?? key.passkeyId,
+                _creationTime: key._creationTime ?? key.createdAt,
+              }))
+              .filter(key => filters.every(match => match(key)))
+              .sort((a, b) => a._creationTime - b._creationTime || a._id.localeCompare(b._id));
+          const query = {
+            order: () => query,
+            async *[Symbol.asyncIterator]() {
+              for (const row of rows()) {
+                reads++;
+                yield row;
+              }
+            },
+          };
+          return query;
+        },
+      };
+    },
+  };
+  return {
+    ctx: { db },
+    reads: () => reads,
+  };
+}
+
 function fixture(t) {
   const s = accountFixture(t, { github: true });
   const now = Date.now();
@@ -14,6 +62,7 @@ function fixture(t) {
   s.sessions.set('other', { userId: 'user', creationTime: now, lastRefreshedAt: now });
   s.sessions.set('stranger', { userId: 'someone-else', creationTime: now, lastRefreshedAt: now });
   s.tables.cliCredentials = new Map();
+  const passkeys = passkeyStore(s.keys);
   const base = s.ctx.runQuery;
   const dispatch = async (ref, args) => {
     const name = getFunctionAddress(ref).reference ?? '';
@@ -30,22 +79,25 @@ function fixture(t) {
       for (const id of removed) s.sessions.delete(id);
       return removed;
     }
+    if (name.endsWith('/accountPasskeys/first')) return passkeyPages.first._handler(passkeys.ctx, args);
+    if (name.endsWith('/accountPasskeys/more')) return passkeyPages.more._handler(passkeys.ctx, args);
     return base(ref, args);
   };
   s.ctx.runQuery = dispatch;
   s.ctx.runMutation = dispatch;
+  s.passkeyReads = passkeys.reads;
   return s;
 }
 test('B-05: the account list contains only its sessions and passkeys, without bearer credentials', async t => {
   const s = fixture(t);
   s.keys.push({
     userId: 'user',
-    passkeyId: 'ours',
+    _id: 'ours',
     name: 'Security key',
-    createdAt: 1,
+    _creationTime: 1,
     credentialId: 'not-returned',
   });
-  s.keys.push({ userId: 'someone-else', passkeyId: 'theirs', createdAt: 1 });
+  s.keys.push({ userId: 'someone-else', _id: 'theirs', _creationTime: 1 });
   const result = await s.call(sessionsApi.list, { paginationOpts: { numItems: 20, cursor: null } });
   assert.deepEqual(
     result.sessions.map(row => [row.sessionId, row.current]),
@@ -55,7 +107,84 @@ test('B-05: the account list contains only its sessions and passkeys, without be
     ],
   );
   assert.deepEqual(result.passkeys, [{ passkeyId: 'ours', name: 'Security key', createdAt: 1 }]);
+  assert.equal(result.passkeysContinueAfter, null);
   assert.doesNotMatch(JSON.stringify(result), /not-returned|someone-else|tokenHash|refreshToken|accessToken/);
+});
+test('Devices reads bounded indexed pages and retains every passkey when timestamps tie', async t => {
+  const s = fixture(t);
+  const keys = Array.from({ length: 65 }, (_, n) => ({
+    userId: 'user',
+    _id: String(n).padStart(2, '0'),
+    _creationTime: 1,
+    credentialId: 'not-returned',
+  }));
+  s.keys.push({ userId: 'other-user', _id: 'other-key', _creationTime: 1 }, ...keys.slice(0, 20));
+  const options = { paginationOpts: { numItems: 20, cursor: null } };
+  const exactlyOnePage = await s.call(sessionsApi.list, options);
+  assert.equal(exactlyOnePage.passkeys.length, 20);
+  assert.equal(exactlyOnePage.passkeysContinueAfter, null);
+  const beforeFirst = s.passkeyReads();
+  s.keys.push(...keys.slice(20));
+  const initial = await s.call(sessionsApi.list, options);
+  assert.equal(initial.passkeys.length, 20);
+  assert.equal(s.passkeyReads() - beforeFirst, 21);
+  const after = initial.passkeysContinueAfter;
+  assert.deepEqual(after, { passkeyId: '19', createdAt: 1 });
+  s.keys.splice(
+    s.keys.findIndex(key => key._id === after.passkeyId),
+    1,
+  );
+  const found = initial.passkeys.slice(0, -1);
+  let cursor = null;
+  for (const expectedSize of [20, 20, 5]) {
+    const before = s.passkeyReads();
+    const page = await s.call(sessionsApi.morePasskeys, { after, paginationOpts: { numItems: 500, cursor } });
+    assert.equal(page.page.length, expectedSize);
+    assert.equal(s.passkeyReads() - before, expectedSize === 20 ? 21 : expectedSize);
+    assert.equal(page.isDone, expectedSize === 5);
+    found.push(...page.page);
+    cursor = page.continueCursor;
+  }
+  assert.deepEqual(
+    found,
+    keys.filter(key => key._id !== after.passkeyId).map(key => ({ passkeyId: key._id, createdAt: 1 })),
+  );
+  // Late commits can grow an interval after the client has opened its next page.
+  const insertAt = s.keys.findIndex(key => key._id === '20');
+  const lateKeys = s.keys.splice(insertAt, 10);
+  const existingPage = await s.call(sessionsApi.morePasskeys, {
+    after,
+    paginationOpts: { numItems: 20, cursor: null },
+  });
+  const endCursor = existingPage.continueCursor;
+  s.keys.splice(insertAt, 0, ...lateKeys);
+  const beforeSplit = s.passkeyReads();
+  const split = await s.call(sessionsApi.morePasskeys, {
+    after,
+    paginationOpts: { numItems: 20, cursor: null, endCursor },
+  });
+  assert.equal(s.passkeyReads() - beforeSplit, 21);
+  assert.equal(split.pageStatus, 'SplitRequired');
+  assert.equal(split.continueCursor, endCursor);
+  const halves = await Promise.all([
+    s.call(sessionsApi.morePasskeys, {
+      after,
+      paginationOpts: { numItems: 20, cursor: null, endCursor: split.splitCursor },
+    }),
+    s.call(sessionsApi.morePasskeys, {
+      after,
+      paginationOpts: { numItems: 20, cursor: split.splitCursor, endCursor },
+    }),
+  ]);
+  assert.deepEqual(
+    halves.flatMap(half => half.page.map(key => key.passkeyId)),
+    keys.slice(20, 50).map(key => key._id),
+  );
+  s.sessions.delete('session');
+  await assert.rejects(
+    s.call(sessionsApi.morePasskeys, { after, paginationOpts: { numItems: 20, cursor: null } }),
+    refused('AUTH_REQUIRED'),
+  );
 });
 test('B-05: sign out other sessions requires a fresh passkey for the same account, retains this browser and other accounts, and retries safely', async t => {
   const s = fixture(t);

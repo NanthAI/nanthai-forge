@@ -1,6 +1,8 @@
 ## Attaching account sign-in methods
 
 An existing-provider session can enroll a passkey on that exact Forge account.
+The Devices screen reads display metadata from the account index in 20-key
+pages. It automatically reads another page when more keys are present.
 Each action verifies the session is active with its provider; each granting
 mutation checks the caller's issuer, account and session proof. Existing passkeys
 confirm additions. A live Convex Auth session can attach GitHub after passkey

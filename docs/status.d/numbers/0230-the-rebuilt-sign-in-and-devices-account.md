@@ -1,5 +1,6 @@
 The rebuilt Sign-in and devices account page lists the current account’s browser
-sessions, passkeys and existing CLI approvals. Ending other browsers requires a
+sessions, passkeys and existing CLI approvals. Passkey reads use the account
+index in pages of 20, and the page loads the rest automatically. Ending other browsers requires a
 fresh passkey or linked GitHub check; a passkey-add notice is acknowledged only
 in the viewing browser. Browser inactivity is one server setting, approved at 14 days. Current verified GitHub addresses replace
 previous values, including clearing an address the provider no longer reports.

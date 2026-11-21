@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuthActions } from '@convex-dev/auth/react';
 import { useMutation, useQuery } from 'convex/react';
+import { usePaginatedQuery } from 'convex-helpers/react';
 import { useOauth, useSignInWithGithub } from '@convex-dev/auth/methods/github/react';
 import { useAddPasskey, useRemovePasskey } from '@convex-dev/auth/methods/username-passkey/react';
 import { api } from '../../../convex/_generated/api';
+import { PASSKEY_PAGE_SIZE } from '../../../convex/authPasskeyPage';
 import { assertPasskey } from './webauthn';
 import { DeviceProjectChoice } from './DeviceProjectChoice';
 import { YouView } from './YouView';
@@ -13,6 +15,18 @@ export default function You({ handle, leave }: { handle?: string; leave?: () => 
   leave ??= () => void signOut().then(() => location.assign('/-/signin'));
   const [cursor, setCursor] = useState<string | null>(null);
   const data = useQuery(api.authSessions.list, { paginationOpts: { numItems: 20, cursor } });
+  const {
+    results: morePasskeys,
+    status: passkeyStatus,
+    loadMore,
+  } = usePaginatedQuery(
+    api.authSessions.morePasskeys,
+    data?.passkeysContinueAfter ? { after: data.passkeysContinueAfter } : 'skip',
+    { initialNumItems: PASSKEY_PAGE_SIZE },
+  );
+  useEffect(() => {
+    if (passkeyStatus === 'CanLoadMore') loadMore(PASSKEY_PAGE_SIZE);
+  }, [passkeyStatus, loadMore]);
   const [seenNotice, setSeenNotice] = useState(() => {
     try {
       return localStorage.getItem('forge.passkey-notice') ?? '';
@@ -88,6 +102,7 @@ export default function You({ handle, leave }: { handle?: string; leave?: () => 
         data
           ? {
               ...data,
+              passkeys: [...data.passkeys, ...morePasskeys],
               notice: data.notice?.passkeyId === seenNotice ? null : data.notice,
               deviceNotice: data.deviceNotice?.signInId === seenDevice ? undefined : data.deviceNotice,
             }

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { paginationOptsValidator } from 'convex/server';
+import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { query, accountMutation } from './cliServer';
 import { authComponents as components } from './authComponents';
 import { linkAccount, confirmationOptions, confirmAccount, digest } from './authLinkAccount';
 import { authenticationResponse, requestOptions } from './authPasskeyWire';
+import { displayPasskey, passkeyPosition } from './authPasskeyPage';
 import { browserInactivitySeconds, browserLifetimeSeconds } from './accessPolicy';
 import { deviceSettings, deviceApprovalExpired } from './deviceFields';
 import { endAccountDevices } from './deviceEndAll';
@@ -16,7 +17,6 @@ const session = v.object({
   lastRefreshedAt: v.number(),
   current: v.boolean(),
 });
-const passkey = v.object({ passkeyId: v.string(), name: v.optional(v.string()), createdAt: v.number() });
 const device = v.object({
   credentialId: v.string(),
   name: v.string(),
@@ -34,7 +34,8 @@ export const list = query({
   args: { paginationOpts: paginationOptsValidator },
   returns: v.object({
     sessions: v.array(session),
-    passkeys: v.array(passkey),
+    passkeys: v.array(displayPasskey),
+    passkeysContinueAfter: v.union(passkeyPosition, v.null()),
     devices: v.array(device),
     github: v.union(v.string(), v.null()),
     deviceNotice: v.optional(v.object({ at: v.number(), credentialId: v.string(), signInId: v.string() })),
@@ -46,7 +47,7 @@ export const list = query({
     const { user, sessionId } = await linkAccount(ctx);
     const [sessions, passkeys, devices] = await Promise.all([
       ctx.runQuery(components.auth.public.listSessions, { userId: user._id }),
-      ctx.runQuery(components.authPasskey.registration.listPasskeys, { userId: user._id }),
+      ctx.runQuery(components.authPasskey.accountPasskeys.first, { userId: user._id }),
       ctx.db
         .query('cliCredentials')
         .withIndex('by_owner', q => q.eq('owner', user.accountKey))
@@ -62,11 +63,8 @@ export const list = query({
             row.lastRefreshedAt + browserInactivitySeconds * 1000 > now,
         )
         .map(row => ({ ...row, current: row.sessionId === sessionId })),
-      passkeys: passkeys.map(({ passkeyId, name, createdAt }) => ({
-        passkeyId,
-        ...(name ? { name } : {}),
-        createdAt,
-      })),
+      passkeys: passkeys.page,
+      passkeysContinueAfter: passkeys.continueAfter,
       devices: devices.page.map(
         ({
           credentialId,
@@ -104,6 +102,16 @@ export const list = query({
     };
   },
 });
+
+export const morePasskeys = query({
+  args: { after: passkeyPosition, paginationOpts: paginationOptsValidator },
+  returns: paginationResultValidator(displayPasskey),
+  handler: async (ctx, args) => {
+    const { user } = await linkAccount(ctx);
+    return ctx.runQuery(components.authPasskey.accountPasskeys.more, { ...args, userId: user._id });
+  },
+});
+
 export const startConfirmation = accountMutation('same')({
   args: {},
   returns: requestOptions,

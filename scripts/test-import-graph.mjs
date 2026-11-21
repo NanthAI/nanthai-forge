@@ -94,6 +94,7 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
     ].find(candidate => files.has(candidate));
   }
   const packages = new Set(builtinModules);
+  const packagePaths = [];
   if (files.has('package-lock.json')) {
     try {
       const locked = JSON.parse(files.get('package-lock.json')).packages;
@@ -108,6 +109,7 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
       for (const path of Object.keys(locked)) {
         const name = path.split('node_modules/').pop();
         if (name) packages.add(name);
+        if (installedPath(path)) packagePaths.push(path);
       }
     } catch {
       return { error: 'Cannot classify locked external imports: package-lock.json' };
@@ -115,6 +117,11 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
   }
   const external = value =>
     value.startsWith('node:') || [...packages].some(name => value === name || value.startsWith(`${name}/`));
+  const installedImport = (from, value) => {
+    if (!value.startsWith('.') || !installedPath(value)) return false;
+    const path = posix.join(posix.dirname(from), value);
+    return packagePaths.some(packagePath => path.startsWith(`${packagePath}/`));
+  };
   let uncertain;
   const domains = ['src/', 'web/src/', 'convex/', 'netlify/', 'scripts/', 'tests/'];
   const jsonFiles = [...files.keys()].filter(
@@ -363,7 +370,8 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
             ts.isExportDeclaration(node.parent) ||
             ts.isExternalModuleReference(node.parent)) &&
           !target &&
-          !external(value)
+          !external(value) &&
+          !installedImport(path, value)
         ) {
           uncertain = `Unresolved import ${value} in ${path}`;
         }
