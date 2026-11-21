@@ -65,7 +65,12 @@ test('a sync head without a saved delta projection gets its exact own paths from
   const before = f.calls.length;
   const result = await savedChangedPaths(transport, { base, head }, { paths: [], complete: false });
   // b.ts equals current main (merged in); c.ts is added and d.ts deleted by the Lane.
-  assert.deepEqual(result, { paths: ['src/c.ts', 'src/d.ts'], complete: true, source: 'manifests' });
+  assert.deepEqual(result, {
+    paths: ['src/c.ts', 'src/d.ts'],
+    complete: true,
+    source: 'manifests',
+    mainHead: main,
+  });
   const calls = f.calls.slice(before);
   assert(calls.length <= 2, `one main read and one bounded object page, saw ${calls.length}`);
   assert(calls.every(call => call.args.digests === undefined || call.args.digests.length <= 3));
@@ -259,7 +264,7 @@ test('593fc2d7: a resolution Lane made by sync preflights against the head the s
       { paths: ['src/a.ts', 'src/b.ts', 'tests/m.test.mjs'], complete: true },
       true,
     ),
-    { paths: ['src/a.ts'], complete: true, source: 'manifests' },
+    { paths: ['src/a.ts'], complete: true, source: 'manifests', mainHead: f.main.head },
   );
   const response = await transport.dispatch('preflight', { laneId: f.lane.laneId, run: false });
   assert.equal(response.result.plan.status, 'planned');

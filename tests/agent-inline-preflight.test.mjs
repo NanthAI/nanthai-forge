@@ -8,6 +8,9 @@ import { once } from 'node:events';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
+import { queueProofPaths, REGISTRY } from '../scripts/core-queue-paths.mjs';
+import { verifyQueueProof } from '../scripts/test-queue-proof.mjs';
+import { slimReceipt } from '../dist/receipt-slim.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { submitHostedLand } from '../dist/hosted-land-cli.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
@@ -451,6 +454,110 @@ test('preflight and land scan a saved resolution against the main it merged in a
     calls,
     'the scan makes no new calls',
   );
+});
+
+test('preflight and inline finish preview the same queue proof as the hosted check on saved inputs', async t => {
+  const source = 'convex/projectHostedFinishWake.ts';
+  const receipt = '.nforge/queue-proofs/wake.json';
+  const saved = 'Saved synthetic wake change';
+  const testName = 'synthetic incident replay for the saved wake';
+  const proof = {
+    version: 1,
+    kind: 'replay',
+    changes: { [source]: digest(Buffer.from(saved)) },
+    replay: { incident: '5e3c3a3c', test: testName, receipt: randomUUID() },
+    authorSession: randomUUID(),
+    review: { session: randomUUID(), receipt: randomUUID() },
+  };
+  const base = {
+    'scripts/forge-check.mjs': '',
+    [source]: 'Before the wake change',
+    [REGISTRY]: JSON.stringify({ replays: [{ incident: '5e3c3a3c', test: testName, paths: [source] }] }),
+  };
+  const prepare = async proofBytes => {
+    const s = agentFixture(t, {
+      base,
+      lane: { ...base, [source]: saved, [receipt]: proofBytes },
+    });
+    s.caps.main = s.main;
+    s.caps.agentDefaults = effectiveAgentDefaults({ preflight: 'advise' });
+    await s.transport().dispatch('open', { laneId: s.lane.laneId });
+    const plan = join(s.root, '..', 'plan.json');
+    writeFileSync(
+      plan,
+      JSON.stringify({
+        standard: true,
+        selection: { queueProof: queueProofPaths([source, receipt]) },
+      }),
+    );
+    return { s, hosted: () => verifyQueueProof({ FORGE_ACTIONS_PLAN: plan }, s.root) };
+  };
+
+  const stale = JSON.stringify({ ...proof, changes: { [source]: digest(Buffer.from('Stale wake')) } });
+  const { s, hosted } = await prepare(stale);
+  let message;
+  await assert.rejects(hosted, error => {
+    assert.match(error.message, /^QUEUE_PROOF_REQUIRED:.*projectHostedFinishWake/);
+    message = error.message;
+    return true;
+  });
+  // A working-copy proof added since the save cannot cover the saved Candidate.
+  writeFileSync(join(s.root, receipt), JSON.stringify(proof));
+  const from = s.calls.length;
+  const preflight = await s.transport().dispatch('preflight', { run: false });
+  const expected = { main: s.main.head, code: 'QUEUE_PROOF_REQUIRED', message };
+  assert.deepEqual(preflight.result.queueProof, expected);
+  assert.deepEqual(slimReceipt(preflight).result.queueProof, expected);
+  const preflightCalls = s.calls.slice(from).map(call => call.name);
+  writeFileSync(join(s.root, receipt), stale);
+  const beforeFinish = s.calls.length;
+  const finish = await s.transport().dispatch('finish', { message: 'Synthetic queue proof check' });
+  assert.deepEqual(slimReceipt(finish).result.defaults.queueProof, expected);
+  assert(s.calls.slice(beforeFinish).some(call => call.name === 'projectHostedCompose:prepare'));
+  const finishCalls = s.calls.slice(beforeFinish).map(call => call.name);
+
+  const good = await prepare(JSON.stringify(proof));
+  await good.hosted();
+  const goodFrom = good.s.calls.length;
+  const goodPreflight = await good.s.transport().dispatch('preflight', { run: false });
+  assert.equal(goodPreflight.result.queueProof, undefined);
+  assert.deepEqual(
+    good.s.calls.slice(goodFrom).map(call => call.name),
+    preflightCalls,
+  );
+  const goodBeforeFinish = good.s.calls.length;
+  const goodFinish = await good.s.transport().dispatch('finish', { message: 'Synthetic queue proof check' });
+  assert.equal(goodFinish.result.defaults.queueProof, undefined);
+  assert.deepEqual(
+    good.s.calls.slice(goodBeforeFinish).map(call => call.name),
+    finishCalls,
+  );
+
+  const moved = await prepare(stale);
+  const f = moved.s;
+  // The fallback derives the change set against newer main than the capability read.
+  f.caps.main = structuredClone(f.main);
+  const before = JSON.parse(f.objects.get(f.main.head));
+  const observed = Buffer.from(JSON.stringify({ ...before, message: 'Newly observed main' }));
+  f.main.head = digest(observed);
+  f.objects.set(f.main.head, observed);
+  const observedPreflight = await f.transport().dispatch('preflight', { run: false });
+  assert.deepEqual(observedPreflight.result.queueProof, { ...expected, main: f.main.head });
+
+  // The source path now diverges, so only the hosted Candidate has its final bytes.
+  const peerBytes = Buffer.from('Main changed the same core file');
+  const peerBlob = digest(peerBytes);
+  const main = Buffer.from(
+    JSON.stringify({
+      ...before,
+      files: before.files.map(file => (file.path === source ? { ...file, blob: peerBlob } : file)),
+    }),
+  );
+  f.main.head = digest(main);
+  f.objects.set(f.main.head, main);
+  f.objects.set(peerBlob, peerBytes);
+  const movedPreflight = await f.transport().dispatch('preflight', { run: false });
+  assert.equal(movedPreflight.result.queueProof, undefined);
 });
 
 test('incident 229147a2: over-budget land with a format error refuses locally before any hosted check', async t => {

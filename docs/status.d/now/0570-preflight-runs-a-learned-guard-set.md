@@ -11,5 +11,6 @@ for 90 s and refuses on a failure.
 An inline budget overrun returns `PREFLIGHT_BUDGET_EXCEEDED` with its continuation
 and the exact replay. If a running quick group hits the cap, replay reuses its
 receipt and leaves the remaining tests to the hosted check.
-Preflight surfaces hosted secret scanner findings early when it can verify
-changed saved files against observed main.
+Preflight surfaces hosted secret scanner and queue proof findings early when it can
+verify changed saved files against observed main. Compact landing replies retain
+the first safe diagnostic line, including its code, for reported static failures.

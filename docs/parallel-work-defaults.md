@@ -794,6 +794,12 @@ saved files they can verify locally against observed main. Findings give the
 path, line, kind and fingerprint. Allow entries come from main. The hosted
 check scans the composed Candidate and decides the outcome.
 
+For the standard Forge check, the same local preview verifies queue proof from
+saved paths, digests and available proof and replay registry files. A missing or
+stale proof is reported as `QUEUE_PROOF_REQUIRED`. The hosted check verifies
+proof on the composed Candidate. When static verification is the reported
+cause, the compact landing receipt retains the first safe coded diagnostic line.
+
 - The landing carries `gates`: the CLI's preflight result for each Lane head it composed. The
   server finds those Lanes and heads in one indexed read of the composition. A landing that names
   no composition of the caller's own is refused: an agent lands through `land --save`.

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "src/hosted-landing-suspect.ts": "9090f301dbe05648eb59af6d48dc37e9c4152f22cf3cf852100ade51366e2dbf"
+  },
+  "replay": {
+    "incident": "5e3c3a3c",
+    "test": "incident 5e3c3a3c: passed followers land within the pass-to-land ceiling while the holder re-checks",
+    "receipt": "28ba6e37-6dda-4584-92f5-366a9bb7e52d"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "088c800e8eb1ddafd78e841ea5534979aec9e1d5fb2bb30a87c6a489d24e364f",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "deef885f7f4308cfd8c6a6a7ee5d8e78c64cf75bc794bb372c481f6a25feef6c",
+    "receipt": "4ed9663c-c6b4-46a3-b3ac-9989def07a35"
+  }
+}

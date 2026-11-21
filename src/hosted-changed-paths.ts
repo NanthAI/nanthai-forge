@@ -13,7 +13,13 @@ import { reviewPaths } from './source-review-format.js';
 import { hostedMainV2Schema } from './hosted-main.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 
-export type SavedChangedPaths = { paths: string[]; complete: boolean; source?: 'projection' | 'manifests' };
+export type SavedChangedPaths = {
+  paths: string[];
+  complete: boolean;
+  source?: 'projection' | 'manifests';
+  /** The exact main used to remove paths already accepted, when the fallback read it. */
+  mainHead?: string;
+};
 
 /** The Lane's saved paths against its base. The server projection is the cheap path, but it is
  * incomplete for any head that arrived without a delta (a sync or resolution merge, an oversized
@@ -55,7 +61,7 @@ export async function savedChangedPaths(
           ),
       )
       .map(item => item.path);
-    return { paths, complete: true, source: 'manifests' };
+    return { paths, complete: true, source: 'manifests', ...(main ? { mainHead: main } : {}) };
   } catch {
     return projected;
   }

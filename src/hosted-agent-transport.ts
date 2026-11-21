@@ -143,6 +143,7 @@ import {
   savedChangedPaths,
   checkoutProtectedPathNotice,
   mainFilteredNotice,
+  type SavedChangedPaths,
 } from './hosted-changed-paths.js';
 import { publishClientSourcePack } from './source-pack-client.js';
 import { missingRequiredFeatures } from './hosted-contract-features.js';
@@ -1455,11 +1456,11 @@ export class HostedAgentTransport {
           // The paths this landing carries, so its check failure can teach the next preflight.
           if (advice.changedPaths?.complete) rememberLandingPaths(root, laneId, advice.changedPaths.paths);
           const checkout = readHostedLaneCheckout(root);
-          const secretScan =
+          const hostedChecks =
             capabilities.agentDefaults?.preflight !== 'off' &&
             checkout?.selection.laneId === laneId &&
             checkout.selection.head === head
-              ? await this.preflightSecretScan(
+              ? await this.preflightHostedChecks(
                   root,
                   checkout,
                   changeBase ?? checkout.selection.base.head,
@@ -1487,7 +1488,7 @@ export class HostedAgentTransport {
               : false,
             journal.get(finishRefusedKey) === 'PREFLIGHT_BUDGET_EXCEEDED',
           );
-          if (secretScan) gates.secretScan = secretScan;
+          Object.assign(gates, hostedChecks);
           // Weakened-test flags advise (never refuse); a reason line in the message clears them.
           if (checkout?.selection.laneId === laneId && checkout.selection.head === head) {
             const { laneWeakenedTestsReply } = await import('./preflight-weakened-tests.js');
@@ -2200,7 +2201,7 @@ export class HostedAgentTransport {
       base !== marker.selection.base.head,
     );
     if (changed?.complete) this.protectedPaths(changed.paths);
-    const secretScan = await this.preflightSecretScan(root, marker, base, changed);
+    const hostedChecks = await this.preflightHostedChecks(root, marker, base, changed);
     const plan = preflightPlan(
       root,
       changed,
@@ -2225,7 +2226,7 @@ export class HostedAgentTransport {
         laneId,
         head,
         plan,
-        ...(secretScan ? { secretScan } : {}),
+        ...hostedChecks,
         ...weakenedTests,
         ...(plan.status === 'unavailable' ? landNext : planNext),
       });
@@ -2271,22 +2272,24 @@ export class HostedAgentTransport {
       failed: receipt.failed ?? 0,
       plan,
       receipt,
-      ...(secretScan ? { secretScan } : {}),
+      ...hostedChecks,
       ...weakenedTests,
       ...(outcome === 'failed' ? planNext : landNext),
     });
   }
-  private async preflightSecretScan(
+  private async preflightHostedChecks(
     root: string,
     marker: NonNullable<ReturnType<typeof readHostedLaneCheckout>>,
     base: string,
-    changed: { paths: string[]; complete: boolean } | undefined,
+    changed: SavedChangedPaths | undefined,
   ) {
-    if (!this.knownMain || (changed?.complete && !changed.paths.length)) return undefined;
-    const { reportPreflightSecretScan } = await import('./preflight-secret-scan.js');
+    // The manifest fallback can observe newer main than the capability read.
+    const main = changed?.mainHead ?? this.knownMain;
+    if (!main || (changed?.complete && !changed.paths.length)) return undefined;
+    const { reportPreflightChecks } = await import('./preflight-hosted-checks.js');
     // Keep these shared readers on the eager side so the preview does not split them
     // into extra imports on the CLI's ordinary command path.
-    return reportPreflightSecretScan(
+    return reportPreflightChecks(
       {
         ...weakenedReads,
         readSource,
@@ -2299,7 +2302,7 @@ export class HostedAgentTransport {
       changed?.complete ? changed.paths : undefined,
       marker.state.files,
       base,
-      this.knownMain,
+      main,
     );
   }
   async query<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {

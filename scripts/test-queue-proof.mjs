@@ -72,32 +72,34 @@ function fileDigest(file) {
 }
 
 /** Validate retained links and their applicability in this exact checkout. No external lookups. */
-function assertQueueProof({ source, receipts }, root) {
+export function assertQueueProof({ source, receipts }, { readText, digest }) {
   const missing = new Set(source);
   const digests = new Map();
   let replays;
   for (const path of receipts) {
     let proof;
     try {
-      proof = readJson(join(root, path));
+      proof = JSON.parse(readText(path));
     } catch (error) {
       // A proof may have been deleted by this comparison. It cannot cover anything.
       if (error.code === 'ENOENT' || error instanceof SyntaxError) continue;
       throw error;
     }
-    if (proof?.kind === 'replay')
-      replays ??= registeredQueueReplays(readFileSync(join(root, REGISTRY), 'utf8'));
+    if (proof?.kind === 'replay') replays ??= registeredQueueReplays(readText(REGISTRY));
     for (const file of qualifiedPaths(proof, replays ?? [])) {
       if (!missing.has(file) || !Object.hasOwn(proof.changes, file)) continue;
-      if (!digests.has(file)) digests.set(file, fileDigest(join(root, file)));
+      if (!digests.has(file)) digests.set(file, digest(file));
       if (digests.get(file) === proof.changes[file]) missing.delete(file);
     }
     if (!missing.size) return;
   }
   const paths = [...missing].sort();
+  const shown = paths
+    .slice(0, 5)
+    .map(path => path.replace(/\p{Cc}/gu, char => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0')));
   const more = paths.length > 5 ? ` and ${paths.length - 5} more` : '';
   throw new Error(
-    `QUEUE_PROOF_REQUIRED: Attach a registered incident replay with fresh-context review or an on-path bench cell for ${paths.slice(0, 5).join(', ')}${more}. See “Attaching queue proof” in the agent briefings.`,
+    `QUEUE_PROOF_REQUIRED: Attach a registered incident replay with fresh-context review or an on-path bench cell for ${shown.join(', ')}${more}. See “Attaching queue proof” in the agent briefings.`,
   );
 }
 
@@ -115,5 +117,9 @@ export async function verifyQueueProof(env = process.env, root = '.') {
     const comparison = pinnedComparison(env);
     if (!comparison?.mainCheck) changes = queueProofPaths(comparison?.paths);
   }
-  if (changes) assertQueueProof(changes, root);
+  if (changes)
+    assertQueueProof(changes, {
+      readText: path => readFileSync(join(root, path), 'utf8'),
+      digest: path => fileDigest(join(root, path)),
+    });
 }

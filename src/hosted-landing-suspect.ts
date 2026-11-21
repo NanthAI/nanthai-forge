@@ -162,6 +162,7 @@ export function failingStep(
   streams: readonly { descriptor: string; seal: string | null; failureExcerpt?: string | undefined }[],
   shardCount: number | undefined,
 ): { job: string; excerpt: string } | null {
+  let fallback: { job: string; excerpt: string } | null = null;
   for (const stream of streams) {
     let summary = stream.failureExcerpt ?? '';
     let shard: number | undefined;
@@ -177,6 +178,17 @@ export function failingStep(
       .map(line => line.trim())
       .filter(Boolean);
     if (!lines.length) continue;
+    // Early static guards print CODE: message before the runner's generic exit trailer.
+    // Prefer that first coded diagnostic over unrelated job output.
+    if (shardCount === undefined || shard === shardCount - 1) {
+      const coded = lines.find(line => /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+: \S/.test(line));
+      if (coded)
+        return {
+          job: jobLabel(shard, shardCount),
+          excerpt: coded.replace(/\p{Cc}/gu, '').slice(0, stepExcerptChars),
+        };
+    }
+    if (fallback) continue;
     // verify.mjs repeats each failed step at the tail: `[failed-step] NAME :: COMMAND :: LINES`.
     const digest = lines
       .filter(text => text.startsWith('[failed-step] ') && text.includes(' :: '))
@@ -184,13 +196,14 @@ export function failingStep(
     if (digest.length) {
       const [first, ...rest] = digest;
       const also = rest.length ? ` (also failed: ${rest.map(item => item.name).join(', ')})` : '';
-      return {
+      fallback = {
         job: jobLabel(shard, shardCount),
         excerpt: `${first!.name} (reproduce: ${first!.command})${also}: ${first!.text}`.slice(
           0,
           stepExcerptChars,
         ),
       };
+      continue;
     }
     // npm's own trailer (`npm ERR! code 1`) names no cause; prefer the step's line.
     const matches = [...lines].reverse().filter(text => stepLine.test(text) && !zeroCount.test(text));
@@ -202,9 +215,9 @@ export function failingStep(
       [...lines].reverse().find(text => !npmTrailer.test(text) && !zeroCount.test(text)) ??
       matches[0] ??
       lines.at(-1)!;
-    return { job: jobLabel(shard, shardCount), excerpt: line.slice(0, 240) };
+    fallback = { job: jobLabel(shard, shardCount), excerpt: line.slice(0, 240) };
   }
-  return null;
+  return fallback;
 }
 
 type Diagnostic = {

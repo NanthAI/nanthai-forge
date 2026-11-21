@@ -8,6 +8,9 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { REGISTRY } from '../scripts/core-queue-paths.mjs';
 import { verifyQueueProof } from '../scripts/test-queue-proof.mjs';
+import { checkFailureDetail } from '../dist/check-failure-detail.js';
+import { failingStep } from '../dist/hosted-landing-suspect.js';
+import { slimReceipt } from '../dist/receipt-slim.js';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
 
 const wake = 'convex/projectHostedFinishWake.ts';
@@ -128,6 +131,57 @@ test('verify refuses the 8bc06644 wake change without proof before starting any 
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stderr, /QUEUE_PROOF_REQUIRED:.*convex\/projectHostedFinishWake\.ts/);
   assert.equal(result.stdout, '');
+});
+
+test('the compact landing failure keeps the static proof code and first safe message line', t => {
+  const { root, hosted } = fixture(t);
+  const control = String.fromCharCode(27);
+  const controlPath = wake.replace('.ts', control + '[2J.ts');
+  const { stderr, status } = spawnSync(
+    process.execPath,
+    [new URL('../scripts/verify.mjs', import.meta.url).pathname],
+    {
+      cwd: root,
+      env: hosted({ source: [controlPath], receipts: [] }),
+      encoding: 'utf8',
+    },
+  );
+  assert.equal(status, 1);
+  const diagnostic = stderr.trim();
+  assert(!diagnostic.includes(control));
+  assert(diagnostic.includes('Wake\\u001b[2J.ts'));
+  const message = checkFailureDetail(
+    {},
+    failingStep(
+      [
+        { descriptor: JSON.stringify({ shard: 0 }), seal: null, failureExcerpt: 'unrelated job output' },
+        {
+          descriptor: JSON.stringify({ shard: 1 }),
+          seal: JSON.stringify({
+            failureSummary: `${diagnostic} ${control}token=fixture-value\nError: Command failed (exit 1)`,
+          }),
+        },
+      ],
+      2,
+    ),
+  );
+  const reply = slimReceipt({
+    transport: 'hosted',
+    action: 'wait',
+    result: {
+      submissions: [
+        {
+          submission: {
+            phase: 'terminal-failed',
+            error: { code: 'CHECK_FAILED', message },
+          },
+        },
+      ],
+    },
+  });
+  const error = reply.result.submissions[0].submission.error;
+  assert.equal(error.code, 'CHECK_FAILED');
+  assert.equal(error.message, `Failing job 1 (static): ${diagnostic} token=[redacted]`);
 });
 
 test('only a matching replay and an independently reviewed change or a healthy on-path cell cover the wake', async t => {
