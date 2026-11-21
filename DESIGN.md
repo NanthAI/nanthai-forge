@@ -388,8 +388,8 @@ Reference page (every state at 512, 64, 32 and 16 px, the stills, CLI frames and
 
 Each is a component or class in `web/src/ds/`; the class names below are what the system's own components render.
 
-- **Page head** (`.head`): a short crumb, then the sentence that is the answer. Filters and the agent's command sit to the right.
-- **Region** (`.region`, `.ph`, `.pf`): a header with the handle (six dots), title, count and one faint hint that says how the list is ordered; a footer is one quiet line that points somewhere.
+- **Page head** (`.head`): a short crumb, then the sentence that is the answer. Filters and the agent's command sit to the right when they fit beside a readable sentence and below it when space is tight.
+- **Region** (`.region`, `.ph`, `.pf`): a header with the handle (six dots), title, count and one faint hint that says how the list is ordered. The hint truncates to give the title room. A footer is one quiet line that points somewhere.
 - **Band** (`.band`): a small bold label with its count that groups rows inside one region. It sits on space, with no line above it.
 - **Row** (`.row`, `.th`): a grid line with a seam under it; `.sel` is the selected row; `.dense` is 34 px.
 - **Keys** (`.btn`): `.primary`, `.rec` (recommended answer), plain, `.ghost` (the way out), `.danger` (red words, never first, never the default), `.sm`, `.lg`, `.wrap`. `kbd` shows the key that does the same.

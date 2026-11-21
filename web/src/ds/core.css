@@ -85,11 +85,13 @@
   .tabs > :is(a, .tabs-more) { display: grid; justify-items: center; gap: 3px; padding: 9px 0 7px; color: var(--text-3); font-size: var(--t-micro); font-weight: var(--w-strong); position: relative; touch-action: manipulation; }
   .tabs > .tabs-more { background: transparent; border: 0; }
   .tabs > [aria-current] { color: var(--text); box-shadow: inset 0 2px 0 var(--brand); }
-  .head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s-1) var(--s-5); align-items: end; padding: 14px var(--gut-head); background: var(--surface); border-bottom: var(--rule) solid var(--line); }
-  .head h1, .head .crumb { grid-column: 1 / -1; font-size: 13px; font-weight: var(--w-strong); color: var(--text-2); display: flex; gap: var(--s-2); align-items: center; min-width: 0; }
-  .head .sit { font: var(--w-medium) var(--t-sit)/var(--lh-head) var(--font-sans); letter-spacing: var(--head-track); color: var(--text-2); max-width: var(--m-sit); text-wrap: pretty; overflow-wrap: anywhere; min-width: 0; }
+  /* Move the tools to their own line when their full row and a readable sentence will not fit together. */
+  .head { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-5); align-items: end; padding: 14px var(--gut-head); background: var(--surface); border-bottom: var(--rule) solid var(--line); }
+  .head > :not(.sit, .tools) { flex-basis: 100%; }
+  .head h1, .head .crumb { font-size: 13px; font-weight: var(--w-strong); color: var(--text-2); display: flex; gap: var(--s-2); align-items: center; min-width: 0; }
+  .head .sit { flex: 1 1 20rem; font: var(--w-medium) var(--t-sit)/var(--lh-head) var(--font-sans); letter-spacing: var(--head-track); color: var(--text-2); max-width: var(--m-sit); text-wrap: pretty; overflow-wrap: anywhere; min-width: 0; }
   .head .sit b { color: var(--text); font-weight: var(--w-bold); }
-  .head .tools { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+  .head .tools { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; justify-content: flex-end; margin-inline-start: auto; min-width: 0; max-width: 100%; }
   .cli { display: inline-flex; align-items: center; gap: 7px; height: var(--ctl-h); padding: 0 10px; border: var(--rule) dashed var(--line-strong); border-radius: var(--r); background: transparent; color: var(--text-2); max-width: 100%; min-width: 0; }
   .cli span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cli[aria-expanded="true"] { border-style: solid; color: var(--text); background: var(--surface-2); }
@@ -113,7 +115,7 @@
   .ph { display: flex; align-items: center; gap: 9px; min-height: var(--ph-h); padding: 0 var(--gut) 0 6px; border-bottom: var(--rule) solid var(--line); background: inherit; }
   .ph.plain { padding-left: var(--gut); }
   .ph h2, .ph h3, .ph h4 { font-size: var(--t-title); font-weight: var(--w-bold); min-width: 0; overflow-wrap: anywhere; }
-  .ph .hint { color: var(--text-3); font-size: var(--t-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .ph .hint { flex: 1 1 0; color: var(--text-3); font-size: var(--t-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .grip { display: grid; place-items: center; width: 22px; height: 28px; flex: none; border: 0; border-radius: var(--r); background: transparent; color: var(--text-3); cursor: grab; touch-action: none; }
   .pf { padding: 9px var(--gut); border-top: var(--rule) solid var(--line); color: var(--text-2); font-size: var(--t-meta); }
   .pad { padding: var(--gut); }
@@ -184,7 +186,7 @@
   .toast a, .toast button { color: var(--accent); font-weight: var(--w-bold); white-space: nowrap; background: none; border: 0; padding: 0; }
   .sheet { width: min(600px, 100%); background: var(--surface); border: var(--rule) solid var(--line-strong); box-shadow: var(--shadow); overflow: hidden; }
   @media (max-width: 860px) {
-    .head { grid-template-columns: minmax(0, 1fr); padding: 14px var(--gut); } .head .sit { font-size: 18px; } .head .tools { justify-content: flex-start; }
+    .head { display: grid; grid-template-columns: minmax(0, 1fr); padding: 14px var(--gut); } .head .sit { font-size: 18px; } .head .tools { justify-content: flex-start; margin-inline-start: 0; }
     .btn { height: var(--ctl-h-touch); padding: 0 14px; font-size: 14.5px; } .btn.sm { height: 34px; } .btn kbd { display: none; } .btn.wrap { min-height: var(--ctl-h-touch); }
     .seg button { height: 36px; padding: 0 var(--s-3); } .grip { width: 34px; height: 36px; } .cli { height: 36px; } .menu button { height: 42px; }
     .dock { display: flex; flex-direction: column; } .zone[data-zone="a"] { border-right: 0; }

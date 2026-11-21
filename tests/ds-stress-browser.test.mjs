@@ -17,6 +17,54 @@ const screens = {
   plan: { path: '/sample-one/synthetic/plan', ready: '.plan .ds-list[role=grid]', sample: '123,456' },
 };
 
+async function checkHead(page, name, width) {
+  const tools = page.locator('.head > .tools > *:visible');
+  assert.ok(await tools.count(), `${name}: page tools are visible`);
+  if (name === 'you') assert.equal(await tools.count(), 4, 'You shows all four tools');
+  const layout = await page.locator('.head > .sit').evaluate(sentence => {
+    const ruler = document.createElement('span');
+    ruler.style.cssText = 'position:absolute; width:20ch';
+    sentence.append(ruler);
+    const minimum = ruler.getBoundingClientRect().width;
+    ruler.remove();
+    const range = document.createRange();
+    const text = document.createTreeWalker(sentence, NodeFilter.SHOW_TEXT);
+    const splitWords = [];
+    for (let node = text.nextNode(); node; node = text.nextNode()) {
+      for (const word of node.textContent.matchAll(/\p{L}+/gu)) {
+        range.setStart(node, word.index);
+        range.setEnd(node, word.index + word[0].length);
+        if (range.getClientRects().length > 1) splitWords.push(word[0]);
+      }
+    }
+    const box = sentence.getBoundingClientRect();
+    const toolsBox = sentence.nextElementSibling.getBoundingClientRect();
+    return { width: box.width, minimum, splitWords, toolsBelow: toolsBox.top >= box.bottom };
+  });
+  assert.ok(
+    layout.width >= layout.minimum,
+    `${name}: sentence width ${layout.width}px < 20ch (${layout.minimum}px)`,
+  );
+  assert.deepEqual(layout.splitWords, [], `${name}: sentence wraps at word boundaries`);
+  if (name === 'you' && width === 1024)
+    assert.ok(layout.toolsBelow, 'wide You tools move below the sentence');
+  if (name === 'place' && width === 1280)
+    assert.ok(!layout.toolsBelow, 'short tools stay beside the sentence');
+  await checkReflow(page, name);
+}
+
+async function checkPanelTitles(page) {
+  for (const name of ['Needs you', 'FYI', 'On the way to main']) {
+    const title = page.locator('.ph').getByRole('heading', { name, exact: true });
+    const lines = await title.evaluate(heading => {
+      const range = document.createRange();
+      range.selectNodeContents(heading.querySelector('button') ?? heading);
+      return range.getClientRects().length;
+    });
+    assert.equal(lines, 1, `${name} fits on one line`);
+  }
+}
+
 async function checkReflow(page, label) {
   const layout = await page.evaluate(async () => {
     await document.fonts.ready;
@@ -145,6 +193,27 @@ test('design system stress text, zoom reflow and maximum-page Dock reorder', asy
       // The browser-shard inventory guard detects the Chromium launch in the suite source.
       const browser = engine === chromium ? await chromium.launch(launchOptions) : await engine.launch();
       t.after(() => browser.close());
+      for (const width of [768, 1024, 1280]) {
+        await t.test(`page heads and Needs me panel titles stay readable at ${width}px`, async t => {
+          const page = await browser.newPage({ viewport: { width, height: 900 } });
+          t.after(() => page.close());
+          page.setDefaultTimeout(5000);
+          await serveFixture(page, out, html, '/sample-one/synthetic/needs?data=busy');
+          await t.test('Needs me panel titles fit on one line', async () => {
+            await page.getByRole('heading', { name: 'On the way to main', exact: true }).waitFor();
+            await page.evaluate(() => document.fonts.ready);
+            await checkPanelTitles(page);
+          });
+          for (const screen of ['you', 'secrets', 'check', 'place']) {
+            await t.test(`${screen} keeps a readable sentence beside its tools or above them`, async () => {
+              await page.goto(`https://forge.test/${screen}`);
+              await page.locator('.head > .tools > *').first().waitFor();
+              await page.evaluate(() => document.fonts.ready);
+              await checkHead(page, screen, width);
+            });
+          }
+        });
+      }
       for (const width of [390, 1440]) {
         await t.test(`keyboard and pointer reorder all seven Billing Dock regions at ${width}px`, async t => {
           const context = await browser.newContext({

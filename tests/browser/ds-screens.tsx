@@ -125,6 +125,10 @@ function Fixture({ place }: { place: 'lanes' | 'plan' }) {
 const screen = location.pathname.split('/').at(-1);
 if (screen === 'needs') {
   void import('./needs-me');
+} else if (screen === 'secrets') {
+  void import('./secrets');
+} else if (screen === 'you' || screen === 'check' || screen === 'place') {
+  void import('./ds-heads');
 } else {
   createRoot(document.getElementById('root')!).render(
     screen === 'billing' ? <Billing /> : <Fixture place={screen === 'lanes' ? 'lanes' : 'plan'} />,
