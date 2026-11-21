@@ -56,6 +56,7 @@ export class ActionsJobClient {
   timings: Record<string, number> = {};
   capabilities: string[] = [];
   sourcePack: SourcePackDownload | null = null;
+  invalidSourcePack = false;
   preflightTicket: ActionsPreflightTicket | null = null;
   proofTicket: ActionsPreflightTicket | null = null;
   /** Shard pool claim targets from the plan bundle (unvalidated until used). */
@@ -210,6 +211,7 @@ export class ActionsJobClient {
       : [];
     this.timings = {};
     this.sourcePack = null;
+    this.invalidSourcePack = false;
     if (timings && this.capabilities.includes('session.timingHistory')) {
       const result = (await this.call({ kind: 'session', timings: true })) as {
         run: HostedCheckRun;
@@ -220,6 +222,7 @@ export class ActionsJobClient {
       if (this.capabilities.includes('sourcePack')) {
         const pack = sourcePackDownloadSchema.safeParse(result.sourcePack);
         this.sourcePack = pack.success ? pack.data : null;
+        this.invalidSourcePack = !pack.success && result.sourcePack != null;
       }
       this.timings = timingDurations(parseTimingHistory(result.timingHistory));
     }

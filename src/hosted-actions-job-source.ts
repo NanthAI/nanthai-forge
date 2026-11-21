@@ -6,7 +6,12 @@ import { SourceWorkerReader } from './hosted-source-worker-reader.js';
 import { parseNativeState, type NativeState } from './state/format.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
 import { directSourceWindow, sourceWindowOrder } from './hosted-actions-direct.js';
-import { fileDigest, downloadSourcePack, unpackSourcePack } from './source-pack-archive.js';
+import {
+  fileDigest,
+  downloadSourcePack,
+  unpackSourcePack,
+  unpackSourcePackObjects,
+} from './source-pack-archive.js';
 import { digest } from './hash.js';
 import { invariant, type ForgeError } from './errors.js';
 import { retryActionsInfrastructure, actionsInfrastructureResponse } from './hosted-actions-retry.js';
@@ -18,6 +23,7 @@ import {
   type MaterializedSubmodule,
 } from './submodule-materialize.js';
 import {
+  actionsAnchoredPackCapability,
   actionsSubmoduleAccessCapability,
   actionsSourceRunsCapability,
 } from './hosted-actions-capabilities.js';
@@ -41,6 +47,11 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
       phases[phase] = (phases[phase] ?? 0) + performance.now() - start;
     }
   };
+  const emptyCache = async () => {
+    await rm(cache, { recursive: true, force: true });
+    await mkdir(cache, { recursive: true });
+  };
+  await emptyCache();
   const connection = client.transport(cache),
     { transport, resolve, resolveWindow, prepareRecipes } = connection;
   const runReads =
@@ -89,28 +100,51 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     pairs && pairs.every(p => byHead.get(p.base) && byHead.get(p.checked))
       ? pairs.map(p => ({ base: byHead.get(p.base)!, checked: byHead.get(p.checked)! }))
       : null;
-  const state = parseNativeState(stateBytes);
-  const base = parseNativeState(baseBytes);
+  invariant(digest(stateBytes) === heads[0], 'SOURCE_HASH_MISMATCH', 'Candidate State differs.');
+  invariant(digest(baseBytes) === heads[1], 'SOURCE_HASH_MISMATCH', 'Accepted base State differs.');
+  const state = parseNativeState(stateBytes),
+    base = parseNativeState(baseBytes);
   phases.stateFetchMs = performance.now() - phaseStarted;
+  const anchored = client.capabilities.includes(actionsAnchoredPackCapability);
+  const notes: string[] = [];
   let selected = state.files,
-    reason = 'no pack',
-    packed: NativeState | null = null;
+    reason = anchored && client.invalidSourcePack ? 'invalid or unavailable pack' : 'no pack',
+    // Only the legacy path reads a pack State. Refresh consumes this as a cache-use signal.
+    packed: NativeState | true | null = null,
+    packFallback: string | undefined;
+  const recordFallback = () => {
+    if (anchored) {
+      packFallback = reason;
+      console.log(`Source pack fallback: ${reason}.`);
+    }
+  };
+  if (anchored && client.invalidSourcePack) recordFallback();
+  const discardPack = async (failure: string) => {
+    reason = failure;
+    packed = null;
+    selected = state.files;
+    recordFallback();
+    await emptyCache();
+    connection.resetCache();
+    reader = new SourceWorkerReader(cache, transport, undefined, actionsReadConcurrency);
+  };
   const archive = join(cache, 'source-pack.gz');
   if (client.capabilities.includes('sourcePack') && client.sourcePack) {
     try {
       const pack = client.sourcePack;
-      const packState =
-        pack.stateRef === heads[0]
+      const packState = anchored
+        ? null
+        : pack.stateRef === heads[0]
           ? state
           : pack.stateRef === heads[1]
             ? base
-            : await (async () => {
+            : await timed('packStateMs', async () => {
                 await connection.resolveHeads([pack.stateRef]);
                 await prepareRecipes([pack.stateRef]);
                 return parseNativeState(
                   await reader.bytes((await transport.describeBatch!([pack.stateRef]))[0]!),
                 );
-              })();
+              });
       console.log(`source: downloading pack ${pack.stateRef} (${pack.size} bytes, ${pack.fileCount} files)`);
       await timed('packFetchMs', () =>
         retryActionsInfrastructure(
@@ -123,21 +157,28 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
         ),
       );
       console.log(`source: pack downloaded in ${((Date.now() - started) / 1000).toFixed(1)}s; unpacking`);
-      await timed('unpackMs', () => unpackSourcePack(pack, packState, archive, cache));
-      const old = new Map(packState.files.map(file => [file.path, file]));
-      selected = state.files.filter(file => old.get(file.path)?.blob !== file.blob);
-      packed = packState;
+      if (packState) {
+        await timed('unpackMs', () => unpackSourcePack(pack, packState, archive, cache));
+        const old = new Map(packState.files.map(file => [file.path, file]));
+        selected = state.files.filter(file => old.get(file.path)?.blob !== file.blob);
+        packed = packState;
+      } else {
+        const held = new Set<string>();
+        for (const manifest of [state, base, ...extraStates])
+          for (const file of manifest?.files ?? []) held.add(file.blob);
+        const written = new Set(
+          await timed('unpackMs', () => unpackSourcePackObjects(pack, archive, cache, id => held.has(id))),
+        );
+        selected = state.files.filter(file => !written.has(file.blob));
+        packed = true;
+      }
     } catch (error) {
-      reason = 'invalid or unavailable pack';
       // Codes only: messages of network errors may carry signed URLs into public logs.
       console.log(
         `source: pack unusable (${(error as { code?: string })?.code ?? 'error'}); reading objects`,
       );
       // Discard every extracted cache byte. A failed pack must not supply W2 bytes.
-      await rm(cache, { recursive: true, force: true });
-      connection.resetCache();
-      await mkdir(cache, { recursive: true });
-      reader = new SourceWorkerReader(cache, transport, undefined, actionsReadConcurrency);
+      await discardPack('invalid or unavailable pack');
     } finally {
       await rm(archive, { force: true });
     }
@@ -254,12 +295,14 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     const pages = await Promise.allSettled(Array.from({ length: 3 }, worker));
     for (const page of pages) if (page.status === 'rejected') throw page.reason;
   };
+  let materializeFailure = 'pack delta download failed';
   const materialize = async () => {
     await rm(directory, { recursive: true, force: true });
     await mkdir(directory, { recursive: true });
     // Copy even unchanged files: a clean tree applies deletions, directory changes
     // and modes without exposing any write to a link from the cached tree.
     await timed('objectFetchMs', download);
+    materializeFailure = 'pack tree verification failed';
     await timed('writeMs', async () => {
       const directories = new Map<string, Promise<unknown>>();
       const ensureDirectory = (path: string) => {
@@ -294,13 +337,7 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     await materialize();
   } catch (error) {
     if (!packed) throw error;
-    packed = null;
-    reason = 'pack tree verification failed';
-    selected = state.files;
-    await rm(cache, { recursive: true, force: true });
-    connection.resetCache();
-    await mkdir(cache, { recursive: true });
-    reader = new SourceWorkerReader(cache, transport, undefined, actionsReadConcurrency);
+    await discardPack(anchored ? materializeFailure : 'pack tree verification failed');
     await materialize();
   }
   // After verification: the pointer bytes are Forge source, the fetched trees are not.
@@ -309,7 +346,6 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
   // the check with its code before project code runs, never a failed plan step.
   let submodules: MaterializedSubmodule[] = [],
     planError: PlanError | undefined;
-  const notes: string[] = [];
   if (run.check.submodules !== false)
     submodules = await timed('submodulesMs', () =>
       materializeSubmodules(directory, state.files, blob => readFile(join(cache, blob)), {
@@ -330,13 +366,17 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
         return [];
       }),
     );
-  const old = new Map(packed?.files.map(file => [file.path, file]) ?? []);
-  const inventory = new Map(state.files.map(file => [file.path, file]));
-  const changed = [...new Set([...old.keys(), ...inventory.keys()])].filter(path => {
-    const before = old.get(path),
-      after = inventory.get(path);
-    return before?.blob !== after?.blob || before?.mode !== after?.mode;
-  });
+  const old = new Map(packed && packed !== true ? packed.files.map(file => [file.path, file]) : []);
+  const deltaPaths = packed === true ? new Set(selected.map(file => file.path)) : null;
+  let deltaFiles = selected.length;
+  if (packed && packed !== true) {
+    const inventory = new Map(state.files.map(file => [file.path, file]));
+    deltaFiles = [...new Set([...old.keys(), ...inventory.keys()])].filter(path => {
+      const before = old.get(path),
+        after = inventory.get(path);
+      return before?.blob !== after?.blob || before?.mode !== after?.mode;
+    }).length;
+  }
   let deltaBytes = 0,
     totalBytes = 0;
   await timed('statMs', async () => {
@@ -349,13 +389,13 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
       }
       const size = await pending;
       totalBytes += size;
-      if (old.get(file.path)?.blob !== file.blob) deltaBytes += size;
+      if (deltaPaths ? deltaPaths.has(file.path) : old.get(file.path)?.blob !== file.blob) deltaBytes += size;
     });
   });
   console.log(`source: phases ${JSON.stringify(phases)}`);
   console.log(
     packed
-      ? `source: pack ${client.sourcePack!.stateRef} + delta ${changed.length} files (${deltaBytes} bytes) in ${((Date.now() - started) / 1000).toFixed(1)}s`
+      ? `source: pack ${client.sourcePack!.stateRef} + delta ${deltaFiles} files (${deltaBytes} bytes) in ${((Date.now() - started) / 1000).toFixed(1)}s`
       : `source: full download (${reason})`,
   );
   return {
@@ -366,7 +406,8 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     checkedBase,
     recheckPairs,
     packed,
-    deltaFiles: changed.length,
+    packFallback,
+    deltaFiles,
     deltaBytes,
     totalBytes,
     connection,

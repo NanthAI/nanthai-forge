@@ -219,6 +219,22 @@ test('pack objects are written only after their own digest matches', async t => 
   assert.deepEqual(readdirSync(empty), []);
 });
 
+test('pack cache fill rejects missing archive files and failed writes without returning a filled set', async t => {
+  const data = fixture(t, 5, 0);
+  const archive = join(data.directory, 'pack.gz');
+  const object = await createSourcePack('a'.repeat(64), { files: data.packed }, data.source, archive);
+  const out = join(data.directory, 'out');
+  await assert.rejects(
+    unpackSourcePackObjects(object, join(data.directory, 'missing.gz'), out, () => true),
+    { code: 'ENOENT' },
+  );
+  mkdirSync(join(out, data.packed[0].blob), { recursive: true });
+  await assert.rejects(
+    unpackSourcePackObjects(object, archive, out, () => true),
+    { code: 'EISDIR' },
+  );
+});
+
 test('the machine store is off in test processes unless configured', () => {
   const saved = process.env.FORGE_OBJECT_CACHE;
   try {

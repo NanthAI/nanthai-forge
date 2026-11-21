@@ -5,7 +5,7 @@ import { checkoutIo } from './checkout-io.js';
 import { writeFile, stat, rm, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
-import { pipeline, finished } from 'node:stream/promises';
+import { pipeline } from 'node:stream/promises';
 import { createGzip, createGunzip } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { digest } from './hash.js';
@@ -147,11 +147,15 @@ async function readSourcePack(
   observe?: (blob: string, bytes: Buffer) => void,
 ) {
   const input = checkoutReadStream(path);
-  const stream = input.pipe(createGunzip());
+  const stream = createGunzip();
+  const decompression = pipeline(input, stream);
+  // Forward archive read errors to the iterator and observe early rejections during cleanup.
+  decompression.catch(() => undefined);
   const iterator = stream[Symbol.asyncIterator]();
   let pending: Buffer = Buffer.alloc(0),
     expanded = 0,
     writing = 0;
+  let writeFailure: { error: unknown } | undefined;
   const writes = new Set<Promise<void>>();
   const take = async (length: number) => {
     const parts: Buffer[] = [];
@@ -190,8 +194,7 @@ async function readSourcePack(
     let total = 0;
     for (const file of header.files as PackFile[]) {
       invariant(
-        typeof file?.path === 'string' &&
-          typeof file.blob === 'string' &&
+        typeof file?.blob === 'string' &&
           /^[0-9a-f]{64}$/.test(file.blob) &&
           Number.isSafeInteger(file.size) &&
           file.size >= 0 &&
@@ -212,26 +215,32 @@ async function readSourcePack(
       // Bounded concurrent writes (16 files, 64 MiB): small-file latency dominates large trees.
       const write: Promise<void> = checkoutIo(() =>
         writeFile(join(directory, file.blob), bytes, { mode: 0o600 }),
-      ).finally(() => {
-        writes.delete(write);
-        writing -= bytes.length;
-      });
-      // Handled here and re-observed below, so a failure never becomes an unhandled rejection.
-      write.catch(() => undefined);
+      )
+        .catch(error => {
+          // A write can settle while the next member is being read and leave the active set.
+          writeFailure ??= { error };
+        })
+        .finally(() => {
+          writes.delete(write);
+          writing -= bytes.length;
+        });
       writes.add(write);
       writing += bytes.length;
       while (writes.size >= 16 || writing > 64 * 1024 * 1024) await Promise.race(writes);
+      if (writeFailure) throw writeFailure.error;
     }
     await Promise.all(writes);
+    if (writeFailure) throw writeFailure.error;
     invariant(
       !pending.length && (await iterator.next()).done,
       'SOURCE_HASH_MISMATCH',
       'Trailing pack bytes.',
     );
+    await decompression;
   } finally {
     await Promise.allSettled(writes);
     stream.destroy();
     input.destroy();
-    await finished(input, { cleanup: true }).catch(() => undefined);
+    await decompression.catch(() => undefined);
   }
 }

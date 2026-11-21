@@ -330,6 +330,8 @@ export async function prepareActionsJob(
       base,
       requiresStateBinding: source.connection.requiresStateBinding(),
       packed: source.packed,
+      // Transport can recover between planning attempts. Keep its diagnostic out of the recipe pin.
+      ...(source.packFallback ? { fallback: source.packFallback } : {}),
       deltaFiles: source.deltaFiles,
       deltaBytes: source.deltaBytes,
       totalBytes: source.totalBytes,

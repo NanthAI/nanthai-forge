@@ -698,7 +698,8 @@ The server still derives retained summaries from `contractReports`; the optional
 `testFiles` field is a compatibility summary, not independent evidence. The runner
 reads the session's `sourcePack` field and sends pack prepare/commit commands only
 when the server advertised `sourcePack`. Without it, planning uses W2 full download
-and skips pack refresh.
+and skips pack refresh. The server advertises `sourcePack.anchored` only when its
+`FORGE_ACTIONS_ANCHORED_SOURCE_PACK` setting is `1`.
 Backend and runner updates can be deployed in any order.
 
 Command and result metadata strip unknown fields. The identity envelope, known
@@ -819,16 +820,25 @@ artifact transfer remain workflow bootstrap, independent of Forge source storage
 The existing planning session optionally returns `sourcePack`: the newest project's
 `stateRef`, `objectKey`, `sha256`, `size`, `fileCount`, `createdAt` and a five-minute
 signed GET. It reuses the negotiated timing-history session; no additional
-pack session or polling is needed. Planning resolves the Candidate,
-base and, if different, pack State through the ordinary hash-verified source path.
+pack session or polling is needed. Planning resolves and verifies the pinned
+Candidate and base manifests. By default it also resolves a different pack State
+through the ordinary hash-verified source path and records that phase as `packStateMs`.
 A historical pack State can be recipe-backed without a physical manifest. Its
 authorized State descriptor binds the recipe metadata and leaves to that exact State;
 it does not use unbound object reads or substitute the current Candidate.
-One pack GET seeds a job-private blob cache; only changed content uses W2's paged,
+One pack GET seeds a freshly emptied, job-private blob cache. With
+`sourcePack.anchored`, planning skips the pack State body and follow-up descriptor
+windows. Existing servers can still include the historical State descriptor in
+the initial reply. Anchored planning keeps only verified,
+hash-named members referenced by a held manifest and computes the Candidate's
+missing content from the set of members it wrote. Pack paths and modes supply
+neither the cache keys nor the tree layout. Only missing content uses W2's paged,
 three-worker downloader. A fresh tree applies deletions, mode changes and path-type
 changes, creates symlinks last, and hashes every final file/link against the Candidate
 with Forge's SHA-256 digest. Cache inventory, size, checksum, State, gzip, or final
-tree failures discard all extracted bytes and run the full W2 transfer. Older
+tree failures discard all extracted bytes and run the full W2 transfer. The
+anchored path records a fallback reason in the plan log and pack-refresh artifact.
+The execution plan pin stays stable across retries. Older
 servers without `sourcePack` use that same full path.
 
 The deterministic format is gzip (level 1), containing a four-byte big-endian JSON
@@ -844,7 +854,8 @@ When there is no usable pack, or the delta exceeds 300 paths or 10% of Candidate
 content bytes, the optional `hosted-pack` job runs alongside the check shards after
 matrix and Candidate artifact publication. It uses that artifact to seed its cache,
 fetches any missing accepted-base blobs, verifies them, and packs the pinned accepted
-base. The plan carries the negotiated State-source requirement in the existing
+base. Anchored planning counts the Candidate paths and bytes the pack did not serve
+for this refresh decision. The plan carries the negotiated State-source requirement in the existing
 artifact. A fresh pack job uses it to bind its missing-file requests to the pinned
 base, with current authorization and no separate State discovery request.
 Refresh failures leave the check outcome alone. The pack job logs a fixed
@@ -868,16 +879,18 @@ The previous or abandoned slot is deleted before its next replacement, after its
 15-minute signed PUT plus two-minute transfer grace has expired. Failed deletion
 retains the slot and skips refresh; later refresh retries it. At most two pack
 objects are tracked, with no idle calls, sweeps, timers or schedulers. Latest pack
-metadata is never removed by that cleanup. Every consumer independently verifies
-its inventory and bytes against immutable Forge State source.
+metadata is never removed by that cleanup. Pack readers verify member hashes.
+The legacy Actions plan also matches the inventory to the pack State. The anchored
+plan gets its tree inventory from the pinned Candidate manifest.
 
 For 6,000 unique raw files with 20 changed blobs and a pack of the base, planning
 uses two source requests (one manifest window and one delta window), versus W2's
 sixteen. Including HTTP actions and nested mutations, session/source/plan totals
 are eleven versus thirty-nine function invocations; source itself is four versus
 thirty-two. R2 reads are 23 GETs (pack, two manifests, twenty blobs), versus 6,002.
-A different pack State adds one manifest request/GET. Recipe-backed content adds
-its actual bounded descriptor and storage windows. The negotiated timing-history session adds one indexed
+A different pack State adds its descriptor and manifest reads on the default
+path. The anchored path skips those reads. Recipe-backed content adds its actual
+bounded descriptor and storage windows. The negotiated timing-history session adds one indexed
 pack-document read; unchanged-pack planning writes no pack metadata.
 
 A refresh adds two HTTP requests / five function invocations, one PUT (Class A)
@@ -1330,10 +1343,14 @@ as well. Relative cache paths are resolved once by the supervisor so setup and
 tests use the same directory. Setup output is not test evidence and its exit status is advisory: a
 missing executable or failed cache warm continues through the cold path.
 
-The supervisor verifies the artifact State hash against the exact run head, then
-checks Candidate paths, hashes and modes before and after setup and rechecks the
-execution plan. Added, removed or modified source fails the check before tests
-start. Cache preparation must keep its files outside Candidate source. This is
+The plan step verifies the Candidate tree before publishing the same-run
+Actions artifact. Run jobs verify tree bytes only when the check declares
+`actions.setup`. In those jobs the supervisor verifies the artifact State hash
+against the exact run head, checks Candidate paths, hashes and modes before and
+after setup, and rechecks the execution plan. Added, removed or modified source
+fails the check before tests start. A run job without setup relies on the plan
+step's verification and the same-run artifact. Cache preparation must keep its
+files outside Candidate source. This is
 source verification under ordinary OS rights, not a sandbox against a malicious
 process with access to supervisor files or other account resources.
 

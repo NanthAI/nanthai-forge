@@ -8,7 +8,10 @@ import { checksFixture, code } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { verifyActionsOidc, validateActionsClaims, actionsIssuer } from '../dist/github-actions-oidc.js';
 import { actionsPreflightSignature } from '../dist/hosted-actions-preflight.js';
-import { hostedActionsCapabilities } from '../dist/hosted-actions-capabilities.js';
+import {
+  actionsAnchoredPackCapability,
+  hostedActionsCapabilities,
+} from '../dist/hosted-actions-capabilities.js';
 import { hostedCheckRunSchema } from '../dist/hosted-check.js';
 import { hostedActionsRuntime } from '../dist/hosted-actions.js';
 import { checkPin } from '../dist/hosted-check.js';
@@ -2376,6 +2379,24 @@ test('source pack reservations bound project storage to two objects and delete o
       packDocuments: s.tables.projectSourcePacks.size,
     }),
   );
+});
+
+test('both Actions sessions advertise anchored source packs only with the server switch on', async t => {
+  const s = await fixture(t),
+    flag = 'FORGE_ACTIONS_ANCHORED_SOURCE_PACK';
+  await s.bind();
+  const previous = process.env[flag];
+  t.after(() => (previous === undefined ? delete process.env[flag] : (process.env[flag] = previous)));
+  delete process.env[flag];
+  for (const timings of [false, true]) {
+    const off = await s.call(sessions, 'session', { ...s.input(), timings });
+    assert.deepEqual(off.capabilities, hostedActionsCapabilities);
+  }
+  process.env[flag] = '1';
+  for (const timings of [false, true]) {
+    const on = await s.call(sessions, 'session', { ...s.input(), timings });
+    assert.deepEqual(on.capabilities, [...hostedActionsCapabilities, actionsAnchoredPackCapability]);
+  }
 });
 
 test('source pack commit verifies R2 size/checksum and reauthorizes after HEAD', async t => {

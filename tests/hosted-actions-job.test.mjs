@@ -26,6 +26,7 @@ import {
   actionsInlineLogCapability,
   actionsJobCalls,
   actionsSourceBatchCapability,
+  actionsAnchoredPackCapability,
 } from '../dist/hosted-actions-capabilities.js';
 import { z } from 'zod';
 import { ConvexHttpClient } from 'convex/browser';
@@ -2368,6 +2369,160 @@ async function cachedPack(s, files = s.files, stateRef = s.run.candidate.base.he
   return pin;
 }
 
+function replacePack(s, unpacked) {
+  const bytes = gzipSync(unpacked);
+  const sha256 = s.put(bytes).sha256;
+  Object.assign(s.session.sourcePack, {
+    sha256,
+    size: bytes.length,
+    url: `https://objects.invalid/${sha256}`,
+  });
+}
+
+test('anchored pack reads only the pinned States, uses content ids across paths and retains base-only blobs', async t => {
+  const s = fixture(t, { capabilities: [...hostedActionsCapabilities, actionsAnchoredPackCapability] });
+  s.run.check = { executable: 'true', args: [], definition: 'c'.repeat(64) };
+  const baseOnly = s.entry('base-only', 'accepted base only'),
+    unused = s.entry('historical-only', 'unused historical bytes'),
+    duplicate = { ...s.files[0], path: 'historical-duplicate' },
+    historical = [...s.files, baseOnly, unused, duplicate];
+  const oldHead = s.state(historical).sha256;
+  const pin = await cachedPack(s, historical, oldHead);
+  s.run.candidate.base.head = s.state([...s.files, baseOnly]).sha256;
+  const live = s.files.map(file =>
+    file.path === 'README.md'
+      ? s.entry(file.path, 'synthetic after')
+      : { ...file, path: file.path === 'scripts/example.sh' ? 'moved.sh' : file.path },
+  );
+  s.run.request.expectedHead = s.state(live).sha256;
+  // Only the inventory's content framing is used. The pack can even carry a different State label.
+  const plain = gunzipSync(s.objects.get(pin.sha256)),
+    length = plain.readUInt32BE(),
+    header = JSON.parse(plain.subarray(4, 4 + length));
+  header.stateRef = s.session.sourcePack.stateRef = '1'.repeat(64);
+  for (const member of header.files) {
+    member.path = { unused: 'irrelevant-header-path' };
+    delete member.mode;
+  }
+  const inventory = Buffer.from(JSON.stringify(header)),
+    prefix = Buffer.alloc(4);
+  prefix.writeUInt32BE(inventory.length);
+  replacePack(s, Buffer.concat([prefix, inventory, plain.subarray(4 + length)]));
+  const directory = join(s.directory, 'candidate'),
+    cache = join(s.directory, 'objects'),
+    missing = live.find(file => file.path === 'README.md').blob;
+  mkdirSync(cache);
+  writeFileSync(join(cache, missing), 'unverified bytes from a prior job');
+  const result = await prepareActionsJob(s.client, directory, cache);
+  assert.equal(result.packRefresh.packed, true);
+  assert.equal(result.packRefresh.deltaFiles, 1);
+  assert.equal(result.packRefresh.deltaBytes, s.objects.get(missing).length);
+  const source = s.calls.filter(call => call.kind === 'source');
+  assert.equal(source.length, 2);
+  assert.deepEqual(source[1].digests, [missing]);
+  assert.equal(s.traffic.downloads, 4, 'two States, one pack and the delta blob');
+  assert.equal(readFileSync(join(directory, 'README.md'), 'utf8'), 'synthetic after');
+  assert.equal(lstatSync(join(directory, 'moved.sh')).mode & 0o111, 0o111);
+  assert.equal(readFileSync(join(directory, 'test-link'), 'utf8'), '{}');
+  assert.equal(existsSync(join(directory, baseOnly.path)), false);
+  assert.equal(readFileSync(join(cache, baseOnly.blob), 'utf8'), 'accepted base only');
+  assert.equal(existsSync(join(cache, unused.blob)), false);
+  assert.equal(existsSync(join(directory, 'irrelevant-header-path')), false);
+});
+
+for (const fault of [
+  'member hash',
+  'duplicate id hash',
+  'member size',
+  'truncated archive',
+  'oversized archive',
+  'missing archive',
+])
+  test(`anchored pack discards the cache and records fallback after ${fault}`, async t => {
+    const s = fixture(t, { capabilities: [...hostedActionsCapabilities, actionsAnchoredPackCapability] });
+    s.run.check = { executable: 'true', args: [], definition: 'c'.repeat(64) };
+    const stale = s.entry('old-base-only', 'discarded pack cache bytes'),
+      unused = s.entry('zz-unheld', 'unheld history'),
+      historical = [
+        ...s.files,
+        stale,
+        fault === 'duplicate id hash' ? { ...s.files[0], path: unused.path } : unused,
+      ],
+      oldHead = s.state(historical).sha256,
+      pin = await cachedPack(s, historical, oldHead);
+    s.run.candidate.base.head = s.state([...s.files, stale]).sha256;
+    const plain = gunzipSync(s.objects.get(pin.sha256));
+    if (fault === 'member hash' || fault === 'duplicate id hash') {
+      plain[plain.length - 1] ^= 1;
+      replacePack(s, plain);
+    }
+    if (fault === 'member size') {
+      const end = 4 + plain.readUInt32BE();
+      const body = plain.subarray(end);
+      const header = plain
+        .subarray(4, end)
+        .toString()
+        .replace(/"size":\d+/, '"size":0');
+      const prefix = Buffer.alloc(4);
+      prefix.writeUInt32BE(Buffer.byteLength(header));
+      replacePack(s, Buffer.concat([prefix, Buffer.from(header), body]));
+    }
+    if (fault === 'truncated archive') replacePack(s, plain.subarray(0, -1));
+    if (fault === 'oversized archive') s.session.sourcePack.size = 301 * 1024 * 1024;
+    if (fault === 'missing archive') s.objects.delete(pin.sha256);
+    const directory = join(s.directory, 'candidate'),
+      cache = join(s.directory, 'objects');
+    const result = await prepareActionsJob(s.client, directory, cache);
+    assert.equal(result.packRefresh.packed, null);
+    assert.equal(result.packRefresh.fallback, 'invalid or unavailable pack');
+    assert.equal(existsSync(join(cache, stale.blob)), false);
+    assert.equal(readFileSync(join(directory, 'README.md'), 'utf8'), 'synthetic after');
+  });
+
+for (const fault of ['missing delta', 'corrupt delta', 'final link mismatch'])
+  test(`anchored pack retries the full Candidate after ${fault} and records why`, async t => {
+    const s = fixture(t, { capabilities: [...hostedActionsCapabilities, actionsAnchoredPackCapability] });
+    await cachedPack(s);
+    const delta = digest('synthetic after'),
+      link = s.files.find(file => file.mode === 'symlink'),
+      directory = join(s.directory, 'candidate'),
+      cache = join(s.directory, 'objects');
+    const request = s.client.request;
+    const objectReads = [];
+    let deltaGets = 0;
+    t.mock.method(s.client, 'request', async (url, init) => {
+      if (String(url).startsWith('https://objects.invalid/')) objectReads.push(String(url).split('/').at(-1));
+      if (String(url) === `https://objects.invalid/${delta}` && ++deltaGets === 1) {
+        if (fault === 'missing delta') return new Response(null, { status: 404 });
+        if (fault === 'corrupt delta') return new Response('synthetic wrong');
+        writeFileSync(join(cache, link.blob), 'README.md');
+      }
+      return request(url, init);
+    });
+    const result = await prepareActionsJob(s.client, directory, cache);
+    assert.equal(result.packRefresh.packed, null);
+    const reason =
+      fault === 'final link mismatch' ? 'pack tree verification failed' : 'pack delta download failed';
+    assert.equal(result.packRefresh.fallback, reason);
+    const windows = s.calls.filter(call => call.kind === 'source');
+    assert.deepEqual(windows[1].digests, [delta]);
+    const finalIds = JSON.parse(result.stateBytes).files.map(file => file.blob);
+    assert.deepEqual(
+      new Set(objectReads.slice(-finalIds.length)),
+      new Set(finalIds),
+      're-fetches every Candidate blob, including the one with an existing descriptor',
+    );
+    assert.equal(deltaGets, 2);
+    assert.equal(readFileSync(join(directory, 'README.md'), 'utf8'), 'synthetic after');
+    assert.equal(readFileSync(join(directory, link.path), 'utf8'), '{}');
+    if (fault === 'missing delta') {
+      const retry = await prepareActionsJob(s.client, directory, cache);
+      assert.equal(retry.packRefresh.packed, true);
+      assert.equal(retry.packRefresh.fallback, undefined);
+      assert.equal(retry.recipe.pin, result.recipe.pin, 'transport recovery keeps the immutable plan pin');
+    }
+  });
+
 test('pack round-trip preserves bytes, modes and links; delta applies added, changed, deleted and mode paths', async t => {
   const s = fixture(t);
   await cachedPack(s);
@@ -2430,6 +2585,35 @@ test('6000-file pack plus 20 changes uses two source windows instead of W2 sixte
   );
 });
 
+test('anchored 6000-file historical pack plus 20 changes stays at two source windows and 23 GETs', async t => {
+  const s = fixture(t, { capabilities: [...hostedActionsCapabilities, actionsAnchoredPackCapability] });
+  const files = Array.from({ length: 6000 }, (_, i) => s.entry(`source/file-${i}.txt`, `before-${i}`));
+  const historical = s.state(files).sha256;
+  await cachedPack(s, files, historical);
+  s.run.candidate.base.head = s.state([...files, s.entry('base-only', 'accepted base only')]).sha256;
+  s.run.request.expectedHead = s.state(
+    files.map((file, i) => (i < 20 ? s.entry(file.path, `after-${i}`) : file)),
+  ).sha256;
+  s.run.check = { executable: 'true', args: [], definition: 'c'.repeat(64) };
+  const started = performance.now(),
+    rssBefore = process.memoryUsage().rss;
+  const result = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'cache'),
+  );
+  const windows = s.calls.filter(call => call.kind === 'source');
+  assert.equal(result.packRefresh.packed, true);
+  assert.equal(result.packRefresh.deltaFiles, 20);
+  assert.equal(result.packRefresh.refresh, false);
+  assert.equal(windows.length, 2);
+  assert(windows.every(call => !call.digests.includes(historical)));
+  assert.equal(s.traffic.downloads, 23);
+  const rssGrowth = process.memoryUsage().rss - rssBefore;
+  assert(rssGrowth < 256 * 1024 * 1024, 'anchored pack planner stays within the existing memory budget');
+  t.diagnostic(JSON.stringify({ elapsedMs: performance.now() - started, rssGrowth }));
+});
+
 test('historical source-pack State recipes stay bound and download only the changed objects', async t => {
   const s = fixture(t);
   s.files.push(
@@ -2486,6 +2670,7 @@ test('historical source-pack State recipes stay bound and download only the chan
   const result = await materializeActionsSource(s.client, directory, cache);
   t.diagnostic(JSON.stringify({ readerRssGrowthBytes: process.memoryUsage().rss - rssBefore }));
   assert.ok(result.packed, 'a valid historical pack must be used');
+  assert.equal(typeof result.phases.packStateMs, 'number');
   assert.equal(result.packed.files.length, s.files.length);
   assert.equal(result.deltaFiles, 1);
   assert.equal(readFileSync(join(directory, 'README.md'), 'utf8'), 'synthetic after');

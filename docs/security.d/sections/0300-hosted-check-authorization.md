@@ -6,4 +6,10 @@ Queueing a hosted check requires current project owner or contributor access and
 
 **Private submodules need the owner's allowlist.** A check gets a read token for a private submodule repository only when the project owner allowed that repository with `configure-runner` `submodules` (owner only; empty by default). Allowing a repository grants every change that reaches a check, from any member or agent who can land one, read access to that repository's contents: the check's own commands can read and print it. On a run whose check logs are public (`publicLogs:true`, or a run repository GitHub's signed OIDC claims do not show as private) a repository is read only when the owner allowed it with `"public-logs"`, because printed content is then public. Anything else is refused with the owner's exact command ([GitHub Actions checks](../../operations/github-actions-checks.md#submodules-in-checks)).
 
+The GitHub Actions plan step verifies the pinned Candidate tree before publishing
+the same-run artifact. Run jobs verify tree bytes only when the check declares an
+`actions.setup` program, with checks before and after setup. Other run jobs rely
+on the plan step's verification and the same-run artifact. See
+[GitHub Actions checks](../../operations/github-actions-checks.md).
+
 Only the request's creator, the runner's current owner or the project owner may cancel or update a request, and each must still have current project write access. Revoked contributors and read-only viewers cannot queue, cancel or update checks, including retries. Result updates retain the original request, runner and run pins and terminal-result reconciliation. Reports remain observations rather than execution attestations. The canonical owner listener accepts recheck requests only from the current project owner.
