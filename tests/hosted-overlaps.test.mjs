@@ -879,6 +879,7 @@ test('missing staged lifecycle evidence is unavailable, never an open-peer fallb
     s.transaction('missing-marker', overlaps.read, {
       projectId: s.projectId,
       laneId: lane.id,
+      detail: true,
     }),
     code('SOURCE_UNAVAILABLE'),
   );

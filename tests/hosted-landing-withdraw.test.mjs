@@ -262,6 +262,8 @@ test('D1 replay: the Lane’s new head supersedes its queued sync-required entry
 {
   const syncApi = await import(moduleUrl('../convex/projectHostedSync.ts'));
   const peersApi = await import(moduleUrl('../convex/projectHostedOverlapPeers.ts'));
+  const overlapApi = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
+  const overlapStore = await import(moduleUrl('../convex/projectHostedOverlapStore.ts'));
 
   const outcome = value => {
     const parsed = typeof value === 'string' ? JSON.parse(value) : value;
@@ -298,6 +300,53 @@ test('D1 replay: the Lane’s new head supersedes its queued sync-required entry
       .then(outcome);
   const landings = (f, laneIds) =>
     f.tx('peerLandings', { _handler: ctx => peersApi.peerLandings(ctx, f.projectId, laneIds) }, {});
+
+  test('ordinary receipts offer the same saved peer on its first ready read', async t => {
+    const at = '2026-01-01T12:00:00.000Z';
+    t.mock.timers.enable({ apis: ['Date'], now: Date.parse(at) });
+    const f = await finishFixture(t);
+    const { c } = f;
+    const path = 'selected.txt';
+    const file = c.file(path, 'my change\n');
+    const mine = await c.lane(c.state([c.baseFile, c.hidden, file], [c.baseline.sha256]));
+    const peer = await f.readLane(f.lane.laneId);
+    const own = await f.readLane(mine.laneId);
+    await f.tx(
+      'trackOverlap',
+      {
+        _handler: async ctx => {
+          for (const [lane, blob] of [
+            [peer, c.file(path, 'selected\n').blob],
+            [own, file.blob],
+          ])
+            await overlapStore.trackHostedOverlapLane(
+              ctx,
+              f.projectId,
+              { ...lane, at },
+              {
+                baseSequence: 0,
+                changes: [{ path, before: null, after: { blob, mode: 'file' } }],
+              },
+            );
+        },
+      },
+      {},
+    );
+    const read = () =>
+      f.tx('overlaps', overlapApi.read, { projectId: f.projectId, laneId: own.id }, 'owner').then(outcome);
+    const { state } = await begin(f);
+    const checking = await read();
+    assert.equal(checking.stackOffer, undefined);
+    await f.passChecks();
+    for (let step = 0; (await f.status(state.id)).request.phase !== 'ready'; step++) {
+      assert(step < 20, 'the synthetic passed check makes the peer ready');
+      await f.execute();
+    }
+    const { stackOffer: offer, ...ready } = await read();
+    assert.equal(offer?.peerLaneId, peer.id);
+    assert.equal(offer.submissionId, state.id);
+    assert.deepEqual(ready, checking, 'all other receipt fields are stable across the ready transition');
+  });
 
   test('sync stackOn is part of the wire request and refuses mixed targets', () => {
     const laneId = randomUUID(),

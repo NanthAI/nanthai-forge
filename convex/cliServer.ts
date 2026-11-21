@@ -18,6 +18,7 @@ import { report } from './errors';
 import { finishReadReader } from './projectFinishReadReader';
 import { invariant } from '../src/errors';
 import { refreshIdentity } from './forgeIdentity';
+import { mapLandingRequestPort } from './projectLandingRequestBody';
 import { withPublicWork } from './publicWorkReads';
 import { actionPublicPeople, actionSubjectArgs, publicPeople, subjectArgs, type Shape } from './publicPeople';
 export * from './server';
@@ -210,23 +211,27 @@ export const projectQuery = readPeople(
       const projects = new Map<string, Promise<Doc<'hostedProjects'> | null>>();
       return {
         ...guarded,
-        db: new Proxy(ctx.db, {
-          get(target, key) {
-            if (key === 'get')
-              return async (id: string) => {
-                const projectId = target.normalizeId('hostedProjects', id);
-                if (!projectId) return target.get(id as never);
-                let row = projects.get(projectId);
-                if (!row) {
-                  row = target.get(projectId);
-                  projects.set(projectId, row);
-                }
-                return structuredClone(await row);
-              };
-            const value = Reflect.get(target, key);
-            return typeof value === 'function' ? value.bind(target) : value;
-          },
-        }),
+        db: mapLandingRequestPort(
+          ctx.db,
+          db =>
+            new Proxy(db, {
+              get(target, key) {
+                if (key === 'get')
+                  return async (id: string) => {
+                    const projectId = target.normalizeId('hostedProjects', id);
+                    if (!projectId) return target.get(id as never);
+                    let row = projects.get(projectId);
+                    if (!row) {
+                      row = target.get(projectId);
+                      projects.set(projectId, row);
+                    }
+                    return structuredClone(await row);
+                  };
+                const value = Reflect.get(target, key);
+                return typeof value === 'function' ? value.bind(target) : value;
+              },
+            }),
+        ),
       };
     }),
   ),

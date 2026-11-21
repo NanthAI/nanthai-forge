@@ -112,6 +112,56 @@ const resolutionOf = (origin, left = digest('moved')) => ({
 });
 const stackOn = (parent, head = digest('pin')) => ({ stack: { laneId: parent.id, head } });
 
+test('ordinary receipts skip peer evidence when no landing is ready, even with many saved peers', async t => {
+  const { s, lane, read } = await project();
+  const mine = await lane('My change');
+  await lane('First peer');
+  const args = { paths: true };
+  const small = await read(mine.id, args);
+  const smallIo = s.counts.at(-1);
+  for (let i = 0; i < 29; i++) await lane(`Peer ${i + 2}`);
+  const busy = await read(mine.id, args);
+  const busyIo = s.counts.at(-1);
+  const explicit = await read(mine.id, { detail: true });
+  const explicitIo = s.counts.at(-1);
+  t.diagnostic(
+    JSON.stringify({
+      smallBytes: smallIo.readBytes,
+      busyBytes: busyIo.readBytes,
+      explicitBytes: explicitIo.readBytes,
+    }),
+  );
+  assert.deepEqual(busy, small);
+  assert.deepEqual(busy.changedPaths, { paths: [shared], complete: true });
+  assert.equal(explicit.peerEvidence.blockingCount, 30, 'explicit overlap evidence still names saved peers');
+  assert.equal(busyIo.documents, smallIo.documents, 'peer fan-out adds zero document reads to the receipt');
+  assert.equal(busyIo.readBytes, smallIo.readBytes, 'peer fan-out adds zero document bytes to the receipt');
+});
+
+test('an unrelated ready landing with unavailable cold evidence does not fail an overlap receipt', async () => {
+  const { s, lane, read } = await project();
+  const mine = await lane('My change');
+  await lane('Editing peer');
+  const ordinary = await read(mine.id);
+  const requestBodyId = s.insert('projectHostedLandingBodies', { value: '{}' });
+  s.insert('projectHostedLandingRequests', {
+    projectId: s.projectId,
+    channel: 'main',
+    submissionId: randomUUID(),
+    operationId: randomUUID(),
+    attemptId: randomUUID(),
+    actor: 'owner',
+    sequence: 1,
+    phase: 'ready',
+    runnable: false,
+    runId: null,
+    value: '{}',
+    requestBodyId,
+  });
+  s.tables.projectHostedLandingBodies.delete(requestBodyId);
+  assert.deepEqual(await read(mine.id), ordinary);
+});
+
 // Issue ee9d5738 (friction ee726a66, c9f5a7c0): replay of the B1.5d and wave-5 notices a builder could
 // do nothing about. Each assertion fails on the head-matching and per-pair exclusions before this change.
 

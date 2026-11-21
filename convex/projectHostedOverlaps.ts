@@ -19,6 +19,7 @@ import { effectivePolicy } from '../src/autonomy-policy';
 import { stackingMode } from '../src/agent-parallel-defaults';
 import { laneConflicts } from './projectHostedConflicts';
 import { overlapMainFor } from './projectHostedOverlapMainLog';
+import { landingRequestOriginalDb } from './projectLandingRequestBody';
 
 /** Path notices were removed (flip 4, Issue 853fcde3); exact trial-merge conflicts replace them. */
 const RETIRED_OVERLAPS = { count: 0, items: [], coverage: 'unavailable' } as const;
@@ -139,17 +140,31 @@ export const read = query({
               changes: '[]',
               complete: lane.head === lane.base.head,
             };
-      // Main's path history only feeds `behindMain`, and hostedOverlapAdvice ignores it for a Lane based
-      // on the current main head (no conflicts, coverage complete): level Lanes never read it. A Lane
-      // behind reads the landings after its base from the per-landing log (Issue 750c5929); only one
-      // further behind than the log reads the whole compact row (up to 128 KB).
-      const latest =
-        lane.base.head === main.head
-          ? null
-          : await overlapMainFor(ctx, projectId, baseSequence, new Set(savedPaths(focus.changes)));
       // A Lane with no saved path changes cannot overlap anything: skip the peer and head
       // reads (the bulk of this query's I/O) instead of scanning every open Lane for nothing.
       const idle = !path && !scope?.length && focus.complete && focus.changes === '[]';
+      const explicitEvidence = Boolean(detail || path);
+      const stacked = Boolean(lane.stack && !lane.stack.detached);
+      const canOffer = !detail && lane.state === 'active' && !stacked;
+      // Ordinary receipts use path comparisons only to select a stack offer. A peer can
+      // back an offer only after its canonical landing request enters ready (D2).
+      // Check only the indexed row. An unrelated landing's cold bodies are irrelevant.
+      const hasReadyLanding = () =>
+        landingRequestOriginalDb(ctx.db)
+          .query('projectHostedLandingRequests')
+          .withIndex('by_project_and_channel_and_phase_and_sequence', q =>
+            q.eq('projectId', projectId).eq('channel', 'main').eq('phase', 'ready'),
+          )
+          .first()
+          .then(row => row !== null);
+      const [latest, needsPeers] = await Promise.all([
+        // Only behind-main Lanes need history. Read the bounded landing log after their base
+        // (Issue 750c5929), falling back to the compact row when the log cannot cover it.
+        lane.base.head === main.head
+          ? null
+          : overlapMainFor(ctx, projectId, baseSequence, new Set(savedPaths(focus.changes))),
+        !idle && (explicitEvidence || (canOffer && hasReadyLanding())),
+      ]);
       const readPeers = () =>
         Promise.all([
           liveOpenOverlapLanes(ctx, projectId, cutoff),
@@ -161,7 +176,9 @@ export const read = query({
             .order('desc')
             .take(51),
         ]);
-      const [peers, headers] = idle ? ([[], []] as Awaited<ReturnType<typeof readPeers>>) : await readPeers();
+      const [peers, headers] = needsPeers
+        ? await readPeers()
+        : ([[], []] as Awaited<ReturnType<typeof readPeers>>);
       const versions = new Map(headers.map(header => [header.key, header.version]));
       // Newest-first windows hold current work, but retained stale active Lanes can still push
       // a live peer out of the 51-row window (2026-10-30: 125 active heads hid every peer).
@@ -218,7 +235,7 @@ export const read = query({
       // The stack offer (D2): bounded reads, only for peers sharing a saved file. A detail read is a
       // listing of every peer (board, peers(detail)); it carries no phases.
       const coordinate = async () => {
-        if (detail) return {};
+        if (!canOffer) return {};
         const pairs = advice.overlaps.items.filter(
           item => item.reason !== 'hot-file' && item.reason !== 'idle-lanes',
         );
@@ -227,12 +244,12 @@ export const read = query({
         const landings = await peerLandings(ctx, projectId, named);
         const offer = stackOffer({
           laneId,
-          stacked: Boolean(lane.stack && !lane.stack.detached),
+          stacked: false,
           landing: false,
           mode: stackingMode(effectivePolicy(project as Parameters<typeof effectivePolicy>[0]).agentDefaults),
           peers: [...landings].map(([id, landing]) => ({ laneId: id, landing })),
         });
-        return offer && lane.state === 'active' ? { stackOffer: offer } : {};
+        return offer ? { stackOffer: offer } : {};
       };
       // Presence is for members with write access only; readers and public viewers get no field.
       const writer =
@@ -263,17 +280,16 @@ export const read = query({
           }
         : {};
       // peers(path|detail) and preflight selection input: free here, the Lane's projection is already loaded.
-      const evidence =
-        detail || path
-          ? {
-              peerEvidence: {
-                ...advice.overlaps,
-                scope: 'saved-paths',
-                unsavedEdits: 'unavailable',
-                ...(path ? { path } : {}),
-              },
-            }
-          : {};
+      const evidence = explicitEvidence
+        ? {
+            peerEvidence: {
+              ...advice.overlaps,
+              scope: 'saved-paths',
+              unsavedEdits: 'unavailable',
+              ...(path ? { path } : {}),
+            },
+          }
+        : {};
       const changedPaths = paths
         ? {
             changedPaths: {
@@ -323,7 +339,7 @@ export const read = query({
       return JSON.stringify({
         behindMain: advice.behindMain,
         // Installed CLIs before flip 4 part 2 require this field; empty, so they show no path notice.
-        ...(detail || path ? {} : { unacknowledgedOverlaps: RETIRED_OVERLAPS }),
+        ...(explicitEvidence ? {} : { unacknowledgedOverlaps: RETIRED_OVERLAPS }),
         ...offered,
         ...changedPaths,
         ...evidence,
