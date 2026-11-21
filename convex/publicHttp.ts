@@ -83,6 +83,15 @@ async function code(ctx: ActionCtx, path: { handle: string; slug: string; addres
         handle: path.handle,
         slug: path.slug,
         before: path.address.history,
+        ...(path.address.receiptId ? { receiptId: path.address.receiptId } : {}),
+      });
+      return page ? json(page) : missing();
+    }
+    if ('fileHistory' in path.address) {
+      const page = await ctx.runQuery(internal.publicCode.fileHistory, {
+        handle: path.handle,
+        slug: path.slug,
+        ...path.address.fileHistory,
       });
       return page ? json(page) : missing();
     }

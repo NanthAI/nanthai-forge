@@ -7,11 +7,11 @@ import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { useSearch } from '../router';
 import { RegionBoundary, type CodeProps } from './CodePlace';
-import { landedAt, landedBy, pinnedState, plural, short, titleOf } from './code-words';
+import { pinnedState, plural, short } from './code-words';
 import { FileBody } from './FileBody';
-import { browse, messageOf, useHistory, useReader, type CodeDir, type CodeHistoryRow } from './code-data';
+import { useCodeReceipt, useHistory, type CodeDir } from './code-data';
 import { useSource, type Source } from './use-source';
-import { CODE_TOUCHED_PAIRS } from '../../../../src/code-tree';
+import { FileHistory } from './FileHistory';
 
 export function Files(props: CodeProps) {
   const { route, projectId, projectName, mainHead } = props;
@@ -21,13 +21,18 @@ export function Files(props: CodeProps) {
   const path = route.rest;
   const source = useSource(projectId, state, path);
   const history = useHistory(projectId);
-  const landing = pinned ? (history.rows.find(row => row.head === pinned) ?? null) : null;
+  const receiptId = pinned ? (search.get('receipt') ?? '') : '';
+  const listed =
+    pinned && history.rows.find(row => row.head === pinned && (!receiptId || row.receiptId === receiptId));
+  const exact = useCodeReceipt(projectId, listed || history.loading ? '' : receiptId, 0);
+  const landing = listed || exact.value?.landings.find(row => row.head === pinned) || null;
   const where = !pinned
     ? 'at main'
     : landing
       ? `as “${landing.title ?? short(landing.head)}” left it`
       : `at State ${short(pinned)}`;
-  const href = (to: string) => `${hrefFor({ ...route, rest: to })}${pinned ? `?at=${pinned}` : ''}`;
+  const href = (to: string) =>
+    `${hrefFor({ ...route, rest: to })}${pinned ? `?at=${pinned}${receiptId ? `&receipt=${encodeURIComponent(receiptId)}` : ''}` : ''}`;
   const lines = source.file?.pages.length
     ? source.file.pages
         .map(p => p.text)
@@ -63,6 +68,11 @@ export function Files(props: CodeProps) {
   const command = `nforge agent . show '${JSON.stringify(pinned ? { state: pinned, path: path || 'README.md' } : { channel: 'main', path: path || 'README.md' })}'`;
   const [cli, setCli] = useState(false);
   const isFile = source.kind === 'file';
+  const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+  const knownFile =
+    source.file?.path === path ||
+    source.dirs.get(parent)?.entries.some(entry => entry.path === path && entry.kind !== 'dir');
+  const before = landing ? landing.sequence + 1 : null;
   return (
     <>
       <Head trail={crumbsFor(route, projectName)} sentence={sentence}>
@@ -144,14 +154,13 @@ export function Files(props: CodeProps) {
             <h2>Landings that touched it</h2>
           </div>
           <div className="body">
-            {isFile ? (
-              <Touched
-                key={`${state}:${path}`}
+            {state && knownFile && (!pinned || (!history.loading && !exact.loading)) ? (
+              <FileHistory
+                key={JSON.stringify([projectId, state, path, before])}
                 projectId={projectId}
                 path={path}
-                rows={history.rows}
+                before={before}
                 route={route}
-                landing={landing}
               />
             ) : null}
             <div className="pf">
@@ -245,80 +254,4 @@ function Tree({ source, href, path }: { source: Source; href: (to: string) => st
     </ul>
   );
   return draw(root, 0);
-}
-
-/** Which of the newest landings changed this file: asked for on a press, eight landings in one read. */
-function Touched({
-  projectId,
-  path,
-  rows,
-  route,
-  landing,
-}: {
-  projectId: CodeProps['projectId'];
-  path: string;
-  rows: CodeHistoryRow[];
-  route: CodeProps['route'];
-  landing: CodeHistoryRow | null;
-}) {
-  const reader = useReader();
-  const from = landing ? Math.max(0, rows.indexOf(landing)) : 0;
-  const pairs = rows.slice(from, from + CODE_TOUCHED_PAIRS);
-  const [found, setFound] = useState<{ rows: CodeHistoryRow[]; looked: number } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const look = () => {
-    setBusy(true);
-    setError('');
-    void browse<{ touched: (string | null)[] }>(reader, {
-      projectId,
-      state: pairs[0]!.head,
-      want: 'touched',
-      path,
-      pairs: pairs.map(row => ({ base: row.base, head: row.head })),
-    }).then(
-      reply => (
-        setBusy(false),
-        setFound({
-          rows: pairs.filter((_, i) => ['added', 'modified', 'deleted'].includes(reply.touched[i] ?? '')),
-          looked: pairs.length,
-        })
-      ),
-      caught => (setBusy(false), setError(messageOf(caught))),
-    );
-  };
-  if (!pairs.length) return <p className="quietline">Nothing has landed yet.</p>;
-  if (!found)
-    return (
-      <div className="pad">
-        <button type="button" className="btn sm" onClick={look} disabled={busy}>
-          {busy ? 'Looking…' : `Look in the last ${plural(pairs.length, 'landing')}`}
-        </button>
-        {error ? <p role="alert">{error}</p> : null}
-      </div>
-    );
-  return (
-    <>
-      <div className="band">
-        <span>
-          {found.rows.length} of the last {plural(found.looked, 'landing')}
-        </span>
-      </div>
-      {found.rows.map(row => (
-        <A
-          key={row.receiptId}
-          className="row"
-          href={hrefFor({ ...route, section: '', rest: row.receiptId })}
-          style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}
-        >
-          <div style={{ minWidth: 0 }}>
-            <div className="ttl" dir="auto">
-              {titleOf(row)}
-            </div>
-            <div className="meta">{[landedBy(row), landedAt(row.at)].filter(Boolean).join(', ')}</div>
-          </div>
-        </A>
-      ))}
-    </>
-  );
 }

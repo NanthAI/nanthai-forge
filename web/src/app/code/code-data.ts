@@ -8,7 +8,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useConvex, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import type { Id } from '../../../../convex/_generated/dataModel';
-import type { CodeHistoryRow } from '../../../../src/code-history';
+import { CODE_RECEIPT_ID, type CodeFileHistoryPage, type CodeHistoryRow } from '../../../../src/code-history';
 import type { CodeChange, CodeDir } from '../../../../src/code-tree';
 import { receiptWindow } from './code-words';
 import { publicReadUrl } from '../../public/read';
@@ -50,10 +50,17 @@ export type LandingEvidence = {
   committedAt: string | null;
 };
 
-const historyRef = makeFunctionReference<'query', { projectId: ProjectId; cursor: string | null }, string>(
-  'projectCode:history',
-);
+const historyRef = makeFunctionReference<
+  'query',
+  { projectId: ProjectId; cursor: string | null; receiptId?: string },
+  string
+>('projectCode:history');
 const browseRef = makeFunctionReference<'action', Record<string, unknown>, string>('projectCodeBrowse:read');
+const fileHistoryRef = makeFunctionReference<
+  'query',
+  { projectId: ProjectId; path: string; before: number | null },
+  string
+>('projectCode:fileHistory');
 const landingsRef = makeFunctionReference<
   'query',
   { projectId: ProjectId; from: string; to: string; limit?: number },
@@ -112,10 +119,6 @@ function visitorPath(base: string, args: Record<string, unknown>): string {
       return `${base}/${state}/page/${path}/${Number(args.offset ?? 0)}.json`;
     case 'changes':
       return `${base}/${state}/changes/${String(args.base)}.json`;
-    case 'touched':
-      return `${base}/${state}/touched/${path}/${(args.pairs as { base: string; head: string }[])
-        .map(pair => pair.base + pair.head)
-        .join('')}.json`;
     default:
       return `${base}/${state}/open/${path}.json`;
   }
@@ -137,6 +140,16 @@ export function useReader(): Reader {
         : { key: '', ask: args => client.action(browseRef, args) },
     [client, visitor],
   );
+}
+
+/** Landing metadata includes viewer-specific identities. Each mount reads with current access. */
+export function useFileHistoryReader(projectId: ProjectId, path: string) {
+  const client = useConvex();
+  const visitor = useContext(VisitorCodeContext);
+  return (before: number | null): Promise<CodeFileHistoryPage> =>
+    visitor
+      ? visitorGet(`${visitor.base}/file-history/${hex(path)}/${before ?? '-'}.json`)
+      : client.query(fileHistoryRef, { projectId, path, before }).then(parseReply<CodeFileHistoryPage>);
 }
 
 type History = { landings: CodeHistoryRow[]; nextCursor: string | null };
@@ -202,26 +215,47 @@ export function browse<T>(reader: Reader, args: Record<string, unknown>): Promis
 type Async<T> = { value: T | null; error: string; loading: boolean };
 /** Runs `read` when `key` changes (null: nothing to read). A refresh keeps the last value on screen. */
 export function useRead<T>(key: string | null, read: () => Promise<T>, retry = 0): Async<T> {
-  const [state, setState] = useState<Async<T>>({ value: null, error: '', loading: key !== null });
+  const [state, setState] = useState<Async<T> & { key: string | null }>({
+    key,
+    value: null,
+    error: '',
+    loading: key !== null,
+  });
   useEffect(() => {
     if (key === null) return;
     let current = true;
-    setState(was => ({ ...was, loading: true, error: '' }));
+    setState(was => ({ key, value: was.key === key ? was.value : null, loading: true, error: '' }));
     read().then(
-      value => current && setState({ value, error: '', loading: false }),
+      value => current && setState({ key, value, error: '', loading: false }),
       caught => current && setState(was => ({ ...was, loading: false, error: messageOf(caught) })),
     );
     return () => {
       current = false;
     };
   }, [key, retry]);
-  return state;
+  return state.key === key ? state : { value: null, error: '', loading: key !== null };
 }
 
 export function useChanges(projectId: ProjectId, row: CodeHistoryRow | null) {
   const reader = useReader();
   return useRead<Changes>(row ? `changes:${row.base}:${row.head}` : null, () =>
     browse<Changes>(reader, { projectId, state: row!.head, base: row!.base, want: 'changes' }),
+  );
+}
+
+/** A receipt outside the loaded list needs one exact read, not a scan of earlier pages. */
+export function useCodeReceipt(projectId: ProjectId, receiptId: string, retry: number) {
+  const client = useConvex();
+  const visitor = useContext(VisitorCodeContext);
+  return useRead<Pick<History, 'landings'>>(
+    CODE_RECEIPT_ID.test(receiptId) ? `${projectId}:${receiptId}` : null,
+    () =>
+      visitor
+        ? visitorGet(`${visitor.base}/history/${receiptId}.json`)
+        : client
+            .query(historyRef, { projectId, cursor: null, receiptId })
+            .then(parseReply<Pick<History, 'landings'>>),
+    retry,
   );
 }
 

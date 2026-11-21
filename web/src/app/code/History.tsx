@@ -9,7 +9,14 @@ import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { RegionBoundary, type CodeProps } from './CodePlace';
 import { ago, between, landedAt, landedBy, plural, titleOf } from './code-words';
-import { useChanges, useEvidence, useHistory, type CodeHistoryRow, type ProjectId } from './code-data';
+import {
+  useChanges,
+  useCodeReceipt,
+  useEvidence,
+  useHistory,
+  type CodeHistoryRow,
+  type ProjectId,
+} from './code-data';
 
 /** Up and Down move between rows (DESIGN.md rule 21). */
 function moveRows(event: KeyboardEvent<HTMLElement>) {
@@ -26,7 +33,10 @@ export function History(props: CodeProps) {
   const { route, projectId, projectName } = props;
   const history = useHistory(projectId);
   const rows = history.rows;
-  const selected = rows.find(row => row.receiptId === route.rest) ?? (route.rest ? null : (rows[0] ?? null));
+  const listed = rows.find(row => row.receiptId === route.rest) ?? (route.rest ? null : (rows[0] ?? null));
+  const [retry, setRetry] = useState(0);
+  const receipt = useCodeReceipt(projectId, listed || history.loading ? '' : route.rest, retry);
+  const selected = listed ?? receipt.value?.landings.find(row => row.receiptId === route.rest) ?? null;
   const today = new Date().toDateString();
   const todays = rows.filter(row => new Date(row.at).toDateString() === today).length;
   const allToday = todays === rows.length && history.next !== null;
@@ -98,12 +108,21 @@ export function History(props: CodeProps) {
         </section>
         <section className={`pane${route.rest ? '' : ' off'}`} aria-label="Receipt">
           <RegionBoundary label="The receipt">
-            <Receipt
-              route={route}
-              projectId={projectId}
-              row={selected}
-              missing={!!route.rest && !selected && !history.loading}
-            />
+            {route.rest && !selected && receipt.error ? (
+              <div className="pad" role="alert">
+                <p>{receipt.error}</p>
+                <button className="btn sm" type="button" onClick={() => setRetry(retry + 1)}>
+                  Retry
+                </button>
+              </div>
+            ) : (
+              <Receipt
+                route={route}
+                projectId={projectId}
+                row={selected}
+                loading={history.loading || receipt.loading}
+              />
+            )}
           </RegionBoundary>
         </section>
       </div>
@@ -131,12 +150,12 @@ function Receipt({
   route,
   projectId,
   row,
-  missing,
+  loading,
 }: {
   route: CodeProps['route'];
   projectId: ProjectId;
   row: CodeHistoryRow | null;
-  missing: boolean;
+  loading: boolean;
 }) {
   const evidence = useEvidence(projectId, row);
   const changes = useChanges(projectId, row);
@@ -154,9 +173,11 @@ function Receipt({
         </div>
         <div className="body pad">
           <p className="t2">
-            {missing
-              ? 'That landing is not in the pages shown. Show earlier landings to find it.'
-              : 'Choose a landing to read its receipt.'}
+            {loading
+              ? 'Reading the receipt…'
+              : route.rest
+                ? 'This receipt is unavailable.'
+                : 'Choose a landing to read its receipt.'}
           </p>
           {back}
         </div>
@@ -164,7 +185,8 @@ function Receipt({
     );
   const by = landedBy(row);
   const toMain = between(evidence?.submittedAt, evidence?.committedAt ?? row.at);
-  const atHead = (path = '') => `${hrefFor({ ...route, section: 'files', rest: path })}?at=${row.head}`;
+  const atHead = (path = '') =>
+    `${hrefFor({ ...route, section: 'files', rest: path })}?at=${row.head}&receipt=${row.receiptId}`;
   const list = changes.value?.changes ?? [];
   const shown = all ? list : list.slice(0, FILES_SHOWN);
   return (

@@ -240,8 +240,28 @@ export class FileKeyStore implements KeyStore {
     }
   }
 }
+function sweepDeviceKeyTemps(directory: string) {
+  const entries = opendirSync(directory);
+  let removed = false;
+  try {
+    for (let entry; (entry = entries.readSync());) {
+      if (
+        !entry.isFile() ||
+        !/^device\.bin\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(entry.name)
+      )
+        continue;
+      unlinkSync(join(directory, entry.name));
+      removed = true;
+    }
+  } finally {
+    entries.closeSync();
+  }
+  if (removed) syncDirectory(directory);
+}
 export async function ensureSecretDevice(directory: string, accountId: Buffer): Promise<StoredDeviceKeys> {
   return secretLocked(join(directory, 'pins.lock'), () => {
+    // All production device-key writes share this lock, so these copies have no live writer.
+    sweepDeviceKeyTemps(directory);
     const store = new FileKeyStore(join(directory, 'device.bin'));
     const existing = store.load();
     if (existing) return existing;

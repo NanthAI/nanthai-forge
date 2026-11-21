@@ -34,7 +34,7 @@ budget, time box, acceptance bar, metrics that must not regress, and what it rem
 merges (or why nothing can go).
 
 When running unattended, edit files only with the file-edit tool inside your Lane.
-Keep temporary files, including logs, in the Lane outside `node_modules`.
+Keep temporary files, including logs, in `.forge/scratch/` inside your Lane. Create it when needed.
 Do not start local dev servers or pipe a read into a write.
 Read first, then pass a literal argument to the write command.
 If a command waits for approval and nobody can answer, cancel it and use the routes above.

@@ -3,7 +3,8 @@ import { lstatSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { dirname, isAbsolute, join, sep } from 'node:path';
 import { z } from 'zod';
 import { ForgeError } from './errors.js';
-import { durableReplace, syncDirectory } from './state/durability.js';
+import { laneScratchPath } from './forge-cache-paths.js';
+import { durableReplace, publishDirectory, syncDirectory } from './state/durability.js';
 
 // Artifacts are native filesystem names, not portable source paths. Preserve
 // names containing newlines or POSIX backslashes without allowing traversal.
@@ -57,6 +58,17 @@ function parents(root: string, path: string, create: boolean) {
     realDirectory(directory);
   }
 }
+function preserveLaneScratch(from: string, to: string) {
+  try {
+    // Move the scratch directory as a unit. Any other shape stays in the held prior checkout.
+    if (lstatSync(from).isDirectory()) publishDirectory(from, to);
+  } catch (error) {
+    // A new destination or a folder we cannot move stays intact. Disposal holds the prior copy.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (!code || !['ENOENT', 'EEXIST', 'ENOTEMPTY', 'ENOTDIR', 'EISDIR', 'EACCES', 'EPERM'].includes(code))
+      throw error;
+  }
+}
 /** Resume individual renames from the retained old checkout. Never merge,
  * replace or unlink an occupied destination, including dangling links. */
 export function preserveCheckoutArtifacts(
@@ -75,7 +87,8 @@ export function preserveCheckoutArtifacts(
     parents(root, path, true);
     const from = join(previous, path),
       to = join(root, path);
-    if (exists(from)) {
+    if (path === laneScratchPath) preserveLaneScratch(from, to);
+    else if (exists(from)) {
       if (exists(to))
         throw new ForgeError(
           'WORK_CONFLICT',

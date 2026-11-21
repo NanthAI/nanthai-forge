@@ -18,7 +18,7 @@ import { once } from 'node:events';
 import { serialize, deserialize } from 'node:v8';
 import { randomUUID } from 'node:crypto';
 import { childEnv } from '../scripts/child-env.mjs';
-import { FileKeyStore, secretLocked } from '../dist/sealed-local.js';
+import { ensureSecretDevice, FileKeyStore, secretLocked, wipeDeviceKeys } from '../dist/sealed-local.js';
 import { SecretPins } from '../dist/sealed-pins.js';
 import { forgeSecretId } from '../dist/sealed-format.js';
 import { deviceKeys } from '../dist/sealed-keys.js';
@@ -107,6 +107,73 @@ test('L8 an invalid intermediate Checks owner is refused even when a later remov
   development.transition({ newChecksPointer: f.request.development.roster.checksPointer });
   const request = { ...f.request, development: development.pin() };
   clear(await pins.verifyAndSave(f.reply, request, 2));
+});
+
+for (const [kind, label] of [
+  [1, 'Development'],
+  [2, 'Checks'],
+  [3, 'Production'],
+])
+  test(`a lost ${label} pin names its set before asking a person to rebuild it`, async t => {
+    const { directory, f, pins } = local(t, fixture(17, 'fixture-project', kind));
+    const request = {
+      ...f.request,
+      ...(kind === 3 ? { development: fixture().pin() } : {}),
+    };
+    clear(await pins.verifyAndSave(f.reply, request, 1));
+    unlinkSync(pinPath(directory, request.forgeProjectId));
+    await assert.rejects(
+      pins.rebuild(f.reply, request, true, async summary => {
+        assert(summary.startsWith(`${label} as of `));
+        return false;
+      }),
+      { code: 'CANCELLED' },
+    );
+    await assert.rejects(pins.load(request.forgeProjectId, kind), { code: 'SECRETS_PIN_LOST' });
+  });
+
+test('device-key startup removes an unpublished private temp left by a killed writer', async t => {
+  const { directory, f, store } = local(t),
+    temporaryName = `device.bin.${randomUUID()}`,
+    temporary = join(directory, temporaryName),
+    unrelated = join(directory, 'device.bin.keep'),
+    nilUuid = join(directory, 'device.bin.00000000-0000-0000-0000-000000000000'),
+    published = readFileSync(store.path);
+  const child = spawn(
+    process.execPath,
+    ['tests/fixtures/sealed-pin-worker.mjs', 'hold-key-write', directory, temporaryName],
+    {
+      env: childEnv(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+  t.after(() => {
+    published.fill(0);
+    if (child.exitCode === null) child.kill('SIGKILL');
+  });
+  await once(child.stdout, 'data');
+  assert.equal(existsSync(temporary), true);
+  await assert.rejects(
+    secretLocked(join(directory, 'pins.lock'), () => true, 0),
+    { code: 'SECRETS_PIN_BUSY' },
+  );
+  assert.equal(existsSync(temporary), true, 'a live writer still owns the copy');
+  const exited = once(child, 'exit');
+  child.kill('SIGKILL');
+  await exited;
+
+  writeFileSync(unrelated, 'synthetic unrelated file', { mode: 0o600 });
+  writeFileSync(nilUuid, 'synthetic unrelated file', { mode: 0o600 });
+  const keys = await ensureSecretDevice(directory, f.account);
+  try {
+    assert(keys.id.equals(f.keys.id));
+    assert(readFileSync(store.path).equals(published));
+    assert.equal(existsSync(temporary), false);
+    assert.equal(existsSync(unrelated), true);
+    assert.equal(existsSync(nilUuid), true);
+  } finally {
+    wipeDeviceKeys(keys);
+  }
 });
 
 test('F3 a killed holder loses its lock candidate while live and unidentifiable candidates are preserved', async t => {

@@ -229,6 +229,7 @@ export function verifySealedReply(reply: SealedReply, pin: SecretPin | null, req
               forgeProjectId: request.forgeProjectId,
               setKind: 2,
               development: { roster: verified },
+              ...(!request.checks ? { anchor: { kind: 'checks-genesis' as const } } : {}),
             }).pin
           : request.checks;
         const oldSigner = old && findEntry(old.roster, s.signerId);

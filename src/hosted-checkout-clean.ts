@@ -1,8 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, type Stats } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  type Stats,
+} from 'node:fs';
 import { join } from 'node:path';
 import { digest } from './hash.js';
-import { EVENT_PROBE_PREFIX } from './forge-cache-paths.js';
+import {
+  EVENT_PROBE_PREFIX,
+  hostedLaneMarkerName,
+  laneScratchName,
+  laneScratchPath,
+} from './forge-cache-paths.js';
 import { ForgeError, invariant } from './errors.js';
 import type { NativeFile } from './state/format.js';
 import { captureExclusion, readSource } from './files.js';
@@ -100,7 +113,18 @@ export function cleanHostedCheckout(
             { obstruction: { kind: 'unknown-metadata', path: '.forge' } },
           );
         }
-        for (const name of readdirSync(join(root, path)))
+        const metadata = readdirSync(join(root, path));
+        for (const name of metadata) {
+          if (
+            markerName === hostedLaneMarkerName &&
+            (name === laneScratchName ||
+              (name.toLowerCase() === laneScratchName &&
+                !metadata.includes(laneScratchName) &&
+                existsSync(join(root, laneScratchPath))))
+          ) {
+            preserved.push(laneScratchPath);
+            continue;
+          }
           if (
             !(
               name === markerName ||
@@ -120,6 +144,7 @@ export function cleanHostedCheckout(
               { obstruction: { kind: 'unknown-metadata', path: `${path}/${name}` } },
             );
           }
+        }
         continue;
       }
       const saved = allowed.get(path),

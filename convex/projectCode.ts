@@ -12,11 +12,16 @@ import { findStoredObject, isRegisteredState } from './projectObjectFind';
 import { isStored, objectDocument } from './projectObjectFields';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
 import { codeHistoryRow, CODE_HISTORY_PAGE, CODE_HISTORY_READ_BYTES } from '../src/code-history';
+import { codeFileHistory, codeHistoryReceipt } from './projectCodeFileHistory';
 
 /** One page of landings on main by main's own sequence, newest first. At most 25 receipts and 256 KB read per page;
  * the cursor resumes exactly. Re-runs only when a landing is accepted (a new receipt row); idle costs nothing. */
 export const history = query({
-  args: { projectId: v.id('hostedProjects'), cursor: v.union(v.string(), v.null()) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    cursor: v.union(v.string(), v.null()),
+    receiptId: v.optional(v.string()),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
@@ -24,6 +29,12 @@ export const history = query({
       // Signed-out visitors read the same rows through the cached public route (publicCode.ts), never this query.
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read what landed.');
       await accessibleProject(ctx, input.projectId, user.subject);
+      if (input.receiptId !== undefined)
+        return JSON.stringify({
+          schema: 1,
+          landings: await codeHistoryReceipt(ctx, input.projectId, input.receiptId, false),
+          nextCursor: null,
+        });
       const page = await ctx.db
         .query('projectHostedAcceptances')
         .withIndex('by_project_and_sequence', q => q.eq('projectId', input.projectId))
@@ -41,6 +52,21 @@ export const history = query({
         ),
         nextCursor: page.isDone ? null : page.continueCursor,
       });
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+export const fileHistory = query({
+  args: { projectId: v.id('hostedProjects'), path: v.string(), before: v.union(v.number(), v.null()) },
+  returns: v.string(),
+  handler: async (ctx, { projectId, path, before }) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read what landed.');
+      await accessibleProject(ctx, projectId, user.subject);
+      return JSON.stringify(await codeFileHistory(ctx, projectId, path, before, false));
     } catch (error) {
       return report(error);
     }

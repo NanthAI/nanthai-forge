@@ -178,6 +178,46 @@ test('T69 Checks pointer records are independently authorized, and owner non-hol
   fresh.reply.transitions = [];
   await refuse(fresh, null, 'SECRETS_PIN_TOO_OLD', { ...fresh.request, development });
 });
+test('T69 a Development pin crosses a Checks replacement with a proof from the trusted Checks genesis', async () => {
+  const dev = fixture(),
+    old = fixture(17, 'fixture-project', 2),
+    next = fixture(19, 'fixture-project', 2);
+  const pointer = f => ({
+    checksSetId: f.reply.roster.setId,
+    checksGenesisHash: framedHash(rosterBytes(f.reply.genesis)),
+  });
+  dev.transition({ newChecksPointer: pointer(old) });
+  const p = pin(dev);
+  old.transition({});
+  const proof = clone(old.reply),
+    supersede = replacement(old, next);
+  dev.bump();
+  dev.transition({ newChecksPointer: pointer(next), supersede });
+  dev.reply.related = [proof];
+
+  const result = verifySealedReply(dev.reply, p, pub(dev));
+  assert.deepEqual(result.pin.roster.checksPointer, pointer(next));
+  assert.equal(result.key, undefined);
+  assert.equal(result.secrets.length, 0);
+
+  proof.genesis.entries[0].displayName = 'different-fixture-device';
+  await refuse(dev, p, 'SECRETS_SET_REPLACED');
+  dev.reply.related = [];
+  await refuse(dev, p, 'SECRETS_ROSTER_REFUSED');
+});
+test('T69 a current revocation applies to a historical Checks signer on a walk from genesis', async () => {
+  const f = fixture(17, 'fixture-project', 2),
+    owner = deviceKeys(f.account, f.random);
+  f.transition({ added: [f.entry(owner, { how: 4, addedAtRosterVersion: 2 })] });
+  f.bump();
+  f.transition({}, owner);
+  f.signHead();
+  const current = pin(f);
+  f.reply.revoked = [owner.id];
+
+  assert.equal(verifySealedReply(f.reply, current, pub(f)).pin.roster.rosterVersion, 3);
+  await refuse(f, null, 'SECRETS_ROSTER_REFUSED');
+});
 test('T79 a revoked change author has no authority for a new proposal, while its pinned record remains valid', async () => {
   const f = fixture(),
     author = addOwner(f);

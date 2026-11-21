@@ -1674,7 +1674,13 @@ external dependency links. The source baseline and incoming manifest take
 precedence over exclusions: changed saved bytes/modes and incoming path or parent
 collisions remain structured conflicts. Matching untracked incoming source is
 safe to install. Ignored directories without source intersections are pruned;
-link targets and ignored output bytes are never scanned. The clean check skips
+link targets and ignored output bytes are never scanned. A hosted Lane keeps
+`.forge/scratch/` as one opaque artifact. Saves already skip Forge metadata.
+An in-place apply leaves scratch where it is. A whole-checkout apply uses the
+existing artifact journal to move the folder without reading its contents. If a
+writer creates a new scratch folder during replacement, the prior folder goes
+into the existing kept-apply backup.
+The clean check skips
 reading saved files whose exact lstat the checkout stat index vouches for. Like
 Git's index, an entry whose file changed within the racy window before it was
 indexed (a fresh install or save) is re-read until a complete clean check, or the

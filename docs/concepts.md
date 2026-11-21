@@ -41,6 +41,9 @@ Merging is line-based three-way text merge. Overlapping edits, binary files and 
 
 The rebuilt Code reader lists one page of a folder at a time with a byte-bounded
 preview of its immediate subfolders. The tab keeps pages for the selected State.
+Opening a file reads its landing history from retained Candidate change lists.
+Earlier windows keep the same descending order, including when a window has no
+matches. Signed-in and public readers use the same receipt and Candidate lookup.
 Signed-in browsing of a registered hosted State reads the State from current
 source storage. Older checkpoints and public visitor reads use their retained
 checkpoint.

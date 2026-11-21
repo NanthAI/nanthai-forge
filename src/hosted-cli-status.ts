@@ -19,6 +19,7 @@ export async function readHostedCliStatus(root: string, supplied?: Pick<HostedAg
     needsFix?: unknown[];
     mainToday?: { words: string };
     landingHold?: LandingHold;
+    scratchPath?: string;
   };
   const hooks = hookHealth(root);
   const hookText = hookHealthText(hooks);
@@ -33,8 +34,9 @@ export async function readHostedCliStatus(root: string, supplied?: Pick<HostedAg
   const main = result.mainToday ? `\nmain: ${result.mainToday.words} (UTC day)` : '';
   const hold = result.landingHold;
   const approval = hold?.kind === 'review' ? `\n${reviewHoldLine(hold.review)}` : '';
+  const scratch = result.scratchPath ? `\nLane scratch: ${JSON.stringify(result.scratchPath)}` : '';
   return {
     value: { transport: 'hosted', ...result, hooks },
-    text: `${text}${main}${approval}${hookText ? `\n${hookText}` : ''}`,
+    text: `${text}${main}${approval}${scratch}${hookText ? `\n${hookText}` : ''}`,
   };
 }

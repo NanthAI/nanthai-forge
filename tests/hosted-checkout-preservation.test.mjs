@@ -41,6 +41,7 @@ function outputs(s) {
     'convex/_generated/api.d.ts',
     'out/deep/object',
     'custom-cache/blob',
+    '.forge/scratch/agent.log',
   ];
   for (const path of files) {
     mkdirSync(join(s.root, path, '..'), { recursive: true });
@@ -205,6 +206,7 @@ test('ignored subtrees are pruned without stat or byte reads of their contents',
     check = outputs(s);
   const lstat = fs.lstatSync,
     read = fs.readFileSync,
+    list = fs.readdirSync,
     touched = [];
   t.mock.method(fs, 'lstatSync', (path, ...args) => {
     touched.push(String(path));
@@ -214,6 +216,10 @@ test('ignored subtrees are pruned without stat or byte reads of their contents',
     touched.push(String(path));
     return read(path, ...args);
   });
+  t.mock.method(fs, 'readdirSync', (path, ...args) => {
+    touched.push(String(path) + '/');
+    return list(path, ...args);
+  });
   syncBuiltinESMExports();
   try {
     cleanHostedCheckout(s.root, readHostedLaneCheckout(s.root).state.files, 'hosted-lane.json', true);
@@ -221,7 +227,7 @@ test('ignored subtrees are pruned without stat or byte reads of their contents',
     t.mock.restoreAll();
     syncBuiltinESMExports();
   }
-  assert(!touched.some(path => /\/(dist|out|custom-cache|node_modules)\//.test(path)));
+  assert(!touched.some(path => /\/(dist|out|custom-cache|node_modules|\.forge\/scratch)\//.test(path)));
   check();
 });
 
@@ -302,6 +308,57 @@ test('an artifact destination recreated after interruption never overwrites eith
   rmSync(join(s.root, 'node_modules')); // remove only this fixture's recreated obstruction
   await applyHostedSync(s.root, request, s.transport);
   check();
+});
+
+test('a scratch directory recreated during full checkout apply holds the older scratch without blocking source', async t => {
+  const s = await fixture(t),
+    request = fullStageCommand(s),
+    scratch = join(s.root, '.forge/scratch');
+  mkdirSync(scratch);
+  writeFileSync(join(scratch, 'agent.log'), 'prior scratch');
+  const rename = fs.renameSync;
+  t.mock.method(fs, 'renameSync', (from, to) => {
+    const result = rename(from, to);
+    if (String(from).includes('/checkout-') && to === s.root) {
+      mkdirSync(scratch);
+      writeFileSync(join(scratch, 'agent.log'), 'current scratch');
+    }
+    return result;
+  });
+  syncBuiltinESMExports();
+  try {
+    const applied = await applyHostedSync(s.root, request, s.transport);
+    assert.equal(applied.head, request.lane.head);
+    assert.equal(readFileSync(join(scratch, 'agent.log'), 'utf8'), 'current scratch');
+    assert.equal(
+      readFileSync(join(applied.displacedRecovery[0], '.forge/scratch/agent.log'), 'utf8'),
+      'prior scratch',
+    );
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+});
+
+test('scratch uses the filesystem spelling of the advertised path and protects a distinct metadata folder', async t => {
+  const s = await fixture(t),
+    scratch = join(s.root, '.forge/scratch'),
+    mixedCase = join(s.root, '.forge/Scratch');
+  mkdirSync(mixedCase);
+  writeFileSync(join(mixedCase, 'agent.log'), 'synthetic scratch');
+  const request = fullStageCommand(s);
+  if (existsSync(scratch)) {
+    const applied = await applyHostedSync(s.root, request, s.transport);
+    assert.equal(applied.head, request.lane.head);
+    assert.equal(readFileSync(join(scratch, 'agent.log'), 'utf8'), 'synthetic scratch');
+  } else {
+    await assert.rejects(applyHostedSync(s.root, request, s.transport), error => {
+      assert.equal(error.code, 'WORK_CONFLICT');
+      assert.equal(error.recovery.blockers[0].path, '.forge/Scratch');
+      return true;
+    });
+    assert.equal(readFileSync(join(mixedCase, 'agent.log'), 'utf8'), 'synthetic scratch');
+  }
 });
 
 for (const same of [false, true])

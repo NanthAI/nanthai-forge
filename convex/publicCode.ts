@@ -5,6 +5,8 @@
  *
  *   code/HANDLE/SLUG/history.json                    newest 25 landings, the project and main's head
  *   code/HANDLE/SLUG/history/BEFORE.json             the 25 landings before sequence BEFORE
+ *   code/HANDLE/SLUG/history/RECEIPT.json            one exact landing
+ *   code/HANDLE/SLUG/file-history/PATH/BEFORE.json   one window of a file's landings ('-' for newest)
  *   code/HANDLE/SLUG/STATE/open/PATH.json            a folder with its ancestors, or a file with its first page
  *   code/HANDLE/SLUG/STATE/more/PATH/CURSOR.json     the next page of one folder
  *   code/HANDLE/SLUG/STATE/page/PATH/OFFSET.json     the next page of one file
@@ -18,9 +20,15 @@ import { internalQuery } from './server';
 import { publicProject } from './publicRead';
 import { lineSummary } from './projectLiveLineStore';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
-import { codeHistoryRow, CODE_HISTORY_PAGE, CODE_HISTORY_READ_BYTES } from '../src/code-history';
+import {
+  codeHistoryRow,
+  CODE_HISTORY_PAGE,
+  CODE_HISTORY_READ_BYTES,
+  CODE_RECEIPT_ID,
+} from '../src/code-history';
 import { CODE_DIR_DEPTH, CODE_TOUCHED_PAIRS } from '../src/code-tree';
 import { safeRelative } from '../src/safe-relative';
+import { codeFileHistory, codeHistoryReceipt } from './projectCodeFileHistory';
 import type { Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 
@@ -39,7 +47,10 @@ type CodeRead = {
   offset?: number;
   pairs?: { base: string; head: string }[];
 };
-export type CodeAddress = { history: number | null } | { read: CodeRead };
+export type CodeAddress =
+  | { history: number | null; receiptId?: string }
+  | { fileHistory: { path: string; before: number | null } }
+  | { read: CodeRead };
 
 /** A path segment as UTF-8 hex, '-' for the root; undefined when it is not one, or not a path the source read accepts
  * (projectCodeBrowse.ts readCode), so a bad address is a 404 before any function runs. */
@@ -66,8 +77,16 @@ export function codeAddress(parts: readonly string[]): CodeAddress | null {
   const at = [...parts.slice(0, -1), last.slice(0, -'.json'.length)];
   if (at[0] === 'history') {
     if (at.length === 1) return { history: null };
+    if (at.length === 2 && CODE_RECEIPT_ID.test(at[1]!)) return { history: null, receiptId: at[1]! };
     const before = count(at[1]);
     return at.length === 2 && before !== undefined && before > 0 ? { history: before } : null;
+  }
+  if (at[0] === 'file-history') {
+    const path = pathOf(at[1]);
+    const before = at[2] === '-' ? null : count(at[2]);
+    return at.length === 3 && path && before !== undefined && before !== 0
+      ? { fileHistory: { path, before } }
+      : null;
   }
   const [state, want, ...rest] = at;
   if (!state || !STATE.test(state)) return null;
@@ -122,12 +141,21 @@ export const resolve = internalQuery({
 /** One page of landings on main, newest first, by main's own sequence: at most 25 receipts and 256 KB read. The first
  * page also names the project and main's head, so a visitor's Code page needs this one read to start. */
 export const history = internalQuery({
-  args: { handle: v.string(), slug: v.string(), before: v.union(v.number(), v.null()) },
+  args: {
+    handle: v.string(),
+    slug: v.string(),
+    before: v.union(v.number(), v.null()),
+    receiptId: v.optional(v.string()),
+  },
   returns: v.any(),
-  handler: async (ctx, { handle, slug, before }) => {
+  handler: async (ctx, { handle, slug, before, receiptId }) => {
     const found = await publicProject(ctx, handle, slug);
     if (!found) return null;
     const { project } = found;
+    if (receiptId !== undefined) {
+      const landings = await codeHistoryReceipt(ctx, project._id, receiptId, true);
+      return { landings };
+    }
     const page = await ctx.db
       .query('projectHostedAcceptances')
       .withIndex('by_project_and_sequence', q =>
@@ -143,14 +171,9 @@ export const history = internalQuery({
         maximumBytesRead: CODE_HISTORY_READ_BYTES,
       });
     // Signed out, nobody may see a person: the actor is left out of every row (no lookup needed).
-    const landings = page.page.map(row => {
-      const { actor: _person, ...landing } = codeHistoryRow(
-        JSON.parse(row.value) as HostedAcceptance,
-        row.sequence,
-      );
-      void _person;
-      return landing;
-    });
+    const landings = page.page.map(row =>
+      codeHistoryRow(JSON.parse(row.value) as HostedAcceptance, row.sequence, true),
+    );
     const main = before === null ? await mainHead(ctx, project._id) : undefined;
     const body = {
       v: 1,
@@ -161,5 +184,14 @@ export const history = internalQuery({
       nextBefore: page.isDone || !landings.length ? null : landings.at(-1)!.sequence,
     };
     return body;
+  },
+});
+
+export const fileHistory = internalQuery({
+  args: { handle: v.string(), slug: v.string(), path: v.string(), before: v.union(v.number(), v.null()) },
+  returns: v.any(),
+  handler: async (ctx, { handle, slug, path, before }) => {
+    const found = await publicProject(ctx, handle, slug);
+    return found ? codeFileHistory(ctx, found.project._id, path, before, true) : null;
   },
 });

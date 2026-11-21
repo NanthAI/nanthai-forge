@@ -3,10 +3,19 @@ import test from 'node:test';
 import { getFunctionName } from 'convex/server';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync, readFileSync, symlinkSync, readlinkSync, rmSync } from 'node:fs';
+import {
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  readlinkSync,
+  rmSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { resolutionFixture } from './hosted-agent-resolution-fixture.mjs';
 import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
+import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
 function build(root) {
   for (const path of ['dist/app.js', 'generated/api.d.ts']) {
     mkdirSync(join(root, path, '..'), { recursive: true });
@@ -19,6 +28,30 @@ function build(root) {
     assert.equal(readlinkSync(join(root, 'node_modules')), '../dependencies');
   };
 }
+
+test('Lane scratch stays local through save and sync when main adds the same filename to source', async t => {
+  const s = await resolutionFixture(t, { overlap: false }),
+    f = s.f;
+  await s.transport().dispatch('open', { laneId: f.lane.laneId });
+  const scratch = join(s.root, '.forge', 'scratch');
+  mkdirSync(scratch);
+  writeFileSync(join(scratch, 'accepted.txt'), 'synthetic scratch');
+  writeFileSync(join(s.root, 'lane.txt'), 'saved source');
+  await s.transport().dispatch('save', { message: 'save source beside scratch' });
+  const saved = readHostedLaneCheckout(s.root);
+  assert(saved.state.files.some(file => file.path === 'lane.txt'));
+  assert(!saved.state.files.some(file => file.path.startsWith('.forge/')));
+  const status = await readHostedCliStatus(s.root, s.transport());
+  const canonicalScratch = realpathSync(scratch);
+  assert.equal(status.value.scratchPath, canonicalScratch);
+  assert(status.text.includes(`Lane scratch: ${JSON.stringify(canonicalScratch)}`));
+
+  f.moveMain({ overlap: false });
+  const synced = await s.transport().dispatch('sync', { laneId: f.lane.laneId, apply: true });
+  assert.equal(readHostedLaneCheckout(s.root).selection.head, synced.result.applied.head);
+  assert.notEqual(readFileSync(join(s.root, 'accepted.txt'), 'utf8'), 'synthetic scratch');
+  assert.equal(readFileSync(join(scratch, 'accepted.txt'), 'utf8'), 'synthetic scratch');
+});
 
 test('hosted sync after a build preserves output; remote advance/local conflict replay installs current lifecycle pins', async t => {
   const s = await resolutionFixture(t, { overlap: false }),
@@ -49,6 +82,8 @@ test('hosted sync after a build preserves output; remote advance/local conflict 
       assert.equal(error.recovery.sourceCompleted, true);
       assert.equal(error.recovery.blockers[0].path, 'accepted.txt');
       assert.equal(error.recovery.next.action, 'recover-apply');
+      assert.match(error.recovery.command, / recover-apply /);
+      assert(error.recovery.command.includes(error.recovery.applyOperationId));
       return true;
     },
   );

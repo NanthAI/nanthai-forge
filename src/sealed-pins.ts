@@ -186,7 +186,8 @@ export class SecretPins {
       .filter(e => e.entryKind === 1)
       .map(e => `${e.displayName} (${e.id.toString('hex')})`)
       .join(', ');
-    const summary = `${request.setKind === 1 ? 'Development' : 'Checks'} as of ${new Date(reply.head.signedAt).toISOString()}. Devices: ${devices}. This set may be older than what this device last saw. Correct?`;
+    const kind = { 1: 'Development', 2: 'Checks', 3: 'Production' }[request.setKind];
+    const summary = `${kind} as of ${new Date(reply.head.signedAt).toISOString()}. Devices: ${devices}. This set may be older than what this device last saw. Correct?`;
     invariant(await confirm(summary), 'CANCELLED', 'Secret trust was not changed.');
     return secretLocked(this.lock, () => {
       this.requireLost(request.forgeProjectId, request.setKind);

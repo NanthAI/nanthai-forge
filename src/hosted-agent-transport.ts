@@ -6,6 +6,7 @@ import { agentClient, agentAuthorship } from './agent-turn-work.js';
 import { workIndexRecovery } from './error-teaching.js';
 import { suppliedLandingMessage } from './landing-message.js';
 import { keptApplyEnvelope } from './hosted-apply-kept.js';
+import { laneScratchPath } from './forge-cache-paths.js';
 import { cliBuildCommit } from './cli-installation.js';
 import { describeIssues, missingObserveId, retryReasonHint } from './argument-errors.js';
 import { liveLanes } from './hosted-live-lanes.js';
@@ -1169,6 +1170,7 @@ export class HostedAgentTransport {
           null,
           {
             needsFix: capabilities.needsFix ?? [],
+            ...(laneId ? { scratchPath: resolve(this.root, laneScratchPath) } : {}),
             ...(hold ? { landingHold: hold } : {}),
             ...(capabilities.githubMirror !== undefined ? { githubMirror: capabilities.githubMirror } : {}),
             ...(capabilities.mainDay ? { mainToday: await mainTodayFrom(capabilities.mainDay) } : {}),

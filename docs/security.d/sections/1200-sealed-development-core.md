@@ -39,6 +39,8 @@ holder are swept only when their token matches and their recorded process is
 dead; live, incomplete or unidentifiable candidates are preserved. Readers use atomic snapshots and re-read
 under that lock before
 reporting lost trust. Writes use private temporary files, fsync and atomic rename.
+Device-key startup removes unpublished device-key temporary files under the same
+lock, preserving the published key file.
 Network calls never hold the lock, and a response is re-verified against the latest
 pin before publication. Unchanged verification changes no pin, index or counter.
 Restoring one kind after index or counter recovery keeps every unchecked sibling
@@ -87,6 +89,11 @@ from it. Retrying a retained sealed request checks this device's own signature
 on that saved request against its locally held public key. Rebuilds verify
 this device's own signed head. Checks
 first contact uses an explicit genesis anchor named by trusted Development.
+Development also uses its trusted Checks genesis pointer to verify the old set
+in a signed Checks replacement proof when this device has no Checks pin. That
+proof opens no Checks values. Current revocation markers apply to every step
+being verified. For a walk from genesis that includes the full walked history,
+so a marker for an early signer can prevent a fresh reader from verifying it.
 A passkey contact needs a person-signed checkpoint
 with matching roster bytes and the public keys derived locally from its seed;
 a listed person entry alone grants no trust. A missing checkpoint or a walk

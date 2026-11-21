@@ -756,9 +756,13 @@ layer out of both first paints.
   `code/files/{path}` reads files at main, and `?at={64-hex State}` pins any
   landing; `#L42` selects a line. `projectCodeBrowse:read` returns one folder
   page (200 entries) with the first page of each of its subfolders (at most
-  64 KiB more), one 16,000-character file page, a landing's changed paths, or
-  which of up to 8 landings touched a file. All of these reads go through the
-  existing source reader, so a whole State never reaches the browser. The tab
+  64 KiB more), one 16,000-character file page, or a landing's changed paths.
+  Opening a file also reads its landing history, newest first, from a page of
+  receipts and the exact Candidate path lists retained during composition.
+  Each page checks up to eight receipts, and older receipts can be read in
+  place. Receipts without a retained list are reported as unavailable. The
+  signed-in and public readers share the same lookup and do no State or R2
+  reads for file history. The tab
   keeps every folder it was sent (`code/listing.ts`): a folder you can see opens
   with no read, and opening it fetches the level below in the background. The views take only a project id and a route, so signed-out public
   reading is a routing change.

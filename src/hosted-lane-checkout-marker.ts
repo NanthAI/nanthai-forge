@@ -7,6 +7,8 @@ import { readSource, safeRelative } from './files.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { parseNativeStateValue, stateSchema } from './state/format.js';
 import { invariant } from './errors.js';
+import { hostedLaneMarkerName } from './forge-cache-paths.js';
+export { hostedLaneMarkerName };
 export const hostedLaneExpectationSchema = z.object(hostedLaneSelectionSchema.shape).pick({
   head: true,
   sourceVersion: true,
@@ -41,7 +43,6 @@ export const hostedLaneCheckoutMarkerSchema = z
   })
   .strict();
 export type HostedLaneCheckoutMarker = z.infer<typeof hostedLaneCheckoutMarkerSchema>;
-export const hostedLaneMarkerName = 'hosted-lane.json';
 export function readHostedLaneCheckout(root: string): HostedLaneCheckoutMarker | null {
   if (!checkoutPathExists(root)) return null;
   invariant(!lstatSync(root).isSymbolicLink(), 'UNSAFE_PATH', 'Checkout directory must be real.');

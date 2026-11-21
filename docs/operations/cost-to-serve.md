@@ -1086,12 +1086,14 @@ Convex, at most once per address per 30 seconds, whatever the number of visitors
 
 **Per miss, counted** (`tests/public-code-access.test.mjs`, "one visitor cache miss"; the test fails if a read
 adds functions). Stored object reads are counted in one process, so a file read after its folder reuses the State
-already read; a cold reader also reads the State. "Landings that touched it" runs one listing per landing compared, at
-most eight per address.
+already read; a cold reader also reads the State. "Landings that touched it" uses one public query per cache miss.
+The query checks up to eight acceptance receipts against their retained Candidate path lists, stopping earlier
+if the Candidate bodies fill the byte budget. It does no R2 reads and adds no writes at acceptance.
 
 | Address | Functions | Fixture DB read / write B | Reply B | Stored object reads |
 | --- | --- | ---: | ---: | ---: |
 | History page | HTTP action + `publicCode:history` | 1,739 / 0 | 1,035 | 0 |
+| File history page | HTTP action + `publicCode:fileHistory` | Bounded receipt and Candidate records / 0 | Up to 8 rows | 0 |
 | Folder | HTTP action + `publicCode:resolve` + `projectCodeBrowse:visitorRead` + `projectCode:checkpoint` + 2 × `projectSourceReviewStore:checkpoint` + 6 × `projectObjects:resolve` (12) | 8,643 / 171 | 209 | 3 |
 | File (first page) | the same, with two source reviews: 4 checkpoints + 14 object lookups (22) | 18,522 / 342 | 472 | 1 |
 

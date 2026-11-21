@@ -38,7 +38,16 @@ export type CodeHistoryRow = {
   docsMerged: boolean;
 };
 
-export function codeHistoryRow(receipt: HostedAcceptance, sequence: number): CodeHistoryRow {
+export type CodeFileHistoryPage = {
+  landings: CodeHistoryRow[];
+  /** Receipts in this window whose exact changed paths were not retained. */
+  missing: number;
+  nextBefore: number | null;
+};
+
+export const CODE_RECEIPT_ID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
+
+export function codeHistoryRow(receipt: HostedAcceptance, sequence: number, visitor = false): CodeHistoryRow {
   const builder = readAuthorship(receipt);
   const message = (receipt.message ?? '').trim();
   const [first = '', ...rest] = message.split('\n');
@@ -49,7 +58,7 @@ export function codeHistoryRow(receipt: HostedAcceptance, sequence: number): Cod
     at: receipt.at,
     title: first.trim() ? first.trim().slice(0, CODE_HISTORY_TITLE_CHARS) : null,
     why: why ? why.slice(0, CODE_HISTORY_WHY_CHARS) : null,
-    actor: builder.actor ?? receipt.actor.id,
+    ...(visitor ? {} : { actor: builder.actor ?? receipt.actor.id }),
     agent: builder.kind === 'agent',
     agentRun: receipt.agentRun ?? null,
     agentClient: receipt.agentClient ?? null,
