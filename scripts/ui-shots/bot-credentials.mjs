@@ -43,7 +43,11 @@ export async function readBotCredentials(file, base) {
     return { kind: 'clerk', email, password, userId, projectId };
   }
 
-  const { origin: webOrigin, deployment, credential } = raw.passkey ?? {};
+  return { ...botPasskey(raw.passkey, base), projectId };
+}
+
+export function botPasskey(entry, base) {
+  const { origin: webOrigin, deployment, credential } = entry ?? {};
   const web = origin(webOrigin);
   const backend = origin(deployment);
   const { credentialId, privateKey, rpId, userHandle } = credential ?? {};
@@ -62,7 +66,6 @@ export async function readBotCredentials(file, base) {
     throw new ShotError('The requested site does not match the bot passkey web origin.');
   return {
     kind: 'passkey',
-    projectId,
     origin: webOrigin,
     deployment,
     // Enroll this tooling credential with a zero counter and keep it counterless across fresh browser contexts.

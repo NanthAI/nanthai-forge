@@ -1,21 +1,93 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, writeFile, chmod, lstat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { savedCredential } from '../dist/auth-store.js';
 import { deadlineConvexClient } from '../dist/network-convex-client.js';
 import { networkFetch, networkTimeout } from '../dist/network-fetch.js';
 import { makeFunctionReference } from 'convex/server';
 import { ShotError } from './ui-shots/options.mjs';
-import { readerGrantOperationId } from './ui-bot-grant.mjs';
+import { grantPasskeyBotReader, readerGrantOperationId } from './ui-bot-grant.mjs';
+import { convexToken, launchBotBrowser } from './ui-shots/browser.mjs';
+import { openBotCredentialStore } from './ui-shots/bot-credential-store.mjs';
+import { provisionBotPasskey } from './ui-shots/passkey-enrollment.mjs';
+
+const devOrigin = 'https://nanthai-forge-dev.netlify.app';
+const devDeployment = 'https://benevolent-wildebeest-974.convex.cloud';
+
+function ownerClient(deployment) {
+  const auth = savedCredential(deployment);
+  if (!auth || auth.scope !== 'cli' || auth.expiresAt <= Date.now())
+    throw new ShotError('A current owner nforge login with CLI scope is required.');
+  const client = deadlineConvexClient(deployment, { logger: false });
+  client.setAuth(auth.token);
+  return client;
+}
+
+async function clerkHandle(page, deployment) {
+  const token = await convexToken(page);
+  if (!token) throw new ShotError('Could not verify the existing Forge bot session.');
+  const client = deadlineConvexClient(deployment, { logger: false });
+  client.setAuth(token);
+  try {
+    return (await client.query(makeFunctionReference('urlAccounts:current'), {}))?.handle;
+  } finally {
+    client.clearAuth();
+  }
+}
+
+async function setupPasskey(values, phase) {
+  const origin = values.base ?? devOrigin;
+  const deployment = values.deployment ?? devDeployment;
+  if (origin !== devOrigin || deployment !== devDeployment)
+    throw new ShotError('Native bot enrollment is for the Forge dev site and deployment.');
+
+  const { data, save } = await openBotCredentialStore(homedir());
+  const projectId = values.project || data.projectId;
+  if (!projectId) throw new ShotError('Supply --project on the first run.');
+  phase('verify saved owner login');
+  const owner = values['grant-reader'] ? ownerClient(deployment) : null;
+  const project = await owner?.query(makeFunctionReference('projectAccess:people'), { projectId, limit: 1 });
+  if (project && project.role !== 'owner')
+    throw new ShotError('The saved nforge login must own the requested project.');
+  phase('native bot passkey enrollment');
+  const browser = await launchBotBrowser({ kind: data.email && !data.passkey ? 'clerk' : 'passkey' });
+  let token;
+  try {
+    token = await provisionBotPasskey(browser, { origin, deployment, clerkHandle }, data, save);
+    data.projectId = projectId;
+    await save();
+  } finally {
+    await browser.close();
+  }
+  console.log('Native DEV bot ready. The private credential file has mode 0600.');
+  if (!owner) return;
+
+  phase('owner-authorized reader grant');
+  const bot = deadlineConvexClient(deployment, { logger: false });
+  bot.setAuth(token);
+  await grantPasskeyBotReader({
+    owner,
+    project,
+    bot,
+    ref: makeFunctionReference,
+    credentials: data.passkey,
+    save,
+    projectId,
+    deployment,
+  });
+  console.log('Reader access verified for the native bot.');
+}
 
 let stage = 'arguments';
 try {
   const { values } = parseArgs({
     options: {
       deployment: { type: 'string' },
+      base: { type: 'string' },
+      passkey: { type: 'boolean' },
       project: { type: 'string' },
       'convex-cwd': { type: 'string' },
       'grant-reader': { type: 'boolean' },
@@ -24,24 +96,17 @@ try {
   });
   if (values.help) {
     console.log(
-      'node scripts/ui-bot-setup.mjs --deployment CONVEX_URL --project ID --convex-cwd CONFIGURED_REPO [--grant-reader]\nCreates/finds the Clerk DEV bot; --grant-reader uses the saved nforge owner login after reader support is deployed.',
+      'node scripts/ui-bot-setup.mjs --deployment CONVEX_URL --project ID --convex-cwd CONFIGURED_REPO [--grant-reader]\nCreates/finds the Clerk DEV bot.\nnode scripts/ui-bot-setup.mjs --passkey --project ID [--grant-reader]\nEnrolls or verifies the native DEV bot. --grant-reader uses the saved nforge owner login.',
     );
+  } else if (values.passkey) {
+    await setupPasskey(values, next => (stage = next));
   } else {
-    const dir = join(homedir(), '.config/forge-ui-bot'),
-      file = join(dir, 'credentials.json');
-    await mkdir(dir, { recursive: true, mode: 0o700 });
-    await chmod(dir, 0o700);
-    let credentials;
-    try {
-      const info = await lstat(file);
-      if (!info.isFile() || info.uid !== process.getuid?.() || (info.mode & 0o777) !== 0o600)
-        throw new ShotError('Existing bot credentials must be a user-owned 0600 regular file.');
-      credentials = JSON.parse(await readFile(file, 'utf8'));
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-    }
+    const { data: credentials, save } = await openBotCredentialStore(homedir());
     const email = 'forge-ui-bot+clerk_test@example.com';
-    if (credentials && (credentials.email !== email || typeof credentials.password !== 'string'))
+    if (
+      Object.hasOwn(credentials, 'email') &&
+      (credentials.email !== email || typeof credentials.password !== 'string')
+    )
       throw new ShotError('Existing bot credentials have an unexpected identity or no password.');
     const deployment = values.deployment || credentials?.deployment;
     const projectId = values.project || credentials?.projectId;
@@ -74,16 +139,11 @@ try {
     );
     if (matches.length > 1) throw new ShotError('Multiple bot users match; no changes made.');
     const hadProvisionedIdentity = Boolean(credentials?.userId);
-    credentials ??= { email, password: `${randomBytes(36).toString('base64url')}!aA9` };
-    credentials = {
-      ...credentials,
-      deployment,
-      projectId,
-      convexCwd: resolve(values['convex-cwd'] || credentials.convexCwd || '.'),
-    };
-    async function save() {
-      await writeFile(file, JSON.stringify(credentials) + '\n', { mode: 0o600 });
-    }
+    credentials.email ??= email;
+    credentials.password ??= `${randomBytes(36).toString('base64url')}!aA9`;
+    credentials.deployment = deployment;
+    credentials.projectId = projectId;
+    credentials.convexCwd = resolve(values['convex-cwd'] || credentials.convexCwd || '.');
     await save();
     let user = matches[0];
     if (!user)
@@ -103,15 +163,7 @@ try {
     console.log('Clerk DEV bot ready; credentials saved outside the repo with mode 0600.');
     if (values['grant-reader']) {
       stage = 'owner-authorized reader grant (requires deployed reader support)';
-      const authPath = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'forge/auth.json');
-      const info = await lstat(authPath);
-      if (!info.isFile() || info.uid !== process.getuid?.() || info.mode & 0o077)
-        throw new ShotError('Saved nforge login must be a user-owned 0600 regular file.');
-      const auth = JSON.parse(await readFile(authPath, 'utf8')).deployments?.[deployment];
-      if (!auth || auth.scope !== 'cli' || auth.expiresAt <= Date.now())
-        throw new ShotError('A current owner nforge login with CLI scope is required.');
-      const client = deadlineConvexClient(deployment, { logger: false });
-      client.setAuth(auth.token);
+      const client = ownerClient(deployment);
       stage = 'verify owner project access';
       const project = await client.query(makeFunctionReference('projectWork:state'), { projectId });
       if (project.owner === user.id)

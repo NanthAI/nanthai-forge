@@ -56,6 +56,10 @@ export async function signIn(page, base, credentials, session, timeout) {
   if (await page.evaluate(() => Boolean(window.Clerk.user)))
     throw new ShotError('Expected a fresh browser session.');
   await page.getByRole('button', { name: 'Sign in', exact: true }).first().click();
+  await finishClerkBotSignIn(page, credentials);
+}
+
+export async function finishClerkBotSignIn(page, credentials) {
   const identifier = page.locator('input[name="identifier"]');
   await identifier.fill(credentials.email);
   await page.getByRole('button', { name: /^Continue$/ }).click();

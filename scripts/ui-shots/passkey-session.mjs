@@ -74,25 +74,9 @@ export function observePasskeySession(page, deployment) {
   };
 }
 
-/** Use the application's existing WebAuthn ceremony with a credential enrolled by the owner. */
-export async function signInWithPasskey(page, credentials, session, timeout) {
-  let cdp;
-  let problem = 'Could not open the native sign-in page.';
+export async function withBotAuthenticator(page, run) {
+  const cdp = await page.context().newCDPSession(page);
   try {
-    const url = new URL(signInPath, credentials.origin);
-    url.searchParams.set('next', accountPath);
-    await page.goto(url.href, { waitUntil: 'domcontentloaded' });
-    if (page.url() !== url.href) throw new ShotError('Expected a fresh browser on the native sign-in page.');
-    problem = 'Could not load the enrolled passkey into Chromium.';
-    // The form can also register a new handle. Only allow assertions with the enrolled tooling credential.
-    await page.evaluate(() => {
-      const create = navigator.credentials.create.bind(navigator.credentials);
-      navigator.credentials.create = options =>
-        options?.publicKey
-          ? Promise.reject(new DOMException('Bot sign-in requires an enrolled passkey.', 'NotAllowedError'))
-          : create(options);
-    });
-    cdp = await page.context().newCDPSession(page);
     await cdp.send('WebAuthn.enable');
     const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', {
       options: {
@@ -104,33 +88,67 @@ export async function signInWithPasskey(page, credentials, session, timeout) {
         automaticPresenceSimulation: true,
       },
     });
-    await cdp.send('WebAuthn.addCredential', { authenticatorId, credential: credentials.credential });
-    problem = 'Native bot passkey sign-in failed. Check enrollment and the configured site.';
-    await page.getByLabel('Your handle', { exact: true }).fill(botHandle);
-    if (page.url() !== url.href) throw new ShotError('Expected the native sign-in page.');
-    await page.getByRole('button', { name: 'Continue', exact: true }).click();
-    // Check a form error without echoing its contents. The server-bound viewer is checked independently below.
-    const outcome = await page.waitForFunction(
-      ({ origin, accountPath }) =>
-        location.origin !== origin ||
-        location.pathname === accountPath ||
-        Boolean(document.querySelector('form.signin [role="alert"]')?.getClientRects().length),
-      { origin: credentials.origin, accountPath },
+    return await run(cdp, authenticatorId);
+  } finally {
+    await cdp.send('WebAuthn.disable').catch(() => {});
+    await cdp.detach().catch(() => {});
+  }
+}
+
+export async function openNativeBotSignIn(page, origin) {
+  const url = new URL(signInPath, origin);
+  url.searchParams.set('next', accountPath);
+  await page.goto(url.href, { waitUntil: 'domcontentloaded' });
+  if (page.url() !== url.href) throw new ShotError('Expected a fresh browser on the native sign-in page.');
+  return url.href;
+}
+
+export async function submitNativeBotSignIn(page, origin, session, timeout) {
+  const url = page.url();
+  await page.getByLabel('Your handle', { exact: true }).fill(botHandle);
+  if (page.url() !== url) throw new ShotError('Expected the native sign-in page.');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  const outcome = await page.waitForFunction(
+    ({ origin, accountPath }) =>
+      location.origin !== origin ||
+      location.pathname === accountPath ||
+      Boolean(document.querySelector('form.signin [role="alert"]')?.getClientRects().length),
+    { origin, accountPath },
+  );
+  await outcome.dispose();
+  if (page.url() !== new URL(accountPath, origin).href)
+    throw new ShotError('The native passkey sign-in did not reach the account page.');
+  try {
+    if ((await session.waitForViewer(timeout)) === botHandle && session.token()) return;
+  } catch {
+    throw new ShotError(
+      'Could not verify the native bot browser session on the configured Convex deployment.',
     );
-    await outcome.dispose();
-    if (page.url() !== new URL(accountPath, credentials.origin).href)
-      throw new ShotError('The native passkey sign-in did not reach the account page.');
-    // The router and the live viewer query can settle in either order.
-    problem = 'Could not verify the native bot browser session on the configured Convex deployment.';
-    if ((await session.waitForViewer(timeout)) !== botHandle || !session.token())
-      throw new ShotError('Signed-in identity does not match the configured bot.');
+  }
+  throw new ShotError('Signed-in identity does not match the configured bot.');
+}
+
+/** Use the application's existing WebAuthn ceremony with a credential enrolled by the owner. */
+export async function signInWithPasskey(page, credentials, session, timeout) {
+  let problem = 'Could not open the native sign-in page.';
+  try {
+    await openNativeBotSignIn(page, credentials.origin);
+    problem = 'Could not load the enrolled passkey into Chromium.';
+    // The form can also register a new handle. Only allow assertions with the enrolled tooling credential.
+    await page.evaluate(() => {
+      const create = navigator.credentials.create.bind(navigator.credentials);
+      navigator.credentials.create = options =>
+        options?.publicKey
+          ? Promise.reject(new DOMException('Bot sign-in requires an enrolled passkey.', 'NotAllowedError'))
+          : create(options);
+    });
+    await withBotAuthenticator(page, async (cdp, authenticatorId) => {
+      await cdp.send('WebAuthn.addCredential', { authenticatorId, credential: credentials.credential });
+      problem = 'Native bot passkey sign-in failed. Check enrollment and the configured site.';
+      await submitNativeBotSignIn(page, credentials.origin, session, timeout);
+    });
   } catch (error) {
     if (error instanceof ShotError) throw error;
     throw new ShotError(problem);
-  } finally {
-    if (cdp) {
-      await cdp.send('WebAuthn.disable').catch(() => {});
-      await cdp.detach().catch(() => {});
-    }
   }
 }
