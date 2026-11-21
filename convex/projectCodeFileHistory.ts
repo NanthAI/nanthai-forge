@@ -17,6 +17,7 @@ import { safeRelative } from '../src/safe-relative';
 const MATCHES_PER_PAGE = 8;
 const SCAN_ROWS = 96;
 const SCAN_BATCH = 16;
+const SCAN_RECEIPT_BYTES = 512 * 1024;
 const CANDIDATE_BYTES = 1024 * 1024;
 const encoder = new TextEncoder();
 const documentBytes = (row: object) => encoder.encode(JSON.stringify(row)).length;
@@ -88,16 +89,14 @@ export async function codeFileHistory(
   while (scanned < rows.length && landings.length < MATCHES_PER_PAGE) {
     if (scanned === MATCHES_PER_PAGE && recent.length > MATCHES_PER_PAGE) {
       const remaining = SCAN_ROWS - recent.length;
-      if (receiptBytes < CODE_HISTORY_READ_BYTES) {
-        const page = await receipts(recent.at(-1)!.sequence).paginate({
-          cursor: null,
-          numItems: remaining,
-          maximumRowsRead: remaining,
-          maximumBytesRead: CODE_HISTORY_READ_BYTES - receiptBytes,
-        });
-        rows = [...recent, ...page.page];
-        hasOlder = !page.isDone;
-      }
+      const page = await receipts(recent.at(-1)!.sequence).paginate({
+        cursor: null,
+        numItems: remaining,
+        maximumRowsRead: remaining,
+        maximumBytesRead: SCAN_RECEIPT_BYTES - receiptBytes,
+      });
+      rows = [...recent, ...page.page];
+      hasOlder = !page.isDone;
     }
     // Keep dense pages cheap. On sparse pages, read headers and then bodies in parallel.
     const count = scanned ? SCAN_BATCH : MATCHES_PER_PAGE;

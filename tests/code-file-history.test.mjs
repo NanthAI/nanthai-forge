@@ -17,6 +17,26 @@ const fileHistoryUrl = '/public/v1/code/ada/example/file-history/' + Buffer.from
 
 function fixture(visibility = 'public') {
   const f = state([]);
+  const query = f.ctx.db.query;
+  f.ctx.db.query = table => {
+    const builder = query(table);
+    if (table === 'projectHostedAcceptances') {
+      // The shared fixture caps rows. Model the provider's separate pagination byte boundary here.
+      const paginate = builder.paginate;
+      builder.paginate = async opts => {
+        const result = await paginate(opts);
+        let bytes = 0;
+        const page = [];
+        for (const row of result.page) {
+          bytes += Buffer.byteLength(JSON.stringify(row));
+          if (page.length && bytes > (opts.maximumBytesRead ?? Infinity)) break;
+          page.push(row);
+        }
+        return { ...result, page, isDone: result.isDone && page.length === result.page.length };
+      };
+    }
+    return builder;
+  };
   const put = (table, id, fields) =>
     f.tables[table].set(id, { _id: id, _creationTime: 1, projectId: 'project', ...fields });
   put('hostedProjects', 'project', { owner: 'owner', name: 'Example', slug: 'example', visibility });
@@ -147,6 +167,53 @@ test('a sparse scan stops at its read budget and resumes without skipping a land
     [16],
   );
   t.diagnostic(JSON.stringify(io));
+});
+
+test('the first page can find sparse matches through more than 256 KiB of receipt metadata', async t => {
+  const f = fixture('private');
+  const docsResolution = {
+    paths: Array.from({ length: 23 }, (_, index) => `docs/${'a'.repeat(180)}/file-${index}.md`),
+    rule: 'keep both sides, main first',
+    undo: 'Edit the affected files.',
+  };
+  for (let i = 1; i <= 90; i++) f.add(i, i <= 20 ? [path] : ['other.ts'], { docsResolution });
+  const meter = meterWorkIO(f.ctx, f.tables);
+  t.after(() => meter.restore());
+  let first;
+  const io = await meter.cost(async () => {
+    first = await f.read();
+  });
+  assert.deepEqual(
+    first.landings.map(row => row.sequence),
+    [20, 19, 18, 17, 16, 15, 14, 13],
+  );
+  assert.equal(first.scanned, 78);
+  assert.equal(first.nextBefore, 13);
+  assert.ok(io.readBytes <= 550_000, `read ${io.readBytes} bytes`);
+});
+
+test('the expanded receipt byte budget stops a sparse scan before its row ceiling', async t => {
+  const f = fixture('private');
+  const docsResolution = {
+    paths: Array.from({ length: 52 }, (_, index) => `docs/${'a'.repeat(180)}/file-${index}.md`),
+    rule: 'keep both sides, main first',
+    undo: 'Edit the affected files.',
+  };
+  for (let i = 1; i <= 80; i++) f.add(i, i === 12 ? [path] : ['other.ts'], { docsResolution });
+  const meter = meterWorkIO(f.ctx, f.tables);
+  t.after(() => meter.restore());
+  let first;
+  const io = await meter.cost(async () => {
+    first = await f.read();
+  });
+  assert.deepEqual(first.landings, []);
+  assert.ok(first.nextBefore > 12);
+  assert.equal(first.scanned, 81 - first.nextBefore);
+  assert.ok(io.readBytes <= 580_000, `read ${io.readBytes} bytes`);
+  assert.deepEqual(
+    (await f.read(first.nextBefore)).landings.map(row => row.sequence),
+    [12],
+  );
 });
 
 test('large receipt metadata stops the scan even before the first batch fills', async t => {
