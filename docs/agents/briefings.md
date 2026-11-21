@@ -245,8 +245,9 @@ path. To refresh the registry after replay or source changes, build the project 
 `nforge heavy node scripts/incident-replay-coverage.mjs --write` from the Lane. The
 normal suite checks existing mappings during their replays. Registry edits schedule the
 named replays in the landing check. The read-only `--check` command verifies the mappings in
-isolation. Retain the passing
-replay result and a GO from a fresh-context review on the Item or in the check records.
+isolation. Run one fresh-context review, fix its findings, and land without a second review.
+Retain the passing replay result, the review, and a record of the fixes on the Item or in the
+check records.
 Record the full session or thread IDs in `authorSession` and `review.session`. The IDs must
 differ. The reviewer may use the same model as the author. Use a full receipt or comment UUID
 or a stable HTTPS link in each `receipt` field.
