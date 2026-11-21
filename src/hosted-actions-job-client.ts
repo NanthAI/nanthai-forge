@@ -280,13 +280,18 @@ export class ActionsJobClient {
   get sourceWindow() {
     return this.capabilities.includes(actionsSourceBatchCapability) ? directSourceBatch : directSourceWindow;
   }
-  transport(cache?: string) {
+  transport(cache?: string, options?: { packBaseBound: true }) {
     const rows = new Map<string, StateSourceRow>();
     const bound = new Map<string, { sha256: string; size: number }>();
     let selectedState: string | null = null;
     const recipeOwners = new Map<string, string>(),
       authorizedStates = new Set<string>();
     let requiredStateSource = false;
+    // The pack job restores the plan's routing choice for its pinned base.
+    // Requests still obtain fresh server authorization and exact grants.
+    const packBase = options?.packBaseBound ? this.run?.candidate.base.head : undefined;
+    const hasStateBinding = (state: string) =>
+      bound.has(state) || (requiredStateSource && authorizedStates.has(state));
     let sourcePage = 0;
     const runFiles = new Map<string, string>();
     const signedLeaves = new Map<string, NonNullable<ReturnType<typeof rows.get>>>();
@@ -673,6 +678,7 @@ export class ActionsJobClient {
     return {
       transport,
       resolveHeads: (ids: string[]) => resolve(ids, false, false, true),
+      requiresStateBinding: () => requiredStateSource,
       async selectState(state: string, all: boolean) {
         if (selectedState !== state) {
           for (const id of rows.keys()) if (!authorizedStates.has(id)) rows.delete(id);
@@ -690,7 +696,7 @@ export class ActionsJobClient {
               rows.set(leaf.digest, signed);
             }
         }
-        if (!bound.has(state) && !(requiredStateSource && authorizedStates.has(state))) {
+        if (!hasStateBinding(state) && (all || state !== packBase)) {
           selectedState = null;
           return false;
         }

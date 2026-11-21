@@ -86,23 +86,20 @@ try {
     );
     if (source.proof) await executeLandingProof(client, directory, source.proof);
   } else if (process.argv[2] === 'pack') {
-    const { refreshActionsSourcePack } = await import('../dist/hosted-actions-job-pack.js');
-    const { SourceWorkerReader } = await import('../dist/hosted-source-worker-reader.js');
+    const { refreshActionsPackArtifact } = await import('../dist/hosted-actions-job-pack.js');
     try {
       restoreRun();
-      if (!client.capabilities.includes('sourcePack')) process.exit(0);
+      if (!client.capabilities.includes('sourcePack')) {
+        console.log('source pack: refresh skipped (capability-unavailable)');
+        process.exit(0);
+      }
       const cache = resolve(process.env.RUNNER_TEMP, 'forge-objects');
       const source = JSON.parse(
         readFileSync(resolve(process.env.RUNNER_TEMP, 'forge-pack-refresh.json'), 'utf8'),
       );
-      client.sourcePack = source.sourcePack;
-      const { warmPackCache } = await import('../dist/hosted-actions-job-pack.js');
-      await warmPackCache(source.state, directory, cache);
-      source.connection = client.transport();
-      source.reader = new SourceWorkerReader(cache, source.connection.transport, undefined, 16);
-      await refreshActionsSourcePack(client, source, cache);
+      await refreshActionsPackArtifact(client, source, directory, cache);
     } catch {
-      console.log('source pack: refresh skipped');
+      console.log('source pack: refresh skipped (job-input)');
     }
   } else {
     restoreRun();

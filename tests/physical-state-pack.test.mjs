@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { makeFunctionReference } from 'convex/server';
 import { physicalStateSourceFixture } from './physical-state-source-fixture.mjs';
 import { expandSourceGrants } from '../dist/source-grant-wire.js';
 import { digest } from '../dist/hash.js';
@@ -12,7 +13,9 @@ import {
   actionsSourceStateCapability,
 } from '../dist/hosted-actions-capabilities.js';
 import { materializeActionsSource } from '../dist/hosted-actions-job-source.js';
-import { refreshActionsSourcePack } from '../dist/hosted-actions-job-pack.js';
+import { refreshActionsPackArtifact } from '../dist/hosted-actions-job-pack.js';
+import { prepareActionsJob } from '../dist/hosted-actions-job-plan.js';
+import { sourcePackKey } from '../dist/source-pack.js';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -21,7 +24,7 @@ const { writableHostedCheck, writeHostedCheck } = await import(
   moduleUrl('../convex/projectHostedCheckStore.ts')
 );
 test('pack refresh selects the accepted base for a file the Candidate changed instead of denying it as a Candidate nonmember', async t => {
-  const f = await physicalStateSourceFixture(t, 10),
+  const f = await physicalStateSourceFixture(t, 10, { protocol: 2 }),
     oldBytes = Buffer.from('old source'),
     oldBlob = f.s.put(oldBytes),
     baseFiles = f.files.map((file, index) => (index ? file : { ...file, blob: oldBlob.sha256 })),
@@ -51,7 +54,7 @@ test('pack refresh selects the accepted base for a file the Candidate changed in
     put: store,
   });
   const row = [...f.s.tables.projectObjects.values()].find(row => row.digest === base.sha256);
-  f.s.patch('projectObjects', row._id, { statePhysical: root.pin });
+  f.s.patch('projectObjects', row._id, { statePhysical: root.pin, stateGeneration: 4 });
   for (const [id, bytes] of [
     [oldBlob.sha256, oldBytes],
     [base.sha256, baseBytes],
@@ -82,23 +85,110 @@ test('pack refresh selects the accepted base for a file the Candidate changed in
     }
     return fetch(url, init);
   });
-  client.run = f.run;
+  const planRun = { ...f.run, check: { ...f.run.check, args: ['verify-source.mjs'] } };
+  client.run = planRun;
   client.capabilities = [...hostedActionsCapabilities, actionsSourceStateCapability];
-  t.mock.method(client, 'call', async command => {
-    if (command.kind === 'source')
-      return command.state ? expandSourceGrants(await f.source(command)) : f.heads();
+  t.mock.method(client, 'session', async () => planRun);
+  const call = async command => {
+    if (command.kind === 'source') {
+      if (command.state) return expandSourceGrants(await f.source(command));
+      if (command.bound) return f.heads();
+      return f.ctx.runMutation(makeFunctionReference('projectHostedActionsSource:resolve'), {
+        ...f.input,
+        digests: command.digests,
+        version: 2,
+      });
+    }
+    if (command.kind === 'plan') return planRun;
     assert.equal(command.kind, 'sourcePack');
     return sourcePackCommand(f.ctx, f.input, command.phase, command.object);
+  };
+  t.mock.method(client, 'call', call);
+  const candidate = join(directory, 'candidate');
+  const plan = await prepareActionsJob(client, candidate, cache);
+  assert.equal(plan.packRefresh.refresh, true);
+  const artifactPath = join(directory, 'forge-pack-refresh.json');
+  writeFileSync(artifactPath, JSON.stringify(plan.packRefresh));
+  const artifact = JSON.parse(readFileSync(artifactPath, 'utf8'));
+  const refreshCache = join(directory, 'pack-job-objects');
+  const refreshClient = new ActionsJobClient(client.site, f.s.projectId, f.run.id, client.request);
+  refreshClient.run = f.run;
+  refreshClient.capabilities = client.capabilities;
+  t.mock.method(refreshClient, 'call', call);
+  const refresh = source => refreshActionsPackArtifact(refreshClient, source, candidate, refreshCache);
+  const skips = [];
+  const originalLog = console.log;
+  const log = t.mock.method(console, 'log', (...args) => {
+    if (args[0].startsWith('source pack: refresh skipped')) skips.push(args.join(' '));
+    else originalLog(...args);
   });
-  const source = await materializeActionsSource(client, join(directory, 'candidate'), cache);
-  assert.equal(await refreshActionsSourcePack(client, source, cache), true);
-  assert(
-    f.calls.some(
-      call => call.name === 'projectStateSourceSelection:runner' && call.args.state === base.sha256,
-    ),
+  const failedCalls = f.calls.length;
+  const failedRequests = f.r2.requests.length;
+  const { requiresStateBinding, ...oldArtifact } = artifact;
+  assert.equal(await refresh(oldArtifact), false);
+  assert.deepEqual(skips, ['source pack: refresh skipped (base-source-unavailable)']);
+  assert.deepEqual(
+    f.calls.slice(failedCalls).map(call => call.name),
+    ['projectHostedActionsSource:resolve'],
   );
+  assert.equal(f.r2.requests.length, failedRequests);
+  log.mock.restore();
+
+  assert.equal(requiresStateBinding, true);
+  const calls = f.calls.length;
+  const requests = f.r2.requests.length;
+  assert.equal(await refresh(artifact), true);
+  const refreshCalls = f.calls.slice(calls);
+  assert.equal(refreshCalls[0].args.state, base.sha256);
+  assert.deepEqual(
+    refreshCalls.map(call => call.name),
+    [
+      'projectStateSourceSelection:runner',
+      'projectStateSourceSelection:runner',
+      'projectSourcePacks:prepare',
+      'projectHostedActionsSession:session',
+      'projectSourcePacks:commit',
+    ],
+  );
+  const refreshRequests = f.r2.requests.slice(requests);
+  assert.deepEqual(refreshRequests, ['GET', 'GET', 'GET', 'PUT', 'HEAD']);
+  t.diagnostic(JSON.stringify({ refreshMutations: refreshCalls.length, r2: refreshRequests }));
   const published = [...f.s.tables.projectSourcePacks.values()][0].latest;
   assert.equal(published.stateRef, base.sha256);
+  assert.equal(published.stateGeneration, 4);
+});
+
+test('a delayed check on an older accepted State cannot replace a newer source pack', async t => {
+  const f = await physicalStateSourceFixture(t, 1);
+  const older = f.run.candidate.base.head;
+  const state = [...f.s.tables.projectObjects.values()].find(row => row.digest === older);
+  f.s.patch('projectObjects', state._id, { stateGeneration: 4 });
+  const stateRef = digest('newer accepted state');
+  const sha256 = digest('newer source pack');
+  const latest = {
+    stateRef,
+    sha256,
+    objectKey: sourcePackKey(f.s.projectId, stateRef, sha256),
+    stateGeneration: 5,
+    size: 10,
+    fileCount: 1,
+    createdAt: 1,
+    expiresAt: 2,
+  };
+  const row = f.s.insert('projectSourcePacks', { projectId: f.s.projectId, latest });
+  const requests = f.r2.requests.length;
+  assert.equal(
+    await sourcePackCommand(f.ctx, f.input, 'prepare', {
+      stateRef: older,
+      sha256: digest('older source pack'),
+      size: 10,
+      fileCount: 1,
+    }),
+    null,
+  );
+  assert.deepEqual(f.s.tables.projectSourcePacks.get(row).latest, latest);
+  assert.equal(f.s.tables.projectSourcePacks.get(row).other, undefined);
+  assert.equal(f.r2.requests.length, requests);
 });
 
 test('a cold29k job with a historical source pack and300 raw changes stays under100KB and three resolver mutations', async t => {

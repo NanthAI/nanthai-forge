@@ -328,6 +328,7 @@ export async function prepareActionsJob(
       refresh: packRefresh,
       state,
       base,
+      requiresStateBinding: source.connection.requiresStateBinding(),
       packed: source.packed,
       deltaFiles: source.deltaFiles,
       deltaBytes: source.deltaBytes,

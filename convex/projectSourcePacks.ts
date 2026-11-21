@@ -48,6 +48,15 @@ export async function reserveSourcePack(
   let row = await selectedSourcePacks(ctx, projectId);
   const objectKey = sourcePackKey(projectId, object.stateRef, object.sha256);
   if (row?.latest?.objectKey === objectKey) return null;
+  // Generations increase along accepted main's ancestry. The other slot holds
+  // the reservation exclusively until it is promoted or retired.
+  const { stateGeneration } = state;
+  if (
+    stateGeneration !== undefined &&
+    row?.latest?.stateGeneration !== undefined &&
+    stateGeneration < row.latest.stateGeneration
+  )
+    return null;
   if (cleanupAck) {
     invariant(
       row?.other?.objectKey === cleanupAck && row.other.expiresAt <= now && row.other.deleting,
@@ -72,6 +81,7 @@ export async function reserveSourcePack(
   const other = {
     ...object,
     objectKey,
+    ...(stateGeneration === undefined ? {} : { stateGeneration }),
     createdAt: row?.other?.createdAt ?? now,
     // Keep retired keys until every signed PUT and bounded upload has expired;
     // a delayed retry must not recreate an already deleted object.
@@ -106,7 +116,12 @@ export async function promoteSourcePack(
     'WORK_STALE',
     'Pack reservation changed.',
   );
-  const latest = { ...sourcePackSchema.strip().parse(row.other), expiresAt: row.other.expiresAt };
+  const { expiresAt, stateGeneration } = row.other;
+  const latest = {
+    ...sourcePackSchema.strip().parse(row.other),
+    expiresAt,
+    ...(stateGeneration === undefined ? {} : { stateGeneration }),
+  };
   await ctx.db.patch(row._id, { latest, other: row.latest ? { ...row.latest, ready: true } : undefined });
   return null;
 }

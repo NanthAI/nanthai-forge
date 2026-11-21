@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import { stat, lstat, rm, mkdir, copyFile, writeFile, readlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileDigest, createSourcePack } from './source-pack-archive.js';
-import { refreshSourcePack } from './source-pack.js';
+import { refreshSourcePack, type SourcePackDownload } from './source-pack.js';
 import { sourceWindowOrder } from './hosted-actions-direct.js';
 import type { ActionsJobClient } from './hosted-actions-job-client.js';
 import type { materializeActionsSource } from './hosted-actions-job-source.js';
@@ -11,25 +11,58 @@ import type { NativeState } from './state/format.js';
 import { digest } from './hash.js';
 import { retryActionsInfrastructure, actionsInfrastructureResponse } from './hosted-actions-retry.js';
 import { invariant } from './errors.js';
+import { SourceWorkerReader } from './hosted-source-worker-reader.js';
+
+type RefreshSource = Pick<
+  Awaited<ReturnType<typeof materializeActionsSource>>,
+  'base' | 'packed' | 'deltaFiles' | 'deltaBytes' | 'totalBytes' | 'connection' | 'reader'
+>;
+
+/** Restore the separate job's source context from the plan artifact. */
+export async function refreshActionsPackArtifact(
+  client: ActionsJobClient,
+  source: Omit<RefreshSource, 'connection' | 'reader'> & {
+    state: NativeState;
+    sourcePack: SourcePackDownload | null;
+    requiresStateBinding?: boolean;
+  },
+  directory: string,
+  cache: string,
+) {
+  client.sourcePack = source.sourcePack;
+  try {
+    await warmPackCache(source.state, directory, cache);
+  } catch {
+    return skipRefresh('candidate-cache');
+  }
+  const connection =
+    source.requiresStateBinding === true
+      ? client.transport(cache, { packBaseBound: true })
+      : client.transport();
+  const reader = new SourceWorkerReader(cache, connection.transport, undefined, 16);
+  return refreshActionsSourcePack(client, { ...source, connection, reader }, cache);
+}
+
 /** Called only after publishing matrix/artifacts. Always pack the accepted base,
  * never let concurrent speculative Candidates churn the project's cache. */
 export async function refreshActionsSourcePack(
   client: ActionsJobClient,
-  source: Awaited<ReturnType<typeof materializeActionsSource>>,
+  source: RefreshSource,
   cache: string,
 ) {
-  if (!client.capabilities.includes('sourcePack')) return false;
-  const archive = join(cache, 'upload-source-pack.gz');
-  try {
-    if (
-      !refreshSourcePack(
-        source.packed ? client.sourcePack : null,
-        source.deltaFiles,
-        source.deltaBytes,
-        source.totalBytes,
-      )
+  if (!client.capabilities.includes('sourcePack')) return skipRefresh('capability-unavailable');
+  if (
+    !refreshSourcePack(
+      source.packed ? client.sourcePack : null,
+      source.deltaFiles,
+      source.deltaBytes,
+      source.totalBytes,
     )
-      return false;
+  )
+    return skipRefresh('delta-within-threshold');
+  const archive = join(cache, 'upload-source-pack.gz');
+  let reason = 'base-source';
+  try {
     // Existing cache blobs have already passed either W2 or pack verification.
     const missing: string[] = [];
     for (const file of source.base.files) {
@@ -50,13 +83,16 @@ export async function refreshActionsSourcePack(
       await source.reader.resolveMany(selected);
       start += count;
     }
+    reason = 'archive-create';
     const object = await createSourcePack(client.run!.candidate.base.head, source.base, cache, archive);
-    if (!object) return false;
+    if (!object) return skipRefresh('archive-bounds');
+    reason = 'reservation';
     const target = (await client.call({ kind: 'sourcePack', phase: 'prepare', object })) as {
       url: string;
       headers: Record<string, string>;
     } | null;
-    if (!target) return false;
+    if (!target) return skipRefresh('reservation-unavailable');
+    reason = 'upload';
     await retryActionsInfrastructure(
       async signal => {
         const body = createReadStream(archive);
@@ -79,15 +115,26 @@ export async function refreshActionsSourcePack(
       120_000,
       360_000,
     );
+    reason = 'commit';
     await client.call({ kind: 'sourcePack', phase: 'commit', object });
     return true;
-  } catch {
+  } catch (error) {
     // A failed refresh never invalidates the published plan.
-    console.log('source pack: refresh skipped (storage or cache bound)');
-    return false;
+    const code = (error as { code?: unknown } | null)?.code;
+    if (code === 'CHECK_CANCELLED') return skipRefresh('check-cancelled');
+    if (reason === 'base-source' && code === 'SOURCE_UNAVAILABLE')
+      return skipRefresh('base-source-unavailable');
+    return skipRefresh(reason);
   } finally {
-    await rm(archive, { force: true });
+    await rm(archive, { force: true }).catch(() =>
+      console.log('source pack: refresh cleanup failed (archive-cleanup)'),
+    );
   }
+}
+
+function skipRefresh(reason: string) {
+  console.log(`source pack: refresh skipped (${reason})`);
+  return false;
 }
 
 /** Seed the separate refresh job from the already uploaded Candidate artifact. */

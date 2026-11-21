@@ -8,6 +8,7 @@ const pack = {
   sha256: v.string(),
   size: v.number(),
   fileCount: v.number(),
+  stateGeneration: v.optional(v.number()),
   createdAt: v.number(),
   expiresAt: v.number(),
 };

@@ -844,14 +844,24 @@ When there is no usable pack, or the delta exceeds 300 paths or 10% of Candidate
 content bytes, the optional `hosted-pack` job runs alongside the check shards after
 matrix and Candidate artifact publication. It uses that artifact to seed its cache,
 fetches any missing accepted-base blobs, verifies them, and packs the pinned accepted
-base rather than speculative Candidate source. Its failure does not fail the check.
-It uses separate `sourcePack` prepare/commit commands only after advertisement.
+base. The plan carries the negotiated State-source requirement in the existing
+artifact. A fresh pack job uses it to bind its missing-file requests to the pinned
+base, with current authorization and no separate State discovery request.
+Refresh failures leave the check outcome alone. The pack job logs a fixed
+`source pack: refresh skipped (CODE)` line, such as `base-source-unavailable`,
+`archive-bounds`, `reservation-unavailable`, `upload` or `commit`. The line carries
+no error message, URL or source identifiers. The job sends `sourcePack`
+prepare/commit commands only after advertisement.
 Servers without that capability receive no pack commands, and their checks use
 the existing source/plan/result shapes.
 
 `projectSourcePacks` holds one small indexed document per project, including newest
 metadata and a second slot for a previous pack or reserved upload. Reservations
 precede PUTs; conflicting refreshes skip, including after interrupted uploads.
+Reservations reuse the State row's authenticated generation when recorded.
+A check on a base with a lower known generation than the current pack skips
+before cleanup or upload. Legacy rows without generations keep the same
+two-slot behavior until a refresh records a generation, with no backfill.
 A create-only, checksum/length-bound PUT grants one computed project/State/digest
 key. Commit checks R2 HEAD size/checksum and repeats current session authorization.
 The previous or abandoned slot is deleted before its next replacement, after its
@@ -873,7 +883,9 @@ pack-document read; unchanged-pack planning writes no pack metadata.
 A refresh adds two HTTP requests / five function invocations, one PUT (Class A)
 and one HEAD (Class B), plus missing-base descriptor pages and blob GETs. Replacing
 an old slot adds one nested mutation and one DELETE (free); the DELETE must succeed
-before another object is reserved. Fallback adds the attempted pack/manifest reads
+before another object is reserved. The saved base routing choice adds no
+requests to planning or to the existing State-bound descriptor windows.
+Fallback adds the attempted pack/manifest reads
 to ordinary full-download costs; a final verification failure can also repeat the
 already downloaded delta. Check result/log operations remain unchanged.
 
