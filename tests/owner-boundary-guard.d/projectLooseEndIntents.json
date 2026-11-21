@@ -1,0 +1,4 @@
+{
+  "actions": ["setAside"],
+  "reason": "An owner can explicitly set aside selected loose-end Intents through the existing lifecycle authority. The mutation rechecks each selection under current device and project authority."
+}

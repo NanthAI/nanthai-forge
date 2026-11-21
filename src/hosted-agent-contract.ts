@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { looseEndIntentBatchSchema } from './hosted-lifecycle.js';
 import { finishRetryReasonSchema, landingTokensSchema } from './hosted-landing.js';
 import { notVerifiedInput } from './agent-handoff-types.js';
 import { effectiveAgentDefaultsWireSchema } from './agent-parallel-defaults.js';
@@ -410,6 +411,8 @@ export const hostedAgentCommandSchemas = {
     .object({
       ...lane,
       reason: z.string().min(1),
+      authorityEpoch: looseEndIntentBatchSchema.shape.authorityEpoch.optional(),
+      intents: looseEndIntentBatchSchema.shape.intents.optional(),
       saveFirst: z.boolean().default(false),
       /** Keep unsaved edits in a local patch next to the checkout, then abandon. */
       keepPatch: z.boolean().default(false),
@@ -423,7 +426,19 @@ export const hostedAgentCommandSchemas = {
         .strict()
         .optional(),
     })
-    .strict(),
+    .strict()
+    .refine(
+      command =>
+        command.intents
+          ? command.authorityEpoch !== undefined &&
+            !command.laneId &&
+            !command.target &&
+            !command.saveFirst &&
+            !command.keepPatch &&
+            looseEndIntentBatchSchema.shape.reason.safeParse(command.reason).success
+          : command.authorityEpoch === undefined,
+      'Batch abandonment takes only the Intent selections, authorityEpoch and reason.',
+    ),
   /** Close one Lane whose work landed; a repeat is a no-op. */
   complete: z.object({ ...lane }).strict(),
   /** Owner pin: cleanup (complete-merged, completeOnAccept, Intent cascade, prune, cache GC) skips the Lane. */

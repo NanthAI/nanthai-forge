@@ -55,3 +55,31 @@ export const hostedLifecycleResultSchema = z
   })
   .strict();
 export type HostedLifecycleResult = z.infer<typeof hostedLifecycleResultSchema>;
+
+/** The Loose ends Intent group uses the same page size for listing and setting aside. */
+export const looseEndIntentPageSize = 25;
+export const looseEndIntentCursor = 'forge-loose-ends-intents-v1:';
+export const looseEndIntentBatchSchema = z
+  .object({
+    authorityEpoch: number,
+    reason: z.string().trim().min(1).max(4000),
+    intents: z
+      .array(
+        z
+          .object({
+            projectId: z.string().min(1),
+            intentId: z.uuid(),
+            version: number,
+            laneRevision: number,
+            observedAt: number,
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(looseEndIntentPageSize)
+      .refine(
+        rows => new Set(rows.map(row => row.intentId)).size === rows.length,
+        'Select each Intent once.',
+      ),
+  })
+  .strict();

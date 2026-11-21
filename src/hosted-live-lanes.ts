@@ -11,7 +11,9 @@ const issueRef = z.string().refine(isPlanningRef, `expected ${planningIdHelp}`);
 import { shellQuote } from './shell-quote.js';
 import { hostedAgentRoot } from './hosted-agent-journal.js';
 import { backgroundSave } from './hosted-save-pending.js';
-const isStoppedCursor = (value: string) => value.startsWith('forge-loose-ends-stopped-v1:');
+import { looseEndIntentCursor } from './hosted-lifecycle.js';
+const isLooseEndsCursor = (value: string) =>
+  value.startsWith('forge-loose-ends-stopped-v1:') || value.startsWith(looseEndIntentCursor);
 export const liveLanesInput = z
   .object({
     planningItemId: issueRef
@@ -32,12 +34,13 @@ export const liveLanesInput = z
         value =>
           value.startsWith('forge-lanes-v1:') ||
           value.startsWith('forge-item-work-v1:') ||
-          isStoppedCursor(value),
+          isLooseEndsCursor(value),
       )
       .nullable()
       .default(null),
     /** Page size: 50 by default (20 for state "all"), at most 100 (50 for state "all"). */
     limit: z.number().int().min(1).max(100).optional(),
+    intents: z.literal(true).optional(),
     /** `live` hides dormant Lanes; `dormant` lists only them, each with `abandonable`; default lists all.
      * `loose-ends` is one compact read of five groups (dormant, stopped, checked never landed, leftover projects,
      * dated checks), each listed or marked not reported with the reason; a quiet Lane beside a live Lane of the same
@@ -57,9 +60,16 @@ export const liveLanesInput = z
   .refine(input => input.state !== 'all' || (input.planningItemId && !input.intentId && !input.view), {
     message: 'state "all" reads one Issue: pass planningItemId (no intentId or view).',
   })
-  .refine(input => input.cursor === null || isStoppedCursor(input.cursor) === (input.view === 'loose-ends'), {
-    path: ['cursor'],
-    message: 'Use the cursor returned for this lanes view, or omit the cursor to start over.',
+  .refine(
+    input => input.cursor === null || isLooseEndsCursor(input.cursor) === (input.view === 'loose-ends'),
+    {
+      path: ['cursor'],
+      message: 'Use the cursor returned for this lanes view, or omit the cursor to start over.',
+    },
+  )
+  .refine(input => !input.intents || (input.view === 'loose-ends' && input.cursor === null), {
+    path: ['intents'],
+    message: 'Use intents:true with view "loose-ends" to start the Intent group, or pass its continueCursor.',
   });
 /** The read returns canonical JSON text; the hosted transport already decodes JSON replies, so the reply may arrive as
  * the object itself (a second JSON.parse made every `view:"loose-ends"` read fail). */
@@ -160,7 +170,10 @@ export async function liveLanes(transport: HostedAgentTransport, input: Record<s
           ? await itemLanes(transport, input.planningItemId!, input)
           : input.view === 'loose-ends'
             ? looseEnds(
-                await transport.query('projectLooseEnds:read', input.cursor ? { cursor: input.cursor } : {}),
+                await transport.query(
+                  'projectLooseEnds:read',
+                  input.cursor || input.intents ? { cursor: input.cursor ?? looseEndIntentCursor } : {},
+                ),
               )
             : input.view === 'tree'
               ? await laneTree(transport, input)

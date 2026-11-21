@@ -25,7 +25,7 @@
 | `x cancel` | `submissionId, operationId?` |
 | `land --withdraw` | `laneId?, submissionId?, reason?, operationId?` |
 | `x revert` | `message?, target, operationId?` |
-| `x abandon` | `laneId?, reason, saveFirst?, keepPatch?, target?, operationId?` |
+| `x abandon` | `laneId?, reason, authorityEpoch?, intents?, saveFirst?, keepPatch?, target?, operationId?` |
 | `x complete` | `laneId?, operationId?` |
 | `x pin` | `laneId?, pinned?, operationId?` |
 | `x complete-merged` | `operationId?` |
@@ -48,7 +48,7 @@
 | `provenance` | `candidateId, file?, lines?, cursor?` |
 | `records` | `collection, parentId?, status?, id?, version?, cursor?` |
 | `log` | `runId, tail?, stream?, shard?, attempt?, laneId?` |
-| `lanes` | `planningItemId?, id?, itemId?, intentId?, state?, cursor?, limit?, view?` |
+| `lanes` | `planningItemId?, id?, itemId?, intentId?, state?, cursor?, limit?, intents?, view?` |
 | `diff` | `laneId?, paths?, byteBudget?, summary?, from?, cursor?` |
 | `peers` | `laneId?, path?, detail?` |
 | `queue` | `limit?, laneId?, submissionId?, beforeAttempt?, attemptId?, afterLaneId?, batchId?` |

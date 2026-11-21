@@ -185,10 +185,10 @@ export function registerHostedAgentWorkflow(
       if (action === 'help')
         return z.object({ action: z.literal('help'), topic: z.string().max(64).optional() }).strict();
       // MCP lanes (f0d0fdd6) names `id` (already listed for records; the CLI read takes it as the Issue key),
-      // intentId, cursor, limit and view, so the per-session listing stays inside its budget (47558a99).
+      // intentId, cursor, limit, intents and view, so the per-session listing stays inside its budget (47558a99).
       if (action === 'lanes') {
-        const { id, intentId, cursor, limit, view } = hostedClientReadSchemas.lanes.shape;
-        return z.object({ action: z.literal('lanes'), id, intentId, cursor, limit, view }).strict();
+        const { id, intentId, cursor, limit, intents, view } = hostedClientReadSchemas.lanes.shape;
+        return z.object({ action: z.literal('lanes'), id, intentId, cursor, limit, intents, view }).strict();
       }
       const clientBody: z.ZodObject | undefined =
         hostedClientReadSchemas[canonical as keyof typeof hostedClientReadSchemas];

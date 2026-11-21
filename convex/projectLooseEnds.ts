@@ -19,6 +19,9 @@ import { LOOSE_ENDS_ACTIVITY_MS, QUIET_MS, withLooseEndsHolders } from '../src/l
 import { report } from './errors';
 import { hostedRecordBody } from './projectHostedRecords';
 
+import { looseEndIntentCursor } from '../src/hosted-lifecycle';
+import { readLooseEndIntents } from './projectLooseEndIntents';
+
 /** The Lane a resolution Lane continues, from its record; nothing for any other Lane or an unreadable record. */
 const resolutionOrigin = (value: string): string | undefined => {
   try {
@@ -219,8 +222,10 @@ export const read = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read loose ends.');
-      const project = await accessibleProject(ctx, projectId, user.subject);
       const now = Date.now();
+      if (cursor?.startsWith(looseEndIntentCursor))
+        return canonicalPayload(await readLooseEndIntents(ctx, projectId, user.subject, cursor, now));
+      const project = await accessibleProject(ctx, projectId, user.subject);
       const quietFrom = now - QUIET_MS;
       const position = cursor === undefined ? null : stoppedPosition(projectId, cursor);
       const cutoff = position ? null : dormantCutoff(project, now);

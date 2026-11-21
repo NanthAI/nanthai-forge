@@ -479,6 +479,39 @@ export class HostedAgentTransport {
       };
     }
     if (requestedAction === 'lanes') return liveLanes(this, input);
+    if (requestedAction === 'abandon' && Object.hasOwn(input, 'intents')) {
+      const { operationId, ...parameters } = input;
+      const command = hostedAgentCommandSchemas.abandon.safeParse(parameters);
+      invariant(
+        command.success && typeof operationId === 'string' && z.uuid().safeParse(operationId).success,
+        'BAD_ARGUMENT',
+        'Use nforge x ROOT abandon with an operationId, authorityEpoch, reason and the Intent selections from lanes.',
+      );
+      const { authorityEpoch, intents, reason } = command.data;
+      try {
+        return {
+          schema: 1,
+          transport: 'hosted',
+          action: 'abandon',
+          operationId,
+          resolved: null,
+          result: await this.mutation('projectLooseEndIntents:setAside', {
+            operationId,
+            request: JSON.stringify({ authorityEpoch, intents, reason }),
+          }),
+        };
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          /Could not find (?:public )?function|No (?:public )?function found/i.test(error.message)
+        )
+          throw new ForgeError(
+            'HOSTED_ACTION_UNSUPPORTED',
+            'This deployment does not offer batch Intent set-aside yet.',
+          );
+        throw hostedActionError(error, 'Intent set-aside');
+      }
+    }
     if (requestedAction === 'diff')
       return {
         schema: 1,

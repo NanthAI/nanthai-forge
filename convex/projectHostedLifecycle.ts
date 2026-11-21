@@ -2,13 +2,14 @@
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { mutation, query } from './cliServer';
-import { internalMutation } from './server';
+import { internalMutation, type MutationCtx } from './server';
+import type { Id } from './_generated/dataModel';
 import { sourceAuthority } from '../src/hosted-source-authority';
 import { requireWriteEpoch } from './projectHostedRecords';
 import { beginHostedOperation, hostedOperationRow } from './projectHostedOperations';
 import { lifecycleGuard } from './projectHostedLifecycleOverlay';
 import { sameSaveLane, loadSave } from './projectHostedSaveStore';
-import { hostedLifecycleRequestSchema } from '../src/hosted-lifecycle';
+import { hostedLifecycleRequestSchema, type HostedLifecycleRequest } from '../src/hosted-lifecycle';
 import { purgedLifecycleReason } from '../src/work-planning-purge';
 import { canonicalPayload, hostedPayloadHash, hostedOperationSchema } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
@@ -38,152 +39,159 @@ export const transition = mutation({
         'BAD_ARGUMENT',
         'Send an original lifecycle UUID, reason for abandonment and exact resource pins.',
       );
-      const request = parsed.data;
-      const actor = await lifecycleCaller(ctx, input.projectId),
-        target = request.target;
-      const expected = {
-        authorityEpoch: request.authorityEpoch,
-        resourceId: target.kind === 'lane' ? target.laneId : target.intentId,
-        resourceVersion: target.kind === 'lane' ? target.expected.version : target.version,
-        ...(target.kind === 'lane'
-          ? { head: target.expected.head, sourceRevision: target.expected.sourceVersion }
-          : {}),
-      };
-      const auth = { projectId: input.projectId, actor, operationId: request.operationId };
-      const prepared = await beginHostedOperation(ctx, {
-        ...auth,
-        ...(request.action === 'complete' ? {} : { metricAction: request.action }),
-        payload: request,
-        request: { schema: 1, ...auth, expected, payloadHash: hostedPayloadHash(request, expected) },
-        firstAttempt: {
-          projectId: input.projectId,
-          operationId: request.operationId,
-          id: crypto.randomUUID(),
-          at: new Date().toISOString(),
-          parentAttemptId: null,
-          expected,
-          ids: { receipt: crypto.randomUUID() },
-        },
-      });
-      if (prepared.replayed) {
-        const plan = await lifecyclePlan(ctx, auth);
-        invariant(plan, 'SOURCE_UNAVAILABLE', 'The original lifecycle receipt is unavailable.');
-        const { mode, epoch } = sourceAuthority(prepared.project);
-        if (!input.replayEpoch && plan.status === 'pending')
-          requireWriteEpoch(prepared.project, request.authorityEpoch);
-        // Return the original plan even when a cutover stranded it, so the client can distinguish
-        // this replay from a request refused before begin. Never schedule a write at the old epoch.
-        if (
-          mode !== 'native-owner' &&
-          epoch === request.authorityEpoch &&
-          (plan.status === 'pending' || (plan.status === 'applied' && !plan.materialized))
-        )
-          await scheduleLifecycle(ctx, plan._id);
-        return canonicalPayload(lifecycleResult(plan));
-      }
-      const { record } = await lifecycleTarget(
-        ctx,
-        input.projectId,
-        actor,
-        target.kind,
-        target.kind === 'lane' ? target.laneId : target.intentId,
-      );
-      if (target.kind === 'lane') {
-        // Only the Lane author or the project owner abandons, completes or reopens a Lane.
-        if (record.kind === 'lane')
-          await requireMemberAuthorityById(ctx, input.projectId, record.actor, actor, 'Lane');
-        invariant(
-          record.kind === 'lane' &&
-            (target.saveOperationId !== null || sameSaveLane(record, target.expected)),
-          'WORK_STALE',
-          'Hosted Lane changed from its lifecycle pins.',
-        );
-        invariant(
-          request.action !== 'complete' || record.kind !== 'lane' || record.state === 'active',
-          'WORK_STALE',
-          'Only an active Lane can be completed.',
-        );
-        invariant(
-          !record.pinned || request.action === 'reopen',
-          'LANE_PINNED',
-          'The owner pinned this Lane. Unpin it (pin with pinned:false) before completing or abandoning it.',
-        );
-        invariant(
-          request.action !== 'abandon' || !target.dirty || target.saveOperationId,
-          'LANE_DIRTY',
-          'Lane has unsaved edits. Use saveFirst:true to save before abandoning.',
-        );
-        if (target.saveOperationId) {
-          const child = await loadSave(ctx, { ...auth, operationId: target.saveOperationId }, false);
-          invariant(
-            child.state.request.laneId === target.laneId &&
-              (child.state.request.authorityEpoch === request.authorityEpoch ||
-                (child.state.request.authorityEpoch < request.authorityEpoch &&
-                  child.operation.terminal?.outcome.status === 'completed')) &&
-              canonicalPayload(child.state.request.expected) === canonicalPayload(target.expected),
-            'WORK_OPERATION_CHANGED',
-            'The retained save-first child must bind this exact original Lane baseline.',
-          );
-        }
-      } else
-        invariant(
-          record.version === target.version,
-          'WORK_STALE',
-          'Hosted Intent changed from its lifecycle pins.',
-        );
-      const intentId = record.kind === 'lane' ? record.intentId : record.id;
-      let guard = await lifecycleGuard(ctx, input.projectId, intentId);
-      if (!guard) {
-        const id = await ctx.db.insert('projectHostedLifecycleGuards', {
-          projectId: input.projectId,
-          intentId,
-          revision: 0,
-          planId: null,
-        });
-        guard = (await ctx.db.get(id))!;
-      }
-      const first = prepared.operation.firstAttempt;
-      const id = await ctx.db.insert('projectHostedLifecyclePlans', {
-        ...auth,
-        intentId,
-        receiptId: first.ids.receipt!,
-        authorityEpoch: request.authorityEpoch,
-        request: canonicalPayload(
-          prepared.project.itemPurges?.some(
-            purge => purge.intentKeys?.includes(intentId) && purge.purgedAt === undefined,
-          )
-            ? { ...request, reason: purgedLifecycleReason(request.action) }
-            : request,
-        ),
-        at: first.at,
-        revision: guard.revision,
-        status: 'pending',
-        cursor: null,
-        staged: 0,
-        ready: false,
-        saveOperationId: target.kind === 'lane' ? target.saveOperationId : null,
-        savedExpected: null,
-        materialized: false,
-        appliedThrough: 0,
-        materializeCursor: null,
-      });
-      const plan = (await ctx.db.get(id))!;
-      if (target.kind === 'lane' && target.saveOperationId) {
-        return canonicalPayload(await advanceLifecycle(ctx, plan));
-      }
-      if (target.kind === 'intent' && target.cascade) {
-        await ctx.db.patch(guard._id, { planId: id });
-        await scheduleLifecycle(ctx, id);
-        return canonicalPayload(lifecycleResult(plan));
-      }
-      await applyLifecycleRecord(ctx, plan, record);
-      await ctx.db.patch(id, { materialized: true });
-      return canonicalPayload(await settleLifecycle(ctx, plan, 'applied'));
+      const actor = await lifecycleCaller(ctx, input.projectId);
+      return await transitionLifecycle(ctx, input, actor, parsed.data);
     } catch (error) {
       return report(error);
     }
   },
 });
+// Explicit single and batched Intent abandonment share the original lifecycle transaction.
+export async function transitionLifecycle(
+  ctx: MutationCtx,
+  input: { projectId: Id<'hostedProjects'>; replayEpoch?: true },
+  actor: string,
+  request: HostedLifecycleRequest,
+) {
+  const target = request.target;
+  const expected = {
+    authorityEpoch: request.authorityEpoch,
+    resourceId: target.kind === 'lane' ? target.laneId : target.intentId,
+    resourceVersion: target.kind === 'lane' ? target.expected.version : target.version,
+    ...(target.kind === 'lane'
+      ? { head: target.expected.head, sourceRevision: target.expected.sourceVersion }
+      : {}),
+  };
+  const auth = { projectId: input.projectId, actor, operationId: request.operationId };
+  const prepared = await beginHostedOperation(ctx, {
+    ...auth,
+    ...(request.action === 'complete' ? {} : { metricAction: request.action }),
+    payload: request,
+    request: { schema: 1, ...auth, expected, payloadHash: hostedPayloadHash(request, expected) },
+    firstAttempt: {
+      projectId: input.projectId,
+      operationId: request.operationId,
+      id: crypto.randomUUID(),
+      at: new Date().toISOString(),
+      parentAttemptId: null,
+      expected,
+      ids: { receipt: crypto.randomUUID() },
+    },
+  });
+  if (prepared.replayed) {
+    const plan = await lifecyclePlan(ctx, auth);
+    invariant(plan, 'SOURCE_UNAVAILABLE', 'The original lifecycle receipt is unavailable.');
+    const { mode, epoch } = sourceAuthority(prepared.project);
+    if (!input.replayEpoch && plan.status === 'pending')
+      requireWriteEpoch(prepared.project, request.authorityEpoch);
+    // Return the original plan even when a cutover stranded it, so the client can distinguish
+    // this replay from a request refused before begin. Never schedule a write at the old epoch.
+    if (
+      mode !== 'native-owner' &&
+      epoch === request.authorityEpoch &&
+      (plan.status === 'pending' || (plan.status === 'applied' && !plan.materialized))
+    )
+      await scheduleLifecycle(ctx, plan._id);
+    return canonicalPayload(lifecycleResult(plan));
+  }
+  const { record } = await lifecycleTarget(
+    ctx,
+    input.projectId,
+    actor,
+    target.kind,
+    target.kind === 'lane' ? target.laneId : target.intentId,
+  );
+  if (target.kind === 'lane') {
+    // Only the Lane author or the project owner abandons, completes or reopens a Lane.
+    if (record.kind === 'lane')
+      await requireMemberAuthorityById(ctx, input.projectId, record.actor, actor, 'Lane');
+    invariant(
+      record.kind === 'lane' && (target.saveOperationId !== null || sameSaveLane(record, target.expected)),
+      'WORK_STALE',
+      'Hosted Lane changed from its lifecycle pins.',
+    );
+    invariant(
+      request.action !== 'complete' || record.kind !== 'lane' || record.state === 'active',
+      'WORK_STALE',
+      'Only an active Lane can be completed.',
+    );
+    invariant(
+      !record.pinned || request.action === 'reopen',
+      'LANE_PINNED',
+      'The owner pinned this Lane. Unpin it (pin with pinned:false) before completing or abandoning it.',
+    );
+    invariant(
+      request.action !== 'abandon' || !target.dirty || target.saveOperationId,
+      'LANE_DIRTY',
+      'Lane has unsaved edits. Use saveFirst:true to save before abandoning.',
+    );
+    if (target.saveOperationId) {
+      const child = await loadSave(ctx, { ...auth, operationId: target.saveOperationId }, false);
+      invariant(
+        child.state.request.laneId === target.laneId &&
+          (child.state.request.authorityEpoch === request.authorityEpoch ||
+            (child.state.request.authorityEpoch < request.authorityEpoch &&
+              child.operation.terminal?.outcome.status === 'completed')) &&
+          canonicalPayload(child.state.request.expected) === canonicalPayload(target.expected),
+        'WORK_OPERATION_CHANGED',
+        'The retained save-first child must bind this exact original Lane baseline.',
+      );
+    }
+  } else
+    invariant(
+      record.version === target.version,
+      'WORK_STALE',
+      'Hosted Intent changed from its lifecycle pins.',
+    );
+  const intentId = record.kind === 'lane' ? record.intentId : record.id;
+  let guard = await lifecycleGuard(ctx, input.projectId, intentId);
+  if (!guard) {
+    const id = await ctx.db.insert('projectHostedLifecycleGuards', {
+      projectId: input.projectId,
+      intentId,
+      revision: 0,
+      planId: null,
+    });
+    guard = (await ctx.db.get(id))!;
+  }
+  const first = prepared.operation.firstAttempt;
+  const id = await ctx.db.insert('projectHostedLifecyclePlans', {
+    ...auth,
+    intentId,
+    receiptId: first.ids.receipt!,
+    authorityEpoch: request.authorityEpoch,
+    request: canonicalPayload(
+      prepared.project.itemPurges?.some(
+        purge => purge.intentKeys?.includes(intentId) && purge.purgedAt === undefined,
+      )
+        ? { ...request, reason: purgedLifecycleReason(request.action) }
+        : request,
+    ),
+    at: first.at,
+    revision: guard.revision,
+    status: 'pending',
+    cursor: null,
+    staged: 0,
+    ready: false,
+    saveOperationId: target.kind === 'lane' ? target.saveOperationId : null,
+    savedExpected: null,
+    materialized: false,
+    appliedThrough: 0,
+    materializeCursor: null,
+  });
+  const plan = (await ctx.db.get(id))!;
+  if (target.kind === 'lane' && target.saveOperationId) {
+    return canonicalPayload(await advanceLifecycle(ctx, plan));
+  }
+  if (target.kind === 'intent' && target.cascade) {
+    await ctx.db.patch(guard._id, { planId: id });
+    await scheduleLifecycle(ctx, id);
+    return canonicalPayload(lifecycleResult(plan));
+  }
+  await applyLifecycleRecord(ctx, plan, record);
+  await ctx.db.patch(id, { materialized: true });
+  return canonicalPayload(await settleLifecycle(ctx, plan, 'applied'));
+}
 export const progress = query({
   args: identity,
   returns: v.string(),

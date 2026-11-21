@@ -107,7 +107,7 @@ export function hostedAgentHelp(action?: string) {
   return [
     'Forge hosted agent workflow',
     'nforge agent ROOT ACTION [JSON | --command-file FILE]; actions listed as `x ACTION` run as nforge x ROOT ACTION [JSON | --command-file FILE].',
-    'Address: hosted checkout ROOT, retained address, or JSON url + projectId. Guide: nforge docs agent.',
+    'Hosted ROOT, retained address, or url + projectId. Guide: nforge docs agent.',
     'Parameters (? = optional, * = required for a new agent session unless FORGE_AGENT_MODEL supplies it):',
     ...entries.map(
       entry =>
@@ -124,7 +124,7 @@ export function hostedAgentHelp(action?: string) {
             'land --save from the Lane folder saves, updates from main, checks and lands; LANDED is acceptance, CHECK PASSED alone is not.',
             'Run waitCommand in the foreground until terminal; exit 3 means wait again.',
             'Replaying an operationId keeps every original parameter, including message; use the receipt replay command.',
-            'Errors show {code,message,next,learn}. Use --detail for full receipts. MCP uses command.replyDetail:true (forge_wait: top level).',
+            'Errors show {code,message,next,learn}. Full receipts use --detail or MCP replyDetail:true.',
             helpTopicIndex(),
             'MCP: forge_work_overview {action:"help",topic} returns any action\'s exact schema, or a topic.',
             '',

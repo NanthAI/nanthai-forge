@@ -5,3 +5,21 @@
 The receipt records reason, actor, time and operation id. Retry with the original operation id and identical input (including returned `resolved` fields); a retry after `reopen` returns the original abandonment without closing the work again. `reopen` restores an abandoned Lane or Intent as active; reopen child Lanes separately after an Intent cascade. `clean` can reclaim abandoned Lane workspaces under its existing capture checks. Abandoned Lanes leave Now and open lists, and appear as grey **Abandoned** under Done/Closed.
 
 MCP uses `forge_task` with `command.action:"abandon"`. Hosted abandonment goes through the hosted Lane APIs; `nforge exchange ROOT push` is retired. Native abandonment records use Work format 13; upgrade readers/writers before sharing an owner with them.
+
+Start the Loose ends Intent group with
+`nforge agent ROOT lanes '{"view":"loose-ends","intents":true}'`. An Intent without an Item
+appears for review with its last recorded Intent, Lane or save activity. When the
+bounded child-Lane read cannot establish activity, the timestamp is null and the
+batch reports that the children need review. Follow
+`groups.intents.continueCursor` as `cursor` with the same view until it is null. Continue
+even through an empty page when the cursor is present.
+
+The project owner can explicitly set aside reviewed Intents in batches of up to 25.
+Pass the top-level `setAside.authorityEpoch` and the chosen rows' `selection` objects to
+`nforge x ROOT abandon '{"operationId":"UUID","authorityEpoch":N,"reason":"…","intents":[…]}'`.
+A row that gained a save or Item link, or whose Intent or Lane changed since the read,
+returns its own skip reason. If the original reply is lost, replay exactly the same
+request, including its UUID, to recover the receipt. For a skipped row you still want
+to set aside, review a fresh selection and submit that row with a new UUID. Each
+successful row carries its lifecycle receipt and the version to use with
+`nforge agent ROOT start --reopen '{"target":{"kind":"intent","intentId":"UUID","version":N}}'`.
