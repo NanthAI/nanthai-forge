@@ -137,6 +137,7 @@ test('contract features: the server names the asked features its code implements
     'planning-put-keeps-omitted',
   ]);
   assert.deepEqual((await ask([])).features, []);
+  assert.deepEqual((await ask(['metric-cli-provenance'])).features, ['metric-cli-provenance']);
   // Project-gated protocols are implemented but are advertised only after activation.
   assert.deepEqual(
     (await ask([...hostedContractFeatures])).features,

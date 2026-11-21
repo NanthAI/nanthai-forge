@@ -38,7 +38,8 @@ const receiptRows = f =>
 
 test('caller receipts ride on a successful CLI mutation, bound to its project and authenticated requester', async () => {
   const f = await landingFixture();
-  const mine = outcome(),
+  const cli = { cliChannel: 'main', cliVersion: '0.3.1', cliCommit: 'a'.repeat(64) };
+  const mine = outcome({ cli }),
     delivery = {
       kind: 'delivery',
       actor: null,
@@ -82,6 +83,7 @@ test('caller receipts ride on a successful CLI mutation, bound to its project an
   assert(rows.every(row => row.projectId === f.projectId && row.actor === 'owner'));
   assert.deepEqual(JSON.parse(rows.find(row => row.kind === 'outcome').value), {
     action: 'finish',
+    cli,
     errorCodes: ['WORK_STALE'],
     noOwner: false,
     noOwnerCause: null,

@@ -25,6 +25,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { recordHead } from './projectHostedRecords';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { cliProvenanceSchema } from '../src/self-metric-receipts';
 export const capture = mutation({
   args: { projectId: v.id('hostedProjects'), request: v.string() },
   returns: v.string(),
@@ -60,6 +61,9 @@ export const capture = mutation({
       }
       if (command.laneId)
         invariant(await recordHead(ctx, projectId, 'lane', command.laneId), 'NOT_FOUND', 'Lane not found.');
+      // Build identity is evidence from the capturing CLI. A retry from another build
+      // keeps the first record and uses the same request digest.
+      const cli = cliProvenanceSchema.safeParse((value as { cli?: unknown }).cli);
       const record = frictionEventSchema.parse({
         ...command,
         id: command.operationId,
@@ -73,8 +77,15 @@ export const capture = mutation({
         project,
         `${command.title} ${command.detail}`,
       );
-      await appendFriction(ctx, projectId, actor, record, canonicalPayload(likelyDuplicates));
-      return canonicalPayload({ ...record, likelyDuplicates });
+      const stored = await appendFriction(
+        ctx,
+        projectId,
+        actor,
+        record,
+        canonicalPayload(likelyDuplicates),
+        cli.success ? cli.data : undefined,
+      );
+      return canonicalPayload({ ...stored, likelyDuplicates });
     } catch (error) {
       return report(error);
     }
@@ -155,6 +166,7 @@ function frictionItem(row: FrictionRow, detailChars = LIST_DETAIL_CHARS) {
       title: clip(f.title, 200),
       area: f.area,
       at: f.at,
+      ...(f.cli ? { cli: f.cli } : {}),
       detail: clip(f.detail, detailChars),
       ...(f.detail.length > detailChars ? { detailTruncated: true, detailLength: f.detail.length } : {}),
       status: state?.status ?? 'open',

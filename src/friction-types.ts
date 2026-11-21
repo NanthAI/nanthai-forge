@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { isPlanningRef, planningIdHelp } from './planning-id.js';
+import { cliProvenanceSchema } from './self-metric-receipts.js';
 const id = z.uuid();
 /** A friction id as a caller types it: a complete UUID or a hex prefix of at least 8 characters,
  * resolved server-side by one indexed range read (same shape rule as planning ids). */
@@ -96,6 +97,7 @@ export const frictionEventSchema = z.discriminatedUnion('kind', [
     at: z.string(),
     count: z.number().int().positive().safe(),
     automatic: z.boolean().optional(),
+    cli: cliProvenanceSchema.optional(),
   }),
   frictionTriageSchema.safeExtend({
     id,

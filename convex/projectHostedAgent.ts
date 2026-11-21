@@ -160,6 +160,8 @@ export const capabilities = query({
                   ),
                   // Only finish asks for this optional submit field.
                   ...(features.includes('landing-client-hold') ? ['landing-client-hold'] : []),
+                  // Only clients that may carry metrics need to ask for this field.
+                  ...(features.includes('metric-cli-provenance') ? ['metric-cli-provenance'] : []),
                 ],
               }
             : {}),

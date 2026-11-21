@@ -1,6 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 
+/** Client-reported build identity. It is diagnostic evidence, never authorization. */
+export const cliProvenanceSchema = z.strictObject({
+  cliChannel: z.enum(['main', 'stable']),
+  cliVersion: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[0-9A-Za-z.+-]+$/),
+  cliCommit: z.string().regex(/^(?:[0-9a-f]{12,64}|development)$/),
+});
+export type CliProvenance = z.infer<typeof cliProvenanceSchema>;
+
 /** Successful owner commands counted by metric 5.5. Start/checkpoint/finish are not interventions. */
 export const metricMutationActions = [
   'cancel',
@@ -22,6 +34,7 @@ export const metricReceiptCoverage = {
 const stamp = z.iso.datetime();
 const code = z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/);
 const cause = z.string().min(1).max(200);
+const cli = cliProvenanceSchema.optional();
 /** What a caller actually received. The server binds project and requester from auth. */
 export const callerReceiptSchema = z.discriminatedUnion('kind', [
   z
@@ -34,6 +47,7 @@ export const callerReceiptSchema = z.discriminatedUnion('kind', [
       errorCodes: z.array(code).max(8),
       noOwner: z.boolean(),
       noOwnerCause: cause.nullable(),
+      cli,
     })
     .strict(),
   z
@@ -47,6 +61,7 @@ export const callerReceiptSchema = z.discriminatedUnion('kind', [
       state: z.enum(['landed', 'terminal-failed']),
       noOwner: z.boolean(),
       noOwnerCause: cause.nullable(),
+      cli,
     })
     .strict(),
 ]);
@@ -67,6 +82,7 @@ export const metricReceiptRowSchema = z.discriminatedUnion('kind', [
     errorCodes: z.array(z.string()),
     noOwner: z.boolean(),
     noOwnerCause: z.string().nullable(),
+    cli,
   }),
   z.object({
     kind: z.literal('delivery'),
@@ -78,6 +94,7 @@ export const metricReceiptRowSchema = z.discriminatedUnion('kind', [
     state: z.enum(['landed', 'terminal-failed']),
     noOwner: z.boolean(),
     noOwnerCause: z.string().nullable(),
+    cli,
   }),
   z.object({
     kind: z.literal('mutation'),

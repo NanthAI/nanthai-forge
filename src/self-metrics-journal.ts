@@ -10,6 +10,7 @@ import type { DiskSample } from './self-metrics-disk.js';
 import type { MetricObservation } from './self-metrics-observations.js';
 import { sampleSelfMetricDisk } from './self-metrics-disk.js';
 import { READ_ONLY_ACTIONS } from './agent-read-actions.js';
+import type { CliProvenance } from './self-metric-receipts.js';
 
 export type Requester = {
   action: string;
@@ -26,6 +27,7 @@ export type SelfMetricReceipt = Requester & {
   observation?: MetricObservation;
   disk?: DiskSample;
   at: string;
+  cli?: CliProvenance | undefined;
   errorCode?: string;
   errorCodes?: string[];
   revision?: number;

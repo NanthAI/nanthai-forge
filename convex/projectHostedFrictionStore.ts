@@ -9,6 +9,9 @@ import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 import { isPlanningUuid, planningIdMaxCandidates } from '../src/planning-id';
 import type { FrictionEvent, FrictionTriageState } from '../src/friction-types';
+import type { CliProvenance } from '../src/self-metric-receipts';
+
+const documentLimit = 1048576;
 export async function recordCaller(
   ctx: QueryCtx | MutationCtx,
   projectId: Id<'hostedProjects'>,
@@ -91,6 +94,7 @@ export async function appendFriction(
   actor: string,
   record: FrictionEvent,
   likelyDuplicates?: string,
+  cli?: CliProvenance,
 ) {
   const old = await frictionRow(ctx, projectId, record.id);
   if (old) {
@@ -99,20 +103,34 @@ export async function appendFriction(
       'WORK_OPERATION_CHANGED',
       'Replay the original friction record.',
     );
-    return false;
+    return record;
   }
   const row = { projectId, actor, id: record.id, request: record.request, value: canonicalPayload(record) };
   const inline = likelyDuplicates === undefined ? row : { ...row, likelyDuplicates };
-  if (likelyDuplicates === undefined || getDocumentSize(inline) <= 1048576)
-    await ctx.db.insert('projectHostedFriction', inline);
-  else {
+  const inlineBytes = likelyDuplicates === undefined ? undefined : getDocumentSize(inline);
+  const spill = inlineBytes !== undefined && inlineBytes > documentLimit;
+  const target = spill ? row : inline;
+  // Keep the same inline/spill decision and the same physical bound as a legacy capture.
+  const stored =
+    cli &&
+    record.kind === 'capture' &&
+    (spill ? getDocumentSize(row) : (inlineBytes ?? getDocumentSize(target))) +
+      canonicalPayload({ cli }).length -
+      1 <=
+      documentLimit
+      ? { ...record, cli }
+      : record;
+  await ctx.db.insert(
+    'projectHostedFriction',
+    stored === record ? target : { ...target, value: canonicalPayload(stored) },
+  );
+  if (spill) {
     // Hints must never make a formerly valid filing exceed the physical row limit.
     // Both records commit together, so a lost response replays the original snapshot.
-    await ctx.db.insert('projectHostedFriction', row);
     await ctx.db.insert('projectHostedFrictionHints', { projectId, id: record.id, value: likelyDuplicates! });
   }
   if (record.kind === 'triage') await applyTriage(ctx, projectId, actor, record);
-  return true;
+  return stored;
 }
 /** Keep the latest triage on each capture row so a list is one indexed page, never a join.
  * An older event (an out-of-order import) never replaces a newer state. One point read and

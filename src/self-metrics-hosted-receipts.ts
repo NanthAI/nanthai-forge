@@ -30,6 +30,7 @@ export function hostedCallerReceipts(
     // Retired first-write rows (metric 5.4, Issue 853fcde3) stay stored but are not joined.
     if (row.kind === 'first-write') continue;
     const actor = { kind: 'agent' as const, name: row.actor };
+    const cli = row.cli ? { cli: row.cli } : {};
     if (row.kind === 'outcome') {
       outcomes.add(row.operationId);
       records.receipts.push({
@@ -40,6 +41,7 @@ export function hostedCallerReceipts(
         operationId: row.operationId,
         actor,
         at: row.at,
+        ...cli,
         ...(row.errorCodes[0] ? { errorCode: row.errorCodes[0] } : {}),
         ...(row.errorCodes.length > 1 ? { errorCodes: row.errorCodes } : {}),
         ...(row.noOwner ? { noOwner: true } : {}),
@@ -54,6 +56,7 @@ export function hostedCallerReceipts(
         operationId: `delivery:${row.entryId}:${row.state}`,
         actor,
         at: row.at,
+        ...cli,
         deliveries: [{ entryId: row.entryId, state: row.state }],
         ...(row.noOwner ? { noOwner: true } : {}),
       });

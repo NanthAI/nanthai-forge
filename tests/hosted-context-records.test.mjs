@@ -65,6 +65,28 @@ test('friction and decisions replay exactly; changed requests fail without appen
   assert.equal(s.scheduled.length, 0);
 });
 
+test('a friction report keeps the capturing CLI build across retries without more calls or database work', async () => {
+  const baseline = recordsFixture(),
+    s = recordsFixture();
+  const command = friction();
+  const cli = { cliChannel: 'stable', cliVersion: '0.3.1', cliCommit: 'a'.repeat(64) };
+  const prior = await baseline.request('projectHostedFriction:capture', command);
+  const recorded = await s.request('projectHostedFriction:capture', { ...command, cli });
+  assert.deepEqual(s.counts(), baseline.counts());
+  assert.deepEqual(recorded.cli, cli);
+  assert.equal(recorded.request, prior.request);
+  assert.deepEqual(
+    await s.request('projectHostedFriction:capture', {
+      ...command,
+      cli: { ...cli, cliCommit: 'b'.repeat(64) },
+    }),
+    recorded,
+  );
+  assert.deepEqual(await s.request('projectHostedFriction:capture', command), recorded);
+  const listed = await s.request('projectHostedFriction:read', { id: recorded.id });
+  assert.deepEqual(listed.items[0].cli, cli);
+});
+
 test('current stranger/contributor/maintainer authority is checked on writes and replay', async () => {
   const s = recordsFixture();
   const original = decision();

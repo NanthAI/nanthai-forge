@@ -182,14 +182,28 @@ test('duplicate hints preserve near-limit friction filing and replay without ove
     return insert(table, value);
   };
   const friction = await import(moduleUrl('../convex/projectHostedFriction.ts'));
-  const input = { projectId: s.projectId, request: JSON.stringify(command) };
+  const cli = { cliChannel: 'stable', cliVersion: '0.3.1', cliCommit: 'a'.repeat(64) };
+  const input = { projectId: s.projectId, request: JSON.stringify({ ...command, cli }) };
   const result = JSON.parse(await friction.capture._handler(s.ctx, input));
   assert(result.likelyDuplicates.items.some(item => item.id === existing.itemId));
   assert.equal(result.detail, command.detail);
+  assert.equal(result.cli, undefined, 'a report larger than the document budget still files');
   assert.equal(s.tables.projectHostedFriction.size, 1);
   assert.equal(s.tables.projectHostedFrictionHints.size, 1);
   assert.deepEqual(JSON.parse(await friction.capture._handler(s.ctx, input)), result);
   assert.equal(s.tables.projectHostedFrictionHints.size, 1);
+
+  const spareBytes =
+    getDocumentSize({ ...oldRow, likelyDuplicates: JSON.stringify(result.likelyDuplicates) }) -
+    getDocumentSize(oldRow);
+  const inline = { ...command, operationId: randomUUID(), detail: command.detail.slice(spareBytes) };
+  const inlineInput = { projectId: s.projectId, request: JSON.stringify({ ...inline, cli }) };
+  const fromInline = JSON.parse(await friction.capture._handler(s.ctx, inlineInput));
+  assert.equal(fromInline.detail, inline.detail);
+  assert.equal(fromInline.cli, undefined, 'CLI metadata cannot spill hints that otherwise fit inline');
+  assert.equal(s.tables.projectHostedFriction.size, 2);
+  assert.equal(s.tables.projectHostedFrictionHints.size, 1);
+  assert.deepEqual(JSON.parse(await friction.capture._handler(s.ctx, inlineInput)), fromInline);
 });
 
 test('large planning membership arrays stay in original payloads and every derived row remains bounded', () => {
