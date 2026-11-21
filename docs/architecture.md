@@ -244,8 +244,7 @@ successful descriptors; verified State parents still drive subsequent reads.
 With the default-off `FORGE_STATE_SOURCE_REUSE_LOCATION` switch enabled, the
 State selector and Actions source-pack descriptor reuse the exact stored row
 already read in their transaction. Each selection still checks current authority
-and signs through the same source location reader. With the default-off
-`FORGE_STATE_SOURCE_PIN_RECHECK` switch enabled, the runner checks the same State
+and signs through the same source location reader. The runner checks the same State
 and physical pin again after R2 reads without signing a second location. A changed
 pin or retryable manifest read failure obtains a complete, freshly authorized
 descriptor for the existing retry. Clone selectors keep their existing signing path.

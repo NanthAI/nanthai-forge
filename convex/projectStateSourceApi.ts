@@ -28,7 +28,6 @@ export async function runnerStateSource(
     fallback?: boolean | undefined;
   },
 ) {
-  const pinRecheck = process.env.FORGE_STATE_SOURCE_PIN_RECHECK === '1';
   return compactSourceGrants(
     await stateSourceGrants({
       ...command,
@@ -40,7 +39,7 @@ export async function runnerStateSource(
           await ctx.runMutation(makeFunctionReference<'mutation'>('projectStateSourceSelection:runner'), {
             ...input,
             state: command.state,
-            ...(pinRecheck && recheck ? { recheck } : {}),
+            ...(recheck ? { recheck } : {}),
             ...(command.version ? { version: command.version } : {}),
           }),
         ),

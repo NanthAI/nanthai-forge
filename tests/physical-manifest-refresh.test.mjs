@@ -34,12 +34,8 @@ function bind(f, pin) {
   f.s.patch('projectObjects', row._id, { statePhysical: pin });
 }
 function observeRunnerSelections(t, f, before) {
-  const flag = 'FORGE_STATE_SOURCE_PIN_RECHECK',
-    previous = process.env[flag],
-    runMutation = f.ctx.runMutation,
+  const runMutation = f.ctx.runMutation,
     selections = [];
-  process.env[flag] = '1';
-  t.after(() => (previous === undefined ? delete process.env[flag] : (process.env[flag] = previous)));
   t.mock.method(f.ctx, 'runMutation', async (ref, args) => {
     assert.equal(getFunctionName(ref), 'projectStateSourceSelection:runner', 'no catalog substitution');
     const selection = { recheck: args.recheck, signed: false };
