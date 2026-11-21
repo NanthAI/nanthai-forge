@@ -23,11 +23,11 @@ test.after(() => {
   }
 });
 
-const ceiling = measured => ({
+const ceiling = (measured, feedWriteAllowance) => ({
   calls: measured.calls,
   documents: Math.ceil(measured.documents * 1.01),
   readBytes: Math.ceil(measured.readBytes * 1.01),
-  writeBytes: Math.ceil(measured.writeBytes * 1.01),
+  writeBytes: Math.ceil(measured.writeBytes * 1.01) + feedWriteAllowance,
 });
 const MOVERS = {
   'global-risk mover': 'package.json',
@@ -119,7 +119,10 @@ for (const name of Object.keys(MEASURED))
         byName,
       }),
     );
-    for (const [metric, limit] of Object.entries(ceiling(MEASURED[name])))
+    // Item f65d8024 adds one 490-byte landing.landed row when the mover lands
+    // (docs/operations/cost-to-serve.md). The existing headroom covers the failed Lane's row.
+    const feedWriteAllowance = name === 'global-risk mover, strict, red' ? 490 : 0;
+    for (const [metric, limit] of Object.entries(ceiling(MEASURED[name], feedWriteAllowance)))
       assert(measured[metric] <= limit, `${metric} ${measured[metric]} > ${limit}`);
     // The wired hold-order keep writes the kept run's landing row and one forked attempt (as
     // bindAdmissionProof does): both stay inside the bound the scenario table prices.
