@@ -1,13 +1,11 @@
 # Import GitHub source into a hosted project
 
-Forge's development app can import a committed GitHub snapshot into a writable
-hosted project. GitHub supplies the source; Forge stores it and initializes
-hosted `main`. Import, source publication and hosted checks need no Mac owner
-process. Your editor and agent can run on any supported machine.
+Bring a [GitHub repository](#import-from-github-in-the-app) or a [local folder](#host-a-local-folder) to Forge, then make a small change and see it land on hosted `main`.
 
 Forge is not published to npm or deployed as a public production service yet.
-Use the development app and deployment URL supplied by its operator, and install
-the CLI from the source repository you have access to.
+Ask the operator for access to the development app and its deployment URL. The
+app URL opens in your browser. The deployment URL is the address you pass to
+`nforge login`. Install the CLI from the source repository you have access to.
 
 ## Install the development CLI
 
@@ -66,6 +64,18 @@ runner. Forge paths always use `/`. Differences from macOS and Linux:
 - Each command reads its process start time through Windows PowerShell 5.1, which adds
   about 0.2 s.
 
+## Sign in
+
+```sh
+nforge login DEPLOYMENT_URL
+nforge auth status DEPLOYMENT_URL
+```
+
+Open the printed link in a browser signed in to the development app, verify the
+code and approve your terminal. Return to the terminal for the completed sign-in.
+An expired code names the command to request a new one. If a saved device sign-in
+expires, run `nforge login DEPLOYMENT_URL` again and approve the new code.
+
 ## Import from GitHub in the app
 
 1. Sign in to the development app and open **Projects → New project**.
@@ -109,32 +119,105 @@ backend; there is no local recovery or second source upload. See the
 [source-import reference](operations/github-project-import.md) for representation
 and retry details.
 
-## Work on a hosted project
+## Host a local folder
 
-Sign in to the deployment supplied by the operator, then clone the copied project
-URL into a new directory. Replace the example URLs and path with your values.
+To start from a folder with no GitHub repository, put a file such as `README.md`
+in it. From the terminal you signed in with, run:
 
 ```sh
-nforge login https://YOUR_DEV_DEPLOYMENT.convex.cloud
-nforge clone https://YOUR_DEV_APP/alice/project /absolute/path/to/project
+nforge host /absolute/path/to/folder --deployment DEPLOYMENT_URL
+```
+
+The folder can be a Git worktree or a plain directory. Hosting is private by
+default. After Forge selects hosted `main`, run the clone command it prints.
+If hosting is interrupted, rerun the same host command to resume its original
+operation and pinned snapshot. See [hosting and recovery](workflows.md#hosted-project-and-companion).
+
+## Clone the project
+
+Clone the project URL into a new directory from the terminal you signed in with.
+Replace `PROJECT_URL` with the copied URL or use the import or host receipt's
+clone command.
+
+```sh
+nforge clone PROJECT_URL /absolute/path/to/project
+```
+
+Cloning materializes hosted `main` for your tools. Keep the clone and its
+`.forge-client` sibling together. The sibling holds bindings, retry journals,
+cached objects and Lane directories.
+
+## Configure the first hosted check
+
+A new project has source but needs a check definition and a runner before the
+first checked landing. In the commands below, replace `ROOT` with the path to
+your hosted clone. The project owner can inspect existing setup with
+`nforge agent ROOT check-settings '{}'`.
+
+For a repository with a README.md, this example defines a small onboarding smoke
+check. Replace it with the repository's real verification command for code changes.
+
+```sh
+nforge x ROOT configure-check '{"command":{"name":"verify","executable":"bash","args":["-c","test -s README.md"],"environmentLabel":"README smoke"}}'
+```
+
+For GitHub Actions, use a runner repository where your linked GitHub account is
+an admin or maintainer. Use a prepared runner repository from your operator, or
+have the runner repository owner prepare one. For a new runner repository, use
+a copy of the operator's Forge source revision on the runner repository's
+`main` so `.github/workflows/forge-check.yml` and the runner code match. Enable
+Actions there and install the deployment's Forge GitHub App on that repository
+with Actions permissions. For a private project, use a private runner to keep
+its check logs private.
+
+```sh
+nforge x ROOT configure-runner '{"provider":"github-actions","repository":"OWNER/RUNNER_REPOSITORY","runsOn":"ubuntu-latest"}'
+nforge agent ROOT check-settings '{}'
+```
+
+See [GitHub App dispatch and runner visibility](operations/github-actions-checks.md#convex-dispatch-with-the-github-app)
+and [runner grants](operations/github-app.md#runner-grants-checks-only) for setup
+and recovery. For a runner without GitHub, use the [self-hosted runner guide](operations/self-hosted-runner.md).
+
+## Work on a hosted project
+
+Start in your clone. For a planned change, use [Start a Lane](guides/agents.md#land-it)
+with the Item ID. To try an unplanned change:
+
+```sh
 nforge agent /absolute/path/to/project start '{"outcome":"Improve the README","model":"unknown"}'
 ```
 
-The import is already hosted and writable before cloning. Cloning materializes
-source for your tools; it is separate from server-side import time. Each start
-returns its `laneId` and `result.path`. Edit inside that Lane path. Concurrent
-agents start separate Lanes. Keep ROOT and its `.forge-client` sibling together;
-the sibling holds bindings, retry journals, cached objects and Lane directories.
+Replace `LANE_PATH` with the path returned by `start` and edit inside it.
+Concurrent agents start separate Lanes. When a check and runner are ready,
+save the Lane:
 
 ```sh
 nforge agent LANE_PATH save '{"message":"Improve the README"}'
+```
+
+If the save is settling, follow its wait command and confirm the save completed.
+If the project's policy requests local preflight, run
+`nforge agent LANE_PATH preflight '{}'` before landing.
+
+```sh
 nforge agent LANE_PATH land --save '{"message":"Improve the README"}'
 ```
 
-Use the returned operation ID to observe or resume the same landing after a lost
-reply. Resolve any reported conflicts in the Lane and retry. If the project's
-existing policy requests local preflight, save first, then run
-`nforge agent LANE_PATH preflight '{}'` before landing.
+Keep the landing's operation id and follow its wait command through the check and any
+[approval](#approve-the-first-landing). Follow the receipt's recovery for
+conflicts and interrupted operations.
+
+## Approve the first landing
+
+New projects use supervised acceptance. When the landing is awaiting review,
+the agent can run `nforge agent ROOT approve-link '{"operationId":"LANDING_OPERATION_ID"}'`
+with the original landing operation id and share the returned link. Open its
+Candidate in the hosted app, inspect the change and check result, and choose
+**Approve and land** if you have authority to approve it. Follow the original
+wait until it reports `LANDED` and an accepted receipt. An existing trusted
+project follows its configured agent acceptance policy. See the
+[agent workflow](agents/workflow.md) for retries and acceptance receipts.
 
 ## No background process
 
@@ -179,36 +262,6 @@ read is needed; the installed CLI updater is separate. See the
 In a Lane folder, `nforge agent . status '{"files":true}'` is the `git status` of
 your edits, and `nforge x . snapshots '{"restore":"saved","paths":["FILE"]}'` is
 `git checkout -- FILE` (undo it with `{"undo":1}`).
-
-## Configure the first hosted check
-
-A fresh import has source and Work, but does not infer a check command or install
-a GitHub Actions runner. The project owner can inspect existing setup with
-`nforge agent ROOT check-settings '{}'`.
-
-For a repository with a README.md, this example defines a small onboarding smoke
-check. Replace it with the repository's real verification command for code changes.
-
-```sh
-nforge agent ROOT configure-check '{"command":{"name":"verify","executable":"bash","args":["-c","test -s README.md"],"environmentLabel":"README smoke"}}'
-nforge agent ROOT configure-runner '{"provider":"github-actions","repository":"OWNER/RUNNER_REPOSITORY","runsOn":"ubuntu-latest"}'
-nforge agent ROOT check-settings '{}'
-```
-
-The runner repository must already have Forge's check workflow and the Forge
-GitHub App installed. configure-runner proves that your linked GitHub account
-administers or maintains it and records a runner grant that also covers your
-later projects; no browser step or operator setting is needed
-([runner grants](operations/github-app.md#runner-grants-checks-only)). No npm
-publication, production deployment or upstream repository write is needed for
-the import itself.
-
-New projects use the supervised acceptance policy. A checked Lane waiting for
-review has not landed: open its Candidate in the hosted app, inspect the change
-and check result, and choose **Accept into main** as a person. An existing trusted
-project instead follows its configured agent acceptance policy. No local server
-is involved. See the [agent workflow](agents/workflow.md) for retries, concurrent
-Lanes and acceptance receipts.
 
 ## Glossary
 

@@ -44,7 +44,7 @@ The Item holds the problem, Done-when lines and discussion; the Lane holds the s
 
 | Usual step | Forge path |
 | --- | --- |
-| Create a branch and open a pull request | Read `planning {id}` and `lanes {planningItemId}`, then `start {planningItemId,operationId}`; work only in the returned Lane. |
+| Create a branch and open a pull request | Read `planning {id}` and `lanes {planningItemId}`, then `start {planningItemId,operationId,model}`. Work in the returned Lane. |
 | Push a commit for feedback | `save {message}`, then `diff {laneId}`. Saves are checkpoints; they do not land. |
 | Review the proposed diff | `diff {laneId}` and `show {state,path}` on its exact base/head. Follow partial pages without changing pins. |
 | Address review threads | Put findings and reasoned outcomes in the Item discussion below. Save fixes and reply with the new head; earlier evidence stays intact. |

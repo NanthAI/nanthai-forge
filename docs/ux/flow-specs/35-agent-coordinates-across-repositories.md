@@ -5,6 +5,8 @@
 
 ---
 
+This spec describes first-class cross-repository dependencies, which are pending. Today, [order separate landings](../../guides/agents.md#work-across-two-repositories) using their receipts.
+
 ## Entry Points
 
 - **From its task:** the Item needs a change in a library project and in the app project that uses it.

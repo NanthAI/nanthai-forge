@@ -5,6 +5,8 @@
 
 ---
 
+For the current save, receipt and planning-edit steps, see [Start a Lane and land it](../../guides/agents.md#land-it) and [Record Done-when evidence](../../guides/plan.md#record-done-when-evidence). This spec describes the target integrated evidence flow.
+
 ## Entry Points
 
 - **From its own work:** after a meaningful step, after landing, or before stopping.

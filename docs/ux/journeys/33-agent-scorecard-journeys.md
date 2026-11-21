@@ -1,6 +1,17 @@
 # Journey 33: the agent-side scorecard journeys
 
-Issue a0cf8c22 fixes six journeys that a fresh agent will run with only the docs, measured in turns, tokens, errors and wrong turns: learn Forge from the docs and `llms.txt`; pick the next backlog Item; report progress and evidence; recover from a failed check or a stale Lane; hand back to a person when stuck; coordinate across repositories. This file maps each as it is today, from the agent's seat, and points to the journey that holds the detail.
+Issue a0cf8c22 fixes six journeys that a fresh agent will run with only the docs, measured in turns, tokens, errors and wrong turns: learn Forge from the docs and `llms.txt`; pick the next backlog Item; report progress and evidence; recover from a failed check or a stale Lane; hand back to a person when stuck; coordinate across repositories. Use the current guides below to run the scorecard. The original mapping pass follows as a record of what its agent observed.
+
+| Journey | Start with the built guide |
+| --- | --- |
+| Learn Forge | [Docs home](../../README.md) and [entry point for agents](/llms.txt) |
+| Pick an Item | [Plan](../../guides/plan.md#find-the-work) |
+| Report evidence | [Save and land](../../guides/agents.md#land-it) and [Done-when evidence](../../guides/plan.md#record-done-when-evidence) |
+| Recover | [Review and land](../../guides/review.md#when-a-check-fails) and the receipt's recovery |
+| Ask or hand back | [When you need someone else](../../guides/agents.md#when-you-need-someone-else) |
+| Work across repositories | [Order two separate landings](../../guides/agents.md#work-across-two-repositories) |
+
+The generated [CLI](../../reference/cli.md) and [MCP](../../reference/mcp.md) references have the current commands. The current entry point teaches `start`, `save` and `land`. Action help puts an example before its schema. For earlier Lanes, pass an Item ID to `lanes {planningItemId}` or a full Intent UUID to `lanes {intentId}`. Use `status {laneId}` for one Lane. The CLI schema for planning Item IDs accepts an unambiguous prefix of at least eight characters. Follow the project's current rules if it asks for a full UUID.
 
 Walked: every command below marked ran, against the Forge project, during this mapping's own Lane (a Lane stacked on the part 1 Lane). **Not walked:** a failed check, a stale Lane and a second repository.
 
@@ -8,7 +19,7 @@ Walked: every command below marked ran, against the Forge project, during this m
 
 Detail: [journey 24](24-llm-discovery.md) and [journey 14](14-setting-up-agents.md).
 
-| Step | Today | Evidence |
+| Step | Observed in the mapping pass | Evidence |
 | --- | --- | --- |
 | Find the start | `nforge --help` opens with "Start here: nforge docs quickstart (offline Git adoption)". `nforge docs` lists 108 documents. `nforge docs agent` prints the skill. | ran |
 | Learn the loop | The skill: "Three verbs: start, save and land". AGENTS.md gives five commands. `llms.txt` still says `finish` and `tests`. | ran, source |
@@ -19,7 +30,7 @@ Detail: [journey 24](24-llm-discovery.md) and [journey 14](14-setting-up-agents.
 
 Detail: [journey 8](08-planning.md).
 
-| Step | Today | Evidence |
+| Step | Observed in the mapping pass | Evidence |
 | --- | --- | --- |
 | List what is open | `planning '{"status":"open","limit":50}'`; one Initiative of 155 Items took two pages; each row has a body cut to 400 characters. | ran |
 | Know the order | No order field. An Initiative's body lists ids in prose ("Run first (owner, early P7): 11ba7bb9 …"). | ran |
@@ -29,7 +40,7 @@ Detail: [journey 8](08-planning.md).
 
 ## 3. Report progress and evidence
 
-| Step | Today | Evidence |
+| Step | Observed in the mapping pass | Evidence |
 | --- | --- | --- |
 | Progress while working | `save '{"message":"…"}'`. Reply: `status:"settling"` and "Saved: the server is finishing this save now. Your next command here reports its outcome, including any failure." | ran |
 | Tell peers | `board --post '{"to":"lane:ID","text":"…"}'` (240 characters) → `status:"posted"`, `recipients:1`. | ran |
@@ -41,7 +52,7 @@ Detail: [journey 8](08-planning.md).
 
 Detail: [journey 4](04-failed-check.md), [journey 3](03-conflict.md) and [journey 10](10-mistakes-recovery.md).
 
-| Situation | Today | Evidence |
+| Situation | Observed in the mapping pass | Evidence |
 | --- | --- | --- |
 | The check failed | "Fix it in the same Lane, save, then land --save again. Do not abandon or re-create the Lane, and never skip or weaken a test to pass." `log '{"runId":"…","tail":8192}'` reads the output. | ran: help |
 | The Lane is behind main | `behindMain` on start, save and status. `save --sync` (also spelled `sync`) updates it; conflicts go to the resolve flow. | ran: help, docs |
@@ -55,7 +66,7 @@ Detail: [journey 4](04-failed-check.md), [journey 3](03-conflict.md) and [journe
 
 Detail: [journey 26](26-answering-an-agent.md).
 
-| Step | Today | Evidence |
+| Step | Observed in the mapping pass | Evidence |
 | --- | --- | --- |
 | Ask for a go | `request-approval`, then `wait '{"approval":"LANE_ID"}'`. | docs |
 | Ask a question | No action among those the help lists. | ran |
@@ -66,7 +77,7 @@ Detail: [journey 26](26-answering-an-agent.md).
 
 Detail: [journey 22](22-many-projects.md).
 
-| Step | Today | Evidence |
+| Step | Observed in the mapping pass | Evidence |
 | --- | --- | --- |
 | Find the other project | No list read. | ran: help |
 | Link two changes | Nothing. Stacking (`stackOn`) works inside one project. | ran |

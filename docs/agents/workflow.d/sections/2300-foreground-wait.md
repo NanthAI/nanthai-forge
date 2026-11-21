@@ -18,9 +18,10 @@ foreground. Never resubmit, sleep between checks or end the turn on a background
 wait. MCP sends progress notifications while it waits.
 `land --save` uses the same 540 s budget for its whole run (submission and wait,
 `--budget` sets another) and ends `IN_PROGRESS` (exit 3) with its exact resume command.
-A hosted `save` waits for its own outcome within that budget on its job's progress
-subscription (no replays, no extra calls) and advances the local Lane binding from the
-receipt; a save still running at the deadline returns `IN_PROGRESS` with its `wait`.
+If a hosted `save` replies `settling`, follow its wait command or check its outcome
+on the next command in that checkout. Waiting uses the save's progress subscription
+and advances the local Lane binding from a completed receipt. A wait that reaches
+its budget returns `IN_PROGRESS` with the continuation.
 A new `save` or `save --sync` first settles (waits for) a save this checkout left unfinished. A sync whose retained
 request the server refuses as `WORK_STALE` (no operation began) is rebuilt once from
 current pins; an identical later sync after the Lane moved starts a fresh operation.

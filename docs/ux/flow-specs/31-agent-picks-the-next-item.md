@@ -5,6 +5,8 @@
 
 ---
 
+For current CLI steps, see [Choose work in Plan](../../guides/plan.md#find-the-work). The next-Item command below describes the target flow.
+
 ## Entry Points
 
 - **From its person or a lead:** "pick the next Item in this project".

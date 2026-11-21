@@ -5,6 +5,8 @@
 
 ---
 
+For the current own-session, owner approval and advisory handoff paths, see [When you need someone else](../../guides/agents.md#when-you-need-someone-else). The dedicated question and hand-back actions below describe the target flow.
+
 ## Entry Points
 
 - **From its own work:** it needs a decision only someone else can make, or it cannot finish.

@@ -18,12 +18,20 @@ Build or install Forge, then print a ready-made client entry:
 nforge mcp-config /absolute/path/to/project --agent
 ```
 
-Merge the printed `mcpServers.forge` entry into your client's configuration (Claude Code: `.mcp.json` in the project folder; Cursor: `.cursor/mcp.json`). Forge adds advisory hooks to Claude Code and Codex only; in Cursor, agents run the same `nforge agent` commands in its terminal. It uses the absolute Node and CLI paths. Run the server directly with Node, not through `npm run`, because npm's output corrupts the stdio stream. Remove that one entry to undo.
+Merge the printed `mcpServers.forge` entry into your client's configuration (Claude Code: `.mcp.json` in the project folder; Cursor: `.cursor/mcp.json`). Forge adds advisory hooks to Claude Code and Codex only; in Cursor, agents run the same `nforge agent` commands in its terminal. It uses the absolute Node and CLI paths. Run the server directly with Node because npm's output corrupts the stdio stream. Remove the entry to disconnect.
+
+For the Codex CLI, use the absolute Node and CLI paths from the printed JSON:
+
+```sh
+codex mcp add forge -- /absolute/path/to/node /absolute/path/to/cli-entry.js mcp /absolute/path/to/project --agent
+```
+
+Start a new session to load the server. Use `codex mcp remove forge` to disconnect. `nforge plugin-config ROOT NEW_DIRECTORY` also generates a local plugin with the skill and the MCP server for clients that load local plugins.
 
 | Process | Tools | Authority |
 | --- | --- | --- |
 | `nforge mcp ROOT` | Eight read-only source tools (`forge_current`, `forge_context`, `forge_inspect`, `forge_references`, `forge_trace`, `forge_impact`, `forge_source`, `forge_reindex`) | Your OS account |
-| `nforge mcp ROOT --agent` (hosted checkout) | Hosted task/check/overview, saved-source reads (`forge_review` supports `show` only) and explicit `forge_wait`; no `forge_brief` or `forge_peers` | Your signed-in account |
+| `nforge mcp ROOT --agent` (hosted checkout) | Hosted task/check/overview, saved-source reads and coordination evidence via `forge_review`, and explicit `forge_wait` | Your signed-in account |
 | `nforge mcp-coordination URL PROJECT_ID` | Coordination tools below | Your account token |
 | `nforge mcp-agent URL` | Only the read tools a source grant allows | `FORGE_AGENT_TOKEN` |
 
@@ -34,8 +42,6 @@ Run `nforge login https://your-deployment.convex.cloud` and approve the displaye
 `nforge auth status [URL]` verifies current authentication and shows your Forge handle and the selected service (`deployment` and `host`). Without an explicit URL or `--hostname`, it selects the hosted project in the current folder before the environment or last-login default; outside a project it keeps that default. Pick or keep your handle on the web in Settings → Account; device credentials cannot change it. `nforge logout [URL]` revokes the saved device and removes its local credential; if the server cannot be reached, it reports that remote revocation was not verified. Account → Account & data lists CLI devices and lets you revoke them. Credentials expire after 30 days; run login again. Codes expire after ten minutes.
 
 Credentials are stored per deployment in `$XDG_CONFIG_HOME/forge/auth.json` (default `~/.config/forge/auth.json`), mode `0600`. Hosted CLI, local checks and MCP commands read them automatically. `FORGE_AUTH_TOKEN` remains a private environment override for CI and existing Clerk JWT integrations; never place tokens in arguments or committed configuration. `FORGE_DEPLOYMENT_URL` or the last login supplies login/status/logout's optional URL. Source-only `FORGE_AGENT_TOKEN` grants remain separate.
-
-`nforge plugin-config ROOT NEW_DIRECTORY` writes a local Codex plugin containing the skill and the `--agent` server. It records your Node and CLI paths and copies no source or credentials.
 
 ## Copy prompts and briefings
 

@@ -4,22 +4,15 @@ Start with a small change whose result you can recognise.
 
 ## Get the CLI and sign in
 
-Use the [source installation steps](../quickstart.md#install-the-development-cli). Forge has not published an installable package or a public production login service. Use the deployment address supplied for your development project.
-
-```sh
-nforge login DEPLOYMENT_URL
-nforge auth status DEPLOYMENT_URL
-```
-
-The terminal prints a browser link and code. Open that link, check the account and approve that terminal. Return to the terminal for the completed sign-in. An expired code names the command to request another.
+Ask the operator for access to the development app and its deployment URL. Follow the [source installation](../quickstart.md#install-the-development-cli) and [terminal sign-in](../quickstart.md#sign-in) steps.
 
 ## Bring your code
 
-Follow [quickstart](../quickstart.md) to import a repository or host a folder. Import keeps the selected source revision and its history. Wait until the receipt says main is ready, then run the clone command it prints. Keep a [mirror](export.md) if you want a second copy of accepted main.
+[Import a GitHub repository](../quickstart.md#import-from-github-in-the-app) or [host a local folder](../quickstart.md#host-a-local-folder). A GitHub import selects the committed snapshot for main and acquires Git history separately. When main is ready, follow the [clone steps](../quickstart.md#clone-the-project). Before the first checked landing, use an existing runner or have the project owner [configure a check and runner](../quickstart.md#configure-the-first-hosted-check).
 
 ## Give the change to an agent
 
-Open the project plan, add an Item with the outcome and the evidence that would show it is done, and give the agent the Item and the hosted clone path. The agent uses [this flow](agents.md). A Lane is its isolated copy of the project for that change.
+Open the project Plan, add an Item with the outcome and the evidence that would show it is done, and give the agent the Item and the hosted clone path. The [agent guide](agents.md) explains connecting an MCP client and starting a Lane, the agent's isolated copy for that change.
 
 Read the saved files in the Lane before deciding. [Review and land](review.md) explains check evidence, held work and failures. A passed check alone does not mean the change has landed; look for the accepted receipt and main's State.
 
