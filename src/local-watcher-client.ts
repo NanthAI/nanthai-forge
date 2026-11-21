@@ -1,15 +1,45 @@
 // SPDX-License-Identifier: Apache-2.0
 import { workerPath } from './worker-install.js';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { lstat, readFile, realpath, rm } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { fork, type ChildProcess } from 'node:child_process';
 import { createConnection, type Socket } from 'node:net';
 import { childEnv } from '../scripts/child-env.mjs';
-import { processAlive, processStartTime } from './local-process.js';
+import { processAlive, processLiveness } from './local-process.js';
 import type { WatchMessage } from './local-watcher-runtime.js';
 
-export type WatchLease = { pid: number; startTime: string; socket: string };
+export type WatchLease = { pid: number; startTime: string; socket: string; cleanupKey?: string };
+export const WATCH_OWNER_PREFIX = 'forge-watch-owner-';
+export const WATCH_OWNER_MARKER = 'owner';
+export async function removeWatchSocket(lease: WatchLease) {
+  const directory = dirname(lease.socket);
+  try {
+    if (lease.cleanupKey === undefined) {
+      const { isSocketDirectory } = await import('./socket-directory.js');
+      if (!isSocketDirectory(directory, WATCH_OWNER_PREFIX)) return;
+    } else {
+      // Peers may have different TMPDIRs. Only remove the original, real
+      // directory whose ownership marker matches the published lease.
+      if (
+        typeof lease.cleanupKey !== 'string' ||
+        lease.cleanupKey.length !== 36 ||
+        basename(lease.socket) !== 'socket' ||
+        !basename(directory).startsWith(WATCH_OWNER_PREFIX)
+      )
+        return;
+      if ((await realpath(directory)) !== directory) return;
+      const marker = join(directory, WATCH_OWNER_MARKER);
+      const stat = await lstat(marker);
+      if (!stat.isFile() || stat.size !== lease.cleanupKey.length) return;
+      if ((await readFile(marker, 'utf8')) !== lease.cleanupKey) return;
+    }
+    await rm(directory, { recursive: true, force: true, maxRetries: 3 });
+  } catch {
+    /* Normal exit or a concurrent reaper may already have removed it. */
+  }
+}
 /** One socket is one attached process. Closing it never kills another client's
  * healthy helper; failed native probes can still terminate a wedged helper. */
 export function sharedWatcher(directory: string) {
@@ -66,6 +96,14 @@ export function sharedWatcher(directory: string) {
     });
     current.once('message', (value: WatchLease) => {
       received = true;
+      if (value.pid === current.pid) {
+        if (current.exitCode !== null || current.signalCode !== null) {
+          if (current.exitCode !== 0) void removeWatchSocket(value);
+        } else
+          current.once('exit', code => {
+            if (code !== 0) void removeWatchSocket(value);
+          });
+      }
       if (stopped && value.pid === current.pid && current.connected) {
         // This client elected the owner and left before attaching. Release it now, not
         // after its startup window; startup completes when it has exited (removing its
@@ -158,13 +196,19 @@ export function sharedWatcher(directory: string) {
       retry?.unref();
     },
     kill() {
-      if (lease && processStartTime(lease.pid) === lease.startTime) {
+      if (!lease) return;
+      const liveness = processLiveness(lease);
+      if (liveness === 'unknown') return;
+      if (liveness === 'alive') {
         try {
           process.kill(lease.pid, 'SIGKILL');
-        } catch {
-          /* Already exited. */
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return;
         }
       }
+      // The electing process reaps after the child's exit event. Peers can
+      // remove the same lease directory after aborting its published identity.
+      if (candidate?.pid !== lease.pid) void removeWatchSocket(lease);
     },
     drainStartup: () => {
       candidate?.ref();

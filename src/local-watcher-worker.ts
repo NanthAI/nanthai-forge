@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 import { isMainModule } from '../scripts/main-module.mjs';
-import { watch, mkdtempSync, realpathSync, writeFileSync, rmSync, type FSWatcher } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { watch, mkdtempSync, writeFileSync, rmSync, type FSWatcher } from 'node:fs';
 import { join } from 'node:path';
 import { rm } from 'node:fs/promises';
 
-export type Command = { id: number; type: string; path: string; recursive: boolean; probe: number };
+export type Command = {
+  id: number;
+  type: string;
+  path: string;
+  recursive: boolean;
+  probe: number;
+  probeRoot?: string;
+};
 type Probe = {
   directory: string;
   watcher?: FSWatcher;
@@ -18,11 +24,13 @@ type Probe = {
 export function startLocalWatcher(
   output?: (message: object, done: () => void) => void,
   runtime = { watch, remove: rm, setImmediate },
+  sharedProbeRoot?: string,
 ) {
   type Target = { watcher: FSWatcher; ids: Set<number>; key: string };
   const targets = new Map<number, Target>();
   const shared = new Map<string, Target>();
   let probe: Probe | undefined;
+  let privateProbeRoot: string | undefined;
   const queued = new Map<number, Command>();
   const send = (message: object, done = () => {}) => {
     if (output) output(message, done);
@@ -48,12 +56,9 @@ export function startLocalWatcher(
       // New probes wait for cleanup; successful native close is already reported.
       void Promise.resolve()
         .then(() => runtime.remove(current.directory, { recursive: true, force: true }))
-        .then(
-          () => send({ type: 'probe-cleaned', directory: current.directory }),
-          () => {
-            /* Parent retains cleanup ownership if the helper cannot remove it. */
-          },
-        )
+        .catch(() => {
+          /* The owner removes the enclosing directory when the helper exits. */
+        })
         .then(() => {
           if (probe !== current) return;
           probe = undefined;
@@ -66,16 +71,12 @@ export function startLocalWatcher(
   const closeProbe = (current: Probe) => {
     current.closing = true;
     clearTimeout(current.signal);
-    if (!current.watcher) return; // Initialization's IPC callback observes cancellation.
+    if (!current.watcher) return;
     current.watcher.once('close', () => cleaned(current));
     // Flush the event receipt before a potentially blocking native close.
     probeMessages(current, 'probe-event', () => runtime.setImmediate(() => current.watcher?.close()));
   };
   const initializeProbe = (current: Probe, recursive: boolean) => {
-    if (current.closing) {
-      cleaned(current);
-      return;
-    }
     try {
       current.watcher = runtime.watch(current.directory, { recursive }, (_event, name) => {
         if (name?.toString() !== 'signal' || probe !== current || current.closing) return;
@@ -109,16 +110,14 @@ export function startLocalWatcher(
       return;
     }
     if (!probe) {
+      const root = sharedProbeRoot ?? (privateProbeRoot ??= message.probeRoot);
+      if (!root) throw new Error('Missing private probe directory');
       probe = {
-        directory: mkdtempSync(join(realpathSync(tmpdir()), 'forge-watch-probe-')),
+        directory: mkdtempSync(join(root, 'forge-watch-probe-')),
         participants: new Map([[id, message.probe]]),
         closing: false,
       };
-      const current = probe;
-      // Parent knows cleanup ownership before native open can hang.
-      send({ type: 'probe-directory', directory: current.directory }, () =>
-        initializeProbe(current, message.recursive),
-      );
+      initializeProbe(probe, message.recursive);
     } else {
       probe.participants.set(id, message.probe);
       if (probe.watcher) send({ id, probe: message.probe, type: 'probe-ready' });
@@ -160,17 +159,17 @@ export function startLocalWatcher(
             target.watcher.close();
           }
         }
-      } else if (message.type === 'probe') {
+      } else if (message.type === 'probe' && targets.has(id)) {
         requestProbe(message);
       }
     } catch (error) {
       failed(id, error as NodeJS.ErrnoException);
     }
   };
-  process.once('exit', () => {
-    if (probe) rmSync(probe.directory, { recursive: true, force: true });
-  });
   if (!output) {
+    process.once('exit', () => {
+      if (privateProbeRoot) rmSync(privateProbeRoot, { recursive: true, force: true });
+    });
     process.on('message', receive);
     process.once('disconnect', () => process.exit(0));
     send({ type: 'ready' });

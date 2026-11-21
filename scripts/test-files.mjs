@@ -193,8 +193,9 @@ export async function runFiles(
         const leaks = temp.cleanup();
         if (leaks.length && !timedOut) {
           code = 1;
-          firstError ||= `FORGE_TEMP_LEAK: ${leaks.length} temporary entries left by this test file`;
-          process.stdout.write(`not ok - ${file}: ${firstError}\n`);
+          const leakError = `FORGE_TEMP_LEAK: ${leaks.length} temporary entries left by this test file: ${leaks.join('; ')}`;
+          firstError ||= leakError;
+          process.stdout.write(`not ok - ${file}: ${leakError}\n`);
         }
         clearTimeout(timer);
         children.delete(child);

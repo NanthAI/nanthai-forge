@@ -16,17 +16,30 @@ export const FILESYSTEM_EVENT_DEADLINE_MS = 1000;
 // Optional ordinary diagnostics use the shared watcher's existing close bound.
 export const FILESYSTEM_EVENT_CLOSE_DEADLINE_MS = 250;
 
+async function ensureDiagnosticDirectory(path) {
+  try {
+    await mkdir(path, { mode: 0o700 });
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+  }
+  const stat = await lstat(path);
+  if (!stat.isDirectory())
+    throw Object.assign(new Error('Diagnostic metadata directory must be real'), { code: 'UNSAFE_PATH' });
+  return stat;
+}
+
 /** The probe's private folder: in the target's client cache sibling (ROOT.forge-client), on the
  * target volume and outside the checkout, so a killed probe never leaves a file in it that a save,
  * clean or apply sees (Issue 48835eea). `id` names this run's own folder, which its caller removes. */
 export async function filesystemDiagnosticDirectory(root, id = '') {
   if (id && !/^[0-9a-f-]{36}$/.test(id))
     throw Object.assign(new Error('Probe id must be a UUID'), { code: 'BAD_ARGUMENT' });
-  const directory = join(`${await realpath(root)}.forge-client`, 'event-probe', id);
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  const stat = await lstat(directory);
-  if (!stat.isDirectory() || stat.isSymbolicLink())
-    throw Object.assign(new Error('Diagnostic metadata directory must be real'), { code: 'UNSAFE_PATH' });
+  const cache = `${await realpath(root)}.forge-client`;
+  const probes = join(cache, 'event-probe');
+  const directory = join(probes, id);
+  await ensureDiagnosticDirectory(cache);
+  const probeStat = await ensureDiagnosticDirectory(probes);
+  const stat = id ? await ensureDiagnosticDirectory(directory) : probeStat;
   if (stat.dev !== (await volumeStat(root)).dev)
     throw Object.assign(new Error('Diagnostic metadata must stay on the target volume'), {
       code: 'DIAGNOSTIC_VOLUME_MISMATCH',

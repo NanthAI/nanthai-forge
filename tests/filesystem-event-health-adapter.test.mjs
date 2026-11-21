@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import { filesystemEventHealth } from '../dist/filesystem-event-health.js';
 
 const healthy = {
@@ -43,3 +47,22 @@ for (const result of [
     assert.match(health.reason, /filesystem diagnostic unavailable/);
     assert.deepEqual(health.attempts, []);
   });
+
+test('diagnostic cleanup never sweeps old-looking folders through metadata symlinks', t => {
+  const directory = temporaryDirectory(t);
+  const root = join(directory, 'checkout');
+  const existing = join(directory, 'user-cache');
+  t.mock.method(Date, 'now', () => Date.parse('2030-01-01T00:02:00Z'));
+  const old = new Date('2030-01-01T00:00:00Z');
+  const paths = [join(existing, '.forge-event-probe-legacy'), join(existing, 'event-probe', randomUUID())];
+  for (const path of paths) {
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, 'pulse'), 'user file');
+    utimesSync(path, old, old);
+  }
+  mkdirSync(root);
+  symlinkSync(existing, join(root, '.forge'), 'dir');
+  symlinkSync(existing, `${root}.forge-client`, 'dir');
+  assert.equal(filesystemEventHealth(root, () => ({ stdout: JSON.stringify(healthy) })).ok, true);
+  for (const path of paths) assert.equal(readFileSync(join(path, 'pulse'), 'utf8'), 'user file');
+});

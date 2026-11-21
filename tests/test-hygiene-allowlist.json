@@ -308,7 +308,7 @@
   "tests/local-watcher-native-fixture.mjs": {"sleep":1,"poll":1},
   "tests/local-watcher-queue.test.mjs": {"date":1},
   "tests/local-watcher-shared.test.mjs": {"timeout":2},
-  "tests/local-watcher.test.mjs": {"sleep":12,"date":1},
+  "tests/local-watcher.test.mjs": {"sleep":11,"date":1},
   "tests/loose-ends.test.mjs": {"date":10},
   "tests/main-race-reasons.test.mjs": {"date":1},
   "tests/main-today.test.mjs": {"date":2},

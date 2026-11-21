@@ -46,7 +46,11 @@ const leakDetail = (root, name, limit = 3) => {
     }
   };
   walk(join(root, name), '');
-  return found.length ? `${name} (${found.join(', ')})` : name;
+  const component =
+    name.startsWith('forge-watch-probe-') || name.startsWith('forge-watch-owner-')
+      ? 'local filesystem watcher: '
+      : '';
+  return component + (found.length ? `${name} (${found.join(', ')})` : name);
 };
 
 const cleanups = new Set();
@@ -122,7 +126,7 @@ export function fileTemp() {
     root,
     env: { TMPDIR: root, TMP: root, TEMP: root },
     cleanup() {
-      const leaked = leaksIn(root);
+      const leaked = leaksIn(root).map(name => leakDetail(root, name));
       remove(root);
       owned.delete(root);
       return leaked;

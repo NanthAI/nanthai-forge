@@ -2,10 +2,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { temporaryDirectory } from '../scripts/test-temp.mjs';
+import { fileTemp, temporaryDirectory } from '../scripts/test-temp.mjs';
 
 const runtime = fileURLToPath(new URL('./check-runtime.mjs', import.meta.url));
 const helper = new URL('../scripts/test-temp.mjs', import.meta.url).href;
@@ -58,7 +58,7 @@ test('92f4bf04: an unowned Forge temp directory fails the file and is reclaimed 
     `import test from 'node:test';
     import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'; import { tmpdir } from 'node:os'; import { join } from 'node:path';
     test('leaks', () => {
-      const leaked = ${JSON.stringify(prefixes)}.map(prefix => mkdtempSync(join(tmpdir(), prefix)));
+      const leaked = ${JSON.stringify([...prefixes, 'forge-watch-probe-'])}.map(prefix => mkdtempSync(join(tmpdir(), prefix)));
       // A late writer recreated a fixture: the report must name what it wrote (4a83a41f).
       mkdirSync(join(leaked[0], '.forge', 'work', 'record-staging'), { recursive: true });
       writeFileSync(join(leaked[0], '.forge', 'work', 'record-staging', 'late.json'), '{}');
@@ -70,7 +70,8 @@ test('92f4bf04: an unowned Forge temp directory fails the file and is reclaimed 
     env: childEnv,
   });
   assert.equal(result.status, 1, result.stdout + result.stderr);
-  assert.match(result.stdout + result.stderr, /FORGE_TEMP_LEAK: 5/);
+  assert.match(result.stdout + result.stderr, /FORGE_TEMP_LEAK: 6/);
+  assert.match(result.stdout + result.stderr, /local filesystem watcher: forge-watch-probe-/);
   assert.match(
     result.stdout + result.stderr,
     /forge-batch-\w+ \(\.forge\/work\/record-staging\/late\.json\)/,
@@ -82,6 +83,20 @@ test('92f4bf04: an unowned Forge temp directory fails the file and is reclaimed 
   );
   assert(JSON.parse(readFileSync(paths, 'utf8')).every(path => !existsSync(path)));
   assert(existsSync(root), 'a parent/peer fixture remains untouched');
+});
+
+test('the test file supervisor attributes a leaked shared watcher probe to its component', () => {
+  const temp = fileTemp();
+  const probe = join(temp.root, 'forge-watch-owner-Xa12YZ', 'forge-watch-probe-AB7890');
+  try {
+    mkdirSync(probe, { recursive: true });
+    writeFileSync(join(probe, 'signal'), 'probe');
+  } finally {
+    assert.deepEqual(temp.cleanup(), [
+      'local filesystem watcher: forge-watch-owner-Xa12YZ (forge-watch-probe-AB7890/signal)',
+    ]);
+  }
+  assert.equal(existsSync(probe), false);
 });
 
 test('92f4bf04: the runtime reclaims persistent product caches while unowned fixtures still fail', t => {

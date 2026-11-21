@@ -3,6 +3,8 @@ import { workerPath } from './worker-install.js';
 import { childEnv } from '../scripts/child-env.mjs';
 import { fork } from 'node:child_process';
 import { rmSync, existsSync, realpathSync } from 'node:fs';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { mkdirBelow } from './mkdir-below.js';
 import { sharedWatcher } from './local-watcher-client.js';
@@ -14,7 +16,6 @@ export type WatchMessage = {
   name?: string | null;
   code?: string;
   probe?: number;
-  directory?: string;
 };
 /** Injectable process transport. Native filesystem work lives only in this child. */
 export const watcherRuntime = {
@@ -28,9 +29,69 @@ export const watcherRuntime = {
     });
     const unref = child.unref.bind(child);
     const ref = child.ref.bind(child);
+    let probeRoot: string | undefined, reservation: Promise<string | undefined> | undefined;
+    let released = false;
+    const removeOnExit = () => {
+      released = true;
+      if (!probeRoot) return;
+      try {
+        rmSync(probeRoot, { recursive: true, force: true });
+        probeRoot = undefined;
+      } catch {
+        /* Private probe cleanup is best effort if storage is unavailable. */
+      }
+    };
+    // Reserve the parent before the helper can create a probe. Removing it on
+    // parent shutdown also fences a helper that has not yet entered mkdtemp.
+    process.once('exit', removeOnExit);
+    const releaseProbeRoot = () => {
+      if (released) return;
+      released = true;
+      if (!probeRoot) {
+        process.off('exit', removeOnExit);
+        return;
+      }
+      void rm(probeRoot, { recursive: true, force: true, maxRetries: 3 }).then(
+        () => process.off('exit', removeOnExit),
+        () => {
+          /* Keep the synchronous shutdown fallback if cleanup failed. */
+        },
+      );
+    };
+    child.once('exit', releaseProbeRoot);
+    child.once('close', releaseProbeRoot); // A failed spawn emits close without exit.
+    async function reserveProbeRoot() {
+      const parent = await realpath(tmpdir());
+      if (released || !child.connected) return;
+      const created = await mkdtemp(join(parent, 'forge-watch-probe-'));
+      if (released) {
+        // A close can win while mkdir is in flight. No request used this directory.
+        await rm(created, { recursive: true, force: true });
+      } else {
+        probeRoot = created;
+        return created;
+      }
+    }
     return Object.assign(child, {
       postMessage(message: object) {
-        if (child.connected) child.send(message, () => {});
+        if (!child.connected) return;
+        if ('type' in message && message.type === 'probe') {
+          reservation ??= reserveProbeRoot();
+          void reservation.then(
+            root => {
+              if (root && child.connected && !released) child.send({ ...message, probeRoot: root }, () => {});
+            },
+            (error: NodeJS.ErrnoException) => {
+              reservation = undefined;
+              if (child.connected && !released)
+                child.emit('message', {
+                  ...message,
+                  type: 'degraded',
+                  code: error.code ?? 'WATCH_PROBE_FAILED',
+                });
+            },
+          );
+        } else child.send(message, () => {});
       },
       unref() {
         child.channel?.unref();
@@ -42,9 +103,15 @@ export const watcherRuntime = {
       },
       drainStartup: () => Promise.resolve(),
       terminate() {
-        if (!child.pid || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+        if (!child.pid || child.exitCode !== null || child.signalCode !== null) {
+          releaseProbeRoot();
+          return Promise.resolve();
+        }
         const exited = new Promise<void>(resolve => child.once('exit', () => resolve()));
         child.kill('SIGKILL');
+        // Arm the filesystem request before unref: the process can otherwise
+        // shut down before it delivers the helper's exit event (for example doctor).
+        releaseProbeRoot();
         if (child.connected) child.disconnect();
         return exited;
       },
@@ -109,17 +176,6 @@ function createRuntime(directory?: string) {
   let startup: NodeJS.Timeout | undefined;
   let retryAfter = 0;
   let failure = 'WATCH_WORKER_FAILED';
-  const probeDirectories = new Set<string>();
-  function cleanupDirectories() {
-    for (const directory of probeDirectories) {
-      try {
-        rmSync(directory, { recursive: true, force: true });
-      } catch {
-        /* Private probe cleanup is best effort. */
-      }
-    }
-    probeDirectories.clear();
-  }
 
   function references() {
     if ([...subscriptions.values()].some(s => s.persistent)) {
@@ -144,7 +200,6 @@ function createRuntime(directory?: string) {
     // create a succession of helpers. Nothing waits for this promise on close.
     stopping = abandoned.terminate().catch(() => undefined);
     abandoned.unref();
-    cleanupDirectories();
     void stopping.finally(() => {
       if (worker !== abandoned) return;
       worker = undefined;
@@ -177,9 +232,7 @@ function createRuntime(directory?: string) {
       });
       current.on('message', (message: WatchMessage) => {
         if (worker !== current || stopping) return;
-        if (message.type === 'probe-directory') probeDirectories.add(message.directory!);
-        else if (message.type === 'probe-cleaned') probeDirectories.delete(message.directory!);
-        else if (message.type === 'ready') {
+        if (message.type === 'ready') {
           clearTimeout(startup);
           startup = undefined;
           ready = true;
@@ -239,7 +292,6 @@ function createRuntime(directory?: string) {
     subscribe,
     shutdown() {
       void worker?.terminate();
-      cleanupDirectories();
     },
   };
 }

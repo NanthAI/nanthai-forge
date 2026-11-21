@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import {
   mkdtempSync,
   readdirSync,
@@ -290,6 +291,6 @@ test('ordinary diagnostic never follows a metadata symlink to another directory'
   mkdirSync(outside);
   mkdirSync(`${root}.forge-client`);
   symlinkSync(outside, join(`${root}.forge-client`, 'event-probe'));
-  await assert.rejects(filesystemDiagnosticDirectory(root), { code: 'UNSAFE_PATH' });
+  await assert.rejects(filesystemDiagnosticDirectory(root, randomUUID()), { code: 'UNSAFE_PATH' });
   assert.deepEqual(readdirSync(outside), []);
 });

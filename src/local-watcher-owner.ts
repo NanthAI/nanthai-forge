@@ -1,14 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createServer, type Socket } from 'node:net';
+import { randomUUID } from 'node:crypto';
 import { statSync, readFileSync, writeFileSync, rmSync, chmodSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { isSocketDirectory, socketDirectory } from './socket-directory.js';
+import { socketDirectory } from './socket-directory.js';
 import { workLocked } from './work-lock.js';
 import { processAlive, processIdentity } from './local-process.js';
 import { startLocalWatcher, type Command } from './local-watcher-worker.js';
-import type { WatchLease } from './local-watcher-client.js';
+import {
+  removeWatchSocket,
+  WATCH_OWNER_MARKER,
+  WATCH_OWNER_PREFIX,
+  type WatchLease,
+} from './local-watcher-client.js';
 
-const WATCH_OWNER_PREFIX = 'forge-watch-owner-';
 /** The owner lease is elected under an existing recoverable local lock. Kernel
  * start identities fence PID reuse; only a dead lease permits socket takeover. */
 export function startSharedWatcher(directory: string) {
@@ -33,13 +38,17 @@ export function startSharedWatcher(directory: string) {
         typeof previous.socket === 'string'
       ) {
         if (processAlive(previous)) return previous;
-        const oldDirectory = dirname(previous.socket);
-        if (isSocketDirectory(oldDirectory, WATCH_OWNER_PREFIX))
-          rmSync(oldDirectory, { recursive: true, force: true });
+        void removeWatchSocket(previous);
       }
       const socket = join(socketDirectory(WATCH_OWNER_PREFIX, 'socket'), 'socket');
-      const next = { ...identity, socket };
-      writeFileSync(path, JSON.stringify(next), { mode: 0o600 });
+      const next = { ...identity, socket, cleanupKey: randomUUID() };
+      try {
+        writeFileSync(join(dirname(socket), WATCH_OWNER_MARKER), next.cleanupKey, { mode: 0o600 });
+        writeFileSync(path, JSON.stringify(next), { mode: 0o600 });
+      } catch (error) {
+        rmSync(dirname(socket), { recursive: true, force: true });
+        throw error;
+      }
       return next;
     },
     { waitMs: 2500 },
@@ -52,13 +61,17 @@ export function startSharedWatcher(directory: string) {
   const clients = new Set<Socket>();
   const routes = new Map<number, { socket: Socket; id: number }>();
   let nextId = 0;
-  const receive = startLocalWatcher((value, done) => {
-    const message = value as { id?: number; type: string };
-    const route = message.id === undefined ? undefined : routes.get(message.id);
-    if (route && !route.socket.destroyed)
-      route.socket.write(JSON.stringify({ ...message, id: route.id }) + '\n', done);
-    else done();
-  });
+  const receive = startLocalWatcher(
+    (value, done) => {
+      const message = value as { id?: number; type: string };
+      const route = message.id === undefined ? undefined : routes.get(message.id);
+      if (route && !route.socket.destroyed)
+        route.socket.write(JSON.stringify({ ...message, id: route.id }) + '\n', done);
+      else done();
+    },
+    undefined,
+    dirname(lease.socket),
+  );
   const server = createServer(socket => {
     clearTimeout(startup);
     clients.add(socket);

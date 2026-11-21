@@ -81,10 +81,15 @@ Opening errors (including EMFILE, ENOSPC and EPERM) mark the affected subscripti
 degraded. Startup, native open and private-probe open have separate three-second
 deadlines; the event deadline starts when the signal is written, after a finite
 100 ms stream-arming delay. Overlapping requests share one native probe, avoiding
-stream changes from closing one probe while another signal is in flight. The
-helper owns its private directory independently of subscribers; the parent tracks
-cleanup if it must kill the helper. Probe directories use the real temporary path,
-never source. Native-close acknowledgements are flushed before directory cleanup,
+stream changes from closing one probe while another signal is in flight. Private
+helpers create probes inside a temporary directory their parent reserves before
+requesting a probe. The parent starts cleanup when stopping the helper or
+observing an unexpected exit, with a fallback on normal Node shutdown.
+Shared helpers create probes inside their lease's private socket directory. The
+helper removes it on normal exit. After an abort, a client or the next election
+validates the lease's ownership marker and reclaims it, even across different
+temporary roots. Native-close acknowledgements
+are flushed before directory cleanup,
 so cleanup latency cannot falsely consume the close deadline. Directory removal
 is asynchronous and does not delay target events or close acknowledgements. Both probe close and subscription close wait at most 250 ms for an
 acknowledgement. A timeout degrades all subscriptions on that helper, kills it,

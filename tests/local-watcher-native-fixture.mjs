@@ -3,15 +3,27 @@ import fs from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { watchLocal, probeLocalWatching, watcherRuntime } from '../dist/local-watcher.js';
 import { startLocalWatcher } from '../dist/local-watcher-worker.js';
+import { startSharedWatcher } from '../dist/local-watcher-owner.js';
+
+const blockUntilKilled = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
 
 // Real mode uses the OS backend; userlandRecursive also exercises Node's
 // recursive-watch implementation (and its synchronous close) on macOS.
 if (process.connected)
   process.once('message', configuration => {
+    const mkdtempSync = fs.mkdtempSync;
+    fs.mkdtempSync = prefix => {
+      const directory = mkdtempSync(prefix);
+      if (basename(prefix) === 'forge-watch-probe-') {
+        fs.writeSync(2, JSON.stringify({ type: 'probe-directory', directory }) + '\n');
+        if (configuration.hangAllocation) blockUntilKilled();
+      }
+      return directory;
+    };
     if (configuration.userlandRecursive) {
       const require = createRequire(import.meta.url);
       const { FSWatcher } = require('internal/fs/recursive_watch');
@@ -24,7 +36,6 @@ if (process.connected)
         watcher.on('change', listener);
         return watcher;
       };
-      syncBuiltinESMExports();
     }
     if (!configuration.real) {
       fs.watch = (path, _options, listener) => {
@@ -32,8 +43,7 @@ if (process.connected)
           throw Object.assign(new Error('synthetic'), { code: configuration.failure });
         const watcher = new EventEmitter();
         watcher.close = () => {
-          if (!path.includes('forge-watch-probe-') && configuration.hangClose)
-            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+          if (!path.includes('forge-watch-probe-') && configuration.hangClose) blockUntilKilled();
           else if (!configuration.missingClose) queueMicrotask(() => watcher.emit('close'));
         };
         if (path.includes('forge-watch-probe-') && !configuration.silent) {
@@ -46,9 +56,10 @@ if (process.connected)
         }
         return watcher;
       };
-      syncBuiltinESMExports();
     }
-    startLocalWatcher();
+    syncBuiltinESMExports();
+    if (process.argv[2]) startSharedWatcher(process.argv[2]);
+    else startLocalWatcher();
   });
 else if (process.argv.includes('--probe') || process.argv.includes('--measure')) {
   const directory = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'forge-watch-native-')));

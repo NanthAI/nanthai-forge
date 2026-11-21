@@ -191,10 +191,15 @@ test('48835eea: a probe folder an older client left in .forge no longer blocks t
   const { s, f, root } = await opened(t);
   mkdirSync(join(root, '.forge', '.forge-event-probe-abc123'));
   writeFileSync(join(root, '.forge', '.forge-event-probe-abc123', 'pulse'), 'probe');
+  const userPath = '.forge-event-probe-abc123/pulse',
+    userBytes = Buffer.from('user file\n');
+  mkdirSync(join(root, '.forge-event-probe-abc123'));
+  writeFileSync(join(root, userPath), userBytes);
   f.moveMain({ overlap: false });
   const synced = await s.transport().dispatch('sync', { laneId: f.lane.laneId, apply: true });
   assert.equal(synced.result.applied.head, (await f.readLane(f.lane.laneId)).head);
   assert(existsSync(join(root, 'accepted.txt')), 'main change installed');
+  assert.equal(savedBlob(root, userPath), digest(userBytes), 'a user file with the same prefix is saved');
 });
 
 test('48835eea non-cause guard: with event health stubbed degraded, a save still takes an edit that kept its size and mtime', async t => {

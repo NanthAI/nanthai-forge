@@ -24,14 +24,18 @@ const STALE_PROBE_MS = 60_000;
  * can live (a killed caller), and `.forge-event-probe-*` folders older clients left inside the
  * checkout. A live concurrent probe's folder is never touched. Never anything else. */
 export function clearEventProbes(root: string, own: string, now = Date.now()) {
-  const probes = join(clientCacheRoot(root), 'event-probe');
-  for (const [directory, owned] of [
-    [probes, (name: string) => name === own || /^[0-9a-f-]{36}$/.test(name)],
-    [join(root, '.forge'), (name: string) => name.startsWith(EVENT_PROBE_PREFIX)],
+  const cache = clientCacheRoot(root);
+  for (const [parent, leaf, owned] of [
+    [cache, 'event-probe', (name: string) => name === own || /^[0-9a-f-]{36}$/.test(name)],
+    [join(root, '.forge'), '', (name: string) => name.startsWith(EVENT_PROBE_PREFIX)],
   ] as const)
     try {
-      for (const name of readdirSync(directory)) {
-        if (!owned(name)) continue;
+      if (!lstatSync(parent).isDirectory()) continue;
+      const directory = join(parent, leaf);
+      if (leaf && !lstatSync(directory).isDirectory()) continue;
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const { name } = entry;
+        if (!entry.isDirectory() || !owned(name)) continue;
         const path = join(directory, name);
         if (name === own || now - lstatSync(path).mtimeMs > STALE_PROBE_MS)
           rmSync(path, { recursive: true, force: true });

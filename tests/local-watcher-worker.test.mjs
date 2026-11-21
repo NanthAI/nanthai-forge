@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { rmSync } from 'node:fs';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import { watchLocal, watcherRuntime } from '../dist/local-watcher.js';
 import { startLocalWatcher } from '../dist/local-watcher-worker.js';
 
@@ -15,14 +16,11 @@ function helper(
     streams = [],
     pending = [],
     cleanup = [];
-  let directory,
-    removed = false,
+  let removed = false,
     failedProbe = false;
-  const before = new Set(process.listeners('exit'));
   const receive = startLocalWatcher(
     (message, done) => {
       messages.push(message);
-      if (message.type === 'probe-directory') directory = message.directory;
       if (message.type === 'healthy' && holdHealthy) pending.push(done);
       else done();
     },
@@ -56,12 +54,8 @@ function helper(
       },
       setImmediate,
     },
+    temporaryDirectory(t),
   );
-  t.after(() => {
-    if (directory) rmSync(directory, { recursive: true, force: true });
-    for (const listener of process.listeners('exit'))
-      if (!before.has(listener)) process.off('exit', listener);
-  });
   const command = (id, type, extra = {}) =>
     receive({ id, type, path: '/synthetic', recursive: true, probe: 1, ...extra });
   return { command, messages, streams, pending, cleanup, removed: () => removed };
@@ -147,11 +141,8 @@ test('first-subscriber cancellation and slow cleanup cannot degrade remaining he
   const transport = new EventEmitter();
   const streams = [],
     messages = [];
-  let directory;
-  const before = new Set(process.listeners('exit'));
   const receive = startLocalWatcher(
     (message, done) => {
-      if (message.type === 'probe-directory') directory = message.directory;
       messages.push(message);
       transport.emit('message', message);
       done();
@@ -170,6 +161,7 @@ test('first-subscriber cancellation and slow cleanup cannot degrade remaining he
       },
       setImmediate,
     },
+    temporaryDirectory(t),
   );
   Object.assign(transport, {
     postMessage: receive,
@@ -185,9 +177,6 @@ test('first-subscriber cancellation and slow cleanup cannot degrade remaining he
   ];
   t.after(async () => {
     await Promise.all(watchers.map(w => w.close()));
-    if (directory) rmSync(directory, { recursive: true, force: true });
-    for (const listener of process.listeners('exit'))
-      if (!before.has(listener)) process.off('exit', listener);
   });
   transport.emit('message', { type: 'ready' });
   const pending = Promise.all(watchers.slice(1).map(w => w.probe()));

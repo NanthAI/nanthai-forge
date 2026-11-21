@@ -2,8 +2,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, statSync, mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { fork, execFile } from 'node:child_process';
+import fsPromises from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import childProcess, { execFile } from 'node:child_process';
+import { once } from 'node:events';
+import { syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import {
@@ -14,9 +18,11 @@ import {
 } from '../dist/local-watcher.js';
 import { WATCH_RETRY_MS } from '../dist/local-watcher-runtime.js';
 import { FakeWatchWorker } from './local-watcher-fixture.mjs';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let time = Date.now();
+const nativeFixture = fileURLToPath(new URL('./local-watcher-native-fixture.mjs', import.meta.url));
 function clock(t) {
   time += WATCH_RETRY_MS * 2;
   t.mock.method(watcherRuntime, 'now', () => time);
@@ -34,42 +40,54 @@ function fake(t, options) {
 function nativeFake(t, options) {
   clock(t);
   const workers = [];
-  t.mock.method(watcherRuntime, 'createWorker', () => {
-    const child = fork(fileURLToPath(new URL('./local-watcher-native-fixture.mjs', import.meta.url)), [], {
+  const fork = childProcess.fork;
+  t.mock.method(childProcess, 'fork', (_path, args, settings) => {
+    const child = fork(nativeFixture, args, {
+      ...settings,
+      ...(options.helperTemp && {
+        env: {
+          ...settings.env,
+          TMPDIR: options.helperTemp,
+          TMP: options.helperTemp,
+          TEMP: options.helperTemp,
+        },
+      }),
       execArgv: options.userlandRecursive ? ['--expose-internals'] : [],
-      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     });
     child.received = [];
-    child.on('message', message => child.received.push(message));
-    child.send(options);
-    const unref = child.unref.bind(child),
-      ref = child.ref.bind(child);
-    const worker = Object.assign(child, {
-      unref() {
-        child.channel?.unref();
-        unref();
-      },
-      ref() {
-        child.channel?.ref();
-        ref();
-      },
-      postMessage(message) {
-        if (child.connected) child.send(message, () => {});
-      },
-      terminate() {
-        if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
-        const exited = new Promise(resolve => child.once('exit', resolve));
-        child.kill('SIGKILL');
-        if (child.connected) child.disconnect();
-        return exited;
-      },
+    const observed = message => {
+      child.received.push(message);
+      child.emit('fixture-message', message);
+    };
+    child.on('message', observed);
+    let buffer = '';
+    child.stderr.setEncoding('utf8').on('data', chunk => {
+      buffer += chunk;
+      for (;;) {
+        const end = buffer.indexOf('\n');
+        if (end < 0) break;
+        const line = buffer.slice(0, end);
+        buffer = buffer.slice(end + 1);
+        if (line.startsWith('{"type":"probe-directory"')) observed(JSON.parse(line));
+      }
     });
-    workers.push(worker);
-    return worker;
+    child.send(options);
+    workers.push(child);
+    return child;
   });
+  syncBuiltinESMExports();
   t.after(async () => {
-    await Promise.all(workers.map(w => w.terminate()));
-    await sleep(0);
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    await Promise.all(
+      workers.map(async worker => {
+        if (worker.exitCode !== null || worker.signalCode !== null) return;
+        const exited = once(worker, 'exit');
+        worker.kill('SIGKILL');
+        await exited;
+      }),
+    );
   });
   return workers;
 }
@@ -218,26 +236,111 @@ async function messageFrom(worker, type) {
     const listen = message => {
       if (message.type !== type) return;
       clearTimeout(bound);
-      worker.off('message', listen);
+      worker.off('fixture-message', listen);
       resolve(message);
     };
-    worker.on('message', listen);
+    worker.on('fixture-message', listen);
   });
 }
 
-test('private probes canonicalize tmp paths, write private files, and remove them on cancellation', async t => {
-  const workers = nativeFake(t, { silent: true });
-  const watcher = watching(t, { probeMs: 1000 });
-  const pending = watcher.probe();
-  const { directory } = await messageFrom(workers[0], 'probe-directory');
-  await messageFrom(workers[0], 'probe-written');
-  assert.equal(directory, realpathSync(directory));
-  assert.equal(statSync(directory).mode & 0o777, 0o700);
-  assert.equal(statSync(join(directory, 'signal')).mode & 0o777, 0o600);
-  assert.equal(directory.startsWith('/synthetic/watch'), false);
-  await watcher.close();
-  await pending;
+function whenProbeRootRemoved(t, directory) {
+  const rm = fsPromises.rm;
+  const { promise, resolve } = Promise.withResolvers();
+  t.mock.method(fsPromises, 'rm', async (path, options) => {
+    await rm(path, options);
+    if (path === directory) resolve();
+  });
+  syncBuiltinESMExports();
+  return promise;
+}
+
+test(
+  'private probes canonicalize tmp paths, write private files, and remove them on cancellation',
+  { timeout: 10_000 },
+  async t => {
+    const workers = nativeFake(t, { silent: true });
+    const watcher = watching(t, { probeMs: 1000 });
+    const pending = watcher.probe();
+    const { directory } = await messageFrom(workers[0], 'probe-directory');
+    await messageFrom(workers[0], 'probe-written');
+    assert.equal(directory, realpathSync(directory));
+    assert.equal(statSync(directory).mode & 0o777, 0o700);
+    assert.equal(statSync(join(directory, 'signal')).mode & 0o777, 0o600);
+    assert.equal(directory.startsWith('/synthetic/watch'), false);
+    const cleanup = whenProbeRootRemoved(t, dirname(directory));
+    await watcher.close();
+    await pending;
+    await cleanup;
+    assert.equal(existsSync(directory), false);
+  },
+);
+
+for (const shared of [false, true])
+  test(
+    `SIGKILL immediately after ${shared ? 'shared' : 'private'} probe allocation removes its directory`,
+    { timeout: 10_000 },
+    async t => {
+      const root = temporaryDirectory(t);
+      const helperTemp = shared
+        ? realpathSync(mkdtempSync(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'forge-test-')))
+        : undefined;
+      if (helperTemp) t.after(() => rmSync(helperTemp, { recursive: true, force: true }));
+      const workers = nativeFake(t, { hangAllocation: true, helperTemp });
+      if (shared) mkdirSync(join(root, '.forge', 'work'), { recursive: true });
+      const watcher = watching(t, { probeMs: 3000 }, () => {}, root);
+      const health = watcher.probe();
+      await Promise.resolve(); // Shared helpers defer election until after subscription listeners attach.
+      // The helper is blocked inside mkdtempSync, before it can return the path or open the probe.
+      const { directory } = await messageFrom(workers[0], 'probe-directory');
+      assert.equal(existsSync(directory), true);
+      const lifetimeDirectory = dirname(directory);
+      if (shared) {
+        assert.equal(dirname(lifetimeDirectory), helperTemp, 'helper really uses a different temp root');
+      }
+      const cleanup = whenProbeRootRemoved(t, lifetimeDirectory);
+      const exited = once(workers[0], 'exit');
+      workers[0].kill('SIGKILL');
+      assert.deepEqual(await exited, [null, 'SIGKILL']);
+      assert.deepEqual(await health, { status: 'degraded', code: 'WATCH_WORKER_EXITED' });
+      await cleanup;
+      assert.equal(existsSync(directory), false);
+      assert.equal(existsSync(lifetimeDirectory), false, 'the helper lifetime directory is reclaimed');
+      assert.equal(existsSync(root), true, 'the watched user directory remains');
+    },
+  );
+
+test('normal parent exit reclaims an allocated probe even if the helper is wedged', async t => {
+  const root = temporaryDirectory(t);
+  const watcherModule = new URL('../dist/local-watcher.js', import.meta.url).href;
+  const script = `
+    import childProcess from 'node:child_process';
+    import { writeSync } from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    import { createInterface } from 'node:readline';
+    import { watchLocal } from ${JSON.stringify(watcherModule)};
+    const fork = childProcess.fork;
+    childProcess.fork = (_file, args, settings) => {
+      const child = fork(${JSON.stringify(nativeFixture)}, args, {
+        ...settings, stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+      });
+      createInterface({ input: child.stderr }).once('line', line => {
+        writeSync(1, line);
+        process.exit(0);
+      });
+      child.send({ hangAllocation: true });
+      return child;
+    };
+    syncBuiltinESMExports();
+    watchLocal(${JSON.stringify(root)}, {}, () => {});
+  `;
+  const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', script], {
+    timeout: 5000,
+  });
+  const { directory, type } = JSON.parse(stdout);
+  assert.equal(type, 'probe-directory');
   assert.equal(existsSync(directory), false);
+  assert.equal(existsSync(dirname(directory)), false);
+  assert.equal(existsSync(root), true);
 });
 
 test('close cancels an in-flight probe and stale events or probe acknowledgements are ignored', async t => {
@@ -315,6 +418,8 @@ for (const userlandRecursive of [false, true])
         throw new Error('missing real source event');
       }),
     ]);
+    const { directory: probe } = await messageFrom(workers[0], 'probe-directory');
+    const cleanup = whenProbeRootRemoved(t, dirname(probe));
     await watcher.close();
     await new Promise((resolve, reject) => {
       if (workers[0].exitCode !== null || workers[0].signalCode !== null) {
@@ -327,7 +432,8 @@ for (const userlandRecursive of [false, true])
         resolve();
       });
     });
-    assert.equal(existsSync(workers[0].received.find(m => m.type === 'probe-directory').directory), false);
+    await cleanup;
+    assert.equal(existsSync(probe), false);
   });
 
 // Sharing and cancellation are the claims here, not deadlines (fake-helper tests cover
