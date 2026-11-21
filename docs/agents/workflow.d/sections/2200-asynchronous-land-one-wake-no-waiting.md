@@ -4,7 +4,7 @@ In an agent client that wakes the agent when a background command exits (Claude
 Code, or any client with `FORGE_AGENT_WAKE=background-exit`), hosted `land --save`
 returns as soon as the landing is submitted. It prints
 `land: SUBMITTED; it settles without you…` and its `result.wake.command`
-(also `command` and `waitCommand`) is one settle wait with a 7,080 s budget:
+is one settle wait with a 7,080 s budget:
 
 ```sh
 nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance","timeoutSeconds":7080}'

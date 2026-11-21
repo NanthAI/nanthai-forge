@@ -346,6 +346,80 @@ function briefPending(result: Json): Json | undefined {
   return slim;
 }
 
+/** A queued submit has a durable wait target. Keep one runnable command and the structured
+ * target, while source preparation and exceptional outcomes keep their own replay and recovery. */
+function briefQueuedSubmit(result: Json, operationId: unknown): Json {
+  const submission = obj(result.submission),
+    observation = obj(submission?.observation),
+    next = obj(result.next),
+    wake = obj(result.wake),
+    wait = result.waitCommand,
+    targets = next?.operationIds;
+  if (
+    result.phase !== 'finish' ||
+    submission?.phase !== 'queued' ||
+    observation?.state !== 'pending' ||
+    observation.pendingReason !== 'queued' ||
+    observation.stall ||
+    submission.error ||
+    result.waitStatus ||
+    result.syncRequired ||
+    result.wouldConflict ||
+    result.recovery ||
+    result.conflict ||
+    result.replay ||
+    result.error ||
+    result.retryCommand ||
+    next?.action !== 'wait' ||
+    next.until !== 'acceptance' ||
+    typeof operationId !== 'string' ||
+    !Array.isArray(targets) ||
+    targets.length !== 1 ||
+    targets[0] !== operationId ||
+    typeof wait !== 'string' ||
+    (result.command !== undefined && result.command !== wait) ||
+    (result.nextCommand !== undefined && result.nextCommand !== wait) ||
+    (wake && wake.command !== wait)
+  )
+    return result;
+
+  const slim = omit(
+    result,
+    'command',
+    'nextCommand',
+    'instruction',
+    'replayParameters',
+    'composeOperationId',
+  );
+  if (wake) delete slim.waitCommand;
+  if (obj(result.landingState)?.state === 'queued') delete slim.landingState;
+  const queued = omit(submission, 'observation', 'message', 'counts', 'error');
+  if (submission.operationId === operationId) delete queued.operationId;
+  slim.submission = queued;
+  const queue = obj(result.queue);
+  if (queue) {
+    slim.queue = { total: queue.total };
+    slim.queuePosition = result.queuePosition ?? queue.position;
+    delete slim.queueAheadSelection;
+    delete slim.queueAheadUnavailable;
+  }
+  const defaults = obj(result.defaults),
+    preflight = obj(defaults?.preflight);
+  // Once queued, a routine optional preflight plan is diagnostic. Preserve the plan if a
+  // local run failed or a static check needs attention, and preserve incomplete-run recovery.
+  if (
+    preflight?.status === 'advised' &&
+    !preflight.lastRun &&
+    !preflight.staticAdvisory &&
+    !Array.isArray(preflight.static)
+  )
+    slim.defaults = {
+      ...defaults,
+      preflight: omit(preflight, 'selected', 'local', 'run', 'estimateMinutes', 'totalEstimateMinutes'),
+    };
+  return slim;
+}
+
 /** `wait`/`observe` that ended with every landing landed: the receipt and State per submission, no cursor. */
 function briefObserved(result: Json, operationId: unknown): Json | undefined {
   if (result.status !== 'terminal' || result.successful !== true || !Array.isArray(result.submissions))
@@ -430,7 +504,10 @@ function brief(out: Json): Json {
   ]
     .map(urgentNotApplied)
     .find(Boolean);
-  const kept = slim ?? result;
+  const kept =
+    slim && (action === 'finish' || action === 'land')
+      ? briefQueuedSubmit(slim, out.operationId)
+      : (slim ?? result);
   // Weakened-test flags advise the agent before review (Issue 11901a0c): never --detail only.
   const weakenedTests = obj(result.defaults)?.weakenedTests;
   out.result = compactReplyDetail(action, {

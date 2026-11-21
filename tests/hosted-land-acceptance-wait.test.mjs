@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { landTerminal, landSummary } from '../dist/hosted-land-summary.js';
 import { landWaitCommand } from '../dist/hosted-land-wait.js';
+import { printedReceipt } from '../dist/receipt-slim.js';
 
 const turn = () => new Promise(resolve => setImmediate(resolve));
 async function fixture(t, checkOnly = false, memberBudget) {
@@ -61,6 +62,7 @@ async function fixture(t, checkOnly = false, memberBudget) {
                       : accepted
                         ? 'landed'
                         : 'pending',
+                ...(pendingPhase === 'queued' ? { pendingReason: 'queued' } : {}),
               },
               ...(terminalFailure ? { error: terminalFailure } : {}),
               ...(conflictRecovery
@@ -542,6 +544,7 @@ function client(t, kind) {
 test('agent land returns at once after submission with the one background wake command', async t => {
   client(t, 'background');
   const s = await fixture(t);
+  s.pendingPhase('queued');
   const result = await s.run('/synthetic', { detach: false });
   assert.deepEqual(s.events, [], 'no observer opens in the land command');
   assert.equal(s.calls.length, 1, 'one submission, no wait, no replay');
@@ -558,6 +561,11 @@ test('agent land returns at once after submission with the one background wake c
     until: 'acceptance',
     timeoutSeconds: 7080,
   });
+  const brief = printedReceipt(result, { agent: true, detail: false, landChild: false }).result;
+  assert.deepEqual(brief.wake, wake);
+  assert.deepEqual(brief.next, next);
+  assert.equal(brief.waitCommand, undefined);
+  assert.equal(brief.command, undefined);
   const err = s.err.join('');
   assert.match(err, /land: SUBMITTED; it settles without you\. Run once in the background/);
   assert(err.includes(wake.command));

@@ -156,6 +156,35 @@ function registry(t, s) {
 }
 const body = response => JSON.parse(response.content[0].text);
 
+test('MCP finish exposes one admitted wait while replyDetail retains the exact replay', async t => {
+  const s = agentFixture(t);
+  const tool = registry(t, s).get('forge_task');
+  const input = z.object(tool.inputSchema);
+  const command = {
+    action: 'finish',
+    laneId: s.lane.laneId,
+    operationId: randomUUID(),
+    message: 'Synthetic queued candidate with full detail available.',
+  };
+  const brief = await tool.call(input.parse({ command }));
+  assert(!brief.isError, brief.content[0].text);
+  assert(brief.content[0].text.length <= 1200);
+  const { result } = body(brief);
+  assert.equal(result.submission.phase, 'queued');
+  assert.deepEqual(result.next, { action: 'wait', operationIds: [command.operationId], until: 'acceptance' });
+  assert.match(result.waitCommand, new RegExp(command.operationId));
+  assert.equal(result.command, undefined);
+  assert.equal(result.replayParameters, undefined);
+
+  const detailed = await tool.call(input.parse({ command: { ...command, replyDetail: true } }));
+  assert(!detailed.isError, detailed.content[0].text);
+  const full = body(detailed).result;
+  assert.equal(full.submission.id, result.submission.id);
+  assert.equal(full.command, result.waitCommand);
+  assert.equal(full.replayParameters.operationId, command.operationId);
+  assert.equal(full.replayParameters.message, command.message);
+});
+
 test('MCP forge_task carries the claim for an exact save and for the land save mode', async t => {
   const s = agentFixture(t);
   s.caps.features = ['save-declarations'];

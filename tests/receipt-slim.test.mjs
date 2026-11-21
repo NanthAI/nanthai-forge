@@ -2,12 +2,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { operationWait } from '../dist/agent-operation-wait.js';
+import { agentDeadEnd } from '../dist/error-teaching.js';
 import { slimReceipt, printedReceipt } from '../dist/receipt-slim.js';
+import { shellQuote } from '../dist/shell-quote.js';
 
 // Issue 47558a99: receipts leave the process without facts the agent already holds. Budgets are
 // characters of the printed JSON (tokens are about chars / 4); raise one only with numbers on the Issue.
 const MEDIAN_RECEIPT = 300; // chars, healthy start/save/sync/land receipts (Issue 47558a99 target)
 const MAX_HEALTHY_RECEIPT = 450; // the terminal wait and landing carry a receipt id and a State (64 hex)
+const MAX_QUEUED_SUBMIT = 1200; // chars, queued landing submit (Issue 47558a99)
 const sha = 'a'.repeat(64);
 const laneId = randomUUID();
 const save = extra => ({
@@ -520,6 +524,142 @@ test('a submitted landing names its composed State and passed static checks, not
     'failed',
     'an unfinished or failed compose keeps its record',
   );
+});
+
+test('a normal queued submit prints one exact continuation within 1,200 characters in either harness', t => {
+  const root = `/srv/workspaces/nanthai/forge/nanthai-forge.forge-client/lanes/${laneId}`;
+  const targets = { operationIds: [opId], until: 'acceptance' };
+  const foreground = operationWait(root, targets);
+  const budgetSeconds = 7080;
+  const background = operationWait(root, { ...targets, timeoutSeconds: budgetSeconds });
+  for (const continuation of [
+    foreground,
+    {
+      ...background,
+      wake: { delivery: 'background-exit', command: background.command, budgetSeconds },
+      instruction: 'Run the command in the background and stay with the original operation. '.repeat(8),
+    },
+  ]) {
+    const full = structuredClone(healthy.land);
+    full.as = 'synthetic/warm-quail';
+    const { submission } = full.result;
+    delete submission.acceptance;
+    delete submission.testFiles;
+    Object.assign(submission, {
+      phase: 'queued',
+      message: 'm'.repeat(1024),
+      observation: { state: 'pending', pendingReason: 'queued', cause: null },
+      counts: { r2: [3, 11, 11000] },
+    });
+    Object.assign(full.result, {
+      ...continuation,
+      queuePosition: 3,
+      queue: { position: 3, total: 6, entriesAhead: 2, predecessor: { id: randomUUID() } },
+      queueAheadSelection: { ahead: [{ head: sha, id: randomUUID() }], more: false },
+      queueAheadUnavailable: true,
+      landingState: { state: 'queued', label: 'Queued', nextStep: 'Waits for its turn on main.' },
+      landingAdvice: 'Landing mode: strict; effective: strict. The full check gates acceptance.',
+      changedPaths: 3,
+      progress: {
+        terminal: { outcome: { status: 'completed', result: { result: { status: 'clean', head: sha } } } },
+      },
+      replayParameters: { operationId: opId, laneId, message: submission.message, save: true },
+      defaults: {
+        preflight: {
+          status: 'advised',
+          tests: 31,
+          deferredTests: 1060,
+          reason: 'over 2 min',
+          local: 'trimmed by the local budget',
+          run: `nforge agent '${root}' preflight '{"laneId":"${laneId}"}'`,
+          selected: Array.from({ length: 20 }, (_, i) => `tests/forge-${i}.test.mjs`),
+          static: [
+            { name: 'lint', outcome: 'passed' },
+            { name: 'format', outcome: 'passed' },
+          ],
+          quick: { ran: 5, notStarted: 26, budgetSeconds: 90, outcome: 'incomplete' },
+        },
+      },
+    });
+    const options = { agent: true, detail: false, landChild: false };
+    const brief = printedReceipt(full, options);
+    const mode = continuation.wake ? 'background wake' : 'foreground wait';
+    t.diagnostic(`${mode}: ${chars(full)} -> ${chars(brief)} chars`);
+    assert(chars(brief) <= MAX_QUEUED_SUBMIT, `${mode}: ${chars(brief)} chars`);
+    assert.equal(brief.operationId, opId);
+    assert.equal(brief.result.submission.id, submission.id);
+    assert.equal(brief.result.submission.phase, 'queued');
+    assert.deepEqual(brief.result.next, continuation.next);
+    assert.equal(brief.result.wake?.command ?? brief.result.waitCommand, continuation.command);
+    assert.equal(brief.result.command, undefined);
+    assert.equal(brief.result.waitCommand, continuation.wake ? undefined : continuation.command);
+    assert.equal(brief.result.replayParameters, undefined);
+    assert.equal(brief.result.queuePosition, 3);
+    assert.deepEqual(brief.result.queue, { total: 6 });
+    assert.equal(brief.result.progress.composed.head, sha);
+    assert.equal(brief.result.defaults.preflight.static, 'passed: lint, format');
+    assert.equal(brief.result.defaults.preflight.quick.ran, 5);
+    assert.equal(agentDeadEnd(brief), undefined);
+    assert.deepEqual(slimReceipt(full), brief);
+    assert.equal(printedReceipt(full, { ...options, detail: true }), full);
+    assert.equal(printedReceipt(full, { ...options, landChild: true }), full);
+  }
+});
+
+test('source preparation and queued conflict advice keep their original replay and recovery', () => {
+  const replayParameters = {
+    operationId: opId,
+    laneId,
+    message: "Summary\n\nBody with 'quotes'.",
+    save: true,
+    with: [randomUUID()],
+  };
+  const command = `nforge agent ${shellQuote(laneRoot)} finish ${shellQuote(JSON.stringify(replayParameters))}`;
+  const preparation = envelope('finish', {
+    phase: 'compose',
+    inProgress: true,
+    progress: { status: 'retryable' },
+    next: { action: 'finish', ...replayParameters },
+    command,
+    replayParameters,
+  });
+  assert.deepEqual(slimReceipt(preparation).result, preparation.result);
+
+  const wait = operationWait(laneRoot, { operationIds: [opId], until: 'acceptance' });
+  const queued = envelope('finish', {
+    phase: 'finish',
+    submission: {
+      phase: 'queued',
+      observation: { state: 'pending', pendingReason: 'queued', cause: null },
+    },
+    ...wait,
+    wouldConflict: { paths: ['src/change.ts'] },
+    replayParameters,
+  });
+  const brief = slimReceipt(queued).result;
+  assert.deepEqual(brief.replayParameters, replayParameters);
+  assert.deepEqual(brief.wouldConflict, queued.result.wouldConflict);
+  assert.equal(brief.waitCommand, wait.waitCommand);
+});
+
+test('a queued submit preserves the preflight commands associated with an incomplete or failed local run', () => {
+  const wait = operationWait(laneRoot, { operationIds: [opId], until: 'acceptance' });
+  const command = `nforge agent '${laneRoot}' preflight '{"laneId":"${laneId}"}'`;
+  for (const preflight of [
+    { status: 'incomplete', finish: command },
+    { status: 'advised', lastRun: { passed: false }, run: command },
+    { status: 'advised', static: [{ name: 'lint', outcome: 'timed-out' }], run: command },
+  ]) {
+    const queued = envelope('finish', {
+      phase: 'finish',
+      submission: { phase: 'queued', observation: { state: 'pending', pendingReason: 'queued' } },
+      ...wait,
+      defaults: { preflight },
+    });
+    const brief = slimReceipt(queued).result;
+    assert.equal(brief.waitCommand, wait.waitCommand);
+    assert.deepEqual(brief.defaults.preflight, preflight);
+  }
 });
 
 test('--detail data is only dropped from the printed copy', () => {

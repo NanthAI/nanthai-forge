@@ -33,9 +33,14 @@ same one). `node scripts/measure-agent-context.mjs` prints the hosted MCP tool l
   main-distance report and idle-Lane paths (the stderr hint lists them). A Lane behind main keeps
   its conflicting paths; a conflicted sync keeps file summaries and recovery; a failed landing
   keeps its error and recovery. Replies retain `resolved` replay inputs, failed test files in full and flaky ones by
-  name, `retry` (`passed`: it failed an attempt and then passed; a file whose retry failed is under `failed`) and the start of their error. An unfinished landing (not part of the 300-character median) keeps its phase and its exact continuation
-  (`waitCommand`, `command`, `next`, `instruction`) and `replayParameters`, and drops the request (except
-  `agent` and the check kind), timings and ids.
+  name, `retry` (`passed`: it failed an attempt and then passed; a file whose retry failed is under `failed`)
+  and the start of their error. A normal queued submit has a 1,200-character budget. Its brief keeps the
+  queue position, the structured `next` wait target and one runnable command (`wake.command` for
+  background wake, otherwise `waitCommand`). The brief summarizes routine preflight advice by count
+  and outcome and keeps commands for incomplete or failed checks. Before admission and when recovery
+  is needed, replies keep the original replay parameters and recovery command. Use `--detail`
+  (MCP: `replyDetail:true`) when replaying the call with its operation id for the full receipt, including
+  the optional preflight plan.
 - **Waiting.** While a landing is queued, `land --save`/`wait` print one line per change of phase, queue
   position or outcome (position, ahead, total, wouldConflict advice, recovery, error code), never the whole
   submission or resume cursor again. An IN_PROGRESS result still carries the cursor and one resume command.
