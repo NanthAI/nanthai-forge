@@ -45,7 +45,7 @@ import {
   sourceFailureSchema,
 } from '../src/hosted-source-retry';
 import { recordSourceStep, sourceStallCause, sourceStepTiming } from './projectSourceStepTiming';
-import { saveStepReads, sourceObjectLocation } from './projectSourceBeginReads';
+import { mergeStepReads, saveStepReads, sourceObjectLocation } from './projectSourceBeginReads';
 import { sourceResultInlineBytes } from './projectConvexSourceTransport';
 import { digest } from '../src/state/hash';
 import { publishSourceResult } from './projectSourcePublishInline';
@@ -323,6 +323,14 @@ export const begin = sourceMutation({
       if (active.job.jobKind === 'save' && !active.row.batchId)
         for (const pin of await saveStepReads(ctx, args.projectId, args.jobId))
           locations.push(await sourceObjectLocation(ctx, args.projectId, pin));
+      const source = active.source?.state;
+      if (
+        process.env.FORGE_SOURCE_MERGE_ROOT_PREFETCH === '1' &&
+        !active.row.batchId &&
+        source &&
+        ('inputs' in source || 'work' in source)
+      )
+        locations.push(...(await mergeStepReads(ctx, args.projectId, source)));
     }
     return canonicalPayload({
       generation: active.row.generation ?? 0,

@@ -110,13 +110,15 @@ export async function sourceStep(
     'SOURCE_JOB_FENCED',
     'Source step pins changed.',
   );
-  if (job.jobKind !== 'register-state')
-    await authorizeSourceTransfer(
-      ctx,
-      { projectId: args.projectId, input: row.dispatch, executionId: row.executionId },
-      { lease, loaded: job },
-    );
-  else
+  const source =
+    job.jobKind !== 'register-state'
+      ? await authorizeSourceTransfer(
+          ctx,
+          { projectId: args.projectId, input: row.dispatch, executionId: row.executionId },
+          { lease, loaded: job },
+        )
+      : null;
+  if (!source)
     invariant(
       job.status === 'running' &&
         job.executionId === row.executionId &&
@@ -125,5 +127,5 @@ export async function sourceStep(
       'Source execution changed or expired.',
     );
   // The project row this check already read: callers take flags from it without another read.
-  return { job, row, project };
+  return { job, row, project, source };
 }

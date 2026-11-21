@@ -4,11 +4,14 @@ import type { Id } from './_generated/dataModel';
 import { saveObjects, saveStateSchema } from './projectHostedSaveStore';
 import { signRecipeClosure } from './projectRecipeClosure';
 import { presignGet, r2Config } from './r2';
-import { findStoredObject as findObject, type ObjectView } from './projectObjectFind';
+import { findStoredObject as findObject, findStoredObjects, type ObjectView } from './projectObjectFind';
 import { isStored } from './projectObjectFields';
 import { packRange, packHeaders } from '../src/object-pack-range';
 import { invariant } from '../src/errors';
 import { smallSavePageBytes, smallSaveStateBytes } from '../src/hosted-source-small-save';
+import type { WorkerObject, WorkerPin } from '../src/hosted-source-worker-format';
+import type { ComposeState } from './projectHostedComposeStore';
+import type { SyncState } from './projectHostedSyncStore';
 
 /** One object's step location, marked for the step exactly as a `resolve` call would mark it. */
 export async function sourceObjectLocation(
@@ -29,6 +32,10 @@ export async function sourceObjectLocation(
   const object = known ?? (await findObject(ctx, projectId, pin.sha256));
   invariant(object, 'SOURCE_UNAVAILABLE', 'Source input is absent.');
   const [descriptor] = await saveObjects(ctx, projectId, [pin], [object]);
+  return signedSourceLocation(object, descriptor!);
+}
+
+async function signedSourceLocation(object: ObjectView, descriptor: WorkerObject) {
   const url =
     object.location === 'r2' && object.r2Key
       ? await presignGet(r2Config(), object.r2Key, packHeaders(packRange(object), object.size))
@@ -36,7 +43,7 @@ export async function sourceObjectLocation(
   // The State's generation and parents, as resolve returns them: the step derives its output
   // State's generation from them (review 3aa618e2 F1).
   return {
-    descriptor: descriptor!,
+    descriptor,
     ...(object.stateGeneration === undefined ? {} : { stateGeneration: object.stateGeneration }),
     ...(object.stateSize === undefined ? {} : { stateSize: object.stateSize }),
     ...(object.stateParents === undefined ? {} : { stateParents: object.stateParents }),
@@ -46,6 +53,44 @@ export async function sourceObjectLocation(
     ...(object.recipeClosure ? { closure: await signRecipeClosure(object) } : {}),
     ...(object.pack ? { range: packRange(object)! } : {}),
   };
+}
+
+/** Reuse pins from the authorized, submitted operation during the first step. Missing
+ * or oversized hints leave the normal page resolver responsible for the read. */
+export async function mergeStepReads(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  state: ComposeState | SyncState,
+) {
+  let pins: WorkerPin[];
+  if ('inputs' in state) {
+    const { inputs, dependencies } = state.request;
+    if (inputs.pages !== 1 || dependencies.pages !== 1) return [];
+    pins = [inputs.root, dependencies.root];
+    if (pins.some(pin => pin.size > smallSavePageBytes)) return [];
+  } else {
+    const work = state.work;
+    if (work.mode !== 'sync' || work.stackBase) return [];
+    pins = [work.left.object, work.right.object];
+    if (pins.reduce((bytes, pin) => bytes + pin.size, 0) > 8 * 1024 * 1024) return [];
+  }
+  const distinct = [...new Map(pins.map(pin => [pin.sha256, pin])).values()];
+  const rows = await findStoredObjects(
+    ctx,
+    projectId,
+    distinct.map(pin => pin.sha256),
+  );
+  const found = distinct.flatMap((pin, i) => {
+    const row = rows[i];
+    return row && !row.removed && isStored(row) && row.size === pin.size ? [{ pin, row }] : [];
+  });
+  const descriptors = await saveObjects(
+    ctx,
+    projectId,
+    found.map(({ pin }) => pin),
+    found.map(({ row }) => row),
+  );
+  return Promise.all(found.map(({ row }, i) => signedSourceLocation(row, descriptors[i]!)));
 }
 
 /** What a save job's first step reads after its input: the baseline State and the first delta

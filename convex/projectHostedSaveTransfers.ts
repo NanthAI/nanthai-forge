@@ -95,7 +95,7 @@ export async function authorizeSourceTransfer(
     'SOURCE_JOB_FENCED',
     'The source transfer execution changed or expired.',
   );
-  return { job, row };
+  return { job, row, state };
 }
 export async function authorizeSaveTransfer(ctx: MutationCtx, request: Transfer) {
   return { ...(await authorizeSourceTransfer(ctx, request)), pin: saveObjectSchema.parse(request.pin) };
