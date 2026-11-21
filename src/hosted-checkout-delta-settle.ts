@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync } from 'node:fs';
+import {
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmdirSync,
+  rmSync,
+} from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { digest } from './hash.js';
@@ -14,6 +23,7 @@ import {
   deltaRetainedName,
   fold,
   readDeltaJournal,
+  resolutionDeltaStagePrefix,
   writeDeltaJournal,
   type DeltaJournal,
   type DeltaPin,
@@ -177,6 +187,20 @@ function rollForward(
 ): DeltaSettlement {
   const { journal, root, stage, backup } = steps;
   const guard = parentGuard(root);
+  const exclusive = journal.stage.startsWith(resolutionDeltaStagePrefix);
+  // A prior fold may have linked the new file and stopped before removing its stage name.
+  // Treat the link as published and preserve any edit made through the checkout name since.
+  if (exclusive)
+    for (const file of journal.install) {
+      const from = join(stage, file.path),
+        to = join(root, file.path);
+      if (!exists(from) || lstatSync(from).nlink !== 2) continue;
+      guard(file.path);
+      if (!exists(to)) continue;
+      const staged = lstatSync(from),
+        live = lstatSync(to);
+      if (staged.dev === live.dev && staged.ino === live.ino) rmSync(from);
+    }
   const pending = new Set(
     journal.install.filter(file => exists(join(stage, file.path))).map(file => file.path),
   );
@@ -241,7 +265,11 @@ function rollForward(
       mkdirSync(dirname(spare), { recursive: true, mode: 0o700 });
       renameSync(to, spare);
     }
-    renameSync(join(stage, file.path), to);
+    const from = join(stage, file.path);
+    if (exclusive) {
+      linkSync(from, to);
+      rmSync(from);
+    } else renameSync(from, to);
   }
   const parents = [...journal.install, ...journal.displace, ...(journal.respell ?? [])].map(file =>
     dirname(join(root, file.path)),

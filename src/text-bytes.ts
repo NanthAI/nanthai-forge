@@ -4,6 +4,15 @@
  * does not decide it: Windows-1252, Latin-1 and other ASCII-compatible encodings are text
  * and merge and diff line by line on their bytes. Pure: also runs in the Convex runtime. */
 export const TEXT_SNIFF_BYTES = 8000;
+/** The hosted diff3 engine keeps one bounded set of text inputs in memory. */
+export const SOURCE_TEXT_MERGE_MAX_BYTES = 4 * 1024 * 1024;
+export const SOURCE_TEXT_MERGE_MAX_LINES = 65_536;
+/** Counts the lines the merge engine will read without decoding the input. */
+export function sourceTextLines(bytes: Uint8Array) {
+  let count = 0;
+  for (let i = bytes.indexOf(10); i !== -1; i = bytes.indexOf(10, i + 1)) count++;
+  return bytes.length && bytes.at(-1) !== 10 ? count + 1 : count;
+}
 export function isTextBytes(bytes: Uint8Array) {
   if (bytes.subarray(0, TEXT_SNIFF_BYTES).includes(0)) return false;
   return !(

@@ -2,8 +2,19 @@
 import { carryOverlapBases } from './hosted-overlap-text.js';
 import { clientCacheRoot } from './root-paths.js';
 import { sourceTree } from './source-tree.js';
-import { cpSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import {
+  cpSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+} from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { basename, dirname, join } from 'node:path';
 import { HostedCheckoutCache } from './hosted-checkout-cache.js';
 import { checkoutPathExists, installHostedFile } from './hosted-checkout-files.js';
 import {
@@ -17,12 +28,24 @@ import { parseNativeState, type NativeFile } from './state/format.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { durableReplace, syncDirectory } from './state/durability.js';
 import { workLocked } from './work-lock.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { finishPendingCheckoutDelta, settlePendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 import { diskShapeMatches } from './source-links.js';
 import type { TextAttributes } from './git-attributes.js';
 import { workingMatches, worktreeText } from './checkout-text.js';
 import { pendingSavePath } from './hosted-save-pending.js';
+import { journalCheckoutDelta, resolutionDeltaStagePrefix, type DeltaPin } from './hosted-checkout-delta.js';
+import { readSource } from './files.js';
+import { hasConflictMarkers } from './conflict-markers.js';
+import { markNativeTextConflicts, wholeFileConflict } from './native-text-merge.js';
+import { digest } from './hash.js';
+import {
+  isTextBytes,
+  SOURCE_TEXT_MERGE_MAX_BYTES,
+  SOURCE_TEXT_MERGE_MAX_LINES,
+  sourceTextLines,
+} from './text-bytes.js';
+import { hostedLaneMarkerName } from './hosted-lane-checkout-marker.js';
 export { pendingSavePath };
 
 type Exchange = ConstructorParameters<typeof ConvexLaneTransport>[0];
@@ -196,4 +219,152 @@ export async function rebaseHostedCheckout(
     // Unsaved local deletions of files the resolution changes: the resolution's bytes are back.
     ...(deletedLocally.length ? { deletedLocally } : {}),
   };
+}
+
+export type ConflictInputs = { base: NativeFile | null; left: NativeFile | null; right: NativeFile | null };
+const maxDraftBytes = 4 * SOURCE_TEXT_MERGE_MAX_BYTES;
+const regular = (file: NativeFile | null | undefined): file is NativeFile =>
+  file?.mode === 'file' || file?.mode === 'executable';
+
+function readMergeFile(root: string, path: string, limit: number, pin?: string) {
+  try {
+    return readSource(root, path, limit, pin);
+  } catch (error) {
+    if (error instanceof ForgeError && error.code === 'FILE_LIMIT') return null;
+    throw error;
+  }
+}
+
+function textEdit(root: string, file: NativeFile) {
+  const path = join(root, file.path);
+  if (!checkoutPathExists(path) || !diskShapeMatches(lstatSync(path), file.mode)) return null;
+  const bytes = readMergeFile(root, file.path, SOURCE_TEXT_MERGE_MAX_BYTES);
+  return bytes && isTextBytes(bytes) && sourceTextLines(bytes) <= SOURCE_TEXT_MERGE_MAX_LINES ? bytes : null;
+}
+
+/** Replay a local diff3 draft from the pinned sync inputs and the preserved late edits. The
+ * Lane's saved source remains the server draft. Publish changed paths with the checkout journal
+ * so a crash or an editor racing the apply keeps the original bytes recoverable. */
+export async function foldLateSyncEdits(
+  root: string,
+  exchange: Exchange,
+  lane: HostedLaneSelection,
+  copied: { paths: string[]; at: string },
+  inputs: ReadonlyMap<string, ConflictInputs>,
+) {
+  finishPendingCheckoutDelta(root);
+  const draft = readHostedLaneCheckout(root);
+  if (draft?.selection.laneId !== lane.laneId || draft.selection.head !== lane.head) return;
+  const localPaths = new Set(copied.paths);
+  const files = draft.state.files.flatMap(file => {
+    const input = inputs.get(file.path);
+    return localPaths.has(file.path) &&
+      regular(file) &&
+      regular(input?.left) &&
+      input.left.mode === file.mode &&
+      input.left.blob !== file.blob &&
+      (!input.base || regular(input.base)) &&
+      (!input.right || regular(input.right)) &&
+      textEdit(copied.at, file)
+      ? [{ file, input }]
+      : [];
+  });
+  if (!files.length) return;
+  const cacheRoot = clientCacheRoot(root);
+  const cache = new HostedCheckoutCache(cacheRoot, new ConvexLaneTransport(exchange));
+  try {
+    await cache.ensure(
+      files.flatMap(({ input }) => [input.base, input.right].flatMap(side => (side ? [side.blob] : []))),
+    );
+  } catch {
+    // This rendering is optional. The existing draft and kept-copy recovery are usable offline.
+    return;
+  }
+  const objects = cache.objects;
+  const archived = join(cacheRoot, 'resolution-folded', lane.laneId);
+  workLocked(join(cacheRoot, 'lock'), () => {
+    settlePendingCheckoutDelta(root);
+    const current = readHostedLaneCheckout(root);
+    if (current?.selection.laneId !== lane.laneId || current.selection.head !== lane.head) return;
+    const text = worktreeText(root, current.state.files);
+    const install: DeltaPin[] = [],
+      displace: DeltaPin[] = [];
+    const folded: string[] = [];
+    let stage: string | undefined;
+    let journaled = false;
+    try {
+      for (const { file, input } of files) {
+        const path = file.path;
+        if (checkoutPathExists(join(archived, path))) continue;
+        const late = textEdit(copied.at, file);
+        const working = readMergeFile(root, path, maxDraftBytes);
+        if (
+          !late ||
+          !working ||
+          !hasConflictMarkers(working) ||
+          !diskShapeMatches(lstatSync(join(root, path)), file.mode)
+        )
+          continue;
+        const checkoutBytes = (bytes: Buffer) => text?.toWorktree(path, bytes) ?? bytes;
+        const side = (pin: NativeFile | null) =>
+          pin ? readMergeFile(objects, pin.blob, SOURCE_TEXT_MERGE_MAX_BYTES, pin.blob) : Buffer.alloc(0);
+        const base = side(input.base),
+          right = side(input.right);
+        if (!base || !right) continue;
+        const sides = [base, late, right].map(checkoutBytes) as [Buffer, Buffer, Buffer];
+        const labels: [string, string] = ['lane', 'target'];
+        const marked = markNativeTextConflicts(...sides, labels, 'right-first');
+        if (!marked) continue;
+        const merged = marked.conflicted ? marked.bytes : wholeFileConflict(...sides, labels)!;
+        if (working.equals(merged)) {
+          folded.push(path);
+          continue;
+        }
+        if (!workingMatches(text, path, working, file.blob, file.mode)) continue;
+        stage ??= mkdtempSync(join(cacheRoot, resolutionDeltaStagePrefix));
+        const target = join(stage, path);
+        mkdirSync(dirname(target), { recursive: true });
+        durableReplace(target, merged, file.mode === 'executable' ? 0o755 : 0o644);
+        install.push({ path, blob: digest(merged), mode: file.mode });
+        displace.push({ path, blob: digest(working), mode: file.mode });
+      }
+      if (stage) {
+        const operationId = randomUUID();
+        const marker = `.forge/${hostedLaneMarkerName}`;
+        const before = readSource(root, marker, Number.MAX_SAFE_INTEGER);
+        if (!before) return;
+        const after = JSON.stringify({ ...current, operationId });
+        mkdirSync(join(stage, '.forge'));
+        durableReplace(join(stage, marker), after);
+        journalCheckoutDelta(cacheRoot, {
+          operationId,
+          stage: basename(stage),
+          marker: hostedLaneMarkerName,
+          priorMarker: digest(before),
+          targetMarker: digest(after),
+          install,
+          displace,
+          targetFiles: current.state.files,
+        });
+        journaled = true;
+        const settled = settlePendingCheckoutDelta(root);
+        if (settled?.retained.length)
+          throw new ForgeError(
+            'WORK_CONFLICT',
+            `Local checkout changes were kept at ${settled.retained.join(', ')}. Retry the sync to view any remaining conflict copies.`,
+          );
+        if (settled?.outcome === 'published') folded.push(...install.map(file => file.path));
+      }
+      for (const path of folded) {
+        const from = join(copied.at, path),
+          to = join(archived, path);
+        mkdirSync(dirname(to), { recursive: true, mode: 0o700 });
+        renameSync(from, to);
+        syncDirectory(dirname(to));
+        syncDirectory(dirname(from));
+      }
+    } finally {
+      if (stage && !journaled) rmSync(stage, { recursive: true, force: true });
+    }
+  });
 }

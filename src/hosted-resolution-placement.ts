@@ -4,7 +4,7 @@ import { join, relative } from 'node:path';
 import type { z } from 'zod';
 import { clientCacheRoot } from './root-paths.js';
 import { hostedRootLanePath, openHostedRootLane } from './hosted-root-checkout.js';
-import { rebaseHostedCheckout } from './hosted-save-rebase.js';
+import { foldLateSyncEdits, rebaseHostedCheckout, type ConflictInputs } from './hosted-save-rebase.js';
 import { markerAt } from './hosted-apply-recovery-records.js';
 import { forgetLane, readLaneEntry } from './lane-registry.js';
 import { pendingConflictPaths } from './hosted-conflict-precheck.js';
@@ -12,32 +12,35 @@ import type { syncResultSchema } from './hosted-sync.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 import type { HostedLaneSelection } from './hosted-lane.js';
 
+type SyncConflict = z.infer<typeof syncResultSchema>;
+type Copies = { paths: string[]; at: string };
+type Placement = {
+  root: string;
+  inPlace: boolean;
+  origin?: string;
+  kept?: Copies | undefined;
+  folded?: Copies;
+  restored?: string[];
+  workIn: string;
+};
+
 /** Where the agent resolves. The conflict was made from this folder's own saved Lane head:
  * the folder itself becomes the resolution Lane (its marker and conflict record name it and
  * the origin), keeping unsaved edits and every path, wait and handoff the agent already has.
  * Otherwise the whole tree opens as a sibling folder, never nested. One line says which. */
 export async function placeResolution(
   session: HostedAgentSession,
-  source: z.infer<typeof syncResultSchema>,
+  source: SyncConflict,
   /** The caller's fresh read of the resolution Lane, reused by an in-place rebase. */
-  selection?: HostedLaneSelection,
-) {
+  selection: HostedLaneSelection | undefined,
+  listed: Promise<{ inputs: ReadonlyMap<string, ConflictInputs> }>,
+): Promise<Placement> {
   const laneId = source.lane.laneId,
     origin = source.resolution?.origin,
     marker = markerAt(session.root);
   const ours =
     marker?.url === session.address.url && marker.selection.projectId === session.address.projectId;
-  if (ours && marker.selection.laneId === laneId) {
-    // A rerun after the folder already became the resolution (a crash before the reply): the copies
-    // set aside earlier are still named, from the folder itself.
-    const kept = keptCopies(session.root, laneId);
-    return {
-      root: session.root,
-      inPlace: true,
-      ...(kept ? { kept } : {}),
-      workIn: workInLine(session.root, laneId, true, kept, undefined, origin?.head),
-    };
-  }
+  if (ours && marker.selection.laneId === laneId) return inPlaceResolution(session, source, listed);
   // A folder still holding an unresolved draft keeps it: a second, explicit draft opens beside.
   const draftHere = ours && pendingConflictPaths(session.root, marker.selection.laneId).length > 0;
   if (
@@ -51,16 +54,10 @@ export async function placeResolution(
     const rebased = await rebaseHostedCheckout(session.root, session.exchange, { laneId, origin }, selection);
     // The folder now belongs to the resolution; the original Lane keeps no local root of its own.
     if (readLaneEntry(origin.laneId)?.root === session.root) forgetLane(origin.laneId);
-    // The set-aside copies as the folder holds them (an earlier crashed run's too), not only this run's.
-    const kept = keptCopies(session.root, laneId);
     const restored = rebased?.deletedLocally?.length ? rebased.deletedLocally : undefined;
     return {
-      root: session.root,
-      inPlace: true,
+      ...(await inPlaceResolution(session, source, listed, restored)),
       origin: origin.laneId,
-      kept,
-      ...(restored ? { restored } : {}),
-      workIn: workInLine(session.root, laneId, true, kept, undefined, origin.head, restored),
     };
   }
   // The whole tree, beside the original Lane: the agent reads the helpers a hunk
@@ -87,6 +84,41 @@ export async function placeResolution(
     workIn: workInLine(opened.root, laneId, false, undefined, why, origin?.head, undefined, session.root),
   };
 }
+
+async function inPlaceResolution(
+  session: HostedAgentSession,
+  source: SyncConflict,
+  listed: Promise<{ inputs: ReadonlyMap<string, ConflictInputs> }>,
+  restored?: string[],
+) {
+  const { root, exchange } = session,
+    { laneId } = source.lane;
+  const resolution = source.resolution;
+  const copied = copyPaths(root, laneId, 'resolution-kept');
+  if (copied && resolution?.candidateId === null && resolution.origin?.head === resolution.left)
+    await foldLateSyncEdits(root, exchange, source.lane, copied, (await listed).inputs);
+  const kept = keptCopies(root, laneId);
+  const folded = boundedCopies(copyPaths(root, laneId, 'resolution-folded'));
+  return {
+    root,
+    inPlace: true,
+    kept,
+    ...(folded ? { folded } : {}),
+    ...(restored ? { restored } : {}),
+    workIn: workInLine(
+      root,
+      laneId,
+      true,
+      kept,
+      undefined,
+      resolution?.origin?.head,
+      restored,
+      undefined,
+      folded,
+    ),
+  };
+}
+
 /** Why the resolution opens in a new folder. Which side moved matters: a folder behind the Lane's
  * save (a save made elsewhere, or one whose reply this folder lost) was not "saved again"; the
  * conflict was made from that newer save (ad80e037). */
@@ -114,6 +146,8 @@ export function workInLine(
   restored?: string[],
   /** A new folder: the folder the sync ran from, left as it was. */
   from?: string,
+  /** Exact copies of late edits already incorporated in the checkout's conflict draft. */
+  folded?: Copies,
 ) {
   const list = (paths: string[]) =>
     `${paths.slice(0, 3).join(', ')}${paths.length > 3 ? ` and ${paths.length - 3} more` : ''}`;
@@ -126,9 +160,12 @@ export function workInLine(
   const restoredNote = restored?.length
     ? ` Restored: the unsaved deletion of ${list(restored)} was undone (main changed the file); delete it again if you still want it gone.`
     : '';
+  const foldedNote = folded
+    ? ` Late edits to ${list(folded.paths)} are in the conflict draft. Their original copies are in ${folded.at}.`
+    : '';
   const restNote = savedHead || kept ? ' Other unsaved edits stay in place, still unsaved.' : '';
   if (inPlace)
-    return `WORK IN ${root} (same folder): it is now resolution Lane ${laneId}; resolve and land from here.${savedNote}${keptNote}${restoredNote}${restNote}`;
+    return `WORK IN ${root} (same folder): it is now resolution Lane ${laneId}; resolve and land from here.${savedNote}${foldedNote}${keptNote}${restoredNote}${restNote}`;
   // A new folder holds the saved head merged with main; nothing from the old folder moves (ad80e037).
   const siblingSaved = savedHead
     ? ` Saved: the new folder holds the Lane's saved head ${savedHead.slice(0, 12)} merged with main.`
@@ -141,7 +178,13 @@ export function workInLine(
 /** Copies of unsaved edits an in-place resolution set aside for this Lane, read from the folder that
  * holds them (rebaseHostedCheckout's keptAt), at most 100 paths. Undefined when there are none. */
 export function keptCopies(root: string, laneId: string) {
-  const at = join(clientCacheRoot(root), 'resolution-kept', laneId);
+  return boundedCopies(copyPaths(root, laneId, 'resolution-kept'));
+}
+const boundedCopies = (copies: Copies | undefined) =>
+  copies && { at: copies.at, paths: copies.paths.slice(0, 100) };
+
+function copyPaths(root: string, laneId: string, directory: string): Copies | undefined {
+  const at = join(clientCacheRoot(root), directory, laneId);
   let entries;
   try {
     entries = readdirSync(at, { recursive: true, withFileTypes: true });
@@ -151,7 +194,6 @@ export function keptCopies(root: string, laneId: string) {
   const paths = entries
     .filter(entry => !entry.isDirectory())
     .map(entry => relative(at, join(entry.parentPath, entry.name)).split('\\').join('/'))
-    .sort()
-    .slice(0, 100);
+    .sort();
   return paths.length ? { paths, at } : undefined;
 }

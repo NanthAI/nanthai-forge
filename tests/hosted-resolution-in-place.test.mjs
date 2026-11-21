@@ -4,7 +4,9 @@
 // keeps unsaved edits, and any other Lane folder is a sibling, never nested. Synthetic fixtures.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { dirname, join } from 'node:path';
 import { resolutionFixture } from './hosted-agent-resolution-fixture.mjs';
 import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
@@ -95,7 +97,7 @@ test('593fc2d7: a sync conflict records the merged head, so the resolution Lane 
   assert.equal(laneChangeBase(root, selection), resolution.right);
 });
 
-// An edit written while the sync runs (after its save-first) meets the merge unsaved: it is set aside.
+// An edit written after sync's save-first meets the merge unsaved.
 function editDuringSync(t, s, edit) {
   const mutation = s.exchange.client.mutation;
   let done = false;
@@ -110,15 +112,44 @@ function editDuringSync(t, s, edit) {
   t.after(() => (s.exchange.client.mutation = mutation));
 }
 
+test('ad80e037: late text edits join the in-place sync conflict and a replay keeps the same merge', async t => {
+  const s = await resolutionFixture(t, { overlap: true }),
+    f = s.f;
+  f.moveMain({ overlap: true });
+  const root = s.root;
+  await s.transport(root).dispatch('open', { laneId: f.lane.laneId });
+  const late = 'mine\nb\nlate edit outside the conflict\n';
+  editDuringSync(t, s, () => writeFileSync(join(root, 'a.txt'), late));
+  const first = (await s.transport(root).dispatch('sync', { laneId: f.lane.laneId })).result.conflict;
+  const draft = readFileSync(join(root, 'a.txt'), 'utf8');
+  assert.match(draft, /<<<<<<< lane\nmine\n\|\|\|\|\|\|\| base\n/);
+  assert.match(draft, /=======\ntheirs\n>>>>>>> target\nb\nlate edit outside the conflict\n$/);
+  assert.equal(first.files.find(file => file.path === 'a.txt').content, draft);
+  assert.equal(first.kept, undefined, 'the text is already where resolve will use it');
+  assert.deepEqual(first.folded.paths, ['a.txt']);
+  assert.equal(readFileSync(join(first.folded.at, 'a.txt'), 'utf8'), late);
+  assert.match(first.workIn, /Late edits to a\.txt are in the conflict draft/);
+
+  // Interrupted after the merged draft was written, before moving the original copy.
+  const keptPath = join(first.folded.at, '..', '..', 'resolution-kept', first.laneId, 'a.txt');
+  renameSync(join(first.folded.at, 'a.txt'), keptPath);
+  const again = (await s.transport(root).dispatch('sync', { laneId: f.lane.laneId })).result.conflict;
+  assert.deepEqual(again.folded, first.folded);
+  assert.equal(again.kept, undefined);
+  assert.equal(readFileSync(join(root, 'a.txt'), 'utf8'), draft);
+});
+
 test('ad80e037: a sync rerun from a folder that is already the resolution Lane still names the set-aside copies', async t => {
   const s = await resolutionFixture(t, { overlap: true }),
     f = s.f;
   f.moveMain({ overlap: true });
   const root = s.root;
   await s.transport(root).dispatch('open', { laneId: f.lane.laneId });
-  editDuringSync(t, s, () => writeFileSync(join(root, 'a.txt'), 'mine\nb\nc\n'));
+  const binary = Buffer.from([0, 255, 10]);
+  editDuringSync(t, s, () => writeFileSync(join(root, 'a.txt'), binary));
   const first = (await s.transport(root).dispatch('sync', { laneId: f.lane.laneId })).result.conflict;
   assert.deepEqual(first.kept.paths, ['a.txt']);
+  assert.deepEqual(readFileSync(join(first.kept.at, 'a.txt')), binary);
   // The rerun takes the already-the-resolution branch (as after a crash before the first reply).
   const again = (await s.transport(root).dispatch('sync', { laneId: f.lane.laneId })).result.conflict;
   assert.deepEqual(again.kept, first.kept);
@@ -129,6 +160,72 @@ test('ad80e037: a sync rerun from a folder that is already the resolution Lane s
     keptCopies(root, again.laneId ?? readHostedLaneCheckout(root).selection.laneId),
     again.kept,
   );
+});
+
+test('ad80e037: late text uses the line endings incoming attributes require', async t => {
+  const s = await resolutionFixture(t, { overlap: true }),
+    f = s.f;
+  f.moveMain({ overlap: true });
+  f.move([f.c.file('.gitattributes', '*.txt text eol=crlf\n')]);
+  const root = s.root;
+  await s.transport(root).dispatch('open', { laneId: f.lane.laneId });
+  editDuringSync(t, s, () => writeFileSync(join(root, 'a.txt'), 'mine\nb\nlate\n'));
+  const { conflict } = (await s.transport(root).dispatch('sync', { laneId: f.lane.laneId })).result;
+  assert.equal(conflict.kept, undefined);
+  assert.equal(
+    readFileSync(join(root, 'a.txt'), 'utf8'),
+    '<<<<<<< lane\r\nmine\r\n||||||| base\r\na\r\n=======\r\ntheirs\r\n>>>>>>> target\r\nb\r\nlate\r\n',
+  );
+});
+
+test('ad80e037: unavailable late-merge inputs leave the original conflict and recovery copy', async t => {
+  const s = await resolutionFixture(t, { overlap: true }),
+    f = s.f;
+  const other = f.c.file('a.txt', 'a cold merge side for this fixture\nb\nc\n');
+  f.move([other]);
+  const root = s.root;
+  await s.transport(root).dispatch('open', { laneId: f.lane.laneId });
+  editDuringSync(t, s, () => writeFileSync(join(root, 'a.txt'), 'mine\nb\nlate\n'));
+  const mutation = s.exchange.client.mutation;
+  t.mock.method(s.exchange.client, 'mutation', async (ref, args) => {
+    if (getFunctionName(ref) === 'projectObjectDownloads:lanePage' && args.digests.includes(other.blob))
+      throw new Error('Synthetic merge input download unavailable');
+    return mutation(ref, args);
+  });
+  const { conflict } = (await s.transport(root).dispatch('sync', { laneId: f.lane.laneId })).result;
+  assert.equal(conflict.folded, undefined);
+  assert.match(readFileSync(join(root, 'a.txt'), 'utf8'), /a cold merge side for this fixture/);
+  assert.equal(readFileSync(join(conflict.kept.at, 'a.txt'), 'utf8'), 'mine\nb\nlate\n');
+});
+
+test('ad80e037: an editor recreating the draft during publication keeps both local edits', async t => {
+  const s = await resolutionFixture(t, { overlap: true }),
+    f = s.f;
+  f.moveMain({ overlap: true });
+  const root = s.root;
+  await s.transport(root).dispatch('open', { laneId: f.lane.laneId });
+  const late = 'mine\nb\nlate\n';
+  const newest = 'a newer editor write\n';
+  const target = join(canonicalRoot(root), 'a.txt');
+  editDuringSync(t, s, () => writeFileSync(target, late));
+  const link = fs.linkSync;
+  const hooked = t.mock.method(fs, 'linkSync', (from, to) => {
+    if (to === target && from.includes('delta-fold-')) writeFileSync(to, newest, { flag: 'wx' });
+    return link(from, to);
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(
+      s.transport(root).dispatch('sync', { laneId: f.lane.laneId }),
+      error => error.code === 'WORK_CONFLICT',
+    );
+  } finally {
+    hooked.mock.restore();
+    syncBuiltinESMExports();
+  }
+  const laneId = readHostedLaneCheckout(root).selection.laneId;
+  assert.equal(readFileSync(target, 'utf8'), newest);
+  assert.equal(readFileSync(join(keptCopies(root, laneId).at, 'a.txt'), 'utf8'), late);
 });
 
 test('ad80e037: an unsaved deletion of a file the merge changed is reported as restored, never as left in place', async t => {

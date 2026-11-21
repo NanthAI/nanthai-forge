@@ -12,6 +12,8 @@ import { workingMatches } from './checkout-text.js';
 
 /** One pending in-place apply per client cache; the work lock serializes writers. */
 export const deltaJournalName = 'delta-apply.json';
+/** Conflict-draft stages exclusively publish regular files so a concurrent editor can recreate them. */
+export const resolutionDeltaStagePrefix = 'delta-fold-';
 /** Displaced bytes kept because they differed from their verified baseline; reported by every
  * later checkout result until the user removes them. */
 export const deltaRetainedName = 'delta-retained.json';

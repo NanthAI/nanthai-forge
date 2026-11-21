@@ -12,18 +12,12 @@ import { invariant } from './errors.js';
 import { syntaxConflictReason } from './state/merge-syntax.js';
 import { docsMainSide, resolveListText } from './native-docs-resolve.js';
 import type { ListMergeRule } from './project-config.js';
+import { SOURCE_TEXT_MERGE_MAX_BYTES, SOURCE_TEXT_MERGE_MAX_LINES, sourceTextLines } from './text-bytes.js';
+export { SOURCE_TEXT_MERGE_MAX_BYTES, SOURCE_TEXT_MERGE_MAX_LINES } from './text-bytes.js';
 /** Bounds for the native whole-file text/import parser. Its memory grows with
  * bytes and with line count, so a file over either bound that both sides changed
  * is reported as a conflict instead of merged line by line (Git hosts do the same). */
-export const SOURCE_TEXT_MERGE_MAX_BYTES = 4 * 1024 * 1024;
-export const SOURCE_TEXT_MERGE_MAX_LINES = 65_536;
 export const SOURCE_TEXT_MERGE_TOO_LARGE = 'too large to merge automatically';
-/** Counts lines as the native parser splits them, without decoding. */
-export function sourceTextLines(bytes: Buffer) {
-  let count = 0;
-  for (let i = bytes.indexOf(10); i !== -1; i = bytes.indexOf(10, i + 1)) count++;
-  return bytes.length && bytes.at(-1) !== 10 ? count + 1 : count;
-}
 export type SourceCalculation = {
   key: string;
   kind: 'merge' | 'conflict' | 'markers' | 'docs';

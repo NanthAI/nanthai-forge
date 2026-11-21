@@ -107,7 +107,7 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
   // read above instead of selecting the same Lane again.
   const listed = conflictPages(objects, source);
   listed.catch(() => {});
-  const placed = await placeResolution(session, source, selection);
+  const placed = await placeResolution(session, source, selection, listed);
   const { paths, reasons, kinds } = await listed;
   const { root } = placed;
   // The run that resolves owns the resolution Lane's idle listing (d730121f).
@@ -116,7 +116,7 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     root,
     ...session.address,
     agent: sessionAgentSlug() ?? null,
-    ...('origin' in placed && placed.origin ? { resolutionOf: placed.origin } : {}),
+    ...(placed.origin ? { resolutionOf: placed.origin } : {}),
   });
   const dependencies = await shareDependencies(root, {
     announce: announceRegistryHosts,
@@ -149,15 +149,7 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     }
   });
   const command = { laneId: source.lane.laneId, operationId: await session.journal.id('next-resolve') };
-  rememberConflictPaths(
-    root,
-    source.lane.laneId,
-    paths,
-    command,
-    false,
-    'origin' in placed ? placed.origin : undefined,
-    mergedOnto(source),
-  );
+  rememberConflictPaths(root, source.lane.laneId, paths, command, false, placed.origin, mergedOnto(source));
   rememberConflictFinishOptions(root, source.lane.laneId, session.journal.get('resolution-finish-options'));
   const shown = reasons.slice(0, 100);
   const origin = source.resolution.origin?.laneId;
@@ -183,7 +175,8 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
       dependencies,
       workIn: placed.workIn,
       ...(placed.kept ? { kept: placed.kept } : {}),
-      ...('restored' in placed && placed.restored ? { restored: placed.restored } : {}),
+      ...(placed.folded ? { folded: placed.folded } : {}),
+      ...(placed.restored ? { restored: placed.restored } : {}),
       automatic: {
         summary: placed.inPlace
           ? `This folder now holds resolution Lane ${source.lane.laneId} (main merged into your saved work, conflict markers in the listed files); only those files need edits.`
@@ -201,6 +194,7 @@ async function conflictPages(objects: HostedObjectStore, source: z.infer<typeof 
     paths: string[] = [],
     reasons: { path: string; reason: string }[] = [],
     kinds = new Map<string, string>(),
+    inputs = new Map<string, (typeof composeConflictPageSchema._output.paths)[number]>(),
     seen = new Set<string>();
   let pin: { sha256: string; size: number } | null = resolution.conflicts;
   while (pin) {
@@ -217,6 +211,7 @@ async function conflictPages(objects: HostedObjectStore, source: z.infer<typeof 
     for (const file of page.paths) {
       invariant(safeRelative(file.path), 'UNSAFE_PATH', 'Conflict paths must be relative source files.');
       paths.push(file.path);
+      if (resolution.candidateId === null) inputs.set(file.path, file);
       kinds.set(
         file.path,
         file.reason ??
@@ -232,7 +227,7 @@ async function conflictPages(objects: HostedObjectStore, source: z.infer<typeof 
     }
     pin = page.next;
   }
-  return { paths, reasons, kinds };
+  return { paths, reasons, kinds, inputs };
 }
 const parseValue = (value: unknown) => (typeof value === 'string' ? JSON.parse(value) : value);
 /** A replayed recovery whose resolution Lane is no longer active. Completed: its landing
