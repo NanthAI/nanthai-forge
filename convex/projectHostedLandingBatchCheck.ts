@@ -336,6 +336,7 @@ async function prepareLandingCheckOnce(
   await installBatchAttempt(ctx, {
     projectId: claim.projectId,
     original: attempt,
+    checkSettled: hostedCheckTerminal(run),
     check: {
       runId: run.id,
       checkId: run.check.id,

@@ -268,6 +268,30 @@ test('a shared check stops only when the last live submission is cancelled, incl
   assert.equal((await f.rawChecks.status(check.id)).cancelRequested, true);
 });
 
+test('late and replayed shared check completion settles its live peer and leaves the cancelled generation closed', async () => {
+  const f = await landingFixture(),
+    { check, request } = await sharedCheck(f);
+  const first = await f.enqueue(request()),
+    peer = await f.enqueue(request()),
+    run = await f.rawChecks.activate(check.id);
+  const cancelled = await cancel(f, first.id);
+  assert.equal((await f.rawChecks.status(check.id)).status, 'running');
+
+  await f.rawChecks.pass(run);
+  const wake = f.pendingTasks().find(task => task.name === 'projectHostedLandingDriver:checkWake');
+  assert(wake);
+  await f.drain();
+  const ready = await f.status(peer.id);
+  assert.equal(ready.request.phase, 'ready');
+  assert.equal(ready.attempt.check.runId, check.id);
+
+  await f.execute(wake);
+  await f.drain();
+  assert.deepEqual((await f.status(first.id)).request, cancelled);
+  assert.deepEqual(await f.status(peer.id), ready);
+  assert.equal((await f.rawChecks.status(check.id)).status, 'passed');
+});
+
 test('explicit check-run cancellation stops the selected shared run and replays inertly', async () => {
   const f = await landingFixture(),
     { check, request } = await sharedCheck(f);

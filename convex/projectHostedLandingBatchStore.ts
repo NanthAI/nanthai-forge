@@ -278,6 +278,7 @@ export async function installBatchAttempt(
     main?: LandingBatch['members'][number]['main'];
     checkOperationId?: string;
     check: NonNullable<LandingBatch['members'][number]['check']>;
+    checkSettled?: boolean;
     /** A platform retry of the same generation keeps its reserved receipt, so
      * groups stacked on (head, receipt) stay valid (ea86f3fb). */
     keepReceipt?: boolean;
@@ -330,7 +331,9 @@ export async function installBatchAttempt(
         : landingObservation('checking'),
       error: null,
     },
-    false,
+    // A retained verdict has already sent its completion wake. The binding
+    // itself makes the attempt selectable for the ordinary queue evaluator.
+    input.checkSettled ?? false,
   );
   return attempt;
 }

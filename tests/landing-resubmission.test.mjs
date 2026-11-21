@@ -9,7 +9,6 @@ import { hostedVerdictKey } from '../dist/hosted-check-evidence.js';
 import { compactDiscardedChecks } from './landing-ticket-fixture.mjs';
 import { landingCosts } from '../dist/hosted-landings-view.js';
 const { statsLanding } = await import(moduleUrl('../convex/projectStats.ts'));
-const { notifyLandingCheck } = await import(moduleUrl('../convex/projectHostedLandingCheckWake.ts'));
 
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.after(() => {
@@ -71,6 +70,35 @@ async function ready(f, id) {
   }
 }
 
+function seedLandingHistory(f, count) {
+  for (let index = 0; index < count; index++) {
+    const submissionId = randomUUID();
+    f.insert('projectHostedLandingRequests', {
+      projectId: f.projectId,
+      channel: 'main',
+      actor: 'owner',
+      submissionId,
+      operationId: randomUUID(),
+      sequence: -index - 1,
+      attemptId: randomUUID(),
+      phase: 'landed',
+      runnable: false,
+      batchable: false,
+      runId: randomUUID(),
+      value: JSON.stringify({ phase: 'landed', id: submissionId }),
+    });
+  }
+}
+
+function cost(f, start) {
+  const calls = f.counts.slice(start);
+  return {
+    transactions: calls.length,
+    documents: calls.reduce((total, call) => total + call.documents, 0),
+    readBytes: calls.reduce((total, call) => total + call.readBytes, 0),
+  };
+}
+
 for (const mode of ['direct', 'desired']) {
   test(`${mode} resubmission keeps unreported predecessor execution unknown after a known pass`, async t => {
     const { f, base, send, first } = await setup(t, mode);
@@ -106,35 +134,53 @@ for (const mode of ['direct', 'desired']) {
     assert.equal(statsLanding({ id: 'receipt', at: landed.at }, landed).discardedRunnerSeconds, null);
   });
 
-  for (const deferred of [false, true]) {
-    test(`${mode} resubmission reuses a passed ${deferred ? 'queued shared' : 'immediate'} run without counting it as waste`, async t => {
+  for (const history of [0, 575, 1150]) {
+    const deferred = history > 0;
+    test(`${mode} resubmission lands from a retained ${deferred ? 'deferred' : 'immediate'} pass with ${history} historical landings`, async t => {
       compactDiscardedChecks(t);
       const { f, base, send, first } = await setup(t, mode, deferred);
+      seedLandingHistory(f, history);
+      const freshStart = f.counts.length;
       await f.drain();
       const runId = await pass(f, 300, true);
       await ready(f, first.id);
+      const fresh = cost(f, freshStart);
       await f.tx('cancelPassed', landingApi.cancel, {
         projectId: f.projectId,
         request: JSON.stringify({ operationId: randomUUID(), authorityEpoch: 1, submissionId: first.id }),
       });
       await f.drain();
+      const cancelled = states(f).find(s => s.id === first.id);
+      const replayStart = f.counts.length;
+      const started = performance.now();
+      const rss = process.memoryUsage().rss;
       const next = await send({ ...base, operationId: randomUUID() });
       await f.drain();
       assert.equal(f.runs().length, 1, 'the original provider verdict is reused');
-      if (deferred) {
-        // Deliver the retained terminal event after the deferred binding; this test guards accounting,
-        // independently of whether the queue re-drives an already-terminal reused run on its own.
-        await f.tx(
-          'deliverRetainedCheck',
-          {
-            _handler: ctx => notifyLandingCheck(ctx, { projectId: f.projectId, runId }),
-          },
-          {},
-        );
-        await f.drain();
-      }
       const landed = states(f).find(s => s.id === next.id);
+      const replay = cost(f, replayStart);
+      const repairCalls = f.counts
+        .slice(replayStart)
+        .filter(call => /^(finishCheckWake|landingAlarm|landingRepair|landingDeadline)$/.test(call.name));
+      assert.deepEqual(repairCalls, [], 'the binding hands its verdict to the ordinary queue');
+      t.diagnostic(
+        JSON.stringify({
+          history,
+          fresh,
+          replay,
+          wallMs: performance.now() - started,
+          rssBefore: rss,
+          rssAfter: process.memoryUsage().rss,
+        }),
+      );
       assert.equal(landed.phase, 'landed', JSON.stringify(landed));
+      assert.deepEqual(
+        states(f).find(s => s.id === first.id),
+        cancelled,
+      );
+      assert.equal(cancelled.error.code, 'LANDING_CANCELLED');
+      assert.equal(f.tables.projectHostedAcceptances.size, 1);
+      assert.equal(f.currentMain().receipt.id, landed.acceptance.receiptId);
       assert.equal(landingCosts(landed, 0).runnerAccepted, 5);
       assert.equal(landingCosts(landed, 0).runnerDiscarded, 0);
       assert.equal(landed.counts.discardedRunnerUnknown, undefined);
@@ -147,6 +193,10 @@ for (const mode of ['direct', 'desired']) {
         );
         assert.equal(desiredRow.supersededCheck, undefined, 'admission consumes the desired copy');
       }
+      const idleStart = f.counts.length;
+      f.advanceClock(24 * 60 * 60_000);
+      await f.drain();
+      assert.deepEqual(cost(f, idleStart), { transactions: 0, documents: 0, readBytes: 0 });
       assert.equal(f.pending().length, 0);
     });
   }

@@ -2088,7 +2088,10 @@ then selection drops it, with one scheduled queue wake for the hold's end. See [
 ready and terminal records remain readable without hiding later independent work.
 H10 run updates transactionally schedule one coalesced check wake; bounded metadata
 pages reactivate its waiters and wake their Channel. The current run binding owns
-completion across both queued and checking phases. Per-run event versions and an
+completion across both queued and checking phases. When a deferred landing binds
+an already-terminal check, the binding makes its attempt runnable in the same
+transaction, so the ordinary queue evaluator can consume the verdict.
+Per-run event versions and an
 indexed last-delivered version on each waiter consume at most 100 requests per
 page without changing queue phase; legacy rows join on their next event. An event
 arriving between pages advances the same fanout, including waiters that already
