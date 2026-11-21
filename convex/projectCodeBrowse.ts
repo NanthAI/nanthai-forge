@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 // The Code place's source reads (Item 90e5bc9c): one folder, one file page, or what one landing changed, at an exact
-// State; a folder read adds the first page of each subfolder (Item a3b55a6e). Each read uses the existing source reader
-// and its access checks (including public read accounting), verified State and blob pins, and no
-// signed URL or object key in the reply. The browser receives the folders it opened and 16,000-character file pages,
-// never the whole State.
+// State; a folder read adds the first page of each subfolder (Item a3b55a6e). Registered States use current source
+// storage. Visitor and legacy checkpoint reads keep their existing access checks and read accounting.
+// Both paths verify exact source; the browser receives folder and file pages without storage URLs or keys.
 import { v, type ObjectType } from 'convex/values';
 import { action, type ActionCtx } from './cliServer';
 import { internalAction } from './server';
 import { internal } from './_generated/api';
+import { bytesFromRow } from './projectExchangeReader';
 import { readSourceReview, renderCheckpointSource } from './projectSourceReview';
 import { report } from './errors';
 import { invariant } from '../src/errors';
@@ -56,8 +56,7 @@ const readArgs = {
 };
 type ReadInput = ObjectType<typeof readArgs>;
 
-/** One Code read at an exact State, as `actor` ('' signed out): the access check is the checkpoint's, then the source
- * reader's around the bytes. */
+/** One Code read at an exact State, with current access checked around its bytes. */
 async function readCode(ctx: ActionCtx, input: ReadInput, actor: string): Promise<string> {
   const path = input.path ?? '';
   invariant(
@@ -71,7 +70,41 @@ async function readCode(ctx: ActionCtx, input: ReadInput, actor: string): Promis
     'BAD_ARGUMENT',
     'Select an exact State and a path inside it.',
   );
-  const backupId = await ctx.runQuery(internal.projectCode.checkpoint, { projectId: input.projectId });
+  const base = input.want === 'page' ? input.state : (input.base ?? input.state);
+  const canonical =
+    actor !== '' && input.want !== 'changes' && input.want !== 'touched' && base === input.state;
+  const select = () =>
+    ctx.runQuery(internal.projectCode.checkpoint, {
+      projectId: input.projectId,
+      ...(canonical ? { state: input.state } : {}),
+    });
+  const { backupId, canonical: row } = await select();
+  if (row) {
+    const bytes = await bytesFromRow(ctx, row, { sha256: input.state, size: row.size }, actor, true);
+    const opened = await openCode(input, path, orderedFiles(bytes), async ids => {
+      // The path-to-digest selection came from the verified State. Resolve each
+      // file once and keep the final State/access recheck after all bytes.
+      const rows = await ctx.runQuery(internal.projectObjects.resolve, {
+        projectId: input.projectId,
+        actor,
+        digests: ids,
+      });
+      return Promise.all(
+        ids.map((sha256, index) => {
+          const object = rows[index];
+          invariant(object?.digest === sha256, 'SOURCE_CHANGED', 'The selected file changed while reading.');
+          return bytesFromRow(ctx, object, { sha256, size: object.size }, actor, true);
+        }),
+      );
+    });
+    const current = (await select()).canonical;
+    invariant(
+      current?.digest === input.state && current.size === row.size,
+      'SOURCE_CHANGED',
+      'The selected State changed while reading.',
+    );
+    return JSON.stringify({ state: input.state, ...opened });
+  }
   invariant(backupId, 'SOURCE_UNAVAILABLE', 'This project has no stored source yet.');
   const review = (base: string, head = input.state) =>
     readSourceReview(ctx, { projectId: input.projectId, backupId, base, head }, actor, true);
@@ -95,7 +128,6 @@ async function readCode(ctx: ActionCtx, input: ReadInput, actor: string): Promis
       return JSON.stringify({ state: input.state, available: false, reason: listed.reason });
     return JSON.stringify({ state: input.state, base: input.base, ...changedPaths(listed.paths ?? []) });
   }
-  const base = input.want === 'page' ? input.state : (input.base ?? input.state);
   const result = await renderCheckpointSource(
     ctx,
     { projectId: input.projectId, backupId, base, head: input.state },
@@ -103,12 +135,8 @@ async function readCode(ctx: ActionCtx, input: ReadInput, actor: string): Promis
     true,
     async bytes => {
       const [selected, compared] = await bytes(base === input.state ? [input.state] : [input.state, base]);
-      const { files } = parseNativeState(selected!);
       if (compared) parseNativeState(compared);
-      // Canonical writers sort by path. Older verified States may be unsorted.
-      if (files.some((file, index) => index > 0 && files[index - 1]!.path > file.path))
-        files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-      return { opened: await openCode(input, path, files, bytes) };
+      return { opened: await openCode(input, path, orderedFiles(selected!), bytes) };
     },
   );
   if (result.available) return JSON.stringify({ state: input.state, ...result.opened });
@@ -117,6 +145,14 @@ async function readCode(ctx: ActionCtx, input: ReadInput, actor: string): Promis
     state: input.state,
     ...(input.want === 'page' ? { file: unavailable } : unavailable),
   });
+}
+
+function orderedFiles(bytes: Uint8Array) {
+  const { files } = parseNativeState(bytes);
+  // Older verified States may be unsorted.
+  if (files.some((file, index) => index > 0 && files[index - 1]!.path > file.path))
+    files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return files;
 }
 
 async function openCode(

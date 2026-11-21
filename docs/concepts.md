@@ -41,6 +41,9 @@ Merging is line-based three-way text merge. Overlapping edits, binary files and 
 
 The rebuilt Code reader lists one page of a folder at a time with a byte-bounded
 preview of its immediate subfolders. The tab keeps pages for the selected State.
+Signed-in browsing of a registered hosted State reads the State from current
+source storage. Older checkpoints and public visitor reads use their retained
+checkpoint.
 On the indexed path, a deep-linked file and its ancestor pages share one verified
 State read. An index miss can fall back to the retained archive. After resolving
 the State, the reader fetches the selected blob and, for a submodule, its pointer

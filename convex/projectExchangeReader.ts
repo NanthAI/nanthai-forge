@@ -17,10 +17,16 @@ import { reviewBytes } from './projectReviewBytes';
 import type { ObjectView } from './projectObjectFind';
 
 type Pin = { sha256: string; size: number };
-export async function bytesFromRow(ctx: ActionCtx, row: ObjectView, pin: Pin, actor?: string) {
+export async function bytesFromRow(
+  ctx: ActionCtx,
+  row: ObjectView,
+  pin: Pin,
+  actor?: string,
+  reuseImmutableBytes = false,
+) {
   if (isRaw(row)) {
     await metadata(ctx, row, pin);
-    return content(ctx, row, pin);
+    return reuseImmutableBytes ? reviewBytes(ctx, row, pin) : content(ctx, row, pin);
   }
   const subject = actor ?? (await ctx.auth.getUserIdentity())?.subject;
   invariant(subject, 'PROJECT_UNAVAILABLE', 'Sign in to read project source.');

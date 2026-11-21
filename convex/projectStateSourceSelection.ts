@@ -6,7 +6,7 @@ import type { Id } from './_generated/dataModel';
 import { sessionArgs, actionsSession } from './projectHostedActionsSession';
 import { scopedRecheckBase, scopedRecheckPairs } from '../src/scoped-recheck-policy';
 import { selectedSourcePacks } from './projectSourcePackStore';
-import { findStoredObject as findObject } from './projectObjectFind';
+import { findStoredObject as findObject, isRegisteredState } from './projectObjectFind';
 import { isStored } from './projectObjectFields';
 import { describeObjects } from './projectObjectDownloads';
 import { downloadProject } from './projectDownloadAccess';
@@ -42,13 +42,8 @@ async function selection(
   invariant(/^[a-f0-9]{64}$/.test(state), 'SOURCE_UNAVAILABLE', 'Select one readable State.');
   const row = await findObject(ctx, projectId, state);
   invariant(row && !row.removed && isStored(row), 'SOURCE_UNAVAILABLE', 'Selected State is unavailable.');
-  if (registered && !row.statePhysical && row.stateGeneration === undefined) {
-    const known = await ctx.db
-      .query('projectHostedStates')
-      .withIndex('by_project_and_head', q => q.eq('projectId', projectId).eq('head', state))
-      .unique();
-    invariant(known, 'SOURCE_UNAVAILABLE', 'Select a registered source State.');
-  }
+  if (registered)
+    invariant(await isRegisteredState(ctx, row), 'SOURCE_UNAVAILABLE', 'Select a registered source State.');
   const value = await sourceObjectLocation(ctx, projectId, { sha256: state, size: row.size }, row);
   if (!value.url && value.storageId) value.url = await blobStore(ctx).getUrl(value.storageId);
   return JSON.stringify(value);

@@ -16,6 +16,18 @@ export type CatalogObject = Omit<Doc<'projectObjects'>, '_id' | '_creationTime'>
 };
 /** A stored object: its own row, or a catalog entry. */
 export type ObjectView = Doc<'projectObjects'> | CatalogObject;
+/** A stored object may serve as a State only after trusted source registration. */
+export async function isRegisteredState(ctx: QueryCtx, row: ObjectView) {
+  return (
+    row.stateGeneration !== undefined ||
+    !!row.statePhysical ||
+    !!(await ctx.db
+      .query('projectHostedStates')
+      .withIndex('by_project_and_head', q => q.eq('projectId', row.projectId).eq('head', row.digest))
+      .unique())
+  );
+}
+
 type Page = Doc<'projectObjectCatalog'>;
 const digestPattern = /^[0-9a-f]{64}$/;
 

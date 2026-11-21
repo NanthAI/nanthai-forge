@@ -8,6 +8,8 @@ import { accessibleProject } from './projectAuthority';
 import { isPublicProject } from './publicVisibility';
 import { report } from './errors';
 import { invariant } from '../src/errors';
+import { findStoredObject, isRegisteredState } from './projectObjectFind';
+import { isStored, objectDocument } from './projectObjectFields';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
 import { codeHistoryRow, CODE_HISTORY_PAGE, CODE_HISTORY_READ_BYTES } from '../src/code-history';
 
@@ -45,13 +47,15 @@ export const history = query({
   },
 });
 
-/** The stored checkpoint the project's source reads verify against, after the caller's access check: a project the
- * caller may not read answers exactly like a missing one, never "no stored source" (Item 4c164732). Signed out, only a
- * public project opens. The source reader's checkpoint mutation checks again around the bytes. */
+/** Select the exact registered State for signed-in Code or its retained checkpoint fallback.
+ * Unreadable projects answer like missing ones. Visitors can only select public checkpoints. */
 export const checkpoint = internalQuery({
-  args: { projectId: v.id('hostedProjects') },
-  returns: v.union(v.id('projectBackups'), v.null()),
-  handler: async (ctx, { projectId }) => {
+  args: { projectId: v.id('hostedProjects'), state: v.optional(v.string()) },
+  returns: v.object({
+    backupId: v.union(v.id('projectBackups'), v.null()),
+    canonical: v.union(objectDocument, v.null()),
+  }),
+  handler: async (ctx, { projectId, state }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       const project = user
@@ -62,7 +66,12 @@ export const checkpoint = internalQuery({
         'PROJECT_UNAVAILABLE',
         'This Forge project is unavailable with the current account.',
       );
-      return project!.work?.backupId ?? null;
+      const backupId = project!.work?.backupId ?? null;
+      if (!state || !user || project!.sourceAuthority?.mode !== 'server')
+        return { backupId, canonical: null };
+      const row = await findStoredObject(ctx, projectId, state);
+      if (!row || row.removed || !isStored(row)) return { backupId, canonical: null };
+      return { backupId, canonical: (await isRegisteredState(ctx, row)) ? row : null };
     } catch (error) {
       // Called with runQuery: only a ConvexError keeps PROJECT_UNAVAILABLE for the caller.
       return report(error);

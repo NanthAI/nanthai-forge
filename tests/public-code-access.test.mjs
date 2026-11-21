@@ -9,8 +9,15 @@ import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
 import { ConvexError } from 'convex/values';
-import { fixture, checkpoint, commitValidatedCheckpoint, asLegacyRows } from './project-exchange-fixture.mjs';
+import {
+  fixture,
+  checkpoint,
+  commitValidatedCheckpoint,
+  asLegacyRows,
+  upload,
+} from './project-exchange-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { interceptDefaultR2 } from './default-r2.mjs';
 
 const contract = await import(moduleUrl('../convex/projectAccessContract.ts'));
 const projectCode = await import(moduleUrl('../convex/projectCode.ts'));
@@ -117,6 +124,102 @@ const memberReads = {
   source: (s, projectId = 'project') =>
     projectCodeBrowse.read._handler(s.ctx, { projectId, state: s.head, want: 'open', path: '' }),
 };
+
+test('signed-in Code opens a registered exact State without loading its stale Work backup', async t => {
+  const s = await setup(t, 'private');
+  const project = s.tables.hostedProjects.get('project');
+  project.sourceAuthority = { mode: 'server', epoch: 1 };
+  const blob = await upload(s, Buffer.from('export const current = true;\n'));
+  const bytes = Buffer.from(
+    JSON.stringify({
+      schema: 1,
+      kind: 'forge-source-state',
+      parents: [s.head],
+      files: [{ path: 'src/current.ts', mode: 'file', blob: blob.sha256 }],
+      message: '',
+      at: '2026-01-01T00:00:00Z',
+    }),
+  );
+  const pin = await upload(s, bytes);
+  const read = (input = {}) =>
+    projectCodeBrowse.read._handler(s.ctx, {
+      projectId: 'project',
+      state: pin.sha256,
+      want: 'open',
+      path: '',
+      ...input,
+    });
+  s.caller('reader');
+  assert.equal((await outcome(read)).code, 'SOURCE_UNAVAILABLE', 'a stored digest alone is insufficient');
+  s.tables.projectHostedStates.set('current', { projectId: 'project', head: pin.sha256, size: pin.size });
+  const historical = JSON.parse(await read({ state: s.head }));
+  assert.equal(
+    historical.dirs[0].entries[0].name,
+    'a.ts',
+    'unregistered retained States still use the backup',
+  );
+  project.visibility = 'public';
+  s.caller(null);
+  assert.equal((await outcome(read)).code, 'SOURCE_UNAVAILABLE', 'visitors keep the checkpoint boundary');
+  project.visibility = 'private';
+  s.caller('reader');
+  const received = [];
+  let onRead = response => response;
+  t.after(
+    interceptDefaultR2(async (url, init, serve) => {
+      const result = await serve(url, init);
+      if ((init.method ?? 'GET') === 'GET') {
+        received.push(Number(result.headers.get('content-length')));
+        return onRead(result);
+      }
+      return result;
+    }),
+  );
+  const from = s.ran.length;
+  const root = JSON.parse(await read());
+  assert.equal(root.state, pin.sha256);
+  assert.equal(root.files, 1);
+  assert.equal(root.dirs[0].entries[0].name, 'src');
+  assert.deepEqual(received, [bytes.length], 'only the registered State reaches storage');
+  assert.deepEqual(s.ran.slice(from), ['projectCode:checkpoint', 'projectCode:checkpoint']);
+  const folder = JSON.parse(await read({ want: 'more', path: 'src' }));
+  assert.equal(folder.dirs[0].entries[0].path, 'src/current.ts');
+  assert.deepEqual(received, [bytes.length], 'the next listing can use existing verified State bytes');
+  const beforeFile = s.ran.length;
+  const file = JSON.parse(await read({ want: 'page', path: 'src/current.ts' }));
+  assert.equal(file.file.page.text, 'export const current = true;\n');
+  assert.deepEqual(s.ran.slice(beforeFile), [
+    'projectCode:checkpoint',
+    'projectObjects:resolve',
+    'projectCode:checkpoint',
+  ]);
+  // Each distinct registered State forces fresh storage IO around the same access checks.
+  const publish = async day => {
+    s.caller('owner');
+    const later = await upload(s, Buffer.from(bytes.toString().replace('2026-01-01', day)));
+    s.tables.projectHostedStates.set(day, { projectId: 'project', head: later.sha256, size: later.size });
+    s.caller('reader');
+    return later.sha256;
+  };
+  const corrupt = await publish('2026-01-02');
+  onRead = response => new Response(Buffer.alloc(bytes.length), { headers: response.headers });
+  assert.equal((await outcome(() => read({ state: corrupt }))).code, 'BLOB_DIGEST_MISMATCH');
+
+  const moved = await publish('2026-01-03');
+  onRead = response => {
+    s.tables.projectHostedStates.delete('2026-01-03');
+    return response;
+  };
+  assert.equal((await outcome(() => read({ state: moved }))).code, 'SOURCE_CHANGED');
+
+  const revoked = await publish('2026-01-04');
+  onRead = response => {
+    s.tables.projectReaders.delete('r');
+    return response;
+  };
+  assert.equal((await outcome(() => read({ state: revoked }))).code, 'PROJECT_UNAVAILABLE');
+});
+
 async function visitor(s, path, method = 'GET') {
   s.caller(null);
   const response = await route.serve._handler(
