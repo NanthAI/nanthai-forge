@@ -33,7 +33,10 @@ async function buildStateSourceGrants(
     fallback?: boolean | undefined;
     /** The caller's time budget for storage reads (the runner's request timeout). */
     budget?: SourceReadBudget | undefined;
-    select: () => Promise<ObjectLocation>;
+    select: (recheck?: {
+      size: number;
+      physical?: ObjectLocation['statePhysical'];
+    }) => Promise<ObjectLocation>;
     catalog: (ids: string[], raw?: boolean) => Promise<unknown[]>;
     log: (message: string) => void;
   },
@@ -289,12 +292,17 @@ export async function stateSourceGrants(options: Parameters<typeof buildStateSou
   } catch (error) {
     if (error !== refreshManifest) throw error;
   }
-  let current = await options.select();
+  const recheck = () =>
+    options.select({
+      size: selected.descriptor.object.size,
+      ...(selected.statePhysical ? { physical: selected.statePhysical } : {}),
+    });
+  let current = await (value ? recheck() : options.select());
   invariant(sameState(current), 'SOURCE_UNAVAILABLE', 'Selected State changed during source resolution.');
   if (!value || !sameRoot(current)) {
     selected = current;
     value = await build();
-    current = await options.select();
+    current = await recheck();
     invariant(
       sameState(current) && sameRoot(current),
       'SOURCE_UNAVAILABLE',

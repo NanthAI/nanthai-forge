@@ -38,18 +38,45 @@ async function selection(
   projectId: Id<'hostedProjects'>,
   state: string,
   registered = false,
+  recheck?: { size: number; physical?: { sha256: string; size: number } },
 ) {
   invariant(/^[a-f0-9]{64}$/.test(state), 'SOURCE_UNAVAILABLE', 'Select one readable State.');
   const row = await findObject(ctx, projectId, state);
   invariant(row && !row.removed && isStored(row), 'SOURCE_UNAVAILABLE', 'Selected State is unavailable.');
   if (registered)
     invariant(await isRegisteredState(ctx, row), 'SOURCE_UNAVAILABLE', 'Select a registered source State.');
-  const value = await sourceObjectLocation(ctx, projectId, { sha256: state, size: row.size }, row);
+  const object = { sha256: state, size: row.size };
+  // The first selection already marked the State as a source. Keep the normal
+  // marking and signing path if that fact or the exact physical pin changed.
+  if (
+    recheck &&
+    row.sourceReferenced &&
+    recheck.size === row.size &&
+    recheck.physical?.sha256 === row.statePhysical?.sha256 &&
+    recheck.physical?.size === row.statePhysical?.size
+  )
+    return JSON.stringify({
+      descriptor: { object, recipe: null },
+      ...(row.statePhysical ? { statePhysical: row.statePhysical } : {}),
+      storageId: null,
+      url: null,
+    } satisfies Awaited<ReturnType<typeof sourceObjectLocation>>);
+  const value = await sourceObjectLocation(ctx, projectId, object, row);
   if (!value.url && value.storageId) value.url = await blobStore(ctx).getUrl(value.storageId);
   return JSON.stringify(value);
 }
 export const runner = internalMutation({
-  args: { ...sessionArgs, state: v.string(), version: v.optional(v.literal(2)) },
+  args: {
+    ...sessionArgs,
+    state: v.string(),
+    version: v.optional(v.literal(2)),
+    recheck: v.optional(
+      v.object({
+        size: v.number(),
+        physical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
+      }),
+    ),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     const { run, project } = await actionsSession(ctx, input, false);
@@ -59,7 +86,7 @@ export const runner = internalMutation({
       'SOURCE_UNAVAILABLE',
       'State is outside this run.',
     );
-    return selection(ctx, input.projectId, input.state);
+    return selection(ctx, input.projectId, input.state, false, input.recheck);
   },
 });
 export const client = internalMutation({

@@ -5,7 +5,7 @@ import { physicalStateSourceFixture } from './physical-state-source-fixture.mjs'
 import { expandSourceGrants } from '../dist/source-grant-wire.js';
 import { digest } from '../dist/hash.js';
 import { moduleUrl } from './convex-module.mjs';
-const { makeFunctionReference } = await import('convex/server');
+const { getFunctionName, makeFunctionReference } = await import('convex/server');
 test('the runner reuses its authorized State row without a second descriptor read', async t => {
   const f = await physicalStateSourceFixture(t, 1000, { protocol: 2 });
   await f.heads();
@@ -44,18 +44,79 @@ test('the runner reuses its authorized State row without a second descriptor rea
 
 test('full29k State signer includes fresh run authority and stays under100KB DB/reply in three resolver mutations', async t => {
   const f = await physicalStateSourceFixture(t, 29000, { protocol: 2 }),
-    start = f.s.counts.length;
-  const heads = await f.heads();
-  assert.equal(heads.physical.pin.sha256, f.root.pin.sha256);
-  const wire = await f.source({ state: f.s.state.sha256, digests: [f.s.state.sha256], all: true }),
-    result = expandSourceGrants(wire);
-  assert.equal(result.mode, 'runs');
-  assert.equal(result.runs.length, 29);
-  assert.equal(f.calls.length, 3, 'head resolve plus State selection before and after R2 IO');
-  const dbBytes = f.s.counts.slice(start).reduce((sum, row) => sum + row.readBytes, 0),
-    replyBytes = Buffer.byteLength(JSON.stringify(heads)) + Buffer.byteLength(JSON.stringify(wire));
-  assert(dbBytes < 100000, `${dbBytes} DB bytes`);
-  assert(replyBytes < 100000, `${replyBytes} reply bytes`);
+    flag = 'FORGE_STATE_SOURCE_PIN_RECHECK',
+    previous = process.env[flag],
+    runMutation = f.ctx.runMutation;
+  t.after(() => (previous === undefined ? delete process.env[flag] : (process.env[flag] = previous)));
+  let selections = [],
+    r2Bytes = 0;
+  const fetch = globalThis.fetch;
+  t.mock.method(globalThis, 'fetch', async (target, init) => {
+    const response = await fetch(target, init);
+    const range = response.headers.get('content-range');
+    if (range) {
+      const [first, last] = range.match(/\d+/g).map(Number);
+      r2Bytes += last - first + 1;
+    } else if (response.ok) {
+      r2Bytes += f.r2.objects.get(new URL(target).pathname)?.byteLength ?? 0;
+    }
+    return response;
+  });
+  t.mock.method(f.ctx, 'runMutation', async (ref, args) => {
+    const reply = await runMutation(ref, args);
+    if (getFunctionName(ref) === 'projectStateSourceSelection:runner')
+      selections.push({
+        signed: Boolean(JSON.parse(reply).url),
+        requestBytes: Buffer.byteLength(JSON.stringify(args)),
+        replyBytes: Buffer.byteLength(reply),
+      });
+    return reply;
+  });
+  const read = async enabled => {
+    if (enabled) process.env[flag] = '1';
+    else delete process.env[flag];
+    selections = [];
+    r2Bytes = 0;
+    const dbStart = f.s.counts.length,
+      callsStart = f.calls.length,
+      r2Start = f.r2.requests.length,
+      start = performance.now(),
+      heads = await f.heads(),
+      wire = await f.source({ state: f.s.state.sha256, digests: [f.s.state.sha256], all: true }),
+      result = expandSourceGrants(wire);
+    assert.equal(heads.physical.pin.sha256, f.root.pin.sha256);
+    assert.equal(result.mode, 'runs');
+    assert.equal(result.runs.length, 29);
+    const metrics = {
+      resolverCalls: f.calls.length - callsStart,
+      sourceRequests: 2,
+      r2Requests: f.r2.requests.length - r2Start,
+      r2Bytes,
+      dbBytes: f.s.counts.slice(dbStart).reduce((sum, row) => sum + row.readBytes, 0),
+      replyBytes: Buffer.byteLength(JSON.stringify(heads)) + Buffer.byteLength(JSON.stringify(wire)),
+      selectorRequestBytes: selections.reduce((sum, row) => sum + row.requestBytes, 0),
+      selectorReplyBytes: selections.reduce((sum, row) => sum + row.replyBytes, 0),
+      stateSignatures: selections.filter(row => row.signed).length,
+      wallMs: Math.round(performance.now() - start),
+    };
+    assert.equal(metrics.resolverCalls, 3, 'head resolve and two fresh authority decisions');
+    assert(metrics.dbBytes < 100000, `${metrics.dbBytes} DB bytes`);
+    assert(metrics.replyBytes < 100000, `${metrics.replyBytes} reply bytes`);
+    return { metrics, pin: result.plan.pin, runs: result.runs.map(({ url, ...run }) => run) };
+  };
+  const before = await read(false),
+    after = await read(true);
+  assert.deepEqual(after.pin, before.pin);
+  assert.deepEqual(after.runs, before.runs);
+  assert.equal(before.metrics.stateSignatures, 2);
+  assert.equal(after.metrics.stateSignatures, 1);
+  assert.equal(after.metrics.r2Requests, before.metrics.r2Requests);
+  assert.equal(after.metrics.r2Bytes, before.metrics.r2Bytes);
+  assert(after.metrics.dbBytes <= before.metrics.dbBytes);
+  assert(
+    after.metrics.selectorRequestBytes + after.metrics.selectorReplyBytes <
+      before.metrics.selectorRequestBytes + before.metrics.selectorReplyBytes,
+  );
   const other = f.s.put('stored history object outside selected State');
   await assert.rejects(
     f.source({ state: f.s.state.sha256, digests: [other.sha256] }),
@@ -69,16 +130,7 @@ test('full29k State signer includes fresh run authority and stays under100KB DB/
     }),
     error => (error.data?.code ?? error.code) === 'SOURCE_UNAVAILABLE',
   );
-  t.diagnostic(
-    JSON.stringify({
-      files: 29000,
-      resolverCalls: 3,
-      sourceRequests: 2,
-      dbBytes,
-      replyBytes,
-      fileRuns: result.runs.length,
-    }),
-  );
+  t.diagnostic(JSON.stringify({ files: 29000, before: before.metrics, after: after.metrics }));
 });
 test('full29k State signer with300 raw changes preserves exact-key grants below100KB including State descriptors', async t => {
   const f = await physicalStateSourceFixture(t, 29000, { rawTail: 300, protocol: 2 }),

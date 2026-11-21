@@ -6,8 +6,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { digest } from '../dist/hash.js';
 import { encodePhysicalRoot } from '../dist/physical-manifest-root.js';
 import { expandSourceGrants } from '../dist/source-grant-wire.js';
-import { makeFunctionReference } from 'convex/server';
-const { stateSourceGrants } = await import(moduleUrl('../convex/projectStateSourceGrants.ts'));
+import { getFunctionName, makeFunctionReference } from 'convex/server';
 function replacement(f, all = false) {
   const prefix = `/synthetic/v1/p/${f.s.projectId}/o/`;
   const moved = f.root.root.chunks.filter((_pin, index) => all || index % 2 === 0).reverse();
@@ -34,94 +33,80 @@ function bind(f, pin) {
   const row = [...f.s.tables.projectObjects.values()].find(row => row.digest === f.s.state.sha256);
   f.s.patch('projectObjects', row._id, { statePhysical: pin });
 }
+function observeRunnerSelections(t, f, before) {
+  const flag = 'FORGE_STATE_SOURCE_PIN_RECHECK',
+    previous = process.env[flag],
+    runMutation = f.ctx.runMutation,
+    selections = [];
+  process.env[flag] = '1';
+  t.after(() => (previous === undefined ? delete process.env[flag] : (process.env[flag] = previous)));
+  t.mock.method(f.ctx, 'runMutation', async (ref, args) => {
+    assert.equal(getFunctionName(ref), 'projectStateSourceSelection:runner', 'no catalog substitution');
+    const selection = { recheck: args.recheck, signed: false };
+    selections.push(selection);
+    before(selections.length);
+    const reply = await runMutation(ref, args);
+    selection.signed = Boolean(JSON.parse(reply).url);
+    return reply;
+  });
+  return selections;
+}
 for (const missing of [false, true])
   test(`grant planning refreshes a ${missing ? 'missing' : 'readable'} superseded root before using the catalog`, async t => {
     const f = await physicalStateSourceFixture(t, 20),
-      pin = replacement(f);
-    let selections = 0,
-      catalog = 0;
+      pin = replacement(f),
+      selections = observeRunnerSelections(t, f, count => {
+        if (count === 2) bind(f, pin);
+      });
     if (missing) f.r2.objects.delete(`/synthetic/v1/p/${f.s.projectId}/o/${f.root.pin.sha256}`);
-    const value = await stateSourceGrants({
-      projectId: f.s.projectId,
-      state: f.s.state.sha256,
-      digests: [],
-      all: true,
-      select: async () => {
-        if (++selections === 2) bind(f, pin);
-        return JSON.parse(
-          await f.ctx.runMutation(makeFunctionReference('projectStateSourceSelection:runner'), {
-            ...f.input,
-            state: f.s.state.sha256,
-          }),
-        );
-      },
-      catalog: async () => {
-        catalog++;
-        assert.fail('a current authoritative root supplies the bindings');
-      },
-      log: () => {},
-    });
+    const value = expandSourceGrants(await f.source({ state: f.s.state.sha256, digests: [], all: true }));
     assert.equal(value.plan.pin.sha256, pin.sha256);
-    assert.equal(selections, 3);
-    assert.equal(catalog, 0);
+    assert.equal(Boolean(selections[1].recheck), !missing, 'a failed read needs a complete descriptor');
+    assert.deepEqual(
+      selections.map(selection => selection.signed),
+      [true, true, false],
+    );
   });
-test('a second rebind during the one replacement read refuses the reply without a catalog substitution', async t => {
-  const f = await physicalStateSourceFixture(t, 20),
-    first = replacement(f),
-    second = replacement(f, true);
-  let selections = 0;
-  await assert.rejects(
-    stateSourceGrants({
-      projectId: f.s.projectId,
-      state: f.s.state.sha256,
-      digests: [],
-      all: true,
-      select: async () => {
-        selections++;
-        if (selections === 2) bind(f, first);
-        if (selections === 3) bind(f, second);
-        return JSON.parse(
-          await f.ctx.runMutation(makeFunctionReference('projectStateSourceSelection:runner'), {
-            ...f.input,
-            state: f.s.state.sha256,
-          }),
-        );
-      },
-      catalog: async () => assert.fail('no catalog substitution'),
-      log: () => {},
-    }),
-    error => error.code === 'SOURCE_UNAVAILABLE',
-  );
-  assert.equal(selections, 3);
-});
-test('access withdrawn while following a replacement root prevents the grant reply', async t => {
-  const f = await physicalStateSourceFixture(t, 20),
-    pin = replacement(f);
-  let selections = 0;
-  await assert.rejects(
-    stateSourceGrants({
-      projectId: f.s.projectId,
-      state: f.s.state.sha256,
-      digests: [],
-      all: true,
-      select: async () => {
-        selections++;
-        if (selections === 2) bind(f, pin);
-        if (selections === 3) f.s.patch('hostedProjects', f.s.projectId, { owner: 'other-owner' });
-        return JSON.parse(
-          await f.ctx.runMutation(makeFunctionReference('projectStateSourceSelection:runner'), {
-            ...f.input,
-            state: f.s.state.sha256,
-          }),
-        );
-      },
-      catalog: async () => assert.fail('no catalog substitution'),
-      log: () => {},
-    }),
-    error => (error.data?.code ?? error.code) === 'PROJECT_UNAVAILABLE',
-  );
-  assert.equal(selections, 3);
-});
+for (const changed of ['physical root', 'State size'])
+  test(`a changed ${changed} during the replacement read refuses the grant reply`, async t => {
+    const f = await physicalStateSourceFixture(t, 20),
+      first = replacement(f),
+      second = replacement(f, true),
+      selections = observeRunnerSelections(t, f, count => {
+        if (count === 2) bind(f, first);
+        if (count === 3 && changed === 'physical root') bind(f, second);
+        if (count === 3 && changed === 'State size') {
+          const row = [...f.s.tables.projectObjects.values()].find(row => row.digest === f.s.state.sha256);
+          f.s.patch('projectObjects', row._id, { size: row.size + 1 });
+        }
+      });
+    await assert.rejects(
+      f.source({ state: f.s.state.sha256, digests: [], all: true }),
+      error => error.code === 'SOURCE_UNAVAILABLE',
+    );
+    assert(selections[2].recheck);
+    assert.deepEqual(
+      selections.map(selection => selection.signed),
+      [true, true, true],
+    );
+  });
+for (const rebind of [false, true])
+  test(`the runner refuses grants when access is withdrawn during a ${rebind ? 'replacement' : 'matching'} root read`, async t => {
+    const f = await physicalStateSourceFixture(t, 20),
+      pin = replacement(f),
+      finalSelection = rebind ? 3 : 2,
+      selections = observeRunnerSelections(t, f, count => {
+        if (rebind && count === 2) bind(f, pin);
+        if (count === finalSelection) f.s.patch('hostedProjects', f.s.projectId, { owner: 'other-owner' });
+      });
+    await assert.rejects(
+      f.source({ state: f.s.state.sha256, digests: [], all: true }),
+      error => (error.data?.code ?? error.code) === 'PROJECT_UNAVAILABLE',
+    );
+    assert.equal(selections.length, finalSelection);
+    assert(selections.at(-1).recheck, 'fresh authorization is required even for an exact pin recheck');
+    assert.equal(selections.at(-1).signed, false);
+  });
 test('Actions materialization refreshes an old bootstrap pin once and verifies every file without catalog fallback', async t => {
   const { ActionsJobClient } = await import('../dist/hosted-actions-job-client.js');
   const { hostedActionsCapabilities } = await import('../dist/hosted-actions-capabilities.js');

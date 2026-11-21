@@ -28,17 +28,19 @@ export async function runnerStateSource(
     fallback?: boolean | undefined;
   },
 ) {
+  const pinRecheck = process.env.FORGE_STATE_SOURCE_PIN_RECHECK === '1';
   return compactSourceGrants(
     await stateSourceGrants({
       ...command,
       projectId: input.projectId,
       // The runner waits 30 s for this reply: slow storage answers 503 (reason storage) inside it.
       budget: { deadline: Date.now() + RUNNER_SOURCE_READ_BUDGET_MS },
-      select: async () =>
+      select: async recheck =>
         JSON.parse(
           await ctx.runMutation(makeFunctionReference<'mutation'>('projectStateSourceSelection:runner'), {
             ...input,
             state: command.state,
+            ...(pinRecheck && recheck ? { recheck } : {}),
             ...(command.version ? { version: command.version } : {}),
           }),
         ),
