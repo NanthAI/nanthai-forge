@@ -6,11 +6,12 @@ import schema from './schema';
 import { journalIndexAt, journalScope } from './projectJournalStore';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
+import { saveHeadKey } from './projectMetricSaveHeads';
 
 type Reference = { laneId: string; version: number; head: string };
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length;
-/** Input versions have an exact existing index. Saves have only a Lane-parent
- * index: retain that Lane's bounded context scan, never the project's saves. */
+/** Look up immutable Lane versions and covered save-head facts by exact keys.
+ * Older histories continue to use that Lane's bounded canonical save scan. */
 export async function metricInputReferences(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
@@ -19,9 +20,16 @@ export async function metricInputReferences(
   from: number,
   to: number,
   cursor: string | null,
+  exactSaveHeads = false,
 ) {
   invariant(references.length <= 100, 'BAD_ARGUMENT', 'Read metric inputs in batches of 100 references.');
-  const binding = canonicalPayload({ stream, references, from, to });
+  const binding = canonicalPayload({
+    stream,
+    references,
+    from,
+    to,
+    ...(exactSaveHeads ? { exactSaveHeads } : {}),
+  });
   let position: { binding: string; index: number; key: (string | number | null)[] | null };
   try {
     position = cursor ? JSON.parse(cursor) : { binding, index: 0, key: null };
@@ -45,9 +53,22 @@ export async function metricInputReferences(
   const page: unknown[] = [];
   for (; index < references.length && readRows < 100 && readBytes < 512 * 1024;) {
     const reference = references[index]!;
+    const saveKey = exactSaveHeads ? saveHeadKey(reference.laneId, reference.head) : null;
     invariant(
       key === null ||
+        (saveKey !== null &&
+          key.length === 6 &&
+          key[0] === projectId &&
+          key[1] === saveKey &&
+          typeof key[2] === 'number' &&
+          key[2] >= from &&
+          key[2] < to &&
+          typeof key[3] === 'string' &&
+          typeof key[4] === 'number' &&
+          Number.isFinite(key[4]) &&
+          typeof key[5] === 'string') ||
         (stream === 'saves' &&
+          saveKey === null &&
           key.length === 5 &&
           key[0] === projectId &&
           key[1] === 'save' &&
@@ -132,16 +153,26 @@ export async function metricInputReferences(
       index++;
       key = null;
     } else {
-      const rows = streamQuery(ctx, {
-        table: 'projectHostedRecords',
-        index: 'by_project_and_kind_and_parent',
+      const bounds = (prefix: string[]) => ({
         schema,
-        startIndexKey: (key as (string | number)[] | null) ?? [projectId, 'save', reference.laneId, from],
+        startIndexKey: (key as (string | number)[] | null) ?? [...prefix, from],
         startInclusive: key === null,
-        endIndexKey: [projectId, 'save', reference.laneId, to],
+        endIndexKey: [...prefix, to],
         endInclusive: false,
-        order: 'asc',
+        order: 'asc' as const,
       });
+      const rows =
+        saveKey === null
+          ? streamQuery(ctx, {
+              table: 'projectHostedRecords',
+              index: 'by_project_and_kind_and_parent',
+              ...bounds([projectId, 'save', reference.laneId]),
+            })
+          : streamQuery(ctx, {
+              table: 'projectMetricFacts',
+              index: 'by_project_and_key_and_source_time_and_id',
+              ...bounds([projectId, saveKey]),
+            });
       let complete = true;
       // Stream the selected Lane's range, keeping at most one document beyond
       // the byte/row threshold. A continuation rereads only that one lookahead,
@@ -153,12 +184,16 @@ export async function metricInputReferences(
         }
         readRows++;
         readBytes += bytes(row);
-        const body = await ctx.db.get(row.bodyId);
-        invariant(body?.projectId === projectId, 'EVIDENCE_CHANGED', 'Metric record body is missing.');
-        readBytes += bytes(body);
-        const save = JSON.parse(body.value);
-        invariant(save.kind === 'save', 'EVIDENCE_CHANGED', 'Metric record kind changed.');
-        page.push({ id: save.id, laneId: save.laneId, head: save.head, at: save.at });
+        if ('sourceCreatedAt' in row)
+          page.push({ id: row.sourceId, laneId: reference.laneId, head: reference.head, at: row.value });
+        else {
+          const body = await ctx.db.get(row.bodyId);
+          invariant(body?.projectId === projectId, 'EVIDENCE_CHANGED', 'Metric record body is missing.');
+          readBytes += bytes(body);
+          const save = JSON.parse(body.value);
+          invariant(save.kind === 'save', 'EVIDENCE_CHANGED', 'Metric record kind changed.');
+          page.push({ id: save.id, laneId: save.laneId, head: save.head, at: save.at });
+        }
         key = indexKey as (string | number)[];
       }
       if (complete) {

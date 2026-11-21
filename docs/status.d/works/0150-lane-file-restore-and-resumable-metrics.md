@@ -4,3 +4,5 @@
   ([agent workflow](../../agents/workflow.d/sections/0200-refresh-the-clone-root.md)).
   A `metrics` read too large for one call's 100 s continues when the same command is asked again
   within the hour, from the calls it already answered, so no page is read twice ([operations](../../operations.md)).
+  For projects with a complete save-head backfill, reports read only the saves matching the
+  selected Lane and head ([operations](../../operations.md)).

@@ -253,6 +253,15 @@ async function changedSave(
   return { stats, calls: c.calls, s, c, root, command, transport };
 }
 
+function assertSaveWriteBudget(run, ceiling) {
+  // Issue 0de95ef2 budgets one compact save-head fact in the existing save mutation.
+  const metricWrites = run.s.counts
+    .flatMap(row => row.written)
+    .filter(table => table === 'projectMetricFacts').length;
+  assert.equal(metricWrites, 1, 'one indexed save-head fact per changed save');
+  assert(run.stats.writes - run.stats.overlapWrites - metricWrites <= ceiling, JSON.stringify(run.stats));
+}
+
 test('ten changed files in a 3,000-file tree fit the complete save budget at dogfood history size', async t => {
   await t.test('retained recipe and single-transfer path', async t => {
     const run = await changedSave(t, true);
@@ -282,7 +291,7 @@ test('ten changed files in a 3,000-file tree fit the complete save budget at dog
     // new paths in the same mutation. Calls and reads are unchanged.
     // Writes 99 -> 101 (a91b9b69 storage quota): each of the two upload batches that reserves new
     // objects updates one project usage counter row. Calls and reads per object are unchanged.
-    assert(run.stats.writes - run.stats.overlapWrites <= 101, JSON.stringify(run.stats));
+    assertSaveWriteBudget(run, 101);
     const prior = run.c.calls.length;
     await saveHostedLane(run.root, run.command, run.transport);
     assert.equal(run.c.calls.length - prior, 1, 'same-op terminal retry only prepares/returns the receipt');
@@ -511,7 +520,7 @@ test('Convex source provider: complete 10-file save including new object uploads
   assert.equal(run.stats.overlapWrites, 1, 'one atomic path projection update per changed save');
   // Writes 97 -> 98 (9c8490a4 presence): the slim presence row follows the save's new paths.
   // Writes 98 -> 100 (a91b9b69 storage quota): one usage counter write per reserving upload batch.
-  assert(run.stats.writes - run.stats.overlapWrites <= 100, JSON.stringify(run.stats));
+  assertSaveWriteBudget(run, 100);
   t.diagnostic(
     JSON.stringify({
       convex: run.stats,
@@ -538,7 +547,7 @@ test('a 10-file save commits its objects once, stages its page in submit and rea
     'begin hands baseline and page; only changed files resolve',
   );
   assert(run.stats.totalCalls <= 16, JSON.stringify({ stats: run.stats, functions: run.calls }));
-  assert(run.stats.writes - run.stats.overlapWrites <= 100, JSON.stringify(run.stats));
+  assertSaveWriteBudget(run, 100);
   // The receipt's server split, as sync has it: submit time and the execution's step.
   const progress = JSON.parse(
     await run.c.call('projectHostedSaves:progress', {
@@ -580,7 +589,7 @@ test('a small save commits, submits and runs its first step in one action (sourc
   assert.equal(count('projectObjectCommit:markCommitted'), 1);
   // 16 -> 14: one action replaces the commit action, the submit mutation, the dispatch and the step.
   assert(run.stats.totalCalls <= 14, JSON.stringify({ stats: run.stats, functions: run.calls }));
-  assert(run.stats.writes - run.stats.overlapWrites <= 100, JSON.stringify(run.stats));
+  assertSaveWriteBudget(run, 100);
   const progress = JSON.parse(
     await run.c.call('projectHostedSaves:progress', {
       projectId: run.s.projectId,
@@ -637,7 +646,7 @@ test('a direct small save: prepare returns every upload target, one PUT wave, an
   assert(!run.c.r2Gets.includes(inputs[0]), 'the inline input was not downloaded back');
   // 14 -> 7 calls: prepare, the submit action, its commit's two rounds, its submit, begin and commit.
   assertCommandWeight('saveChanged', { calls: run.stats.totalCalls, reads: run.stats.documents });
-  assert(run.stats.writes - run.stats.overlapWrites <= 100, JSON.stringify(run.stats));
+  assertSaveWriteBudget(run, 100);
   t.diagnostic(
     JSON.stringify({
       convex: run.stats,

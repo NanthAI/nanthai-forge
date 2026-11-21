@@ -6,6 +6,7 @@ import { checkArgs, checkDocument } from './convex-args.mjs';
 const api = await import(moduleUrl('../convex/projectSelfMetrics.ts'));
 const { metricReadProjection } = await import(moduleUrl('../convex/projectMetricReadProjection.ts'));
 const bills = await import(moduleUrl('../convex/projectSelfMetricBills.ts'));
+const saveHeads = await import(moduleUrl('../convex/projectMetricSaveHeadBackfill.ts'));
 const placement = await import(moduleUrl('../convex/projectBytePlacement.ts'));
 const handlers = {
   'projectSelfMetrics:page': api.page,
@@ -81,6 +82,12 @@ export function fixture() {
       insert: async (table, row) => {
         meter.writes++;
         return put(table, row, new Date().toISOString())._id;
+      },
+      patch: async (id, fields) => {
+        const row = documentsById.get(id);
+        assert(row);
+        meter.writes++;
+        Object.assign(row, fields);
       },
       get: async id => {
         const row =
@@ -296,6 +303,11 @@ export function fixture() {
       }
     },
     recordBill,
+    backfillSaveHeads() {
+      const input = { projectId: project._id };
+      checkArgs(saveHeads.backfillPage, input, 'projectMetricSaveHeadBackfill:backfillPage');
+      return saveHeads.backfillPage._handler(makeCtx({ paginations: 0 }), input);
+    },
     put,
     landing,
     run,

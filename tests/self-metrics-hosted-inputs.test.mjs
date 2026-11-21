@@ -18,7 +18,7 @@ function evidence(f) {
     for (const page of built.pages) objects.set(page.pin.sha256, saveBytes(page.value));
     return built.manifest.root;
   };
-  const input = (lane, intent, h, savedAt, version = 0) => {
+  const input = (lane, intent, h, savedAt, version = 0, withSave = true) => {
     const body = f.put(
       'projectHostedRecordBodies',
       {
@@ -49,7 +49,7 @@ function evidence(f) {
       },
       savedAt,
     );
-    save(lane, h, savedAt);
+    if (withSave) save(lane, h, savedAt);
     return compose([
       {
         laneId: lane,
@@ -61,7 +61,7 @@ function evidence(f) {
       },
     ]);
   };
-  const save = (lane, h, savedAt) => {
+  const save = (lane, h, savedAt, createdAt = savedAt, indexed = false) => {
     const saveId = randomUUID();
     const saved = f.put(
       'projectHostedRecordBodies',
@@ -77,7 +77,7 @@ function evidence(f) {
       },
       savedAt,
     );
-    f.put(
+    const source = f.put(
       'projectHostedRecords',
       {
         projectId: 'project',
@@ -90,8 +90,22 @@ function evidence(f) {
         digest: h,
         bytes: 100,
       },
-      savedAt,
+      createdAt,
     );
+    f.put(
+      'projectHostedRecordHeads',
+      {
+        projectId: 'project',
+        kind: 'save',
+        key: saveId,
+        parent: lane,
+        status: indexed ? 'saved:metric-head' : 'saved',
+        version: 0,
+        recordId: source._id,
+      },
+      createdAt,
+    );
+    return saveId;
   };
   const attempt = (id, start, pin, runId, main = head('1'), parent = null) => {
     const row = f.tables.projectHostedLandingAttempts.find(row => row.attemptId === id);
@@ -721,6 +735,125 @@ test('P6 selected-Lane save pagination preserves tied timestamps and memoizes La
     f.query('projectSelfMetrics:page', saveSelections[0].args),
     error => error.data?.code === 'PROJECT_UNAVAILABLE',
   );
+});
+
+test('covered save heads preserve canonical timing and stay flat with tenfold unrelated same-Lane saves', async t => {
+  const f = fixture();
+  const e = evidence(f);
+  const lane = randomUUID(),
+    intent = randomUUID();
+  const original = e.input(lane, intent, head('a'), at(-30));
+  const other = e.input(lane, intent, head('b'), at(-10), 1);
+  e.fail('first', at(-20), at(-15), original);
+  e.fail('other-first', at(-20), at(-15), other);
+  // A late publication has the earliest body timestamp for this head. Another
+  // earlier body is outside the selected creation horizon and cannot win.
+  e.save(lane, head('b'), at(-25), at(-5));
+  e.save(lane, head('b'), at(-40), at(-3 * 1440));
+  e.landing('current', at(1), at(2), e.combined(original, other));
+  for (let i = 0; i < 100; i++) e.save(lane, head('c'), at(-90));
+  const read = async () => {
+    const before = { ...f.meter };
+    const { records } = await readHostedMetricPages(f.query, period);
+    assert.equal(f.meter.writes, before.writes);
+    return {
+      report: metricsSurface(records, period),
+      moves: records.moves,
+      documents: f.meter.documents - before.documents,
+      bytes: f.meter.bytes - before.bytes,
+      calls: f.meter.calls - before.calls,
+    };
+  };
+  const legacy = await read();
+  assert.deepEqual(await f.backfillSaveHeads(), { complete: false, inserted: 80 });
+  assert.deepEqual((await read()).report, legacy.report);
+  assert.deepEqual(await f.backfillSaveHeads(), { complete: true, inserted: 24 });
+  assert.deepEqual(await f.backfillSaveHeads(), { complete: true, inserted: 0 });
+  const baseline = await read();
+  assert.deepEqual(baseline.report, legacy.report);
+  assert(baseline.documents < legacy.documents);
+  assert.equal(baseline.moves[0].inputs.find(input => input.head === head('b')).savedAt, at(-25));
+
+  for (let i = 100; i < 1000; i++) {
+    const id = e.save(lane, head('c'), at(-90), at(-90), true);
+    f.put(
+      'projectMetricFacts',
+      {
+        projectId: f.project._id,
+        key: JSON.stringify(['save-head', lane, head('c')]),
+        sourceCreatedAt: Date.parse(at(-90)),
+        sourceId: id,
+        value: at(-90),
+      },
+      at(3),
+    );
+  }
+  const grown = await read();
+  assert.deepEqual(grown, baseline);
+  const { documents, bytes, calls } = grown;
+  t.diagnostic(JSON.stringify({ documents, bytes, calls }));
+});
+
+test('exact save lookups ride on Lane pages when many heads came from sync', async () => {
+  const f = fixture(),
+    e = evidence(f);
+  const lane = randomUUID(),
+    intent = randomUUID();
+  const pins = Array.from({ length: 101 }, (_, i) =>
+    e.input(lane, intent, i.toString(16).padStart(64, '0'), at(-20), i, i === 0),
+  );
+  e.landing('sync-only-heads', at(1), at(2), e.combined(...pins));
+  const legacy = await readHostedMetricPages(f.query, period);
+  const legacyCalls = f.meter.calls;
+  assert.deepEqual(await f.backfillSaveHeads(), { complete: true, inserted: 1 });
+  const before = f.meter.calls;
+  const exact = await readHostedMetricPages(f.query, period);
+  assert.deepEqual(metricsSurface(exact.records, period), metricsSurface(legacy.records, period));
+  assert.deepEqual(exact.records.moves, legacy.records.moves);
+  assert(f.meter.calls - before <= legacyCalls);
+});
+
+test('a cached exact save capability falls back if an older writer creates a coverage gap', async () => {
+  const f = fixture(),
+    e = evidence(f);
+  const lane = randomUUID();
+  const pin = e.input(lane, randomUUID(), head('a'), at(-10));
+  e.landing('current', at(1), at(2), pin);
+  await f.backfillSaveHeads();
+  let lagged = false;
+  const query = async (name, args) => {
+    if (name === 'projectSelfMetrics:page' && args.saveHeadReferences && !lagged) {
+      lagged = true;
+      e.save(lane, head('a'), at(-20), at(-5));
+    }
+    return f.query(name, args);
+  };
+  query.objects = f.query.objects;
+  const { records } = await readHostedMetricPages(query, period);
+  assert.equal(lagged, true);
+  assert.equal(records.moves[0].inputs[0].savedAt, at(-20));
+});
+
+test('a cached exact save capability survives an older server rejecting new arguments', async () => {
+  const f = fixture(),
+    e = evidence(f);
+  const lane = randomUUID();
+  const pin = e.input(lane, randomUUID(), head('a'), at(-10));
+  e.landing('current', at(1), at(2), pin);
+  const previous = await readHostedMetricPages(f.query, period);
+  await f.backfillSaveHeads();
+  let legacyValidation = false;
+  const query = async (name, args) => {
+    if (name === 'projectSelfMetrics:page' && (args.saveHeadReferences || args.exactSaveHeads)) {
+      legacyValidation = true;
+      throw new Error('ArgumentValidationError: unexpected field');
+    }
+    return f.query(name, args);
+  };
+  query.objects = f.query.objects;
+  const { records } = await readHostedMetricPages(query, period);
+  assert.equal(legacyValidation, true);
+  assert.deepEqual(metricsSurface(records, period), metricsSurface(previous.records, period));
 });
 
 test('P6 exact Lane context includes lifecycle-backed versions inside the original horizon', async () => {

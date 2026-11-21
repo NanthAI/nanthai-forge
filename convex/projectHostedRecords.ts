@@ -9,6 +9,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { activeProject, accessibleProject } from './projectAuthority';
 import { sourceAuthority } from '../src/hosted-source-authority';
 import { hostedRecordValue, hostedRecordIndex, type HostedRecordKind } from '../src/hosted-records';
+import { indexedSaveStatus, resumeSaveHeadBackfill, saveHeadFact } from './projectMetricSaveHeads';
 import { invariant } from '../src/errors';
 import { planningPurged } from '../src/work-planning-put';
 import { verifiedPurgedRecord } from './projectWorkPurgedRows';
@@ -230,6 +231,7 @@ export async function writeHostedRecord(
   const pointer = {
     ...identity,
     ...indexed,
+    ...(record.kind === 'save' ? { status: indexedSaveStatus } : {}),
     recordId: id,
     ...(record.kind === 'intent' && itemId ? { planningItemId: itemId } : {}),
   };
@@ -255,7 +257,12 @@ export async function writeHostedRecord(
         input.reopened === true || Boolean(head && head.status !== 'active' && record.state === 'active'),
     });
   }
-  return { ...(await ctx.db.get(id))!, value };
+  const saved = (await ctx.db.get(id))!;
+  if (record.kind === 'save') {
+    await ctx.db.insert('projectMetricFacts', saveHeadFact(input.projectId, saved._creationTime, record));
+    await resumeSaveHeadBackfill(ctx, project);
+  }
+  return { ...saved, value };
 }
 
 export async function readHostedRecord(

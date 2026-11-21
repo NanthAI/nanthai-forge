@@ -283,12 +283,23 @@ Receipt counters need only in-window rows, plus the first receipt of each kind f
 coverage; their context is zero. Lane/save streams are read only when immutable input pins
 and their object reader are present. On a compatible server, verified compose pages select
 only exact immutable Lane versions in batches of 100 references, memoized for one report.
-Save context uses each selected Lane's existing parent index once; absent a Lane/head index,
-that Lane's context saves are still scanned. Other streams retain the requested context for
-unlinked/legacy/combined classifications, bill-period evidence and output parity; P6 Issue
-`d824900c` tracks the remaining exact-lookup design. Older servers retain their existing
-Lane/save pagination. Streams run side by side, with input history fetched after its pins
-are verified. Missing/out-of-horizon versions keep the same explicit unknowns and coverage.
+Once the save-head backfill is complete, the reader selects only saves matching
+the Lane and head within the original creation-time horizon. The earliest canonical
+save time wins when a Lane saved the same head more than once. Older clients and
+projects with incomplete coverage use the bounded Lane save scan. Other streams
+retain the requested context for unlinked, legacy and combined classifications and
+bill-period evidence. Issue `0de95ef2` tracks the remaining exact lookups. Streams
+run side by side, fetching input history after verifying its pins. Missing or
+out-of-horizon versions remain explicitly unknown.
+
+New saves publish the compact fact and mark their existing save heads in the same
+transaction. Reports detect any unmarked saves through the existing status index and
+use canonical reads until coverage is complete. Exact saves ride on the first Lane
+page, with independent limits of 100 rows and 512 KiB for each selection. The
+internal `projectMetricSaveHeadBackfill:backfillPage` populates older saves, up to
+80 at a time, until it returns `complete`. It reads each unmarked head, canonical
+header and body, then inserts the fact and marks the head. There are no periodic
+backfill calls.
 
 Full metrics reads negotiate compact check-run rows. Those rows retain exactly the fields
 used by the report, including runner/audit seconds, flakes, reuse keys, gates, fallbacks and
@@ -1611,6 +1622,10 @@ Build the browser with `VITE_CLERK_PUBLISHABLE_KEY=''` and `node --env-file=DIR/
 **Restore:** start a fresh instance, import first, then deploy: `npx convex import backup.zip --env-file ...` and then `npx convex deploy`. Deploying a newer schema first can clash table IDs. A restored snapshot can bring back older grants, so recheck current access.
 
 **Backend upgrade:** create a fresh instance with the new pin and restore a snapshot into it. Keep the old instance until you accept the result. Rollback restores a snapshot into a fresh instance on the old pin.
+
+Before a save-writer rollback, invoke `projectMetricSaveHeadBackfill:invalidate` with the project ID and an operation ID. Keep the release that normalizes private save statuses as the rollback floor. After redeploy, the first save starts bounded repair.
+
+After the save writer deploys, invoke `projectMetricSaveHeadBackfill:start` once per existing project with the project ID and a fresh operation ID. Its bounded chain covers the old saves.
 
 **Storage:** a self-hosted instance stores bytes in R2 like every deployment; there is no Convex byte mode. Set the `R2_*` settings, or `R2_ENDPOINT` for another S3-compatible bucket. Without them, every byte write fails with `R2_NOT_CONFIGURED`. File-inclusive snapshots hold only legacy copies, not the bucket. The launcher accepts an optional private dotenv file as a third `start` argument. It sets native S3 storage with five buckets (`S3_STORAGE_EXPORTS_BUCKET`, `_SNAPSHOT_IMPORTS_`, `_MODULES_`, `_FILES_`, `_SEARCH_`) and `AWS_*` credentials. Changing the argument on an existing database does not move its files. Restore a snapshot into a fresh instance instead.
 

@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { recordsFixture } from './hosted-records-fixture.mjs';
 import {
@@ -23,6 +24,8 @@ import { HOSTED_SNAPSHOT_EMPTY_ROOT, hostedSnapshotPageRoot } from '../dist/host
 const store = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const snapshots = await import(moduleUrl('../convex/projectHostedSnapshots.ts'));
 const recordReads = await import(moduleUrl('../convex/projectHostedRecordReads.ts'));
+const metricSaves = await import(moduleUrl('../convex/projectMetricSaveHeads.ts'));
+const metricBackfill = await import(moduleUrl('../convex/projectMetricSaveHeadBackfill.ts'));
 const reads = await import(moduleUrl('../convex/projectHostedSnapshotRead.ts'));
 const projection = await import(moduleUrl('../convex/projectHostedProjection.ts'));
 const operations = await import(moduleUrl('../convex/projectHostedOperations.ts'));
@@ -143,6 +146,17 @@ test('canonical Lane/save/Candidate/job versions have exact indexed identity, si
       code('WORK_OPERATION_CHANGED'),
     );
   }
+  const saveRow = await store.readHostedRecord(s.ctx, { ...s.auth, kind: 'save', key: sv.id });
+  const facts = [...s.tables.projectMetricFacts.values()].map(({ _id, _creationTime, ...row }) => row);
+  assert.deepEqual(facts, [
+    {
+      projectId: s.auth.projectId,
+      key: canonicalPayload(['save-head', sv.laneId, sv.head]),
+      sourceCreatedAt: saveRow._creationTime,
+      sourceId: sv.id,
+      value: sv.at,
+    },
+  ]);
   const firstHead = await store.recordHead(s.ctx, s.auth.projectId, 'lane', l.id);
   const sibling = { ...lane(), intentId: l.intentId };
   await s.put(sibling);
@@ -606,6 +620,7 @@ test('generic Work metadata copies cannot publish a clean Candidate outside comp
   assert.equal([...s.tables.projectHostedRecords.values()].filter(row => row.kind === 'candidate').length, 0);
 });
 
+// Reader-first rollout: immutable save records, rather than a mutable Lane, own historical attribution.
 test('save-head marking preserves public saved filters and canonical record status', async () => {
   const s = await setup();
   const l = lane();
@@ -641,7 +656,94 @@ test('save-head marking preserves public saved filters and canonical record stat
   assert.equal((await read({ id: second.id, cursor: null })).record.status, 'saved');
 });
 
-// Reader-first rollout: immutable save records, rather than a mutable Lane, own historical attribution.
+test('initial save fact backfill schedules one bounded chain and replays safely', async () => {
+  const s = await setup();
+  const l = lane();
+  await s.put(l);
+  const record = save(l.id);
+  await s.put(record);
+  const projectId = s.auth.projectId;
+  const head = await store.recordHead(s.ctx, projectId, 'save', record.id);
+  const existing = [...s.tables.projectMetricFacts.values()].find(row => row.sourceId === record.id);
+  await s.ctx.db.delete(existing._id);
+  await s.ctx.db.patch(head._id, { status: 'saved' });
+  const tasks = [];
+  const ctx = {
+    ...s.ctx,
+    scheduler: {
+      runAfter: async (delay, ref, args) => {
+        tasks.push({ delay, name: getFunctionName(ref), args });
+        return 'synthetic-backfill';
+      },
+    },
+  };
+  const args = { projectId, operationId: randomUUID() };
+  const start = () => s.run('start', () => metricBackfill.start._handler(ctx, args));
+  assert.deepEqual(await start(), { scheduled: true, started: true });
+  assert.deepEqual(await start(), { scheduled: true, started: false });
+  assert.deepEqual(tasks, [{ delay: 0, name: 'projectMetricSaveHeadBackfill:backfillPage', args }]);
+  assert.deepEqual(await s.call('backfill', metricBackfill.backfillPage, args), {
+    complete: true,
+    inserted: 1,
+  });
+  assert.equal(await metricSaves.saveHeadsCovered(s.ctx, await s.ctx.db.get(projectId)), true);
+});
+
+test('save-head rollback falls back to canonical and the first save after redeploy resumes repair', async () => {
+  const s = await setup();
+  const repairs = [];
+  const repairName = 'projectMetricSaveHeadBackfill:backfillPage';
+  const ctx = {
+    ...s.ctx,
+    scheduler: {
+      async runAfter(delay, ref, args) {
+        if (getFunctionName(ref) !== repairName) return s.ctx.scheduler.runAfter(delay, ref, args);
+        repairs.push(args);
+        return 'synthetic-metric-save-repair';
+      },
+    },
+  };
+  const put = record =>
+    s.run('save', () => store.writeHostedRecord(ctx, { ...s.auth, record, expectedVersion: null }));
+  const l = lane();
+  await put(l);
+  const projectId = s.auth.projectId;
+  const covered = async () => metricSaves.saveHeadsCovered(s.ctx, await s.ctx.db.get(projectId));
+  const invalidate = operationId =>
+    s.call('invalidate', metricBackfill.invalidate, { projectId, operationId });
+  const rollbackSave = async () => {
+    const record = save(l.id);
+    await put(record);
+    const head = await store.recordHead(s.ctx, projectId, 'save', record.id);
+    const fact = [...s.tables.projectMetricFacts.values()].find(row => row.sourceId === record.id);
+    await s.ctx.db.delete(fact._id);
+    await s.ctx.db.patch(head._id, { status: 'saved' });
+    return record;
+  };
+
+  await put(save(l.id));
+  assert.equal(await covered(), true);
+  const unattended = await rollbackSave();
+  assert.equal(await covered(), false, 'the legacy status protects reports if invalidation was missed');
+  const operationId = randomUUID();
+  assert.equal(await invalidate(operationId), true);
+  assert.equal(await invalidate(operationId), false);
+  assert.equal(await covered(), false);
+  const legacy = await rollbackSave();
+  await put(save(l.id));
+  assert.equal(repairs.length, 1);
+  assert.deepEqual(repairs[0], { projectId, operationId });
+  assert.deepEqual(await s.call('repair save heads', metricBackfill.backfillPage, repairs[0]), {
+    complete: true,
+    inserted: 2,
+  });
+  assert.equal(await covered(), true);
+  assert([...s.tables.projectMetricFacts.values()].some(row => row.sourceId === unattended.id));
+  assert([...s.tables.projectMetricFacts.values()].some(row => row.sourceId === legacy.id));
+  await put(save(l.id));
+  assert.equal(repairs.length, 1);
+});
+
 test('retained source history keeps declared, unknown and person stamps across mixed saves and model switches', async () => {
   const s = await setup(),
     l = lane();

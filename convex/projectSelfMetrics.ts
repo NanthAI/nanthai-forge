@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { metricInputReferences } from './projectMetricInputReferences';
+import { saveHeadsCovered } from './projectMetricSaveHeads';
 import { journalLaneMetricsPage } from './projectJournalLaneMetrics';
 import { capsuleMetricsPage } from './projectLandingCapsuleMetrics';
 import { capsuleAttempt } from './projectLandingCapsuleStore';
@@ -137,6 +138,10 @@ export const page = query({
     cursor: v.union(v.string(), v.null()),
     contextDays: v.optional(v.number()),
     compactRuns: v.optional(v.boolean()),
+    exactSaveHeads: v.optional(v.boolean()),
+    saveHeadReferences: v.optional(
+      v.array(v.object({ laneId: v.string(), version: v.number(), head: v.string() })),
+    ),
     inputReferences: v.optional(
       v.array(v.object({ laneId: v.string(), version: v.number(), head: v.string() })),
     ),
@@ -158,6 +163,16 @@ export const page = query({
         Math.max(0, Number.isFinite(input.contextDays) ? input.contextDays! : 30),
       );
       const context = from - contextDays * 86400000;
+      if (input.exactSaveHeads || input.saveHeadReferences)
+        invariant(
+          input.inputReferences &&
+            (input.exactSaveHeads
+              ? input.stream === 'saves' && !input.saveHeadReferences
+              : input.stream === 'lanes' && input.cursor === null) &&
+            (await saveHeadsCovered(ctx, project)),
+          'EVIDENCE_CHANGED',
+          'Restart metrics with the current save-head coverage.',
+        );
       if (input.inputReferences) {
         invariant(
           input.stream === 'lanes' || input.stream === 'saves',
@@ -173,7 +188,22 @@ export const page = query({
             context,
             to,
             input.cursor,
+            input.exactSaveHeads,
           )),
+          ...(input.saveHeadReferences
+            ? {
+                saveHeadsPage: await metricInputReferences(
+                  ctx,
+                  input.projectId,
+                  'saves',
+                  input.saveHeadReferences,
+                  context,
+                  to,
+                  null,
+                  true,
+                ),
+              }
+            : {}),
           inputReferencesVersion: 1,
           contextFrom: new Date(context).toISOString(),
           cutover: project.sourceCutover?.at ?? null,
@@ -461,6 +491,7 @@ export const page = query({
           ? {
               audits: await mainAuditEvents(ctx, input.projectId, from, to),
               ...(await landingSpeedSummary(ctx, input.projectId)),
+              ...((await saveHeadsCovered(ctx, project)) ? { exactSaveHeads: true } : {}),
             }
           : {}),
         contextFrom: new Date(context).toISOString(),
