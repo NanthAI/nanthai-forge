@@ -57,7 +57,17 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
       '.github/workflows/release.yml': "on:\\n  push:\\n    tags: ['v*']\\n",
     };
     const mirror = q.has('nomirror') ? null : { repository: 'example/parser', at: 1800000000000 };
-    const check = q.has('chosen') ? { kind: 'ci-file', repository: 'example/parser', workflow: '.github/workflows/ci.yml', chosenAt: 1800000000000 } : null;
+    const check = q.has('dispatched')
+      ? { kind: 'forge-runner', repository: 'example/parser', publicLogs: false, chosenAt: 1800000000000 }
+      : q.has('chosen') ? { kind: 'ci-file', repository: 'example/parser', workflow: '.github/workflows/ci.yml', chosenAt: 1800000000000 } : null;
+    if (q.has('dispatched')) {
+      delete files['.github/workflows/ci.yml'];
+      files['.github/workflows/convex-deploy.yml'] = "on:\\n  push:\\n    branches: [main]\\n    paths: ['convex/**']\\n";
+      files['.github/workflows/forge-check.yml'] = 'on: workflow_dispatch\\n';
+    }
+    const sourceReady = q.has('pause-source')
+      ? new Promise(resolve => { window.releaseWorkflowFiles = resolve; })
+      : Promise.resolve();
     if (q.has('covered')) files['.github/workflows/ci.yml'] = "on:\\n  push:\\n    branches: [main, 'forge/candidates/**']\\n";
     const landings = q.has('landed') ? [{ title: 'Add the trigger line', committedAt: '2027-01-15T10:09:00.000Z', checkRunIds: ['run-1'] }] : [];
     const setup = { owner: 'ada', viewerIsOwner: true, created: { at: 1800000000000, by: 'ada' }, repository: { fullName: 'example/parser', at: 1800000000000, by: 'ada' }, mirror, check, firstLanding: null, approvalsAnswered: false };
@@ -79,6 +89,7 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
       },
       action: async (ref, args) => {
         window.calls.push({ name: getFunctionName(ref), args });
+        await sourceReady;
         if (args.want === 'more' && args.path === '') return JSON.stringify({ state: HEAD, dirs: [{ path: '', entries: rootNames.map(name => ({ name, path: name, kind: name.includes('.') && name !== '.github' ? 'file' : 'dir' })), total: rootNames.length, next: null }] });
         if (args.want === 'more') return JSON.stringify({ state: HEAD, dirs: [{ path: args.path, entries: Object.keys(files).map(path => ({ name: path.split('/').at(-1), path, kind: 'file' })), total: Object.keys(files).length, next: null }] });
         const text = files[args.path];
@@ -249,6 +260,55 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
     'a connected check reads no source',
   );
   await layouts('checks-landed');
+
+  await t.test('the recorded CI and workflow are selected before any workflow files arrive', async () => {
+    await page.goto(
+      'https://forge.test/-/example/parser/settings/checks?dispatched=1&landed=1&pause-source=1',
+    );
+    await page.getByRole('button', { name: 'Change', exact: true }).click();
+    await page.getByText(/Looking in .*\.github\/workflows/).waitFor();
+    const current = workflows.getByRole('radio', { name: /forge-check\.yml/ });
+    assert.equal(
+      await cis.getByRole('radio', { name: 'GitHub Actions' }).getAttribute('aria-checked'),
+      'true',
+    );
+    assert.equal(await current.getAttribute('aria-checked'), 'true');
+    assert.equal(await workflows.getByRole('radio').count(), 1);
+    assert.equal(await page.getByRole('button', { name: /^Use .*\.yml$/ }).count(), 0);
+    assert.equal(
+      await page.evaluate(() => window.calls.filter(call => call.name === 'projectSetup:read').length),
+      1,
+    );
+    await page.evaluate(() => window.releaseWorkflowFiles());
+  });
+
+  await t.test('the dispatch-only check stays selected beside a path-filtered deploy workflow', async () => {
+    await page.goto('https://forge.test/-/example/parser/settings/checks?dispatched=1&landed=1');
+    await page.getByRole('button', { name: 'Change', exact: true }).click();
+    const current = workflows.getByRole('radio', { name: /forge-check\.yml/ });
+    const deploy = workflows.getByRole('radio', { name: /convex-deploy\.yml/ });
+    await deploy.waitFor();
+    assert.equal(await current.count(), 1);
+    assert.equal(await current.getAttribute('aria-checked'), 'true');
+    assert.equal(await current.isEnabled(), true);
+    assert.match(await current.textContent(), /Forge starts this workflow to check landings/);
+    assert.equal(await deploy.getAttribute('aria-checked'), 'false');
+    assert.match(await deploy.textContent(), /only when some paths change/);
+    assert.equal(await page.getByRole('button', { name: 'Use convex-deploy.yml' }).count(), 0);
+    await deploy.click();
+    await page.getByRole('button', { name: 'Use convex-deploy.yml' }).waitFor();
+    await current.click();
+    assert.equal(await page.getByRole('button', { name: 'Use convex-deploy.yml' }).count(), 0);
+    assert.equal(
+      await page.evaluate(
+        () => window.calls.filter(call => call.name === 'projectHostedCheckDefinitions:configure').length,
+      ),
+      0,
+    );
+    await page.getByRole('button', { name: 'Check settings for agents' }).click();
+    await page.getByText(/The owner chooses the check on this page/).waitFor();
+    await layouts('checks-dispatched');
+  });
 
   // How a landing is checked: one shut line per setting with its value and source; the explanation opens in place.
   // While a person approves each landing nothing is grouped, so no grouping setting is listed.

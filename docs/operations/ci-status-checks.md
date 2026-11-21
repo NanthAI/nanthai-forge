@@ -26,17 +26,20 @@ project setting.
    ```
 
 On the web, the owner starts from Settings → Landing and checks, which asks "Which CI do you
-have?": GitHub Actions, GitLab CI, another CI or your own machines, or no CI yet. The answer
-main's own files point to is chosen ahead (workflow files, `.gitlab-ci.yml`, or another CI's
-file in the root folder). Every answer leads to a route that works today: GitHub Actions to
+have?": GitHub Actions, GitLab CI, another CI or your own machines, or no CI yet. The project's
+current check sets the initial choice as soon as the chooser opens. If the project has yet to
+choose a check, the page suggests a CI based on main's files (workflow files, `.gitlab-ci.yml`,
+or another CI's file in the root folder). Every answer leads to a route that works today: GitHub Actions to
 the steps below, any other CI to a [machine you run](self-hosted-runner.md) (Forge cannot
 publish to GitLab yet), and no CI to one command on that machine or on
 [Forge's check workflow](github-actions-checks.md).
 
-For GitHub Actions the page does step 3: it lists the workflows on main, says which can check
-a landing (a tags-only, schedule-only or pull-request-only workflow cannot), shows the exact
-step 2 change for the chosen file and selects it with one press; the server derives the pins,
-so there are no placeholder values.
+For GitHub Actions the page selects the current workflow immediately. When the current runner is
+Forge's GitHub Actions runner, the page shows the workflow Forge starts directly. As files arrive,
+the page lists other workflows on main and shows whether each can check a landing through a push
+to the mirror. Choosing a different workflow on the page applies step 3. The page shows the exact
+step 2 change where needed, and the server derives the pins. The **Check settings for agents**
+chip shows the terminal command for reading the settings.
 
 Choosing a file is not the end of setup. Until a landing has been checked by it, the page says
 "No landing checked yet" and what stands in the way: the file on main does not run on Forge's

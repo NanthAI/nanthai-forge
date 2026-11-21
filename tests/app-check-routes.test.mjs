@@ -43,7 +43,7 @@ test('a trigger that already runs on every branch, or on Forge’s, needs no cha
   }
 });
 
-test('tags-only, schedule-only, pull-request-only and by-hand workflows are not offered to decide a landing', () => {
+test('without a branch push, a workflow cannot check a landing through the mirror', () => {
   const cases = {
     "on:\n  push:\n    tags: ['v*']\n": 'tags',
     "on:\n  schedule:\n    - cron: '0 3 * * *'\n": 'schedule',

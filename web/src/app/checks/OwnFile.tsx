@@ -10,7 +10,7 @@ import { A } from '../frames';
 import { CommandBlock } from '../start/parts';
 import { chooseCiFile, triggerLine, workflowProblem } from './choose-ci';
 import type { Workflows } from './use-workflows';
-import { cannotDecide, preferred, type FoundWorkflow, type TriggerChange } from './workflows';
+import { cannotDecide, preferred, type Trigger, type TriggerChange } from './workflows';
 
 const short = (path: string) => path.split('/').at(-1) ?? path;
 
@@ -31,8 +31,7 @@ export function Change({ path, change }: { path: string; change: TriggerChange }
   );
 }
 
-function workflowSub(entry: FoundWorkflow) {
-  const trigger = entry.trigger;
+function workflowSub(trigger: Trigger | null) {
   if (!trigger) return 'Not opened: more workflow files than this page reads.';
   if (trigger.kind === 'unknown') return 'Forge could not tell what it runs on.';
   const no = cannotDecide(trigger);
@@ -41,6 +40,40 @@ function workflowSub(entry: FoundWorkflow) {
     ? ' It runs only when some paths change, so a landing that touches none is not checked.'
     : '';
   return `${trigger.covers ? 'Runs on push, including Forge’s branches.' : 'Runs on push. Needs one trigger line.'}${filter}`;
+}
+
+function WorkflowChoice({
+  path,
+  fact,
+  checked,
+  disabled,
+  onPick,
+}: {
+  path: string;
+  fact: string;
+  checked: boolean;
+  disabled?: boolean;
+  onPick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      className="row choice"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={onPick}
+    >
+      <span className="rd" aria-hidden="true" />
+      <span>
+        <b className="mono" translate="no">
+          {path}
+        </b>
+        <span className="sub">{fact}</span>
+      </span>
+      <span />
+    </button>
+  );
 }
 
 function TypedFile({ onUse, busy }: { onUse: (path: string) => void; busy: boolean }) {
@@ -88,6 +121,7 @@ export function OwnFile({
   result,
   retry,
   mirror,
+  current,
   mirrorHref,
   onDone,
 }: {
@@ -97,14 +131,34 @@ export function OwnFile({
   result: Workflows;
   retry: () => void;
   mirror: string | null;
+  current: { path: string; repository: string | null; dispatched: boolean } | null;
   mirrorHref: string;
   onDone: () => void;
 }) {
   const client = useConvex();
   const found = result.kind === 'found' ? result.found : [];
-  const [picked, setPicked] = useState<string | undefined>();
-  const chosen = picked ?? preferred(found);
-  const entry = found.find(item => item.path === chosen);
+  const [picked, setPicked] = useState<string | null>();
+  // Match the repository as well as the path. A separate runner repository can have its own copy.
+  const onMirror = !!mirror && current?.repository?.toLowerCase() === mirror.toLowerCase();
+  const currentFile = onMirror ? found.find(item => item.path === current?.path) : undefined;
+  const alternatives = found.filter(
+    item => item !== currentFile || (current?.dispatched && (!item.trigger || !cannotDecide(item.trigger))),
+  );
+  const chosen = picked === undefined ? (current ? null : preferred(found)) : picked;
+  const entry =
+    chosen === null
+      ? current?.dispatched
+        ? undefined
+        : currentFile
+      : alternatives.find(item => item.path === chosen);
+  const canUse = chosen && entry && !(entry.trigger && cannotDecide(entry.trigger));
+  const currentFact =
+    current &&
+    (current.dispatched
+      ? 'Forge starts this workflow to check landings.'
+      : currentFile
+        ? workflowSub(currentFile.trigger)
+        : '');
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState('');
   const operation = useRef<{ id: string; workflow: string } | null>(null);
@@ -133,8 +187,34 @@ export function OwnFile({
     <>
       <Band
         title="Which workflow must pass?"
-        hint={found.length > 1 ? 'one decides; the others keep running as they do today' : undefined}
+        hint={
+          alternatives.length + Number(!!current) > 1
+            ? 'one decides; the others keep running as they do today'
+            : undefined
+        }
       />
+      {current || alternatives.length ? (
+        <div role="radiogroup" aria-label="Which workflow must pass">
+          {current ? (
+            <WorkflowChoice
+              path={current.path}
+              fact={`${current.repository ? `Current check on ${current.repository}.` : 'Current check.'}${currentFact ? ` ${currentFact}` : ''}`}
+              checked={chosen === null}
+              onPick={() => setPicked(null)}
+            />
+          ) : null}
+          {alternatives.map(item => (
+            <WorkflowChoice
+              key={item.path}
+              path={item.path}
+              fact={`${item.path === current?.path ? 'As a check through the mirror. ' : ''}${workflowSub(item.trigger)}`}
+              checked={chosen === item.path}
+              disabled={!!(item.trigger && cannotDecide(item.trigger))}
+              onPick={() => setPicked(item.path)}
+            />
+          ))}
+        </div>
+      ) : null}
       {noMain ? (
         <p className="quietline">{project} has no main yet, so there is no workflow to read.</p>
       ) : result.kind === 'failed' ? (
@@ -148,33 +228,7 @@ export function OwnFile({
         <p className="quietline">Looking in {project}’s .github/workflows…</p>
       ) : found.length === 0 ? (
         <p className="quietline">{project} has no workflow file on main.</p>
-      ) : (
-        <div role="radiogroup" aria-label="Which workflow must pass">
-          {found.map(item => {
-            const no = item.trigger ? cannotDecide(item.trigger) : null;
-            return (
-              <button
-                type="button"
-                key={item.path}
-                role="radio"
-                className="row choice"
-                aria-checked={chosen === item.path}
-                disabled={!!no}
-                onClick={() => setPicked(item.path)}
-              >
-                <span className="rd" aria-hidden="true" />
-                <span>
-                  <b className="mono" translate="no">
-                    {item.path}
-                  </b>
-                  <span className="sub">{workflowSub(item)}</span>
-                </span>
-                <span />
-              </button>
-            );
-          })}
-        </div>
-      )}
+      ) : null}
       {entry && trigger && !trigger.covers ? (
         <div className="pad gs-stack">
           <div className="meta t2">
@@ -191,10 +245,10 @@ export function OwnFile({
       ) : null}
       {!mirror ? (
         <p className="quietline">
-          A CI file checks through the GitHub mirror, and it is off.{' '}
+          To choose a workflow that runs on push, turn on the GitHub mirror.{' '}
           <A href={mirrorHref}>Turn on the mirror</A>
         </p>
-      ) : entry && !(entry.trigger && cannotDecide(entry.trigger)) ? (
+      ) : canUse ? (
         <div className="pad btns">
           <Key kind="rec" disabled={busy} onClick={() => void use(entry.path)}>
             {busy ? 'Choosing…' : `Use ${short(entry.path)}`}

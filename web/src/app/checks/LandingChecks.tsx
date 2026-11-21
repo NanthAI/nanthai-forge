@@ -2,8 +2,8 @@
 // Settings > Landing and checks (Items 871e9b73, 0c9207b8): which check decides a landing, who approves landings and
 // the landing mode in effect, with the one press that changes each. A fixed frame. It reads once when it opens (the
 // setup read, the policy and the main audit's landing view: three calls) and again only after its own write; an open
-// tab holds no subscription. While the owner chooses a check, CheckRoutes starts from the CI the project has (the CI
-// files on main, use-workflows.ts). With a check chosen, one more read says whether it has decided a landing yet
+// tab holds no subscription. CheckRoutes starts from the setup read's check setting, and reads CI files on main
+// for workflow facts and first-time setup. With a check chosen, one more read says whether it has decided a landing yet
 // (FirstLanding.tsx), because a saved setting alone is not a connected CI. Settings that have no effect are not
 // offered as choices. How a landing is checked is one folded line per setting, from the policy already read
 // (LandingSettings.tsx); the Automatic and Manual switch appears once its engine (Item bd0f850e) is on main.
@@ -156,18 +156,19 @@ export default function LandingChecks({ projectId, route, projectName, feed }: P
       <Head trail={trail} sentence={sentence(facts)}>
         <button
           type="button"
-          className="cli mono"
+          className="cli"
           aria-expanded={cli}
           aria-controls="checks-cli"
           onClick={() => setCli(!cli)}
         >
-          <span>nforge agent . check-settings &#39;&#123;&#125;&#39;</span>
+          <span>Check settings for agents</span>
         </button>
       </Head>
       {cli ? (
-        <pre className="cli-out mono" id="checks-cli">
+        <pre className="cli-out mono" id="checks-cli" tabIndex={0}>
           <b>$ nforge agent . check-settings &#39;&#123;&#125;&#39;</b>
-          {'\n'}# prints the check definitions, the runner, who approves landings and what still blocks one
+          {'\n'}# The owner chooses the check on this page.
+          {'\n'}# Agents read the same settings with this command.
         </pre>
       ) : null}
       <Region
@@ -223,6 +224,7 @@ export default function LandingChecks({ projectId, route, projectName, feed }: P
             route={route}
             mainHead={feed === undefined ? undefined : (feed.main?.head ?? null)}
             mirror={mirrorRepository}
+            check={setup.check}
             onDone={refresh}
           />
         ) : null}

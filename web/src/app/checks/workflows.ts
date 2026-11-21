@@ -130,7 +130,7 @@ export function cannotDecide(trigger: Trigger): string | null {
     case 'schedule':
       return 'Runs on a schedule only, so it cannot check a landing.';
     case 'manual':
-      return 'Runs only when started by hand, so it cannot check a landing.';
+      return 'Runs on request. It needs a push trigger to check a landing through the mirror.';
     case 'other':
       return 'Has no push trigger, so it cannot check a landing.';
     case 'unknown':

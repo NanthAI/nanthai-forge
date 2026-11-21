@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Choosing the check that decides a landing, starting from the CI the project has (Item 0c9207b8). The first question
-// is the CI itself: four answers drawn alike, each with the one fact Forge found for it on main, and the one main's
-// files point to chosen ahead. Every answer leads to a route that works today: GitHub Actions to its workflows
+// is the CI itself: four answers drawn alike. The recorded check sets the initial answer, with main's files as
+// a fallback for first-time setup. Every answer leads to a route that works today: GitHub Actions to its workflows
 // (OwnFile.tsx), any other CI to a machine you run, no CI to one command. Who pays and what a pass proves are said for
 // the route in front of the person, not for all of them. Reads: use-workflows.ts, only while this chooser is open.
 import { useState } from 'react';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { Band, Row } from '../../ds';
 import { hrefFor, type AppRoute } from '../paths';
+import type { SetupView } from '../start/setup-model';
 import { CI_ORDER, ciFact, ciPreferred, ciTitles, type Ci } from './ci';
 import { OwnFile } from './OwnFile';
 import { useWorkflows } from './use-workflows';
@@ -47,20 +48,28 @@ export function CheckRoutes(props: {
   route: ProjectRoute;
   mainHead: string | null | undefined;
   mirror: string | null;
+  check: SetupView['check'];
   onDone: () => void;
 }) {
   const { result, retry } = useWorkflows(props.projectId, props.mainHead, true);
   const [picked, setPicked] = useState<Ci | undefined>();
   const found = result.kind === 'found' ? result : null;
   const workflows = found?.found.length ?? 0;
-  // The person's own answer wins; otherwise the CI whose files are on main. With no main there is nothing to read.
-  const ci =
-    picked ??
-    (found
-      ? ciPreferred(found.files, workflows, found.complete)
-      : props.mainHead === null
-        ? 'none'
-        : undefined);
+  const { check } = props;
+  const current =
+    check?.kind === 'forge-runner'
+      ? { path: '.github/workflows/forge-check.yml', repository: check.repository, dispatched: true }
+      : check?.kind === 'ci-file'
+        ? { path: check.workflow, repository: check.repository, dispatched: false }
+        : null;
+  // A file read can suggest a choice only when the project has no recorded check.
+  const recorded = current ? 'github' : check ? 'other' : undefined;
+  const suggested = found
+    ? ciPreferred(found.files, workflows, found.complete)
+    : props.mainHead === null
+      ? 'none'
+      : undefined;
+  const ci = picked ?? recorded ?? suggested;
   const project = props.route.project;
   return (
     <>
@@ -100,6 +109,7 @@ export function CheckRoutes(props: {
             result={result}
             retry={retry}
             mirror={props.mirror}
+            current={current}
             mirrorHref={hrefFor({ ...props.route, section: 'mirror', rest: '' })}
             onDone={props.onDone}
           />
