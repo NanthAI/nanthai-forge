@@ -20,11 +20,12 @@ export const LANE_PAGE = 100;
 const parse = <T>(value: string | undefined): T | undefined =>
   value === undefined ? undefined : (JSON.parse(value) as T);
 
-export function useLaneMeta(projectId: Id<'hostedProjects'>) {
+export function useLaneMeta(projectId: Id<'hostedProjects'>, byline?: true) {
   const read = useSafeQuery(api.projectHostedLiveLanes.list, {
     projectId,
     cursor: null,
     limit: LANE_PAGE,
+    ...(byline ? { byline } : {}),
   });
   const page = parse<{ page: LaneMeta[]; isDone: boolean }>(read.value);
   return { lanes: page?.page, complete: page?.isDone ?? false, error: read.error };

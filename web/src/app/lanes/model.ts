@@ -15,6 +15,10 @@ export type LaneMeta = {
   intentId: string;
   intent: string | null;
   actor: string;
+  mine?: boolean;
+  agent?: boolean;
+  agentRun?: string;
+  agentClient?: string;
   lastSaveAt: string | null;
   landing: { submissionId: string; state: string } | null;
   dormant?: boolean;
@@ -87,6 +91,10 @@ export type YardRow = {
   stage: LineStage;
   title: string;
   actor: string | null;
+  mine?: boolean;
+  agent?: boolean;
+  agentRun?: string;
+  agentClient?: string;
   /** The state glyph and colour, and the word beside it (lane-state.ts, the same as every other screen). */
   state: StateKind;
   glyph: StateWord;
@@ -299,6 +307,10 @@ export function buildYard(
       stage: shown.stage,
       title: lane?.intent ?? entry?.intentTitle ?? `Lane ${short(mark.laneId)}`,
       actor: lane?.actor ?? null,
+      ...(lane?.mine !== undefined ? { mine: lane.mine } : {}),
+      ...(lane?.agent ? { agent: lane.agent } : {}),
+      ...(lane?.agentRun ? { agentRun: lane.agentRun } : {}),
+      ...(lane?.agentClient ? { agentClient: lane.agentClient } : {}),
       changedAt: mark.changedAt,
       overlap: mark.overlap,
       untitled: !lane?.intent && !entry?.intentTitle,
@@ -447,7 +459,7 @@ export function situation(yard: Yard): { lead: string; rest: string } {
 export type Filter = 'all' | 'needs' | 'mine';
 export function filterRows(rows: readonly YardRow[], filter: Filter, viewer: string | undefined) {
   if (filter === 'needs') return rows.filter(row => row.band === 'needs');
-  if (filter === 'mine') return rows.filter(row => !!viewer && row.actor === viewer);
+  if (filter === 'mine') return rows.filter(row => row.mine ?? (!!viewer && row.actor === viewer));
   return rows;
 }
 

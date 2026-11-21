@@ -15,6 +15,7 @@ import { landingRow } from './projectHostedLandingStore';
 import { finishRow } from './projectHostedFinishWake';
 import { openApprovalRequests } from './projectHostedApprovals';
 import { messagesTo } from './projectNeedsFyi';
+import { splitAgentActor } from '../src/agent-slug';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { report } from './errors';
 import { invariant } from '../src/errors';
@@ -52,6 +53,8 @@ export const needsMeResult = v.object({
       title: v.union(v.string(), v.null()),
       actor: v.union(v.string(), v.null()),
       agent: v.union(v.string(), v.null()),
+      agentClient: v.optional(v.string()),
+      agentAuthored: v.optional(v.literal(true)),
       why: needsMeWhy,
       /** Forge's own words for the hold (the landing's recorded error), when it has them. */
       note: v.union(v.string(), v.null()),
@@ -143,6 +146,9 @@ async function reason(ctx: QueryCtx, projectId: Id<'hostedProjects'>, mark: Held
               : 'unknown';
   const ended = state?.timing?.ciEndedAt ?? state?.timing?.settledAt;
   const parentLaneId = why === 'dependency' && state ? await dependencyLane(ctx, projectId, state.id) : null;
+  const agentAuthored = state?.request.authorship
+    ? state.request.authorship.kind === 'agent'
+    : Boolean(row?.agentRun || row?.agentClient || state?.request.agent);
   return {
     why,
     note: state?.error?.message ? state.error.message.replace(/\s+/g, ' ').slice(0, NOTE_CHARS) : null,
@@ -150,6 +156,15 @@ async function reason(ctx: QueryCtx, projectId: Id<'hostedProjects'>, mark: Held
     ...(why === 'review' && state?.attemptId ? { attemptId: state.attemptId } : {}),
     since: ended ? Date.parse(ended) : mark.changedAt,
     parentLaneId,
+    submitter:
+      row && state
+        ? {
+            actor: row.actor,
+            agent: agentAuthored ? (row.agentRun ?? splitAgentActor(row.actor)?.agent ?? null) : null,
+            ...(agentAuthored && row.agentClient ? { agentClient: row.agentClient } : {}),
+            ...(agentAuthored ? { agentAuthored: true as const } : {}),
+          }
+        : null,
   } as const;
 }
 
@@ -220,16 +235,23 @@ export const read = query({
           .unique();
       const held = await Promise.all(
         shown.map(async mark => {
-          const [presence, { parentLaneId, ...why }] = await Promise.all([
+          const [presence, { parentLaneId, submitter, ...why }] = await Promise.all([
             presenceOf(mark.laneId),
             reason(ctx, projectId, mark),
           ]);
+          // A review is for the submitted landing; for other holds the byline names who
+          // acts next. Select only one account so privacy mapping reads no second person.
+          const by = why.why === 'review' ? (submitter ?? presence) : presence;
+          const stamp =
+            by && by.actor === submitter?.actor && by.agent === submitter.agent ? submitter : null;
           return {
             laneId: mark.laneId,
             intentId: presence?.intentId ?? null,
             title: await titleOf(presence),
-            actor: presence?.actor ?? null,
-            agent: presence?.agent ?? null,
+            actor: by?.actor ?? null,
+            agent: by?.agent ?? null,
+            ...(stamp?.agentClient ? { agentClient: stamp.agentClient } : {}),
+            ...(stamp?.agentAuthored ? { agentAuthored: stamp.agentAuthored } : {}),
             ...why,
             ...(parentLaneId
               ? { dependsOn: { laneId: parentLaneId, title: await titleOf(await presenceOf(parentLaneId)) } }

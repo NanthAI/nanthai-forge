@@ -310,7 +310,7 @@
   .ln { display: grid; grid-template-columns: minmax(0, 1fr); }
   .ln { position: relative; align-items: center; min-height: var(--row-h-lane); border-bottom: var(--rule) solid var(--line); color: inherit; }
   .ln .lab { padding: 10px var(--gut) 2px; min-width: 0; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 1px 10px; align-items: start; }
-  .ln .lab .av { grid-row: span 2; margin-top: 2px; }
+  .ln .lab > .av { grid-row: span 2; margin-top: 2px; }
   .ln .lab .ttl { font-weight: var(--w-strong); line-height: var(--lh-head); min-width: 0; }
   .ln .lab .meta { color: var(--text-2); font-size: var(--t-meta); min-width: 0; }
   .ln .actn { padding: var(--s-1) var(--gut) var(--s-2) 54px; display: flex; align-items: center; gap: 6px 10px; min-width: 0; flex-wrap: wrap; }
@@ -335,7 +335,7 @@
   .ln .shards { max-width: 110px; overflow: hidden; }
   .yard.dense .ln { min-height: var(--row-h-dense); }
   .yard.dense .ln .lab { grid-template-columns: 22px minmax(0, 1fr) auto; padding-block: var(--s-1); align-items: center; }
-  .yard.dense .ln .lab .av { grid-row: auto; width: 22px; height: 22px; margin: 0; }
+  .yard.dense .ln .lab > .av { grid-row: auto; width: 22px; height: 22px; margin: 0; }
   .yard.dense .ln .lab .ttl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--w-medium); }
   .yard.dense .ln .lab .meta { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .yard.dense .ln .actn .why { -webkit-line-clamp: 1; }
@@ -360,7 +360,7 @@
       .yard .ln .xnote { display: none; }
     }
     @container (width > 1100px) {
-      .yard { --lab: 300px; --actw: 330px; }
+      .yard { --lab: 352px; --actw: 330px; }
     }
   }
   .ovl { border-bottom: var(--rule) solid var(--line); }

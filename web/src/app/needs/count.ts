@@ -26,6 +26,8 @@ export type HeldLane = {
   title: string | null;
   actor: string | null;
   agent: string | null;
+  agentClient?: string;
+  agentAuthored?: true;
   why: HeldWhy;
   note: string | null;
   submissionId: string | null;

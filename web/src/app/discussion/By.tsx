@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Avatar, Who } from '../../ds';
-import { whoLinks, type WhoProject } from '../who-links';
+import { Avatar } from '../../ds';
+import { RecordedWho } from '../RecordedWho';
+import type { WhoProject } from '../who-links';
 import type { Writer } from './model';
 
 export function By({ by, project }: { by: Writer; project?: WhoProject | undefined }) {
@@ -18,12 +19,7 @@ export function By({ by, project }: { by: Writer; project?: WhoProject | undefin
   return (
     <span className="by-who" data-kind={by.kind}>
       {by.verified ? (
-        <Who
-          handle={handle}
-          model={by.model}
-          nofor={hiddenAgent}
-          {...(by.verified && !hiddenAgent ? whoLinks(handle, project) : {})}
-        />
+        <RecordedWho handle={handle} model={by.model} project={project} />
       ) : (
         <>
           <Avatar handle={by.label || '?'} />

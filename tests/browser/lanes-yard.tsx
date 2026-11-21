@@ -18,12 +18,14 @@ import {
   type QueueEntry,
 } from '../../web/src/app/lanes/model';
 import { WaitRow } from '../../web/src/app/lanes/Touching';
+import { HistoryView } from '../../web/src/app/lanes/History';
 import { Yard } from '../../web/src/app/lanes/Yard';
 import type { LineFeed } from '../../web/src/app/Line';
 
 const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
 
+const project = { handle: 'sample-owner', project: 'sample-project' };
 const NOW = Date.parse('2026-11-17T14:20:00Z');
 const at = (minutesAgo: number) => new Date(NOW - minutesAgo * 60_000).toISOString();
 const ids = {
@@ -83,9 +85,13 @@ const meta = (
   landing: null,
 });
 const lanes = [
-  meta(ids.held, 'pages', 'Public pages: share cards, sitemap and page titles', 'mara/quiet-otter', 58),
+  {
+    ...meta(ids.held, 'pages', 'Public pages: share cards, sitemap and page titles', 'mara', 58),
+    agentRun: 'quiet-otter',
+    agentClient: 'codex:gpt-example',
+  },
   meta(ids.oldA, 'pages', 'Public pages: share cards, sitemap and page titles', 'mara/quiet-otter', 290),
-  meta(ids.oldB, 'pages', 'Public pages: share cards, sitemap and page titles', 'mara/salt-wren', 292),
+  meta(ids.oldB, 'pages', 'Public pages: share cards, sitemap and page titles', 'mara', 292),
   meta(ids.first, 'cli', 'Hosted CLI and agent workflow papercuts', 'devon/brisk-heron', 47),
   meta(ids.second, 'stamp', 'Stamp every save and landing with who made it', 'devon/amber-finch', 14),
   // Item e1633718: parked on a named holder, with the reason under it.
@@ -181,6 +187,7 @@ createRoot(document.getElementById('root')!).render(
       hint="stuck work first"
     >
       <Yard
+        project={project}
         rows={yard.rows}
         checking={yard.checking}
         hrefOf={id => `#${id}`}
@@ -189,6 +196,48 @@ createRoot(document.getElementById('root')!).render(
         sharesHref={id => `#touching-${id}`}
       />
     </Region>
+    {params.has('history') ? (
+      <HistoryView
+        project={project}
+        trail={[]}
+        page={{
+          started: false,
+          through: null,
+          newest: 3,
+          next: null,
+          scanned: 3,
+          rows: [
+            { sequence: 3, actor: 'mara', agent: true, agentRun: 'quiet-otter', model: 'gpt-example' },
+            { sequence: 2, actor: null, agent: true, agentRun: 'amber-fox', model: 'unknown' },
+            { sequence: 1, actor: 'devon', agent: false, agentRun: null, model: null },
+          ].map(stamp => ({
+            ...stamp,
+            title: ['Preserve read marks', 'Trace review order', 'Handle split UTF-8'][stamp.sequence - 1]!,
+            receiptId: String(stamp.sequence),
+            at: at(2),
+            goal: null,
+            message: null,
+            item: null,
+            laneId: null,
+            automatic: true,
+            read: false,
+          })),
+        }}
+        error={false}
+        filter={{ unread: false, by: null, item: null }}
+        approvals={0}
+        needsMe="#needs"
+        laneHref={id => `#${id}`}
+        receiptHref={id => `#receipt-${id}`}
+        onFilter={() => {}}
+        onMark={() => {}}
+        onMarkAll={() => {}}
+        showEarlier={() => {}}
+        busy={false}
+        earlierFailed={false}
+        status={null}
+      />
+    ) : null}
     <Region title="Who waits on whom" weight="act" waiting={1} count={pairs.length}>
       {pairs.map(pair => (
         <WaitRow

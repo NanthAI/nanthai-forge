@@ -34,6 +34,8 @@ test('live Lanes are paged with joined Intent, actor, save and landing metadata;
     base: { head: hash, receiptId: randomUUID() },
     status: 'active',
   });
+  await s.ctx.db.insert('forgeAccounts', { owner: 'teammate', handle: 'synthetic-teammate' });
+  await s.ctx.db.insert('accountHandles', { owner: 'teammate', handle: 'synthetic-teammate' });
   const lanes = [];
   // The record fixture enforces <=4096 documents and <16 MiB read bytes per transaction.
   for (let i = 0; i < 105; i++) {
@@ -43,7 +45,7 @@ test('live Lanes are paged with joined Intent, actor, save and landing metadata;
       version: 0,
       at,
       intentId,
-      actor: 'owner',
+      actor: i === 104 ? 'teammate' : 'owner',
       base: { head: hash, receiptId: randomUUID() },
       head: hash,
       sourceVersion: 0,
@@ -57,6 +59,9 @@ test('live Lanes are paged with joined Intent, actor, save and landing metadata;
   const lane = lanes.at(-1);
   await s.put({
     kind: 'save',
+    authorship: { kind: 'agent' },
+    agentRun: 'amber-fox',
+    agentClient: 'codex:gpt-example',
     id: randomUUID(),
     version: 0,
     at,
@@ -98,7 +103,7 @@ test('live Lanes are paged with joined Intent, actor, save and landing metadata;
     value: '{}',
   });
   const first = JSON.parse(
-    await s.call('list', api.list, { projectId: s.auth.projectId, cursor: null, limit: 50 }),
+    await s.call('list', api.list, { projectId: s.auth.projectId, cursor: null, limit: 50, byline: true }),
   );
   assert.equal(first.page.length, 50);
   assert.equal(first.isDone, false);
@@ -107,9 +112,31 @@ test('live Lanes are paged with joined Intent, actor, save and landing metadata;
   assert.equal(first.page[0].intent, 'Synthetic outcome');
   // Members see the Forge handle, never the auth subject.
   assert.equal(first.page[0].actor, 'synthetic-owner');
+  assert.equal(first.page[0].mine, false, 'the owner who saved it did not start the Lane');
   assert.deepEqual(first.page[0].landing, { submissionId, state: 'checking', scope: 'intent' });
   const count = s.counts.at(-1);
   assert.equal(count.writes, 0);
+  const cli = JSON.parse(
+    await s.call('legacy', api.list, { projectId: s.auth.projectId, cursor: null, limit: 50 }),
+  );
+  assert.equal(cli.page[0].actor, 'synthetic-teammate', 'CLI retains the starter contract');
+  assert(s.counts.at(-1).documents >= count.documents, 'the byline does not also resolve the starter');
+  const { agent, agentRun, agentClient } = first.page[0];
+  assert.deepEqual(
+    { agent, agentRun, agentClient },
+    {
+      agent: true,
+      agentRun: 'amber-fox',
+      agentClient: 'codex:gpt-example',
+    },
+  );
+  const baseline = {
+    ...first,
+    page: first.page.map(({ agent, agentRun, agentClient, mine, ...row }) => row),
+  };
+  t.diagnostic(
+    `50 Lane rows, one stamped save: ${Buffer.byteLength(JSON.stringify(baseline))} → ${Buffer.byteLength(JSON.stringify(first))} reply bytes`,
+  );
   assert(count.documents <= 1100, JSON.stringify(count));
   assert(count.readBytes < 2 * 1024 * 1024, JSON.stringify(count));
   t.diagnostic(JSON.stringify(count));

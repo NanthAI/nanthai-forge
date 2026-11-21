@@ -17,6 +17,8 @@ export async function trackHostedOverlapLane(
   lane: z.infer<typeof hostedLaneSchema>,
   metadata?: {
     changes?: OverlapChange[];
+    /** The authenticated actor of a save that published a new head. */
+    savedBy?: string;
     complete?: boolean;
     baseSequence?: number;
     intent?: string;
@@ -84,6 +86,7 @@ export async function trackHostedOverlapLane(
     metadata?.agent === null
       ? undefined
       : (metadata?.agent ?? old?.agent ?? (origin?.actor === lane.actor ? origin.agent : undefined));
+  const savedBy = metadata?.savedBy === lane.actor ? (true as const) : (metadata?.savedBy ?? old?.savedBy);
   const open = ['active', 'paused', 'ready'].includes(lane.state);
   // Superseded lasts while the Lane stays open at the head it was set on; a save or reopen ends it.
   const superseded = old?.open && open && old.superseded?.laneHead === lane.head ? old.superseded : undefined;
@@ -92,6 +95,7 @@ export async function trackHostedOverlapLane(
     laneId: lane.id,
     intentId: lane.intentId,
     actor: lane.actor,
+    ...(savedBy ? { savedBy } : {}),
     ...(lane.holder?.sessionId
       ? {
           session: metadata?.session ??

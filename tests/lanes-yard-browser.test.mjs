@@ -77,7 +77,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
     });
     await page.goto(`https://forge.test/yard.html${query}`);
     await page
-      .locator('.yard a.ln')
+      .locator('.yard .ln')
       .first()
       .waitFor({ timeout: 10_000 })
       .catch(error => assert.fail(`${error.message}\n${errors.join('\n')}`));
@@ -88,7 +88,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
     return page;
   }
   const rows = page =>
-    page.locator('.yard a.ln').evaluateAll(nodes =>
+    page.locator('.yard .ln').evaluateAll(nodes =>
       nodes.map(node => ({
         title: node.querySelector('.ttl')?.textContent,
         meta: node.querySelector('.meta')?.textContent,
@@ -123,7 +123,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
         ],
       );
       assert.equal(new Set(pages.map(row => row.meta)).size, 3, 'three rows of one Item never look the same');
-      assert.match(pages[0].meta, /^9e8e8826 · 3 Lanes · /);
+      assert.match(pages[0].meta, /^9e8e8826 · 3 Lanes$/);
       assert.ok(!all.some(row => row.word === 'Check failed'), 'nothing here failed a check');
       const waiting = all.find(row => row.title.startsWith('Stamp every save'));
       assert.deepEqual(
@@ -179,7 +179,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
             'the resolution Lane first, the Lane it resolves below it',
           );
           // textContent holds the whole line even when the row cuts it: measure what is drawn.
-          const cut = await page.locator('.yard a.ln .meta').evaluateAll(nodes =>
+          const cut = await page.locator('.yard .ln .meta').evaluateAll(nodes =>
             nodes.flatMap(meta => {
               const box = meta.getBoundingClientRect();
               const mark = meta.querySelector('.mk');
@@ -212,13 +212,13 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
             if (!link) return [];
             return [
               {
-                title: item.querySelector('a.ln .ttl')?.textContent,
+                title: item.querySelector('.ln .ttl')?.textContent,
                 shown: link.textContent.replace(item.querySelector('.ln-sh .sr')?.textContent ?? '', ''),
                 href: link.getAttribute('href'),
-                nested: !!link.closest('a.ln'),
+                nested: Boolean(link.parentElement.closest('a')),
                 below:
                   link.getBoundingClientRect().top >=
-                  item.querySelector('a.ln').getBoundingClientRect().bottom - 0.5,
+                  item.querySelector('.ln').getBoundingClientRect().bottom - 0.5,
               },
             ];
           }),
@@ -247,6 +247,31 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
           /^Account Projects page in the redesign: shares /,
           'the link names its Lane to a screen reader',
         );
+      }
+    });
+
+    await t.test('Lane and identity links have separate targets, including on a phone', async t => {
+      const page = await open(t, PHONE, '?history');
+      const row = page.locator('.yard .ln').filter({ hasText: 'Public pages' }).first();
+      assert.match(
+        await row.getByRole('link', { name: 'quiet-otter' }).getAttribute('href'),
+        /lanes\/sessions\/mara\/quiet-otter$/,
+      );
+      assert.equal(await row.getByRole('link', { name: '@mara' }).getAttribute('href'), '/-/mara');
+      assert.match(await row.getByRole('link', { name: /Public pages/ }).getAttribute('href'), /^#/);
+      assert.equal(await row.locator('a a').count(), 0);
+      if (shots) {
+        for (const viewport of [DESK, PHONE]) {
+          await page.setViewportSize(viewport);
+          for (const theme of ['dark', 'light']) {
+            await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
+            await page
+              .locator('.row.hv')
+              .first()
+              .locator('..')
+              .screenshot({ path: join(shots, `history-byline-${viewport.width}-${theme}.png`) });
+          }
+        }
       }
     });
 

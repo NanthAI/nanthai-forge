@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The yard (DESIGN.md figures): every open Lane on the shell's four stops (Editing, Saved, In queue, Checking) and main, in bands, stuck work first. The
 // Checking and passed-waiting use the shell strip's counts. Each
-// row is a link to its Lane; the band that waits on the reader is the first stop. Static markup: no behaviour layer.
+// row opens its Lane; the band that waits on the reader is the first stop. Static markup: no behaviour layer.
 // A running check (Item ecd6e610) says how long it has run against the project's usual check, and its mark glides
 // along the Checking stop by a CSS animation drawn from the check's start: the browser moves it with no script per
 // frame and no server call. One timer at most, for the whole yard, armed only for the next minute its words change and
@@ -9,9 +9,11 @@
 // A Lane that saved a file another open Lane also saved says so under its row, "shares 3 files with 2 Lanes", linked to
 // Who is touching what for that Lane (Item f787005c); a link of its own, beside the row's link, never inside it.
 import { useEffect, useState, type CSSProperties } from 'react';
-import { Avatar, Band, State } from '../../ds';
+import { Band, State } from '../../ds';
 import { useReadsAsleep } from '../../live-reads';
 import { A } from '../frames';
+import { RecordedWho } from '../RecordedWho';
+import { declaredModel, recordedIdentity, type WhoProject } from '../who-links';
 import { passedWaiting, type lineStopCounts, type LineStage } from '../Line';
 import {
   CHECK_FROM,
@@ -38,6 +40,7 @@ const order: readonly BandName[] = ['needs', 'queue', 'work', 'quiet'];
 
 export function Yard({
   rows,
+  project,
   checking,
   hrefOf,
   dense,
@@ -45,6 +48,7 @@ export function Yard({
   sharesHref,
 }: {
   rows: readonly YardRow[];
+  project?: WhoProject | undefined;
   checking?: ReturnType<typeof lineStopCounts> | undefined;
   hrefOf: (laneId: string) => string;
   dense: boolean;
@@ -74,7 +78,14 @@ export function Yard({
               const shares = sharesHref ? sharesOf?.(row.laneId) : undefined;
               return (
                 <div role="listitem" key={row.laneId} className={shares ? 'ln-item sh' : 'ln-item'}>
-                  <LaneLine row={row} href={hrefOf(row.laneId)} dense={dense} now={now} glide={!asleep} />
+                  <LaneLine
+                    row={row}
+                    project={project}
+                    href={hrefOf(row.laneId)}
+                    dense={dense}
+                    now={now}
+                    glide={!asleep}
+                  />
                   {shares && sharesHref ? (
                     <div className="ln-sh">
                       <A className="lk" href={sharesHref(row.laneId)}>
@@ -116,18 +127,20 @@ function useCheckClock(rows: readonly YardRow[]) {
 
 function LaneLine({
   row,
+  project,
   href,
   dense,
   now,
   glide,
 }: {
   row: YardRow;
+  project?: WhoProject | undefined;
   href: string;
   dense: boolean;
   now: number;
   glide: boolean;
 }) {
-  const who = row.actor ?? 'not reported';
+  const who = recordedIdentity(row.actor, row.agentRun);
   const progress = row.check ? checkProgress(row.check, now, clock) : null;
   // Past the usual slowest check: the warning tone. The server's deadline still ends a dead check.
   const state = progress?.overdue ? 'waiting' : row.state;
@@ -150,30 +163,35 @@ function LaneLine({
   // Two open Lanes of one Item must never look the same: the short Lane mark, and how many the Item has.
   const mark = row.untitled ? null : row.mark;
   return (
-    // The visible text is the link's name, in reading order (no hand-made label to drift from it); the stop and queue
-    // place, drawn on the track, are spoken from a hidden line at the end.
-    <A className="ln" href={href} data-st={state}>
+    <div className="ln" data-st={state}>
       <div className="lab">
-        <Avatar handle={row.actor ?? '?'} />
-        <div className={dense ? 'ttl' : 'ttl wrap2'} dir="auto">
+        <A
+          className={dense ? 'ttl ln-open' : 'ttl ln-open wrap2'}
+          href={href}
+          dir="auto"
+          aria-label={mark ? `${row.title}, Lane ${mark}` : undefined}
+        >
           {row.title}
-        </div>
-        {/* The mark and the Item's Lane count come first: a dense row cuts this line at its end, and only the person
-            (also on the avatar) may be cut, never what tells two Lanes apart (real case: Item 1dd4e095). */}
+        </A>
+        {/* The mark and count stay whole even in a dense row (Item 1dd4e095). */}
         <div className="meta cut">
           {mark ? (
             <>
               <span className="mono mk" translate="no" title={`Lane ${row.laneId}`}>
                 {mark}
               </span>
-              {' · '}
+              {row.lanes > 1 ? ' · ' : null}
             </>
           ) : null}
-          {row.lanes > 1 ? `${row.lanes.toLocaleString()} Lanes · ` : null}
-          <span className="mono" translate="no" dir="auto">
-            {who}
-          </span>
+          {row.lanes > 1 ? `${row.lanes.toLocaleString()} Lanes` : null}
         </div>
+        <RecordedWho
+          handle={who}
+          agentAuthored={row.agent}
+          model={declaredModel(row.agentClient)}
+          project={project}
+          layout="line"
+        />
       </div>
       <div className={going ? 'trk going' : 'trk'} style={track} aria-hidden="true">
         <div className="rl">
@@ -195,6 +213,6 @@ function LaneLine({
         </span>
         <span className="sr">. {where}</span>
       </div>
-    </A>
+    </div>
   );
 }

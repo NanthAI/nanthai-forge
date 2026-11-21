@@ -192,7 +192,7 @@ function parkedRow(row: ParkedLane): ParkedRow {
         ? `${title} is parked for your agent run ${run}.`
         : `${title} is parked for you.`,
     tag: row.park.named ? 'Parked' : 'Parked, no one named',
-    who: row.park.named ? row.park.by || null : whoOf(row.actor, row.agent),
+    who: row.park.by || null,
     mark: row.laneId.slice(0, 8),
     since: row.park.named ? row.park.at : row.at,
   };

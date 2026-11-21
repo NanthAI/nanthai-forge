@@ -9,10 +9,12 @@ import { useConvex, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { reviewGroupLabels, reviewGroups, type ReviewGroup } from '../../../../src/review-order';
-import { Avatar, Band, CodeBox, Key, State, Who } from '../../ds';
+import { Avatar, Band, CodeBox, Key, State } from '../../ds';
 import { requestHighlight } from '../../highlight-client';
 import type { SourceToken } from '../../source-highlight';
 import { A } from '../frames';
+import { RecordedWho } from '../RecordedWho';
+import { declaredModel, recordedIdentity } from '../who-links';
 import type { LineFeed } from '../Line';
 import { hrefFor, type AppRoute } from '../paths';
 import { crumbsFor, Head } from '../Place';
@@ -902,7 +904,12 @@ function Side({
       <dl className="kv">
         <dt>By</dt>
         <dd>
-          <Who handle={who} />
+          <RecordedWho
+            handle={recordedIdentity(lane.actor, lane.agent)}
+            agentAuthored={lane.agentAuthored}
+            model={declaredModel(lane.agentClient)}
+            project={route}
+          />
         </dd>
         <dt>For</dt>
         <dd>

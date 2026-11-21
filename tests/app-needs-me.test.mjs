@@ -298,6 +298,11 @@ test('e1633718: a Lane parked for the reader counts at once; one parked with no 
   );
   assert.equal(late.parked[1].head, 'Title p2 is parked, no one named.');
   assert.equal(late.parked[1].tag, 'Parked, no one named');
+  assert.equal(
+    late.parked[1].who,
+    'sample-one',
+    'the park names the recorded person, even on a Lane held by an agent',
+  );
   assert.equal(late.count, 2);
   assert.match(needsSentence(late).bold, /^2 things hold work until you decide\.$/);
   assert.deepEqual(needsCount(input, 100 + PARK_UNNAMED_AFTER_MS), { n: 2, atLeast: false });

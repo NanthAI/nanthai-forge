@@ -64,7 +64,14 @@ const approval = (laneId: string, reason: string, minutes: number) => ({
 
 const baseRead: NeedsRead = first
   ? {
-      held: [lane(1, 'review', 6, { title: 'Stream parser: handle split UTF-8', agent: 'amber-fox' })],
+      held: [
+        lane(1, 'review', 6, {
+          title: 'Stream parser: handle split UTF-8',
+          agent: 'amber-fox',
+          agentClient: 'codex:gpt-example',
+          agentAuthored: true,
+        }),
+      ],
       more: 0,
       moreIsLowerBound: false,
       approvals: JSON.stringify({

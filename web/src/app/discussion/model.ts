@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // An Item's discussion as the screen draws it (Item 9a3d6f5f): threads in the order they started, each reply under its
 // root, who wrote each comment by public identity only, and the reaction counts beside it.
+import { declaredModel } from '../who-links';
 
 /** A planning comment row as public reads return it: `author` is already the writer's Forge handle (or gone for a
  * reader who may not see people); `agent` is the writing agent session's slug. */
@@ -48,8 +49,6 @@ export type ReactionCount = { commentId: string; kind: ReactionKind; count: numb
 
 const handle = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/;
 const slug = /^[a-z]{2,10}-[a-z]{2,10}$/;
-/** A receipt's agent client (src/agent-slug.ts AGENT_CLIENT): `tool` or `tool:model`. */
-const clientShape = /^[a-z][a-z0-9-]{0,31}(?::[A-Za-z0-9][A-Za-z0-9._/-]{0,63})?$/;
 const legacyLabel = /^@?([a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?(?:\/[a-z]{2,10}-[a-z]{2,10})?)$/;
 
 /** The longest comment a hosted project stores (convex/planningCommentWriter.ts); longer text is never drawn. */
@@ -69,14 +68,10 @@ export type Writer = {
   model: string | null;
   verified: boolean;
 };
-const modelOf = (client: string | undefined) => {
-  const model = client && clientShape.test(client) ? client.split(':')[1] : undefined;
-  return model ?? null;
-};
 export function writer(comment: DiscussionComment): Writer {
   if (comment.system === true) return { kind: 'forge', label: 'Forge', model: null, verified: true };
   const agent = comment.agent && slug.test(comment.agent) ? comment.agent : undefined;
-  const model = agent ? modelOf(comment.agentClient) : null;
+  const model = agent ? declaredModel(comment.agentClient) : null;
   if (comment.author && handle.test(comment.author))
     return agent
       ? { kind: 'agent', label: `${comment.author}/${agent}`, model, verified: true }

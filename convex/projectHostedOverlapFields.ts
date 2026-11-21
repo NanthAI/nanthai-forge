@@ -32,6 +32,8 @@ export const hostedOverlapTables = {
     session,
     /** The agent session's word-list slug (c29d0780); absent for a person. Shown as `handle/slug`. */
     agent: v.optional(v.string()),
+    /** Authenticated author of the save that published this head. True means the Lane starter. */
+    savedBy: v.optional(v.union(v.string(), v.literal(true))),
     intent: v.string(),
     head: v.string(),
     baseHead: v.string(),

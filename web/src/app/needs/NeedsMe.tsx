@@ -11,6 +11,8 @@
 //   folded region reads nothing.
 // Reads, sent together: projectNeedsMe:read (shared with the shell's count), projectNeedsFyi:read and the planning
 // counts; Loose ends while open. All re-run only on server writes; idle and hidden tabs cost nothing.
+import { RecordedWho } from '../RecordedWho';
+import { declaredModel, recordedIdentity, type WhoProject } from '../who-links';
 import {
   lazy,
   Suspense,
@@ -356,6 +358,7 @@ export function NeedsMeView({
                         const decision =
                           'park' in row ? (
                             <Parked
+                              project={route}
                               key={`park:${row.laneId}`}
                               row={row}
                               drawnAt={drawnAt}
@@ -363,6 +366,7 @@ export function NeedsMeView({
                             />
                           ) : 'choices' in row ? (
                             <Question
+                              project={route}
                               key={row.id}
                               row={row}
                               drawnAt={drawnAt}
@@ -371,6 +375,7 @@ export function NeedsMeView({
                             />
                           ) : (
                             <Held
+                              project={route}
                               key={row.laneId}
                               row={row}
                               drawnAt={drawnAt}
@@ -406,6 +411,7 @@ export function NeedsMeView({
                     <Capped rows={view.ahead} more={0} atLeast={false}>
                       {row => (
                         <Ahead
+                          project={route}
                           key={row.laneId}
                           row={row}
                           detail={row.kind === 'setting' ? settingDetail : undefined}
@@ -578,6 +584,7 @@ function Later({ head, onShow }: { head: string; onShow: () => void }) {
 
 function Held({
   row,
+  project,
   drawnAt,
   laneHref,
   decide,
@@ -585,6 +592,7 @@ function Held({
   announce,
 }: {
   row: NowRow;
+  project: WhoProject;
   drawnAt: number;
   laneHref: string;
   decide: Decide;
@@ -592,6 +600,7 @@ function Held({
   announce: (text: string) => void;
 }) {
   const target = decideTarget(row);
+  const who = recordedIdentity(row.actor, row.agent);
   const [later, setLater] = useState(false);
   if (later) return <Later head={row.head} onShow={() => setLater(false)} />;
   const link =
@@ -617,7 +626,14 @@ function Held({
           {row.siblings > 1 ? `, 1 of ${row.siblings} held for this Item` : ''}
         </span>
         <span>waiting {waited(row.since, drawnAt)}</span>
-        {row.who ? <Who handle={row.who} /> : null}
+        {who || row.agentAuthored ? (
+          <RecordedWho
+            handle={who}
+            agentAuthored={row.agentAuthored}
+            model={declaredModel(row.agentClient)}
+            project={project}
+          />
+        ) : null}
       </div>
       <h3 dir="auto">{row.head}</h3>
       {row.note ? (
@@ -641,7 +657,18 @@ function Held({
 }
 
 /** A Lane parked for the reader (Item e1633718): who parked it, why in their words, and how long it has waited. */
-function Parked({ row, drawnAt, laneHref }: { row: ParkedRow; drawnAt: number; laneHref: string }) {
+function Parked({
+  row,
+  drawnAt,
+  laneHref,
+  project,
+}: {
+  row: ParkedRow;
+  drawnAt: number;
+  laneHref: string;
+  project: WhoProject;
+}) {
+  const who = recordedIdentity(row.who);
   const [later, setLater] = useState(false);
   if (later) return <Later head={row.head} onShow={() => setLater(false)} />;
   return (
@@ -656,7 +683,7 @@ function Parked({ row, drawnAt, laneHref }: { row: ParkedRow; drawnAt: number; l
         <span>
           {row.park.named ? 'parked' : 'idle'} {waited(row.since, drawnAt)}
         </span>
-        {row.who ? <Who handle={row.who} /> : null}
+        {who ? <RecordedWho handle={who} model={null} project={project} /> : null}
       </div>
       <h3 dir="auto">{row.head}</h3>
       <p className="why" dir="auto">
@@ -677,11 +704,13 @@ function Parked({ row, drawnAt, laneHref }: { row: ParkedRow; drawnAt: number; l
 /** A question with fixed choices for the reader, from a person or an agent with no terminal (12fde646). */
 function Question({
   row,
+  project,
   drawnAt,
   answer,
   announce,
 }: {
   row: AskRow;
+  project: WhoProject;
   drawnAt: number;
   answer: Answer;
   announce: (text: string) => void;
@@ -705,7 +734,14 @@ function Question({
       <div className="dtop">
         <State word="Needs you">Question</State>
         <span>waiting {waited(row.at, drawnAt)}</span>
-        {row.who ? <Who handle={row.who} /> : null}
+        {row.who ? (
+          <RecordedWho
+            handle={recordedIdentity(row.who)}
+            agentAuthored={!!row.agent}
+            model={null}
+            project={project}
+          />
+        ) : null}
       </div>
       <h3 dir="auto">{row.text}</h3>
       <div className="btns">
@@ -729,6 +765,7 @@ function Question({
 
 function Ahead({
   row,
+  project,
   detail,
   drawnAt,
   decide,
@@ -736,6 +773,7 @@ function Ahead({
   announce,
 }: {
   row: AheadRow;
+  project: WhoProject;
   detail?: (laneId: string) => ReactNode;
   drawnAt: number;
   decide: Decide;
@@ -760,7 +798,14 @@ function Ahead({
       <div className="dec">
         <div className="dtop">
           <span>holds nothing yet</span>
-          {row.who ? <Who handle={row.who} /> : null}
+          {row.who ? (
+            <RecordedWho
+              handle={recordedIdentity(row.who)}
+              agentAuthored={!!row.agent}
+              model={null}
+              project={project}
+            />
+          ) : null}
         </div>
         <p className="why" dir="auto">
           {row.label}. {row.nextStep}

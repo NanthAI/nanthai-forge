@@ -137,6 +137,7 @@ export async function writeHostedRecord(
     ownerOnly?: boolean;
     overlap?: {
       changes?: OverlapChange[];
+      savedBy?: string;
       complete?: boolean;
       baseSequence?: number;
       intent?: string;

@@ -39,7 +39,7 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
   const search = useSearch();
   const filter = (filters.find(f => f.id === search.get('show'))?.id ?? 'all') as Filter;
   const stop = search.get('stop');
-  const { lanes, error: laneError } = useLaneMeta(projectId);
+  const { lanes, error: laneError } = useLaneMeta(projectId, true);
   const { queue, error: queueError } = useQueue(projectId);
   const shared = useSharedFiles(projectId);
   const [layout, setLayout, resetLayout, moved] = useDockLayout('lanes', LAYOUT);
@@ -110,6 +110,7 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
           ) : shown.length ? (
             <>
               <Yard
+                project={route}
                 rows={shown}
                 checking={filter === 'all' && (!stop || stop === 'checking') ? yard.checking : undefined}
                 hrefOf={laneHref}

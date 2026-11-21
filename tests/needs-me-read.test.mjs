@@ -48,6 +48,13 @@ test('Needs me lists the line’s held Lanes with the recorded reason, and an id
   await observe(f, state.id, before => ({
     observation: { ...before.observation, pendingReason: 'waiting-for-review' },
   }));
+  const request = [...f.tables.projectHostedLandingRequests.values()].find(
+    row => row.submissionId === state.id,
+  );
+  request.agentRun = 'amber-fox';
+  request.agentClient = 'codex:gpt-example';
+  const presence = [...f.tables.projectHostedPresence.values()].find(row => row.laneId === f.lane.laneId);
+  presence.actor = 'user_otherHolder1234';
   const shell = await f.tx('lineRead', line.read, { projectId: f.projectId });
   const review = await read(f);
   t.diagnostic(JSON.stringify({ needsMeHeldRead: f.counts.at(-1) }));
@@ -55,7 +62,24 @@ test('Needs me lists the line’s held Lanes with the recorded reason, and an id
   assert.equal(review.held[0].laneId, f.lane.laneId);
   assert.equal(review.held[0].why, 'review');
   assert.equal(review.held[0].submissionId, state.id);
+  assert.equal(
+    review.held[0].actor,
+    request.actor,
+    'the held review names the submitter, not the current holder',
+  );
   assert.equal(typeof review.canDecide, 'boolean');
+  const { agent, agentClient, agentAuthored, ...priorHeld } = review.held[0];
+  assert.deepEqual(
+    { agent, agentClient, agentAuthored },
+    {
+      agent: 'amber-fox',
+      agentClient: 'codex:gpt-example',
+      agentAuthored: true,
+    },
+  );
+  t.diagnostic(
+    `One held Lane: ${Buffer.byteLength(JSON.stringify({ ...review, held: [{ ...priorHeld, agent: null }] }))} → ${Buffer.byteLength(JSON.stringify(review))} reply bytes`,
+  );
 
   await observe(f, state.id, before => ({
     phase: 'terminal-failed',
@@ -79,6 +103,18 @@ test('Needs me lists the line’s held Lanes with the recorded reason, and an id
   const unchanged = f.readSet();
   f.advanceClock(30 * 60_000);
   assert.equal(unchanged(), true, 'thirty idle minutes change nothing this read depends on');
+});
+
+test('a held landing uses the recorded person stamp even on the agent submission path', async t => {
+  const f = await finishFixture(t);
+  const state = await f.enqueue(f.request({ authorship: { kind: 'person' }, agent: true }));
+  await observe(f, state.id, before => ({
+    observation: { ...before.observation, pendingReason: 'waiting-for-review' },
+  }));
+  const person = (await read(f)).held[0];
+  assert.equal(person.agent, null);
+  assert.equal(person.agentClient, undefined);
+  assert.equal(person.agentAuthored, undefined);
 });
 
 test('a Lane held for a dependency names the Lane it lands after; other rows carry no field (9e748e41)', async t => {

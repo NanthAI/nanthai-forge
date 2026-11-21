@@ -809,6 +809,7 @@ const historyPage = (rows, extra = {}) => ({
 const renderHistory = (page, filter = { unread: false, by: null, item: null }) =>
   renderToStaticMarkup(
     h(HistoryView, {
+      project: { handle: 'sample-owner', project: 'sample-project' },
       trail: [],
       page,
       error: false,
@@ -827,6 +828,26 @@ const renderHistory = (page, filter = { unread: false, by: null, item: null }) =
     }),
   );
 const EMPTY = /Nothing has landed yet|Nothing landed that matches|You have read everything/;
+
+test('History links published handles and runs and omits a withheld person for public readers', () => {
+  const html = renderHistory(
+    historyPage([
+      historyRow(4),
+      historyRow(3, { model: 'unknown' }),
+      historyRow(2, { agent: false, agentRun: null, model: null, actor: 'jon' }),
+      historyRow(1, { actor: null, agentRun: 'bold-finch', model: 'example-model' }),
+    ]),
+  );
+  assert.match(
+    html,
+    /href="\/-\/sample-owner\/sample-project\/lanes\/sessions\/mara\/amber-fox"[^>]*>amber-fox</,
+  );
+  assert.match(html, /href="\/-\/mara"[^>]*>@mara</);
+  assert.match(html, /href="\/-\/jon"[^>]*>@jon</);
+  assert.match(html, /model not declared/);
+  assert.match(html, /<span class="a-run mono"[^>]*>bold-finch<\/span>/);
+  assert.doesNotMatch(html, /href="[^"]*bold-finch/);
+});
 
 test('History never shows the empty state while it reads or when the read returned landings (35f62c2c)', () => {
   const loading = renderHistory(undefined);

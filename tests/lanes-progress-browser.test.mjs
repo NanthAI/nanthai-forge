@@ -75,7 +75,7 @@ test('the yard: a running check says its time, sits by elapsed / usual and glide
     });
     await page.goto(`https://forge.test/progress.html${query}`);
     await page
-      .locator('.yard a.ln')
+      .locator('.yard .ln')
       .first()
       .waitFor({ timeout: 10_000 })
       .catch(error => assert.fail(`${error.message}\n${errors.join('\n')}`));
@@ -87,7 +87,7 @@ test('the yard: a running check says its time, sits by elapsed / usual and glide
   }
   /** Each row's words, tone and where its mark sits on the track (0 to 4), as drawn now. */
   const rows = page =>
-    page.locator('.yard a.ln').evaluateAll(nodes =>
+    page.locator('.yard .ln').evaluateAll(nodes =>
       nodes.map(node => {
         const rail = node.querySelector('.trk .rl').getBoundingClientRect();
         const mark = node.querySelector('.trk .nw').getBoundingClientRect();

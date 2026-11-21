@@ -4,8 +4,10 @@
 // state shows only when that read came back with no rows. Read state is per account (convex/projectLandingReads.ts),
 // so every device and the CLI agree; nothing here holds a landing or counts toward Needs you.
 import { useState, type KeyboardEvent, type ReactNode } from 'react';
-import { Band, Key, Region, Who } from '../../ds';
+import { Band, Key, Region } from '../../ds';
 import { A } from '../frames';
+import { RecordedWho } from '../RecordedWho';
+import { recordedIdentity, type WhoProject } from '../who-links';
 import { hrefFor } from '../paths';
 import { navigate, useSearch } from '../router';
 import { Head, crumbsFor } from '../Place';
@@ -23,11 +25,15 @@ import {
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 /** Who landed it, as a public identity: `@person`, or `person/run` for an agent run. */
-export const whoOf = (row: Pick<Landed, 'actor' | 'agent' | 'agentRun'>) =>
-  !row.actor ? null : row.agent && row.agentRun ? `${row.actor}/${row.agentRun}` : `@${row.actor}`;
+const whoOf = (row: Pick<Landed, 'actor' | 'agent' | 'agentRun'>) =>
+  recordedIdentity(row.actor, row.agent ? row.agentRun : null);
 /** The declared model for <Who>: a model, null ("model not declared"), or undefined for a person. */
 const modelOf = (row: Landed) =>
-  !row.agent ? undefined : row.model === 'not-declared' || row.model === null ? null : row.model;
+  !row.agent
+    ? undefined
+    : row.model === 'not-declared' || row.model === 'unknown' || row.model === null
+      ? null
+      : row.model;
 const titleOf = (row: Landed) => row.item?.title ?? row.goal ?? row.title ?? 'Untitled landing';
 
 /** The filters in the address (`?unread=1&by=…&item=…`), so a link, a reload and Back show the same view. */
@@ -70,6 +76,7 @@ export function History({ route, projectId, projectName }: LanesProps) {
   };
   return (
     <HistoryView
+      project={route}
       trail={crumbsFor(route, projectName)}
       page={history.page}
       error={!!history.error}
@@ -108,6 +115,7 @@ export function History({ route, projectId, projectName }: LanesProps) {
 }
 
 export type HistoryViewProps = {
+  project?: WhoProject | undefined;
   trail: Parameters<typeof Head>[0]['trail'];
   page: LandedPage | undefined;
   error: boolean;
@@ -155,12 +163,14 @@ export function HistoryView(props: HistoryViewProps) {
   };
   // The choices are the people and agent runs, and the Items, in the rows read so far, plus the one chosen.
   const byChoices = [
-    ...new Set([
-      ...rows.flatMap(row => (row.actor ? [`@${row.actor}`] : [])),
-      ...rows.flatMap(row =>
-        row.actor && row.agent && row.agentRun ? [`${row.actor}/${row.agentRun}`] : [],
-      ),
-    ]),
+    ...new Set(
+      rows.flatMap(row => {
+        const who = whoOf(row);
+        if (!who || who.startsWith('/')) return [];
+        const slash = who.indexOf('/');
+        return slash < 0 ? [who] : [`@${who.slice(0, slash)}`, who];
+      }),
+    ),
   ];
   const byValue = (who: string) => (who.startsWith('@') ? who.slice(1) : who);
   if (filter.by && !byChoices.some(who => byValue(who) === filter.by))
@@ -278,6 +288,7 @@ export function HistoryView(props: HistoryViewProps) {
                   on={selected.has(row.sequence)}
                   toggle={() => flip(setSelected, row.sequence)}
                   open={open.has(row.sequence)}
+                  project={props.project}
                   expand={() => flip(setOpen, row.sequence)}
                   laneHref={row.laneId ? props.laneHref(row.laneId) : null}
                   receiptHref={props.receiptHref(row.receiptId)}
@@ -336,6 +347,7 @@ function Empty({
 
 function HistoryRow({
   row,
+  project,
   on,
   toggle,
   open,
@@ -345,6 +357,7 @@ function HistoryRow({
   onMark,
 }: {
   row: Landed;
+  project?: WhoProject | undefined;
   on: boolean;
   toggle: () => void;
   open: boolean;
@@ -380,7 +393,15 @@ function HistoryRow({
           {row.read ? null : <span className="sr">Unread: </span>}
           {title}
         </button>
-        <span className="meta cut">{who ? <Who handle={who} model={modelOf(row)} /> : 'not reported'}</span>
+        <span className="meta cut">
+          <RecordedWho
+            handle={who}
+            agentAuthored={row.agent}
+            model={modelOf(row)}
+            project={project}
+            layout="line"
+          />
+        </span>
       </span>
       <span className="num t2 when" title={new Date(row.at).toLocaleString()}>
         {time(row.at)}

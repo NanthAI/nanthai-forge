@@ -48,8 +48,10 @@ export type Reply = {
     laneId: string;
     intentId: string;
     goal: string | null;
-    actor: string;
+    actor: string | null;
     agent: string | null;
+    agentAuthored?: boolean;
+    agentClient?: string;
     state: 'active' | 'completed' | 'abandoned';
     head: string;
     base: { head: string };

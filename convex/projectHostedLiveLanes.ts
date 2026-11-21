@@ -3,6 +3,7 @@ import { v } from 'convex/values';
 import { query } from './cliServer';
 import { recordCaller } from './projectHostedFrictionStore';
 import { readHostedRecord, hostedRecordBody, recordHead } from './projectHostedRecords';
+import { isAgentSlug } from '../src/agent-slug';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { ForgeError, invariant } from '../src/errors';
@@ -55,6 +56,7 @@ export const list = query({
     projectId: v.id('hostedProjects'),
     cursor: v.union(v.string(), v.null()),
     limit: v.number(),
+    byline: v.optional(v.literal(true)),
     planningItemId: v.optional(v.string()),
     intentId: v.optional(v.string()),
     /** `live` leaves out dormant Lanes, `dormant` lists only them with whether each is abandonable;
@@ -64,7 +66,7 @@ export const list = query({
     view: v.optional(v.union(v.literal('all'), v.literal('live'), v.literal('dormant'), v.literal('tree'))),
   },
   returns: v.string(),
-  handler: async (ctx, { projectId, cursor, limit, view, planningItemId, intentId }) => {
+  handler: async (ctx, { projectId, cursor, limit, view, planningItemId, intentId, byline }) => {
     try {
       invariant(
         Number.isInteger(limit) && limit >= 1 && limit <= 100,
@@ -207,18 +209,39 @@ export const list = query({
               .order('desc')
               .take(1)
           : [];
+        const save = saved
+          ? (JSON.parse(await hostedRecordBody(ctx, saved)) as {
+              at: string;
+              actor?: string;
+              authorship?: { kind: 'agent' | 'person' };
+              agentRun?: string;
+              agentClient?: string;
+            })
+          : null;
+        // A save carries its own author and its own declaration, including when it made no declaration.
+        const stamp = save ?? lane;
         lanes.push({
           laneId: lane.id,
           intentId: lane.intentId,
           intent: intent ? JSON.parse(intent.value).outcome : null,
-          actor: lane.actor,
+          // Keep the list contract for CLI callers. The Yard asks for the saver, and for
+          // Mine it keeps the ownership comparison so the reply only names one account per Lane.
+          actor: byline ? (save?.actor ?? lane.actor) : lane.actor,
+          ...(byline
+            ? {
+                ...(save?.actor && save.actor !== lane.actor ? { mine: lane.actor === actor } : {}),
+                ...(isAgentSlug(stamp.agentRun) ? { agentRun: stamp.agentRun } : {}),
+                ...(stamp.agentClient ? { agentClient: stamp.agentClient } : {}),
+                ...(stamp.authorship?.kind === 'agent' ? { agent: true } : {}),
+              }
+            : {}),
           state: lane.state,
           head: lane.head,
           // A resolution Lane names the conflicted Lane it continues (Item d9e1ac62): from the record already read.
           ...(lane.resolution?.origin ? { resolves: lane.resolution.origin.laneId } : {}),
           // Parked (Item e1633718): who it waits on, why and since when, from the record already read.
           ...(lane.park ? { park: { ...lane.park, named: Boolean(lane.park.to) } } : {}),
-          lastSaveAt: saved ? JSON.parse(await hostedRecordBody(ctx, saved)).at : null,
+          lastSaveAt: save?.at ?? null,
           // Last Lane-record change (save, start, sync, landing), from the record already read (f0d0fdd6).
           lastActivityAt: lane.at,
           landing: landing

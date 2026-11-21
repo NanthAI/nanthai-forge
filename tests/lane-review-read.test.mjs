@@ -12,7 +12,7 @@ import { digest } from '../dist/hash.js';
 const review = await import(moduleUrl('../convex/projectLaneReview.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 
-async function lane(changes, extra = {}) {
+async function lane(changes, extra = {}, savedBy) {
   const s = await saveFixture('original', 'a.txt');
   const base = JSON.parse(
     [...s.tables.projectHostedRecordBodies.values()].find(row => JSON.parse(row.value).kind === 'lane').value,
@@ -43,7 +43,16 @@ async function lane(changes, extra = {}) {
   };
   await write(first, { baseSequence: 0, intent: 'Stream parser: handle split UTF-8' });
   const saved = { ...first, head: digest(first.id), version: 1, sourceVersion: 1 };
-  await write(saved, { baseSequence: 0, intent: 'Stream parser: handle split UTF-8', changes }, 0);
+  await write(
+    saved,
+    {
+      baseSequence: 0,
+      intent: 'Stream parser: handle split UTF-8',
+      changes,
+      ...(savedBy ? { savedBy } : {}),
+    },
+    0,
+  );
   const read = (args = {}) =>
     s
       .transaction(
@@ -95,6 +104,38 @@ test('one read names the pinned head and every changed path with its exact blobs
   assert(meter.readBytes < 64 * 1024, `reads ${meter.readBytes} bytes`);
   for (const table of ['projectBackups', 'projectWorkRecords', 'projectWorkEvents', 'projectHostedSaveJobs'])
     assert(!meter.touched.includes(table), `does not read ${table}`);
+});
+
+test('review attributes a takeover save to its recorded author and omits uncertain historical attribution', async t => {
+  const stamp = { authorship: { kind: 'agent' }, agentRun: 'amber-fox', agentClient: 'codex:gpt-example' };
+  const holder = { actor: 'other-writer', since: 1, lastSeen: 1, agent: stamp.agentRun };
+  const { s, saved, read } = await lane([], { ...stamp, holder }, 'same-save-author');
+  const before = await read();
+  const meter = s.counts.at(-1);
+  const { agent, agentClient, agentAuthored, ...laneFields } = before.lane;
+  assert.deepEqual(
+    { actor: before.lane.actor, agent, agentClient, agentAuthored },
+    {
+      actor: 'same-save-author',
+      agent: 'amber-fox',
+      agentClient: 'codex:gpt-example',
+      agentAuthored: true,
+    },
+  );
+  t.diagnostic(
+    `Lane detail: ${Buffer.byteLength(JSON.stringify({ ...before, lane: { ...laneFields, agent: null } }))} → ${Buffer.byteLength(JSON.stringify(before))} reply bytes`,
+  );
+  const row = [...s.tables.projectHostedOverlapLanes.values()].find(entry => entry.laneId === saved.id);
+  // Stale projections and historical saves without the author projection must not supply the wrong person.
+  row.head = digest('another save');
+  assert.equal((await read()).lane.actor, null);
+  row.head = saved.head;
+  delete row.savedBy;
+  const historical = await read();
+  assert.equal(historical.lane.actor, null);
+  assert.equal(historical.lane.agent, 'amber-fox');
+  assert.equal(historical.lane.agentClient, 'codex:gpt-example');
+  assert(s.counts.at(-1).documents <= meter.documents);
 });
 
 test('a row written for another head is not shown as this save; pages are bounded', async () => {

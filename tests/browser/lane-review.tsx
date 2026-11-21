@@ -154,6 +154,7 @@ async function reply(): Promise<Reply> {
       goal: 'Stream parser: handle split UTF-8',
       actor: 'sample-owner',
       agent: 'amber-fox',
+      agentClient: 'codex:gpt-example',
       state: scenario === 'abandoned' ? 'abandoned' : scenario === 'landed' ? 'completed' : 'active',
       head: HEAD,
       base: { head: BASE },

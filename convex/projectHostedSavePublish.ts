@@ -155,6 +155,7 @@ export async function publishHostedSave(
       authorityEpoch,
       expectedVersion: lane.version,
       overlap: {
+        savedBy: input.actor,
         ...(state.session ? { session: state.session } : {}),
         ...(state.overlapChanges ? { changes: JSON.parse(state.overlapChanges) } : {}),
         complete: state.overlapComplete !== false,

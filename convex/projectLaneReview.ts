@@ -9,6 +9,7 @@ import { projectQuery as query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
 import { readHostedRecord } from './projectHostedRecords';
 import { laneConflicts } from './projectHostedConflicts';
+import { isAgentSlug } from '../src/agent-slug';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { effectivePolicy, protectedMatches } from '../src/autonomy-policy';
 import { lineCounts, type OverlapChange } from '../src/hosted-overlap';
@@ -99,13 +100,27 @@ export const read = query({
         }),
       );
       const timing = row?.landed ? await landedTiming(ctx, projectId, row.landed.receiptId) : null;
+      const run = isAgentSlug(lane.agentRun) ? lane.agentRun : null;
+      const savedBy = current ? row.savedBy : undefined;
+      // Before the save's author was projected, a holder change or a legacy owner override
+      // can separate the Lane's starter from its stamped save. Keep the run and model, but
+      // don't pair them with an account the pinned records cannot establish.
+      const knowsStarter =
+        !lane.authorship ||
+        lane.sourceVersion === 0 ||
+        (lane.holder
+          ? lane.holder.actor === lane.actor && !lane.holder.change
+          : lane.actor === project.owner);
+      const author = typeof savedBy === 'string' ? savedBy : savedBy || knowsStarter ? lane.actor : null;
       return JSON.stringify({
         lane: {
           laneId,
           intentId: lane.intentId,
           goal: row?.intent ?? null,
-          actor: row?.actor ?? lane.actor,
-          agent: row?.agent ?? null,
+          actor: author,
+          agent: lane.authorship ? (run ?? null) : (row?.agent ?? null),
+          ...(lane.agentClient ? { agentClient: lane.agentClient } : {}),
+          ...(lane.authorship?.kind === 'agent' ? { agentAuthored: true } : {}),
           state: lane.state,
           head: lane.head,
           base: lane.base,

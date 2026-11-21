@@ -12,3 +12,5 @@
   A cube opens its Lane. The top-bar stops, station labels and the solid columns used past the 60-Lane
   feed cap open station drawers. A drawer makes at most one batched read when opened. Flow animates moving work when fresh
   and quiets its loops after a minute without input. Reduced motion removes the animation.
+
+- The Lane yard, Lane review, History, Needs you and Item discussion use the same public byline. It links the handle and agent run when the viewer may see them. The Yard names the latest save. Lane review names the save that published the pinned head. Held reviews, History and discussion use the recorded submission, receipt or comment.
