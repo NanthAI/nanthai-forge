@@ -25,6 +25,7 @@ const names = [
   'projectHostedLandingPriority',
   'projectHostedLandingDesired',
   'projectHostedFinish',
+  'projectHostedFinishObserve',
   'projectHostedCheckDefinitions',
   'projectHostedChecks',
   'projectHostedCheckRead',

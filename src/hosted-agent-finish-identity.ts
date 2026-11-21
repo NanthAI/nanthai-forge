@@ -3,6 +3,7 @@ import { checkTerminal } from './check-run-state.js';
 import { conflictMarkerScan, scanConflictMarkers, conflictMarkersFound } from './conflict-markers.js';
 import {
   assertNoConflictMarkers,
+  inPlaceOrigin,
   inPlaceResolution,
   pendingConflictPaths,
 } from './hosted-conflict-precheck.js';
@@ -40,6 +41,7 @@ const selectionSchema = z.object({
   operationId: z.uuid(),
   fingerprint: z.string(),
   command: z.record(z.string(), z.unknown()),
+  checkoutLaneId: z.uuid().optional(),
 });
 export type FinishSelection = z.infer<typeof selectionSchema>;
 /** Journal key: this finish was refused before it submitted anything (a known refusal code). */
@@ -51,6 +53,26 @@ export type FinishContext = {
   clean: HostedLaneSelection | null;
   previous: FinishSelection | null;
 };
+
+/** Older finish selections retained the checkout binding only once they pinned a source step. */
+function legacyFinishLane(root: string, directory: string, operationId: string) {
+  const path = join(directory, `${operationId}.json`);
+  if (!checkoutPathExists(path)) return undefined;
+  const { values } = readAgentJson(path) as { values: Record<string, unknown> };
+  const context = values['finish-context'] as FinishContext | undefined;
+  if (context?.clean) return context.clean.laneId;
+  const compose = values[`compose:${String(values['finish-compose-operation'])}`] as
+    | { pages: { kind: string; value: { entries: { laneId?: string }[] } }[] }
+    | undefined;
+  const inputLane = compose?.pages.find(page => page.kind === 'inputs')?.value.entries[0]?.laneId;
+  if (inputLane) return inputLane;
+  // A dirty checkout may already have saved when compose selection loses its reply. The small
+  // save request survives settlement and pins the Lane even before compose records its inputs.
+  const save = z.uuid().safeParse(values['id:save']);
+  if (!save.success) return undefined;
+  const request = join(clientCacheRoot(root), 'saves', save.data, 'request.json');
+  return checkoutPathExists(request) ? (readAgentJson(request) as { laneId: string }).laneId : undefined;
+}
 
 /** Only one Lane's metadata and a 1 MiB scan buffer. Source is reread on every new
  * shorthand selection, except files whose lstat the checkout stat index ties to their baseline
@@ -257,7 +279,25 @@ export async function selectHostedFinish(
           files: [...marker.state.files].sort((a, b) => a.path.localeCompare(b.path)),
         }),
       );
-  const previous = checkoutPathExists(index) ? selectionSchema.parse(readAgentJson(index)) : undefined;
+  const checkoutLaneId =
+    !command.laneId && !command.candidateId && !command.inputs ? marker?.selection.laneId : undefined;
+  const readSelection = () => {
+    if (!checkoutPathExists(index)) return undefined;
+    const selection = selectionSchema.parse(readAgentJson(index));
+    if (selection.checkoutLaneId !== undefined)
+      return selection.checkoutLaneId === checkoutLaneId ? selection : undefined;
+    // A matching legacy fingerprint already includes this Lane's id. After an in-place resolution,
+    // a different fingerprint needs a retained pin before it can replay a shorthand operation.
+    if (
+      checkoutLaneId &&
+      selection.fingerprint !== fingerprint &&
+      inPlaceOrigin(root) &&
+      legacyFinishLane(root, directory, selection.operationId) !== checkoutLaneId
+    )
+      return undefined;
+    return selection;
+  };
+  const previous = readSelection();
   // This folder became the named Lane's conflict resolution: that Lane's saved source is unchanged
   // by anything done here, so its shorthand keeps following the original operation's recovery.
   const resolvedHere =
@@ -327,7 +367,7 @@ export async function selectHostedFinish(
       `Landing operation ${retained.operationId} already has its original notVerified value. Replay its original request, or use a fresh operationId once it ends.`,
     );
   const reservation = workLocked(join(directory, 'lock'), () => {
-    const latest = checkoutPathExists(index) ? selectionSchema.parse(readAgentJson(index)) : undefined;
+    const latest = readSelection();
     // Another caller may have reserved the next generation while terminality
     // was observed outside the lock. Reconcile that unknown outcome first.
     if (
@@ -349,6 +389,7 @@ export async function selectHostedFinish(
       operationId: selected!,
       fingerprint: previous && selected === previous.operationId ? previous.fingerprint : fingerprint,
       command: retainedCommand,
+      ...(checkoutLaneId ? { checkoutLaneId } : {}),
     };
     durableReplace(index, canonicalPayload(value));
     return value;

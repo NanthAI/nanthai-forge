@@ -1,11 +1,128 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeFunctionReference } from 'convex/server';
 import { resolutionFixture } from './hosted-agent-resolution-fixture.mjs';
 import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
+import { submitHostedLand } from '../dist/hosted-land-cli.js';
+import { hostedAgentDirectory } from '../dist/hosted-agent-journal.js';
+import { drainReady } from './early-resolution-replay.mjs';
+
+function useLegacyFinishIndex(root) {
+  const directory = hostedAgentDirectory(root);
+  const [index] = readdirSync(directory).filter(name => name.startsWith('finish-'));
+  const path = join(directory, index);
+  const { checkoutLaneId: _checkoutLaneId, ...legacy } = JSON.parse(readFileSync(path, 'utf8'));
+  writeFileSync(path, JSON.stringify(legacy));
+}
+
+for (const mode of ['implicit', 'implicit with a legacy journal', 'explicit'])
+  test(`36fd3295: ${mode} land follows the current Lane after successive in-place resolutions`, async t => {
+    const s = await resolutionFixture(t, { overlap: true }),
+      f = s.f;
+    const root = s.root;
+    const command = { message: 'Land current resolution', accept: true };
+    await s.transport().dispatch('open', { laneId: f.lane.laneId });
+    // Keep the original shorthand operation and its clean pins, with no admitted landing to observe.
+    const transport = s.transport();
+    let originalOperation;
+    transport.onOperation = (_action, id) => {
+      originalOperation = id;
+    };
+    s.lose('projectHostedComposeSelection:page');
+    await assert.rejects(submitHostedLand(root, command, s.address, transport), {
+      code: 'HOSTED_ACTION_FAILED',
+    });
+    if (mode === 'implicit with a legacy journal') useLegacyFinishIndex(root);
+    writeFileSync(join(root, 'notes.txt'), 'A later save moves the original pins\n');
+    await s.transport().dispatch('save', { message: 'Save notes' });
+
+    const lanes = [f.lane.laneId];
+    for (const edit of ['first', 'second']) {
+      f.move([f.c.file('a.txt', `main ${edit}\nb\nc\n`)]);
+      const { conflict } = (await s.transport().dispatch('sync', { laneId: lanes.at(-1) })).result;
+      assert.equal(conflict.laneId, readHostedLaneCheckout(root).selection.laneId);
+      assert(!lanes.includes(conflict.laneId));
+      lanes.push(conflict.laneId);
+      writeFileSync(join(root, 'a.txt'), `chosen ${edit}\nb\nc\n`);
+      const { action, ...resolve } = conflict.next;
+      await s.transport().dispatch(action, resolve);
+    }
+    f.move([f.c.file('accepted.txt', 'later accepted\n')]);
+    assert.equal(
+      (await s.transport().dispatch('sync', { laneId: lanes.at(-1) })).result.source.outcome.result.status,
+      'merged',
+    );
+    const current = readHostedLaneCheckout(root).selection;
+    const parameters = mode === 'explicit' ? { ...command, laneId: current.laneId } : command;
+    const before = s.calls.length;
+    const submitted = await submitHostedLand(root, parameters, s.address, s.transport());
+    assert.equal(submitted.result.phase, 'finish');
+    assert.notEqual(submitted.operationId, originalOperation);
+    const calls = s.calls.slice(before);
+    assert(!calls.some(call => call.name === 'projectHostedFinishObserve:page'));
+    assert.deepEqual(
+      calls.filter(call => call.name === 'projectHostedComposeSelection:page').map(call => call.args.inputs),
+      [
+        [
+          {
+            laneId: current.laneId,
+            expected: {
+              head: current.head,
+              version: current.version,
+              sourceVersion: current.sourceVersion,
+              lifecycleVersion: current.lifecycleVersion,
+            },
+          },
+        ],
+      ],
+    );
+    const replay = await submitHostedLand(
+      root,
+      { ...parameters, operationId: submitted.operationId },
+      s.address,
+      s.transport(),
+    );
+    assert.equal(replay.result.submission.id, submitted.result.submission.id);
+    await assert.rejects(
+      submitHostedLand(root, { ...command, operationId: originalOperation }, s.address, s.transport()),
+      { code: 'WORK_STALE' },
+      'an explicit operation replay still uses the original Lane pins',
+    );
+    await drainReady(f);
+    await f.passChecks();
+    await drainReady(f);
+    assert.equal((await f.current(submitted.result.submission.id)).submission.phase, 'landed');
+    assert.equal(f.text(f.currentMain().head, 'a.txt'), 'chosen second\nb\nc\n');
+  });
+
+test('a legacy finish paused after saving still replays on the same resolution Lane', async t => {
+  const s = await resolutionFixture(t, { overlap: true });
+  const { f, root } = s;
+  await s.transport().dispatch('open', { laneId: f.lane.laneId });
+  f.moveMain({ overlap: true });
+  const { conflict } = (await s.transport().dispatch('sync', { laneId: f.lane.laneId })).result;
+  writeFileSync(join(root, 'a.txt'), 'chosen\nb\nc\n');
+  const { action, ...resolve } = conflict.next;
+  await s.transport().dispatch(action, resolve);
+
+  const command = { message: 'Land the saved resolution', accept: true };
+  writeFileSync(join(root, 'notes.txt'), 'Captured by the first land\n');
+  s.lose('projectHostedComposeSelection:page');
+  await assert.rejects(submitHostedLand(root, command, s.address, s.transport()), {
+    code: 'HOSTED_ACTION_FAILED',
+  });
+  useLegacyFinishIndex(root);
+  writeFileSync(join(root, 'notes.txt'), 'Added while the reply was lost\n');
+  await assert.rejects(submitHostedLand(root, command, s.address, s.transport()), {
+    code: 'UNSAVED_LANE_EDITS',
+  });
+  const saved = await f.readLane(conflict.laneId);
+  assert.equal(f.text(saved.head, 'notes.txt'), 'Captured by the first land\n');
+  assert.equal(readFileSync(join(root, 'notes.txt'), 'utf8'), 'Added while the reply was lost\n');
+});
 
 test('completed resolve hands exact pins to an ordinary land on the resolution root', async t => {
   const s = await resolutionFixture(t, { overlap: true }),
