@@ -57,7 +57,7 @@ async function fixture(out) {
       const reply = part => all ? statsAllReply(months, tail, part)
         : statsRangeReply(inRange(days, period), period, part, part === 'trend' ? inRange(days, previousRange(period)) : []);
       const usePart = part => ((window.foldReads ??= new Set()).add(part), reply(part));
-      return h(StatsView, {projectName: 'tidepool', data: reply('head'), period, usePart, historyHref: '/-/example/tidepool/lanes/history', onPeriod: setSearch});
+      return h(StatsView, {data: reply('head'), period, now, usePart, historyHref: '/-/example/tidepool/lanes/history', onPeriod: setSearch});
     }
     createRoot(document.getElementById('root')).render(h(ConvexProvider, {client},
       h(ProjectFrame, {route, name: 'tidepool', projects: [], controls: {onPalette(){}, onKeys(){}, onPicker(){}, viewerHandle: 'example'}},

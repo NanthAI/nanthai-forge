@@ -8,6 +8,7 @@
   .stats-range { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
   .stats-range .inp { width: auto; min-width: 0; max-width: 11rem; }
   .stats[aria-busy='true'] { opacity: .6; transition: opacity var(--d-quick) var(--ease-out); }
+  .stats-freshness { display: block; margin-top: var(--s-1); font-size: var(--t-meta); }
   /* Links sitting in a sentence carry an underline, not colour alone. */
   .stats a.lk { text-decoration: underline; text-underline-offset: 3px; }
   .stats-note { padding: var(--s-3) var(--gut); color: var(--text-2); max-width: var(--m-note); }

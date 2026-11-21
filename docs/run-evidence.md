@@ -256,6 +256,9 @@ per closed day, first try, median time to main, CI minutes per landing); opened,
 rows too (at most 184 rows for the two), and its method is on hover only. A read
 re-runs only when a day inside its period closes; it takes no clock argument. Until a period has fully closed, the
 page names the closed days it covers ("over 17–18 Nov 2026 (2 closed days)"), never the whole month. A day left not
-measured is not a closed day: it is in neither the span nor the count, and a period holding one has not wholly closed. By agent shows
-agents in four first-try buckets (100%, 75–99%, 50–74%, under 50%), never a list per agent; each landing's own
+measured is not a closed day: it is in neither the span nor the count, and a period holding one has not wholly closed.
+The Stats headline names the latest measured day and says when figures update. When the selected period includes today
+and the project's live line is available, Stats also shows today's UTC landings and the share of judged landings
+that were first try. It uses the shell's existing feed with no extra reads or idle timer.
+By agent shows agents in four first-try buckets (100%, 75–99%, 50–74%, under 50%), never a list per agent; each landing's own
 time to main and stops are on its Lane page.

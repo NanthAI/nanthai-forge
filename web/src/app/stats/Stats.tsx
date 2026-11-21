@@ -12,6 +12,7 @@ import { useRef, type ReactNode } from 'react';
 import { useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import { Region, useFold } from '../../ds';
+import { firstTryPercent, flowToday, utcDayStart, type FlowDayFeed } from '../../../../src/flow-day';
 import { rangeDays } from '../../../../src/stats-period';
 import type {
   StatsAgents,
@@ -50,7 +51,8 @@ type FoldPart = Exclude<StatsPart, 'head'>;
 export type UsePart = (part: FoldPart) => unknown;
 
 export default function Stats(props: PlaceProps) {
-  const period = periodOf(useSearch(), Date.now());
+  const now = Date.now();
+  const period = periodOf(useSearch(), now);
   const all = period.kind === 'all';
   const range = { projectId: props.projectId, from: period.from, to: period.to };
   // One read for the chosen period: a range, or All time (the other is skipped, never read).
@@ -70,10 +72,11 @@ export default function Stats(props: PlaceProps) {
   const data = last.current?.data;
   return (
     <StatsView
-      projectName={props.projectName}
       data={data}
       period={period}
       busy={result === undefined && data !== undefined}
+      flow={props.feedError ? undefined : props.feed?.flow}
+      now={now}
       historyHref={hrefFor({ ...props.route, place: 'lanes', section: 'history', rest: '' })}
       usePart={usePart}
       onPeriod={search => navigate(`${location.pathname}${search ? `?${search}` : ''}`)}
@@ -82,17 +85,20 @@ export default function Stats(props: PlaceProps) {
 }
 
 export function StatsView({
-  projectName,
   data,
   period,
   busy = false,
+  flow,
+  now,
   historyHref,
   usePart,
   onPeriod,
-}: Pick<PlaceProps, 'projectName'> & {
+}: {
   data: Reply | undefined;
   period: Period;
   busy?: boolean;
+  flow?: FlowDayFeed | undefined;
+  now: number;
   historyHref: string;
   usePart: UsePart;
   /** The new address query for a chosen period ('' is this month). */
@@ -121,6 +127,9 @@ export function StatsView({
     );
   const w = data.window;
   const billing = hrefFor({ frame: 'account', place: 'billing' });
+  const freshness = busy ? null : (
+    <Freshness through={data.cover.last} period={period} flow={flow} now={now} />
+  );
   const notice = period.error ? (
     <p role="alert" className="stats-note">
       {period.error}
@@ -133,8 +142,8 @@ export function StatsView({
           trail={trail}
           sentence={
             <>
-              <b>No closed days {periodWords(period)}.</b> A day closes at {projectName}’s first landing on a
-              later day; its figures appear then.
+              <b>No closed days {periodWords(period)}.</b>
+              {freshness}
             </>
           }
         >
@@ -151,7 +160,15 @@ export function StatsView({
     );
   return (
     <>
-      <Head trail={trail} sentence={<Sentence data={data} period={period} />}>
+      <Head
+        trail={trail}
+        sentence={
+          <>
+            <Sentence data={data} period={period} />
+            {freshness}
+          </>
+        }
+      >
         {picker}
       </Head>
       {notice}
@@ -162,8 +179,7 @@ export function StatsView({
           title={data.perMonth ? 'Landings per month' : 'Landings per day'}
           hint={
             <>
-              {plural(w.landings, 'landing')} closed through {data.through ? dayName(data.through) : 'no day'}
-              ;{' '}
+              {plural(w.landings, 'landing')} ·{' '}
               <A href={billing} className="lk">
                 plan usage in Billing
               </A>
@@ -210,6 +226,39 @@ export function StatsView({
           </Fold>
         ) : null}
       </div>
+    </>
+  );
+}
+
+function Freshness({
+  through,
+  period,
+  flow,
+  now,
+}: {
+  through: string | null;
+  period: Period;
+  flow: FlowDayFeed | undefined;
+  now: number;
+}) {
+  const day = new Date(now).toISOString().slice(0, 10);
+  const includesToday = period.kind === 'all' || (period.from <= day && day <= period.to);
+  const today = flow && includesToday ? flowToday(flow, now, utcDayStart(now)) : null;
+  const firstTry = today && !today.partial.includes('firstTry') ? firstTryPercent(today) : null;
+  return (
+    <>
+      <span className="stats-freshness">
+        {through ? `Through ${dayName(through)}. ` : ''}
+        Stats updates after the first landing on a later UTC day.
+      </span>
+      {today ? (
+        <span className="stats-freshness">
+          Today so far (UTC) · {today.partial.includes('landed') ? 'at least ' : ''}
+          {plural(today.landed, 'landing')}
+          {firstTry === null ? '' : ` · ${firstTry}% first try`}
+          {firstTry !== null && today.judged < today.landed ? ' among judged landings' : ''}
+        </span>
+      ) : null}
     </>
   );
 }

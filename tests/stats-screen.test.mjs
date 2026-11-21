@@ -30,6 +30,7 @@ async function fixture(out) {
     import {ConvexProvider, ConvexReactClient} from 'convex/react';
     import {StatsView} from ${JSON.stringify(join(root, 'web/src/app/stats/Stats.tsx'))};
     import {ProjectFrame} from ${JSON.stringify(join(root, 'web/src/app/frames.tsx'))};
+    import {rebuildFlowLandings, stepFlow, utcDayStart} from ${JSON.stringify(join(root, 'src/flow-day.ts'))};
     import {statsCarry, statsDay, statsFailedDay} from ${JSON.stringify(join(root, 'src/stats-estimate.ts'))};
     import {classifyRuns} from ${JSON.stringify(join(root, 'src/stats-runs.ts'))};
     import {statsRangeReply} from ${JSON.stringify(join(root, 'src/stats-period.ts'))};
@@ -50,6 +51,11 @@ async function fixture(out) {
     // Samples, as [UTC start of day, landings]: November so far with one October day; two days; one day; a full
     // 31-day October; a few early landings; nothing closed at all (an empty month).
     const sample = new URLSearchParams(location.search).get('sample');
+    let flow = stepFlow(undefined, now - 86400000, {landed: 1, first: true});
+    flow = stepFlow(flow, now - 2 * min, {landed: 1, first: true});
+    flow = stepFlow(flow, now - min, {landed: 1, first: false});
+    if (sample === 'now') flow = stepFlow(flow, now, {landed: 1});
+    if (sample === 'two') flow = rebuildFlowLandings(flow, utcDayStart(now), [], false);
     const dayAt = (y, m, d) => Date.UTC(y, m, d);
     const nov = [22, 18, 14, 9, 21, 24, 19, 23, 20, 13, 11, 25, 27, 26, 14].map((n, i) => [base + i * 86400000, n]);
     const plan = {
@@ -122,7 +128,7 @@ async function fixture(out) {
       const data = statsRangeReply(days, period);
       // Each fold's part, recorded so the test can tell an unopened fold made no read.
       const usePart = part => ((window.foldReads ??= new Set()).add(part), statsRangeReply(days, period, part));
-      return h(StatsView, {projectName: 'tidepool', data, period, usePart, historyHref: '/-/example/tidepool/lanes/history', onPeriod: setSearch});
+      return h(StatsView, {data, period, busy: new URLSearchParams(search).has('busy'), flow: sample === 'none' ? undefined : flow, now, usePart, historyHref: '/-/example/tidepool/lanes/history', onPeriod: setSearch});
     }
     createRoot(document.getElementById('root')).render(h(ConvexProvider, {client},
       h(ProjectFrame, {route, name: 'tidepool', projects: [], controls: {onPalette(){}, onKeys(){}, onPicker(){}, viewerHandle: 'example'}},
@@ -156,7 +162,7 @@ async function fixture(out) {
   return `<!doctype html><html lang="en" data-ds><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Stats · tidepool · Forge</title><style>body{margin:0}</style>${styles}</head><body><div id="root"></div><script type="module" src="/${script}"></script></body></html>`;
 }
 
-test('stats: own-history comparison headline, stated assumptions, left-out landings, tables and both themes', async t => {
+test('stats: closed-day freshness, today so far, comparison, tables and both themes', async t => {
   const launchOptions = chromiumLaunchOptions(t);
   if (!launchOptions) return;
   const out = mkdtempSync(join(tmpdir(), 'forge-stats-screen-'));
@@ -204,6 +210,16 @@ test('stats: own-history comparison headline, stated assumptions, left-out landi
     'the headline is against the merge queue, replayed, over the closed days only',
   );
   assert.match(sentence, /than one at a time, the worst case\./);
+  assert.deepEqual(await page.locator('.stats-freshness').allTextContents(), [
+    'Through Sun, Nov 15. Stats updates after the first landing on a later UTC day.',
+    'Today so far (UTC) · 3 landings · 50% first try among judged landings',
+  ]);
+  const pending = await open(1440, 'now', 'dark', 'busy');
+  assert.equal(
+    await pending.locator('.stats-freshness').count(),
+    0,
+    'no freshness for a retained busy reply',
+  );
   const main = await page.locator('main').textContent();
   // Baselines are named by how they merge, each with its GitHub hint, and the exact setting names on hover.
   assert.match(main, /One at a time\(like GitHub with branches up to date\)/);
@@ -372,6 +388,11 @@ test('stats: own-history comparison headline, stated assumptions, left-out landi
     assert(first.width <= 26 && second.width <= 26, `${width}: bars keep their width`);
     assert(second.left + second.width - plot < 60, `${width}: two days sit at the left, not across the page`);
     assert.deepEqual(await two.locator('.stats-days .v').allTextContents(), ['31', '128']);
+    assert.equal(
+      await two.locator('.stats-freshness').last().textContent(),
+      'Today so far (UTC) · at least 2 landings',
+      'partial live counts are lower bounds and omit the incomplete first-try share',
+    );
     const one = await open(width, 'one');
     assert.equal((await bars(one)).length, 1);
     assert.match(await one.locator('.sit').textContent(), /^7 landings on 18 Nov 2026 \(1 closed day\)\./);
@@ -394,6 +415,9 @@ test('stats: own-history comparison headline, stated assumptions, left-out landi
   }
   const empty = await open(390, 'none');
   assert.match(await empty.locator('.sit').textContent(), /^No closed days in November 2026\./);
+  assert.deepEqual(await empty.locator('.stats-freshness').allTextContents(), [
+    'Stats updates after the first landing on a later UTC day.',
+  ]);
   await empty.getByLabel('Period').selectOption('last');
   assert.match(await empty.locator('.sit').textContent(), /^No closed days in October 2026\./);
   const early = await open(390, 'early');
@@ -458,6 +482,10 @@ test('stats: own-history comparison headline, stated assumptions, left-out landi
   );
   assert.equal(await notMeasured.locator('.stats-days button:not([data-missing])').count(), 2);
   assert.match(await notMeasured.locator('.sit').textContent(), /60 landings/, 'the missing day adds none');
+  const newestFailed = await open(1440, 'notMeasured', 'dark', 'from=2026-10-31&to=2026-11-01');
+  assert.deepEqual(await newestFailed.locator('.stats-freshness').allTextContents(), [
+    'Through Sat, Oct 31. Stats updates after the first landing on a later UTC day.',
+  ]);
   await notMeasured.getByRole('button', { name: 'By month' }).click();
   assert.match(
     await notMeasured.getByRole('table', { name: 'Stats by month' }).locator('tbody tr').nth(1).textContent(),
