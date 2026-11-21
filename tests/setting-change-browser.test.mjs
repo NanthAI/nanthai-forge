@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
+import { chromiumLaunchOptions } from './browser-runtime.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const axePath = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
@@ -34,7 +35,8 @@ async function buildFixture(out) {
 }
 
 test('a held settings change: no sideways scroll, hidden characters shown, axe clean', async t => {
-  if (!existsSync(chromium.executablePath())) return t.skip('Playwright Chromium is not installed.');
+  const launchOptions = chromiumLaunchOptions(t);
+  if (!launchOptions) return;
   const out = mkdtempSync(join(tmpdir(), 'forge-setting-change-'));
   const page = await buildFixture(out);
   const server = createServer((request, response) => {
@@ -49,7 +51,7 @@ test('a held settings change: no sideways scroll, hidden characters shown, axe c
     response.end(readFileSync(file));
   }).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(launchOptions);
   try {
     for (const ds of [false, true])
       for (const none of [false, true])

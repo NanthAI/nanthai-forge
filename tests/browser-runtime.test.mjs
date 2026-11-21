@@ -2,7 +2,7 @@
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import assert from 'node:assert/strict';
-import { browserExecutable, settleBrowserPage } from './browser-runtime.mjs';
+import { browserExecutable, chromiumLaunchOptions, settleBrowserPage } from './browser-runtime.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -75,6 +75,24 @@ test('1dd4e095: local missing browsers skip and a configured cached executable i
     },
   );
   assert.equal(cached, '/synthetic/cached-browser');
+});
+
+test('1dd4e095: CI fixture launch options honor the probe’s override without a Playwright cache', t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-browser-override-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const env = { CI: 'true', FORGE_UI_BROWSER: process.execPath, PLAYWRIGHT_BROWSERS_PATH: root };
+  const probe = new URL('../scripts/check-browser-runtime.mjs', import.meta.url);
+  assert.equal(execFileSync(process.execPath, [fileURLToPath(probe)], { env }).length, 0);
+  const fixture = { skip: () => assert.fail('a configured browser cannot skip') };
+  assert.deepEqual(chromiumLaunchOptions(fixture, { env }), { executablePath: process.execPath });
+  assert.throws(
+    () =>
+      chromiumLaunchOptions(fixture, {
+        env: { ...env, FORGE_UI_BROWSER: '' },
+        executablePath: join(root, 'missing'),
+      }),
+    /CI browser is missing/,
+  );
 });
 
 test('1dd4e095: the fixed executor fails a missing selected browser before any fixture can silently skip', t => {

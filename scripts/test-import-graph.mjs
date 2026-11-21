@@ -273,23 +273,24 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
           edge(candidate, path, kind, detail);
     };
     let loaded = [];
+    // Type-aware browser selection also follows imports nested inside type aliases
+    // and interfaces. The runtime walk deliberately prunes those subtrees.
+    function visitTypeEdges(node) {
+      const value =
+        (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier
+          ? node.moduleSpecifier
+          : ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)
+            ? node.argument.literal
+            : undefined;
+      if (value && ts.isStringLiteralLike(value)) {
+        const target = resolve(path, value.text);
+        if (target) edge(target, path, 'import');
+      }
+      ts.forEachChild(node, visitTypeEdges);
+    }
     function visit(node) {
       site = node;
       sitePath = path;
-      // Browser coverage also follows web-facing type contracts. Keep ordinary
-      // runtime test selection unchanged (type-only edits still have static checks).
-      if (typeImports) {
-        const value =
-          (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier
-            ? node.moduleSpecifier
-            : ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)
-              ? node.argument.literal
-              : undefined;
-        if (value && ts.isStringLiteralLike(value)) {
-          const target = resolve(path, value.text);
-          if (target) edge(target, path, 'import');
-        }
-      }
       if (ts.isImportDeclaration(node) && node.importClause?.isTypeOnly) return;
       if (ts.isExportDeclaration(node) && node.isTypeOnly) return;
       if (ts.isImportEqualsDeclaration(node) && node.isTypeOnly) return;
@@ -516,6 +517,7 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
     }
     // convex-module is a known test loader: its moduleUrl callers contribute literal
     // edges above; its recursive resolver is represented by transitive source imports.
+    if (typeImports) visitTypeEdges(ast);
     visit(ast);
     site = null;
   }

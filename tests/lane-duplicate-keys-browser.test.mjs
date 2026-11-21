@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
+import { chromiumLaunchOptions } from './browser-runtime.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const DESK = { width: 1440, height: 1000 };
@@ -37,10 +38,11 @@ async function buildFixture(out) {
 }
 
 test('f9309eec: the Lane page and the review screen render repeated source rows without a duplicate-key error', async t => {
-  if (!existsSync(chromium.executablePath())) return t.skip('Playwright Chromium is not installed.');
+  const launchOptions = chromiumLaunchOptions(t);
+  if (!launchOptions) return;
   const out = mkdtempSync(join(tmpdir(), 'forge-lane-keys-'));
   const html = await buildFixture(out);
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(launchOptions);
   try {
     for (const [scenario, ready] of [
       ['lane', '.fx-lane-page'],

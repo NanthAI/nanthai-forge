@@ -127,6 +127,11 @@ test('1dd4e095: every browser-launching file is a browser fixture by name or reg
     .map(name => `tests/${name}`)
     .sort();
   assert.deepEqual(browserFiles(names.map(name => `tests/${name}`)), actual);
+  // A bare Chromium launch can ignore a valid runner override even when the fixed probe passed.
+  for (const file of [...actual, 'tests/billing-fixture.mjs']) {
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /chromium\.launch\(\s*(?:\)|\{\s*headless:\s*true\s*\}\s*\))/, file);
+  }
   // The registry holds only fixtures the name rule misses; named ones never need an entry.
   for (const file of browserTests) assert.doesNotMatch(file, /-browser\.test\.mjs$/, file);
 });
@@ -176,10 +181,14 @@ test('1dd4e095: runtime and type web imports reach shared src and Convex contrac
     ...inventory,
     [
       'web/src/App.tsx',
-      `import {model} from '../../src/planning-model'; import type {Work} from '../../src/work-types'; import type {Data} from '../../convex/_generated/dataModel';`,
+      `import {model} from '../../src/planning-model'; import type {Work} from '../../src/work-types'; import type {Data} from '../../convex/_generated/dataModel';
+        export type Nested = { model: import('../../src/nested-type').Nested };
+        export interface View { model: import('../../src/view-type').View }`,
     ],
     ['src/planning-model.ts', 'export const model = 1;'],
     ['src/work-types.ts', 'export type Work = {};'],
+    ['src/nested-type.ts', 'export type Nested = {};'],
+    ['src/view-type.ts', 'export type View = {};'],
     [
       'convex/_generated/dataModel.d.ts',
       `import type schema from '../schema'; export type Data = typeof schema;`,
@@ -190,7 +199,13 @@ test('1dd4e095: runtime and type web imports reach shared src and Convex contrac
     // A test which imports both domains must not turn a test edge into a web import.
     ['tests/shared.test.mjs', `import '../src/unrelated'; import '../web/src/App';`],
   ]);
-  for (const path of ['src/planning-model.ts', 'src/work-types.ts', 'convex/schema.ts'])
+  for (const path of [
+    'src/planning-model.ts',
+    'src/work-types.ts',
+    'src/nested-type.ts',
+    'src/view-type.ts',
+    'convex/schema.ts',
+  ])
     assert.equal(browserChange([path], files), true, path);
   for (const path of ['src/unrelated.ts', 'convex/server.ts'])
     assert.equal(browserChange([path], files), false, path);

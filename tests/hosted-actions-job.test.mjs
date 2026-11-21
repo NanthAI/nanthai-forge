@@ -1354,7 +1354,7 @@ test('1dd4e095: the hosted planner builds one graph and reuses it for browser se
   const run = { gate: { mode: 'contract', tests: [browser] }, check: {} };
   const paths = ['src/shared.ts'];
   const selected = actionsGateSelection(run, paths, files, true, null, null, graphCache);
-  assert.equal(browserSelection(selected, paths, files, graphCache).browser, true);
+  assert.equal(selected.browser, true);
   assert.equal(builds, 1);
   assert.equal(webReads, 1);
   files.get = () => assert.fail('the fallback must reuse the graph, not scan source again');
@@ -1487,6 +1487,73 @@ test('1dd4e095: a selected browser shard keeps its exact pin and excluded browse
     assert.deepEqual(prepared.browser, {});
     assert.equal(prepared.browserShard, '');
   });
+});
+
+test('1dd4e095: a no-change main audit provisions the full browser shard', async t => {
+  const s = fixture(t, { browser: true });
+  s.run.gate = { mode: 'audit' };
+  s.run.request.expectedHead = s.run.candidate.base.head;
+  const plan = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'objects'),
+  );
+  assert.equal(plan.recipe.selection.scope, 'full');
+  assert.equal(plan.recipe.selection.browser, true);
+  assert.deepEqual(plan.recipe.groups[Number(plan.browserShard)], ['tests/demo-browser.test.mjs']);
+  assert.deepEqual(plan.browser, { shard: plan.browserShard, version: '1.2.3' });
+});
+
+test('1dd4e095: solo and cohort rechecks select browser coverage for web changes brought in by main', async t => {
+  const mainChanges = [
+    ['non-web', 'src/backend.ts', false],
+    ['web', 'web/demo.ts', true],
+    ['web type contract', 'src/web-types.ts', true],
+  ];
+  for (const cohort of [false, true])
+    for (const [change, path, browser] of mainChanges)
+      await t.test(`${cohort ? 'cohort' : 'solo'} after a ${change} main change`, async t => {
+        const s = fixture(t, { browser: true });
+        const own = s.entry('tests/backend.test.mjs', 'export const change = 1;');
+        const main = s.entry(path, 'export type Change = 2;');
+        const baseline = [
+          ...s.files,
+          s.entry('tests/browser-runtime.mjs', 'export const runtime = true;'),
+          s.entry('src/web-types.ts', 'export type Change = 1;'),
+          s.entry('web/src/view.ts', "export type View = { change: import('../../src/web-types').Change };"),
+        ];
+        const mainFiles = [...baseline.filter(file => file.path !== path), main];
+        const checkedBase = s.state(baseline).sha256;
+        const checked = s.state([...baseline, own]).sha256;
+        const currentBase = s.state(mainFiles).sha256;
+        const members = [own];
+        let reason = `scoped-recheck:${checkedBase}`;
+        if (cohort) {
+          // Only the second member's basis predates the main change.
+          const other = s.entry('tests/another-backend.test.mjs', 'export const change = 3;');
+          const otherChecked = s.state([...mainFiles, other]).sha256;
+          members.push(other);
+          reason = `scoped-recheck-batch:${currentBase}.${otherChecked},${checkedBase}.${checked}`;
+        }
+        s.run.candidate.base.head = currentBase;
+        s.run.request.expectedHead = s.state([...mainFiles, ...members]).sha256;
+        s.run.gate = { mode: 'scoped', reason };
+        const plan = await prepareActionsJob(
+          s.client,
+          join(s.directory, 'candidate'),
+          join(s.directory, 'objects'),
+        );
+        assert.equal(plan.recipe.selection.scope, 'scoped', plan.recipe.selection.reason);
+        assert.equal(plan.recipe.selection.browser, browser);
+        assert.deepEqual(
+          plan.recipe.selection.tests,
+          [...members.map(member => member.path), ...(browser ? ['tests/demo-browser.test.mjs'] : [])].sort(),
+        );
+        if (browser) {
+          assert.deepEqual(plan.browser, { shard: plan.browserShard, version: '1.2.3' });
+          assert.ok(plan.recipe.groups[Number(plan.browserShard)].includes('tests/demo-browser.test.mjs'));
+        } else assert.equal(plan.browserShard, '');
+      });
 });
 
 test('1dd4e095: empty browser metadata never restores or installs on shard zero; only control versions seed cache', async t => {

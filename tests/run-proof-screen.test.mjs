@@ -7,13 +7,15 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { chromium } from 'playwright';
+import { chromiumLaunchOptions } from './browser-runtime.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const axe = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
 const shots = process.env.FORGE_PROOF_SHOTS;
 
 test('proof screen distinguishes missing, empty and many claims, preserves attribution and fits both themes and widths', async t => {
-  if (!existsSync(chromium.executablePath())) return t.skip('Playwright Chromium is not installed.');
+  const launchOptions = chromiumLaunchOptions(t);
+  if (!launchOptions) return;
   const temp = mkdtempSync(join(tmpdir(), 'forge-proof-screen-'));
   t.after(() => rmSync(temp, { recursive: true, force: true }));
   const html = join(temp, 'proof.html');
@@ -116,7 +118,7 @@ setData({...original,save:kind==='hiddenauthor'?{...original.save,author:undefin
       rolldownOptions: { input: { proof: html } },
     },
   });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ ...launchOptions, headless: true });
   t.after(() => browser.close());
   const context = await browser.newContext({ reducedMotion: 'reduce' });
   const page = await context.newPage();

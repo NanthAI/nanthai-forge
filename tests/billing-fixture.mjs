@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Real billing components in the account frame, built once per test file with synthetic stub data and no session.
 import assert from 'node:assert/strict';
-import { settleBrowserPage } from './browser-runtime.mjs';
+import { chromiumLaunchOptions, settleBrowserPage } from './browser-runtime.mjs';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -57,10 +57,11 @@ async function page(out) {
 
 /** Builds the fixture and returns `open(query, width, theme)`, or null when Chromium is not installed. */
 export async function billingFixture(t) {
-  if (!existsSync(chromium.executablePath())) return null;
+  const launchOptions = chromiumLaunchOptions(t);
+  if (!launchOptions) return null;
   const out = mkdtempSync(join(tmpdir(), 'forge-billing-'));
   const html = await page(out);
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(launchOptions);
   if (shots) mkdirSync(shots, { recursive: true });
   const errors = [];
   t.after(async () => {
@@ -69,7 +70,7 @@ export async function billingFixture(t) {
     assert.deepEqual(errors, [], 'no runtime errors');
   });
   const open = async (query, width = 1440, theme = 'dark') => {
-    const tab = await browser.newPage({ viewport: viewport(width) });
+    const tab = await browser.newPage({ viewport: viewport(width), locale: 'en-US' });
     t.after(() => tab.close());
     tab.on('pageerror', error => errors.push(error.message));
     await tab.route('**/*', async route => {

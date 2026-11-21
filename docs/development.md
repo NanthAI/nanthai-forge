@@ -565,11 +565,14 @@ For recorded historical replays, `scripts/measure-test-impact.mjs` accepts expli
 `.github/workflows/foundation.yml` compares exact Git pins. Markdown-only changes,
 including packaged docs, run foundation and package-document checks on pull requests. Other changes
 run full verification on pinned Node 24.22.1, plus native self-host.
-One static job runs the non-test verify stages and package
-smoke, and shares its builds with eight parallel test shards on GitHub-hosted
-`ubuntu-latest` runners (Node 24.22.1 is the only version in the matrices). `scripts/public-verify.mjs` reuses Forge's full selection,
-round-robin partition and Actions executor; every current test file is assigned
-to a shard, including newly added files. Both matrices disable
+One static job runs the non-test verify stages and package smoke. It shares its
+builds and the exact test plan with eight parallel test shards on GitHub-hosted
+`ubuntu-latest` runners (Node 24.22.1 is the only version in the matrices).
+`scripts/public-verify.mjs` reuses Forge's full selection, partitioner and Actions
+executor. Every test file is assigned to a shard, including newly added files.
+Only the plan's browser shard restores or installs Chromium. The scope job sends
+only the selected scope, so even a very large pull request passes no changed-path
+list through a runner environment variable. Both matrices disable
 fail-fast, and native self-host is independent. The final `verify` job always runs
 and requires every selected job to succeed, including all shards; only jobs
 excluded by the docs-only scope may be skipped. Branch protection can require

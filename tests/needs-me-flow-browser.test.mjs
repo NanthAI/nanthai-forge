@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
+import { chromiumLaunchOptions } from './browser-runtime.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const axePath = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
@@ -50,11 +51,12 @@ async function buildFixture(out) {
 }
 
 test('Needs me Flow picture: one source, the home layout, widths, tags and worst-case text', async t => {
-  if (!existsSync(chromium.executablePath())) return t.skip('Playwright Chromium is not installed.');
+  const launchOptions = chromiumLaunchOptions(t);
+  if (!launchOptions) return;
   const out = mkdtempSync(join(tmpdir(), 'forge-needs-flow-'));
   if (shots) mkdirSync(shots, { recursive: true });
   const html = await buildFixture(out);
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(launchOptions);
   async function open(
     t,
     width,

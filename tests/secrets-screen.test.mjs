@@ -3,12 +3,13 @@
 // failure and partial-page states are honest; commands are inert, quoted proposals; both widths and themes pass axe.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
+import { chromiumLaunchOptions } from './browser-runtime.mjs';
 import { moduleUrl } from './convex-module.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -22,7 +23,8 @@ test('the stub has no invented data; proposed commands quote a metadata name as 
 });
 
 test('Secrets: value-free screen, honest states, accessible themes and zero protocol activity', async t => {
-  if (!existsSync(chromium.executablePath())) return t.skip('Playwright Chromium is not installed.');
+  const launchOptions = chromiumLaunchOptions(t);
+  if (!launchOptions) return;
   const server = await createServer({
     root: join(root, 'web'),
     configFile: false,
@@ -45,9 +47,12 @@ test('Secrets: value-free screen, honest states, accessible themes and zero prot
   });
   await server.listen();
   t.after(() => server.close());
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(launchOptions);
   t.after(() => browser.close());
-  const context = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
+  const context = await browser.newContext({
+    locale: 'en-US',
+    permissions: ['clipboard-read', 'clipboard-write'],
+  });
   const page = await context.newPage();
   const base = `http://127.0.0.1:${server.httpServer.address().port}`;
   const errors = [];

@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
+import { chromiumLaunchOptions } from './browser-runtime.mjs';
 import { checkDesktopDock, checkPhoneDock } from './browser/needs-me-dock.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -67,12 +68,13 @@ async function buildFixture(out) {
 }
 
 test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and widths in both themes', async t => {
-  if (!existsSync(chromium.executablePath())) return t.skip('Playwright Chromium is not installed.');
+  const launchOptions = chromiumLaunchOptions(t);
+  if (!launchOptions) return;
   const out = mkdtempSync(join(tmpdir(), 'forge-needs-me-'));
   t.after(() => rmSync(out, { recursive: true, force: true }));
   if (shots) mkdirSync(shots, { recursive: true });
   const html = await buildFixture(out);
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(launchOptions);
   async function open(
     t,
     viewport,

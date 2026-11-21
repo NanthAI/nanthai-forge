@@ -6,6 +6,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium, firefox, webkit } from 'playwright';
+import { chromiumLaunchOptions } from './browser-runtime.mjs';
 import { buildFixture, serveFixture } from './browser/ds-screens-fixture.mjs';
 import { reflowViewport, zoomContext } from './browser/ds-zoom.mjs';
 
@@ -132,12 +133,17 @@ test('design system stress text, zoom reflow and maximum-page Dock reorder', asy
   for (const [name, engine] of Object.entries(engines)) {
     if (selected && selected !== name) continue;
     await t.test(name, async t => {
-      if (!existsSync(engine.executablePath())) {
+      const launchOptions = engine === chromium ? chromiumLaunchOptions(t) : {};
+      if (!launchOptions) {
+        if (selected) assert.fail(`Playwright ${name} is not installed.`);
+        return;
+      }
+      if (engine !== chromium && !existsSync(engine.executablePath())) {
         if (selected) assert.fail(`Playwright ${name} is not installed.`);
         return t.skip(`Playwright ${name} is not installed.`);
       }
       // The browser-shard inventory guard detects the Chromium launch in the suite source.
-      const browser = engine === chromium ? await chromium.launch() : await engine.launch();
+      const browser = engine === chromium ? await chromium.launch(launchOptions) : await engine.launch();
       t.after(() => browser.close());
       for (const width of [390, 1440]) {
         await t.test(`keyboard and pointer reorder all seven Billing Dock regions at ${width}px`, async t => {
@@ -221,7 +227,7 @@ test('design system stress text, zoom reflow and maximum-page Dock reorder', asy
         });
       }
       for (const zoom of [2, 4]) {
-        const { context, applyZoom } = await zoomContext(browser, name, out, zoom);
+        const { context, applyZoom } = await zoomContext(browser, name, out, zoom, launchOptions);
         t.after(() => context.close());
         const mode = name === 'webkit' ? 'reflow viewport' : 'browser zoom';
         for (const [screen, spec] of Object.entries(screens)) {

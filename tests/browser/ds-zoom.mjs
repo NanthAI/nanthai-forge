@@ -8,7 +8,7 @@ const DESKTOP = { width: 1440, height: 1000 };
 export const reflowViewport = zoom => ({ width: DESKTOP.width / zoom, height: DESKTOP.height / zoom });
 
 /** Actual full-page zoom in Chromium and Firefox. WebKit's Playwright API exposes viewport emulation only. */
-export async function zoomContext(browser, name, directory, zoom) {
+export async function zoomContext(browser, name, directory, zoom, launchOptions) {
   const locale = 'en-US';
   if (name === 'webkit') {
     const context = await browser.newContext({ locale, viewport: reflowViewport(zoom) });
@@ -52,6 +52,7 @@ export async function zoomContext(browser, name, directory, zoom) {
   );
   writeFileSync(join(extension, 'zoom.js'), 'chrome.runtime.onInstalled.addListener(() => {});');
   const context = await chromium.launchPersistentContext(profile, {
+    ...launchOptions,
     locale,
     viewport: DESKTOP,
     channel: 'chromium',

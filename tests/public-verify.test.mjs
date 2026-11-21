@@ -39,13 +39,16 @@ function fixture(t) {
     rmSync(root, { recursive: true, force: true });
   });
   process.env.RUNNER_TEMP = root;
+  delete process.env.GITHUB_OUTPUT;
   return join(root, 'public-verify-plan.json');
 }
 
 test('public shards prepare ignored Convex types before consuming shared builds', t => {
   const path = fixture(t);
   const expected = benchmarkPlan(24, {});
-  for (const shard of ['0', '23', 'static']) {
+  const output = join(process.env.RUNNER_TEMP, 'outputs');
+  process.env.GITHUB_OUTPUT = output;
+  for (const shard of ['static', '0', '23']) {
     const calls = [];
     publicVerify(shard, '24', (command, args, options) =>
       calls.push({ command, args, env: { ...options.env } }),
@@ -53,6 +56,7 @@ test('public shards prepare ignored Convex types before consuming shared builds'
     assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), expected);
     assert.ok(calls.every(call => call.command === 'node' || call.command === process.execPath));
     if (shard === 'static') {
+      assert.equal(readFileSync(output, 'utf8'), 'browser_shard=23\n');
       assert.equal(calls.length, 1);
       assert.deepEqual(calls[0].args, ['scripts/verify.mjs']);
       assert.deepEqual(JSON.parse(calls[0].env.FORGE_SELECTED_TESTS).tests, []);
@@ -76,6 +80,9 @@ test('public shards prepare ignored Convex types before consuming shared builds'
 test('public verification rejects invalid partitions and propagates command failure', t => {
   fixture(t);
   const execute = () => assert.fail('invalid shard must not execute a command');
+  assert.throws(() => publicVerify('0', '24', execute), { code: 'ENOENT' });
+  publicVerify('static', '24', () => {});
+  assert.throws(() => publicVerify('0', '8', execute), /plan has 24 shards; the matrix expects 8/);
   for (const count of [undefined, '0', '-1', '1.5', 'Infinity', '9007199254740992'])
     assert.throws(() => publicVerify('0', count, execute), /positive integer/);
   for (const shard of [undefined, '', '-1', '1.5', '24', '01'])
@@ -114,10 +121,16 @@ test('public verification uses timing history while retaining every file, includ
   assert.notDeepEqual(expected.groups, baseline.groups);
   assert.deepEqual(expected.groups.flat().sort(), baseline.selection.tests);
   const calls = [];
+  const output = join(process.env.RUNNER_TEMP, 'outputs');
+  process.env.GITHUB_OUTPUT = output;
+  publicVerify('static', '4', () => {});
+  assert.equal(readFileSync(output, 'utf8'), 'browser_shard=3\n');
+  // The matrix receives this plan via the build artifact, without planning again locally.
+  rmSync(historyPath);
   for (const shard of ['0', '1', '2', '3'])
     publicVerify(shard, '4', (command, args) => {
       if (args[0] === 'scripts/test-files.mjs') calls.push(args.slice(1));
     });
   assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), expected);
-  assert.deepEqual(calls.flat().sort(), baseline.selection.tests);
+  assert.deepEqual(calls, expected.groups);
 });

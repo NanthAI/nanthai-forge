@@ -95,12 +95,6 @@ test('docs are static, contract-generated and usable without account or backend 
   const origin = `http://127.0.0.1:${server.address().port}`;
   await t.test(
     'docs tree, copy, keyboard, accessibility and no-JavaScript reading in both themes and widths',
-    {
-      skip:
-        process.env.FORGE_BROWSER_TESTS === undefined &&
-        !existsSync(chromium.executablePath()) &&
-        'Playwright Chromium is not installed.',
-    },
     async t => {
       const executablePath = browserExecutable(t);
       if (!executablePath) return;

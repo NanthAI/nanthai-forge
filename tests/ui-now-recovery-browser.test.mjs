@@ -7,10 +7,12 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { build } from 'vite';
 import { chromium } from 'playwright';
+import { chromiumLaunchOptions } from './browser-runtime.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 test('Now recovery D/D2/D3 works in both themes with fakes, zero idle calls, retry pins and viewer authority', async t => {
-  if (!existsSync(chromium.executablePath())) return t.skip('Playwright Chromium is not installed.');
+  const launchOptions = chromiumLaunchOptions(t);
+  if (!launchOptions) return;
   const temporary = temporaryDirectory(t, 'forge-now-recovery-browser-');
   const output = join(temporary, 'browser'),
     screenshots = join(temporary, 'screenshots');
@@ -26,7 +28,7 @@ test('Now recovery D/D2/D3 works in both themes with fakes, zero idle calls, ret
     logLevel: 'silent',
     build: { outDir: output, emptyOutDir: true },
   });
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(launchOptions);
   try {
     const page = await browser.newPage({ viewport: { width: 1240, height: 1000 } });
     const errors = [];

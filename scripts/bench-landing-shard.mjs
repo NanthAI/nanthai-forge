@@ -17,7 +17,7 @@ export function benchmarkPlan(
   const graphCache = {};
   const selection = browserSelection(
     standardSelection({ ...comparison, files, graphCache }),
-    process.env.FORGE_PUBLIC_BROWSER_TESTS === '0' ? [] : comparison?.paths,
+    comparison?.paths,
     files,
     graphCache,
   );

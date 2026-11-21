@@ -1,18 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
+import { chromiumLaunchOptions } from './browser-runtime.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 test('owner decision routes filter, navigate and disclose locally in both themes without idle network calls', async t => {
-  if (!existsSync(chromium.executablePath())) {
-    t.skip(
-      'Playwright Chromium is not installed in this clean check environment; run the browser fixture in the QA Lane.',
-    );
-    return;
-  }
+  const launchOptions = chromiumLaunchOptions(t);
+  if (!launchOptions) return;
   const server = await createServer({
     root: `${root}/web`,
     configFile: false,
@@ -29,7 +26,7 @@ test('owner decision routes filter, navigate and disclose locally in both themes
           s.middlewares.use('/fixture.html', (_req, res) => {
             res.setHeader('Content-Type', 'text/html');
             res.end(
-              `<html><head><title>Owner decisions fixture</title><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/@fs/${root}/tests/fixtures/owner-decisions-preview.tsx"></script></body></html>`,
+              `<html><head><title>Owner decisions fixture</title><link rel="icon" href="data:,"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/@fs/${root}/tests/fixtures/owner-decisions-preview.tsx"></script></body></html>`,
             );
           });
         },
@@ -38,7 +35,7 @@ test('owner decision routes filter, navigate and disclose locally in both themes
   });
   await server.listen();
   t.after(() => server.close());
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(launchOptions);
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
   const errors = [];

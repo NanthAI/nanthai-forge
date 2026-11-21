@@ -5,7 +5,7 @@
 // as not verified, a comment posts once with the server choosing its writer, and axe is clean with no sideways scroll
 // at desk and phone width in both themes. Set FORGE_DISCUSSION_SHOTS to a folder to also save the screenshots.
 import test from 'node:test';
-import { settleBrowserPage } from './browser-runtime.mjs';
+import { chromiumLaunchOptions, settleBrowserPage } from './browser-runtime.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -50,11 +50,12 @@ async function buildFixture(out) {
 }
 
 test('the Item page discussion: lazy reads, inert member HTML, readers, posting, axe and widths', async t => {
-  if (!existsSync(chromium.executablePath())) return t.skip('Playwright Chromium is not installed.');
+  const launchOptions = chromiumLaunchOptions(t);
+  if (!launchOptions) return;
   const out = mkdtempSync(join(tmpdir(), 'forge-discussion-'));
   if (shots) mkdirSync(shots, { recursive: true });
   const html = await buildFixture(out);
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(launchOptions);
   async function open(t, viewport, query = '') {
     const context = await browser.newContext({ viewport });
     const page = await context.newPage();

@@ -61,7 +61,7 @@ export function classifyGitChanges({ cwd = process.cwd(), eventName, base, head 
     if (!names || !names.endsWith('\0')) return full('No complete changed-path list');
     const manifests = [base, head].map(sha => JSON.parse(git('show', `${sha}:package.json`)));
     const paths = names.slice(0, -1).split('\0');
-    return { ...classifyPaths(paths, manifests), paths };
+    return classifyPaths(paths, manifests);
   } catch {
     return full('Commit, diff or package metadata unavailable');
   }
@@ -73,10 +73,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     base: process.env.CI_BASE_SHA,
     head: process.env.CI_HEAD_SHA,
   });
-  if (process.env.GITHUB_OUTPUT)
-    appendFileSync(
-      process.env.GITHUB_OUTPUT,
-      `scope=${result.scope}\nbrowser_paths=${JSON.stringify(result.paths ?? null)}\n`,
-    );
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `scope=${result.scope}\n`);
   console.log(JSON.stringify(result));
 }

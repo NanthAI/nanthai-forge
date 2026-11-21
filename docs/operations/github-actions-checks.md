@@ -1644,13 +1644,16 @@ Standard Forge checks classify browser fixtures in `scripts/browser-test-policy.
 Any `tests/<name>-browser.test.mjs` is a browser fixture by name, in the Candidate's own
 inventory too, so a new browser test needs no registry edit; the policy lists only older
 fixtures without that suffix. Name new browser tests `*-browser.test.mjs`.
-Changes under `web/`, browser tests and fixtures, package manifests, the browser policy,
-or shared source in the web import closure (including type contracts) select them;
-other changes omit browser execution and browser cache restores. The static
+For scoped checks, changes under `web/`, browser tests and fixtures, package
+manifests, the browser policy, or shared source in the web import closure select
+the browser fixtures. Scoped non-web changes omit browser execution and cache restores. The static
 contracts in `docs-site.test.mjs` remain applicable independently of its browser
 subtest. A missing changed-path comparison selects browser coverage conservatively.
-A full selection (main audits, full checks, culprit probes and revert checks) runs
-every browser test whatever the changed paths: full means full.
+A full selection runs every browser test, including main audits with no changed
+paths. A scoped solo recheck considers both the Lane’s changes and the main delta
+since its checked base. A cohort recheck also considers the Candidate delta from
+each member’s checked head. Web-affecting paths on either side, including changes
+to shared type contracts the web imports, select the browser fixtures. An unavailable recheck basis falls back to full coverage.
 
 A test file whose every test skipped is recorded as skipped (`attempts: []`), never
 as a pass or a timing, and is never culprit-probe pass evidence. When browser
@@ -1685,7 +1688,9 @@ flag through the private check environment. It is an additive executor contract;
 the fixed executor already enforces CI failure for a missing selected browser.
 Individual fixtures adopt the shared CI-failure/local-skip rule after that executor
 is accepted. The helper reads the pinned `FORGE_BROWSER_TESTS` flag; excluded
-coverage never probes a browser.
+coverage never probes a browser. A self-hosted check can declare `FORGE_UI_BROWSER`
+as an environment input and point it to an installed Chromium. The fixed probe and
+the Chromium fixtures use that executable even with an empty Playwright cache.
 Executor contract 6 stops the hosted executor (`scripts/hosted-actions-execute.mjs`) from
 collecting V8 coverage: hosted results keep none, and it made test files 0.93 to 2.83 times
 slower (median about 1.9). Native runners still collect it ([development](../development.md#scope-aware-standard-check)).

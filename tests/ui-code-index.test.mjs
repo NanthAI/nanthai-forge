@@ -2,17 +2,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
+import { chromiumLaunchOptions } from './browser-runtime.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 test('Code lists indexed paths without full-source reads and reads only the default README.md', async t => {
-  if (!existsSync(chromium.executablePath())) {
-    t.skip(
-      'Playwright Chromium is not installed in this clean check environment; run the browser fixture in the QA Lane.',
-    );
-    return;
-  }
+  const launchOptions = chromiumLaunchOptions(t);
+  if (!launchOptions) return;
   const server = await createServer({
     root: `${root}/web`,
     configFile: false,
@@ -49,7 +45,7 @@ test('Code lists indexed paths without full-source reads and reads only the defa
   let browser;
   try {
     await server.listen();
-    browser = await chromium.launch();
+    browser = await chromium.launch(launchOptions);
     const page = await browser.newPage();
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/fixture.html`);
     const errors = [];

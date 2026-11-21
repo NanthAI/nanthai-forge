@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, webkit } from 'playwright';
+import { chromiumLaunchOptions } from './browser-runtime.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const axePath = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
@@ -113,12 +114,13 @@ async function chromeGeometry(page) {
 }
 
 test('the top bar main segment and side rails stay accessible at responsive widths', async t => {
-  if (!existsSync(chromium.executablePath())) return t.skip('Playwright Chromium is not installed.');
+  const launchOptions = chromiumLaunchOptions(t);
+  if (!launchOptions) return;
   const out = mkdtempSync(join(tmpdir(), 'forge-top-bar-'));
   t.after(() => rmSync(out, { recursive: true, force: true }));
   if (shots) mkdirSync(shots, { recursive: true });
   const html = await buildFixture(out);
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(launchOptions);
   try {
     for (const { land, width, theme } of cases)
       await t.test(`${land} landings at ${width} px, ${theme}`, async () => {
@@ -247,7 +249,7 @@ test('the top bar main segment and side rails stay accessible at responsive widt
         }
       });
     for (const type of [chromium, webkit]) {
-      if (!existsSync(type.executablePath())) {
+      if (type !== chromium && !existsSync(type.executablePath())) {
         t.diagnostic(`Playwright ${type.name()} is absent; the hosted cache supplies Chromium.`);
         continue;
       }

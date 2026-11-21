@@ -7,7 +7,7 @@ import { assertDrawn, billingFixture, shots } from './billing-fixture.mjs';
 
 test('billing home: monthly pool, bounded project list, chart/table, navigation and recovery in both themes', async t => {
   const fixture = await billingFixture(t);
-  if (!fixture) return t.skip('Playwright Chromium is not installed.');
+  if (!fixture) return;
   const open = (width = 1440, sample = 'pro', view = 'owner', theme = 'dark') =>
     fixture.open(`sample=${sample}&view=${view}`, width, theme);
   const page = await open();

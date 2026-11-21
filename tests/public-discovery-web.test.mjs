@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { build } from 'vite';
 import { chromium } from 'playwright';
+import { chromiumLaunchOptions } from './browser-runtime.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const axe = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
@@ -415,10 +416,11 @@ async function fixture(out) {
 }
 
 test('public discovery screens: explore, a profile signed out and as its person, and a public project page', async t => {
-  if (!existsSync(chromium.executablePath())) return t.skip('Playwright Chromium is not installed.');
+  const launchOptions = chromiumLaunchOptions(t);
+  if (!launchOptions) return;
   const out = mkdtempSync(join(tmpdir(), 'forge-discovery-'));
   const html = await fixture(out);
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(launchOptions);
   if (shots) mkdirSync(shots, { recursive: true });
   t.after(async () => {
     await browser.close();

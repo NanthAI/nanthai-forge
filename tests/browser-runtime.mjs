@@ -1,5 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-export { browserExecutable } from '../scripts/check-browser-runtime.mjs';
+import { browserExecutable } from '../scripts/check-browser-runtime.mjs';
+export { browserExecutable };
+
+/** Use the runner override for both availability and launch. Otherwise keep Playwright's default launch. */
+export function chromiumLaunchOptions(t, options) {
+  const executablePath = browserExecutable(t, options);
+  if (!executablePath) return null;
+  return { executablePath: (options?.env ?? process.env).FORGE_UI_BROWSER || undefined };
+}
 
 /** Settle fonts and finite transitions before layout/contrast assertions; idle animations never finish. */
 export async function settleBrowserPage(page) {

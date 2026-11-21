@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
+import { chromiumLaunchOptions } from './browser-runtime.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const axePath = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
@@ -58,13 +59,14 @@ async function buildFixture(out) {
 }
 
 test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and widths in both themes', async t => {
-  if (!existsSync(chromium.executablePath())) return t.skip('Playwright Chromium is not installed.');
+  const launchOptions = chromiumLaunchOptions(t);
+  if (!launchOptions) return;
   const out = mkdtempSync(join(tmpdir(), 'forge-lane-review-'));
   if (shots) mkdirSync(shots, { recursive: true });
   const html = await buildFixture(out);
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(launchOptions);
   async function open(t, viewport, query) {
-    const context = await browser.newContext({ viewport });
+    const context = await browser.newContext({ viewport, locale: 'en-US' });
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));

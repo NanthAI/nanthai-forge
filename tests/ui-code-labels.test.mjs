@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
+import { chromiumLaunchOptions } from './browser-runtime.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 /** Exactly one match, once it has rendered: Lane activity loads after the frame, so wait for the
  * first match (a DOM event, not a timer), then require exactly one. */
@@ -14,7 +15,8 @@ async function one(locator, message) {
 }
 
 test('Code labels and activity follow file selection; work-map counts use singular and plural', async t => {
-  if (!existsSync(chromium.executablePath())) return t.skip('Playwright Chromium is not installed.');
+  const launchOptions = chromiumLaunchOptions(t);
+  if (!launchOptions) return;
   const server = await createServer({
     root: `${root}/web`,
     configFile: false,
@@ -31,7 +33,7 @@ test('Code labels and activity follow file selection; work-map counts use singul
           s.middlewares.use('/fixture.html', (_req, res) => {
             res.setHeader('Content-Type', 'text/html');
             res.end(
-              `<html><head><title>Forge label QA</title></head><body><div id="root"></div><script type="module" src="/@fs/${root}/tests/fixtures/qa-m-code.tsx"></script></body></html>`,
+              `<html><head><title>Forge label QA</title><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module" src="/@fs/${root}/tests/fixtures/qa-m-code.tsx"></script></body></html>`,
             );
           });
         },
@@ -41,7 +43,7 @@ test('Code labels and activity follow file selection; work-map counts use singul
   let browser;
   try {
     await server.listen();
-    browser = await chromium.launch();
+    browser = await chromium.launch(launchOptions);
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));

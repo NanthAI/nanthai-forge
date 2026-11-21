@@ -148,7 +148,7 @@ test('CLI writes only a fixed scope value, including missing-input fallback', t 
     },
   );
   assert.equal(JSON.parse(stdout).scope, 'full');
-  assert.equal(readFileSync(output, 'utf8'), 'scope=full\nbrowser_paths=null\n');
+  assert.equal(readFileSync(output, 'utf8'), 'scope=full\n');
 });
 test('CLI uses supplied exact PR pins for documentation scope output', t => {
   const r = repository(t);
@@ -171,7 +171,33 @@ test('CLI uses supplied exact PR pins for documentation scope output', t => {
     },
   );
   assert.equal(JSON.parse(stdout).scope, 'docs');
-  assert.equal(readFileSync(output, 'utf8'), 'scope=docs\nbrowser_paths=["docs/notes.md"]\n');
+  assert.equal(readFileSync(output, 'utf8'), 'scope=docs\n');
+});
+
+test('1dd4e095: a PR whose UTF-8 changed paths exceed Linux’s environment limit sends only its scope', t => {
+  const r = repository(t);
+  const paths = Array.from({ length: 650 }, (_, i) => `web/${i}-${'é'.repeat(110)}.css`);
+  assert.ok(Buffer.byteLength(JSON.stringify(paths)) > 128 * 1024);
+  for (const path of paths) r.put(path, '/* synthetic */');
+  const head = r.commit();
+  const output = join(r.cwd, 'ci-output');
+  const stdout = execFileSync(
+    process.execPath,
+    [new URL('../scripts/ci-scope.mjs', import.meta.url).pathname],
+    {
+      cwd: r.cwd,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        CI_EVENT_NAME: 'pull_request',
+        CI_BASE_SHA: r.base,
+        CI_HEAD_SHA: head,
+        GITHUB_OUTPUT: output,
+      },
+    },
+  );
+  assert.equal(JSON.parse(stdout).scope, 'full');
+  assert.equal(readFileSync(output, 'utf8'), 'scope=full\n');
 });
 
 test('docs checks regenerate LLM discovery and reject drift without a web build', t => {

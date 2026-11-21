@@ -53,6 +53,21 @@ test('public shards share the Node 24 build and package smoke runs only in the s
   assert.doesNotMatch(tests, /npm run (?:verify|build|typecheck|lint|smoke:package)/);
 });
 
+test('1dd4e095: the public browser steps use the uploaded plan’s nonempty browser shard', () => {
+  const staticJob = job('verify-static');
+  const tests = job('verify-tests');
+  assert.match(staticJob, /browser_shard: \$\{\{ steps.plan.outputs.browser_shard \}\}/);
+  assert.match(
+    staticJob,
+    /path: \|\n +\$\{\{ runner.temp \}\}\/verify-build.tgz\n +\$\{\{ runner.temp \}\}\/public-verify-plan.json/,
+  );
+  const gates = [...tests.matchAll(/^      - if: (.*browser_shard.*)$/gm)].map(match => match[1]);
+  assert.equal(gates.length, 4);
+  const guard =
+    "needs.verify-static.outputs.browser_shard != '' && matrix.shard == needs.verify-static.outputs.browser_shard";
+  assert.ok(gates.every(gate => gate === guard || gate.startsWith(`${guard} && `)));
+});
+
 test('the always-running aggregate fails closed for failed, cancelled or unexpectedly skipped jobs', () => {
   const aggregate = job('verify');
   const names = ['scope', 'foundation', 'verify-static', 'verify-tests', 'native-selfhost'];

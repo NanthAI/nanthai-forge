@@ -133,7 +133,7 @@ export async function prepareActionsJob(
   const standard = isStandardForgeCheck(run.check);
   const files = new SourceFiles(new Map(state.files.map(file => [file.path, file.blob])), cache);
   const graphCache = {};
-  const selectedBeforeBrowser = actionsGateSelection(
+  const selected = actionsGateSelection(
     run,
     paths,
     files,
@@ -146,9 +146,6 @@ export async function prepareActionsJob(
     })) ?? null,
     graphCache,
   );
-  const selected = standard
-    ? browserSelection(selectedBeforeBrowser, paths, files, graphCache)
-    : selectedBeforeBrowser;
   // Markdown that tests or scripts read: a clean merge of any other Markdown can
   // land on its first check (Issue 7fe54c7c). Absent means every Markdown is tested.
   // An opaque command has no Forge selector: only its declared docs paths say which Markdown is untested.
@@ -395,7 +392,15 @@ export function actionsGateSelection(
       )
     : gated;
   // Gate probes, contract unions and rechecks can select nothing; that must never pass.
-  const selected = standard ? guardedSelection(raw, { files, paths }) : raw;
+  const guarded = standard ? guardedSelection(raw, { files, paths }) : raw;
+  // A recheck sees the changes on the opposite side of each checked basis too.
+  const otherSide = standard ? (mainPaths ?? members?.flatMap(member => member.mainPaths) ?? []) : [];
+  const browserPaths = otherSide.length ? [...new Set([...paths, ...otherSide])] : paths;
+  let selected = standard ? browserSelection(guarded, browserPaths, files, graphCache) : guarded;
+  // The impact graph omits type-only edges. If the recheck's shared-source
+  // changes did not select a browser through runtime imports, check type imports.
+  if ((mainPaths || members) && 'browser' in selected && selected.browser === false)
+    selected = browserSelection(guarded, browserPaths, files);
   // Why the command could not be narrowed or skipped, pinned with the selection (7c2e69e1).
   const fallback = selectionFallback({
     standard,
