@@ -1,18 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-// The phone's Filter and view sheet (owner phone review 2026-11-17): the views, every filter, the order, the layout and
+// The phone's Tune sheet: every filter, the order, the layout and
 // the Initiative folds, each a native select or key so the phone shows its own picker (DESIGN.md rule 8). Every choice
 // applies at once through the address, as on the desk toolbar; Done only closes the sheet. Mounted only while open.
 import type { ReactNode } from 'react';
 import { Key, Sheet } from '../../ds';
 import type { PlanQuery, Sort } from './query';
-import type { Facet, ViewList, ViewsProps } from './Views';
-
-/** The View select's Save choice; a saved view's name never starts with a NUL. */
-const SAVE = '\u0000save';
+import type { Facet, ViewsProps } from './Views';
 
 export function Tune({
   onOpenChange,
-  views,
   facets,
   query,
   go,
@@ -21,7 +17,6 @@ export function Tune({
   folds,
 }: {
   onOpenChange: (open: boolean) => void;
-  views: ViewList;
   facets: readonly Facet[];
   query: PlanQuery;
   go: ViewsProps['go'];
@@ -33,34 +28,10 @@ export function Tune({
     <Sheet
       open
       onOpenChange={onOpenChange}
-      title="Filter and view"
+      title="Tune"
       footer={<Key onClick={() => onOpenChange(false)}>Done</Key>}
     >
       <div className="plan-tune">
-        <label>
-          <span>View</span>
-          <select
-            className="inp"
-            value={views.on ?? ''}
-            onChange={event => {
-              if (event.target.value !== SAVE) return views.choose(event.target.value);
-              onOpenChange(false);
-              views.setSaving(true);
-            }}
-          >
-            {views.on ? null : (
-              <option value="" disabled>
-                This view
-              </option>
-            )}
-            {views.all.map(view => (
-              <option key={view.name} value={view.name}>
-                {view.n === undefined ? view.name : `${view.name} · ${view.n.toLocaleString()}`}
-              </option>
-            ))}
-            <option value={SAVE}>Save this view…</option>
-          </select>
-        </label>
         {facets.map(facet => (
           <label key={facet.label}>
             <span>{facet.label}</span>

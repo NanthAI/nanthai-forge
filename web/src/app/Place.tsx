@@ -5,7 +5,8 @@ import { lazy, Suspense, type ReactNode } from 'react';
 const You = lazy(() => import('./You'));
 const InvitationHome = lazy(() => import('./people/InvitationHome'));
 import { A } from './frames';
-import { currentScreenHref, hrefFor, type AppRoute } from './paths';
+import { currentScreenHref, hrefFor, placeSections, type AppRoute } from './paths';
+import { PhonePageTitle } from './project-pages';
 import {
   accountPlaceLabels,
   accountSentence,
@@ -29,7 +30,7 @@ export function crumbsFor(route: AppRoute, projectName: string): Crumb[] {
     { label: projectName, href: at({ place: 'needs', section: '', rest: '' }) },
     { label: projectPlaceLabels[route.place], href: at({ section: '', rest: '' }) },
   ];
-  if (route.section)
+  if (placeSections[route.place].length > 1)
     trail.push({ label: sectionLabels[route.place][route.section] ?? route.section, href: at({ rest: '' }) });
   if (route.rest)
     trail.push({
@@ -56,6 +57,7 @@ export function Head({
   return (
     <div className="head">
       <h1 className="crumb">
+        <PhonePageTitle />
         {trail.map((crumb, index) => (
           <span key={index} className="crumb-step">
             {index ? (

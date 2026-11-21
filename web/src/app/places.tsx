@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // The places of each frame (DESIGN.md "Frames"; pattern rule 8): the rail's six project places, the account's five,
-// the section strip of each place, and the quiet line icon each place shows in the rail and the phone tabs.
+// the pages of each place, and the quiet line icon each place shows in the rail and the phone tabs.
 import type { AccountPlace, ProjectPlace } from './paths';
 
 export const projectPlaceLabels: Record<ProjectPlace, string> = {
@@ -22,8 +22,8 @@ export const accountPlaceLabels: Record<AccountPlace, string> = {
 export const accountTabLabels: Partial<Record<AccountPlace, string>> = { people: 'People' };
 
 export const sectionLabels: Record<ProjectPlace, Record<string, string>> = {
-  needs: { '': 'Needs me', held: 'Held, redone or refused', 'loose-ends': 'Loose ends' },
-  lanes: { '': 'Lanes', history: 'History', touching: 'Who is touching what', sessions: 'Sessions' },
+  needs: { '': 'Now', held: 'Held, redone or refused', 'loose-ends': 'Loose ends' },
+  lanes: { '': 'Open', history: 'History', touching: 'Who is touching what', sessions: 'Sessions' },
   plan: { '': 'Backlog' },
   code: { '': 'What landed', files: 'Files' },
   stats: { '': 'Stats' },
@@ -36,9 +36,6 @@ export const sectionLabels: Record<ProjectPlace, Record<string, string>> = {
     you: 'You',
   },
 };
-/** In the settings strip, "You" sits apart at the far end (the strip's gap). */
-export const stripGapBefore: Partial<Record<ProjectPlace, string>> = { settings: 'you' };
-
 /** The sentence each place's head states until its rebuilt screen states the real answer. */
 export const placeSentence: Record<ProjectPlace, string> = {
   needs: 'What waits on you in this project.',

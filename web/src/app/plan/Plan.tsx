@@ -66,7 +66,8 @@ import {
   type PlanView,
 } from './model';
 import { filtered, keeps, readQuery, sortRows, writeQuery, type PlanQuery } from './query';
-import { Toolbar, useSavedViews, viewList, ViewsColumn } from './Views';
+import { Toolbar } from './Views';
+import { useProjectPages } from '../project-pages';
 import { ItemWork, type ReadItemWork } from './ItemWork';
 import './plan.css';
 
@@ -321,7 +322,8 @@ export function PlanScreenView({
   const [sent, setSent] = useState<{ row: PlanRow; shelf: Shelf; version: number } | null>(null);
   const [message, announce] = useAnnounce();
   const { folds, toggle: toggleFold, setAll: setFolds } = usePlanFolds(projectId ?? '');
-  const savedViews = useSavedViews(projectId ?? '');
+  const navigation = useProjectPages();
+  const setRailCounts = navigation?.setCounts;
   const find = query.find;
   const keep = useMemo(() => (row: PlanRow) => keeps(row, query), [query]);
   const view = useMemo(
@@ -382,6 +384,22 @@ export function PlanScreenView({
     if (sent) map.set(sent.row.id, sent.row);
     return map;
   }, [view, closed.rows, dropped.rows, shelved.rows, sent]);
+  const viewCounts = useMemo(() => {
+    if (!whole || !allRows) return undefined;
+    const me = viewer?.replace(/^@/, '');
+    let mine = 0;
+    let unowned = 0;
+    for (const row of allRows) {
+      if (row.kind !== 'issue' || !isLive(row)) continue;
+      if (!row.owner) unowned++;
+      if (me && ownerOf(row.owner) === me) mine++;
+    }
+    return { open: whole.live, mine, unowned };
+  }, [allRows, viewer, whole]);
+  useEffect(() => {
+    setRailCounts?.(viewCounts);
+    return () => setRailCounts?.(undefined);
+  }, [setRailCounts, viewCounts]);
   /** One Item to a shelf or back, through the batch call: retry-safe, one version, and the 10-second Undo. */
   const shelfMove = async (writes: BatchPut[], row: PlanRow, to: Shelf | null) => {
     if (!run) return;
@@ -553,12 +571,6 @@ export function PlanScreenView({
   const types = [...new Set([...(view?.byId.values() ?? [])].flatMap(row => (row.type ? [row.type] : [])))];
   const initiatives = whole?.groups.flatMap(group => (group.initiative ? [group.initiative] : [])) ?? [];
   const liveItems = [...(view?.byId.values() ?? [])].filter(row => row.kind === 'issue' && isLive(row));
-  const me = viewer?.replace(/^@/, '');
-  const counts = {
-    open: whole?.live ?? 0,
-    mine: me ? liveItems.filter(row => ownerOf(row.owner) === me).length : 0,
-    unowned: liveItems.filter(row => !row.owner).length,
-  };
   const words = [
     query.type ? `type ${query.type}` : '',
     query.owner ? (query.owner === 'none' ? 'no owner' : `owner ${query.owner}`) : '',
@@ -655,10 +667,6 @@ export function PlanScreenView({
     Boolean(view?.groups.length) &&
     (view?.groups ?? []).every(group => isShut(folds, group.initiative?.id ?? NO_INITIATIVE));
   const anyShut = (view?.groups ?? []).some(group => isShut(folds, group.initiative?.id ?? NO_INITIATIVE));
-  const views = viewList(
-    { projectId: projectId ?? '', query, base: at({}), go, viewer, initiatives, owners, types, counts },
-    savedViews,
-  );
   /** Collapse all and Expand all: quiet in the region's head on a desk, solid keys in the phone's sheet. */
   const foldKeys = (kind?: 'ghost') =>
     view && openShown && query.layout !== 'board' && view.groups.length > 1 ? (
@@ -680,11 +688,17 @@ export function PlanScreenView({
     setToast({ outcome, words: text });
     announce(text);
   };
+  const currentView = navigation?.pages.plan.find(page => page.current);
+  const trail = crumbsFor(route, projectName);
+  if (currentView) {
+    trail.at(-1)!.href = at({});
+    trail.push({ label: currentView.label });
+  }
 
   return (
     <div className="plan plan-with-views">
       <Head
-        trail={crumbsFor(route, projectName)}
+        trail={trail}
         sentence={
           sentence ? (
             <>
@@ -712,7 +726,6 @@ export function PlanScreenView({
         })}
       />
       <div className="plan-body">
-        <ViewsColumn projectId={projectId ?? ''} query={query} views={views} />
         <Region
           title={scopeWords[query.scope]}
           count={view ? shown : undefined}
@@ -736,7 +749,9 @@ export function PlanScreenView({
             owners={owners}
             types={types}
             viewer={viewer}
-            views={views}
+            projectId={projectId ?? ''}
+            base={at({})}
+            counts={viewCounts}
             folds={foldKeys()}
             count={
               view

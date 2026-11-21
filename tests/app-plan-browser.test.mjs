@@ -6,9 +6,9 @@
 // overview, an Initiative moves with one order write, a group header's roll never draws over its breakdown words
 // (f49e3a5c, 3-digit counts at 1440, 1024 and 390), the header's chip is every Item and its breakdown parts come in
 // one order, add up to the chip and match the roll's ticks (b7a0dff1), and the Initiative page edits its title and asks for its done
-// Items. On a phone (owner review 2026-11-17) the list shows one count, Find and one Filter and view key at one height,
-// each row's status on the line under its name, and the line's counts beside their own words; the views, filters,
-// order, layout and folds are in the sheet. Set FORGE_PLAN_SHOTS to a folder to also save the screenshots.
+// Items. On a phone, the list shows one count, Find and Tune at one height, each row's status on the line under its
+// name, and the line's counts beside their own words. The title offers the views. Tune holds the filters, order,
+// layout and folds. Set FORGE_PLAN_SHOTS to a folder to also save the screenshots.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
@@ -22,6 +22,7 @@ import { settleBrowserPage } from './browser-runtime.mjs';
 const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL('../', import.meta.url));
 const shots = process.env.FORGE_PLAN_SHOTS;
+const sidebarShots = process.env.FORGE_SIDEBAR_SHOTS;
 
 const fixture = `
 import React from 'react';
@@ -153,7 +154,7 @@ function Fixture() {
   const go = patch => navigate(location.pathname + writeQuery({ ...query, ...patch }), { replace: true });
   // The shell receives the same Needs you count as the page read (window.heldFeed, set before load).
   const feed = window.heldFeed ? { lanes: [{ laneId: uuid(90), stage: 'ready', held: true, overlap: false, changedAt: 1 }], more: 0, moreIsLowerBound: false, main: null } : undefined;
-  return <ProjectFrame route={route} name="Synthetic project" feed={feed}
+  return <ProjectFrame route={route} projectId="synthetic" name="Synthetic project" feed={feed}
     needs={window.heldFeed ? { n: 1, atLeast: false } : undefined} projects={null}
     controls={{ viewerHandle: 'example-builder', onPicker() {}, onPalette() {}, onKeys() {} }}>
     <React.Suspense fallback={<h1>Loading</h1>}>{window.livePlan ?
@@ -284,6 +285,23 @@ test('plan views and bulk bar: real components keep the view in the address and 
     assert.match(await main.textContent(), /Tidy the old notes/);
     await page.getByRole('button', { name: 'Remove Owner no one' }).click();
     assert.doesNotMatch(page.url(), /owner=/);
+    await page.getByRole('button', { name: 'Type: any' }).click();
+    await page.getByRole('menuitem', { name: 'Bug', exact: true }).click();
+    await page.getByRole('button', { name: 'Save this view' }).click();
+    const save = page.getByRole('dialog', { name: 'Save this view' });
+    await save.getByRole('textbox', { name: 'Name' }).fill('Parser bugs');
+    await save.getByRole('button', { name: 'Save', exact: true }).click();
+    await save.waitFor({ state: 'hidden' });
+    const saved = page.locator('.rail').getByRole('link', { name: 'Parser bugs' });
+    assert.equal(await saved.getAttribute('aria-current'), 'page');
+    await page.getByRole('button', { name: 'Collapse sidebar' }).click();
+    await page.getByRole('button', { name: 'View: Parser bugs' }).click();
+    await page.getByRole('menuitem', { name: /^Open work/ }).click();
+    assert.doesNotMatch(page.url(), /type=/);
+    await page.getByRole('button', { name: 'Expand sidebar' }).click();
+    await saved.click();
+    assert.match(page.url(), /type=bug/);
+    await page.getByRole('button', { name: 'Remove Type bug' }).click();
     await page
       .getByRole('checkbox', { name: 'Select Stream parser: preserve split bytes across reads' })
       .check();
@@ -450,7 +468,8 @@ test('plan views and bulk bar: real components keep the view in the address and 
     for (const theme of ['dark', 'light'])
       await t.test(`group header ${width} ${theme}: the roll never draws over its words`, async () => {
         const { page, errors, context } = await open(width, theme);
-        assert.equal(await page.locator('.plan-gh .plan-bfull').first().isVisible(), width === 1440);
+        const fullBreakdown = page.locator('.plan-gh .plan-bfull').first();
+        assert.equal(await fullBreakdown.isVisible(), width >= 1024);
         const boxes = await headers(page);
         assert.ok(
           boxes.some(
@@ -486,6 +505,15 @@ test('plan views and bulk bar: real components keep the view in the address and 
         assert.deepEqual(launch.ticks, ['ok', 'ok', 'ok', 'ok', 'run', 'open', 'open', 'prop', 'gone']);
         if (shots && width !== 390)
           await page.screenshot({ path: join(shots, `plan-headers-${width}-${theme}.png`), fullPage: true });
+        if (width === 1024) {
+          await page.getByRole('button', { name: 'Expand sidebar' }).click();
+          assert.equal(
+            await fullBreakdown.isVisible(),
+            false,
+            'an expanded rail leaves less than 860px for Plan',
+          );
+          for (const box of await headers(page)) assert.deepEqual({ ...box, meet: false, spill: false }, box);
+        }
         assert.deepEqual(errors, []);
         await context.close();
       });
@@ -624,8 +652,8 @@ test('plan views and bulk bar: real components keep the view in the address and 
     for (const theme of ['dark', 'light'])
       await t.test(`overview ${width} ${theme}: no clipping or axe violations`, async () => {
         const { page, errors, context } = await open(width, theme);
-        // A phone keeps the folds in Filter and view.
-        if (width === 390) await page.getByRole('button', { name: 'Filter and view' }).click();
+        // A phone keeps the folds in Tune.
+        if (width === 390) await page.getByRole('button', { name: 'Tune' }).click();
         await page.getByRole('button', { name: 'Collapse all' }).click();
         if (width === 390) await page.getByRole('button', { name: 'Done' }).click();
         await page.getByRole('grid', { name: 'Initiatives, in order' }).waitFor();
@@ -714,11 +742,11 @@ test('plan views and bulk bar: real components keep the view in the address and 
         await context.close();
       });
 
-  // On a phone (owner review 2026-11-17): one count for the list, Find and Filter and view on one row at one height, the
+  // On a phone: one count for the list, Find and Tune on one row at one height, the
   // offered filters, order and layout folded into the sheet, each row's status under its name, the line's counts beside
   // their own words, and the page's end clear of the fixed tab bar even with a count on Needs me.
   for (const theme of ['dark', 'light'])
-    await t.test(`phone ${theme}: one count, Filter and view, rows and the end of the page`, async () => {
+    await t.test(`phone ${theme}: one count, title picker, Tune, rows and the end of the page`, async () => {
       const { page, errors, context } = await open(390, theme, '', true);
       // On the app's own address a change of view is an in-page step, as for a reader (elsewhere it reloads the page).
       await page.evaluate(() => history.replaceState(null, '', `/-${location.pathname}`));
@@ -745,7 +773,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
         );
       assert.equal(await page.getByRole('button', { name: 'Type: any' }).isVisible(), false);
       const find = page.getByRole('searchbox', { name: 'Find in the plan' });
-      const tune = page.getByRole('button', { name: 'Filter and view' });
+      const tune = page.getByRole('button', { name: 'Tune' });
       const [findBox, tuneBox] = [await find.boundingBox(), await tune.boundingBox()];
       assert.ok(
         Math.abs(findBox.y - tuneBox.y) < 1 && Math.abs(findBox.height - tuneBox.height) < 1,
@@ -772,15 +800,18 @@ test('plan views and bulk bar: real components keep the view in the address and 
         }),
       );
       for (const stop of stops) assert.ok(stop.own < stop.next, JSON.stringify(stop));
-      // The sheet: a view, a filter (then a chip on the bar), the order and the layout, all in the address.
-      await tune.click();
-      const sheet = page.getByRole('dialog', { name: 'Filter and view' });
-      await sheet.getByRole('combobox', { name: 'View' }).waitFor();
-      await check(page, `phone sheet ${theme}`);
-      await sheet.getByRole('combobox', { name: 'View' }).selectOption('Closed');
+      // The title changes the view in the address. Tune changes a filter, the order and the layout.
+      await page.getByRole('button', { name: 'Plan: Open work. Choose a page' }).click();
+      const views = page.getByRole('dialog', { name: 'Plan' });
+      await views.getByRole('link', { name: 'Closed', exact: true }).click();
       await page.waitForFunction(() => location.search.includes('scope=closed'));
-      await sheet.getByRole('combobox', { name: 'View' }).selectOption('Open work');
+      await page.getByRole('button', { name: 'Plan: Closed. Choose a page' }).click();
+      await views.getByRole('link', { name: /^Open work/ }).click();
       await page.waitForFunction(() => !location.search.includes('scope='));
+      await tune.click();
+      const sheet = page.getByRole('dialog', { name: 'Tune' });
+      await sheet.getByRole('combobox', { name: 'Owner' }).waitFor();
+      await check(page, `phone sheet ${theme}`);
       await sheet.getByRole('combobox', { name: 'Owner' }).selectOption('none');
       await page.waitForFunction(() => location.search.includes('owner=none'));
       await sheet.getByRole('combobox', { name: 'Order' }).selectOption('title');
@@ -819,6 +850,47 @@ test('plan views and bulk bar: real components keep the view in the address and 
       assert.deepEqual(errors, []);
       await context.close();
     });
+  if (sidebarShots) {
+    mkdirSync(sidebarShots, { recursive: true });
+    for (const [width, theme, query] of [
+      [1440, 'dark', '?owner=none'],
+      [1440, 'light', ''],
+      [1024, 'light', ''],
+      [390, 'light', ''],
+    ]) {
+      const { page, context } = await open(width, theme, query);
+      await page.evaluate(() =>
+        localStorage.setItem(
+          'forge.plan.views.synthetic',
+          JSON.stringify([
+            { name: 'Bugs with no owner', query: '?type=bug&owner=none' },
+            { name: 'Documentation', query: '?type=docs' },
+          ]),
+        ),
+      );
+      await page.reload();
+      await page.locator('.plan h1').first().waitFor();
+      if (width === 1024) {
+        await page.locator('.rail').getByRole('link', { name: 'Plan', exact: true }).hover();
+        await page
+          .getByRole('group', { name: 'Plan pages' })
+          .getByRole('link', { name: /^Open work/ })
+          .waitFor();
+      }
+      await page.setViewportSize({ width, height: width === 390 ? 844 : width === 1024 ? 768 : 860 });
+      await settleBrowserPage(page);
+      const name =
+        width === 1440 ? `plan-${theme}` : width === 1024 ? 'plan-collapsed-light' : 'plan-phone-light';
+      await page.screenshot({ path: join(sidebarShots, `${name}.png`) });
+      if (width === 390) {
+        await page.getByRole('button', { name: 'Plan: Open work. Choose a page' }).click();
+        await page.getByRole('dialog', { name: 'Plan' }).waitFor();
+        await settleBrowserPage(page);
+        await page.screenshot({ path: join(sidebarShots, 'plan-phone-views-light.png') });
+      }
+      await context.close();
+    }
+  }
   // Archive and Deleted (Item 4c9e961e): a shelved row comes back to the status it left in one batch write with Undo,
   // and the Item page sends an Item to Deleted the same way.
   {

@@ -353,6 +353,7 @@ function ProjectView({
   return (
     <ProjectFrame
       route={route}
+      projectId={projectId}
       name={name}
       feed={feed}
       needs={needs}

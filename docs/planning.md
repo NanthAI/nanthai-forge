@@ -261,7 +261,8 @@ default scope. `"all"` adds done, dropped, archived and deleted Items. For a lis
 of stored statuses to match any of them. The Closed view copies `"status":["closed","abandoned"]` with `"kind":"issue"`.
 An indexed search with multiple statuses filters each bounded search page, so continue with its cursor
 even when that page has no matching Items. The web Plan screen keeps the same fields in its address, and a
-saved view is a personal shortcut to them.
+saved view is a personal shortcut to them. Open Plan's views in the sidebar or from the page title on a phone.
+The Plan toolbar saves and removes views kept in the current browser.
 
 ## Progress
 

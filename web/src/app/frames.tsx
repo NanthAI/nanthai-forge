@@ -5,29 +5,22 @@
 // behaviour layer (decisions.md, shared-base rule 3). Each frame has a skip link, one main landmark and the phone tabs.
 import type { FocusEvent, ReactNode } from 'react';
 import { Avatar, Count, DockPerson, Menu, State, initials, type MenuAction } from '../ds';
+import { Rail } from '../ds/Rail';
+import { RailControls, useRailState } from '../ds/rail-state';
 import { ForgeMark } from '../shell/brand';
 import { Line, type LineFeed } from './Line';
 import { useMark } from './mark';
+import { accountPlaces, hrefFor, projectPlaces, type AccountPlace, type ProjectPlace } from './paths';
+import { PlaceIcon, accountPlaceLabels, accountTabLabels, projectPlaceLabels } from './places';
 import {
-  accountPlaces,
-  hrefFor,
-  placeSections,
-  projectPlaces,
-  type AccountPlace,
-  type AppRoute,
-  type ProjectPlace,
-} from './paths';
-import {
-  PlaceIcon,
-  accountPlaceLabels,
-  accountTabLabels,
-  projectPlaceLabels,
-  sectionLabels,
-  stripGapBefore,
-} from './places';
+  PageLinks,
+  ProjectMore,
+  ProjectPagesProvider,
+  placeHref,
+  useProjectPages,
+  type ProjectRoute,
+} from './project-pages';
 import { followLink, navigate } from './router';
-
-type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
 
 export function A({
   href,
@@ -138,10 +131,6 @@ function End({
 
 export type FrameControls = { onPalette: () => void; onKeys: () => void; viewerHandle: string | undefined };
 
-function placeHref(route: ProjectRoute, place: ProjectPlace) {
-  return hrefFor({ ...route, place, section: '', rest: '' });
-}
-
 function PhoneMore<Place extends string>({
   places,
   tabs,
@@ -175,37 +164,9 @@ function PhoneMore<Place extends string>({
   );
 }
 
-/** The section strip of a place with more than one section. */
-function Strip({ route }: { route: ProjectRoute }) {
-  const sections = placeSections[route.place];
-  if (sections.length < 2) return null;
-  return (
-    <nav className="strip" aria-label={projectPlaceLabels[route.place]}>
-      {sections.map(section => (
-        <span key={section || 'first'} style={{ display: 'contents' }}>
-          {stripGapBefore[route.place] === section ? <span className="gap" /> : null}
-          <A
-            href={hrefFor({ ...route, section, rest: '' })}
-            aria-current={route.section === section && !route.rest ? 'page' : undefined}
-          >
-            {sectionLabels[route.place][section]}
-          </A>
-        </span>
-      ))}
-    </nav>
-  );
-}
-
-export function ProjectFrame({
-  route,
-  name,
-  feed,
-  needs,
-  projects,
-  controls,
-  children,
-}: {
+type ProjectFrameProps = {
   route: ProjectRoute;
+  projectId?: string | null;
   /** The project's display name once resolved; the address slug until then. */
   name: string;
   feed: LineFeed | undefined;
@@ -215,7 +176,24 @@ export function ProjectFrame({
   projects: readonly { handle: string; slug: string; name: string }[] | null;
   controls: FrameControls & { onPicker: () => void };
   children: ReactNode;
-}) {
+};
+
+export function ProjectFrame(props: ProjectFrameProps) {
+  return (
+    <ProjectPagesProvider
+      route={props.route}
+      projectId={props.projectId ?? null}
+      viewer={props.controls.viewerHandle}
+    >
+      <ProjectShell {...props} />
+    </ProjectPagesProvider>
+  );
+}
+
+function ProjectShell({ route, name, feed, needs, projects, controls, children }: ProjectFrameProps) {
+  const rail = useRailState();
+  const { pages } = useProjectPages()!;
+  const address = hrefFor(route) + (typeof location === 'undefined' ? '' : location.search);
   const held = needs?.n;
   const needsLabel =
     // The name starts with the words shown ("Needs you 3"), so speech and voice control match the screen.
@@ -238,67 +216,73 @@ export function ProjectFrame({
   ];
   const tabPlaces: readonly ProjectPlace[] = ['needs', 'lanes', 'plan', 'code'];
   return (
-    <div className="shell" data-frame="project">
-      <Skip />
-      <header className="top">
-        <Brand href={placeHref(route, 'needs')} feed={feed} />
-        <span onPointerEnter={controls.onPicker} onFocus={controls.onPicker} style={{ display: 'contents' }}>
-          <Menu label={`Project: ${name}. Switch project`} items={pickerItems} className="proj">
-            <span className="cut" translate="no">
-              {name}
-            </span>
-          </Menu>
-        </span>
-        <Line feed={feed} handle={route.handle} project={route.project} />
-        <End handle={controls.viewerHandle} onPalette={controls.onPalette} onKeys={controls.onKeys}>
-          <A className="needs" href={placeHref(route, 'needs')} aria-label={needsLabel}>
-            <span className="hide-ph">Needs you</span>
-            {/* A space, so the shown text reads "Needs you 3" like its name (the flex row drops it). */}
-            {held === undefined ? null : ' '}
-            {held === undefined ? null : <Count n={held} hot={held > 0} />}
-          </A>
-        </End>
-      </header>
-      <Line feed={feed} handle={route.handle} project={route.project} phone />
-      <nav className="rail" aria-label="Project">
-        {projectPlaces.map((place, index) => (
-          <A
-            key={place}
-            href={placeHref(route, place)}
-            aria-current={route.place === place ? 'page' : undefined}
-            aria-keyshortcuts={String(index + 1)}
+    <RailControls.Provider value={rail}>
+      <div className="shell" data-frame="project" data-rail={rail.shut ? 'shut' : 'open'}>
+        <Skip />
+        <header className="top">
+          <Brand href={placeHref(route, 'needs')} feed={feed} />
+          <span
+            onPointerEnter={controls.onPicker}
+            onFocus={controls.onPicker}
+            style={{ display: 'contents' }}
           >
-            <PlaceIcon name={place} />
-            <span className="rail-label">{projectPlaceLabels[place]}</span>
-            {place === 'needs' && held ? <Count n={held} hot /> : <kbd aria-hidden="true">{index + 1}</kbd>}
-          </A>
-        ))}
-      </nav>
-      <main id="main" tabIndex={-1} onFocus={showPageFocus}>
-        <Strip route={route} />
-        <DockPerson value={controls.viewerHandle ?? null}>{children}</DockPerson>
-      </main>
-      <nav className="tabs" aria-label="Project">
-        {tabPlaces.map(place => (
-          <A
-            key={place}
-            href={placeHref(route, place)}
-            aria-current={route.place === place ? 'page' : undefined}
-          >
-            <PlaceIcon name={place} size={20} />
-            {projectPlaceLabels[place]}
-            {place === 'needs' && held ? <Count n={held} hot /> : null}
-          </A>
-        ))}
-        <PhoneMore
-          places={projectPlaces}
-          tabs={tabPlaces}
-          current={route.place}
-          labels={projectPlaceLabels}
-          href={place => placeHref(route, place)}
+            <Menu label={`Project: ${name}. Switch project`} items={pickerItems} className="proj">
+              <span className="cut" translate="no">
+                {name}
+              </span>
+            </Menu>
+          </span>
+          <Line feed={feed} handle={route.handle} project={route.project} />
+          <End handle={controls.viewerHandle} onPalette={controls.onPalette} onKeys={controls.onKeys}>
+            <A className="needs" href={placeHref(route, 'needs')} aria-label={needsLabel}>
+              <span className="hide-ph">Needs you</span>
+              {/* A space, so the shown text reads "Needs you 3" like its name (the flex row drops it). */}
+              {held === undefined ? null : ' '}
+              {held === undefined ? null : <Count n={held} hot={held > 0} />}
+            </A>
+          </End>
+        </header>
+        <Line feed={feed} handle={route.handle} project={route.project} phone />
+        <Rail
+          label="Project"
+          address={address}
+          {...rail}
+          places={projectPlaces.map((place, index) => {
+            const current = route.place === place;
+            const nested = pages[place].length > 1;
+            return {
+              id: `sidebar-${place}`,
+              label: projectPlaceLabels[place],
+              href: placeHref(route, place),
+              shortcut: String(index + 1),
+              icon: <PlaceIcon name={place} />,
+              badge: place === 'needs' && held ? <Count n={held} hot /> : null,
+              current: current ? (nested ? 'true' : 'page') : undefined,
+              marked: current && (rail.shut || !nested || !pages[place].some(page => page.current)),
+              ...(current && nested ? { pages: <PageLinks pages={pages[place]} compact /> } : {}),
+              ...(nested ? { flyPages: <PageLinks pages={pages[place]} compact fly /> } : {}),
+            };
+          })}
         />
-      </nav>
-    </div>
+        <main id="main" tabIndex={-1} onFocus={showPageFocus}>
+          <DockPerson value={controls.viewerHandle ?? null}>{children}</DockPerson>
+        </main>
+        <nav className="tabs" aria-label="Project">
+          {tabPlaces.map(place => (
+            <A
+              key={place}
+              href={placeHref(route, place)}
+              aria-current={route.place === place ? 'page' : undefined}
+            >
+              <PlaceIcon name={place} size={20} />
+              {projectPlaceLabels[place]}
+              {place === 'needs' && held ? <Count n={held} hot /> : null}
+            </A>
+          ))}
+          <ProjectMore icon={<PlaceIcon name="more" size={20} />} />
+        </nav>
+      </div>
+    </RailControls.Provider>
   );
 }
 
@@ -315,62 +299,70 @@ export function AccountFrame({
   children: ReactNode;
 }) {
   const tabPlaces: readonly AccountPlace[] = ['projects', 'billing', 'people'];
+  const rail = useRailState();
   return (
-    <div className="shell" data-frame="account">
-      <Skip />
-      <header className="top">
-        <Brand href={hrefFor({ frame: 'account', place: 'projects' })} />
-        <span className="owner" translate="no">
-          {controls.viewerHandle ? <Avatar handle={`@${controls.viewerHandle}`} /> : null}
-          <span className="cut">{controls.viewerHandle ? `@${controls.viewerHandle}` : 'Your account'}</span>
-        </span>
-        <div className="fill" />
-        <End handle={controls.viewerHandle} onPalette={controls.onPalette} onKeys={controls.onKeys} />
-      </header>
-      <nav className="rail" aria-label="Account">
-        <div className="grp">Account</div>
-        {accountPlaces.map(name => (
-          <A
-            key={name}
-            href={hrefFor({ frame: 'account', place: name })}
-            aria-current={place === name ? 'page' : undefined}
-          >
-            <PlaceIcon name={name} />
-            <span className="rail-label">{accountPlaceLabels[name]}</span>
-          </A>
-        ))}
-        {back ? (
-          <A className="back" href={back.href} style={{ marginTop: 'auto' }}>
-            <PlaceIcon name="back" />
-            <span className="rail-label cut" translate="no">
-              {back.name}
+    <RailControls.Provider value={rail}>
+      <div className="shell" data-frame="account" data-rail={rail.shut ? 'shut' : 'open'}>
+        <Skip />
+        <header className="top">
+          <Brand href={hrefFor({ frame: 'account', place: 'projects' })} />
+          <span className="owner" translate="no">
+            {controls.viewerHandle ? <Avatar handle={`@${controls.viewerHandle}`} /> : null}
+            <span className="cut">
+              {controls.viewerHandle ? `@${controls.viewerHandle}` : 'Your account'}
             </span>
-          </A>
-        ) : null}
-      </nav>
-      <main id="main" tabIndex={-1} onFocus={showPageFocus}>
-        <DockPerson value={controls.viewerHandle ?? null}>{children}</DockPerson>
-      </main>
-      <nav className="tabs" aria-label="Account" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-        {tabPlaces.map(name => (
-          <A
-            key={name}
-            href={hrefFor({ frame: 'account', place: name })}
-            aria-current={place === name ? 'page' : undefined}
-          >
-            <PlaceIcon name={name} size={20} />
-            {accountTabLabels[name] ?? accountPlaceLabels[name]}
-          </A>
-        ))}
-        <PhoneMore
-          places={accountPlaces}
-          tabs={tabPlaces}
-          current={place}
-          labels={accountPlaceLabels}
-          href={name => hrefFor({ frame: 'account', place: name })}
+          </span>
+          <div className="fill" />
+          <End handle={controls.viewerHandle} onPalette={controls.onPalette} onKeys={controls.onKeys} />
+        </header>
+        <Rail
+          label="Account"
+          heading="Account"
+          address={place}
+          {...rail}
+          places={accountPlaces.map(name => ({
+            id: `sidebar-${name}`,
+            label: accountPlaceLabels[name],
+            href: hrefFor({ frame: 'account', place: name }),
+            current: place === name ? 'page' : undefined,
+            marked: place === name,
+            icon: <PlaceIcon name={name} />,
+          }))}
+          bottom={
+            back ? (
+              <A className="rail-link rail-back" href={back.href}>
+                <PlaceIcon name="back" />
+                <span className="rail-label cut" translate="no">
+                  {back.name}
+                </span>
+              </A>
+            ) : null
+          }
         />
-      </nav>
-    </div>
+        <main id="main" tabIndex={-1} onFocus={showPageFocus}>
+          <DockPerson value={controls.viewerHandle ?? null}>{children}</DockPerson>
+        </main>
+        <nav className="tabs" aria-label="Account" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+          {tabPlaces.map(name => (
+            <A
+              key={name}
+              href={hrefFor({ frame: 'account', place: name })}
+              aria-current={place === name ? 'page' : undefined}
+            >
+              <PlaceIcon name={name} size={20} />
+              {accountTabLabels[name] ?? accountPlaceLabels[name]}
+            </A>
+          ))}
+          <PhoneMore
+            places={accountPlaces}
+            tabs={tabPlaces}
+            current={place}
+            labels={accountPlaceLabels}
+            href={name => hrefFor({ frame: 'account', place: name })}
+          />
+        </nav>
+      </div>
+    </RailControls.Provider>
   );
 }
 

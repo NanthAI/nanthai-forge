@@ -66,7 +66,8 @@
   --gut-land: clamp(16px, 4vw, 48px); --wrap-land: 1280px; --sec-land: clamp(56px, 9vw, 128px);
 
   /* fixed parts of the shell */
-  --top-h: 48px; --rail-w: 196px; --rail-w-min: 56px; --tabs-h: 58px; --ph-h: 40px;
+  --top-h: 48px; --rail-w: 224px; --rail-w-min: 56px; --tabs-h: 58px; --ph-h: 40px;
+  --sub-h: 30px; --fly-w: 232px; --fly-open: 80ms; --fly-close: 160ms;
   --line-phone-h: 46px;
   --row-h: 40px; --row-h-dense: 34px; --row-h-lane: 54px;
   --ctl-h: 30px; --ctl-h-sm: 26px; --ctl-h-lg: 44px; --ctl-h-touch: 40px; --inp-h: 34px;

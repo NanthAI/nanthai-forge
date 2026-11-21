@@ -3,6 +3,7 @@
 // with data-ds on its root; legacy screens keep their own styles until stage C retires them route by route.
 import './base.css';
 import './core.css';
+import './rail.css';
 import './parts.css';
 
 export {

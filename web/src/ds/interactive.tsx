@@ -122,6 +122,7 @@ export function Menu(props: ActionMenuProps) {
       aria-expanded="false"
       aria-current={props['aria-current']}
       aria-label={props.children ? props.label : undefined}
+      tabIndex={props.excludeFromTabOrder ? -1 : undefined}
       data-focus-key={focusKey}
       onFocus={() => {
         setFocused(true);

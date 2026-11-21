@@ -121,12 +121,13 @@ export function sortRows<T extends { row: PlanRow }>(lines: readonly T[], sort: 
 
 // ---- Saved views (this browser only) ----------------------------------------------------------------------------
 export type SavedView = { name: string; query: string };
-const storageKey = (projectId: string) => `forge.plan.views.${projectId}`;
+export const savedViewStorageKey = (projectId: string) => `forge.plan.views.${projectId}`;
 export const SAVED_LIMIT = 20;
 
-export function loadViews(projectId: string): SavedView[] {
+function storedViews(projectId: string): SavedView[] {
+  const value = localStorage.getItem(savedViewStorageKey(projectId));
   try {
-    const raw = JSON.parse(localStorage.getItem(storageKey(projectId)) ?? '[]');
+    const raw = JSON.parse(value ?? '[]');
     return Array.isArray(raw)
       ? raw
           .filter(view => typeof view?.name === 'string' && typeof view?.query === 'string')
@@ -137,11 +138,22 @@ export function loadViews(projectId: string): SavedView[] {
   }
 }
 
-/** Saves (or renames over the same name) one view; false when the browser keeps nothing. */
-export function saveView(projectId: string, views: readonly SavedView[], view: SavedView) {
-  const next = [view, ...views.filter(entry => entry.name !== view.name)].slice(0, SAVED_LIMIT);
+export function loadViews(projectId: string): SavedView[] {
   try {
-    localStorage.setItem(storageKey(projectId), JSON.stringify(next));
+    return storedViews(projectId);
+  } catch {
+    return [];
+  }
+}
+
+/** Update the current stored list even when another tab has a newer version. */
+export function saveView(projectId: string, view: SavedView) {
+  try {
+    const next = [view, ...storedViews(projectId).filter(entry => entry.name !== view.name)].slice(
+      0,
+      SAVED_LIMIT,
+    );
+    localStorage.setItem(savedViewStorageKey(projectId), JSON.stringify(next));
     return next;
   } catch {
     return null;
@@ -149,11 +161,11 @@ export function saveView(projectId: string, views: readonly SavedView[], view: S
 }
 
 export function removeView(projectId: string, views: readonly SavedView[], name: string) {
-  const next = views.filter(entry => entry.name !== name);
   try {
-    localStorage.setItem(storageKey(projectId), JSON.stringify(next));
+    const next = storedViews(projectId).filter(entry => entry.name !== name);
+    localStorage.setItem(savedViewStorageKey(projectId), JSON.stringify(next));
+    return next;
   } catch {
-    /* Nothing kept on this browser; the list still updates for this visit. */
+    return views.filter(entry => entry.name !== name);
   }
-  return next;
 }

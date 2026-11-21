@@ -12,7 +12,7 @@ export type ProjectPlace = (typeof projectPlaces)[number];
 export const accountPlaces = ['projects', 'billing', 'people', 'devices', 'data'] as const;
 export type AccountPlace = (typeof accountPlaces)[number];
 
-/** Sections of one place: the section strip. The first is the place itself (no path segment). */
+/** Pages of a place. Its first page has no path segment. */
 export const placeSections: Record<ProjectPlace, readonly string[]> = {
   needs: ['', 'held', 'loose-ends'],
   lanes: ['', 'history', 'touching', 'sessions'],
@@ -34,7 +34,7 @@ export type AppRoute =
       handle: string;
       project: string;
       place: ProjectPlace;
-      /** A section of the place (a strip entry), or '' for the place itself. */
+      /** A page of the place, or '' for its first page. */
       section: string;
       /** What the section shows: a Lane or Item id; for Code a landing's receipt id or red/<sequence> (one main
        * red), or under files a path. */

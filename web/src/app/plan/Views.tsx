@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-// Plan views and filters (Item e0a23825): the views column, the toolbar with find, one chip per filter, sort and the
-// List / Tree / Board choice (rule 7), all of it in the address; on a phone the views, filters, order and layout are
-// one Filter and view sheet (Tune.tsx, the phone's own pickers, DESIGN.md rule 8). A saved view
-// is a name for an address, kept on this browser only. Nothing here reads or writes Convex.
+// The Plan toolbar and the browser-local Save this view sheet.
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Chip, CodeBox, Key, Menu, Sheet } from '../../ds';
 import { defaultItemTypes } from '../../../../src/planning-model';
 import type { PlanRow } from '../../../../src/planning-model';
-import { A } from '../frames';
 import { PlaceIcon } from '../places';
+import { useProjectPages } from '../project-pages';
+import { navigate } from '../router';
 import { Tune } from './Tune';
+import { planViewLinks, type PlanViewCounts } from './view-links';
 import {
   agentRead,
   agentReadNote,
@@ -17,7 +16,6 @@ import {
   removeView,
   saveView,
   writeQuery,
-  type Layout,
   type PlanQuery,
   type SavedView,
   type Sort,
@@ -47,126 +45,18 @@ export type ViewsProps = {
   initiatives: readonly PlanRow[];
   owners: readonly string[];
   types: readonly string[];
-  counts: { open: number; mine: number; unowned: number };
+  counts?: PlanViewCounts | undefined;
 };
 
-function views(props: ViewsProps) {
-  const mine = props.viewer ? `@${props.viewer.replace(/^@/, '')}` : undefined;
-  return [
-    { name: 'Open work', query: '', n: props.counts.open },
-    ...(mine ? [{ name: 'Mine', query: writeQuery({ owner: mine }), n: props.counts.mine }] : []),
-    { name: 'No owner', query: writeQuery({ owner: 'none' }), n: props.counts.unowned },
-    { name: 'Closed', query: writeQuery({ scope: 'closed' }) },
-    { name: 'Everything', query: writeQuery({ scope: 'all' }) },
-    { name: 'Archive', query: writeQuery({ scope: 'archived' }) },
-    { name: 'Deleted', query: writeQuery({ scope: 'deleted' }) },
-  ];
-}
-
-/** This browser's saved views and whether the Save sheet is open; held by the screen so the desk column and the
- * phone's Filter and view sheet share them. */
-export function useSavedViews(projectId: string) {
-  const [saved, setSaved] = useState<SavedView[]>(() => loadViews(projectId));
+function useSavedViews(projectId: string) {
+  const navigation = useProjectPages();
+  const [local, setLocal] = useState<SavedView[]>(() => (navigation ? [] : loadViews(projectId)));
   const [saving, setSaving] = useState(false);
-  return { saved, setSaved, saving, setSaving };
-}
-
-/** The built-in views, then the saved ones, and which one is on. */
-export function viewList(
-  props: ViewsProps,
-  { saved, setSaved, saving, setSaving }: ReturnType<typeof useSavedViews>,
-) {
-  // A view is its scope and filters; the order, layout and find stay as the reader set them when switching.
-  const filters = (query: Partial<PlanQuery>) =>
-    writeQuery({ ...query, sort: 'hand', layout: 'list', find: '' });
-  const current = filters(props.query);
-  const keep = { sort: props.query.sort, layout: props.query.layout };
-  const builtIn = views(props);
-  const all = [...builtIn, ...saved.map(view => ({ ...view, n: undefined as number | undefined }))];
-  const isOn = (query: string) => filters(fromQuery(query)) === current;
   return {
-    saved,
-    setSaved,
+    saved: navigation?.saved ?? local,
+    setSaved: navigation?.setSaved ?? setLocal,
     saving,
     setSaving,
-    builtIn,
-    all,
-    isOn,
-    /** The view on now, or undefined when the filters match none. */
-    on: all.find(view => isOn(view.query))?.name,
-    href: (query: string) => props.base + writeQuery({ ...fromQuery(query), ...keep }),
-    choose: (name: string) => {
-      const view = all.find(each => each.name === name);
-      if (view) props.go({ ...fromQuery(view.query), ...keep });
-    },
-  };
-}
-export type ViewList = ReturnType<typeof viewList>;
-
-/** The desk's views column; on a phone the same views are the first choice in Filter and view. */
-export function ViewsColumn({
-  views: list,
-  ...props
-}: Pick<ViewsProps, 'projectId' | 'query'> & { views: ViewList }) {
-  const { saved, setSaved, saving, setSaving, isOn, href } = list;
-  return (
-    <>
-      <nav className="pnav plan-views" aria-label="Plan views">
-        {list.builtIn.map(view => (
-          <A
-            key={view.name}
-            href={href(view.query)}
-            className={isOn(view.query) ? 'on' : undefined}
-            aria-current={isOn(view.query) ? 'page' : undefined}
-          >
-            <span>{view.name}</span>
-            {view.n === undefined ? <span /> : <span className="num">{view.n.toLocaleString()}</span>}
-          </A>
-        ))}
-        {saved.length ? <div className="plan-views-h">Saved on this browser</div> : null}
-        {saved.map(view => (
-          <A
-            key={view.name}
-            href={href(view.query)}
-            className={isOn(view.query) ? 'on' : undefined}
-            aria-current={isOn(view.query) ? 'page' : undefined}
-          >
-            <span dir="auto">{view.name}</span>
-            <span />
-          </A>
-        ))}
-        <button type="button" className="btn ghost sm plan-save" onClick={() => setSaving(true)}>
-          Save this view
-        </button>
-      </nav>
-      <SaveView
-        open={saving}
-        onOpenChange={setSaving}
-        query={props.query}
-        saved={saved}
-        onSave={name => {
-          const next = saveView(props.projectId, saved, { name, query: writeQuery(props.query) });
-          if (next) setSaved(next);
-          return Boolean(next);
-        }}
-        onRemove={name => setSaved(removeView(props.projectId, saved, name))}
-      />
-    </>
-  );
-}
-
-/** A view's query back as the fields `go` takes (unset fields are cleared). */
-function fromQuery(text: string): Partial<PlanQuery> {
-  const params = new URLSearchParams(text);
-  return {
-    scope: (params.get('scope') as PlanQuery['scope']) ?? 'open',
-    type: params.get('type') ?? undefined,
-    owner: params.get('owner') ?? undefined,
-    relation: (params.get('relation') as PlanQuery['relation']) ?? undefined,
-    initiative: params.get('initiative') ?? undefined,
-    sort: (params.get('sort') as Sort) ?? 'hand',
-    layout: (params.get('view') as Layout) ?? 'list',
-    find: params.get('q') ?? '',
   };
 }
 
@@ -252,7 +142,7 @@ export type Facet = {
 };
 
 /** Find, one chip per filter (set ones solid and removable, the rest offered), sort, and the layout choice. On a
- * phone the offered filters, the order and the layout fold into one Filter and view sheet with the views; find and
+ * phone the offered filters, the order and the layout fold into Tune; find and
  * the filters already set stay on the bar. */
 export function Toolbar({
   query,
@@ -262,15 +152,18 @@ export function Toolbar({
   types,
   count,
   viewer,
-  views: list,
+  projectId,
+  base,
+  counts,
   folds,
-}: Pick<ViewsProps, 'query' | 'go' | 'initiatives' | 'owners' | 'types' | 'viewer'> & {
+}: ViewsProps & {
   count: string;
-  views: ViewList;
   /** Collapse all and Expand all, when the list has groups to fold. */
   folds?: ReactNode;
 }) {
   const [tuning, setTuning] = useState(false);
+  const { saved, setSaved, saving, setSaving } = useSavedViews(projectId);
+  const views = planViewLinks(base, query, viewer, saved, counts);
   const initiative = initiatives.find(row => row.id === query.initiative);
   const typeNames = [...new Set([...defaultItemTypes, ...types.map(type => type.toLowerCase())])];
   const mine = viewer ? `@${viewer.replace(/^@/, '')}` : undefined;
@@ -336,8 +229,18 @@ export function Toolbar({
         />
       </label>
       <Key className="plan-phone" aria-haspopup="dialog" onClick={() => setTuning(true)}>
-        Filter and view
+        Tune
       </Key>
+      <Menu
+        className="btn sm plan-view-picker"
+        label={`View: ${views.on?.name ?? 'This view'}`}
+        items={views.all.map(view => ({
+          id: view.id,
+          label: view.n === undefined ? view.name : `${view.name} · ${view.n.toLocaleString()}`,
+          href: views.href(view.query),
+        }))}
+        onNavigate={navigate}
+      />
       {facets.map(facet =>
         facet.value ? (
           <Chip key={facet.label} label={facet.label} value={facet.value} onRemove={facet.clear} />
@@ -360,6 +263,9 @@ export function Toolbar({
         }))}
       />
       <Layouts query={query} go={go} className="seg plan-desk" />
+      <Key className="plan-save" size="sm" onClick={() => setSaving(true)}>
+        Save this view
+      </Key>
       {/* The region's head shows the count; this says it again only to assistive tech when a filter changes it. */}
       <span className="sr" aria-live="polite">
         {count}
@@ -367,13 +273,26 @@ export function Toolbar({
       {tuning ? (
         <Tune
           onOpenChange={setTuning}
-          views={list}
           facets={facets}
           query={query}
           go={go}
           sortWords={sortWords}
           layouts={<Layouts query={query} go={go} className="seg" />}
           folds={folds}
+        />
+      ) : null}
+      {saving ? (
+        <SaveView
+          open={saving}
+          onOpenChange={setSaving}
+          query={query}
+          saved={saved}
+          onSave={name => {
+            const next = saveView(projectId, { name, query: writeQuery(query) });
+            if (next) setSaved(next);
+            return Boolean(next);
+          }}
+          onRemove={name => setSaved(removeView(projectId, saved, name))}
         />
       ) : null}
     </div>

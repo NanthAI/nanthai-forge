@@ -71,14 +71,11 @@
   .plan-capture label { display: grid; gap: var(--s-1); font-size: var(--t-small); color: var(--text-2); }
   .plan-capture textarea { resize: vertical; min-height: 4.5em; }
   .plan-similar { display: grid; gap: 2px; font-size: var(--t-meta); padding: var(--s-2); border: var(--rule) solid var(--line); border-radius: var(--r); }
-  /* Views column, toolbar, bulk bar and board (Items e0a23825, 65b0e706). */
-  .plan .plan-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 0 var(--s-4); align-items: start; }
-  .plan .plan-views { position: sticky; top: var(--s-2); display: grid; align-content: start; }
-  .plan .plan-views-h { padding: var(--s-3) var(--gut) var(--s-1); color: var(--text-3); font-size: var(--t-meta); }
-  .plan .plan-save { justify-self: start; margin: var(--s-2) var(--gut); }
-  .plan .plan-phone { display: none; }
+  /* Toolbar, bulk bar and board. The frame supplies the view links. */
+  .plan :is(.plan-phone, .plan-view-picker) { display: none; }
+  @media (min-width: 861px) { [data-rail="shut"] .plan .plan-view-picker { display: inline-flex; } }
   .plan .plan-tbar { padding: var(--s-2) var(--gut); }
-  /* The phone's Filter and view sheet: each choice named above its control, as in the capture form. */
+  /* Tune names each choice above its control, as in the capture form. */
   .plan-tune { display: grid; gap: var(--s-3); }
   .plan-tune label, .plan-tune-row { display: grid; gap: var(--s-1); font-size: var(--t-small); color: var(--text-2); }
   .plan-tune-row { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-2); align-items: center; }
@@ -106,15 +103,14 @@
   .plan-diff .old .w { background: var(--del-bg); text-decoration: line-through; }
   .plan-diff .new .w { background: var(--add-bg); text-decoration: underline; }
   @media (max-width: 860px) {
-    .plan .plan-body { grid-template-columns: minmax(0, 1fr); }
-    .plan .plan-views { display: none; }
     /* Phone (owner review 2026-11-17): one count (the region's), one gutter, one control height, and the first Item
-       close to the top. Find and Filter and view share a row at the touch height; filters already set stay as chips;
-       the views, the offered filters, the order, the layout and the folds are in the sheet. */
+       close to the top. Find and Tune share a row at the touch height; filters already set stay as chips;
+       the offered filters, order, layout and folds are in Tune. */
     .plan .plan-phone { display: inline-flex; flex: none; }
     .plan .plan-tbar :is(.plan-desk, .chip.off) { display: none; }
     .plan .plan-tbar .find { flex: 1 1 0; }
     .plan .plan-tbar .find .inp { height: var(--ctl-h-touch); }
+    .plan .plan-save { min-height: var(--ctl-h-touch); }
     .plan-with-views .plan-body .ph > .tools { display: none; }
     /* An Item row: handle and tick, then its number and name; the status and the flags share one line under the name,
        so the name keeps the width. Done-when and owner are on the Item page (plan-wide). Descendant selectors: a

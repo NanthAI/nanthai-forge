@@ -123,6 +123,12 @@ test('frame keys never fire while typing in a field; ⌘K and Ctrl+K always open
   assert.equal(keyAction(press('3'), page, false), null, 'number keys belong to the project frame only');
   assert.equal(keyAction(press('3', { altKey: true }), page, true), null);
   assert.equal(keyAction(press('?', { shiftKey: true }), page, false), 'keys');
+  assert.equal(keyAction(press('['), page, false, true), 'rail');
+  assert.equal(keyAction(press('['), field, true, true), null);
+  assert.equal(keyAction(press('['), page, true), null);
+  assert.equal(keyAction(press('[', { ctrlKey: true }), page, true, true), null);
+  assert.equal(keyAction(press('[', { shiftKey: true }), page, true, true), null);
+  assert.equal(keyAction(press('['), page, true, true), 'rail');
 });
 
 test('browser Back walks the same entries as in-app moves, and modified clicks keep the browser behaviour', async () => {

@@ -2,12 +2,14 @@
 // Keyboard navigation of the frames: ⌘K or Ctrl+K opens go to or run, ? lists every key, 1–6 go to the project's
 // places. Keys never fire while the reader types in a field or holds a modifier other than the palette's. The palette
 // and the keys sheet are the design system's (they arrive with the behaviour layer; a key pressed first waits for it).
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import type { Id } from '../../../convex/_generated/dataModel';
 import { Palette, Sheet, type PaletteGroup } from '../ds';
+import { RailControls } from '../ds/rail-state';
 import { useIdPalette } from './id-palette';
 import { accountPlaces, hrefFor, projectPlaces, type AppRoute } from './paths';
 import { accountPlaceLabels, projectPlaceLabels } from './places';
+import { projectPaletteEntries, useProjectPages } from './project-pages';
 import { keyAction, navigate } from './router';
 
 export type Go = {
@@ -25,7 +27,7 @@ export function useFrameKeys(go: Go) {
       event.preventDefault();
       if (action === 'palette') go.openPalette();
       else if (action === 'keys') go.openKeys();
-      else if (go.route.frame === 'project')
+      else if (typeof action === 'object' && go.route.frame === 'project')
         navigate(hrefFor({ ...go.route, place: projectPlaces[action.place]!, section: '', rest: '' }));
     };
     addEventListener('keydown', onKey);
@@ -33,18 +35,23 @@ export function useFrameKeys(go: Go) {
   }, [go.route]);
 }
 
-function groupsFor(go: Go): PaletteGroup[] {
+function useGroups(go: Go): PaletteGroup[] {
   const groups: PaletteGroup[] = [];
   const { route } = go;
+  const navigation = useProjectPages();
+  const rail = useContext(RailControls);
   if (route.frame === 'project')
     groups.push({
       title: 'Go to',
-      entries: projectPlaces.map((place, index) => ({
-        id: `place-${place}`,
-        label: projectPlaceLabels[place],
-        keys: String(index + 1),
-        onAction: () => navigate(hrefFor({ ...route, place, section: '', rest: '' })),
-      })),
+      entries: [
+        ...projectPlaces.map((place, index) => ({
+          id: `place-${place}`,
+          label: projectPlaceLabels[place],
+          keys: String(index + 1),
+          onAction: () => navigate(hrefFor({ ...route, place, section: '', rest: '' })),
+        })),
+        ...(navigation ? projectPaletteEntries(navigation.pages) : []),
+      ],
     });
   groups.push({
     title: 'Account',
@@ -58,6 +65,16 @@ function groupsFor(go: Go): PaletteGroup[] {
     title: 'Run',
     entries: [
       { id: 'keys', label: 'Show every key', keys: '?', onAction: go.openKeys },
+      ...(rail
+        ? [
+            {
+              id: 'rail',
+              label: rail.shut ? 'Expand sidebar' : 'Collapse sidebar',
+              keys: '[',
+              onAction: rail.toggle,
+            },
+          ]
+        : []),
       { id: 'sign-out', label: 'Sign out', onAction: go.signOut },
     ],
   });
@@ -67,6 +84,10 @@ function groupsFor(go: Go): PaletteGroup[] {
 const keyList: readonly [string, string][] = [
   ['⌘K or Ctrl+K', 'Go to or run'],
   ['1 to 6', 'Needs me, Lanes, Plan, Code, Stats, Settings'],
+  ['[', 'Collapse or expand the sidebar'],
+  ['→ or ↓', 'Enter the pages of a collapsed sidebar place'],
+  ['↑ or ↓', 'Move between pages in the flyout'],
+  ['← or Esc', 'Return to the place icon from its flyout'],
   ['?', 'Every key'],
   ['Tab', 'Next link or control; the first Tab offers "Skip to the page"'],
   ['Esc', 'Close a sheet or the palette'],
@@ -91,6 +112,7 @@ export function Keys({
   // The search text, kept only while the palette is open: a reopened palette starts empty.
   const [query, setQuery] = useState('');
   const found = useIdPalette(projectId, go.route, palette, palette ? query : '');
+  const groups = useGroups(go);
   return (
     <>
       <Palette
@@ -99,7 +121,7 @@ export function Keys({
           if (!open) setQuery('');
           setPalette(open);
         }}
-        groups={[...found.groups, ...groupsFor(go)]}
+        groups={[...found.groups, ...groups]}
         placeholder={
           go.route.frame === 'project' ? 'Go to a place, or paste an id…' : 'Go to a place or run…'
         }

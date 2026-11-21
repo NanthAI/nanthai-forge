@@ -84,7 +84,8 @@ export function keyAction(
   event: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>,
   target: EventTarget | null,
   hasProject: boolean,
-): 'palette' | 'keys' | { place: number } | null {
+  hasRail = false,
+): 'palette' | 'keys' | 'rail' | { place: number } | null {
   if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') return 'palette';
   if (event.metaKey || event.ctrlKey || event.altKey) return null;
   const element = target as HTMLElement | null;
@@ -95,6 +96,7 @@ export function keyAction(
   )
     return null;
   if (event.key === '?') return 'keys';
+  if (hasRail && !event.shiftKey && event.key === '[') return 'rail';
   if (hasProject && !event.shiftKey && /^[1-6]$/.test(event.key)) return { place: Number(event.key) - 1 };
   return null;
 }

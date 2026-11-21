@@ -10,13 +10,14 @@ export type SheetProps = {
   onOpenChange: (open: boolean) => void;
   title: string;
   children: ReactNode;
+  headerAction?: ReactNode;
   /** The answer keys, last one the main answer. */
   footer?: ReactNode;
   /** An answer is needed: Escape and the scrim do not close it (an alertdialog). */
   required?: boolean;
 };
 
-export function Sheet({ open, onOpenChange, title, children, footer, required }: SheetProps) {
+export function Sheet({ open, onOpenChange, title, children, footer, required, headerAction }: SheetProps) {
   return (
     <EnglishOnly>
       <ModalOverlay
@@ -28,8 +29,9 @@ export function Sheet({ open, onOpenChange, title, children, footer, required }:
       >
         <Modal className="sheet">
           <Dialog role={required ? 'alertdialog' : 'dialog'} className="ds-dialog">
-            <div className="ph plain">
+            <div className={headerAction ? 'ph plain sheet-with-action' : 'ph plain'}>
               <Heading slot="title">{title}</Heading>
+              {headerAction}
             </div>
             <div className="sbody">{children}</div>
             {footer ? <div className="sfoot">{footer}</div> : null}

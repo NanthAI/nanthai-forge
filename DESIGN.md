@@ -130,7 +130,7 @@ motion:
   beats: 3
 components:
   topbar: { backgroundColor: "{colors.surface}", height: "48px" }
-  rail: { backgroundColor: "{colors.surface}", width: "196px", widthCollapsed: "56px" }
+  rail: { backgroundColor: "{colors.surface}", width: "224px", widthCollapsed: "56px" }
   region: { backgroundColor: "{colors.surface}", rounded: "{rounded.none}" }
   region-header: { height: "40px", padding: "0 16px 0 6px" }
   row: { height: "40px", heightDense: "34px", heightLane: "54px", padding: "7px 16px" }
@@ -249,9 +249,9 @@ The app scale is fixed in pixels. The public page and docs scale is fluid: docs 
 ## Layout
 
 - **Space** is a 4 px step: 2, 4, 8, 12, 16, 20, 24, 32, 48; 64 and 96 on the public page only. The gutter inside every region is 16 px; the page head's is 20 px (16 on a phone).
-- **Shell:** top bar 48 px, rail 196 px (56 px as icons), region header 40 px, phone tab bar 58 px. Fixed chrome stays under 100 px of height before content. One scroll area per region. A sticky header inside a page sticks under the frame's top bar at `top: var(--stick-top, 0px)`; the frame sets `--stick-top` (the top bar, plus the notch and project line on phones), so it never slides under the bar.
+- **Shell:** top bar 48 px, rail 224 px (56 px as icons), region header 40 px, phone tab bar 58 px. The desktop page starts directly below the 48 px top bar. One scroll area per region. A sticky header inside a page sticks under the frame's top bar at `top: var(--stick-top, 0px)`; the frame sets `--stick-top` (the top bar, plus the notch and project line on phones), so it never slides under the bar.
 - **Density:** a row is 40 px; 34 px dense when a list shows more than about 20 rows; 54 px for a Lane with two lines. Controls are 30 px (26 small, 44 large), inputs 34 px.
-- **Window breakpoints:** at 1240 px the rail shows icons and keeps the link text available to assistive technology. At 860 px the page is one column, the rail becomes four bottom tabs and More, and the line moves to its own row under the top bar.
+- **Window breakpoints:** the rail starts expanded above 1240 px and collapsed at narrower desktop widths. The footer button and `[` toggle it. The browser remembers each width band's choice locally. Collapsed icons keep their accessible names and offer page links on hover, focus or touch. At 860 px the page is one column, four bottom tabs and More replace the rail, and the line moves to its own row under the top bar.
 - **Region breakpoints** (container queries, because regions can be moved): 900 px a yard stacks each label over its track; 700 px a Lane row stacks; 560 px a matrix stacks; 520 px the overlap ruler stacks; 420 px.
 - **Phone:** every control is at least 40 px tall; inputs are 16 px type; key caps are hidden and nothing depends on them; the tab bar pads for the safe area; the page never scrolls sideways (wide content scrolls inside its own region); what needs a person comes first.
 - **More:** the last phone tab opens the shared Menu above the bar. It lists the places outside the direct tabs and carries the current mark while one of those places is open.
@@ -403,7 +403,7 @@ Each is a component or class in `web/src/ds/`; the class names below are what th
 - **Notice** (`.notice[data-st]`): one bar across the page that stays until it is true no longer.
 - **Menu, toast, sheet:** the only floating things. A sheet sits on a scrim, centred on a desktop and at the bottom edge on a phone, with a scrolling body and a foot.
 - **Frames:** project, account, bare, and the public bar and column.
-- **Between sibling pages:** the section strip (`.strip`) and a place's own column (`.pnav`).
+- **Between sibling pages:** links nested in the active place, a flyout from a collapsed place, and the page-title picker on a phone.
 - **A long list:** the toolbar with find, filter chips, the bulk bar, the pager.
 - **Changes and history:** a setting's before and after, a step with who did it, a timeline row, loading rows, quick reasons.
 - **Access and presence:** the access table (teams, then people with their devices folded inside), a session row, a device and its sign-in line, who holds a Lane and each change of holder.
@@ -427,7 +427,7 @@ Each is a component or class in `web/src/ds/`; the class names below are what th
 5. **Which one?** In this order. **A list** when each thing has one name and a little context and a person acts on one at a time (the default). **A table** when people compare the same fields across things, or the cells are controls. **A tree** only when things really contain each other and the path matters; one tree per page. **A board** only when the columns are a fixed sequence every thing passes through and moving between them is the main act. *Use* a board as lists side by side: columns meet at seams, things are rows. *Not* floating cards in boxed columns.
 6. **A table, drawn.** The first column is the name and the only link. Numbers are right-aligned and tabular. One header row that sticks; at most seven columns. One action shows per row; the rest are in a menu. Selecting rows reveals the bulk actions with the count; "select all" beyond what is shown is an explicit second step. Sort and filters live in the address. On a phone a table becomes stacked rows.
 7. **A long list.** Past about 20 rows a list gets a toolbar: find on the left, one chip per filter (a set filter is solid and removable; an offered one is dashed and says "any"), the count on the right, all of it in the address. The page sentence carries the totals. Ticking rows swaps in the bulk bar on the selected tint, inside the frame; "tick all that match" is a second step; one confirmation covers a batch and names the total loss. Pages where people return to a row or act on many get a pager; live presence and feeds get "show more". *Use* "37 of 400 people" beside two chips. *Not* endless scroll, a floating bulk bar, or filters behind an unmarked icon.
-8. **Between sibling pages.** The six places: the rail. The sections of one place: the strip. Saved views and groups of one place that are also drop targets: the place's own column, one per page, a picker on a phone. Things that contain each other: a tree. Views of the same rows: the segmented choice. *Not* tabs inside a region, or a second rail.
+8. **Between sibling pages.** The rail holds the six places. A place's pages and saved views nest under its row, with a picker in the page title on a phone. Things that contain each other use a tree. Views of the same rows use the segmented choice.
 9. **One thing, one place.** A thing is shown in full in one region; elsewhere it is a line that points there. *Use* "2 waiting for your decision, in Needs you". *Not* the same decision drawn twice.
 
 ### Charts and yardsticks
