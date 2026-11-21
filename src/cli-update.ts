@@ -11,13 +11,22 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { availableParallelism, homedir } from 'node:os';
+import { basename, join, resolve } from 'node:path';
 import { childEnv } from '../scripts/child-env.mjs';
 import { ForgeError, invariant } from './errors.js';
 import { durableReplace } from './state/durability.js';
 import { hostedAgentAddress } from './hosted-agent-address.js';
-import { tryHeavySlot } from './heavy-slots.js';
+import {
+  acquireHeavySlot,
+  HEAVY_KILL_GRACE_MS,
+  heavySlotDirectory,
+  inheritedHeavySlot,
+  tryHeavySlot,
+  waitingMessage,
+} from './heavy-slots.js';
+import { recordHold } from './heavy-queue.js';
+import { heavySlots, readClientSettings } from './client-settings.js';
 import { shareDependencies } from './shared-dependencies.js';
 import {
   CLI_UPDATE_WAIT_MS,
@@ -38,7 +47,7 @@ import {
 } from './cli-update-install.js';
 import { migrateEditHookRunner } from './agent-install-hooks.js';
 import type { HostedMain } from './hosted-main.js';
-import { clientCacheRoot } from './root-paths.js';
+import { canonicalRoot, clientCacheRoot } from './root-paths.js';
 import { processAlive } from './local-process.js';
 import { cliPackageRoot } from './cli-installation.js';
 import { shellQuote } from './shell-quote.js';
@@ -58,7 +67,11 @@ export const CLI_BACKGROUND_RETRY_MS = 10 * 60_000;
 const failureMark = (installation: string) => join(installation, 'update-failed.json');
 /** Live updater on this installation (dead holders do not count). */
 export function cliUpdateRunning(installation: string) {
-  const slot = join(installation, 'update-lock', '1');
+  return ['update-lock', 'background-update-lock'].some(name =>
+    updateLockRunning(join(installation, name, '1')),
+  );
+}
+function updateLockRunning(slot: string) {
   try {
     const pid = Number(readFileSync(join(slot, 'pid'), 'utf8'));
     if (!Number.isSafeInteger(pid) || pid <= 0) return Date.now() - statSync(slot).mtimeMs < 60_000;
@@ -85,40 +98,164 @@ export const defaultCliInstallation = () => join(homedir(), '.local', 'share', '
 /** Build and install output is diagnostic only: stdout and stderr are buffered and shown (on stderr)
  * when a step fails. A successful update prints nothing, so the caller's stdout stays one result. */
 const OUTPUT_TAIL = 64 * 1024;
-export async function cliUpdateRun(cwd: string, args: string[], home?: string) {
+type UpdateBuildCommand = { env: Record<string, string>; maxMs: number };
+export async function cliUpdateRun(cwd: string, args: string[], home?: string, build?: UpdateBuildCommand) {
   await new Promise<void>((done, reject) => {
+    const group = !!build && process.platform !== 'win32';
     const child = spawn(args[0]!, args.slice(1), {
       cwd,
+      detached: group,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: childEnv({
         allow: ['XDG_CACHE_HOME'],
-        ...(home ? { extra: { HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: join(home, '.config') } } : {}),
+        extra: {
+          ...build?.env,
+          ...(home ? { HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: join(home, '.config') } : {}),
+        },
       }),
     });
+    let stopped = false;
+    let kill: NodeJS.Timeout | undefined;
+    function signalChild(signal: NodeJS.Signals) {
+      if (!child.pid) return;
+      if (!group) {
+        child.kill(signal);
+        return;
+      }
+      try {
+        process.kill(-child.pid, signal);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      }
+    }
+    function stop(signal: NodeJS.Signals) {
+      stopped = true;
+      signalChild(signal);
+      kill ??= setTimeout(() => signalChild('SIGKILL'), HEAVY_KILL_GRACE_MS);
+    }
+    const handlers = (['SIGINT', 'SIGTERM', 'SIGHUP'] as const).map(
+      signal => [signal, () => stop(signal)] as const,
+    );
+    if (build) for (const [signal, handler] of handlers) process.on(signal, handler);
+    const bound = build && build.maxMs > 0 ? setTimeout(() => stop('SIGTERM'), build.maxMs) : undefined;
+    function cleanup() {
+      clearTimeout(bound);
+      clearTimeout(kill);
+      if (build) for (const [signal, handler] of handlers) process.removeListener(signal, handler);
+    }
     let output = '';
     const collect = (chunk: Buffer) => {
       output = (output + chunk.toString('utf8')).slice(-OUTPUT_TAIL);
     };
     child.stdout?.on('data', collect);
     child.stderr?.on('data', collect);
-    child.once('error', reject);
-    child.once('exit', code => {
-      if (code === 0) return done();
+    child.once('error', error => {
+      cleanup();
+      reject(error);
+    });
+    child.once('close', (code, signal) => {
+      // The shell can exit on SIGTERM before all its descendants do.
+      if (stopped) signalChild('SIGKILL');
+      cleanup();
+      if (code === 0 && !stopped) return done();
       process.stderr.write(output.endsWith('\n') || !output ? output : `${output}\n`);
-      reject(new ForgeError('CLI_UPDATE_BUILD_FAILED', `CLI update command failed (${code}).`));
+      reject(new ForgeError('CLI_UPDATE_BUILD_FAILED', `CLI update command failed (${signal ?? code}).`));
     });
   });
+}
+type UpdateBuildLease = { command(): UpdateBuildCommand; release(): void };
+/** The ordinary heavy FIFO, taken before the installation lock to avoid lock inversion
+ * with foreground updaters already inside heavy. Only a missing build takes a lease. */
+async function updateBuildLease(installation: string, inherited: string | null): Promise<UpdateBuildLease> {
+  const { sampleHold, slotCapEnv } = (await import(
+    /* @vite-ignore */ new URL('./heavy-hold.js', import.meta.url).href
+  )) as typeof import('./heavy-hold.js');
+  const directory = heavySlotDirectory();
+  const slots = () => heavySlots(readClientSettings().localHeavySlots);
+  const slot = inherited
+    ? null
+    : await acquireHeavySlot(
+        directory,
+        slots,
+        wait => process.stderr.write(waitingMessage(slots(), directory, wait)),
+        { command: 'cli-update-build', cwd: installation },
+      );
+  const startedAt = Date.now();
+  let cap: ReturnType<typeof slotCapEnv> | undefined;
+  let sampler: ReturnType<typeof sampleHold> | undefined;
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    try {
+      cap?.dispose();
+    } finally {
+      if (slot) {
+        try {
+          if (readFileSync(join(slot, 'pid'), 'utf8') === String(process.pid))
+            rmSync(slot, { recursive: true, force: true });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+        recordHold(directory, Date.now() - startedAt, {
+          at: startedAt,
+          kind: 'build',
+          ...(sampler?.stop() ?? {}),
+        });
+      }
+    }
+  };
+  const writeHolder = (maxMs: number) => {
+    if (slot)
+      writeFileSync(
+        join(slot, 'holder.json'),
+        JSON.stringify({ startedAt: Date.now(), command: 'cli-update-build', maxMs }),
+      );
+  };
+  try {
+    if (slot) {
+      writeHolder(0);
+      sampler = sampleHold(process.pid);
+    }
+    cap = slotCapEnv(
+      childEnv({ allow: ['GOMAXPROCS', 'RAYON_NUM_THREADS'] }),
+      availableParallelism(),
+      slots(),
+    );
+    const env = {
+      ...cap.env,
+      FORGE_HEAVY_DIR: directory,
+      FORGE_HEAVY_PARENT: slot
+        ? JSON.stringify({ directory: canonicalRoot(directory), slot: basename(slot), pid: process.pid })
+        : process.env.FORGE_HEAVY_PARENT!,
+    };
+    return {
+      command() {
+        const maxMs = slot ? Math.round(readClientSettings().localHeavyMaxMinutes * 60_000) : 0;
+        writeHolder(maxMs);
+        return { env, maxMs };
+      },
+      release,
+    };
+  } catch (error) {
+    release();
+    throw error;
+  }
 }
 /** Wait for another updater (same installation) instead of refusing; null when still busy. */
 export async function updateLock(installation: string, waitMs: number, onWait?: () => void) {
   const path = join(installation, 'update-lock');
-  let lock = tryHeavySlot(path, 1);
+  const attempt = () => {
+    mkdirBelow(installation, path);
+    return tryHeavySlot(path, 1, process.pid, true, false);
+  };
+  let lock = attempt();
   if (lock || waitMs <= 0) return { lock, waited: false };
   onWait?.();
   const deadline = Date.now() + waitMs;
   for (let delay = 50; !lock && Date.now() < deadline; delay = Math.min(delay * 2, 500)) {
     await new Promise<void>(done => setTimeout(done, delay));
-    lock = tryHeavySlot(path, 1);
+    lock = attempt();
   }
   return { lock, waited: true };
 }
@@ -143,20 +280,52 @@ export async function updateCli(
     /** Release keys, transition switch and alert; the compiled ones unless a test supplies its own. */
     releaseCheck?: ReleaseCheckHooks;
   },
-  options: {
-    expectedCurrent?: string | null;
-    rollback?: boolean;
-    /** Wait this long for a concurrent updater, then continue from whatever it installed. */
-    lockWaitMs?: number;
-    onWait?: () => void;
-    retireGraceMs?: number;
-    /** Background updates: the head the starting read saw. When an earlier updater already
-     * selected it, finish without a release read. */
-    skipIfCurrent?: string;
-    /** The installation already exists (a background updater inside it): never recreate it. A
-     * detached updater outliving its deleted installation then fails with ENOENT. */
-    installed?: boolean;
-  } = {},
+  options: UpdateCliOptions = {},
+) {
+  const result = await updateCliLocked(installation, address, selected, dependencies, options);
+  if (!('buildRequired' in result)) return result;
+  const lease = await updateBuildLease(installation, result.inherited);
+  try {
+    const installed = await updateCliLocked(
+      installation,
+      address,
+      result.buildRequired,
+      dependencies,
+      {
+        ...options,
+        expectedCurrent: result.expectedCurrent,
+      },
+      lease,
+    );
+    if ('buildRequired' in installed) throw new Error('CLI update did not receive its claimed build slot');
+    return installed;
+  } finally {
+    lease.release();
+  }
+}
+
+type UpdateCliOptions = {
+  expectedCurrent?: string | null;
+  rollback?: boolean;
+  /** Wait this long for a concurrent updater, then continue from whatever it installed. */
+  lockWaitMs?: number;
+  onWait?: () => void;
+  retireGraceMs?: number;
+  /** Background updates: the head the starting read saw. When an earlier updater already
+   * selected it, finish without a release read. */
+  skipIfCurrent?: string;
+  /** The installation already exists (a background updater inside it): never recreate it. A
+   * detached updater outliving its deleted installation then fails with ENOENT. */
+  installed?: boolean;
+};
+
+async function updateCliLocked(
+  installation: string,
+  address: CliSource,
+  selected: HostedMain | undefined,
+  dependencies: NonNullable<Parameters<typeof updateCli>[3]>,
+  options: UpdateCliOptions,
+  buildLease?: UpdateBuildLease,
 ) {
   let expectedCurrent =
     options.expectedCurrent !== undefined ? options.expectedCurrent : cliCurrentCommit(installation);
@@ -203,9 +372,14 @@ export async function updateCli(
     // After waiting: when the other updater moved current, use what it installed from main (no
     // second release read; the next command's own check still sees any newer main). When it
     // failed, current is unchanged and this updater installs the release it already read.
-    if (waited && !options.rollback) {
+    if ((waited || buildLease) && !options.rollback) {
       const installed = cliCurrentCommit(installation);
       if (installed !== expectedCurrent && installed && existsSync(join(installation, 'manager'))) {
+        invariant(
+          !buildLease || !existsSync(join(installation, 'rollback.json')),
+          'CLI_UPDATE_CHANGED',
+          `The selected CLI changed to a historical State while waiting for a build slot. Next: ${cliUpdateCommand(installation)}.`,
+        );
         rmSync(failureMark(installation), { force: true });
         return { status: 'current', cliCommit: installed, installation, removed: [] };
       }
@@ -218,7 +392,7 @@ export async function updateCli(
       'Select the configured Forge release State.',
     );
     // A waiter does not repeat a canary the updater it waited for just failed on this head.
-    if (waited && !options.rollback) {
+    if ((waited || buildLease) && !options.rollback) {
       const refused = activeCliCanaryRefusal(installation, release.head);
       if (refused)
         throw new ForgeError(
@@ -248,6 +422,15 @@ export async function updateCli(
         });
       rmSync(failureMark(installation), { force: true });
       return { status: 'current', cliCommit: release.head, installation, removed: [] };
+    }
+    const retainedBuild =
+      existsSync(build) && cliBuildCommit(build) === release.head && existsSync(join(build, '.managed-cli'));
+    if (!retainedBuild && !buildLease) {
+      const slots = heavySlots(readClientSettings().localHeavySlots);
+      if (slots > 0) {
+        const inherited = inheritedHeavySlot(heavySlotDirectory());
+        return { buildRequired: release, expectedCurrent, inherited };
+      }
     }
     // Signed releases: checked with this (already installed) build's keys before the new State is
     // downloaded, provisioned or built. Explicit --state selection is the owner's own recovery path.
@@ -294,12 +477,7 @@ export async function updateCli(
         }
       return value;
     };
-    if (
-      existsSync(build) &&
-      cliBuildCommit(build) === release.head &&
-      existsSync(join(build, '.managed-cli'))
-    )
-      return await published(publish());
+    if (retainedBuild) return await published(publish());
     stage = mkdtempSync(join(installation, 'builds', '.install-'));
     const transferCache = clientCacheRoot(stage);
     try {
@@ -313,11 +491,18 @@ export async function updateCli(
       'CLI_UPDATE_SOURCE_INVALID',
       'CLI releases must come from the Forge source project.',
     );
+    const install = (directory: string) =>
+      dependencies.run(
+        directory,
+        ['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'],
+        undefined,
+        buildLease?.command(),
+      );
     const deps = await shareDependencies(stage, {
       enabled: true,
-      install: directory =>
-        dependencies.run(directory, ['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund']),
-      // The updater is already serialized by update-lock; machine-wide test slots must not stall it.
+      install,
+      // An older Lane can hold the cache lock while waiting for our machine lease.
+      ...(buildLease ? { installIfCacheBusy: install } : {}),
       heavy: false,
     });
     invariant(
@@ -325,9 +510,8 @@ export async function updateCli(
       'CLI_UPDATE_DEPENDENCIES_FAILED',
       'Could not provision locked CLI dependencies.',
     );
-    // Not a heavy-slot job: ~2 s of tsc, one at a time per installation through update-lock. Queueing
-    // behind long test batches is what turned a forced update into a multi-minute stall.
-    await dependencies.run(stage, ['npm', 'run', 'build:core']);
+    await dependencies.run(stage, ['npm', 'run', 'build:core'], undefined, buildLease?.command());
+    buildLease?.release();
     const smokeHome = mkdtempSync(join(stage, '.smoke-home-'));
     try {
       await dependencies.run(stage, [process.execPath, 'dist/cli.js', '--help'], smokeHome);
@@ -419,6 +603,11 @@ export async function cliUpdateCli(args: string[]) {
       'BAD_ARGUMENT',
       'nforge update --background takes only --directory and --release-head.',
     );
+    // Keep one detached updater per installation, including while it waits outside update-lock.
+    const pendingDirectory = join(installation, 'background-update-lock');
+    mkdirBelow(installation, pendingDirectory);
+    const reservation = tryHeavySlot(pendingDirectory, 1, process.pid, true, false);
+    if (!reservation) return { status: 'busy', installation };
     try {
       return await updateCli(installation, readCliSource(installation), undefined, undefined, {
         lockWaitMs: 0,
@@ -436,6 +625,8 @@ export async function cliUpdateCli(args: string[]) {
         JSON.stringify({ code: error instanceof ForgeError ? error.code : 'CLI_UPDATE_FAILED' }),
       );
       throw error;
+    } finally {
+      rmSync(reservation, { recursive: true, force: true });
     }
   }
   const address = root ? hostedAgentAddress(root, {}) : readCliSource(installation);

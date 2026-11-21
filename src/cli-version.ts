@@ -111,7 +111,7 @@ export async function startBackgroundCliUpdate(
         cwd: installation,
         detached: true,
         stdio: ['ignore', log, log],
-        env: childEnv({ allow: RUNTIME_ENV }),
+        env: childEnv({ allow: [...RUNTIME_ENV, 'FORGE_HEAVY_DIR'] }),
       },
     ).unref();
   } finally {
@@ -134,6 +134,8 @@ async function redispatch(
       env: childEnv({
         allow: [
           ...RUNTIME_ENV,
+          'FORGE_HEAVY_DIR',
+          'FORGE_HEAVY_PARENT',
           'DO_NOT_TRACK',
           'FORGE_POSTHOG_PROJECT_TOKEN',
           'FORGE_POSTHOG_DEV_DEPLOYMENT',

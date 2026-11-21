@@ -24,6 +24,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { removeInstall } from '../dist/dependency-seal.js';
+import { dependencyKey } from '../dist/shared-dependencies.js';
 import { withCliRuntimeLock, cliProcessIdentity } from '../dist/cli-launcher.js';
 import { cliUpdateRunning, launcherElsewhere } from '../dist/cli-update.js';
 import { cliStartup, cliVersionCheck } from '../dist/cli-version.js';
@@ -1091,24 +1092,28 @@ try { await cliUpdateRun(${JSON.stringify(f.directory)}, [process.execPath, '-e'
   assert.match(failed.stderr, /code=CLI_UPDATE_BUILD_FAILED/);
 });
 
-test('a forced update is never queued behind machine-wide heavy slots', async t => {
+test('an update waits for a heavy lease without blocking an updater already inside heavy', async t => {
   const f = fixture(t),
     slots = join(f.directory, 'slots'),
     cache = join(f.directory, 'cache');
   writeFileSync(join(f.directory, 'client.json'), JSON.stringify({ localHeavySlots: 1 }));
   mkdirSync(join(slots, '1'), { recursive: true });
   writeFileSync(join(slots, '1', 'pid'), String(process.pid));
-  const previous = { slots: process.env.FORGE_HEAVY_DIR, cache: process.env.XDG_CACHE_HOME };
+  const previous = {
+    FORGE_HEAVY_DIR: process.env.FORGE_HEAVY_DIR,
+    FORGE_HEAVY_PARENT: process.env.FORGE_HEAVY_PARENT,
+    XDG_CACHE_HOME: process.env.XDG_CACHE_HOME,
+  };
   process.env.FORGE_HEAVY_DIR = slots;
   process.env.XDG_CACHE_HOME = cache;
+  delete process.env.FORGE_HEAVY_PARENT;
   t.after(() => {
-    for (const [name, value] of [
-      ['FORGE_HEAVY_DIR', previous.slots],
-      ['XDG_CACHE_HOME', previous.cache],
-    ])
+    for (const [name, value] of Object.entries(previous))
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
   });
+  let builds = 0;
+  let cacheHolder;
   const dependencies = {
     source: {
       current: async () => ({ head: b, projectId: address.projectId }),
@@ -1118,11 +1123,21 @@ test('a forced update is never queued behind machine-wide heavy slots', async t 
           JSON.stringify({ name: '@nanthai/forge', testIdentity: f.directory }),
         );
         writeFileSync(join(stage, 'package-lock.json'), '{}');
+        // An older client can hold this cache entry while waiting for the same heavy slot.
+        cacheHolder = join(cache, 'forge', 'deps', `npm-${dependencyKey(stage)}.lock`, '1', 'pid');
+        mkdirSync(join(cacheHolder, '..'), { recursive: true });
+        writeFileSync(cacheHolder, String(process.pid));
       },
     },
-    run: async (cwd, args) => {
-      if (args[1] === 'ci') mkdirSync(join(cwd, 'node_modules'));
-      else if (args[1] === 'run') {
+    run: async (cwd, args, _home, build) => {
+      if (args[1] === 'ci') {
+        assert.ok(cwd.startsWith(join(f.installation, 'builds', '.install-')), 'local install on contention');
+        mkdirSync(join(cwd, 'node_modules'));
+      } else if (args[1] === 'run') {
+        builds++;
+        assert.match(build.env.GOMAXPROCS, /^[1-9][0-9]*$/);
+        assert.equal(build.env.FORGE_HEAVY_PARENT, process.env.FORGE_HEAVY_PARENT);
+        assert.equal(readFileSync(join(slots, '1', 'pid'), 'utf8'), String(process.pid));
         mkdirSync(join(cwd, 'dist'));
         for (const name of ['cli-version.js', 'cli-launcher.js', 'cli-entry.js', 'agent-edit-hook.js'])
           writeFileSync(join(cwd, 'dist', name), '// synthetic');
@@ -1130,12 +1145,26 @@ test('a forced update is never queued behind machine-wide heavy slots', async t 
     },
     migrate: () => {},
   };
-  const result = await Promise.race([
-    updateCli(f.installation, address, undefined, dependencies),
-    new Promise((_, reject) => setTimeout(() => reject(new Error('queued behind heavy slots')), 20_000)),
-  ]);
-  assert.equal(result.status, 'updated');
-  assert.equal(readFileSync(join(slots, '1', 'pid'), 'utf8'), String(process.pid), 'foreign slot untouched');
+  const pending = updateCli(f.installation, address, undefined, dependencies);
+  try {
+    await until(() => readdirSync(slots).some(name => name.startsWith('q-')), 'update heavy ticket');
+    assert.equal(builds, 0);
+    process.env.FORGE_HEAVY_PARENT = JSON.stringify({
+      directory: slots,
+      slot: '1',
+      pid: process.pid,
+    });
+    const nested = await updateCli(f.installation, address, undefined, dependencies);
+    assert.equal(nested.status, 'updated');
+    assert.equal(readFileSync(cacheHolder, 'utf8'), String(process.pid), 'legacy cache lock retained');
+    assert.equal(readFileSync(join(slots, '1', 'pid'), 'utf8'), String(process.pid), 'outer lease retained');
+  } finally {
+    rmSync(join(slots, '1'), { recursive: true, force: true });
+    await pending;
+  }
+  assert.equal((await pending).cliCommit, b);
+  assert.equal(builds, 1);
+  assert.equal(existsSync(join(slots, '1')), false);
 });
 
 // Concurrency during an update (7af26482): many agents share one installed CLI.

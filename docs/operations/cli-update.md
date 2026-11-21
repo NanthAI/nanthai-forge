@@ -57,9 +57,11 @@ release read; running on the current build adds none (Issue 2a0557b6).
 The update is cheap and invisible:
 stdout holds only the command's result; the one progress line, the selected/revert
 line and any step failure output go to stderr; successful build and smoke output is
-discarded and no help text is printed. The build is not a heavy-slot job, so it never
-queues behind test batches (about 4 s warm; one updater per installation through
-`update-lock`). The runtime lock is held only for milliseconds: selection, hook
+discarded and no help text is printed. A new build uses the same machine-wide slots
+and compiler cap as `nforge heavy`. A foreground update inside a heavy command
+reuses the command's lease. A detached update can wait for a slot while ordinary
+commands continue on the selected build. A current or retained build needs no slot.
+The runtime lock is held only for milliseconds during selection, hook
 migration and the final retirement fence. Process inspection and deletion of old
 builds run outside it. Commands wait up to 30 s for that lock; only the foreground
 cases above and an explicit `nforge update` wait (up to 10 min) for a live updater; a dead updater is reclaimed at once and its unselected stage is

@@ -33,7 +33,7 @@ import {
   type ManagerRunner,
   type SkippedScriptsHint,
 } from './package-manager-install.js';
-import { acquireHeavySlot, heavySlotDirectory } from './heavy-slots.js';
+import { acquireHeavySlot, heavySlotDirectory, tryHeavySlot } from './heavy-slots.js';
 import { heavySlots, readClientSettings } from './client-settings.js';
 import { installRegistryHosts, type RegistryHosts } from './install-registry-hosts.js';
 import { sharedDownloadCache } from './install-download-cache.js';
@@ -285,6 +285,8 @@ export async function shareDependencies(
   root: string,
   options: {
     install?: DependencyInstaller;
+    /** A caller already holding a machine lease can use its own install on cache contention. */
+    installIfCacheBusy?: (root: string) => Promise<void>;
     enabled?: boolean;
     cache?: string;
     heavy?: boolean;
@@ -370,7 +372,14 @@ export async function shareDependencies(
     hosts = registryHosts ? { registryHosts } : {};
   let installed = false;
   mkdirSync(cache, { recursive: true });
-  const lock = await acquireHeavySlot(`${entry}.lock`, 1);
+  const { installIfCacheBusy } = options;
+  const lock = installIfCacheBusy
+    ? tryHeavySlot(`${entry}.lock`, 1)
+    : await acquireHeavySlot(`${entry}.lock`, 1);
+  if (!lock) {
+    await installIfCacheBusy!(root);
+    return { status: 'installed', key, path: join(root, 'node_modules'), ...hosts };
+  }
   try {
     if (!complete(entry, key)) {
       if (registryHosts) options.announce?.(registryHosts);

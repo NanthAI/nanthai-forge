@@ -79,8 +79,9 @@ export function tryHeavySlot(
   slots: number,
   pid = process.pid,
   deep = true,
+  createDirectory = true,
 ): string | null {
-  mkdirSync(directory, { recursive: true });
+  if (createDirectory) mkdirSync(directory, { recursive: true });
   for (let index = 1; index <= slots; index++) {
     const slot = join(directory, String(index));
     try {
