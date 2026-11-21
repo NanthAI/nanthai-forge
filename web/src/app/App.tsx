@@ -33,6 +33,7 @@ import { forget, recall, safeNext } from './session';
 import { FirstPasskey, SignIn } from './SignIn';
 import './app.css';
 const Legal = lazy(() => import('./Legal'));
+const ExistingDeleteRequest = lazy(() => import('./requests/ExistingDeleteRequest'));
 const loadingPlace = (
   <p className="quietline" aria-busy="true">
     Loading…
@@ -65,16 +66,22 @@ function makeClient() {
 
 export default function App() {
   const route = useRoute();
+  const search = useSearch();
   if (route.frame === 'public' && (route.page === 'terms' || route.page === 'privacy'))
     return (
       <Suspense fallback={loadingPlace}>
         <Legal page={route.page} />
       </Suspense>
     );
-  return <ConnectedApp />;
+  const request = route.frame === 'account' && route.place === 'projects' ? search.get('request') : null;
+  const clerkKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
+  const existing = request && clerkKey && search.get('auth') === 'existing' ? { request, clerkKey } : null;
+  return <ConnectedApp key={existing ? 'existing' : 'default'} existing={existing} />;
 }
-function ConnectedApp() {
+function ConnectedApp({ existing }: { existing: { request: string; clerkKey: string } | null }) {
   const [client] = useState(makeClient);
+  // The provider clears auth in its own unmount effect before the socket closes.
+  useEffect(() => () => queueMicrotask(() => void client?.close()), [client]);
   useEffect(() => liveReads.watchActivity(), []);
   useEffect(() => prefetchLayerWhenIdle(), []);
   if (!client)
@@ -85,6 +92,16 @@ function ConnectedApp() {
           <p>Set VITE_CONVEX_URL for this development build.</p>
         </div>
       </PublicFrame>
+    );
+  if (existing)
+    return (
+      <Suspense fallback={loadingPlace}>
+        <ExistingDeleteRequest
+          client={client}
+          requestId={existing.request}
+          publishableKey={existing.clerkKey}
+        />
+      </Suspense>
     );
   return (
     <ConvexAuthProvider

@@ -338,9 +338,9 @@ async function purgeOne(
   const id = ctx.db.normalizeId('hostedProjects', frozen.projectId);
   const project = id ? await ctx.db.get(id) : null;
   if (!project || project.owner !== owner) return 'refused';
-  if (project.removal === 'deleted') return 'deleted';
-  if (project.removal === 'deleting') return 'started';
   if (
+    project.removal === 'deleting' ||
+    project.removal === 'deleted' ||
     project.revision !== frozen.revision ||
     ((await newestLanding(ctx, project._id))?._id ?? null) !== frozen.landing
   )
@@ -362,7 +362,7 @@ export const retry = accountMutation('same')({
     try {
       const user = await requireOwnerPerson(ctx, 'permanently delete projects');
       const row = await ownRequest(ctx, input.requestId, user.subject);
-      const results = [];
+      const results: NonNullable<Row['results']> = [];
       for (const entry of row.results ?? []) {
         if (entry.outcome !== 'failed') {
           results.push(entry);
@@ -370,21 +370,34 @@ export const retry = accountMutation('same')({
         }
         const id = ctx.db.normalizeId('hostedProjects', entry.projectId);
         const project = id ? await ctx.db.get(id) : null;
-        const frozen = row.projects.find(p => p.projectId === entry.projectId)!;
-        if (project?.removal === 'deleting')
+        if (!project || project.owner !== user.subject) {
+          results.push({ projectId: entry.projectId, outcome: 'refused' });
+          continue;
+        }
+        const operationId = `${OPERATION}${row._id}`;
+        if (project.lifecycle?.operationId !== operationId) {
+          results.push({ projectId: entry.projectId, outcome: 'changed' });
+          continue;
+        }
+        if (project.removal === 'deleting')
           await transition(
             ctx,
             {
               projectId: project._id,
-              operationId: `${OPERATION}${row._id}`,
-              expectedRevision: frozen.revision,
+              operationId,
+              expectedRevision: project.lifecycle.expectedRevision,
             },
             'delete',
             { confirmed: true },
           );
         results.push({
           projectId: entry.projectId,
-          outcome: project?.removal === 'deleted' ? ('deleted' as const) : ('started' as const),
+          outcome:
+            project.removal === 'deleted'
+              ? 'deleted'
+              : project.removal === 'deleting'
+                ? 'started'
+                : 'changed',
         });
       }
       await ctx.db.patch(row._id, { results });

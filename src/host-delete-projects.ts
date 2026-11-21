@@ -17,6 +17,7 @@ import { ForgeError, invariant } from './errors.js';
 export type DeleteRequestProject = {
   projectId: string;
   slug: string;
+  revision: number;
   bytes: number;
   trash: boolean;
   lastLandingAt: number | null;
@@ -89,18 +90,18 @@ const size = (bytes: number) =>
       ? `${(bytes / 1024 ** 2).toFixed(1)} MB`
       : `${Math.round(bytes / 1024)} KB`;
 /** The request as a person reads it in a terminal: one line of totals, one per project, then the next steps. */
-export function formatDeleteRequest(request: DeleteRequest, root: string) {
+export function formatDeleteRequest(request: DeleteRequest, root: string, deployment: string) {
   const total = request.projects.reduce((sum, project) => sum + project.bytes, 0);
   const time = (iso: string) => iso.slice(11, 16);
   const lines = [
-    `request ${request.id}  ${request.projects.length} ${request.projects.length === 1 ? 'project' : 'projects'}  ${size(total)}  ${request.status}  list frozen at ${time(request.at)} UTC, expires ${time(request.expiresAt)} UTC`,
+    `request ${request.id}  ${request.projects.length} ${request.projects.length === 1 ? 'project' : 'projects'}  ${size(total)}  ${request.status}  list frozen at ${time(request.at)} UTC, expires ${time(request.expiresAt)} UTC  ${deployment}`,
     ...request.projects.map(
       project =>
-        `  ${project.slug}  ${project.trash ? 'in the trash' : 'not in the trash'}  ${size(project.bytes)}  last landing ${project.lastLandingAt ? new Date(project.lastLandingAt).toISOString().slice(0, 10) : 'never'}${project.outcome ? `  ${project.outcome}` : ''}`,
+        `  ${project.slug}  ${project.projectId}  revision ${project.revision}  ${project.trash ? 'in the trash' : 'not in the trash'}  ${size(project.bytes)}  last landing ${project.lastLandingAt ? new Date(project.lastLandingAt).toISOString().slice(0, 10) : 'never'}${project.outcome ? `  ${project.outcome}` : ''}`,
     ),
   ];
   if (request.status === 'requested') {
-    const command = `nforge host ${shellQuote(root)} --delete-projects`;
+    const command = `nforge host ${shellQuote(root)} --delete-projects --deployment ${shellQuote(deployment)}`;
     lines.push(
       `approve   ${request.url ?? 'open Forge on the web, signed in as the owner'} (only the owner person, signed in on the web)`,
       `wait      ${command} --wait ${request.id}  (one subscription, no polling)`,
@@ -133,8 +134,8 @@ export async function deleteProjects(root: string, flags: string[], json: boolea
   invariant(selected, 'AUTH_REQUIRED', 'Run nforge login DEPLOYMENT_URL with cli scope first.');
   const deployment = deploymentUrl(selected);
   const done = (request: DeleteRequest) => {
-    if (json) return { type: 'host-delete-request', ...request };
-    process.stdout.write(formatDeleteRequest(request, root));
+    if (json) return { type: 'host-delete-request', deployment, ...request };
+    process.stdout.write(formatDeleteRequest(request, root, deployment));
     return undefined;
   };
   try {

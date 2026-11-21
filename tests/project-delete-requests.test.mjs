@@ -12,9 +12,14 @@ import { state } from './hosted-fixture.mjs';
 
 const requests = await import(moduleUrl('../convex/projectDeleteRequests.ts'));
 const { noteDeleteOutcome } = await import(moduleUrl('../convex/projectDeleteRequestOutcome.ts'));
+const lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
+const { prefixComplete } = await import(moduleUrl('../convex/projectR2Maintenance.ts'));
+const { purgeSettleMs } = await import(moduleUrl('../convex/projectRetention.ts'));
 const code = expected => error => error.data?.code === expected;
+const fixtureNow = Date.parse('2026-11-17T08:00:00Z');
 
-function fixture(count = 12) {
+function fixture(t, count = 12) {
+  t.mock.timers.enable({ apis: ['Date'], now: fixtureNow });
   const s = state([]);
   for (let i = 0; i < count; i++) {
     const id = `project-${i}`;
@@ -46,8 +51,8 @@ function fixture(count = 12) {
     owner: 'owner',
     name: 'test',
     tokenHash: 'synthetic-hash',
-    issuedAt: Date.now(),
-    expiresAt: Date.now() + 600000,
+    issuedAt: fixtureNow,
+    expiresAt: fixtureNow + 600000,
     revoked: false,
     scope: 'cli',
   });
@@ -73,8 +78,25 @@ const approve = (f, request, extra = {}) =>
     ...(extra.kept ? { kept: extra.kept } : {}),
   });
 
-test('an agent prepares the exact list from a name pattern; only matching projects are listed and nothing is deleted', async () => {
-  const f = fixture();
+async function finishPurge(f, projectId) {
+  const get = () => f.s.tables.hostedProjects.get(projectId);
+  for (let page = 0; get().removal === 'deleting'; page++) {
+    assert.ok(page < 250, 'permanent deletion reaches a terminal receipt');
+    const project = get();
+    if (project.r2Purge && !project.r2PrefixPurged)
+      await prefixComplete._handler(f.s.ctx, {
+        projectId,
+        generation: project.r2Purge.generation,
+        operationId: project.purge.operationId,
+        objects: 1,
+        bytes: 32,
+      });
+    await lifecycle.purge._handler(f.s.ctx, { projectId });
+  }
+}
+
+test('an agent prepares the exact list from a name pattern; only matching projects are listed and nothing is deleted', async t => {
+  const f = fixture(t);
   const request = await prepare(f, { glob: 'bench-zoo-*' });
   assert.equal(request.status, 'requested');
   assert.equal(request.projects.length, 12);
@@ -84,8 +106,8 @@ test('an agent prepares the exact list from a name pattern; only matching projec
   assert.equal(trash.projects.length, 6, 'only the projects in the trash');
 });
 
-test('a device or agent sign-in cannot approve; another account cannot even read the request', async () => {
-  const f = fixture();
+test('a device or agent sign-in cannot approve; another account cannot even read the request', async t => {
+  const f = fixture(t);
   const request = await prepare(f, { glob: 'bench-zoo-*' });
   f.as('owner', true);
   await assert.rejects(approve(f, request), code('PROJECT_UNAVAILABLE'));
@@ -95,8 +117,8 @@ test('a device or agent sign-in cannot approve; another account cannot even read
   assert.ok([...f.s.tables.hostedProjects.values()].every(project => project.removal !== 'deleting'));
 });
 
-test('one owner approval purges every listed project; a replay is a no-op and the typed count must match', async () => {
-  const f = fixture();
+test('one owner approval purges every listed project; a replay is a no-op and the typed count must match', async t => {
+  const f = fixture(t);
   const request = await prepare(f, { glob: 'bench-zoo-*' });
   f.as('owner');
   await assert.rejects(approve(f, request, { count: 11 }), code('BAD_ARGUMENT'));
@@ -119,15 +141,53 @@ test('one owner approval purges every listed project; a replay is a no-op and th
     code('WORK_STALE'),
     'a second approval is refused',
   );
+  t.mock.timers.tick(purgeSettleMs);
+  for (const project of done.projects.filter(p => p.outcome === 'started')) {
+    await finishPurge(f, project.projectId);
+    assert.equal(f.s.tables.hostedProjects.get(project.projectId).removal, 'deleted');
+    assert.ok(f.s.tables.hostedProjects.get(project.projectId).purge.completedAt);
+    const live = await f.call('read', { requestId: request.id });
+    assert.equal(live.projects.find(p => p.projectId === project.projectId).outcome, 'deleted');
+  }
+  const terminal = await f.call('read', { requestId: request.id });
+  assert.equal(terminal.projects.filter(p => p.outcome === 'deleted').length, 11);
+  assert.equal(terminal.projects.find(p => p.projectId === 'project-0').outcome, 'kept');
 });
 
-test('a project that gained a landing, changed revision or changed owner after the list was shown is skipped and named', async () => {
-  const f = fixture(3);
+test('overlapping requests skip projects whose purge started or finished under another approval', async t => {
+  const f = fixture(t, 2);
+  const selection = { ids: ['project-0', 'project-1'] };
+  const first = await prepare(f, selection);
+  const next = await prepare(f, selection);
+  assert.deepEqual(
+    next.projects.map(project => project.projectId),
+    selection.ids,
+  );
+  f.as('owner');
+  await approve(f, first);
+  t.mock.timers.tick(purgeSettleMs);
+  await finishPurge(f, 'project-1');
+  const done = await approve(f, next);
+  assert.deepEqual(
+    done.projects.map(project => project.outcome),
+    ['changed', 'changed'],
+  );
+  await finishPurge(f, 'project-0');
+  const original = await f.call('read', { requestId: first.id });
+  assert.deepEqual(
+    original.projects.map(project => project.outcome),
+    ['deleted', 'deleted'],
+  );
+  assert.deepEqual(await f.call('read', { requestId: next.id }), done);
+});
+
+test('a project that gained a landing, changed revision or changed owner after the list was shown is skipped and named', async t => {
+  const f = fixture(t, 3);
   const request = await prepare(f, { glob: 'bench-zoo-*' });
   // A new save landed on project-0 after the list was shown.
   f.s.tables.projectHostedAcceptances.set('landing-new', {
     _id: 'landing-new',
-    _creationTime: Date.now(),
+    _creationTime: fixtureNow,
     projectId: 'project-0',
   });
   f.s.tables.hostedProjects.get('project-1').revision = 2;
@@ -145,19 +205,18 @@ test('a project that gained a landing, changed revision or changed owner after t
   assert.ok([...f.s.tables.hostedProjects.values()].every(project => project.removal !== 'deleting'));
 });
 
-test('an expired request deletes nothing and cannot be approved', async () => {
-  const f = fixture(2);
+test('an expired request deletes nothing and cannot be approved', async t => {
+  const f = fixture(t, 2);
   const request = await prepare(f, { glob: 'bench-zoo-*' });
-  const row = f.s.tables.projectDeleteRequests.get(request.id);
-  row.expiresAt = Date.now() - 1;
+  t.mock.timers.setTime(Date.parse(request.expiresAt));
   f.as('owner');
   assert.equal((await f.call('read', { requestId: request.id })).status, 'expired');
   await assert.rejects(approve(f, request), code('WORK_STALE'));
   assert.ok([...f.s.tables.hostedProjects.values()].every(project => project.removal !== 'deleting'));
 });
 
-test('a purge that stops is recorded on the request; retry replays only those projects', async () => {
-  const f = fixture(2);
+test('a purge that stops is recorded on the request; retry replays only those projects', async t => {
+  const f = fixture(t, 2);
   const request = await prepare(f, { glob: 'bench-zoo-*' });
   f.as('owner');
   await approve(f, request);
@@ -178,8 +237,8 @@ test('a purge that stops is recorded on the request; retry replays only those pr
   await assert.rejects(f.call('retry', { requestId: request.id }), code('PROJECT_UNAVAILABLE'));
 });
 
-test('a decline and a withdrawal delete nothing and reach the requester through the same read', async () => {
-  const f = fixture(2);
+test('a decline and a withdrawal delete nothing and reach the requester through the same read', async t => {
+  const f = fixture(t, 2);
   const request = await prepare(f, { glob: 'bench-zoo-*' });
   f.as('owner');
   const declined = await f.call('decide', {

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID, generateKeyPairSync } from 'node:crypto';
 import { getFunctionAddress } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
-import { state } from './hosted-fixture.mjs';
+import { projectRow, state } from './hosted-fixture.mjs';
 import { checkArgs } from './convex-args.mjs';
 
 const identity = await import(moduleUrl('../convex/forgeIdentity.ts'));
@@ -17,6 +17,7 @@ const device = await import(moduleUrl('../convex/deviceActions.ts'));
 const deviceStore = await import(moduleUrl('../convex/deviceStore.ts'));
 const tokenStore = await import(moduleUrl('../convex/githubUserTokens.ts'));
 const tokenActions = await import(moduleUrl('../convex/githubUserTokenActions.ts'));
+const deleteRequests = await import(moduleUrl('../convex/projectDeleteRequests.ts'));
 const { action } = await import(moduleUrl('../convex/cliServer.ts'));
 const key = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({
   type: 'pkcs8',
@@ -194,6 +195,41 @@ test('browser identity resolves session to Forge account once per invocation, at
     s.tables.users.set(`other${n}`, { ...s.user, _id: `other${n}`, accountKey: `user_other${n}` });
   await identity.identityContext(s.ctx).auth.getUserIdentity();
   assert.deepEqual(s.reads(), { componentReads: 2, userReads: 2 });
+});
+
+test('Clerk and a linked Convex Auth session approve bulk requests for the same Forge owner', async t => {
+  const s = fixture(t);
+  const convex = s.browser();
+  const clerk = {
+    issuer: 'https://clerk.example',
+    subject: s.user.accountKey,
+    tokenIdentifier: 'clerk|owner',
+  };
+  for (const [i, requester, approver] of [
+    [0, clerk, convex],
+    [1, convex, clerk],
+  ]) {
+    const projectId = `scratch-${i}`;
+    s.tables.hostedProjects.set(projectId, projectRow({ _id: projectId, owner: s.user.accountKey }));
+    s.identity(requester);
+    const request = JSON.parse(
+      await deleteRequests.prepare._handler(s.ctx, {
+        operationId: randomUUID(),
+        select: { ids: [projectId] },
+      }),
+    );
+    s.identity(approver);
+    const done = JSON.parse(
+      await deleteRequests.decide._handler(s.ctx, {
+        requestId: request.id,
+        operationId: randomUUID(),
+        decision: 'approve',
+        count: 1,
+      }),
+    );
+    assert.equal(done.projects[0].outcome, 'started');
+    assert.equal(s.tables.hostedProjects.get(projectId).removal, 'deleting');
+  }
 });
 
 test('a copied browser token loses reads and device approval after session revocation', async t => {

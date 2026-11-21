@@ -355,7 +355,6 @@
   "tests/presence.test.mjs": {"date":6},
   "tests/presign-node-reference.mjs": {"date":1},
   "tests/project-addresses.test.mjs": {"date":4},
-  "tests/project-delete-requests.test.mjs": {"date":4},
   "tests/project-exchange-fixture.mjs": {"date":1},
   "tests/project-invitation-acceptance.test.mjs": {"date":6},
   "tests/project-invitation-followups.test.mjs": {"date":10},

@@ -78,7 +78,7 @@ export function requestView(read: DeleteRequestRead, kept: ReadonlySet<string>, 
   else if (read.status === 'approved' && failed)
     sentence = {
       bold: `${done.toLocaleString('en')} of ${count.toLocaleString('en')} deleted. ${n(failed, 'project')} could not be.`,
-      rest: 'Storage did not answer. Nothing is half-deleted; retry covers only those.',
+      rest: 'Retry resumes only the purges that stopped.',
     };
   else if (read.status === 'approved')
     sentence = {

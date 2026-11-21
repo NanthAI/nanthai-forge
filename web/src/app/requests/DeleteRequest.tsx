@@ -3,7 +3,7 @@
 // then what goes and the typed count. Only the owner person approves, once; the server re-checks every project and
 // skips any that changed. One subscription (projectDeleteRequests:read), which the server writes on the decision and
 // once per project as its purge ends; nothing polls. Loaded with its route only.
-import { useMemo, useRef, useState, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useMutation } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { Key, Region, Row, State, type StateWord } from '../../ds';
@@ -38,7 +38,13 @@ const TONE_WORD: Record<string, StateWord> = {
   waiting: 'Needs you',
 };
 
-export default function DeleteRequest({ requestId }: { requestId: string }) {
+export default function DeleteRequest({
+  requestId,
+  alternate,
+}: {
+  requestId: string;
+  alternate?: { href: string; label: string };
+}) {
   const live = useSafeQuery(read, { requestId });
   const value = useMemo(() => {
     try {
@@ -51,19 +57,26 @@ export default function DeleteRequest({ requestId }: { requestId: string }) {
     { label: 'Your projects', href: hrefFor({ frame: 'account', place: 'projects' }) },
     { label: 'Delete request' },
   ];
+  const signInLink = alternate ? <a href={alternate.href}>{alternate.label}</a> : null;
   if (live.error || value === null)
-    return <Head trail={trail} sentence="This request was not found, or it belongs to another account." />;
+    return (
+      <Head trail={trail} sentence="This request was not found, or it belongs to another account.">
+        {signInLink}
+      </Head>
+    );
   if (value === undefined) return <Head trail={trail} sentence="Loading the request…" />;
-  return <RequestPage read={value} trail={trail} />;
+  return <RequestPage key={value.id} read={value} trail={trail} signInLink={signInLink} />;
 }
 
 export function RequestPage({
   read: request,
   trail,
+  signInLink,
   actions,
 }: {
   read: DeleteRequestRead;
   trail: { label: string; href?: string }[];
+  signInLink?: ReactNode;
   /** For a test or a fixture page: the decision and retry calls (default: the live mutations). */
   actions?: {
     decide: (args: Parameters<ReturnType<typeof useDecide>>[0]) => Promise<unknown>;
@@ -119,7 +132,9 @@ export function RequestPage({
             <b>{view.sentence.bold}</b> {view.sentence.rest}
           </>
         }
-      />
+      >
+        {signInLink}
+      </Head>
       <div className="req">
         <Region
           title="The list"

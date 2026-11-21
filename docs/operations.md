@@ -855,11 +855,13 @@ nforge host ROOT --delete-projects --withdraw REQUEST_ID
 
 Preparing deletes nothing. It freezes the exact list (slug, revision, newest landing, stored size, in the trash or
 not), prints it with the approval link `/-/account?request=ID`, and exits. A request holds at most 100 projects and
-expires 30 minutes after it is made; an expired request deletes nothing. Both numbers follow the Item's suggestion
-and are open for the owner to change. On the page the owner reads the whole list, keeps any project out, types the
-number left and approves once; **Decline** tells the agent through the same read. Approval re-checks every project in
+expires 30 minutes after it is made. An expired request deletes nothing. While Clerk sign-in is available, the link
+also offers **Review with your existing sign-in** so the owner can review with that account session. On the page the
+owner reads the whole list, keeps any project out, types the number left and approves once. **Decline** tells the agent
+through the same read. Approval re-checks every project in
 that one transaction: a project with a new landing, a new revision or a new owner since the list was made is skipped
-and named, never deleted. Each other project starts the same permanent purge as the single delete, and its row shows
+and named. This also covers projects already being purged by a different request. Each other project starts the same
+permanent purge as the single delete, and its row shows
 deleting, deleted or could not delete as that purge ends. **Retry** replays only the purges that stopped. Approving
 twice, or replaying the same decision, changes nothing.
 

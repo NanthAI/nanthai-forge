@@ -12,18 +12,7 @@ import './legacy-hosted.css';
 import { ClerkProvider, SignInButton, SignOutButton, useAuth, useUser, useClerk } from '@clerk/react';
 import { ConvexProvider, ConvexReactClient, useConvex, useConvexAuth } from 'convex/react';
 import { ConvexProviderWithClerk } from 'convex/react-clerk';
-
-/** Convex auth always uses the Clerk `convex` JWT template (10 min lifetime). Clerk's own session token
- * lives 60 s, and each refresh makes the server re-run every live query of the tab. */
-function useConvexTokenAuth() {
-  const auth = useAuth();
-  const { getToken } = auth;
-  const convexToken = useCallback(
-    (options?: Parameters<typeof getToken>[0]) => getToken({ ...options, template: 'convex' }),
-    [getToken],
-  );
-  return { ...auth, getToken: convexToken } as typeof auth;
-}
+import { useConvexTokenAuth } from './clerk-convex-auth';
 import { api as functions } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { SourceRequest, Route } from './api';

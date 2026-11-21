@@ -12,7 +12,7 @@ import { api } from '../../../convex/_generated/api';
 import { Key, State } from '../ds';
 import { WhileAwake } from './awake';
 import { PublicFrame } from './frames';
-import { hrefFor } from './paths';
+import { existingDeleteRequestHref, hrefFor } from './paths';
 import { useSearch } from './router';
 import { errorCode, recall, remember, safeNext } from './session';
 import { createPasskey, assertPasskey, type CeremonyFailure, type CreationOptions } from './webauthn';
@@ -61,6 +61,7 @@ export function SignIn() {
 function HandleSignIn() {
   const search = useSearch();
   const next = safeNext(search.get('next'));
+  const existing = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ? existingDeleteRequestHref(next) : undefined;
   const { flowError } = useOauth();
   const { signIn: github } = useSignInWithGithub(api.auth);
   const driver = useRef<PasskeyHook | null>(null);
@@ -162,7 +163,11 @@ function HandleSignIn() {
           .
         </span>
         <span>New here? Type the handle you want.</span>
-        <a href="/-/signin?link=existing">Add a passkey from your existing sign-in</a>
+        {existing ? (
+          <a href={existing}>Review with your existing sign-in</a>
+        ) : (
+          <a href="/-/signin?link=existing">Add a passkey from your existing sign-in</a>
+        )}
         <span>
           From a terminal: <code>nforge login</code>
         </span>
