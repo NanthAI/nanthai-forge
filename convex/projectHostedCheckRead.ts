@@ -7,6 +7,7 @@ import { accessibleProject } from './projectAuthority';
 import { requireMacMachine } from './projectHostedCheckMachines';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { checkPin, type HostedCheckRun } from '../src/hosted-check';
+import { sourceAuthority } from '../src/hosted-source-authority';
 import { recordHead, hostedWriteProject } from './projectHostedRecords';
 import { checkSetting, loadHostedCheck, type CheckIdentity } from './projectHostedCheckStore';
 import { summarizeCheckRun } from '../src/hosted-check-summary';
@@ -20,7 +21,7 @@ const identity = { projectId: v.id('hostedProjects'), runId: v.string() };
 export async function checkReader(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
   const user = await ctx.auth.getUserIdentity();
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted checks.');
-  await accessibleProject(ctx, projectId, user.subject);
+  return accessibleProject(ctx, projectId, user.subject);
 }
 export const status = query({
   args: {
@@ -31,7 +32,7 @@ export const status = query({
   returns: v.string(),
   handler: async (ctx, { features, board: cursor, ...input }) => {
     try {
-      await checkReader(ctx, input.projectId);
+      const project = await checkReader(ctx, input.projectId);
       const { run } = await loadHostedCheck(ctx, input, !features?.includes('check-report-detail'));
       invariant(
         !run.reportPointer || features?.includes('check-report-detail'),
@@ -54,7 +55,13 @@ export const status = query({
               ...cursor,
             })
           : undefined;
-      return canonicalPayload({ ...run, ...(board ? { board } : {}) });
+      return canonicalPayload({
+        ...run,
+        ...(features?.includes('check-authority-epoch')
+          ? { currentAuthorityEpoch: sourceAuthority(project).epoch }
+          : {}),
+        ...(board ? { board } : {}),
+      });
     } catch (error) {
       return report(error);
     }

@@ -21,11 +21,15 @@ const names = [
   'projectHostedSync',
   'projectHostedSyncJobs',
   'projectHostedLanding',
+  'projectHostedLandingWithdraw',
+  'projectHostedLandingPriority',
   'projectHostedLandingDesired',
   'projectHostedFinish',
   'projectHostedCheckDefinitions',
   'projectHostedChecks',
+  'projectHostedCheckRead',
   'projectHostedLifecycle',
+  'projectHostedLanePin',
   'projectHostedStart',
   'projectHostedSaves',
   'projectHostedSaveJobs',
@@ -61,7 +65,7 @@ export async function resolutionFixture(t, options = {}) {
     try {
       result = await f.tx(`agent:${name}`, modules[module][member], args);
       if (
-        eager &&
+        (typeof eager === 'function' ? eager(name) : eager) &&
         member === 'submit' &&
         /projectHosted(Compose|Sync|Save)Jobs/.test(module) &&
         JSON.parse(result).status === 'submitted'

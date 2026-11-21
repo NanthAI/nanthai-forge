@@ -19,6 +19,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { hostedLifecycleRequestSchema, hostedLifecycleResultSchema } from './hosted-lifecycle.js';
 import { invariant } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
+import { authorityPinRefusal, olderEpochRefusal } from './hosted-main-pin.js';
 import { finishPendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 import type { HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import type { ConvexExchange } from './exchange-client.js';
@@ -38,6 +39,7 @@ export async function transitionHostedLane(
   command: z.input<typeof commandSchema>,
   exchange: Pick<ConvexExchange, 'client' | 'projectId' | 'uploadFile' | 'upload' | 'missing'>,
   saveFeatures: SaveContract | false = false,
+  replayEpoch = false,
 ) {
   const parsed = commandSchema.parse(command);
   invariant(parsed.action !== 'abandon' || parsed.reason, 'BAD_ARGUMENT', 'Give a reason for abandoning.');
@@ -128,31 +130,48 @@ export async function transitionHostedLane(
     );
   // A save-first that began at an older authority epoch names this abandon, not its inner save, as
   // the next command (review f08934a5 low 2).
-  const abandonContinuation = {
-    action: 'abandon' as const,
-    parameters: { reason: parsed.reason, saveFirst: parsed.saveFirst },
+  const continuation = {
+    action: parsed.action,
+    parameters:
+      parsed.action === 'abandon'
+        ? { reason: parsed.reason, saveFirst: parsed.saveFirst, keepPatch: parsed.keepPatch }
+        : {},
   };
-  let childProgress: Awaited<ReturnType<typeof saveHostedLane>> | null = null;
-  if (original.request && parsed.action === 'abandon' && parsed.saveFirst)
-    childProgress = await saveHostedLane(
-      root,
-      {
-        operationId: original.saveOperationId,
-        message: `Before abandon: ${parsed.reason}`,
-        supersedeFinish: true,
-      },
-      exchange,
-      saveFeatures,
-      true,
-      abandonContinuation,
-    );
+  const saveFirst = parsed.action === 'abandon' && parsed.saveFirst;
+  const child = join(cache, 'saves', original.saveOperationId, 'request.json');
+  const contract: SaveContract = saveFeatures || { overlapEvidence: false, submitPage: false };
+  let childPinned = checkoutPathExists(child);
+  // Drive the child before inspecting local edits. After a crash between saving and writing the
+  // parent request, the marker can already be on the saved head and the child's capture removed.
+  // Its retained request and receipt still bind the exact original baseline and saved head.
+  const childProgress = saveFirst
+    ? await saveHostedLane(
+        root,
+        {
+          operationId: original.saveOperationId,
+          message: `Before abandon: ${parsed.reason}`,
+          supersedeFinish: true,
+        },
+        exchange,
+        {
+          ...contract,
+          async onCapture(capture) {
+            const { selection } = capture.marker;
+            invariant(
+              selection.laneId === original.selection.laneId &&
+                (childPinned || canonicalPayload(selection) === canonicalPayload(original.selection)),
+              'WORK_STALE',
+              'The retained lifecycle capture belongs to another Lane baseline.',
+            );
+            childPinned = true;
+            await contract.onCapture?.(capture);
+          },
+        },
+        true,
+        { ...continuation, action: 'abandon' },
+      )
+    : null;
   if (!original.request) {
-    const marker = readHostedLaneCheckout(root);
-    invariant(
-      marker?.selection.projectId === exchange.projectId,
-      'WORK_OPERATION_CHANGED',
-      'Open this project’s Lane before changing its lifecycle.',
-    );
     const expected = {
       head: original.selection.head,
       version: original.selection.version,
@@ -162,9 +181,9 @@ export async function transitionHostedLane(
     let dirty = false,
       kept: ReturnType<typeof keepHostedEditsPatch> | undefined,
       selected: HostedLaneCheckoutMarker['selection'] | undefined;
-    if (parsed.action === 'abandon') {
+    if (parsed.action === 'abandon' && !saveFirst) {
       const captured = join(cache, 'saves', original.saveOperationId),
-        capture = await captureHostedSave(root, captured, parsed.action === 'abandon');
+        capture = await captureHostedSave(root, captured, true);
       invariant(
         canonicalPayload(capture.marker.selection) === canonicalPayload(original.selection),
         'WORK_STALE',
@@ -172,7 +191,7 @@ export async function transitionHostedLane(
       );
       dirty = capture.changes.length > 0;
       invariant(
-        !dirty || parsed.saveFirst || parsed.keepPatch,
+        !dirty || parsed.keepPatch,
         'LANE_DIRTY',
         'Lane has unsaved edits. Use saveFirst:true to save them before abandoning, or keepPatch:true to keep them in a local patch file next to the checkout and abandon.',
       );
@@ -187,42 +206,30 @@ export async function transitionHostedLane(
       // Its marker may be older than the Lane (a sync, a resolution Lane's landing or another save moved
       // the record), and those old pins would be refused as WORK_STALE on every retry: pin the Lane
       // as the server has it now.
-      if (!dirty && !selected && !parsed.saveFirst) selected = await selectServerLane();
-      if (parsed.saveFirst) {
-        childProgress = await saveHostedLane(
-          root,
-          {
-            operationId: original.saveOperationId,
-            message: `Before abandon: ${parsed.reason}`,
-            supersedeFinish: true,
-          },
-          exchange,
-          saveFeatures,
-          true,
-          abandonContinuation,
-        );
-        if ('outcome' in childProgress && childProgress.outcome.status === 'failed')
-          return {
-            phase: 'save' as const,
-            operationId: parsed.operationId,
-            saveOperationId: original.saveOperationId,
-            progress: childProgress,
-          };
-      }
+      if (!dirty && !selected) selected = await selectServerLane();
     }
+    if (childProgress && 'outcome' in childProgress && childProgress.outcome.status === 'failed')
+      return {
+        phase: 'save' as const,
+        operationId: parsed.operationId,
+        saveOperationId: original.saveOperationId,
+        progress: childProgress,
+      };
     // A save-first child may have rebased onto a moved Lane; bind its exact baseline.
-    const child = join(cache, 'saves', original.saveOperationId, 'request.json');
+    const childRequest =
+      saveFirst && checkoutPathExists(child)
+        ? saveRequestSchema.parse(JSON.parse(readFileSync(child, 'utf8')))
+        : null;
     const pinned =
-      parsed.saveFirst && checkoutPathExists(child)
-        ? saveRequestSchema.parse(JSON.parse(readFileSync(child, 'utf8'))).expected
-        : selected
-          ? {
-              head: selected.head,
-              version: selected.version,
-              sourceVersion: selected.sourceVersion,
-              lifecycleVersion: selected.lifecycleVersion,
-            }
-          : expected;
+      childRequest?.expected ??
+      (selected
+        ? {
+            head: selected.head,
+            version: selected.version,
+            sourceVersion: selected.sourceVersion,
+            lifecycleVersion: selected.lifecycleVersion,
+          }
+        : expected);
     const request = hostedLifecycleRequestSchema.parse({
       operationId: parsed.operationId,
       action: parsed.action,
@@ -236,8 +243,8 @@ export async function transitionHostedLane(
         kind: 'lane',
         laneId: original.selection.laneId,
         expected: pinned,
-        dirty,
-        saveOperationId: parsed.action === 'abandon' && parsed.saveFirst ? original.saveOperationId : null,
+        dirty: childRequest ? childRequest.changeCount > 0 : dirty,
+        saveOperationId: saveFirst ? original.saveOperationId : null,
       },
     });
     original.request = workLocked(lock, () => {
@@ -252,18 +259,39 @@ export async function transitionHostedLane(
     });
   }
   let request = hostedLifecycleRequestSchema.parse(original.request);
+  const epoch = replayEpoch && saveFeatures ? saveFeatures.authorityEpoch : undefined;
+  const repin = (replacement: typeof request) => {
+    request = workLocked(lock, () => {
+      const saved = JSON.parse(readFileSync(path, 'utf8'));
+      if (canonicalPayload(saved.request) !== canonicalPayload(request))
+        return hostedLifecycleRequestSchema.parse(saved.request);
+      durableReplace(path, canonicalPayload({ ...saved, request: replacement }));
+      return replacement;
+    });
+  };
   const transition = async () =>
     hostedLifecycleResultSchema.parse(
       JSON.parse(
         await exchange.client.mutation(
           makeFunctionReference<'mutation'>('projectHostedLifecycle:transition'),
-          { projectId: exchange.projectId, request: canonicalPayload(request) },
+          {
+            projectId: exchange.projectId,
+            request: canonicalPayload(request),
+            ...(replayEpoch ? { replayEpoch: true } : {}),
+          },
         ),
       ),
     );
   let result: Awaited<ReturnType<typeof transition>>;
   try {
-    result = await transition();
+    try {
+      result = await transition();
+    } catch (error) {
+      if (epoch === undefined || request.authorityEpoch === epoch || !authorityPinRefusal(error, 'lifecycle'))
+        throw error;
+      repin({ ...request, authorityEpoch: epoch });
+      result = await transition();
+    }
   } catch (error) {
     // The server refused the retained pins (the Lane moved after this request was journaled: a sync draft's
     // landing, another save) and began no operation, so replaying it would repeat WORK_STALE forever (23429bac).
@@ -287,31 +315,32 @@ export async function transitionHostedLane(
       server.lifecycleVersion === target.expected.lifecycleVersion
     )
       throw error;
-    request = hostedLifecycleRequestSchema.parse({
-      ...request,
-      authorityEpoch: server.authority.epoch,
-      target: {
-        ...target,
-        expected: {
-          head: server.head,
-          version: server.version,
-          sourceVersion: server.sourceVersion,
-          lifecycleVersion: server.lifecycleVersion,
+    repin(
+      hostedLifecycleRequestSchema.parse({
+        ...request,
+        authorityEpoch: server.authority.epoch,
+        target: {
+          ...target,
+          expected: {
+            head: server.head,
+            version: server.version,
+            sourceVersion: server.sourceVersion,
+            lifecycleVersion: server.lifecycleVersion,
+          },
         },
-      },
-    });
-    workLocked(lock, () =>
-      durableReplace(
-        path,
-        canonicalPayload({
-          ...original,
-          request,
-          ...(original.kept ? { kept: original.kept } : {}),
-        }),
-      ),
+      }),
     );
     result = await transition();
   }
+  if (result.status === 'pending' && epoch !== undefined && request.authorityEpoch !== epoch)
+    throw olderEpochRefusal(
+      root,
+      'SOURCE_AUTHORITY_CHANGED',
+      'This lifecycle change',
+      request.authorityEpoch,
+      epoch,
+      continuation,
+    );
   // Only metadata advances (src/hosted-marker-advance.ts); a lost reply or old replay cannot rewind a later baseline.
   if (result.lane && request.target.kind === 'lane')
     advanceMarkerMetadata(root, request.target.laneId, result.lane);

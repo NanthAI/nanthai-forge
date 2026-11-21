@@ -13,6 +13,7 @@ import {
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { ForgeError } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
+import { settleTurnWork } from './agent-turn-work.js';
 import { finishRefusedKey } from './hosted-agent-finish-identity.js';
 import { preparingFinishSource } from './hosted-agent-finish-result.js';
 import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
@@ -262,7 +263,12 @@ export async function followLocalOperation(
       emit,
       subscribe,
       board,
-    );
+    ).catch(error => {
+      // This wait was registered under the local finish id, not the hosted run id.
+      if (error instanceof ForgeError && error.code === 'SOURCE_AUTHORITY_CHANGED' && error.recovery)
+        settleTurnWork([operationId]);
+      throw error;
+    });
   if (local.kind === 'save')
     return observeHostedSave(transport, operationId, input.timeoutSeconds, signal, subscribe, board);
   if (local.kind === 'finish')

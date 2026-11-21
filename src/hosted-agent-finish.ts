@@ -47,6 +47,7 @@ import { syncRequiredAdvice, syncRequiredContinuation, type WouldConflict } from
 import type { HostedAgentResponse, HostedAgentSession } from './hosted-agent-transport.js';
 import {
   AuthorityPinRefused,
+  beganAtOlderEpoch,
   BeganAtOlderEpoch,
   MAIN_PIN_TRIES,
   MainPinRefused,
@@ -352,11 +353,18 @@ async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolea
     // still-running one never ends, and a wait on it would never return. Name a new finish (N3).
     const began = (request as { authorityEpoch?: number }).authorityEpoch,
       epoch = session.capabilities.authority.epoch;
-    if (began !== undefined && began !== epoch && !hostedCheckTerminal(run))
-      throw olderEpochRefusal(session.root, 'SOURCE_AUTHORITY_CHANGED', "This finish's check", began, epoch, {
-        action: 'finish',
-        parameters: freshFinish(command),
-      });
+    if (beganAtOlderEpoch(began, epoch, hostedCheckTerminal(run)))
+      throw olderEpochRefusal(
+        session.root,
+        'SOURCE_AUTHORITY_CHANGED',
+        "This finish's check",
+        began!,
+        epoch,
+        {
+          action: 'finish',
+          parameters: freshFinish(command),
+        },
+      );
     await session.journal.retain('finish-check-run', () => run);
     return { phase: 'check', composeOperationId, run };
   }

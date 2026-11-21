@@ -54,3 +54,4 @@ export const hostedLifecycleResultSchema = z
     lane: saveExpectedSchema.extend({ state: z.enum(['active', 'abandoned', 'completed']) }).nullable(),
   })
   .strict();
+export type HostedLifecycleResult = z.infer<typeof hostedLifecycleResultSchema>;

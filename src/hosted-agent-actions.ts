@@ -39,10 +39,15 @@ import {
 } from './hosted-save-receipt-state.js';
 import { transitionHostedLane } from './hosted-lifecycle-client.js';
 import { lifecycleApplied, recordLifecycleApplied } from './hosted-replay-holds.js';
-import { hostedLifecycleRequestSchema } from './hosted-lifecycle.js';
+import { hostedLifecycleRequestSchema, type HostedLifecycleResult } from './hosted-lifecycle.js';
 import { randomUUID } from 'node:crypto';
 import { sep } from 'node:path';
-import { hostedCheckRequestSchema, hostedSelfHostedRunnerSchema } from './hosted-check.js';
+import {
+  hostedCheckRequestSchema,
+  hostedCheckTerminal,
+  hostedSelfHostedRunnerSchema,
+  type HostedCheckRun,
+} from './hosted-check.js';
 import { hostedMacRuntime } from './hosted-mac-lease.js';
 import { checkEnvironment } from './check-environment.js';
 import { autonomyPolicySchema, reviewReason, snapshotIntervalMinutes } from './autonomy-policy.js';
@@ -52,7 +57,16 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { syncRequestSchema, syncResultSchema } from './hosted-sync.js';
 import { applyHostedSync } from './hosted-sync-client.js';
 import { markerAt, retainedLocalApplyBlocked } from './hosted-apply-recovery-records.js';
-import { authorityPinRefusal, pinRefused, sendMainPinned } from './hosted-main-pin.js';
+import {
+  authorityPinRefusal,
+  AuthorityPinRefused,
+  BeganAtOlderEpoch,
+  freshOperationRefusal,
+  olderEpochRefusal,
+  pinRefused,
+  sendAuthorityPinned,
+  sendMainPinned,
+} from './hosted-main-pin.js';
 import {
   composeAgentSource,
   driveAgentSource,
@@ -977,16 +991,34 @@ export async function executeHostedAgent(
   }
   if (action === 'revert') {
     const command = hostedAgentCommandSchemas.revert.parse(input);
-    const request = await session.journal.retain('revert-request', () =>
-      syncRequestSchema.parse({
-        kind: 'revert',
-        operationId,
-        authorityEpoch: epoch,
-        ...command,
-        ...(session.holderSessionId ? { holderSessionId: session.holderSessionId } : {}),
-      }),
+    return sendAuthorityPinned(
+      session.journal,
+      'revert-request',
+      epoch,
+      () =>
+        syncRequestSchema.parse({
+          kind: 'revert',
+          operationId,
+          authorityEpoch: epoch,
+          ...command,
+          ...(session.holderSessionId ? { holderSessionId: session.holderSessionId } : {}),
+        }),
+      async request => {
+        try {
+          return await driveAgentSource(session, 'Sync', operationId, request, [], false, false, true);
+        } catch (error) {
+          if (error instanceof AuthorityPinRefused) throw error.refusal;
+          if (error instanceof BeganAtOlderEpoch)
+            throw freshOperationRefusal(
+              session.root,
+              error.code,
+              `This revert began at source authority epoch ${error.began}, and the project is now at epoch ${error.epoch}. It cannot publish its revert Lane.`,
+              { action, parameters: command },
+            );
+          throw error;
+        }
+      },
     );
-    return driveAgentSource(session, 'Sync', operationId, request);
   }
   if (action === 'pin') {
     const command = hostedAgentCommandSchemas.pin.parse(input);
@@ -1021,6 +1053,7 @@ export async function executeHostedAgent(
     }
     const target = 'target' in command ? command.target : undefined;
     const abandonment = action === 'abandon' ? hostedAgentCommandSchemas.abandon.parse(input) : null;
+    const replayEpoch = session.capabilities.features?.includes('source-epoch-recovery') ?? false;
     const applied = async <T>(done: Promise<T>): Promise<T> => {
       const result = await done;
       if (lifecycleApplied(result)) recordLifecycleApplied(session.root, action, input);
@@ -1044,6 +1077,7 @@ export async function executeHostedAgent(
           },
           session.exchange,
           { ...saveContract(session.capabilities), authorship: session.authorship },
+          replayEpoch,
         ),
       );
     }
@@ -1052,7 +1086,7 @@ export async function executeHostedAgent(
       'HOSTED_CHECKOUT_REQUIRED',
       'Saving or keeping local edits first requires an opened Lane checkout.',
     );
-    const request = await session.journal.retain('lifecycle-request', async () => {
+    const build = async () => {
       const lane = !target ? await selectAgentLane(session, command.laneId) : null;
       return hostedLifecycleRequestSchema.parse({
         operationId,
@@ -1072,14 +1106,35 @@ export async function executeHostedAgent(
         },
         ...(abandonment ? { reason: abandonment.reason } : {}),
       });
-    });
+    };
     return applied(
-      session.mutation('projectHostedLifecycle:transition', { request: canonicalPayload(request) }),
+      sendAuthorityPinned(
+        session.journal,
+        'lifecycle-request',
+        replayEpoch ? epoch : undefined,
+        build,
+        async request => {
+          const result = await session.mutation<HostedLifecycleResult>('projectHostedLifecycle:transition', {
+            request: canonicalPayload(request),
+            ...(replayEpoch ? { replayEpoch: true } : {}),
+          });
+          if (result.status === 'pending' && request.authorityEpoch !== epoch)
+            throw olderEpochRefusal(
+              session.root,
+              'SOURCE_AUTHORITY_CHANGED',
+              'This lifecycle change',
+              request.authorityEpoch,
+              epoch,
+              { action, parameters: command },
+            );
+          return result;
+        },
+      ),
     );
   }
   if (action === 'check') {
     const command = hostedAgentCommandSchemas.check.parse(input);
-    const request = await session.journal.retain('check-request', async () => {
+    const build = async () => {
       const candidate = hostedRecordSchema.options[3].parse(
         await session.query('projectHostedCompose:candidate', { candidateId: command.candidateId }),
       );
@@ -1099,14 +1154,47 @@ export async function executeHostedAgent(
         expectedHead: command.expectedHead ?? candidate.result.head,
         ...selection,
       });
+    };
+    const run = await sendAuthorityPinned(session.journal, 'check-request', epoch, build, async request => {
+      const run = await session.mutation<HostedCheckRun>('projectHostedChecks:enqueue', {
+        request: canonicalPayload(request),
+      });
+      if (run?.status && request.authorityEpoch !== epoch && !hostedCheckTerminal(run)) {
+        const {
+          candidateId,
+          expectedHead,
+          checkId,
+          expectedDefinition,
+          expectedConfiguration,
+          expectedEnvironment,
+        } = request;
+        throw olderEpochRefusal(
+          session.root,
+          'SOURCE_AUTHORITY_CHANGED',
+          'This check run',
+          request.authorityEpoch,
+          epoch,
+          {
+            action,
+            parameters: {
+              candidateId,
+              expectedHead,
+              checkId,
+              expectedDefinition,
+              expectedConfiguration,
+              expectedEnvironment,
+            },
+          },
+        );
+      }
+      return run;
     });
-    const run = await session.mutation('projectHostedChecks:enqueue', { request: canonicalPayload(request) });
     const checkLogs = session.journal.get<string>(checkLogsKey);
     return checkLogs && run && typeof run === 'object' ? { ...run, checkLogs } : run;
   }
   if (action === 'prioritize') {
     const command = hostedAgentCommandSchemas.prioritize.parse(input);
-    const request = await session.journal.retain('priority-request', async () => {
+    const build = async () => {
       const current = await session.query<{ request: { priorityVersion?: number } }>(
         'projectHostedLanding:status',
         { submissionId: command.submissionId },
@@ -1117,17 +1205,23 @@ export async function executeHostedAgent(
         authorityEpoch: epoch,
         expectedVersion: current.request.priorityVersion ?? 0,
       };
-    });
-    return session.mutation('projectHostedLandingPriority:prioritize', request);
+    };
+    return sendAuthorityPinned(session.journal, 'priority-request', epoch, build, request =>
+      session.mutation('projectHostedLandingPriority:prioritize', request),
+    );
   }
   if (action === 'cancel') {
     const command = hostedAgentCommandSchemas.cancel.parse(input);
-    const request = await session.journal.retain('cancel-request', () =>
-      hostedLandingCancelSchema.parse({ operationId, authorityEpoch: epoch, ...command }),
+    const cancelled = await sendAuthorityPinned(
+      session.journal,
+      'cancel-request',
+      epoch,
+      () => hostedLandingCancelSchema.parse({ operationId, authorityEpoch: epoch, ...command }),
+      request =>
+        session.mutation<Record<string, unknown>>('projectHostedLanding:cancel', {
+          request: canonicalPayload(request),
+        }),
     );
-    const cancelled = await session.mutation<Record<string, unknown>>('projectHostedLanding:cancel', {
-      request: canonicalPayload(request),
-    });
     // The landing is ended: this turn has nothing left to wait for (SM-C M1).
     const ended = cancelled?.operationId;
     if (typeof ended === 'string') settleTurnWork([ended]);

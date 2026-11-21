@@ -2,8 +2,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { getFunctionName } from 'convex/server';
+import { observeHostedRun } from '../dist/hosted-agent-observe.js';
+import { landWaitContinuation } from '../dist/hosted-land-wait.js';
+import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 import { resolutionFixture, nextEpoch, dropFirst } from './hosted-agent-resolution-fixture.mjs';
 
 // Item 1d69905b, review f08934a5: every kept request replayed under the same operation id after a
@@ -508,4 +512,317 @@ test('a check-only finish whose check began at the old epoch is refused naming f
   assert.equal(checked.result.phase, 'check');
   assert.notEqual(checked.result.run.id, first.result.run.id, 'a new check run');
   assert.equal(requests(s, 'projectHostedChecks:enqueue').at(-1).authorityEpoch, epoch);
+});
+
+test('the check-only run wait ends across a cutover, both before and during the subscription (96c473d7)', async t => {
+  const s = await resolutionFixture(t);
+  const first = await s.transport().dispatch('finish', { laneId: s.f.lane.laneId, accept: false });
+  const wait = landWaitContinuation(s.root, first).next;
+  assert.equal(wait.runId, first.result.run.id);
+  let unsubscribed = false,
+    closed = false;
+  const subscribed = await observeHostedRun(
+    s.transport(),
+    { runId: wait.runId },
+    undefined,
+    undefined,
+    () => ({
+      onUpdate(ref, args, update, error) {
+        nextEpoch(s.f);
+        void s.exchange.client.query(ref, args).then(value => {
+          update(value);
+          // A client missing the epoch check would continue to the next update and return a pass.
+          update({ ...JSON.parse(value), status: 'passed' });
+        }, error);
+        return () => {
+          unsubscribed = true;
+        };
+      },
+      async close() {
+        closed = true;
+      },
+    }),
+  ).catch(error => error);
+  assert(unsubscribed && closed, 'the cutover releases the running wait');
+  const parameters = namesNext(subscribed, 'check', first.result.run.request.operationId);
+  assert.equal(parameters.candidateId, first.result.run.request.candidateId);
+  assert.equal(parameters.expectedHead, first.result.run.request.expectedHead);
+  const before = s.calls.length;
+  const read = await observeHostedRun(s.transport(), { runId: wait.runId, timeoutSeconds: 0 }).catch(
+    error => error,
+  );
+  namesNext(read, 'check', first.result.run.request.operationId);
+  assert.deepEqual(
+    s.calls
+      .slice(before)
+      .map(call => call.name)
+      .filter(name => !name.endsWith(':capabilities')),
+    ['projectHostedCheckRead:status'],
+  );
+  const checked = await s.transport().dispatch('check', parameters);
+  assert.notEqual(checked.result.id, wait.runId, 'the named check reserves a new run on those same pins');
+  assert.equal(checked.result.request.expectedHead, parameters.expectedHead);
+  assert.equal(checked.result.request.authorityEpoch, first.result.run.request.authorityEpoch + 1);
+});
+
+for (const cutover of [false, true])
+  test(`abandon resumes between the child save and parent request${cutover ? ' across a cutover' : ''}`, async t => {
+    const s = await resolutionFixture(t);
+    await s.transport().dispatch('open', { laneId: s.f.lane.laneId });
+    writeFileSync(join(s.root, 'a.txt'), 'saved before the interruption\n');
+    // Fail the first parent send, then restore the journal as left before the parent was retained.
+    dropFirst(s, 'projectHostedLifecycle:transition');
+    const command = { operationId: randomUUID(), reason: 'Crash after the child completed', saveFirst: true };
+    await assert.rejects(s.transport().dispatch('abandon', command), { code: 'HOSTED_ACTION_FAILED' });
+    const journal = join(`${s.root}.forge-client`, 'lifecycle', `${command.operationId}.json`);
+    const original = JSON.parse(readFileSync(journal, 'utf8'));
+    writeFileSync(journal, JSON.stringify({ ...original, request: null }));
+    const savedHead = readHostedLaneCheckout(s.root).selection.head;
+    if (cutover) nextEpoch(s.f);
+    writeFileSync(join(s.root, 'a.txt'), 'local edit after the save\n');
+    const reply = await s.transport().dispatch('abandon', command);
+    assert.equal(reply.result.result.status, 'applied');
+    assert.equal(reply.result.result.saveOperationId, original.saveOperationId);
+    assert.equal(reply.result.result.lane.head, savedHead);
+    assert.equal(s.f.text(savedHead, 'a.txt'), 'saved before the interruption\n');
+    assert.equal(readFileSync(join(s.root, 'a.txt'), 'utf8'), 'local edit after the save\n');
+    assert.equal(s.f.tables.projectHostedSaves.size, 1, 'the exact child was reused');
+  });
+
+test('a retained lifecycle request refreshes its epoch and preserves explicit Intent pins (2d71df3d)', async t => {
+  const s = await resolutionFixture(t);
+  const command = {
+    reason: 'Superseded',
+    operationId: randomUUID(),
+    target: { kind: 'intent', intentId: s.f.c.intentId, version: 0 },
+  };
+  dropFirst(s, 'projectHostedLifecycle:transition');
+  await assert.rejects(s.transport().dispatch('abandon', command), { code: 'HOSTED_ACTION_FAILED' });
+  const epoch = nextEpoch(s.f);
+  const result = await s.transport().dispatch('abandon', command);
+  assert.equal(result.result.status, 'applied');
+  const sent = requests(s, 'projectHostedLifecycle:transition');
+  assert.deepEqual(
+    sent.map(r => r.authorityEpoch),
+    [epoch - 1, epoch],
+  );
+  assert.deepEqual(sent[0].target, sent[1].target);
+  assert.equal(sent[1].operationId, command.operationId);
+});
+
+test('a lifecycle plan begun before a cutover names a fresh abandon, preserving its target (2d71df3d)', async t => {
+  const s = await resolutionFixture(t);
+  const command = {
+    reason: 'Superseded cascade',
+    operationId: randomUUID(),
+    target: { kind: 'intent', intentId: s.f.c.intentId, version: 0, cascade: true },
+  };
+  const result = await s.transport().dispatch('abandon', command);
+  assert.equal(result.result.status, 'pending');
+  const epoch = nextEpoch(s.f);
+  const refused = await s
+    .transport()
+    .dispatch('abandon', command)
+    .catch(error => error);
+  const parameters = namesNext(refused, 'abandon', command.operationId);
+  assert.deepEqual(parameters.target, command.target);
+  assert.deepEqual(
+    requests(s, 'projectHostedLifecycle:transition').map(r => r.authorityEpoch),
+    [epoch - 1, epoch - 1],
+  );
+  const next = await s.transport().dispatch('abandon', parameters);
+  assert.notEqual(next.result.receiptId, result.result.receiptId);
+});
+
+test('a pending lifecycle replay on an older server keeps the original request for an upgraded server', async t => {
+  const s = await resolutionFixture(t);
+  const command = {
+    reason: 'Superseded cascade',
+    operationId: randomUUID(),
+    target: { kind: 'intent', intentId: s.f.c.intentId, version: 0, cascade: true },
+  };
+  const result = await s.transport().dispatch('abandon', command);
+  assert.equal(result.result.status, 'pending');
+  const epoch = nextEpoch(s.f);
+  const query = s.exchange.client.query;
+  s.exchange.client.query = async (ref, args) => {
+    const value = await query(ref, args);
+    if (getFunctionName(ref) !== 'projectHostedAgent:capabilities') return value;
+    const reply = JSON.parse(value);
+    return JSON.stringify({
+      ...reply,
+      features: reply.features.filter(feature => feature !== 'source-epoch-recovery'),
+    });
+  };
+  await assert.rejects(s.transport().dispatch('abandon', command), { code: 'SOURCE_AUTHORITY_CHANGED' });
+  assert.equal(operations(s, 'projectHostedLifecycle:transition').at(-1).args.replayEpoch, undefined);
+  s.exchange.client.query = query;
+  const refused = await s
+    .transport()
+    .dispatch('abandon', command)
+    .catch(error => error);
+  namesNext(refused, 'abandon', command.operationId);
+  const sent = requests(s, 'projectHostedLifecycle:transition');
+  assert.deepEqual(
+    sent.map(r => r.authorityEpoch),
+    [epoch - 1, epoch - 1, epoch - 1],
+  );
+});
+
+test('standalone check refreshes a refused request and ends the replay of a stranded run', async t => {
+  const s = await resolutionFixture(t);
+  const command = {
+    operationId: randomUUID(),
+    candidateId: s.f.candidate.id,
+    checkId: s.f.rawChecks.checkId,
+  };
+  dropFirst(s, 'projectHostedChecks:enqueue');
+  await assert.rejects(s.transport().dispatch('check', command), { code: 'HOSTED_ACTION_FAILED' });
+  const epoch = nextEpoch(s.f);
+  const checked = await s.transport().dispatch('check', command);
+  assert.equal(checked.operationId, command.operationId);
+  assert.equal(checked.result.request.authorityEpoch, epoch);
+  nextEpoch(s.f);
+  const refused = await s
+    .transport()
+    .dispatch('check', command)
+    .catch(error => error);
+  const parameters = namesNext(refused, 'check', command.operationId);
+  assert.equal(parameters.expectedHead, checked.result.request.expectedHead);
+  assert.equal(parameters.expectedDefinition, checked.result.request.expectedDefinition);
+  assert.deepEqual(
+    requests(s, 'projectHostedChecks:enqueue').map(r => r.authorityEpoch),
+    [epoch - 1, epoch, epoch],
+  );
+});
+
+test('a retained revert refreshes its epoch before begin and gives a fresh revert after begin (2d71df3d)', async t => {
+  const s = await resolutionFixture(t);
+  const receipt = await s.f.landOriginal();
+  s.eagerSource(false);
+  const command = {
+    target: { kind: 'receipt', receiptId: receipt.id },
+    message: 'Reverse the recorded landing',
+    operationId: randomUUID(),
+  };
+  dropFirst(s, 'projectHostedSync:prepare');
+  await assert.rejects(s.transport().dispatch('revert', command), { code: 'HOSTED_ACTION_FAILED' });
+  const epoch = nextEpoch(s.f);
+  assert.equal((await s.transport().dispatch('revert', command)).result.status, 'submitted');
+  const sent = requests(s, 'projectHostedSync:prepare');
+  assert.deepEqual(
+    sent.map(r => r.authorityEpoch),
+    [epoch - 1, epoch],
+  );
+  assert.deepEqual(sent[0].target, sent[1].target);
+  nextEpoch(s.f);
+  const before = s.calls.length;
+  const refused = await s
+    .transport()
+    .dispatch('revert', command)
+    .catch(error => error);
+  const next = namesNext(refused, 'revert', command.operationId);
+  assert.deepEqual(next.target, command.target);
+  assert.deepEqual(
+    s.calls
+      .slice(before)
+      .map(call => call.name)
+      .filter(name => !name.endsWith(':capabilities')),
+    ['projectHostedSync:prepare'],
+  );
+});
+
+for (const action of ['cancel', 'withdraw'])
+  test(`a retained ${action} by submission refreshes its epoch without changing the target (2d71df3d)`, async t => {
+    const s = await resolutionFixture(t);
+    const first = await s.f.enqueue(s.f.request());
+    const command = { submissionId: first.id, operationId: randomUUID() };
+    dropFirst(s, 'projectHostedLanding:cancel');
+    await assert.rejects(s.transport().dispatch(action, command), { code: 'HOSTED_ACTION_FAILED' });
+    // Real cutovers drain live landings. Keep its terminal record available for the replay.
+    await s.transport().dispatch('cancel', { ...command, operationId: randomUUID() });
+    const epoch = nextEpoch(s.f);
+    const reply = await s.transport().dispatch(action, command);
+    assert.equal(reply.operationId, command.operationId);
+    assert.equal((reply.result.landing ?? reply.result).id, first.id);
+    const sent = requests(s, 'projectHostedLanding:cancel').filter(
+      r => r.operationId === command.operationId,
+    );
+    assert.deepEqual(
+      sent.map(r => r.authorityEpoch),
+      [epoch - 1, epoch],
+    );
+    assert(sent.every(r => r.submissionId === first.id));
+  });
+
+test('pin already reads the current epoch on replay after a cutover (2d71df3d)', async t => {
+  const s = await resolutionFixture(t);
+  const command = { laneId: s.f.lane.laneId, pinned: true, operationId: randomUUID() };
+  dropFirst(s, 'projectHostedLanePin:setPin');
+  await assert.rejects(s.transport().dispatch('pin', command), { code: 'HOSTED_ACTION_FAILED' });
+  const epoch = nextEpoch(s.f);
+  const reply = await s.transport().dispatch('pin', command);
+  assert.equal(reply.result.pinned, true);
+  assert.equal(operations(s, 'projectHostedLanePin:setPin').at(-1).args.authorityEpoch, epoch);
+});
+
+test('a refused withdraw by Lane uses the current epoch and a completed withdraw keeps its original submission (2d71df3d)', async t => {
+  const s = await resolutionFixture(t);
+  const first = await s.f.enqueue(s.f.request());
+  const command = { laneId: s.f.lane.laneId, operationId: randomUUID() };
+  dropFirst(s, 'projectHostedLandingWithdraw:withdraw');
+  await assert.rejects(s.transport().dispatch('withdraw', command), { code: 'HOSTED_ACTION_FAILED' });
+  await s.transport().dispatch('cancel', { submissionId: first.id });
+  const epoch = nextEpoch(s.f);
+  const second = (await s.transport().dispatch('finish', { laneId: s.f.lane.laneId })).result.submission;
+  assert(second?.id, 'a new live landing at the current epoch');
+  const reply = await s.transport().dispatch('withdraw', command);
+  assert.equal(reply.operationId, command.operationId);
+  assert.equal(reply.result.submissionId, second.id);
+  assert.deepEqual(
+    requests(s, 'projectHostedLandingWithdraw:withdraw').map(r => r.authorityEpoch),
+    [epoch - 1, epoch],
+  );
+  nextEpoch(s.f);
+  const replay = await s.transport().dispatch('withdraw', command);
+  assert.equal(replay.result.submissionId, second.id);
+  assert.equal(requests(s, 'projectHostedLandingWithdraw:withdraw').at(-1).authorityEpoch, epoch);
+});
+
+test('resolve preserves its original inputs and replaces a stranded prefix compose after cutover (2d71df3d)', async t => {
+  const s = await resolutionFixture(t, { overlap: true });
+  const f = s.f;
+  f.moveMain({ overlap: true });
+  const dependency = { candidateId: f.candidate.id, head: f.candidate.result.head };
+  const composition = await s.transport().dispatch('compose', {
+    laneId: f.lane.laneId,
+    dependencies: [dependency],
+    message: 'Compose with dependency',
+  });
+  const candidate = composition.result.outcome.result;
+  assert.equal(candidate.result.status, 'conflict');
+  const draft = await s.transport().dispatch('sync', { candidateId: candidate.id });
+  const { root, laneId } = draft.result.conflict;
+  writeFileSync(join(root, 'a.txt'), 'chosen\nb\nc\n');
+  const controller = new AbortController();
+  s.eagerSource(name => {
+    if (name !== 'projectHostedComposeJobs:submit') return true;
+    controller.abort();
+    return false;
+  });
+  const command = { laneId, operationId: randomUUID() };
+  const pending = await s.transport(root).dispatch('resolve', command, controller.signal);
+  assert.equal(pending.result.phase, 'compose');
+  const oldPrefix = pending.result.composeOperationId;
+  const epoch = nextEpoch(f);
+  s.eagerSource(true);
+  const done = await s.transport(root).dispatch('resolve', command);
+  assert.equal(done.operationId, command.operationId);
+  assert.equal(done.result.next.action, 'finish');
+  assert.deepEqual(done.result.next.dependencies.slice(1), [dependency]);
+  assert.equal(done.result.next.inputs[0].laneId, f.lane.laneId);
+  const prepares = requests(s, 'projectHostedCompose:prepare').slice(-2);
+  assert.equal(prepares[0].operationId, oldPrefix, 'read the original prefix prepare');
+  assert.notEqual(prepares[1].operationId, oldPrefix, 'replace only the stranded compose operation');
+  assert.equal(prepares[1].authorityEpoch, epoch);
 });

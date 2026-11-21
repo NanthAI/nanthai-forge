@@ -5,6 +5,31 @@ import { shellQuote } from './shell-quote.js';
 import { hostedActionError } from './hosted-action-error.js';
 import type { HostedAgentJournal } from './hosted-agent-journal.js';
 
+/** Refresh only the epoch after the first transaction refused it, keeping every other pin and the
+ * operation id. Send must return a replay (including an unfinished one) before checking its epoch. */
+export async function sendAuthorityPinned<R extends { authorityEpoch: number }, T>(
+  journal: HostedAgentJournal,
+  key: string,
+  epoch: number | undefined,
+  build: () => R | Promise<R>,
+  send: (request: R) => Promise<T>,
+): Promise<T> {
+  const request = await journal.retain(key, build);
+  try {
+    return await send(request);
+  } catch (error) {
+    const refusal = hostedActionError(error, key);
+    if (
+      epoch === undefined ||
+      request.authorityEpoch === epoch ||
+      refusal.recovery ||
+      !authorityCode(refusal.code)
+    )
+      throw error;
+    return send(journal.replaceRefused(key, request, { ...request, authorityEpoch: epoch }));
+  }
+}
+
 /** Tries per call when main keeps moving between the main read and the server's check. */
 export const MAIN_PIN_TRIES = 3;
 
@@ -137,13 +162,13 @@ export async function sendMainPinned<R, T>(
       if (error instanceof AuthorityPinRefused && authority) {
         // Stale for good either way. Refused at this command's own epoch: the epoch moved after this
         // command discovered it, and a replay rediscovers it and rebuilds.
-        journal.forget(key);
+        journal.forget(key, request);
         if (authority.of(request) === authority.epoch) throw error.refusal;
         continue;
       }
       if (!(error instanceof MainPinRefused)) throw error;
       // Stale for good: a replay of this operation must rebuild, never resend it.
-      journal.forget(key);
+      journal.forget(key, request);
       if (!rebuild) throw error.refusal;
       if (tries >= MAIN_PIN_TRIES)
         throw new ForgeError(

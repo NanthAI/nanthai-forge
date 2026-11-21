@@ -178,12 +178,28 @@ export class HostedAgentJournal {
   id(key: string) {
     return this.retain(`id:${key}`, () => randomUUID());
   }
+  /** Replace only the request whose pins the server refused, including across concurrent replays. */
+  replaceRefused<T>(key: string, refused: T, replacement: T): T {
+    return workLocked(this.lock, () => {
+      const current = this.read();
+      if (
+        Object.hasOwn(current.values, key) &&
+        canonicalPayload(current.values[key]) !== canonicalPayload(refused)
+      )
+        return current.values[key] as T;
+      current.values[key] = replacement;
+      durableReplace(this.path, canonicalPayload(current));
+      return replacement;
+    });
+  }
   /** Drop one retained value the server refused before any operation began (for example a request
    * pinned to a Lane version that moved), so the next replay rebuilds it from current pins. */
-  forget(key: string) {
+  forget(key: string, refused?: unknown) {
     workLocked(this.lock, () => {
       const current = this.read();
       if (!Object.hasOwn(current.values, key)) return;
+      if (refused !== undefined && canonicalPayload(current.values[key]) !== canonicalPayload(refused))
+        return;
       delete current.values[key];
       durableReplace(this.path, canonicalPayload(current));
     });

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { clientCacheRoot } from './root-paths.js';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { HostedObjectStore } from './hosted-object-store.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import {
@@ -14,6 +15,7 @@ import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { invariant } from './errors.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 import type { SyncResult } from './hosted-sync.js';
+import { BeganAtOlderEpoch } from './hosted-main-pin.js';
 /** A conflict may precede an unmerged input/dependency suffix. Keep every exact
  * original selection; finishing only the conflict draft would lose that suffix. */
 export async function resolutionFinishSelection(session: HostedAgentSession, source: SyncResult) {
@@ -72,12 +74,22 @@ export async function resolutionFinishSelection(session: HostedAgentSession, sou
     return { intentId: candidate.intentId, inputs: [resolved, ...inputs], dependencies };
   // Dependencies compose before inputs: prepend the resolved prefix as a clean
   // dependency so their original conflict cannot recur before the resolution.
-  const operationId = await session.journal.id('resolution-prefix');
-  let progress = await composeAgentSource(
-    session,
-    hostedAgentCommandSchemas.compose.parse({ inputs: [resolved], message: 'Compose resolved prefix' }),
-    operationId,
-  );
+  const command = hostedAgentCommandSchemas.compose.parse({
+    inputs: [resolved],
+    message: 'Compose resolved prefix',
+  });
+  let operationId = await session.journal.id('resolution-prefix');
+  const compose = () => composeAgentSource(session, command, operationId, false);
+  let progress;
+  try {
+    progress = await compose();
+  } catch (error) {
+    if (!(error instanceof BeganAtOlderEpoch)) throw error;
+    // The resolution already published. Replace just its stranded prefix compose, preserving the
+    // original finish selection and the resolve's operation id.
+    operationId = session.journal.replaceRefused('id:resolution-prefix', operationId, randomUUID());
+    progress = await compose();
+  }
   progress = await session.waitSource(operationId, progress, 'Compose');
   const outcome = (progress as { outcome?: { status: string; result?: unknown } }).outcome;
   if (outcome?.status !== 'completed')

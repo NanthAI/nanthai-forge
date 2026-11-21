@@ -1181,6 +1181,7 @@ export class HostedAgentTransport {
       if (observation) {
         const observed = (await this.observe(
           command.data as z.infer<typeof hostedAgentCommandSchemas.status>,
+          action === 'observe',
         )) as Record<string, unknown>;
         return this.response(
           action,
@@ -2227,7 +2228,7 @@ export class HostedAgentTransport {
     });
   }
   async query<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
-    if (name === 'projectHostedCheckRead:status')
+    if (name === 'projectHostedCheckRead:status' && !args.features)
       args = { ...args, features: ['ci-status-check', 'check-report-detail'] };
     const priorityRead = [
       'projectHostedLanding:status',
@@ -2409,7 +2410,7 @@ export class HostedAgentTransport {
       return null;
     }
   }
-  private async observe(command: z.infer<typeof hostedAgentCommandSchemas.status>) {
+  private async observe(command: z.infer<typeof hostedAgentCommandSchemas.status>, waiting = false) {
     const { laneId, operationId, submissionId, runId, kind, version, summary, reports, cursor, main } =
       command;
     if (main !== undefined) {
@@ -2447,7 +2448,13 @@ export class HostedAgentTransport {
         runId,
         ...(!summary
           ? {
-              features: ['ci-status-check', 'check-report-detail'],
+              features: [
+                'ci-status-check',
+                'check-report-detail',
+                ...(waiting && this.serverFeatures?.includes('source-epoch-recovery')
+                  ? ['check-authority-epoch']
+                  : []),
+              ],
               ...(this.waitBoard && this.serverFeatures?.includes('run-board-wait')
                 ? { board: { laneId: this.waitBoard.laneId, after: this.waitBoard.after } }
                 : {}),

@@ -47,6 +47,8 @@ export const hostedContractFeatures = [
   'board-wait',
   /** The existing check status subscription also takes the Lane inbox cursor. */
   'run-board-wait',
+  /** Check waits can read the current epoch, and lifecycle transitions can return a stranded plan's receipt. */
+  'source-epoch-recovery',
   /** Save, sync and compose progress subscriptions also accept the existing Lane inbox cursor. */
   'source-board-wait',
   /** Automatic file claims: projectBoardClaims:claim exists, and the overlap read's board arg takes

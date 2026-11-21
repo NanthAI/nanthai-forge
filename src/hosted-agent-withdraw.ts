@@ -14,6 +14,7 @@ import { parseHostedResponse } from './hosted-response.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 import { HostedAgentJournal } from './hosted-agent-journal.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
+import { sendAuthorityPinned } from './hosted-main-pin.js';
 
 export const WITHDRAW_COST =
   'Withdraw ends only this submission: its queue place and its unfinished check (stopped once no other landing needs it). The Lane, its saves, Candidates and the recorded check results stay. Undo by landing again: land --save resubmits the same Lane under a new operation.';
@@ -34,17 +35,25 @@ export async function executeHostedWithdraw(session: HostedAgentSession, input: 
       'HOSTED_FEATURE_UNAVAILABLE',
       `This server cannot withdraw by Lane yet. Read the Lane's submissionId with lanes {} or the land receipt, then run nforge x ${shellQuote(session.root)} cancel '{"submissionId":"SUBMISSION_ID"}'.`,
     );
-  const request = await session.journal.retain('withdraw-request', () =>
-    hostedLandingWithdrawSchema.parse({
-      operationId: session.journal.operationId,
-      authorityEpoch: session.capabilities.authority.epoch,
-      laneId,
-      ...(command.reason ? { reason: command.reason } : {}),
-    }),
-  );
-  const landing = parseHostedResponse(
-    hostedLandingStateSchema,
-    await session.mutation('projectHostedLandingWithdraw:withdraw', { request: canonicalPayload(request) }),
+  const epoch = session.capabilities.authority.epoch;
+  const landing = await sendAuthorityPinned(
+    session.journal,
+    'withdraw-request',
+    epoch,
+    () =>
+      hostedLandingWithdrawSchema.parse({
+        operationId: session.journal.operationId,
+        authorityEpoch: epoch,
+        laneId,
+        ...(command.reason ? { reason: command.reason } : {}),
+      }),
+    async request =>
+      parseHostedResponse(
+        hostedLandingStateSchema,
+        await session.mutation('projectHostedLandingWithdraw:withdraw', {
+          request: canonicalPayload(request),
+        }),
+      ),
   );
   // Received: an identical withdraw after this one is new work (a later landing), not a replay.
   await session.journal.retain('withdraw-received', () => landing.id);
@@ -56,16 +65,22 @@ export async function executeHostedWithdraw(session: HostedAgentSession, input: 
 /** By submission (friction a0faf3a9): the landing the queue lists, even when it moved to a resolution
  * Lane the caller does not know. The existing cancel mutation: one call, Lane author or project owner. */
 async function withdrawSubmission(session: HostedAgentSession, submissionId: string) {
-  const request = await session.journal.retain('withdraw-request', () =>
-    hostedLandingCancelSchema.parse({
-      operationId: session.journal.operationId,
-      authorityEpoch: session.capabilities.authority.epoch,
-      submissionId,
-    }),
-  );
-  const landing = parseHostedResponse(
-    hostedLandingStateSchema,
-    await session.mutation('projectHostedLanding:cancel', { request: canonicalPayload(request) }),
+  const epoch = session.capabilities.authority.epoch;
+  const landing = await sendAuthorityPinned(
+    session.journal,
+    'withdraw-request',
+    epoch,
+    () =>
+      hostedLandingCancelSchema.parse({
+        operationId: session.journal.operationId,
+        authorityEpoch: epoch,
+        submissionId,
+      }),
+    async request =>
+      parseHostedResponse(
+        hostedLandingStateSchema,
+        await session.mutation('projectHostedLanding:cancel', { request: canonicalPayload(request) }),
+      ),
   );
   await session.journal.retain('withdraw-received', () => landing.id);
   settleTurnWork([landing.operationId]);

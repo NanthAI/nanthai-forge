@@ -3,7 +3,8 @@ import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { mutation, query } from './cliServer';
 import { internalMutation } from './server';
-import { hostedWriteProject } from './projectHostedRecords';
+import { sourceAuthority } from '../src/hosted-source-authority';
+import { requireWriteEpoch } from './projectHostedRecords';
 import { beginHostedOperation, hostedOperationRow } from './projectHostedOperations';
 import { lifecycleGuard } from './projectHostedLifecycleOverlay';
 import { sameSaveLane, loadSave } from './projectHostedSaveStore';
@@ -27,7 +28,7 @@ const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
 /** Saved-work lifecycle only. Unknown/disconnected client bytes are never deleted
  * or claimed saved. The local API helper owns capture and retained save-first IDs. */
 export const transition = mutation({
-  args: { projectId: v.id('hostedProjects'), request: v.string() },
+  args: { projectId: v.id('hostedProjects'), request: v.string(), replayEpoch: v.optional(v.literal(true)) },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
@@ -67,17 +68,17 @@ export const transition = mutation({
       if (prepared.replayed) {
         const plan = await lifecyclePlan(ctx, auth);
         invariant(plan, 'SOURCE_UNAVAILABLE', 'The original lifecycle receipt is unavailable.');
-        if (plan.status === 'pending') {
-          await hostedWriteProject(ctx, input.projectId, actor, request.authorityEpoch);
+        const { mode, epoch } = sourceAuthority(prepared.project);
+        if (!input.replayEpoch && plan.status === 'pending')
+          requireWriteEpoch(prepared.project, request.authorityEpoch);
+        // Return the original plan even when a cutover stranded it, so the client can distinguish
+        // this replay from a request refused before begin. Never schedule a write at the old epoch.
+        if (
+          mode !== 'native-owner' &&
+          epoch === request.authorityEpoch &&
+          (plan.status === 'pending' || (plan.status === 'applied' && !plan.materialized))
+        )
           await scheduleLifecycle(ctx, plan._id);
-        } else if (plan.status === 'applied' && !plan.materialized) {
-          const project = await ctx.db.get(input.projectId);
-          if (
-            project?.sourceAuthority?.mode !== 'native-owner' &&
-            project?.sourceAuthority?.epoch === request.authorityEpoch
-          )
-            await scheduleLifecycle(ctx, plan._id);
-        }
         return canonicalPayload(lifecycleResult(plan));
       }
       const { record } = await lifecycleTarget(
@@ -116,7 +117,9 @@ export const transition = mutation({
           const child = await loadSave(ctx, { ...auth, operationId: target.saveOperationId }, false);
           invariant(
             child.state.request.laneId === target.laneId &&
-              child.state.request.authorityEpoch === request.authorityEpoch &&
+              (child.state.request.authorityEpoch === request.authorityEpoch ||
+                (child.state.request.authorityEpoch < request.authorityEpoch &&
+                  child.operation.terminal?.outcome.status === 'completed')) &&
               canonicalPayload(child.state.request.expected) === canonicalPayload(target.expected),
             'WORK_OPERATION_CHANGED',
             'The retained save-first child must bind this exact original Lane baseline.',
