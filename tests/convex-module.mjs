@@ -174,7 +174,10 @@ function build(file, directory, keys) {
   if (process.env.FORGE_TEST_PRECOMPILED === '1')
     throw new Error(`Precompiled test module is missing: ${file.pathname}`);
   if (output) keys.outputs.set(file.href, pathToFileURL(output).href);
-  const code = compile(file, directory, keys);
+  // V8 should report the source path, even when this module is compiled into a
+  // content-addressed cache or loaded in a replay's child process.
+  const code =
+    compile(file, directory, keys) + (patchedSources.has(file.href) ? '' : `\n//# sourceURL=${file.href}\n`);
   if (!output) return `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`;
   const temp = `${output}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
   try {

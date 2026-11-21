@@ -236,8 +236,16 @@ text. Recheck the proof if a merge changes those bytes. A Candidate can carry mu
 and together they must cover every changed core queue path.
 
 For an **incident replay**, identify the incident and exact test title in
-[`incident-replays.json`](../../tests/fixtures/incident-replays.json). Its `paths` list names
-the core source files the replay exercises. Retain the passing
+[`incident-replays.json`](../../tests/fixtures/incident-replays.json). From the Lane, run
+`rg -n -F 'convex/projectHostedFinishWake.ts' tests/fixtures/incident-replays.json` with
+your path in place of the example. Each matching entry names the incident, test file and
+title. The `paths` lists come from function calls observed during each isolated replay.
+If there is no matching entry, use an on-path bench cell or add a replay that reaches the
+path. To refresh the registry after replay or source changes, build the project and run
+`nforge heavy node scripts/incident-replay-coverage.mjs --write` from the Lane. The
+normal suite checks existing mappings during their replays. Registry edits schedule the
+named replays in the landing check. The read-only `--check` command verifies the mappings in
+isolation. Retain the passing
 replay result and a GO from a fresh-context review on the Item or in the check records.
 Record the full session or thread IDs in `authorSession` and `review.session`. The IDs must
 differ. The reviewer may use the same model as the author. Use a full receipt or comment UUID

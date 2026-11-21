@@ -3,6 +3,7 @@
 // normal suite, and the ladder doc lists every incident. Static reads only, well under 1 s.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 
 const registry = JSON.parse(readFileSync('tests/fixtures/incident-replays.json', 'utf8'));
@@ -63,6 +64,40 @@ test('guard fixture: a renamed, skipped or moved replay fails the guard', () => 
     replayProblems({ ...entry, file: 'tests/fixtures/x.mjs' }, read(''))[0],
     /outside the normal suite/,
   );
+});
+
+test('a registered core file whose replay only loads its module loses its proof', () => {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const probe = (call, todo = false) =>
+    spawnSync(
+      process.execPath,
+      [
+        '--import',
+        './tests/check-runtime.mjs',
+        '--input-type=module',
+        '--eval',
+        `
+        import test from 'node:test';
+        import { watchIncidentReplays } from './tests/incident-replay-runtime.mjs';
+        watchIncidentReplays([{ file: 'probe', test: 'probe', paths: ['src/landing-attempt-timing.ts'] }]);
+        test('probe', async t => {
+          const { readAttemptLocks } = await import('./dist/landing-attempt-timing.js');
+          ${call ? "readAttemptLocks({ directory: process.env.TMPDIR }, 'unused');" : ''}
+          ${todo ? "t.todo('deferred');" : ''}
+        });
+      `,
+      ],
+      { env, encoding: 'utf8' },
+    );
+  const called = probe(true);
+  assert.equal(called.status, 0, called.stderr);
+  const imported = probe(false);
+  assert.equal(imported.status, 1, imported.stderr);
+  assert.match(imported.stderr, /no longer reaches src\/landing-attempt-timing\.ts/);
+  const deferred = probe(true, true);
+  assert.equal(deferred.status, 1, deferred.stderr);
+  assert.match(deferred.stderr, /skipped or marked TODO/);
 });
 
 test('Guard 4 (6abdde40): a core queue change runs every registered replay, the queue simulation and the cost guard', async () => {

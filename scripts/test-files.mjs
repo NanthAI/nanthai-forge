@@ -31,6 +31,7 @@ export async function runFiles(
     maxRetries = Number(process.env.FORGE_TEST_MAX_RETRIES ?? 3),
   } = {},
 ) {
+  const namePattern = process.env.FORGE_TEST_NAME_PATTERN;
   if (!Number.isSafeInteger(maxRetries) || maxRetries < 0)
     throw new Error('FORGE_TEST_MAX_RETRIES must be a nonnegative safe integer.');
   const totals = Object.fromEntries(
@@ -84,6 +85,7 @@ export async function runFiles(
       const childEnv = { ...process.env, ...temp.env };
       if (moduleCache) childEnv.FORGE_TEST_MODULE_DIRECTORY = moduleCache;
       delete childEnv.NODE_TEST_CONTEXT;
+      delete childEnv.FORGE_TEST_NAME_PATTERN;
       let coverageDirectory = null;
       if (coverageFiles) {
         try {
@@ -102,6 +104,8 @@ export async function runFiles(
           fileURLToPath(new URL('../tests/check-runtime.mjs', import.meta.url)),
           '--test',
           '--test-reporter=tap',
+          ...(namePattern ? [`--test-name-pattern=${namePattern}`] : []),
+          '--',
           file,
         ],
         { env: childEnv, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' },

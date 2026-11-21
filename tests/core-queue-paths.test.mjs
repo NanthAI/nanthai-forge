@@ -99,6 +99,17 @@ test('6abdde40: local preflight ranks the queue guards like any test; the pre-qu
   }
 });
 
+test('a replay registry edit checks the registered replays without broadening local preflight', () => {
+  const replay = 'tests/stall-replay.test.mjs';
+  const input = { files, paths: [REGISTRY] };
+  const selection = selectTests(input);
+  assert.equal(selection.reasons[replay].kind, 'guard');
+  assert(!selection.tests.includes('tests/unrelated.test.mjs'));
+  const preflight = selectPreflightTests(input);
+  assert(!preflight.tests.includes(replay));
+  assert(preflight.deferredTests.includes(replay));
+});
+
 test("6abdde40: a re-check after main moved runs the queue guards only for the Lane's own core change", () => {
   const head = 'a'.repeat(40);
   const interaction = (lanePaths, mainPaths) => ({

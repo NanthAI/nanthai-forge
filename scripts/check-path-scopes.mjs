@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { posix } from 'node:path';
-import { coreQueuePath, coreQueueReason, coreQueueTests, queueProofPath } from './core-queue-paths.mjs';
+import {
+  coreQueuePath,
+  coreQueueReason,
+  coreQueueTests,
+  queueProofPath,
+  REGISTRY,
+} from './core-queue-paths.mjs';
 // Explicit infrastructure/fixture ownership supplements the import graph. Unknown
 // paths stay unknown: a filename resemblance is never an independence proof.
 export const webTest = path => /^(?:tests\/ui-|tests\/.*-ui\.test)/.test(path);
@@ -267,6 +273,16 @@ export function classifyCheckPath(path, files) {
   }
   if (!files.has(path)) return null;
   if (/^scripts\/.+\.(?:mjs|js|ts)$/.test(path)) return { domain: 'scripts', seeds: [path] };
+  // The shared preload watches only replay files named in the registry. Route those
+  // files as guards so unrelated preload users do not expand local preflight.
+  if (path === REGISTRY)
+    return {
+      domain: 'tests',
+      seeds: [path],
+      tests: coreQueueTests(files),
+      guard: true,
+      reason: 'Incident replay proof registry and its registered replays',
+    };
   // Guard 4: classified by path, never by the change's stated intent; `guard` adds the queue
   // guard set to every check; local preflight still ranks it like any test (test-impact.mjs, eb0491bb).
   if (coreQueuePath(path))

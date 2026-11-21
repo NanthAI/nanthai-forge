@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
+import { relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { REGISTRY } from '../scripts/core-queue-paths.mjs';
 import { testBrowserPath } from '../scripts/test-browser-path.mjs';
 import { installTestTemp } from '../scripts/test-temp.mjs';
 import { installDefaultR2 } from './default-r2.mjs';
@@ -47,7 +50,27 @@ Object.defineProperty(Function.prototype, '_handler', {
 });
 // Optional per-file wall times include module loading, test execution and teardown.
 const timingFile = process.env.FORGE_TEST_TIMINGS;
-const testFile = process.argv[1]?.match(/(?:^|\/)tests\/[^/]+\.test\.mjs$/)?.[0]?.replace(/^\//, '');
+const entryFile = process.argv[1]?.replaceAll('\\', '/');
+const testFile = entryFile?.match(/(?:^|\/)(tests\/[^/]+\.test\.mjs)$/)?.[1];
+const projectRoot = new URL('../', import.meta.url);
+if (
+  testFile &&
+  !process.env.FORGE_REPLAY_COVERAGE_CHILD &&
+  relative(fileURLToPath(projectRoot), process.argv[1]).replaceAll('\\', '/') === testFile
+) {
+  const source = readFileSync(new URL(REGISTRY, projectRoot), 'utf8');
+  const output = process.env.FORGE_REPLAY_COVERAGE_OUTPUT;
+  if (source.includes(JSON.stringify(testFile))) {
+    const { replays } = JSON.parse(source);
+    const entries = replays.filter(
+      entry =>
+        entry.file === testFile &&
+        (output ? entry.test === process.env.FORGE_REPLAY_COVERAGE_TEST : entry.paths?.length),
+    );
+    const { watchIncidentReplays } = await import('./incident-replay-runtime.mjs');
+    if (entries.length) watchIncidentReplays(entries, output, !output);
+  }
+}
 if (timingFile && process.env.NODE_TEST_CONTEXT && testFile) {
   const start = performance.now();
   process.once('exit', exitCode =>
