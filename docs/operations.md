@@ -780,6 +780,8 @@ at the recorded migration revision, never by rewriting old events.
 `nforge host ROOT --json --wait` emits progress and result JSON lines; ordinary progress uses stderr.
 `nforge host ROOT --status`, or `nforge host ROOT --json` with no action, reads the local
 binding and last saved progress without network calls, writes or worker wakeups.
+In a hosted clone or Lane without a local Work owner, it reports the checkout's
+project and last checked-out head from the local marker, without Git.
 A pending operation resumes only with `--resume`. During native backfill it reports `historyBackfilling: true`, the last phase/counts/rate/ETA,
 an observation timestamp and any recorded interruption code. The hosted backup also carries
 `historyBackfilling` until complete-manifest validation succeeds. Its full manifest is pinned from

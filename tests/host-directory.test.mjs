@@ -93,6 +93,16 @@ function mainTransport(exchange) {
   const downloads = new HostedCheckoutDownloads(exchange);
   return { current: expected => exchange.current(expected), ...downloads.transport() };
 }
+async function startHostedLane(exchange, projectId, main) {
+  const result = await call(exchange, 'mutation', 'projectHostedStart:start', {
+    projectId,
+    operationId: randomUUID(),
+    authorityEpoch: main.authority.epoch,
+    expectedMain: { head: main.head, receiptId: main.receipt.id },
+    intent: { kind: 'new', outcome: 'First synthetic Lane' },
+  });
+  return JSON.parse(result).lane;
+}
 
 test('plain-directory host without Git clones exact paths, modes, empty/binary bytes and saves/reopens its first Lane (8eccaf03)', async t => {
   const f = plain(t),
@@ -126,15 +136,7 @@ test('plain-directory host without Git clones exact paths, modes, empty/binary b
   assert.deepEqual(inventory(clone), expected);
   const main = await exchange.current();
   assert.deepEqual(main.authority, hosted.sourceAuthority);
-  const started = JSON.parse(
-    await call(exchange, 'mutation', 'projectHostedStart:start', {
-      projectId: hosted.projectId,
-      operationId: randomUUID(),
-      authorityEpoch: main.authority.epoch,
-      expectedMain: { head: main.head, receiptId: main.receipt.id },
-      intent: { kind: 'new', outcome: 'First synthetic Lane' },
-    }),
-  );
+  const started = await startHostedLane(exchange, hosted.projectId, main);
   const lane = join(f.directory, 'lane');
   const open = root =>
     checkoutHostedLane(
@@ -143,7 +145,7 @@ test('plain-directory host without Git clones exact paths, modes, empty/binary b
         operationId: randomUUID(),
         url: hosted.deployment,
         projectId: hosted.projectId,
-        laneId: started.lane.laneId,
+        laneId: started.laneId,
       },
       new ConvexLaneTransport(exchange),
     );
@@ -173,6 +175,53 @@ test('plain-directory host without Git clones exact paths, modes, empty/binary b
   );
   assert.deepEqual((await exchange.current()).authority, main.authority);
   assert.deepEqual(inventory(clone), expected);
+});
+
+test('host status reads hosted Lane and clone pins without Git or a server call (2abda01f)', async t => {
+  const f = plain(t);
+  noGit(t, f);
+  const calls = allHandlers(f);
+  const hosted = await host(f);
+  const exchange = f.dependencies.exchange(hosted.projectId, randomUUID());
+  const main = await exchange.current();
+  const started = await startHostedLane(exchange, hosted.projectId, main);
+  const lane = join(f.directory, 'lane'),
+    clone = join(f.directory, 'clone');
+  const selection = {
+    operationId: randomUUID(),
+    url: hosted.deployment,
+    projectId: hosted.projectId,
+  };
+  await checkoutHostedLane(lane, { ...selection, laneId: started.laneId }, new ConvexLaneTransport(exchange));
+  await hostedCloneCli([hosted.projectUrl, clone, '--deployment', hosted.deployment], {
+    client: exchange.client,
+    transport: () => mainTransport(exchange),
+  });
+  const count = calls.length;
+  assert.deepEqual(await hostCli([lane, '--status']), {
+    status: 'hosted',
+    canonicalOwner: false,
+    checkout: {
+      projectId: hosted.projectId,
+      head: started.head,
+      kind: 'lane',
+      laneId: started.laneId,
+      state: started.state,
+      authority: main.authority,
+    },
+  });
+  assert.deepEqual(await hostCli([clone, '--json']), {
+    status: 'hosted',
+    canonicalOwner: false,
+    checkout: {
+      projectId: hosted.projectId,
+      head: main.head,
+      kind: 'main',
+      channel: 'main',
+      authority: main.authority,
+    },
+  });
+  assert.equal(calls.length, count);
 });
 
 test('fresh host authority and Plan publication use the same Convex calls as a pinned legacy seed; idle makes none', async t => {

@@ -10,6 +10,8 @@ import { deleteHostedProject, parseDeleteProjectOptions } from './host-delete.js
 import { checkServiceEnv } from './worker-environment.js';
 import { effectivePolicy as childPolicy } from './autonomy-policy.js';
 import { readRecoveryInventory } from './recovery-inventory.js';
+import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
+import { readHostedMainSelection } from './hosted-main-marker.js';
 
 import { spawn } from 'node:child_process';
 
@@ -74,6 +76,29 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
     throw new ForgeError('CLI_UPGRADE_REQUIRED', CUTOVER_UPGRADE);
   if (flags.includes('--status') || (json && flags.length === 0)) {
     invariant(flags.length === 0 || flags.length === 1, 'BAD_ARGUMENT', HOST_HELP);
+    // Hosted checkouts have a source selection but no local Work owner or host journal.
+    if (
+      existsSync(root) &&
+      !existsSync(join(root, '.git')) &&
+      !existsSync(join(root, '.forge', 'native.json'))
+    ) {
+      const checkoutRoot = realpathSync(root);
+      const selection =
+        readHostedLaneCheckout(checkoutRoot)?.selection ?? readHostedMainSelection(checkoutRoot);
+      if (selection)
+        return {
+          status: 'hosted',
+          canonicalOwner: false,
+          checkout: {
+            projectId: selection.projectId,
+            head: selection.head,
+            ...('laneId' in selection
+              ? { kind: 'lane', laneId: selection.laneId, state: selection.state }
+              : { kind: 'main', channel: selection.channel }),
+            ...('authority' in selection ? { authority: selection.authority } : {}),
+          },
+        };
+    }
     const store = WorkStore.open<'directory'>(root, { readOnly: true });
     const state = readHostState(store);
     return {
