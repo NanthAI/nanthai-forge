@@ -34,13 +34,13 @@ export function initiativeSentence(group: PlanGroup) {
     statusOf(group.initiative) !== 'abandoned'
   )
     return {
-      bold: `All ${group.total.toLocaleString()} Items are done or dropped.`,
+      bold: 'Every Item in this Initiative is done or dropped.',
       rest: 'Close the Initiative, or keep it open for what comes next.',
     };
   const next = group.lines.find(line => line.next);
   const breakdown = groupBreakdown(group);
   return {
-    bold: `${breakdownTotal(breakdown)}: ${breakdownWords(breakdown)}.`,
+    bold: `${breakdownTotal(breakdown)} in this Initiative · ${breakdownWords(breakdown)}.`,
     rest: next ? `The next free one is ${next.row.title}.` : '',
   };
 }
@@ -108,6 +108,7 @@ export function InitiativePage({
   // The backlog's own move: shown at once, one order write, put back with a notice if it fails.
   const ordered = group.lines;
   const sentence = initiativeSentence(group);
+  const breakdown = groupBreakdown(group);
   const settled = [...closed.rows, ...dropped.rows].filter(row => row.initiativeId === initiative.id);
   const status = statusOf(initiative);
   const allDone = group.total > 0 && !group.live && status !== 'done' && status !== 'abandoned';
@@ -233,15 +234,13 @@ export function InitiativePage({
             </div>
           </div>
         </Region>
-        <Region title="Progress" quiet>
+        <Region title="Initiative progress" quiet>
           <div className="fig">
             <div className="big">
-              {breakdownTotal(groupBreakdown(group))}
-              <small>
-                {group.total ? <BreakdownWords breakdown={groupBreakdown(group)} /> : 'nothing to count yet'}
-              </small>
+              {breakdownTotal(breakdown)}
+              <small>{group.total ? <BreakdownWords breakdown={breakdown} /> : 'nothing to count yet'}</small>
             </div>
-            {group.total ? <Roll breakdown={groupBreakdown(group)} large /> : null}
+            {group.total ? <Roll breakdown={breakdown} large /> : null}
           </div>
           <dl className="kv">
             <dt>Status</dt>

@@ -53,8 +53,6 @@ export const lineStops: readonly {
   { stage: 'checking', label: 'Checking', short: 'Check', of: ['checking', 'ready'] },
 ];
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
-
 /** Count Lanes in the check phase and passed Lanes separately. A recorded run can check several Lanes together. */
 export function lineStopCounts(feed: LineFeed | undefined, stop: (typeof lineStops)[number]) {
   let total = 0;
@@ -85,18 +83,24 @@ export function Line({
   phone?: boolean;
 }) {
   const flowHref = hrefFor({ frame: 'project', handle, project, place: 'needs', section: '', rest: '' });
+  const plus = feed?.more ? '+' : '';
+  const units = (n: number) => (n === 1 && !plus ? 'Lane' : 'Lanes');
+  const scope = plus ? ` (first ${feed?.lanes.length} open Lanes in this project)` : ' in this project';
   return (
     <nav
       className={phone ? 'line phone' : 'line'}
-      aria-label="Where work is"
+      aria-label="Lane progress in this project"
       aria-busy={feed ? undefined : true}
     >
       {lineStops.map(stop => {
         const { total, count, held, passed } = lineStopCounts(feed, stop);
         const shown = phone ? stop.short : stop.label;
         // The name starts with what the stop shows ("Editing 1"), so speech and voice control match the screen.
+        const amount = `${count}${plus} ${units(count)}`;
+        const fullStop = shown !== stop.label ? `, ${stop.label.toLowerCase()}` : '';
+        const waiting = `${passed}${plus} ${units(passed)} passed`;
         const words = feed
-          ? `${shown} ${passed ? `${count} ${passedWaiting(passed)}` : plural(count, 'Lane')}${shown === stop.label ? '' : `, ${stop.label.toLowerCase()}`}${held ? `, ${held} held` : ''}`
+          ? `${shown} ${amount}${passed ? `, ${waiting}, waiting` : ''}${held ? `, ${held}${plus} held` : ''}${scope}${fullStop}`
           : `${shown}, not loaded yet`;
         const label = (
           <span className="lbl" aria-hidden="true">
@@ -104,8 +108,12 @@ export function Line({
           </span>
         );
         const number = (
-          <span className="n" aria-hidden="true">
-            {count}
+          <span className="line-count" aria-hidden="true">
+            <span className="n">
+              {count}
+              {plus}
+            </span>
+            <span className="line-unit"> {units(count)}</span>
           </span>
         );
         return (
@@ -122,15 +130,16 @@ export function Line({
                 <span className="line-checking">
                   {label} {number}
                 </span>{' '}
-                <span className="line-passed" aria-hidden="true" title={passedWaiting(passed)}>
-                  {passed.toLocaleString('en')} passed
+                <span className="line-passed" aria-hidden="true" title={`${waiting}, waiting`}>
+                  {passed}
+                  {plus}
+                  <span className="line-unit"> {units(passed)}</span> passed
                   <span className="line-passed-detail">, waiting</span>
                 </span>
               </>
             ) : (
               <>
                 {label}
-                <span className="slot" aria-hidden="true" />
                 {feed ? <> {number}</> : null}
               </>
             )}

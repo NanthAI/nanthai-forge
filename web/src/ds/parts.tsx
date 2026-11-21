@@ -330,6 +330,7 @@ const UNITS = {
 export function Standing({ of, done, inProgress, left }: StandingProps) {
   const units = UNITS[of];
   const total = done.n + inProgress.n + left.n;
+  const amount = (n: number, atLeast?: boolean) => `${n.toLocaleString()}${atLeast ? '+' : ''}`;
   const ticks = Math.min(total, 60);
   const step = total / (ticks || 1);
   const cell = (
@@ -345,10 +346,7 @@ export function Standing({ of, done, inProgress, left }: StandingProps) {
           <Glyph of={glyph} />
           {word}
         </span>
-        <b>
-          {value.n.toLocaleString()}
-          {value.atLeast ? '+' : ''}
-        </b>
+        <b>{amount(value.n, value.atLeast)}</b>
         <span>{value.n === 1 && !value.atLeast ? unit[0] : unit[1]}</span>
         {value.more ? <span className="more">· {value.more}</span> : null}
       </>
@@ -364,17 +362,16 @@ export function Standing({ of, done, inProgress, left }: StandingProps) {
   return (
     <nav className="pstate" aria-label="Where the project stands">
       {of === 'app' ? (
-        <span
-          className="roll"
-          role="img"
-          aria-label={`${done.n} of ${total} Items done, ${inProgress.n} in progress, ${left.n} left`}
-        >
-          {Array.from({ length: ticks }, (_, i) => (
-            <i
-              key={i}
-              className={i * step < done.n ? 'ok' : i * step < done.n + inProgress.n ? 'run' : undefined}
-            />
-          ))}
+        <span className="pstate-scope">
+          <span>Items in this project</span>
+          <span className="roll" aria-hidden="true">
+            {Array.from({ length: ticks }, (_, i) => (
+              <i
+                key={i}
+                className={i * step < done.n ? 'ok' : i * step < done.n + inProgress.n ? 'run' : undefined}
+              />
+            ))}
+          </span>
         </span>
       ) : null}
       {cell('Done', 'passed', 'passed', done, units.done)}

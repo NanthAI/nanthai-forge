@@ -4,9 +4,10 @@
 // overview: one row each, dragged or moved by keyboard into hand order. An open group's header keeps a Move key for
 // the keyboard and phones. The header's name opens the Initiative page. A move is one put-planning-item `order`, as
 // for an Item.
-import { Count, Menu, ReorderList } from '../../ds';
+import { Menu, ReorderList } from '../../ds';
 import type { PlanRow } from '../../../../src/planning-model';
 import { A } from '../frames';
+import { breakdownTotal } from '../progress';
 import type { PlaceProps } from '../screens';
 import { isShut, NO_INITIATIVE, type Folds } from './fold';
 import { groupBreakdown, type PlanGroup, type PlanView } from './model';
@@ -126,7 +127,7 @@ function Head({
       ) : (
         <span className="plan-gn">{name}</span>
       )}
-      <Count n={breakdown.total} />
+      <span className="cnt">{breakdownTotal(breakdown)}</span>
       {group.initiative ? (
         <span className="plan-prog">
           <Roll breakdown={breakdown} />

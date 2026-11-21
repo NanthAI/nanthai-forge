@@ -151,9 +151,7 @@ test('the plan read lists live work and counts settled Items of live Initiatives
     'owned and blocked Items are skipped; the next free planned Item is derived',
   );
   assert.equal(group.lines.find(line => line.row.id === second.id).blockedBy.id, first.id);
-  assert.equal(view.done + view.inProgress + view.planned + view.proposed, 1 + 1 + 3 + 1);
-  assert.match(planSentence(view).bold, /^1 Item in progress, 3 planned\.$/);
-  assert.match(planSentence(view).rest, /The next free one is Item 004\./);
+  assert.equal(planSentence(view).bold, 'The next free Item is Item 004.');
 
   // Find filters the rows, never the counts.
   const found = planView(result, 'item 003');

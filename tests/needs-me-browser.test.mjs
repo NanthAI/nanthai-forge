@@ -167,13 +167,23 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
           };
           const needs = await open(t, DESK, 'needs', 'dark', { ...options, query });
           const plan = await open(t, DESK, 'plan', 'dark', { ...options, query: { ...query, initiative } });
-          const standing = page =>
-            page
-              .getByRole('navigation', { name: 'Where the project stands' })
+          const standing = async page => {
+            const scope = page.getByRole('navigation', { name: 'Where the project stands' });
+            assert.equal(await scope.getByText('Items in this project', { exact: true }).isVisible(), true);
+            assert.equal(
+              await scope.locator('.roll').evaluate(roll => {
+                const edge = roll.getBoundingClientRect().right;
+                return [...roll.children].every(tick => tick.getBoundingClientRect().right <= edge + 0.5);
+              }),
+              true,
+              'the roll fits beside the scoped counts',
+            );
+            return scope
               .locator('.ps')
               .evaluateAll(cells =>
                 cells.map(cell => [...cell.children].map(part => part.textContent.trim())),
               );
+          };
           const expected = [
             ['Done', count[0], 'Items'],
             ['In progress', count[1], unit],
@@ -182,14 +192,20 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
           assert.deepEqual(await standing(needs), expected, 'Needs me project labels, units and figures');
           assert.deepEqual(await standing(plan), expected, 'Plan project labels, units and figures');
           const header = plan.locator('.plan-gh').filter({ hasText: 'Parser release' });
-          const breakdown = header.locator('.plan-pl');
-          await breakdown.waitFor();
-          assert.equal(await header.locator('.cnt').textContent(), '6');
-          assert.equal(
-            (await breakdown.innerText()).replace(/\s+/g, ' ').trim(),
-            '4 done · 1 in progress · 0 open · 1 removed',
-            'the filtered Initiative keeps its own breakdown',
-          );
+          const detail = await open(t, DESK, 'initiative', 'dark', {
+            ...options,
+            query,
+            ready: '.plan-ini .plan-bd',
+          });
+          const progress = detail.getByRole('region', { name: 'Initiative progress', exact: true });
+          const plus = name === 'capped' ? '+' : '';
+          const total = `6${plus} Items`;
+          const breakdown = `4${plus} done · 1 in progress · 0 open · 1${plus} removed`;
+          assert.equal(await header.locator('.cnt').textContent(), total);
+          assert.equal(await progress.getByText(total, { exact: false }).isVisible(), true);
+          for (const part of [header.locator('.plan-bd'), progress.locator('.plan-bd')]) {
+            assert.equal((await part.innerText()).replace(/\s+/g, ' ').trim(), breakdown);
+          }
           assert.equal(await plan.getByText('Write the changelog', { exact: true }).count(), 0);
         },
       );

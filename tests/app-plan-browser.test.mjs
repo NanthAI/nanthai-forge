@@ -543,7 +543,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
     const main = page.locator('main');
     assert.match(
       await main.textContent(),
-      /9 Items: 4 done · 1 in progress · 2 open · 1 proposed · 1 removed\./,
+      /9 Items in this Initiative · 4 done · 1 in progress · 2 open · 1 proposed · 1 removed\./,
     );
     assert.match(await main.textContent(), /Everything that must land before the parser ships\./);
     assert.match(await main.textContent(), /Stream parser/);
@@ -580,7 +580,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
           calls.push(args);
           return initiativeFixture.readInitiativeRaw(args);
         });
-        const progress = page.getByRole('region', { name: 'Progress' });
+        const progress = page.getByRole('region', { name: 'Initiative progress' });
         await progress.getByText('At least 2', { exact: true }).waitFor();
         assert.match(await progress.textContent(), /Lanes open1Landings2Files touchedAt least 2/);
         await page.getByRole('button', { name: 'Done and dropped Items' }).click();
@@ -605,14 +605,13 @@ test('plan views and bulk bar: real components keep the view in the address and 
       await page.evaluate(() => history.replaceState(null, '', `/-${location.pathname}`));
       const main = page.locator('main#main');
       const list = page.getByRole('region', { name: 'Open work' });
+      const toolbarCount = list.locator('.plan-tbar').getByText(/^\d+ Items?$/);
+      assert.equal(await toolbarCount.count(), 1, 'the toolbar keeps one count for assistive tech');
+      assert.ok((await toolbarCount.boundingBox()).width <= 1, 'the toolbar count is visually hidden');
       assert.equal(
-        await list.getByText(/^\d+ Items?$/).count(),
-        1,
-        'the toolbar count is for assistive tech only',
-      );
-      assert.ok(
-        (await list.getByText(/^\d+ Items?$/).boundingBox()).width <= 1,
-        'drawn only as the head count',
+        await list.locator(':scope > .ph .cnt').isVisible(),
+        true,
+        'the list head shows its count',
       );
       assert.equal(
         await page.getByRole('combobox', { name: 'View' }).count(),

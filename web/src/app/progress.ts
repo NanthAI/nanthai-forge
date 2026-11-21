@@ -114,4 +114,4 @@ const partText = (part: BreakdownPart) => `${part.n.toLocaleString()}${part.atLe
 export const breakdownWords = (breakdown: Breakdown) => breakdown.parts.map(partText).join(' · ');
 /** "100 Items" (or "1,000+ Items" past the cap). */
 export const breakdownTotal = (breakdown: Breakdown) =>
-  `${breakdown.total.toLocaleString()}${breakdown.atLeast ? '+' : ''} ${breakdown.total === 1 ? 'Item' : 'Items'}`;
+  `${breakdown.total.toLocaleString()}${breakdown.atLeast ? '+' : ''} ${breakdown.total === 1 && !breakdown.atLeast ? 'Item' : 'Items'}`;

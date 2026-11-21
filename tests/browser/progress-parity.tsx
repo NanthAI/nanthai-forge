@@ -15,16 +15,17 @@ document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
 const projectId = 'progress-fixture' as Id<'hostedProjects'>;
 const projectName = 'Parser project';
 const viewerHandle = 'sample-one';
+const data = params.get('data');
+const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const initiativeId = uuid(1);
 const route: ProjectRoute = {
   frame: 'project',
   handle: viewerHandle,
   project: 'parser',
-  place: params.get('data') === 'plan' ? 'plan' : 'needs',
+  place: data === 'plan' || data === 'initiative' ? 'plan' : 'needs',
   section: '',
-  rest: '',
+  rest: data === 'initiative' ? initiativeId : '',
 };
-const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-const initiativeId = uuid(1);
 const rows: PlanRow[] = [
   { id: initiativeId, kind: 'initiative', title: 'Parser release', status: 'open', position: 0 },
   {
@@ -46,7 +47,7 @@ const exact = !params.has('capped');
 const plan = {
   rows: JSON.stringify(rows),
   more: false,
-  settled: [{ initiativeId, done: 4, dropped: 1, atLeast: false }],
+  settled: [{ initiativeId, done: 4, dropped: 1, atLeast: !exact }],
   canEdit: true,
 };
 const counts: PlanCountsRead = {

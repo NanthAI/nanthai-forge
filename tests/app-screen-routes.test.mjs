@@ -144,17 +144,25 @@ test('the Lane stops, desktop and phone, are named starting with the words they 
       const stops = names(markup);
       assert.equal(stops.length, 4);
       for (const { name, shown } of stops)
-        assert.ok(name.toLowerCase().startsWith(shown.toLowerCase()), `"${name}" must start with "${shown}"`);
+        assert.ok(
+          name.toLowerCase().replaceAll(',', '').startsWith(shown.toLowerCase().replaceAll(',', '')),
+          `"${name}" must start with "${shown}"`,
+        );
     }
   const desktop = names(renderToStaticMarkup(createElement(Line, { feed, handle: 'm', project: 'p' })));
   assert.deepEqual(
     desktop.map(stop => stop.name),
-    ['Editing 1 Lane', 'Saved 0 Lanes', 'In queue 0 Lanes', 'Checking 0 2 passed, waiting, 1 held'],
+    [
+      'Editing 1 Lane in this project',
+      'Saved 0 Lanes in this project',
+      'In queue 0 Lanes in this project',
+      'Checking 0 Lanes, 2 Lanes passed, waiting, 1 held in this project',
+    ],
   );
   const phone = names(
     renderToStaticMarkup(createElement(Line, { feed, handle: 'm', project: 'p', phone: true })),
   );
-  assert.equal(phone[0].name, 'Edit 1 Lane, editing');
+  assert.equal(phone[0].name, 'Edit 1 Lane in this project, editing');
 });
 
 test('recipient invitations have their own lazy account page', () => {

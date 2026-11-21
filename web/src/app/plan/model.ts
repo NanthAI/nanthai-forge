@@ -49,10 +49,7 @@ export type PlanView = {
   groups: PlanGroup[];
   next: PlanRow | null;
   live: number;
-  inProgress: number;
   planned: number;
-  proposed: number;
-  done: number;
   more: boolean;
   canEdit: boolean;
   byId: Map<string, PlanRow>;
@@ -136,35 +133,20 @@ export function planView(
     groups,
     next,
     live: items.length,
-    inProgress: count('in-progress'),
     planned: count('open'),
-    proposed: count('proposed'),
-    done: groups.reduce((sum, group) => sum + group.done, 0),
     more: read.more,
     canEdit: read.canEdit,
     byId,
   };
 }
 
-const n = (value: number, one: string, many = `${one}s`) =>
-  `${value.toLocaleString()} ${value === 1 ? one : many}`;
-
-/** The page sentence: what is moving, what is planned, and the next free Item. */
+/** The page sentence points to available work. Project totals come from the shared Standing row. */
 export function planSentence(view: PlanView): { bold: string; rest: string } {
-  if (!view.live && !view.done)
-    return { bold: 'The plan is empty.', rest: 'Write the first Item, or let an agent propose a list.' };
-  if (!view.live)
-    return { bold: 'Nothing is left.', rest: `${n(view.done, 'Item')} done in open Initiatives.` };
-  const bold = `${n(view.inProgress, 'Item')} in progress, ${view.planned.toLocaleString()} planned.`;
-  const proposed = view.proposed
-    ? ` ${n(view.proposed, 'proposal')} ${view.proposed === 1 ? 'waits' : 'wait'} for a person to plan.`
-    : '';
-  const next = view.next
-    ? ` The next free one is ${view.next.title}.`
-    : view.planned
-      ? ' Every planned Item is owned, in a Lane or blocked.'
-      : '';
-  return { bold, rest: `${next}${proposed}`.trim() };
+  if (view.next) return { bold: `The next free Item is ${view.next.title}.`, rest: '' };
+  if (view.more) return { bold: 'No free Item among the Items shown.', rest: '' };
+  if (view.planned) return { bold: 'Every planned Item is owned, in a Lane or blocked.', rest: '' };
+  if (view.live) return { bold: 'No Items are ready to pick up.', rest: '' };
+  return { bold: 'No open Items.', rest: 'Add an Item, or let an agent propose one.' };
 }
 
 /** The visible status word for a row. */

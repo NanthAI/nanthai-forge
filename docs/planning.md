@@ -253,8 +253,13 @@ saved view is a personal shortcut to them.
 
 ## Progress
 
-An Initiative's progress counts its Items and their sub-items, one tick each: done, in progress, not started
-(proposed and planned) and dropped (abandoned). There is no typed percentage (`progress`).
+Needs me and Plan show the same project-wide Item counts, including when Plan is filtered. Done counts all
+closed Items, In progress counts Items in progress, and Left counts planned Items and lists proposed Items
+separately. A `+` marks a lower bound.
+
+An Initiative's progress counts its Items and their sub-items, one tick each for done, in progress, open,
+proposed or removed. Plan and the Initiative page use the same breakdown. There is no typed percentage
+(`progress`).
 
 ## Public plan
 

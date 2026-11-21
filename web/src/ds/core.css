@@ -15,16 +15,18 @@
   .mk-f .arm { fill: var(--brand); }
   .mk-f .xT { fill: var(--mark-warm); }
   .mk-f .xL { fill: var(--mark-teal); }
-  .line { position: relative; flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(min-content, 1.1fr); border-left: var(--rule) solid var(--line); border-right: var(--rule) solid var(--line); height: var(--top-h); container-type: inline-size;
+  .line { position: relative; flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(min-content, 1.1fr); grid-template-rows: minmax(0, 1fr); border-left: var(--rule) solid var(--line); border-right: var(--rule) solid var(--line); height: var(--top-h); container-type: inline-size;
     background: linear-gradient(to right, var(--rail-off) 1px, transparent 1px) 0 100% / 12px 5px repeat-x; }
   .line .stop { position: relative; display: flex; align-items: center; gap: var(--s-2); padding: 0 10px 6px 12px; color: var(--text-2); font-size: 13px; white-space: nowrap; min-width: 0; }
   .line .stop::before { content: ""; position: absolute; left: 0; bottom: 0; width: 1px; height: 11px; background: var(--text-3); }
   .line .stop .lbl { overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
   .line .stop .n, .line .tomain .main-number { color: var(--text); font: var(--w-strong) 13px/1 var(--font-mono); font-variant-numeric: tabular-nums; flex: none; }
-  .line .stop[data-stop] .n { order: 3; min-width: 2.6ch; text-align: right; }
+  .line .stop[data-stop] { gap: var(--s-1); }
+  .line .line-count { flex: none; color: var(--text-2); }
   .line .stop .slot { flex: 1 1 0; min-width: 0; align-self: stretch; }
   .line .checking-split { flex-direction: column; flex-wrap: nowrap; justify-content: center; align-items: start; gap: 0; }
-  .line .line-passed { color: var(--waiting); font-size: var(--t-micro); }
+  .line .line-checking { display: flex; align-items: baseline; gap: var(--s-1); max-inline-size: 100%; }
+  .line .line-passed { align-self: stretch; overflow: hidden; text-overflow: ellipsis; color: var(--waiting); font-size: var(--t-micro); }
   .line .stop.zero { color: var(--text-3); }
   .line .stop.here { color: var(--text); font-weight: var(--w-bold); box-shadow: inset 0 -2px 0 var(--st, var(--text)); }
   .line .tomain { color: var(--text); gap: 0 var(--s-1); }
@@ -53,8 +55,11 @@
   @container (max-width: 760px) {
     .line .stop { flex-wrap: wrap; align-items: baseline; align-content: flex-start; gap: 0 var(--s-1); padding: 6px 4px 9px 9px; font-size: var(--t-micro); }
     .line .stop .slot { display: none; }
-    .line .stop[data-stop] .n { order: 0; min-width: 0; text-align: left; font-size: var(--t-micro); }
-    .line .stop.checking-split { flex-wrap: nowrap; align-items: start; padding: 3px var(--s-1) 9px; }
+    .line .stop[data-stop] { gap: 0 var(--s-1); line-height: var(--lh-tight); }
+    .line .stop[data-stop] .n { font-size: var(--t-micro); }
+    .line .stop.checking-split { flex-wrap: nowrap; align-items: start; gap: 0; padding: 3px var(--s-1) 6px; line-height: var(--lh-disp); }
+    .line .checking-split .line-checking { flex-wrap: wrap; gap: 0 var(--s-1); }
+    .line .checking-split .lbl { flex: none; max-inline-size: 100%; }
     .line .line-passed-detail { display: none; }
     .line .tomain { padding-right: 0; padding-left: 6px; } .line .tomain .main-number { font-size: var(--t-micro); }
   }
@@ -66,7 +71,13 @@
   @container (max-width: 380px) {
     .line:not(.phone) .tomain .share { display: none; }
   }
-  .line.phone { grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(max-content, 1.1fr); height: var(--line-phone-h); border: 0; border-bottom: var(--rule) solid var(--line); background-color: var(--surface); background-size: 10px 4px; }
+  @container (max-width: 360px) {
+    .line .stop[data-stop] { padding-inline: var(--s-1); }
+    .line .line-unit { display: none; }
+  }
+  .line.phone .stop[data-stop]:not(.checking-split) { flex-direction: column; align-items: flex-start; flex-wrap: nowrap; }
+  /* Keep the split Checking labels and the main count whole in the phone row. */
+  .line.phone { grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(max-content, 1.3fr) minmax(max-content, 1.1fr); height: var(--line-phone-h); border: 0; border-bottom: var(--rule) solid var(--line); background-color: var(--surface); background-size: 10px 4px; }
   .rail { background: var(--surface); border-right: var(--rule) solid var(--line); display: flex; flex-direction: column; padding: var(--s-2) 0; min-height: 0; }
   .rail a { display: grid; grid-template-columns: 18px 1fr auto; gap: 10px; align-items: center; height: 36px; padding: 0 14px; color: var(--text-2); font-weight: var(--w-medium); }
   .rail a[aria-current] { color: var(--text); background: var(--surface-3); font-weight: var(--w-bold); box-shadow: inset 2px 0 0 var(--brand); }
@@ -380,14 +391,15 @@
     details.sumdec[open] > summary { grid-template-columns: minmax(0, 1fr) 28px; } details.sumdec[open] > summary .meta { grid-row: 2; }
   }
   .pstate { display: flex; align-items: center; gap: var(--s-2) var(--s-6); flex-wrap: wrap; min-height: var(--ph-h); padding: var(--s-2) var(--gut-head); background: var(--surface); border-bottom: var(--rule) solid var(--line); min-width: 0; }
-  .pstate > .roll { flex: 0 1 220px; min-width: 96px; height: 9px; }
-  .pstate > .roll i { max-width: none; }
+  .pstate-scope { flex: 0 1 256px; display: flex; align-items: center; gap: var(--s-2); color: var(--text-2); font-size: var(--t-small); }
+  .pstate-scope .roll { flex: 1; min-width: 64px; height: 9px; gap: var(--rule); }
+  .pstate-scope .roll i { min-width: 0; max-width: none; }
   .pstate .ps { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; color: var(--text-2); font-size: var(--t-small); white-space: nowrap; }
   .pstate .ps .st { align-self: center; }
   .pstate .ps b { color: var(--text); font: var(--w-bold) var(--t-body)/1 var(--font-mono); font-variant-numeric: tabular-nums; }
   .pstate .ps .more { overflow-wrap: anywhere; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   @media (hover: hover) and (pointer: fine) { .pstate a.ps:hover { color: var(--text); } .pstate a.ps:hover .more { color: var(--text-2); } }
-  @media (max-width: 860px) { .pstate { padding-inline: var(--gut); gap: var(--s-1) var(--s-4); } .pstate > .roll { flex-basis: 100%; } .pstate .ps { flex: 1 1 100%; white-space: normal; flex-wrap: wrap; } .pstate a.ps { min-block-size: 24px; align-items: center; } }
+  @media (max-width: 860px) { .pstate { padding-inline: var(--gut); gap: var(--s-1) var(--s-4); } .pstate-scope { flex-basis: 100%; } .pstate .ps { flex: 1 1 100%; white-space: normal; flex-wrap: wrap; } .pstate a.ps { min-block-size: 24px; align-items: center; } }
   [data-weight="ref"] .nums b { font-size: var(--t-body); line-height: var(--lh-body); letter-spacing: 0; }
   [data-weight="ref"] .nums > div { padding-block: var(--s-2); }
   [data-weight="ref"] .nums span { color: var(--ref-ink-2); }

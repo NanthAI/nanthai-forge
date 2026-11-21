@@ -1,7 +1,9 @@
 - Needs me opens on the Flow picture, "On the way to main": the line's stops (Editing, Saved, In queue,
   Checking, main) as isometric platforms with one block per open Lane, Lanes checked together as one
   tower and main as today's landings hour by hour. The Checking stop splits Lanes in the check phase from
-  passed Lanes waiting to land, using the same counts in the top bar, Flow and Lanes. Passed Lanes
+  passed Lanes waiting to land, using the same counts in the top bar, Flow and Lanes. The top bar keeps
+  each count with its stop name and stacks the single-count stops on phones. A `+` marks figures from
+  the capped feed. Passed Lanes
   waiting their turn are amber. The picture shows five figures (landed this hour, land to main,
   needs fix, reverted, main passing since), a state legend and a strip for running checks. The strip
   shows the Lanes in each recorded run, its elapsed time, speculative queue room where recorded and

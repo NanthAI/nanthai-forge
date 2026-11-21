@@ -108,7 +108,11 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
       if (url.pathname === HOME) return route.fulfill({ contentType: 'text/html', body: html });
       const file = join(out, url.pathname.slice(1));
       if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
-      const contentType = file.endsWith('.js') ? 'text/javascript' : 'text/css';
+      const contentType = file.endsWith('.js')
+        ? 'text/javascript'
+        : file.endsWith('.woff2')
+          ? 'font/woff2'
+          : 'text/css';
       return route.fulfill({ contentType, body: readFileSync(file) });
     });
     await page.goto(
@@ -251,13 +255,55 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
         for (const width of [1440, 390]) {
           for (const theme of ['dark', 'light']) {
             const page = await open(t, width, 'stall', { theme });
-            const line = page.locator('.line:visible [data-stop="checking"]');
+            await page.evaluate(() => document.fonts.ready.then(() => null));
+            const strip = page.getByRole('navigation', { name: 'Lane progress in this project' });
+            const stopClipping = () =>
+              strip.locator('[data-stop]').evaluateAll(stops =>
+                stops.flatMap(stop => {
+                  const cell = stop.getBoundingClientRect();
+                  const range = document.createRange();
+                  return [...stop.querySelectorAll('.lbl, .line-count, .n, .line-passed')].flatMap(part => {
+                    const box = part.getBoundingClientRect();
+                    range.selectNodeContents(part);
+                    const text = range.getBoundingClientRect();
+                    // Integer scrollWidth and clientWidth can round the same fractional text edge differently.
+                    const left = Math.max(cell.left, box.left);
+                    const right = Math.min(cell.right, box.right);
+                    return box.left < cell.left - 0.5 ||
+                      box.right > cell.right + 0.5 ||
+                      box.top < cell.top - 0.5 ||
+                      box.bottom > cell.bottom + 0.5 ||
+                      text.left < left - 0.5 ||
+                      text.right > right + 0.5
+                      ? [{ label: part.innerText, left, right, textLeft: text.left, textRight: text.right }]
+                      : [];
+                  });
+                }),
+              );
+            assert.deepEqual(await stopClipping(), [], `stop words and counts fit at ${width}px in ${theme}`);
+            if (width === 390) {
+              const widerText = await page.addStyleTag({
+                content: '.line.phone .line-passed { font-size: var(--t-small); }',
+              });
+              const clipped = await stopClipping();
+              await widerText.evaluate(style => style.remove());
+              assert.deepEqual(clipped, [], 'Checking reserves room when the passed label measures wider');
+            }
+            assert.equal(
+              await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
+              false,
+              `the page fits at ${width}px in ${theme}`,
+            );
+            const line = strip.locator('[data-stop="checking"]');
             assert.equal(await line.locator('.n').textContent(), '4');
             assert.equal(
               await line.locator('.line-passed').innerText(),
-              width === 390 ? '6 passed' : '6 passed, waiting',
+              width === 390 ? '6 Lanes passed' : '6 Lanes passed, waiting',
             );
-            assert.match(await line.getAttribute('aria-label'), /Check(?:ing)? 4 6 passed, waiting/);
+            assert.match(
+              await line.getAttribute('aria-label'),
+              /Check(?:ing)? 4 Lanes, 6 Lanes passed, waiting in this project/,
+            );
             const station =
               width === 390
                 ? page.locator('.flow-rows .flow-row').nth(3)
@@ -275,22 +321,6 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
                 ? station.locator('.flow-marks [data-st="waiting"]')
                 : page.locator('.fv-pic g[data-stop="checking"] .fv-cube[data-st="waiting"]');
             assert.equal(await waiting.count(), 6);
-            const fits = await line.evaluate(el => {
-              const stop = el.getBoundingClientRect();
-              return (
-                [...el.querySelectorAll('.lbl, .n, .line-passed')].every(item => {
-                  const box = item.getBoundingClientRect();
-                  return (
-                    box.left >= stop.left &&
-                    box.right <= stop.right &&
-                    box.top >= stop.top &&
-                    box.bottom <= stop.bottom &&
-                    item.scrollWidth <= item.clientWidth
-                  );
-                }) && document.documentElement.scrollWidth <= innerWidth
-              );
-            });
-            assert.ok(fits, `the split fits at ${width}px in ${theme}`);
             const loose = region(page, 'Loose ends');
             assert.match(
               await loose.textContent(),
@@ -453,6 +483,16 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
         await region(over, 'Saved').waitFor();
 
         const phone = await open(t, 390, 'over');
+        for (const page of [over, phone]) {
+          const strip = page.getByRole('navigation', { name: 'Lane progress in this project' });
+          const counts = strip.locator('[data-stop] .n');
+          assert.equal(await counts.count(), STOPS.length);
+          assert.ok((await counts.allTextContents()).every(text => /^\d+\+$/.test(text)));
+          assert.match(
+            await strip.locator('[data-stop="saved"]').getAttribute('aria-label'),
+            /^Saved \d+\+ Lanes, \d+\+ held \(first 60 open Lanes in this project\)$/,
+          );
+        }
         const phoneMarks = await phone.locator('.flow-row .flow-marks > span, .flow-row .fv-tag').count();
         assert.equal(phoneMarks, 3, 'the compact rows keep held marks only past the cap');
         await phone.locator('.line.phone [data-stop="checking"]').click();
