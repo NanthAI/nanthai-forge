@@ -118,7 +118,7 @@ test('the yard: a running check says its time, sits by elapsed / usual and glide
       );
       assert.ok(Math.abs(overdue.at - 3.7) < 0.02 && !overdue.moving, 'overdue holds at the end of the stop');
       const passed = row(all, 'Account Projects');
-      assert.equal(passed.word, 'Ready to land');
+      assert.equal(passed.word, 'Waiting its turn');
       assert.ok(Math.abs(passed.at - 3.85) < 0.02, 'a pass rests at the end of Checking');
       const failed = row(all, 'Public pages');
       assert.deepEqual([failed.word, failed.tone], ['Check failed', 'failed']);

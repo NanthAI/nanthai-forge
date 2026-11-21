@@ -343,6 +343,8 @@ async function runAgentCli(
         await (await import('./hosted-show-cli.js')).hostedShowCli(here, command, hosted);
         return undefined;
       }
+      if (action === 'lanes' && command.view === 'loose-ends')
+        return await hostedAgentCli(here, action, command, hosted, undefined, undefined, true);
       if (action !== 'start' || !options.process) return await hostedAgentCli(here, action, command, hosted);
       const transport = new HostedAgentTransport(here, hosted);
       // The Lane id and path print before the checkout downloads, so a slow open never hides them.

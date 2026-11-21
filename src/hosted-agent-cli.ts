@@ -65,6 +65,7 @@ async function dispatchHostedAgentCli(
   address: HostedAgentAddress,
   transport = new HostedAgentTransport(root, address),
   signal?: AbortSignal,
+  localLooseEnds = false,
 ) {
   root = hostedAgentRoot(root);
   const command = canonicalOperationIds(
@@ -546,5 +547,13 @@ async function dispatchHostedAgentCli(
   // A passed preflight names the self-review of what will land (593fc2d7).
   if (action === 'preflight' && (result.result as { outcome?: unknown } | undefined)?.outcome === 'passed')
     process.stderr.write(`${selfReviewLine(root)}\n`);
+  // MCP also dispatches here. Only the installed CLI opts in to private machine-local evidence.
+  if (localLooseEnds && action === 'lanes' && command.view === 'loose-ends') {
+    // Load the unbundled sibling so other CLI commands and MCP keep their startup graph.
+    const { withLocalLooseEndsHolders } = (await import(
+      /* @vite-ignore */ new URL('./hosted-loose-ends.js', import.meta.url).href
+    )) as typeof import('./hosted-loose-ends.js');
+    return { ...result, result: withLocalLooseEndsHolders(result.result, address) };
+  }
   return result;
 }

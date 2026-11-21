@@ -3,12 +3,12 @@
 // one line for checks, in one region. It replaces "Moving without you". Everything comes from the line feed the shell
 // already subscribes to and the Needs you rows the page already reads: no read of its own, no timer. Below desk width the
 // picture is the stops as flat rows.
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import { FlowMotion } from './motion';
 import type { DrawerStop } from './drawer-model';
 import { Glyph, Region } from '../../ds';
 import { A } from '../frames';
-import type { LineFeed } from '../Line';
+import { passedWaiting, type LineFeed } from '../Line';
 import { SizedPicture, type PictureFacts } from './Picture';
 import { Tag } from './labels';
 import { FlowChecks, FlowLegend } from './Checks';
@@ -17,20 +17,10 @@ import './flow.css';
 
 type FlowHrefs = { stats: string; lanes: string; code: string };
 
-const plural = (n: number, word: string) => `${n.toLocaleString('en')} ${word}${n === 1 ? '' : 's'}`;
-
 /** Each stop's few words at full size: what is checked there, and what is held. */
 function stationFact(station: Station) {
   const parts: string[] = [];
-  if (station.checks.length)
-    parts.push(
-      `${plural(station.checks.length, 'check')}, ${plural(
-        station.checks.reduce((a, b) => a + b, 0),
-        'Lane',
-      )} · shards proposed`,
-    );
   if (station.stop === 'saved' && station.n) parts.push('Preflight · proposed');
-  if (station.passed) parts.push(`${station.passed} passed, landing`);
   const red = station.held.filter(block => block.shape === '').length;
   if (red) parts.push(`${red} held: main is failing`);
   return parts.join(' · ') || null;
@@ -66,6 +56,7 @@ export function FlowRegion({
   hrefs: FlowHrefs;
   drawnAt: number;
 }) {
+  const passedId = useId();
   const stations = flowStations(feed, rows);
   const day = flowFigures(feed, drawnAt);
   const tracking = !!feed && !error;
@@ -123,12 +114,18 @@ export function FlowRegion({
                 type="button"
                 className="flow-stop"
                 aria-expanded={stop === station.stop}
+                aria-describedby={station.passed ? passedId : undefined}
                 onClick={() => onOpen(station.stop)}
               >
-                <span className="n">{station.name}</span>
-                <span className="c num">{feed ? station.n.toLocaleString('en') : '–'}</span>
+                <span className="n">{station.name}</span>{' '}
+                <span className="c num">{feed ? station.count.toLocaleString('en') : '–'}</span>
               </button>
               <span className="w">
+                {station.passed ? (
+                  <span className="f flow-passed" id={passedId}>
+                    {passedWaiting(station.passed)}
+                  </span>
+                ) : null}
                 <span className="flow-marks" aria-hidden="true">
                   {station.blocks
                     .filter(block => !block.needsYou)

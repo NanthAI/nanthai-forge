@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { LineFeed } from '../Line';
+import { passedWaiting, type LineFeed } from '../Line';
 import { Glyph, KindMark } from '../../ds';
 import { duration, type flowFigures } from './model';
 
@@ -50,7 +50,7 @@ export function FlowChecks({
             : checks && !checks.partial
               ? 'None running'
               : 'Running checks not reported'}
-          {passed ? ` · ${passed} passed` : ''}
+          {passed ? ` · ${passedWaiting(passed)}` : ''}
         </span>
         {runs.length ? <span>Shards · proposed</span> : null}
       </button>

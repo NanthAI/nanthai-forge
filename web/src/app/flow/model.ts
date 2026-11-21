@@ -5,8 +5,8 @@
 // No read, timer or clock of its own: "today" and elapsed times are worked out from the feed's timestamps against the
 // time the page was drawn. Pure.
 import { flowToday, flowVerdict, utcDayStart } from '../../../../src/flow-day';
-import { lineStops, type LineFeed, type LineStop } from '../Line';
-import { unheldConflict } from '../lane-state';
+import { lineStopCounts, lineStops, type LineFeed, type LineStop } from '../Line';
+import { laneState, unheldConflict } from '../lane-state';
 import type { StateWord } from '../../ds';
 
 /** A block's colour (the state tokens) and the glyph cut into its top. */
@@ -32,6 +32,7 @@ export type Station = {
   stop: LineStop;
   name: string;
   n: number;
+  count: number;
   held: Block[];
   /** The blocks drawn: every Lane, or past the feed's cap only the held ones, in front of the solid. */
   blocks: Block[];
@@ -39,8 +40,6 @@ export type Station = {
   allBlocks: Block[];
   /** Past the feed's cap (more open Lanes than it lists): the moving Lanes here, drawn as one solid. */
   solid: number;
-  /** Checks running here (Checking only), largest first, as tower sizes. */
-  checks: number[];
   /** Checks that passed and wait to land (Checking only). */
   passed: number;
 };
@@ -56,6 +55,7 @@ export function flowStations(feed: LineFeed | undefined, rows: readonly HeldRow[
   const byLane = new Map(rows.map(row => [row.laneId, row]));
   const lanes = feed?.lanes ?? [];
   return lineStops.map(stop => {
+    const { total, count, passed } = lineStopCounts(feed, stop);
     const at = lanes
       .filter(lane => stop.of.includes(lane.stage))
       .sort((a, b) => Number(a.held) - Number(b.held) || a.changedAt - b.changedAt);
@@ -67,7 +67,7 @@ export function flowStations(feed: LineFeed | undefined, rows: readonly HeldRow[
           ? colourOf(row.word)
           : (lane.held && lane.overlap) || unheldConflict(lane)
             ? 'conflict'
-            : lane.held || lane.stage === 'queued'
+            : lane.held || lane.stage === 'queued' || lane.stage === 'ready'
               ? 'waiting'
               : 'active';
       return {
@@ -84,7 +84,7 @@ export function flowStations(feed: LineFeed | undefined, rows: readonly HeldRow[
                 ? 'Conflict'
                 : 'Held'
               : lane.stage === 'ready'
-                ? 'Passed'
+                ? laneState(lane).glyph
                 : stop.label,
         head: row?.head ?? null,
         who: row?.who ?? null,
@@ -93,8 +93,6 @@ export function flowStations(feed: LineFeed | undefined, rows: readonly HeldRow[
         passed: lane.stage === 'ready' && !lane.held,
       };
     });
-    const sizes = new Map<string, number>();
-    for (const block of blocks) if (block.check) sizes.set(block.check, (sizes.get(block.check) ?? 0) + 1);
     const held = blocks.filter(block => block.shape !== '' || block.word === 'main is failing');
     // Past the cap the feed lists 60 Lanes, held ones first, and counts the rest: the picture draws counts per stop,
     // with held Lanes still as blocks (the line's rule; lead 2026-11-20).
@@ -102,13 +100,13 @@ export function flowStations(feed: LineFeed | undefined, rows: readonly HeldRow[
     return {
       stop: stop.stage,
       name: stop.label,
-      n: at.length,
+      n: total,
+      count,
       held,
       blocks: over ? held : blocks,
       allBlocks: blocks,
       solid: over ? blocks.length - held.length : 0,
-      checks: [...sizes.values()].sort((a, b) => b - a),
-      passed: blocks.filter(block => block.passed).length,
+      passed,
     };
   });
 }

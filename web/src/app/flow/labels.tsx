@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { CSSProperties } from 'react';
+import { useId, type CSSProperties } from 'react';
 import { Glyph } from '../../ds';
+import { passedWaiting } from '../Line';
 import type { DrawerStop } from './drawer-model';
 import { shortWho, type Block, type Station } from './model';
 
@@ -88,6 +89,8 @@ export function StationLabel({
   open: { stop: DrawerStop; shown: boolean; go: (stop: DrawerStop) => void };
   revealHeld: (laneId: string) => void;
 }) {
+  const passedId = useId();
+  const showPassed = !loading && !unit && station.passed > 0;
   const n = unit ? unit.n : station.n;
   // Only a Lane that waits on the reader carries a tag: it links to its row under Needs you. Other held Lanes keep
   // their colour and glyph, and say why on hover.
@@ -102,14 +105,20 @@ export function StationLabel({
         type="button"
         className="flow-stop"
         aria-expanded={open.shown}
+        aria-describedby={showPassed ? passedId : undefined}
         onClick={() => open.go(open.stop)}
       >
-        <span className="n">{station.name}</span>
+        <span className="n">{station.name}</span>{' '}
         <span className="c num">
-          {loading ? '–' : n.toLocaleString('en')}
+          {loading ? '–' : (unit?.n ?? station.count).toLocaleString('en')}
           {unit && !loading ? <small>{unit.word}</small> : null}
         </span>
       </button>
+      {showPassed ? (
+        <span className="f flow-passed" id={passedId}>
+          {passedWaiting(station.passed)}
+        </span>
+      ) : null}
       {!bare && (facts || unit?.fact) ? <span className="f">{unit ? unit.fact : facts}</span> : null}
       {!big && tagged.length ? (
         <span className="tags">

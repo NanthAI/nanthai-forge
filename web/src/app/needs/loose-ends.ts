@@ -13,41 +13,47 @@ export type LooseRow = {
   at: number;
   /** Another open Lane of the same Item is live: this one was left behind, and its agent abandons it. */
   replacedBy?: string;
+  /** Current liveness evidence, for rows in the Still active group. */
+  heldBy?: string;
 };
 type Group = { reported: true; rows: LooseRow[]; more: boolean } | { reported: false; why: string };
 export type LooseEndsRead = {
   at: number;
   setAside: { authorityEpoch: number } | null;
-  groups: Record<GroupKey, Group>;
+  groups: Record<GroupKey, Group> & { active?: Group };
 };
 export type GroupKey = 'idle' | 'stopped' | 'checked' | 'projects' | 'dated';
 
-const META: { key: GroupKey; title: string; hint: string }[] = [
+const META: { key: GroupKey | 'active'; title: string; hint: string }[] = [
   { key: 'idle', title: 'Lanes nobody holds', hint: 'no save for days, oldest first' },
   { key: 'stopped', title: 'Stopped mid-task', hint: 'no save, sync or start for over 90 minutes' },
   { key: 'checked', title: 'Checked, never landed', hint: 'the check passed and nobody asked to land' },
   { key: 'projects', title: 'Leftover projects', hint: 'no landing for 30 days' },
   { key: 'dated', title: 'Waiting for a date', hint: 'a Done-when line due later' },
+  { key: 'active', title: 'Still active', hint: 'has a live landing or recent activity' },
 ];
 
 export function looseEndsView(read: LooseEndsRead, now: number) {
-  const groups = META.map(meta => {
+  const groups = META.flatMap(meta => {
     const group = read.groups[meta.key];
-    return {
-      ...meta,
-      reported: group.reported,
-      why: group.reported ? null : group.why,
-      more: group.reported && group.more,
-      rows: group.reported
-        ? group.rows.map(row => ({
-            ...row,
-            who: whoOf(row.actor, row.agent),
-            age: waited(row.at, now),
-          }))
-        : [],
-    };
+    if (!group) return [];
+    return [
+      {
+        ...meta,
+        reported: group.reported,
+        why: group.reported ? null : group.why,
+        more: group.reported && group.more,
+        rows: group.reported
+          ? group.rows.map(row => ({
+              ...row,
+              who: whoOf(row.actor, row.agent),
+              age: waited(row.at, now),
+            }))
+          : [],
+      },
+    ];
   });
-  const listed = groups.reduce((sum, group) => sum + group.rows.length, 0);
+  const listed = groups.reduce((sum, group) => sum + (group.key === 'active' ? 0 : group.rows.length), 0);
   const quiet = groups.filter(group => !group.reported).length;
   return {
     groups,

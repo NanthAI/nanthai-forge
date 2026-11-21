@@ -3,7 +3,7 @@
 // yard's words and counts are the shell's; the existing Lane page, queue view and overlap view add the title, the
 // person, the reason it is held and the queue order. Pure and read-free: every count here comes from rows in hand and
 // says when the rows are not all of them.
-import { lineStops, type LineFeed, type LineStage } from '../Line';
+import { lineStopCounts, lineStops, type LineFeed, type LineStage } from '../Line';
 import type { StateKind, StateWord } from '../../ds';
 import { QUIET_MS } from '../../../../src/lane-quiet';
 import { currentEntries, landingOf, laneState, notLandedWhy, stopWords, waitLine } from '../lane-state';
@@ -179,6 +179,7 @@ function clockWords(check: CheckClock, now: number, time: (ms: number) => string
 export type Yard = {
   rows: YardRow[];
   counts: Record<Band, number>;
+  checking: ReturnType<typeof lineStopCounts>;
   /** Lanes open beyond the feed's window (`more`), and whether that is a lower bound. */
   beyond: number;
   beyondIsLowerBound: boolean;
@@ -304,7 +305,7 @@ export function buildYard(
       position: null,
       state: said.kind,
       glyph: said.glyph,
-      word: said.word,
+      word: mark.stage === 'ready' && !mark.held ? said.glyph : said.word,
       why: said.why,
       detail: null,
       lanes: lane ? (perItem.get(lane.intentId) ?? 1) : 1,
@@ -389,6 +390,10 @@ export function buildYard(
   return {
     rows: byItem(rows),
     counts,
+    checking: lineStopCounts(
+      feed,
+      lineStops.find(stop => stop.stage === 'checking')!,
+    ),
     beyond: feed.more,
     beyondIsLowerBound: feed.moreIsLowerBound,
     open: rows.length + feed.more,

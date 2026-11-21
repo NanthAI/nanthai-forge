@@ -149,8 +149,7 @@ test('the Lane stops, desktop and phone, are named starting with the words they 
   const desktop = names(renderToStaticMarkup(createElement(Line, { feed, handle: 'm', project: 'p' })));
   assert.deepEqual(
     desktop.map(stop => stop.name),
-    // The Flow view's stops (Item 85f456c1): a passed check ('ready') counts at Checking.
-    ['Editing 1 Lane', 'Saved 0 Lanes', 'In queue 0 Lanes', 'Checking 2 Lanes, 1 held'],
+    ['Editing 1 Lane', 'Saved 0 Lanes', 'In queue 0 Lanes', 'Checking 0 2 passed, waiting, 1 held'],
   );
   const phone = names(
     renderToStaticMarkup(createElement(Line, { feed, handle: 'm', project: 'p', phone: true })),

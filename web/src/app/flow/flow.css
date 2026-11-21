@@ -132,6 +132,7 @@
   .flow-row.zero .c { color: var(--text-3); }
   .flow-row .w { display: flex; flex-wrap: wrap; gap: 4px var(--s-2); align-items: center; min-width: 0; }
   .flow-row .f { font-size: var(--t-meta); color: var(--text-3); min-width: 0; overflow-wrap: anywhere; }
+  .fv-stn .flow-passed, .flow-row .flow-passed { color: var(--waiting); }
   @media (max-width: 860px) {
     .flow-desk { display: none; }
     .flow-rows { display: block; }

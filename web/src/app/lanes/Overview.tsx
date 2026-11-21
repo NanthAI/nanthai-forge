@@ -111,6 +111,7 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
             <>
               <Yard
                 rows={shown}
+                checking={filter === 'all' && (!stop || stop === 'checking') ? yard.checking : undefined}
                 hrefOf={laneHref}
                 dense={shown.length > 12}
                 sharesOf={laneId => shares.get(laneId)}

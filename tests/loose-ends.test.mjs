@@ -5,6 +5,9 @@
 // and only a failed call is retried.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { moduleUrl } from './convex-module.mjs';
 import { projectRow, state } from './hosted-fixture.mjs';
 import { meterReads } from './hosted-read-set.mjs';
@@ -13,6 +16,9 @@ const { digest } = await import(moduleUrl('../src/state/hash.ts'));
 const loose = await import(moduleUrl('../convex/projectLooseEnds.ts'));
 const { looseEndsView, setAsideWord } = await import(moduleUrl('../web/src/app/needs/loose-ends.ts'));
 const { liveLanes } = await import('../dist/hosted-live-lanes.js');
+const { hostedAgentCli } = await import('../dist/hosted-agent-cli.js');
+const { recordLane } = await import('../dist/lane-registry.js');
+const { tryHeavySlot } = await import('../dist/heavy-slots.js');
 const day = 24 * 60 * 60 * 1000;
 /** A Lane record as the server keeps it (shape of a real resolution Lane), with its origin when it resolves one. */
 const laneRecord = (laneId, origin) =>
@@ -100,6 +106,205 @@ test('one read lists dormant and quiet Lanes oldest first and names the groups i
 test('another account cannot read loose ends', async () => {
   const s = fixture();
   await assert.rejects(read(s, 'stranger'), error => error.data?.code === 'PROJECT_UNAVAILABLE');
+});
+
+test('5a7d57a3: a 108-minute-old unsaved Lane in the live queue has a holder and no abandon advice', async t => {
+  const s = fixture();
+  const now = Date.now();
+  const presence = s.tables.projectHostedPresence.get('presence-quiet');
+  presence.at = now - 108 * 60_000;
+  presence.pathCount = 0;
+  presence.paths = [];
+  s.tables.projectHostedPresence.get('presence-busy').intentId = presence.intentId;
+  for (const lane of ['quiet', 'busy'])
+    s.tables.projectHostedRecordHeads.set(`head-${lane}`, {
+      _id: `head-${lane}`,
+      _creationTime: 1,
+      projectId: 'project',
+      kind: 'lane',
+      key: lane,
+      parent: presence.intentId,
+      status: 'active',
+      recordId: `record-${lane}`,
+      at: now,
+    });
+  const transport = { query: (name, args) => read(s, 'owner', args) };
+  const reads = meterReads(s.ctx);
+  const capture = async () => {
+    let result;
+    const cost = await reads.cost(async () => {
+      ({ result } = await liveLanes(transport, { view: 'loose-ends' }));
+    });
+    return { result, cost };
+  };
+  const atRest = await capture();
+  assert.ok(atRest.result.groups.stopped.rows[0].next);
+  for (const stage of ['queued', 'checking', 'ready']) {
+    const mark = {
+      _id: 'row-1',
+      _creationTime: 1,
+      projectId: 'project',
+      sourceId: 'row-2',
+      laneId: 'quiet',
+      stage,
+      changedAt: now,
+      held: false,
+      overlap: false,
+      ...(stage === 'checking' ? { check: '12345678' } : {}),
+    };
+    s.tables.projectLiveLineLanes.set(mark._id, mark);
+    const { result, cost } = await capture();
+    assert.deepEqual(result.groups.stopped.rows, []);
+    const [held] = result.groups.active.rows;
+    assert.equal(held.laneId, 'quiet');
+    assert.equal(held.heldBy, 'Landing queue');
+    assert.equal(held.next, undefined);
+    assert.equal(held.replacedBy, undefined);
+    const view = looseEndsView(result, now);
+    assert.equal(view.groups.find(group => group.key === 'active').rows[0].heldBy, 'Landing queue');
+    assert.equal(cost.documents - atRest.cost.documents, 1);
+    const bytes = cost.bytes - atRest.cost.bytes;
+    assert.ok(bytes > 0 && bytes <= 320);
+    t.diagnostic(`${stage}: 1 additional mark document, ${bytes} fixture B`);
+  }
+  reads.restore();
+});
+
+test('77d2e8bc: local CLI names a heavy slot, a running agent and recent activity in place of abandon advice', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'forge-loose-holders-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.mock.method(Date, 'now', () => 10_000_000);
+  const before = Date.now() - 108 * 60_000;
+  const candidates = ['heavy', 'running', 'recent', 'quiet'].map((name, i) => ({
+    laneId: `d0000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+    name,
+    at: before,
+    replacedBy: 'sibling',
+    next: 'abandon advice',
+  }));
+  const settings = join(directory, 'settings.json');
+  const settingsEnv = {
+    XDG_STATE_HOME: directory,
+    FORGE_HEAVY_DIR: directory,
+    FORGE_CLIENT_SETTINGS: settings,
+  };
+  const saved = Object.fromEntries(Object.keys(settingsEnv).map(key => [key, process.env[key]]));
+  Object.assign(process.env, settingsEnv);
+  t.after(() => {
+    for (const [key, value] of Object.entries(saved))
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+  });
+  writeFileSync(settings, JSON.stringify({ localHeavySlots: 1 }));
+  const laneDir = join(directory, 'lanes');
+  mkdirSync(laneDir);
+  const address = { url: 'https://forge.test', projectId: 'project' };
+  const oldRoot = join(laneDir, candidates[3].laneId);
+  mkdirSync(join(oldRoot, '.forge'), { recursive: true });
+  const nested = join(oldRoot, 'tests');
+  mkdirSync(nested);
+  writeFileSync(
+    join(oldRoot, '.forge', 'hosted-lane.json'),
+    JSON.stringify({
+      url: address.url,
+      selection: { projectId: address.projectId, laneId: candidates[0].laneId },
+    }),
+  );
+  const slot = tryHeavySlot(directory, 1);
+  assert.ok(slot);
+  writeFileSync(
+    join(slot, 'holder.json'),
+    JSON.stringify({
+      cwd: nested,
+      startedAt: before,
+      command: 'preflight',
+      maxMs: 0,
+    }),
+  );
+  for (const candidate of candidates.slice(1))
+    recordLane({
+      laneId: candidate.laneId,
+      root: join(laneDir, candidate.laneId),
+      ...address,
+      agent: 'calm-egret',
+      ...(candidate.name === 'running'
+        ? { running: { action: 'preflight', pid: process.pid, since: before } }
+        : {}),
+      lastActionAt: candidate.name === 'recent' ? Date.now() - 30 * 60_000 : before,
+    });
+  const stopped = { reported: true, rows: candidates, more: true, continueCursor: 'next-page' };
+  const command = { view: 'loose-ends' };
+  const transport = {
+    query: async () => ({ groups: { stopped } }),
+    dispatch: (_action, input) => liveLanes(transport, input),
+  };
+  const checkout = join(directory, 'cli-checkout');
+  mkdirSync(checkout);
+  const hosted = await hostedAgentCli(checkout, 'lanes', command, address, transport);
+  assert.deepEqual(hosted.result.groups, { stopped }, 'MCP dispatch sees hosted evidence only');
+  const { result } = await hostedAgentCli(checkout, 'lanes', command, address, transport, undefined, true);
+  assert.deepEqual(result.groups.stopped.rows, [candidates[3]]);
+  assert.equal(result.groups.stopped.continueCursor, stopped.continueCursor);
+  assert.deepEqual(
+    result.groups.active.rows.map(row => [row.name, row.heldBy]),
+    [
+      ['heavy', 'Local heavy slot 1 (preflight)'],
+      ['running', '@calm-egret (running a local command)'],
+      ['recent', '@calm-egret (recent activity)'],
+    ],
+  );
+  assert.ok(result.groups.active.rows.every(row => !row.next && !row.replacedBy));
+});
+
+test('queue evidence reads only the 25 displayed candidates and keeps the cursor even if every candidate is active', async t => {
+  const s = fixture();
+  const presence = s.tables.projectHostedPresence;
+  const first = presence.get('presence-quiet');
+  const marks = [];
+  for (let n = 0; n < 26; n++) {
+    const laneId = `d0000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    if (n === 0) presence.delete(first._id);
+    presence.set(`presence-${n}`, {
+      ...first,
+      _id: `presence-${n}`,
+      _creationTime: n,
+      laneId,
+      intentId: `intent-${n}`,
+    });
+    marks.push({
+      _id: `row-${n}`,
+      _creationTime: n,
+      projectId: 'project',
+      laneId,
+      sourceId: `row-${n + 100}`,
+      stage: 'checking',
+      check: '12345678',
+      changedAt: first.at,
+      held: false,
+      overlap: false,
+    });
+  }
+  const reads = meterReads(s.ctx);
+  const costBefore = await reads.cost(() => read(s, 'owner'));
+  for (const mark of marks) s.tables.projectLiveLineLanes.set(mark._id, mark);
+  let result;
+  const costAfter = await reads.cost(async () => {
+    result = await read(s, 'owner');
+  });
+  assert.deepEqual(result.groups.stopped.rows, []);
+  assert.equal(result.groups.active.rows.length, 25);
+  const extraDocuments = costAfter.documents - costBefore.documents;
+  const extraBytes = costAfter.bytes - costBefore.bytes;
+  assert.equal(extraDocuments, 25);
+  assert.ok(extraBytes <= 25 * 320);
+  t.diagnostic(`full stopped page: +${extraDocuments} documents, +${extraBytes} fixture B`);
+  const next = await read(s, 'owner', { cursor: result.groups.stopped.continueCursor });
+  assert.deepEqual(
+    next.groups.active.rows.map(row => row.laneId),
+    [marks.at(-1).laneId],
+  );
+  assert.equal(next.groups.stopped.continueCursor, null);
+  reads.restore();
 });
 
 test('77d2e8bc: a CLI tidy pass reaches every stopped Lane once across timestamp ties and a removed boundary', async t => {

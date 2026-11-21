@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // The yard (DESIGN.md figures): every open Lane on the shell's four stops (Editing, Saved, In queue, Checking) and main, in bands, stuck work first. The
-// counts per stop are the shell strip's alone, never repeated here (owner dogfood 2026-11-17). Each
+// Checking and passed-waiting use the shell strip's counts. Each
 // row is a link to its Lane; the band that waits on the reader is the first stop. Static markup: no behaviour layer.
 // A running check (Item ecd6e610) says how long it has run against the project's usual check, and its mark glides
 // along the Checking stop by a CSS animation drawn from the check's start: the browser moves it with no script per
@@ -12,7 +12,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { Avatar, Band, State } from '../../ds';
 import { useReadsAsleep } from '../../live-reads';
 import { A } from '../frames';
-import type { LineStage } from '../Line';
+import { passedWaiting, type lineStopCounts, type LineStage } from '../Line';
 import {
   CHECK_FROM,
   CHECK_TO,
@@ -38,12 +38,14 @@ const order: readonly BandName[] = ['needs', 'queue', 'work', 'quiet'];
 
 export function Yard({
   rows,
+  checking,
   hrefOf,
   dense,
   sharesOf,
   sharesHref,
 }: {
   rows: readonly YardRow[];
+  checking?: ReturnType<typeof lineStopCounts> | undefined;
   hrefOf: (laneId: string) => string;
   dense: boolean;
   /** What a Lane shares with other open Lanes, from the one overlap read; absent when it shares nothing. */
@@ -61,7 +63,11 @@ export function Yard({
             <Band
               title={bandTitles[band].title}
               count={inBand.length}
-              hint={bandTitles[band].hint}
+              hint={
+                band === 'queue' && checking?.passed
+                  ? `Checking ${checking.count.toLocaleString('en')} · ${passedWaiting(checking.passed)}`
+                  : bandTitles[band].hint
+              }
               needs={band === 'needs'}
             />
             {inBand.map(row => {

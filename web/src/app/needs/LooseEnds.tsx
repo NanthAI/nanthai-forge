@@ -86,9 +86,9 @@ export function LooseEndsView({
       `${done.toLocaleString('en')} set aside${skipped ? `, ${skipped.toLocaleString('en')} skipped or failed, named in the list` : ''}.`,
     );
   };
-  const failed = Object.entries(outcome)
-    .filter(([, result]) => setAsideWord(result).retry)
-    .map(([id]) => id);
+  const idle = view.groups.find(group => group.key === 'idle')?.rows ?? [];
+  const failed = idle.filter(row => outcome[row.laneId] === 'failed').map(row => row.laneId);
+  const selected = idle.filter(row => picked.has(row.laneId)).map(row => row.laneId);
   return (
     <div className="needs-me loose-ends">
       <Head
@@ -117,10 +117,10 @@ export function LooseEndsView({
                 <Key
                   size="sm"
                   kind="primary"
-                  disabled={busy || !picked.size}
-                  onClick={() => void run([...picked])}
+                  disabled={busy || !selected.length}
+                  onClick={() => void run(selected)}
                 >
-                  Set aside {picked.size ? picked.size.toLocaleString('en') : ''}
+                  Set aside {selected.length ? selected.length.toLocaleString('en') : ''}
                 </Key>
               </span>
             ) : undefined
@@ -172,6 +172,7 @@ export function LooseEndsView({
                         </span>
                       </>
                     ) : null}
+                    {row.heldBy ? ` · ${row.heldBy}` : ''}
                   </span>
                   <span className="r">
                     {word ? (

@@ -55,6 +55,24 @@ export const lineStops: readonly {
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
+/** Count Lanes in the check phase and passed Lanes separately. A recorded run can check several Lanes together. */
+export function lineStopCounts(feed: LineFeed | undefined, stop: (typeof lineStops)[number]) {
+  let total = 0;
+  let held = 0;
+  let passed = 0;
+  let count = 0;
+  for (const lane of feed?.lanes ?? []) {
+    if (!stop.of.includes(lane.stage)) continue;
+    total++;
+    if (lane.held) held++;
+    if (lane.stage === 'ready') passed++;
+    else if (lane.stage !== 'checking' || !lane.held) count++;
+  }
+  return { total, held, passed, count };
+}
+
+export const passedWaiting = (count: number) => `${count.toLocaleString('en')} passed, waiting`;
+
 export function Line({
   feed,
   handle,
@@ -74,33 +92,48 @@ export function Line({
       aria-busy={feed ? undefined : true}
     >
       {lineStops.map(stop => {
-        const at = feed?.lanes.filter(lane => stop.of.includes(lane.stage)) ?? [];
-        const held = at.filter(lane => lane.held).length;
+        const { total, count, held, passed } = lineStopCounts(feed, stop);
         const shown = phone ? stop.short : stop.label;
         // The name starts with what the stop shows ("Editing 1"), so speech and voice control match the screen.
         const words = feed
-          ? `${shown} ${plural(at.length, 'Lane')}${shown === stop.label ? '' : `, ${stop.label.toLowerCase()}`}${held ? `, ${held} held` : ''}`
+          ? `${shown} ${passed ? `${count} ${passedWaiting(passed)}` : plural(count, 'Lane')}${shown === stop.label ? '' : `, ${stop.label.toLowerCase()}`}${held ? `, ${held} held` : ''}`
           : `${shown}, not loaded yet`;
+        const label = (
+          <span className="lbl" aria-hidden="true">
+            {shown}
+          </span>
+        );
+        const number = (
+          <span className="n" aria-hidden="true">
+            {count}
+          </span>
+        );
         return (
           <a
             key={stop.stage}
             href={`${flowHref}?open=${stop.stage}`}
             onClick={followLink}
-            className={feed && !at.length ? 'stop zero' : 'stop'}
+            className={passed ? 'stop checking-split' : feed && !total ? 'stop zero' : 'stop'}
             data-stop={stop.stage}
             aria-label={words}
           >
-            <span className="lbl" aria-hidden="true">
-              {shown}
-            </span>
-            <span className="slot" aria-hidden="true" />
-            {/* A space between the words and the count, so the shown text reads "Editing 1" (the flex row drops it). */}
-            {feed ? ' ' : null}
-            {feed ? (
-              <span className="n" aria-hidden="true">
-                {at.length}
-              </span>
-            ) : null}
+            {passed ? (
+              <>
+                <span className="line-checking">
+                  {label} {number}
+                </span>{' '}
+                <span className="line-passed" aria-hidden="true" title={passedWaiting(passed)}>
+                  {passed.toLocaleString('en')} passed
+                  <span className="line-passed-detail">, waiting</span>
+                </span>
+              </>
+            ) : (
+              <>
+                {label}
+                <span className="slot" aria-hidden="true" />
+                {feed ? <> {number}</> : null}
+              </>
+            )}
           </a>
         );
       })}

@@ -238,8 +238,8 @@ export function Picture({
           blocks: [],
           allBlocks: [],
           solid: 0,
-          checks: [],
           passed: 0,
+          count: 0,
         };
         const unit = station ? undefined : mainUnit;
         const key: DrawerStop = station?.stop ?? 'main';

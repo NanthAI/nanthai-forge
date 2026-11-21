@@ -86,7 +86,7 @@ export function laneDrawer(
       id: block.laneId,
       title: block.head ?? titleOf(m, block.laneId),
       who: block.who ?? whoOf(m),
-      block: block.shape || block.word === 'main is failing' ? block : null,
+      block: block.passed || block.shape || block.word === 'main is failing' ? block : null,
       ago: Math.max(0, drawnAt - (mark?.changedAt ?? drawnAt)),
       needsYou: block.needsYou,
     };

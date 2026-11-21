@@ -243,7 +243,12 @@ Run long-lived servers (Vite/dev servers) directly, outside heavy.
 node --test with no test file path is refused (Node would run the whole suite); name the files.
 `;
 /** Metadata contains only the executable basename, never arguments or environment. */
-export function heavyStatus(directory: string, slots: number, cwd = process.cwd()) {
+export function heavySlotHolders(
+  directory: string,
+  slots: number,
+  cwd = process.cwd(),
+  identifyLane = laneOf,
+) {
   const holders = [];
   for (let index = 1; index <= slots; index++) {
     const slot = join(directory, String(index));
@@ -263,7 +268,7 @@ export function heavyStatus(directory: string, slots: number, cwd = process.cwd(
       holders.push({
         slot: index,
         pid,
-        lane: laneOf(folder),
+        lane: identifyLane(folder),
         elapsedMs,
         command: typeof metadata.command === 'string' ? basename(metadata.command) : null,
         selfHeld: folder !== null && canonicalRoot(folder) === canonicalRoot(cwd),
@@ -273,6 +278,11 @@ export function heavyStatus(directory: string, slots: number, cwd = process.cwd(
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
   }
+  return holders;
+}
+
+export function heavyStatus(directory: string, slots: number, cwd = process.cwd()) {
+  const holders = heavySlotHolders(directory, slots, cwd);
   const queue = readQueue(directory, { deep: true }).map((ticket, index) => ({
     position: index + 1,
     pid: ticket.pid,

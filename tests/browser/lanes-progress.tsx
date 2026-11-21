@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // The yard's running checks (Item ecd6e610) on synthetic data, through its real model and row: a check running for
-// `?elapsed=` minutes (default 3), one past the usual slowest check (overdue), one that passed (Ready to land) and one
+// `?elapsed=` minutes (default 3), one past the usual slowest check (overdue), one that passed and waits its turn, and one
 // that failed, against a project whose checks usually take 10 min and at slowest 18 min. Starts count back from the
 // real clock, so the browser's own animation timeline places the marks. A watch region: the first stop's edge beat
 // (ds-beat) would add an animation of its own to what the test counts.

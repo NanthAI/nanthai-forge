@@ -412,7 +412,7 @@ test('d4b68402: a Ready row behind a checking one says what it waits on', () => 
   };
   const yard = model.buildYard(feed(lanes), [meta('first', 'a', 'A'), meta('second', 'b', 'B')], queue, NOW);
   const second = yard.rows.find(row => row.laneId === 'second');
-  assert.equal(second.word, 'Ready to land');
+  assert.equal(second.word, 'Waiting its turn');
   assert.equal(second.why, 'waits for #1: its check is running');
   assert.equal(second.longWait, false);
 });

@@ -101,6 +101,7 @@ export function LooseFoldView({
                       {' '}
                       {row.who ? <Who handle={row.who} /> : null} {row.age}
                       {row.replacedBy ? `, replaced by Lane ${row.replacedBy.slice(0, 8)}` : ''}
+                      {row.heldBy ? ` · ${row.heldBy}` : ''}
                     </span>
                   </span>
                   <span className="r">

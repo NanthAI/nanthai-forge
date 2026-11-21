@@ -97,6 +97,19 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
       })),
     );
   try {
+    await t.test(
+      '5a7d57a3: the yard reports four checking and six amber Lanes waiting their turn',
+      async t => {
+        for (const width of [1440, 390]) {
+          const page = await open(t, { width, height: 1000 }, '?stall');
+          const queue = page.getByRole('list', { name: 'In the landing queue' });
+          assert.match(await queue.locator('.band').textContent(), /Checking 4 · 6 passed, waiting/);
+          const waiting = queue.locator('.actn .st[data-st="waiting"]');
+          assert.deepEqual(await waiting.allTextContents(), Array(6).fill('Waiting its turn'));
+        }
+      },
+    );
+
     await t.test('held for approval, replaced Lanes below the live one, and the wait named', async t => {
       const page = await open(t, DESK);
       const all = await rows(page);
@@ -116,7 +129,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
       assert.deepEqual(
         [waiting.word, waiting.why],
         [
-          'Ready to land',
+          'Waiting its turn',
           'waits for #1: its check restarted 3 times because main moved longer than a usual check',
         ],
       );

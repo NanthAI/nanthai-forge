@@ -134,7 +134,27 @@ const entries: QueueEntry[] = [
     lastProgressAt: at(58),
   },
 ];
-const yard = buildYard(feed, lanes, { total: 2, held: 1, listed: 3, more: false, entries }, NOW);
+const stallMarks = Array.from({ length: 10 }, (_, i) =>
+  mark(
+    `a0000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+    i < 4 ? 'checking' : 'ready',
+    i === 0 ? 108 : 10,
+  ),
+);
+const stallEntries = stallMarks.map((lane, i) => ({
+  laneId: lane.laneId,
+  position: i + 1,
+  phase: lane.stage,
+  landingState: { state: i < 4 ? 'checking' : 'waiting-for-order' },
+}));
+const yard = params.has('stall')
+  ? buildYard(
+      { ...feed, lanes: stallMarks },
+      [],
+      { total: 10, held: 0, listed: 10, more: false, entries: stallEntries },
+      NOW,
+    )
+  : buildYard(feed, lanes, { total: 2, held: 1, listed: 3, more: false, entries }, NOW);
 const titles = new Map(lanes.map(lane => [lane.laneId, lane.intent]));
 const titleOf = (laneId: string) => titles.get(laneId) ?? `Lane ${laneId.slice(0, 8)}`;
 const pairs = waits(
@@ -162,6 +182,7 @@ createRoot(document.getElementById('root')!).render(
     >
       <Yard
         rows={yard.rows}
+        checking={yard.checking}
         hrefOf={id => `#${id}`}
         dense={params.get('dense') === '1'}
         sharesOf={id => shares.get(id)}

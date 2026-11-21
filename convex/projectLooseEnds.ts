@@ -15,7 +15,7 @@ import { dormantCutoff } from './projectHostedDormancy';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { sourceAuthority } from '../src/hosted-source-authority';
 import { ForgeError, invariant } from '../src/errors';
-import { QUIET_MS } from '../src/lane-quiet';
+import { LOOSE_ENDS_ACTIVITY_MS, QUIET_MS, withLooseEndsHolders } from '../src/lane-quiet';
 import { report } from './errors';
 import { hostedRecordBody } from './projectHostedRecords';
 
@@ -180,8 +180,34 @@ async function continueStopped(ctx: QueryCtx, { projectId, upTo, after }: Stoppe
   return rows;
 }
 
+/** Read only displayed candidates. The lookahead is used for the cursor and replacement evidence. */
+async function currentHolders(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  candidates: Presence[],
+  now: number,
+) {
+  const holders = new Map<string, string>();
+  await Promise.all(
+    candidates.map(async ({ laneId, at }) => {
+      if (at >= now - LOOSE_ENDS_ACTIVITY_MS) {
+        holders.set(laneId, 'Recent activity');
+        return;
+      }
+      const mark = await ctx.db
+        .query('projectLiveLineLanes')
+        .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
+        .unique();
+      if (mark?.stage === 'queued' || mark?.stage === 'checking' || mark?.stage === 'ready')
+        holders.set(laneId, 'Landing queue');
+    }),
+  );
+  return holders;
+}
+
 /** Any member's read. Costs: the project row, then at most two indexed presence ranges of 26 rows each (oldest first),
  * or one stopped page over at most three disjoint index ranges (26 rows total) for a continuation,
+ * one indexed live-line mark lookup per displayed candidate (at most 25 per group),
  * and per distinct Item among them one Lane-head read of at most 6 rows, a Lane-record point read per listed quiet
  * Lane of an Item with several open Lanes and several listed quiet Lanes (at most 52, about 1 KB each), plus a presence point read per other Lane until a live one is
  * found. Re-runs only when a Lane in those ranges, or
@@ -208,9 +234,15 @@ export const read = query({
             : presenceBetween(ctx, projectId, cutoff, quietFrom),
       ]);
       const quiet = [...(idle ?? []), ...stopped];
-      const replacedBy = quiet.length
-        ? await replacements(ctx, projectId, quiet, quietFrom)
-        : new Map<string, string>();
+      const [replacedBy, holders] = await Promise.all([
+        quiet.length ? replacements(ctx, projectId, quiet, quietFrom) : new Map<string, string>(),
+        currentHolders(
+          ctx,
+          projectId,
+          [...(idle ?? []).slice(0, LOOSE_ENDS_LIMIT), ...stopped.slice(0, LOOSE_ENDS_LIMIT)],
+          now,
+        ),
+      ]);
       const boundary = stopped.length > LOOSE_ENDS_LIMIT ? stopped[LOOSE_ENDS_LIMIT - 1] : undefined;
       const stoppedGroup = {
         ...listed(stopped, replacedBy),
@@ -223,21 +255,26 @@ export const read = query({
         at: now,
         // The owner sets Lanes aside through projectHostedDormant:abandon, which needs the current authority epoch.
         setAside: project.owner === user.subject ? { authorityEpoch: sourceAuthority(project).epoch } : null,
-        groups: position
-          ? { stopped: stoppedGroup }
-          : {
-              idle: idle
-                ? listed(idle, replacedBy)
-                : notReported('This project turned dormant Lanes off (agentDefaults.dormantAfterDays 0).'),
-              stopped: stoppedGroup,
-              checked: notReported('A passed check that nobody asked to land is not recorded per Lane yet.'),
-              projects: notReported(
-                'Projects with no landing for 30 days need an account-wide read; it is not built yet.',
-              ),
-              dated: notReported(
-                'Done-when lines carry no date yet; that needs the planning contract change.',
-              ),
-            },
+        groups: withLooseEndsHolders(
+          position
+            ? { stopped: stoppedGroup }
+            : {
+                idle: idle
+                  ? listed(idle, replacedBy)
+                  : notReported('This project turned dormant Lanes off (agentDefaults.dormantAfterDays 0).'),
+                stopped: stoppedGroup,
+                checked: notReported(
+                  'A passed check that nobody asked to land is not recorded per Lane yet.',
+                ),
+                projects: notReported(
+                  'Projects with no landing for 30 days need an account-wide read; it is not built yet.',
+                ),
+                dated: notReported(
+                  'Done-when lines carry no date yet; that needs the planning contract change.',
+                ),
+              },
+          holders,
+        ),
       });
     } catch (error) {
       return report(error);

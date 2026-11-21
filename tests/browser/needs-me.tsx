@@ -21,10 +21,11 @@ import { stressText } from '../../web/src/ds/reference/stress-text';
 import type { LooseEndsRead } from '../../web/src/app/needs/loose-ends';
 
 const params = new URLSearchParams(location.search);
+const stall = params.get('data') === 'stall';
 document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
 const first = params.get('data') === 'first';
 const connect = params.get('data') === 'connect';
-const calm = params.get('data') === 'calm';
+const calm = params.get('data') === 'calm' || stall;
 const variant = params.get('data');
 const stress = variant === 'stress';
 const worst = stress || variant === 'worst' || variant === 'over';
@@ -247,6 +248,26 @@ const loose: LooseEndsRead = {
     checked: { reported: true, more: false, rows: [] },
     projects: { reported: false, why: 'the project list is read on its own page' },
     dated: { reported: true, more: false, rows: [] },
+    ...(stall
+      ? {
+          active: {
+            reported: true,
+            more: false,
+            rows: [
+              {
+                laneId: uuid(500),
+                intentId: uuid(600),
+                title: 'Compare and restore Item versions',
+                actor: 'sample-one',
+                agent: 'zesty-salmon',
+                paths: 0,
+                at: ago(108),
+                heldBy: 'Landing queue',
+              },
+            ],
+          } as const,
+        }
+      : {}),
   },
 };
 
@@ -414,40 +435,53 @@ const towers = [
   ...Array.from({ length: 7 }, (_, i) => moving(300 + i, 'checking', 32 - i, `check-${i}`)),
   ...Array.from({ length: 24 }, (_, i) => moving(320 + i, 'checking', 24 - i, 'tower')),
 ];
+const stalledLanes = [
+  ...Array.from({ length: 4 }, (_, i) => moving(100 + i, 'checking', i === 0 ? 108 : 4 + i, `stall-${i}`)),
+  ...Array.from({ length: 6 }, (_, i) => moving(110 + i, 'ready', 10 + i)),
+];
 const fixtureFeed: LineFeed = {
   lanes: quiet
     ? []
     : variant === 'towers'
       ? towers
-      : first || connect
-        ? [moving(81, 'editing', 1)]
-        : variant === 'over'
-          ? [...worstLanes, ...Array.from({ length: 4 }, (_, i) => moving(200 + i, 'saved', 1))]
-          : worst
-            ? worstLanes
-            : busyLanes,
+      : stall
+        ? stalledLanes
+        : first || connect
+          ? [moving(81, 'editing', 1)]
+          : variant === 'over'
+            ? [...worstLanes, ...Array.from({ length: 4 }, (_, i) => moving(200 + i, 'saved', 1))]
+            : worst
+              ? worstLanes
+              : busyLanes,
   more: variant === 'over' ? 17 : 0,
   moreIsLowerBound: false,
   main: variant === 'empty' ? null : { head: 'b'.repeat(64), at: new Date(ago(62)).toISOString() },
   ...(first || connect || variant === 'empty' ? {} : { flow }),
   checks: quiet
     ? { runs: [], free: 4 }
-    : worst
+    : stall
       ? {
-          runs: [
-            { groups: ['c0ffee01'], lanes: 4, at: ago(4) },
-            { groups: ['c0ffee00'], lanes: 3, at: ago(3) },
-            { groups: ['c0ffee02'], lanes: 3, at: ago(2), reserved: true },
-          ],
-          free: 1,
+          runs: stalledLanes
+            .slice(0, 4)
+            .map((lane, i) => ({ groups: [`stall-${i}`], lanes: 1, at: lane.changedAt })),
+          free: 0,
         }
-      : {
-          runs: [
-            { groups: ['c0ffee01'], lanes: 2, at: ago(4) },
-            { groups: ['c0ffee02'], lanes: 1, at: ago(2) },
-          ],
-          free: 2,
-        },
+      : worst
+        ? {
+            runs: [
+              { groups: ['c0ffee01'], lanes: 4, at: ago(4) },
+              { groups: ['c0ffee00'], lanes: 3, at: ago(3) },
+              { groups: ['c0ffee02'], lanes: 3, at: ago(2), reserved: true },
+            ],
+            free: 1,
+          }
+        : {
+            runs: [
+              { groups: ['c0ffee01'], lanes: 2, at: ago(4) },
+              { groups: ['c0ffee02'], lanes: 1, at: ago(2) },
+            ],
+            free: 2,
+          },
 };
 
 const projectName = stress ? stressText.identifier : 'tidepool';

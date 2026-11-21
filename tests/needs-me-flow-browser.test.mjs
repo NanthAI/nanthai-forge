@@ -219,12 +219,15 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
             stop,
             line: text(document.querySelector(`header.top .line a.stop[data-stop="${stop}"] .n`)),
             label: text(document.querySelector(`.fv-pic .fv-stn[data-stop="${stop}"] .c`)),
-            blocks: String(document.querySelectorAll(`.fv-pic g[data-stop="${stop}"] .fv-cube`).length),
+            passed:
+              parseInt(text(document.querySelector(`.fv-pic .fv-stn[data-stop="${stop}"] .flow-passed`))) ||
+              0,
+            blocks: document.querySelectorAll(`.fv-pic g[data-stop="${stop}"] .fv-cube`).length,
           }));
         }, STOPS);
-        for (const { stop, line, label, blocks } of counts) {
+        for (const { stop, line, label, passed, blocks } of counts) {
           assert.equal(label, line, `${data} ${stop}: the picture says the top bar's count`);
-          assert.equal(blocks, line, `${data} ${stop}: one block per open Lane`);
+          assert.equal(blocks, Number(line) + passed, `${data} ${stop}: one block per open Lane`);
         }
         const lanesOpen = await region(page, 'On the way to main').locator('.ph .cnt').textContent();
         const standing = await page.locator('.needs-me').textContent();
@@ -241,6 +244,68 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
       const line = await phone.locator('header.top .line a.stop .n').allTextContents();
       assert.deepEqual(rows.slice(0, 4), line, 'the phone rows count what the line counts');
     });
+
+    await t.test(
+      '5a7d57a3: four checks run while six amber Lanes wait, and the old queued Lane is active',
+      async t => {
+        for (const width of [1440, 390]) {
+          for (const theme of ['dark', 'light']) {
+            const page = await open(t, width, 'stall', { theme });
+            const line = page.locator('.line:visible [data-stop="checking"]');
+            assert.equal(await line.locator('.n').textContent(), '4');
+            assert.equal(
+              await line.locator('.line-passed').innerText(),
+              width === 390 ? '6 passed' : '6 passed, waiting',
+            );
+            assert.match(await line.getAttribute('aria-label'), /Check(?:ing)? 4 6 passed, waiting/);
+            const station =
+              width === 390
+                ? page.locator('.flow-rows .flow-row').nth(3)
+                : page.locator('.fv-pic .fv-stn[data-stop="checking"]');
+            assert.equal(await station.locator('.c').textContent(), '4');
+            assert.equal(await station.locator('.flow-passed').textContent(), '6 passed, waiting');
+            const button = station.getByRole('button', { name: 'Checking 4' });
+            assert.equal(await button.count(), 1);
+            assert.equal(
+              await button.getAttribute('aria-describedby'),
+              await station.locator('.flow-passed').getAttribute('id'),
+            );
+            const waiting =
+              width === 390
+                ? station.locator('.flow-marks [data-st="waiting"]')
+                : page.locator('.fv-pic g[data-stop="checking"] .fv-cube[data-st="waiting"]');
+            assert.equal(await waiting.count(), 6);
+            const fits = await line.evaluate(el => {
+              const stop = el.getBoundingClientRect();
+              return (
+                [...el.querySelectorAll('.lbl, .n, .line-passed')].every(item => {
+                  const box = item.getBoundingClientRect();
+                  return (
+                    box.left >= stop.left &&
+                    box.right <= stop.right &&
+                    box.top >= stop.top &&
+                    box.bottom <= stop.bottom &&
+                    item.scrollWidth <= item.clientWidth
+                  );
+                }) && document.documentElement.scrollWidth <= innerWidth
+              );
+            });
+            assert.ok(fits, `the split fits at ${width}px in ${theme}`);
+            const loose = region(page, 'Loose ends');
+            assert.match(
+              await loose.textContent(),
+              /Still active.*Compare and restore Item versions.*Landing queue/,
+            );
+            assert.equal(await loose.getByText('Stopped mid-task').count(), 0);
+            if (shots) await page.screenshot({ path: join(shots, `stall-${width}-${theme}.png`) });
+            await line.click();
+            const drawer = page.getByRole(width === 390 ? 'dialog' : 'region', { name: 'Checking' });
+            await drawer.waitFor();
+            assert.equal(await drawer.getByText('Waiting its turn', { exact: true }).count(), 6);
+          }
+        }
+      },
+    );
 
     await t.test('the home layout: picture left, Needs you right, FYI and Loose ends below', async t => {
       const ratio = async page => {
