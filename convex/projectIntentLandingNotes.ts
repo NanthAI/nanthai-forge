@@ -62,6 +62,25 @@ export async function postIntentLandingNote(
   return true;
 }
 
+/** Follow-up Intents have deterministic ids and can leave earlier Lanes open. */
+export async function itemIntentChain(ctx: QueryCtx, projectId: Id<'hostedProjects'>, itemId: string) {
+  const intents: string[] = [];
+  let current = itemId;
+  let head = await recordHead(ctx, projectId, 'intent', current);
+  let state: string | null = null;
+  for (let hop = 0; head && hop <= maxIntentChain; hop++) {
+    intents.push(current);
+    state = head.status.startsWith('journal:') ? null : head.status;
+    if (!intentFinished(head.status.replace(/^journal:/, ''))) break;
+    const next = successorIntentId(current);
+    const following = await recordHead(ctx, projectId, 'intent', next);
+    if (!following) break;
+    current = next;
+    head = following;
+  }
+  return { intents, state };
+}
+
 /** The Item's system landing comments, newest first: the Intents of its chain (the Issue's own id, then
  * `successorIntentId` hops while the Intent is finished, the same walk as `intentStates`), and per Intent
  * one index range of its newest notes. At most LANDING_NOTES_PER_ITEM in all. An Item with no started
@@ -72,15 +91,7 @@ export async function intentLandingComments(
   itemId: string,
   limit = LANDING_NOTES_PER_ITEM,
 ) {
-  const intents: string[] = [];
-  let at = itemId;
-  let head = await recordHead(ctx, projectId, 'intent', at);
-  for (let hop = 0; head && hop <= maxIntentChain; hop++) {
-    intents.push(at);
-    if (!intentFinished(head.status.replace(/^journal:/, ''))) break;
-    at = successorIntentId(at);
-    head = await recordHead(ctx, projectId, 'intent', at);
-  }
+  const { intents } = await itemIntentChain(ctx, projectId, itemId);
   const notes = [];
   for (const intentId of intents) {
     const rows = await ctx.db

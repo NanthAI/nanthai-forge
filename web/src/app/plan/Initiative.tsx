@@ -17,6 +17,7 @@ import { groupBreakdown, statusOf, type PlanGroup, type PlanView } from './model
 import { breakdownTotal, breakdownWords } from '../progress';
 import type { Put, Settled } from './Plan';
 import { BreakdownWords, COLS, Line, Owner, Roll, Status } from './rows';
+import { InitiativeWork, type ReadInitiativeWork } from './InitiativeWork';
 import { workersOf, type Workers } from './workers';
 
 type At = (patch: Partial<PlaceProps['route']>) => string;
@@ -53,6 +54,7 @@ export function InitiativePage({
   at,
   put,
   reads,
+  readWork,
   closed,
   dropped,
   onShowDone,
@@ -70,6 +72,7 @@ export function InitiativePage({
   at: At;
   put: Put;
   reads?: Reads | undefined;
+  readWork?: ReadInitiativeWork | undefined;
   closed: Settled;
   dropped: Settled;
   /** Subscribes to (id) or drops (null) this Initiative's done and dropped pages. */
@@ -266,6 +269,9 @@ export function InitiativePage({
               </>
             ) : null}
           </dl>
+          {readWork ? (
+            <InitiativeWork key={initiative.id} initiativeId={initiative.id} read={readWork} />
+          ) : null}
           <Band title="About" />
           <div className="plan-about" dir="auto">
             {full.item === undefined ? (

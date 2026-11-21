@@ -65,7 +65,7 @@ const linkedOpen = rows.find(row => row.id === uuid(10));
 const linkedDeleted = shelfRows.deleted[0];
 const linkBackend = fakeConvex({
   resolve(name, args) {
-    if (name === 'projectPlanView:read') return { ...read, rows: JSON.stringify([linkedOpen]) };
+    if (name === 'projectPlanView:read') return { ...read, rows: JSON.stringify(window.readItemWork ? [launch, linkedOpen] : [linkedOpen]) };
     if (name === 'projectPlanSettled:item') {
       const candidates = [linkedOpen, linkedDeleted, ...settledRows].filter(row => row.id.startsWith(args.id));
       if (candidates.length !== 1) return null;
@@ -132,6 +132,7 @@ function Fixture() {
         projectName="Synthetic project" viewerHandle="example-builder" /></ConvexProvider> :
       <PlanScreenView route={route} projectId={rest === uuid(16) ? undefined : "synthetic"} projectName="Synthetic project" feed={undefined} read={read}
       put={put} run={run} purge={purge} reads={reads} query={query} go={go} viewer="example-builder"
+      readInitiativeWork={window.readItemWork ? (initiativeId, cursor) => window.readItemWork({initiativeId, cursor}) : undefined}
       closed={query.scope === 'open' && !rest ? undefined : settled}
       shelved={shelfRows[query.scope] ? { ...settled, rows: shelfRows[query.scope] } : undefined}
       shelvedItem={[...shelfRows.archived, ...shelfRows.deleted].find(row => row.id === rest) ?? null} showDone={id => window.doneFor.push(id)} />}</React.Suspense>
@@ -561,11 +562,20 @@ test('plan views and bulk bar: real components keep the view in the address and 
     assert.deepEqual(errors, []);
     await context.close();
   }
+  const initiativeFixture = await itemWorkFixture({ initiativeId: launchId, details: true });
   for (const width of [1440, 390])
     for (const theme of ['dark', 'light'])
       await t.test(`initiative page ${width} ${theme}: no clipping or axe violations`, async () => {
-        const { page, errors, context } = await open(width, theme, `/${launchId}`);
+        const calls = [];
+        const { page, errors, context } = await open(width, theme, `/${launchId}`, false, false, args => {
+          calls.push(args);
+          return initiativeFixture.readInitiativeRaw(args);
+        });
+        const progress = page.getByRole('region', { name: 'Progress' });
+        await progress.getByText('At least 2', { exact: true }).waitFor();
+        assert.match(await progress.textContent(), /Lanes open1Landings2Files touchedAt least 2/);
         await page.getByRole('button', { name: 'Done and dropped Items' }).click();
+        assert.deepEqual(calls, [{ initiativeId: launchId, cursor: null }]);
         await check(page, `initiative ${width} ${theme}`);
         if (shots)
           await page.screenshot({
@@ -793,6 +803,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
   // The same Item has 12 Lanes in both cases, so unrelated project history cannot change either page's cost.
   const workFixture = await itemWorkFixture({
     itemId: '00000000-0000-4000-8000-000000000010',
+    initiativeId: launchId,
     extra: 8,
     details: true,
   });
@@ -851,7 +862,11 @@ test('plan views and bulk bar: real components keep the view in the address and 
           );
           assert.equal(await work.getByRole('link', { name: 'Parser release' }).count(), 1);
           assert.equal(await work.getByText('Split into', { exact: true }).count(), 1);
-          assert.equal(await work.getByText('Blocks', { exact: true }).count(), 1);
+          assert.equal(await work.getByText('Blocks', { exact: true }).count(), 2);
+          assert.equal(
+            await work.getByRole('link', { name: 'Document compatibility' }).getAttribute('href'),
+            `/-/example-builder/synthetic/plan/${workFixture.settledBlockerId}`,
+          );
           assert.doesNotMatch(await page.locator('.head .crumb').textContent(), /00000000/);
           const landings = work.getByRole('link', { name: /^Landing / });
           assert.equal(await lanes.count(), 10);
@@ -859,7 +874,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
             await lanes.first().getAttribute('href'),
             `/-/example-builder/synthetic/lanes/${workFixture.open.id}`,
           );
-          assert.equal(await landings.count(), 1);
+          assert.equal(await landings.count(), 2);
           assert.equal(
             await landings.first().getAttribute('href'),
             `/-/example-builder/synthetic/code/files?at=${'c'.repeat(64)}`,
@@ -906,9 +921,10 @@ test('plan views and bulk bar: real components keep the view in the address and 
             'projectItemWork:read',
             'projectItemWork:read',
           ]);
-          assert.deepEqual(calls.slice(-1), [
-            { itemId, projectId: 'synthetic', limit: 10, cursor: 'forge-item-work-v1:10', details: true },
-          ]);
+          assert.equal(calls.at(-1).itemId, itemId);
+          assert.equal(calls.at(-1).limit, 10);
+          assert.equal(calls.at(-1).details, true);
+          assert(calls.at(-1).cursor?.startsWith('forge-item-work-v2:'));
           assert.deepEqual(errors, []);
         } finally {
           await context.close();
@@ -918,8 +934,10 @@ test('plan views and bulk bar: real components keep the view in the address and 
       for (const cost of costs) {
         assert.equal(cost.writes, 0);
         assert(cost.ranges <= 85, JSON.stringify(cost));
-        assert(cost.documents <= 95, JSON.stringify(cost));
-        assert(cost.readBytes < 28 * 1024, JSON.stringify(cost));
+        // A Work page may probe up to ten legacy Lane stamps. Unrelated
+        // history below must leave the complete database and response costs unchanged.
+        assert(cost.documents <= 105, JSON.stringify(cost));
+        assert(cost.readBytes < 32 * 1024, JSON.stringify(cost));
       }
       if (unrelated)
         assert.deepEqual(costs, workCosts, 'unrelated Lane heads add no database I/O or response bytes');

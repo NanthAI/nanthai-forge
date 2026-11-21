@@ -97,6 +97,7 @@ test('Item-page details link recorded saves, acceptance evidence and settled rel
       ['Depends on', 'Define the wire format'],
       ['Split into', 'Cover retry cases'],
       ['Blocks', 'Cover retry cases'],
+      ['Blocks', 'Document compatibility'],
     ],
   );
   const followUp = await s.read({ details: true, itemId: s.followUpId });
@@ -132,31 +133,114 @@ test('Item Work preserves earlier landings of a Lane that was kept open and page
   }
   const first = await s.read({ details: true });
   assert.deepEqual(
-    first.landings.map(landing => landing.receiptId).slice(0, 10),
+    first.landings.map(landing => landing.receiptId),
     receipts.slice(2).reverse(),
   );
   assert.equal(first.lanes[0].receipt.receiptId, receipts.at(-1));
+  assert(first.moreLandings);
+  assert(first.nextCursor);
   const next = await s.read({ details: true, cursor: first.nextCursor });
   assert.deepEqual(next.lanes, []);
   assert.deepEqual(
-    next.landings.map(landing => landing.receiptId),
-    [receipts[1], receipts[0], s.noteReceipt],
+    new Set(next.landings.map(landing => landing.receiptId)),
+    new Set([receipts[1], receipts[0], s.noteReceipt, s.stampReceipt]),
   );
   assert.equal(next.nextCursor, null);
-  assert.equal(first.landingsPartial, false);
-  for (let sequence = 60; sequence < 110; sequence++)
-    await s.ctx.db.insert('projectIntentLandingNotes', {
-      projectId: s.auth.projectId,
-      intentId: s.itemId,
-      receiptId: randomUUID(),
-      kind: 'landed',
-      at,
-      laneIds: [s.open.id],
-      commit: other,
-      sequence,
-      actor: 'owner',
-    });
-  assert.equal((await s.read({ details: true })).landingsPartial, true);
+  assert.equal(next.moreLandings, false);
+});
+
+test('landing history advances through 10,000 retained notes without offset reads or shifting on a new landing', async t => {
+  const s = await fixture({ details: true });
+  const [note] = [...s.tables.projectIntentLandingNotes.values()];
+  await s.ctx.db.delete(note._id);
+  const stamp = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === s.stamped.id);
+  await s.ctx.db.patch(stamp._id, { landed: undefined });
+  const measure = async (surface, history, read) => {
+    const start = performance.now();
+    const raw = await read();
+    t.diagnostic(
+      JSON.stringify({
+        surface,
+        history,
+        replyBytes: Buffer.byteLength(raw),
+        processPeakKiB: process.resourceUsage().maxRSS,
+        handlerMs: +(performance.now() - start).toFixed(1),
+        ...s.counts.at(-1),
+      }),
+    );
+    return JSON.parse(raw);
+  };
+  assert.deepEqual((await measure('Item', 0, () => s.readRaw({ details: true }))).landings, []);
+  assert.deepEqual((await measure('Initiative', 0, s.readInitiativeRaw)).landings, []);
+  for (let sequence = 43; sequence < 10_043; sequence++) await s.addLandingNote(sequence);
+  let page = await measure('Item', 10_000, () => s.readRaw({ details: true }));
+  const initiative = await measure('Initiative', 10_000, s.readInitiativeRaw);
+  assert.equal(initiative.openLanes, 1);
+  assert.equal(initiative.landings.length, 10);
+  assert(initiative.nextCursor);
+  assert(s.counts.at(-1).documents < 50);
+  const older = JSON.parse(await s.readInitiativeRaw({ cursor: initiative.nextCursor }));
+  assert.equal(older.openLanes, 0, 'continuing one Item never adds its open Lanes twice');
+  assert.equal(older.landings.length, 10);
+  assert(!older.landings.some(id => initiative.landings.includes(id)));
+  assert.equal(s.counts.at(-1).writes, 0);
+  assert.deepEqual(
+    page.landings.map(x => x.sequence),
+    Array.from({ length: 10 }, (_, i) => 10_042 - i),
+  );
+  await s.addLandingNote(10_043);
+  for (let n = 1; n <= 6; n++) {
+    page = await s.read({ details: true, cursor: page.nextCursor });
+    assert.deepEqual(page.lanes, []);
+    assert.deepEqual(
+      page.landings.map(x => x.sequence),
+      Array.from({ length: 10 }, (_, i) => 10_042 - n * 10 - i),
+    );
+    const cost = s.counts.at(-1);
+    assert.equal(cost.writes, 0);
+    assert(cost.documents < 45, JSON.stringify(cost));
+    assert(cost.readBytes < 20 * 1024, JSON.stringify(cost));
+  }
+});
+
+test('settled reverse links continue beyond the first planning page and keep shelved titles private', async () => {
+  const s = await fixture({ details: true });
+  const split = randomUUID();
+  await s.planning(split, {
+    title: 'A dropped split',
+    status: 'abandoned',
+    relations: [{ kind: 'related', id: s.itemId }],
+    body: `Split from ${s.itemId.slice(0, 8)}.\n`,
+  });
+  await s.planning(randomUUID(), {
+    title: 'Owner-only blocker',
+    status: 'archived',
+    relations: [{ kind: 'depends-on', id: s.itemId }],
+  });
+  const duplicate = randomUUID(),
+    related = randomUUID();
+  await s.planning(duplicate, {
+    title: 'Dropped duplicate',
+    status: 'abandoned',
+    relations: [{ kind: 'duplicate-of', id: s.itemId }],
+  });
+  await s.planning(related, {
+    title: 'Settled related work',
+    status: 'closed',
+    relations: [{ kind: 'related', id: s.itemId }],
+  });
+  for (let i = 0; i < 50; i++) await s.planning(randomUUID(), { title: `Unrelated Item ${i}` });
+  await s.ctx.db.insert('projectReaders', { projectId: s.auth.projectId, reader: 'reader' });
+  s.as('reader');
+  const first = await s.read({ details: true });
+  assert(!first.related.some(x => x.id === split));
+  const next = await s.read({ details: true, cursor: first.nextCursor });
+  assert(next.related.some(x => x.kind === 'Split into' && x.id === split));
+  assert(next.related.some(x => x.kind === 'Blocks' && x.id === s.settledBlockerId));
+  assert(next.related.some(x => x.kind === 'Duplicated by' && x.id === duplicate));
+  assert(next.related.some(x => x.kind === 'Related' && x.id === related));
+  assert(!next.related.some(x => x.title === 'Owner-only blocker'));
+  assert.equal(next.nextCursor, null);
 });
 
 test('an open Lane reads queued while its Intent has a live submission, parked while it waits', async () => {
@@ -301,4 +385,112 @@ test('lanes {state:"all"} pages the same read and accepts the 8-character Item i
   assert.equal(open.args.state, undefined);
   assert.deepEqual(calls, ['projectHostedPlanning:resolveId', 'projectHostedLiveLanes:list']);
   await assert.rejects(liveLanes(transport, { intentId: s.itemId, state: 'all' }), /state "all"/);
+});
+
+test('the Initiative roll-up includes a settled Item, counts a shared receipt once and uses its member files', async () => {
+  const s = await fixture({ details: true });
+  const root = { sha256: other, size: 0 };
+  const nextIntent = s.settledBlockerId;
+  await s.put({
+    kind: 'intent',
+    id: nextIntent,
+    version: 0,
+    at,
+    outcome: 'Settled parser work',
+    constraints: '',
+    creatorAccountId: 'owner',
+    assigneeAccountIds: [],
+    base: { head: other, receiptId: randomUUID() },
+    status: 'active',
+  });
+  const member = { id: randomUUID(), head: 'e'.repeat(64) };
+  await s.put({
+    kind: 'candidate',
+    intentId: nextIntent,
+    id: member.id,
+    version: 0,
+    at,
+    algorithm: 'fixture',
+    base: { head: other, receiptId: randomUUID() },
+    inputs: root,
+    dependencies: root,
+    result: { status: 'clean', head: member.head },
+    governance: { version: 1, paths: ['src/parser.ts', 'docs/format.md'], ownerInputs: true },
+  });
+  await s.addLandingNote(42, { intentId: nextIntent, receiptId: s.noteReceipt, commit: 'c'.repeat(64) });
+  const receiptId = randomUUID();
+  await s.addLandingNote(43, { intentId: nextIntent, receiptId });
+  await s.ctx.db.insert('projectHostedAcceptances', {
+    projectId: s.auth.projectId,
+    receiptId,
+    submissionId: randomUUID(),
+    attemptId: randomUUID(),
+    sequence: 43,
+    value: JSON.stringify({
+      candidate: { id: randomUUID(), head: other },
+      memberCandidate: member,
+      check: null,
+    }),
+  });
+  const page = JSON.parse(await s.readInitiativeRaw());
+  assert.equal(page.openLanes, 1);
+  assert.deepEqual(new Set(page.landings), new Set([s.noteReceipt, s.stampReceipt, receiptId]));
+  assert.equal(page.landings.length, 3);
+  assert.deepEqual(page.files.toSorted(), ['docs/format.md', 'src/parser.ts', 'tests/parser.test.mjs']);
+  assert.deepEqual(page.missingFiles, [s.stampReceipt]);
+  assert.equal(page.nextCursor, null);
+  assert.equal(s.counts.at(-1).writes, 0);
+  await s.ctx.db.patch(s.auth.projectId, { visibility: 'public' });
+  s.as('visitor');
+  assert.deepEqual(JSON.parse(await s.readInitiativeRaw()), { role: false });
+  s.as(null);
+  assert.deepEqual(JSON.parse(await s.readInitiativeRaw()), { role: false });
+});
+
+test('large planning roots leave later reverse relations and Initiative work reachable', async () => {
+  const s = await fixture({ details: true });
+  const giant = 'legacy text '.repeat(16_000);
+  const reverse = randomUUID();
+  await s.planning(
+    reverse,
+    {
+      title: 'Large blocker',
+      initiativeId: s.initiativeId,
+      relations: [{ kind: 'depends-on', id: s.itemId }],
+      status: 'closed',
+    },
+    giant,
+  );
+  await s.planning(randomUUID(), { title: 'More recent large Item', initiativeId: s.initiativeId }, giant);
+  const first = await s.read({ details: true });
+  assert(!first.related.some(x => x.id === reverse));
+  const second = await s.read({ details: true, cursor: first.nextCursor });
+  assert(second.related.some(x => x.kind === 'Blocks' && x.id === reverse));
+  const firstRoll = JSON.parse(await s.readInitiativeRaw());
+  assert.deepEqual(new Set(firstRoll.landings), new Set([s.stampReceipt, s.noteReceipt]));
+  assert(firstRoll.nextCursor);
+  const secondRoll = JSON.parse(await s.readInitiativeRaw({ cursor: firstRoll.nextCursor }));
+  assert(secondRoll.nextCursor);
+  const lastRoll = JSON.parse(await s.readInitiativeRaw({ cursor: secondRoll.nextCursor }));
+  assert.equal(lastRoll.nextCursor, null);
+});
+
+test('a reader loses access to detailed landing history when the selected Item is shelved', async () => {
+  const s = await fixture({ details: true });
+  for (let sequence = 43; sequence < 54; sequence++) await s.addLandingNote(sequence);
+  await s.ctx.db.insert('projectReaders', { projectId: s.auth.projectId, reader: 'reader' });
+  s.as('reader');
+  const first = await s.read({ details: true });
+  assert.equal(first.landings.length, 10);
+  assert(first.nextCursor);
+  for (const row of s.tables.projectPlanningRecords.values())
+    if (row.key === s.itemId)
+      await s.ctx.db.patch(row._id, {
+        value: JSON.stringify({ ...JSON.parse(row.value), status: 'archived' }),
+      });
+  assert.equal((await s.read({ details: true, cursor: first.nextCursor })).landings, undefined);
+  assert.equal((await s.read({ details: true })).landings, undefined);
+  assert.equal((await s.read()).lanes.length, 4, 'the existing compact Lane read is preserved');
+  s.as('owner');
+  assert.equal((await s.read({ details: true })).landings.length, 10);
 });

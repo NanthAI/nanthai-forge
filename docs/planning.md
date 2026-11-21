@@ -27,9 +27,18 @@ discussion and Lane rows use the same identity mark as the rest of Forge.
 
 Work opens with one call to the same bounded reader as the agent CLI. Each request for
 more work reads one cursor page. The web details are optional and Work makes no idle
-calls. Reverse dependency links use the relations already available in the Work reply
-and open Plan. The Landings fold marks partial coverage when an Intent has more
-notes than its recent-history window.
+calls. The Landings fold pages retained receipt notes by recorded time, then older
+Lane stamps. Check or file evidence unavailable in the retained records stays unknown.
+Related resolves both directions from the current Plan records, including Done and
+Dropped Items. Reverse links use bounded pages of planning rows, so a later page may
+contain a link from an older Item.
+
+The Initiative Progress region rolls up open Lanes, distinct landing receipts and
+distinct files touched by its Items, including Done and Dropped Items. It uses the
+Item's Intent chain and exact Candidate file evidence, using the member Candidate when
+a cohort lands several members together. Partial counts are lower bounds while more
+pages remain or older file evidence is unavailable. Each Work page is read once on
+request.
 
 ## Status
 
@@ -284,7 +293,7 @@ it yet.
 
 When Plan resolves an Item page, Work opens with one page of 10 Lanes from `projectItemWork:read`, the same
 reader agents use. Work shows the Lane count and links the receipts on those Lanes to Code at the landed State.
-Show more Lanes requests the next page using the returned cursor. Work stays idle between requests.
+Show more work advances the Lane, landing and Related cursors that still have pages. Work stays idle between requests.
 
 Who wrote a comment comes from the sign-in, never from typed text: a browser sign-in is the person, a device
 credential is an agent run (its session slug, and the model its launcher declared in `FORGE_AGENT_MODEL`, stored as

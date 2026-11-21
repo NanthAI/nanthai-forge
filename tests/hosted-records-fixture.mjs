@@ -208,11 +208,11 @@ export function recordsFixture() {
             selected = indexes.get(cacheKey).groups.get(JSON.stringify(equalities)) ?? [];
             if (lower)
               selected = selected.filter(row =>
-                lower.inclusive ? row[lower.field] >= lower.value : row[lower.field] > lower.value,
+                lower.inclusive ? at(row, lower.field) >= lower.value : at(row, lower.field) > lower.value,
               );
             if (upper)
               selected = selected.filter(row =>
-                upper.exclusive ? row[upper.field] < upper.value : row[upper.field] <= upper.value,
+                upper.exclusive ? at(row, upper.field) < upper.value : at(row, upper.field) <= upper.value,
               );
             if (before !== null) selected = selected.filter(row => row._creationTime < before);
             return q;

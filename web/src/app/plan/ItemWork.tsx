@@ -43,8 +43,9 @@ type Work =
       role: true;
       lanes: Lane[];
       landings?: Landing[];
-      landingsPartial?: boolean | undefined;
+      moreLandings?: boolean;
       related?: Related[];
+      moreRelated?: boolean;
       total: number;
       atLeast: boolean;
       nextCursor: string | null;
@@ -127,17 +128,16 @@ export function ItemWork({
   read,
   at,
   project,
-  blocks,
 }: {
   itemId: string;
   read: ReadItemWork;
   at: (patch: Partial<ProjectRoute>) => string;
   project: WhoProject;
-  blocks: readonly Related[];
 }) {
   const [work, setWork] = useState<Work | 'failed' | null>(null);
   const [paging, setPaging] = useState(false);
   const [pageFailed, setPageFailed] = useState(false);
+  const [stale, setStale] = useState(false);
   const [attempt, retry] = useState(0);
   useEffect(() => {
     let current = true;
@@ -182,8 +182,9 @@ export function ItemWork({
     setPaging(true);
     setPageFailed(false);
     try {
-      const next = JSON.parse(await read(itemId, work.nextCursor)) as Work;
-      if (!next.role) {
+      const next = JSON.parse(await read(itemId, stale ? null : work.nextCursor)) as Work;
+      setStale(false);
+      if (!next.role || stale) {
         setWork(next);
         return;
       }
@@ -195,10 +196,13 @@ export function ItemWork({
         ...next,
         lanes: [...lanes.values()],
         landings: [...landings.values()],
-        landingsPartial: work.landingsPartial || next.landingsPartial,
-        related: work.related ?? [],
+        moreLandings: Boolean(next.moreLandings ?? work.moreLandings),
+        total: next.total ?? work.total,
+        atLeast: next.atLeast ?? work.atLeast,
+        related: [...(work.related ?? []), ...(next.related ?? [])],
       });
-    } catch {
+    } catch (error) {
+      setStale(stale || (error instanceof Error && /WORK_STALE/.test(error.message)));
       setPageFailed(true);
     } finally {
       setPaging(false);
@@ -207,9 +211,7 @@ export function ItemWork({
   const landings = [...(work.landings ?? [])].sort(
     (a, b) => b.at.localeCompare(a.at) || (b.sequence ?? 0) - (a.sequence ?? 0),
   );
-  const related = new Map(
-    [...(work.related ?? []), ...blocks].map(link => [`${link.kind}:${link.id}`, link]),
-  );
+  const related = new Map((work.related ?? []).map(link => [`${link.kind}:${link.id}`, link]));
   const fold = `item-work:${project.handle}/${project.project}:${itemId}`;
   const more = work.nextCursor ? (
     <div className="pad">
@@ -257,7 +259,12 @@ export function ItemWork({
           <div className="quietline">No Lanes yet.</div>
         )}
       </Part>
-      <Part name="Landings" fold={`${fold}:landings`}>
+      <Part
+        name="Landings"
+        count={landings.length}
+        atLeast={Boolean(work.moreLandings)}
+        fold={`${fold}:landings`}
+      >
         {landings.length ? (
           landings.map(landing => (
             <Row key={landing.receiptId} cols="minmax(0, 1fr) auto">
@@ -293,7 +300,6 @@ export function ItemWork({
         ) : (
           <div className="quietline">No landings shown.</div>
         )}
-        {work.landingsPartial ? <div className="quietline">Showing recent landings.</div> : null}
       </Part>
       <Part name="Related" fold={`${fold}:related`} count={related.size}>
         {related.size ? (
@@ -306,7 +312,7 @@ export function ItemWork({
             </Row>
           ))
         ) : (
-          <div className="quietline">No related Items.</div>
+          <div className="quietline">{work.moreRelated ? 'No links in this page.' : 'No related Items.'}</div>
         )}
       </Part>
       {more}

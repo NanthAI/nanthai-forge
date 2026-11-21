@@ -34,6 +34,7 @@ import { Capture } from './Capture';
 import { isShut, NO_INITIATIVE, usePlanFolds } from './fold';
 import { Groups } from './Groups';
 import { InitiativePage } from './Initiative';
+import type { ReadInitiativeWork } from './InitiativeWork';
 import { COLS, DoneWhen, Line, Owner, Status } from './rows';
 import { useWorkers, type ActiveLane, type Workers } from './workers';
 import { Tick, type Ticker } from './Tick';
@@ -168,6 +169,11 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
       client.query(api.projectItemWork.read, { projectId, itemId, limit: 10, cursor, details: true }),
     [client, projectId],
   );
+  const readInitiativeWork = useCallback<ReadInitiativeWork>(
+    (initiativeId, cursor) =>
+      client.query(api.projectInitiativeWork.read, { projectId, initiativeId, cursor }),
+    [client, projectId],
+  );
   const put: Put = command => {
     const operationId = crypto.randomUUID();
     return mutate({
@@ -207,6 +213,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
       purge={input => deleteForever({ projectId, ...input })}
       reads={reads}
       readItemWork={readItemWork}
+      readInitiativeWork={readInitiativeWork}
       query={query}
       go={go}
       viewer={viewerHandle}
@@ -250,6 +257,7 @@ export function PlanScreenView({
   purge,
   reads,
   readItemWork,
+  readInitiativeWork,
   query = readQuery(new URLSearchParams()),
   go = () => undefined,
   viewer,
@@ -277,6 +285,7 @@ export function PlanScreenView({
   purge?: PurgeItem;
   reads?: Reads;
   readItemWork?: ReadItemWork | undefined;
+  readInitiativeWork?: ReadInitiativeWork | undefined;
   query?: PlanQuery;
   go?: (patch: Partial<PlanQuery>) => void;
   viewer?: string | undefined;
@@ -599,6 +608,7 @@ export function PlanScreenView({
           at={at}
           put={put}
           reads={reads}
+          readWork={readInitiativeWork}
           closed={closed}
           dropped={dropped}
           onShowDone={showDone}
@@ -965,13 +975,6 @@ function ItemPage({
     : undefined;
   const line = group?.lines.find(entry => entry.row.id === row?.id);
   const initiative = row?.initiativeId ? view?.byId.get(row.initiativeId) : undefined;
-  const blocks = row
-    ? [...(view?.byId.values() ?? [])]
-        .filter(other =>
-          other.relations?.some(relation => relation.kind === 'depends-on' && relation.id === row.id),
-        )
-        .map(other => ({ kind: 'Blocks', id: other.id, title: other.title }))
-    : [];
   const facts: [string, ReactNode][] = row
     ? [
         ['Status', <Status key="s" row={row} />],
@@ -1107,7 +1110,6 @@ function ItemPage({
           read={readItemWork}
           at={at}
           project={route}
-          blocks={blocks}
         />
       ) : null}
     </div>

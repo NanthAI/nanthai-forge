@@ -5,11 +5,17 @@ import { recordsFixture } from './hosted-records-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const work = await import(moduleUrl('../convex/projectItemWork.ts'));
+const initiativeWork = await import(moduleUrl('../convex/projectInitiativeWork.ts'));
 const hash = 'a'.repeat(64),
   other = 'b'.repeat(64),
   at = '2026-01-01T00:00:00.000Z';
 
-export async function itemWorkFixture({ extra = 0, itemId = randomUUID(), details = false } = {}) {
+export async function itemWorkFixture({
+  extra = 0,
+  itemId = randomUUID(),
+  initiativeId = randomUUID(),
+  details = false,
+} = {}) {
   const s = recordsFixture(),
     auth = await s.setup();
   const as = subject => {
@@ -52,8 +58,8 @@ export async function itemWorkFixture({ extra = 0, itemId = randomUUID(), detail
     return record;
   };
   const abandoned = await lane('abandoned');
-  const stamped = await lane('completed');
   for (let i = 0; i < extra; i++) await lane('abandoned');
+  const stamped = await lane('completed');
   const noted = await lane('completed');
   const open = await lane(
     'active',
@@ -95,13 +101,55 @@ export async function itemWorkFixture({ extra = 0, itemId = randomUUID(), detail
       complete: true,
       ...stamp,
     });
-  const initiativeId = randomUUID();
   const dependencyId = randomUUID();
   const followUpId = randomUUID();
+  const settledBlockerId = randomUUID();
+  let generationId;
+  let position = 0;
+  const planning = async (id, fields, text) => {
+    const value = { id, kind: 'issue', status: 'open', ...fields };
+    const entry = {
+      projectId: auth.projectId,
+      generationId,
+      key: id,
+      parent: '',
+      position: position++,
+      value: JSON.stringify(value),
+    };
+    for (const collection of ['planningSearch', 'planningItems'])
+      await s.ctx.db.insert('projectPlanningRecords', {
+        ...entry,
+        collection,
+        ...(collection === 'planningSearch'
+          ? {
+              planning: {
+                text: text ?? value.title,
+                open: ['proposed', 'open', 'in-progress'].includes(value.status),
+                kind: value.kind,
+                status: value.status,
+                initiativeId: value.initiativeId ?? '',
+              },
+            }
+          : {}),
+      });
+  };
+  const addLandingNote = (sequence, overrides = {}) =>
+    s.ctx.db.insert('projectIntentLandingNotes', {
+      projectId: auth.projectId,
+      intentId: itemId,
+      receiptId: randomUUID(),
+      kind: 'landed',
+      at,
+      laneIds: [open.id],
+      commit: other,
+      sequence,
+      actor: 'owner',
+      ...overrides,
+    });
   if (details) {
     const project = await s.ctx.db.get(auth.projectId);
     const backupId = project.work?.backupId ?? 'backup';
-    const generationId = await s.ctx.db.insert('projectWorkGenerations', {
+    generationId = await s.ctx.db.insert('projectWorkGenerations', {
       projectId: auth.projectId,
       backupId,
       format: 11,
@@ -136,6 +184,15 @@ export async function itemWorkFixture({ extra = 0, itemId = randomUUID(), detail
       [initiativeId, { kind: 'initiative', title: 'Parser release' }],
       [dependencyId, { status: 'closed', title: 'Define the wire format' }],
       [
+        settledBlockerId,
+        {
+          status: 'closed',
+          initiativeId,
+          title: 'Document compatibility',
+          relations: [{ kind: 'depends-on', id: itemId }],
+        },
+      ],
+      [
         followUpId,
         {
           title: 'Cover retry cases',
@@ -147,18 +204,8 @@ export async function itemWorkFixture({ extra = 0, itemId = randomUUID(), detail
           ],
         },
       ],
-    ]) {
-      for (const collection of ['planningSearch', 'planningItems'])
-        await s.ctx.db.insert('projectPlanningRecords', {
-          projectId: auth.projectId,
-          generationId,
-          collection,
-          key: id,
-          parent: '',
-          position: 0,
-          value: JSON.stringify({ id, kind: 'issue', status: 'open', ...fields }),
-        });
-    }
+    ])
+      await planning(id, fields);
     await put({
       kind: 'save',
       id: randomUUID(),
@@ -218,6 +265,8 @@ export async function itemWorkFixture({ extra = 0, itemId = randomUUID(), detail
   const readRaw = (args = {}, name = 'read') =>
     s.call(name, work.read, { projectId: auth.projectId, itemId, ...args });
   const read = async (...args) => JSON.parse(await readRaw(...args));
+  const readInitiativeRaw = (args = {}, name = 'initiative') =>
+    s.call(name, initiativeWork.read, { projectId: auth.projectId, initiativeId, cursor: null, ...args });
   return {
     ...s,
     auth,
@@ -226,6 +275,11 @@ export async function itemWorkFixture({ extra = 0, itemId = randomUUID(), detail
     initiativeId,
     dependencyId,
     followUpId,
+    settledBlockerId,
+    planning,
+    addLandingNote,
+    readInitiativeRaw,
+    put,
     open,
     noted,
     stamped,
