@@ -15,7 +15,7 @@ import { MEASUREMENT_LAND_RECORD } from './hosted-land-child-env.js';
 import { resolvedOriginFinishId } from './hosted-land-resolution.js';
 import { spawnLandSubmitter } from './hosted-land-submitter-process.js';
 import { landWaitContinuation } from './hosted-land-wait.js';
-import { LAND_INVOKED_ENV } from './land-timing.js';
+import { LAND_HELD_MS_ENV, LAND_INVOKED_ENV, MAX_LANDING_HOLD_MS } from './land-timing.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { processAlive, processIdentityIfKnown } from './local-process.js';
 import { waitForSubmitter } from './hosted-land-measurement-wait.js';
@@ -32,6 +32,8 @@ type Held = {
   auto: boolean;
   installation: string;
   budget: number;
+  holdStartedAt?: number;
+  heldMs?: number | null;
   worker: { pid: number; startTime?: string };
 };
 type Completion = { code: number; record: Held };
@@ -173,6 +175,7 @@ export function deferMeasurementLand(
       command: { ...request, operationId },
       installation,
       budget: options.budget ?? AGENT_WAIT_SECONDS,
+      holdStartedAt: Date.now(),
       auto: suppliedId === undefined,
     });
   });
@@ -190,10 +193,34 @@ export async function activateMeasurementSubmitter(root: string, command: Comman
     { waitMs: 1000 },
   );
   if (!record) return false;
+  let completed = record;
   process.once('beforeExit', code =>
-    durableReplace(donePath(path, record.operationId), JSON.stringify({ code, record })),
+    durableReplace(donePath(path, record.operationId), JSON.stringify({ code, record: completed })),
   );
-  await waitForCliMeasurement(record.installation, undefined, async () => record.address.projectId);
+  if (record.heldMs === undefined) {
+    const heldMs = await waitForCliMeasurement(
+      record.installation,
+      undefined,
+      async () => record.address.projectId,
+      record.holdStartedAt,
+    );
+    if (record.holdStartedAt !== undefined)
+      completed = workLocked(`${path}.lock`, () => {
+        const records = readPending(path);
+        const index = records.findIndex(item => item.operationId === record.operationId);
+        const active = records[index];
+        invariant(active?.worker.pid === process.pid, 'WORK_BUSY', 'The held landing submitter changed.');
+        const measured = {
+          ...active,
+          heldMs: heldMs === undefined ? null : Math.min(MAX_LANDING_HOLD_MS, heldMs),
+        };
+        records[index] = measured;
+        durableReplace(path, JSON.stringify(records));
+        return measured;
+      });
+  }
+  // Older records lack a start clock. A worker that missed release lacks an end clock.
+  process.env[LAND_HELD_MS_ENV] = completed.heldMs == null ? '' : String(completed.heldMs);
   process.env[LAND_INVOKED_ENV] = String(Date.now());
   return true;
 }

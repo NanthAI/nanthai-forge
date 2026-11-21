@@ -67,6 +67,7 @@ import {
   hostedLandingCancelSchema,
   storedLandingStateSchema,
   landingObservation,
+  landingHoldMs,
   landingTokensColumn,
 } from '../src/hosted-landing';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
@@ -76,7 +77,7 @@ import { loadHostedCheck } from './projectHostedCheckStore';
 import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
 import { receiptMessageForReader } from './projectHostedAcceptanceMessage';
-import { landingMessageForReader } from './projectHostedLandingMessageBody';
+import { landingMessageForReader, landingWithoutClientHold } from './projectHostedLandingMessageBody';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
 import { enforceLandGates } from './projectHostedLandGates';
 import { requireQueueRoom } from './projectHostedQueueRoom';
@@ -93,7 +94,9 @@ export const cancel = mutation({
         actor: actor.id,
         request: hostedLandingCancelSchema.parse(JSON.parse(input.request)),
       });
-      return canonicalPayload(await landingMessageForReader(ctx, input.projectId, result));
+      return canonicalPayload(
+        await landingMessageForReader(ctx, input.projectId, landingWithoutClientHold(result)),
+      );
     } catch (error) {
       return report(error);
     }
@@ -113,6 +116,7 @@ export const enqueue = receiptMutation({
     gates: v.optional(v.string()),
     /** The agent's own reported tokens (feature landing-tokens, Item a61d3c91); not part of the request. */
     tokens: v.optional(v.number()),
+    heldMs: v.optional(v.number()),
     /** Land only while the queue holds fewer checks (feature land-when-room, ad80e037); judged here,
      * for a new operation only, and not part of the request. */
     maxChecks: v.optional(v.number()),
@@ -121,6 +125,7 @@ export const enqueue = receiptMutation({
   handler: async (ctx, input) => {
     try {
       const tokens = landingTokensColumn(input.tokens);
+      const heldMs = landingHoldMs(input.heldMs);
       const request = hostedLandingRequestSchema.parse(JSON.parse(input.request));
       validateNotVerified(request.notVerified);
       const actor = await acceptanceActor(ctx, request.agent);
@@ -137,6 +142,7 @@ export const enqueue = receiptMutation({
           ...landingAgentRun(input.agent),
           ...landingAgentClient(input.agentClient),
           ...tokens,
+          heldMs,
           gates: { value: input.gates },
           ...(input.maxChecks === undefined ? {} : { maxChecks: input.maxChecks }),
         },
@@ -144,7 +150,8 @@ export const enqueue = receiptMutation({
         actor,
       );
       const review = await heldReview(ctx, authorizedReadProject(ctx, input.projectId), state);
-      const selected = await landingMessageForReader(ctx, input.projectId, state);
+      const visible = heldMs === undefined ? landingWithoutClientHold(state) : state;
+      const selected = await landingMessageForReader(ctx, input.projectId, visible);
       return reply(canonicalPayload(review ? { ...selected, ...review } : selected));
     } catch (error) {
       return report(error);
@@ -340,6 +347,7 @@ export async function enqueueHostedLanding(
     agentClient?: string | undefined;
     /** The agent's reported tokens (Item a61d3c91), range-checked by the public mutation. */
     agentTokens?: number | undefined;
+    heldMs?: number | undefined;
     /** Guard-set evidence a desired landing kept from its gate (13ea93bf). */
     preflightRan?: string | undefined;
     preflightRuns?: number | undefined;
@@ -506,6 +514,7 @@ export async function enqueueHostedLanding(
     timing: {
       submittedAt: first.at,
       ...reserved?.timing,
+      ...(input.heldMs === undefined ? {} : { heldMs: input.heldMs }),
       ...landGateTiming(input.gates?.value),
       composedAt: new Date().toISOString(),
     },

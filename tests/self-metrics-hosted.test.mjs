@@ -15,23 +15,11 @@ import { fixture, period, seam, at, empty } from './self-metrics-hosted-fixture.
 
 test('finish-to-main reports measured builder hold seconds separately and keeps omissions unknown', async () => {
   const f = fixture();
-  f.landing('held', at(1), at(3));
-  f.landing('no-hold', at(5), at(7));
+  f.landing('held', at(1), at(3), true, 12_500);
+  f.landing('no-hold', at(5), at(7), true, 0);
   f.landing('old-client', at(9), at(11));
-  f.landing('person', at(13), at(15), false);
-  const query = async (name, args) => {
-    const reply = await f.query(name, args);
-    if (args.stream !== 'acceptances') return reply;
-    const page = JSON.parse(reply);
-    const hold = new Map([
-      [at(3), 12.5],
-      [at(7), 0],
-      [at(15), 500],
-    ]);
-    for (const row of page.page) if (hold.has(row.at)) row.clientHoldSeconds = hold.get(row.at);
-    return JSON.stringify(page);
-  };
-  const { records } = await readHostedMetricPages(query, period);
+  f.landing('person', at(13), at(15), false, 500_000);
+  const { records } = await readHostedMetricPages(f.query, period);
   const surface = metricsSurface(records, period);
   assert.deepEqual(surface.totals.finishToMain.clientHold, {
     meanSeconds: 6.25,

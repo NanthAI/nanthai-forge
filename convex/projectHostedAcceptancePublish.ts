@@ -15,6 +15,7 @@ import { enqueueGithubMirror } from './projectGithubMirrorQueue';
 import type { MutationCtx } from './_generated/server';
 import { activeProject } from './projectAuthority';
 import { requireLandingLease, type LandingClaim } from './projectHostedLandingControl';
+import { closeOrderWait } from './projectHostedLandingOrder';
 import { writeLanding, settleLandingOperation, loadLanding } from './projectHostedLandingStore';
 import { releaseLandingQueue } from './projectHostedLandingWake';
 import { acceptanceSelection, acceptanceRow, acceptancePlan } from './projectHostedAcceptanceStore';
@@ -364,7 +365,7 @@ export async function publishAcceptance(
     authorityEpoch: attempt.authorityEpoch,
     previous: attempt.main,
     candidate: attempt.candidate,
-    ...orderWaitsField(row.orderWaits),
+    ...orderWaitsField(closeOrderWait(row, now).orderWaits ?? row.orderWaits),
     ...mainRedHoldsField(row.mainRedHolds),
     actor,
     ...(row.agentRun ? { agentRun: row.agentRun } : {}),

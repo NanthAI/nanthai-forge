@@ -645,6 +645,7 @@ async function solo(
     moveMain = false,
     extraQuery = false,
     durations = false,
+    heldMs,
     guard = false,
     guards,
     indexExports = false,
@@ -662,10 +663,10 @@ async function solo(
     });
   const m = meter(f, runner);
   if (indexExports) await measureIndexExportClaims(f);
-  const state = await f.enqueue(
-    f.request(),
-    durations || guard ? { gates: landGate(f.lane, { durations, guard }) } : {},
-  );
+  const state = await f.enqueue(f.request(), {
+    ...(durations || guard ? { gates: landGate(f.lane, { durations, guard }) } : {}),
+    ...(heldMs === undefined ? {} : { heldMs }),
+  });
   if (extraQuery) {
     // The seeded regression: one more query per landing (a status read on the landing path).
     assert(finishApi.status.isQuery);
@@ -680,6 +681,7 @@ async function solo(
     await drain(f, m);
   }
   assert.equal(landed(f), 1);
+  assert.equal(states(f).find(row => row.id === state.id)?.timing?.heldMs, heldMs);
   assertRunMetrics(f);
   return {
     landings: 1,
@@ -1202,6 +1204,61 @@ test('save/preflight timing keeps landing cost guard bytes within one percent wi
   t.diagnostic(
     `duration bytes: read ${after.readBytes - before.readBytes}, write ${after.writeBytes - before.writeBytes}; baseline ${before.readBytes}/${before.writeBytes}`,
   );
+});
+
+test('client hold survives a main-race recheck with no added Convex call or document access', async t => {
+  const scenario = { moveMain: true, durations: true };
+  let before, after;
+  await t.test('legacy submit', async sub => {
+    fixedClock(sub);
+    before = await solo(sub, scenario);
+  });
+  await t.test('submit with client hold', async sub => {
+    fixedClock(sub);
+    after = await solo(sub, { ...scenario, heldMs: 12_750 });
+  });
+  t.diagnostic(
+    `hold timing bytes: read +${after.readBytes - before.readBytes}, write +${after.writeBytes - before.writeBytes}`,
+  );
+  for (const key of ['queries', 'observerQueries', 'mutations', 'v8Actions', 'nodeActions', 'readDocuments'])
+    assert.equal(after[key], before[key], `${key}: no added work`);
+  for (const key of ['readBytes', 'writeBytes', 'observerReadBytes'])
+    assert(after[key] <= before[key] * 1.01, `${key} stays within one percent`);
+});
+
+test('direct and desired submit replays preserve the first client hold and keep legacy replies compatible', async t => {
+  for (const mode of ['direct', 'desired'])
+    await t.test(mode, async sub => {
+      const f = await finishFixture(sub);
+      const command = f.request();
+      const send =
+        mode === 'direct'
+          ? metadata => f.enqueue(command, metadata)
+          : metadata =>
+              f
+                .tx('desiredSubmit', desired.submit, {
+                  projectId: f.projectId,
+                  request: JSON.stringify({
+                    operationId: command.operationId,
+                    authorityEpoch: command.authorityEpoch,
+                    composeOperationId: command.finish.composeOperationId,
+                    after: null,
+                    check: command.check,
+                  }),
+                  ...metadata,
+                })
+                .then(JSON.parse);
+      for (const heldMs of [-1, 0.5, 86_400_001])
+        await assert.rejects(send({ heldMs }), error => error.data?.code === 'BAD_ARGUMENT');
+      const first = await send({ heldMs: 12_750 });
+      const legacy = await send({});
+      const retry = await send({ heldMs: 0 });
+      assert.equal(first.id, legacy.id);
+      assert.equal(first.id, retry.id);
+      assert.equal(first.timing.heldMs, 12_750);
+      assert.equal(legacy.timing.heldMs, undefined);
+      assert.equal(retry.timing.heldMs, 12_750);
+    });
 });
 
 test('guard-set gate evidence (ran, runs) adds no call and a bounded, measured read cost', async t => {

@@ -9,6 +9,7 @@ import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { requireLandingLease, type LandingClaim } from './projectHostedLandingControl';
+import { closeOrderWait } from './projectHostedLandingOrder';
 import { loadBatch, writeBatch, wakeBatch, retryLandingBatch } from './projectHostedLandingBatchStore';
 import {
   loadLanding,
@@ -378,7 +379,7 @@ export async function publishLandingBatch(
           scoped: run.plan?.scoped,
         }),
       ),
-      ...orderWaitsField(member.row.orderWaits),
+      ...orderWaitsField(closeOrderWait(member.row, now).orderWaits ?? member.row.orderWaits),
       ...mainRedHoldsField(member.row.mainRedHolds),
       actor: member.attempt.actor,
       ...(member.row.agentRun ? { agentRun: member.row.agentRun } : {}),

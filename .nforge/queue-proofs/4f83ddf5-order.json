@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedAcceptancePublish.ts": "46d8d8135d949b47e505bfcb52b7bfe716322f70494916867e859a542c1f6ce6",
+    "convex/projectHostedLandingControl.ts": "a1b3143c63f9c34fe3e310a7b041d7c59bed0fc292b6a569f723325ee6248595",
+    "convex/projectHostedLandingOrder.ts": "0124d37ee80c4784d3a8f8c4d426a16abd32c578a4396cc7366e35ee34980da3",
+    "convex/projectHostedLandingStore.ts": "224cbcaa1cf8c7d837b227ab7a3f82bab1b67aea40298ee97b5816ebfc30259d"
+  },
+  "replay": {
+    "incident": "19328518",
+    "test": "replay 19328518: a parked passed landing names the older submission it waits for in every status read",
+    "receipt": "8cd8a0d4-ef94-466d-aa4e-7bb9243c00f9"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "01a1fe43-cca7-77d2-adbe-1e0faf0bc7e4",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "01a1fe88-629a-7fe2-b8d8-d98ae51c08e4",
+    "receipt": "6507a229-17e8-4bdb-8ab1-9e5255e73431"
+  }
+}

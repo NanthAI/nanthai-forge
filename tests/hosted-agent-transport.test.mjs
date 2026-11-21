@@ -25,6 +25,8 @@ import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { slimReceipt } from '../dist/receipt-slim.js';
 import { readLaneEntry, recordLane } from '../dist/lane-registry.js';
 import { laneCheckoutRoot, laneSuccessor } from '../dist/hosted-lane-location.js';
+import { LAND_HELD_MS_ENV } from '../dist/land-timing.js';
+import { MAX_CONTRACT_FEATURES } from '../dist/hosted-contract-features.js';
 const errorCode = expected => error => error.code === expected;
 
 test('the compact finish reply carries the tightest member budget without changing landing pins', async t => {
@@ -214,19 +216,30 @@ test('pending source and finish steps return promptly and retain all child opera
       message: 'Pending subject\n\nCo-Authored-By: Synthetic Sol <noreply@openai.com>',
       notVerified: ['The Windows adapter was not checked'],
     };
-  s.caps.features = ['save-declarations'];
+  s.caps.features = ['save-declarations', 'landing-client-hold'];
+  const previousHold = process.env[LAND_HELD_MS_ENV];
+  t.after(() => {
+    if (previousHold === undefined) delete process.env[LAND_HELD_MS_ENV];
+    else process.env[LAND_HELD_MS_ENV] = previousHold;
+  });
+  process.env[LAND_HELD_MS_ENV] = '8750';
   s.pending(true);
   const first = await s.transport().dispatch('finish', command);
+  const { features } = s.calls.find(c => c.name === 'projectHostedAgent:capabilities').args;
+  assert(features.includes('landing-client-hold'));
+  assert(features.length <= MAX_CONTRACT_FEATURES);
   assert.equal(first.result.phase, 'finish');
   assert.equal(first.result.submission.phase, 'composing');
   assert.equal(first.result.submission.preparing, true);
   const desired = s.calls.find(c => c.name === 'projectHostedLandingDesired:submit');
+  assert.equal(desired.args.heldMs, 8750);
   assert.equal(JSON.parse(desired.args.request).message, command.message);
   assert.deepEqual(JSON.parse(desired.args.request).notVerified, command.notVerified);
   assert.deepEqual(first.result.submission.request.notVerified, command.notVerified);
   const count = s.calls.length;
   assert(!s.calls.some(call => call.name === 'projectHostedLanding:enqueue'));
   s.pending(false);
+  process.env[LAND_HELD_MS_ENV] = '0';
   const next = await s.transport().dispatch('finish', command);
   assert.equal(next.operationId, first.operationId);
   assert.equal(next.result.composeOperationId, first.result.composeOperationId);
@@ -240,6 +253,10 @@ test('pending source and finish steps return promptly and retain all child opera
     ],
   );
   assert.deepEqual(next.result.submission, first.result.submission);
+  assert.equal(
+    s.calls.slice(count).find(c => c.name === 'projectHostedLandingDesired:submit').args.heldMs,
+    8750,
+  );
   assert.equal(next.result.submission.request.finish.composeOperationId, first.result.composeOperationId);
   // A long queue outlives any poller: the receipt names the one wake-driven command that resumes it.
   for (const receipt of [first, next])

@@ -619,6 +619,58 @@
       "what": "Publishing a resolution draft could strand the origin Lane's queued sync-required landing until acceptance",
       "file": "tests/hosted-landing-lineage.test.mjs",
       "test": "39a68046: a conflict draft retires only the origin queued sync-required entry at publication"
+    },
+    {
+      "incident": "19328518",
+      "what": "A passed follower parked behind an older submission without an explanation or measured duration. Its live status identifies the holder and its final receipt records the wait.",
+      "file": "tests/hosted-landing-order-wait-visible.test.mjs",
+      "paths": [
+        "convex/projectHostedAcceptancePublish.ts",
+        "convex/projectHostedLandingControl.ts",
+        "convex/projectHostedLandingOrder.ts",
+        "convex/projectHostedLandingStore.ts"
+      ],
+      "test": "replay 19328518: a parked passed landing names the older submission it waits for in every status read"
+    },
+    {
+      "incident": "3dfacaa4",
+      "what": "A measurement-held CLI can resume and replay one submission. Direct and desired requests preserve the original duration and old replies omit it.",
+      "file": "tests/landing-cost-guard.test.mjs",
+      "paths": [
+        "convex/projectHostedLanding.ts",
+        "convex/projectHostedLandingDesired.ts",
+        "convex/projectHostedLandingMessageBody.ts",
+        "src/hosted-landing.ts"
+      ],
+      "test": "direct and desired submit replays preserve the first client hold and keep legacy replies compatible"
+    },
+    {
+      "incident": "65e2d743",
+      "what": "The order-wait witness showed a passed landing waiting for main. The landings read projects the measured interval, including one below a minute, and a measured zero builder hold.",
+      "file": "tests/hosted-landings-read.test.mjs",
+      "paths": [
+        "convex/projectHostedLandings.ts",
+        "src/hosted-landings-view.ts"
+      ],
+      "test": "landings reads short order waits and the client hold from existing receipt and request rows"
+    },
+    {
+      "incident": "65e2d743",
+      "what": "A cohort publishes its members atomically. The member that waited gets its own closed order interval on its acceptance receipt.",
+      "file": "tests/hosted-landing-batches.test.mjs",
+      "paths": [
+        "convex/projectHostedLandingBatchPublish.ts"
+      ],
+      "test": "incident replay: four finishes in one minute share one full check and one atomic main publication"
+    },
+    {
+      "incident": "78a97771",
+      "what": "A builder withdraws a live landing by Lane and can save and re-land. A stamped submit remains compatible with old withdrawal replies.",
+      "file": "tests/hosted-landing-withdraw.test.mjs",
+      "paths": [
+        "convex/projectHostedLandingWithdraw.ts"
+      ],
+      "test": "withdraw by Lane cancels the live landing, keeps the Lane and fences the late check"
     }
   ]
 }

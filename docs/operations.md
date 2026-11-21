@@ -390,12 +390,18 @@ minutes of every started, non-reused run, so overlapping runs add; they measure 
 run record keeps its request time, not a start time. `runsPerLanding` and `discardedMainRaceRuns` (runs a
 moved main made useless) show what drives them. Finish-to-main reports `p50Minutes`, `p90Minutes`,
 `meanMinutes` and `admissionRunShare` (admitted landings that landed on their admission check): the p50 alone
-flips on a two-humped distribution (main did not move versus moved). `heldAfterCheck` and the 60 s floor on its
-waits are a floor: shorter order waits are in `orderWaits` without a duration. `mainRedHolds` lists
+flips on a two-humped distribution (main did not move versus moved). The adjacent `clientHold` reports
+mean and p90 seconds of the CLI's measurement hold before hosted submission. A CLI that recorded no wait
+reports zero. Missing client measurements are counted as unknown, including when a restarted client
+missed the hold's release. `heldAfterCheck` keeps its 60 s floor.
+`orderWaits` carries the seconds of recorded queue waits, including shorter waits. `mainRedHolds` lists
 each main-red hold a landing waited under (`parked` after its check failed only on main's red tests,
 or `publication` when acceptance waited for green), with `heldAt` and `releasedAt`; the row's
-receipt is the re-landing, so `committedAt` minus `releasedAt` is its green-to-land time. The builder's own measurement-hold
-wait is client-side before submission, so no server timestamp includes it.
+receipt is the re-landing, so `committedAt` minus `releasedAt` is its green-to-land time.
+
+The minimum CLI build for recovery of receipts containing order-wait seconds is the landing timing
+reader rollout (`e8db97b29769`, CLI 0.3.1). Normal land and wait commands retain compatibility with earlier builds. Older CLIs
+omit the client hold duration and metrics reports it as unknown.
 
 #### Fallback reasons
 

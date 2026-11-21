@@ -15,6 +15,7 @@ import { hostedLandingWithdrawSchema } from '../src/hosted-landing';
 import { canonicalPayload, hostedOperationSchema } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { landingWithoutClientHold } from './projectHostedLandingMessageBody';
 
 export const withdrawReason = (laneId: string) =>
   `Withdrawn by its agent from Lane ${laneId}: fix the Lane, save, then land again.`;
@@ -73,11 +74,13 @@ export const withdraw = mutation({
     try {
       const actor = await acceptanceActor(ctx, true);
       return canonicalPayload(
-        await withdrawHostedLanding(ctx, {
-          projectId: input.projectId,
-          actor: actor.id,
-          request: hostedLandingWithdrawSchema.parse(JSON.parse(input.request)),
-        }),
+        landingWithoutClientHold(
+          await withdrawHostedLanding(ctx, {
+            projectId: input.projectId,
+            actor: actor.id,
+            request: hostedLandingWithdrawSchema.parse(JSON.parse(input.request)),
+          }),
+        ),
       );
     } catch (error) {
       return report(error);

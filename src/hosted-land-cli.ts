@@ -164,9 +164,10 @@ export async function submitHostedLand(
   // Where the time before submission went: in the receipt, and one line for people.
   const timing = landTiming();
   if (!timing) return response;
+  const heldMs = resultOf(response).submission?.timing?.heldMs;
   const line = landTimingLine(timing);
   if (line) process.stderr.write(`${line}\n`);
-  return { ...response, landTiming: timing };
+  return { ...response, landTiming: { ...timing, ...(heldMs === undefined ? {} : { heldMs }) } };
 }
 
 /** Copy a growing file to stderr; stop() flushes the rest. A short local timer, no network. */

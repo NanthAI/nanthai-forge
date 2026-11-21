@@ -44,9 +44,13 @@ export async function waitForCliMeasurement(
   installation: string,
   signal?: AbortSignal,
   project: () => Promise<string | null> = async () => null,
+  startedAt?: number,
 ) {
   const hold = join(installation, '.freeze');
-  if (!existsSync(hold)) return;
+  // A restarted worker may have missed release. The clock proves when it
+  // began waiting, but gives no end time once the hold is already gone.
+  if (!existsSync(hold)) return startedAt === undefined ? 0 : undefined;
+  const waitingAt = startedAt ?? Date.now();
   // The project is resolved only once a hold names projects; an unscoped hold waits as before.
   let id: string | null | undefined,
     resolving: Promise<void> | undefined,
@@ -67,7 +71,7 @@ export async function waitForCliMeasurement(
   if (measurementHoldProjects(installation)?.length) await resolve();
   if (measured()) {
     process.stderr.write(`Forge CLI landing for measured project ${id} passes measurement hold ${hold}.\n`);
-    return;
+    return startedAt === undefined ? 0 : undefined;
   }
   process.stderr.write(
     `Forge CLI landing waits for measurement hold ${hold}; it resumes when the hold is removed.\n`,
@@ -116,4 +120,5 @@ export async function waitForCliMeasurement(
     if (signal?.aborted) cancelled();
     else recheck();
   });
+  return Math.max(0, Date.now() - waitingAt);
 }

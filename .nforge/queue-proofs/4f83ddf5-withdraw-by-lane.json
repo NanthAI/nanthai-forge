@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingWithdraw.ts": "143993ade15a38870c243b2b4a75058b8414c487c0c8d41d59794eb031071cb2"
+  },
+  "replay": {
+    "incident": "78a97771",
+    "test": "withdraw by Lane cancels the live landing, keeps the Lane and fences the late check",
+    "receipt": "8cd8a0d4-ef94-466d-aa4e-7bb9243c00f9"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "01a1fe43-cca7-77d2-adbe-1e0faf0bc7e4",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "01a1fe88-629a-7fe2-b8d8-d98ae51c08e4",
+    "receipt": "6507a229-17e8-4bdb-8ab1-9e5255e73431"
+  }
+}

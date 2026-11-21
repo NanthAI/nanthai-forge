@@ -29,7 +29,12 @@ import { enforceLandGates } from './projectHostedLandGates';
 import { requireQueueRoom } from './projectHostedQueueRoom';
 import { hostedLandingDesiredSchema } from '../src/hosted-landing-desired';
 import { validateNotVerified } from '../src/agent-handoff-types';
-import { storedLandingStateSchema, landingObservation, landingTokensColumn } from '../src/hosted-landing';
+import {
+  storedLandingStateSchema,
+  landingHoldMs,
+  landingObservation,
+  landingTokensColumn,
+} from '../src/hosted-landing';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { sanitizeOutside, declarationIdentity } from '../src/run-evidence';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -37,7 +42,7 @@ import { digest } from '../src/state/hash';
 import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
 import { heldReview } from './projectHostedOwnerReview';
-import { landingMessageForReader } from './projectHostedLandingMessageBody';
+import { landingMessageForReader, landingWithoutClientHold } from './projectHostedLandingMessageBody';
 
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() };
 /** Register the goal while the first source job runs. The selected source pages
@@ -55,6 +60,7 @@ export const submit = receiptMutation({
     gates: v.optional(v.string()),
     /** The agent's own reported tokens (feature landing-tokens, Item a61d3c91); not part of the request. */
     tokens: v.optional(v.number()),
+    heldMs: v.optional(v.number()),
     /** Land only while the queue holds fewer checks (feature land-when-room, ad80e037); judged here,
      * for a new submission only, and not part of the request. */
     maxChecks: v.optional(v.number()),
@@ -63,6 +69,7 @@ export const submit = receiptMutation({
   handler: async (ctx, input) => {
     try {
       const tokens = landingTokensColumn(input.tokens);
+      const heldMs = landingHoldMs(input.heldMs);
       const command = hostedLandingDesiredSchema.parse(JSON.parse(input.request));
       validateNotVerified(command.notVerified);
       const actor = await acceptanceActor(ctx, true);
@@ -83,6 +90,7 @@ export const submit = receiptMutation({
         tokens.agentTokens,
         input.maxChecks,
         true,
+        heldMs,
       );
       return reply(state);
     } catch (error) {
@@ -106,6 +114,7 @@ export async function submitDesiredLanding(
   /** Public submit only: `land {maxChecks}` (convex/projectHostedQueueRoom.ts). */
   maxChecks?: number,
   includeReview = false,
+  heldMs?: number,
 ): Promise<string> {
   if (command.outside !== undefined) command = { ...command, outside: sanitizeOutside(command.outside) };
   const input = { projectId, agent, agentClient };
@@ -123,8 +132,9 @@ export async function submitDesiredLanding(
   const reply = async (row: Pick<LandingRow, 'value'> & { phase?: LandingRow['phase'] }) => {
     const state = JSON.parse(row.value) as z.infer<typeof storedLandingStateSchema>;
     const review = includeReview && row.phase === 'ready' ? await heldReview(ctx, project, state) : null;
-    if (!review && !state.messageRef) return row.value;
-    const selected = await landingMessageForReader(ctx, projectId, state);
+    const visible = heldMs === undefined ? landingWithoutClientHold(state) : state;
+    if (!review && !state.messageRef && visible === state) return row.value;
+    const selected = await landingMessageForReader(ctx, projectId, visible);
     return canonicalPayload(review ? { ...selected, ...review } : selected);
   };
   const request = canonicalPayload(withoutAuthorship(command));
@@ -291,6 +301,7 @@ export async function submitDesiredLanding(
       submittedAt: at,
       composeStartedAt: source.operation.firstAttempt.at,
       ...landGateTiming(gates?.value),
+      ...(heldMs === undefined ? {} : { heldMs }),
     },
     request: {
       ...(command.authorship ? { authorship: command.authorship } : {}),

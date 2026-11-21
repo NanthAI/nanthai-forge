@@ -323,23 +323,48 @@ export async function olderLandingAhead(
 }
 /** Order waits a receipt records; later ones are dropped (the first ones explain the wait). */
 export const HOSTED_ORDER_WAITS = 8;
-/** The row's order-wait list with one more wait (repeats of the latest are not added). */
+/** Finish the current recorded wait in the row update that releases it. Older waits have no clock. */
+export function closeOrderWait(
+  row: Pick<LandingRow, 'orderWait' | 'orderWaits'>,
+  now = Date.now(),
+  withdrawn = false,
+) {
+  const waits = row.orderWaits;
+  const last = waits?.at(-1);
+  if (!waits || last?.at === undefined) return {};
+  const { at, ...closed } = last;
+  if (!withdrawn && row.orderWait === last.submissionId)
+    closed.seconds = (closed.seconds ?? 0) + Math.max(0, now - at) / 1000;
+  return { orderWaits: [...waits.slice(0, -1), closed] };
+}
+/** Preserve the same bounded history and de-duplication as the queue's order evidence. */
 export function recordOrderWait(
-  waits: LandingRow['orderWaits'],
+  row: Pick<LandingRow, 'orderWait' | 'orderWaits'>,
   ahead: {
     row: Pick<LandingRow, 'submissionId'>;
     held: OrderHeld;
     footprints: 'overlap' | 'disjoint' | 'unknown';
   },
+  now: number,
 ) {
-  const list = waits ?? [];
-  const last = list[list.length - 1];
+  const waits = row.orderWaits ?? [];
+  const active = waits.at(-1);
   if (
-    list.length >= HOSTED_ORDER_WAITS ||
-    (last?.submissionId === ahead.row.submissionId && last.held === ahead.held)
+    active?.at !== undefined &&
+    active.submissionId === row.orderWait &&
+    active.submissionId === ahead.row.submissionId &&
+    active.held === ahead.held
   )
-    return list;
-  return [...list, { submissionId: ahead.row.submissionId, held: ahead.held, footprints: ahead.footprints }];
+    return waits;
+  const list = closeOrderWait(row, now).orderWaits ?? waits;
+  if (list.length >= HOSTED_ORDER_WAITS) return list;
+  const last = list[list.length - 1];
+  if (last?.submissionId === ahead.row.submissionId && last.held === ahead.held)
+    return [...list.slice(0, -1), { ...last, at: now }];
+  return [
+    ...list,
+    { submissionId: ahead.row.submissionId, held: ahead.held, footprints: ahead.footprints, at: now },
+  ];
 }
 const footprintLabel = (independent: boolean | null | undefined) =>
   independent === true

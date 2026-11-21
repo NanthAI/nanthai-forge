@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { cliBuildCommit, selectCliBuild } from '../dist/cli-installation.js';
 import { cliStartup, cliVersionCheck } from '../dist/cli-version.js';
 import { updateCli as updateCliChecked } from '../dist/cli-update.js';
-import { measurementHoldProjects } from '../dist/cli-measurement-hold.js';
+import { measurementHoldProjects, waitForCliMeasurement } from '../dist/cli-measurement-hold.js';
 import { testReleaseSigner, withSignedReleases } from './release-trust-fixture.mjs';
 import { benchHoldText } from '../scripts/bench-t3code/versions.mjs';
 import { staleBenchFreeze } from '../scripts/bench-t3code/drive.mjs';
@@ -83,6 +83,24 @@ const land = (f, projectId) =>
 /** 'waiting' while the landing is still held after a few event-loop turns. */
 const settled = pending =>
   Promise.race([pending, new Promise(done => setTimeout(() => done('waiting'), 300))]);
+
+test('measurement time is zero without a wait and a recovered worker uses its original start', async t => {
+  const f = fixture(t);
+  let now = 1_000_000;
+  t.mock.method(Date, 'now', () => now);
+  assert.equal(await waitForCliMeasurement(f.installation), 0);
+  writeFileSync(f.hold, 'synthetic measurement\n');
+  const waiting = waitForCliMeasurement(f.installation);
+  now += 12_750;
+  rmSync(f.hold);
+  assert.equal(await waiting, 12_750);
+  assert.equal(await waitForCliMeasurement(f.installation, undefined, undefined, now - 8_500), undefined);
+  writeFileSync(f.hold, 'synthetic recovered measurement\n');
+  const recovered = waitForCliMeasurement(f.installation, undefined, undefined, now - 8_500);
+  now += 1_000;
+  rmSync(f.hold);
+  assert.equal(await recovered, 9_500);
+});
 
 test('the measured project lands under its own hold, on the held build even after main moves', async t => {
   const f = fixture(t),

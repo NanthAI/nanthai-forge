@@ -6,7 +6,11 @@ import { z } from 'zod';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { unadvertisedActionError } from './hosted-agent-version.js';
 import { hostedLandingDesiredSchema } from './hosted-landing-desired.js';
-import { hostedLandingRequestSchema, type HostedLandingState } from './hosted-landing.js';
+import {
+  hostedLandingRequestSchema,
+  landingHoldMsSchema,
+  type HostedLandingState,
+} from './hosted-landing.js';
 import { sourceWaitSnapshot } from './hosted-agent-source-wait.js';
 import { hostedCheckRequestSchema, hostedCheckTerminal, type HostedCheckRun } from './hosted-check.js';
 import { hostedRecordSchema } from './hosted-records.js';
@@ -35,7 +39,7 @@ import {
   type FinishContext,
 } from './hosted-agent-finish-identity.js';
 import { landWaitCommand } from './hosted-land-wait.js';
-import { markLandStep } from './land-timing.js';
+import { LAND_HELD_MS_ENV, markLandStep } from './land-timing.js';
 import {
   changedPathsAgainstBase,
   finishChangedPathsKey,
@@ -79,6 +83,11 @@ const landGatesArg = (session: HostedAgentSession) => {
 const tokensArg = (session: HostedAgentSession) => {
   const tokens = session.landingTokens ? session.journal.get<number>('finish-tokens') : undefined;
   return typeof tokens === 'number' ? { tokens } : {};
+};
+const clientHoldArg = (session: HostedAgentSession) => {
+  if (!session.capabilities.features?.includes('landing-client-hold')) return {};
+  const heldMs = session.journal.get<number>('finish-held-ms');
+  return heldMs === undefined ? {} : { heldMs };
 };
 async function retainLandGates(session: HostedAgentSession, composeOperationId: string) {
   if (session.landGates)
@@ -231,6 +240,7 @@ async function enqueueLanding(session: HostedAgentSession, request: unknown, pin
           ...(session.landingClient ? { agentClient: session.landingClient } : {}),
           ...landGatesArg(session),
           ...tokensArg(session),
+          ...clientHoldArg(session),
           ...room,
         }),
       () => {
@@ -281,6 +291,7 @@ async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolea
           ...(session.landingClient ? { agentClient: session.landingClient } : {}),
           ...landGatesArg(session),
           ...tokensArg(session),
+          ...clientHoldArg(session),
           ...room,
         }),
       );
@@ -602,6 +613,10 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   const pinnedCandidate = command.candidateId !== undefined;
   if (command.tokens !== undefined && session.landingTokens)
     await session.journal.retain('finish-tokens', async () => command.tokens!);
+  if (command.accept !== false && session.capabilities.features?.includes('landing-client-hold')) {
+    const measured = landingHoldMsSchema.safeParse(Number(process.env[LAND_HELD_MS_ENV] || undefined));
+    if (measured.success) await session.journal.retain('finish-held-ms', () => measured.data);
+  }
   // First run only (the condition is not yet retained): a replay of an admitted landing is never
   // told "nothing was submitted" by an older server.
   if (
@@ -853,6 +868,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
           ...(session.landingClient ? { agentClient: session.landingClient } : {}),
           ...landGatesArg(session),
           ...tokensArg(session),
+          ...clientHoldArg(session),
           ...room,
         }),
       );

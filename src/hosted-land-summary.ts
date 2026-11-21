@@ -37,6 +37,7 @@ type Result = {
   submission?: {
     id?: string;
     phase?: string;
+    timing?: { heldMs?: number };
     observation?: { state: string; pendingReason?: string | null; stall?: LandingStall };
     error?: { code: string; message: string } | null;
     acceptance?: {

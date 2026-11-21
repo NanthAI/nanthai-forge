@@ -164,7 +164,9 @@ sealed, since its pass cannot carry, but takes the same one-generation overtake 
 entry parked behind an older submission is not about to land, so it takes that overtake too,
 once for its passed generation.
 
-`orderWaits` records up to eight holders with `held` reason and `footprints` classification,
+`orderWaits` records up to eight holders with `held` reason, `footprints` classification and measured
+`seconds` when a recorded Ready wait ends. Older waits without a start time omit `seconds`. A
+withdrawal discards the still-open interval. The queue records these times within its existing row updates,
 reading Candidates only for a new comparison; a link made only by the older side's own global
 risk counts as `disjoint`. Current parking clears the waiter's alarm and hands remaining waiters
 to the oldest wake; incident `5e3c3a3c` exposes stale edges in that path. A handed Ready waiter is marked as handed to

@@ -5,6 +5,14 @@ import type { HostedLandingState } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
 import { landingMessage } from '../src/landing-message';
 
+/** Old cancel and withdraw clients validate the original timing object strictly. */
+export function landingWithoutClientHold(state: HostedLandingState): HostedLandingState {
+  if (state.timing?.heldMs === undefined) return state;
+  const { heldMs: _heldMs, ...timing } = state.timing;
+  void _heldMs;
+  return { ...state, timing };
+}
+
 /** Callers resolve the containing landing or receipt under current project access first. */
 export async function landingMessageText(
   ctx: QueryCtx,

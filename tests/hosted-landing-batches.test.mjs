@@ -36,11 +36,22 @@ test('incident replay: four finishes in one minute share one full check and one 
   assert(states(f).every(s => s.phase === 'checking'));
   const oldMain = f.currentMain();
   await f.passChecks();
+  const [holder, waiter] = states(f);
+  const parked = [...f.tables.projectHostedLandingRequests.values()].find(
+    row => row.submissionId === waiter.id,
+  );
+  const orderWait = { submissionId: holder.id, held: 'accepting', footprints: 'overlap' };
+  f.patch('projectHostedLandingRequests', parked._id, {
+    orderWait: holder.id,
+    orderWaits: [{ ...orderWait, at: f.now() - 4_250 }],
+  });
   await f.drain();
   assert(states(f).every(s => s.phase === 'landed'));
   assert.equal(f.tables.projectHostedAcceptances.size, 4);
   const accepted = [...f.tables.projectHostedAcceptances.values()];
   const receipts = accepted.map(r => JSON.parse(r.value));
+  const waited = receipts.find(receipt => receipt.submissionId === waiter.id);
+  assert.deepEqual(waited.orderWaits, [{ ...orderWait, seconds: 4.25 }]);
   assert.deepEqual(
     accepted.map(r => r.checkReused),
     [false, false, false, false],

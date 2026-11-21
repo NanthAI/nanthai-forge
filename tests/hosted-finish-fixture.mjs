@@ -691,6 +691,7 @@ export async function finishFixture(
     moveMain,
     metrics,
     reuseDecisions,
+    now: () => clock.now,
     advanceClock: ms => {
       clock.now += ms;
     },

@@ -216,8 +216,9 @@ export function fixture() {
     checkArgs(bills.record, input, 'projectSelfMetricBills:record');
     return JSON.parse(await bills.record._handler(makeCtx({ paginations: 0 }), input));
   };
-  const landing = (id, submitted, accepted, trusted = true) => {
-    const request = { id, at: submitted, phase: 'landed', timing: { submittedAt: submitted }, error: null };
+  const landing = (id, submitted, accepted, trusted = true, heldMs) => {
+    const timing = { submittedAt: submitted, ...(heldMs === undefined ? {} : { heldMs }) };
+    const request = { id, at: submitted, phase: 'landed', timing, error: null };
     put(
       'projectHostedLandingRequests',
       {

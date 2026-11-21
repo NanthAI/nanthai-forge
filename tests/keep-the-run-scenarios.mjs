@@ -85,8 +85,9 @@ export const MEASURED = {
   'unrelated mover, strict, C1 follower': {
     calls: 136,
     documents: 2924,
-    readBytes: 3_084_818,
-    writeBytes: 996_581 + 3 * LANDED_FEED_ROW_BYTES,
+    // Recording the Ready order wait adds 1,191 read bytes and 340 write bytes in this replay.
+    readBytes: 3_084_818 + 1_191,
+    writeBytes: 996_581 + 340 + 3 * LANDED_FEED_ROW_BYTES,
   },
   'no checking row, strict': {
     calls: 23,

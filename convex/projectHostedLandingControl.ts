@@ -24,7 +24,7 @@ import {
   type LandingRow,
 } from './projectHostedLandingStore';
 import { nextTrainLandingRow, scheduleLandingWake, releaseLandingQueue } from './projectHostedLandingWake';
-import { olderLandingAhead, recordOrderWait } from './projectHostedLandingOrder';
+import { closeOrderWait, olderLandingAhead, recordOrderWait } from './projectHostedLandingOrder';
 import { reservationAhead } from './projectHostedLandingReservation';
 import { overtakeMark } from '../src/landing-overtake';
 import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
@@ -428,7 +428,7 @@ export async function claimReadyLanding(
       await ctx.db.patch(row._id, {
         orderWait: ahead.row.submissionId,
         alarm: null,
-        ...(parked ? { orderWaits: recordOrderWait(row.orderWaits, ahead), orderWaitHanded: undefined } : {}),
+        ...(parked ? { orderWaits: recordOrderWait(row, ahead, now), orderWaitHanded: undefined } : {}),
         ...(parked && 'ownRisk' in ahead && ahead.ownRisk && !row.ownGlobalRisk
           ? { ownGlobalRisk: true as const }
           : {}),
@@ -453,7 +453,11 @@ export async function claimReadyLanding(
     return { waitingFor: ahead.row.submissionId, until: ahead.until, ahead: ahead.row };
   }
   if (row.orderWait || row.orderWaitHanded)
-    await ctx.db.patch(row._id, { orderWait: undefined, orderWaitHanded: undefined });
+    await ctx.db.patch(row._id, {
+      orderWait: undefined,
+      orderWaitHanded: undefined,
+      ...closeOrderWait(row, now),
+    });
   if (leased) return null;
   if (row.priority !== 'urgent') {
     const [urgent] = await ctx.db

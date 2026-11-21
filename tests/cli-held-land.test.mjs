@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { once, EventEmitter } from 'node:events';
-import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { once, on, EventEmitter } from 'node:events';
+import { mkdirSync, readFileSync, realpathSync, rmSync, watch, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -18,6 +18,7 @@ import { temporaryDirectory } from '../scripts/test-temp.mjs';
 
 async function fixture(t, pauseEnqueue = false) {
   const hosted = agentFixture(t);
+  hosted.caps.features = ['landing-client-hold'];
   const faults = [];
   const enqueue = Promise.withResolvers();
   const submitted = Promise.withResolvers();
@@ -76,6 +77,16 @@ async function fixture(t, pauseEnqueue = false) {
     const path = `${hosted.root}.forge-client/agent/measurement-land.json`;
     return JSON.parse(readFileSync(path, 'utf8'));
   };
+  async function workerWaiting(operationId) {
+    const path = `${hosted.root}.forge-client/agent/land/held-${operationId}.err`;
+    const watcher = watch(path);
+    try {
+      const changes = on(watcher, 'change');
+      while (!readFileSync(path, 'utf8').includes('waits for measurement hold')) await changes.next();
+    } finally {
+      watcher.close();
+    }
+  }
   function cli(action, flags, body) {
     const child = spawn(
       process.execPath,
@@ -113,11 +124,23 @@ async function fixture(t, pauseEnqueue = false) {
     };
     return { child, done, observed };
   }
-  const submissions = () =>
-    hosted.calls
-      .filter(call => call.name === 'projectHostedLanding:enqueue')
-      .map(call => JSON.parse(call.args.request));
-  return { hosted, address, hold, command, cli, submissions, faults, submitted, enqueue, workers };
+  const sent = () => hosted.calls.filter(call => call.name === 'projectHostedLanding:enqueue');
+  const submissions = () => sent().map(call => JSON.parse(call.args.request));
+  const heldDurations = () => sent().map(call => call.args.heldMs);
+  return {
+    hosted,
+    address,
+    hold,
+    command,
+    cli,
+    submissions,
+    heldDurations,
+    faults,
+    submitted,
+    enqueue,
+    workers,
+    workerWaiting,
+  };
 }
 
 test(
@@ -144,6 +167,7 @@ test(
 
     const awaiting = f.cli('wait', [], wait);
     await awaiting.observed('held by measurement');
+    await f.workerWaiting(operationId);
     rmSync(f.hold);
     await f.submitted.promise;
     const replay = await run();
@@ -163,6 +187,8 @@ test(
       f.submissions().map(request => request.operationId),
       [operationId],
     );
+    assert(Number.isSafeInteger(f.workers()[0].heldMs), 'the detached worker durably records its hold');
+    assert.deepEqual(f.heldDurations(), [f.workers()[0].heldMs]);
     assert.equal(
       f.hosted.calls.filter(call => call.name === 'projectHostedLaneHistory:resolveLaneId').length,
       1,
@@ -180,16 +206,20 @@ test(
     const first = await run();
     assert.equal(first.code, 0, first.stderr);
     const { operationId } = first.receipt;
-    const foreground = f.cli('land', ['--save'], f.command);
-    await foreground.observed('held by measurement');
+    assert.equal(first.receipt.result.phase, 'measurement-hold');
     const [held] = f.workers();
     process.kill(held.worker.pid, 'SIGKILL');
     while (processAlive(held.worker)) await setImmediate();
     rmSync(f.hold);
+    const foreground = f.cli('land', ['--save'], f.command);
     const settled = await foreground.done;
     assert.equal(settled.code, 0, settled.stderr);
     assert.equal(settled.receipt.result.submissions[0].submission.operationId, operationId);
     assert.notEqual(f.workers()[0].worker.pid, held.worker.pid, 'active wait recovered the stopped worker');
+    assert(Number.isSafeInteger(held.holdStartedAt));
+    assert.equal(f.workers()[0].holdStartedAt, held.holdStartedAt);
+    assert.equal(f.workers()[0].heldMs, null, 'the replacement could not observe the end of the hold');
+    assert.deepEqual(f.heldDurations(), [undefined], 'missing release time remains unknown on the wire');
 
     writeFileSync(f.hold, 'later measurement\n');
     const completed = await run({ ...f.command, operationId });
@@ -225,9 +255,21 @@ test(
       [settled.stderr, ...f.faults, ...f.hosted.calls.map(call => call.name)].join('\n'),
     );
     assert.equal(settled.receipt.result.submission.phase, 'landed');
+    assert.equal(f.heldDurations().length, 1);
+    assert(
+      Number.isSafeInteger(f.heldDurations()[0]),
+      'the foreground duration reaches the detached submitter',
+    );
     assert.deepEqual(
       f.submissions().map(request => request.operationId),
       [settled.receipt.operationId],
     );
   },
 );
+
+test('a recent CLI submits zero when it proceeds without a measurement hold', async t => {
+  const f = await fixture(t);
+  const settled = await f.cli('land', ['--save'], f.command).done;
+  assert.equal(settled.code, 0, settled.stderr);
+  assert.deepEqual(f.heldDurations(), [0]);
+});

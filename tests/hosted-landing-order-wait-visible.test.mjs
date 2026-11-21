@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { landingApi } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
+const { claimReadyLanding } = await import(moduleUrl('../convex/projectHostedLandingControl.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -31,7 +33,7 @@ const PARKED_MS = 7.5 * 60_000;
  * READY with no reason; the older landing's commit woke it, it recomposed and landed. Its
  * receipt then read compose start 15 min 38 s after submission (each attempt restamps
  * timing.composeStartedAt) and recomposeCount 0, so the wait read as a lost compose driver. */
-test('replay 19328518: a parked passed landing names the older submission it waits for in every status read', async t => {
+async function orderWaitJourney(t, waitedMs, ending) {
   const f = await batchesFixture(t, { count: 2, batching: false, requestCheck: true });
   const [older, newer] = f.entries.map(entry => entry.state);
   assert(older.sequence < newer.sequence);
@@ -54,14 +56,53 @@ test('replay 19328518: a parked passed landing names the older submission it wai
         }),
       );
       seen = { status, landing, page, olderStatus: await f.current(older.id), row: structuredClone(parked) };
-      // The older entry takes as long as the incident's recheck did.
-      f.advanceClock(PARKED_MS);
+      f.advanceClock(waitedMs);
+      if (ending === 'claim') {
+        const holder = [...f.tables.projectHostedLandingRequests.values()].find(
+          r => r.submissionId === older.id,
+        );
+        f.patch('projectHostedLandingRequests', holder._id, { orderLive: undefined });
+      }
+      if (ending === 'failed' || ending === 'claim') {
+        const claim = await f.transaction(
+          'replay-ready-claim',
+          {
+            _handler: ctx =>
+              claimReadyLanding(
+                ctx,
+                {
+                  projectId: f.projectId,
+                  channel: 'main',
+                  submissionId: parked.submissionId,
+                  attemptId: parked.attemptId,
+                  owner: 'synthetic-claim',
+                },
+                undefined,
+                false,
+              ),
+          },
+          {},
+        );
+        if (ending === 'claim') {
+          assert(claim?.token, 'the waiter claims acceptance when it no longer has a holder');
+          return { f, older, newer, seen };
+        }
+        assert.equal(claim.waitingFor, older.id);
+        assert.equal(f.counts.at(-1).writes, 0, 'a repeated claim adds no write or new start');
+        assert.deepEqual(f.tables.projectHostedLandingRequests.get(parked._id).orderWaits, parked.orderWaits);
+      }
+      if (ending === 'withdrawn')
+        await f.transaction('withdraw-parked-waiter', landingApi.cancel, {
+          projectId: f.projectId,
+          request: JSON.stringify({ operationId: randomUUID(), authorityEpoch: 1, submissionId: newer.id }),
+        });
     }
     for (const run of f.runs().filter(run => run.status === 'queued')) {
       // The older check finishes only after the newer one has passed and parked.
       if (runOwner(f, run) === older.id && !seen) continue;
       if (runOwner(f, run) === older.id) released = true;
-      await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+      if (runOwner(f, run) === older.id && ending === 'failed') await f.fail(run.id);
+      else await f.rawChecks.pass(await f.rawChecks.activate(run.id));
     }
     const task = f.pending()[0];
     if (!task) break;
@@ -69,6 +110,11 @@ test('replay 19328518: a parked passed landing names the older submission it wai
   }
   assert(seen, 'the newer passed entry parked behind the older one');
   assert(released);
+  return { f, older, newer, seen };
+}
+
+test('replay 19328518: a parked passed landing names the older submission it waits for in every status read', async t => {
+  const { f, older, newer, seen } = await orderWaitJourney(t, PARKED_MS, 'landed');
   for (const [name, value] of [
     ['finish status', seen.status],
     ['landing status', seen.landing],
@@ -82,7 +128,9 @@ test('replay 19328518: a parked passed landing names the older submission it wai
     assert.equal(value.orderWait.held, last.held, `${name} names the hold reason`);
     assert.equal(value.orderWait.footprints, last.footprints, `${name} names the footprints`);
     assert(['overlap', 'disjoint', 'unknown'].includes(value.orderWait.footprints));
-    assert.deepEqual(value.orderWait.waits, seen.row.orderWaits, `${name} lists the waits so far`);
+    const { at, ...publicWait } = last;
+    assert(Number.isSafeInteger(at), 'the queue has a start clock');
+    assert.deepEqual(value.orderWait.waits, [publicWait], `${name} lists the waits without internal clocks`);
     assert(value.orderWait.waits.length <= 8, 'bounded');
   }
   assert.equal(seen.olderStatus.orderWait, undefined, 'an entry that is not parked shows no order wait');
@@ -100,4 +148,33 @@ test('replay 19328518: a parked passed landing names the older submission it wai
   assert.equal(new Set(chain.map(a => a.candidate.id)).size, 2, 'one recompose after the older landing');
   assert.equal(chain[0].progress.error.code, 'CHANNEL_CHANGED');
   assert.match(chain[0].progress.error.message, /landed, submitted before this one/);
+  const receipt = [...f.tables.projectHostedAcceptances.values()].find(row => row.submissionId === newer.id);
+  assert.equal(JSON.parse(receipt.value).orderWaits[0].seconds, PARKED_MS / 1000);
+});
+
+test('a failed holder releases a measured order wait shorter than one minute', async t => {
+  const { f, older, newer } = await orderWaitJourney(t, 12_500, 'failed');
+  assert.equal(stateOf(f, older.id).phase, 'terminal-failed');
+  assert.equal(stateOf(f, newer.id).phase, 'landed');
+  const receipt = [...f.tables.projectHostedAcceptances.values()].find(row => row.submissionId === newer.id);
+  const waits = JSON.parse(receipt.value).orderWaits;
+  assert.equal(waits[0].seconds, 12.5);
+  assert.equal(waits[0].at, undefined);
+});
+
+test('a ready claim closes the last wait when it finds no holder', async t => {
+  const { f, newer } = await orderWaitJourney(t, 6_750, 'claim');
+  const row = [...f.tables.projectHostedLandingRequests.values()].find(r => r.submissionId === newer.id);
+  assert.equal(row.orderWait, undefined);
+  assert.equal(row.orderWaits[0].at, undefined);
+  assert.equal(row.orderWaits[0].seconds, 6.75);
+});
+
+test('withdrawing a parked waiter clears the unfinished interval without recording seconds', async t => {
+  const { f, newer } = await orderWaitJourney(t, 9_000, 'withdrawn');
+  const row = [...f.tables.projectHostedLandingRequests.values()].find(r => r.submissionId === newer.id);
+  assert.equal(stateOf(f, newer.id).error.code, 'LANDING_CANCELLED');
+  assert.equal(row.orderWait, undefined);
+  assert.equal(row.orderWaits[0].at, undefined);
+  assert.equal(row.orderWaits[0].seconds, undefined);
 });

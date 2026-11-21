@@ -3,6 +3,12 @@ import { z } from 'zod';
 import { discardedRunnerSeconds } from './cost-budgets.js';
 import type { HostedLandingState } from './hosted-landing.js';
 
+/** The builder's own pre-submission measurement hold. Older submissions remain unknown. */
+export function landingClientHoldSeconds(state: HostedLandingState | null) {
+  const heldMs = state?.timing?.heldMs;
+  return heldMs === undefined ? null : heldMs / 1000;
+}
+
 /** Counts already carried by the landing row. Missing stamps stay unknown, including on old servers. */
 export const landingCostsSchema = z.object({
   attempts: z.number().nonnegative().nullable(),

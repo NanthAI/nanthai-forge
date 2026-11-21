@@ -111,6 +111,10 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `e62d834b` | Core claim: source steps fenced at the fixed 60 s worker lease were never retried, so landings sat in source preparation (2026-11-20). A step renews its lease from inside, a fenced or failed step retries server-side, and a dead step or a fan-out batch queued past its lease is repaired by its own wake at the lease end (no polling; a healthy step cancels its wake, so it never runs). The queue and a stalled `wait` name the failed step and its cause, and a runner source request answers slow object storage with 503 `reason: storage` inside the runner 30 s timeout |
 | `39a68046` | A conflict handoff could leave the origin Lane's sync-required landing queued. Draft publication supersedes the landing for that exact saved head, including on retry. |
 
+| `3dfacaa4` | A measurement-held CLI replay submits the original operation once. Direct and desired retries preserve its first measured builder hold and legacy reply shape. |
+| `65e2d743` | The passed landing waited behind an older submission. Individual and batch receipts record the elapsed order wait, and `landings` includes waits shorter than one minute. |
+| `78a97771` | Withdrawal by Lane keeps the builder's saves and ends the pending check. An old withdrawal reader can still read a reply after a newer CLI stamps the submit. |
+
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.
 

@@ -12,7 +12,7 @@ import {
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { armLandingAlarm } from './projectHostedLandingStallWake';
 import { overtakeOlder } from '../src/landing-overtake';
-import { HOSTED_ORDER_WAITS } from './projectHostedLandingOrder';
+import { closeOrderWait, HOSTED_ORDER_WAITS } from './projectHostedLandingOrder';
 import {
   HOSTED_FINISH_COMPOSE_WATCHDOG_MS,
   HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS,
@@ -243,6 +243,7 @@ const handedTo = (
   from: Doc<'projectHostedLandingRequests'>,
   landed: boolean,
 ) => ({
+  ...closeOrderWait(waiter),
   orderWait: next.submissionId,
   orderWaitHanded:
     waiter.phase === 'ready' && !(landed && heldByPaths(waiter, from)) ? next.submissionId : undefined,
@@ -288,6 +289,7 @@ export async function driveParkedWaiter(ctx: MutationCtx, waiter: Doc<'projectHo
   await ctx.db.patch(waiter._id, {
     orderWait: undefined,
     orderWaitHanded: undefined,
+    ...closeOrderWait(waiter),
     ...(alarm ? { alarm } : {}),
   });
   // Review d4f55e9f F3: a parked finish has no IO in flight, so its wake is a mutation.
@@ -392,6 +394,7 @@ export async function wakeLandingOrderWaiters(
       await ctx.db.patch(waiter._id, {
         orderWait: undefined,
         orderWaitHanded: undefined,
+        ...closeOrderWait(waiter),
         ...(early ? { runnable: true } : {}),
         ...(alarm ? { alarm } : {}),
       });

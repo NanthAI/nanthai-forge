@@ -17,6 +17,7 @@ import { hostedLandingStateSchema } from '../dist/hosted-landing.js';
 import { hostedAgentCapabilitiesSchema } from '../dist/hosted-agent-contract.js';
 import { effectiveAgentDefaultsSchema } from '../dist/agent-parallel-defaults.js';
 import { hostedContractFeatures } from '../dist/hosted-contract-features.js';
+import { capabilityOptions } from '../dist/hosted-capabilities-early.js';
 import {
   checkResponseCompatibility,
   replyBreakMessage,
@@ -63,6 +64,15 @@ test('feed capability is negotiated within the existing discovery request budget
   const feed = await candidateCapabilities(['feed']);
   assert(!normal.features.includes('feed'));
   assert.deepEqual(feed.features, ['feed']);
+});
+
+test('finish negotiates its client hold in the existing discovery budget', async () => {
+  const { features } = capabilityOptions('synthetic-root');
+  const finish = await candidateCapabilities([...features, 'landing-client-hold']);
+  assert(finish.features.includes('landing-client-hold'));
+  assert(!finish.features.includes('main-today'));
+  const general = await candidateCapabilities();
+  assert(!general.features.includes('landing-client-hold'));
 });
 
 test('incident replay: a strict CLI rejects an added agentDefaults field; the reply boundary drops it', async () => {

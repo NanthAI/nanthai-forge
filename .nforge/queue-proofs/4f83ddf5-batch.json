@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingBatchPublish.ts": "ef88c05bf0a49d43292043a41929464b828c9dc77a87f86691e31f884705a62d"
+  },
+  "replay": {
+    "incident": "65e2d743",
+    "test": "incident replay: four finishes in one minute share one full check and one atomic main publication",
+    "receipt": "8cd8a0d4-ef94-466d-aa4e-7bb9243c00f9"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "01a1fe43-cca7-77d2-adbe-1e0faf0bc7e4",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "01a1fe88-629a-7fe2-b8d8-d98ae51c08e4",
+    "receipt": "6507a229-17e8-4bdb-8ab1-9e5255e73431"
+  }
+}

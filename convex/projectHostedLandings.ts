@@ -24,6 +24,7 @@ import {
   LANDINGS_READ_BYTES,
   LANDINGS_REASON_CHARS,
   LANDINGS_RUN_IDS,
+  landingClientHoldSeconds,
   landingCosts,
 } from '../src/hosted-landings-view';
 
@@ -184,6 +185,7 @@ async function evidence(
       kind: request?.revertOf ? 'compensating' : 'landing',
       batchId: receipt.batchId ?? null,
       submittedAt: state?.timing?.submittedAt ?? state?.at ?? null,
+      clientHoldSeconds: landingClientHoldSeconds(state),
       // End of the pre-queue Lane check that admitted the change; null when it queued unadmitted.
       admittedAt: iso(request?.admission?.status === 'passed' ? request.admission.endedAt : undefined),
       committedAt: state?.timing?.committedAt ?? receipt.at,

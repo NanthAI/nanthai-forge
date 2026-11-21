@@ -106,6 +106,8 @@ function fixture() {
       counts,
       pending,
       message,
+      heldMs,
+      orderWaits,
       created = minute(at),
     } = {},
   ) => {
@@ -135,7 +137,11 @@ function fixture() {
           ...(version === undefined ? {} : { version }),
           ...(counts ? { counts } : {}),
           at: iso(minute(at - 30)),
-          timing: { submittedAt: iso(minute(at - 30)), committedAt: iso(minute(at)) },
+          timing: {
+            submittedAt: iso(minute(at - 30)),
+            committedAt: iso(minute(at)),
+            ...(heldMs === undefined ? {} : { heldMs }),
+          },
           pad: 'x'.repeat(pad),
         }),
       },
@@ -177,6 +183,7 @@ function fixture() {
           id: id('receipt', n),
           at: iso(minute(at)),
           ...(message ? { message } : {}),
+          ...(orderWaits ? { orderWaits } : {}),
           submissionId: sub,
           previous: { head: `h-${landedOn}`, receiptId: landedOn },
           candidate: { head: `landed-${n}` },
@@ -240,6 +247,22 @@ test('landings: one row per landing with times, bases, main move, runs and recom
   assert.equal(c.kind, 'compensating');
   assert.equal(b.firstCheck, null);
   assert.deepEqual(a.firstCheck, { landedOn: 'admission-run', mainMoved: false });
+});
+
+test('landings reads short order waits and the client hold from existing receipt and request rows', async () => {
+  const f = fixture();
+  const orderWaits = [
+    { submissionId: id('sub', 1), held: 'accepting', footprints: 'unknown', seconds: 4.25 },
+  ];
+  f.landing(1, { at: 60 });
+  f.landing(2, { at: 90, orderWaits, heldMs: 0 });
+  const {
+    landings: [legacy, timed],
+  } = await f.read();
+  assert.equal(legacy.clientHoldSeconds, null);
+  assert.equal(legacy.orderWaits, null);
+  assert.equal(timed.clientHoldSeconds, 0);
+  assert.deepEqual(timed.orderWaits, orderWaits);
 });
 
 test('landings: names the following main audit run and verdict, null when none is stored', async () => {

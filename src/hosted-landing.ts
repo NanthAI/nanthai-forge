@@ -21,9 +21,18 @@ import { crossHeadProofSchema } from './hosted-cross-head-proof.js';
 import { scopedRecheckBasisSchema } from './scoped-recheck-policy.js';
 import { docsResolutionSchema } from './docs-resolution.js';
 import { landingAcceptedBySchema } from './landing-accepted-by.js';
+import { MAX_LANDING_HOLD_MS } from './land-timing.js';
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
-export const landingHoldMsSchema = z.number().int().min(0).max(86_400_000);
+export const landingHoldMsSchema = z.number().int().min(0).max(MAX_LANDING_HOLD_MS);
+export function landingHoldMs(value: number | undefined) {
+  invariant(
+    value === undefined || landingHoldMsSchema.safeParse(value).success,
+    'BAD_ARGUMENT',
+    `heldMs: send a whole number from 0 to ${MAX_LANDING_HOLD_MS}.`,
+  );
+  return value;
+}
 export const finishRetryReasonSchema = z.enum(['flake', 'main-moved', 'infra', 'other']);
 /** Agent-reported tokens at landing (Item a61d3c91): the tokens the agent's own work on this landing used, as its
  * harness counts them. Optional, display-only (Stats), never billing; the server refuses anything else. */

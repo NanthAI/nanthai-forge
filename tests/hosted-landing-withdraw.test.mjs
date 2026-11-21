@@ -22,9 +22,9 @@ test.after(() => {
 const withdrawApi = await import(moduleUrl('../convex/projectHostedLandingWithdraw.ts'));
 const laneFinish = await import(moduleUrl('../convex/projectHostedLaneFinish.ts'));
 
-async function begin(f, overrides = {}) {
+async function begin(f, overrides = {}, metadata) {
   const request = f.request(overrides),
-    state = await f.enqueue(request);
+    state = await f.enqueue(request, metadata);
   await f.drain();
   return { request, state };
 }
@@ -56,7 +56,7 @@ test('land --withdraw lowers to the hosted withdraw action', () => {
 
 test('withdraw by Lane cancels the live landing, keeps the Lane and fences the late check', async t => {
   const f = await finishFixture(t),
-    { state } = await begin(f),
+    { state } = await begin(f, {}, { heldMs: 12_750 }),
     lane = await f.readLane(f.lane.laneId),
     main = f.currentMain(),
     run = (await f.status(state.id)).attempt.check.runId;
@@ -69,6 +69,8 @@ test('withdraw by Lane cancels the live landing, keeps the Lane and fences the l
   assert.equal(calls.length, 1, 'one mutation per withdraw');
   assert(calls[0].documents <= 80, `bounded metadata reads: ${calls[0].documents}`);
   t.diagnostic(JSON.stringify({ calls: calls.length, reads: calls[0].documents, writes: calls[0].writes }));
+  assert.equal(state.timing.heldMs, 12_750);
+  assert.equal(withdrawn.timing.heldMs, undefined, 'legacy withdraw replies omit the submit duration');
   assert.equal(withdrawn.id, state.id);
   assert.equal(withdrawn.phase, 'terminal-failed');
   assert.equal(withdrawn.error.code, 'LANDING_CANCELLED');

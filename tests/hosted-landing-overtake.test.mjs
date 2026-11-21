@@ -191,12 +191,23 @@ test('unsealedBy: only refusals no dependent change caused, and scoped re-checks
 
 test('recordOrderWait: one row per new wait, bounded', () => {
   const wait = (id, held = 'dependent') => ({ row: { submissionId: id }, held, footprints: 'overlap' });
-  let list = recordOrderWait(undefined, wait('a'));
-  assert.deepEqual(list, [{ submissionId: 'a', held: 'dependent', footprints: 'overlap' }]);
-  assert.equal(recordOrderWait(list, wait('a')), list, 'a repeat of the latest wait');
-  list = recordOrderWait(list, wait('a', 'accepting'));
+  let list = recordOrderWait({}, wait('a'), 1_000);
+  assert.deepEqual(list, [{ submissionId: 'a', held: 'dependent', footprints: 'overlap', at: 1_000 }]);
+  assert.equal(
+    recordOrderWait({ orderWait: 'a', orderWaits: list }, wait('a'), 2_000),
+    list,
+    'a repeat of the latest wait keeps its original start',
+  );
+  list = recordOrderWait({ orderWait: 'a', orderWaits: list }, wait('a', 'accepting'), 3_500);
   assert.equal(list.length, 2);
-  for (let i = 0; i < 20; i++) list = recordOrderWait(list, wait(`x${i}`));
+  assert.equal(list[0].seconds, 2.5);
+  assert.equal(list[0].at, undefined);
+  for (let i = 0; i < 20; i++)
+    list = recordOrderWait(
+      { orderWait: list.at(-1).submissionId, orderWaits: list },
+      wait(`x${i}`),
+      4_000 + i,
+    );
   assert.equal(list.length, HOSTED_ORDER_WAITS);
 });
 

@@ -12,6 +12,7 @@ import {
 } from './cli-installation.js';
 import { CLI_RUNTIME_WAIT_MS, resolveCliPointer } from './cli-launcher.js';
 import { ForgeError } from './errors.js';
+import { LAND_HELD_MS_ENV, MAX_LANDING_HOLD_MS } from './land-timing.js';
 
 /** Cache the promise, including failures, so concurrent callers never repeat discovery. */
 export function cliVersionCheck() {
@@ -76,6 +77,7 @@ const RUNTIME_ENV = [
   'FORGE_ACTOR',
   'FORGE_LAND_CHILD',
   'FORGE_LAND_INVOKED_AT',
+  LAND_HELD_MS_ENV,
   'FORGE_LAND_BUDGET_SECONDS',
   'FORGE_LAND_WAKE',
   'FORGE_HELD_LAND_AUTO',
@@ -220,7 +222,12 @@ export async function cliStartup(
   // Resolved from local files at most once, and only while a measurement hold exists.
   let project: Promise<string | null> | undefined;
   const commandProject = () => (project ??= cliCommandProject(args));
-  if (cliLandingCommand(args)) await waitForCliMeasurement(installation, undefined, commandProject);
+  if (cliLandingCommand(args)) {
+    const heldMs = (await waitForCliMeasurement(installation, undefined, commandProject)) ?? 0;
+    const previous = process.env[LAND_HELD_MS_ENV];
+    if (heldMs > 0 || previous === undefined)
+      process.env[LAND_HELD_MS_ENV] = String(Math.min(MAX_LANDING_HOLD_MS, (Number(previous) || 0) + heldMs));
+  }
   // The updater module (and its install graph) loads only when this command installs in the foreground.
   const { cliReleaseSource, readCliSource, cliUpdateCommand, CLI_UPDATE_WAIT_MS } =
     await import('./cli-update-source.js');

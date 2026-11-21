@@ -3,6 +3,8 @@
  * reads only, no I/O and no network. The first mark of a step wins, so replays inside the same
  * submitter keep the original times. A resumed submission (new process) times only its own part. */
 export const LAND_INVOKED_ENV = 'FORGE_LAND_INVOKED_AT';
+export const LAND_HELD_MS_ENV = 'FORGE_LAND_HELD_MS';
+export const MAX_LANDING_HOLD_MS = 86_400_000;
 
 /** In order. Each duration is "from the previous recorded step to this one". */
 const steps = [
@@ -38,6 +40,7 @@ export type LandTiming = {
   invokedAt: string;
   submittedAt: string | null;
   totalMs: number | null;
+  heldMs?: number;
   stepsMs: Record<string, number>;
 };
 

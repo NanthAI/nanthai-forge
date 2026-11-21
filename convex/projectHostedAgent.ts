@@ -152,11 +152,15 @@ export const capabilities = query({
           ...(landingMessageVersion === 1 ? { landingMessageVersion: 1 } : {}),
           ...(features
             ? {
-                features: advertisedFeatures(features).filter(
-                  feature =>
-                    feature !== 'lane-holder-v1' ||
-                    effectivePolicy(project).accessIdentities?.laneHolders === true,
-                ),
+                features: [
+                  ...advertisedFeatures(features).filter(
+                    feature =>
+                      feature !== 'lane-holder-v1' ||
+                      effectivePolicy(project).accessIdentities?.laneHolders === true,
+                  ),
+                  // Only finish asks for this optional submit field.
+                  ...(features.includes('landing-client-hold') ? ['landing-client-hold'] : []),
+                ],
               }
             : {}),
           // Lane snapshots (7ac4e32f): the policy rides on the read every command already makes.

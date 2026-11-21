@@ -935,6 +935,9 @@ export class HostedAgentTransport {
           ? (await import('./preflight-guard-cache.js')).guardRevisionToAsk(this.root, this.address.projectId)
           : undefined;
         if (guardRevision !== undefined) options = { ...options, guardRevision };
+        // Finish uses the discovery slot reserved for main-today on bare status.
+        if (action === 'finish')
+          options = { ...options, features: [...(options.features as string[]), 'landing-client-hold'] };
         // The CLI may have started this exact read alongside its release check: take it once.
         let early = takeEarlyCapabilities(this.address, { clientVersion: CUTOVER_CLI_VERSION, ...options });
         for (;;) {

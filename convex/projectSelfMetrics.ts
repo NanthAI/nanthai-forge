@@ -24,7 +24,7 @@ import { metricRunRow } from '../src/self-metrics-run';
 import { metricRunsPage } from './projectMetricReadRuns';
 import { report } from './errors';
 import { metricReceiptCoverage } from '../src/self-metric-receipts';
-import { landingCosts } from '../src/hosted-landings-view';
+import { landingClientHoldSeconds, landingCosts } from '../src/hosted-landings-view';
 import {
   dayBudgetStateSchema,
   landingSpeedSample,
@@ -395,6 +395,7 @@ export const page = query({
               head: move.candidate.head,
               submissionId: move.submissionId,
               submittedAt: submitted?.timing?.submittedAt ?? submitted?.at ?? null,
+              clientHoldSeconds: landingClientHoldSeconds(submitted),
               trusted: selected?.actor.kind === 'agent' && selected.policy.acceptance.mode === 'auto-on-pass',
               kind: request?.revertOf ? 'compensating' : 'landing',
               attemptId: move.attemptId,

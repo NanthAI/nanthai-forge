@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandings.ts": "bca3958839cd1aad2f85b0f7d2685441024c45cdbb3ca033217d615fe72a4e55",
+    "src/hosted-landings-view.ts": "60e878824e17f2c349d460890eb4318bacc56df68d7d25892c99df5d573e6002"
+  },
+  "replay": {
+    "incident": "65e2d743",
+    "test": "landings reads short order waits and the client hold from existing receipt and request rows",
+    "receipt": "8cd8a0d4-ef94-466d-aa4e-7bb9243c00f9"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "01a1fe43-cca7-77d2-adbe-1e0faf0bc7e4",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "01a1fe88-629a-7fe2-b8d8-d98ae51c08e4",
+    "receipt": "6507a229-17e8-4bdb-8ab1-9e5255e73431"
+  }
+}

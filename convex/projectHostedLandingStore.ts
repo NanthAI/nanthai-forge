@@ -7,7 +7,7 @@ import { unsealedBy } from '../src/landing-overtake';
 export { landingAttemptRow, loadLandingAttempt } from './projectHostedLandingAttemptRead';
 import { recordLandingFeed } from './projectFeedTerminal';
 import { landingAttemptRow, loadLandingAttempt, pinsFor } from './projectHostedLandingAttemptRead';
-import { holdsLandingOrder, landingPriorityState } from './projectHostedLandingOrder';
+import { closeOrderWait, holdsLandingOrder, landingPriorityState } from './projectHostedLandingOrder';
 import { invalidatePipeline } from './projectHostedLandingPipelineInvalidation';
 import { cancelUnneededHostedCheck } from './projectHostedCheckCancel';
 import { makeFunctionReference } from 'convex/server';
@@ -168,6 +168,9 @@ export async function writeLanding(
   );
   const state = landingPriorityState(row, storedLandingStateSchema.parse(input)),
     previous = storedLandingStateSchema.parse(JSON.parse(row.value));
+  // Attempt clocks can restart. Client hold time belongs to the original submission.
+  const heldMs = previous.timing?.heldMs;
+  if (heldMs !== undefined) (state.timing ??= { submittedAt: state.at }).heldMs = heldMs;
   // A new attempt starts with empty check progress: counts and the progress
   // digest belong to the attempt that observed them (9f94c28a). Fresh values
   // written with this transition differ from the previous attempt's and stay.
@@ -414,6 +417,9 @@ export async function writeLanding(
         : undefined,
     // A handoff mark lasts only while the entry is a Ready waiter (43b51a5e case 2).
     orderWaitHanded: state.phase === 'ready' ? row.orderWaitHanded : undefined,
+    ...(state.phase === 'ready'
+      ? {}
+      : closeOrderWait(row, Date.now(), state.error?.code === 'LANDING_CANCELLED')),
     orderWaited: orderLive || reserving || admissionHolds ? row.orderWaited : undefined,
     value: semanticPayload(state),
   });

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLanding.ts": "ccc5cfb6945ac5ca90de183766d4c9f6ec15d95152457eeae251f18e9895ef1a",
+    "convex/projectHostedLandingDesired.ts": "8c505877fbaca34df0079a23c713c92d291adb0bce07aee0cab9ac9de78a5c9f",
+    "convex/projectHostedLandingMessageBody.ts": "a0d58ee8d5e56b33dd5aab90ec3fb6ab8e1f7b185dc53ea7386ba1edf2308a93",
+    "src/hosted-landing.ts": "db73391e182cd3fad1a21371308f7717826bca99d869d0cf71208a26af91b34d"
+  },
+  "replay": {
+    "incident": "3dfacaa4",
+    "test": "direct and desired submit replays preserve the first client hold and keep legacy replies compatible",
+    "receipt": "8cd8a0d4-ef94-466d-aa4e-7bb9243c00f9"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "01a1fe43-cca7-77d2-adbe-1e0faf0bc7e4",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "01a1fe88-629a-7fe2-b8d8-d98ae51c08e4",
+    "receipt": "6507a229-17e8-4bdb-8ab1-9e5255e73431"
+  }
+}
