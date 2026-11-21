@@ -13,6 +13,7 @@ import type {
   MetricPeriod,
   MetricRecords,
   MetricRun,
+  MetricSubmission,
   SelfMetricsReader,
 } from './self-metrics-types.js';
 
@@ -284,35 +285,7 @@ export function calculateSelfMetrics(
     per100Finishes: finishes ? (errors.filter(r => r.errorCode === code).length * 100) / finishes : null,
     noOwner: errors.filter(r => r.errorCode === code && r.noOwner === true).length || null,
   }));
-  const delivered = new Map<string, string>();
-  for (const receipt of records.receipts.filter(r => instant(r.at) <= instant(asOf)))
-    for (const item of receipt.deliveries ?? []) delivered.set(item.entryId, item.state);
-  const acceptedInputs = new Set(
-    records.moves
-      .filter(move => instant(move.at) <= instant(asOf))
-      .flatMap(move => move.inputs.map(input => `${input.laneId}:${input.head}`)),
-  );
-  const runsById = new Map(records.runs.map(run => [run.id, run]));
-  const dropped = (options.headline ? [] : records.submissions)
-    .filter(s => inPeriod(s.at, period) && instant(s.at) <= instant(asOf))
-    .filter(s => {
-      if (s.delivered || delivered.has(s.entryId) || (s.landedAt && instant(s.landedAt) <= instant(asOf)))
-        return false;
-      if (s.inputs.some(input => acceptedInputs.has(`${input.laneId}:${input.head}`))) return false;
-      const progress = [
-        s.at,
-        ...(s.endedAt ? [s.endedAt] : []),
-        ...s.progressAt,
-        ...s.runIds
-          .flatMap(id => (runsById.has(id) ? [runsById.get(id)!] : []))
-          .flatMap(r => [r.at, ...(r.endedAt ? [r.endedAt] : [])]),
-      ]
-        .filter(at => instant(at) <= instant(asOf))
-        .sort((a, b) => instant(a) - instant(b))
-        .at(-1)!;
-      return Date.parse(asOf) - Date.parse(progress) >= 60 * 60_000;
-    })
-    .map(s => ({ id: s.id, entryId: s.entryId, noOwner: s.noOwner ?? null }));
+  const { rows: dropped, unknown } = droppedLandingEntries(records, period, asOf, options.headline);
   const mutations = first(
     records.receipts.filter(r => r.kind === 'mutation' && r.origin === 'command' && !excluded.has(r.action)),
     r => `${r.operationId}:${r.action}`,
@@ -427,11 +400,13 @@ export function calculateSelfMetrics(
       : []),
   ];
   const deliveryGaps = coverage(records, 'deliveries', period.from)
-    ? [
-        'Terminal-outcome delivery and timestamped batch progress were not recorded for the whole period; dropped rows are candidates where delivery is unknown.',
-      ]
+    ? ['Delivery and timestamped batch progress history are incomplete for this period.']
     : [];
   deliveryGaps.push(...(records.deliveryCoverageGaps ?? []), ...receiptGaps);
+  if (unknown)
+    deliveryGaps.push(
+      `${unknown} entries lack qualifying request state or settlement evidence at the reporting cutoff.`,
+    );
   return {
     period: { ...period, asOf },
     incompleteReceiptRecords,
@@ -511,6 +486,7 @@ export function calculateSelfMetrics(
       gaps: deliveryGaps,
       dropped: deliveryGaps.length && !dropped.length ? null : dropped.length,
       rows: dropped,
+      unknown,
     },
     metric7: joined(
       calculateAuthorityMetrics(options.headline ? { ...records, observations: [], receipts: [] } : records, {
@@ -571,4 +547,104 @@ export function calculateSelfMetrics(
 }
 export async function readSelfMetrics(reader: SelfMetricsReader, period: MetricPeriod) {
   return calculateSelfMetrics(await reader.read(), period);
+}
+
+const pending = new Set(['composing', 'queued', 'checking', 'ready', 'awaiting-review']);
+const settled = new Set([
+  'landed',
+  'accepted',
+  'terminal-failed',
+  'failed',
+  'conflict',
+  'cancelled',
+  'interrupted',
+]);
+const lostDriver = new Set(['LANDING_STALLED', 'LANDING_DRIVER_EXHAUSTED']);
+
+function droppedLandingEntries(records: MetricRecords, period: MetricPeriod, asOf: string, headline = false) {
+  const rows: { id: string; entryId: string; noOwner: boolean | null }[] = [];
+  if (headline) return { rows, unknown: 0 };
+
+  const cutoff = Date.parse(asOf),
+    from = Date.parse(period.from),
+    to = Date.parse(period.to);
+  // Closed reports use the same half-open boundary as their retained rows.
+  const observed = (time: number) => time <= cutoff && (cutoff !== to || time < to);
+  const delivered = new Set<string>();
+  const lostOperations = new Set<string>();
+  for (const receipt of records.receipts) {
+    if (!observed(Date.parse(receipt.at))) continue;
+    for (const delivery of receipt.deliveries ?? []) delivered.add(delivery.entryId);
+    if (
+      receipt.kind === 'lifecycle' &&
+      (receipt.errorCodes?.some(code => lostDriver.has(code)) ||
+        (receipt.errorCode && lostDriver.has(receipt.errorCode)))
+    )
+      lostOperations.add(receipt.operationId);
+  }
+  const inputKey = (input: { laneId: string; head: string }) => `${input.laneId}:${input.head}`;
+  const accepted = new Set(
+    records.moves.filter(move => observed(Date.parse(move.at))).flatMap(move => move.inputs.map(inputKey)),
+  );
+  const runs = new Map(records.runs.map(run => [run.id, run]));
+  const entries = new Map<string, { request: MetricSubmission; last: number; settled: boolean }>();
+
+  for (const row of records.submissions) {
+    const start = Date.parse(row.entryAt ?? row.at);
+    if (start < from || start >= to || !observed(start) || !observed(Date.parse(row.at))) continue;
+    let entry = entries.get(row.entryId);
+    if (!entry) {
+      entry = { request: row, last: start, settled: false };
+      entries.set(row.entryId, entry);
+    }
+    // The request carries the entry phase. Each attempt and batch check may contribute progress.
+    if (
+      row.id === row.entryId ||
+      (entry.request.id !== row.entryId && Date.parse(row.at) > Date.parse(entry.request.at))
+    )
+      entry.request = row;
+    entry.settled ||= Boolean(
+      row.delivered ||
+      (row.landedAt && observed(Date.parse(row.landedAt))) ||
+      row.inputs.some(input => accepted.has(inputKey(input))),
+    );
+    for (const at of [
+      row.at,
+      row.endedAt,
+      ...row.progressAt,
+      ...row.runIds.flatMap(id => {
+        const run = runs.get(id);
+        return run ? [run.at, run.endedAt] : [];
+      }),
+    ]) {
+      const time = at ? Date.parse(at) : NaN;
+      if (observed(time) && time > entry.last) entry.last = time;
+    }
+  }
+
+  let unknown = 0;
+  for (const [entryId, entry] of entries) {
+    const { request } = entry;
+    const phase = request.entryStatus ?? request.status;
+    if (settled.has(phase)) {
+      const ended =
+        request.entryEndedAt ??
+        (request.entryStatus === undefined || request.id === entryId ? request.endedAt : undefined);
+      const requestLostDriver = request.errorCode && lostDriver.has(request.errorCode);
+      // An older terminal request can omit the code and time. A caller outcome
+      // with the original operation and typed code proves it ended by the cutoff.
+      const callerLostDriver =
+        (!request.errorCode || requestLostDriver) &&
+        request.operationId &&
+        lostOperations.has(request.operationId);
+      if (ended ? observed(Date.parse(ended)) : callerLostDriver) {
+        if (callerLostDriver || requestLostDriver) rows.push({ id: request.id, entryId, noOwner: true });
+        continue;
+      }
+    }
+    if (entry.settled || delivered.has(entryId) || cutoff - entry.last < 60 * 60_000) continue;
+    if (pending.has(phase)) rows.push({ id: request.id, entryId, noOwner: request.noOwner ?? null });
+    else unknown++;
+  }
+  return { rows, unknown };
 }

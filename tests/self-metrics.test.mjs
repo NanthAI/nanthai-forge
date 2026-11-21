@@ -117,7 +117,7 @@ test('metric 2: Oct 21 incident shape, eight concurrent finishes return seven WO
     { code: 'WORK_STALE', count: 7, per100Finishes: 87.5, noOwner: null },
   ]);
 });
-test('metric 3: Oct 23 leaderless batch, terminal undelivered failure and exact 60-minute threshold', () => {
+test('friction 70469355: settled check and conflict failures stay out of dropped landings', () => {
   // STATE.md egress2 + friction.md: batch 811eb360 kept waiting after mates settled; land-ready returned finishes:[].
   const r = base(),
     asOf = at('23', '15:00');
@@ -127,22 +127,59 @@ test('metric 3: Oct 23 leaderless batch, terminal undelivered failure and exact 
     submission('threshold', at('23', '14:00'), []),
     submission('terminal', at('23', '13:00'), [], 'failed', at('23', '13:30')),
     submission('delivered', at('23', '13:00'), [], 'failed', at('23', '13:30')),
+    {
+      ...submission('conflict', at('23', '13:00'), [], 'terminal-failed', at('23', '13:30')),
+      errorCode: 'COMPOSITION_CONFLICT',
+    },
+    {
+      ...submission('no-driver', at('23', '13:00'), [], 'terminal-failed', at('23', '14:55')),
+      errorCode: 'LANDING_DRIVER_EXHAUSTED',
+    },
+    {
+      ...submission('stalled', at('23', '13:00'), [], 'terminal-failed', at('23', '14:59')),
+      errorCode: 'LANDING_STALLED',
+    },
+    submission('unknown', at('23', '13:00'), [], 'unknown'),
+    submission('uncertain-time', at('23', '13:00'), [], 'terminal-failed'),
+    submission('later', at('23', '13:00'), [], 'terminal-failed', at('23', '15:05')),
   ];
   r.submissions[0].noOwner = true;
   r.receipts = [
     {
       ...receipt('f', 'finish'),
       at: at('23', '13:31'),
-      deliveries: [{ entryId: 'delivered', state: 'terminal-failed' }],
+      deliveries: [
+        { entryId: 'delivered', state: 'terminal-failed' },
+        { entryId: 'no-driver', state: 'terminal-failed' },
+      ],
     },
   ];
   const m = calculateSelfMetrics(r, { ...period, asOf }).metric3;
-  assert.equal(m.dropped, 3);
+  assert.equal(m.dropped, 4);
+  assert.equal(m.unknown, 3);
+  assert.equal(m.partial, true);
   assert.deepEqual(
     m.rows.map(s => s.id),
-    ['811eb360-egress2', 'threshold', 'terminal'],
+    ['811eb360-egress2', 'threshold', 'no-driver', 'stalled'],
   );
+  assert.equal(m.rows.find(s => s.id === 'no-driver').noOwner, true);
   assert.equal(m.rows[0].noOwner, true);
+});
+test('metric 3: a terminal event at the next report boundary stays outside the closed window', () => {
+  const r = base();
+  const cutoff = at('23', '15:00');
+  r.submissions = [
+    {
+      ...submission('boundary', at('23', '13:00'), [], 'terminal-failed', cutoff),
+      errorCode: 'LANDING_STALLED',
+    },
+  ];
+  const closed = calculateSelfMetrics(r, { from, to: cutoff }).metric3;
+  assert.equal(closed.dropped, null);
+  assert.equal(closed.unknown, 1);
+  const snapshot = calculateSelfMetrics(r, { ...period, asOf: cutoff }).metric3;
+  assert.equal(snapshot.dropped, 1);
+  assert.equal(snapshot.unknown, 0);
 });
 test('metric 3: run/batch progress resets stall clock; landed input is settled, unrelated same head is not', () => {
   const r = base();
@@ -152,7 +189,15 @@ test('metric 3: run/batch progress resets stall clock; landed input is settled, 
     submission('landed', at('23', '12:00'), [i]),
     submission('other', at('23', '12:00'), [input('b', 'h')]),
   ];
-  r.submissions[0].runIds = ['run'];
+  r.submissions.push(
+    { ...submission('superseded-attempt', at('23', '12:00'), [], 'superseded'), entryId: 'progress' },
+    {
+      ...submission('current-attempt', at('23', '12:01'), [], 'checking'),
+      entryId: 'progress',
+      runIds: ['run'],
+    },
+    { ...submission('other-attempt', at('23', '12:02'), [], 'checking'), entryId: 'other' },
+  );
   r.runs = [{ id: 'run', at: at('23', '14:30'), status: 'running', inputs: [] }];
   r.moves = [move('main', at('23', '13:00'), [i])];
   assert.deepEqual(

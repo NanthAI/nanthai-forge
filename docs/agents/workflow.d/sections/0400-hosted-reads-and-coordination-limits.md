@@ -97,6 +97,9 @@ MCP `forge_review` exposes hosted `show`, `diff`, `peers` and `queue`.
 - `help` and `history --help` expose log, blame and show; MCP `forge_review` accepts
   `action:"history"` with read-only `op:"status"|"log"|"blame"|"show"`. A file filter
   belongs on history, not the UTC-window `landings` ledger. One landing's receipt (checks, costs, agent, acceptance) is `landings {"receiptId":"…"}` with the full id or a unique 8+ character prefix and no window; an ambiguous prefix is refused with `AMBIGUOUS_ID`.
+  Add `message:true` to select the stored receipt message and any ordered cohort messages.
+  `landings {"submissionId":"…"}` gives project members the stored request and top-level
+  messages and the cohort hold evidence. Each selected message reply uses one authorized query.
 - `history {op,commit?,path?}` reads the Git history of a project imported from
   GitHub, so log, blame and old versions match GitHub. `op:"log"`
   (`limit` ≤1000, default 50, `skip`, optional `path`), `op:"blame"` (`path`,

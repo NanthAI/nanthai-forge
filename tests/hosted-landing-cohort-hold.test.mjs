@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { HOSTED_TRAIN_HOLD_MS } from '../dist/hosted-landing-batch.js';
+const landings = await import(moduleUrl('../convex/projectHostedLandings.ts'));
 const admission = await import(moduleUrl('../convex/projectHostedLandingAdmission.ts'));
 const redrive = await import(moduleUrl('../convex/projectHostedLandingRedrive.ts'));
 const env = {
@@ -80,8 +81,10 @@ async function wave(t, hook = () => null, stop = () => false) {
     for (const id of ids) {
       const hold = row(f, id)?.admission?.hold;
       if (hold && !events.some(e => e.held === id)) events.push({ held: id, since: hold.since });
-      if (hold?.done && !events.some(e => e.released === id))
+      if (hold?.done && !events.some(e => e.released === id)) {
+        assert.equal(hold.endedAt, f.now(), 'the original release stamps its transaction time');
         events.push({ released: id, by: task.name, at: Date.now() });
+      }
     }
   }
   return { f, ids, events };
@@ -94,6 +97,34 @@ test('a refused change holds for a peer still deciding and they form one cohort'
   const [cohort] = batches(f);
   assert.deepEqual(new Set(cohort.members.map(m => m.submissionId)), new Set(ids.slice(1)));
   assert.equal(events.filter(e => e.held).length, 1, 'only the earlier refused change held');
+  const query = async args =>
+    JSON.parse(
+      await f.tx('cohort-hold-evidence', landings.read, {
+        projectId: f.projectId,
+        ...args,
+      }),
+    );
+  const start = events.find(e => e.held).since;
+  const end = events.find(e => e.released).at;
+  const receipt = [...f.tables.projectHostedAcceptances.values()].find(r => r.submissionId === ids[1]);
+  const exact = {
+    status: 'released',
+    startedAt: new Date(start).toISOString(),
+    endedAt: new Date(end).toISOString(),
+    seconds: (end - start) / 1000,
+  };
+  assert.deepEqual((await query({ receiptId: receipt.receiptId })).landings[0].cohortHold, exact);
+  assert.deepEqual((await query({ submissionId: ids[1] })).cohortHold, exact);
+  assert.equal((await query({ submissionId: ids[0] })).cohortHold, null);
+  const held = row(f, ids[1]);
+  const { endedAt: _newStamp, ...legacy } = held.admission.hold;
+  f.patch('projectHostedLandingRequests', held._id, { admission: { ...held.admission, hold: legacy } });
+  assert.deepEqual((await query({ submissionId: ids[1] })).cohortHold, {
+    status: 'unavailable',
+    startedAt: exact.startedAt,
+    endedAt: null,
+    seconds: null,
+  });
   assert.equal(f.pending().length, 0, 'idle after settling: no timers or polling');
 });
 

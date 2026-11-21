@@ -486,7 +486,7 @@ oldest first, at most 30 per page (default 20) and under 64 KB, read in one quer
 from stored rows (the receipt index, then about four indexed rows per landing; a page also
 ends at 800 KB read) with no writes and no idle work. Each row carries `receiptId`,
 `submissionId`, `laneId`, `intentId`, `kind`, `submittedAt`, `admittedAt` (the end of the
-pre-queue Lane check, null when the change queued unadmitted), `committedAt`,
+pre-queue Lane check, null when the change queued unadmitted), `cohortHold`, `committedAt`,
 `admissionBase` (the first landing attempt's main) and `landedBase` (main the receipt
 moved), `mainMoved` (they differ), the receipt's `firstCheck` and `check.skipped` (as
 `checkSkipped`, null when every selected part ran), `landedHead`,
@@ -505,6 +505,20 @@ this member landed on its own check; else null) and
 `conflictPaths`. Text-conflict paths of an earlier generation live only
 in retained compose results (R2), so `conflictPaths` is null today. Follow `nextCursor`
 until it is null. Nothing in it depends on GitHub.
+
+For one acceptance, `landings {receiptId,message:true}` returns its exact retained `message`
+and ordered `cohortMessages` when retained by that receipt. A receipt ID or unique prefix works.
+Project members can use `landings {submissionId}` for a canonical request's exact `requestMessage`
+and its separate top-level `message` (for example, an inherited message). The two selectors return
+a single authorized query with a reply under 64 KB. The query reads the selected retained rows,
+which can include metadata beyond the message. Unset messages are null. A missing selection
+returns `NOT_FOUND`. Window rows keep only their title.
+
+`cohortHold` on an acceptance row or selected submission uses the request's own hold start and
+release timestamps. `released` includes exact elapsed seconds, `holding` has only a start, and
+`unavailable` means the endpoint lacks a retained start or release stamp. A retained request that
+never held returns null. The release timestamp shares the existing release patch. Reads use
+the same request row and add no landing-path reads, writes, calls, or idle work.
 
 Paging rule for time-window reads (`landings`): a page returns every row up to its limit or byte budget, or a `nextCursor` naming the next row; it is never silently short. The cursor is `TIME` or `TIME:SKIP`, so rows sharing one stored instant (a batch) neither repeat nor stall a page, and a window of any length pages to every row once. `metrics` pages follow the platform `isDone`/`continueCursor` pair instead.
 
@@ -1382,6 +1396,15 @@ check minutes and reuse rate remain unmeasured by this drill. Metric 3 is checke
 by requiring every original submission to settle, with no pending queue work.
 
 ### Stalled and dropped landings
+
+Metrics 5.3 counts each submission once. It counts pending entries with at least 60 minutes since
+their last known progress, plus requests that settled as `LANDING_STALLED` or
+`LANDING_DRIVER_EXHAUSTED`. Ordinary terminal outcomes such as check failure, a composition
+conflict, or cancellation are settled. For older terminal requests, a retained caller outcome with
+the same operation ID can supply the missing stranded outcome. When evidence cannot establish
+the request phase or settlement at the reporting cutoff, the report exposes that count as
+`unknown` and marks the metric partial.
+
 
 A hosted landing entry with no progress for 15 minutes raises a `LANDING_STALLED`
 alarm (`stall` in its observation). For a queued entry, a second deadline 60 minutes

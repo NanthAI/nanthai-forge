@@ -2,6 +2,25 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { landingCapsulePointer } from './projectLandingCapsuleFields';
+import type { Doc } from './_generated/dataModel';
+
+type HoldRow = Pick<Doc<'projectHostedLandingRequests'>, 'admission' | 'phase' | 'runnable'>;
+/** A release time is measured only when the release transaction stamped it. */
+export function cohortHoldEvidence(row: HoldRow | null | undefined) {
+  if (!row) return { status: 'unavailable' as const, startedAt: null, endedAt: null, seconds: null };
+  const hold = row.admission?.hold;
+  if (!hold) return null;
+  const startedAt = new Date(hold.since).toISOString();
+  if (hold.endedAt !== undefined)
+    return {
+      status: 'released' as const,
+      startedAt,
+      endedAt: new Date(hold.endedAt).toISOString(),
+      seconds: (hold.endedAt - hold.since) / 1000,
+    };
+  const status = !hold.done && row.phase === 'queued' && !row.runnable ? 'holding' : 'unavailable';
+  return { status, startedAt, endedAt: null, seconds: null };
+}
 /** Server-only accounting checkpoint; existing state/reply readers ignore it. Cleared at check binding. */
 const supersededCheck = v.optional(
   v.object({
@@ -246,6 +265,7 @@ export const hostedLandingTables = {
             /** The hold's one-shot wake at its bound, armed with the hold. */
             taskId: v.id('_scheduled_functions'),
             done: v.optional(v.literal(true)),
+            endedAt: v.optional(v.number()),
           }),
         ),
       }),

@@ -112,9 +112,9 @@ export function hostedAgentHelp(action?: string) {
       : canonical
         ? []
         : [
-            'land --save from the Lane folder saves, updates from main, checks and lands; LANDED is acceptance, CHECK PASSED alone is not.',
+            'Run land --save from the Lane. LANDED confirms acceptance.',
             'Run waitCommand in the foreground until terminal; exit 3 means wait again.',
-            'Replaying an operationId keeps every original parameter, including message; use the receipt replay command.',
+            'Replay the receipt command with its original operationId and parameters.',
             'Errors show {code,message,next,learn}. Full receipts use --detail or MCP replyDetail:true.',
             helpTopicIndex(),
             'MCP schemas: forge_work_overview {action:"help",topic}. Forms: nforge docs agents/workflow.',

@@ -106,7 +106,7 @@ async function release(ctx: MutationCtx, row: Row) {
     orderLive: holdsLandingOrder(row, state) ? true : undefined,
     admission: {
       ...row.admission!,
-      hold: { ...row.admission!.hold!, done: true },
+      hold: { ...row.admission!.hold!, done: true, endedAt: Date.now() },
     },
   });
 }

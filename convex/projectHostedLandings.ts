@@ -3,7 +3,11 @@ import { v } from 'convex/values';
 import { query } from './cliServer';
 import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, readProjectRole } from './projectAuthority';
+import { cohortHoldEvidence } from './projectHostedLandingFields';
+import { desiredLanding } from './projectHostedLandingDesiredWake';
+import { hydrateLandingRequest, landingRequestOriginalDb } from './projectLandingRequestBody';
+import { receiptMessageForReader } from './projectHostedAcceptanceMessage';
 import { report } from './errors';
 import { landingCapsulePointer } from './projectLandingCapsuleStore';
 import { landingAttemptPrefix } from './projectHostedLandingAttemptRead';
@@ -15,7 +19,7 @@ import { invariant } from '../src/errors';
 import { nextCreationCursor, readCreationCursor } from './creationTimeCursor';
 import { landingAcceptedBySchema, receiptAcceptedBy } from '../src/landing-accepted-by';
 import { authorshipLabel } from './projectAuthorshipLabel';
-import { landingMessageText } from './projectHostedLandingMessageBody';
+import { landingMessageForReader, landingMessageText } from './projectHostedLandingMessageBody';
 import {
   LANDINGS_ATTEMPTS,
   LANDINGS_DEFAULT_LIMIT,
@@ -176,6 +180,7 @@ async function evidence(
       batchId: receipt.batchId ?? null,
       submittedAt: state?.timing?.submittedAt ?? state?.at ?? null,
       clientHoldSeconds: landingClientHoldSeconds(state),
+      cohortHold: cohortHoldEvidence(request),
       // End of the pre-queue Lane check that admitted the change; null when it queued unadmitted.
       admittedAt: iso(request?.admission?.status === 'passed' ? request.admission.endedAt : undefined),
       committedAt: state?.timing?.committedAt ?? receipt.at,
@@ -231,9 +236,8 @@ async function evidence(
     },
   };
 }
-/** One receipt: the exact id (one indexed read), else a unique prefix (one bounded range of
- * two rows on the same index), then the same evidence rows as a window read. */
-async function oneLanding(ctx: QueryCtx, projectId: Id<'hostedProjects'>, receiptId: string) {
+/** Exact receipt id or unique prefix. The prefix range needs at most two rows. */
+async function selectedReceipt(ctx: QueryCtx, projectId: Id<'hostedProjects'>, receiptId: string) {
   const wanted = receiptId.trim().toLowerCase();
   invariant(
     wanted.length >= 8 && wanted.length <= 64,
@@ -258,7 +262,52 @@ async function oneLanding(ctx: QueryCtx, projectId: Id<'hostedProjects'>, receip
     'AMBIGUOUS_ID',
     `Receipt prefix ${wanted} matches more than one landing (${found.map(row => row.receiptId).join(', ')}, ...); pass more characters.`,
   );
-  const receipt = found[0]!;
+  return found[0]!;
+}
+
+/** The public query layer can interpret embedded JSON as structured identity fields.
+ * Encode the UTF-8 payload to preserve literal message text through that layer. */
+function messageReply(identity: object, fields: Record<string, string | string[] | null>) {
+  const bytes = new TextEncoder().encode(JSON.stringify(fields));
+  invariant(
+    bytes.length < 48 * 1024,
+    'SOURCE_UNAVAILABLE',
+    'The retained landing message exceeds the selected read budget.',
+  );
+  const messageBase64 = btoa(String.fromCharCode(...bytes));
+  const reply = JSON.stringify({ schema: 1, ...identity, messageBase64 });
+  invariant(
+    new TextEncoder().encode(reply).length < 64 * 1024,
+    'SOURCE_UNAVAILABLE',
+    'The retained landing message exceeds the selected read budget.',
+  );
+  return reply;
+}
+
+async function selectedRequest(ctx: QueryCtx, projectId: Id<'hostedProjects'>, submissionId: string) {
+  const key = { projectId, submissionId };
+  const db = landingRequestOriginalDb(ctx.db);
+  const live = await landingRow({ ...ctx, db }, key, false);
+  // The cold selection body can be much larger and carries no request message.
+  const retained = live
+    ? await hydrateLandingRequest(db, { ...live, selectionBodyId: undefined })
+    : await desiredLanding(ctx, key);
+  invariant(retained, 'NOT_FOUND', 'Hosted landing request not found.');
+  const state = JSON.parse(retained.value as string) as HostedLandingState;
+  invariant(
+    state.id === submissionId && state.projectId === projectId && state.request,
+    'SOURCE_UNAVAILABLE',
+    'Landing request identity differs from its record.',
+  );
+  const { request, message } = await landingMessageForReader(ctx, projectId, state);
+  return messageReply(
+    { submissionId, cohortHold: cohortHoldEvidence(live) },
+    { requestMessage: request?.message ?? null, message: message ?? null },
+  );
+}
+
+async function oneLanding(ctx: QueryCtx, projectId: Id<'hostedProjects'>, receiptId: string) {
+  const receipt = await selectedReceipt(ctx, projectId, receiptId);
   const { row } = await evidence(
     ctx,
     projectId,
@@ -279,15 +328,52 @@ export const read = query({
     cursor: v.optional(v.union(v.string(), v.null())),
     /** One landing by its receipt id or a unique 8+ character prefix, instead of a window. */
     receiptId: v.optional(v.string()),
+    message: v.optional(v.literal(true)),
+    submissionId: v.optional(v.string()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read landings.');
-      await accessibleProject(ctx, input.projectId, user.subject);
-      if (input.receiptId !== undefined)
+      const project = await accessibleProject(ctx, input.projectId, user.subject);
+      if (input.submissionId !== undefined || input.message !== undefined || input.receiptId !== undefined) {
+        invariant(
+          input.from === undefined &&
+            input.to === undefined &&
+            input.cursor === undefined &&
+            !(
+              input.submissionId !== undefined &&
+              (input.receiptId !== undefined || input.message !== undefined)
+            ),
+          'BAD_ARGUMENT',
+          'Select a window, one receipt, or one submission.',
+        );
+        if (input.submissionId !== undefined) {
+          // A pre-acceptance request can contain a message never published to the project.
+          invariant(
+            await readProjectRole(ctx, project, user.subject),
+            'NOT_FOUND',
+            'Hosted landing request not found.',
+          );
+          return await selectedRequest(ctx, input.projectId, input.submissionId);
+        }
+        invariant(input.receiptId !== undefined, 'BAD_ARGUMENT', 'Select receiptId to read its message.');
+        if (input.message) {
+          const row = await selectedReceipt(ctx, input.projectId, input.receiptId);
+          const receipt = await receiptMessageForReader(
+            ctx,
+            input.projectId,
+            JSON.parse(row.value) as HostedAcceptance,
+            row.sequence,
+          );
+          return messageReply(
+            { receiptId: receipt.id, submissionId: receipt.submissionId },
+            { message: receipt.message ?? null, cohortMessages: receipt.cohortMessages ?? null },
+          );
+        }
         return JSON.stringify(await oneLanding(ctx, input.projectId, input.receiptId));
+      }
       const from = Date.parse(input.from ?? ''),
         to = Date.parse(input.to ?? '');
       invariant(

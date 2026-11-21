@@ -39,6 +39,8 @@ export type MetricSubmission = {
   entryId: string;
   entryAt?: string | undefined;
   entryStatus?: string | undefined;
+  /** Settlement of the whole entry, distinct from an individual attempt or check ending. */
+  entryEndedAt?: string | undefined;
   /** The request's selected attempt for failed admission accounting. */
   entryAttemptId?: string | undefined;
   retryCause?: import('./first-attempt-land-rate.js').LandRateEntry['cause'] | undefined;

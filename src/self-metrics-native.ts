@@ -147,6 +147,9 @@ export function nativeSelfMetricsReader(
           return entryInputs.map(input => ({
             id: `${entry.id}:${input.laneId}`,
             entryId: entry.id,
+            entryStatus: entry.status,
+            entryEndedAt: entry.terminalAt,
+            errorCode: entry.error?.code ?? null,
             retryCause:
               entry.status === 'conflict'
                 ? ('conflict' as const)

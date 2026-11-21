@@ -575,6 +575,7 @@ export async function readHostedMetricPages(
               entryId: row.id,
               entryAt: row.at,
               entryStatus: row.status,
+              entryEndedAt: row.endedAt ?? undefined,
               ...(row.admissionRun?.status === 'failed' ? { entryAttemptId: row.attemptId } : {}),
               inputs: [],
               endedAt: row.endedAt ?? undefined,

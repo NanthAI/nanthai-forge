@@ -172,6 +172,8 @@ export function hostedSelfMetricsReader(source: HostedMetricSource): SelfMetrics
                 entryId: attempt.submissionId,
                 entryAt: request?.at,
                 entryStatus: request?.phase,
+                entryEndedAt: request?.timing?.settledAt ?? request?.timing?.committedAt,
+                errorCode: request?.error?.code ?? null,
                 retryCause:
                   request?.observation?.cause === 'conflict'
                     ? ('conflict' as const)

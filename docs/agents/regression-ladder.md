@@ -101,6 +101,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `1018d0f8` | An alert refresh overwrote an unticked measurement line and reconciliation closed an unmet Issue; refreshed alerts retain the existing body and reconciliation counts bare unticked checkboxes too |
 | `f5c45985` | A missing accepted-run stamp hid 3,317 discarded runner seconds; projections use the independent discard stamp and existing maintenance repairs retained null samples |
 
+| `025470bf` | A moved-main cohort records its actual hold release. The selected request and receipt agree, and old releases with no stamp stay unavailable. |
 | `9829778c` | A stale conflict beside older board pages or a note already read in another Lane repeatedly interrupts a wait |
 | `aad45785` | Overlapping full admissions spend checks before composing against an earlier pending predecessor; failed predecessors must preserve follower source |
 | `70a9bd2f` | Zoo timing: a build input and disjoint source arrived together; the admission pipeline must check a follower with its predecessor on the exact combined head and keep the 1.5x solo timing bar. The deleted O3 queue switch broke this replay (Item 026ce0cf) |

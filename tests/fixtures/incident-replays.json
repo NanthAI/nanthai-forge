@@ -8839,6 +8839,16 @@
       "what": "The November 5 legacy maintenance required a 22-minute write outage. An online copy-and-switch fixture keeps ordinary landings moving in their original order.",
       "file": "tests/maintenance-online.test.mjs",
       "test": "incident 779d17be: the 22-minute maintenance replay preserves every landing and its order"
+    },
+    {
+      "incident": "025470bf",
+      "file": "tests/hosted-landing-cohort-hold.test.mjs",
+      "test": "a refused change holds for a peer still deciding and they form one cohort",
+      "paths": [
+        "convex/projectHostedLandingCohortHold.ts",
+        "convex/projectHostedLandingFields.ts",
+        "convex/projectHostedLandings.ts"
+      ]
     }
   ]
 }

@@ -17,6 +17,10 @@ export const hostedLandingsSchema = z
       to: instant.optional(),
       /** One landing by its receipt id or a unique 8+ character prefix; no window then. */
       receiptId: z.string().min(8).max(64).optional(),
+      /** Read one receipt's retained message and any cohort messages. */
+      message: z.literal(true).optional(),
+      /** One canonical submission with its request message and cohort hold. */
+      submissionId: z.uuid().optional(),
       limit: z.number().int().min(1).max(LANDINGS_MAX_LIMIT).optional(),
       /** `nextCursor` of the previous page of the same window. */
       cursor: z.string().min(1).max(64).optional(),
@@ -28,8 +32,14 @@ export const hostedLandingsSchema = z
   )
   .strict()
   .refine(
-    input => (input.receiptId ? !input.from && !input.to && !input.cursor : input.from && input.to),
-    'Pass from and to for a window, or receiptId alone for one landing.',
+    input =>
+      input.receiptId || input.submissionId
+        ? !input.from &&
+          !input.to &&
+          !input.cursor &&
+          !(input.submissionId && (input.receiptId || input.message))
+        : !input.message && input.from && input.to,
+    'Pass from and to for a window, receiptId with optional message:true, or submissionId alone.',
   );
 /** One bounded page of accepted landings (Issue b78ca196), read from rows already stored. */
 export async function landingsHostedSource(transport: HostedAgentTransport, input: unknown) {
@@ -40,8 +50,11 @@ export async function landingsHostedSource(transport: HostedAgentTransport, inpu
     `Invalid hosted landings parameters: ${parsed.success ? '' : parsed.error.issues.map(issue => issue.message).join('; ')}. Use landings --help. ${fileHistoryHelp}`,
   );
   const { from, to, ...rest } = parsed.data;
-  return transport.query('projectHostedLandings:read', {
+  const result = await transport.query<Record<string, unknown>>('projectHostedLandings:read', {
     ...(from && to ? { from: new Date(from).toISOString(), to: new Date(to).toISOString() } : {}),
     ...rest,
   });
+  if (typeof result.messageBase64 !== 'string') return result;
+  const { messageBase64, ...identity } = result;
+  return { ...identity, ...JSON.parse(Buffer.from(messageBase64, 'base64').toString('utf8')) };
 }

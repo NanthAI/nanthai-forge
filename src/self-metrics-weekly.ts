@@ -45,7 +45,12 @@ export function weeklyMetricBytes(records: MetricRecords, period: MetricPeriod) 
         ...r,
         progressAt: r.progressAt.filter(at => Date.parse(at) < Date.parse(period.to)),
         ...(r.endedAt && Date.parse(r.endedAt) >= Date.parse(period.to)
-          ? { status: 'checking', endedAt: undefined }
+          ? {
+              entryStatus: r.entryStatus ?? r.status,
+              entryEndedAt: r.entryEndedAt ?? r.endedAt,
+              status: 'checking',
+              endedAt: undefined,
+            }
           : {}),
       })),
     runs: records.runs

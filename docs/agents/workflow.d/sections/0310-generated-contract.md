@@ -52,7 +52,7 @@
 | `diff` | `laneId?, paths?, byteBudget?, summary?, from?, cursor?` |
 | `peers` | `laneId?, path?, detail?` |
 | `queue` | `limit?, laneId?, submissionId?, beforeAttempt?, attemptId?, afterLaneId?, batchId?` |
-| `landings` | `from?, to?, receiptId?, limit?, cursor?` |
+| `landings` | `from?, to?, receiptId?, message?, submissionId?, limit?, cursor?` |
 | `lane-history` | `laneId?` |
 | `flow` | `{}` |
 | `wait` | `runId?, operationIds?, cursor?, until?, timeoutSeconds?, peer?, approval?` |

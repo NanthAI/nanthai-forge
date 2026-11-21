@@ -6,6 +6,8 @@ import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { batchesFixture, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { acceptanceFixture } from './hosted-acceptance-fixture.mjs';
+import { agentFixture } from './hosted-agent-fixture.mjs';
+import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { mirrorFixture } from './hosted-github-mirror-fixture.mjs';
 import {
   landingMessage,
@@ -16,6 +18,7 @@ import {
 import { prepareMirror, stepMirror } from '../dist/hosted-github-mirror.js';
 import { hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
 import { hostedLandingStateSchema, hostedLandingRequestSchema } from '../dist/hosted-landing.js';
+const evidence = await import(moduleUrl('../convex/projectHostedLandings.ts'));
 const store = await import(moduleUrl('../convex/projectGithubMirrorStore.ts'));
 const landingApi = await import(moduleUrl('../convex/projectHostedLanding.ts'));
 const landingPriority = await import(moduleUrl('../convex/projectHostedLandingPriority.ts'));
@@ -199,6 +202,99 @@ test('inline and referenced cohort messages give identical receipt, history, Nee
     assert(!error.message.includes(messages.at(-1)));
     return true;
   });
+});
+
+test('friction 8c5666d2: one authorized CLI query returns exact receipt, cohort and request messages', async t => {
+  const exact = '{"actor":"user_syntheticAccount","email":"literal@example.invalid","body":"採用"}';
+  const messages = Array.from({ length: 8 }, (_, i) => {
+    const footer = `\n\nCo-Authored-By: Synthetic ${i} <noreply@openai.com>`;
+    return '\\'.repeat(LANDING_MESSAGE_BYTES - Buffer.byteLength(footer)) + footer;
+  });
+  messages[0] = exact;
+  const f = await batchesFixture(t, { count: 0 });
+  for (const [index, message] of messages.entries()) await f.add(index, { request: { message } });
+  const cli = agentFixture(t);
+  const transport = cli.transport();
+  let actor;
+  const queries = [];
+  transport.query = async (name, args) => {
+    queries.push(name);
+    const raw = await f.tx('selected-message', evidence.read, { projectId: f.projectId, ...args }, actor);
+    const cost = f.counts.findLast(row => row.name === 'selected-message');
+    assert.equal(cost.writes, 0);
+    assert(Buffer.byteLength(raw) < 64 * 1024);
+    assert(cost.readBytes < 64 * 1024, `${cost.readBytes} read bytes`);
+    return JSON.parse(raw);
+  };
+  const read = async args => {
+    const before = queries.length;
+    const reply = await hostedAgentCli(cli.root, 'landings', args, cli.address, transport);
+    assert.deepEqual(queries.slice(before), ['projectHostedLandings:read']);
+    return reply.result;
+  };
+  const submissionId = f.entries[0].state.id;
+  assert.deepEqual(await read({ submissionId }), {
+    schema: 1,
+    submissionId,
+    cohortHold: null,
+    message: null,
+    requestMessage: exact,
+  });
+  await assert.rejects(read({ submissionId: randomUUID() }), /NOT_FOUND/);
+  actor = 'outsider';
+  await assert.rejects(read({ submissionId }), /PROJECT_UNAVAILABLE/);
+  f.patch('hostedProjects', f.projectId, { visibility: 'public' });
+  await assert.rejects(read({ submissionId }), /NOT_FOUND/);
+  actor = undefined;
+
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  const receipts = [...f.tables.projectHostedAcceptances.values()].sort((a, b) => a.sequence - b.sequence);
+  assert.equal(receipts.length, 8);
+  const [first] = receipts;
+  const last = receipts.at(-1);
+  const choose = { receiptId: last.receiptId.slice(0, 8), message: true };
+  assert.deepEqual(await read({ receiptId: first.receiptId, message: true }), {
+    schema: 1,
+    receiptId: first.receiptId,
+    submissionId,
+    message: exact,
+    cohortMessages: null,
+  });
+  const inline = await read(choose);
+  assert.equal(inline.message, messages.at(-1));
+  assert.deepEqual(inline.cohortMessages, messages);
+
+  // The normalized representation shares the same member messages without duplicating their text.
+  for (const row of receipts) {
+    const value = JSON.parse(row.value);
+    value.messageRef = f.insert('projectHostedLandingBodies', {
+      messageProjectId: f.projectId,
+      value: value.message,
+    });
+    delete value.message;
+    if (row === last) {
+      delete value.cohortMessages;
+      value.cohortSize = receipts.length;
+    }
+    f.patch('projectHostedAcceptances', row._id, { value: JSON.stringify(value) });
+  }
+  assert.deepEqual(await read(choose), inline);
+  const cost = f.counts.findLast(row => row.name === 'selected-message');
+  t.diagnostic(
+    `Eight-member selected receipt: ${cost.documents} DB documents, ${cost.readBytes} DB bytes, ${Buffer.byteLength(JSON.stringify(inline))} CLI bytes`,
+  );
+
+  // A missing request body is different from a recorded message omission.
+  const request = [...f.tables.projectHostedLandingRequests.values()].find(
+    row => row.submissionId === submissionId,
+  );
+  assert(request.requestBodyId);
+  f.tables.projectHostedLandingBodies.delete(request.requestBodyId);
+  await assert.rejects(read({ submissionId }), /SOURCE_UNAVAILABLE/);
+  assert.equal((await read({ receiptId: first.receiptId, message: true })).message, exact);
+  await assert.rejects(read({ receiptId: randomUUID(), message: true }), /NOT_FOUND/);
 });
 
 // Issue b30284de / class guard 8b7b97ce / eacfdb6e: run real finish, acceptance,

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingCohortHold.ts": "48f92959c3d434fafe2c691938bab2bcced94ab4b4a805961f2d53efd928c699",
+    "convex/projectHostedLandingFields.ts": "e17accd9c7ccb43d70f74764b2033992fbebee6f5ffff380d3643843b7cb959e",
+    "convex/projectHostedLandings.ts": "38e668e5237bd47a7c814dbdbabce5a828345ede48f7a17bdb8c3be1ef3702ef"
+  },
+  "replay": {
+    "incident": "025470bf",
+    "test": "a refused change holds for a peer still deciding and they form one cohort",
+    "receipt": "06419469-55eb-4328-9ffd-c7c8098938d3"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "1cb19477-ee78-4c1a-8d5b-ddece350c1e7",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "1cb19477-ee78-4c1a-8d5b-ddece350c1e7/retained_evidence_review",
+    "receipt": "a7e627c3-8599-472b-8664-2745d0cdec62"
+  }
+}
