@@ -313,6 +313,7 @@ export const read = query({
     laneId: v.optional(v.string()),
     after: v.optional(v.number()),
     laneAfter: v.optional(v.number()),
+    projectAfter: v.optional(v.number()),
     id: v.optional(v.string()),
     limit: v.optional(v.number()),
     /** Include resolved notes (marked `resolved`). Sent only with `board {all:true}`. */
@@ -355,9 +356,9 @@ export const read = query({
         ...(intentId ? { intentId } : {}),
         after: input.after ?? 0,
         ...(!input.all && input.laneAfter !== undefined ? { laneAfter: input.laneAfter } : {}),
+        ...(!input.all && input.projectAfter !== undefined ? { projectAfter: input.projectAfter } : {}),
         limit,
-        // Ordinary pages must continue at the last returned note, including when
-        // the client filters project notes already read in another Lane.
+        // Ordinary pages continue at the last note returned across the three inboxes.
         order: input.all ? 'desc' : 'asc',
         ...(input.all ? { includeResolved: true } : {}),
       });

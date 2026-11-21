@@ -33,7 +33,7 @@ import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { mergeNativeText } from '../dist/native-text-merge.js';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
-import { boardReadPosition } from '../dist/board-local.js';
+import { boardReadPosition, writeBoardProjectCursor } from '../dist/board-local.js';
 import { boardWakeEnvelope } from '../dist/hosted-board-wait.js';
 import { readHostedOverlapAdvice } from '../dist/hosted-overlap-client.js';
 const overlaps = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
@@ -348,7 +348,10 @@ test('70b38346: the real overlap validator and save-advice path carry laneAfter 
   const client = transport(lane);
   await client.dispatch('capabilities', {});
   assert(client.advertisedFeatures.includes('board-lane-after'));
+  assert(client.advertisedFeatures.includes('board-project-after'));
   for (const [targetKey, at, body] of [
+    ['project', 1, 'Read in the other Lane'],
+    ['project', 2, 'Also read in the other Lane'],
     [`lane:${lane.id}`, 5, 'Delivered first'],
     [`lane:${lane.id}`, 6, 'Delivered second'],
     ['project', 7, 'Unread project note'],
@@ -378,6 +381,7 @@ test('70b38346: the real overlap validator and save-advice path carry laneAfter 
     {},
   );
   boardWakeEnvelope(client.root, lane.id, woke);
+  writeBoardProjectCursor(client.root, 2);
   const requests = [],
     query = exchange.client.query.bind(exchange.client);
   exchange.client.query = (ref, args) => {
@@ -398,6 +402,7 @@ test('70b38346: the real overlap validator and save-advice path carry laneAfter 
   );
   assert.equal(requests.length, 1);
   assert.equal(requests[0].board.laneAfter, 6);
+  assert.equal(requests[0].board.projectAfter, 2);
   requests.length = 0;
   const saved = await client.dispatch('save', {
     operationId: randomUUID(),
@@ -407,6 +412,7 @@ test('70b38346: the real overlap validator and save-advice path carry laneAfter 
   assert(saved.board.notices.some(notice => notice.includes('Unread project note')));
   assert.equal(requests.length, 1, 'the save gate and receipt share their existing overlap query');
   assert.equal(requests[0].board.laneAfter, 6);
+  assert.equal(requests[0].board.projectAfter, 2);
 });
 
 test('two separate checkout roots save the same file; the second save returns the exact conflict and names the peer once as presence', async t => {

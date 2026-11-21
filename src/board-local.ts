@@ -60,8 +60,7 @@ export function writeBoardProjectCursor(root: string, after: number) {
   const file = projectCursorFile(root);
   if (file && after > cursorAt(file)) writeJson(file, { after });
 }
-/** Lane/Issue notes retain the Lane cursor; project notes already read by this actor in another
- * Lane do not repeat. Filter only bytes already returned by the existing query. */
+/** Client-side deduplication also covers older servers and concurrent local reads. */
 export function unreadBoardNotes(root: string, messages: BoardNote[]): BoardNote[] {
   const after = readBoardProjectCursor(root);
   const lanes = new Map<string, number>();
@@ -92,15 +91,18 @@ const directedNotesAfter = (root: string, laneId: string): number => {
   const value = readJson(waitCursorFile(root, laneId)) as { notesAfter?: number } | undefined;
   return typeof value?.notesAfter === 'number' && Number.isFinite(value.notesAfter) ? value.notesAfter : 0;
 };
-/** Ordinary pages skip directed notes before filling the page, only on servers with this argument. */
+/** Ordinary pages skip already-delivered notes on servers that accept the per-inbox positions. */
 export function boardReadPosition(root: string, laneId: string, features: readonly string[]) {
+  const after = readBoardCursor(root, laneId);
+  const projectAfter = features.includes('board-project-after') ? readBoardProjectCursor(root) : 0;
   return {
-    after: readBoardCursor(root, laneId),
+    after,
     ...(features.includes('board-lane-after') ? { laneAfter: directedNotesAfter(root, laneId) } : {}),
+    ...(projectAfter > after ? { projectAfter } : {}),
   };
 }
-/** A cached feature can outlive a server rollback. Retry only its argument rejection,
- * once; other failures keep their original handling and no mutation is repeated. */
+/** A cached feature can outlive a server rollback. Drop only the argument explicitly
+ * rejected by the validator, at most once per field. */
 export async function readBoardCompatible<T>(
   position: ReturnType<typeof boardReadPosition>,
   read: (position: ReturnType<typeof boardReadPosition>) => Promise<T>,
@@ -108,13 +110,13 @@ export async function readBoardCompatible<T>(
   try {
     return await read(position);
   } catch (error) {
-    if (
-      position.laneAfter !== undefined &&
-      error instanceof Error &&
-      /extra field\s+[`'"]?laneAfter\b/i.test(error.message)
-    )
-      return read({ after: position.after });
-    throw error;
+    const rejected =
+      error instanceof Error && /extra field\s+[`'"]?(laneAfter|projectAfter)\b/i.exec(error.message)?.[1];
+    if ((rejected !== 'laneAfter' && rejected !== 'projectAfter') || position[rejected] === undefined)
+      throw error;
+    const fallback = { ...position };
+    delete fallback[rejected];
+    return readBoardCompatible(fallback, read);
   }
 }
 
@@ -186,6 +188,7 @@ const boardFeatureNames = [
   'agent-slug',
   'board-resolve',
   'board-lane-after',
+  'board-project-after',
 ];
 export function readBoardServerFeatures(projectId: string): string[] {
   if (noState()) return [];

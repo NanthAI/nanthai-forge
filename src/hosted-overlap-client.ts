@@ -7,7 +7,7 @@ import { boardDeliverySchema } from './hosted-board.js';
 import { parseHostedResponse } from './hosted-response.js';
 import { stackHintSchema } from './hosted-stack-restack.js';
 import { exactConflictsSchema } from './hosted-conflict-notice.js';
-import { readBoardCompatible } from './board-local.js';
+import { readBoardCompatible, type boardReadPosition } from './board-local.js';
 
 const advice = z.object({
   behindMain: z.object({
@@ -49,7 +49,7 @@ export async function readHostedOverlapAdvice(
   paths = false,
   items?: number,
   presence?: { since?: number },
-  board?: { after: number; laneAfter?: number },
+  board?: ReturnType<typeof boardReadPosition>,
   /** Declared scope of a fresh Lane (start scope.paths); sent only to servers with overlap-scope. */
   scope?: string[],
 ) {

@@ -49,11 +49,12 @@ Issue (`issue:ISSUE_ID`), or to the whole project (`project`).
   Forge never records who read what, so a second machine on the same Lane sees the
   notes again. Lane/Issue notes reach each Lane once. A local cursor scoped to the
   authenticated actor and project suppresses project notes already read in another
-  Lane; it filters the existing reply without another call. Relevant Lane/Issue
+  Lane. Servers advertising `board-project-after` use that position in the existing
+  project inbox index before filling ordinary pages. Older servers filter the reply
+  on the client and may return an empty continuation page. Relevant Lane and Issue
   notes keep their Lane cursor, including notes older than that actor's project cursor.
   Ordinary pages are oldest-first and continue at the last returned note when more
-  remain. The next `board {}` reaches the rest, including an unread Issue note behind
-  project notes already read in another Lane. `board {"all":true}` ignores the local
+  remain. `board {"all":true}` ignores the local
   cursor and lists recent history newest-first, including resolved notes, without
   changing either local read position. An exact `board {"id":"NOTE_ID"}` read also
   leaves those positions unchanged, so reading a newer note cannot acknowledge older

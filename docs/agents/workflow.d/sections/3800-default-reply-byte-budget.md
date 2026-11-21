@@ -36,8 +36,8 @@ Cost: zero added Convex calls, DB reads/writes or R2 requests per action; idle
 zero. Shaping visits the existing reply once and copies metadata proportional to
 that reply; conflict content is scanned for ordered marker triples without another
 file read or body copy. Actor board cursors are small local files shared by this
-clone's Lanes, scoped by a hash of the authenticated actor and project. A bounded
-board page may still contain old project notes on the wire; filtering advances the
-Lane cursor without another query and never filters relevant Lane/Issue notes.
+clone's Lanes, scoped by a hash of the authenticated actor and project. Supported
+servers apply the project cursor in the existing indexed page read. Older servers
+may still return old project notes on the wire, where the client filters them.
 
 MCP tools/list grows by 56 UTF-8 bytes (5,685 → 5,741, including the accepted Issue aliases) for the four reply-detail selectors; advertised description bytes stay at 675. No action or CLI command is added.

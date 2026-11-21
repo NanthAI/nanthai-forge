@@ -53,7 +53,12 @@ export const read = query({
      * (feature board-claims) it also lists automatic claims on the path (`touching`) and says
      * `claim: 'send'` when the hook should record its own. */
     board: v.optional(
-      v.object({ after: v.number(), laneAfter: v.optional(v.number()), claim: v.optional(v.literal(true)) }),
+      v.object({
+        after: v.number(),
+        laneAfter: v.optional(v.number()),
+        projectAfter: v.optional(v.number()),
+        claim: v.optional(v.literal(true)),
+      }),
     ),
   },
   returns: v.string(),
@@ -285,6 +290,7 @@ export const read = query({
             intentId: lane.intentId,
             after: boardCursor.after,
             ...(boardCursor.laneAfter !== undefined ? { laneAfter: boardCursor.laneAfter } : {}),
+            ...(boardCursor.projectAfter !== undefined ? { projectAfter: boardCursor.projectAfter } : {}),
             // The first-write hook names its path: claims on it ride on the same read.
             ...(path ? { path } : {}),
             ...(path && boardCursor.claim

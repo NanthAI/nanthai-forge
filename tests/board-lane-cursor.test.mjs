@@ -21,7 +21,7 @@ import { printedReceipt } from '../dist/receipt-slim.js';
 import { boardEnvelope } from '../dist/board-local.js';
 import { hostedEditContext, readHostedEditPeers } from '../dist/agent-edit-hosted.js';
 
-const features = ['agent-board', 'board-lane-after', 'board-resolve'];
+const features = ['agent-board', 'board-lane-after', 'board-project-after', 'board-resolve'];
 function setup(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-lane-cursor-'));
   const prior = process.env.XDG_STATE_HOME;
@@ -91,6 +91,64 @@ test('70b38346 line 1: project notes read in another Lane cannot hide an older u
   const fresh = await boardHostedSource(transport, 'board', { laneId: f.lanes.A });
   assert.equal(fresh.notices.length, 1);
   assert.match(fresh.notices[0], /Unread Issue note/);
+});
+
+test('3e9eb758: draining overlapping project notes in two Lanes skips empty pages and keeps unread notes', async t => {
+  const { f, root, note } = setup(t);
+  rememberBoardReader(root, 'project', 'writer');
+  const otherLane = [...f.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === f.lanes.B);
+  otherLane.intentId = randomUUID();
+  otherLane.actor = 'writer';
+  note(`lane:${f.lanes.A}`, 1, 'Older unread Lane note');
+  for (let at = 2; at <= 218; at++) note('project', at, `Shared project note ${at}`);
+  let calls = 0;
+  const transport = {
+    root,
+    advertisedFeatures: features,
+    query: async (_name, args) => {
+      calls++;
+      return f.read(args, 'writer');
+    },
+  };
+  for (let page = 1; page <= 22; page++) {
+    const read = await boardHostedSource(transport, 'board', { laneId: f.lanes.B });
+    assert.equal(read.notices.length, page === 22 ? 7 : 10);
+    assert.equal(read.more > 0, page < 22);
+  }
+  assert.equal(readBoardProjectCursor(root), 218);
+  assert.equal(readBoardCursor(root, f.lanes.A), 0);
+  note(`issue:${f.issue}`, 219, 'Later unread Issue note');
+  note('project', 220, 'New unread project note');
+
+  let after = 0,
+    legacyReads = 0,
+    emptyPages = 0;
+  for (let page = 1; page <= 22; page++) {
+    const read = await f.read({ laneId: f.lanes.A, after }, 'writer');
+    legacyReads += f.invoke.reads;
+    if (unreadBoardNotes(root, read.messages).length === 0) emptyPages++;
+    after = read.cursor;
+    assert.equal(read.more > 0, page < 22);
+  }
+  assert.equal(emptyPages, 20);
+  const before = calls;
+  const read = await boardHostedSource(transport, 'board', { laneId: f.lanes.A });
+  const reads = f.invoke.reads;
+  assert.equal(read.more, 0);
+  assert.deepEqual(
+    read.messages.map(message => message.at),
+    [1, 219, 220],
+  );
+  assert.equal(read.notices.length, 3);
+  assert.equal(calls - before, 1);
+  assert(reads <= 12, 'one candidate page stays within the existing inbox and message read budget');
+  console.log(`Two-Lane drain: 22 -> 1 board queries, ${legacyReads} -> ${reads} indexed documents/probes`);
+
+  const history = await f.read({ laneId: f.lanes.A, after: 0, projectAfter: 220, all: true }, 'writer');
+  assert(
+    history.messages.some(message => message.target === 'project'),
+    'history ignores the project cursor',
+  );
 });
 
 test('70b38346: ordinary continuation reaches all eleven unread notes without dropping or repeating a page', async t => {

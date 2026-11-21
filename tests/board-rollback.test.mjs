@@ -7,7 +7,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConvexError } from 'convex/values';
 import { boardHostedSource } from '../dist/hosted-board.js';
-import { rememberBoardServerFeatures } from '../dist/board-local.js';
+import {
+  rememberBoardReader,
+  rememberBoardServerFeatures,
+  writeBoardProjectCursor,
+} from '../dist/board-local.js';
 import { readHostedEditPeers } from '../dist/agent-edit-hosted.js';
 import { readHostedOverlapAdvice } from '../dist/hosted-overlap-client.js';
 
@@ -39,6 +43,41 @@ function fixture(t) {
     behindMain: { commits: 0, conflictingPaths: [], more: 0, coverage: 'hosted' },
   };
   return { root, laneId, reply };
+}
+
+for (const rejectsLaneAfter of [false, true]) {
+  const name = rejectsLaneAfter
+    ? 'a rollback past both cursor features removes each rejected field once'
+    : 'a rollback that rejects projectAfter preserves the supported directed cursor';
+  test(name, async t => {
+    const f = fixture(t);
+    rememberBoardReader(f.root, 'project', 'writer');
+    writeBoardProjectCursor(f.root, 5);
+    const seen = [];
+    const result = await boardHostedSource(
+      {
+        root: f.root,
+        advertisedFeatures: [...features, 'board-project-after'],
+        query: async (_name, args) => {
+          seen.push(args);
+          if ('projectAfter' in args)
+            throw Error(
+              'ArgumentValidationError: Object contains extra field `projectAfter` that is not in the validator.',
+            );
+          if (rejectsLaneAfter && 'laneAfter' in args) throw Error(rollbackError);
+          return f.reply;
+        },
+      },
+      'board',
+      { laneId: f.laneId },
+    );
+    assert.match(result.notices[0], /Recovered note/);
+    assert.deepEqual(seen, [
+      { laneId: f.laneId, after: 0, laneAfter: 0, projectAfter: 5 },
+      { laneId: f.laneId, after: 0, laneAfter: 0 },
+      ...(rejectsLaneAfter ? [{ laneId: f.laneId, after: 0 }] : []),
+    ]);
+  });
 }
 const read = (kind, f, query) => {
   if (kind === 'board')

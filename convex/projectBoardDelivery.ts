@@ -59,6 +59,7 @@ export async function boardInbox(
     intentId?: string;
     after: number;
     laneAfter?: number;
+    projectAfter?: number;
     limit: number;
     order: 'asc' | 'desc';
     includeResolved?: boolean;
@@ -79,8 +80,11 @@ export async function boardInbox(
         .unique(),
     ),
   );
-  const after = (key: string) =>
-    key.startsWith('lane:') ? Math.max(input.after, input.laneAfter ?? 0) : input.after;
+  const after = (key: string) => {
+    if (key === 'project') return Math.max(input.after, input.projectAfter ?? 0);
+    if (key.startsWith('lane:')) return Math.max(input.after, input.laneAfter ?? 0);
+    return input.after;
+  };
   const hot = inboxes.filter(row => row !== null && row.latestAt > after(row.key));
   const pages = await Promise.all(
     hot.map(row => {
@@ -163,6 +167,7 @@ export async function boardDelivery(
     intentId: string;
     after: number;
     laneAfter?: number;
+    projectAfter?: number;
     path?: string;
     /** First-write hook with feature board-claims: decide whether to send an automatic claim, and
      * list other Lanes' automatic claims on the path. `lane` is the caller's Lane as already read. */

@@ -38,6 +38,8 @@ export const hostedContractFeatures = [
   'agent-board',
   /** Ordinary board/overlap pages accept a separate delivered-directed-note watermark. */
   'board-lane-after',
+  /** Ordinary board/overlap pages accept a separate read-project-note watermark. */
+  'board-project-after',
   /** Wait delivery: the landing page subscription takes `board`, projectBoardWait:peer exists, and
    * the overlap read lists claims on a first-write path. Without it waits carry no board argument. */
   'board-wait',
