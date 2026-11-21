@@ -475,15 +475,16 @@ export async function claimReadyLanding(
         selected.observation.pendingReason !== 'waiting-for-dependency' &&
         !(state.batchId && state.batchId === selected.batchId)
       ) {
-        // Give way only to an urgent entry that can take main now (review 01a38b28 F1). One parked on
-        // this entry (handed to it by an urgent holder's exit, or made urgent while parked, since
-        // prioritize wakes nothing) waited for this claim while this claim re-polled for it, forever:
-        // drive it, its claim skips this normal entry. One parked on another entry cannot land before
-        // that one moves, so this claim goes on rather than re-polling through that entry's check.
+        // Drive an urgent entry parked on this normal claimant (review 01a38b28 F1), or one handed
+        // off by a wake whose own claim has yet to decide the wait (review 57ca898f F1). Otherwise
+        // an unrelated normal claimant could take the lease before the handoff recipient runs.
+        // An automatic wake must be scheduled for a handed waiter to take the turn. A manual
+        // request with no finish must not make an unrelated claimant keep retrying.
+        // A wait already decided on another entry stays parked until its holder advances.
         if (!urgent.orderWait) return null;
-        if (urgent.orderWait === row.submissionId) {
-          await driveParkedWaiter(ctx, urgent);
-          return null;
+        const handed = urgent.orderWaitHanded === urgent.orderWait;
+        if (handed || urgent.orderWait === row.submissionId) {
+          if ((await driveParkedWaiter(ctx, urgent)) || !handed) return null;
         }
       }
     }

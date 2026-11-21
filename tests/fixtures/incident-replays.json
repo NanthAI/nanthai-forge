@@ -500,6 +500,18 @@
       "test": "43b51a5e 01a38b28 F1: a normal entry does not wait out a check for an urgent one parked on another entry"
     },
     {
+      "incident": "43b51a5e",
+      "what": "Review 57ca898f F1: an unrelated normal entry claims before the normal handoff recipient runs, and must give the handed urgent waiter its turn first",
+      "file": "tests/hosted-landing-urgent-yield.test.mjs",
+      "test": "43b51a5e 57ca898f F1: an urgent waiter handed to a normal entry keeps its place"
+    },
+    {
+      "incident": "43b51a5e",
+      "what": "Review of the urgent handoff fix: a manual urgent waiter without a finish controller cannot keep unrelated normal claims retrying",
+      "file": "tests/hosted-landing-urgent-yield.test.mjs",
+      "test": "43b51a5e 57ca898f F1: a manual urgent handoff lets an unrelated normal claim proceed"
+    },
+    {
       "incident": "cd63bbe9",
       "what": "A shared check failed, its unattributed members split, and a dispatched child ran to provider success without Forge collecting its shard results",
       "file": "tests/hosted-split-result-recovery.test.mjs",

@@ -2057,7 +2057,9 @@ current main; a full passed check carries only when every file path, blob and mo
 is identical, under the existing reuse policy and main-audit gates. Approval later
 recomposes the held submission on then-current main. Unstarted batches yield
 to urgent work before reserving
-a check; reserved checks continue. Admission runs (`acceptance.admissionCheck: "full"` opts in to the
+a check; reserved checks continue. Before taking the acceptance lease, a normal
+claim yields if it schedules a wake for a Ready urgent entry whose wait was
+handed off. Admission runs (`acceptance.admissionCheck: "full"` opts in to the
 [pre-queue Lane check](pre-queue-checks.md) on any runner; absent or `false` checks
 in the queue) hold no
 queue order while they run. A strict, disjoint unplaceable global-risk follower

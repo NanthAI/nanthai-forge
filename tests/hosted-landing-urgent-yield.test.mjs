@@ -5,6 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { synthetic } from './hosted-landing-batches-fixture.mjs';
+import { patchTicketState, ticketState } from './landing-ticket-fixture.mjs';
 import { drive } from './queue-sim/overtake-drive.mjs';
 const env = {
   ...synthetic,
@@ -96,4 +97,70 @@ test('43b51a5e 01a38b28 F1: a normal entry does not wait out a check for an urge
   const [q, u0, u] = r.landedAt;
   assert(q < SLOW && u0 < u, `Q takes main during U0's check (${[q, u0, u]})`);
   assert.equal(r.idle, 0, 'the drained queue has no idle work');
+});
+
+async function urgentHandoff(t, { manual = false } = {}) {
+  let sawHandoff = false;
+  let pauseNext = false;
+  let detached;
+  const r = await drive(t, {
+    memberPaths: ['src/peer.ts', 'src/holder.ts', 'src/next.ts', 'src/urgent.ts'],
+    ownerApprovalPaths: ['scripts/deploy*'],
+    fixture: queueShape,
+    duration: i => (i < 2 ? SLOW + (i === 0 ? LANE : 0) : LANE),
+    prepare(f, [, holder, , urgent]) {
+      for (const id of [holder, urgent])
+        f.patch('projectHostedLandingRequests', row(f, id)._id, { priority: 'urgent' });
+    },
+    pick(tasks, [, , next]) {
+      // The unrelated peer gets a claim before the holder's scheduled handoff recipient.
+      return pauseNext ? (tasks.find(task => task.args[0]?.submissionId !== next) ?? null) : tasks[0];
+    },
+    afterStep(f, tick) {
+      const [peer, , next, urgent] = f.entries.map(entry => entry.state.id);
+      const waiter = row(f, urgent);
+      if (!sawHandoff && waiter.orderWaitHanded === next) {
+        sawHandoff = true;
+        pauseNext = true;
+        if (manual) {
+          // A manually accepted request can park and be handed on without a finish controller.
+          const finishes = f.tables.projectHostedFinishes;
+          const finish = [...finishes.values()].find(entry => entry.submissionId === urgent);
+          const state = ticketState(f, waiter);
+          detached = { finish, request: state.request.finish };
+          finishes.delete(finish._id);
+          delete state.request.finish;
+          patchTicketState(f, waiter, state);
+        }
+      }
+      if (pauseNext && (row(f, peer).phase === 'landed' || waiter.phase === 'landed')) {
+        pauseNext = false;
+        if (detached) {
+          assert.equal(waiter.orderWaitHanded, next, 'the manual waiter keeps its handoff');
+          // Restore the simulation's finish driver so the replay can drain after the race.
+          const { finish, request } = detached;
+          f.tables.projectHostedFinishes.set(finish._id, finish);
+          const state = ticketState(f, waiter);
+          state.request.finish = request;
+          patchTicketState(f, waiter, state);
+        }
+      }
+      assert(tick < BOUND, 'an urgent handoff must not strand the queue');
+    },
+  });
+  assert(sawHandoff, 'the holder handed the urgent waiter to next');
+  assert.equal(r.idle, 0, 'the drained queue has no idle work');
+  return r.landedAt;
+}
+
+test('43b51a5e 57ca898f F1: an urgent waiter handed to a normal entry keeps its place', async t => {
+  const landedAt = await urgentHandoff(t);
+  const [peer, holder, next, urgent] = landedAt;
+  assert(holder < urgent && urgent < peer && urgent < next, `urgent follows holder (${landedAt})`);
+});
+
+test('43b51a5e 57ca898f F1: a manual urgent handoff lets an unrelated normal claim proceed', async t => {
+  const landedAt = await urgentHandoff(t, { manual: true });
+  const [peer, holder, , urgent] = landedAt;
+  assert(holder < peer && peer < urgent, `the normal claim proceeds after the holder (${landedAt})`);
 });
