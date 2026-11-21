@@ -173,8 +173,12 @@ export const serve = httpAction(async (ctx, request) => {
     return json(body);
   }
   if (path.kind === 'code') return code(ctx, path);
-  if (path.kind === 'explore')
-    return json(await ctx.runQuery(internal.publicRead.explorePage, { order: path.order, now }));
+  if (path.kind === 'explore') {
+    const page = await ctx.runQuery(internal.publicRead.explorePage, { order: path.order, now });
+    // The website and its Convex API can have different origins. Pin agent clone commands
+    // to this deployment using public system configuration, never a request header.
+    return json({ ...page, deployment: process.env.CONVEX_CLOUD_URL });
+  }
   if (path.kind === 'profile') {
     const page = await ctx.runQuery(internal.publicRead.profilePage, { handle: path.handle, now });
     return page ? json(page) : missing();

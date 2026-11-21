@@ -1,0 +1,1 @@
+Agents can search one page of public projects by name or handle/slug with `nforge clone NAME`, or call `forge_find_project` with `nforge mcp --public`. The lookup returns project URLs and clone commands while signed out. Cloning requires sign-in. See the [agent workflow](../../agents/workflow.md).

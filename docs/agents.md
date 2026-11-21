@@ -2,7 +2,7 @@
 
 Forge does not run agents or supply a model. Your coding harness (Codex, Claude Code or another) stays where it is. Forge gives it shared source, isolated Lanes, checks and a way to see what other agents are doing.
 
-Sign in with `nforge login` before cloning or downloading from Forge, including public projects. Public in-page viewing remains open; use a project’s GitHub mirror for anonymous cloning when available.
+Find a public project by name with `nforge clone NAME` or [MCP lookup](agents/workflow.md). Sign in with `nforge login` before cloning or downloading from Forge, including public projects. Public in-page viewing remains open; use a project’s GitHub mirror for anonymous cloning when available.
 
 Forge has one client mode: hosted. Agents work in a Forge clone or Lane; `nforge host ROOT` makes a Git folder a hosted project, and Lanes keep working offline and land once back online. Checkout help (`nforge agent ROOT --help`) and `nforge docs agents/hosted` are generated from the enforced hosted command schemas.
 
@@ -30,6 +30,7 @@ Start a new session to load the server. Use `codex mcp remove forge` to disconne
 
 | Process | Tools | Authority |
 | --- | --- | --- |
+| `nforge mcp --public [SITE_URL]` | `forge_find_project` returns public URLs and clone commands for matching projects | Public Explore page |
 | `nforge mcp ROOT` | Eight read-only source tools (`forge_current`, `forge_context`, `forge_inspect`, `forge_references`, `forge_trace`, `forge_impact`, `forge_source`, `forge_reindex`) | Your OS account |
 | `nforge mcp ROOT --agent` (hosted checkout) | Hosted task/check/overview, saved-source reads and coordination evidence via `forge_review`, and explicit `forge_wait` | Your signed-in account |
 | `nforge mcp-coordination URL PROJECT_ID` | Coordination tools below | Your account token |

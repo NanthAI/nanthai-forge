@@ -59,6 +59,7 @@ const agentRules = [
   'Governance: hosted landing checks and lands under current project policy. Automatic projects land after passing evidence; protected paths or review-required policy may hold for a person. Never change policy to bypass a hold.',
   // Default project rules (docs/parallel-work-defaults.md); a project's `policy` read shows its own.
   ...agentDefaultLines(AGENT_DEFAULTS),
+  'Find public projects by name with `nforge clone NAME` or `forge_find_project` in `nforge mcp --public`. A lookup returns public URLs and clone commands.',
   'Sign in with nforge login before cloning or downloading any Forge project, including public projects. Public web viewing remains open. Use a project’s GitHub mirror for anonymous cloning when available.',
 ];
 

@@ -14,6 +14,7 @@ Start here: nforge docs quickstart (hosted project to first landing).
 Browse packaged documentation: nforge docs
 
 Usage:
+  nforge clone [--find] NAME [--site URL]   # find public projects by name or handle/slug
   nforge clone <project-url|project-id> DIR [--deployment URL]
   nforge import <github-url|OWNER/NAME> [--ref REF] [--name NAME] [--deployment URL] [--operation-id UUID] [--no-wait]
   nforge import --resume OPERATION_UUID   # resume a pinned GitHub source import; reports project and readiness
@@ -55,6 +56,7 @@ Usage:
   nforge recover NEW_RUNNER --command-file REQUEST.json
   nforge policy <root>
   nforge set-policy <root> JSON
+  nforge mcp --public [SITE_URL]   # find public projects without a checkout
   nforge mcp <root> [--agent]   # source tools; --agent: a hosted checkout's agent tools
   nforge mcp-agent <forge-convex-deployment-url>
   nforge mcp-config <root> [--agent]
@@ -221,6 +223,11 @@ async function main(args: string[]): Promise<unknown> {
     return undefined;
   }
   if (args[0] === 'mcp') {
+    if (args[1] === '--public') {
+      invariant(args.length <= 3, 'BAD_ARGUMENT', 'Use nforge mcp --public [SITE_URL].');
+      await (await import('./public-project-mcp.js')).startPublicProjectMcp(args[2]);
+      return undefined;
+    }
     const explicitHosted =
       args.length === 7 && args[2] === '--agent' && args[3] === '--url' && args[5] === '--project-id';
     invariant(

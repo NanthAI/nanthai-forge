@@ -21,7 +21,11 @@ export function cliVersionCheck() {
 }
 export const checkCliVersion = cliVersionCheck();
 export function cliDeferredCommand(args: string[]) {
-  return ['agent', 'x', 'heavy', 'pull', 'clone'].includes(args[0]!);
+  return (
+    ['agent', 'x', 'heavy', 'pull', 'clone'].includes(args[0]!) ||
+    // Public lookup works before login, including with an installed runtime.
+    (args[0] === 'mcp' && args[1] === '--public')
+  );
 }
 /** Commands that never write to Forge. While main moves they keep running on the current build
  * and start the install in the background, even when the last install failed. Writes do the same

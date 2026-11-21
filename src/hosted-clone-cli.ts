@@ -21,7 +21,7 @@ import { durableReplace } from './state/durability.js';
 import { workLocked } from './work-lock.js';
 import { ForgeError, invariant } from './errors.js';
 export const CLONE_HELP =
-  'nforge clone <project-url|project-id> DIR [--deployment URL]\nSign in with nforge login to clone any Forge project, including public projects.\n';
+  'nforge clone [--find] NAME [--site URL]   # find public projects by name or handle/slug\nnforge clone <project-url|project-id> DIR [--deployment URL]\nSign in with nforge login to clone any Forge project, including public projects.\n';
 type Client = Pick<ConvexExchange['client'], 'query'>;
 /** Root binding is the same private address used by CLI/MCP; no native owner is created. */
 export async function cloneHostedProject(
@@ -86,6 +86,24 @@ export async function hostedCloneCli(
   beforeRun?: () => Promise<boolean>,
   beforeLocal?: () => Promise<void>,
 ) {
+  const explicitLookup = args[0] === '--find';
+  const lookupArgs = explicitLookup ? args.slice(1) : args;
+  const [name, siteFlag, site] = lookupArgs;
+  if (
+    explicitLookup ||
+    (name &&
+      !name.startsWith('-') &&
+      !/^https?:\/\//.test(name) &&
+      (args.length === 1 || siteFlag === '--site'))
+  ) {
+    invariant(
+      name && (lookupArgs.length === 1 || (lookupArgs.length === 3 && siteFlag === '--site' && site)),
+      'BAD_ARGUMENT',
+      CLONE_HELP,
+    );
+    const { findPublicProjects, publicProjectSite } = await import('./public-project-lookup.js');
+    return findPublicProjects(name, publicProjectSite(site));
+  }
   if (args.includes('--help')) {
     await beforeLocal?.();
     process.stdout.write(CLONE_HELP);
@@ -107,6 +125,7 @@ export async function hostedCloneCli(
       parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
     invariant(!url.username && !url.password, 'BAD_ARGUMENT', 'Use a project URL without credentials.');
     origin = url.origin;
+    if (parts[0] === '-') parts.shift();
     route = url.searchParams.has('project')
       ? { projectId: url.searchParams.get('project')! }
       : { handle: parts[0]!, slug: parts[1]! };
