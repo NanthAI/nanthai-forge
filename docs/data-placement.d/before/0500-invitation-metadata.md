@@ -2,7 +2,8 @@
 
 `projectInvites` remains the single invitation store: target as typed, optional
 handle-account binding, inviter, role, expiry, state, answer receipt and projected
-mail status. Email targets acquire no account binding until acceptance. Rows are
+mail status. The schema also accepts team-scoped rows, which share the indexed
+recipient page. Older inbox callers still receive only project invitations. Email targets acquire no account binding until acceptance. Rows are
 retained as metadata; no source, email body, token or attachment bytes enter them.
 `projectAccessOperations` keeps retry receipts, its compatible mail projection,
 and one small invitation-generation counter per project that has a removed or

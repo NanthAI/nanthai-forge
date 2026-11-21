@@ -2,14 +2,20 @@
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { invitationPerson, recipientEmail, invitationBlock } from './projectInvitationRecipient';
-import { invitationLifetime, invitationStatus } from './projectInvitationPolicy';
+import {
+  invitationLifetime,
+  invitationPageCursor,
+  invitationPageSize,
+  invitationStatus,
+} from './projectInvitationPolicy';
+import { pendingTeamInvitation, teamInboxRow } from './teamInvitationReads';
 import {
   invitationInviter,
   invitationWasRevoked,
   type InvitationRevocations,
 } from './projectInvitationRevocation';
 
-const invitation = v.object({
+const projectInvitation = v.object({
   invitationId: v.id('projectInvites'),
   projectName: v.string(),
   inviterHandle: v.string(),
@@ -18,14 +24,25 @@ const invitation = v.object({
   href: v.string(),
   state: v.union(v.literal('pending'), v.literal('expired')),
 });
+const teamInvitation = v.object({
+  invitationId: v.id('projectInvites'),
+  teamName: v.string(),
+  inviterHandle: v.string(),
+  href: v.string(),
+  state: v.literal('pending'),
+});
 /** One indexed recipient page per selector. Sparse pages retain continuation; a link
  * carries no token or project identity and the session supplies both recipient selectors. */
 export const inbox = query({
   args: {
     kind: v.union(v.literal('handle'), v.literal('email')),
     cursor: v.optional(v.union(v.string(), v.null())),
+    includeTeams: v.optional(v.boolean()),
   },
-  returns: v.object({ rows: v.array(invitation), cursor: v.union(v.string(), v.null()) }),
+  returns: v.object({
+    rows: v.array(v.union(projectInvitation, teamInvitation)),
+    cursor: v.union(v.string(), v.null()),
+  }),
   handler: async (ctx, input) => {
     const user = await invitationPerson(ctx),
       email = input.kind === 'email' ? await recipientEmail(ctx, user) : null;
@@ -33,10 +50,22 @@ export const inbox = query({
       input.kind === 'email'
         ? ctx.db.query('projectInvites').withIndex('by_email', q => q.eq('email', email ?? ''))
         : ctx.db.query('projectInvites').withIndex('by_recipient', q => q.eq('recipient', user.subject));
-    const page = await selected.order('desc').paginate({ cursor: input.cursor ?? null, numItems: 25 });
+    const page = await selected.order('desc').paginate({
+      cursor: input.cursor ?? null,
+      numItems: invitationPageSize,
+      maximumRowsRead: invitationPageSize,
+    });
     const rows = [];
     const revoked: InvitationRevocations = new Map();
     for (const row of page.page) {
+      if (row.teamId) {
+        if (input.includeTeams && email && pendingTeamInvitation(row)) {
+          const teamRow = await teamInboxRow(ctx, row, user.subject);
+          if (teamRow) rows.push(teamRow);
+        }
+        continue;
+      }
+      if (!row.projectId) continue;
       const state = invitationStatus(row);
       if (state !== 'pending') continue;
       const project = await ctx.db.get(row.projectId);
@@ -60,7 +89,7 @@ export const inbox = query({
             : '/-/account',
       });
     }
-    return { rows, cursor: page.isDone ? null : page.continueCursor };
+    return { rows, cursor: invitationPageCursor(page) };
   },
 });
 export const blocked = query({

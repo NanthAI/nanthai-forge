@@ -35,12 +35,14 @@ export async function invitationWasRevoked(
   recipient: string,
   cache?: InvitationRevocations,
 ) {
-  const key = JSON.stringify([row.projectId, recipient]);
+  const projectId = row.projectId;
+  if (!projectId) return false;
+  const key = JSON.stringify([projectId, recipient]);
   let pending = cache?.get(key);
   if (!pending) {
     pending = ctx.db
       .query('projectActorNames')
-      .withIndex('by_project_and_actor', q => q.eq('projectId', row.projectId).eq('actor', recipient))
+      .withIndex('by_project_and_actor', q => q.eq('projectId', projectId).eq('actor', recipient))
       .unique()
       .then(value => value?.invitationsEndedBeforeEpoch ?? 0);
     cache?.set(key, pending);
@@ -51,13 +53,14 @@ export async function invitationWasRevoked(
 /** Legacy rows prove their inviter through the retained original operation, not today's owner. */
 export async function invitationInviter(ctx: QueryCtx | MutationCtx, row: Doc<'projectInvites'>) {
   if (row.inviter !== undefined) return row.inviter;
-  if (!row.operationId) return null;
+  const projectId = row.projectId;
+  if (!projectId || !row.operationId) return null;
   return (
     (
       await ctx.db
         .query('projectAccessOperations')
         .withIndex('by_project_and_operation', q =>
-          q.eq('projectId', row.projectId).eq('operationId', row.operationId!),
+          q.eq('projectId', projectId).eq('operationId', row.operationId!),
         )
         .unique()
     )?.owner ?? null

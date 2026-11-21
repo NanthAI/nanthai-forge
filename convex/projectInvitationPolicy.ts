@@ -1,10 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { PaginationResult } from 'convex/server';
 import type { Doc } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './server';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { invariant } from '../src/errors';
 import { digest } from '../src/state/hash';
+
+export const invitationPageSize = 25;
+
+export function invitationPageCursor(page: PaginationResult<unknown>) {
+  // A reactive range can grow past its read budget. The split is within the scanned
+  // prefix, so continuing there can repeat some rows but cannot skip unread ones.
+  if (page.pageStatus === 'SplitRequired' && page.splitCursor) return page.splitCursor;
+  return page.isDone ? null : page.continueCursor;
+}
 
 export const invitationLifetime = 7 * 24 * 60 * 60_000;
 export const invitationSendTimeout = 10 * 60_000;

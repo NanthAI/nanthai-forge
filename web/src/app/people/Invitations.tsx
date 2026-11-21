@@ -7,12 +7,13 @@ import { Band, State } from '../../ds';
 import { A } from '../frames';
 
 type Inbox = NonNullable<ReturnType<typeof useQuery<typeof api.projectInvitationInbox.inbox>>>;
+type ProjectInvitation = Extract<Inbox['rows'][number], { projectName: string }>;
 function InvitationRows({
   rows,
   answer,
   busy,
 }: {
-  rows: Inbox['rows'];
+  rows: ProjectInvitation[];
   busy: string;
   answer: (id: Id<'projectInvites'>, choice: 'accept' | 'decline' | 'block', href: string) => void;
 }) {
@@ -77,9 +78,9 @@ export default function Invitations() {
     [problem, setProblem] = useState(''),
     [joined, setJoined] = useState<string | null>(null);
   const [preferences, setPreferences] = useState(false);
-  const rows = [...(handles?.rows ?? []), ...(emails?.rows ?? [])].sort(
-    (a, b) => Number(a.state !== 'pending') - Number(b.state !== 'pending'),
-  );
+  const rows = [...(handles?.rows ?? []), ...(emails?.rows ?? [])]
+    .filter(row => 'projectName' in row)
+    .sort((a, b) => Number(a.state !== 'pending') - Number(b.state !== 'pending'));
   const act = (invitationId: Id<'projectInvites'>, choice: 'accept' | 'decline' | 'block', href: string) => {
     const key = `${invitationId}:${choice}`;
     if (!attempts.current.has(key)) attempts.current.set(key, crypto.randomUUID());

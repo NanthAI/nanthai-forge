@@ -53,7 +53,7 @@ export const answer = accountMutation('person')({
       const user = await requireOwnerPerson(ctx, 'answer invitations');
       const row = await ctx.db.get(input.invitationId);
       invariant(
-        row,
+        row?.projectId && !row.teamId,
         'PROJECT_UNAVAILABLE',
         'Invitation unavailable for this account. Open your invitations with the invited account.',
       );
