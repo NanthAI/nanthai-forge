@@ -27,10 +27,10 @@ to that local checkout and CLI installation.
 Forge previews its entry before writing and prints the private backup path and
 undo command. It also previews the first-run Claude Code and Codex hooks, backs
 up any hook file it changes, and prints the command to remove Forge hooks from
-both apps. Open a new agent
-session so the app loads its project configuration. Refresh **Connect your agent
-app yourself** to see **Connected** after the app's first authenticated contact
-with Forge on this account. The page reads once per load.
+both apps. Open a new agent session so the app loads its project configuration.
+During setup, expand **Connect your agent app yourself** on the project's
+**Needs me** page. Refresh the page after the app's first authenticated contact
+with Forge on this account to see **Connected**.
 
 For manual setup or another app, print the entry:
 

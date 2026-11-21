@@ -48,10 +48,11 @@ Project children receive neither collector key nor account token.
 
 ### Start the worker
 
-Once owner-person registration is provisioned, choose a stable machine UUID
-(for example `node -p 'crypto.randomUUID()'`) and supply it on restarts. From
-the built package, this command configures the runner, registers it and waits
-for work:
+Once owner-person registration is provisioned, use the deployment URL you
+signed in to and the `projectId` printed by [`nforge clone`](../quickstart.md#clone-the-project).
+Choose a stable machine UUID (for example `node -p 'crypto.randomUUID()'`) and
+supply it on restarts. From the built package, this command configures the
+runner, registers it and waits for work:
 
 ```sh
 node scripts/self-hosted-runner/start.mjs "$DEPLOYMENT_URL" "$PROJECT_ID" "$MACHINE_ID" '["build"]'
