@@ -21,7 +21,12 @@ import type { NativeFile } from './state/format.js';
 import { durableReplace, syncDirectory } from './state/durability.js';
 import { indexedBlob, type CheckoutStatIndex } from './checkout-stat-index.js';
 import { workingMatches, worktreeText } from './checkout-text.js';
-import { pendingHeldCheckoutName, keptApplyRoot, type KeptEntry } from './hosted-apply-kept.js';
+import {
+  pendingHeldCheckoutName,
+  keptApplyRoot,
+  keptCheckoutKey,
+  type KeptEntry,
+} from './hosted-apply-kept.js';
 import { retainedDeltaBackups } from './hosted-checkout-delta-settle.js';
 import { diskShapeMatches, writeSourceLink } from './source-links.js';
 import { checkoutPathStat } from './hosted-checkout-files.js';
@@ -73,6 +78,7 @@ export function disposePriorCheckout(input: {
       receipt,
       JSON.stringify({
         held: true,
+        checkoutKey: keptCheckoutKey(root),
         preservedAt: previous,
         rounds: { 'prior-checkout': kept },
         complete,

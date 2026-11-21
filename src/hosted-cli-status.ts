@@ -35,8 +35,10 @@ export async function readHostedCliStatus(root: string, supplied?: Pick<HostedAg
   const hold = result.landingHold;
   const approval = hold?.kind === 'review' ? `\n${reviewHoldLine(hold.review)}` : '';
   const scratch = result.scratchPath ? `\nLane scratch: ${JSON.stringify(result.scratchPath)}` : '';
+  const budget = response.keptApplyBudget;
+  const kept = budget ? `\n${budget.note}${budget.clearCommand ? `\n${budget.clearCommand}` : ''}` : '';
   return {
-    value: { transport: 'hosted', ...result, hooks },
-    text: `${text}${main}${approval}${scratch}${hookText ? `\n${hookText}` : ''}`,
+    value: { transport: 'hosted', ...result, hooks, ...(budget ? { keptApplyBudget: budget } : {}) },
+    text: `${text}${main}${approval}${scratch}${kept}${hookText ? `\n${hookText}` : ''}`,
   };
 }

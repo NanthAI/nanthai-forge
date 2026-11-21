@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Recover-apply keeps only the changed files, in the client cache, lists them, and expires them.
 import test from 'node:test';
+import { randomUUID } from 'node:crypto';
+import { syncBuiltinESMExports } from 'node:module';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import assert from 'node:assert/strict';
 import {
@@ -14,9 +16,10 @@ import {
   readlinkSync,
   rmSync,
   symlinkSync,
+  truncateSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join, sep } from 'node:path';
 import { fixture } from './hosted-sync-client-fixture.mjs';
 import { applyHostedSync } from '../dist/hosted-sync-client.js';
 import { recoverLocalApply } from '../dist/hosted-apply-recovery.js';
@@ -28,11 +31,13 @@ import {
   keptApplyEnvelope,
   keptApplyRoot,
   listKeptApply,
+  recordKeptCheckout,
   removeCachePreservingKept,
   sweepKeptApply,
 } from '../dist/hosted-apply-kept.js';
 
 const COUNT = 300;
+const confirmedFixtureAt = Date.UTC(2026, 10, 21);
 const extra = Array.from({ length: COUNT }, (_, i) => ({
   path: `src/dir${i % 10}/file${i}.txt`,
   content: `baseline ${i} `.repeat(40),
@@ -359,4 +364,130 @@ test('status does not invent kept changes for empty retained apply receipts', t 
   assert.deepEqual(listKeptApply(root), { entries: [], more: 0 });
   assert.deepEqual(keptApplyEnvelope(root), {});
   assert(existsSync(directory), 'a read preserves the retained folder');
+});
+
+test('F7: kept bytes are scoped to a checkout and a warm sync reads sizes without walking retained files', async t => {
+  const outer = temporaryDirectory(t, 'forge-kept-budget-');
+  const cache = keptApplyRoot(outer);
+  const first = join(dirname(cache), 'lanes', randomUUID());
+  const second = join(dirname(cache), 'lanes', randomUUID());
+  for (const root of [first, second]) mkdirSync(root, { recursive: true });
+  const gib = 1024 ** 3;
+  const kept = (root, bytes, fields = {}) => {
+    const directory = join(cache, randomUUID()),
+      path = join(directory, 'files', 'draft');
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, 'keep');
+    truncateSync(path, bytes);
+    recordKeptCheckout(root, directory);
+    writeFileSync(join(directory, 'receipt.json'), JSON.stringify(fields));
+    return directory;
+  };
+  const confirmedAt = confirmedFixtureAt;
+  const confirmed = kept(first, gib - 1, { confirmedAt });
+  const other = kept(second, gib - 1, { confirmedAt });
+  assert.deepEqual(keptApplyEnvelope(first, 'sync'), {});
+  const unconfirmed = kept(first, 1);
+  const cold = keptApplyEnvelope(first, 'sync').keptApplyBudget;
+  assert.equal(cold.bytes, gib);
+  assert.equal(cold.budgetBytes, gib);
+  assert(cold.clearCommand.includes(confirmed));
+  assert(!cold.clearCommand.includes(unconfirmed));
+  assert(!cold.clearCommand.includes(other));
+
+  const fs = (await import('node:fs')).default;
+  const read = fs.readFileSync,
+    list = fs.readdirSync;
+  t.mock.method(fs, 'readFileSync', (path, ...args) => {
+    assert(!String(path).startsWith(cache) || basename(String(path)) !== 'receipt.json');
+    return read(path, ...args);
+  });
+  t.mock.method(fs, 'readdirSync', (path, ...args) => {
+    assert(!String(path).startsWith(cache + sep), 'a sync does not enumerate retained paths');
+    return list(path, ...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    assert.deepEqual(keptApplyEnvelope(first, 'sync').keptApplyBudget, cold);
+    assert.deepEqual(keptApplyEnvelope(second, 'sync'), {});
+    for (const directory of [confirmed, unconfirmed, other]) assert(existsSync(directory));
+    rmSync(confirmed, { recursive: true });
+    assert.deepEqual(keptApplyEnvelope(first, 'sync'), {});
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+});
+
+test('F7: a legacy apply with checkout evidence counts there and an unattributed round is not offered for cleanup', t => {
+  const outer = temporaryDirectory(t, 'forge-legacy-kept-budget-'),
+    cache = keptApplyRoot(outer),
+    laneId = randomUUID(),
+    lane = join(dirname(cache), 'lanes', laneId);
+  mkdirSync(lane, { recursive: true });
+  mkdirSync(clientCacheRoot(lane));
+  const makeRound = () => {
+    const id = randomUUID(),
+      directory = join(cache, id),
+      files = join(directory, 'files'),
+      draft = join(files, 'draft');
+    mkdirSync(files, { recursive: true });
+    writeFileSync(draft, 'draft');
+    truncateSync(draft, 1024 ** 3);
+    writeFileSync(
+      join(directory, 'receipt.json'),
+      JSON.stringify({ confirmedAt: confirmedFixtureAt, marker: { selection: { laneId } } }),
+    );
+    return { id, directory };
+  };
+  const known = makeRound(),
+    unknown = makeRound();
+  writeFileSync(join(clientCacheRoot(lane), `apply-completed-${known.id}.json`), '{}');
+  assert.deepEqual(keptApplyEnvelope(outer, 'sync'), {});
+  const budget = keptApplyEnvelope(lane, 'sync').keptApplyBudget;
+  assert.equal(budget.bytes, 1024 ** 3);
+  assert(budget.clearCommand.includes(known.directory));
+  assert(!budget.clearCommand.includes(unknown.directory));
+  assert(existsSync(unknown.directory));
+});
+
+test('F7: an unreadable kept subtree leaves readable bytes and confirmation available', async t => {
+  const root = temporaryDirectory(t, 'forge-partial-kept-budget-'),
+    directory = join(keptApplyRoot(root), randomUUID()),
+    files = join(directory, 'files'),
+    unreadable = join(files, 'unreadable'),
+    draft = join(files, 'draft');
+  mkdirSync(unreadable, { recursive: true });
+  writeFileSync(draft, 'draft');
+  truncateSync(draft, 1024 ** 3);
+  recordKeptCheckout(root, directory);
+  const receipt = join(directory, 'receipt.json');
+  writeFileSync(receipt, '{}');
+  const fs = (await import('node:fs')).default,
+    list = fs.readdirSync;
+  let unreadableReads = 0;
+  t.mock.method(fs, 'readdirSync', (path, ...args) => {
+    if (path === unreadable) {
+      unreadableReads++;
+      throw Object.assign(new Error('synthetic read failure'), { code: 'EACCES' });
+    }
+    return list(path, ...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    const unconfirmed = keptApplyEnvelope(root, 'sync').keptApplyBudget;
+    assert.equal(unconfirmed.bytes, 1024 ** 3);
+    assert.match(unconfirmed.note, /at least/);
+    assert.equal(unconfirmed.clearCommand, null);
+    assert.deepEqual(keptApplyEnvelope(root, 'sync').keptApplyBudget, unconfirmed);
+    assert.equal(unreadableReads, 1, 'warm sync leaves the unreadable tree alone');
+    writeFileSync(receipt, JSON.stringify({ confirmedAt: confirmedFixtureAt }));
+    const confirmed = keptApplyEnvelope(root, 'sync').keptApplyBudget;
+    assert.equal(confirmed.bytes, 1024 ** 3);
+    assert(confirmed.clearCommand.includes(directory));
+    assert(existsSync(unreadable));
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
 });

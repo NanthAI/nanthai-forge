@@ -5,17 +5,20 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import {
   mkdirSync,
+  lstatSync,
   writeFileSync,
   readFileSync,
   realpathSync,
   symlinkSync,
   readlinkSync,
   rmSync,
+  truncateSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { resolutionFixture } from './hosted-agent-resolution-fixture.mjs';
 import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
+import { keptApplyRoot, recordKeptCheckout } from '../dist/hosted-apply-kept.js';
 function build(root) {
   for (const path of ['dist/app.js', 'generated/api.d.ts']) {
     mkdirSync(join(root, path, '..'), { recursive: true });
@@ -51,6 +54,34 @@ test('Lane scratch stays local through save and sync when main adds the same fil
   assert.equal(readHostedLaneCheckout(s.root).selection.head, synced.result.applied.head);
   assert.notEqual(readFileSync(join(s.root, 'accepted.txt'), 'utf8'), 'synthetic scratch');
   assert.equal(readFileSync(join(scratch, 'accepted.txt'), 'utf8'), 'synthetic scratch');
+});
+
+test('F7: hosted sync and status show the kept size and how to clear confirmed rounds', async t => {
+  const s = await resolutionFixture(t, { overlap: false });
+  await s.transport().dispatch('open', { laneId: s.f.lane.laneId });
+  const directory = join(keptApplyRoot(s.root), randomUUID()),
+    draft = join(directory, 'files', 'draft');
+  mkdirSync(join(directory, 'files'), { recursive: true });
+  writeFileSync(draft, 'draft');
+  const bytes = 1024 ** 3 + 1;
+  truncateSync(draft, bytes);
+  recordKeptCheckout(s.root, directory);
+  writeFileSync(join(directory, 'receipt.json'), JSON.stringify({ confirmedAt: Date.UTC(2026, 10, 21) }));
+
+  s.f.moveMain({ overlap: false });
+  const sync = await s.transport().dispatch('sync', { laneId: s.f.lane.laneId, apply: true });
+  const budget = sync.keptApplyBudget;
+  assert.equal(sync.result.applied.head, readHostedLaneCheckout(s.root).selection.head);
+  assert.equal(budget.bytes, bytes);
+  assert(budget.clearCommand.includes(directory));
+  const status = await readHostedCliStatus(s.root, s.transport());
+  assert.deepEqual(status.value.keptApplyBudget, budget);
+  assert(status.text.includes(`${bytes} bytes (1 GiB budget)`));
+  assert(status.text.includes(budget.clearCommand));
+  assert.equal(lstatSync(draft).size, bytes);
+  truncateSync(draft, 5);
+  const afterEdit = await readHostedCliStatus(s.root, s.transport());
+  assert.equal(afterEdit.value.keptApplyBudget, undefined, 'plain status refreshes after a manual edit');
 });
 
 test('hosted sync after a build preserves output; remote advance/local conflict replay installs current lifecycle pins', async t => {

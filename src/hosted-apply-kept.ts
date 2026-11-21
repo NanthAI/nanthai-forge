@@ -14,15 +14,20 @@ import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
 import { ForgeError, invariant } from './errors.js';
 import { digest } from './hash.js';
-import { retainedRootSibling } from './root-paths.js';
-import { syncDirectory, syncFile } from './state/durability.js';
-import { checkoutPathExists } from './hosted-checkout-files.js';
+import { clientCacheRoot, retainedRootSibling, unfollowedRoot } from './root-paths.js';
+import { durableReplace, syncDirectory, syncFile } from './state/durability.js';
+import { checkoutPathExists, checkoutPathStat } from './hosted-checkout-files.js';
+import { retainedDeltaBackups } from './hosted-checkout-delta-settle.js';
+import { shellQuote } from './shell-quote.js';
 import type { CheckoutChange } from './hosted-checkout-clean.js';
 import type { NativeFile } from './state/format.js';
 import { diskShapeMatches, writeSourceLink } from './source-links.js';
 
 /** Local changes an explicit recover-apply set aside are kept this long after the apply is confirmed. */
 export const KEPT_APPLY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const KEPT_APPLY_BUDGET_BYTES = 1024 ** 3;
+const keptSizeRefreshMs = 60 * 60 * 1000;
+const checkoutKeyName = '.checkout-key';
 /** Entries listed in one status read. */
 const LISTED = 20;
 const PATHS_SHOWN = 20;
@@ -30,6 +35,16 @@ const PATHS_SHOWN = 20;
 /** Lives in the outermost client cache, so evicting a nested Lane copy never removes it, and nothing
  * is created beside the project root. */
 export const keptApplyRoot = (root: string) => join(retainedRootSibling(root, '.forge-client'), 'kept-apply');
+export const keptCheckoutKey = (root: string) => digest(unfollowedRoot(root));
+
+/** Keep the checkout attribution beside the strict recovery receipt so older clients can still replay. */
+export function recordKeptCheckout(root: string, directory: string) {
+  try {
+    durableReplace(join(directory, checkoutKeyName), keptCheckoutKey(root));
+  } catch {
+    /* Size accounting never refuses to keep edits. */
+  }
+}
 
 export const keptEntrySchema = z
   .object({
@@ -261,6 +276,7 @@ const receiptShape = z
     rounds: z.record(z.string(), z.array(keptEntrySchema)).optional(),
     /** Found in a prior checkout after publication; kept until deleted, never swept by expiry. */
     held: z.boolean().optional(),
+    checkoutKey: z.string().optional(),
   })
   .passthrough();
 export type KeptApplySummary = {
@@ -292,14 +308,18 @@ function names(cache: string) {
     return [];
   }
 }
+function readKeptReceipt(directory: string) {
+  const receipt = receiptShape.parse(JSON.parse(readFileSync(join(directory, 'receipt.json'), 'utf8')));
+  // Disposal writes its intent before moving the directory (or symlink) into position.
+  return receipt.held && !checkoutPathExists(join(directory, 'prior-checkout')) ? null : receipt;
+}
 function summarize(cache: string, name: string, hideEmpty = false): KeptApplySummary | null {
   const directory = join(cache, name);
   let receipt;
   try {
     if (!real(directory)) return null;
-    receipt = receiptShape.parse(JSON.parse(readFileSync(join(directory, 'receipt.json'), 'utf8')));
-    // Disposal writes its intent before moving the directory (or symlink) into position.
-    if (receipt.held && !checkoutPathExists(join(directory, 'prior-checkout'))) return null;
+    receipt = readKeptReceipt(directory);
+    if (!receipt) return null;
   } catch {
     return null;
   }
@@ -385,10 +405,150 @@ export const keptApplyEntry = (root: string, id: string) =>
 
 /** Status view: one small receipt read per kept entry, newest listing capped. No Convex calls. */
 export function listKeptApply(root: string) {
-  const cache = keptApplyRoot(root),
-    all = names(cache),
-    shown = all.slice(0, LISTED).flatMap(id => summarize(cache, id, true) ?? []);
+  const cache = keptApplyRoot(root);
+  return keptListing(cache, names(cache));
+}
+function keptListing(cache: string, all: readonly string[]) {
+  const shown = all.slice(0, LISTED).flatMap(id => summarize(cache, id, true) ?? []);
   return { entries: shown, more: Math.max(0, all.length - LISTED) };
+}
+
+const sizeRecord = z.object({
+  stamp: z.string(),
+  bytes: z.int().nonnegative(),
+  complete: z.boolean(),
+  measuredAt: z.int().nonnegative(),
+  checkout: z.string().nullable(),
+  confirmed: z.boolean(),
+});
+
+function measureKeptPath(path: string, total: { bytes: number; complete: boolean }) {
+  try {
+    const stat = lstatSync(path);
+    if (stat.isDirectory() && !stat.isSymbolicLink())
+      for (const name of readdirSync(path)) measureKeptPath(join(path, name), total);
+    else total.bytes += stat.size;
+  } catch {
+    total.complete = false;
+  }
+}
+
+function legacyCheckout(
+  root: string,
+  directory: string,
+  receipt: NonNullable<ReturnType<typeof readKeptReceipt>>,
+) {
+  const cacheRoot = dirname(dirname(directory)),
+    outer = cacheRoot.slice(0, -'.forge-client'.length),
+    id = basename(directory);
+  const laneId = (receipt.marker as { selection?: { laneId?: unknown } } | undefined)?.selection?.laneId;
+  const candidates = new Set([unfollowedRoot(root), unfollowedRoot(outer)]);
+  if (typeof laneId === 'string' && uuid.test(laneId)) candidates.add(join(cacheRoot, 'lanes', laneId));
+  const matches = [...candidates].filter(candidate => {
+    const cache = clientCacheRoot(candidate);
+    return receipt.held
+      ? retainedDeltaBackups(cache).includes(join(directory, 'prior-checkout'))
+      : [`${id}.json`, `apply-blocked-${id}.json`, `apply-completed-${id}.json`].some(name =>
+          checkoutPathStat(join(cache, name))?.isFile(),
+        );
+  });
+  return matches.length === 1 ? keptCheckoutKey(matches[0]!) : null;
+}
+
+function retainedSizes(directory: string) {
+  const total = { bytes: 0, complete: true };
+  let names: string[];
+  try {
+    names = readdirSync(directory);
+  } catch {
+    return { bytes: 0, complete: false };
+  }
+  for (const name of names) {
+    if (
+      name === 'files' ||
+      name === 'prior-checkout' ||
+      /^(files|checkout)-[a-f0-9-]{36}$/.test(name) ||
+      /^delta-[a-z0-9_-]+$/i.test(name)
+    )
+      measureKeptPath(join(directory, name), total);
+  }
+  return total;
+}
+
+/** One listing and one index read on warm sync. Only new or changed receipts measure retained
+ * paths until the next lazy refresh. Plain status refreshes this checkout on request. */
+function keptBudget(root: string, cache: string, ids: readonly string[], refresh: boolean) {
+  if (!ids.length) return undefined;
+  if (!real(dirname(cache))) return undefined;
+  const indexPath = join(dirname(cache), 'kept-apply-sizes.json');
+  let prior: Record<string, z.infer<typeof sizeRecord>> = {};
+  try {
+    if (lstatSync(indexPath).isFile())
+      prior = z.record(z.string(), sizeRecord).parse(JSON.parse(readFileSync(indexPath, 'utf8')));
+  } catch {
+    /* The index is disposable and rebuilds from the kept receipts. */
+  }
+  const index: typeof prior = {};
+  let bytes = 0,
+    complete = true;
+  const confirmed: string[] = [],
+    key = keptCheckoutKey(root),
+    now = Date.now();
+  for (const id of ids) {
+    const directory = join(cache, id);
+    try {
+      const folder = lstatSync(directory, { bigint: true });
+      if (!folder.isDirectory() || folder.isSymbolicLink()) continue;
+      const stat = lstatSync(join(directory, 'receipt.json'), { bigint: true });
+      if (!stat.isFile()) continue;
+      const stamp = `${folder.ctimeNs}:${stat.ino}:${stat.ctimeNs}:${stat.size}`;
+      let row = prior[id];
+      if (
+        row?.stamp !== stamp ||
+        now - row.measuredAt >= keptSizeRefreshMs ||
+        (refresh && (row.checkout === key || row.checkout === null))
+      ) {
+        const receipt = readKeptReceipt(directory);
+        if (!receipt) continue;
+        const ownerPath = join(directory, checkoutKeyName);
+        const owner =
+          receipt.checkoutKey ??
+          (checkoutPathStat(ownerPath)?.isFile() ? readFileSync(ownerPath, 'utf8') : undefined);
+        row = {
+          stamp,
+          ...retainedSizes(directory),
+          measuredAt: now,
+          checkout: owner && /^[a-f0-9]{64}$/.test(owner) ? owner : legacyCheckout(root, directory, receipt),
+          confirmed: !receipt.held && !!receipt.confirmedAt,
+        };
+      }
+      index[id] = row;
+      if (row.checkout !== key) continue;
+      bytes += row.bytes;
+      complete &&= row.complete;
+      if (row.confirmed) confirmed.push(directory);
+    } catch {
+      // An incomplete or unreadable receipt may be published again on recovery.
+    }
+  }
+  if (ids.some(id => index[id] !== prior[id]) || Object.keys(prior).length !== Object.keys(index).length)
+    try {
+      durableReplace(indexPath, JSON.stringify(index));
+    } catch {
+      /* A read still reports the measured bytes if it cannot update the index. */
+    }
+  if (bytes < KEPT_APPLY_BUDGET_BYTES) return undefined;
+  const clearCommand = !confirmed.length
+    ? null
+    : process.platform === 'win32'
+      ? `Remove-Item -Recurse -LiteralPath ${confirmed.map(path => `'${path.replaceAll("'", "''")}'`).join(', ')}`
+      : `rm -r -- ${confirmed.map(shellQuote).join(' ')}`;
+  return {
+    bytes,
+    budgetBytes: KEPT_APPLY_BUDGET_BYTES,
+    note: `Kept edits use ${complete ? '' : 'at least '}${bytes} bytes (1 GiB budget). ${clearCommand ? 'Copy back what you need before clearing the confirmed rounds.' : 'There are no confirmed rounds to clear.'}`,
+    clearCommand,
+  };
 }
 
 /** Sweep one client cache directory by path (used when its project root is gone). */
@@ -432,11 +592,17 @@ function sweep(cache: string, now: number) {
   return removed;
 }
 
-/** Added to a status read only when something is kept. Never throws: a damaged entry is skipped. */
-export function keptApplyEnvelope(root: string) {
+/** Status lists the kept rounds; both status and sync report a checkout over its size budget. */
+export function keptApplyEnvelope(root: string, action: 'status' | 'sync' = 'status', refresh = false) {
   try {
-    const listing = listKeptApply(root);
-    return listing.entries.length || listing.more ? { keptApply: listing } : {};
+    const cache = keptApplyRoot(root),
+      ids = names(cache),
+      budget = keptBudget(root, cache, ids, refresh),
+      listing = action === 'status' ? keptListing(cache, ids) : undefined;
+    return {
+      ...(listing && (listing.entries.length || listing.more) ? { keptApply: listing } : {}),
+      ...(budget ? { keptApplyBudget: budget } : {}),
+    };
   } catch {
     return {};
   }

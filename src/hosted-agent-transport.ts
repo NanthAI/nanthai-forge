@@ -296,6 +296,8 @@ export type HostedAgentResponse = {
   operationId: string | null;
   resolved: { operationId: string } | null;
   result: unknown;
+  /** Local kept-file budget notice on checkout status and sync replies. */
+  keptApplyBudget?: ReturnType<typeof keptApplyEnvelope>['keptApplyBudget'];
   /** The tightest member work budget reported by this command's mutations. */
   budget?: MemberBudget;
   behindMain?: unknown;
@@ -2030,7 +2032,9 @@ export class HostedAgentTransport {
       // conflict and presence peers name member-written text. A stack hint holds Lane ids only.
       ...(conflictNotice || presence || board?.notices.length ? { notice: memberDataNotice } : {}),
       ...this.nudge(action, result),
-      ...(action === 'status' ? keptApplyEnvelope(this.root) : {}),
+      ...(action === 'status' || action === 'sync'
+        ? keptApplyEnvelope(this.root, action, action === 'status' && this.plainStatus)
+        : {}),
       ...this.identity(action),
       ...(missing.length ? { serverContract: { missing } } : {}),
     };

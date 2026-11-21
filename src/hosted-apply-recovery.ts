@@ -40,6 +40,7 @@ import {
   liveState,
   misplacedCacheContent,
   preserveChanges,
+  recordKeptCheckout,
   sweepKeptApply,
 } from './hosted-apply-kept.js';
 
@@ -215,6 +216,7 @@ async function recoverApply(root: string, id: string, transport: LaneTransport) 
             undo: `Only your unsaved changes that clash with the incoming change are kept at ${backup}, with the same relative paths; other edits and new files stay in place. Files that were deleted are listed in the receipt next to it. Copy what you need back after the apply. Further rounds stay in the same folder. It is removed seven days after the apply is confirmed.`,
           };
           mkdirSync(directory, { recursive: true, mode: 0o700 });
+          recordKeptCheckout(root, directory);
           durableReplace(receiptPath, JSON.stringify(value));
           return receiptSchema.parse(value);
         });
