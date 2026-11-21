@@ -15,8 +15,8 @@ import { spawnSync } from 'node:child_process';
 import { availableParallelism, loadavg, tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { laneOf, recordHold } from './heavy-queue.js';
-import { slotCapEnv } from './heavy-hold.js';
+import { laneOf, recordHold, type HeavyKind } from './heavy-queue.js';
+import { commandKind, slotCapEnv } from './heavy-hold.js';
 import { safeRelative } from './files.js';
 import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { z } from 'zod';
@@ -1553,13 +1553,12 @@ const observationSchema = z.union([
  * static job would reject, and a failure there ends the run before any build or test. Tests then
  * run mandatory first in groups sized from the speed already observed; an earlier failure or the
  * spent time budget stops later groups and names them. */
-type PreflightHeavyKind = 'test' | 'typecheck';
 type HeldHeavySlot = {
   env: Record<string, string>;
   waited: boolean;
-  release(kind: PreflightHeavyKind): void;
+  release(kind: HeavyKind): void;
 };
-/** One `nforge heavy` slot for this preflight's typecheck, build and tests, held for this process. The
+/** One `nforge heavy` slot for this preflight's static checks, build and tests, held for this process. The
  * synchronous run waits for it in a child (FIFO with every other heavy command); a preflight inside
  * `nforge heavy` reuses that slot. Null when slots are off or the claim fails (the run goes on, said once). */
 function holdHeavySlot(cwd: string, base: NodeJS.ProcessEnv): HeldHeavySlot | null {
@@ -1610,7 +1609,7 @@ export function runPreflight(
   /** The saved paths base to head (null: unknown). Given, a static failure blocks only when it is the
    * change's (src/agent-preflight-static.ts); omitted, every static failure blocks. */
   changed?: string[] | null,
-  /** Hold one `nforge heavy` slot for the typecheck, build and tests. The preflight action and the
+  /** Hold one `nforge heavy` slot for the static checks, build and tests. The preflight action and the
    * land gate's inline run set it; a fixture run inside a test (already in its runner's slot) does not. */
   options: {
     heavySlot?: boolean;
@@ -1664,8 +1663,8 @@ export function runPreflight(
   // Browser test files that did not run their browser (not installed here, or a skip): NOT COMPLETE.
   const needsBrowser: string[] = [];
   let heavy: HeldHeavySlot | null | undefined;
-  let heavyKind: PreflightHeavyKind = 'typecheck';
-  const heavyEnv = (kind: PreflightHeavyKind) => {
+  let heavyKind: HeavyKind = 'other';
+  const heavyEnv = (kind: HeavyKind) => {
     const env = cleanEnv();
     if (options.heavySlot && heavy === undefined) {
       heavy = holdHeavySlot(root, env);
@@ -1683,31 +1682,44 @@ export function runPreflight(
     } else if (plan.static?.selected.length) {
       const checks = plan.static.selected.map(check => ({ ...check, inputs: null }));
       const scope = changed === undefined ? undefined : staticScope(root, changed);
+      const kinds = new Set(
+        checks.map(check =>
+          isTypecheck(check) || isTypecheckCommand(check) ? 'typecheck' : commandKind(check.command),
+        ),
+      );
+      const kind = kinds.has('test')
+        ? 'test'
+        : kinds.has('typecheck')
+          ? 'typecheck'
+          : kinds.has('build')
+            ? 'build'
+            : 'other';
+      const env = heavyEnv(kind);
       staticResults = runStaticChecks(
         root,
         checks.filter(check => !isTypecheck(check)),
-        check => (isTypecheckCommand(check) ? heavyEnv('typecheck') : cleanEnv()),
+        env,
         undefined,
         scope,
       );
       // The typecheck script's compiler steps (fix 6): only those whose program holds a changed path.
       const typechecks = checks.filter(isTypecheck);
       if (typechecks.length) {
-        const env = typecheckEnv(root, heavyEnv('typecheck'));
-        const narrowed = selectTypechecks(root, typechecks, changed, env, command =>
-          runTypecheckSetup(root, command, env, STATIC_CHECK_TIMEOUT_MS),
+        const compilerEnv = typecheckEnv(root, env);
+        const narrowed = selectTypechecks(root, typechecks, changed, compilerEnv, command =>
+          runTypecheckSetup(root, command, compilerEnv, STATIC_CHECK_TIMEOUT_MS),
         );
         typecheckUntouched = narrowed.untouched;
         if (narrowed.untouched.length)
           process.stderr.write(
             `preflight: not run here, no changed file is in its program (the landing check still runs it): ${narrowed.untouched.join(', ')}\n`,
           );
-        staticResults.push(...runStaticChecks(root, narrowed.selected, env, undefined, scope));
+        staticResults.push(...runStaticChecks(root, narrowed.selected, compilerEnv, undefined, scope));
       }
       if (staticResults.some(result => result.outcome === 'failed')) exitCode = 1;
     }
     if (!staticOnly && plan.tests.length && exitCode === 0) {
-      // Keep the typecheck's lease if one was needed so this preflight waits at most once.
+      // Keep the static batch's lease if one was needed so this preflight waits at most once.
       const buildAndTestEnv = heavyEnv('test');
       // Only Forge's own Node layout (no project runner) builds first; another project's script of
       // that name is not Forge's to run, and its runner builds what it needs.

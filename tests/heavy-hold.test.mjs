@@ -228,6 +228,7 @@ test('a hold is classed as test, typecheck, build or other from its command word
     [['node', '--import', 'x.mjs', '--test', 'a.test.mjs'], 'test'],
     [['sh', '-c', 'npm run build:core && node --test tests/a.test.mjs'], 'test'],
     [['npm', 'test'], 'test'],
+    [['npm', 'run', '-s', 'test'], 'test'],
     [['nforge', 'agent', '.', 'preflight', '{}'], 'test'],
     [['node', 'node_modules/@typescript/native/bin/tsc', '--noEmit'], 'typecheck'],
     [['npm', 'run', 'typecheck'], 'typecheck'],

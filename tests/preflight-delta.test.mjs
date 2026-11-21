@@ -10,7 +10,7 @@ import {
   readdirSync,
   rmSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { availableParallelism, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { digest } from '../dist/state/hash.js';
 import { sourceTree } from '../dist/source-tree.js';
@@ -738,6 +738,48 @@ test('7008ff18: a declared typecheck still takes a slot when preflight has no te
   assert.deepEqual(
     readHoldHistory(heavy.slotsDir).map(hold => hold.kind),
     ['typecheck'],
+  );
+});
+
+test('7008ff18: the static batch shares one lease and caps a declared test with no regular tests selected', t => {
+  const f = fixture(t);
+  const heavy = heavyEvidence(f, t, 1);
+  const staticEvidence = join(heavy.slotsDir, '..', 'static.jsonl');
+  const writeEvidence = `import { appendFileSync } from 'node:fs';
+const parent = JSON.parse(process.env.FORGE_HEAVY_PARENT || 'null');
+const tookSlot = parent?.pid === ${process.pid};
+const capApplied = process.execArgv.includes('--test-concurrency=${availableParallelism()}');
+appendFileSync(${JSON.stringify(staticEvidence)}, JSON.stringify({ tookSlot, capApplied }) + '\\n');`;
+  f.put('scripts/static-check.mjs', writeEvidence);
+  f.put('scripts/static.test.mjs', writeEvidence);
+  f.put(
+    'package.json',
+    JSON.stringify({
+      type: 'module',
+      forge: {
+        preflight: {
+          static: [
+            { name: 'syntax', command: ['node', 'scripts/static-check.mjs'] },
+            { name: 'project smoke tests', command: ['node', '--test', 'scripts/static.test.mjs'] },
+          ],
+        },
+      },
+    }),
+  );
+
+  const receipt = f.run({ ...f.plan(), tests: [] }, { heavySlot: true });
+  assert.equal(receipt.passed, true);
+  const evidence = readFileSync(staticEvidence, 'utf8')
+    .trim()
+    .split('\n')
+    .map(line => JSON.parse(line));
+  assert.deepEqual(evidence, [
+    { tookSlot: true, capApplied: false },
+    { tookSlot: true, capApplied: true },
+  ]);
+  assert.deepEqual(
+    readHoldHistory(heavy.slotsDir).map(hold => hold.kind),
+    ['test'],
   );
 });
 

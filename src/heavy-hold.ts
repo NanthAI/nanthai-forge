@@ -107,7 +107,7 @@ export function commandKind(args: string[]): HeavyKind {
   const text = ` ${args.join(' ')} `;
   if (
     /\s--test(?=[\s=])/.test(text) ||
-    /\b(?:npm|pnpm|yarn|bun)(?:\.cmd)?\s+(?:run\s+)?test\b/.test(text) ||
+    /\b(?:npm|pnpm|yarn|bun)(?:\.cmd)?\s+(?:run\s+(?:(?:-s|--silent)\s+)?)?test\b/.test(text) ||
     /\b(?:vitest|jest|mocha|preflight)\b/.test(text)
   )
     return 'test';

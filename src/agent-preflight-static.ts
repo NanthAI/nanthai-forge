@@ -201,7 +201,7 @@ export function selectStaticChecks(checks: StaticCheck[], changedPaths: string[]
 export function runStaticChecks(
   root: string,
   checks: StaticCheck[],
-  environment: NodeJS.ProcessEnv | ((check: StaticCheck) => NodeJS.ProcessEnv),
+  env: NodeJS.ProcessEnv,
   timeoutMs = STATIC_CHECK_TIMEOUT_MS,
   scope?: StaticScope,
 ): StaticCheckResult[] {
@@ -213,7 +213,6 @@ export function runStaticChecks(
   const hints = scope?.changed ? changedHints(scope.changed, scope) : undefined;
   try {
     return checks.map(check => {
-      const env = typeof environment === 'function' ? environment(check) : environment;
       const started = Date.now();
       const [command, ...args] = check.command as [string, ...string[]];
       const head = mentions(root, known(root), changed);
