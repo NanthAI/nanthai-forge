@@ -6,3 +6,6 @@
   its last progress time and a failed attempt's cause; a stalled landing `wait` prints
   the stall, that cause and the replay. A runner source request answers slow object
   storage with 503 `reason: storage` inside the runner's 30 s timeout.
+- `queue {submissionId}` reads earlier landing attempts and the current one, with
+  retained phase durations and causes, including a source failure during recomposition.
+  It reads one bounded page on demand.

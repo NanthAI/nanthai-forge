@@ -579,6 +579,12 @@
     },
     {
       "incident": "e62d834b",
+      "what": "A no-check main-race attempt waited on a fenced source step for 313 minutes with no agent-visible attempt history (d52e034f)",
+      "file": "tests/hosted-landing-attempt-history.test.mjs",
+      "test": "incident replay e62d834b (d52e034f): the CLI explains a main-race landing still composing after 313 minutes"
+    },
+    {
+      "incident": "e62d834b",
       "what": "Every landing check ended RUNNER_UNAVAILABLE 05:27-06:41Z on 2026-11-20, so each landing spent its platform retries on a broken CI and failed for good: with FORGE_QUEUE_HOLD_ON_CI_DOWN on, a cohort waits under one CI-down reason and lands once CI runs checks again",
       "file": "tests/hosted-landing-ci-down.test.mjs",
       "test": "incident replay e62d834b line 5: a cohort whose CI fails every check waits under one CI-down reason, then lands when CI runs again"

@@ -51,7 +51,7 @@
 | `lanes` | `planningItemId?, id?, itemId?, intentId?, state?, cursor?, limit?, view?` |
 | `diff` | `laneId?, paths?, byteBudget?, summary?, from?, cursor?` |
 | `peers` | `laneId?, path?, detail?` |
-| `queue` | `limit?, laneId?` |
+| `queue` | `limit?, laneId?, submissionId?, beforeAttempt?` |
 | `landings` | `from?, to?, receiptId?, limit?, cursor?` |
 | `lane-history` | `laneId?` |
 | `flow` | `{}` |

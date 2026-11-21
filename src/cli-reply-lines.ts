@@ -91,6 +91,32 @@ export function cliReplyLines(args: string[], output: unknown): string[] {
   }
   if (!['agent', 'x'].includes(args[0] ?? '')) return [];
   const action = text(envelope.action) || args[2];
+  if (action === 'queue' && Array.isArray(result.attempts)) {
+    const attempts = rows(result.attempts);
+    const lines = attempts.map(attempt => {
+      const past = rows(attempt.periods).map(period => {
+        const ms = Number(period.elapsedMs);
+        const elapsed =
+          ms >= 60_000 ? `${count(Math.floor(ms / 60_000))} min` : `${count(Math.round(ms / 1_000))} s`;
+        return `${text(period.phase)} ${elapsed}${period.endedAt ? '' : ' so far'}`;
+      });
+      const source = row(attempt.sourceFailure);
+      const cause = row(attempt.cause);
+      return [
+        `Attempt ${count(attempt.number)}${attempt.current ? ' (current)' : ''} · ${text(attempt.phase) || 'phase unavailable'}`,
+        ...past,
+        ...(source.code ? [`source step ${count(source.step)}: ${text(source.code)}`] : []),
+        ...(cause.code ? [`${text(cause.code)}${cause.message ? `: ${text(cause.message)}` : ''}`] : []),
+      ].join(' · ');
+    });
+    if (!lines.length) lines.push('No retained attempts in this page.');
+    if (result.historyPartial) lines.push('Some earlier attempt records are unavailable in this read.');
+    if (typeof result.nextBeforeAttempt === 'number')
+      lines.push(
+        `Earlier attempts: nforge agent ROOT queue '${JSON.stringify({ submissionId: result.submissionId, beforeAttempt: result.nextBeforeAttempt })}'`,
+      );
+    return lines;
+  }
   if (action === 'status' || action === 'observe') {
     const run = row(result.run),
       submission = row(result.submission);

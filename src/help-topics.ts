@@ -122,6 +122,7 @@ CHECK_NOT_PASSED: acceptance needs a passed check for this exact head; land --sa
   queue: {
     title: 'The landing queue',
     text: `queue {limit?,laneId?} lists the landing queue in dispatch order: Lane, Intent title, phase, suspect, last failing test files and recompose count. yourLane names your position when it is in the page. Held entries (waiting for a person or a dependency) follow with position null and hold {kind,reason,paths,next}. One bounded read, no idle cost.
+- queue {submissionId,beforeAttempt?} shows one landing's attempts, newest first, with recorded phase times and failure causes. Take submissionId from queue or the landing reply. Continue with nextBeforeAttempt.
 - SYNC_REQUIRED while queued: main landed a file your entry changes; run the one land --save it names instead of waiting.
 - LANDING_CANCELLED: the landing was withdrawn or cancelled; the Lane and its saves stay. Fix if needed and land --save again.
 - LANDING_STALLED: run the receipt's exact repair command; do not resubmit a live landing. If none is present, read queue '{}' and landing {operationId}. A terminal-failed receipt may explicitly direct a retry in the same Lane.

@@ -1,6 +1,19 @@
 ### Hosted reads and coordination limits
 
-MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
+MCP `forge_review` exposes hosted `show`, `diff`, `peers` and `queue`.
+
+- `queue {"submissionId":"SUBMISSION_ID"}` shows why one landing is still in flight.
+  Copy the submission ID from the queue or landing reply. The page shows the current
+  source reservation, if any, and up to eight installed attempts newest first.
+  A reservation's ID stays fixed if another attempt takes its ordinal before install.
+  Each attempt shows its retained phase, timed intervals and cause, with check and
+  Candidate IDs when available. Open intervals report elapsed milliseconds as of
+  `observedAt`. The current source step includes its last retained failure and
+  timings. A failed reservation keeps its terminal cause. Phase intervals require
+  timestamps attributable to that attempt, so inherited or missing clocks are
+  omitted. The read flags gaps it finds in live history as partial.
+  For older attempts, pass `nextBeforeAttempt` as `beforeAttempt` with the same
+  submission ID. Each page is one authorized read with no source download or writes.
 
 - `peers {laneId,path?,detail?}` reads saved peer evidence in one query,
   including paths before their first save, as `peerEvidence`. Detail shows 50 items

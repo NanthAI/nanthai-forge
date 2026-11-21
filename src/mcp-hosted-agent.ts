@@ -296,7 +296,7 @@ export function registerHostedAgentWorkflow(
           hostedProvenanceSchema.extend({ action: z.literal('provenance') }),
           hostedDiffSchema.extend({ action: z.literal('diff') }),
           hostedPeersSchema.extend({ action: z.literal('peers') }),
-          hostedQueueSchema.extend({ action: z.literal('queue') }),
+          hostedQueueSchema.safeExtend({ action: z.literal('queue') }),
         ]),
       },
       annotations: read,
@@ -324,7 +324,7 @@ export function registerHostedAgentWorkflow(
       ),
   );
   prose.forge_review =
-    'history: op status/log/blame/show, commit?,path?,limit?,skip?,start?,end?; exact commit history, line authors and old file bytes. provenance: candidateId,file?,lines?,cursor?; one file/20 Lane versions, explicit partial coverage and pinned continuations; source and executor identities never guessed. show: exact Lane/main/state/candidateId file; force permits binary/large bytes. diff: pinned Lane base to saved head, paths/byteBudget/cursor; summary:true returns per path equal|absent|different against current main with no hunks. peers: laneId/path/detail saved overlap evidence; incomplete coverage never proves independence. queue: landing queue entries (Lane, Intent, phase, failing tests, recompose count). Unsaved bytes excluded.';
+    'history: op status/log/blame/show, commit?,path?,limit?,skip?,start?,end?; exact commit history, line authors and old file bytes. provenance: candidateId,file?,lines?,cursor?; one file/20 Lane versions, explicit partial coverage and pinned continuations; source and executor identities never guessed. show: exact Lane/main/state/candidateId file; force permits binary/large bytes. diff: pinned Lane base to saved head, paths/byteBudget/cursor; summary:true returns per path equal|absent|different against current main with no hunks. peers: laneId/path/detail saved overlap evidence; incomplete coverage never proves independence. queue: landing queue entries, or submissionId and beforeAttempt? for attempt phases, durations and causes. Unsaved bytes excluded.';
   server.registerTool(
     'forge_wait',
     {

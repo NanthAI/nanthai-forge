@@ -107,15 +107,31 @@ export const hostedQueueSchema = z
     limit: z.number().int().min(1).max(QUEUE_VIEW_LIMIT).optional(),
     /** Mark this Lane's entries in the answer (default: this checkout's Lane). Never sent to the server. */
     laneId: z.uuid().optional(),
+    /** Select one submission's landing attempt history instead of listing the queue. */
+    submissionId: z.uuid().optional(),
+    /** Continue with the selected submission's nextBeforeAttempt. */
+    beforeAttempt: z.number().int().nonnegative().optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    input =>
+      input.submissionId
+        ? input.limit === undefined && input.laneId === undefined
+        : input.beforeAttempt === undefined,
+    'Use submissionId with beforeAttempt, or list the queue with limit and laneId.',
+  );
 /** One bounded read of the landing queue (09e637f7): Lane, Intent title, phase,
  * last failing test files and recompose count per entry, in dispatch order. */
 export async function queueHostedSource(transport: HostedAgentTransport, input: unknown) {
   const parsed = hostedQueueSchema.safeParse(input);
   invariant(parsed.success, 'BAD_ARGUMENT', 'Invalid hosted queue parameters. Use queue --help.');
-  const { laneId: selected, ...query } = parsed.data;
-  const view = await transport.query('projectHostedQueueView:read', query);
+  const { laneId: selected, limit, submissionId, beforeAttempt } = parsed.data;
+  if (submissionId)
+    return transport.query('projectHostedLandingAttemptHistory:read', {
+      submissionId,
+      ...(beforeAttempt === undefined ? {} : { beforeAttempt }),
+    });
+  const view = await transport.query('projectHostedQueueView:read', limit === undefined ? {} : { limit });
   return markQueueLane(view, selected ?? readHostedLaneCheckout(transport.root)?.selection.laneId);
 }
 /** Local, no extra call: say where the caller's Lane stands in the page that was read. */
