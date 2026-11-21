@@ -248,32 +248,42 @@ test('stats: own-history comparison headline, stated assumptions, left-out landi
       .evaluate(a => getComputedStyle(a).textDecorationLine),
     'underline',
   );
-  await page.getByRole('button', { name: 'How this is worked out' }).click();
-  const how = await page.locator('#stats-how').textContent();
-  assert.match(how, /Nothing here comes from a benchmark/);
-  assert.match(how, /median of [\d,]+ solo full checks/);
-  assert.match(how, /“Require branches to be up to date before merging”/);
-  // GitHub's own setting names (review 1240fe03 finding 3), and every assumption of the replay stated.
+  const method = page.locator('#stats-how');
+  const methodButton = page.getByRole('button', { name: 'How this is worked out' });
+  assert.equal(await method.count(), 0);
+  await methodButton.click();
+  assert.equal(await methodButton.getAttribute('aria-expanded'), 'true');
+  const how = await method.textContent();
+  assert.match(how, /^We compare Forge’s recorded results with two GitHub replays of the same 15 days/);
   assert.match(
     how,
+    /price a replayed full run at 10 runner minutes\. That is the median of 319 solo full checks/,
+  );
+  const settings = await page
+    .locator('.stats-vx3 [title]')
+    .evaluateAll(nodes => nodes.map(node => node.title));
+  // GitHub's exact names stay available on the chart. The fold describes the behavior.
+  assert.match(settings[0], /“Require branches to be up to date before merging”/);
+  assert.match(
+    settings[1],
     /“Build concurrency” \(maximum pull requests to build\) 5 and “Maximum pull requests to merge” 1/,
   );
-  assert.match(how, /Each change runs its pull-request check, then joins the queue/);
-  assert.match(how, /fails its pull-request run on GitHub and never joins the queue/);
-  assert.match(how, /fails in the queue: it is ejected and the builds behind it start again/);
-  assert.match(how, /counts the share of a check it ran/);
-  assert.match(how, /A backlog carries into the next day slot by slot/);
-  assert.match(how, /on GitHub that is the pull-request check plus the queue, here the one check/);
-  assert.match(how, /no landing attempt names \([\d,.]+ min: run by hand/);
-  // A flaky failure on a recheck after a pass ejects on GitHub too; the page never claims it does not (review
-  // d6b0f1aa finding 3: the run rows cannot tell a flake-caused failure apart).
-  assert.match(
-    how,
-    /counts as a queue ejection only when every change on it had passed; whatever failed it, a flaky test included/,
-  );
+  assert.match(how, /add up the recorded minutes for checks that started on these days/);
+  assert.match(how, /one check per change and a rerun each time another change reached main while it waited/);
+  assert.match(how, /a pull-request check and a queue build for each change that lands/);
+  assert.match(how, /failed pull-request check \([\d,]+ runs?\) keeps its change out of the queue/);
+  assert.match(how, /removes the change from the queue \([\d,]+ checks?\) and restarts the builds/);
+  assert.match(how, /A cut-short build counts for the share it ran/);
+  assert.match(how, /Waiting changes carry into the next day/);
+  assert.match(how, /median time from “land” to main for changes that landed on those days/);
+  assert.match(how, /Forge uses recorded times\. The GitHub setups replay the wait and checks/);
+  assert.match(how, /15 checks that Stats couldn’t match to a landing count only here \(150 min\)/);
+  // All changes on the recheck must have passed earlier that day. Flakes follow the same rule.
+  assert.match(how, /counts as a queue failure only if every change in it had passed that day/);
   assert.doesNotMatch(how, /never as queue ejections/);
-  assert.match(how, /10% faster or slower/);
-  assert.match(how, /runs? reported no minutes and add none/);
+  assert.match(how, /10% faster or slower, the median time to main is 9 min 4 s to 11 min 4 s/);
+  assert.match(how, /15 runs reported no minutes/);
+  assert.match(how, /Only signed-in project members with write access can see them/);
   // The page opens with the headline and landings per day; every other chart is a fold that reads only once opened.
   const foldReads = () => page.evaluate(() => [...(window.foldReads ?? [])].sort());
   assert.deepEqual(await foldReads(), [], 'an unopened fold reads nothing');

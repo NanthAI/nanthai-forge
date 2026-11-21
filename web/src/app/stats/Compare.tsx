@@ -17,8 +17,7 @@ import {
   type StatsWindow,
 } from './model';
 
-/** The two replayed setups. `like` is the short hint under the name; `setting` is GitHub's exact wording, on hover
- * and in the method. */
+/** The two replayed setups. `like` is the short hint under the name. `setting` gives GitHub's wording on hover. */
 export const BASELINES = {
   oneAtATime: {
     name: 'One at a time',
@@ -181,71 +180,76 @@ export function Compare({ w }: { data: StatsRead; w: StatsWindow }) {
       {how ? (
         <div className="stats-how-body" id="stats-how">
           <p>
-            <b>Nothing here comes from a benchmark.</b> Both replays use only this project’s own days: when
-            each change was sent to land, which checks failed, and what one solo full check costs here (
-            {minutes(c.check.runnerSeconds / 60)} runner minutes, {duration(c.check.wallSeconds)} to finish,
-            the median of {plural(c.check.runs, 'solo full check')}). Each replayed run is priced at that.
+            We compare Forge’s recorded results with two GitHub replays of the same {plural(c.days, 'day')}.
+          </p>
+          <p>
+            We price a replayed full run at {minutes(c.check.runnerSeconds / 60)} runner minutes. That is the
+            median of {plural(c.check.runs, 'solo full check')}. Each of those checks ran in full for one
+            change and passed. The median finish time is {duration(c.check.wallSeconds)}. We round the numbers
+            shown here.
           </p>
           <dl className="kv">
             <dt>Forge, {minutes(c.forgeMinutes)}</dt>
             <dd>
-              Every check run started on these days, failed and discarded ones included; main audits are left
-              out.
-              {c.unknownRuns ? ` ${plural(c.unknownRuns, 'run')} reported no minutes and add none.` : ''}
+              We add up the recorded minutes for checks that started on these days, including failed and
+              discarded checks. We leave out main audits.
+              {c.unknownRuns ? ` ${plural(c.unknownRuns, 'run')} reported no minutes.` : ''}
               {c.unlinked.runs
-                ? ` ${plural(c.unlinked.runs, 'check')} no landing attempt names (${minutes(c.unlinked.minutes)} min: run by hand, or a pre-queue check its landing did not reuse) count here only.`
+                ? ` ${plural(c.unlinked.runs, 'check')} that Stats couldn’t match to a landing count only here (${minutes(c.unlinked.minutes)} min).`
                 : ''}
             </dd>
             <dt>The same on both sides</dt>
             <dd>
-              Work a GitHub flow runs the same way, at the minutes it took here: checks of work that was
-              replaced, withdrawn or stopped ({plural(c.notLanded.runs, 'run')},{' '}
-              {minutes(c.notLanded.minutes)} min), and failed checks. A change’s own failed check (
-              {plural(c.failed.pullRequest, 'run')}) fails its pull-request run on GitHub and never joins the
-              queue.
+              Both replays use recorded minutes for checks of work that stopped before landing (
+              {plural(c.notLanded.runs, 'run')}, {minutes(c.notLanded.minutes)} min). They also use recorded
+              minutes for failed checks counted outside the merge queue. A failed pull-request check (
+              {plural(c.failed.pullRequest, 'run')}) keeps its change out of the queue.
             </dd>
             <dt>
               {BASELINES.oneAtATime.name}, {minutes(one.ciMinutes)}
             </dt>
             <dd>
-              {BASELINES.oneAtATime.setting}. One run per change and a rerun each time another change reached
-              main while it waited ({plural(Math.round(one.runs), 'run')}), plus{' '}
-              {plural(one.recordedRuns, 'run')} the same on both sides. Changes reach main one by one, so when
-              the checks asked for are more than a day holds (here {percent(c.load)} of it) its time is a
-              growing backlog: the worst case.
+              We price one check per change and a rerun each time another change reached main while it waited
+              ({plural(Math.round(one.runs), 'run')}). We add {plural(one.recordedRuns, 'run')} at their
+              recorded minutes. Changes land one at a time. The checks need {percent(c.load)} of the time
+              available. The wait grows when checks need more time than the day has.
             </dd>
             <dt>
               {BASELINES.mergeQueue.name}, {minutes(queue.ciMinutes)}
             </dt>
             <dd>
-              {BASELINES.mergeQueue.setting}. Each change runs its pull-request check, then joins the queue:
-              up to 5 build at once, each on top of those ahead, and each merges on its own. A recheck that
-              failed here after main moved ({plural(c.failed.inQueue, 'check')}) fails in the queue: it is
-              ejected and the builds behind it start again. A build cut short by a restart counts the share of
-              a check it ran: {plural(Math.round(queue.runs), 'full-check equivalent')}, plus{' '}
-              {plural(queue.recordedRuns, 'run')} the same on both sides. A backlog carries into the next day
-              slot by slot. With the check 10% faster or slower, its median time to main is{' '}
+              We replay a pull-request check and a queue build for each change that lands. Up to 5 changes
+              build at once on top of those ahead, and 1 merges at a time. A failed recheck after main moves
+              removes the change from the queue ({plural(c.failed.inQueue, 'check')}) and restarts the builds
+              behind it. A cut-short build counts for the share it ran. That gives{' '}
+              {plural(Math.round(queue.runs), 'full-check equivalent')} plus{' '}
+              {plural(queue.recordedRuns, 'run')} at their recorded minutes. Waiting changes carry into the
+              next day. With checks 10% faster or slower, the median time to main is{' '}
               {duration(queue.sensitivity.fast)} to {duration(queue.sensitivity.slow)}.
             </dd>
             <dt>Time to main</dt>
             <dd>
-              From “land” to on main on both sides: on GitHub that is the pull-request check plus the queue,
-              here the one check. Forge’s median here is over the same {plural(c.days, 'day')} as the replays.
+              We take the median time from “land” to main for changes that landed on those days. Forge uses
+              recorded times. The GitHub setups replay the wait and checks using each day’s median solo full
+              check duration, carried forward when a day has none.
             </dd>
             <dt>Left out</dt>
             <dd>
-              Review time, and time spent before a change asks to land, on both sides. A failed recheck after
-              main moved counts as a queue ejection only when every change on it had passed; whatever failed
-              it, a flaky test included, as on GitHub. Checks still running or waiting to land when a day
-              closed count on Forge’s side that day; GitHub’s side counts their change on the day it lands.
+              Both sides leave out review and time before “land.” A failed recheck after main moved counts as
+              a queue failure only if every change in it had passed that day. Forge counts checks still
+              running or waiting to land at day’s end. The replays count the change on the day it landed.
               {w.daysWithoutRuns
-                ? ` ${plural(w.daysWithoutRuns, 'day')} closed before every run was counted ${w.daysWithoutRuns === 1 ? 'is' : 'are'} left out of the CI figures.`
+                ? ` We left ${plural(w.daysWithoutRuns, 'day')} with missing run records out of the CI figures.`
                 : ''}
               {w.daysWithoutSolo
-                ? ` ${plural(w.daysWithoutSolo, 'day')} with no solo full check to price ${w.daysWithoutSolo === 1 ? 'is' : 'are'} left out of the comparison.`
+                ? ` We left ${plural(w.daysWithoutSolo, 'day')} without a solo full check to use out of the comparison.`
                 : ''}
             </dd>
           </dl>
+          <p>
+            We calculate these figures from this project’s own records and use them only on Stats. Only
+            signed-in project members with write access can see them.
+          </p>
         </div>
       ) : null}
     </Region>
