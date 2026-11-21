@@ -166,14 +166,15 @@ test('an independent landing saves one write and legacy Intents retain their not
       );
       result[kind] = meter;
     }
-    assert.equal(result.planned.writes, result.legacy.writes, name);
-    assert.equal(result.planned.writes - result.independent.writes, 1, name);
+    assert.equal(result.planned.writes - result.legacy.writes, 1, `${name}: one scheduled Initiative fold`);
+    assert.equal(result.legacy.writes - result.independent.writes, 1, name);
     assert.deepEqual(
       result.independent.written,
-      result.planned.written.filter(table => table !== 'projectIntentLandingNotes'),
+      result.legacy.written.filter(table => table !== 'projectIntentLandingNotes'),
       name,
     );
     assert.equal(result.planned.ranges - result.independent.ranges, 1, name);
+    assert.equal(result.planned.ranges, result.legacy.ranges, `${name}: fold scheduling adds no reads`);
     t.diagnostic(
       `${name}: ${result.planned.writes} → ${result.independent.writes} writes, ` +
         `${result.planned.writeBytesByTable.projectIntentLandingNotes} note bytes saved`,

@@ -63,6 +63,7 @@ import { derivedFields } from './derivedArtifactFields';
 import { hostedLifecycleTables } from './projectHostedLifecycleFields';
 import { hostedAcceptanceTables } from './projectHostedAcceptanceFields';
 import { intentLandingNoteTables } from './projectIntentLandingNoteFields';
+import { initiativeWorkTables } from './projectInitiativeWorkFields';
 import { deleteRequestTables } from './projectDeleteRequestFields';
 import { defineSchema, defineTable } from 'convex/server';
 import { feedTables } from './projectFeedFields';
@@ -624,7 +625,9 @@ export default defineSchema({
     copyKey: v.string(),
     operationId: v.string(),
     contentType: v.optional(v.string()),
-  }).index('by_storage', ['storageId']),
+  })
+    .index('by_storage', ['storageId'])
+    .index('by_copy_key', ['copyKey']),
   legacyStorageCleanupWindows: defineTable({
     operationId: v.string(),
     deployment: v.string(),
@@ -758,6 +761,7 @@ export default defineSchema({
   ...hostedApprovalTables,
   ...hostedAcceptanceTables,
   ...intentLandingNoteTables,
+  ...initiativeWorkTables,
   ...deleteRequestTables,
   ...hostedLifecycleTables,
   ...hostedSnapshotTables,

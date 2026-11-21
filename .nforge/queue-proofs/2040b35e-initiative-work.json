@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedAcceptanceCompletion.ts": "97150bc58cdfde3f3bf5ff15f0c3df15a31a9dccd652bcd4f4a5ef4bdc8b852b",
+    "convex/projectHostedAcceptanceFields.ts": "77523879a27c014805b0f572bff56a1839fece4e387eb2d73a8d67f5ec64bf84"
+  },
+  "replay": {
+    "incident": "2bf85ddf",
+    "test": "incident replay 2bf85ddf: a parked Lane the queue lands after its agent stopped posts its receipt to its Item",
+    "receipt": "3c16db0f-67f1-4c2b-adaa-d7c0ed51ad81"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "01a20008-82f2-73c1-9e32-6bf7fa45e677",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "01a20015-e6df-7f33-8c1c-c5da8c7afe3f",
+    "receipt": "9d182ffc-1c1c-4657-b46d-2ad44f3ea2f5"
+  }
+}

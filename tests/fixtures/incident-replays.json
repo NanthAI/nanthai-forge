@@ -3771,6 +3771,7 @@
       "paths": [
         "convex/projectConvexSourceActive.ts",
         "convex/projectHostedAcceptanceCompletion.ts",
+        "convex/projectHostedAcceptanceFields.ts",
         "convex/projectHostedAcceptancePublish.ts",
         "convex/projectHostedAcceptanceStore.ts",
         "convex/projectHostedActionsDirect.ts",

@@ -18,7 +18,14 @@ export async function sourceKeyReferenced(ctx: QueryCtx, projectId: Id<'hostedPr
   if (object && !object.removed && object.sourceReferenced && object.r2Committed && object.r2Key === key)
     return true;
   const retained = (await findSourceObjects(ctx, projectId, [physical.digest])).get(physical.digest);
-  return retained?.r2Key === key;
+  if (retained?.r2Key === key) return true;
+  if (physical.nonce) return false;
+  // Retirement pins also protect copies used by legacy Work and archives.
+  const [copy] = await ctx.db
+    .query('legacyStorageTombstones')
+    .withIndex('by_copy_key', q => q.eq('copyKey', key))
+    .take(1);
+  return copy !== undefined;
 }
 
 /** A verified source placement can share its logical hash with an unrelated

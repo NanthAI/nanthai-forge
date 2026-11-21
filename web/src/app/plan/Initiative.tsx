@@ -106,20 +106,16 @@ export function InitiativePage({
   const full = useFullItem(reads, initiative);
   const accountable = accountableHandle(full.item?.creator);
   const [openLanes, setOpenLanes] = useState<number | null>(null);
-  // Only a complete first Work page establishes coverage. Never fetch a page to finish the count.
+  // Only an exact Work count establishes coverage for the active agent list.
   const readWorkCoverage = useMemo<ReadInitiativeWork | undefined>(
     () =>
       readWork &&
-      (async (id, cursor) => {
-        const raw = await readWork(id, cursor);
-        if (cursor === null) {
-          const page = JSON.parse(raw);
-          setOpenLanes(
-            page.role && !page.nextCursor && !page.openAtLeast && typeof page.openLanes === 'number'
-              ? page.openLanes
-              : null,
-          );
-        }
+      (async id => {
+        const raw = await readWork(id);
+        const work = JSON.parse(raw);
+        setOpenLanes(
+          work.role && !work.openAtLeast && typeof work.openLanes === 'number' ? work.openLanes : null,
+        );
         return raw;
       }),
     [readWork],

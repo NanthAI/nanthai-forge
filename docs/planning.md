@@ -34,11 +34,12 @@ Dropped Items. Reverse links use bounded pages of planning rows, so a later page
 contain a link from an older Item.
 
 The Initiative Progress region rolls up open Lanes, distinct landing receipts and
-distinct files touched by its Items, including Done and Dropped Items. It uses the
-Item's Intent chain and exact Candidate file evidence, using the member Candidate when
-a cohort lands several members together. Partial counts are lower bounds while more
-pages remain or older file evidence is unavailable. Each Work page is read once on
-request.
+distinct files touched by its Items, including Done and Dropped Items. It reads the
+totals in one query when opened. Landings use a project-owned rollup maintained after
+acceptance completion. Files use retained Candidate paths, including the member Candidate
+when a cohort lands several members together. A `+` marks a lower bound when file
+evidence is incomplete or the active Lane read reaches its bound. Landing and
+file totals show a dash until existing history has been backfilled or a rebuild finishes.
 
 Accountable shows the public handle behind the Initiative's creation record.
 Working now links to Lanes › Who is touching what and counts distinct agents on

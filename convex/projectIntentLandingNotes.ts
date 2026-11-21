@@ -72,7 +72,12 @@ export async function postIntentLandingNote(
 }
 
 /** Follow-up Intents have deterministic ids and can leave earlier Lanes open. */
-export async function itemIntentChain(ctx: QueryCtx, projectId: Id<'hostedProjects'>, itemId: string) {
+export async function itemIntentChain(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  itemId: string,
+  legacyHeads?: Id<'projectHostedRecordHeads'>[],
+) {
   const intents: string[] = [];
   let current = itemId;
   let head = await recordHead(ctx, projectId, 'intent', current);
@@ -80,6 +85,7 @@ export async function itemIntentChain(ctx: QueryCtx, projectId: Id<'hostedProjec
   let selectingStatus = true;
   for (let hop = 0; head && hop <= maxIntentChain; hop++) {
     intents.push(current);
+    if (head.planningItemId === undefined) legacyHeads?.push(head._id);
     if (selectingStatus) {
       state = head.status.startsWith('journal:') ? null : head.status;
       selectingStatus = intentFinished(head.status.replace(/^journal:/, ''));

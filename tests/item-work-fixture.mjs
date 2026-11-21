@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Shared synthetic data for the CLI reader and the rendered Item Work route.
 import { randomUUID } from 'node:crypto';
+import { getFunctionName } from 'convex/server';
 import { recordsFixture } from './hosted-records-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const work = await import(moduleUrl('../convex/projectItemWork.ts'));
 const initiativeWork = await import(moduleUrl('../convex/projectInitiativeWork.ts'));
+const rebuild = await import(moduleUrl('../convex/projectInitiativeWorkRebuild.ts'));
+const fold = await import(moduleUrl('../convex/projectInitiativeWorkFold.ts'));
+const workIndex = await import(moduleUrl('../convex/projectWorkIndexStore.ts'));
 const hash = 'a'.repeat(64),
   other = 'b'.repeat(64),
   at = '2026-01-01T00:00:00.000Z';
@@ -268,7 +272,39 @@ export async function itemWorkFixture({
     s.call(name, work.read, { projectId: auth.projectId, itemId, ...args });
   const read = async (...args) => JSON.parse(await readRaw(...args));
   const readInitiativeRaw = (args = {}, name = 'initiative') =>
-    s.call(name, initiativeWork.read, { projectId: auth.projectId, initiativeId, cursor: null, ...args });
+    s.call(name, initiativeWork.read, { projectId: auth.projectId, initiativeId, ...args });
+  const workTasks = [];
+  const workHandlers = {
+    'projectInitiativeWorkRebuild:advance': rebuild.advance,
+    'projectInitiativeWorkRebuild:refresh': rebuild.refresh,
+    'projectInitiativeWorkFold:fold': fold.fold,
+    'projectWorkIndexStore:sweep': workIndex.sweep,
+  };
+  const schedule = s.ctx.scheduler.runAfter;
+  s.ctx.scheduler.runAfter = async (delay, ref, args) => {
+    const name = getFunctionName(ref);
+    if (!(name in workHandlers)) return schedule(delay, ref, args);
+    workTasks.push({ name, args });
+    return `work-${workTasks.length}`;
+  };
+  const drainWork = async () => {
+    while (workTasks.length) {
+      const { name, args } = workTasks.shift();
+      await s.call(name, workHandlers[name], args);
+    }
+  };
+  const rebuildInitiative = async (id = initiativeId) => {
+    await s.call('backfill', rebuild.backfill, { projectId: auth.projectId, initiativeId: id });
+    await drainWork();
+  };
+  const foldInitiative = args => s.call('fold', fold.fold, { projectId: auth.projectId, ...args });
+  const publishWork = generationId =>
+    s.call('publishWork', workIndex.publish, {
+      projectId: auth.projectId,
+      generationId,
+      owner: 'owner',
+      batches: 0,
+    });
   return {
     ...s,
     auth,
@@ -281,6 +317,11 @@ export async function itemWorkFixture({
     planning,
     addLandingNote,
     readInitiativeRaw,
+    rebuildInitiative,
+    foldInitiative,
+    publishWork,
+    drainWork,
+    workTasks,
     put,
     open,
     noted,

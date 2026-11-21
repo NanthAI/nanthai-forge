@@ -75,7 +75,9 @@ byte memo. A cache hit is still a read requiring current permission.
   visible without billing attribution.
 - Legacy archive metadata and archive range reads keep streamed or ranged
   `fetch` of action-private storage URLs: a Node action's `ctx.storage.get`
-  buffers the whole Blob. Function attribution suggests Node `storage.get` bytes
+  buffers the whole Blob. An uncached metadata extraction reads and hashes the
+  complete compressed response, decoding only the metadata prefix. Verified
+  sidecar hits avoid another archive download. Function attribution suggests Node `storage.get` bytes
   are also reported as fetch egress (source return used only `storage.get` yet
   carried most fetch egress), so replacing those URLs would not remove the double
   count. Imported and derived artifacts also consume storage bodies.

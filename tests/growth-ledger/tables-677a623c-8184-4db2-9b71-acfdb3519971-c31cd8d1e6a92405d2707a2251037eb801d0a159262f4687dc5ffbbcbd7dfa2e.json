@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "Issue 2040b35e replaces the Initiative history pager with exact totals. Receipt and path membership require project-owned indexed rows because generation-local counters cannot deduplicate them or outlive a partition.",
+  "date": "2026-11-21"
+}

@@ -160,7 +160,7 @@ function Fixture() {
         projectName="Synthetic project" viewerHandle="example-builder" /></ConvexProvider> :
       <PlanScreenView route={route} projectId={rest === uuid(16) ? undefined : "synthetic"} projectName="Synthetic project" feed={undefined} read={read}
       put={put} run={run} purge={purge} reads={reads} query={query} go={go} viewer="example-builder"
-      readInitiativeWork={window.readItemWork ? (initiativeId, cursor) => window.readItemWork({initiativeId, cursor}) : undefined}
+      readInitiativeWork={window.readItemWork ? initiativeId => window.readItemWork({initiativeId}) : undefined}
       closed={query.scope === 'open' && !rest ? undefined : settled}
       shelved={shelfRows[query.scope] ? { ...settled, rows: shelfRows[query.scope] } : undefined}
       shelvedItem={[...shelfRows.archived, ...shelfRows.deleted].find(row => row.id === rest) ?? null} showDone={id => window.doneFor.push(id)} />}</React.Suspense>
@@ -677,6 +677,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
     await context.close();
   }
   const initiativeFixture = await itemWorkFixture({ initiativeId: launchId, details: true, extraOpen: 2 });
+  await initiativeFixture.rebuildInitiative();
   for (const width of [1440, 390])
     for (const theme of ['dark', 'light'])
       await t.test(`initiative page ${width} ${theme}: no clipping or axe violations`, async () => {
@@ -696,11 +697,12 @@ test('plan views and bulk bar: real components keep the view in the address and 
           'projectWorkIndex:records',
         ]);
         assert.equal(await page.evaluate(() => window.workerReads), 1);
-        await progress.getByText('At least 2', { exact: true }).waitFor();
+        await progress.getByText('2+', { exact: true }).waitFor();
         assert.ok(await progress.getByText(/^\d+ in progress$/).isVisible());
-        assert.match(await progress.textContent(), /Lanes open3Landings2Files touchedAt least 2/);
+        assert.match(await progress.textContent(), /Lanes open3Landings2Files touched2\+/);
+        assert.equal(await progress.getByRole('button', { name: 'Show more work' }).count(), 0);
         await page.getByRole('button', { name: 'Done and dropped Items' }).click();
-        assert.deepEqual(calls, [{ initiativeId: launchId, cursor: null }]);
+        assert.deepEqual(calls, [{ initiativeId: launchId }]);
         await check(page, `initiative ${width} ${theme}`);
         if (shots)
           await page.screenshot({

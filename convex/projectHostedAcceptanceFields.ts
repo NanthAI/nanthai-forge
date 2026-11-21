@@ -4,6 +4,12 @@ import { v } from 'convex/values';
 import { landingNoteBy } from './projectIntentLandingNoteFields';
 const identity = { projectId: v.id('hostedProjects'), receiptId: v.string() };
 const pin = v.object({ sha256: v.string(), size: v.number() });
+
+/** Completion windows retain a set of Item roots, in first-observed order. */
+export function acceptanceWorkItems(previous: readonly string[] | undefined, current: readonly string[]) {
+  return [...new Set([...(previous ?? []), ...current])];
+}
+
 export const hostedAcceptanceTables = {
   projectHostedAcceptances: defineTable({
     ...identity,
@@ -54,6 +60,8 @@ export const hostedAcceptanceTables = {
     root: v.string(),
     appliedPage: v.number(),
     appliedEntry: v.number(),
+    /** Item roots collected by earlier acceptance completion windows for one rollup fold. */
+    workItemIds: v.optional(v.array(v.string())),
     /** Who published it and whether a person accepted it (Issue 3a733ee8), set with the completion tick
      * from facts publication holds; the tick copies it into each Item's system landing note. */
     landedBy: v.optional(landingNoteBy),

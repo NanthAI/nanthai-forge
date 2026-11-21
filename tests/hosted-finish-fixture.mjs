@@ -25,6 +25,7 @@ const stallAlertApi = await import(moduleUrl('../convex/projectHostedLandingStal
 const wouldConflictApi = await import(moduleUrl('../convex/projectHostedLandingWouldConflict.ts'));
 const precomposeApi = await import(moduleUrl('../convex/projectHostedLandingPrecompose.ts'));
 const acceptanceApi = await import(moduleUrl('../convex/projectHostedAcceptance.ts'));
+const initiativeWork = await import(moduleUrl('../convex/projectInitiativeWorkFold.ts'));
 const batchAbandon = await import(moduleUrl('../convex/projectHostedBatchAbandon.ts'));
 const revertNoticeApi = await import(moduleUrl('../convex/projectHostedRevertNotice.ts'));
 const acceptedByNoteApi = await import(moduleUrl('../convex/projectHostedAcceptedByNote.ts'));
@@ -513,6 +514,9 @@ export async function finishFixture(
         await f.materialize(input.receiptId, input.precompose);
       } else if (task.name === 'projectHostedAcceptance:guard') {
         await tx('acceptanceGuard', acceptanceApi.guard, input);
+      } else if (task.name === 'projectInitiativeWorkFold:fold') {
+        if (stop === 'initiative-fold-failed') throw new Error('synthetic Initiative fold failure');
+        await tx('initiativeWorkFold', initiativeWork.fold, input);
       } else if (task.name === 'projectHostedActionsDirect:dispatch') {
         // Provider dispatch IO; tests drive the run lifecycle directly.
       } else if (

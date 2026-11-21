@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { MutationCtx } from './server';
+import type { MutationCtx, QueryCtx } from './server';
 import { invariant } from '../src/errors';
-export async function cleanupReceipt(ctx: MutationCtx, operationId: string, part: string, request: string) {
+export async function cleanupReceipt(ctx: QueryCtx, operationId: string, part: string, request: string) {
   const old = await ctx.db
     .query('legacyStorageCleanupPages')
     .withIndex('by_operation_and_part', q => q.eq('operationId', operationId).eq('part', part))

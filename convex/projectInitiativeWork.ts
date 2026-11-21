@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { v } from 'convex/values';
-import { z } from 'zod';
+import { getDocumentSize, v } from 'convex/values';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { isPlanningUuid } from '../src/planning-id';
@@ -8,45 +7,25 @@ import { query } from './cliServer';
 import { report } from './errors';
 import { readProjectRole } from './projectAuthority';
 import { recordCaller } from './projectHostedFrictionStore';
-import {
-  cursorJson,
-  ITEM_LANDINGS_PAGE,
-  itemLandingHistory,
-  landingHistoryCursor,
-  type ItemLanding,
-} from './projectItemLandingHistory';
-import { itemWorkLandingDetails, planningWorkPage } from './projectItemWorkDetails';
-import { itemIntentChain } from './projectIntentLandingNotes';
+import { recordHead } from './projectHostedRecords';
+import { visibleLifecycleRecord } from './projectHostedLifecycleOverlay';
+import { initiativeWorkIdentity } from './projectInitiativeWorkFields';
+import { activeWorkRoot, initiativeWorkSummary, itemWorkRoot } from './projectInitiativeWorkStore';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 
-const ITEMS_PER_PAGE = 8;
-const OPEN_LANES_COUNTED = 50;
-const pageCursor = z.object({
-  partition: z.string(),
-  initiativeId: z.string(),
-  position: z.number().int().min(0),
-  history: landingHistoryCursor.optional(),
-});
+const OPEN_LANES_COUNTED = 200;
+const ITEM_LOOKUP_BATCH = 8;
+const ITEM_LOOKUP_BYTES = 5 * 1024 * 1024;
 
 export const read = query({
-  args: {
-    projectId: v.id('hostedProjects'),
-    initiativeId: v.string(),
-    cursor: v.union(v.string(), v.null()),
-  },
+  args: initiativeWorkIdentity,
   returns: v.string(),
-  handler: async (ctx, { projectId, initiativeId, cursor }) => {
+  handler: async (ctx, { projectId, initiativeId }) => {
     try {
       invariant(
         isPlanningUuid(initiativeId),
         'BAD_ARGUMENT',
         'initiativeId: expected the full Initiative UUID.',
-      );
-      const from = cursor === null ? null : pageCursor.safeParse(cursorJson(cursor));
-      invariant(
-        from === null || from.success,
-        'BAD_ARGUMENT',
-        'Restart this Initiative work read without a cursor.',
       );
       if (!(await ctx.auth.getUserIdentity())) return canonicalPayload({ role: false });
       const { actor, project } = await recordCaller(ctx, projectId);
@@ -54,77 +33,61 @@ export const read = query({
       const generation = await selectedGeneration(ctx, project);
       if (!generation) return canonicalPayload({ role: false });
       const partition = recordPartition(generation);
-      const previous = from?.data;
-      invariant(
-        !previous || (previous.partition === partition && previous.initiativeId === initiativeId),
-        'WORK_STALE',
-        'The plan changed. Reopen the Initiative to read its work.',
-      );
       const root = await record(ctx, partition, 'planningSearch', initiativeId);
-      const initiative = root && JSON.parse(root.value);
-      if (
-        initiative?.kind !== 'initiative' ||
-        initiative.purged ||
-        initiative.status === 'archived' ||
-        initiative.status === 'deleted'
-      )
-        return canonicalPayload({ role: false });
+      if (!activeWorkRoot(root, 'initiative')) return canonicalPayload({ role: false });
 
-      const items = await planningWorkPage(
-        ctx.db.query('projectPlanningRecords').withIndex('by_planning_initiativeId_and_kind', q =>
-          q
-            .eq('generationId', partition)
-            .eq('collection', 'planningSearch')
-            .eq('planning.initiativeId', initiativeId)
-            .eq('planning.kind', 'issue')
-            .gte('position', previous?.position ?? 0),
-        ),
-        ITEMS_PER_PAGE,
+      const [summary, lanes] = await Promise.all([
+        initiativeWorkSummary(ctx, { projectId, initiativeId }),
+        ctx.db
+          .query('projectHostedRecordHeads')
+          .withIndex('by_project_and_kind_and_status', q =>
+            q.eq('projectId', projectId).eq('kind', 'lane').eq('status', 'active'),
+          )
+          .take(OPEN_LANES_COUNTED + 1),
+      ]);
+      const sampled = lanes.slice(0, OPEN_LANES_COUNTED);
+      const intents = await Promise.all(
+        [...new Set(sampled.map(row => row.parent))].map(id => recordHead(ctx, projectId, 'intent', id)),
       );
-      let openLanes = 0;
-      let openAtLeast = false;
-      let remaining = ITEM_LANDINGS_PAGE;
-      let next: z.infer<typeof pageCursor> | null = null;
-      const receipts = new Map<string, ItemLanding>();
-      for (const row of items.page) {
-        const item = JSON.parse(row.value);
-        if (item.purged || item.status === 'archived' || item.status === 'deleted') continue;
-        const history = previous?.position === row.position ? previous.history : undefined;
-        if (remaining === 0) {
-          next = { partition, initiativeId, position: row.position };
-          break;
+      const itemIds = new Map(
+        intents.flatMap(head => {
+          // A pre-link root used its Item ID as the Intent ID.
+          const id = head && (head.planningItemId ?? head.key);
+          return id ? [[head.key, id] as const] : [];
+        }),
+      );
+      const items = [...new Set(itemIds.values())];
+      const inInitiative = new Set<string>();
+      let readBytes = 0;
+      let checkedItems = 0;
+      // Legacy search roots may be close to the 1 MiB document limit. Reserve
+      // room for a full batch before issuing its indexed probes.
+      while (checkedItems < items.length && readBytes < ITEM_LOOKUP_BYTES) {
+        const ids = items.slice(checkedItems, checkedItems + ITEM_LOOKUP_BATCH);
+        const rows = await Promise.all(ids.map(id => itemWorkRoot(ctx, partition, id)));
+        for (const [index, row] of rows.entries()) {
+          if (!row) continue;
+          readBytes += getDocumentSize(row);
+          if (activeWorkRoot(row, 'issue')?.initiativeId === initiativeId) inInitiative.add(ids[index]!);
         }
-        const { intents } = await itemIntentChain(ctx, projectId, row.key);
-        if (!history) {
-          for (const intentId of intents) {
-            const active = await ctx.db
-              .query('projectHostedRecordHeads')
-              .withIndex('by_project_and_kind_and_parent_and_status', q =>
-                q.eq('projectId', projectId).eq('kind', 'lane').eq('parent', intentId).eq('status', 'active'),
-              )
-              .take(OPEN_LANES_COUNTED + 1);
-            openLanes += Math.min(active.length, OPEN_LANES_COUNTED);
-            openAtLeast ||= active.length > OPEN_LANES_COUNTED;
-          }
-        }
-        const landings = await itemLandingHistory(ctx, projectId, intents, history ?? {}, remaining);
-        for (const receipt of landings.rows) receipts.set(receipt.receiptId, receipt);
-        remaining -= landings.used;
-        if (landings.next) {
-          next = { partition, initiativeId, position: row.position, history: landings.next };
-          break;
-        }
+        checkedItems += ids.length;
       }
-      if (!next && items.more) next = { partition, initiativeId, position: items.page.at(-1)!.position + 1 };
-      const landings = await itemWorkLandingDetails(ctx, projectId, [...receipts.values()], true);
+      const open = sampled.filter(lane => inInitiative.has(itemIds.get(lane.parent) ?? ''));
+      const effective = await Promise.all(
+        open.map(async lane => {
+          if (lane.pinned) return true;
+          const overlay = await visibleLifecycleRecord(ctx, projectId, lane.key);
+          return overlay?.pointer.baseRecordId !== lane.recordId || overlay.row.status === 'active';
+        }),
+      );
+      const totals = summary?.partition === partition && !summary.stale ? summary : null;
       return canonicalPayload({
         role: true,
-        openLanes,
-        openAtLeast,
-        landings: landings.map(({ receiptId }) => receiptId),
-        files: [...new Set(landings.flatMap(({ paths }) => paths ?? []))],
-        missingFiles: landings.filter(({ paths }) => paths === null).map(({ receiptId }) => receiptId),
-        nextCursor: next ? JSON.stringify(next) : null,
+        openLanes: effective.filter(Boolean).length,
+        openAtLeast: lanes.length > OPEN_LANES_COUNTED || checkedItems < items.length,
+        landings: totals?.landings ?? null,
+        files: totals?.files ?? null,
+        missingFiles: totals?.missing ?? 0,
       });
     } catch (error) {
       return report(error);

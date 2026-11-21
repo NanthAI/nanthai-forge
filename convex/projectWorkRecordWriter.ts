@@ -5,6 +5,7 @@ import { planCountsBirth, planCountsWriter } from './projectPlanCountsStore';
 import { requestPlanRepair } from './projectPlanPreparationStore';
 import type { Doc, Id } from './_generated/dataModel';
 import { splitRecordTable } from './projectWorkRecordTables';
+import { initiativeWorkPlanning } from './projectInitiativeWorkPlanning';
 
 const tag = Symbol('workRecordWriter');
 const originals = new WeakMap<object, () => MutationCtx['db']>();
@@ -103,6 +104,8 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
     ));
   let tally: ReturnType<typeof planCountsWriter> | undefined;
   const counts = () => (tally ??= planCountsWriter(db()));
+  let initiativeWork: ReturnType<typeof initiativeWorkPlanning> | undefined;
+  const work = () => (initiativeWork ??= initiativeWorkPlanning());
   let tail = Promise.resolve();
   let pending = false;
   const serial = <T>(work: () => Promise<T>) => {
@@ -159,6 +162,7 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
               remember({ ...input, _id: id });
               await plan().change(null, input as Row);
               counts().change(null, input as Row);
+              if (!preparing) work().change(null, input as Row);
             });
           return id;
         };
@@ -216,6 +220,7 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
               if (old.collection === 'planningSearch' || next?.collection === 'planningSearch') {
                 await plan().change(old, next);
                 counts().change(old, next);
+                if (!preparing) work().change(old, next);
               }
             }
           });
@@ -241,6 +246,7 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
     pending
       ? tail.then(async () => {
           await tally?.flush();
+          await initiativeWork?.flush(context);
           const result = await projection?.flush();
           if (!preparing) for (const id of repairs) await requestPlanRepair(context, id);
           repairs.clear();

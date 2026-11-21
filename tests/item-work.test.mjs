@@ -171,18 +171,8 @@ test('landing history advances through 10,000 retained notes without offset read
     return JSON.parse(raw);
   };
   assert.deepEqual((await measure('Item', 0, () => s.readRaw({ details: true }))).landings, []);
-  assert.deepEqual((await measure('Initiative', 0, s.readInitiativeRaw)).landings, []);
   for (let sequence = 43; sequence < 10_043; sequence++) await s.addLandingNote(sequence);
   let page = await measure('Item', 10_000, () => s.readRaw({ details: true }));
-  const initiative = await measure('Initiative', 10_000, s.readInitiativeRaw);
-  assert.equal(initiative.openLanes, 1);
-  assert.equal(initiative.landings.length, 10);
-  assert(initiative.nextCursor);
-  assert(s.counts.at(-1).documents < 50);
-  const older = JSON.parse(await s.readInitiativeRaw({ cursor: initiative.nextCursor }));
-  assert.equal(older.openLanes, 0, 'continuing one Item never adds its open Lanes twice');
-  assert.equal(older.landings.length, 10);
-  assert(!older.landings.some(id => initiative.landings.includes(id)));
   assert.equal(s.counts.at(-1).writes, 0);
   assert.deepEqual(
     page.landings.map(x => x.sequence),
@@ -432,13 +422,30 @@ test('the Initiative roll-up includes a settled Item, counts a shared receipt on
       check: null,
     }),
   });
+  await s.rebuildInitiative();
   const page = JSON.parse(await s.readInitiativeRaw());
-  assert.equal(page.openLanes, 1);
-  assert.deepEqual(new Set(page.landings), new Set([s.noteReceipt, s.stampReceipt, receiptId]));
-  assert.equal(page.landings.length, 3);
-  assert.deepEqual(page.files.toSorted(), ['docs/format.md', 'src/parser.ts', 'tests/parser.test.mjs']);
-  assert.deepEqual(page.missingFiles, [s.stampReceipt]);
-  assert.equal(page.nextCursor, null);
+  assert.deepEqual(page, {
+    role: true,
+    openLanes: 1,
+    openAtLeast: false,
+    landings: 3,
+    files: 3,
+    missingFiles: 1,
+  });
+  assert.deepEqual(
+    [...s.tables.projectInitiativeWorkMembers.values()]
+      .filter(row => row.kind === 'receipt')
+      .map(row => row.key)
+      .sort(),
+    [s.noteReceipt, s.stampReceipt, receiptId].sort(),
+  );
+  assert.deepEqual(
+    [...s.tables.projectInitiativeWorkMembers.values()]
+      .filter(row => row.kind === 'path')
+      .map(row => row.key)
+      .sort(),
+    ['docs/format.md', 'src/parser.ts', 'tests/parser.test.mjs'],
+  );
   assert.equal(s.counts.at(-1).writes, 0);
   await s.ctx.db.patch(s.auth.projectId, { visibility: 'public' });
   s.as('visitor');
@@ -466,13 +473,12 @@ test('large planning roots leave later reverse relations and Initiative work rea
   assert(!first.related.some(x => x.id === reverse));
   const second = await s.read({ details: true, cursor: first.nextCursor });
   assert(second.related.some(x => x.kind === 'Blocks' && x.id === reverse));
-  const firstRoll = JSON.parse(await s.readInitiativeRaw());
-  assert.deepEqual(new Set(firstRoll.landings), new Set([s.stampReceipt, s.noteReceipt]));
-  assert(firstRoll.nextCursor);
-  const secondRoll = JSON.parse(await s.readInitiativeRaw({ cursor: firstRoll.nextCursor }));
-  assert(secondRoll.nextCursor);
-  const lastRoll = JSON.parse(await s.readInitiativeRaw({ cursor: secondRoll.nextCursor }));
-  assert.equal(lastRoll.nextCursor, null);
+  await s.rebuildInitiative();
+  const rollup = JSON.parse(await s.readInitiativeRaw());
+  assert.equal(rollup.landings, 2);
+  assert.equal(rollup.files, 2);
+  assert.equal(rollup.missingFiles, 1);
+  assert(s.counts.at(-1).readBytes < 10_000, 'the Work view does not read the large settled roots');
 });
 
 test('a reader loses access to detailed landing history when the selected Item is shelved', async () => {

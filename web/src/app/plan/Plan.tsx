@@ -183,8 +183,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
     [client, projectId],
   );
   const readInitiativeWork = useCallback<ReadInitiativeWork>(
-    (initiativeId, cursor) =>
-      client.query(api.projectInitiativeWork.read, { projectId, initiativeId, cursor }),
+    initiativeId => client.query(api.projectInitiativeWork.read, { projectId, initiativeId }),
     [client, projectId],
   );
   const put: Put = command => {

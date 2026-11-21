@@ -16,6 +16,8 @@ import { backupRow, projectRow, state } from './hosted-fixture.mjs';
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 const backups = await import(moduleUrl('../convex/projectBackups.ts'));
 const { projectArchiveMetadata } = await import(moduleUrl('../convex/projectArchiveMetadata.ts'));
+const { derivedArtifact } = await import(moduleUrl('../convex/derivedArtifactActions.ts'));
+const { encodeWorkMetadataSidecar } = await import(moduleUrl('../convex/workMetadataSidecar.ts'));
 function header(name, size, type = 48) {
   const h = Buffer.alloc(512);
   h.write(name);
@@ -182,6 +184,53 @@ test('provider metadata checks original size/digest before URL access, cancels i
   globalThis.fetch = async () => new Response(fragment(bytes.subarray(0, 10), [2]).stream);
   await assert.rejects(projectArchiveMetadata(ctx, 'id', bytes.length, sha, async () => undefined));
 });
+
+test('archive metadata verifies the compressed tail before using or caching the extracted bytes', async t => {
+  const bytes = archive(),
+    sha = digest(bytes),
+    s = state([]);
+  s.files.set('archive', {
+    blob: new Blob([bytes]),
+    metadata: { size: bytes.length, sha256: sha },
+    url: 'https://storage.invalid/archive',
+  });
+  const old = await derivedArtifact(
+    s.ctx,
+    'archive',
+    'work-metadata-v2',
+    '',
+    async () =>
+      encodeWorkMetadataSidecar({ manifest: Buffer.from('{}'), work: Buffer.from('{"stale":true}') }),
+    async () => {},
+  );
+  const read = () => projectArchiveMetadata(s.ctx, 'archive', bytes.length, sha, async () => {});
+  const changed = Buffer.from(bytes);
+  changed[changed.length - 24] ^= 1;
+  let current = bytes;
+  const inputs = [];
+  const originalFetch = globalThis.fetch;
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (url !== 'https://storage.invalid/archive') return originalFetch(url, init);
+    const body = fragment(current, [1, 71680, 3]);
+    inputs.push(body);
+    return new Response(body.stream);
+  });
+  for (const value of [
+    changed,
+    bytes.subarray(0, bytes.length - 24),
+    Buffer.concat([bytes, Buffer.from([0])]),
+  ]) {
+    current = value;
+    await assert.rejects(read(), { code: 'INVALID_WORK_BACKUP' });
+    assert.deepEqual([...s.tables.derivedArtifacts.keys()], [old._id]);
+  }
+  current = bytes;
+  assert.equal(Buffer.from((await read()).work).toString(), '{}');
+  assert.deepEqual(inputs.at(-1).stats(), { offset: bytes.length, canceled: false });
+  assert.equal(Buffer.from((await read()).work).toString(), '{}');
+  assert.equal(inputs.length, 4, 'the verified sidecar avoids another full response read');
+});
+
 async function nativeFixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-streamed-metadata-'));
   t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));

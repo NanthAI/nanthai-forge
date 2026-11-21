@@ -4,8 +4,8 @@
 import { maintenanceInternalMutation as internalMutation, internalQuery } from './server';
 import { v, type Infer } from 'convex/values';
 import type { QueryCtx } from './server';
-import type { Id } from './_generated/dataModel';
 import { cleanupPin, cleanupResult } from './legacyStorageCleanupFields';
+import { checkLegacyFile } from './legacyStoragePinGuard';
 import { requireCleanupWindow, activeStoragePause } from './legacyStoragePause';
 import { storageDigest } from './storageDigest';
 import { digest } from '../src/state/hash';
@@ -40,88 +40,11 @@ const backup = v.object({
   includeFileStorage: v.literal(true),
   checkedAt: v.string(),
 });
-/** Keep every existing indexed guard, including the original archive alias path.
- * Frozen all-table coverage handles unindexed/nested source/task/Work references. */
-async function indexedReferences(ctx: QueryCtx, storageId: Id<'_storage'>) {
-  return (
-    await Promise.all([
-      ctx.db
-        .query('projectObjects')
-        .withIndex('by_storage', q => q.eq('storageId', storageId))
-        .take(3),
-      ctx.db
-        .query('projectBackups')
-        .withIndex('by_storage', q => q.eq('storageId', storageId))
-        .take(3),
-      ctx.db
-        .query('projectProposals')
-        .withIndex('by_storage', q => q.eq('storageId', storageId))
-        .take(3),
-      ctx.db
-        .query('projectBackups')
-        .withIndex('by_archive_storage', q => q.eq('archiveReceipt.storageId', storageId))
-        .take(3),
-      ctx.db
-        .query('imports')
-        .withIndex('by_artifactKey', q => q.eq('artifactKey', storageId))
-        .take(3),
-      ctx.db
-        .query('importArtifacts')
-        .withIndex('by_artifactKey', q => q.eq('artifactKey', storageId))
-        .take(3),
-    ])
-  ).flat();
-}
-type Pin = Infer<typeof cleanupPin>;
-/** The single per-file delete guard. deletePage evaluates it inside the pause;
- * planPage evaluates the same code read-only in the dry run, so plan and delete
- * cannot disagree on any data check. Last failing check wins (stable codes). */
-async function pinExclusion(ctx: QueryCtx, pin: Pin, recheckSince: number) {
-  const file = await ctx.db.system.get(pin.storageId);
-  // No absent-file success without an original committed page receipt.
-  let code: string | null = !file
-    ? 'FILE_ABSENT'
-    : file.size !== pin.size || storageDigest(file.sha256) !== pin.digest
-      ? 'FILE_CHANGED'
-      : null;
-  // Class 4 has no R2 copy to recheck; its approved manifest pins Convex metadata only.
-  if (
-    !recent(pin.verifiedAt, 0, 86400_000) ||
-    (pin.class !== 4 &&
-      (!pin.keys.length || pin.keys.some(k => !k.startsWith('v1/') || k.split('/').at(-1) !== pin.digest)))
-  )
-    code = 'FULL_DIGEST_REQUIRED';
-  if (pin.class !== 1 && pin.owners.length) code = 'REFERENCE_REMAINS';
-  if (!recent(pin.recheckedAt, recheckSince, 5 * 60_000)) code = 'R2_HEAD_REQUIRED';
-  const refs = await indexedReferences(ctx, pin.storageId);
-  if (refs.length !== pin.owners.length || refs.some(r => !pin.owners.some(o => o.id === r._id)))
-    code = 'REFERENCE_CHANGED';
-  const owners = [];
-  let unset = false;
-  for (const owner of pin.owners) {
-    const id = ctx.db.normalizeId(owner.table, owner.id),
-      row = id ? await ctx.db.get(id) : null;
-    if (
-      !row ||
-      row.storageId !== pin.storageId ||
-      row.digest !== pin.digest ||
-      row.size !== pin.size ||
-      row.location !== 'r2' ||
-      !row.r2Committed ||
-      row.r2ConvexPurged ||
-      !pin.keys.includes(row.r2Key ?? '') ||
-      row.r2Key !== `v1/p/${row.projectId}/o/${pin.digest}`
-    )
-      code = 'OWNER_CHANGED';
-    else if (row.r2BackfilledAt === undefined) unset = true;
-    else if (row.r2BackfilledAt > Date.parse(pin.verifiedAt)) code = 'OWNER_CHANGED';
-    if (row) owners.push(row);
-  }
-  // R2-native rows (inserted already committed) never got a backfill time. Report
-  // it apart only when nothing else fails, so the bounded owner-scoped repair
-  // (projectLegacyStorageRepair) can record it after a fresh R2 digest check.
-  if (unset) code ??= 'OWNER_BACKFILL_UNSET';
-  return { code, owners };
+async function pinExclusion(ctx: QueryCtx, pin: Infer<typeof cleanupPin>, recheckSince: number) {
+  return checkLegacyFile(ctx, pin, {
+    verifiedAt: Date.parse(pin.verifiedAt),
+    headVerified: recent(pin.recheckedAt, recheckSince, 5 * 60_000),
+  });
 }
 export const deletePage = internalMutation({
   args: {

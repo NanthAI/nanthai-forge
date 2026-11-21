@@ -43,7 +43,7 @@ const notesOf = (f, intentId) =>
  * (receipt 1bc84170) with no agent attached. Nothing reached its Item, so the lead briefed a takeover and a
  * review for work already on main. Replay: two Lanes on two Items; the newer passes first and parks behind
  * the older; only scheduled queue steps run after submission (no agent call). */
-async function parkedQueueLanding(t) {
+async function parkedQueueLanding(t, failFold = false) {
   const f = await batchesFixture(t, {
     count: 2,
     batching: false,
@@ -53,6 +53,12 @@ async function parkedQueueLanding(t) {
   const [older, parked] = f.entries.map(entry => entry.state.id);
   const [olderItem, parkedItem] = f.entries.map(entry => entry.selection.request.intentId);
   assert.notEqual(olderItem, parkedItem, 'two Lanes on two Items');
+  if (failFold) {
+    const head = [...f.tables.projectHostedRecordHeads.values()].find(
+      row => row.kind === 'intent' && row.key === parkedItem,
+    );
+    f.patch('projectHostedRecordHeads', head._id, { planningItemId: parkedItem });
+  }
   let wasParked = false;
   for (let tick = 0; ; tick++) {
     assert(tick < 800, JSON.stringify(states(f).map(s => [s.sequence, s.phase])));
@@ -66,13 +72,41 @@ async function parkedQueueLanding(t) {
     }
     const task = f.pending()[0];
     if (!task) break;
-    await f.execute(task);
+    if (failFold && task.name === 'projectInitiativeWorkFold:fold') {
+      const plan = [...f.tables.projectHostedAcceptancePlans.values()].find(
+        row => row.receiptId === task.args[0].receiptId,
+      );
+      assert.equal(
+        plan.appliedPage,
+        plan.inputPages,
+        'acceptance completion already processed its final page',
+      );
+      assert.equal(plan.completion, undefined);
+      assert.deepEqual(task.args[0].itemIds, [parkedItem]);
+      await assert.rejects(f.execute(task, 'initiative-fold-failed'), /synthetic Initiative fold failure/);
+    } else await f.execute(task);
   }
   assert(wasParked, 'the newer Lane parked behind the older one');
   assert.equal(stateOf(f, older).phase, 'landed');
   assert.equal(stateOf(f, parked).phase, 'landed', 'the queue landed the parked Lane');
   return { f, older, parked, olderItem, parkedItem };
 }
+
+test('an Initiative fold failure leaves the accepted landing and its completion settled', async t => {
+  const { f, parked, older } = await parkedQueueLanding(t, true);
+  const folds = [...f.tables._scheduled_functions.values()].filter(
+    task => task.name === 'projectInitiativeWorkFold:fold',
+  );
+  assert.equal(
+    folds.length,
+    1,
+    'one scheduled fold for the Item-linked receipt and none for the independent receipt',
+  );
+  assert.equal(folds[0].state.kind, 'failed');
+  assert.equal(folds[0].args[0].receiptId, stateOf(f, parked).acceptance.receiptId);
+  assert.equal(stateOf(f, older).phase, 'landed');
+  assert.equal(stateOf(f, parked).phase, 'landed');
+});
 
 test('incident replay 2bf85ddf: a parked Lane the queue lands after its agent stopped posts its receipt to its Item', async t => {
   const { f, parked, parkedItem, olderItem } = await parkedQueueLanding(t);

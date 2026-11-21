@@ -65,6 +65,17 @@ export async function itemWorkLaneDetails(
   );
 }
 
+export const landingFileCandidate = (receipt: HostedAcceptance, memberFiles: boolean) =>
+  (memberFiles ? receipt.memberCandidate : undefined) ?? receipt.candidate;
+
+export const candidateLandingPaths = (
+  candidate: Extract<HostedRecord, { kind: 'candidate' }> | undefined,
+  head: string | null | undefined,
+) =>
+  candidate?.result.status === 'clean' && candidate.result.head === head
+    ? (candidate.governance?.paths ?? null)
+    : null;
+
 export async function itemWorkLandingDetails<T extends { receiptId: string; commit: string }>(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
@@ -78,8 +89,7 @@ export async function itemWorkLandingDetails<T extends { receiptId: string; comm
       return receipt?.candidate.head === landing.commit ? receipt : null;
     }),
   );
-  const fileCandidate = (receipt: HostedAcceptance) =>
-    (memberFiles ? receipt.memberCandidate : undefined) ?? receipt.candidate;
+  const fileCandidate = (receipt: HostedAcceptance) => landingFileCandidate(receipt, memberFiles);
   const keys = new Set(receipts.flatMap(receipt => (receipt ? [fileCandidate(receipt).id] : [])));
   const versions = await Promise.all([...keys].map(id => recordVersion(ctx, projectId, 'candidate', id, 0)));
   // A cohort can share a Candidate across many receipts. Hydrate it once and reuse
@@ -99,14 +109,10 @@ export async function itemWorkLandingDetails<T extends { receiptId: string; comm
       const receipt = receipts[index];
       const source = receipt && fileCandidate(receipt);
       const candidate = source && (await candidates.get(source.id));
-      const paths =
-        candidate?.result.status === 'clean' && candidate.result.head === source?.head
-          ? candidate.governance?.paths
-          : null;
       return {
         ...landing,
         check: receipt ? (receipt.check ? ('passed' as const) : ('not-checked' as const)) : null,
-        paths: paths ?? null,
+        paths: candidateLandingPaths(candidate || undefined, source?.head),
       };
     }),
   );

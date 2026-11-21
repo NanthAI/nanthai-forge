@@ -89,12 +89,20 @@ export class ObjectDownloadReader {
     invariant(row.location !== 'recipe', 'INVALID_WORK_BACKUP', 'Resolve the recipe before reading bytes.');
     let url = row.location === 'r2' ? signed!.url : row.url;
     let range = row.location === 'r2' ? signed!.range : undefined;
+    const pin = { sha256: row.digest, size: row.size };
     const refresh = async () => {
       const next = renew
         ? await renew()
-        : (await this.signatures([{ sha256: row.digest, size: row.size }])).get(row.digest)!;
+        : row.location === 'convex'
+          ? (await this.rows([pin], true)).get(row.digest)!
+          : (await this.signatures([pin])).get(row.digest)!;
+      invariant(
+        (!('location' in next) || next.location !== 'recipe') && 'url' in next && next.url,
+        'EXCHANGE_DOWNLOAD_DENIED',
+        'Object storage no longer permits this content to be read.',
+      );
       url = next.url;
-      range = next.range;
+      range = 'range' in next ? next.range : undefined;
     };
     for (let attempt = 0; attempt < 2; attempt++) {
       let response: Response;
@@ -109,15 +117,14 @@ export class ObjectDownloadReader {
       } catch (error) {
         if (error instanceof ForgeError) throw error;
         // R2's expired responses can omit CORS headers, appearing as a network error.
-        invariant(
-          row.location === 'r2' && attempt === 0,
-          'R2_READ_FAILED',
-          'Stored content download failed.',
-        );
+        invariant(attempt === 0, 'R2_READ_FAILED', 'Stored content download failed.');
         await refresh();
         continue;
       }
-      if (row.location === 'r2' && response.status === 403 && attempt === 0) {
+      if (
+        attempt === 0 &&
+        (response.status === 403 || (row.location === 'convex' && response.status === 404))
+      ) {
         await response.body?.cancel();
         await refresh();
         continue;

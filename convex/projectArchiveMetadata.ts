@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { createHash } from 'node:crypto';
 import type { ActionCtx } from './_generated/server';
 import { archiveSource } from './r2ArchiveSource';
 import { derivedArtifact, derivedBytes } from './derivedArtifactActions';
@@ -33,8 +34,8 @@ async function readOriginalMetadata(
   const url = await source.getUrl();
   invariant(url, 'INVALID_WORK_BACKUP', 'Stored source and Work are unavailable.');
   await checkAccess();
-  // Keep streaming/early cancellation: buffering the whole archive defeats
-  // metadata-only reads. Every upstream chunk renews the request's idle timer.
+  // Read the complete response once. Decode only the metadata prefix and hash
+  // the entire compressed stream without buffering the source or evidence.
   return exchangeRequest(
     'archive metadata download',
     url,
@@ -50,7 +51,19 @@ async function readOriginalMetadata(
           'Stored source and Work are unavailable or incomplete.',
         );
         noteStorageRead(ctx, size);
-        return await workArchiveMetadata(response.body, undefined, progressed);
+        const hash = createHash('sha256');
+        let received = 0;
+        const result = await workArchiveMetadata(response.body, undefined, progressed, chunk => {
+          received += chunk.length;
+          invariant(received <= size, 'INVALID_WORK_BACKUP', 'Stored archive exceeds its pinned size.');
+          hash.update(chunk);
+        });
+        invariant(
+          received === size && hash.digest('hex') === digest,
+          'INVALID_WORK_BACKUP',
+          'Downloaded archive differs from its original pin.',
+        );
+        return result;
       } finally {
         if (response.body && !response.body.locked) await response.body.cancel().catch(() => undefined);
       }
@@ -86,7 +99,7 @@ export async function projectArchiveMetadata(
   const cached = await derivedArtifact(
     ctx,
     storageId,
-    'work-metadata-v2',
+    'work-metadata-v3',
     '',
     async () => {
       original = await readOriginalMetadata(ctx, storageId, size, digest, checkAccess);

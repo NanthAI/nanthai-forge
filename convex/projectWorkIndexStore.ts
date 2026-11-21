@@ -15,6 +15,7 @@ import { generationDocument, indexEntry } from './projectWorkIndexFields';
 import { invariant } from '../src/errors';
 import { projectExecution } from './projectExecution';
 import { findObject } from './projectObjectFind';
+import { scheduleWorkRefresh } from './projectInitiativeWorkStore';
 
 // Incremental source returns retain the public generation. Its disposable
 // record partition can be reused directly; this pointer never forms a chain.
@@ -305,6 +306,7 @@ export const publish = internalMutation({
     await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.sweep, {
       projectId: project._id,
       cursor: null,
+      refreshInitiativeWork: recordPartition(generation),
     });
     return true;
   },
@@ -421,12 +423,17 @@ export const lookups = internalQuery({
 });
 /** Reclaim superseded/abandoned derived builds by source binding, never age. */
 export const sweep = internalMutation({
-  args: { projectId: v.id('hostedProjects'), cursor: v.union(v.string(), v.null()) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    cursor: v.union(v.string(), v.null()),
+    refreshInitiativeWork: v.optional(v.id('projectWorkGenerations')),
+  },
   returns: v.null(),
-  handler: async (ctx, { projectId, cursor }) => {
+  handler: async (ctx, { projectId, cursor, refreshInitiativeWork }) => {
     const project = await ctx.db.get(projectId);
     projectExecution(ctx, projectId, project?.name, project?.key);
     if (!project) return null;
+    if (refreshInitiativeWork) await scheduleWorkRefresh(ctx, projectId, refreshInitiativeWork);
     const page = await ctx.db
       .query('projectWorkGenerations')
       .withIndex('by_project_and_backup_and_revision_and_format_and_work_schema', q =>

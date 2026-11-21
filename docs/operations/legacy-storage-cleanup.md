@@ -12,11 +12,11 @@ removed 92,650 Convex files / 2,685,123,068 bytes in committed cleanup pages:
 the second, including class 4 files from owner-approved manifests. R2 objects
 are retained.
 
-The 16 remaining files (five class 3, eleven Forge sections) are reached only
-from the cursors of eight source steps whose jobs stopped at the cutover. The
-[stale source job](#stale-source-jobs) tool settles those jobs and drops their
-dead cursors; a later remaining-only run, which needs its own pause and lead go,
-then deletes the files. The CLI no longer has a Convex upload path (`uploadUrl` /
+The 16 remaining files (five class 3, eleven Forge sections) were reached from
+the cursors of eight source steps whose jobs stopped at the cutover. The
+[stale source job](#stale-source-jobs) operation on Issue 11fd39de cleared
+those cursors. Use [online retirement](#online-retirement) for these files.
+The CLI no longer has a Convex upload path (`uploadUrl` /
 `putConvexUpload`): every upload is a presigned R2 PUT. The guard's legacy
 read and record-field allowlist entries remain while those files and the legacy
 `storageId` columns exist.
@@ -26,8 +26,11 @@ copy is fetched from R2 and verified against its pinned size and SHA-256 before
 its bytes are returned. A native hit performs no tombstone lookup. This reader
 adds no scheduled work. Source cursors and their nested Forge sections use the
 existing authorized byte reader. The synthetic cursor fixture covers the shape
-of the 16-file inventory. URL readers continue to use native URLs. The maintenance operations described below still use
-their existing write pause and approval.
+of the 16-file inventory. A native URL miss can resolve to a signed R2 URL.
+The browser renews an expired object URL through the same authorized describe
+call, then checks the downloaded size and digest. Archive metadata extraction
+checks the full compressed response before using or caching it. The historical
+bulk cleanup tools below retain their existing write-pause requirements.
 
 Each pause ended with both maintenance flags proven absent by name. The first
 stopped on a HEAD fetch failure; the remaining-only run stopped when the delete
@@ -38,6 +41,33 @@ with the delete guard and skip-and-report for refused files (see
 [Remaining-only run](#remaining-only-run)). A closed window never reopens. Every
 further run needs fresh inputs, verification and dry-run evidence, a new
 operation and a new lead go.
+
+## Online retirement
+
+Issue 779d17be authorizes the dev retirement of the last 16 native files while
+landings run. Keep the exact private inventory, verified R2 keys and original
+request. Use the deployed `projectLegacyStorageRetirement:run` action with
+`apply: false` first. It checks the native file and current indexed owners and
+streams each existing same-project copy through SHA-256. It returns a count and
+changes no records. Stop if any native or R2 pin differs, a copy is missing,
+or the registered incident replay fails. Run the existing read-only preflight
+for the named stale source jobs before settling them.
+
+Each request carries the project ID, a fresh operation UUID and one page of
+pins. A pin contains `storageId`, `digest`, `size`, `class` (1–3),
+`copyKey` and the exact indexed `owners` (empty for cursor files and nested
+sections). Use the same request with `apply: true` to verify every copy again
+and switch the page. The mutation rechecks the native and owner pins and the
+R2 object bindings. It retains the verified copies, records tombstones, marks
+any backfilled owners, removes the native files and writes the receipt in one
+transaction. The exact request replays the same receipt. No maintenance flag,
+global fence, R2 delete or landing re-drive is part of this path.
+
+Use `projectLegacyStorageRetirement:observe` with the original scope and pins
+to verify the tombstones through the reader's index and the absence of the old
+files. Record acceptance receipts, refusals, re-drives, fall-through reads and
+measured provider usage for the window. Keep the copies for at least 30 days
+with zero fall-through reads and seek owner approval before any copy deletion.
 
 ## Read-only inventory first
 

@@ -25,7 +25,10 @@ const copyFields = {
 const copyValidator = v.object(copyFields);
 type Copy = typeof copyValidator.type;
 
-async function lookup({ db }: Pick<QueryCtx, 'db'>, storageId: string): Promise<Copy | null> {
+export async function lookupLegacyCopy(
+  { db }: Pick<QueryCtx, 'db'>,
+  storageId: string,
+): Promise<Copy | null> {
   const row = await db
     .query('legacyStorageTombstones')
     .withIndex('by_storage', q => q.eq('storageId', storageId as Id<'_storage'>))
@@ -47,11 +50,11 @@ async function lookup({ db }: Pick<QueryCtx, 'db'>, storageId: string): Promise<
 export const tombstone = internalQuery({
   args: { storageId: v.string() },
   returns: v.union(v.null(), copyValidator),
-  handler: (ctx, { storageId }) => lookup(ctx, storageId),
+  handler: (ctx, { storageId }) => lookupLegacyCopy(ctx, storageId),
 });
 
 function findCopy(ctx: TombstoneReader, storageId: string) {
-  if (ctx.db) return lookup({ db: ctx.db }, storageId);
+  if (ctx.db) return lookupLegacyCopy({ db: ctx.db }, storageId);
   return ctx.runQuery?.(internal.legacyStorageRead.tombstone, { storageId }) ?? null;
 }
 
@@ -65,15 +68,17 @@ function observed(storageId: string, copy: Copy) {
   console.info('legacy_storage_read_through', { storageId, operationId: copy.operationId });
 }
 
-async function copyBlob(storageId: string, copy: Copy, clock?: SourceStepClock): Promise<Blob> {
-  observed(storageId, copy);
+export async function verifyLegacyCopy(
+  copy: Pick<Copy, 'digest' | 'size' | 'copyKey'>,
+  retain?: (part: Uint8Array<ArrayBuffer>) => void,
+  clock?: SourceStepClock,
+) {
   return exchangeRequest(
     'Retired file download',
     await presignGet(r2Config(), copy.copyKey),
     { headers: { 'accept-encoding': 'identity' }, redirect: 'error' },
     async (response, progressed) => {
       invariant(response.ok, 'R2_OBJECT_UNAVAILABLE', 'Retired file copy is unavailable.');
-      const parts: Uint8Array<ArrayBuffer>[] = [];
       const hash = sha256.create();
       let size = 0;
       if (response.body) {
@@ -89,10 +94,11 @@ async function copyBlob(storageId: string, copy: Copy, clock?: SourceStepClock):
               'Retired file copy exceeds its pinned size.',
             );
             hash.update(part.value);
-            parts.push(part.value);
+            retain?.(part.value);
             progressed();
           }
         } finally {
+          await reader.cancel().catch(() => undefined);
           reader.releaseLock();
         }
       }
@@ -101,10 +107,16 @@ async function copyBlob(storageId: string, copy: Copy, clock?: SourceStepClock):
         'BLOB_DIGEST_MISMATCH',
         'Retired file copy differs from its pin.',
       );
-      return new Blob(parts, { type: copy.contentType });
     },
     { retries: 0, onAttempt: clock && (() => clock.request('gets')) },
   );
+}
+
+async function copyBlob(storageId: string, copy: Copy, clock?: SourceStepClock): Promise<Blob> {
+  observed(storageId, copy);
+  const parts: Uint8Array<ArrayBuffer>[] = [];
+  await verifyLegacyCopy(copy, part => parts.push(part), clock);
+  return new Blob(parts, { type: copy.contentType });
 }
 
 /** Callers must authorize the legacy id before reading, as for native storage. */
@@ -145,7 +157,7 @@ export async function legacyMetadata(ctx: Reader & TombstoneReader, storageId: s
 export async function legacySystemMetadata(ctx: Pick<QueryCtx, 'db'>, storageId: Id<'_storage'>) {
   const file = await ctx.db.system.get(storageId);
   if (file) return file;
-  const copy = await lookup(ctx, storageId);
+  const copy = await lookupLegacyCopy(ctx, storageId);
   if (!copy) return null;
   observed(storageId, copy);
   return { _id: storageId, sha256: copy.digest, size: copy.size, contentType: copy.contentType };

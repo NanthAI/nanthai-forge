@@ -2,10 +2,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { getFunctionName } from 'convex/server';
+import { randomUUID } from 'node:crypto';
 import { v } from 'convex/values';
 import { digest } from '../dist/hash.js';
 import { moduleUrl } from './convex-module.mjs';
-import { state } from './hosted-fixture.mjs';
+import { projectRow, state } from './hosted-fixture.mjs';
 import { fakeSourceR2 } from './convex-source-r2-fixture.mjs';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { replayUrlSwitch } from './maintenance-online-url.mjs';
@@ -13,8 +14,12 @@ import { replayUrlSwitch } from './maintenance-online-url.mjs';
 const { legacyBlob, legacyMetadata, tombstone } = await import(moduleUrl('../convex/legacyStorageRead.ts'));
 const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
 const { internalMutation } = await import(moduleUrl('../convex/server.ts'));
+const retirement = await import(moduleUrl('../convex/projectLegacyStorageRetirement.ts'));
+const sweep = await import(moduleUrl('../convex/projectR2Sweep.ts'));
+const { sourceKeyReferenced } = await import(moduleUrl('../convex/projectSourceKeyProtection.ts'));
 const payload = Buffer.from('exact legacy bytes');
 const mediaType = 'application/x-forge-fixture';
+const devDeployment = 'https://benevolent-wildebeest-974.convex.cloud';
 const pin = (storageId, projectId, bytes = payload) => ({
   storageId,
   digest: digest(bytes),
@@ -24,9 +29,8 @@ const pin = (storageId, projectId, bytes = payload) => ({
   contentType: mediaType,
 });
 
-// The switch exists only in this fixture. There is no production writer for
-// tombstones in the expand slice. The fixture transaction makes the old file
-// removal and the row visible together and replays the same operation id.
+// A synthetic URL-reachable legacy object has no committed R2 owner row. The
+// reader fixtures exercise its fallback separately from eligible retirement pages.
 async function switchFile(ctx, pin, verifiedBytes) {
   const existing = await tombstone._handler(ctx, { storageId: pin.storageId });
   if (existing?.operationId === pin.operationId) return false;
@@ -35,6 +39,27 @@ async function switchFile(ctx, pin, verifiedBytes) {
   await ctx.db.insert('legacyStorageTombstones', pin);
   await ctx.storage.delete(pin.storageId);
   return true;
+}
+
+const retirementPage = (files, projectId = 'project') => ({
+  projectId,
+  operationId: randomUUID(),
+  pins: files.map(({ storageId, size, digest, copyKey }) => ({
+    storageId,
+    size,
+    digest,
+    copyKey,
+    class: 3,
+    owners: [],
+  })),
+});
+function executeRetirement(transaction, input, apply = true) {
+  const invoke = (ref, args) => {
+    const [namespace, name] = getFunctionName(ref).split(':');
+    assert.equal(namespace, 'projectLegacyStorageRetirement');
+    return transaction(name, retirement[name], args);
+  };
+  return retirement.run._handler({ runQuery: invoke, runMutation: invoke }, { ...input, apply });
 }
 
 const ordinaryWrite = internalMutation({
@@ -62,6 +87,7 @@ const ordinaryWrite = internalMutation({
 
 async function fileFixture() {
   const f = state([]);
+  f.tables.hostedProjects.set('project', projectRow({ _id: 'project', owner: 'owner' }));
   const storageId = await f.ctx.storage.store(new Blob([payload], { type: mediaType }));
   const file = pin(storageId, 'project');
   const ctx = {
@@ -74,17 +100,21 @@ async function fileFixture() {
   return { f, file, ctx };
 }
 
-test('copy and replayed switch preserve ordinary write order and final rows at every insertion point', async () => {
+test('copy and replayed switch preserve ordinary write order and final rows at every insertion point', async t => {
+  const { objects } = fakeSourceR2(t);
+  process.env.CONVEX_CLOUD_URL = devDeployment;
   // This fixed schedule includes an unindexed legacy ID inside a Work body.
   const operations = ['save beta', 'save alpha', 'accept alpha', 'reference', 'accept beta'];
   const run = async positions => {
     const { f, file } = await fileFixture();
-    let copy;
+    const key = '/synthetic/' + file.copyKey,
+      page = retirementPage([file]),
+      retire = () => executeRetirement((_, fn, args) => f.transaction(() => fn._handler(f.ctx, args)), page);
+    objects.delete(key);
     const switched = [];
     for (let i = 0; i <= operations.length; i++) {
-      if (positions?.[0] === i) copy = Buffer.from(payload);
-      for (const position of positions?.slice(1) ?? [])
-        if (position === i) switched.push(await f.transaction(() => switchFile(f.ctx, file, copy)));
+      if (positions?.[0] === i) objects.set(key, payload);
+      for (const position of positions?.slice(1) ?? []) if (position === i) switched.push(await retire());
       if (i === operations.length) break;
       const command = operations[i] === 'reference' ? `unindexed:${file.storageId}` : operations[i];
       assert.equal(
@@ -100,7 +130,11 @@ test('copy and replayed switch preserve ordinary write order and final rows at e
         'ordinary writes commit with no refusal or retry time',
       );
     }
-    assert.deepEqual(switched, positions ? [true, false] : []);
+    if (positions) {
+      assert.equal(switched[0].receipt.retired, 1);
+      assert.equal(switched[0].verifiedCopies, 1);
+      assert.deepEqual(switched[1], { verifiedCopies: 0, receipt: switched[0].receipt });
+    } else assert.deepEqual(switched, []);
     assert.deepEqual(f.scheduled, [], 'no re-drive or retry is scheduled');
     return [...f.tables.projectWorkEvents.values()].map(({ _id, _creationTime, ...row }) => row);
   };
@@ -113,6 +147,92 @@ test('copy and replayed switch preserve ordinary write order and final rows at e
           control,
           `copy/switch/replay at ${copy}/${commit}/${replay}`,
         );
+});
+
+test('retirement checks every full copy first and leaves native files intact on mismatch or a changed binding', async t => {
+  const { objects, requests } = fakeSourceR2(t);
+  const now = Date.parse('2026-11-05T12:00:00Z');
+  t.mock.method(Date, 'now', () => now);
+  const { f, file } = await fileFixture();
+  const other = Buffer.from('second exact file');
+  const second = pin(await f.ctx.storage.store(new Blob([other])), 'project', other);
+  const page = retirementPage([file, second]);
+  const transaction = (_, fn, args) => f.transaction(() => fn._handler(f.ctx, args));
+  const retire = apply => executeRetirement(transaction, page, apply);
+  await assert.rejects(retire(true), { code: 'PROJECT_UNAVAILABLE' });
+  process.env.CONVEX_CLOUD_URL = devDeployment;
+  const { bindings } = await transaction('prepare', retirement.prepare, page);
+  await assert.rejects(
+    transaction('commit', retirement.commit, {
+      ...page,
+      bindings,
+      verifiedAt: now,
+      proof: '0'.repeat(64),
+    }),
+    { code: 'R2_VERIFIED_PASS_REQUIRED' },
+  );
+  assert.equal(requests.length, 0);
+  objects.set('/synthetic/' + file.copyKey, payload);
+  await assert.rejects(retire(false), { code: 'R2_OBJECT_UNAVAILABLE' });
+  objects.set('/synthetic/' + second.copyKey, Buffer.alloc(second.size, 1));
+  await assert.rejects(retire(true), { code: 'BLOB_DIGEST_MISMATCH' });
+  assert.equal(f.tables.legacyStorageTombstones.size, 0);
+  assert.equal(f.tables.legacyStorageCleanupPages.size, 0);
+  assert(f.files.has(file.storageId) && f.files.has(second.storageId));
+  objects.set('/synthetic/' + second.copyKey, other);
+  assert.deepEqual(await retire(false), { verifiedCopies: 2, receipt: null });
+  assert.equal(f.tables.legacyStorageTombstones.size, 0);
+
+  await assert.rejects(
+    executeRetirement(async (name, fn, args) => {
+      if (name === 'commit')
+        f.tables.projectObjects.set('new', {
+          _id: 'new',
+          projectId: 'project',
+          digest: second.digest,
+          size: second.size,
+          nonce: 'changed during verification',
+          removed: false,
+          location: 'r2',
+          r2Key: second.copyKey,
+          r2PreparedAt: now - 2 * 86400_000,
+        });
+      return transaction(name, fn, args);
+    }, page),
+    { code: 'EVIDENCE_CHANGED' },
+  );
+  assert.equal(f.tables.legacyStorageTombstones.size, 0);
+  assert(f.files.has(file.storageId) && f.files.has(second.storageId));
+
+  const row = f.tables.projectObjects.get('new');
+  row.r2SweepKey = second.copyKey;
+  const beforeClaimed = requests.length;
+  await assert.rejects(retire(true), { code: 'EVIDENCE_CHANGED' });
+  assert.equal(requests.length, beforeClaimed);
+  delete row.r2SweepKey;
+  const sweepPreview = () =>
+    transaction('sweep', sweep.claim, { projectId: 'project', ids: ['new'], dryRun: true });
+  assert.deepEqual(await sweepPreview(), [{ id: 'new', key: second.copyKey }]);
+
+  const { receipt } = await retire(true);
+  assert.equal(receipt.retired, 2);
+  assert.equal(receipt.bytes, payload.length + other.length);
+  assert.equal(receipt.changedRows, 0);
+  assert.equal(receipt.retainedCopies, 2);
+  assert(await sourceKeyReferenced(f.ctx, 'project', file.copyKey));
+  assert(await sourceKeyReferenced(f.ctx, 'project', second.copyKey));
+  assert.deepEqual(await sweepPreview(), []);
+  assert.deepEqual(await transaction('observe', retirement.observe, page), {
+    receipt,
+    matchingTombstones: 2,
+  });
+  const calls = requests.length;
+  assert.deepEqual(await retire(true), { verifiedCopies: 0, receipt });
+  assert.equal(requests.length, calls);
+  assert(requests.every(method => method === 'GET'));
+  await assert.rejects(executeRetirement(transaction, { ...page, pins: [page.pins[0]] }), {
+    code: 'OPERATION_REUSED',
+  });
 });
 
 function* orders(steps) {
@@ -238,8 +358,9 @@ test('legacy URL reads use the native hit or resolve one exact tombstone in quer
 });
 
 test('incident 779d17be: the 22-minute maintenance replay preserves every landing and its order', async t => {
-  const before = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
-  Object.assign(process.env, synthetic);
+  const configured = { ...synthetic, CONVEX_CLOUD_URL: devDeployment };
+  const before = Object.fromEntries(Object.keys(configured).map(key => [key, process.env[key]]));
+  Object.assign(process.env, configured);
   t.after(() => {
     for (const [key, value] of Object.entries(before))
       if (value === undefined) delete process.env[key];
@@ -266,9 +387,22 @@ test('incident 779d17be: the 22-minute maintenance replay preserves every landin
         r2Committed: undefined,
         r2Key: undefined,
       });
-      const files = [linked];
-      for (let i = 1; i < 16; i++)
-        files.push(pin(await f.sourceStorage.store(new Blob([payload], { type: mediaType })), 'project'));
+      // The eligible cursor-shaped stock shares the transactional fixture with
+      // the queue. Keep the separate synthetic legacy reader above to force a
+      // fallback from the recompose, independently of the retirement guards.
+      f.tables.hostedProjects.set('project', projectRow({ _id: 'project', owner: 'owner' }));
+      f.extendContext(ctx => {
+        const get = ctx.db.system.get;
+        ctx.db.system.get = async id => (await f.sourceStorage.getMetadata(id)) ?? get(id);
+      });
+      const files = [];
+      for (let i = 0; i < 16; i++) {
+        const bytes = Buffer.from(`legacy cursor section ${i}`);
+        files.push(
+          pin(await f.sourceStorage.store(new Blob([bytes], { type: mediaType })), 'project', bytes),
+        );
+      }
+      const inputPage = retirementPage(files);
       const reads = t.mock.method(f.sourceStorage, 'get');
       const fetches = globalThis.fetch.mock;
       const logs = t.mock.method(console, 'info', () => {});
@@ -277,19 +411,8 @@ test('incident 779d17be: the 22-minute maintenance replay preserves every landin
         windowEnd,
         switched = false,
         replayed = false;
-      const page = () =>
-        f.transaction(
-          'online-switch-fixture',
-          {
-            _handler: async ctx => {
-              const results = [];
-              for (const file of files)
-                results.push(await switchFile(ctx, file, f.c.objects.get(file.digest)));
-              return results;
-            },
-          },
-          {},
-        );
+      const page = () => executeRetirement(f.c.transaction, inputPage);
+      let originalReceipt;
       for (let tick = 0; landed.length < 3; tick++) {
         assert(tick < 250, 'every landing settles');
         for (const run of f.runs().filter(run => run.status === 'queued')) {
@@ -303,7 +426,15 @@ test('incident 779d17be: the 22-minute maintenance replay preserves every landin
         }
         if (online && !switched && states(f).some(state => state.phase === 'ready')) {
           assert(windowEnd, 'verified copies are retained before the switch');
-          assert.deepEqual(await page(), Array(16).fill(true));
+          const { verifiedCopies, receipt } = await page();
+          assert.equal(verifiedCopies, 16);
+          assert.equal(receipt.retired, 16);
+          originalReceipt = receipt;
+          await f.transaction(
+            'legacy-fixture-fall-through',
+            { _handler: ctx => switchFile(ctx, linked, stateBytes) },
+            {},
+          );
           switched = true;
         }
         const task = f.pending()[0];
@@ -313,13 +444,16 @@ test('incident 779d17be: the 22-minute maintenance replay preserves every landin
           if (state.phase === 'landed' && !landed.includes(state.sequence)) landed.push(state.sequence);
         if (online && switched && !replayed && landed.length) {
           assert(f.now() < windowEnd, 'a landing settled inside the maintenance window');
-          assert.deepEqual(await page(), Array(16).fill(false));
+          assert.deepEqual(await page(), { verifiedCopies: 0, receipt: originalReceipt });
           replayed = true;
         }
       }
       if (online) {
         assert(replayed, 'copy, switch and replay all ran while landings were active');
-        assert.equal(f.tables.legacyStorageTombstones.size, 16);
+        assert.deepEqual(await f.c.transaction('observe', retirement.observe, inputPage), {
+          receipt: originalReceipt,
+          matchingTombstones: 16,
+        });
         const fallback = logs.mock.calls.filter(
           ({ arguments: [event, ids] }) =>
             event === 'legacy_storage_read_through' && ids.storageId === linked.storageId,

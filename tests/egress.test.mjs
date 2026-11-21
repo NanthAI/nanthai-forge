@@ -200,7 +200,7 @@ test('warm Work metadata reads only a sidecar, preserving original bytes, unknow
   assert.equal(buckets.get(t).requests.filter(r => r.method === 'GET').length, 1);
   assert.ok(access >= 4);
   const row = [...s.tables.derivedArtifacts.values()][0];
-  assert.equal(row.kind, 'work-metadata-v2');
+  assert.equal(row.kind, 'work-metadata-v3');
   assert.ok(
     row.storageId && row.inline === undefined,
     'Full metadata bytes retained outside database documents',
@@ -401,7 +401,7 @@ test('a stale missing-cache rebuild cannot delete the concurrently repaired winn
   assert.equal(await (await blobStore(s.ctx).get(winner.storageId)).text(), 'pinned export bytes');
 });
 
-test('v2 Work sidecars retain independently stored v1 derivatives and rebuild corrupt files from original bytes', async t => {
+test('verified Work sidecars retain independently stored v1 derivatives and rebuild corrupt files from original bytes', async t => {
   const manifest = Buffer.from(' {"future":"original"}\n'),
     work = Buffer.from('{"future":true,"a":1}\n');
   const bytes = gzipSync(
@@ -425,7 +425,7 @@ test('v2 Work sidecars retain independently stored v1 derivatives and rebuild co
   const read = () => projectArchiveMetadata(s.ctx, 'archive', bytes.length, sha, async () => {});
   const first = await read();
   assert.deepEqual(Buffer.from(first.work), work);
-  const row = [...s.tables.derivedArtifacts.values()].find(x => x.kind === 'work-metadata-v2');
+  const row = [...s.tables.derivedArtifacts.values()].find(x => x.kind === 'work-metadata-v3');
   assert.ok(row.storageId);
   const damaged = new Blob(['corrupt sidecar']);
   row.storageId = 'damaged-legacy';

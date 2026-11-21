@@ -32,11 +32,13 @@ import { effectivePolicy } from '../src/autonomy-policy';
 import { effectiveAgentDefaults } from '../src/agent-parallel-defaults';
 import type { LandingNote } from '../src/intent-landing-note';
 import { postIntentLandingNote } from './projectIntentLandingNotes';
+import { acceptanceWorkItems } from './projectHostedAcceptanceFields';
 type CompletionInput = ReceiptIdentity & {
   precompose?: { receiptIds: string[]; paths?: string[] };
 };
 const COMPLETE = makeFunctionReference<'mutation'>('projectHostedAcceptance:complete');
 const GUARD = makeFunctionReference<'mutation'>('projectHostedAcceptance:guard');
+const FOLD_WORK = makeFunctionReference<'mutation'>('projectInitiativeWorkFold:fold');
 export const ACCEPTANCE_COMPLETION_STALLED = 'ACCEPTANCE_COMPLETION_STALLED';
 type Plan = NonNullable<Awaited<ReturnType<typeof acceptancePlan>>>;
 const armGuard = (ctx: MutationCtx, input: ReceiptIdentity) =>
@@ -87,6 +89,7 @@ async function settleCompletion(ctx: MutationCtx, plan: Plan, patch: Partial<Pla
       capsuleWake: undefined,
       landedBy: undefined,
       feedCompletion: undefined,
+      workItemIds: undefined,
     });
   return { complete: true };
 }
@@ -310,8 +313,10 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
     for (const entry of entries)
       if ('laneId' in entry && resolutionCandidates.has(entry.laneId))
         await noteResolutionOrigins(ctx, input.projectId, entry, note);
+  const currentWorkItems = [];
   for (const [intentId, { laneIds, viaLaneId }] of noted) {
     const head = await recordHead(ctx, input.projectId, 'intent', intentId);
+    if (head?.planningItemId) currentWorkItems.push(head.planningItemId);
     // Unmarked legacy Intents may belong to an Item. Remove their fallback once no
     // open unmarked legacy Intents remain.
     if (head?.planningItemId !== independentIntentItem)
@@ -349,7 +354,17 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
   }
   const appliedPage = end === entries.length ? plan.appliedPage + 1 : plan.appliedPage;
   const position = { appliedPage, appliedEntry: end === entries.length ? 0 : end };
-  if (appliedPage === plan.inputPages) return settleCompletion(ctx, plan, position);
+  const workItemIds = acceptanceWorkItems(plan.workItemIds, currentWorkItems);
+  if (appliedPage === plan.inputPages) {
+    if (workItemIds.length)
+      await ctx.scheduler.runAfter(0, FOLD_WORK, {
+        projectId: input.projectId,
+        receiptId: receipt.id,
+        commit: receipt.candidate.head,
+        itemIds: workItemIds,
+      });
+    return settleCompletion(ctx, plan, position);
+  }
   // The next page's tick replaces the retained one; its guard keeps watching.
   const tick = await ctx.scheduler.runAfter(0, COMPLETE, {
     projectId: input.projectId,
@@ -357,6 +372,7 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
   });
   await ctx.db.patch(plan._id, {
     ...position,
+    ...(workItemIds.length ? { workItemIds } : {}),
     ...(plan.completion ? { completion: { ...plan.completion, alarm: undefined, tick } } : {}),
   });
   return { complete: false };

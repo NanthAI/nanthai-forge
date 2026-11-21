@@ -357,6 +357,73 @@ test('raw object reads recheck access on cache hits and during a GET, including 
   assert.equal(new TextDecoder().decode((await reader.read([p]))[0]), 'guarded');
 });
 
+test('browser renews retired Convex object URLs through describe and verifies the renewed bytes', async t => {
+  const { s, fake } = await setup(t);
+  const bytes = Buffer.from('retired object bytes');
+  const p = await upload(s, bytes, false);
+  const { storageId } = rawRow(s, p.sha256);
+  const copyKey = `v1/p/project/o/${p.sha256}`;
+  fake.objects.set(fake.key(copyKey), bytes);
+  s.tables.legacyStorageTombstones.set('retired', {
+    storageId,
+    digest: p.sha256,
+    size: p.size,
+    copyKey,
+    operationId: randomUUID(),
+  });
+  await s.ctx.storage.delete(storageId);
+  t.mock.method(console, 'info', () => {});
+
+  const read = async () => {
+    const b = browser(s);
+    const result = await browserObjects(b, 'project').read([p]);
+    assert.deepEqual(Buffer.from(result[0]), bytes);
+    return b.calls.map(({ method, args }) => [method, args.signed ?? false]);
+  };
+  const healthy = [
+    ['describe', true],
+    ['describe', false],
+  ];
+  assert.deepEqual(await read(), healthy);
+
+  fake.forbidGets = 1;
+  const before = fake.requests.length;
+  assert.deepEqual(await read(), [['describe', true], ...healthy]);
+  assert.deepEqual(
+    fake.requests.slice(before).map(({ method, status }) => [method, status]),
+    [
+      ['GET', 403],
+      ['GET', 200],
+    ],
+  );
+
+  const masked = browser(s);
+  const originalFetch = globalThis.fetch;
+  let gets = 0;
+  const reader = new ObjectDownloadReader({
+    describe: (digests, signed) =>
+      modules.projectObjectDownloads.describe._handler(s.ctx, { projectId: 'project', digests, signed }),
+    sign: async () => assert.fail('Retired URLs renew through describe'),
+    fetch: (url, init) => {
+      if (++gets === 1) throw new TypeError('CORS prevents reading the expired response');
+      return originalFetch(url, init);
+    },
+  });
+  fake.corrupt.add(fake.key(copyKey));
+  await assert.rejects(reader.read([p]), code('BLOB_DIGEST_MISMATCH'));
+  assert.equal(gets, 2);
+
+  fake.forbidGets = 2;
+  await assert.rejects(browserObjects(masked, 'project').read([p]), code('EXCHANGE_DOWNLOAD_DENIED'));
+  assert.deepEqual(
+    masked.calls.map(({ method, args }) => [method, args.signed]),
+    [
+      ['describe', true],
+      ['describe', true],
+    ],
+  );
+});
+
 test('public anonymous Code reads retain exact checkpoint selection', async t => {
   const f = await sourceFixture(t);
   f.s.caller(null);

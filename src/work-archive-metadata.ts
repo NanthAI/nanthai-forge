@@ -233,6 +233,7 @@ export async function workArchiveMetadata(
     read(name: string, bytes: Uint8Array): void | Promise<void>;
   },
   progressed?: () => void,
+  observeCompressed?: (bytes: Uint8Array) => void,
 ): Promise<{ manifest: Uint8Array; work: Uint8Array }> {
   const compressed = archiveStream(input),
     upstream = compressed.stream.getReader(),
@@ -242,6 +243,14 @@ export async function workArchiveMetadata(
   let queuedInput: Promise<ReadableStreamReadResult<Uint8Array<ArrayBuffer>>> | undefined,
     writing: Promise<void> | undefined,
     upstreamDone = false;
+  async function readCompressed() {
+    const next = await upstream.read();
+    if (!next.done && next.value.length) {
+      observeCompressed?.(next.value);
+      progressed?.();
+    }
+    return next;
+  }
   // Feed only while metadata needs decoded output. pipeThrough eagerly drains the
   // compressed source in Node 22, even when metadata is followed by large artifacts.
   async function decoded() {
@@ -264,7 +273,7 @@ export async function workArchiveMetadata(
         writing = undefined;
       }
       if (upstreamDone) return output;
-      queuedInput ??= upstream.read();
+      queuedInput ??= readCompressed();
       void queuedInput.catch(() => undefined);
       const next = await Promise.race([
         output.then(value => ({ output: value })),
@@ -275,10 +284,7 @@ export async function workArchiveMetadata(
       if (next.input.done) {
         upstreamDone = true;
         writing = writer.close();
-      } else {
-        if (next.input.value.length) progressed?.();
-        writing = writer.write(next.input.value);
-      }
+      } else writing = writer.write(next.input.value);
       // A decoded result can win the race; retain the write for the next read and
       // handle a later rejection even if metadata is already complete.
       void writing.catch(() => undefined);
@@ -354,6 +360,13 @@ export async function workArchiveMetadata(
       );
       for (const file of value.files)
         if (file.path !== 'work.json' && !aliases.has(file.path)) await entry(file.path, true);
+    }
+    // Verify the compressed tail without decoding or retaining its archive entries.
+    if (observeCompressed) {
+      await queuedInput;
+      while (!(await readCompressed()).done) {
+        // The observer consumes each chunk.
+      }
     }
     return { manifest, work };
   } finally {
