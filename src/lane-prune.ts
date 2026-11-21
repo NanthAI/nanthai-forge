@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { removeCachePreservingKept, sweepKeptApplyCache } from './hosted-apply-kept.js';
 import { canonicalRoot, clientCacheRoot, rootSibling } from './root-paths.js';
-import { lstatSync, readFileSync, readdirSync, readlinkSync, rmSync } from 'node:fs';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { lstatSync, readdirSync, readlinkSync, rmSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
+import { isLaneDirectoryName, isNestedLaneCopy, markerIdentity } from './hosted-lane-directory.js';
 import { makeFunctionReference } from 'convex/server';
 import {
   forgetLane,
@@ -27,7 +28,7 @@ const DIRTY_CHECKS = 8;
  * Keep a launch window as long as the worker's one-minute deadline. */
 const SNAPSHOT_LAUNCH_MS = 60_000;
 const terminal = new Set(['completed', 'abandoned']);
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export { markerIdentity };
 export type LaneAddress = { url: string; projectId: string };
 type LaneState = string | { state: string; pinned?: boolean; reason?: string };
 type LaneStateGroup = { address: LaneAddress; laneIds: string[] };
@@ -63,22 +64,6 @@ const exists = (path: string) => {
     return null;
   }
 };
-/** Reads the Lane identity from a checkout marker without hydrating its source state. */
-export function markerIdentity(root: string): { laneId: string; url: string; projectId: string } | null {
-  try {
-    const marker = JSON.parse(readFileSync(join(root, '.forge', 'hosted-lane.json'), 'utf8')) as {
-      url?: unknown;
-      selection?: { laneId?: unknown; projectId?: unknown };
-    };
-    const laneId = marker.selection?.laneId,
-      projectId = marker.selection?.projectId;
-    return typeof laneId === 'string' && uuid.test(laneId) && typeof projectId === 'string'
-      ? { laneId, projectId, url: typeof marker.url === 'string' ? marker.url : '' }
-      : null;
-  } catch {
-    return null;
-  }
-}
 /** Newest change and allocated bytes; symlinks (node_modules) are never followed. */
 function scanTree(paths: string[], snapshots: string | null) {
   let newest = 0,
@@ -151,7 +136,11 @@ export function adoptLaneCheckouts(directory: string, now = Date.now(), write = 
       try {
         lanes = readdirSync(join(path, 'lanes'));
       } catch {}
-      for (const lane of lanes) if (uuid.test(lane)) adopt(join(path, 'lanes', lane));
+      for (const lane of lanes) {
+        if (!isLaneDirectoryName(lane)) continue;
+        const copy = join(path, 'lanes', lane);
+        if (exists(copy)?.isDirectory()) adopt(copy);
+      }
     } else if (stat?.isDirectory()) adopt(path);
   }
   return { adopted, links, found };
@@ -337,9 +326,7 @@ export async function laneHousekeeping(input: {
     if (
       deleted &&
       (root !== resolve(entry.root) ||
-        !uuid.test(basename(root)) ||
-        basename(dirname(root)) !== 'lanes' ||
-        !basename(dirname(dirname(root))).endsWith('.forge-client') ||
+        !isNestedLaneCopy(root) ||
         exists(clientCacheRoot(root))?.isSymbolicLink())
     ) {
       result.kept.push({ laneId: entry.laneId, reason: 'outside the Lane checkout cache' });

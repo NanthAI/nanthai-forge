@@ -40,7 +40,7 @@ import { transitionHostedLane } from './hosted-lifecycle-client.js';
 import { lifecycleApplied, recordLifecycleApplied } from './hosted-replay-holds.js';
 import { hostedLifecycleRequestSchema, type HostedLifecycleResult } from './hosted-lifecycle.js';
 import { randomUUID } from 'node:crypto';
-import { sep } from 'node:path';
+import { isNestedLaneCopy } from './hosted-lane-directory.js';
 import {
   hostedCheckRequestSchema,
   hostedCheckTerminal,
@@ -586,7 +586,12 @@ export async function executeHostedAgent(
         ...(session.capabilities.needsFix !== undefined ? { noticeVersion: 1 } : {}),
         ...(session.capabilities.openLanesVersion === 1
           ? {
-              openLanesVersion: session.capabilities.features?.includes('start-open-lanes-resolves') ? 2 : 1,
+              openLanesVersion:
+                command.intentId && session.capabilities.features?.includes('start-lane-title')
+                  ? 3
+                  : session.capabilities.features?.includes('start-open-lanes-resolves')
+                    ? 2
+                    : 1,
             }
           : {}),
         // The project's learned preflight guard set comes back only when it changed (13ea93bf).
@@ -654,10 +659,10 @@ export async function executeHostedAgent(
     // A handover gives the Lane away; it never opens or rewrites the recipient's local directory.
     if ('handedOff' in holder) return holder.handedOff;
     const { checkoutCommand, prepared } = holder;
+    const registered = readLaneEntry(command.laneId);
     if (
       !session.holderSessionId &&
-      (session.journal.get('open-result') !== undefined ||
-        readLaneEntry(command.laneId)?.root.endsWith(`.forge-client${sep}lanes${sep}${command.laneId}`))
+      (session.journal.get('open-result') !== undefined || (registered && isNestedLaneCopy(registered.root)))
     )
       await session.query('projectHostedLanes:select', { laneId: command.laneId });
     return session.journal

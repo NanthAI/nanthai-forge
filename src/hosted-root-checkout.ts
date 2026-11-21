@@ -12,6 +12,8 @@ import { readAgentJson } from './hosted-agent-journal.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { touchNestedLane } from './client-cache-gc.js';
 import { invariant } from './errors.js';
+import { markerIdentity, namedLanePath, nestedLaneParent } from './hosted-lane-directory.js';
+import { readLaneEntry } from './lane-registry.js';
 import type { z } from 'zod';
 import type { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
@@ -20,8 +22,18 @@ import { parseHostedResponse } from './hosted-response.js';
 /** Main stays at ROOT; each editing directory and its receipt/lock lives beside it.
  * Single-Lane roots retain their original directory for that Lane. */
 export function hostedRootLanePath(root: string, address: HostedAgentAddress): boolean;
-export function hostedRootLanePath(root: string, address: HostedAgentAddress, laneId: string): string;
-export function hostedRootLanePath(root: string, address: HostedAgentAddress, laneId?: string) {
+export function hostedRootLanePath(
+  root: string,
+  address: HostedAgentAddress,
+  laneId: string,
+  title?: string,
+): string;
+export function hostedRootLanePath(
+  root: string,
+  address: HostedAgentAddress,
+  laneId?: string,
+  title?: string,
+) {
   const bytes = readSource(root, '.forge/hosted-main.json', Number.MAX_SAFE_INTEGER);
   const main = bytes ? hostedMainSchema.parse(JSON.parse(bytes.toString()).selection) : null;
   const lane = main ? null : readHostedLaneCheckout(root);
@@ -42,18 +54,34 @@ export function hostedRootLanePath(root: string, address: HostedAgentAddress, la
       'Select this checkout’s hosted project.',
     );
   if (!laneId) return Boolean(main || lane);
-  if (main) return join(clientCacheRoot(root), 'lanes', laneId);
-  if (lane && lane.selection.laneId !== laneId) return laneSiblingPath(root, laneId);
-  return root;
+  if (!main && (!lane || lane.selection.laneId === laneId)) return root;
+  const parent = main ? join(clientCacheRoot(root), 'lanes') : dirname(canonicalRoot(root));
+  const matchesMarker = (path: string) => {
+    const identity = markerIdentity(path);
+    return (
+      identity?.laneId === laneId && identity.url === address.url && identity.projectId === address.projectId
+    );
+  };
+  const existing = readLaneEntry(laneId);
+  if (
+    existing?.url === address.url &&
+    existing.projectId === address.projectId &&
+    dirname(existing.root) === parent
+  )
+    if (!checkoutPathExists(existing.root) || matchesMarker(existing.root)) return existing.root;
+  const legacy = main ? join(parent, laneId) : laneSiblingPath(root, laneId);
+  if (title === undefined || (checkoutPathExists(legacy) && matchesMarker(legacy))) return legacy;
+  return namedLanePath(parent, title, laneId, true);
 }
 /** A Lane opened, started or resolved from another Lane's checkout is its sibling, never
  * nested in that checkout's own client directory (friction d184519f): beside it in the
- * clone's ROOT0.forge-client/lanes/ when it lives there; otherwise (a Lane folder at a
- * chosen path) a visible sibling folder `<folder>-<first 8 of laneId>`. */
-export function laneSiblingPath(root: string, laneId: string) {
+ * clone's ROOT0.forge-client/lanes/ when it lives there; otherwise beside a Lane folder
+ * at a chosen path. Legacy placements keep their original form. */
+export function laneSiblingPath(root: string, laneId: string, title?: string) {
   const own = canonicalRoot(root),
     parent = dirname(own);
-  return basename(parent) === 'lanes' && basename(dirname(parent)).endsWith('.forge-client')
+  if (title !== undefined) return namedLanePath(parent, title, laneId, false);
+  return nestedLaneParent(parent)
     ? join(parent, laneId)
     : join(parent, `${basename(own)}-${laneId.slice(0, 8)}`);
 }

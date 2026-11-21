@@ -42,7 +42,7 @@ const args = {
   ),
   agentClient: v.optional(v.string()),
   noticeVersion: v.optional(v.literal(1)),
-  openLanesVersion: v.optional(v.union(v.literal(1), v.literal(2))),
+  openLanesVersion: v.optional(v.union(v.literal(1), v.literal(2), v.literal(3))),
   /** The guard-set revision the caller holds (feature preflight-guard-set, 13ea93bf). */
   guardRevision: v.optional(v.string()),
   /** The calling agent session's slug (feature agent-slug, c29d0780); not part of the payload. */
@@ -76,7 +76,7 @@ type Input = {
   authorship?: AuthorshipClaim;
   agentClient?: string;
   noticeVersion?: 1;
-  openLanesVersion?: 1 | 2;
+  openLanesVersion?: 1 | 2 | 3;
   guardRevision?: string;
   agent?: string;
   authorityEpoch: number;
@@ -93,15 +93,22 @@ type Input = {
 function startReply(
   value: unknown,
   noticeVersion?: 1,
-  openLanesVersion?: 1 | 2,
+  openLanesVersion?: 1 | 2 | 3,
   guardSet?: GuardCandidates | null,
+  laneTitle?: string,
 ) {
   const { openLanes, ...parsed } = hostedStartResultSchema.parse(value);
   // Reply-only: never part of the stored result a replayed start returns.
-  const result = guardSet ? { ...parsed, guardSet } : parsed;
+  const result = {
+    ...parsed,
+    ...(guardSet ? { guardSet } : {}),
+    ...(openLanesVersion === 3 && laneTitle ? { laneTitle } : {}),
+  };
   // Older strict clients reject unknown reply fields: each one is sent only when the client asked.
   const listed =
-    openLanesVersion === 2 ? openLanes : openLanes?.map(({ resolves: _resolves, ...lane }) => lane);
+    openLanesVersion === 2 || openLanesVersion === 3
+      ? openLanes
+      : openLanes?.map(({ resolves: _resolves, ...lane }) => lane);
   const current = openLanesVersion && listed ? { ...result, openLanes: listed } : result;
   if (noticeVersion === 1) return current;
   const { fixBrief: brief, needsFix: notices, ...legacy } = current;
@@ -257,7 +264,9 @@ async function execute(
       'WORK_OPERATION_CHANGED',
       'The original operation did not complete.',
     );
-    return canonicalPayload(startReply(terminal.result, noticeVersion, openLanesVersion, guardSet));
+    return canonicalPayload(
+      startReply(terminal.result, noticeVersion, openLanesVersion, guardSet, overlapIntent),
+    );
   }
   const main = await hostedStartMain(ctx, projectId);
   invariant(
@@ -451,7 +460,7 @@ async function execute(
       actor,
       startOperationId: operationId,
     });
-  return canonicalPayload(startReply(result, noticeVersion, openLanesVersion, guardSet));
+  return canonicalPayload(startReply(result, noticeVersion, openLanesVersion, guardSet, overlapIntent));
 }
 
 export const start = receiptMutation({

@@ -478,7 +478,12 @@ async function runAgentCli(
           if (held?.command) command = held.command;
         }
         if (discoversCapabilitiesFirst(hostedAgentRoot(here), action, command))
-          startEarlyCapabilities(hostedAgentRoot(here), hosted, bareStatus(action, command));
+          startEarlyCapabilities(
+            hostedAgentRoot(here),
+            hosted,
+            bareStatus(action, command),
+            action === 'start' && typeof command.intentId === 'string',
+          );
         if (!(await options.beforeDispatch(stdin === undefined ? undefined : { stdin }))) return;
       }
       const [{ hostedAgentCli }, { hostedLandCli }, { HostedAgentTransport }] = await modules;

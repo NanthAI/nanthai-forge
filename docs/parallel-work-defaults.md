@@ -77,14 +77,13 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   checkouts in DIRECTORY and in its `*.forge-client/lanes/`; a dry scan only reads them. With `--apply` it also removes links
   in DIRECTORY whose target was a `*.forge-client/lanes/` copy that no longer exists. An explicit
   prune with `autoPruneHours` set to 0 uses 3 hours.
-- One root per Lane: `open` at a new path moves the copy `start` made in
-  `ROOT.forge-client/lanes/LANE_ID` there instead of downloading a second tree. It reports
+- One root per Lane: `open` at a new path moves the copy `start` made under
+  `ROOT.forge-client/lanes/` there instead of downloading a second tree. It reports
   `movedFrom`. A copy whose client lock is held, or one on another volume, is left alone.
 
 ### clientCacheMaxGB and clientCacheMaxAgeHours
 
-- Other Lanes materialized by a call (conflict checkouts, `with:` inputs, overlap reads) land in
-  `ROOT.forge-client/lanes/LANE_ID`. Each use refreshes usage/size bookkeeping at `LANE_ID.forge-client/cache-use.json`, beside
+- Nested Lane copies live under `ROOT.forge-client/lanes/`. Each use refreshes usage/size bookkeeping at `FOLDER.forge-client/cache-use.json`, beside
   the copy. Touch, inventory and eviction share this location; checkout replacement leaves it intact.
   Earlier `.forge/cache-use.json` records are read as known bookkeeping and preserved beside the
   copy before replacement. Unknown metadata is preserved and prevents eviction or replacement.

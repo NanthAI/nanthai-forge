@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { canonicalRoot, clientCacheRoot, rootSibling } from './root-paths.js';
 import { lstatSync, readlinkSync, renameSync, rmSync } from 'node:fs';
-import { join, sep } from 'node:path';
+import { join } from 'node:path';
 import { readLaneEntry } from './lane-registry.js';
-import { markerIdentity } from './lane-prune.js';
+import { isNestedLaneCopy, markerIdentity } from './hosted-lane-directory.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 
-/** `start` from a checkout ROOT opens the new Lane in ROOT.forge-client/lanes/<id>. A later `open`
+/** `start` from a clone opens the new Lane in ROOT.forge-client/lanes. A later `open`
  * at another path moves that copy there instead of downloading a second tree, so a Lane has one
  * root per machine. Returns the old path when it moved; null leaves the caller's normal checkout.
  * Never moves a copy in use (its client lock is held) or one on another volume. */
@@ -20,9 +20,10 @@ export function adoptNestedLaneCopy(
   const entry = readLaneEntry(laneId);
   if (!entry || entry.url !== address.url || entry.projectId !== address.projectId) return null;
   const copy = canonicalRoot(entry.root);
-  if (copy === root || !copy.endsWith(`.forge-client${sep}lanes${sep}${laneId}`)) return null;
+  if (copy === root || !isNestedLaneCopy(copy)) return null;
   const identity = markerIdentity(copy);
-  if (identity?.laneId !== laneId || identity.projectId !== address.projectId) return null;
+  if (identity?.laneId !== laneId || identity.projectId !== address.projectId || identity.url !== address.url)
+    return null;
   if (checkoutPathExists(join(clientCacheRoot(copy), `lock`))) return null;
   // `start` linked shared dependencies into the copy; `open` links them again at the new root.
   const modules = join(copy, 'node_modules');

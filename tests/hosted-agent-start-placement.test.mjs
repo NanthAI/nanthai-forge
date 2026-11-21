@@ -2,7 +2,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getFunctionName } from 'convex/server';
@@ -12,6 +20,7 @@ import { readLaneEntry, recordLane } from '../dist/lane-registry.js';
 import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
 import { submitHostedLand } from '../dist/hosted-land-cli.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
+import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 
 const downloads = calls => calls.filter(call => call.name.startsWith('projectObjectDownloads')).length;
 function stateHome(t) {
@@ -141,6 +150,119 @@ test('start open:false returns pins only, with no checkout download', async t =>
   await assert.rejects(transport.dispatch('start', { outcome: 'Bad', open: 'no' }), { code: 'BAD_ARGUMENT' });
 });
 
+test('clone defaults keep full Lane identity and recover the same path after folded titles collide', async t => {
+  stateHome(t);
+  const s = agentFixture(t);
+  signedDownloads(t, s);
+  mkdirSync(join(s.root, '.forge'), { recursive: true });
+  writeFileSync(join(s.root, '.forge', 'hosted-main.json'), JSON.stringify({ selection: s.main }));
+  const parent = `${realpathSync(s.root)}.forge-client/lanes`;
+  const command = { outcome: '../ Révise tax rules!', operationId: randomUUID() };
+  const firstId = '01234567-0000-4000-8000-000000000001';
+  s.lane.laneId = firstId;
+  const start = await s.transport().dispatch('start', command);
+  const first = join(parent, 'revise-tax-rules-01234567');
+  assert.equal(start.result.path, first);
+  assert.equal(start.result.lane.laneId, firstId);
+  assert.equal(readHostedLaneCheckout(first).selection.laneId, firstId);
+
+  const second = { outcome: 'Revise tax rules', operationId: randomUUID() };
+  s.lane.laneId = '89abcdef-0000-4000-8000-000000000002';
+  const sibling = await s.transport().dispatch('start', second);
+  assert.equal(sibling.result.path, join(parent, 'revise-tax-rules-89abcdef'));
+  // Two different ids with the same prefix must never share a checkout or its journal.
+  s.lane.laneId = '01234567-0000-4000-8000-000000000003';
+  const collision = await s.transport().dispatch('start', { ...second, operationId: randomUUID() });
+  assert.equal(collision.result.path, join(parent, s.lane.laneId));
+  assert.equal(readHostedLaneCheckout(first).selection.laneId, firstId);
+
+  s.lane.laneId = firstId;
+  const open = { laneId: firstId, operationId: randomUUID() };
+  assert.equal((await s.transport().dispatch('open', open)).result.root, first);
+  rmSync(first, { recursive: true });
+  // Explicit operation ids name their receipts. The ordinary recovery opens the same folder.
+  assert.equal((await s.transport().dispatch('open', { laneId: firstId })).result.root, first);
+  assert.equal(readHostedLaneCheckout(first).selection.laneId, firstId);
+  rmSync(first, { recursive: true });
+  assert.equal((await s.transport().dispatch('start', command)).result.path, first);
+  assert.equal(readHostedLaneCheckout(first).selection.laneId, firstId);
+  assert(!existsSync(join(parent, firstId)));
+});
+
+test('start and open leave an existing UUID checkout at its original path', async t => {
+  stateHome(t);
+  const s = agentFixture(t);
+  signedDownloads(t, s);
+  mkdirSync(join(s.root, '.forge'), { recursive: true });
+  writeFileSync(join(s.root, '.forge', 'hosted-main.json'), JSON.stringify({ selection: s.main }));
+  const path = join(`${realpathSync(s.root)}.forge-client`, 'lanes', s.lane.laneId);
+  await s.transport().dispatch('start', { outcome: 'An earlier build', path });
+  const original = readFileSync(join(path, 'lane-edit.txt'), 'utf8');
+  assert.equal((await s.transport().dispatch('start', { outcome: 'An earlier build' })).result.path, path);
+  const reopened = await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  assert.equal(reopened.result.root, path);
+  assert.equal(readFileSync(join(path, 'lane-edit.txt'), 'utf8'), original);
+});
+
+test('parallel starts with the same title and id prefix claim different checkout roots', async t => {
+  stateHome(t);
+  const s = agentFixture(t);
+  signedDownloads(t, s);
+  mkdirSync(join(s.root, '.forge'), { recursive: true });
+  writeFileSync(join(s.root, '.forge', 'hosted-main.json'), JSON.stringify({ selection: s.main }));
+  const ids = ['1234abcd-0000-4000-8000-000000000001', '1234abcd-0000-4000-8000-000000000002'];
+  const operations = new Map(ids.map(id => [randomUUID(), id]));
+  const mutation = s.exchange.client.mutation,
+    query = s.exchange.client.query;
+  s.exchange.client.mutation = (ref, args) => {
+    if (getFunctionName(ref) !== 'projectHostedStart:start') return mutation(ref, args);
+    return {
+      schema: 1,
+      operationId: args.operationId,
+      intentId: s.lane.intentId,
+      lane: { ...s.lane, laneId: operations.get(args.operationId) },
+      at: '2026-01-01T00:00:00.000Z',
+    };
+  };
+  s.exchange.client.query = (ref, args) =>
+    getFunctionName(ref) === 'projectHostedLanes:select'
+      ? { ...s.lane, laneId: args.laneId }
+      : query(ref, args);
+  const replies = await Promise.all(
+    [...operations.keys()].map(operationId =>
+      s.transport().dispatch('start', { outcome: 'Concurrent update', operationId }),
+    ),
+  );
+  const paths = replies.map(reply => reply.result.path);
+  assert.equal(new Set(paths).size, 2);
+  assert.equal(paths.filter(path => path.endsWith('concurrent-update-1234abcd')).length, 1);
+  assert.deepEqual(
+    paths.map(path => readHostedLaneCheckout(path).selection.laneId),
+    ids,
+  );
+});
+
+test('a new titled sibling leaves an unrelated legacy short folder alone', async t => {
+  stateHome(t);
+  const s = agentFixture(t);
+  signedDownloads(t, s);
+  const path = join(s.root, '..', 'working');
+  const first = await s.transport().dispatch('start', { outcome: 'First Lane', path });
+  s.lane.laneId = 'c0ffee12-0000-4000-8000-000000000001';
+  const occupied = `${first.result.path}-c0ffee12`;
+  mkdirSync(occupied);
+  writeFileSync(join(occupied, 'keep.txt'), 'unrelated');
+  const response = await new HostedAgentTransport(first.result.path, s.address, s.exchange).dispatch(
+    'start',
+    {
+      outcome: 'Read tax rules',
+      model: 'unknown',
+    },
+  );
+  assert.equal(response.result.path, join(first.result.path, '..', 'read-tax-rules-c0ffee12'));
+  assert.equal(readFileSync(join(occupied, 'keep.txt'), 'utf8'), 'unrelated');
+});
+
 test('version skew names the upgrade step instead of a bare unsupported action', async t => {
   const s = agentFixture(t);
   await assert.rejects(s.transport().dispatch('teleport', { secret: 'private-value' }), error => {
@@ -217,7 +339,7 @@ test('start from inside a Lane root places the new Lane beside it, never nested 
   });
   // hostedRootLanePath(Lane root) is true, so the start opens a sibling even when the root is a Lane.
   const response = await inside.dispatch('start', { outcome: 'Second Lane' });
-  const sibling = join(realpathSync(clone), s.lane.laneId);
+  const sibling = join(realpathSync(clone), `second-lane-${s.lane.laneId.slice(0, 8)}`);
   assert.equal(response.result.path, sibling);
   assert(!existsSync(join(first + '.forge-client', 'lanes', s.lane.laneId)), 'not nested');
   assert(existsSync(join(sibling, '.forge', 'hosted-lane.json')));

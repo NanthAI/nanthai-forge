@@ -102,11 +102,11 @@ CHECK_NOT_PASSED: acceptance needs a passed check for this exact head; land --sa
   },
   lanes: {
     title: 'Lanes',
-    text: `start '{"planningItemId":"ISSUE_ID","operationId":"UUID","model":"unknown"}' returns your Lane path; edit there.
+    text: `start {planningItemId} gives the full Lane id and path. New default folders use <title-slug>-<first 8 of id>. Existing folders and start retries keep their paths. Pass path to choose a folder.
 - lanes {planningItemId?,intentId?,state?,limit?,cursor?,view?} lists open Lanes with Intent, actor, last save and landing. Filter by Issue (current Intent) or exact Intent. With planningItemId, state "all" includes landed Lanes and receipts. Views: "live" hides dormant Lanes, "dormant" lists them, "tree" shows stacks, overlaps, state and next step. Follow continueCursor. For "loose-ends", pass groups.stopped.continueCursor as cursor with the same view.
 - x abandon-dormant {apply?,limit?} dry-runs, or with apply:true abandons at most 25 abandonable dormant Lanes per call.
 - lane-history {laneId?} reads one Lane's history: openedAt, startBase, lastSyncedBase, state, head and landing {receiptId,commit,current,revertedBy?,mainRedHolds?}.
-- flow {} draws the project as text from the top bar's one line feed read: one line per stop (open, held Lanes by id, longest wait, checks), main today, the ways back, CI minutes and the next step. Same counts as the top bar.
+- flow {} shows the top bar's stops, Lane counts, longest wait, main today and CI minutes in one read.
 - LANE_DIRTY: unsaved edits; save '{}' first. LANE_NOT_ACTIVE: the Lane landed or was abandoned; keep your edits and start a new Lane.
 - x abandon {laneId,reason} closes a Lane without deleting anything; keepPatch:true keeps unsaved edits as a patch.`,
   },

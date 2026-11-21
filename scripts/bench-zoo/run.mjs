@@ -300,9 +300,9 @@ export async function runRepo(cfg, repo, state, runDir, io) {
   for (const name of ['a', 'b', 'c', 'd']) {
     const res = await nf(clone, 'start', { outcome: `zoo ${name}: probe edit`, operationId: randomUUID() });
     const lane = res.json?.result;
-    if (!lane?.path)
+    if (!lane?.path || !lane.lane?.laneId)
       return (refuse(`start ${name}`, errorCode(res.json) ?? `exit ${res.code}`, res.stderr), r);
-    lanes[name] = { id: lane.lane?.laneId ?? basename(lane.path), path: lane.path };
+    lanes[name] = { id: lane.lane.laneId, path: lane.path };
     if (name === 'a') step('start', 'forge', { ok: true, seconds: res.seconds });
   }
   tag(lanes.a.path, probe.first, 'a');
@@ -590,9 +590,9 @@ export function resolutionFolder(res, lanePath, file) {
     try {
       const text = readFileSync(join(p, file), 'utf8');
       if (/^<{7}/m.test(text)) {
-        const laneId =
-          findAll(res.json, 'laneId').find(id => typeof id === 'string' && p.includes(id)) ?? basename(p);
-        return { path: p, laneId };
+        const laneId = JSON.parse(readFileSync(join(p, '.forge', 'hosted-lane.json'), 'utf8')).selection
+          ?.laneId;
+        if (typeof laneId === 'string') return { path: p, laneId };
       }
     } catch {}
   }

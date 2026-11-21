@@ -941,7 +941,11 @@ export class HostedAgentTransport {
       let discovery: unknown;
       let guardAsked = false;
       try {
-        let options = capabilityOptions(this.root, bareStatus(action, input));
+        let options = capabilityOptions(
+          this.root,
+          bareStatus(action, input),
+          action === 'start' && typeof input.intentId === 'string',
+        );
         // The project's learned preflight guard set (13ea93bf) rides on this read for the commands
         // that preflight a checkout a start may not have reached on this machine; fresh copies skip it.
         const guardRevision = guardAsking.has(action)
@@ -1611,22 +1615,38 @@ export class HostedAgentTransport {
             typeof placement.installScripts === 'boolean'
               ? { ...(command.data as object), installScripts: placement.installScripts }
               : command.data;
-          const started = parseHostedResponse(hostedStartResultSchema, result);
-          const into =
-            placement.open === false || !started.lane
-              ? null
-              : typeof placement.path === 'string'
-                ? resolve(placement.path)
-                : hostedRootLanePath(root, this.address)
-                  ? hostedRootLanePath(root, this.address, started.lane.laneId)
-                  : null;
+          const { laneTitle, ...started } = parseHostedResponse(hostedStartResultSchema, result);
+          const explicit = typeof placement.path === 'string' ? resolve(placement.path) : null;
+          const local = Boolean(
+            started.lane && placement.open !== false && hostedRootLanePath(root, this.address),
+          );
+          const pinned =
+            started.lane && placement.open !== false
+              ? journal.retainLocal('start-path', () => {
+                  const laneId = started.lane!.laneId;
+                  // Replays from older clients already pinned a checkout at the legacy default.
+                  const title = journal.get('id:checkout')
+                    ? undefined
+                    : (journal.get<{ outcome?: string }>('start-planned-intent')?.outcome ??
+                      laneTitle ??
+                      (command.data as { outcome?: string }).outcome ??
+                      'lane');
+                  return (
+                    explicit ??
+                    (local
+                      ? hostedRootLanePath(root, this.address, laneId, title)
+                      : laneSiblingPath(root, laneId, title))
+                  );
+                })
+              : null;
+          const into = pinned && (explicit || local) ? (explicit ?? pinned) : null;
           if (started.lane) {
             // Later identical starts replay this Lane only while it is open (closedStart).
             await journal.retain('started-lane', () => started.lane!.laneId);
             // Report the Lane before its checkout downloads, so a slow or interrupted open never hides it.
             recordLane({
               laneId: started.lane.laneId,
-              root: into ?? root,
+              root: into ?? readLaneEntry(started.lane.laneId)?.root ?? root,
               url: this.address.url,
               projectId: this.address.projectId,
               // This run started it: only this run's start lists it as its own idle Lane (d730121f).
@@ -1648,7 +1668,7 @@ export class HostedAgentTransport {
                 this.root,
                 startData,
                 journal.operationId,
-                laneSiblingPath(root, started.lane.laneId),
+                pinned!,
                 'no-placement',
               ),
             };

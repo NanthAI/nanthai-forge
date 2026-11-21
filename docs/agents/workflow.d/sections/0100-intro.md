@@ -20,6 +20,12 @@ self-contained `skills/forge-agent/SKILL.md` for recorded Work or graph context;
 install it in your agent's skill directory. Ordinary file questions need no
 workflow guidance.
 
+New default folders made by `start` use `<title-slug>-<first 8 of Lane id>`.
+From a clone they live in `ROOT.forge-client/lanes/`. From a Lane they open beside
+it. The receipt gives the full Lane id and folder path. Existing folders and retries
+keep their paths. Pass `path` to choose a folder. When a shortened name is occupied,
+the folder uses the full id. If no title is available, the slug is `lane`.
+
 Landing documentation calls the accepted destination Channel `main`; a receipt's target Channel refers to that same destination, including when the project names it differently.
 
 A hosted finish replays the outcome for the same `operationId`. After a terminal

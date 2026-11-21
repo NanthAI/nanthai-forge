@@ -417,6 +417,10 @@ test('a sibling start lists the other open Lanes newest first with public handle
   const sibling = s.input({ kind: 'existing', intentId: first.intentId });
   const legacy = await s.begin(sibling);
   assert.equal(legacy.openLanes, undefined, 'older strict clients never see the new field');
+  const named = await s.begin({ ...sibling, openLanesVersion: 3 });
+  assert.equal(named.laneTitle, intent.outcome);
+  assert.equal(named.lane.laneId, legacy.lane.laneId, 'requesting a title replays the original Lane');
+  assert.equal((await s.begin(sibling)).laneTitle, undefined, 'older strict clients never see the title');
   const asked = { ...s.input({ kind: 'existing', intentId: first.intentId }), openLanesVersion: 1 };
   const second = await s.begin(asked);
   assert.deepEqual(

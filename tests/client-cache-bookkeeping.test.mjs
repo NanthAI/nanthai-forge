@@ -67,6 +67,35 @@ test('touch ignores ordinary roots and malformed nested Lane names', t => {
   }
 });
 
+test('named checkout eviction uses the exact marker id after a Lane takes over the folder', t => {
+  const directory = fixture(t);
+  const root = join(directory, 'project');
+  const path = join(`${root}.forge-client`, 'lanes', 'earlier-lane-12345678');
+  const laneId = randomUUID();
+  fs.mkdirSync(join(path, '.forge'), { recursive: true });
+  fs.writeFileSync(
+    join(path, '.forge', 'hosted-lane.json'),
+    JSON.stringify({ selection: { laneId, projectId: 'project' } }),
+  );
+  fs.utimesSync(path, old / 1000, old / 1000);
+  touchNestedLane(path, old);
+  assert(readCacheUse(path));
+  const keep = gcNestedLanes({ root, settings, keepLaneIds: [laneId], isDirty: () => false });
+  assert.deepEqual(keep.kept, [{ laneId, reason: 'the caller’s Lane' }]);
+  assert(fs.existsSync(path));
+  const remove = gcNestedLanes({
+    root,
+    settings,
+    isDirty: () => false,
+    processes: () => ({ paths: [], unknown: false }),
+  });
+  assert.deepEqual(
+    remove.evicted.map(entry => entry.laneId),
+    [laneId],
+  );
+  assert(!fs.existsSync(path));
+});
+
 for (const kind of ['valid', 'empty', 'unknown field', 'invalid bytes', 'symlink', 'directory'])
   test(`legacy bookkeeping ${kind} is preserved without ignoring unknown metadata`, t => {
     const directory = fixture(t),

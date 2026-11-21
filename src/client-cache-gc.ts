@@ -5,11 +5,17 @@ import { dirname, join, resolve } from 'node:path';
 import { readClientSettings, type ClientSettings } from './client-settings.js';
 import { hostedLaneDirty } from './hosted-lane-dirty.js';
 import { listLanes } from './lane-registry.js';
-import { isNestedLaneCopy, readCacheUse, writeCacheUse, unknownCacheMetadata } from './client-cache-use.js';
+import { readCacheUse, writeCacheUse, unknownCacheMetadata } from './client-cache-use.js';
+import {
+  isLaneDirectoryName,
+  isNestedLaneCopy,
+  legacyLaneDirectoryId,
+  markerIdentity,
+} from './hosted-lane-directory.js';
 import { processBlocker, workingProcesses } from './clean-processes.js';
 import { logLanePrune } from './lane-prune-log.js';
+import { hostedLaneMarkerName } from './forge-cache-paths.js';
 
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const hour = 3_600_000;
 /** A copy touched this recently counts as in use by a running operation. */
 const GRACE_MS = 10 * 60_000;
@@ -79,7 +85,7 @@ export function gcNestedLanes(input: {
   const directory = join(clientCacheRoot(input.root), 'lanes');
   let names: string[];
   try {
-    names = readdirSync(directory).filter(name => uuid.test(name));
+    names = readdirSync(directory).filter(isLaneDirectoryName);
   } catch {
     return result;
   }
@@ -110,12 +116,16 @@ export function gcNestedLanes(input: {
       .map(entry => `${entry.laneId}\u0000${canonicalRoot(entry.root)}`),
   );
   const keep = new Set(input.keepLaneIds ?? []);
-  const copies = names.map(laneId => {
-    const copy = join(directory, laneId);
+  const copies = names.flatMap(name => {
+    const copy = join(directory, name);
+    const stat = exists(copy);
+    if (!stat?.isDirectory()) return [];
+    const legacyId = legacyLaneDirectoryId(name);
+    if (!legacyId && !exists(join(copy, '.forge', hostedLaneMarkerName))?.isFile()) return [];
     const usage = readCacheUse(copy);
-    const used = Math.max(usage?.used ?? 0, registry.get(copy) ?? 0, exists(copy)?.mtimeMs ?? 0);
+    const used = Math.max(usage?.used ?? 0, registry.get(copy) ?? 0, stat.mtimeMs);
     const bytes = usage?.bytes;
-    return { laneId, copy, used, bytes };
+    return [{ legacyId, copy, used, bytes }];
   });
   copies.sort((a, b) => a.used - b.used);
   for (const item of copies) {
@@ -140,15 +150,18 @@ export function gcNestedLanes(input: {
     const tooOld = maxAgeMs > 0 && now - item.used >= maxAgeMs,
       tooBig = maxBytes > 0 && total > maxBytes;
     if (!tooOld && !tooBig) continue;
-    const reason = keep.has(item.laneId)
+    // Named folders use the full marker id, including after an in-place resolution.
+    const laneId = item.legacyId ?? markerIdentity(item.copy)?.laneId;
+    if (!laneId) continue;
+    const reason = keep.has(laneId)
       ? 'the caller’s Lane'
-      : pinned.has(item.laneId)
+      : pinned.has(laneId)
         ? 'pinned'
         : lockHeld(item.copy) || now - item.used < GRACE_MS
           ? 'in use'
           : linked.has(item.copy)
             ? 'linked from a sibling directory'
-            : open.has(`${item.laneId}\u0000${item.copy}`)
+            : open.has(`${laneId}\u0000${item.copy}`)
               ? 'open Lane checkout'
               : (processBlocker(item.copy, (processes ??= (input.processes ?? workingProcesses)())) ??
                 (unknownCacheMetadata(item.copy)
@@ -157,12 +170,12 @@ export function gcNestedLanes(input: {
                     ? 'unsaved edits'
                     : null));
     if (reason) {
-      result.kept.push({ laneId: item.laneId, reason });
+      result.kept.push({ laneId, reason });
       continue;
     }
     logLanePrune(
       {
-        laneId: item.laneId,
+        laneId,
         root: item.copy,
         state: 'cache',
         reason: tooOld ? 'Unused Lane cache exceeded age limit' : 'Unused Lane cache exceeded size cap',
@@ -178,7 +191,7 @@ export function gcNestedLanes(input: {
     ])
       rmSync(path, { recursive: true, force: true });
     total -= item.bytes ?? 0;
-    result.evicted.push({ laneId: item.laneId, bytes: item.bytes ?? 0 });
+    result.evicted.push({ laneId, bytes: item.bytes ?? 0 });
   }
   result.totalBytes = total;
   return result;

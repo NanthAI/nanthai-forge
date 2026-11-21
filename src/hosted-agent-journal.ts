@@ -167,9 +167,14 @@ export class HostedAgentJournal {
     const previous = this.get<T>(key);
     if (previous !== undefined) return previous;
     const value = await prepare();
+    return this.retainLocal(key, () => value);
+  }
+  /** Serialize local preparation as well as the pin when preparation claims a checkout path. */
+  retainLocal<T>(key: string, prepare: () => T): T {
     return workLocked(this.lock, () => {
       const current = this.read();
       if (Object.hasOwn(current.values, key)) return current.values[key] as T;
+      const value = prepare();
       current.values[key] = value;
       durableReplace(this.path, canonicalPayload(current));
       return value;

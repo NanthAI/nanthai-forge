@@ -137,9 +137,14 @@ test('lastJson takes the last JSON line; resolutionFolder finds the folder holdi
   const dir = mkdtempSync(join(tmpdir(), 'zoo-'));
   try {
     const lane = join(dir, 'lane'),
-      res = join(dir, '3f2b0c1e-0000-4000-8000-000000000000');
+      res = join(dir, 'resolve-tax-rules-5d4c3b2a');
     mkdirSync(join(lane, 'p'), { recursive: true });
     mkdirSync(join(res, 'p'), { recursive: true });
+    mkdirSync(join(res, '.forge'));
+    writeFileSync(
+      join(res, '.forge', 'hosted-lane.json'),
+      JSON.stringify({ selection: { laneId: '3f2b0c1e-0000-4000-8000-000000000000' } }),
+    );
     writeFileSync(join(lane, 'p/x.go'), '// a\n');
     writeFileSync(join(res, 'p/x.go'), '<<<<<<< ours\n// a\n=======\n// b\n>>>>>>> main\n');
     const found = resolutionFolder({ json: { recovery: { root: res } }, stderr: '' }, lane, 'p/x.go');

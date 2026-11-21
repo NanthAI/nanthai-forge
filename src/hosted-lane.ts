@@ -58,8 +58,8 @@ export const hostedStartSchema = z
     agentClient: authorshipFields.agentClient,
     noticeVersion: z.literal(1).optional(),
     /** The client reads openLanes in the reply (capability openLanesVersion); 2 adds each Lane's `resolves`
-     * (feature start-open-lanes-resolves). Never part of the payload hash. */
-    openLanesVersion: z.union([z.literal(1), z.literal(2)]).optional(),
+     * (feature start-open-lanes-resolves) and 3 returns a title for an Intent-id-only start. Never hashed. */
+    openLanesVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
     /** The learned guard-set revision the client caches (feature preflight-guard-set, 13ea93bf); the
      * reply carries `guardSet` only when the server's differs. Never part of the payload hash. */
     guardRevision: z.string().max(16).optional(),
@@ -171,6 +171,8 @@ export const hostedStartResultSchema = z
     intentId: z.uuid(),
     lane: hostedLaneSelectionSchema.nullable(),
     at: z.iso.datetime(),
+    /** Reply-only placement hint for starts that already read the existing Intent by id. */
+    laneTitle: intentCreateSchema.shape.outcome.optional(),
     /** Other open Lanes on the same Intent when this start ran, newest first (bounded). */
     openLanes: z
       .array(
