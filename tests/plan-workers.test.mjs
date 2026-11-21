@@ -12,9 +12,8 @@ import { meterReads } from './hosted-read-set.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const workers = await import(moduleUrl('../convex/projectPlanWorkers.ts'));
 const people = await import(moduleUrl('../convex/publicPeople.ts'));
-const { askedIntents, workersByItem, workersOf, PLAN_WORK_INTENTS } = await import(
-  moduleUrl('../web/src/app/plan/workers.ts')
-);
+const { accountableHandle, askedIntents, workersByItem, workingAgentsLabel, PLAN_WORK_INTENTS } =
+  await import(moduleUrl('../web/src/app/plan/workers.ts'));
 const { successorIntentId } = await import(moduleUrl('../src/hosted-intent-chain.ts'));
 
 const HOUR = 3_600_000;
@@ -185,11 +184,7 @@ test('Plan workers on the page: asked Items by plan order, each Lane on its Item
     [uuid(2)]: ['peer-builder'],
     [uuid(3)]: [],
   });
-  assert.deepEqual(workersOf(by, [uuid(2), uuid(1)]), [
-    'peer-builder',
-    'synthetic-owner/ocean-moth',
-    'synthetic-owner/amber-fox',
-  ]);
+  assert.equal(workingAgentsLabel(by, [uuid(2), uuid(1)], 4, false, 4), '2 agents');
   // Past the cap an in-progress Item is not asked about, and the page says nothing for it rather than "no one yet".
   const many = Array.from({ length: 70 }, (_, n) => ({
     id: uuid(100 + n),
@@ -203,4 +198,42 @@ test('Plan workers on the page: asked Items by plan order, each Lane on its Item
   const placed = workersByItem([], many, capped);
   assert.equal(placed.get(uuid(100))?.length, 0, 'asked and nobody: "no one yet"');
   assert.equal(placed.has(uuid(169)), false, 'not asked: nothing said');
+});
+
+test('Initiative accountability names the creator’s public account, including when an agent created it', () => {
+  assert.equal(accountableHandle('release-lead/amber-fox'), 'release-lead');
+  assert.equal(accountableHandle('release-lead'), 'release-lead');
+  assert.equal(accountableHandle('user_2AbCdEf/amber-fox'), undefined);
+  assert.equal(accountableHandle(undefined), undefined);
+});
+
+test('Initiative working label counts distinct agents on its Items and marks incomplete evidence', () => {
+  const workers = new Map([
+    ['one', ['release-lead/amber-fox', 'release-lead']],
+    ['two', ['release-lead/amber-fox', 'peer-builder/ocean-moth']],
+    ['empty', []],
+    ['other-initiative', ['peer-builder/copper-moth']],
+  ]);
+  const words = (ids, seen, open, missingIdentity = false) =>
+    workingAgentsLabel(workers, ids, seen, missingIdentity, open);
+  assert.equal(words(['one', 'two'], 4, 4), '2 agents');
+  assert.equal(words(['one'], 2, 2), '1 agent');
+  assert.equal(words(['empty'], 0, 0), '0 agents');
+  assert.equal(words(['missing'], 0, 1), 'Not reported', 'a later Intent can have an unobserved open Lane');
+  assert.equal(
+    words(['one'], 2, 3),
+    'At least 1 agent',
+    'an open Lane on a settled Item may add another agent',
+  );
+  assert.equal(words(['one', 'two'], 4, 4, true), 'At least 2 agents', 'identity missing');
+  assert.equal(words(['one'], 2, null), 'At least 1 agent', 'partial Work page');
+});
+
+test('Plan presence keeps its existing in-progress selection, while the Initiative can include proposed Items with Lanes', () => {
+  const rows = [
+    { id: randomUUID(), kind: 'issue', status: 'proposed', inLane: true, position: 1 },
+    { id: randomUUID(), kind: 'issue', status: 'in-progress', position: 2 },
+  ];
+  assert.deepEqual(new Set(askedIntents(rows).values()), new Set([rows[1].id]));
+  assert.deepEqual(new Set(askedIntents(rows, true).values()), new Set([rows[0].id, rows[1].id]));
 });

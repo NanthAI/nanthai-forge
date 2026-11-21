@@ -12,6 +12,7 @@ const hash = 'a'.repeat(64),
 
 export async function itemWorkFixture({
   extra = 0,
+  extraOpen = 0,
   itemId = randomUUID(),
   initiativeId = randomUUID(),
   details = false,
@@ -67,6 +68,7 @@ export async function itemWorkFixture({
       ? { authorship: { kind: 'agent' }, agentRun: 'cobalt-fox', agentClient: 'codex:gpt-6.2-sol' }
       : undefined,
   );
+  for (let i = 0; i < extraOpen; i++) await lane('active');
   // A landing since 3a733ee8 writes a note per Intent; an older one left only the overlap row's stamp.
   const noteReceipt = randomUUID(),
     stampReceipt = randomUUID();

@@ -40,6 +40,13 @@ a cohort lands several members together. Partial counts are lower bounds while m
 pages remain or older file evidence is unavailable. Each Work page is read once on
 request.
 
+Accountable shows the public handle behind the Initiative's creation record.
+Working now links to Lanes › Who is touching what and counts distinct agents on
+the Initiative's Items from the Plan's existing recent Lane read. That snapshot
+uses open Lanes active within 48 hours. When it does not cover all open Lanes
+reported by Work, the panel shows a lower bound if some agents are known.
+The panel makes no idle calls.
+
 ## Status
 
 Stored status words never change. Screens and agent replies show the visible word:

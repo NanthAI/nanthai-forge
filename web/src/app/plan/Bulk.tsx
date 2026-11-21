@@ -17,11 +17,12 @@ import {
   type BatchWrite,
 } from '../../../../src/planning-batch';
 import { defaultItemTypes, type PlanRow } from '../../../../src/planning-model';
-import type { BatchOutcome, FullItem, ItemComment, RunBatch } from './batch';
+import type { BatchOutcome, FullItem, InitiativeDetails, ItemComment, RunBatch } from './batch';
 import type { ReadWorkers } from './workers';
 
 export type Reads = {
   items: (ids: readonly string[]) => Promise<FullItem[]>;
+  initiative: (id: string) => Promise<InitiativeDetails>;
   comments: (ids: readonly string[]) => Promise<{ comments: ItemComment[]; more: string[] }>;
   /** Open Lanes active in the last 48 hours, for the Owner column (workers.ts). */
   workers?: ReadWorkers;

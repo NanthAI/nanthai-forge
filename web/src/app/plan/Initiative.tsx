@@ -5,20 +5,20 @@
 // Reads: the backlog's own projectPlanView:read rows (no new subscription); the Initiative record once per version
 // (one-shot, re-read only when the live row's version changes); done and dropped Items of this Initiative, one page
 // of 50 each, subscribed only while that fold is open. Writes: projectWorkCommand:command, retry-safe by operation id.
-import { useEffect, useState, type FormEvent } from 'react';
-import { Band, Count, Key, Region, ReorderList, Sheet } from '../../ds';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Band, Count, Key, Region, ReorderList, Sheet, Who } from '../../ds';
 import { itemStatus, itemStatusLabel, type PlanRow, type StoredStatus } from '../../../../src/planning-model';
 import { A } from '../frames';
 import { Head, crumbsFor } from '../Place';
 import type { PlaceProps } from '../screens';
-import type { FullItem } from './batch';
+import type { InitiativeDetails } from './batch';
 import type { Reads } from './Bulk';
 import { groupBreakdown, statusOf, type PlanGroup, type PlanView } from './model';
 import { breakdownTotal, breakdownWords } from '../progress';
 import type { Put, Settled } from './Plan';
-import { BreakdownWords, COLS, Line, Owner, Roll, Status } from './rows';
+import { BreakdownWords, COLS, Line, Roll, Status } from './rows';
 import { InitiativeWork, type ReadInitiativeWork } from './InitiativeWork';
-import { workersOf, type Workers } from './workers';
+import { accountableHandle, workingAgentsLabel, type Workers } from './workers';
 
 type At = (patch: Partial<PlaceProps['route']>) => string;
 const statuses: StoredStatus[] = ['proposed', 'open', 'in-progress', 'closed', 'abandoned'];
@@ -51,6 +51,8 @@ export function InitiativePage({
   initiative,
   view,
   workers,
+  observedLanes,
+  missingIdentity,
   at,
   put,
   reads,
@@ -67,8 +69,9 @@ export function InitiativePage({
   projectName: string;
   initiative: PlanRow;
   view: PlanView;
-  /** Who works on this Initiative's Items now (workers.ts): its Owner when it has none. */
-  workers?: Workers | undefined;
+  workers: Workers;
+  observedLanes: number;
+  missingIdentity: boolean;
   at: At;
   put: Put;
   reads?: Reads | undefined;
@@ -101,6 +104,26 @@ export function InitiativePage({
   const [editing, setEditing] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const full = useFullItem(reads, initiative);
+  const accountable = accountableHandle(full.item?.creator);
+  const [openLanes, setOpenLanes] = useState<number | null>(null);
+  // Only a complete first Work page establishes coverage. Never fetch a page to finish the count.
+  const readWorkCoverage = useMemo<ReadInitiativeWork | undefined>(
+    () =>
+      readWork &&
+      (async (id, cursor) => {
+        const raw = await readWork(id, cursor);
+        if (cursor === null) {
+          const page = JSON.parse(raw);
+          setOpenLanes(
+            page.role && !page.nextCursor && !page.openAtLeast && typeof page.openLanes === 'number'
+              ? page.openLanes
+              : null,
+          );
+        }
+        return raw;
+      }),
+    [readWork],
+  );
   useEffect(() => {
     onShowDone(showDone ? initiative.id : null);
     return () => onShowDone(null);
@@ -247,19 +270,19 @@ export function InitiativePage({
             <dd>
               <Status row={initiative} />
             </dd>
-            <dt>Owner</dt>
+            <dt>Accountable</dt>
+            <dd>{accountable ? <Who handle={accountable} /> : <span className="t3">Not reported</span>}</dd>
+            <dt>Working now</dt>
             <dd>
-              <Owner
-                owner={initiative.owner}
-                workers={
-                  workers
-                    ? workersOf(
-                        workers,
-                        group.lines.map(line => line.row.id),
-                      )
-                    : []
-                }
-              />
+              <A className="lk" href={at({ place: 'lanes', section: 'touching' })}>
+                {workingAgentsLabel(
+                  workers,
+                  ordered.map(line => line.row.id),
+                  observedLanes,
+                  missingIdentity,
+                  !view.more && group.total === 0 ? 0 : openLanes,
+                )}
+              </A>
             </dd>
             {initiative.hidden ? (
               <>
@@ -268,8 +291,8 @@ export function InitiativePage({
               </>
             ) : null}
           </dl>
-          {readWork ? (
-            <InitiativeWork key={initiative.id} initiativeId={initiative.id} read={readWork} />
+          {readWorkCoverage ? (
+            <InitiativeWork key={initiative.id} initiativeId={initiative.id} read={readWorkCoverage} />
           ) : null}
           <Band title="About" />
           <div className="plan-about" dir="auto">
@@ -310,13 +333,13 @@ export function InitiativePage({
 
 /** The Initiative in full (its About text), read once per version: the live plan row's version changing re-reads it. */
 function useFullItem(reads: Reads | undefined, initiative: PlanRow) {
-  const [item, setItem] = useState<FullItem | null | undefined>(undefined);
+  const [item, setItem] = useState<InitiativeDetails | null | undefined>(undefined);
   const [tick, setTick] = useState(0);
   useEffect(() => {
     if (!reads) return setItem(null);
     let live = true;
-    reads.items([initiative.id]).then(
-      ([value]) => live && setItem(value ?? null),
+    reads.initiative(initiative.id).then(
+      value => live && setItem(value),
       () => live && setItem(null),
     );
     return () => {

@@ -276,44 +276,55 @@ export async function readWorkRecord<T>(
   collection: string,
   id: string,
 ): Promise<T> {
+  return (await readSelectedWorkRecord<T>(client, projectId, collection, id, workspace.generationId)).value;
+}
+
+export async function readSelectedWorkRecord<T>(
+  client: Pick<ConvexReactClient, 'query'>,
+  projectId: Id<'hostedProjects'>,
+  collection: string,
+  id: string,
+  expectedGeneration?: string,
+): Promise<{ value: T; generationId: string }> {
   const result = await client.query(workIndex.detail, {
     projectId,
-    generationId: workspace.generationId,
+    ...(expectedGeneration ? { generationId: expectedGeneration } : {}),
     collection,
     id,
   });
-  if (result.generationId !== workspace.generationId || !result.value)
+  const { generationId } = result;
+  if (!generationId || (expectedGeneration && generationId !== expectedGeneration) || !result.value)
     throw new Error('This source selection changed. Load the current item before editing.');
   const header = JSON.parse(result.value) as T & IndexHeader;
-  if (!header.payloadKey) return header;
+  if (!header.payloadKey) return { value: header, generationId };
   const parts: Row[] = [];
   let cursor: string | null = null;
   do {
     const page: Page = await client.query(workIndex.records, {
       projectId,
-      generationId: workspace.generationId,
+      generationId,
       collection: `${collection}:payload`,
       parentId: header.payloadKey,
       paginationOpts: { cursor, numItems: 50 },
     });
-    if (page.generationId !== workspace.generationId)
+    if (page.generationId !== generationId)
       throw new Error('This source selection changed. The original item remains retained.');
     if (page.revision !== result.revision)
-      return readWorkRecord(client, projectId, workspace, collection, id);
+      return readSelectedWorkRecord(client, projectId, collection, id, generationId);
     parts.push(...page.page);
     cursor = page.isDone ? null : page.continueCursor;
   } while (cursor !== null);
   const latest = await client.query(workIndex.detail, {
     projectId,
-    generationId: workspace.generationId,
+    generationId,
     collection,
     id,
   });
-  if (latest.generationId !== workspace.generationId)
+  if (latest.generationId !== generationId)
     throw new Error('This source selection changed. The original item remains retained.');
   if (latest.revision !== result.revision || latest.value !== result.value)
-    return readWorkRecord(client, projectId, workspace, collection, id);
-  return assembleIndexValue(collection, header, parts);
+    return readSelectedWorkRecord(client, projectId, collection, id, generationId);
+  return { value: assembleIndexValue(collection, header, parts), generationId };
 }
 
 /** Immutable records use one-shot pages, invalidated only by the existing workspace query.

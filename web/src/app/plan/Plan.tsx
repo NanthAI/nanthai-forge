@@ -29,7 +29,15 @@ import { Head, crumbsFor } from '../Place';
 import { progressCells, progressOf, type PlanCountsRead } from '../progress';
 import { navigate, useSearch } from '../router';
 import type { PlaceProps } from '../screens';
-import { readComments, readItems, runBatch, batchApply, type BatchOutcome, type RunBatch } from './batch';
+import {
+  readComments,
+  readInitiative,
+  readItems,
+  runBatch,
+  batchApply,
+  type BatchOutcome,
+  type RunBatch,
+} from './batch';
 import { Board } from './Board';
 import { Capture } from './Capture';
 import { isShut, NO_INITIATIVE, usePlanFolds } from './fold';
@@ -190,6 +198,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
   const run: RunBatch = writes => runBatch(apply, projectId, writes);
   const reads: Reads = {
     items: ids => readItems(client, projectId, ids),
+    initiative: id => readInitiative(client, projectId, id),
     comments: ids => readComments(client, projectId, ids),
     workers: async intentIds => {
       const reply = JSON.parse(await client.query(planWorkers, { projectId, intentIds: [...intentIds] })) as {
@@ -346,7 +355,21 @@ export function PlanScreenView({
   useEffect(() => setPicked(new Set()), [writeQuery({ ...query, find: '' })]);
   const whole = useMemo(() => (read ? planView(read, '', orders) : null), [read, orders]);
   const allRows = useMemo(() => (whole ? [...whole.byId.values()] : undefined), [whole]);
-  const workers = useWorkers(reads?.workers, allRows);
+  const selectedInitiative = initiativeRow?.id;
+  const workerRows = useMemo(
+    () =>
+      selectedInitiative
+        ? (whole?.groups.find(group => group.initiative?.id === selectedInitiative)?.lines ?? []).map(
+            line => line.row,
+          )
+        : allRows,
+    [whole, allRows, selectedInitiative],
+  );
+  const {
+    byItem: workers,
+    observedLanes,
+    missingIdentity,
+  } = useWorkers(reads?.workers, workerRows, Boolean(selectedInitiative));
   const settledRows = useMemo(
     () =>
       [...closed.rows, ...dropped.rows].filter(
@@ -605,11 +628,14 @@ export function PlanScreenView({
     return (
       <>
         <InitiativePage
+          key={initiativeRow.id}
           route={route}
           projectName={projectName}
           initiative={initiativeRow}
           view={whole}
           workers={workers}
+          observedLanes={observedLanes}
+          missingIdentity={missingIdentity}
           at={at}
           put={put}
           reads={reads}

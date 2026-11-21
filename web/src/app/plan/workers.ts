@@ -32,11 +32,14 @@ const labelShape = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])(?:\/[a-z]+-[a-z]+)?$/;
 export const publicLabel = (actor: unknown): actor is string =>
   typeof actor === 'string' && labelShape.test(actor);
 
-/** The Intents to ask about, each with its Item: in-progress Items in plan order, own Intent then two follow-ups. */
-export function askedIntents(rows: readonly PlanRow[]): Map<string, string> {
+const hasWork = (row: PlanRow, includeOpenLanes: boolean) =>
+  row.status === 'in-progress' || (includeOpenLanes && row.inLane === true);
+
+/** The Intents to ask about, each with its Item: Items with work in plan order, own Intent then two follow-ups. */
+export function askedIntents(rows: readonly PlanRow[], includeOpenLanes = false): Map<string, string> {
   const asked = new Map<string, string>();
   const started = rows
-    .filter(row => row.kind === 'issue' && row.status === 'in-progress')
+    .filter(row => row.kind === 'issue' && hasWork(row, includeOpenLanes))
     .sort((a, b) => (a.position ?? Infinity) - (b.position ?? Infinity) || a.id.localeCompare(b.id));
   for (const row of started) {
     if (asked.size + PER_ITEM > PLAN_WORK_INTENTS) break;
@@ -47,16 +50,17 @@ export function askedIntents(rows: readonly PlanRow[]): Map<string, string> {
 }
 
 /** Each asked Item's labels (an empty list when nobody works on it), and every other Item that is not in progress
- * as nobody; an in-progress Item past the cap is left out. */
+ * as nobody; a working Item past the cap is left out. */
 export function workersByItem(
   lanes: readonly ActiveLane[],
   rows: readonly PlanRow[],
   asked: ReadonlyMap<string, string> = askedIntents(rows),
+  includeOpenLanes = false,
 ): Map<string, string[]> {
   const out = new Map<string, string[]>();
   const items = new Set(asked.values());
   for (const row of rows)
-    if (row.kind === 'issue' && (row.status !== 'in-progress' || items.has(row.id))) out.set(row.id, []);
+    if (row.kind === 'issue' && (!hasWork(row, includeOpenLanes) || items.has(row.id))) out.set(row.id, []);
   const newest = [...lanes].sort((a, b) => (b.at ?? Infinity) - (a.at ?? Infinity));
   for (const lane of newest) {
     const item = asked.get(lane.intentId);
@@ -68,21 +72,41 @@ export function workersByItem(
   return out;
 }
 
-/** The labels across several Items (an Initiative's), newest Item order kept, each once. */
-export function workersOf(workers: Workers, ids: readonly string[]) {
-  return [...new Set(ids.flatMap(id => workers.get(id) ?? []))];
+/** Distinct agents across an Initiative's Items. Missing or capped data only supports a lower bound. */
+export function workingAgentsLabel(
+  workers: Workers,
+  ids: readonly string[],
+  observedLanes: number,
+  missingIdentity: boolean,
+  openLanes: number | null,
+) {
+  const agents = new Set<string>();
+  for (const id of ids) for (const label of workers.get(id) ?? []) if (label.includes('/')) agents.add(label);
+  const partial = missingIdentity || openLanes !== observedLanes;
+  const n = agents.size;
+  if (partial && !n) return 'Not reported';
+  return `${partial ? 'At least ' : ''}${n.toLocaleString()} ${n === 1 ? 'agent' : 'agents'}`;
+}
+
+/** The account for which the recorded creator acted. Only projected public identities qualify. */
+export function accountableHandle(creator: string | undefined) {
+  return publicLabel(creator) ? creator.split('/')[0] : undefined;
 }
 
 const hidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
 
 /** Reads the active Lanes once, then again only when the asked Intents change or a hidden tab is shown again. */
-export function useWorkers(read: ReadWorkers | undefined, rows: readonly PlanRow[] | undefined): Workers {
+export function useWorkers(
+  read: ReadWorkers | undefined,
+  rows: readonly PlanRow[] | undefined,
+  includeOpenLanes: boolean,
+) {
   const [answer, setAnswer] = useState<{
     key: string;
     lanes: readonly ActiveLane[];
     withheld?: boolean;
   } | null>(null);
-  const asked = useMemo(() => (rows ? askedIntents(rows) : null), [rows]);
+  const asked = useMemo(() => (rows ? askedIntents(rows, includeOpenLanes) : null), [rows, includeOpenLanes]);
   const key = asked ? [...asked.keys()].sort().join(',') : null;
   const [shown, setShown] = useState(0);
   useEffect(() => {
@@ -106,10 +130,14 @@ export function useWorkers(read: ReadWorkers | undefined, rows: readonly PlanRow
     };
   }, [key, shown, Boolean(read)]);
   return useMemo(() => {
-    if (!rows) return new Map();
     // Until the answer for these Intents arrives, an in-progress Item says nothing; the rest are nobody's.
-    // A reader the server withholds presence from is told nothing about in-progress Items.
+    // A reader the server withholds presence from is told nothing about active Lanes.
     const current = answer && answer.key === key && !answer.withheld && asked;
-    return current ? workersByItem(answer.lanes, rows, current) : workersByItem([], rows, new Map());
-  }, [answer, rows, asked, key]);
+    const seen = current ? answer.lanes.filter(lane => current.has(lane.intentId)) : [];
+    return {
+      byItem: workersByItem(seen, rows ?? [], current || new Map(), includeOpenLanes),
+      observedLanes: seen.length,
+      missingIdentity: seen.some(lane => !publicLabel(lane.actor)),
+    };
+  }, [answer, rows, asked, key, includeOpenLanes]);
 }

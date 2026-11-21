@@ -6,7 +6,12 @@ import type { ConvexReactClient } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { batchUndo, type BatchPut, type BatchResult, type BatchWrite } from '../../../../src/planning-batch';
-import { readWorkRecord, workIndex, type WorkIndexWorkspace } from '../../hosted-work-index';
+import {
+  readSelectedWorkRecord,
+  readWorkRecord,
+  workIndex,
+  type WorkIndexWorkspace,
+} from '../../hosted-work-index';
 
 export const batchApply = makeFunctionReference<
   'mutation',
@@ -42,6 +47,7 @@ export type FullItem = {
   kind: 'issue' | 'initiative';
   title: string;
   body: string;
+  author?: string;
   intentIds?: string[];
   relations?: { kind: 'depends-on' | 'duplicate-of' | 'related'; id: string }[];
   initiativeId?: string | null;
@@ -71,6 +77,39 @@ export async function readItems(
 ) {
   const ws = await workspace(client, projectId);
   return Promise.all(ids.map(id => readWorkRecord<FullItem>(client, projectId, ws, 'planningItems', id)));
+}
+
+export type InitiativeDetails = FullItem & { creator?: string | undefined };
+
+/** Read About directly, using the detail's generation for any payload pages. For an edited Initiative,
+ * replace the workspace read with its first version: a later body author may be someone else. */
+export async function readInitiative(
+  client: Pick<ConvexReactClient, 'query'>,
+  projectId: Id<'hostedProjects'>,
+  id: string,
+): Promise<InitiativeDetails> {
+  const { value: item, generationId } = await readSelectedWorkRecord<FullItem>(
+    client,
+    projectId,
+    'planningItems',
+    id,
+  );
+  if (item.version === 1) return { ...item, creator: item.author };
+  const first = await client
+    .query(workIndex.records, {
+      projectId,
+      generationId,
+      collection: 'planningVersions',
+      parentId: id,
+      paginationOpts: { cursor: null, numItems: 1 },
+    })
+    .then(page =>
+      page.generationId === generationId && page.page[0]
+        ? (JSON.parse(page.page[0].value) as FullItem)
+        : null,
+    )
+    .catch(() => null);
+  return { ...item, creator: first?.version === 1 ? first.author : undefined };
 }
 
 /** Each duplicate's comments, one page of 50 each (a longer thread is named, not copied in part silently). */

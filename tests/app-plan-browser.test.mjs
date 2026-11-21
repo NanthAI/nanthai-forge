@@ -38,9 +38,10 @@ import { readQuery, writeQuery } from ${JSON.stringify(join(root, 'web/src/app/p
 import { ProjectFrame } from ${JSON.stringify(join(root, 'web/src/app/frames.tsx'))};
 import { navigate, useSearch } from ${JSON.stringify(join(root, 'web/src/app/router.ts'))};
 import { batchUndo } from ${JSON.stringify(join(root, 'src/planning-batch.ts'))};
+import { readInitiative } from ${JSON.stringify(join(root, 'web/src/app/plan/batch.ts'))};
 import ${JSON.stringify(join(root, 'web/src/app/app.css'))};
 const uuid = n => '00000000-0000-4000-8000-' + String(n).padStart(12, '0');
-const launch = { id: uuid(1), kind: 'initiative', title: 'Launch the parser', status: 'open', position: 0, version: 3 };
+const launch = { id: uuid(1), kind: 'initiative', title: 'Launch the parser', status: 'open', position: 0, version: 3, owner: 'example-builder/amber-fox' };
 const docs = { id: uuid(2), kind: 'initiative', title: 'Documentation and recovery paths', status: 'open', position: 1, version: 1 };
 const largeInitiative = new URLSearchParams(location.search).has('large-initiative');
 const big = { id: uuid(3), kind: 'initiative', title: 'A long running release with a name that will not fit on a phone line', status: 'open', position: 2, version: 1, hidden: largeInitiative };
@@ -74,8 +75,21 @@ const shelfRows = {
 };
 const linkedOpen = rows.find(row => row.id === uuid(10));
 const linkedDeleted = shelfRows.deleted[0];
+window.initiativeReads = [];
 const linkBackend = fakeConvex({
   resolve(name, args) {
+    if (name === 'projectWorkIndex:detail' && args.id === launch.id) {
+      window.initiativeReads.push(name);
+      return { generationId: 'generation', revision: 1, value: JSON.stringify({
+        ...launch, author: 'another-editor/ivory-raccoon', body: 'Everything that must land before the parser ships.',
+      }) };
+    }
+    if (name === 'projectWorkIndex:records' && args.parentId === launch.id && args.collection === 'planningVersions') {
+      window.initiativeReads.push(name);
+      if (args.generationId !== 'generation' || args.paginationOpts.numItems !== 1 || args.paginationOpts.cursor !== null)
+        throw Error('Expected one first version on the current detail’s generation');
+      return { generationId: 'generation', page: [{ value: JSON.stringify({ ...launch, version: 1, author: 'release-lead/amber-fox' }) }], isDone: false };
+    }
     if (name === 'projectPlanView:read') return { ...read, rows: JSON.stringify(window.readItemWork ? [launch, linkedOpen] : [linkedOpen]) };
     if (name === 'projectPlanSettled:item') {
       const candidates = [linkedOpen, linkedDeleted, ...settledRows].filter(row => row.id.startsWith(args.id));
@@ -116,7 +130,8 @@ window.puts = [];
 window.doneFor = [];
 const put = async command => { window.puts.push(command); };
 const reads = {
-  items: async ids => ids.map(id => (id === launch.id ? { ...launch, body: 'Everything that must land before the parser ships.' } : { id, version: 1, kind: 'issue', title: id, body: '' })),
+  items: async ids => ids.map(id => ({ id, version: 1, kind: 'issue', title: id, body: '' })),
+  initiative: id => readInitiative(linkBackend.client, 'synthetic', id),
   comments: async () => ({ comments: [], more: [] }),
   // Open Lanes active in the last 48 hours (d3357f40): three on the unowned in-progress Item, one on an owned
   // in-progress Item. The page asks by Intent: each in-progress Item and two follow-ups (window.workerAsked).
@@ -125,6 +140,8 @@ const reads = {
     { intentId: uuid(17), actor: 'peer-builder', at: 20 },
     { intentId: uuid(17), actor: 'peer-builder/copper-moth', at: 10 },
     { intentId: uuid(11), actor: 'peer-builder/ocean-lark', at: 5 },
+    { intentId: uuid(11), actor: 'example-builder/amber-fox', at: 4 },
+    { intentId: uuid(11), actor: 'peer-builder', at: 3 },
   ] }),
 };
 function Fixture() {
@@ -659,7 +676,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
     assert.deepEqual(errors, []);
     await context.close();
   }
-  const initiativeFixture = await itemWorkFixture({ initiativeId: launchId, details: true });
+  const initiativeFixture = await itemWorkFixture({ initiativeId: launchId, details: true, extraOpen: 2 });
   for (const width of [1440, 390])
     for (const theme of ['dark', 'light'])
       await t.test(`initiative page ${width} ${theme}: no clipping or axe violations`, async () => {
@@ -669,9 +686,19 @@ test('plan views and bulk bar: real components keep the view in the address and 
           return initiativeFixture.readInitiativeRaw(args);
         });
         const progress = page.getByRole('region', { name: 'Initiative progress' });
+        await progress.getByText('@release-lead', { exact: true }).waitFor();
+        const working = progress.getByRole('link', { name: '2 agents', exact: true });
+        await working.waitFor();
+        assert.match(await working.getAttribute('href'), /\/lanes\/touching$/);
+        assert.doesNotMatch(await progress.textContent(), /Owner|amber-fox|another-editor/);
+        assert.deepEqual(await page.evaluate(() => window.initiativeReads), [
+          'projectWorkIndex:detail',
+          'projectWorkIndex:records',
+        ]);
+        assert.equal(await page.evaluate(() => window.workerReads), 1);
         await progress.getByText('At least 2', { exact: true }).waitFor();
         assert.ok(await progress.getByText(/^\d+ in progress$/).isVisible());
-        assert.match(await progress.textContent(), /Lanes open1Landings2Files touchedAt least 2/);
+        assert.match(await progress.textContent(), /Lanes open3Landings2Files touchedAt least 2/);
         await page.getByRole('button', { name: 'Done and dropped Items' }).click();
         assert.deepEqual(calls, [{ initiativeId: launchId, cursor: null }]);
         await check(page, `initiative ${width} ${theme}`);
