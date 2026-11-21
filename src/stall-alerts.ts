@@ -41,13 +41,14 @@ export function stallAlert(
   const repair =
     step === 'checking'
       ? read +
-        'Forge re-checks a dispatch no runner acknowledged (up to 2 retries) and the runner watchdog ends a silent run. ' +
+        'Forge reconciles an unacknowledged dispatch (up to 2 retries) or checks the original Actions execution for missing shard results. ' +
+        'If the Actions result is still pending, Forge uses the bounded provider confirmation schedule. The runner watchdog ends a silent run. ' +
         `If ${stall?.missingOwner ?? 'the check runner'} is down, fix that first; replaying the land does not restart a check.`
       : read +
         `replay the same land operationId to resume. If ${stall?.missingOwner ?? 'the controller'} is down, fix that first.`;
   const retried = [
     step === 'checking'
-      ? 'stall alarm re-woke the landing and reconciled an unacknowledged check dispatch at 15 min'
+      ? 'stall alarm checked for a lost landing wake, dispatch or result collection at 15 min'
       : 'stall alarm replayed any lost landing step (queue, finish, check or compose) at 15 min',
     ...(state.supersedes ? [`resubmission of ${state.supersedes} (${state.retryReason ?? 'retry'})`] : []),
   ];

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { getFunctionName } from 'convex/server';
 import { reportFoldFixture } from './hosted-report-fold-guard.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const collector = await import(moduleUrl('../convex/projectHostedActionsBatch.ts'));
@@ -8,6 +9,83 @@ const batchStore = await import(moduleUrl('../convex/projectHostedActionsBatchSt
 const results = await import(moduleUrl('../convex/projectHostedActionsResults.ts'));
 const timingStore = await import(moduleUrl('../convex/projectHostedTestTimings.ts'));
 const ingests = l => l.s.counts.filter(count => count.name === 'projectHostedActionsResults:batch');
+const repair = await import(moduleUrl('../convex/projectHostedCheckReconcile.ts'));
+const verdict = await import(moduleUrl('../convex/projectHostedActionsVerdict.ts'));
+
+test('incident cd63bbe9: an acknowledged Actions run settles from its original provider result and signed shards', async t => {
+  const l = await reportFoldFixture(t);
+  assert.equal(l.stored().status, 'running');
+  assert.equal(l.stored().counts.completed, 0);
+  const stall = () =>
+    l.s.transaction('checking-stall', { _handler: ctx => repair.repairStalledCheck(ctx, l.id) }, {});
+  await stall();
+  await stall();
+  const recoveries = l.scheduled.filter(task => task.input.stallRepair);
+  assert.equal(recoveries.length, 1, 'both member alarms share one recovery');
+  await verdict.confirm._handler(l.ctx, recoveries[0].input);
+  assert.equal(l.stored().id, l.id.runId);
+  assert.equal(l.stored().executionId, '123');
+  assert.equal(l.stored().status, 'passed');
+  assert.equal(l.stored().counts.passed, 2);
+  assert.equal(ingests(l).length, 1);
+  await verdict.confirm._handler(l.ctx, recoveries[0].input);
+  assert.equal(ingests(l).length, 1, 'settled recovery is a no-op');
+});
+
+test('the checking alarm leaves an active report collector its lease and cancels recovery when it settles', async t => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-11-21T12:00:00Z'));
+  const l = await reportFoldFixture(t);
+  const original = JSON.parse(await l.s.transaction('reserve-first', batchStore.prepare, l.input));
+  const row = [...l.s.tables.projectHostedCheckRuns.values()][0];
+  await l.s.transaction('checking-stall', { _handler: ctx => repair.repairStalledCheck(ctx, l.id) }, {});
+  const wake = l.scheduled.find(task => task.input.stallRepair);
+  assert.equal(wake.at, row.reportCollection.until);
+  await l.events.W();
+  assert.equal(l.stored().counts.completed, 0, 'the webhook leaves the active collector in charge');
+  await collector.collectResultBatch(l.ctx, l.input, undefined, original);
+  assert.equal(l.stored().status, 'passed');
+  assert.equal(l.scheduledStates.get(wake.id).state.kind, 'canceled', 'the successful fold retires the wake');
+  assert.equal(ingests(l).length, 1);
+});
+
+test('the stalled result recovery still owns completion after an early provider read or failed collection', async t => {
+  const l = await reportFoldFixture(t);
+  l.provider.completed = false;
+  await l.s.transaction('checking-stall', { _handler: ctx => repair.repairStalledCheck(ctx, l.id) }, {});
+  const wake = attempt => l.scheduled.find(task => task.input.stallRepair && task.input.attempt === attempt);
+  await verdict.confirm._handler(l.ctx, wake(0).input);
+  assert.equal(ingests(l).length, 0);
+  assert.equal(l.stored().status, 'running');
+  l.provider.completed = true;
+
+  const original = l.ctx.runMutation;
+  l.ctx.runMutation = (ref, input) => {
+    if (getFunctionName(ref) === 'projectHostedActionsResults:batch')
+      throw new Error('synthetic collector loss');
+    return original(ref, input);
+  };
+  await assert.rejects(verdict.confirm._handler(l.ctx, wake(1).input), /synthetic collector loss/);
+  l.scheduledStates.set(wake(1).id, { state: { kind: 'failed' } });
+  l.ctx.runMutation = original;
+
+  await verdict.confirm._handler(l.ctx, wake(2).input);
+  assert.equal(ingests(l).length, 1);
+  assert.equal(l.stored().status, 'passed');
+});
+
+for (const caseName of ['rerun', 'missing shard']) {
+  test(`a stalled Actions recovery cannot attest a pass from a provider success with a ${caseName}`, async t => {
+    const l = await reportFoldFixture(t);
+    if (caseName === 'rerun') l.provider.runAttempt = 2;
+    else l.inbox.delete([...l.inbox.keys()][0]);
+    await l.s.transaction('checking-stall', { _handler: ctx => repair.repairStalledCheck(ctx, l.id) }, {});
+    const wake = l.scheduled.find(task => task.input.stallRepair);
+    assert(wake);
+    await verdict.confirm._handler(l.ctx, wake.input);
+    assert.equal(l.stored().status, caseName === 'rerun' ? 'running' : 'runner-unavailable');
+    assert.notEqual(l.stored().counts.passed, 2);
+  });
+}
 
 for (const owner of ['U', 'W'])
   test(`S3 ${owner} collector coalesces concurrent ingress and consumes its arriving conclusion`, async t => {

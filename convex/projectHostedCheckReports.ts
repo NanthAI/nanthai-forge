@@ -22,6 +22,7 @@ type Transport = {
   collecting?: boolean;
   timingParts?: string[];
   conclusion?: string | null;
+  recovery?: Id<'_scheduled_functions'>;
   collection?: {
     token: string;
     fence: number;

@@ -113,7 +113,7 @@ async function landing(t, shards, batch = false, packed = false, r2Reports = fal
     ctx.scheduler = {
       runAfter: async (delay, ref, input) => {
         const id = `scheduled-${scheduled.length + 1}`;
-        scheduled.push({ name: getFunctionName(ref), input, id });
+        scheduled.push({ name: getFunctionName(ref), input, id, at: Date.now() + delay });
         scheduledStates.set(id, { state: { kind: 'pending' } });
         return id;
       },
@@ -166,7 +166,7 @@ async function landing(t, shards, batch = false, packed = false, r2Reports = fal
     ...(batch ? { resultsBatch: true } : {}),
     ...(packed ? { resultsPacked: true } : {}),
   });
-  const provider = { conclusion: 'success', completed: true };
+  const provider = { conclusion: 'success', completed: true, runAttempt: 1 };
   const logs = new Map(),
     inbox = new Map(),
     r2 = { classA: 0, classB: 0, bytesPut: 0, deletes: 0 };
@@ -199,6 +199,9 @@ async function landing(t, shards, batch = false, packed = false, r2Reports = fal
       if (new URL(url).pathname.endsWith('/access_tokens'))
         return Response.json({ token: 'synthetic-token' });
       return Response.json({
+        id: 123,
+        head_sha: 'a'.repeat(40),
+        run_attempt: provider.runAttempt,
         status: provider.completed ? 'completed' : 'in_progress',
         conclusion: provider.completed ? provider.conclusion : null,
         total_count: 1,
@@ -347,7 +350,7 @@ async function landing(t, shards, batch = false, packed = false, r2Reports = fal
           path: '.github/workflows/forge-check.yml',
           head_branch: 'main',
           head_sha: 'a'.repeat(40),
-          created_at: new Date().toISOString(),
+          created_at: new Date(stored().actions.reservedAt).toISOString(),
           conclusion,
         },
       }),

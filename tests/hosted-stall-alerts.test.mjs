@@ -103,7 +103,7 @@ test('incident replay 2026-10-30 403 stall: tier 1 at 15 min and tier 2 at 30 mi
   assert.match(first.text, /\nWhy: .+/);
   assert.match(
     first.text,
-    /\nAlready tried: stall alarm re-woke the landing and reconciled an unacknowledged check dispatch at 15 min/,
+    /\nAlready tried: stall alarm checked for a lost landing wake, dispatch or result collection at 15 min/,
   );
   assert.match(first.text, /replaying the land does not restart a check/);
   assert.match(

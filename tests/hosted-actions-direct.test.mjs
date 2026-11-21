@@ -2927,7 +2927,7 @@ test('runner contract: the checking stall alarm reconciles only an unacknowledge
   const call = now =>
     s.transaction(
       'reconcile',
-      { _handler: (ctx, input) => reconcileModule.reconcileUnacknowledgedCheck(ctx, input, now) },
+      { _handler: (ctx, input) => reconcileModule.repairStalledCheck(ctx, input, now) },
       s.id,
     );
   assert.equal(await call(run.actions.reservedAt + 60_000), 'none', 'inside the bound the adapter owns it');
@@ -2935,7 +2935,11 @@ test('runner contract: the checking stall alarm reconciles only an unacknowledge
   assert.equal(reconcileTasks(s).at(-1).delay, 0);
   await s.call(direct, 'observe', { ...s.id, fence: 1, outcome: 'accepted', executionId: '123' });
   const size = s.scheduled.length;
-  assert.equal(await call(run.actions.reservedAt + 60 * 60_000), 'none', 'acknowledged: one read, no work');
+  assert.equal(
+    await call(run.actions.reservedAt + 60 * 60_000),
+    'none',
+    'acknowledged without a prepared report inbox: one read, no work',
+  );
   assert.equal(s.scheduled.length, size);
 });
 

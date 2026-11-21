@@ -69,7 +69,11 @@ deadline, transfer it during admission and cancel it at settlement. Reading neve
 the alarm and starts a new deadline. A hosted queued entry reaching its alarm deadline retains
 one orphan-recovery deadline 60 minutes after its last progress (the dropped-landing limit);
 entries waiting for review or a dependency never get one. Checking entries keep
-the run lease watchdog instead. At the deadline Forge re-drives the entry (a cohort
+the run lease watchdog. At the checking alarm, Forge can also look up the
+original Actions execution and collect its retained shard results when no report
+fold was recorded. Members of a shared run use one recovery with the existing
+bounded provider confirmation schedule. An active HTTP collector keeps its
+lease, and provider success still needs the original shard evidence. At the deadline Forge re-drives the entry (a cohort
 stuck composing is split into halves that compose apart); if that makes no progress and nothing is left to drive it
 (not claimable, no pending attempt of its own, no batch peer holding the fallback
 turn or a run), Forge ends it as `terminal-failed` with `LANDING_STALLED` and a

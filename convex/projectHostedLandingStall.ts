@@ -25,7 +25,7 @@ import { composeRow, composeStateSchema } from './projectHostedComposeStore';
 import { hostedFinishSchema } from '../src/hosted-finish';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
 import { holdsLandingOrder } from './projectHostedLandingOrder';
-import { reconcileUnacknowledgedCheck } from './projectHostedCheckReconcile';
+import { repairStalledCheck } from './projectHostedCheckReconcile';
 import { redriveLanding } from './projectHostedLandingRedrive';
 import { alertExhausted, exhaustLanding, exhaustedReason } from './projectHostedLandingExhaust';
 
@@ -274,10 +274,10 @@ export async function repairStalledLanding(
     await exhaustLanding(ctx, state, input.reason ?? exhaustedReason('The landing supervisor gave up.'));
     return null;
   }
-  // Incident a7de3a93: a checking entry whose dispatch no runner acknowledged
-  // has no other owner for 12 h. Act on it, not only flag it (one read otherwise).
+  // A lost dispatch or a lost collection from an acknowledged execution has
+  // no other owner until the watchdog (a7de3a93, cd63bbe9).
   if (canonical.phase === 'checking' && canonical.runId)
-    await reconcileUnacknowledgedCheck(ctx, { projectId: input.projectId, runId: canonical.runId }, now);
+    await repairStalledCheck(ctx, { projectId: input.projectId, runId: canonical.runId }, now);
   if (canonical.orderWait && canonical.phase === 'ready' && !(await aheadHoldsOrder(ctx, canonical))) {
     const finish = await finishRow(ctx, input);
     // The holder already ended; its old expiry timer must not suppress repair.

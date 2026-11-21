@@ -136,6 +136,7 @@ export async function loadHostedCheck(
     useObjectReports(run, {
       ...(row.resultBatch ? { packed: row.resultBatch.packed } : {}),
       flakes: row.reportFlakes,
+      recovery: row.reportRecovery,
       timingStamp: row.reportTimingStamp,
       timingComplete: row.reportTimingComplete,
       timingParts: row.reportTimingParts,
@@ -199,13 +200,17 @@ export async function writeHostedCheck(
     await cancelPendingTask(ctx, run.actions.watchdog as Id<'_scheduled_functions'>);
     run.actions.watchdog = null;
   }
-  checkReportHeader(run, objectReportTransport(run) ? 7 * 1024 : 8 * 1024);
+  const transport = objectReportTransport(run);
+  const reportRecovered = transport?.recovery && (run.reportPointer || hostedCheckTerminal(run));
+  if (reportRecovered) await cancelPendingTask(ctx, transport.recovery);
+  checkReportHeader(run, transport ? 7 * 1024 : 8 * 1024);
   const reports = await storeCheckReports(ctx, run);
   const stored = { ...run };
   if ('reportParts' in reports || objectReportTransport(run)) delete stored.contractReports;
   await ctx.db.patch(id, {
     ...reports,
     status: run.status,
+    ...(reportRecovered ? { reportRecovery: undefined } : {}),
     ...(providerAttested && run.status === 'passed' ? { verdictKey: hostedVerdictKey(run) } : {}),
     value: semanticPayload(hostedCheckRunSchema.parse(stored), true),
   });

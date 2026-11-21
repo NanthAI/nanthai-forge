@@ -81,6 +81,8 @@ export const hostedCheckTables = {
     reportTimingComplete: v.optional(v.boolean()),
     reportTimingParts: v.optional(v.array(v.string())),
     reportConclusion: v.optional(v.union(v.string(), v.null())),
+    // A checking stall schedules one recovery of the original report inbox.
+    reportRecovery: v.optional(v.id('_scheduled_functions')),
     reportCollection: v.optional(
       v.object({
         token: v.string(),

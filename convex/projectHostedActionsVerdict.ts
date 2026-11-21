@@ -37,6 +37,19 @@ export const verdictConfirmMs = providerVerdictReadsMs;
  * also never waits for the optional pack job (friction 0064c3b2). */
 export const verdictJobsMs = [10_000, 30_000] as const;
 const identity = { projectId: v.id('hostedProjects'), runId: v.string() };
+const stallRepairArg = { stallRepair: v.optional(v.literal(true)) };
+
+function hasStalledReportInbox({ row, run }: LoadedHostedCheck) {
+  return Boolean(
+    row.reportRecovery &&
+    row.reportStorage === 'r2' &&
+    row.resultBatch &&
+    run.plan &&
+    run.actions?.workflowSha &&
+    !run.reportPointer &&
+    !run.cancelRequested,
+  );
+}
 /** What a jobs read needs, resolved in the scheduling transaction (no pendingConfirm call). */
 const jobsTarget = v.object({
   repository: v.string(),
@@ -145,14 +158,15 @@ async function prepareDelayedPass(ctx: MutationCtx, selected: LoadedHostedCheck)
 }
 
 export const pendingConfirm = internalMutation({
-  args: { ...identity, fence: v.number() },
+  args: { ...identity, fence: v.number(), ...stallRepairArg },
   returns: v.any(),
   handler: async (ctx, input) => {
-    const { run } = await writableHostedCheck(ctx, input);
+    const selected = await writableHostedCheck(ctx, input);
+    const { run } = selected;
     if (
       hostedCheckTerminal(run) ||
       run.fence !== input.fence ||
-      run.actions?.verdictPending !== true ||
+      (input.stallRepair ? !hasStalledReportInbox(selected) : run.actions?.verdictPending !== true) ||
       !run.executionId ||
       run.configuration.provider !== 'github-actions'
     )
@@ -161,6 +175,7 @@ export const pendingConfirm = internalMutation({
       repository: run.configuration.repository,
       executionId: run.executionId,
       runnerScope: await runnerTokenScope(ctx, input.projectId, run.configuration.repository),
+      ...(input.stallRepair ? { workflowSha: run.actions!.workflowSha } : {}),
     };
   },
 });
@@ -170,6 +185,7 @@ export const confirmed = internalMutation({
     fence: v.number(),
     attempt: v.number(),
     completed: v.boolean(),
+    ...stallRepairArg,
     conclusion: v.union(v.string(), v.null()),
     jobs: v.optional(v.literal(true)),
     since: v.optional(v.number()),
@@ -181,6 +197,36 @@ export const confirmed = internalMutation({
     const selected = await writableHostedCheck(ctx, input),
       { row, run } = selected;
     if (run.fence !== input.fence) return null;
+    if (input.stallRepair) {
+      if (hostedCheckTerminal(run) || !hasStalledReportInbox(selected)) return null;
+      if (input.completed) {
+        const reports = await prepareReportCollection(ctx, selected, input.conclusion, applyConclusion, {
+          scheduledFunctionId: row.reportRecovery,
+        });
+        if (reports.collect) return JSON.stringify(reports);
+      }
+      // A live provider, unavailable lookup or active collector keeps the same
+      // recovery owner on the existing finite provider confirmation schedule.
+      const delay = verdictConfirmMs[input.attempt];
+      if (delay !== undefined) {
+        const now = Date.now(),
+          since = input.since ?? now;
+        const next = await ctx.scheduler.runAfter(
+          Math.max(0, since + delay - now),
+          makeFunctionReference<'action'>('projectHostedActionsVerdict:confirm'),
+          {
+            projectId: input.projectId,
+            runId: input.runId,
+            fence: run.fence,
+            attempt: input.attempt + 1,
+            stallRepair: true,
+            since,
+          },
+        );
+        await ctx.db.patch(row._id, { reportRecovery: next });
+      }
+      return null;
+    }
     const scheduledFunctionId = run.actions?.confirm;
     // The scheduled action is executing; never cancel it from its completion.
     if (run.actions) run.actions.confirm = null;
@@ -287,6 +333,7 @@ export const confirm = internalAction({
     attempt: v.number(),
     jobs: v.optional(v.literal(true)),
     target: v.optional(jobsTarget),
+    ...stallRepairArg,
     since: v.optional(v.number()),
     lagged: v.optional(v.literal(true)),
   },
@@ -294,7 +341,12 @@ export const confirm = internalAction({
   handler: async (ctx, input): Promise<null> => {
     const { target, ...identityInput } = input;
     // A jobs read carries its target; `confirmed` still rechecks that the run is pending.
-    const pending =
+    const pending: {
+      repository: string;
+      executionId: string;
+      runnerScope?: RunnerScope | null;
+      workflowSha?: string;
+    } | null =
       target ??
       ((await ctx.runMutation(
         makeFunctionReference<'mutation'>('projectHostedActionsVerdict:pendingConfirm'),
@@ -302,8 +354,9 @@ export const confirm = internalAction({
           projectId: input.projectId,
           runId: input.runId,
           fence: input.fence,
+          ...(input.stallRepair ? { stallRepair: true } : {}),
         },
-      )) as { repository: string; executionId: string; runnerScope?: RunnerScope | null } | null);
+      )) as typeof pending);
     if (!pending) return null;
     let completed = false,
       conclusion: string | null = null,
@@ -343,7 +396,20 @@ export const confirm = internalAction({
         }
         completed = conclusion !== null;
       } else {
-        const body = (await response.json()) as { status?: unknown; conclusion?: unknown };
+        const body = (await response.json()) as {
+          status?: unknown;
+          conclusion?: unknown;
+          id?: number;
+          run_attempt?: number;
+          head_sha?: string;
+        };
+        if (
+          input.stallRepair &&
+          (String(body.id) !== pending.executionId ||
+            body.run_attempt !== 1 ||
+            body.head_sha !== pending.workflowSha)
+        )
+          return null;
         completed = body.status === 'completed';
         conclusion = typeof body.conclusion === 'string' ? body.conclusion.slice(0, 40) : null;
         if (['failure', 'failed', 'timed_out', 'action_required'].includes(conclusion ?? ''))
@@ -352,28 +418,32 @@ export const confirm = internalAction({
     } catch {
       // An unreadable answer is not a conclusion: treat it as still running.
     }
-    const reports = await ctx.runMutation(
-      makeFunctionReference<'mutation'>('projectHostedActionsVerdict:confirmed'),
-      {
-        ...identityInput,
-        completed,
-        conclusion,
-        ...(stepVerdict ? { stepVerdict } : {}),
-      },
-    );
+    const confirmVerdict = makeFunctionReference<'mutation'>('projectHostedActionsVerdict:confirmed');
+    const reports = await ctx.runMutation(confirmVerdict, {
+      ...identityInput,
+      completed,
+      conclusion,
+      ...(stepVerdict ? { stepVerdict } : {}),
+    });
     if (reports) {
       const prepared = JSON.parse(reports);
-      await collectResultBatch(
-        ctx,
-        {
-          projectId: input.projectId,
-          runId: input.runId,
-          fence: input.fence,
-          executionId: prepared.run.executionId,
-        },
-        stepVerdict === 'passed' ? 'success' : completed ? conclusion : undefined,
-        prepared,
-      );
+      try {
+        await collectResultBatch(
+          ctx,
+          {
+            projectId: input.projectId,
+            runId: input.runId,
+            fence: input.fence,
+            executionId: prepared.run.executionId,
+          },
+          stepVerdict === 'passed' ? 'success' : completed ? conclusion : undefined,
+          prepared,
+        );
+      } catch (error) {
+        if (input.stallRepair)
+          await ctx.runMutation(confirmVerdict, { ...identityInput, completed: false, conclusion: null });
+        throw error;
+      }
     }
     return null;
   },

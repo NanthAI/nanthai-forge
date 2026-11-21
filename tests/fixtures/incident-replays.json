@@ -500,6 +500,18 @@
       "test": "43b51a5e 01a38b28 F1: a normal entry does not wait out a check for an urgent one parked on another entry"
     },
     {
+      "incident": "cd63bbe9",
+      "what": "A shared check failed, its unattributed members split, and a dispatched child ran to provider success without Forge collecting its shard results",
+      "file": "tests/hosted-split-result-recovery.test.mjs",
+      "test": "incident cd63bbe9: a failed cohort splits and the alarm repairs its dispatched recheck"
+    },
+    {
+      "incident": "cd63bbe9",
+      "what": "An acknowledged Actions run stayed at zero recorded shards after provider success and the checking alarm ignored it",
+      "file": "tests/hosted-report-fold.test.mjs",
+      "test": "incident cd63bbe9: an acknowledged Actions run settles from its original provider result and signed shards"
+    },
+    {
       "incident": "e62d834b",
       "what": "Source steps fenced at the 60 s lease sat up to 60 min after the fix deployed (66edd19a, 20ad8233, 2026-11-20): the step's own wake repairs a dead worker at its lease end, not the desired-landing watchdog's backoff",
       "file": "tests/source-lease-incident.test.mjs",
