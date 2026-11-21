@@ -1,6 +1,7 @@
-Public discovery uses a service-key backend boundary and a per-IP/domain site function budget. JSON query strings
-and non-canonical public paths redirect before reads; explicit empty-query targets prevent Netlify query-copy loops.
-HTML, JSON and sitemap variants share their canonical cache identity. The native limiter counts redirects, but
+Public discovery uses a service-key backend boundary and a per-IP/domain site function budget. Non-canonical
+public paths and requests with the reserved cache selector redirect before reads. Ordinary JSON and sitemap
+queries return the same data on cache hits and misses. HTML, JSON and sitemap variants share their canonical
+cache identity. The native limiter counts redirects, but
 enforcement is asynchronous (about ten seconds in dev), and native 429s lack a configurable `Retry-After`.
 The bounded sustained-traffic probe covers canonical and redirecting paths. Raw dot segments can receive an
 empty platform 404 before any function operation; application-controlled missing paths have a nonempty response.

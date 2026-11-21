@@ -2,7 +2,7 @@
 /** The cached public read (Items 6a60e89a, 875a4b60, 8947a779). Signed-out visitors and crawlers of public pages are
  * served from the CDN's durable cache: a hit runs no function and makes no Convex call. On a miss this function asks
  * the backend's public route once (convex/publicHttp.ts) and the CDN keeps the answer for the cache period, so the
- * backend is reached only on misses. Data queries redirect; HTML query state never varies the shared bytes. No visitor credential is forwarded.
+ * backend is reached only on misses. Ordinary query parameters do not affect the shared bytes. No visitor credential is forwarded.
  * Failures and missing reads are cached for 30 seconds to absorb repeated retries.
  *
  * It also gives the app page of explore, profiles and public projects its title, description and share-card tags
@@ -15,7 +15,7 @@ import { normalizeAccountPathname } from '../../web/src/app/paths.js';
 import { exploreMeta, profileMeta, projectMeta, withMeta, type PageMeta } from '../lib/public-meta.js';
 
 const SHARED = 'public, durable, s-maxage=30, must-revalidate';
-// This parameter is always removed before a read, so every HTML query shares one cache entry.
+// Strip this reserved cache selector before reads so ordinary query parameters share one cache entry.
 const PAGE_KEY = '__forge_page';
 // Netlify copies the incoming query onto a redirect whose target has no query entries.
 // One empty entry explicitly clears it; a lone '?' does not. It has no page identity.
@@ -56,6 +56,19 @@ function backend() {
 const get = (url: string, headers: Record<string, string> = {}) =>
   networkFetch(url, { redirect: 'error', signal: networkTimeout(8_000), headers }, { retries: 0 });
 
+function publicDataHeaders(response: Response, status: number) {
+  const headers = new Headers({ 'content-type': response.headers.get('content-type') ?? 'application/json' });
+  for (const name of ['cache-control', 'netlify-cdn-cache-control', 'access-control-allow-origin']) {
+    const value = response.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  if (status === 404) {
+    headers.set('cache-control', 'public, max-age=0, must-revalidate');
+    headers.set('netlify-cdn-cache-control', SHARED);
+  }
+  return headers;
+}
+
 async function proxy(path: string) {
   const site = backend();
   const key = process.env.FORGE_PUBLIC_READ_SECRET;
@@ -63,18 +76,14 @@ async function proxy(path: string) {
   // Keep missing/failure outcomes in successful cache envelopes while preserving their real
   // status for visitors. The Cache API expires them after 30 s, without timers or stale reuse.
   const storage = (globalThis as unknown as { caches?: Pick<CacheStorage, 'open'> }).caches;
-  const cache = storage ? await storage.open('forge-public-outcomes-v2') : null;
+  const cache = storage ? await storage.open('forge-public-outcomes-v3') : null;
   const cacheKey = `${site}${path}`;
   const failed = cache ? await cache.match(cacheKey) : null;
   if (failed) {
     if (failed.headers.get('x-forge-public-status') === '404')
       return new Response(failed.body, {
         status: 404,
-        headers: {
-          'content-type': failed.headers.get('content-type') ?? 'application/json',
-          'cache-control': 'public, max-age=0, must-revalidate',
-          'netlify-cdn-cache-control': SHARED,
-        },
+        headers: publicDataHeaders(failed, 404),
       });
     return unavailable(502, 'The public read is unavailable; try again.');
   }
@@ -87,29 +96,13 @@ async function proxy(path: string) {
       );
     return unavailable(502, 'The public read is unavailable; try again.');
   }
-  const headers = new Headers({ 'content-type': response.headers.get('content-type') ?? 'application/json' });
-  // Only what the route marked cacheable is kept.
-  for (const name of [
-    'cache-control',
-    'netlify-cdn-cache-control',
-    'access-control-allow-origin',
-    'x-content-type-options',
-  ])
-    if (response.headers.get(name)) headers.set(name, response.headers.get(name)!);
-  if (response.status === 404) {
-    headers.set('cache-control', 'public, max-age=0, must-revalidate');
-    headers.set('netlify-cdn-cache-control', SHARED);
-    if (cache)
-      await cache.put(
-        cacheKey,
-        new Response(await response.clone().text(), {
-          headers: {
-            'cache-control': 'public, max-age=30',
-            'content-type': headers.get('content-type')!,
-            'x-forge-public-status': '404',
-          },
-        }),
-      );
+  const headers = publicDataHeaders(response, response.status);
+  if (response.status === 404 && cache) {
+    const envelope = new Headers(headers);
+    envelope.set('cache-control', 'public, max-age=30');
+    envelope.delete('netlify-cdn-cache-control');
+    envelope.set('x-forge-public-status', '404');
+    await cache.put(cacheKey, new Response(await response.clone().arrayBuffer(), { headers: envelope }));
   }
   return new Response(response.body, { status: response.status, headers });
 }
@@ -190,15 +183,10 @@ async function respond(request: Request) {
         headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
       },
     );
-  // Canonicalize before loading the shell or calling the backend. HTML preserves app query state.
-  if (
-    path !== url.pathname ||
-    (data && url.search && url.search !== EMPTY_QUERY) ||
-    url.searchParams.has(PAGE_KEY)
-  ) {
+  // Canonicalize the path and remove the reserved selector. The proxy reads by path alone.
+  if (path !== url.pathname || url.searchParams.has(PAGE_KEY)) {
     const hadQuery = Boolean(url.search);
-    if (data) url.search = url.search ? EMPTY_QUERY : '';
-    else url.searchParams.delete(PAGE_KEY);
+    if (url.searchParams.has(PAGE_KEY)) url.searchParams.delete(PAGE_KEY);
     return new Response(null, {
       status: 308,
       headers: {
@@ -221,8 +209,7 @@ export default async (request: Request) => {
     response = unavailable(502, 'The public read is unavailable; try again.');
   }
   for (const [name, value] of Object.entries(SECURITY)) response.headers.set(name, value);
-  // Cacheable requests never carry PAGE_KEY. Bare URLs and explicit empty-query targets
-  // therefore share one object for HTML, JSON and sitemap responses alike.
+  // Cacheable requests never carry PAGE_KEY, so ordinary query variants share one object per path.
   response.headers.set('netlify-vary', `query=${PAGE_KEY}`);
   return request.method === 'HEAD'
     ? new Response(null, { status: response.status, headers: response.headers })

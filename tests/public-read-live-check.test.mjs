@@ -12,7 +12,7 @@ const native = JSON.parse(
   readFileSync(new URL('./fixtures/public-read-netlify.json', import.meta.url)),
 ).nativeRateLimit;
 
-test('the post-deploy probe checks both exact live query cases and follows each exactly once', async () => {
+test('the post-deploy probe follows the reserved HTML redirect exactly once', async () => {
   const paths = [];
   const result = await probeSelfRedirects({
     base: 'https://site.example',
@@ -23,21 +23,17 @@ test('the post-deploy probe checks both exact live query cases and follows each 
         : { status: 308, location: `https://site.example${path.split('?')[0]}?=` };
     },
   });
-  assert.deepEqual(paths, [
-    '/-/public/v1/explore/active.json?forge_probe=61',
-    '/-/public/v1/explore/active.json?=',
-    '/-/explore?__forge_page=x',
-    '/-/explore?=',
-  ]);
-  assert.equal(result.cases.length, 2);
-  assert(result.cases.every(({ first, followed }) => first.status === 308 && followed.status === 200));
+  assert.deepEqual(paths, ['/-/explore?__forge_page=x', '/-/explore?=']);
+  const [{ first, followed }] = result.cases;
+  assert.equal(first.status, 308);
+  assert.equal(followed.status, 200);
 });
 
 test('a restored query, self target, warm cache or another redirect cannot pass the live one-hop check', async () => {
   for (const location of [
-    'https://site.example/-/public/v1/explore/active.json?forge_probe=61',
-    'https://site.example/-/public/v1/explore/active.json?=&forge_probe=61',
-    'https://other.example/-/public/v1/explore/active.json?=',
+    'https://site.example/-/explore?__forge_page=x',
+    'https://site.example/-/explore?=&__forge_page=x',
+    'https://other.example/-/explore?=',
     'https://site.example/outside?=',
   ])
     await assert.rejects(

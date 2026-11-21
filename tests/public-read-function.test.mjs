@@ -136,22 +136,26 @@ test('only explore, profiles and project front pages map to a public read', () =
     assert.equal(readFor(path), null, path);
 });
 
-test('query strings redirect to an explicitly cleared identity with zero reads, including arbitrary vary names', async t => {
+test('reserved data cache selectors redirect without a backend read', async t => {
   const asked = backend(t, () => {
     throw new Error('must not fetch');
   });
   for (const path of ['/sitemap.xml', '/-/public/v1/project/ada/atlas.json']) {
-    for (const query of ['?utm_source=x', '?cache=1', '?cache=2&x=3']) {
+    for (const [query, target] of [
+      ['?__forge_page=unbounded', '?='],
+      ['?%5f%5fforge_page=unbounded&x=3', '?x=3'],
+    ]) {
       const response = await serve(new Request(`https://untrusted.example${path}${query}`));
       assert.equal(response.status, 308);
-      assert.equal(response.headers.get('location'), `https://site.example${path}?=`);
+      assert.equal(response.headers.get('location'), `https://site.example${path}${target}`);
+      assert.equal(response.headers.get('cache-control'), 'no-store');
     }
   }
   assert.equal(asked.length, 0);
   assert.deepEqual(config.rateLimit, { windowLimit: 60, windowSize: 60, aggregateBy: ['ip', 'domain'] });
 });
 
-test('the live query cases cannot self-redirect after Netlify query pass-through', async t => {
+test('reserved HTML selectors cannot self-redirect after Netlify query pass-through', async t => {
   const require = createRequire(import.meta.resolve('netlify-cli/package.json'));
   const { RedirectsHandler } = await import(pathToFileURL(require.resolve('@netlify/redirects')).href);
   const directory = await fs.mkdtemp(join(tmpdir(), 'forge-public-redirect-'));
@@ -178,30 +182,53 @@ test('the live query cases cannot self-redirect after Netlify query pass-through
   assert(asked.every(({ url }) => url.startsWith(`${SITE}/public/v1/`)));
 });
 
-test('bare and explicitly cleared JSON or sitemap queries share one cache identity', async t => {
-  const asked = backend(t, () => json({ found: true }));
-  for (const path of ['/sitemap.xml', '/-/public/v1/explore/active.json']) {
-    const cache = new Map();
-    for (const query of ['', '?=', '?forge_probe=61', '?__forge_page=unbounded']) {
-      let request = new Request(`https://site.example${path}${query}`);
-      if (query && query !== '?=') {
-        const redirect = await serve(request);
-        assert.equal(redirect.status, 308);
-        request = new Request(redirect.headers.get('location'));
-      }
-      const url = new URL(request.url);
-      const identity = `${url.pathname}:${url.searchParams.get('__forge_page') ?? ''}`;
-      if (!cache.has(identity)) {
-        const response = await serve(request);
-        assert.equal(response.status, 200);
-        assert.equal(response.headers.get('netlify-vary'), 'query=__forge_page');
-        cache.set(identity, response);
-      }
+for (const [path, upstream, mime, body] of [
+  ['/sitemap.xml', '/public/v1/sitemap.xml', 'application/xml', '<urlset/>'],
+  [
+    '/-/public/v1/explore/active.json',
+    '/public/v1/explore/active.json',
+    'application/json',
+    '{"found":true}',
+  ],
+])
+  test(`${path} ignores ordinary queries on misses and declares a shared cache identity`, async t => {
+    const asked = backend(
+      t,
+      () =>
+        new Response(body, {
+          headers: {
+            'content-type': mime,
+            'netlify-cdn-cache-control': 'public, durable, s-maxage=30, must-revalidate',
+          },
+        }),
+    );
+    const queries = ['?forge_probe=61', '', '?=', '?cache=2&x=3'];
+    const url = query => new URL(`https://site.example${path}${query}`);
+    const cold = await serve(new Request(url(queries[0])));
+    const vary = cold.headers.get('netlify-vary');
+    assert.equal(vary, 'query=__forge_page');
+    const identity = address => [address.pathname, address.searchParams.get(vary.slice('query='.length))];
+    for (const query of queries) assert.deepEqual(identity(url(query)), identity(url(queries[0])));
+    assert.equal(cold.status, 200);
+    assert.equal(cold.headers.get('location'), null);
+    assert.equal(cold.headers.get('content-type'), mime);
+    assert.equal(await cold.text(), body);
+    assert.deepEqual(
+      asked.map(call => call.url),
+      [`${SITE}${upstream}`],
+      'one backend read for the shared entry',
+    );
+    for (const query of queries.slice(1)) {
+      const uncached = await serve(new Request(url(query)));
+      assert.equal(uncached.status, cold.status);
+      assert.deepEqual([...uncached.headers], [...cold.headers]);
+      assert.equal(await uncached.text(), body);
     }
-    assert.equal(cache.size, 1);
-  }
-  assert.equal(asked.length, 2, 'one cold read per identity, none for redirects or cache hits');
-});
+    assert.deepEqual(
+      asked.map(call => call.url),
+      queries.map(() => `${SITE}${upstream}`),
+    );
+  });
 
 test('paths outside the public root have a nonempty HTML 404 and cannot reach a backend', async t => {
   const asked = backend(t, () => {
@@ -405,8 +432,12 @@ test('case, encoding and slash variants redirect before any public backend call'
     );
 });
 
-test('missing public records are cached briefly and retain a 404 status', async t => {
-  const asked = backend(t, () => json({ found: false }, 404));
+test('private or missing data stays an identical 404 on a warm cache across queries', async t => {
+  const asked = backend(t, () => {
+    const response = json({ found: false }, 404);
+    response.headers.set('access-control-allow-origin', '*');
+    return response;
+  });
   const values = new Map();
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'caches');
   Object.defineProperty(globalThis, 'caches', {
@@ -426,16 +457,24 @@ test('missing public records are cached briefly and retain a 404 status', async 
     if (previous) Object.defineProperty(globalThis, 'caches', previous);
     else delete globalThis.caches;
   });
-  for (let n = 0; n < 3; n++) {
-    const response = await serve(new Request('https://site.example/-/public/v1/project/ada/missing.json'));
+  const path = 'https://site.example/-/public/v1/project/ada/missing.json';
+  const cold = await serve(new Request(`${path}?source=cold`));
+  assert.equal(cold.headers.get('access-control-allow-origin'), '*');
+  assert.equal(cold.headers.get('set-cookie'), null);
+  assert.equal(cold.status, 404);
+  const body = await cold.text();
+  assert.deepEqual(JSON.parse(body), { found: false });
+  for (const query of ['', '?source=warm']) {
+    const response = await serve(new Request(`${path}${query}`));
     assert.equal(response.status, 404);
-    assert.deepEqual(await response.json(), { found: false });
+    assert.equal(await response.text(), body);
+    assert.deepEqual([...response.headers], [...cold.headers]);
     assert.match(response.headers.get('netlify-cdn-cache-control'), /s-maxage=30/);
     assert.equal(response.headers.get('cache-control'), 'public, max-age=0, must-revalidate');
   }
   assert.equal(asked.length, 1);
   values.clear();
-  await serve(new Request('https://site.example/-/public/v1/project/ada/missing.json'));
+  await serve(new Request(path));
   assert.equal(asked.length, 2);
 });
 

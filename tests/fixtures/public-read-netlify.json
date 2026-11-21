@@ -1,18 +1,11 @@
 {
   "queryRedirects": [
     {
-      "path": "/-/public/v1/explore/active.json?forge_probe=61",
-      "oldLocation": "/-/public/v1/explore/active.json?forge_probe=61",
-      "location": "/-/public/v1/explore/active.json?="
-    },
-    {
       "path": "/-/explore?__forge_page=synthetic",
-      "oldLocation": "/-/explore?__forge_page=synthetic",
       "location": "/-/explore?="
     },
     {
       "path": "/-/explore?__forge_page=synthetic&q=kept",
-      "oldLocation": "/-/explore?q=kept",
       "location": "/-/explore?q=kept"
     }
   ],

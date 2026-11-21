@@ -27,31 +27,20 @@ export async function requestPublicPath(base, path, timeoutMs = 10_000) {
   };
 }
 
-/** Run immediately after deploy, before warming the public JSON cache entry. */
+/** The reserved selector must be removed without restoring it at the edge. */
 export async function probeSelfRedirects({ base, request = path => requestPublicPath(base, path) }) {
-  const cases = [];
-  for (const path of ['/-/public/v1/explore/active.json?forge_probe=61', '/-/explore?__forge_page=x']) {
-    const original = new URL(path, base);
-    const first = await request(path);
-    if (first.status !== 308 || !first.location?.endsWith('?='))
-      throw Error(`Self-redirect probe ${path}: expected 308 with Location ending exactly in ?=`);
-    const target = new URL(first.location, original);
-    if (
-      target.origin !== original.origin ||
-      target.pathname !== original.pathname ||
-      target.username ||
-      target.password ||
-      target.search !== '?=' ||
-      target.hash ||
-      target.href === original.href
-    )
-      throw Error(`Self-redirect probe ${path}: unsafe or self-referencing target`);
-    const followed = await request(`${target.pathname}${target.search}`);
-    if (followed.status !== 200 || followed.location)
-      throw Error(`Self-redirect probe ${path}: following once must return 200 with no Location`);
-    cases.push({ path, first, followed });
-  }
-  return { cases };
+  const path = '/-/explore?__forge_page=x';
+  const canonical = '/-/explore?=';
+  const first = await request(path);
+  if (first.status !== 308 || !first.location?.endsWith('?='))
+    throw Error(`Self-redirect probe ${path}: expected 308 with Location ending exactly in ?=`);
+  const target = new URL(first.location, new URL(path, base));
+  if (target.href !== new URL(canonical, base).href)
+    throw Error(`Self-redirect probe ${path}: unsafe or self-referencing target`);
+  const followed = await request(canonical);
+  if (followed.status !== 200 || followed.location)
+    throw Error(`Self-redirect probe ${path}: following once must return 200 with no Location`);
+  return { cases: [{ path, first, followed }] };
 }
 
 /** A fresh window starts with the expected answer, then sustained traffic must reach 429.

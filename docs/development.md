@@ -1431,7 +1431,6 @@ site's cache and budget. A bare Vite server does not host the site function. The
 The native limiter is asynchronous. Test sustained traffic, not an exact 61st response:
 
 ```sh
-# Immediately after deployment, before warming the public JSON cache entry:
 node scripts/public-read-live-check.mjs HTTPS_DEV_ORIGIN self-redirect
 node scripts/public-read-live-check.mjs HTTPS_DEV_ORIGIN canonical
 # Wait at least 65 seconds without test traffic from this IP before the second shape.
@@ -1449,13 +1448,13 @@ passing probe establishes abuse protection for that deployment and request shape
 The sustained dev measurements were 9.962 seconds over 64 requests for the canonical address and 12.759 seconds
 over 63 requests for the redirecting address (3.099 and 2.204 seconds after their bursts, respectively).
 
-The `self-redirect` mode requests `/-/public/v1/explore/active.json?forge_probe=61` and
-`/-/explore?__forge_page=x` without following redirects. Each Location must end exactly in `?=`, and following
-each once must return 200 with no Location. Run it before warming the JSON entry or after its 30-second expiry:
-a warm entry can answer the data query directly with 200, so that does not exercise the redirect branch.
-The no-query restoration was observed on dev; the lone-`?` result was shown only in netlify-cli's local engine.
-The regression fixture and real local Netlify matcher test cover that distinction. Bare and cleared targets use the same
-cache key; confirm a repeat is a CDN hit with zero Convex executions after deploy.
+The `self-redirect` mode requests `/-/explore?__forge_page=x` without following redirects. Its Location must
+end exactly in `?=`, and following it once must return 200 with no Location.
+
+To verify data queries after deploy, fetch `/-/public/v1/explore/active.json?forge_probe=61` and
+`/sitemap.xml?forge_probe=61` before warming their entries, or after their 30-second expiry. Compare each
+with its bare URL immediately afterward. Both requests should return the same 200 response with no Location,
+and the repeat should be a CDN hit with zero Convex executions.
 
 Raw dot paths need `curl --path-as-is`; `fetch` and browsers normalize them before transport. Dev refused the
 raw `/./` form with an empty edge 404 and zero function operations. This is a platform boundary, not a Forge
