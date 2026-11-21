@@ -20,12 +20,19 @@ MCP `forge_review` exposes hosted `show`, `diff`, `peers` and `queue`.
   instead of five. Count/coverage disclose omissions; unsaved edits remain
   unavailable and missing notices never prove independence.
 - `diff {laneId,paths?,byteBudget?,cursor?}` pins base/saved-head R2 States.
-  Defaults: 48,000 source/hunk bytes plus path metadata, 50 paths/page. Continue
+  Defaults: 48,000 hunk payload bytes plus path metadata, 50 paths/page. A small
+  hunk can fit even when both file versions exceed the reply budget. The source
+  read keeps the ordinary small-file window and allows larger comparisons up to
+  1 MiB per version and 2 MiB per page. `cost.sourceBytes` reports the source
+  verified for the page, including batched cold downloads. Continue
   `result.nextCursor` with the same Lane/paths, retaining the pair after saves.
   A page that is not the last says so in `more` (the paths shown, the total) and
   carries the next-page `command` and `next`.
-  `omitted`/`requiredByteBudget` and `truncated` disclose shortened output;
-  increase the budget or use exact show for remaining bytes. `from` compares an
+  A file whose hunks do not fit the remaining page can continue on the next
+  pinned page. A file that cannot fit on a fresh page reports
+  `truncated` and its `requiredByteBudget` for the context-free hunks.
+  `omitted` reports files beyond the text comparison bound with their source
+  size. Use exact show for the omitted bytes. `from` compares an
   older saved State with the saved head instead of the pinned base: a full State id
   or a unique 8+ character prefix of the Lane's base or saved States (an ambiguous
   prefix is refused with `AMBIGUOUS_ID`). `summary:true`

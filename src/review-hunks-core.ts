@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 import { byteString, displayLine, isTextBytes, stringBytes, utf8Text } from './text-bytes.js';
+import type { LineEdit } from './text-line-edits.js';
 type Op = { kind: 'context' | 'removed' | 'added'; text: string; before: number; after: number };
+export const REVIEW_MAX_FILE_BYTES = 1024 * 1024;
 
 /** Lines split on 0x0A for comparison, one character per byte (exact). Text is Git's rule
  * (Issue 113bc7b3), so any ASCII-compatible encoding diffs, not only valid UTF-8. */
 function decoded(bytes: Uint8Array): string[] | null {
-  if (bytes.length > 1024 * 1024 || !isTextBytes(bytes)) return null;
+  if (bytes.length > REVIEW_MAX_FILE_BYTES || !isTextBytes(bytes)) return null;
   // Preserve the final empty line to disclose final-newline changes.
   return bytes.length ? byteString(bytes).split('\n') : [];
 }
-export function computeHunks(original: Uint8Array, selected: Uint8Array, context: number) {
+export function computeHunks(
+  original: Uint8Array,
+  selected: Uint8Array,
+  context: number,
+  alignSparse?: (before: string[], after: string[]) => LineEdit[] | null,
+) {
   const a = decoded(original),
     b = decoded(selected);
   if (!a || !b)
@@ -34,6 +41,7 @@ export function computeHunks(original: Uint8Array, selected: Uint8Array, context
   const x = a.slice(first, lastA),
     y = b.slice(first, lastB),
     bounded = (x.length + 1) * (y.length + 1) <= 1_000_000;
+  const sparseEdits = bounded || !x.length || !y.length ? null : alignSparse?.(x, y);
   const ops: Op[] = [];
   let ai = Math.max(0, first - context),
     bi = ai;
@@ -62,6 +70,14 @@ export function computeHunks(original: Uint8Array, selected: Uint8Array, context
         emit('removed', x[i++]!);
       else emit('added', y[j++]!);
     }
+  } else if (sparseEdits) {
+    let i = 0;
+    for (const edit of sparseEdits) {
+      while (i < edit.start) emit('context', x[i++]!);
+      while (i < edit.end) emit('removed', x[i++]!);
+      for (const line of edit.lines) emit('added', line);
+    }
+    while (i < x.length) emit('context', x[i++]!);
   } else {
     for (const line of x) emit('removed', line);
     for (const line of y) emit('added', line);
@@ -76,6 +92,7 @@ export function computeHunks(original: Uint8Array, selected: Uint8Array, context
       if (previous && start <= previous.end) previous.end = Math.max(previous.end, end);
       else ranges.push({ start, end });
     }
+  const truncated = !bounded && !sparseEdits;
   return {
     hunks: ranges.map(({ start, end }) => ({
       beforeStart: ops[start]!.before,
@@ -84,9 +101,9 @@ export function computeHunks(original: Uint8Array, selected: Uint8Array, context
       afterLines: ops.slice(start, end).filter(op => op.kind !== 'removed').length,
       lines: ops.slice(start, end).map(({ kind, text }) => ({ kind, ...shown(text) })),
     })),
-    truncated: !bounded,
+    truncated,
     ...encoding,
-    ...(!bounded
+    ...(truncated
       ? { content: 'Bounded replacement hunk; minimal alignment exceeded the computation budget' }
       : {}),
   };

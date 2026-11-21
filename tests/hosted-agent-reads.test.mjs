@@ -91,14 +91,142 @@ for (const count of [3000, 29000])
       `${count}: ${result.cost.manifestBytes} manifest bytes; ${result.cost.sourceBytes} selected source bytes; ${pages.length} metadata pages`,
     );
   });
-test('diff reports an oversized file without reading its bytes', async t => {
-  const f = fixture(t, 1);
+test('saved CLI and MCP return small hunks from large files within the reply budget (c4a16f44)', async t => {
+  const base = {},
+    lane = {};
+  for (const [index, size] of [78_500, 102_500, 125_000].entries()) {
+    const path = `large-${index}.txt`;
+    const stable = 'unchanged saved source\n'.repeat(Math.floor(size / 23));
+    base[path] = `before ${index}\n${stable}`;
+    lane[path] = base[path].replace(`before ${index}`, `after ${index}`);
+    if (index === 0) {
+      base[path] += 'removed at end\n';
+      lane[path] += 'added at end\nnew final line\n';
+    }
+  }
+  const f = agentFixture(t, { base, lane }),
+    transport = f.transport();
+  const tools = new Map();
+  t.after(
+    registerHostedAgentWorkflow({ registerTool: (name, _options, call) => tools.set(name, call) }, transport),
+  );
+  const command = { laneId: f.lane.laneId, byteBudget: 100_000 };
+  const cli = (await hostedAgentCli(f.root, 'diff', command, f.address, transport)).result;
+  const reply = await tools.get('forge_review')({ command: { action: 'diff', ...command } });
+  const mcp = JSON.parse(reply.content[0].text).result;
+  const sourceBytes = [...Object.values(base), ...Object.values(lane)].reduce(
+    (sum, value) => sum + Buffer.byteLength(value),
+    0,
+  );
+  for (const result of [cli, mcp]) {
+    assert.deepEqual(result.omitted, []);
+    assert.equal(result.nextCursor, null);
+    assert.equal(result.truncated, false);
+    assert.equal(result.cost.sourceBytes, sourceBytes);
+    assert(result.cost.outputBytes < 3000);
+    assert.equal(result.cost.metadataPages, 1);
+    assert.deepEqual(
+      result.items.map(item =>
+        item.hunks.flatMap(hunk => hunk.lines.filter(line => line.kind !== 'context').map(line => line.text)),
+      ),
+      [
+        ['before 0', 'after 0', 'removed at end', 'added at end', 'new final line'],
+        ['before 1', 'after 1'],
+        ['before 2', 'after 2'],
+      ],
+    );
+    assert.deepEqual(
+      result.items[0].hunks.map(hunk => hunk.beforeStart),
+      [1, Math.floor(78_500 / 23) - 1],
+    );
+  }
+  const pages = f.calls.filter(call => call.name === 'projectObjectDownloads:lanePage');
+  assert(pages.every(call => call.args.digests.length <= 100));
+  assert.equal(pages.filter(call => call.args.digests.length === 6).length, 2);
+  t.diagnostic(
+    `Large-file page: ${cli.cost.manifestBytes} manifest B, ${sourceBytes} selected source B, ${cli.cost.downloadedBytes} cold download B, ${mcp.cost.downloadedBytes} repeated download B, ${cli.cost.outputBytes} hunk B`,
+  );
+});
+test('a full hunk continues on the original saved pair when an earlier file fills the reply', async t => {
+  const line = letter => letter.repeat(370);
+  const stable = 'unchanged\n'.repeat(8200);
+  const f = agentFixture(t, {
+    base: {
+      'a.txt': `${line('a')}\n${stable}`,
+      'b.txt': `${line('b')}\n${stable}`,
+      'c.txt': `${line('e')}\n${stable}`,
+    },
+    lane: {
+      'a.txt': `${line('c')}\n${stable}`,
+      'b.txt': `${line('d')}\n${stable}`,
+      'c.txt': `${line('f')}\n${stable}`,
+    },
+  });
+  const transport = f.transport(),
+    command = { laneId: f.lane.laneId, byteBudget: 1024 };
+  const { result: first } = await transport.dispatch('diff', command);
+  assert.deepEqual(
+    first.items.map(item => item.path),
+    ['a.txt'],
+  );
+  assert.equal(first.items[0].truncated, false);
+  assert(first.cost.outputBytes <= command.byteBudget);
+  assert.equal(first.nextCursor.offset, 1);
+  const { result: repeated } = await transport.dispatch('diff', command);
+  assert.equal(repeated.cost.downloadedBytes, 0);
+  assert.equal(repeated.cost.sourceBytes, 4 * (371 + stable.length), 'the third pair stays unread');
+  f.lane.head = f.lane.base.head;
+  const { result: second } = await transport.dispatch('diff', { ...command, cursor: first.nextCursor });
+  assert.equal(second.head, first.head);
+  assert.equal(second.base, first.base);
+  assert.deepEqual(
+    second.items.map(item => item.path),
+    ['b.txt'],
+  );
+  assert.deepEqual(
+    second.items[0].hunks.flatMap(hunk => hunk.lines.filter(change => change.kind !== 'context')),
+    [
+      { kind: 'removed', text: line('b') },
+      { kind: 'added', text: line('d') },
+    ],
+  );
+  assert(second.cost.outputBytes <= command.byteBudget);
+  assert.equal(second.nextCursor.offset, 2);
+  f.allow(false);
+  await assert.rejects(
+    transport.dispatch('diff', { ...command, cursor: second.nextCursor }),
+    error => error.code === 'PROJECT_UNAVAILABLE',
+  );
+});
+test('diff discloses a changed line that cannot fit and reports the budget needed for the hunk', async t => {
+  const f = agentFixture(t, {
+    base: { 'row.txt': 'a'.repeat(1400) },
+    lane: { 'row.txt': 'b'.repeat(1400) },
+  });
+  const transport = f.transport(),
+    command = { laneId: f.lane.laneId, byteBudget: 1024 };
+  const { result: first } = await transport.dispatch('diff', command);
+  const [item] = first.items;
+  assert.deepEqual(item.hunks, []);
+  assert.equal(item.truncated, true);
+  assert(item.requiredByteBudget > command.byteBudget);
+  assert(first.cost.outputBytes <= command.byteBudget);
+  const { result: full } = await transport.dispatch('diff', {
+    ...command,
+    byteBudget: item.requiredByteBudget,
+  });
+  assert.equal(full.truncated, false);
+  assert.equal(full.items[0].hunks[0].lines.length, 2);
+});
+test('diff reports a file beyond the text comparison bound without reading its blob', async t => {
+  const f = agentFixture(t, { lane: { 'huge.txt': 'x'.repeat(1024 * 1024 + 1) } });
   const result = (await f.transport().dispatch('diff', { laneId: f.lane.laneId, byteBudget: 1024 })).result;
   assert.equal(result.items.length, 0);
-  assert.equal(result.omitted.length, 1);
+  assert.deepEqual(result.omitted, [
+    { path: 'huge.txt', reason: 'source-too-large', sourceBytes: 1024 * 1024 + 1 },
+  ]);
   assert.equal(result.truncated, true);
   assert.equal(result.cost.sourceBytes, 0);
-  assert(result.omitted[0].requiredByteBudget > 1024);
 });
 test('CLI and MCP show exact Candidate/State bytes, with no revision substitution and fresh access on cache hits', async t => {
   const f = fixture(t, 1),

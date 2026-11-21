@@ -11,7 +11,6 @@ import { HostedCheckoutCache } from './hosted-checkout-cache.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
 import { parseNativeState } from './state/format.js';
 import { reviewPaths } from './source-review-format.js';
-import { contextualHunks } from './review-hunks.js';
 import { safeRelative } from './safe-relative.js';
 import { invariant } from './errors.js';
 import { selectHostedSource, selectHostedMain, hostedSourceShowSchema } from './mcp-hosted-source.js';
@@ -293,81 +292,14 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
       },
     };
   }
-  const window = changes.slice(offset, offset + 50);
-  const ids = [
-    ...new Set(
-      window.flatMap(item => [item.before?.blob, item.after?.blob].filter((id): id is string => !!id)),
-    ),
-  ];
-  const pins = ids.length ? await objects.objects(ids) : [];
-  const sizes = new Map(pins.map(pin => [pin.sha256, pin.size]));
-  let sourceBytes = 0,
-    outputBytes = 0,
-    end = offset;
-  const selected: typeof window = [],
-    omitted: { path: string; requiredByteBudget: number }[] = [];
-  for (const item of window) {
-    const size =
-      (item.before ? sizes.get(item.before.blob)! : 0) + (item.after ? sizes.get(item.after.blob)! : 0);
-    if (sourceBytes + size > command.byteBudget) {
-      if (selected.length) break;
-      omitted.push({ path: item.path, requiredByteBudget: size });
-      end++;
-      continue;
-    }
-    sourceBytes += size;
-    selected.push(item);
-    end++;
-  }
-  const selectedIds = [
-    ...new Set(
-      selected.flatMap(item => [item.before?.blob, item.after?.blob].filter((id): id is string => !!id)),
-    ),
-  ];
-  // Reuse the descriptors/signatures from the one metadata page instead of looking up each file again.
-  const byteCache = new HostedCheckoutCache(clientCacheRoot(transport.root), {
-    objects: async digests => digests.map(id => pins.find(pin => pin.sha256 === id)!),
-    downloadToFile: objects.downloadToFile.bind(objects),
-    downloadFiles: objects.downloadFiles.bind(objects),
-  });
-  await byteCache.ensure(selectedIds);
-  const items = selected.map(item => {
-    const diff = contextualHunks(
-      item.before ? read(item.before.blob) : Buffer.alloc(0),
-      item.after ? read(item.after.blob) : Buffer.alloc(0),
-      3,
-    );
-    const bytes = Buffer.byteLength(JSON.stringify(diff));
-    if (outputBytes + bytes > command.byteBudget) {
-      const bounded: typeof diff = { ...diff, hunks: [], truncated: true };
-      let remaining = command.byteBudget - outputBytes - Buffer.byteLength(JSON.stringify(bounded));
-      for (const hunk of diff.hunks) {
-        const partial = { ...hunk, lines: [] as typeof hunk.lines, beforeLines: 0, afterLines: 0 };
-        // Reserve header/count growth once; accounting is linear in emitted lines.
-        remaining -= Buffer.byteLength(JSON.stringify(partial)) + 64;
-        if (remaining <= 0) break;
-        bounded.hunks.push(partial);
-        for (const line of hunk.lines) {
-          const size = Buffer.byteLength(JSON.stringify(line)) + 1;
-          if (size > remaining) break;
-          remaining -= size;
-          partial.lines.push(line);
-          if (line.kind !== 'added') partial.beforeLines++;
-          if (line.kind !== 'removed') partial.afterLines++;
-        }
-        if (!partial.lines.length) bounded.hunks.pop();
-        if (partial.lines.length !== hunk.lines.length) break;
-      }
-      const size = Buffer.byteLength(JSON.stringify(bounded));
-      if (size <= command.byteBudget - outputBytes) {
-        outputBytes += size;
-        return { ...item, ...bounded };
-      }
-      return { ...item, hunks: [], truncated: true };
-    }
-    outputBytes += bytes;
-    return { ...item, ...diff };
-  });
+  const { readHostedDiffPage } = await import('./hosted-diff-page.js');
+  const { items, omitted, cost } = await readHostedDiffPage(
+    clientCacheRoot(transport.root),
+    objects,
+    changes.slice(offset, offset + 50),
+    command.byteBudget,
+  );
+  const end = offset + items.length + omitted.length;
   // Cache access and an old cursor never grant current project access.
   await transport.query('projectHostedLanes:select', { laneId: lane.laneId });
   const nextCursor =
@@ -386,10 +318,8 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
       truncated: omitted.length > 0 || items.some(item => item.truncated) || nextCursor !== null,
       ...diffMore(transport.root, command, nextCursor, { from: offset, to: end, total: changes.length }),
       cost: {
-        sourceBytes,
-        outputBytes,
-        downloadedBytes: cache.downloadedBytes + byteCache.downloadedBytes,
-        metadataPages: ids.length ? 1 : 0,
+        ...cost,
+        downloadedBytes: cache.downloadedBytes + cost.downloadedBytes,
         manifestBytes: read(base).length + (head === base ? 0 : read(head).length),
       },
     },
