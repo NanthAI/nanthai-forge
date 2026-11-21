@@ -59,6 +59,7 @@ function fixture(
     timingHistory = { version: 1, files: {}, runs: [] },
     capabilities = hostedActionsCapabilities,
     reader = false,
+    queue = false,
     submodule = null,
     // A browser test plus a web change, so the standard plan selects browser coverage (pinned Playwright).
     browser = false,
@@ -81,6 +82,12 @@ function fixture(
       browser ? JSON.stringify({ packages: { 'node_modules/playwright': { version: '1.2.3' } } }) : '{}',
     ),
     ...(browser ? [entry('tests/demo-browser.test.mjs', "import './browser-runtime.mjs';")] : []),
+    ...(queue
+      ? [
+          entry('tests/demo.test.mjs', 'import "../convex/projectHostedFinishWake.ts";'),
+          entry('convex/projectHostedFinishWake.ts', 'export const wake = false;'),
+        ]
+      : []),
     entry('scripts/example.sh', '#!/bin/sh\nexit 0\n', 'executable'),
     entry('test-link', 'package-lock.json', 'symlink'),
     entry('README.md', 'synthetic before'),
@@ -108,7 +115,15 @@ function fixture(
     );
   const base = state(files),
     candidate = state([
-      ...files.map(file => (file.path === 'README.md' ? entry(file.path, 'synthetic after') : file)),
+      ...files
+        .filter(file => !queue || file.path !== 'convex/projectHostedFinishWake.ts')
+        .map(file => (file.path === 'README.md' ? entry(file.path, 'synthetic after') : file)),
+      ...(queue
+        ? [
+            entry('convex/projectHostedLandingWake.ts', 'export const wake = true;'),
+            entry('.nforge/queue-proofs/wake.json', '{}'),
+          ]
+        : []),
       ...(browser ? [entry('web/demo.ts', 'export const demo = 1;')] : []),
     ]);
   const run = {
@@ -1231,12 +1246,26 @@ test('a docs-only change shards the tests that read the changed document and kee
     );
   const readers = ['tests/reads-readme.test.mjs'];
   assert.equal(prepared.recipe.selection.scope, 'docs');
+  assert.equal(prepared.recipe.selection.queueProof, undefined);
   assert.deepEqual(prepared.recipe.selection.tests, readers);
   assert.deepEqual(prepared.recipe.groups, [readers]);
   assert.deepEqual(prepared.matrix, ['0', 'static']);
   assert.equal(prepared.singleShard, '');
   // The plan carries a test shard, so the landing waits for it.
   assert.equal(s.run.plan.shardCount, 2);
+});
+test('the standard Actions plan pins changed and deleted queue paths with the Candidate proof files', async t => {
+  const s = fixture(t, { queue: true });
+  const prepared = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'objects'),
+  );
+  assert.deepEqual(prepared.recipe.selection.queueProof?.source.slice().sort(), [
+    'convex/projectHostedFinishWake.ts',
+    'convex/projectHostedLandingWake.ts',
+  ]);
+  assert.deepEqual(prepared.recipe.selection.queueProof?.receipts, ['.nforge/queue-proofs/wake.json']);
 });
 test('any configured command gets the pinned changed paths; declared scope and shards plan scoped jobs', async t => {
   const s = fixture(t),

@@ -20,6 +20,25 @@ const CORE = [
 export const coreQueuePath = path => CORE.some(pattern => pattern.test(path));
 
 export const REGISTRY = 'tests/fixtures/incident-replays.json';
+export const queueProofPath = path => /^\.nforge\/queue-proofs\/[^/]+\.json$/.test(path);
+
+/** Pin only the paths Guard 1 needs, in the existing standard check plan. */
+export function queueProofPaths(paths) {
+  if (!Array.isArray(paths)) return;
+  const source = paths.filter(coreQueuePath);
+  if (source.length) return { source, receipts: paths.filter(queueProofPath) };
+}
+
+export function registeredQueueReplays(text) {
+  try {
+    const { replays } = JSON.parse(text);
+    if (Array.isArray(replays)) return replays;
+  } catch {
+    // Missing or malformed registry fails tests/incident-replays.test.mjs.
+  }
+  return [];
+}
+
 const FIXED = [
   // Its drift check: a new import in core code must be core or a listed exception.
   'tests/core-queue-paths.test.mjs',
@@ -30,12 +49,7 @@ const FIXED = [
 /** The guard set every core queue change runs: the queue simulation, the cost guard and each test
  * file the incident replay registry names, as present in this Candidate. */
 export function coreQueueTests(files) {
-  let replays = [];
-  try {
-    replays = (JSON.parse(files.get(REGISTRY) ?? '{}').replays ?? []).map(entry => entry.file);
-  } catch {
-    // A malformed registry fails tests/incident-replays.test.mjs, which is in the fixed set.
-  }
+  const replays = registeredQueueReplays(files.get(REGISTRY)).map(entry => entry?.file);
   return [...new Set([...FIXED, ...replays])]
     .filter(file => typeof file === 'string' && /^tests\/[^/]+\.test\.mjs$/.test(file) && files.has(file))
     .sort();

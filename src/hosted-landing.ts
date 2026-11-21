@@ -23,6 +23,7 @@ import { docsResolutionSchema } from './docs-resolution.js';
 import { landingAcceptedBySchema } from './landing-accepted-by.js';
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
+export const landingHoldMsSchema = z.number().int().min(0).max(86_400_000);
 export const finishRetryReasonSchema = z.enum(['flake', 'main-moved', 'infra', 'other']);
 /** Agent-reported tokens at landing (Item a61d3c91): the tokens the agent's own work on this landing used, as its
  * harness counts them. Optional, display-only (Stats), never billing; the server refuses anything else. */
@@ -204,6 +205,8 @@ export const hostedLandingStateSchema = z
     timing: z
       .object({
         submittedAt: z.iso.datetime(),
+        /** Client time spent waiting for a local measurement hold before submission. */
+        heldMs: landingHoldMsSchema.optional(),
         /** Save and preflight milliseconds; compact because landing rows are read at every stage. */
         ms: z
           .tuple([z.number().int().nonnegative().nullable(), z.number().int().nonnegative().nullable()])

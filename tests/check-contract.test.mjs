@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   assertCheckContract,
   CHECK_CONTRACT_ENV,
@@ -137,8 +137,14 @@ test('verify.mjs run by an executor older than the contract refuses a newer requ
     'verify-failure-digest.mjs',
     'selection-guard.mjs',
     'prepare-convex-api.mjs',
-  ])
-    copyFileSync(join(repo, 'scripts', name), join(root, 'scripts', name));
+    'test-queue-proof.mjs',
+    'core-queue-paths.mjs',
+    'bench-t3code/path-evidence.mjs',
+  ]) {
+    const target = join(root, 'scripts', name);
+    mkdirSync(dirname(target), { recursive: true });
+    copyFileSync(join(repo, 'scripts', name), target);
+  }
   mkdirSync(join(root, 'convex'), { recursive: true });
   writeFileSync(join(root, 'scripts/test-files.mjs'), 'export const fileTimeout = () => 1000;');
   writeFileSync(join(root, 'tests/worker-budget.mjs'), 'export const workerBudget = () => 2;');

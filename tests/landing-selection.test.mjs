@@ -114,6 +114,25 @@ function fixture(t, extra = []) {
   return { plan, changes };
 }
 
+test('a standalone standard Actions plan passes queue paths and changed proof files to verify', async t => {
+  const previous = process.env;
+  process.env = { ...previous, FORGE_CHECK_SCOPED: '1', FORGE_CHECK_FULL: '0', FORGE_CHECK_INTERACTION: '0' };
+  t.after(() => {
+    process.env = previous;
+  });
+  const { plan } = fixture(t);
+  const wake = 'convex/projectHostedFinishWake.ts';
+  const receipt = '.nforge/queue-proofs/wake.json';
+  const planned = await plan(
+    [0],
+    [
+      [wake, 'export const wake = true;'],
+      [receipt, '{}'],
+    ],
+  );
+  assert.deepEqual(planned.selection.queueProof, { source: [wake], receipts: [receipt] });
+});
+
 test('E3 burst and diagnosis prefixes select the union of entry tests against the batch base', async t => {
   const previous = process.env;
   process.env = { ...previous, FORGE_CHECK_SCOPED: '1', FORGE_CHECK_FULL: '0', FORGE_CHECK_INTERACTION: '0' };

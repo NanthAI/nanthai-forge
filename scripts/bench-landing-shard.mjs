@@ -3,6 +3,7 @@
 import { pinnedComparison, standardSelection, sourceFiles } from './test-impact.mjs';
 import { browserSelection, browserGroups } from './browser-test-policy.mjs';
 import { runActionsCheck } from './github-actions-check.mjs';
+import { queueProofPaths } from './core-queue-paths.mjs';
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, resolve } from 'node:path';
@@ -15,12 +16,14 @@ export function benchmarkPlan(
   durations = timingDurations(readTimingHistory()),
 ) {
   const graphCache = {};
-  const selection = browserSelection(
+  const selected = browserSelection(
     standardSelection({ ...comparison, files, graphCache }),
     comparison?.paths,
     files,
     graphCache,
   );
+  const queueProof = comparison?.mainCheck ? undefined : queueProofPaths(comparison?.paths);
+  const selection = queueProof ? { ...selected, queueProof } : selected;
   const groups = browserGroups(
     partitionTests(selection.tests, Number(count), durations),
     Boolean(selection.browser),

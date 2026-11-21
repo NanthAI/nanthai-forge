@@ -86,6 +86,7 @@ export const hostedAcceptanceSchema = z
             submissionId: z.string().min(1).max(64),
             held: z.string().min(1).max(32),
             footprints: z.enum(['overlap', 'disjoint', 'unknown']),
+            seconds: z.number().nonnegative().optional(),
           })
           .strict(),
       )
@@ -205,4 +206,13 @@ export function closeMainRedHold(holds: MainRedHold[] | undefined, at: string) {
 }
 /** Receipt `orderWaits` from the landing row's server-only list (no read). */
 export const orderWaitsField = (waits: HostedAcceptance['orderWaits'] | undefined) =>
-  waits?.length ? { orderWaits: waits.slice(0, 8) } : {};
+  waits?.length
+    ? {
+        orderWaits: waits.slice(0, 8).map(({ submissionId, held, footprints, seconds }) => ({
+          submissionId,
+          held,
+          footprints,
+          ...(seconds === undefined ? {} : { seconds }),
+        })),
+      }
+    : {};

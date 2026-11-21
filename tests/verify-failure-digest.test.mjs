@@ -54,6 +54,7 @@ for (const [name, expected] of Object.entries(failures)) {
       'prepare-convex-api.mjs',
     ])
       write(`scripts/${file}`, readFileSync(`scripts/${file}`));
+    write('scripts/test-queue-proof.mjs', 'export const verifyQueueProof = () => {};');
     const pass = 'process.exit(0);';
     write(
       'scripts/check-foundation.mjs',

@@ -27,6 +27,22 @@ const files = new Map(
 );
 const select = (paths, extra = {}) => selectTests({ files, paths, ...extra });
 
+test('attaching queue proof preserves the scoped check and its queue tests', () => {
+  const path = 'convex/projectHostedFinishWake.ts';
+  const tree = new Map([
+    ...files,
+    [path, 'export const wake = true;'],
+    ['tests/hosted-landing-queue-sim.test.mjs', ''],
+  ]);
+  const proof = '.nforge/queue-proofs/wake.json';
+  const before = selectTests({ files: tree, paths: [path] });
+  const after = selectTests({ files: tree, paths: [path, proof] });
+  assert.equal(after.scope, 'scoped');
+  assert(after.tests.includes('tests/hosted-landing-queue-sim.test.mjs'));
+  assert.deepEqual(after.tests, before.tests);
+  assert.deepEqual(selectTests({ files: new Map([...tree, [proof, '{}']]), paths: [path, proof] }), after);
+});
+
 test('a pinned Markdown-only change reaches the docs path without enabling behavior scoping', () => {
   const docs = standardSelection({ files, paths: ['docs/development.md'], env: {} });
   assert.equal(docs.scope, 'docs');

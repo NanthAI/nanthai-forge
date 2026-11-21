@@ -31,6 +31,7 @@ for (const flaky of [false, true])
       'prepare-convex-api.mjs',
     ])
       write(`scripts/${name}`, readFileSync(`scripts/${name}`));
+    write('scripts/test-queue-proof.mjs', 'export const verifyQueueProof = () => {};');
     write('scripts/oxc.mjs', '');
     write('scripts/check-schema-compat.mjs', '');
     write('scripts/check-convex-runtime.mjs', '');

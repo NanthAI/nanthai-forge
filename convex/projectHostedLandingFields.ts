@@ -310,6 +310,8 @@ export const hostedLandingTables = {
           submissionId: v.string(),
           held: v.string(),
           footprints: v.union(v.literal('overlap'), v.literal('disjoint'), v.literal('unknown')),
+          at: v.optional(v.number()),
+          seconds: v.optional(v.number()),
         }),
       ),
     ),

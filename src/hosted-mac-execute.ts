@@ -10,6 +10,7 @@ import {
   unstoredReportsNote,
 } from './contract-test-timings.js';
 import { isBrowserTest } from '../scripts/browser-test-policy.mjs';
+import { queueProofPaths } from '../scripts/core-queue-paths.mjs';
 import { isStandardForgeCheck } from './standard-check.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { localMacLogFiles } from './check-local-log-files.js';
@@ -69,6 +70,7 @@ export async function machineSecretScan(
   baseHead: string,
   files: ReturnType<typeof parseNativeState>['files'],
   signal: AbortSignal,
+  pinQueueProof = false,
 ) {
   let before: ReturnType<typeof parseNativeState>['files'] | null = null;
   try {
@@ -92,7 +94,7 @@ export async function machineSecretScan(
     ...(baseAllowFile ? [baseAllowFile.blob] : []),
   ]);
   signal.throwIfAborted();
-  return scanSecretPaths(
+  const scan = scanSecretPaths(
     changed,
     path => {
       const file = inventory.get(path);
@@ -100,6 +102,15 @@ export async function machineSecretScan(
     },
     { baseAllow: baseAllowFile ? readFileSync(join(cache.objects, baseAllowFile.blob)) : undefined },
   );
+  // The scan needs new bytes only. Queue proof also covers paths absent from this State.
+  const queueProof =
+    pinQueueProof && before
+      ? queueProofPaths([
+          ...changed,
+          ...before.filter(file => !inventory.has(file.path)).map(file => file.path),
+        ])
+      : undefined;
+  return { ...scan, queueProof };
 }
 /** Check commands receive a private HOME/temp and only declared inputs. Source
  * bytes go from hosted/R2 to a hash-verified checkout, without any Git export. */
@@ -153,7 +164,19 @@ export async function executeHostedMacCheck(
       signal.throwIfAborted();
       return pin;
     };
-    const secretScan = await machineSecretScan(cache, run.candidate.base.head, state.files, signal);
+    const secretScan = await machineSecretScan(
+      cache,
+      run.candidate.base.head,
+      state.files,
+      signal,
+      isStandardForgeCheck(run.check, process.execPath) &&
+        run.gate?.mode !== 'audit' &&
+        run.gate?.mode !== 'probe',
+    );
+    const queueProof = secretScan.queueProof;
+    const queueProofFile = queueProof ? join(root, 'queue-proof.json') : undefined;
+    if (queueProofFile)
+      await writeFile(queueProofFile, JSON.stringify(queueProof), { mode: 0o600, flag: 'wx' });
     // Union tests run with the project's own runner; its package.json is fetched only when there are any.
     const unionTests = semanticTests(run.semanticPlan);
     const packageFile = unionTests.length
@@ -190,6 +213,7 @@ export async function executeHostedMacCheck(
       scope: 'full',
       tests: [],
       semanticTests: semanticTests(run.semanticPlan),
+      ...(queueProof ? { queueProof } : {}),
       // The full command always runs here; declared docs paths only say which Markdown no test reads.
       ...(testedDocsList ? { testedDocs: testedDocsList } : {}),
     });
@@ -311,7 +335,11 @@ export async function executeHostedMacCheck(
         const readers: ContractTimingReader[] = [];
         const child = spawn(execute[0]!, execute.slice(1), {
           cwd: checkout,
-          env: { ...runtime.env, [junitDirEnv]: junitDir },
+          env: {
+            ...runtime.env,
+            [junitDirEnv]: junitDir,
+            ...(queueProofFile ? { FORGE_QUEUE_PROOF: queueProofFile } : {}),
+          },
           detached: process.platform !== 'win32',
           stdio: ['ignore', 'pipe', 'pipe'],
         });

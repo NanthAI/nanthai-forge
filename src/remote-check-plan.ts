@@ -14,6 +14,7 @@ import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 import { partitionTests, timingDurations } from '../scripts/test-shards.mjs';
 import { readTimingHistory } from '../scripts/test-timings-file.mjs';
+import { queueProofPaths } from '../scripts/core-queue-paths.mjs';
 import { isStandardForgeCheck } from './standard-check.js';
 import { lockfileDigest } from './project-lockfile.js';
 import { scanSecretPaths } from './secret-scan.js';
@@ -84,9 +85,12 @@ export async function remoteCheckPlan(
           })
         : { scope: 'full', reason: 'Exact configured command', tests: [] as string[] };
   // A selection that touches code but selects no test never reaches a passing plan.
-  const selection = standard
+  const guarded = standard
     ? guardedSelection(planned, { files, paths: comparison.paths, interaction: run.interaction })
     : planned;
+  const queueProof =
+    standard && !run.mainCheck && guarded.scope !== 'partial' ? queueProofPaths(comparison.paths) : undefined;
+  const selection = queueProof ? { ...guarded, queueProof } : guarded;
   if (run.checkSelection?.scope === 'partial' && selection.tests.some(path => !files.has(path)))
     throw new Error('An explicit test file is absent from the pinned source.');
   const durations = timingDurations(readTimingHistory(join(store.directory, 'test-timings.json')));

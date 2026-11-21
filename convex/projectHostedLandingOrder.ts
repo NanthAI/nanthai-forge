@@ -2,6 +2,7 @@
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { LandingChannel, LandingRow } from './projectHostedLandingStore';
 import type { HostedLandingState } from '../src/hosted-landing';
+import { orderWaitsField } from '../src/hosted-acceptance';
 import { orderLandingEntries } from '../src/landing-batch-order';
 import { storedLandingStateSchema } from '../src/hosted-landing';
 import type { Doc } from './_generated/dataModel';
@@ -364,12 +365,13 @@ export function landingOrderWaitForReader(
   if (!row?.orderWait || row.phase !== 'ready' || state.phase !== 'ready') return null;
   if (state.observation.state !== 'pending') return null;
   const last = row.orderWaits?.at(-1);
+  const { orderWaits } = orderWaitsField(row.orderWaits);
   // Why it waits now and every wait so far, as the receipt's `orderWaits` will record them: from the
   // row already loaded (at most 8 entries), so a waiting entry shows its order reason before it lands
   // (ad80e037: rebuilding it from receipts after the fact cost a builder about 15 minutes).
   const why = {
     ...(last?.submissionId === row.orderWait ? { held: last.held, footprints: last.footprints } : {}),
-    ...(row.orderWaits?.length ? { waits: row.orderWaits.slice(-8) } : {}),
+    ...(orderWaits ? { waits: orderWaits } : {}),
   };
   if (last?.submissionId === row.orderWait && last.held === 'reserved')
     return {
@@ -497,8 +499,9 @@ export function landingStateForReader(state: HostedLandingState, priorityInfo?: 
   void _message;
   void _messageRef;
   void _requestedMessage;
-  const { ms: _ms, ...timing } = state.timing ?? { submittedAt: state.at };
+  const { ms: _ms, heldMs: _heldMs, ...timing } = state.timing ?? { submittedAt: state.at };
   void _ms;
+  void _heldMs;
   const readable = { ...publicState, ...(state.timing ? { timing } : {}), request: publicRequest };
   if (priorityInfo === 1) return readable;
   const { priority: _priority, priorityReason: _reason, priorityVersion: _version, ...legacy } = readable;

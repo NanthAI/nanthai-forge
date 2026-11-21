@@ -156,6 +156,17 @@ export function cellLandings(
 }
 
 const RULES = { N1: n1, O3: o3, O4: o4 };
+const SOURCE_PATHS = {
+  N1: ['convex/projectHostedFinishWake.ts'],
+  O3: [
+    'convex/projectHostedBatchSplit.ts',
+    'convex/projectHostedBatchStore.ts',
+    'convex/projectHostedLandingCancel.ts',
+  ],
+  O4: ['convex/projectHostedLandingStaleChecks.ts'],
+};
+/** The source changes each receipt-derived verdict can qualify as queue proof. */
+export const queueBenchPaths = rule => (Object.hasOwn(SOURCE_PATHS, rule) ? SOURCE_PATHS[rule] : []);
 
 /** Per rule: { on, permanent, precondition, reached, label, evidence }. `switches` maps env
  * names to the cell's recorded values; `cell` is cellLandings(result) (O4 needs it);

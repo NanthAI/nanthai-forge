@@ -182,6 +182,8 @@ A brief or a lead comment on the Issue can override one for that slice.
   the list in the same landing: `tests/core-queue-paths.test.mjs`, also in that set, fails when the
   queue simulation reaches a queue module that is neither core nor a listed exception with its
   reason (the 2026-11-17 wake cut saved a little and cost hours of landing time; incident 5e3c3a3c).
+  The landing check also requires a [qualifying proof](#attaching-queue-proof) for every
+  changed core queue path (Guard 1, Item d4289a6a).
 - **Automatic settings.** Forge adapts to each project ([principle 6](../../PRODUCT.md#product-principles)).
   Every new automatic setting declares:
   - its signal, read from the project's own records;
@@ -223,6 +225,58 @@ A brief or a lead comment on the Issue can override one for that slice.
   to the lead for a design review; do not settle them yourself.
 
 Docs-only work changes no runtime usage; no live billing benchmark is needed.
+
+### Attaching queue proof
+
+Before landing a core queue change, retain its proof and attach a JSON file at
+`.nforge/queue-proofs/<item-or-change>.json` in the Lane. Use a distinct filename for each
+proof. The `changes` object maps each covered queue path to the SHA-256 of its final source
+bytes (`shasum -a 256 PATH`), or to `null` for a deletion. For a symbolic link, hash its target
+text. Recheck the proof if a merge changes those bytes. A Candidate can carry multiple proofs,
+and together they must cover every changed core queue path.
+
+For an **incident replay**, identify the incident and exact test title in
+[`incident-replays.json`](../../tests/fixtures/incident-replays.json). Its `paths` list names
+the core source files the replay exercises. Retain the passing
+replay result and a fresh-context review by a different model on the Item or in the check
+records. Use a full receipt or comment UUID or a stable HTTPS link in each `receipt` field.
+The record has this shape (example digests and IDs):
+
+```json
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedFinishWake.ts": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "replay": {
+    "incident": "5e3c3a3c",
+    "test": "incident 5e3c3a3c: passed followers land within the pass-to-land ceiling while the holder re-checks",
+    "receipt": "11111111-1111-1111-1111-111111111111"
+  },
+  "authorModel": "claude-opus-5-5",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "receipt": "22222222-2222-2222-2222-222222222222"
+  }
+}
+```
+
+For a **bench cell**, use `"kind": "bench"`, the same `version` and `changes` fields,
+a `receipt` for the retained report, and `rule` naming the verdict for the affected path.
+Copy the cell's `cellId`, `landed`, `voided`, `failed` and the matching `paths[rule]` entry
+from the [scenario report](../../scripts/bench-t3code/scenario-report.mjs) into `cell`.
+The cell must have landings, empty `voided` and `failed` lists, and an `on path` verdict
+with recorded evidence for the [rule's source paths](../../scripts/bench-t3code/path-evidence.mjs).
+For example, the bench result in 9faeae30 had healthy cells without a reached N1
+path, so the 5e3c3a3c replay is the proof route for the wake case that motivated this guard
+(8bc06644).
+
+The standard verify check reads the Candidate's changed proof files and checks their
+references, the replay or path verdict and the covered bytes locally. The references
+point readers to the retained evidence. No hosted evidence lookup runs in the check.
+
+### Briefing setup
 
 Briefs point here instead of repeating these rules or naming a private file; machine
 specifics (heavy slots, disk reserve, builder count, local paths) come from local

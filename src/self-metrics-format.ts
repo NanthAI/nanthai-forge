@@ -30,6 +30,10 @@ const finishToMain = (current: MetricsSurface) => {
   const f = current.totals.finishToMain;
   return `p50 ${number(f.p50Minutes)} / p90 ${number(f.p90Minutes)} / mean ${number(f.meanMinutes)} min; ${f.admissionRunShare === null ? 'admission-run share unknown' : `${number(f.admissionRunShare * 100)}% landed on the admission check`}`;
 };
+const clientHold = (current: MetricsSurface) => {
+  const hold = current.totals.finishToMain.clientHold;
+  return `Builder-side measurement hold: mean ${number(hold.meanSeconds)} s / p90 ${number(hold.p90Seconds)} s · ${hold.unknown} unknown`;
+};
 const cell = (value: string) => value.replace(/\|/g, '\\|').replace(/[\r\n]/g, ' ');
 export function formatMetricReport(current: MetricsSurface, before?: MetricsSurface) {
   const values = metricValues(current.totals),
@@ -65,6 +69,7 @@ export function formatMetricReport(current: MetricsSurface, before?: MetricsSurf
     ...formatSecondChecks(current),
     ...formatFirstChecks(current),
     `Finish-to-main (trusted actors): ${finishToMain(current)}. ${cell(current.totals.finishToMain.gaps.join(' '))}`,
+    clientHold(current),
     '',
     ...speedBudgetTable(current.totals.speedBudgets.rows),
     '',
@@ -184,6 +189,7 @@ export function formatMetrics(current: MetricsSurface) {
     `Metrics UTC [${current.period.from}, ${current.period.to})`,
     ...rows,
     `Finish-to-main (trusted actors): ${finishToMain(current)} · partial`,
+    clientHold(current),
     ...current.totals.waste.byCause
       .filter(row => row.attempts)
       .map(

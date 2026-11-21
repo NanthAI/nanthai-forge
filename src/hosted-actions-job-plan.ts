@@ -9,6 +9,7 @@ import { standardTestPath } from './intent-test-contract.js';
 import { checkPin } from './hosted-check.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { guardedSelection, standardSelection } from '../scripts/test-impact.mjs';
+import { queueProofPaths } from '../scripts/core-queue-paths.mjs';
 import { describeShardPlan, timedShards } from '../scripts/test-shards.mjs';
 import { browserSelection, browserGroups, browserShard } from '../scripts/browser-test-policy.mjs';
 import { hostedActionsRecipeSchema } from './hosted-actions.js';
@@ -170,6 +171,9 @@ export async function prepareActionsJob(
         ? `; ${secrets.allowChanges.entries.length + secrets.allowChanges.more} allow entries added or edited`
         : ''),
   );
+  // The actual Candidate delta, not a scoped test selection or an already accepted main audit.
+  const queueProof =
+    standard && run.gate?.mode !== 'audit' && run.gate?.mode !== 'probe' ? queueProofPaths(paths) : undefined;
   const selection = {
     scope: selected.scope,
     reason: selected.reason,
@@ -183,6 +187,7 @@ export async function prepareActionsJob(
     ...checkedPackagePlacement(files.keys(), path => files.get(path)),
     // Any other command reads this as its changed-paths file (FORGE_CHECK_CHANGES).
     ...('changes' in selected ? { changes: selected.changes } : {}),
+    ...(queueProof ? { queueProof } : {}),
     // A package-graph first check's minority share, recorded on the run (src/graph-first-check.ts).
     ...('graph' in selected && selected.graph ? { graph: selected.graph } : {}),
     // Materialization notes are printed in the check output.

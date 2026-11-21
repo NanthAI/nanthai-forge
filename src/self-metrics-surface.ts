@@ -70,11 +70,18 @@ export function metricTotals(
       const rows = (records.finishTimings ?? []).filter(row => row.trusted && during(row.at, period));
       const minutes = rows.flatMap(row => (row.minutes === null ? [] : [row.minutes]));
       const admitted = rows.filter(row => row.onAdmissionRun != null);
+      const holds = rows.flatMap(row => (row.clientHoldSeconds == null ? [] : [row.clientHoldSeconds]));
+      const unknownHolds = rows.length - holds.length;
       return {
         p50Minutes: percentile(minutes, 0.5),
         // The p50 flips on a two-humped distribution (main did not move vs moved): read these with it.
         p90Minutes: percentile(minutes, 0.9),
         meanMinutes: minutes.length ? minutes.reduce((n, m) => n + m, 0) / minutes.length : null,
+        clientHold: {
+          meanSeconds: holds.length ? holds.reduce((sum, seconds) => sum + seconds, 0) / holds.length : null,
+          p90Seconds: percentile(holds, 0.9),
+          unknown: unknownHolds,
+        },
         /** Share of pre-queue admitted landings that landed on their admission check (no recheck). */
         admissionRunShare: admitted.length
           ? admitted.filter(row => row.onAdmissionRun).length / admitted.length
@@ -84,6 +91,9 @@ export function metricTotals(
         gaps: [
           ...globalGaps,
           'Finish-to-main uses retained hosted submission and acceptance timestamps under the attempt auto-on-pass policy; native trust/timing and missing submissions remain unknown.',
+          ...(unknownHolds
+            ? ['Builder-side measurement holds remain unknown when the CLI did not report a duration.']
+            : []),
         ],
       };
     })(),

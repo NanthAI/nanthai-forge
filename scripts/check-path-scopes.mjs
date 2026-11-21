@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { posix } from 'node:path';
-import { coreQueuePath, coreQueueReason, coreQueueTests } from './core-queue-paths.mjs';
+import { coreQueuePath, coreQueueReason, coreQueueTests, queueProofPath } from './core-queue-paths.mjs';
 // Explicit infrastructure/fixture ownership supplements the import graph. Unknown
 // paths stay unknown: a filename resemblance is never an independence proof.
 export const webTest = path => /^(?:tests\/ui-|tests\/.*-ui\.test)/.test(path);
@@ -125,6 +125,8 @@ export const unclassifiedFolder = path =>
   path.includes('/') && !Object.hasOwn(topLevelFolders, path.split('/')[0]) ? path.split('/')[0] : null;
 
 export function classifyCheckPath(path, files) {
+  // Verify reads the changed proof files in the static job. They select no additional test files.
+  if (queueProofPath(path)) return { domain: 'tooling', seeds: [], reason: 'Retained queue proof' };
   const domain = (name, prefixes, reason) => ({
     domain: name,
     seeds: [...files.keys()].filter(file => prefixes.some(prefix => file.startsWith(prefix))),

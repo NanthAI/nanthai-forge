@@ -39,6 +39,7 @@ for (const failure of [
       'prepare-convex-api.mjs',
     ])
       write(`scripts/${name}`, readFileSync(`scripts/${name}`));
+    write('scripts/test-queue-proof.mjs', 'export const verifyQueueProof = () => {};');
     write('scripts/check-schema-compat.mjs', `process.exit(${failure === 'schema' ? 9 : 0});`);
     write('scripts/check-convex-runtime.mjs', 'process.exit(0);');
     write(

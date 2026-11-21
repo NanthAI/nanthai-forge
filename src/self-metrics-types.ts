@@ -123,6 +123,7 @@ export type MetricRecords = {
     minutes: number | null;
     /** True: the landing took its admission check as acceptance evidence; false: it rechecked; null: not admitted or unknown. */
     onAdmissionRun?: boolean | null;
+    clientHoldSeconds?: number | null;
     costs?: import('zod').infer<typeof import('./hosted-landings-view.js').landingCostsSchema>;
     settleSeconds?: number;
     /** First passed check to commit, minutes (queue health alarm, 42200ce4). */

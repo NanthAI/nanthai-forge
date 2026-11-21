@@ -13,11 +13,13 @@ import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { prepareConvexApi } from './prepare-convex-api.mjs';
 import { assertCheckContract } from './check-contract.mjs';
+import { verifyQueueProof } from './test-queue-proof.mjs';
 import { describeStep, failureDigest, firstErrorLines } from './verify-failure-digest.mjs';
 
 // Fail in seconds, before any build, when this tree's scripts need more than the executor provides.
 try {
   assertCheckContract();
+  await verifyQueueProof();
 } catch (error) {
   console.error(error.message);
   process.exit(1);

@@ -9,8 +9,38 @@ import { childEnv } from '../scripts/child-env.mjs';
 import { readHostedMetricPages } from '../dist/self-metrics-hosted-pages.js';
 import { joinMetricAuthority } from '../dist/self-metrics-source.js';
 import { metricsSurface } from '../dist/self-metrics-surface.js';
+import { formatMetrics } from '../dist/self-metrics-format.js';
 
 import { fixture, period, seam, at, empty } from './self-metrics-hosted-fixture.mjs';
+
+test('finish-to-main reports measured builder hold seconds separately and keeps omissions unknown', async () => {
+  const f = fixture();
+  f.landing('held', at(1), at(3));
+  f.landing('no-hold', at(5), at(7));
+  f.landing('old-client', at(9), at(11));
+  f.landing('person', at(13), at(15), false);
+  const query = async (name, args) => {
+    const reply = await f.query(name, args);
+    if (args.stream !== 'acceptances') return reply;
+    const page = JSON.parse(reply);
+    const hold = new Map([
+      [at(3), 12.5],
+      [at(7), 0],
+      [at(15), 500],
+    ]);
+    for (const row of page.page) if (hold.has(row.at)) row.clientHoldSeconds = hold.get(row.at);
+    return JSON.stringify(page);
+  };
+  const { records } = await readHostedMetricPages(query, period);
+  const surface = metricsSurface(records, period);
+  assert.deepEqual(surface.totals.finishToMain.clientHold, {
+    meanSeconds: 6.25,
+    p90Seconds: 12.5,
+    unknown: 1,
+  });
+  assert.equal(surface.totals.finishToMain.meanMinutes, 2);
+  assert.match(formatMetrics(surface), /Builder-side measurement hold: mean .* p90 .* 1 unknown/);
+});
 
 test('hosted queries authorize owner/maintainer, reject stranger and plain reader, enforce validators and windowed indexes', async () => {
   const f = fixture();

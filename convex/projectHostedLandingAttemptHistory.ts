@@ -52,7 +52,8 @@ function installedTiming(
   const { phase, observedAt, hasCheck } = input;
   if (!timing) return { phase, periods: [] };
   // A park, proof binding or check retry can copy the previous attempt's entire clock.
-  const own = (key: Exclude<keyof Timing, 'ms'>) => (timing[key] === parent?.[key] ? undefined : timing[key]);
+  const own = (key: Extract<keyof Timing, `${string}At`>) =>
+    timing[key] === parent?.[key] ? undefined : timing[key];
   const composeStartedAt = own('composeStartedAt');
   const composedAt = own('composedAt');
   const checkReservedAt = hasCheck ? own('checkReservedAt') : undefined;

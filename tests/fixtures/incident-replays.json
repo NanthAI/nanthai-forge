@@ -180,6 +180,7 @@
       "incident": "5e3c3a3c",
       "what": "Core claim: passed landings waited 60-100 min behind a holder that started a new check (2026-11-17); the queue simulation gates followers' pass-to-land and fails on the pre-N1 code",
       "file": "tests/hosted-landing-queue-sim.test.mjs",
+      "paths": ["convex/projectHostedFinishWake.ts"],
       "test": "incident 5e3c3a3c: passed followers land within the pass-to-land ceiling while the holder re-checks"
     },
     {

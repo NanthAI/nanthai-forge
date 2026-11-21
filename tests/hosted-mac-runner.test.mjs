@@ -577,7 +577,7 @@ for (const [p, sha256, mode, target] of expected) {
 }
 console.log('exact source verified: ' + expected.length + ' entries on ' + process.platform + '/' + process.arch);
 `;
-async function exactSourceRun(t, files, serve = bytes => bytes, command = null) {
+async function exactSourceRun(t, files, serve = bytes => bytes, command = null, removed = []) {
   const blobs = new Map(files.map(([, text]) => [digest(Buffer.from(text)), Buffer.from(text)]));
   const stateFiles = files
     .map(([path, text, mode]) => ({ path, blob: digest(Buffer.from(text)), mode }))
@@ -599,7 +599,13 @@ async function exactSourceRun(t, files, serve = bytes => bytes, command = null) 
   );
   const run = (await f.claim((await f.enqueue({ expectedDefinition: definition.digest })).id)).run;
   const state = f.objectBytes?.get(run.request.expectedHead);
-  const bytesOf = sha256 => (sha256 === run.request.expectedHead ? state : serve(blobs.get(sha256), sha256));
+  const base = removed.length
+    ? f.put(JSON.stringify({ ...JSON.parse(state), files: [...stateFiles, ...removed] }))
+    : null;
+  const bytesOf = sha256 => {
+    if (sha256 === run.request.expectedHead || sha256 === base?.sha256) return f.objectBytes.get(sha256);
+    return serve(blobs.get(sha256), sha256);
+  };
   const transport = {
     objects: async ids => ids.map(sha256 => ({ sha256, size: bytesOf(sha256).length })),
     downloadToFile: async (pin, path) => writeFile(path, bytesOf(pin.sha256)),
@@ -659,7 +665,13 @@ async function exactSourceRun(t, files, serve = bytes => bytes, command = null) 
         ),
       execute: async (owned, signal, control) => {
         try {
-          await executeHostedMacCheck(owned, signal, control, transport, f.key);
+          const input = base
+            ? {
+                ...owned,
+                candidate: { ...owned.candidate, base: { ...owned.candidate.base, head: base.sha256 } },
+              }
+            : owned;
+          await executeHostedMacCheck(input, signal, control, transport, f.key);
         } catch (error) {
           failure = error;
         }
@@ -671,6 +683,37 @@ async function exactSourceRun(t, files, serve = bytes => bytes, command = null) 
   );
   return { f, run, failure, wallMs: Math.round(performance.now() - started) };
 }
+
+test('a hosted machine standard check refuses a deleted queue path without attached proof', async t => {
+  const guard = new URL('../scripts/test-queue-proof.mjs', import.meta.url).href;
+  const command = {
+    name: 'verify',
+    executable: process.execPath,
+    args: ['scripts/forge-check.mjs'],
+    environmentLabel: 'clean',
+  };
+  const wake = 'convex/projectHostedFinishWake.ts';
+  const { f, run, failure } = await exactSourceRun(
+    t,
+    [
+      [
+        'scripts/forge-check.mjs',
+        `import { verifyQueueProof } from ${JSON.stringify(guard)}; await verifyQueueProof();`,
+        'file',
+      ],
+    ],
+    undefined,
+    command,
+    [{ path: wake, blob: 'a'.repeat(64), mode: 'file' }],
+  );
+  assert.equal(failure, null);
+  assert.equal((await f.status(run.id)).status, 'failed');
+  const logs = readdirSync(f.localLogs, { recursive: true })
+    .filter(name => String(name).endsWith('.log'))
+    .map(name => readFileSync(join(f.localLogs, name), 'utf8'))
+    .join('\n');
+  assert.match(logs, /QUEUE_PROOF_REQUIRED:.*projectHostedFinishWake/);
+});
 
 test('self-hosted runner checks one fixed commit exactly on this platform (1444471f)', async t => {
   const { f, run, failure, wallMs } = await exactSourceRun(t, fixedCommit);
