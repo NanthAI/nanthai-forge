@@ -2,7 +2,7 @@
 import { pendingRunnerState } from './cancelledRunUsage';
 import { readProviderDelay } from './projectHostedLandingCheckProgress';
 import { failureCauseReply } from './projectFailureCauseRead';
-import { finishReadReader } from './projectFinishReadReader';
+import { finishReadReader, selectExactFinishProject } from './projectFinishReadReader';
 import { readWouldConflict, syncRequiredQueue } from './projectHostedLandingWouldConflict';
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
 import { landingOrderWaitForReader, landingStateForReader } from './projectHostedLandingOrder';
@@ -28,7 +28,7 @@ import { sourceAuthority } from '../src/hosted-source-authority';
 import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
 import { boardWake } from './projectBoardDelivery';
-import { heldReview, loadHeldPolicy, noteHeldPolicy } from './projectHostedOwnerReview';
+import { held, heldReview, loadHeldPolicy, noteHeldPolicy } from './projectHostedOwnerReview';
 
 /** Finite selected-request pages. Every page/subscription rechecks current access;
  * neither reading nor reconnecting wakes a controller. Versions are durable offsets,
@@ -63,6 +63,25 @@ export const page = query({
   },
 });
 
+async function selectOperation(
+  ctx: QueryCtx,
+  input: { projectId: Id<'hostedProjects'>; operationId: string },
+  actor: string,
+) {
+  const rows = await ctx.db
+    .query('projectHostedLandingRequests')
+    .withIndex('by_project_and_operation', q =>
+      q.eq('projectId', input.projectId).eq('operationId', input.operationId),
+    )
+    .take(2);
+  const alias = rows.length ? null : await landingAlias(ctx, { ...input, actor });
+  if (alias) {
+    const canonical = await landingRow(ctx, alias, false);
+    if (canonical) rows.push(canonical);
+  }
+  return { rows, alias, reviewHeld: rows[0]?.phase === 'ready' && held(JSON.parse(rows[0].value)) };
+}
+
 async function observePage(
   rawCtx: QueryCtx,
   input: {
@@ -81,6 +100,13 @@ async function observePage(
   try {
     const user = await ctx.auth.getUserIdentity();
     invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to observe hosted submissions.');
+    // Select the operation first so a held reply can authorize with the row that has its policy.
+    // Current access is checked before the selected row or its absence can affect the reply.
+    const selection = await selectOperation(ctx, input, user.subject).then(
+      value => ({ value }),
+      error => ({ error }),
+    );
+    if ('value' in selection && selection.value.reviewHeld) selectExactFinishProject(ctx, input.projectId);
     const project = await accessibleProject(ctx, input.projectId, user.subject);
     invariant(
       Number.isSafeInteger(input.nextVersion) && input.nextVersion >= 0,
@@ -88,23 +114,8 @@ async function observePage(
       'Select a submission version.',
     );
     stage = 'operation';
-    const rows = await ctx.db
-      .query('projectHostedLandingRequests')
-      .withIndex('by_project_and_operation', q =>
-        q.eq('projectId', input.projectId).eq('operationId', input.operationId),
-      )
-      .take(2);
-    const alias = rows.length
-      ? null
-      : await landingAlias(ctx, {
-          projectId: input.projectId,
-          actor: user.subject,
-          operationId: input.operationId,
-        });
-    if (alias) {
-      const canonical = await landingRow(ctx, alias);
-      if (canonical) rows.push(canonical);
-    }
+    if ('error' in selection) throw selection.error;
+    const { rows, alias } = selection.value;
     const desired = rows.length
       ? null
       : alias

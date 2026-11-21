@@ -2215,6 +2215,11 @@ Current access, authority, advice, progress and acceptance remain dependencies.
 Exact conflict advice uses the effective early-resolution decision from the
 existing project projection. When an older projection lacks the decision,
 delivery uses the latest policy receipt in place of rereading the project.
+The finite reply shares its project authorization read across the handler, board delivery
+and public identity mapping. A held landing authorizes with the exact project row so it
+can compare the current policy with its attempt pin from that same read. This gives it the same note
+as ordinary landing status and the approval link, and keeps acceptance-policy edits
+outside the dependencies of unheld finishes and peer waits.
 Live board delivery reads only directed Lane notes; ordinary board reads retain Issue and project
 notes. Client waits remember content-derived conflict identities separately from message cursors,
 so a conflict beside an older two-note page is returned once across reconnects. The wait reply

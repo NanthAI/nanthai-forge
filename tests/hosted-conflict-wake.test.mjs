@@ -161,6 +161,11 @@ test('d6bc421b: exact advice agrees across ordinary and finite reads through a p
   );
   const on = await readWaits();
   await assertParity(on, advice);
+  await setPolicy({ acceptance: { protectedPaths: ['.env.example', 'notes/**'] } });
+  assert(
+    on.every(wait => wait.current()),
+    'an acceptance policy edit keeps unheld finish and peer waits current',
+  );
   await setPolicy({ notify: { awaySummary: false } });
   assert(
     on.every(wait => wait.current()),
@@ -178,6 +183,8 @@ test('d6bc421b: exact advice agrees across ordinary and finite reads through a p
     ranges(off),
     ranges(legacy).map(reads => reads - 1),
   );
+  assert(off[0].cost.ranges <= 18, 'projected finish wait stays within 18 indexed reads');
+  assert(off[1].cost.ranges <= 13, 'projected peer wait stays within 13 indexed reads');
   t.diagnostic(
     `finish/peer index reads with advice suppressed: legacy ${ranges(legacy)}, projected ${ranges(off)}`,
   );

@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { moduleUrl } from './convex-module.mjs';
-import { finishFixture, code } from './hosted-finish-fixture.mjs';
+import { finishFixture, code, landingApi } from './hosted-finish-fixture.mjs';
 import { policyPreset as preset } from '../dist/autonomy-policy.js';
 // Server preflight gate (Issue 029138ef) has its own tests (hosted-landing-desired.test.mjs).
 const policyPreset = name => ({ ...preset(name), agentDefaults: { preflight: 'advise' } });
@@ -24,6 +24,7 @@ const { OwnerApproval } = await import(moduleUrl('../web/src/review/OwnerApprova
 const { LaneApproval } = await import(moduleUrl('../web/src/review/LaneApproval.tsx'));
 const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
+const { set: setPolicy } = await import(moduleUrl('../convex/projectAutonomy.ts'));
 const { approvalDecisions } = await import(moduleUrl('../web/src/cockpit/attention.ts'));
 const needsMe = await import(moduleUrl('../convex/projectNeedsMe.ts'));
 const { needsView } = await import(moduleUrl('../web/src/app/needs/model.ts'));
@@ -520,6 +521,13 @@ test('the requester withdraws the request and the Lane lands as before', async t
 
 test('a held landing names the policy it is pinned to; a policy edit re-reads only on approval', async t => {
   const { f, state, select } = await heldLanding(t);
+  f.insert('forgeAccounts', { owner: 'owner', handle: 'synthetic-owner' });
+  f.patch('hostedProjects', f.projectId, { visibility: 'private' });
+  for (const operationId of [state.operationId, randomUUID()])
+    await assert.rejects(
+      f.tx('privateHold', observe.page, { projectId: f.projectId, operationId, nextVersion: 0 }, 'other'),
+      code('PROJECT_UNAVAILABLE'),
+    );
   const linkOf = async label =>
     JSON.parse(
       await f.tx(label, review.link, { projectId: f.projectId, operationId: state.operationId }, device),
@@ -528,19 +536,52 @@ test('a held landing names the policy it is pinned to; a policy edit re-reads on
   assert.equal(pinned.policy.changed, false);
   assert.equal(typeof pinned.policy.attempt, 'number');
   assert.match(pinned.policyNote, /^Pinned to the landing policy of attempt \d+ .*only on a fresh attempt/);
-  const policy = policyPreset('trusted');
-  policy.acceptance.ownerApprovalPaths = ['selected.txt', 'other.txt'];
-  f.patch('hostedProjects', f.projectId, { autonomyPolicy: policy });
+  const readPage = () =>
+    f
+      .tx(
+        'observerBudgetPage',
+        observe.page,
+        { projectId: f.projectId, operationId: state.operationId, nextVersion: 0 },
+        device,
+      )
+      .then(JSON.parse);
+  const ordinaryStatus = () =>
+    f
+      .tx('landingStatus', landingApi.status, { projectId: f.projectId, submissionId: state.id }, device)
+      .then(JSON.parse);
+  const current = await ordinaryStatus();
+  const unchanged = await readPage();
+  const heldCost = f.counts.at(-1);
+  t.diagnostic(`held finish indexed reads: ${heldCost.ranges}`);
+  assert.equal(unchanged.submission.error.message, current.request.error.message);
+  assert.doesNotMatch(unchanged.submission.error.message, /policy changed since/);
+  const edit = fields =>
+    f.tx('editHeldPolicy', setPolicy, {
+      projectId: f.projectId,
+      command: JSON.stringify({ action: 'set-policy', operationId: randomUUID(), ...fields }),
+    });
+  await edit({ notify: { awaySummary: false } });
+  assert.equal((await readPage()).submission.error.message, current.request.error.message);
+  const isCurrent = f.readSet();
+  await edit({ governanceVersion: 1, acceptance: { ownerApprovalPaths: ['selected.txt', 'other.txt'] } });
+  assert.equal(isCurrent(), false, 'a changed landing policy invalidates the held wait');
   const link = await linkOf('linkStale');
   assert.equal(link.policy.changed, true);
   assert.match(link.policyNote, /policy changed since.*holds for the owner once more/);
-  const page = JSON.parse(
-    await f.tx(
-      'observeStale',
-      observe.page,
-      { projectId: f.projectId, operationId: state.operationId, nextVersion: 0 },
-      device,
-    ),
+  const page = await readPage();
+  for (const { ranges, readRangesByTable, writes } of [heldCost, f.counts.at(-1)]) {
+    assert.equal(
+      readRangesByTable.hostedProjects,
+      1,
+      'a hold authorizes and reads its current policy together',
+    );
+    assert(ranges <= 15, 'the held finish wait adds no reads over its baseline');
+    assert.equal(writes, 0);
+  }
+  assert.equal(page.submission.error.message, (await ordinaryStatus()).request.error.message);
+  assert.equal(
+    page.events.find(event => event.submission.version === page.submission.version)?.submission.error.message,
+    page.submission.error.message,
   );
   assert.match(
     page.submission.error.message,
