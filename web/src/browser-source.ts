@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readSubmodulePointers } from '../../src/gitlink';
 import { verifiedBytes } from './verified-blob';
-import { ObjectDownloadReader } from '../../src/blob-download';
+import { ObjectDownloadReader, type DownloadTransport } from '../../src/blob-download';
 import { parseNativeState } from '../../src/state/format';
 import { reviewPaths, reviewTextPage, type ReviewPath } from '../../src/source-review-format';
 import { computeHunks } from '../../src/review-hunks-core';
@@ -39,6 +39,7 @@ export type SourcePlan = {
   transport: string;
   root: DownloadPin;
   pins: DownloadPin[] | null;
+  checkpointDescribe?: true;
 };
 type SourcePair = Pick<SourceInput, 'projectId' | 'backupId' | 'base' | 'head'>;
 type SourceFiles = { available: true; paths: (ReviewPath & { add?: number; del?: number })[] };
@@ -48,6 +49,40 @@ export type BrowserComparison =
   | SourceUnavailable
   | (SourceFiles & { readFile: (path: string) => Promise<FileComparison> });
 const readers = new WeakMap<Client, Map<string, ObjectDownloadReader>>();
+type CheckpointRead = {
+  pin: { backupId: Id<'projectBackups'>; backupDigest: string; manifestDigest: string };
+  active: Map<string, number>;
+};
+function browserTransport(
+  client: Client,
+  projectId: Id<'hostedProjects'>,
+  checkpoint?: CheckpointRead,
+): DownloadTransport {
+  const scope = (ids: string[]) => (ids.some(id => checkpoint?.active.has(id)) ? checkpoint?.pin : undefined);
+  const describe = (digests: string[], signed?: boolean) => {
+    const selected = scope(digests);
+    return client.mutation(api.projectObjectDownloads.describe, {
+      projectId,
+      digests,
+      ...(signed ? { signed: true } : {}),
+      ...(selected ? { checkpoint: selected } : {}),
+    });
+  };
+  return {
+    describe,
+    sign: async digests => {
+      if (!scope(digests))
+        return (
+          await client.mutation(api.projectObjectDownloads.signDownloads, { projectId, digests })
+        ).filter(row => 'url' in row);
+      return (await describe(digests, true)).flatMap(row =>
+        row.location === 'r2' && row.url
+          ? [{ digest: row.digest, size: row.size, url: row.url, ...(row.range ? { range: row.range } : {}) }]
+          : [],
+      );
+    },
+  };
+}
 export function browserObjects(client: Client, projectId: Id<'hostedProjects'>) {
   let projects = readers.get(client);
   if (!projects) {
@@ -56,18 +91,7 @@ export function browserObjects(client: Client, projectId: Id<'hostedProjects'>) 
   }
   let reader = projects.get(projectId);
   if (!reader) {
-    reader = new ObjectDownloadReader({
-      describe: (digests, signed) =>
-        client.mutation(api.projectObjectDownloads.describe, {
-          projectId,
-          digests,
-          ...(signed ? { signed: true } : {}),
-        }),
-      sign: async digests =>
-        (await client.mutation(api.projectObjectDownloads.signDownloads, { projectId, digests })).filter(
-          row => 'url' in row,
-        ),
-    });
+    reader = new ObjectDownloadReader(browserTransport(client, projectId));
     projects.set(projectId, reader);
   }
   return reader;
@@ -101,7 +125,7 @@ export async function browserManifest(client: Client, projectId: Id<'hostedProje
   const manifest = sourceManifestSchema.parse(JSON.parse(new TextDecoder().decode(manifestBytes)));
   return { manifest, manifestBytes, exchange: exchange.success ? exchange.data : null };
 }
-async function pinComparison(client: Client, input: SourcePair) {
+async function pinComparison(client: Client, input: SourcePair, open = false) {
   const selection = { projectId: input.projectId, backupId: input.backupId },
     plan = await sourcePlan(client, selection, [input.base, input.head]);
   if (plan.transport !== 'objects' || plan.format !== 'native')
@@ -110,8 +134,22 @@ async function pinComparison(client: Client, input: SourcePair) {
       reason:
         'This checkpoint uses a source archive. Its existing download contains source and Work for local review.',
     };
-  const reader = browserObjects(client, input.projectId),
-    pins = new Map(plan.pins?.map(pin => [pin.sha256, pin]));
+  const checkpoint: CheckpointRead | undefined =
+    open && plan.checkpointDescribe
+      ? {
+          pin: {
+            backupId: input.backupId,
+            backupDigest: plan.backupDigest,
+            manifestDigest: plan.manifestDigest,
+          },
+          active: new Map(),
+        }
+      : undefined;
+  const shared = browserObjects(client, input.projectId);
+  const reader = checkpoint
+    ? shared.withTransport(browserTransport(client, input.projectId, checkpoint))
+    : shared;
+  const pins = new Map(plan.pins?.map(pin => [pin.sha256, pin]));
   const check = async (digests: string[] = []) => {
     const current = await sourcePlan(client, selection, digests);
     invariant(
@@ -141,22 +179,29 @@ async function pinComparison(client: Client, input: SourcePair) {
         await manifestIndex;
       }
     }
-    return reader.read(
-      ids.map(id => {
-        const pin = pins.get(id);
-        invariant(
-          pin,
-          'SOURCE_UNAVAILABLE',
-          'This source object is not retained in the selected checkpoint.',
-        );
-        return pin;
-      }),
-    );
+    const selected = ids.map(id => {
+      const pin = pins.get(id);
+      invariant(pin, 'SOURCE_UNAVAILABLE', 'This source object is not retained in the selected checkpoint.');
+      return pin;
+    });
+    if (!checkpoint) return reader.read(selected);
+    // The enclosing logical read checks the checkpoint before and after IO.
+    // Recipe descendants still check access, without rereading the checkpoint per page.
+    for (const id of ids) checkpoint.active.set(id, (checkpoint.active.get(id) ?? 0) + 1);
+    try {
+      return await reader.read(selected);
+    } finally {
+      for (const id of ids) {
+        const pending = checkpoint.active.get(id)! - 1;
+        if (pending) checkpoint.active.set(id, pending);
+        else checkpoint.active.delete(id);
+      }
+    }
   };
   const [aState, bState] = await bytes([input.base, input.head]),
     state = parseNativeState(bState!),
     paths = reviewPaths(parseNativeState(aState!).files, state.files);
-  return { available: true as const, plan, paths, state, bytes, check };
+  return { available: true as const, plan, paths, state, bytes, check, checkpointScoped: !!checkpoint };
 }
 
 function filePins(file: ReviewPath) {
@@ -190,10 +235,10 @@ export async function openBrowserComparison(
       },
     };
   }
-  const pinned = await pinComparison(client, input);
+  const pinned = await pinComparison(client, input, true);
   if (!pinned.available) return pinned;
-  const { paths, bytes, check } = pinned;
-  await check();
+  const { paths, bytes, check, checkpointScoped } = pinned;
+  if (!checkpointScoped) await check();
   return {
     available: true,
     paths,
@@ -201,10 +246,10 @@ export async function openBrowserComparison(
       const file = paths.find(file => file.path === path);
       invariant(file, 'NOT_FOUND', 'Choose a file from this source comparison.');
       const ids = filePins(file);
-      const current = await check(ids);
+      const current = checkpointScoped ? undefined : await check(ids);
       const { before, after } = fileSides(file, await bytes(ids, current));
       const comparison = computeHunks(before, after, 3);
-      await check();
+      if (!checkpointScoped) await check();
       return { file, comparison };
     },
   };

@@ -229,7 +229,7 @@ the reader walked their byte trees one node at a time. With the reader now
 batching each tree level, the same sample made 34 calls in 39 s before the same
 failure. Both are single observations.
 
-Classic Lane Changes now keeps the file list decoded from the two verified
+The original shared comparison keeps the file list decoded from the two verified
 States for the mounted comparison. A selected file uses four calls: checkpoint
 and blob pins, signed describe, unsigned describe after the GETs, and a final
 checkpoint check. The fixture in `tests/browser-r2-bytes.test.mjs` runs the old
@@ -245,6 +245,26 @@ The initial index still transfers whole States, and the larger fixture needs
 the existing recipe reads. Live billing, peak browser memory and signed-in
 timing were not measured. An overlap row can contain pending-save or rebase
 evidence, so exact file pins in this reader come from the verified checkpoint.
+
+### Checkpoint checks in the object reader
+
+A supported server advertises checkpoint checks on the existing source plan.
+Classic Changes includes its exact checkpoint in the signed describe before a
+logical object read and the unsigned describe after it. The recipe's child
+describes use the existing project access and object checks. A file whose pin
+was already selected from the checkpoint uses two calls for a direct read.
+An uncached pin can first need the existing membership lookup. Older servers
+keep the four-call selected-file path.
+
+The fixtures reduce the first diff from 11 to 8 source calls at 3,000 paths
+and from 23 to 20 at 29,000. Both make two selected-file Convex calls, eight
+database lookups and two storage GETs totalling 48 bytes. They guard the call
+sequence, checkpoint changes before and during IO, revocation during IO and
+no idle requests. Initial discovery still reads whole States. A persisted
+exact live Lane pair would be needed to
+remove that transfer for the measured dogfood Lane, whose States are newer
+than the classic view's retained checkpoint. Live usage and signed-in paint
+timing remain unmeasured for this change.
 
 ## Rendering and highlighter comparison
 

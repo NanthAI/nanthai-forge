@@ -872,6 +872,10 @@ size and digest; the final checkpoint check remains. Missing or inconsistent
 disposable pins, an older backup, or an index race restart the
 original manifest reader with the same backup, base and head. No source revision
 or visibility is substituted, and no new index format or backfill is required.
+Classic Changes folds checkpoint validation into the signed and unsigned object
+descriptor calls when the checkpoint plan advertises support. Recipe pages
+keep their existing project and object checks within the surrounding logical
+object read.
 
 ## Unified Work formats (schemas 18/20)
 

@@ -22,6 +22,24 @@ import { packRange, packHeaders, type ObjectPack } from '../src/object-pack-rang
 import { signRecipeClosure } from './projectRecipeClosure';
 import { runValue, signRuns, type RunBinding } from './projectObjectRuns';
 const rangeValue = v.optional(v.object({ offset: v.number(), total: v.number() }));
+const checkpointPin = v.object({
+  backupId: v.id('projectBackups'),
+  backupDigest: v.string(),
+  manifestDigest: v.string(),
+});
+async function selectedCheckpoint(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  backupId: Id<'projectBackups'>,
+) {
+  const backup = await ctx.db.get(backupId);
+  invariant(
+    backup && backup.projectId === projectId && backup.status === 'stored',
+    'PROJECT_UNAVAILABLE',
+    'Select a stored checkpoint from this project.',
+  );
+  return backup;
+}
 const signedClosureValue = v.array(
   v.object({ digest: v.string(), size: v.number(), url: v.string(), range: rangeValue }),
 );
@@ -113,6 +131,7 @@ export const describe = mutation({
     stateSource: v.optional(v.union(v.boolean(), v.literal(2))),
     /** Signed pages of up to hostedDownloadPageSize; neighbours in one stored pack share a run. */
     runs: v.optional(v.boolean()),
+    checkpoint: v.optional(checkpointPin),
   },
   returns: v.array(
     v.union(
@@ -162,17 +181,28 @@ export async function describeObjects(
     signed,
     stateSource,
     runs,
+    checkpoint,
   }: {
     projectId: Id<'hostedProjects'>;
     digests: string[];
     signed?: boolean;
     stateSource?: boolean | 2;
     runs?: boolean;
+    checkpoint?: import('convex/values').Infer<typeof checkpointPin>;
   },
   maximum = runs ? hostedDownloadPageSize : 100,
 ) {
   try {
     const project = await downloadProject(ctx, projectId);
+    if (checkpoint) {
+      const backup = await selectedCheckpoint(ctx, projectId, checkpoint.backupId);
+      invariant(
+        backup.digest === checkpoint.backupDigest &&
+          backup.preview.manifestDigest === checkpoint.manifestDigest,
+        'SOURCE_CHANGED',
+        'The selected checkpoint changed while reading.',
+      );
+    }
     if (stateSource) requireSourceProtocol(project, stateSource);
     invariant(
       digests.length <= maximum && digests.every(id => /^[a-f0-9]{64}$/.test(id)) && (!runs || signed),
@@ -290,12 +320,7 @@ export const source = mutation({
   handler: async (ctx, { projectId, backupId, digests = [] }) => {
     try {
       const project = await downloadProject(ctx, projectId),
-        backup = await ctx.db.get(backupId);
-      invariant(
-        backup && backup.projectId === projectId && backup.status === 'stored',
-        'PROJECT_UNAVAILABLE',
-        'Select a stored checkpoint from this project.',
-      );
+        backup = await selectedCheckpoint(ctx, projectId, backupId);
       invariant(
         digests.length <= 100 && digests.every(id => /^[a-f0-9]{64}$/.test(id)),
         'BAD_ARGUMENT',
@@ -314,6 +339,7 @@ export const source = mutation({
           size: backup.objectManifest?.size ?? backup.size,
         },
         pins,
+        checkpointDescribe: true,
       });
     } catch (error) {
       return report(error);

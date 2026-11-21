@@ -21,24 +21,32 @@ export type DownloadTransport = {
 /** One reader per client/project. Bytes are immutable; authority is checked afresh even on hits.
  * No timer, background refresh, URL persistence or idle work. The byte cache expires lazily. */
 export class ObjectDownloadReader {
-  private readonly cache = new Map<string, { bytes: Uint8Array; until: number }>();
-  private retained = 0;
+  private cache = {
+    entries: new Map<string, { bytes: Uint8Array; until: number }>(),
+    retained: 0,
+  };
   private readonly budget = 16 * 1024 * 1024;
   constructor(private readonly transport: DownloadTransport) {}
+  /** Reuse verified immutable bytes with a more specific authority check. */
+  withTransport(transport: DownloadTransport) {
+    const reader = new ObjectDownloadReader(transport);
+    reader.cache = this.cache;
+    return reader;
+  }
   private now() {
     return (this.transport.now ?? Date.now)();
   }
   private remember(pin: DownloadPin, bytes: Uint8Array) {
     if (bytes.length > this.budget) return;
-    for (const [key, value] of this.cache)
-      if (value.until <= this.now() || this.retained + bytes.length > this.budget) {
-        this.cache.delete(key);
-        this.retained -= value.bytes.length;
+    for (const [key, value] of this.cache.entries)
+      if (value.until <= this.now() || this.cache.retained + bytes.length > this.budget) {
+        this.cache.entries.delete(key);
+        this.cache.retained -= value.bytes.length;
       }
-    const previous = this.cache.get(pin.sha256);
-    if (previous) this.retained -= previous.bytes.length;
-    this.cache.set(pin.sha256, { bytes: bytes.slice(), until: this.now() + 60_000 });
-    this.retained += bytes.length;
+    const previous = this.cache.entries.get(pin.sha256);
+    if (previous) this.cache.retained -= previous.bytes.length;
+    this.cache.entries.set(pin.sha256, { bytes: bytes.slice(), until: this.now() + 60_000 });
+    this.cache.retained += bytes.length;
   }
   private async rows(pins: DownloadPin[], signed = false) {
     const result = new Map<string, DownloadRow>();
@@ -167,7 +175,7 @@ export class ObjectDownloadReader {
     // an already-authorized immutable hit must not fall through to an unsigned GET.
     const hits = new Map<string, Uint8Array>();
     for (const pin of pins) {
-      const hit = this.cache.get(pin.sha256);
+      const hit = this.cache.entries.get(pin.sha256);
       if (hit && hit.until > this.now()) hits.set(pin.sha256, hit.bytes);
     }
     const direct = pins.filter(pin => {

@@ -146,19 +146,25 @@ for (const files of [3000, 29000])
     assert(comparison.available);
     assert.equal(comparison.paths.length, files);
     const indexCalls = f.browser.calls.length;
-    assert(indexCalls <= (files === 3000 ? 7 : 19));
+    assert(indexCalls <= (files === 3000 ? 6 : 18));
     const start = f.fake.requests.length;
+    const getsFromDb = t.mock.method(f.s.ctx.db, 'get');
+    const queries = t.mock.method(f.s.ctx.db, 'query');
     const selected = await comparison.readFile('a.ts');
+    const lookups = getsFromDb.mock.callCount() + queries.mock.callCount();
+    assert.equal(lookups, 8, 'two project, two checkpoint and four object lookups');
     assert.equal(selected.comparison.hunks[0].lines[1].text, 'export const value = 2;');
     const pins = [f.before.sha256, f.after.sha256];
     assert.deepEqual(
       f.browser.calls.slice(indexCalls).map(call => [call.method, call.args.digests, call.args.signed]),
       [
-        ['source', pins, undefined],
         ['describe', pins, true],
         ['describe', pins, undefined],
-        ['source', [], undefined],
       ],
+    );
+    assert(
+      f.browser.calls.slice(indexCalls).every(call => call.args.checkpoint?.backupId === f.input.backupId),
+      'both object calls check the selected checkpoint',
     );
     const gets = f.fake.requests.slice(start).filter(request => request.method === 'GET');
     assert.deepEqual(
@@ -173,7 +179,7 @@ for (const files of [3000, 29000])
     const previous = indexCalls + f.browser.calls.length - complete;
     assert(complete < previous);
     t.diagnostic(
-      `${files} paths: ${f.base.size + f.head.size} State bytes for the index; 2 selected GETs, ${f.before.size + f.after.size} file bytes; ${previous} to ${complete} calls`,
+      `${files} paths: ${f.base.size + f.head.size} State bytes for the index; 2 selected GETs, ${f.before.size + f.after.size} file bytes, ${lookups} DB lookups; ${previous} to ${complete} calls`,
     );
   });
 
@@ -199,6 +205,45 @@ test('an open comparison rechecks its selected checkpoint before and after file 
   } finally {
     mocked.mock.restore();
   }
+});
+
+test('an open comparison rechecks project access after selected file IO', async t => {
+  const f = await sourceFixture(t, [true, true]);
+  const comparison = await openBrowserComparison(f.browser, f.input);
+  assert(comparison.available);
+  const fetch = globalThis.fetch;
+  const mocked = t.mock.method(globalThis, 'fetch', async (...args) => {
+    const result = await fetch(...args);
+    f.s.caller('outsider');
+    return result;
+  });
+  try {
+    await assert.rejects(comparison.readFile('a.ts'), code('PROJECT_UNAVAILABLE'));
+  } finally {
+    mocked.mock.restore();
+  }
+});
+
+test('an open comparison negotiates checkpoint descriptors with an older server', async t => {
+  const f = await sourceFixture(t, [true, true]);
+  const mutate = f.browser.mutation;
+  f.browser.mutation = async (ref, input) => {
+    assert.equal(input.checkpoint, undefined, 'an old server does not accept the new argument');
+    const result = await mutate(ref, input);
+    if (getFunctionName(ref) !== 'projectObjectDownloads:source') return result;
+    const { checkpointDescribe, ...plan } = JSON.parse(result);
+    assert.equal(checkpointDescribe, true);
+    return JSON.stringify(plan);
+  };
+  const comparison = await openBrowserComparison(f.browser, f.input);
+  assert(comparison.available);
+  const at = f.browser.calls.length;
+  const result = await comparison.readFile('a.ts');
+  assert.equal(result.comparison.hunks[0].lines[1].text, 'export const value = 2;');
+  assert.deepEqual(
+    f.browser.calls.slice(at).map(call => call.method),
+    ['source', 'describe', 'describe', 'source'],
+  );
 });
 
 test('a project object outside the selected checkpoint cannot supply an open comparison', async t => {
