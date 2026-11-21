@@ -19,5 +19,8 @@ The current files are snapshotted first and the result is recorded in the
 snapshot log, so `{"undo":1}` brings the edits back
 ([snapshots](1500-unsaved-edits-after-a-crash.md)). A path a snapshot cannot hold
 (secret-flagged, over the new-file cap, or an untracked credential) is refused,
-and nothing changes.
+and nothing changes. If a local file stands where a saved file needs a parent
+folder, the restore identifies the obstruction before changing any named file.
+Restoring the parent replaces that local file with the saved folder and keeps
+the local file in the undo snapshot.
 [Refresh and cost reference](../../../operations/source-exchange.md#hosted-main-client-checkout).

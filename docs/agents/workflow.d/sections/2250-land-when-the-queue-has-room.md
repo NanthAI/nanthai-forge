@@ -11,7 +11,10 @@ writes nothing; the land then subscribes to the queue's room count and submits a
 drops under N. The server re-runs that live query when the queue's order, phases or holds change
 or a preparing landing changes, plus the queue row's progress clock once the queue spans 8
 or more pages (never on a timer), so a waiting land wakes when a check ends,
-with no polling loop and no idle calls. Past its wait budget the land refuses with `WORK_BUSY`
+with no polling loop and no idle calls. If main moves while a landing waits for room,
+a landing that composed its own Candidate composes again within the same wait budget.
+Those moves leave the ordinary main-pin attempts available for races on fresh pins.
+Past its wait budget the land refuses with `WORK_BUSY`
 and names the replay: the same land command with the same `operationId` keeps waiting (and
 keeps its maxChecks). Nothing was submitted, so landing with another maxChecks, without it, or
 on new saved source is new work, never a replay of the refused one. A cancel (Ctrl-C, SIGTERM,

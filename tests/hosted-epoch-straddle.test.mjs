@@ -217,6 +217,56 @@ test('a desired landing that began at the old epoch is refused with the next com
   assert.notEqual(landed.result.submission.phase, 'terminal-failed');
 });
 
+test('ad80e037: a capped landing retains maxChecks across an authority epoch change', async t => {
+  const switchName = 'FORGE_QUEUE_LAND_WHEN_ROOM';
+  const previous = process.env[switchName];
+  process.env[switchName] = '1';
+  t.after(() => {
+    if (previous === undefined) delete process.env[switchName];
+    else process.env[switchName] = previous;
+  });
+  const maxChecks = 5;
+  for (const [route, eager] of [
+    ['projectHostedLanding:enqueue', true],
+    ['projectHostedLandingDesired:submit', false],
+  ]) {
+    await t.test(route, async t => {
+      const s = await resolutionFixture(t);
+      s.eagerSource(eager);
+      dropFirst(s, route);
+      const command = { laneId: s.f.lane.laneId, operationId: randomUUID(), maxChecks };
+      await assert.rejects(s.transport().dispatch('finish', command), { code: 'HOSTED_ACTION_FAILED' });
+      const epoch = nextEpoch(s.f);
+      const reply = await s.transport().dispatch('finish', command);
+      assert.equal(reply.operationId, command.operationId);
+      assert.equal(reply.result.submission.request.authorityEpoch, epoch);
+      assert.deepEqual(
+        operations(s, route).map(call => call.args.maxChecks),
+        [maxChecks, maxChecks],
+      );
+    });
+  }
+
+  await t.test('a named fresh finish', async t => {
+    const s = await resolutionFixture(t);
+    s.eagerSource(false);
+    const command = { laneId: s.f.lane.laneId, operationId: randomUUID(), maxChecks };
+    const first = await s.transport().dispatch('finish', command);
+    assert.equal(first.result.submission.phase, 'composing');
+    const epoch = nextEpoch(s.f);
+    const refused = await s
+      .transport()
+      .dispatch('finish', command)
+      .catch(error => error);
+    const parameters = namesNext(refused, 'finish', command.operationId);
+    assert.equal(parameters.maxChecks, maxChecks);
+    s.eagerSource(true);
+    const reply = await s.transport().dispatch('finish', parameters);
+    assert.equal(reply.result.submission.request.authorityEpoch, epoch);
+    assert.equal(operations(s, 'projectHostedLanding:enqueue').at(-1).args.maxChecks, maxChecks);
+  });
+});
+
 test('a plain save that began at the old epoch is refused naming save, and that save completes (review f08934a5 low 3)', async t => {
   const s = await resolutionFixture(t),
     f = s.f;

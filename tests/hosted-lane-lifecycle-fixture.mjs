@@ -12,8 +12,8 @@ export const cascade = await import(moduleUrl('../convex/projectHostedLifecycleC
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 export const code = value => error => (error.data?.code ?? error.code) === value;
 export const maxima = {};
-export async function lifecycleFixture() {
-  const f = await saveFixture();
+export async function lifecycleFixture(originalPath = 'a.txt') {
+  const f = await saveFixture('original', originalPath);
   f.tables._scheduled_functions = new Map();
   let schedulerFailure = false;
   f.decorateContext(ctx => {

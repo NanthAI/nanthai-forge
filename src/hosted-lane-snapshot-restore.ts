@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { readHostedLaneCheckout, type HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import { captureSnapshot } from './hosted-lane-snapshot-capture.js';
 import { snapshotDirectory } from './lane-snapshot-hint.js';
@@ -319,9 +319,8 @@ export async function executeSnapshots(
     );
     const writes = [...desired.values()].filter((file): file is NativeFile => file !== null);
     const removals = [...desired.entries()].filter(([, file]) => file === null).map(([path]) => path);
-    for (const path of removals) rmSync(join(root, path), { force: true });
-    for (const file of writes) mkdirSync(dirname(join(root, file.path)), { recursive: true });
-    rebuildCheckoutFiles(root, stage, writes, worktreeText(root, marker.state.files));
+    const folders = snapshotWriteFolders(root, writes, removals);
+    applySnapshotFiles(root, stage, marker, writes, removals, folders, readSnapshotLedger(root, laneId).seq);
     await call(client, 'mutation', 'projectLaneSnapshots:restore', {
       projectId,
       laneId,
@@ -358,6 +357,77 @@ export async function executeSnapshots(
     };
   } finally {
     rmSync(stage, { recursive: true, force: true });
+  }
+}
+
+/** Check each required parent once, from the root down, without traversing a link. A file can
+ * become a directory when this operation also removes that file. */
+function snapshotWriteFolders(root: string, writes: readonly NativeFile[], removals: readonly string[]) {
+  const removing = new Set(removals);
+  const checked = new Map<string, boolean>([['.', true]]);
+  const directoryExists = (directory: string, writing: string): boolean => {
+    const known = checked.get(directory);
+    if (known !== undefined) return known;
+    const stat = directoryExists(dirname(directory), writing)
+      ? lstatSync(join(root, directory), { throwIfNoEntry: false })
+      : undefined;
+    invariant(
+      !stat || stat.isDirectory() || removing.has(directory),
+      'BAD_ARGUMENT',
+      `Not restored: ${directory} blocks the folder for ${writing}. Name ${directory} in a restore from the saved head, or move it aside first. Nothing was changed.`,
+    );
+    const exists = stat?.isDirectory() ?? false;
+    checked.set(directory, exists);
+    return exists;
+  };
+  const folders: string[] = [];
+  for (const { path } of writes) {
+    if (
+      !directoryExists(dirname(path), path) ||
+      !lstatSync(join(root, path), { throwIfNoEntry: false })?.isDirectory()
+    )
+      continue;
+    const left = readdirSync(join(root, path), { recursive: true, withFileTypes: true })
+      .filter(entry => !entry.isDirectory())
+      .map(entry => relative(root, join(entry.parentPath, entry.name)).split(sep).join('/'))
+      .filter(file => !removing.has(file));
+    invariant(
+      !left.length,
+      'BAD_ARGUMENT',
+      `Not restored: ${path} is a folder now and holds files this restore does not remove (${left.slice(0, 3).join(', ')}${left.length > 3 ? ` and ${left.length - 3} more` : ''}); name the folder or move them aside first. Nothing was changed.`,
+    );
+    folders.push(path);
+  }
+  return folders;
+}
+
+function applySnapshotFiles(
+  root: string,
+  stage: string,
+  marker: HostedLaneCheckoutMarker,
+  writes: readonly NativeFile[],
+  removals: readonly string[],
+  folders: readonly string[],
+  before: number | null,
+) {
+  try {
+    for (const path of removals) rmSync(join(root, path), { force: true });
+    // Remove only empty directories, bottom-up. A new entry stops the restore without deletion.
+    for (const folder of folders) {
+      const inner = readdirSync(join(root, folder), { recursive: true, withFileTypes: true })
+        .filter(entry => entry.isDirectory())
+        .map(entry => join(entry.parentPath, entry.name))
+        .sort((a, b) => b.length - a.length);
+      for (const path of [...inner, join(root, folder)]) rmdirSync(path);
+    }
+    rebuildCheckoutFiles(root, stage, writes, worktreeText(root, marker.state.files));
+  } catch (error) {
+    if (!['ENOTDIR', 'ENOTEMPTY', 'EEXIST', 'EISDIR'].includes((error as NodeJS.ErrnoException).code ?? ''))
+      throw error;
+    throw new ForgeError(
+      'WORK_BUSY',
+      `A file or folder changed during the restore. Your edits were snapshotted first: x snapshots {"restore":${before ?? '"latest"'}} brings this folder back as it was.`,
+    );
   }
 }
 
@@ -492,27 +562,7 @@ async function restoreSaved(
     return file ? [file] : [];
   });
   const removals = changes.filter(change => !head.has(change.path)).map(change => change.path);
-  // A saved file that is a folder now: restorable only when the restore removes everything in it.
-  const removing = new Set(removals);
-  const folders = writes
-    .map(file => file.path)
-    .filter(path => {
-      try {
-        return lstatSync(join(root, path)).isDirectory();
-      } catch {
-        return false;
-      }
-    });
-  for (const folder of folders) {
-    const left = (readdirSync(join(root, folder), { recursive: true }) as string[])
-      .map(entry => `${folder}/${entry}`)
-      .filter(path => !lstatSync(join(root, path)).isDirectory() && !removing.has(path));
-    invariant(
-      !left.length,
-      'BAD_ARGUMENT',
-      `Not restored: ${folder} is a folder now and holds files this restore does not remove (${left.slice(0, 3).join(', ')}${left.length > 3 ? ` and ${left.length - 3} more` : ''}); name the folder or move them aside first. Nothing was changed.`,
-    );
-  }
+  snapshotWriteFolders(root, writes, removals);
   // The current files first, confirmed on the server: the restore must be undoable.
   await protectCurrentFiles(root, laneId, projectId, client, listed, capture, 'restoring them');
   const kept = readSnapshotLedger(root, laneId);
@@ -525,23 +575,8 @@ async function restoreSaved(
       writes.map(file => file.blob),
       stage,
     );
-    for (const path of removals) rmSync(join(root, path), { force: true });
-    // Only empty folders are left in them now (checked above); removed bottom-up without
-    // recursion, so a file written there meanwhile stops the restore instead of being deleted.
-    for (const folder of folders) {
-      const inner = (readdirSync(join(root, folder), { recursive: true }) as string[])
-        .map(entry => join(root, folder, entry))
-        .sort((a, b) => b.length - a.length);
-      try {
-        for (const path of [...inner, join(root, folder)]) rmdirSync(path);
-      } catch {
-        throw new ForgeError(
-          'WORK_BUSY',
-          `Not restored: ${folder} gained files during the restore. Your edits were snapshotted first: x snapshots {"restore":${kept.seq ?? '"latest"'}} brings this folder back as it was.`,
-        );
-      }
-    }
-    rebuildCheckoutFiles(root, stage, writes, worktreeText(root, marker.state.files));
+    const folders = snapshotWriteFolders(root, writes, removals);
+    applySnapshotFiles(root, stage, marker, writes, removals, folders, kept.seq);
   } finally {
     rmSync(stage, { recursive: true, force: true });
   }

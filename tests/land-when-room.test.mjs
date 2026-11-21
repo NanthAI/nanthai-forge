@@ -246,6 +246,79 @@ test('ad80e037: a land without room waits on the live room query and submits onc
   assert.equal(feed.closed, 1, 'the live client is closed once the land has room');
 });
 
+test('ad80e037: main movement while waiting for room leaves the normal main pin attempts available', async t => {
+  const s = agentFixture(t);
+  s.caps.features = ['land-when-room'];
+  const feed = roomFeed(t);
+  const inner = s.exchange.client.mutation;
+  s.pinMain(true);
+  let waits = 0;
+  let retrying = false;
+  s.exchange.client.mutation = (ref, args) => {
+    const name = getFunctionName(ref);
+    if (name !== 'projectHostedLanding:enqueue') return inner(ref, args);
+    if (retrying) {
+      retrying = false;
+      return inner(ref, args);
+    }
+    if (waits === 3) return inner(ref, args);
+    return Promise.reject(busy());
+  };
+  feed.onSubscribe = () => {
+    feed.push({ checks: 2, groups: 2, preparing: 0 });
+    s.moveMainBefore('projectHostedLanding:enqueue');
+    waits++;
+    retrying = true;
+    feed.push({ checks: 1, groups: 1, preparing: 0 });
+  };
+
+  const operationId = randomUUID();
+  const reply = await s.transport().dispatch('finish', { laneId: s.lane.laneId, maxChecks: 2, operationId });
+  assert.equal(reply.operationId, operationId);
+  assert.equal(reply.result.submission.phase, 'queued');
+  assert.equal(feed.subscribed.length, 3);
+  assert.equal(feed.closed, 3);
+  assert.equal(reply.result.submission.request.expectedMain.head, s.main.head);
+});
+
+test('ad80e037: a capped replay does not recompose after its room wait budget', async t => {
+  const s = agentFixture(t);
+  s.caps.features = ['land-when-room'];
+  s.pinMain(true);
+  const feed = roomFeed(t);
+  const inner = s.exchange.client.mutation;
+  let full = true;
+  s.exchange.client.mutation = (ref, args) =>
+    full && getFunctionName(ref) === 'projectHostedLanding:enqueue'
+      ? Promise.reject(busy())
+      : inner(ref, args);
+  const command = { laneId: s.lane.laneId, maxChecks: 2, operationId: randomUUID() };
+  const spent = Object.assign(s.transport(), { waitUntil: Date.now() - 1 });
+  await assert.rejects(spent.dispatch('finish', command), code('WORK_BUSY'));
+
+  let now = Date.now();
+  const deadline = now + 10_000;
+  t.mock.method(Date, 'now', () => now);
+  feed.onSubscribe = () => {
+    feed.push({ checks: 2, groups: 2, preparing: 0 });
+    s.moveMainBefore('projectHostedLanding:enqueue');
+    full = false;
+    feed.push({ checks: 1, groups: 1, preparing: 0 });
+    now = deadline;
+  };
+  const replay = Object.assign(s.transport(), { waitUntil: deadline });
+  const before = s.calls.length;
+  await assert.rejects(
+    replay.dispatch('finish', command),
+    error => error.code === 'CHANNEL_CHANGED' && /Replay the same operation/.test(error.message),
+  );
+  assert(!s.calls.slice(before).some(call => call.name === 'projectHostedCompose:prepare'));
+
+  const resumed = await s.transport().dispatch('finish', command);
+  assert.equal(resumed.operationId, command.operationId);
+  assert.equal(resumed.result.submission.request.expectedMain.head, s.main.head);
+});
+
 test('ad80e037: the land refuses maxChecks itself when the server does not take it', async t => {
   const s = agentFixture(t);
   s.caps.features = [];

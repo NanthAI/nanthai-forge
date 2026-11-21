@@ -131,6 +131,7 @@ const unmark = (session: HostedAgentSession) => {
 async function submitWhenRoom<T>(
   session: HostedAgentSession,
   submit: (room: { maxChecks?: number }) => Promise<T>,
+  waited?: () => void,
 ): Promise<T> {
   // From a submit attempt on, this operation may run on the server (a lost reply, a crash): no
   // earlier pre-submit refusal mark survives it, so new source is never a second landing. Only a
@@ -153,6 +154,7 @@ async function submitWhenRoom<T>(
       // Nothing was submitted: new source or another maxChecks is new work, not this replay.
       await refused(NO_QUEUE_ROOM);
       const room = await waitForQueueRoom(session, limit);
+      if (!room.immediate) waited?.();
       open = room.immediate ? open + 1 : 0;
       if (open > 1) throw error;
       unmark(session);
@@ -214,17 +216,25 @@ async function waitForQueueRoom(session: HostedAgentSession, limit: number) {
     }
   }
 }
+class RoomMainPinRefused extends MainPinRefused {}
+
 async function enqueueLanding(session: HostedAgentSession, request: unknown, pinnedCandidate: boolean) {
+  let waited = false;
   try {
-    return await submitWhenRoom(session, room =>
-      session.mutation<HostedLandingState>('projectHostedLanding:enqueue', {
-        request: canonicalPayload({ ...(request as object), governanceVersion: 1 }),
-        ...(session.landingAgent ? { agent: session.landingAgent } : {}),
-        ...(session.landingClient ? { agentClient: session.landingClient } : {}),
-        ...landGatesArg(session),
-        ...tokensArg(session),
-        ...room,
-      }),
+    return await submitWhenRoom(
+      session,
+      room =>
+        session.mutation<HostedLandingState>('projectHostedLanding:enqueue', {
+          request: canonicalPayload({ ...(request as object), governanceVersion: 1 }),
+          ...(session.landingAgent ? { agent: session.landingAgent } : {}),
+          ...(session.landingClient ? { agentClient: session.landingClient } : {}),
+          ...landGatesArg(session),
+          ...tokensArg(session),
+          ...room,
+        }),
+      () => {
+        waited = true;
+      },
     );
   } catch (error) {
     // An older epoch: the request rebuilds at this command's epoch; one this finish composed is
@@ -236,7 +246,7 @@ async function enqueueLanding(session: HostedAgentSession, request: unknown, pin
     }
     if (pinnedCandidate || !mainPinRefusal(error, 'finish')) throw error;
     forgetFinishSource(session, 'finish-request');
-    throw new MainPinRefused(error);
+    throw waited ? new RoomMainPinRefused(error) : new MainPinRefused(error);
   }
 }
 
@@ -354,6 +364,8 @@ async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolea
   try {
     submission = await enqueueLanding(session, request, pinnedCandidate);
   } catch (error) {
+    // A stale pin after a room wait goes through the command budget check on replays too.
+    if (error instanceof RoomMainPinRefused) throw error;
     // The retained request was stale and is dropped: this pass composes on the current main and epoch.
     if (error instanceof MainPinRefused || error instanceof AuthorityPinRefused) return null;
     throw error;
@@ -459,15 +471,27 @@ function staleBeforeCompose(session: HostedAgentSession, error: unknown) {
 
 export async function executeHostedFinish(session: HostedAgentSession, input: unknown) {
   let result: unknown;
-  for (let tries = 1; ; tries++)
+  for (let tries = 1; ;)
     try {
       result = await executeFinishWork(session, input);
       break;
     } catch (error) {
       // Main moved, or the epoch rose, before the landing began: the stale request is dropped, compose
       // again (b8c0a4f6, N3).
+      if (error instanceof RoomMainPinRefused) {
+        // A check can move main while this request waits for admission. Refresh its Candidate
+        // within the existing command budget and keep the ordinary pin-race attempts for fresh pins.
+        if (Date.now() < session.waitUntil) continue;
+        throw new ForgeError(
+          'CHANNEL_CHANGED',
+          'Main moved while this landing waited for queue room. Nothing began. Replay the same operation to compose on current main.',
+        );
+      }
       if (error instanceof MainPinRefused || error instanceof AuthorityPinRefused) {
-        if (tries < MAIN_PIN_TRIES) continue;
+        if (tries < MAIN_PIN_TRIES) {
+          tries++;
+          continue;
+        }
         throw new ForgeError(
           'CHANNEL_CHANGED',
           `Main moved during each of ${tries} tries to land on its current head. Nothing began, and the stale request was dropped: a replay of this same operation composes on the new main.`,

@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getFunctionName } from 'convex/server';
 import { lifecycleFixture, code } from './hosted-lane-lifecycle-fixture.mjs';
@@ -51,9 +51,9 @@ const handlers = {
   'projectObjectDownloads:signDownloads': downloads.signDownloads,
 };
 
-async function fixture(t, { policy = true, packs = false } = {}) {
+async function fixture(t, { policy = true, packs = false, savedPath = 'a.txt' } = {}) {
   const r2 = fakeSourceR2(t);
-  const f = await lifecycleFixture();
+  const f = await lifecycleFixture(savedPath);
   const jobs = new Map();
   let runningJob = null;
   const schedule = (at, ref, args) => {
@@ -104,7 +104,8 @@ async function fixture(t, { policy = true, packs = false } = {}) {
   t.after(() => rmSync(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(base, 'lane');
   mkdirSync(join(root, '.forge'), { recursive: true });
-  writeFileSync(join(root, 'a.txt'), 'original');
+  mkdirSync(dirname(join(root, savedPath)), { recursive: true });
+  writeFileSync(join(root, savedPath), 'original');
   writeFileSync(
     join(root, '.forge/hosted-lane.json'),
     JSON.stringify({
@@ -123,8 +124,8 @@ async function fixture(t, { policy = true, packs = false } = {}) {
         authority: { mode: 'server', epoch: 1 },
       },
       state: f.state,
-      scope: ['a.txt'],
-      materialized: ['a.txt'],
+      scope: [savedPath],
+      materialized: [savedPath],
     }),
   );
   const rows = () => [...f.tables.projectLaneSnapshots.values()];
@@ -380,6 +381,28 @@ test('restore saved puts a file back where a folder now stands, unless the folde
   assert.equal(one.written, 1);
   assert.equal(one.removed, 1);
   assert.equal(text(x.root, 'a.txt'), 'original');
+});
+
+test('restore saved reports a file blocking a parent folder before changing any path and supports undo', async t => {
+  const x = await fixture(t, { savedPath: 'nested/a.txt' });
+  rmSync(join(x.root, 'nested'), { recursive: true });
+  writeFileSync(join(x.root, 'nested'), 'local file in place of folder');
+  writeFileSync(join(x.root, 'other.txt'), 'unrelated edit');
+
+  await assert.rejects(x.run({ restore: 'saved', paths: ['other.txt', 'nested/a.txt'] }), error => {
+    assert.equal(error.code, 'BAD_ARGUMENT');
+    assert.match(error.message, /nested.+blocks.+nested\/a\.txt/);
+    return true;
+  });
+  assert.equal(x.calls.length, 0);
+  assert.equal(text(x.root, 'nested'), 'local file in place of folder');
+  assert.equal(text(x.root, 'other.txt'), 'unrelated edit');
+
+  await x.run({ restore: 'saved', paths: ['nested'] });
+  assert.equal(text(x.root, 'nested/a.txt'), 'original');
+  await x.run({ undo: 1 });
+  assert.equal(text(x.root, 'nested'), 'local file in place of folder');
+  assert.equal(text(x.root, 'other.txt'), 'unrelated edit');
 });
 
 test('kill the machine: a new checkout restores the unsaved files byte for byte', async t => {
