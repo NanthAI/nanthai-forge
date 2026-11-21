@@ -1,25 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-import { useSourceReview } from '../use-source-review';
+import { useSourceComparison } from '../use-source-review';
 import { usePageCritical } from '../ui/page-critical';
 import { useReadRetry } from '../ui/read-retry';
 import { useQuery } from 'convex/react';
 import { workIndex, type WorkIndexWorkspace } from '../hosted-work-index';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Id } from '../../../convex/_generated/dataModel';
-import type { ReviewPath } from '../../../src/native-source-review';
+import type { BrowserComparison } from '../browser-source';
 import { hostedError } from '../snapshot';
 import { ChangesPanel, type ChangedPath } from './ChangesPanel';
-import type { Comparison } from './Diff';
 import type { MapPeer } from './ChangeMapToggle';
 import { numberedLines } from './diff-rows';
 import { api } from '../../../convex/_generated/api';
 import type { ExactConflicts } from '../../../src/hosted-conflict-notice';
-type Index =
-  | { available: true; paths: (ReviewPath & { add?: number; del?: number })[] }
-  | { available: false; reason: string };
-type File =
-  | { available: true; file: ReviewPath; comparison: Comparison }
-  | { available: false; reason: string };
 const lineText = (ranges: number[][]) =>
   ranges.length
     ? ` at lines ${ranges.map(([from, to]) => (from === to ? `${from}` : `${from}-${to}`)).join(', ')}`
@@ -47,9 +40,14 @@ export function HostedLaneChanges({
   laneId?: string;
 }) {
   const readAttempt = useReadRetry();
-  const read = useSourceReview();
-  const [index, setIndex] = useState<Index | null>(null),
+  const read = useSourceComparison();
+  const scope = useMemo(
+    () => ({ read, source: { projectId, backupId, base, head }, readAttempt }),
+    [read, projectId, backupId, base, head, readAttempt],
+  );
+  const [loaded, setLoaded] = useState<{ scope: typeof scope; index: BrowserComparison } | null>(null),
     [error, setError] = useState('');
+  const index = loaded?.scope === scope ? loaded.index : null;
   const indexedPins =
     workspace?.backupId === backupId &&
     workspace.sourceKind === 'native' &&
@@ -87,7 +85,7 @@ export function HostedLaneChanges({
   const [stats, setStats] = useState<Record<string, { add: number; del: number }>>({});
   useEffect(() => {
     let current = true;
-    setIndex(null);
+    setLoaded(null);
     setStats({});
     setDiffReady(false);
     setError('');
@@ -96,9 +94,9 @@ export function HostedLaneChanges({
       setError('This source object is not retained in the selected checkpoint.');
       return;
     }
-    void read({ projectId, backupId, base, head }).then(
+    void scope.read(scope.source).then(
       value => {
-        if (current) setIndex(JSON.parse(value) as Index);
+        if (current) setLoaded({ scope, index: value });
       },
       e => {
         if (current) setError(hostedError(e));
@@ -107,11 +105,11 @@ export function HostedLaneChanges({
     return () => {
       current = false;
     };
-  }, [read, projectId, backupId, base, head, readAttempt, pinsLoading, sourceMissing]);
+  }, [scope, pinsLoading, sourceMissing]);
   const load = useCallback(
     async (file: string, signal: AbortSignal) => {
-      const result = JSON.parse(await read({ projectId, backupId, base, head, file })) as File;
-      if (!result.available) throw new Error(result.reason);
+      if (!index?.available) throw new Error('Choose a file from this source comparison.');
+      const result = await index.readFile(file);
       if (!signal.aborted && !result.comparison.truncated) {
         const whole = result.file.status === 'added' || result.file.status === 'deleted';
         const lines = result.comparison.hunks.flatMap((hunk, i) =>
@@ -131,7 +129,7 @@ export function HostedLaneChanges({
         afterBlob: result.file.after?.blob ?? null,
       };
     },
-    [read, projectId, backupId, base, head],
+    [index],
   );
   const paths: ChangedPath[] | null = index?.available
     ? index.paths

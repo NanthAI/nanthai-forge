@@ -12,3 +12,13 @@ export function useSourceReview() {
     [client, isAuthenticated],
   );
 }
+
+export function useSourceComparison() {
+  const client = useConvex();
+  const { isAuthenticated } = useConvexAuth();
+  return useCallback(
+    async (input: Pick<SourceInput, 'projectId' | 'backupId' | 'base' | 'head'>) =>
+      (await import('./browser-source')).openBrowserComparison(client, input, !isAuthenticated),
+    [client, isAuthenticated],
+  );
+}

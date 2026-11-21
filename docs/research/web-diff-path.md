@@ -229,6 +229,23 @@ the reader walked their byte trees one node at a time. With the reader now
 batching each tree level, the same sample made 34 calls in 39 s before the same
 failure. Both are single observations.
 
+Classic Lane Changes now keeps the file list decoded from the two verified
+States for the mounted comparison. A selected file uses four calls: checkpoint
+and blob pins, signed describe, unsigned describe after the GETs, and a final
+checkpoint check. The fixture in `tests/browser-r2-bytes.test.mjs` runs the old
+two-read sequence and the shared comparison at both scales.
+
+| Fixture paths | Source calls, separate reads → shared comparison | State bytes for the initial index | Selected file bytes |
+| --- | ---: | ---: | ---: |
+| 3,000 | 16 → 11 | 678,216 | 48 |
+| 29,000 | 28 → 23 | 6,554,216 | 48 |
+
+The selected file uses two GETs and the mounted reader makes no idle calls.
+The initial index still transfers whole States, and the larger fixture needs
+the existing recipe reads. Live billing, peak browser memory and signed-in
+timing were not measured. An overlap row can contain pending-save or rebase
+evidence, so exact file pins in this reader come from the verified checkpoint.
+
 ## Rendering and highlighter comparison
 
 Values below are medians of three cells, in ms. Each pair is plain / highlighted

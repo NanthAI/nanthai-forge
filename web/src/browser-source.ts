@@ -3,7 +3,7 @@ import { readSubmodulePointers } from '../../src/gitlink';
 import { verifiedBytes } from './verified-blob';
 import { ObjectDownloadReader } from '../../src/blob-download';
 import { parseNativeState } from '../../src/state/format';
-import { reviewPaths, reviewTextPage } from '../../src/source-review-format';
+import { reviewPaths, reviewTextPage, type ReviewPath } from '../../src/source-review-format';
 import { computeHunks } from '../../src/review-hunks-core';
 import { readChangeMap } from '../../src/change-map';
 import { sourceFilePageText } from '../../src/source-file-page-core';
@@ -17,6 +17,7 @@ import type { ConvexReactClient } from 'convex/react';
 import { z } from 'zod';
 
 type Client = Pick<ConvexReactClient, 'mutation'>;
+type BrowserClient = Client & Partial<Pick<ConvexReactClient, 'action'>>;
 export type SourceInput = {
   projectId: Id<'hostedProjects'>;
   backupId: Id<'projectBackups'>;
@@ -39,6 +40,13 @@ export type SourcePlan = {
   root: DownloadPin;
   pins: DownloadPin[] | null;
 };
+type SourcePair = Pick<SourceInput, 'projectId' | 'backupId' | 'base' | 'head'>;
+type SourceFiles = { available: true; paths: (ReviewPath & { add?: number; del?: number })[] };
+type SourceUnavailable = { available: false; reason: string };
+type FileComparison = { file: ReviewPath; comparison: ReturnType<typeof computeHunks> };
+export type BrowserComparison =
+  | SourceUnavailable
+  | (SourceFiles & { readFile: (path: string) => Promise<FileComparison> });
 const readers = new WeakMap<Client, Map<string, ObjectDownloadReader>>();
 export function browserObjects(client: Client, projectId: Id<'hostedProjects'>) {
   let projects = readers.get(client);
@@ -93,41 +101,44 @@ export async function browserManifest(client: Client, projectId: Id<'hostedProje
   const manifest = sourceManifestSchema.parse(JSON.parse(new TextDecoder().decode(manifestBytes)));
   return { manifest, manifestBytes, exchange: exchange.success ? exchange.data : null };
 }
-export async function readBrowserSource(
-  client: Client & Partial<Pick<ConvexReactClient, 'action'>>,
-  input: SourceInput,
-  viewOnly = false,
-): Promise<string> {
-  if (viewOnly) {
-    invariant(client.action, 'SOURCE_UNAVAILABLE', 'The public file viewer is unavailable.');
-    return client.action(api.projectSourceReview.read, { ...input, render: true });
-  }
+async function pinComparison(client: Client, input: SourcePair) {
   const selection = { projectId: input.projectId, backupId: input.backupId },
     plan = await sourcePlan(client, selection, [input.base, input.head]);
   if (plan.transport !== 'objects' || plan.format !== 'native')
-    return JSON.stringify({
-      available: false,
+    return {
+      available: false as const,
       reason:
         'This checkpoint uses a source archive. Its existing download contains source and Work for local review.',
-    });
+    };
   const reader = browserObjects(client, input.projectId),
     pins = new Map(plan.pins?.map(pin => [pin.sha256, pin]));
-  let manifest: Awaited<ReturnType<typeof browserManifest>> | undefined;
-  const bytes = async (ids: string[]) => {
+  const check = async (digests: string[] = []) => {
+    const current = await sourcePlan(client, selection, digests);
+    invariant(
+      current.backupDigest === plan.backupDigest && current.manifestDigest === plan.manifestDigest,
+      'SOURCE_CHANGED',
+      'The selected checkpoint changed while reading.',
+    );
+    return current;
+  };
+  let manifestIndex: Promise<void> | undefined;
+  const bytes = async (ids: string[], checked?: SourcePlan) => {
     for (let at = 0; at < ids.length; at += 100) {
       const missing = ids.slice(at, at + 100).filter(id => !pins.has(id));
       if (!missing.length) continue;
-      const current = await sourcePlan(client, selection, missing);
-      invariant(
-        current.backupDigest === plan.backupDigest && current.manifestDigest === plan.manifestDigest,
-        'SOURCE_CHANGED',
-        'The selected checkpoint changed while reading.',
-      );
+      const current = (at === 0 ? checked : undefined) ?? (await check(missing));
       if (current.pins) for (const pin of current.pins) pins.set(pin.sha256, pin);
       else {
-        manifest ??= await browserManifest(client, input.projectId, plan);
-        for (const file of manifest.manifest.files)
-          if (file.path === `objects/${file.sha256}`) pins.set(file.sha256, file);
+        manifestIndex ??= browserManifest(client, input.projectId, plan)
+          .then(({ manifest }) => {
+            for (const file of manifest.files)
+              if (file.path === `objects/${file.sha256}`) pins.set(file.sha256, file);
+          })
+          .catch(error => {
+            manifestIndex = undefined;
+            throw error;
+          });
+        await manifestIndex;
       }
     }
     return reader.read(
@@ -145,6 +156,72 @@ export async function readBrowserSource(
   const [aState, bState] = await bytes([input.base, input.head]),
     state = parseNativeState(bState!),
     paths = reviewPaths(parseNativeState(aState!).files, state.files);
+  return { available: true as const, plan, paths, state, bytes, check };
+}
+
+function filePins(file: ReviewPath) {
+  return [file.before?.blob, file.after?.blob].filter((id): id is string => !!id);
+}
+function fileSides(file: ReviewPath, contents: Uint8Array[]) {
+  return {
+    before: file.before ? contents.shift()! : new Uint8Array(),
+    after: file.after ? contents.shift()! : new Uint8Array(),
+  };
+}
+
+/** Keep the file list of this verified checkpoint while the Changes panel is open. Each selection
+ * still checks the checkpoint before and after IO and verifies the exact selected object bytes. */
+export async function openBrowserComparison(
+  client: BrowserClient,
+  input: SourcePair,
+  viewOnly = false,
+): Promise<BrowserComparison> {
+  if (viewOnly) {
+    const index = JSON.parse(await readBrowserSource(client, input, true)) as SourceFiles | SourceUnavailable;
+    if (!index.available) return index;
+    return {
+      ...index,
+      async readFile(path) {
+        const file = JSON.parse(await readBrowserSource(client, { ...input, file: path }, true)) as
+          | (FileComparison & { available: true })
+          | SourceUnavailable;
+        if (!file.available) throw new Error(file.reason);
+        return file;
+      },
+    };
+  }
+  const pinned = await pinComparison(client, input);
+  if (!pinned.available) return pinned;
+  const { paths, bytes, check } = pinned;
+  await check();
+  return {
+    available: true,
+    paths,
+    async readFile(path) {
+      const file = paths.find(file => file.path === path);
+      invariant(file, 'NOT_FOUND', 'Choose a file from this source comparison.');
+      const ids = filePins(file);
+      const current = await check(ids);
+      const { before, after } = fileSides(file, await bytes(ids, current));
+      const comparison = computeHunks(before, after, 3);
+      await check();
+      return { file, comparison };
+    },
+  };
+}
+
+export async function readBrowserSource(
+  client: BrowserClient,
+  input: SourceInput,
+  viewOnly = false,
+): Promise<string> {
+  if (viewOnly) {
+    invariant(client.action, 'SOURCE_UNAVAILABLE', 'The public file viewer is unavailable.');
+    return client.action(api.projectSourceReview.read, { ...input, render: true });
+  }
+  const pinned = await pinComparison(client, input);
+  if (!pinned.available) return JSON.stringify(pinned);
+  const { paths, plan, state, bytes, check } = pinned;
   let result: object = { base: input.base, head: input.head, paths };
   if (input.submodules)
     result = {
@@ -161,9 +238,7 @@ export async function readBrowserSource(
   else if (input.file !== undefined) {
     const file = paths.find(file => file.path === input.file);
     invariant(file, 'NOT_FOUND', 'Choose a file from this source comparison.');
-    const contents = await bytes([file.before?.blob, file.after?.blob].filter((id): id is string => !!id)),
-      a = file.before ? contents.shift()! : new Uint8Array(),
-      b = file.after ? contents.shift()! : new Uint8Array();
+    const { before: a, after: b } = fileSides(file, await bytes(filePins(file)));
     result = {
       base: input.base,
       head: input.head,
@@ -183,12 +258,7 @@ export async function readBrowserSource(
       },
     };
   }
-  const final = await sourcePlan(client, selection);
-  invariant(
-    final.backupDigest === plan.backupDigest && final.manifestDigest === plan.manifestDigest,
-    'SOURCE_CHANGED',
-    'The selected checkpoint changed while reading.',
-  );
+  await check();
   return JSON.stringify({
     available: true,
     backupId: plan.backupId,

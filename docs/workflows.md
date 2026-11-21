@@ -864,6 +864,8 @@ Lane pages show the edited → saved → checked → accepted journey, the next 
 
 The Timeline/Conversation column and file list collapse to 36px rails on desktops; the controls remember `forge.lane.side` and `forge.lane.files` in browser storage. Below 1060px both panels remain expanded. **Unified**, **Split**, and **Inline** word diffs share the selected file's comparison and remember `forge.diff.mode`. Changing modes does not fetch source again. File selection loads that file on demand; counts unavailable from a manifest remain absent until known.
 
+Changes keeps the file list it verified for the selected checkpoint. Opening a file reuses that list and checks checkpoint access again before and after downloading the file versions.
+
 Syntax highlighting loads the JavaScript/TypeScript, Python, Java or Rust grammar only when visible code requests it. Parsing and the blob/range token cache run in a module worker. Source appears immediately as plain text; unknown languages, worker failures, truncated comparisons and files above the highlighting threshold keep readable plain text. Syntax classes are scoped to `.diff` and `.source`.
 
 ## Planning, Activity and Code

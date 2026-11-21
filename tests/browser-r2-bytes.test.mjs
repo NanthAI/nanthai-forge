@@ -12,7 +12,9 @@ import { digest } from '../dist/hash.js';
 import { buildObjectRecipe } from '../dist/object-chunks.js';
 import { workArchiveMetadata } from '../dist/work-archive-metadata.js';
 import { createHash } from 'node:crypto';
-const { readBrowserSource, browserObjects } = await import(moduleUrl('../web/src/browser-source.ts'));
+const { readBrowserSource, openBrowserComparison, browserObjects } = await import(
+  moduleUrl('../web/src/browser-source.ts')
+);
 const { downloadObjectArchive } = await import(moduleUrl('../web/src/object-archive.ts'));
 const { read: publicReview } = await import(moduleUrl('../convex/projectSourceReview.ts'));
 const pin = bytes => ({ sha256: digest(bytes), size: bytes.length });
@@ -135,6 +137,90 @@ test('Code, exact State, diff and map read R2, Convex and mixed file rows direct
       'no server byte actions used',
     );
   }
+});
+
+for (const files of [3000, 29000])
+  test(`classic Changes reuses the verified ${files}-path index when opening a file`, async t => {
+    const f = await sourceFixture(t, [true, true], undefined, files);
+    const comparison = await openBrowserComparison(f.browser, f.input);
+    assert(comparison.available);
+    assert.equal(comparison.paths.length, files);
+    const indexCalls = f.browser.calls.length;
+    assert(indexCalls <= (files === 3000 ? 7 : 19));
+    const start = f.fake.requests.length;
+    const selected = await comparison.readFile('a.ts');
+    assert.equal(selected.comparison.hunks[0].lines[1].text, 'export const value = 2;');
+    const pins = [f.before.sha256, f.after.sha256];
+    assert.deepEqual(
+      f.browser.calls.slice(indexCalls).map(call => [call.method, call.args.digests, call.args.signed]),
+      [
+        ['source', pins, undefined],
+        ['describe', pins, true],
+        ['describe', pins, undefined],
+        ['source', [], undefined],
+      ],
+    );
+    const gets = f.fake.requests.slice(start).filter(request => request.method === 'GET');
+    assert.deepEqual(
+      gets.map(request => new URL(request.path, 'https://fixture.invalid').pathname.split('/').at(-1)).sort(),
+      pins.sort(),
+    );
+    const complete = f.browser.calls.length;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.browser.calls.length, complete);
+    const separate = JSON.parse(await readBrowserSource(f.browser, { ...f.input, file: 'a.ts' }));
+    assert.deepEqual(separate.comparison.hunks, selected.comparison.hunks);
+    const previous = indexCalls + f.browser.calls.length - complete;
+    assert(complete < previous);
+    t.diagnostic(
+      `${files} paths: ${f.base.size + f.head.size} State bytes for the index; 2 selected GETs, ${f.before.size + f.after.size} file bytes; ${previous} to ${complete} calls`,
+    );
+  });
+
+test('an open comparison rechecks its selected checkpoint before and after file IO', async t => {
+  const f = await sourceFixture(t, [true, true]);
+  const comparison = await openBrowserComparison(f.browser, f.input);
+  assert(comparison.available);
+  const backup = f.s.tables.projectBackups.get('backup');
+  const digest = backup.digest;
+  const requestsAt = f.fake.requests.length;
+  backup.digest = 'f'.repeat(64);
+  await assert.rejects(comparison.readFile('a.ts'), code('SOURCE_CHANGED'));
+  assert.equal(f.fake.requests.length, requestsAt);
+  backup.digest = digest;
+  const fetch = globalThis.fetch;
+  const mocked = t.mock.method(globalThis, 'fetch', async (...args) => {
+    const result = await fetch(...args);
+    backup.digest = 'f'.repeat(64);
+    return result;
+  });
+  try {
+    await assert.rejects(comparison.readFile('a.ts'), code('SOURCE_CHANGED'));
+  } finally {
+    mocked.mock.restore();
+  }
+});
+
+test('a project object outside the selected checkpoint cannot supply an open comparison', async t => {
+  const f = await sourceFixture(t, [true, true]);
+  const root = await upload(
+    f.s,
+    JSON.stringify({
+      ...f.manifest,
+      files: f.manifest.files.filter(file => file.sha256 !== f.after.sha256),
+    }),
+  );
+  const backup = f.s.tables.projectBackups.get('backup');
+  Object.assign(backup, {
+    digest: root.sha256,
+    size: root.size,
+    preview: { ...backup.preview, manifestDigest: root.sha256 },
+  });
+  const comparison = await openBrowserComparison(f.browser, f.input);
+  assert(comparison.available);
+  const requestsAt = f.fake.requests.length;
+  await assert.rejects(comparison.readFile('a.ts'), code('SOURCE_UNAVAILABLE'));
+  assert.equal(f.fake.requests.length, requestsAt);
 });
 
 test('a checksum mismatch rejects the browser render, and bad bytes never enter the cache', async t => {
