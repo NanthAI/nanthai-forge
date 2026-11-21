@@ -206,6 +206,7 @@ export const policyWriteObject = z
     action: z.literal('set-policy'),
     governanceVersion: z.literal(1).optional(),
     operationId: z.string().uuid(),
+    dryRun: z.boolean().optional(),
     /** Compare-and-swap prevents a concurrent settings edit from being overwritten. */
     expectedPolicy: autonomyPolicySchema.optional(),
     preset: autonomyPolicySchema.shape.preset.optional(),
@@ -364,12 +365,15 @@ export function globPattern(glob: string): RegExp {
     invariant(false, 'BAD_ARGUMENT', 'Protected-path glob is invalid.');
   }
 }
-export function protectedMatches(policy: Pick<AutonomyPolicy, 'acceptance'>, paths: string[]) {
-  const patterns = policy.acceptance.protectedPaths.map(glob => {
+export function protectedPathMatcher(globs: readonly string[]) {
+  const patterns = globs.map(glob => {
     const pattern = globPattern(glob);
     return glob.toLowerCase() === '.env.example' ? new RegExp(pattern.source, 'i') : pattern;
   });
-  return paths.filter(path => patterns.some(pattern => pattern.test(path)));
+  return (path: string) => patterns.some(pattern => pattern.test(path));
+}
+export function protectedMatches(policy: Pick<AutonomyPolicy, 'acceptance'>, paths: string[]) {
+  return paths.filter(protectedPathMatcher(policy.acceptance.protectedPaths));
 }
 export function reviewReason(
   policy: Pick<AutonomyPolicy, 'acceptance'>,

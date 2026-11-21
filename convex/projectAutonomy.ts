@@ -25,7 +25,7 @@ import {
 } from '../src/autonomy-policy';
 import { invariant } from '../src/errors';
 import { acceptancePolicyDigest, ownerGated } from '../src/policy-digest';
-import { landingQueue } from './projectHostedLandingEvents';
+import { policyImpactReceipt } from './projectHostedLandingPolicyImpact';
 import { report } from './errors';
 import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
 import { callerActorKind } from './metricActorKind';
@@ -121,11 +121,7 @@ async function writePolicy(
   },
 ) {
   const { command, previous, policy } = input;
-  // One queue-row read, only on an edit that changes what landings are pinned to.
-  const invalidatedLandings =
-    acceptancePolicyDigest(previous) === acceptancePolicyDigest(policy)
-      ? 0
-      : ((await landingQueue(ctx, { projectId: project._id, channel: 'main' }))?.status?.total ?? 0);
+  const impact = await policyImpactReceipt(ctx, project._id, previous, policy);
   const mirror = policy.githubMirror;
   const sameMirror = mirror?.repo.toLowerCase() === previous.githubMirror?.repo.toLowerCase();
   // Keep the disabled policy readable by existing CLIs (inbound:false); the project retains the resume choice.
@@ -165,7 +161,7 @@ async function writePolicy(
     request: input.request,
     previous,
     policy,
-    invalidatedLandings,
+    ...impact,
     rule: input.rule,
     at: new Date().toISOString(),
   });
@@ -179,7 +175,7 @@ async function writePolicy(
   return {
     operationId: command.operationId,
     policy: receiptPolicy(policy),
-    invalidatedLandings,
+    ...impact,
     rule: input.rule,
   };
 }
@@ -243,8 +239,11 @@ export const set = mutation({
   returns: v.object({
     operationId: v.string(),
     policy: autonomyPolicy,
-    /** Queued or checking landings this edit invalidated (their pinned policy no longer matches); 0 when it changed nothing a landing depends on. Absent on a replay. */
+    dryRun: v.optional(v.literal(true)),
+    /** Newly stale in-flight landings, or the predicted impact for a dry run. */
     invalidatedLandings: v.optional(v.number()),
+    invalidatedSubmissionIds: v.optional(v.array(v.string())),
+    impactComplete: v.optional(v.literal(false)),
     /** Issue 470ef29b: who could write it (SettingRule); `held` means nothing changed yet. Absent on replays of edits from before it existed. */
     rule: v.optional(settingRuleValidator),
     /** A held edit: the owner's approval request, its link and how to wait for it. */
@@ -272,12 +271,14 @@ export const set = mutation({
         'PROJECT_UNAVAILABLE',
         'Only the owner person can pause or un-pause the GitHub mirror. Open Forge → Settings → GitHub mirror.',
       );
-      const original = await ctx.db
-        .query('projectPolicyChanges')
-        .withIndex('by_project_and_operation', q =>
-          q.eq('projectId', input.projectId).eq('operationId', command.operationId),
-        )
-        .unique();
+      const original = command.dryRun
+        ? null
+        : await ctx.db
+            .query('projectPolicyChanges')
+            .withIndex('by_project_and_operation', q =>
+              q.eq('projectId', input.projectId).eq('operationId', command.operationId),
+            )
+            .unique();
       if (original) {
         invariant(
           original.actor === user.subject && original.request === request,
@@ -290,14 +291,19 @@ export const set = mutation({
           ...(original.invalidatedLandings === undefined
             ? {}
             : { invalidatedLandings: original.invalidatedLandings }),
+          ...(original.invalidatedSubmissionIds === undefined
+            ? {}
+            : { invalidatedSubmissionIds: original.invalidatedSubmissionIds }),
+          ...(original.impactComplete === false ? { impactComplete: false as const } : {}),
           ...(original.rule ? { rule: original.rule } : {}),
         };
       }
       const previous = effectivePolicy(project);
       const device = isDeviceIdentity(user);
-      const pending = device
-        ? await heldReplay(ctx, input.projectId, POLICY_KEY, command.operationId, request)
-        : null;
+      const pending =
+        device && !command.dryRun
+          ? await heldReplay(ctx, input.projectId, POLICY_KEY, command.operationId, request)
+          : null;
       if (pending) return heldPolicyReply(pending, previous, command.operationId);
       if (command.expectedPolicy?.acceptance.withoutCheck)
         command.expectedPolicy.acceptance.withoutCheck = await resolveUncheckedSelection(
@@ -327,6 +333,14 @@ export const set = mutation({
         : ownerGated(previous, policy)
           ? await agentSettingRule(ctx, input.projectId, user)
           : 'no-gate-change';
+      if (command.dryRun)
+        return {
+          operationId: command.operationId,
+          dryRun: true as const,
+          policy: receiptPolicy(policy),
+          ...(await policyImpactReceipt(ctx, project._id, previous, policy)),
+          rule,
+        };
       if (rule === 'held') {
         const row = await holdSetting(ctx, {
           projectId: input.projectId,
@@ -356,7 +370,7 @@ export const set = mutation({
 /** The fields a set-policy command edits, for the owner's one-line summary. */
 const changedFields = (command: PolicyCommand) =>
   Object.keys(command).filter(
-    key => !['action', 'operationId', 'expectedPolicy', 'governanceVersion'].includes(key),
+    key => !['action', 'operationId', 'expectedPolicy', 'governanceVersion', 'dryRun'].includes(key),
   );
 /** Issue 470ef29b: the owner person granted an agent's held edit. It applies only to the policy the
  * request was made against, as the agent's operation (its retry then returns this receipt). */

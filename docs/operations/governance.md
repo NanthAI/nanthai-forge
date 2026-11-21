@@ -206,7 +206,13 @@ including the owner's. Other projects retain their existing policy behavior.
 ```
 
 Generate a fresh operation UUID for a new edit; retries retain the original command.
-Use `expectedPolicy` for compare-and-swap edits. The new fields are optional in stored
+Use `expectedPolicy` for compare-and-swap edits. Send `dryRun: true` to preview the
+resulting policy, count and submission IDs (`invalidatedLandings` and
+`invalidatedSubmissionIds`) with no writes or approval request. The preview is
+current when it runs. Applying the edit returns the impact at commit time, and
+replaying that write returns the original receipt. When the transaction cannot
+verify the impact, the receipt says `impactComplete: false` and omits the count
+and IDs. An edit can still apply. The new fields are optional in stored
 policies and records. New runners send `governanceVersion:1` on landing/desired-finish
 requests, including recovered pre-upgrade requests. Old strict servers reject that
 field rather than silently accepting without governance. List edits require the
@@ -215,8 +221,13 @@ a new server remain subject to final server enforcement.
 
 Deploy the server schema/mutations and fixed source-worker build together first,
 then runners/CLI and web. An older worker's missing coverage remains pending until
-explicit owner acceptance or recomposition with the new worker. Existing pinned
-attempts that race a policy edit retain their normal `POLICY_CHANGED` outcome.
+explicit owner acceptance or recomposition with the new worker. Edits to the
+gate, acceptance mode, owner approval paths or enforced trust still invalidate
+all affected in-flight pins. An edit limited to `acceptance.protectedPaths`
+invalidates a pin when its Candidate changes a path matching an added or removed
+pattern, or when its changed-path coverage is unavailable. A shared check whose
+cohort contains an invalidated member follows the batch fallback workflow. A
+landing already held for owner review follows the original review workflow.
 No backfill, timer, idle call or new provider operation is required.
 
 ## Outside contributions and the GitHub mirror

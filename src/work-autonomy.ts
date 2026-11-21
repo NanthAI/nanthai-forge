@@ -36,7 +36,9 @@ export function setPolicy(store: StoreAccess, input: unknown, actor: AcceptanceA
   return store.locked(() => {
     const data = store.load(),
       request = digest(JSON.stringify(command)),
-      original = data.policyChanges?.find(item => item.id === command.operationId);
+      original = command.dryRun
+        ? undefined
+        : data.policyChanges?.find(item => item.id === command.operationId);
     if (original) {
       invariant(
         original.request === request && original.actor === actor.id,
@@ -52,15 +54,20 @@ export function setPolicy(store: StoreAccess, input: unknown, actor: AcceptanceA
       'POLICY_CHANGED',
       'Project policy changed. Refresh it before editing.',
     );
-    const policy = editedPolicy(previous, command),
-      change = {
-        id: command.operationId,
-        request,
-        actor: actor.id,
-        previous,
-        policy,
-        at: new Date().toISOString(),
+    const policy = editedPolicy(previous, command);
+    if (command.dryRun)
+      return {
+        revision: data.revision,
+        result: { dryRun: true, policy, invalidatedLandings: 0, invalidatedSubmissionIds: [] },
       };
+    const change = {
+      id: command.operationId,
+      request,
+      actor: actor.id,
+      previous,
+      policy,
+      at: new Date().toISOString(),
+    };
     data.autonomyPolicy = policy;
     (data.policyChanges ??= []).push(change);
 

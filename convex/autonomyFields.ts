@@ -150,6 +150,8 @@ export const autonomyTables = {
     policy: autonomyPolicy,
     /** Queued landings this edit invalidated, kept so a replay returns the same reply. */
     invalidatedLandings: v.optional(v.number()),
+    invalidatedSubmissionIds: v.optional(v.array(v.string())),
+    impactComplete: v.optional(v.literal(false)),
     /** Issue 470ef29b: who could write it (SettingRule in convex/projectSettingApprovals.ts). */
     rule: v.optional(
       v.union(

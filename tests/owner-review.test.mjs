@@ -278,6 +278,45 @@ test('main moves after the hold: approval does not publish the stale Candidate; 
   assert(receipt.check, 'the fresh attempt carries its own check');
 });
 
+test('a queued owner approval still requires the exact held policy when it reaches publication', async t => {
+  const { f, state, select } = await heldLanding(t);
+  const held = await select();
+  const [queue] = f.tables.projectHostedLandingQueues.values();
+  f.patch('projectHostedLandingQueues', queue._id, {
+    lease: {
+      owner: 'busy',
+      token: queue.fence,
+      until: Number.MAX_SAFE_INTEGER,
+      submissionId: held.submissionId,
+      attemptId: held.attemptId,
+    },
+  });
+  const approval = JSON.parse(await f.tx('deferredOwnerApprove', acceptance.approve, held));
+  assert.equal(approval.reason, 'approved; lands in its turn');
+  const deferred = (await f.current(state.id)).submission;
+  assert.equal(deferred.observation.pendingReason, 'queued');
+  assert.equal(deferred.attemptId, held.attemptId);
+  const edit = await f.tx('editDeferredApprovalPolicy', setPolicy, {
+    projectId: f.projectId,
+    command: JSON.stringify({
+      action: 'set-policy',
+      operationId: randomUUID(),
+      acceptance: { protectedPaths: ['unrelated/**'] },
+    }),
+  });
+  assert.deepEqual(edit.invalidatedSubmissionIds, [state.id]);
+  await assert.rejects(
+    f.tx('deferredOwnerPublish', acceptance.publish, {
+      ...held,
+      channel: 'main',
+      owner: 'busy',
+      token: queue.fence,
+    }),
+    code('POLICY_CHANGED'),
+  );
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+});
+
 test('the owner declines: the submission ends REVIEW_DECLINED with the reason; a replay returns it', async t => {
   const { f, state, select } = await heldLanding(t);
   const operationId = randomUUID();

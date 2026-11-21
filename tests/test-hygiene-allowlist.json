@@ -153,7 +153,6 @@
   "tests/hosted-agent-mcp.test.mjs": {"sleep":1},
   "tests/hosted-agent-observe.test.mjs": {"date":2},
   "tests/hosted-agent-planning.test.mjs": {"sleep":1,"date":11},
-  "tests/hosted-agent-policy.test.mjs": {"date":1},
   "tests/hosted-agent-start-placement.test.mjs": {"date":1},
   "tests/hosted-agent-transport.test.mjs": {"date":1},
   "tests/hosted-backup.test.mjs": {"date":1},

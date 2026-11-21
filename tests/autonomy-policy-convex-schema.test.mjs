@@ -65,7 +65,7 @@ test('guard: every nested policy field the CLI accepts (stored or set-policy) ha
   const stored = convexPaths(autonomyPolicy, 'policy', new Set());
   const accepted = zodPaths(autonomyPolicySchema, 'policy', new Set());
   // set-policy edits are partial forms of the stored shapes; their fields must be storable too.
-  const envelope = new Set(['action', 'governanceVersion', 'operationId', 'expectedPolicy']);
+  const envelope = new Set(['action', 'governanceVersion', 'operationId', 'expectedPolicy', 'dryRun']);
   for (const [key, field] of Object.entries(policyWriteObject.shape)) {
     if (envelope.has(key)) continue;
     accepted.add(`policy.${key}`);

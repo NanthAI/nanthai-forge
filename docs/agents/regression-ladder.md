@@ -92,6 +92,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `10d253c6` | Core claim: a 130-path Lane on hot files starved in a composition-conflict loop (10 land operations, about 2.5 h; 2026-11-10) |
 | `c01d5457` | Cohort retry/split and singleton-to-solo handoffs replace the retired finish timer; late retired compose callbacks cannot displace successor work. Running owners retain their descendants; the replay models Convex action cancellation and a fresh solo plan. Synthetic failure/split progression is replayed without watchdog execution; the historical long-running source action still needs live qualification |
 | `5d690345` | Core claim: a docs-only main advance changed the full audit's source pin, causing a false audit-baseline refusal and discarding a passed check |
+| `830ccd4b` | A protected-path edit invalidated an unrelated passing check, recurring on submission `81359837`. Adding or removing the pattern now affects only matching Candidates or those without path coverage. The preview and saved receipt name the affected submissions. |
 
 | `27865bc4` | Red main: a new failing test has no predecessor report; later failed audits must retain one recovery and complete its automatic reverse |
 | `438e9ace` | Red main: two landings pass alone but fail together; a later failed audit retains one checked pair recovery, with widening bounded at four |

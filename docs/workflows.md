@@ -242,7 +242,10 @@ main receipt fully checked, the owner enables it with
 `nforge x ROOT set-policy '{"operationId":"UUID","acceptance":{"gate":"contract"}}'` (or
 `nforge hosted-work DEPLOYMENT PROJECT_ID '{"action":"set-policy","operationId":"UUID","acceptance":{"gate":"contract"}}'`).
 Use the same command with a fresh UUID and `gate: full` to revert the policy.
-Policy changes invalidate older pinned attempts through `POLICY_CHANGED`.
+Gate changes invalidate older pinned attempts through `POLICY_CHANGED`. A
+`protectedPaths` edit affects only Candidates matching an added or removed
+pattern and Candidates without known changed paths. Add `"dryRun":true` to
+`set-policy` to preview the impact before applying the edit.
 
 An agent can request `tests` with `timingBasis: history`, then `confirm-tests`
 with that basis, the exact Candidate/head and proposed contract version before

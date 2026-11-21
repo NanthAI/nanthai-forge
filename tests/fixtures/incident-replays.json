@@ -3,6 +3,12 @@
   "about": "Regression ladder rung 3 (docs/agents/regression-ladder.md): each core-claim incident and B1.5d case study names the normal-suite test that replays it. tests/incident-replays.test.mjs fails if a named test is renamed, removed, skipped or moved out of tests/*.test.mjs.",
   "replays": [
     {
+      "incident": "830ccd4b",
+      "what": "An unrelated protected-path edit discarded a passing landing check; the failure recurred on submission 81359837",
+      "file": "tests/hosted-acceptance.test.mjs",
+      "test": "830ccd4b and 81359837 replay: protected pattern edits retain unrelated checks and name invalidated submissions"
+    },
+    {
       "incident": "n3-r3-a1",
       "what": "B1.5d n3-r3 attempt 1: a land --save ran 1555 s and ended LANDING_STALLED; the agent hunted for its landing state",
       "file": "tests/hosted-conflict-precheck.test.mjs",

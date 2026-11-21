@@ -55,7 +55,7 @@ import {
   liveApprovals,
 } from './projectHostedApprovalStore';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { policyDigestCurrent } from '../src/policy-digest';
+import { landingPolicyCurrent } from '../src/policy-digest';
 import { landingObservation } from '../src/hosted-landing';
 import { landingAcceptedBy } from '../src/landing-accepted-by';
 import { invariant } from '../src/errors';
@@ -209,7 +209,7 @@ export async function publishLandingBatch(
       paths: originalCandidate.governance?.paths,
     });
     retry ||=
-      !policyDigestCurrent(policy, member.attempt.policyDigest) ||
+      !landingPolicyCurrent(policy, member.attempt, originalCandidate.governance?.paths ?? null) ||
       !batchEligible(project, policy, member.attempt.actor, originalCandidate) ||
       approvalHoldReason(await memberApprovals(member.attempt.operations.accept)) !== null;
   }

@@ -37,7 +37,7 @@ import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { effectivePolicy, type AcceptanceActor } from '../src/autonomy-policy';
 import { landingObservation } from '../src/hosted-landing';
-import { policyDigestCurrent } from '../src/policy-digest';
+import { landingPolicyCurrent } from '../src/policy-digest';
 import { scheduleWouldConflict } from './projectHostedLandingWouldConflict';
 import { governanceReason } from '../src/public-governance';
 import { mayLandUnchecked } from './projectUncheckedLanding';
@@ -115,11 +115,6 @@ export async function publishAcceptance(
     'Only explicit owner acceptance can approve protected paths.',
   );
   const policy = effectivePolicy(project);
-  invariant(
-    policyDigestCurrent(policy, attempt.policyDigest),
-    'POLICY_CHANGED',
-    'Current landing policy differs from the pinned attempt.',
-  );
   const candidateRow = await readHostedRecord(ctx, {
     projectId: claim.projectId,
     actor: attempt.actor.id,
@@ -132,6 +127,17 @@ export async function publishAcceptance(
     'The exact canonical Candidate differs.',
   );
   const candidate = hostedRecordSchema.parse(JSON.parse(candidateRow.value));
+  invariant(
+    landingPolicyCurrent(
+      policy,
+      attempt,
+      candidate.kind === 'candidate' ? (candidate.governance?.paths ?? null) : null,
+      state.observation.pendingReason === 'waiting-for-review' ||
+        row.ownerGrant?.policyDigest === attempt.policyDigest,
+    ),
+    'POLICY_CHANGED',
+    'Current landing policy differs from the pinned attempt.',
+  );
   if (candidate.kind === 'candidate')
     for (const early of candidate.earlyResolutions ?? [])
       invariant(

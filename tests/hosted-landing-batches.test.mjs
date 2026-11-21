@@ -288,6 +288,28 @@ test('a changed supervised policy returns every passing member to individual rev
   assert.equal(f.pending().length, 0);
 });
 
+test('an unrelated protected-path edit keeps the exact shared check usable', async t => {
+  const f = await batchesFixture(t);
+  await f.drain();
+  const [run] = f.runs();
+  const project = f.tables.hostedProjects.get(f.projectId);
+  const policy = project.autonomyPolicy;
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: {
+      ...policy,
+      acceptance: { ...policy.acceptance, protectedPaths: ['unrelated/**'] },
+    },
+  });
+  await f.passChecks();
+  await f.drain();
+  assert(states(f).every(state => state.phase === 'landed'));
+  assert.deepEqual(
+    f.runs().map(run => run.id),
+    [run.id],
+  );
+  assert.deepEqual(f.publications, [{ receipts: 4, mainMoves: 1, landed: 4 }]);
+});
+
 test('lost batch upload replies replay the same generation without duplicate source jobs or checks', async t => {
   const f = await batchesFixture(t);
   // Select the batch, then crash after its first metadata upload. The durable

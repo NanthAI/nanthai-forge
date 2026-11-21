@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { digest } from './state/hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import type { AutonomyPolicy } from './autonomy-policy.js';
+import { protectedPathMatcher, type AutonomyPolicy } from './autonomy-policy.js';
 import { effectiveAgentDefaults } from './agent-parallel-defaults.js';
 
 /** The part of the policy that decides what a landing may accept: gate, mode, protected paths, auto
@@ -48,6 +48,45 @@ const legacyDigest = (policy: AutonomyPolicy) => {
 /** True when an attempt pinned to `pinned` is still valid under `policy`. */
 export const policyDigestCurrent = (policy: AutonomyPolicy, pinned: string) =>
   pinned === acceptancePolicyDigest(policy) || pinned === legacyDigest(policy);
+
+/** Skip the impact scan when neither supported pin format could see the edit. */
+export const landingPolicyMayChange = (previous: AutonomyPolicy, current: AutonomyPolicy) =>
+  acceptancePolicyDigest(previous) !== acceptancePolicyDigest(current) ||
+  legacyDigest(previous) !== legacyDigest(current);
+
+type PolicyPin = { policy: AutonomyPolicy; policyDigest: string };
+type PolicyImpact = 'none' | 'all' | ((paths: readonly string[] | null) => boolean);
+
+/** Classify an edit against the original attempt. Match additions and removals using the
+ * same glob semantics as review. Unknown Candidate paths cannot establish disjointness. */
+export function landingPolicyImpact(current: AutonomyPolicy, pin: PolicyPin, exact = false): PolicyImpact {
+  if (policyDigestCurrent(current, pin.policyDigest)) return 'none';
+  if (exact) return 'all';
+  const pinned = pin.policy.acceptance.protectedPaths;
+  const next = current.acceptance.protectedPaths;
+  const aligned = { ...current, acceptance: { ...current.acceptance, protectedPaths: pinned } };
+  // Editing a named preset also changes its label to custom. Older digests included the label.
+  const legacyPathEdit =
+    canonicalPayload(pinned) !== canonicalPayload(next) &&
+    pin.policyDigest === legacyDigest({ ...aligned, preset: pin.policy.preset });
+  if (!policyDigestCurrent(aligned, pin.policyDigest) && !legacyPathEdit) return 'all';
+  const before = new Set(pinned);
+  const after = new Set(next);
+  const changed = [...pinned.filter(path => !after.has(path)), ...next.filter(path => !before.has(path))];
+  if (!changed.length) return 'none';
+  const matches = protectedPathMatcher(changed);
+  return paths => paths === null || paths.some(matches);
+}
+
+export function landingPolicyCurrent(
+  current: AutonomyPolicy,
+  pin: PolicyPin,
+  paths: readonly string[] | null,
+  exact = false,
+) {
+  const impact = landingPolicyImpact(current, pin, exact);
+  return impact === 'none' || (typeof impact === 'function' && !impact(paths));
+}
 
 /** `relax` holds a change only when it lowers owner oversight: `held(previous, next)` says when. */
 type Relax = { relax: string; held: (previous: AutonomyPolicy, policy: AutonomyPolicy) => boolean };

@@ -166,32 +166,42 @@ test('the expectedPolicy compare ignores key order, so a policy copied from a re
   assert(!samePolicy({ ...reordered, preset: 'custom' }, stored));
 });
 
-test('set-policy reports how many queued landings an edit invalidated', async t => {
-  const { s, run } = cli(t);
-  const projectId = [...s.tables.hostedProjects.keys()][0];
-  s.insert('projectHostedLandingQueues', {
-    projectId,
-    channel: 'main',
-    sequence: 3,
-    fence: 0,
-    wake: null,
-    lease: null,
-    status: { total: 4, groups: 2, horizon: [], lastProgressAt: new Date().toISOString() },
-  });
+test('set-policy previews an edit through the CLI without writing or reserving its operation ID', async t => {
+  const { s, state, run } = cli(t);
+  const before = (await run('policy')).result;
   const edit = fields => run('set-policy', { operationId: randomUUID(), ...fields });
-  // Edits no landing depends on invalidate nothing.
-  for (const fields of [
-    { notify: { awaySummary: false } },
-    { trust: { enabled: false } },
-    { agentDefaults: { preflight: 'advise' } },
-  ])
-    assert.equal((await edit(fields)).result.invalidatedLandings, 0, JSON.stringify(fields));
-  // A gate edit invalidates every pinned landing in the queue.
-  const gate = await edit({ acceptance: { gate: 'contract' } });
-  assert.equal(gate.result.invalidatedLandings, 4);
-  // A replay returns the original reply, count included.
-  const first = (await run('set-policy', { operationId: randomUUID(), acceptance: { gate: 'contract' } }))
-    .result;
-  const again = await run('set-policy', { operationId: first.operationId, acceptance: { gate: 'contract' } });
-  assert.equal(again.result.invalidatedLandings, first.invalidatedLandings);
+  const fields = { acceptance: { gate: 'contract' } };
+  const { result: preview } = await edit({ ...fields, dryRun: true });
+  assert.deepEqual(state.calls, ['projectAutonomy:set']);
+  assert.equal(s.counts.at(-1).writes, 0);
+  assert.equal(preview.dryRun, true);
+  assert.equal(preview.policy.acceptance.gate, 'contract');
+  assert.equal(preview.invalidatedLandings, 0);
+  assert.deepEqual(preview.invalidatedSubmissionIds, []);
+  assert.deepEqual((await run('policy')).result, before);
+  const { dryRun, ...predicted } = preview;
+  const { result: applied } = await run('set-policy', { operationId: preview.operationId, ...fields });
+  assert.deepEqual(applied, predicted);
+  state.actor = 'peer';
+  await assert.rejects(edit({ ...fields, dryRun: true }), code('PROJECT_UNAVAILABLE'));
+});
+
+test('set-policy can apply and replay an edit when transaction headroom cannot support an exact impact receipt', async t => {
+  const { s, run } = cli(t);
+  s.extendContext(ctx => {
+    const metrics = ctx.meta.getTransactionMetrics.bind(ctx.meta);
+    ctx.meta.getTransactionMetrics = async () => ({
+      ...(await metrics()),
+      bytesRead: { remaining: 7 * 1024 * 1024 },
+    });
+  });
+  const edit = { operationId: randomUUID(), acceptance: { protectedPaths: ['docs/**'] } };
+  const { result: preview } = await run('set-policy', { ...edit, dryRun: true });
+  assert.equal(preview.impactComplete, false);
+  assert.equal(s.counts.at(-1).writes, 0);
+  const { result: applied } = await run('set-policy', edit);
+  assert.equal(applied.impactComplete, false);
+  assert.equal(applied.invalidatedLandings, undefined);
+  assert.deepEqual((await run('policy')).result.acceptance.protectedPaths, ['docs/**']);
+  assert.deepEqual((await run('set-policy', edit)).result, applied);
 });
