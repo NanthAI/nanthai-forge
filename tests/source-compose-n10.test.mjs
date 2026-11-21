@@ -236,8 +236,8 @@ for (const kind of ['clean', 'conflict', 'criss-cross', 'closed-roots', 'restore
       'right',
     );
     const initial = s.plan(left, [right], kind === 'restore-base' ? common : undefined);
-    // Verified unrelated prefetch forces the paged-hint seam without changing
-    // the selected roots. Hints themselves remain untrusted and incomplete.
+    // Verified unrelated prefetch forces the paged-hint seam for ancestry
+    // searches. The explicit restore base bypasses that search.
     for (let i = 0; i < 32; i++) initial.parents[s.state([], [], `prefetch-${i}`)] = [];
     if (kind === 'closed-roots') {
       await assert.rejects(s.compose(initial, { complete: true }), { code: 'NATIVE_MERGE_BASE_UNKNOWN' });
@@ -254,8 +254,8 @@ for (const kind of ['clean', 'conflict', 'criss-cross', 'closed-roots', 'restore
       assert.deepEqual(JSON.parse(selected.output).result.status, kind === 'clean' ? 'clean' : 'conflict');
       assert.equal(
         s.hints.length > before,
-        hintMode !== 'absent',
-        'exercise the actual probe/cache hint seam',
+        kind !== 'restore-base' && hintMode !== 'absent',
+        'only ordinary merges use the probe/cache hint seam',
       );
     }
   });

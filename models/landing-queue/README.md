@@ -23,6 +23,8 @@ npm run model:landing-queue -- six-slots    # seven singleton groups, six occupi
 npm run model:landing-queue -- isolation    # suspect naming and one-time unstack (51bbbd00)
 npm run model:landing-queue -- all          # all configurations sequentially
 npm run model:landing-queue -- reuse-core   # expected literal S2 counterexample
+npm run model:landing-queue -- reuse-overlap       # broken overlap guard violates S2-reuse
+npm run model:landing-queue -- reuse-overlap-fixed # overlap requires an exact check
 npm run model:landing-queue -- wait         # expected observation counterexample
 npm run model:landing-queue -- wait-fixed   # canonical-terminal observation
 npm run model:landing-queue -- cohort
@@ -139,6 +141,14 @@ proof. `claim`, `fence`, `running` and `crashes` model the publication driver.
 - **S2**: the exact proof tuple (base, receipt, composed head, included members)
   that passed is the tuple published on current main. Checked in `strict.cfg`;
   **violated by the existing cross-head reuse path** in `reuse-core.cfg`.
+- **S2-reuse** (`S2Reuse`): publish either the exact passed tuple or a clean
+  recomposition of its unchanged members onto current main. In the second case
+  `DisjointCheckInputs` requires the input classes affected by main's changes
+  since the original checked base to be disjoint from the original check's input
+  classes. `small.cfg` checks this on every publication with reuse enabled.
+  `RecomposesProof` checks the provenance shape, and each contribution stands for
+  an input class. The default gives contributions distinct classes. The overlap
+  litmus gives the check and an external main change the same class.
 - **S3**: each submitted entry's acceptance counter is at most one. Repeated
   operation deliveries after settlement are stuttering steps.
 - **L1**: every modeled submission (including source preparation) eventually lands, fails with a reason, or
@@ -382,7 +392,7 @@ scope limitation; passing TLC does not verify the omitted implementation.
 | `Check(g, "infra")` retry keeps receipt and dependents, `StackPinned` | `convex/projectHostedLandingStore.ts` (`retiresSolo` keep pins), `convex/projectHostedLandingPipelineInvalidation.ts` (`keep`), `convex/projectHostedLandingBatchSplit.ts` (`retryLandingBatchCheck`), `convex/projectHostedLandingBatchStore.ts` (`keepReceipt`) | Since ea86f3fb a platform retry re-checks the same base, members and head and keeps its receipt, so groups stacked on that (head, receipt) keep their checks. A stacked group's base is its pending predecessor, not main. A changed predicted head or receipt is `Rebase`/`Unstack`/`Released`, which still invalidate. `StackPinned`: while a predecessor slot reserves a dependent's pinned receipt it predicts the pinned head. |
 | cancel/abandon | `convex/projectHostedLandingCancel.ts:35`, `convex/projectHostedBatchAbandon.ts:35` | One atomic target settlement and peer release; final publication wins or cancellation wins. Abandon discovery pages and Lane lifecycle are hidden. Shared check execution continues independently; only binding authority matters here. |
 | `Claim`, `Publish`, `MoveMain` | `convex/projectHostedLandingControl.ts:293`, `convex/projectHostedLandingBatchPublish.ts:48`, `convex/projectHostedAcceptancePublish.ts:110` | Transactional OCC/CAS is atomic; includes main receipt equality, exact proof and member counters. Policy, contributor access, full shard evidence and registration are assumed validated; this is the automatic agent path, not explicit unchecked owner acceptance (which independently also makes unrestricted literal S2 false). Main contributions are append-only ancestry tokens; legitimate file edits/reverts are outside this property. |
-| `Reuse` | `convex/projectHostedFinishCompose.ts` (`installFinishCompose`), `convex/projectHostedAcceptancePublish.ts`, `src/hosted-cross-head-analysis.ts` (`analyzeCrossHeadReuse`), `src/first-check-risk.ts`, `convex/projectHostedReuseStore.ts` (`reuseDecision`) | First-check landing (`clean-disjoint-v1`) on a disjoint synthetic main change. Path disjointness, risk list and clean composition are the constant `Independent`; red main and audit debt refuse it (`~q.red`). Original checked result stays different from applied result. `strict.cfg` disables this branch; the default enables it; `reuse-core` explicitly enables it. |
+| `Reuse` | `convex/projectHostedFinishCompose.ts` (`installFinishCompose`), `convex/projectHostedAcceptancePublish.ts`, `src/hosted-cross-head-analysis.ts` (`analyzeCrossHeadReuse`), `src/first-check-risk.ts`, `convex/projectHostedReuseStore.ts` (`reuseDecision`) | `RecomposesProof` models a clean recomposition as union of contributions. `DisjointCheckInputs` compares synthetic input classes. `Independent` stands for the remaining conservative first-check eligibility rules, and `Relaxed` for the modeled fast-mode classes. Red main refuses reuse, while the real code also checks audit debt. The model assumes correct input classification and leaves manifest analysis outside the state space. `strict.cfg` disables reuse and the default enables it. |
 | `AuditRed`, `Revert`, `FixForward` | `convex/projectHostedMainAuditState.ts` (`noteMainLanding`, `promptAudit`, `onGateRunTerminal`), `convex/projectHostedCulprit.ts` (`startRedClassification`, `prepareSystemRevert`, `finishSystemRevert`, `fixForward`, `revertMessage`) | The audit run, bisect probes and the reverse Candidate's own full check are atomic steps; "sole break" stands for a single proven bisect boundary. The reverse's queue turn is abstracted to an atomic landing with a fresh receipt; in code it is a normal queued landing with `revertOf`. Re-landing a fixed culprit is outside this finite episode. |
 | `LaneCheck`, `LaneAdopt`, `LaneRefused`, `Behind` | `convex/projectHostedLandingAdmission.ts` (`startLandingAdmission`, `settleLandingAdmission`, `admittedReuseFirst`), `convex/projectHostedLandingStore.ts` (`orderLive`, `batchable`), `convex/projectHostedLandingSuffix.ts`, `convex/projectHostedLandingOrder.ts` (`olderLandingAhead`) | Lane-check outcomes are fixed by `Red`; in-flight interaction failures stay nondeterministic in `Check`. Proof eligibility is the constant `Independent`, not the path/test analysis. A refused proof is reduced to returning to the pool; the code recomposes on current main first. The code walks the suffix only for entries that went through full admission: only they can enter the queue behind a younger group. |
 | `EarlyRefusal`, `RefusableLane` | `convex/projectHostedLandingEarlyRefusal.ts` (`refuseStaleLaneProofNow`, `wakeAfterLaneRefusal`, `laneRefusalCohort`), `convex/projectHostedFinishControl.ts` (`finishStep`) | The code requires the retained train to be empty of live groups (a lane-bound entry is not in the train); the model requires no non-Lane active group. The cohort class stands for the code's cohort-size limit; urgent entries and the 16-row window are not modelled. |
@@ -413,16 +423,16 @@ algorithm drift: changes to these code anchors require manual model review.
 
 ## Findings and counterexamples
 
-1. **Literal S2 differs from implemented cross-head acceptance (design/contract
-   mismatch, not evidence of an unsafe merge).** Check Candidate C on M0; main
-   advances to disjoint M1; recomposition produces C1; the conservative-impact
-   proof authorizes C1 using C's original passed run. `Reuse` then `Publish`
-   violates literal S2. The real code deliberately validates the old
-   `reuse.checked` Candidate/head at `convex/projectHostedAcceptancePublish.ts:175`
-   after checking the reuse proof at line 125. Recommendation: lead/owner choose
-   whether S2 means exact-run equality or the existing proved reuse contract.
-   For exact equality, require a fresh check for C1 and explicitly scope S2 to check-required acceptance; owners can also explicitly accept unchecked Candidates. Do not disable reuse or add
-   restrictions as part of this modeling task.
+1. **A disjoint main move can carry an earlier pass.** Candidate C passes on M0.
+   Main advances to disjoint M1 and recomposition produces C1. In `reuse-core`,
+   `Reuse` then `Publish` meets S2-reuse and violates literal S2. Forge retains
+   and validates C's original run and binds its proof to C1. See the
+   [hosted reuse contract](../../docs/architecture.md#hosted-check-reuse-across-main-moves).
+   In `reuse-overlap-fixed` the check and the main move share an input class,
+   so only an exact passing tuple can publish. This configuration checks literal
+   S2 and eventual settlement with reuse enabled. `reuse-overlap` disables
+   the input guard at preparation and publication while leaving `S2Reuse` intact.
+   TLC finds the bad publication.
 2. **Same-cohort conflict against work that never lands (6e587f06; design
    behavior).** A and B compose alone cleanly; B conflicts only with A's prefix.
    B becomes terminal conflict before A's check; A fails; neither lands and B
@@ -624,12 +634,14 @@ or production historical replay is implied.
 
 | Configuration | Generated | Distinct | Java wall time (s) | Result |
 | --- | ---: | ---: | ---: | --- |
-| `small` | 60,565 | 22,509 | 30.991 | Passed |
+| `small` | 60,565 | 22,509 | 50.740 | Passed with S2-reuse |
 | `strict` | 55,453 | 21,582 | 41.405 | Passed |
 | `races` | 46,296 | 15,030 | 15.064 | Passed |
 | `submission` | 378,895 | 124,875 | 115.238 | Passed |
 | `six-slots` | 3,655 | 3,655 | 854.897 | Passed |
-| `reuse-core` | 188 | 104 | 0.639 | Expected S2 |
+| `reuse-core` | 188 | 104 | 0.620 | Expected S2, with S2-reuse intact |
+| `reuse-overlap` | 32 | 28 | 0.760 | Expected S2-reuse violation with broken guard |
+| `reuse-overlap-fixed` | 170 | 95 | 0.687 | Passed, including literal S2 and L1/L2 |
 | `isolation` | 123,429 | 33,252 | 118.289 | Passed |
 | `wait` | 4 | 4 | 3.733 | Expected FreshTerminal |
 | `wait-fixed` | 4 | 4 | 0.560 | Passed |
@@ -692,7 +704,7 @@ All 18 configurations matched their expected outcomes on the registered Java 25.
 
 The two `prequeue-early` rows were added with Issue 7fe54c7c (2026-11-06, Lane 6d62d7fe); all 41 configurations, Incidents included, were re-run with them and matched. `prequeue-cohort` and `prequeue-cohort-mixed` are from that run (the earlier counts predated later spec changes); `prequeue-early` explores a superset of `prequeue-cohort`'s states, as `"early"` only adds refusals.
 
-All 48 configurations, Incidents included, were re-run with the first-check change (Issue 7fe54c7c, 2026-11-06, Lane a3fed1a0) and matched; every row above is from that run. `Breaks = {}` adds no states: `submission`, `reuse-core`, `prequeue` and `prequeue-strict` were also run on an unmodified copy of the main model with identical counts, so rows that changed here had predated earlier spec changes. `prequeue-suffix` and `prequeue-hold-order` stop at their liveness counterexample; their partial counts vary between runs (the unmodified copy stopped `prequeue-suffix` at 162,842 / 74,207).
+All 48 configurations then present, Incidents included, were re-run with the first-check change (Issue 7fe54c7c, Lane a3fed1a0) and matched. `small`, `reuse-core` and the overlap litmus pair report the S2-reuse run. `Breaks = {}` adds no states: `submission`, `reuse-core`, `prequeue` and `prequeue-strict` were also run on an unmodified copy of the earlier model with identical counts. `prequeue-suffix` and `prequeue-hold-order` stop at their liveness counterexamples, so their partial counts vary between runs.
 
 The two `reserve` rows were added with Issue 10d253c6 (2026-11-10, Lane 0ada81a0). The `Spec` gained two weak-fairness conjuncts that are never enabled outside `reserve`; every Incidents configuration was re-run and matched with unchanged counts. Disk was 18 GiB free, below the runner's 40 GB reserve, so these litmus runs called the same pinned jar with the runner's flags directly; each used under 1 MB.
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { networkFetch, networkTimeout } from './network-fetch.js';
 import { analysisManifest, sourceLanguage } from './languages.js';
-import { positionIn } from './structural-positions.js';
+import { binaryInventoryPath, inventoryEntry, inventoryFull, inventoryText } from './analysis-inventory.js';
 import { ignoreLayer, ignoredBy, ignoreNames } from './source-ignore.js';
 import { posix } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -11,11 +11,11 @@ import { exclusion, safeRelative } from './files.js';
 import { isRepositoryDocument } from './document-paths.js';
 import { digest, identity } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
-import type { GraphPack, Snapshot } from './types.js';
+import type { GraphPack, Snapshot, SourceIdentity } from './types.js';
 
 export const githubAnalysisVersion = (): string => {
   const provider = analysisProvider();
-  return `${provider.version}:${provider.configVersion}:github-5`;
+  return `${provider.version}:${provider.configVersion}:github-6`;
 };
 
 export type GithubFetch = typeof fetch;
@@ -33,6 +33,7 @@ export interface HostedArtifact {
   repository: GithubRepository;
 }
 type TreeEntry = { path: string; mode: string; type: string; sha: string; size?: number };
+const analysisSource = (path: string) => !!sourceLanguage(path) || analysisManifest(path);
 
 export function githubInput(input: string): { repository: string; ref: string | undefined } {
   let value = input.trim();
@@ -192,14 +193,14 @@ export async function captureGithub(
     .sort((a, b) => a.path.localeCompare(b.path, 'en'));
   const selected = entries.filter(
     e =>
-      !!sourceLanguage(e.path) ||
-      analysisManifest(e.path) ||
+      analysisSource(e.path) ||
       ignoreNames.some(name => posix.basename(e.path) === name) ||
       isRepositoryDocument(e.path),
   );
   let totalBytes = 0,
     done = 0;
-  const downloaded = new Map<string, string>();
+  const downloaded = new Map<string, { text: string; bytes: number }>();
+  const unavailable = new Map<string, string>();
   const rules: ReturnType<typeof ignoreLayer> = [];
   const matches = (path: string) => {
     const directory = path.endsWith('/');
@@ -218,11 +219,29 @@ export async function captureGithub(
         .some((_, i, parts) => matches(`${parts.slice(0, i + 1).join('/')}/`)) || matches(path)
     );
   await progress(0, selected.length);
-  const download = async (entry: TreeEntry) => {
+  const download = async (entry: TreeEntry, required: boolean) => {
+    if (
+      !required &&
+      Number.isSafeInteger(entry.size) &&
+      inventoryFull(DEFAULT_LIMITS, 0, totalBytes, entry.size)
+    ) {
+      unavailable.set(
+        entry.path,
+        binaryInventoryPath(entry.path) ? 'unsupported-language' : 'inventory-limit',
+      );
+      return;
+    }
     invariant(
-      Number.isSafeInteger(entry.size) && entry.size! <= DEFAULT_LIMITS.maxFileBytes,
+      Number.isSafeInteger(entry.size) && entry.size! >= 0 && entry.size! <= DEFAULT_LIMITS.maxFileBytes,
       'FILE_LIMIT',
       'Source file exceeds the existing byte budget.',
+    );
+    // Reserve listed bytes in page order, before the concurrent blob reads.
+    totalBytes += entry.size!;
+    invariant(
+      totalBytes <= DEFAULT_LIMITS.maxTotalBytes,
+      'SOURCE_LIMIT',
+      'Repository exceeds the existing source byte budget.',
     );
     const blob = await githubJson<{ content: string; encoding: string; sha: string }>(
       `${prefix}/git/blobs/${entry.sha}`,
@@ -248,21 +267,10 @@ export async function captureGithub(
       'ARTIFACT_INTEGRITY',
       'Source blob does not match its Git object identity.',
     );
-    totalBytes += bytes.length;
-    invariant(
-      totalBytes <= DEFAULT_LIMITS.maxTotalBytes,
-      'SOURCE_LIMIT',
-      'Repository exceeds the existing source byte budget.',
-    );
-    let text: string;
-    try {
-      text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-    } catch {
-      throw new ForgeError('INVALID_ENCODING', 'Included source is not UTF-8.');
-    }
-    invariant(!text.includes('\0'), 'INVALID_ENCODING', 'Included source contains a NUL byte.');
-    downloaded.set(entry.path, text);
-    done++;
+    const text = inventoryText(bytes);
+    invariant(text !== undefined || !required, 'INVALID_ENCODING', 'Included source is not UTF-8 text.');
+    if (text === undefined) unavailable.set(entry.path, 'unsupported-language');
+    else downloaded.set(entry.path, { text, bytes: bytes.length });
   };
   const ignoreEntries = new Map(
     selected
@@ -276,32 +284,66 @@ export async function captureGithub(
     if (directory !== '.' && ignored(directory + '/')) continue;
     for (const name of ignoreNames) {
       const entry = ignoreEntries.get(directory === '.' ? name : `${directory}/${name}`);
-      if (entry) await download(entry);
+      if (entry) {
+        await download(entry, true);
+        done++;
+      }
     }
     rules.push(
-      ...ignoreLayer(directory === '.' ? '' : directory, name =>
-        downloaded.get(directory === '.' ? name : `${directory}/${name}`),
+      ...ignoreLayer(
+        directory === '.' ? '' : directory,
+        name => downloaded.get(directory === '.' ? name : `${directory}/${name}`)?.text,
       ),
     );
   }
-  const included = selected.filter(
-    e => !ignoreNames.some(name => posix.basename(e.path) === name) && !ignored(e.path),
-  );
+  for (const [path, file] of downloaded) {
+    if (!ignored(path)) continue;
+    totalBytes -= file.bytes;
+    downloaded.delete(path);
+  }
+  const code: TreeEntry[] = [],
+    textOnly: TreeEntry[] = [];
+  for (const entry of selected) {
+    if (ignoreEntries.has(entry.path) || ignored(entry.path)) continue;
+    (analysisSource(entry.path) ? code : textOnly).push(entry);
+  }
   invariant(
-    included.filter(e => !!sourceLanguage(e.path)).length <= DEFAULT_LIMITS.maxFiles,
+    code.filter(entry => sourceLanguage(entry.path)).length <= DEFAULT_LIMITS.maxFiles,
     'SOURCE_LIMIT',
     'Repository exceeds the existing source file budget.',
   );
+  const included = [...code, ...textOnly];
+  const total = included.length + done;
   for (let i = 0; i < included.length; i += 5) {
-    await Promise.all(included.slice(i, i + 5).map(download));
-    await progress(done, included.length + rules.length);
+    const page = included.slice(i, i + 5);
+    await Promise.all(page.map((entry, offset) => download(entry, i + offset < code.length)));
+    done += page.length;
+    await progress(done, total);
   }
   const content = new Map<string, string>(),
-    documents: Record<string, string> = {};
-  for (const [path, text] of [...downloaded].sort(([a], [b]) => a.localeCompare(b, 'en'))) {
-    if (ignored(path)) continue;
-    if (!!sourceLanguage(path) || analysisManifest(path)) content.set(path, text);
-    else if (!ignoreNames.some(name => posix.basename(path) === name)) documents[path] = text;
+    documents: Record<string, string> = {},
+    files: SourceIdentity['files'] = [],
+    inventory: NonNullable<Snapshot['inventory']> = [];
+  let bytes = 0;
+  const add = (path: string, file: { text: string; bytes: number }) => {
+    files.push({ path, digest: digest(file.text), bytes: file.bytes });
+    bytes += file.bytes;
+    if (!sourceLanguage(path)) inventory.push(inventoryEntry(path, file.text));
+  };
+  const ordered = [...downloaded].sort(([a], [b]) => a.localeCompare(b, 'en'));
+  // Reserve the capture budget for analyzed languages and their manifests first.
+  for (const [path, file] of ordered) {
+    if (!analysisSource(path)) continue;
+    content.set(path, file.text);
+    add(path, file);
+  }
+  for (const [path, file] of ordered) {
+    if (analysisSource(path)) continue;
+    if (!ignoreEntries.has(path)) documents[path] = file.text;
+    if (binaryInventoryPath(path)) unavailable.set(path, 'unsupported-language');
+    else if (inventoryFull(DEFAULT_LIMITS, files.length, bytes, file.bytes))
+      unavailable.set(path, 'inventory-limit');
+    else add(path, file);
   }
   const excluded: Record<string, number> = {};
   for (const entry of tree.tree) {
@@ -315,27 +357,16 @@ export async function captureGithub(
             ? matches(entry.path)?.source === '.forgeignore'
               ? 'forgeignored'
               : 'gitignored'
-            : !sourceLanguage(entry.path) && !analysisManifest(entry.path)
-              ? 'unsupported-language'
-              : null));
+            : (unavailable.get(entry.path) ?? (downloaded.has(entry.path) ? null : 'unsupported-language'))));
     if (reason) excluded[reason] = (excluded[reason] ?? 0) + 1;
   }
-  const files = [...content].map(([path, text]) => ({
-    path,
-    digest: digest(text),
-    bytes: Buffer.byteLength(text),
-  }));
   const state = {
     gitHead: commit.sha,
     scope: 'included-language-git-revision' as const,
     files,
-    inventoryDigest: identity([...content.keys()]),
+    inventoryDigest: identity(files.map(file => file.path)),
     policy: { version: 2 as const, limits: { ...DEFAULT_LIMITS } },
   };
-  // Manifests (go.mod) are captured for import resolution and listed as file-level entries.
-  const inventory = [...content]
-    .filter(([path]) => !sourceLanguage(path))
-    .map(([path, text]) => ({ path, end: positionIn(text)(text.length) }));
   const snapshot: Snapshot = {
     root: '',
     source: { id: identity(state), ...state, excluded },

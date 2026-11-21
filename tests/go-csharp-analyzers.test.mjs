@@ -164,6 +164,7 @@ test('every text file has a file-level entry; binaries and over-budget files are
     Makefile: 'all:\n\techo hi\n',
     'logo.png': 'not really an image',
     'blob.txt': 'x\0y',
+    'large.txt': 'x'.repeat(1024 * 1024 + 1),
   });
   const snapshot = capture(root);
   const { pack } = indexRepository(root);
@@ -173,6 +174,7 @@ test('every text file has a file-level entry; binaries and over-budget files are
     assert(files.includes(path), path);
   assert(!files.includes('logo.png') && !files.includes('blob.txt'));
   assert.equal(pack.source.excluded['unsupported-language'], 2);
+  assert.equal(pack.source.excluded['inventory-limit'], 1);
   const entry = pack.nodes.find(n => n.kind === 'File' && n.locator.file === 'config/app.yaml');
   assert.equal(entry.name, 'app.yaml');
   assert.deepEqual(entry.locator.end, { offset: 9, line: 2, column: 5 });

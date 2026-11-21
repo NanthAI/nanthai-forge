@@ -2,7 +2,7 @@
 import { realpathSync, lstatSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { analysisManifest, sourceLanguage } from './languages.js';
-import { positionIn } from './structural-positions.js';
+import { binaryInventoryPath, inventoryEntry, inventoryFull, inventoryText } from './analysis-inventory.js';
 import { digest, identity } from './hash.js';
 import { exclusion, readSource, safeRelative } from './files.js';
 import { gitHead, ignoredPaths, sourcePaths, verifyRoot } from './git.js';
@@ -15,10 +15,6 @@ export const DEFAULT_LIMITS: Readonly<Limits> = Object.freeze({
   maxFileBytes: 1024 * 1024,
   maxTotalBytes: 16 * 1024 * 1024,
 });
-
-/** Files that are never text; skipped before any read so a repository of images costs no I/O. */
-const BINARY =
-  /\.(png|jpe?g|gif|webp|avif|ico|bmp|tiff?|pdf|zip|gz|tgz|bz2|xz|7z|rar|jar|war|class|dll|exe|so|dylib|a|o|obj|wasm|woff2?|ttf|otf|eot|mp[34]|mov|avi|webm|ogg|wav|flac|bin|dat|pyc|sqlite3?|db)$/i;
 
 export function normalizeRoot(rootInput: string): string {
   let root: string;
@@ -77,7 +73,7 @@ export function capture(rootInput: string, limits: Limits = { ...DEFAULT_LIMITS 
     }
     const language = sourceLanguage(path);
     if (!language && !analysisManifest(path)) {
-      if (BINARY.test(path)) skip('unsupported-language');
+      if (binaryInventoryPath(path)) skip('unsupported-language');
       else textOnly.push(path);
       continue;
     }
@@ -102,30 +98,36 @@ export function capture(rootInput: string, limits: Limits = { ...DEFAULT_LIMITS 
     );
     content.set(path, text);
     files.push({ path, digest: digest(data), bytes: data.length });
-    if (!language) entries.push({ path, end: positionIn(text)(text.length) });
+    if (!language) entries.push(inventoryEntry(path, text));
   }
   for (const path of textOnly) {
     // The code budget above is spent first: an inventory entry never takes a code file's place,
     // and never raises the file or byte limits.
-    if (files.length >= limits.maxFiles || bytes >= limits.maxTotalBytes) {
+    if (inventoryFull(limits, files.length, bytes)) {
       skip('inventory-limit');
       continue;
     }
-    const data = readSource(root, path, limits.maxFileBytes);
-    let text: string | undefined;
+    let data: Buffer | null;
     try {
-      text = data ? new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(data) : undefined;
-    } catch {
-      text = undefined;
+      data = readSource(root, path, limits.maxFileBytes);
+    } catch (error) {
+      if (!(error instanceof ForgeError) || error.code !== 'FILE_LIMIT') throw error;
+      skip('inventory-limit');
+      continue;
     }
-    if (!data || text === undefined || text.includes('\0') || bytes + data.length > limits.maxTotalBytes) {
+    const text = data ? inventoryText(data) : undefined;
+    if (!data || text === undefined) {
       skip('unsupported-language');
+      continue;
+    }
+    if (inventoryFull(limits, files.length, bytes, data.length)) {
+      skip('inventory-limit');
       continue;
     }
     bytes += data.length;
     inventory.push(path);
     files.push({ path, digest: digest(data), bytes: data.length });
-    entries.push({ path, end: positionIn(text)(text.length) });
+    entries.push(inventoryEntry(path, text));
   }
   const state = {
     gitHead: head,

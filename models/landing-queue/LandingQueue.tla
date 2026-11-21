@@ -68,7 +68,9 @@ Init == /\ q = [phase |-> [e \in Entries |-> IF InitiallyQueued
                 unaudited |-> 0, audited |-> IF Earned0 THEN EarnAfter ELSE 0,
                 stalled |-> FALSE, stalls |-> 0, drilled |-> Earned0]
         /\ main = {} /\ stamp = 0 /\ moves = 0
-        /\ counts = [e \in Entries |-> 0] /\ audit = [cas |-> TRUE, exact |-> TRUE, authorized |-> TRUE, fresh |-> TRUE, used |-> FALSE]
+        /\ counts = [e \in Entries |-> 0]
+        /\ audit = [cas |-> TRUE, exact |-> TRUE, reuse |-> TRUE,
+                    authorized |-> TRUE, fresh |-> TRUE, used |-> FALSE]
         /\ running = TRUE /\ crashes = 0 /\ claim = 0 /\ fence = 0
 Live == {e \in Entries : q.phase[e] \notin Terminal \cup {"new"}}
 \* A composed head fails its check when an unfixed break sits beside other content.
@@ -130,6 +132,30 @@ PredPending(g) == LET b == q.batches[g] IN
 Exact(g) == q.batches[g].base = main /\ q.batches[g].rev = stamp
 PredOK(g) == Exact(g)
 Proof(b) == <<b.base, b.rev, b.head, b.included>>
+\* Each contribution stands for a conservative input class. The default gives
+\* them distinct classes; the overlap litmus maps the external move (0) to 1.
+ImpactInput(e) == e
+OverlapInput(e) == IF e = 0 THEN 1 ELSE e
+ImpactInputs(changes) == {ImpactInput(e) : e \in changes}
+DisjointCheckInputs(checkedBase, base, included) ==
+  ImpactInputs(base \ checkedBase) \cap ImpactInputs(included) = {}
+\* Only the original passed tuple may carry. Recompare against its base even
+\* after multiple moves, preserving the checked members and their contribution.
+RecomposesProof(b, base, head) ==
+  IF Len(b.proof) = 4 THEN
+    /\ b.proof[1] \subseteq base
+    /\ b.proof[3] = b.proof[1] \cup b.proof[4]
+    /\ b.proof[4] = b.included
+    /\ head = base \cup b.included
+  ELSE FALSE
+\* Overridden only in the broken-proof litmus. The invariant never uses it.
+IgnoreInputOverlap == FALSE
+BrokenInputGuard == TRUE
+PermitReuse(b, base, head) ==
+  /\ RecomposesProof(b, base, head)
+  /\ IgnoreInputOverlap \/ DisjointCheckInputs(b.proof[1], base, b.included)
+CarryOnMain(b) == /\ (PreQueue => Carries(b.included))
+                  /\ PermitReuse(b, main, main \cup b.included)
 Reset(b) == [b EXCEPT !.phase = "composing", !.included = b.members,
                      !.rejected = {}, !.proof = <<>>, !.pred = 0, !.fast = FALSE]
 \* Ordinary solo recovery can coexist with a train. Retire only groups whose
@@ -199,7 +225,7 @@ LaneAdopt(g) ==
 \* member or in a Lane group that publication must refuse, all of one cohort,
 \* and no non-Lane group is active (none can move main before that cohort).
 RefusableLane(h) == q.batches[h].lane /\ q.batches[h].phase = "ready"
-                    /\ ~Exact(h) /\ ~Carries(q.batches[h].included)
+                    /\ ~Exact(h) /\ ~CarryOnMain(q.batches[h])
 EarlyRefusal(g, older) ==
   /\ Hold = "early"
   /\ ~\E h \in Active : ~q.batches[h].lane
@@ -211,7 +237,7 @@ EarlyRefusal(g, older) ==
 LaneRefused(g) ==
   /\ PreQueue /\ running /\ claim = 0 /\ q.batches[g].lane /\ q.batches[g].phase = "ready"
   \* A fast carry whose earned or fresh condition lapsed is refused like any other.
-  /\ \/ ~Exact(g) /\ ~Carries(q.batches[g].included)
+  /\ \/ ~Exact(g) /\ ~CarryOnMain(q.batches[g])
      \/ q.batches[g].fast /\ ~FastOK
   \* In code the refusal happens at publication, after the order claim. The
   \* earlier configurations ("none") keep the simpler unordered refusal.
@@ -355,12 +381,15 @@ Claim(g) == /\ running /\ claim = 0 /\ q.batches[g].phase = "ready"
 Publish(g) ==
   /\ running /\ claim = g /\ q.batches[g].phase = "ready" /\ Exact(g) /\ PredOK(g)
   /\ LET b == q.batches[g] IN
-     /\ (b.proof = Proof(b) \/ (AllowReuse /\ Len(b.proof) = 4))
+     /\ (b.proof = Proof(b) \/ (AllowReuse /\ PermitReuse(b, main, b.head)))
      /\ (FreshAt = "publish" /\ b.fast => FastOK)
      /\ main' = b.head /\ stamp' = b.receipt
      /\ counts' = [e \in Entries |-> counts[e] + IF e \in b.included THEN 1 ELSE 0]
      /\ audit' = [cas |-> audit.cas /\ main \subseteq b.head /\ b.base = main /\ b.rev = stamp,
                   exact |-> audit.exact /\ b.proof = <<main, stamp, main', b.included>>,
+                  reuse |-> audit.reuse /\
+                    (b.proof = <<main, stamp, main', b.included>> \/
+                      (RecomposesProof(b, main, main') /\ DisjointCheckInputs(b.proof[1], main, b.included))),
                   authorized |-> audit.authorized /\ Len(b.proof) = 4 /\
                     b.proof[3] \subseteq main' /\ b.proof[4] = b.included,
                   fresh |-> audit.fresh /\ (b.fast => FastOK), used |-> audit.used \/ b.fast]
@@ -392,13 +421,12 @@ Crash == /\ running /\ crashes < CrashBound
          /\ UNCHANGED <<q, main, stamp, moves, counts, audit, claim, fence>>
 Restart == /\ ~running /\ running' = TRUE /\ claim' = 0 /\ fence' = fence + 1
            /\ UNCHANGED <<q, main, stamp, moves, counts, audit, crashes>>
-\* Land on the first check (7fe54c7c, clean-disjoint-v1) after a disjoint main
-\* move. Eligibility is a constant assumption; the old run is immutable. While
-\* main is red (audit failed, not yet recovered) no change lands this way.
+\* Land on the first check after a disjoint main move. The old run is immutable.
+\* While main is red (audit failed, not yet recovered) no change lands this way.
 Reuse(g) == /\ AllowReuse /\ running /\ claim = 0 /\ ~Exact(g) /\ ~q.red
             /\ q.batches[g].phase = "ready" /\ q.batches[g].pred = 0
             /\ q.batches[g].base \subseteq main
-            /\ (PreQueue => Carries(q.batches[g].included))
+            /\ CarryOnMain(q.batches[g])
             /\ q' = [q EXCEPT !.batches[g].base = main, !.batches[g].rev = stamp,
                               !.batches[g].fast = PreQueue /\ ~(q.batches[g].included \subseteq Independent),
                               !.batches[g].head = main \cup q.batches[g].included]
@@ -497,6 +525,7 @@ NeverFixed == q.fixed = {}
 \* A red main always recovers (revert or fix-forward), and no main stays broken.
 MainRecovers == (Fails(main) \/ q.red) ~> (~Fails(main) /\ ~q.red)
 S2 == audit.exact
+S2Reuse == audit.reuse
 \* Every landing carried by a fast relaxation was published while the policy was
 \* fast, the project had earned it and the audit was fresh (81d12a32, review note N2).
 FastSound == audit.fresh

@@ -293,7 +293,7 @@ test('Netlify handler captures exact synthetic Git blobs, reports progress, uplo
     assert.equal(uploaded.documents['docs/guide.md'], files['docs/guide.md']);
     assert.equal(
       ready.analysisVersion,
-      `${uploaded.pack.analysis.version}:${uploaded.pack.analysis.configVersion}:github-5`,
+      `${uploaded.pack.analysis.version}:${uploaded.pack.analysis.configVersion}:github-6`,
     );
     assert.equal(uploaded.documents['COMMERCIAL_LICENSE.md'], files['COMMERCIAL_LICENSE.md']);
     assert.ok(reconciled);
@@ -780,7 +780,7 @@ test('explicit refresh reacquires old acquisition artifacts at the same Git head
     assert.equal(trees, 1);
     assert.equal(
       local.job.analysisVersion,
-      `${uploaded.pack.analysis.version}:${uploaded.pack.analysis.configVersion}:github-5`,
+      `${uploaded.pack.analysis.version}:${uploaded.pack.analysis.configVersion}:github-6`,
     );
     assert.deepEqual(local.deleted, []);
     const repeat = await imports.begin._handler(local.ctx, local.job);

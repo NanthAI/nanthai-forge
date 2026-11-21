@@ -40,9 +40,14 @@ export async function prepareMergeStep(
   if (!c.generations && Object.keys(c.parents).length) c.generationFallback = true;
   io.rememberStateGenerations?.(c.generations ?? {});
   const kind = (c.plan as { kind: string }).kind;
-  if (c.phase === 'selection') {
-    if (kind === 'forge-hosted-compose-input') {
-      const plan = sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan));
+  const compose =
+    kind === 'forge-hosted-compose-input'
+      ? sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan))
+      : null;
+  const selecting = c.phase === 'selection';
+  if (selecting) {
+    if (compose) {
+      const plan = compose;
       invariant(
         plan.main.object.sha256 === plan.base.head,
         'SOURCE_JOB_INVALID',
@@ -92,7 +97,6 @@ export async function prepareMergeStep(
       if (c.index === 1) return;
       c.head = plan.base.head;
       c.inventory[plan.base.head] = plan.main;
-      c.states = [plan.base.head, ...c.selections.map(v => (v as { head: string }).head)];
       c.index = 0;
     } else {
       const plan = sourceValidation('SOURCE_JOB_INVALID', () => syncInputSchema.parse(c.plan)),
@@ -123,17 +127,37 @@ export async function prepareMergeStep(
     await describeStackTips(c, io, stack);
     return;
   }
+  let composeRoots: string[] | undefined;
+  if (compose) {
+    const selections = c.selections as { head: string; laneId?: string }[];
+    const { restoreBases } = compose;
+    // Restores merge against their pinned tree. Only an ordinary merge needs ancestry,
+    // and its current head can descend from every earlier selection, including restores.
+    const ancestryCount = restoreBases
+      ? selections.reduce((count, { laneId }, i) => (laneId && restoreBases[laneId] ? count : i + 1), 0)
+      : selections.length;
+    if (restoreBases && !ancestryCount) {
+      c.states = [];
+      c.phase = 'compute';
+      return;
+    }
+    composeRoots = [compose.base.head, ...selections.slice(0, ancestryCount).map(entry => entry.head)];
+    if (selecting) c.states = [...composeRoots];
+    else if (ancestryCount < selections.length && c.states.length) {
+      // A cursor from the previous worker may have queued a trailing restore's
+      // history. Keep any pending edge that the ordinary merges still reach.
+      const reachable = new Set(composeRoots);
+      for (const id of reachable) for (const parent of c.parents[id] ?? []) reachable.add(parent);
+      c.states = c.states.filter(id => reachable.has(id));
+    }
+  }
   // The first finish commonly composes one saved direct child of current
   // main. Its two verified tip manifests prove the native fast-forward without
   // fetching unrelated retained ancestry.
   // Restore plans reapply an original delta even when its saved head is already
   // an ancestor of reverted main; tip ancestry cannot prove a no-op for them.
-  if (
-    kind === 'forge-hosted-compose-input' &&
-    c.selections.length === 1 &&
-    !sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan)).restoreBases
-  ) {
-    const plan = sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan)),
+  if (compose && c.selections.length === 1 && !compose.restoreBases) {
+    const plan = compose,
       right = (c.selections[0] as { head: string }).head,
       left = plan.base.head;
     const tips = [...new Set([left, right])].filter(id => !c.parents[id]);
@@ -235,21 +259,9 @@ export async function prepareMergeStep(
     }
   }
   c.states = [...new Set(c.states)].filter(id => !c.parents[id]);
-  const roots =
-    kind === 'forge-hosted-compose-input'
-      ? [
-          sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan)).base.head,
-          ...c.selections.map(v => (v as { head: string }).head),
-          ...Object.values(
-            sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan)).restoreBases ?? {},
-          ).map(ref => ref.object.sha256),
-        ]
-      : await syncRoots(c, io, m);
+  const roots = composeRoots ?? (await syncRoots(c, io, m));
   let walk =
-    !c.generationFallback &&
-    io.stateGeneration &&
-    roots.every(id => c.parents[id]) &&
-    !(kind === 'forge-hosted-compose-input' && composeInputSchema.parse(c.plan).restoreBases)
+    !compose?.restoreBases && !c.generationFallback && io.stateGeneration && roots.every(id => c.parents[id])
       ? sourceGenerationWalk(c.parents, c.generations ?? {}, roots)
       : null;
   if (walk?.cuts) {

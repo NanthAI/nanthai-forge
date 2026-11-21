@@ -6,10 +6,13 @@
 // Synthetic fixtures only; the history models a stack parent that branched from an old main.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { scaleFixture, at } from './convex-source-scale-fixture.mjs';
+import { buildComposePages } from '../dist/hosted-compose.js';
 import { saveBytes } from '../dist/hosted-save.js';
 import { buildHostedSourceState } from '../dist/hosted-source-worker.js';
 import { digest } from '../dist/hash.js';
+import { parseNativeState } from '../dist/state/format.js';
 
 const ref = object => ({ object, recipe: null });
 async function history(s, v = {}) {
@@ -71,7 +74,7 @@ async function history(s, v = {}) {
     parentFiles = await edit(parentFiles, `dir0/g0.txt`, 'newer main 0\n');
     parent = await state(parentFiles, [parent.sha256, newer.sha256]);
   }
-  return { generations, old, stackBase, child, parent };
+  return { generations, old, stackBase, child, parent, childFiles, parentFiles, state };
 }
 async function reference(s, input) {
   const uploaded = new Map(),
@@ -99,6 +102,83 @@ const row = (s, sha256) =>
     .query('projectObjects')
     .withIndex('by_project_and_digest', q => q.eq('projectId', s.projectId).eq('digest', sha256))
     .unique();
+
+test('recovery compose reapplies a reverted Lane delta without reading pre-parent history', async t => {
+  const s = await scaleFixture();
+  try {
+    const h = await history(s, { mergeMain: true });
+    const recovered = h.childFiles.filter(file => file.path.startsWith('child/'));
+    const accepted = await h.state([...h.parentFiles, ...recovered], [h.parent.sha256, h.child.sha256]);
+    const reverted = await h.state(h.parentFiles, [accepted.sha256]);
+    const fixed = {
+      path: 'fix.sh',
+      mode: 'executable',
+      blob: (await s.putSpec(Buffer.from('#!/bin/sh\nexit 0\n'))).sha256,
+    };
+    const lane = await h.state([...h.childFiles, fixed], [h.child.sha256]);
+    const laneId = randomUUID();
+    const inputs = buildComposePages([
+        { laneId, head: lane.sha256, version: 1, sourceVersion: 1, lifecycleVersion: 0, state: ref(lane) },
+      ]),
+      dependencies = buildComposePages([]);
+    for (const page of [...dependencies.pages, ...inputs.pages]) await s.json(page.value);
+    const input = await s.json({
+      schema: 1,
+      kind: 'forge-hosted-compose-input',
+      base: { head: reverted.sha256, receiptId: 'revert' },
+      main: ref(reverted),
+      inputs: inputs.manifest,
+      dependencies: dependencies.manifest,
+      restoreBases: { [laneId]: ref(h.stackBase) },
+      algorithm: 'forge-native-compose-v1',
+      message: 'recover',
+      at,
+    });
+    const start = s.events.length,
+      id = await s.enqueue(input),
+      drained = await s.drain(),
+      job = await s.job(id),
+      reads = fetched(s.events.slice(start));
+    assert.equal(job.status, 'completed');
+    assert.deepEqual(job.output, await reference(s, input), 'exact whole-worker result');
+    const { result } = JSON.parse(await s.bytes(job.output));
+    assert.equal(result.status, 'clean');
+    const merged = await row(s, result.state.sha256);
+    assert.deepEqual(merged.stateParents, [reverted.sha256, lane.sha256]);
+    assert.equal(
+      merged.stateGeneration,
+      1 + Math.max(h.generations.get(reverted.sha256), h.generations.get(lane.sha256)),
+    );
+    const state = parseNativeState(await s.bytes(result.state));
+    assert.deepEqual(
+      state.files,
+      [...h.parentFiles, ...recovered, fixed].sort((a, b) => a.path.localeCompare(b.path)),
+    );
+    const oldReads = reads.filter(read => h.old.has(read)).length;
+    t.diagnostic(
+      JSON.stringify({
+        oldReads,
+        manifests: reads.filter(read => h.generations.has(read)).length,
+        steps: drained.steps,
+        calls: drained.functionCalls,
+        documentsRead: drained.documentsRead,
+        documentsWritten: drained.documentsWritten,
+        readBytes: drained.readBytes,
+        wallMs: drained.wallMs,
+        maxRssBytes: drained.maxRssBytes,
+      }),
+    );
+    assert.equal(oldReads, 0, 'no pre-parent history manifest is needed to reapply an explicit delta');
+    assert.deepEqual(
+      reads.filter(read => h.generations.has(read)).sort(),
+      [reverted.sha256, lane.sha256, h.stackBase.sha256].sort(),
+      'only main, Lane and the explicit base are read, once each',
+    );
+    assert(drained.steps <= 2, 'small recovery finishes in up to two source steps');
+  } finally {
+    s.restore();
+  }
+});
 
 // The parent synced with a newer main, so a side lineage joins below the stack base. `bare` rows keep
 // no recorded generation (the oldest rows); `conflict` makes both Lanes edit the same file.

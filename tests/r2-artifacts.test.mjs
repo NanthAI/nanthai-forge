@@ -8,6 +8,7 @@ import { setup, pinOf } from './r2-harness.mjs';
 import { job } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { decodeHostedArtifact } from '../dist/hosted-artifact.js';
+import { hostedQuery } from '../dist/hosted-query.js';
 import { putR2 } from '../dist/exchange-blobs.js';
 const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
 const { storeProjectArtifact } = await import(moduleUrl('../convex/projectArtifactActions.ts'));
@@ -18,26 +19,31 @@ const { derivedArtifact, derivedBytes } = await import(moduleUrl('../convex/deri
 const { default: worker } = await import(moduleUrl('../netlify/functions/analyze-background.mts'));
 const artifactStorage = await import(moduleUrl('../convex/artifactStorage.ts'));
 
-function github(t) {
+function github(t, files = { 'a.ts': 'export const answer = 42;\n' }, requests = []) {
   const previous = globalThis.fetch,
     remote = process.env.NETLIFY_WORKER_URL;
   delete process.env.NETLIFY_WORKER_URL;
-  const bytes = Buffer.from('export const answer = 42;\n');
-  const sha = createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+  const blobs = new Map(),
+    tree = Object.entries(files).map(([path, text]) => {
+      const bytes = Buffer.from(text);
+      const sha = createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+      blobs.set(sha, bytes);
+      return { path, mode: '100644', type: 'blob', sha, size: bytes.length };
+    });
   globalThis.fetch = async (url, init) => {
     const target = new URL(url);
     if (target.hostname !== 'api.github.com') return previous(url, init);
+    requests.push(target.pathname);
     if (target.pathname.includes('/commits/'))
       return Response.json({ sha: 'a'.repeat(40), commit: { tree: { sha: 'b'.repeat(40) } } });
-    if (target.pathname.includes('/git/trees/'))
-      return Response.json({
-        tree: [{ path: 'a.ts', mode: '100644', type: 'blob', sha, size: bytes.length }],
-        truncated: false,
-      });
-    if (target.pathname.includes('/git/blobs/'))
+    if (target.pathname.includes('/git/trees/')) return Response.json({ tree, truncated: false });
+    if (target.pathname.includes('/git/blobs/')) {
+      const sha = target.pathname.split('/').at(-1),
+        bytes = blobs.get(sha);
       return init?.headers?.Accept === 'application/vnd.github.raw+json'
         ? new Response(bytes)
         : Response.json({ sha, content: bytes.toString('base64'), encoding: 'base64' });
+    }
     return Response.json({
       full_name: 'example/project',
       private: false,
@@ -51,7 +57,7 @@ function github(t) {
     if (remote === undefined) delete process.env.NETLIFY_WORKER_URL;
     else process.env.NETLIFY_WORKER_URL = remote;
   });
-  return bytes.toString();
+  return files['a.ts'];
 }
 function noConvexWrites(s) {
   s.ctx.storage.store = () => assert.fail('opted-in artifacts must not call Convex storage.store');
@@ -135,6 +141,72 @@ test('indexed imports store R2 gzip, reconcile a lost publication reply, and rea
     (await decodeHostedArtifact(await blobStore(s.ctx).get(row.artifactKey))).content['a.ts'],
     text,
   );
+});
+
+test('a Go and C# import lists fetched text without adding downloads, R2 reads or Convex calls', async t => {
+  const { s, fake } = await setup(t);
+  indexed(s);
+  const requests = [];
+  github(
+    t,
+    {
+      '.gitignore': 'ignored.md\n',
+      'main.go': 'package main\n\nfunc main() {}\n',
+      'go.mod': 'module example.com/project\n',
+      'App.cs': 'namespace App;\npublic class Program {}\n',
+      'README.md': '# Project\n🦎',
+      'docs/guide.md': '# Guide\n',
+      LICENSE: 'Synthetic license',
+      NOTICE: 'Synthetic attribution',
+      'logo.png': 'binary by name',
+      'ignored.md': 'ignored text',
+      Makefile: 'not fetched by analysis imports',
+    },
+    requests,
+  );
+  const calls = {};
+  for (const method of ['runQuery', 'runMutation', 'runAction']) {
+    const run = s.ctx[method];
+    calls[method] = 0;
+    s.ctx[method] = (...args) => {
+      calls[method]++;
+      return run(...args);
+    };
+  }
+  await indexer.run._handler(s.ctx, { id: 'indexed', generation: 1 });
+  const row = s.tables.imports.get('indexed');
+  assert.equal(row.phase, 'ready');
+  assert.deepEqual(calls, { runQuery: 6, runMutation: 7, runAction: 1 });
+  assert.equal(requests.length, 12);
+  const downloads = requests.filter(path => path.includes('/git/blobs/'));
+  assert.equal(downloads.length, 8);
+  assert.equal(new Set(downloads).size, 8);
+  assert.equal(fake.requests.filter(r => r.method === 'GET').length, 0);
+  assert.equal(s.scheduled.length, 0);
+  const artifact = await decodeHostedArtifact(await blobStore(s.ctx).get(row.artifactKey));
+  const files = hostedQuery(artifact, 'files', row.head).results;
+  assert.deepEqual(files.map(file => file.path).sort(), [
+    '.gitignore',
+    'App.cs',
+    'LICENSE',
+    'NOTICE',
+    'README.md',
+    'docs/guide.md',
+    'go.mod',
+    'main.go',
+  ]);
+  const declaration = hostedQuery(artifact, 'declarations?file=README.md', row.head).results[0];
+  assert.equal(declaration.kind, 'File');
+  assert.deepEqual(declaration.locator.end, { offset: 12, line: 2, column: 3 });
+  assert.deepEqual(
+    artifact.pack.nodes
+      .filter(node => node.kind === 'File')
+      .map(node => node.locator.file)
+      .sort(),
+    ['.gitignore', 'LICENSE', 'NOTICE', 'README.md', 'docs/guide.md', 'go.mod'],
+  );
+  assert.equal(artifact.content['README.md'], undefined);
+  assert.equal(artifact.documents['README.md'], '# Project\n🦎');
 });
 
 test('indexed imports and binary derivatives use R2 without the old flag or per-import opt-in', async t => {

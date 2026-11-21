@@ -26,6 +26,8 @@ if (config === 'all') {
     'submission',
     'six-slots',
     'reuse-core',
+    'reuse-overlap',
+    'reuse-overlap-fixed',
     'isolation',
     'wait',
     'wait-fixed',

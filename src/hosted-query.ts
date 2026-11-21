@@ -75,6 +75,8 @@ function queryArtifact(
   };
   const file = p.get('file') ?? '',
     limit = number('limit', 50);
+  const inventoriedDocument = (path: string, sha256: string) =>
+    pack.source.files.some(file => file.path === path && file.digest === sha256);
   switch (name) {
     case 'status':
       return {
@@ -102,13 +104,14 @@ function queryArtifact(
           'NOT_FOUND',
           'This document is not retained in the indexed snapshot. README remains available; new documents require an explicit re-index.',
         );
-        const text = artifact.documents[file];
+        const text = artifact.documents[file],
+          sha256 = digest(text);
         return {
           file,
           text,
-          digest: digest(text),
+          digest: sha256,
           scope: 'git-revision',
-          sourceIdentityIncludesReadme: false,
+          sourceIdentityIncludesReadme: inventoriedDocument(file, sha256),
         };
       }
       const readmeFile = Object.keys(artifact.documents).find(path =>
@@ -125,22 +128,25 @@ function queryArtifact(
           return `\n\n## ${path}\n\n${fence}\n${text}\n${fence}`;
         })
         .join('');
+      const readme = readmeFile ? artifact.documents[readmeFile]! : '';
       return {
         file: readmeFile ?? null,
-        text: (readmeFile ? artifact.documents[readmeFile] : '') + noticeText,
+        text: readme + noticeText,
         scope: 'git-revision',
-        sourceIdentityIncludesReadme: false,
+        sourceIdentityIncludesReadme: readmeFile ? inventoriedDocument(readmeFile, digest(readme)) : false,
       };
     }
     case 'home': {
       query.context('', 1);
-      const text = artifact.documents['.nforge/home.md'];
+      const file = '.nforge/home.md',
+        text = artifact.documents[file],
+        sha256 = typeof text === 'string' ? digest(text) : undefined;
       return {
-        file: typeof text === 'string' ? '.nforge/home.md' : null,
+        file: typeof text === 'string' ? file : null,
         text: typeof text === 'string' ? text : '',
-        digest: typeof text === 'string' ? digest(text) : undefined,
+        digest: sha256,
         scope: 'git-revision',
-        sourceIdentityIncludesReadme: false,
+        sourceIdentityIncludesReadme: sha256 ? inventoriedDocument(file, sha256) : false,
       };
     }
     case 'graph':

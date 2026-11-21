@@ -56,7 +56,7 @@ export function ancestryFixture({ generationMetadata = false } = {}) {
       assert.deepEqual(put(Buffer.concat(parts)), pin);
     },
   };
-  const plan = (main, heads, restoreBase) => {
+  const plan = (main, heads, restoreBase, restoreIndex = 0) => {
     const entries = heads.map(head => ({
       laneId: randomUUID(),
       head,
@@ -78,7 +78,7 @@ export function ancestryFixture({ generationMetadata = false } = {}) {
       algorithm: 'forge-native-compose-v1',
       message: 'merge',
       at,
-      ...(restoreBase ? { restoreBases: { [entries[0].laneId]: ref(restoreBase) } } : {}),
+      ...(restoreBase ? { restoreBases: { [entries[restoreIndex].laneId]: ref(restoreBase) } } : {}),
     };
     return { ...initialSourceStep(json(value)), plan: value, phase: 'selection' };
   };

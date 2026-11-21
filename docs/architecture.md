@@ -136,6 +136,8 @@ Forge reads TypeScript, JavaScript, Python, Java, Rust, Go and C#. TypeScript an
 
 Every other text file (Markdown, YAML, a Makefile, `go.mod`) gets a file-level entry: its path, size and digest in the source files and one `File` node spanning the file, so declaration and file reads are never empty. Binary files, files over the per-file bound and files past the file or byte budget are counted in `excluded` (`unsupported-language`, `inventory-limit`) and never read twice; code is captured first, so an entry never displaces a code file. Entry text is not retained.
 
+GitHub analysis artifacts apply the same inventory rules to files already fetched for analysis, including repository documents and ignore files. The graph lists each eligible text path with its byte size, digest and one `File` node spanning the file. Source and Go manifests take priority in the inventory budget. The document reader still serves retained repository documents outside that inventory. Paths outside the import's analysis selection remain excluded. Inventory adds no download or storage read, and the importer reports progress in its existing batches. Refreshing an older analysis at the same Git head builds the new inventory.
+
 Coverage is partial and says so. Relative imports resolve for TypeScript, JavaScript and Python, as do qualified Java imports and explicit Rust file modules. A Go import resolves through the `module` line of a captured `go.mod` to the package directory and edges every non-test file of that package (at most 64); same-package names resolve across files, and `alias.Name` resolves to an exported package-level declaration. A C# `using` resolves to the captured files that declare that namespace. Go workspaces, `vendor/`, `replace`, build tags, struct fields and methods reached through a selector, and all C# references are not modelled. Not modelled: tsconfig aliases, installed packages, dynamic dispatch, framework routes, macros, overload resolution and complete call or data-flow graphs. A missing relationship means unknown. It does not mean independent.
 
 `impact` means direct reverse imports. Use ordinary search for configuration and strings.
@@ -661,7 +663,7 @@ available to local and Actions runners.
 
 A check is an executable, its arguments, an optional environment label and explicit environment/credential passthrough names. A run records the pinned Candidate, the check definition, an environment fingerprint and the process owner. It runs in a fresh workspace under your OS account with private HOME/XDG/temp directories and a clean runtime allowlist plus declared passthrough. Passthrough values are transient; receipts retain names only. It is not sandboxed. The runner keeps outcomes, bounded failure summaries, compact test evidence, provider log links and chosen build outputs. Local logs stay local for seven days; upload requires explicit project opt-in with finite retention. Cancelled, interrupted and failed are different results. After a lost reply, a retry observes the existing run and does not start another.
 
-Playbooks run a sequence of checks. Automation rules start a Playbook on an event. Evidence is reused only under the explicit native disjoint fast-path policy; acceptance revalidates the exact check and manifest-path proof and schedules full main verification. Missing coverage is unknown. A passing check, a model critique and a human review are separate facts. Accepting a Channel is an explicit step against an observed previous head. An optional Invariant can require specific evidence first.
+Playbooks run a sequence of checks. Automation rules start a Playbook on an event. Native disjoint fast-path reuse requires explicit policy and revalidates the exact check and manifest-path proof before scheduling full main verification. Missing coverage is unknown. A passing check, a model critique and a human review are separate facts. Accepting a Channel is an explicit step against an observed previous head. An optional Invariant can require specific evidence first.
 
 Hosted checks run on the project's configured runner (`configure-runner`); the local `nforge local-checks` computer path is retired.
 
@@ -1349,7 +1351,11 @@ history-sized R2 probe chains without adding calls, metadata caches or idle work
 read the merge base manifests (found from parents already verified) in the same wave
 as the tips; a resolve reads its draft and first conflict page with the saved head;
 compose merges from the tip manifests its graph step read. Native text calculations are journaled per path, while
-final State assembly and source publication remain serial. Raw/recipe verification proceeds in windows of at most 100
+final State assembly and source publication remain serial. Revert recovery applies
+the saved Lane delta using its pinned restore tree. A restore-only selection
+skips ancestry traversal. Mixed selections search from main and the selected tips
+through the last ordinary merge, since earlier restores can contribute parents.
+Raw/recipe verification proceeds in windows of at most 100
 objects or about 8 MiB. Recipe traversal and SHA-256 progress survive action
 boundaries. Ancestry retains verified parent links; full file trees are read only
 when the native merge needs them. Derived ancestry rows are prefetch hints, never
@@ -2356,9 +2362,10 @@ when a later save changes that Lane. Unchecked person acceptance remains availab
 A main head **or receipt** race reserves a named child with distinct compose/check/
 accept identities before source IO. The driver yields with exponential backoff,
 recomposes the original H08-validated manifests on the newly observed main and
-requests a new exact-Candidate check. It never rereads current Lane heads, changes
-selection order, transfers evidence between Candidates or treats a queue lease as
-permission to accept. Overlap retains a conflicted Candidate with the exact H09
+checks the new Candidate when its original pass cannot carry under the
+[hosted reuse contract](#hosted-check-reuse-across-main-moves). It retains the
+original Lane heads and selection order. A queue lease grants scheduling authority
+only. A merge conflict retains a conflicted Candidate with the exact H09
 resolution root; the existing explicit resolution path remains available.
 
 Each driver action makes one short control transaction, at most one metadata
@@ -2375,7 +2382,7 @@ storage objects; no new retention or deletion policy is applied.
 Check/source completion wakes the selected request. A parent receipt or failure
 wakes dependent submissions through indexed bounded windows. Pending dependencies
 and review waits schedule nothing while idle. Current authorization, epoch, policy,
-registered source, exact check and main CAS remain H14's publication conditions.
+registered source, passing check evidence and main CAS remain H14's publication conditions.
 Submission status reuses the native pending reasons and terminal causes. Input-page
 status shares the native source-relative projection: later Lane saves show
 `superseded` while preserving the actual pending/failed/landed outcome. Versioned
@@ -2389,6 +2396,34 @@ remain separate.
 Explicit finish resume checks current project/contributor write authority before
 scheduler repair, plus the original epoch while work is pending. Completed
 requests retain current-access checks while acknowledging historical epochs.
+
+#### Hosted check reuse across main moves
+
+The S2-reuse contract for conservative automatic acceptance is that Forge
+publishes either the Candidate that passed or a clean recomposition of the same
+pinned inputs onto current main. In the second case the server must establish
+that changes since the checked base are disjoint from the passed check's inputs
+under the conservative impact rules. An unchanged file tree can carry a full
+pass under the exact-tree proof. The receipt keeps the original Candidate and run and
+binds the proof to the recomposed head and current main receipt. If main moves
+again, Forge compares against the original checked base. If the proof is
+unavailable or refused, the recomposed Candidate needs its own passing check
+under the configured gate.
+
+Forge estimates check input impact from verified manifests and pinned check
+selection evidence. Shared entries with identical bytes and modes, and clean
+merges of Markdown that no test or script reads, can qualify under the
+documented rules. The optional Fast mode has its own guarded relaxations.
+Path and input evidence can miss semantic interactions. The hosted main audit
+is a coalesced full check of accepted main and tracks coverage separately from
+the original run. See [pre-queue checks and landing modes](pre-queue-checks.md)
+and the [bounded queue model](../models/landing-queue/README.md).
+
+A strict GitHub merge queue requires its configured checks to pass on the synthetic
+merge group containing the latest base and queued changes ahead. When a failing
+predecessor is removed, GitHub rebuilds and checks the affected groups. Forge can
+carry an earlier pass when its reuse proof covers the move, and its receipt
+identifies the source the run actually checked. [GitHub merge queue documentation](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue#how-merge-queues-work)
 
 ### Hosted compensating revert
 

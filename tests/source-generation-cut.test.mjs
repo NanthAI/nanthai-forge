@@ -197,7 +197,7 @@ test('prefetched cycles below a candidate and unequal-generation criss-cross bas
       assert.deepEqual(merge(s, left, right, result.parents, result.cuts), merge(s, left, right, s.parents));
     }
 });
-test('restore bases and three-root plans retain complete-oracle bytes with generation metadata', async () => {
+test('a pinned restore base needs no ancestry walk and retains complete-oracle bytes', async () => {
   const { s, left, right } = generationGraph('closed-side', 20);
   const restore = Object.keys(s.parents).find(id => s.parents[id].length === 0),
     plan = s.plan(left, [right], restore);
@@ -205,7 +205,72 @@ test('restore bases and three-root plans retain complete-oracle bytes with gener
     actual = await s.compose(plan);
   assert.deepEqual(actual.output, oracle.output);
   assert.deepEqual(actual.headBytes, oracle.headBytes);
-  assert.equal(actual.cursor.ancestryCuts, undefined);
+  // An explicit restore uses its three merge trees during compute, even with generations available.
+  assert.deepEqual(
+    actual.graphReads.filter(id => s.parents[id]),
+    [],
+  );
+});
+test('an ordinary merge queries earlier restore tips and leaves later restores to compute', async () => {
+  const s = ancestryFixture({ generationMetadata: true });
+  const file = s.file('base', 'original\n'),
+    base = s.state([file], [], 'base'),
+    main = s.state([file, s.file('main', 'main\n')], [base], 'main'),
+    recovery = s.state([file, s.file('recovered', 'recovered\n')], [base], 'recovery');
+  for (const restoreFirst of [true, false]) {
+    const parent = restoreFirst ? recovery : main,
+      files = JSON.parse(s.objects.get(parent)).files,
+      ordinary = s.state([...files, s.file('lane', 'lane\n')], [parent], 'ordinary'),
+      heads = restoreFirst ? [recovery, ordinary] : [ordinary, recovery],
+      plan = s.plan(main, heads, base, restoreFirst ? 0 : 1);
+    const oracle = await s.compose(plan, { complete: true }),
+      selected = await s.compose(plan);
+    assert.deepEqual(selected.output, oracle.output);
+    assert.deepEqual(selected.headBytes, oracle.headBytes);
+    assert.equal(JSON.parse(selected.output).result.status, 'clean');
+    assert.equal(selected.graphReads.includes(recovery), restoreFirst);
+  }
+});
+test('a resumed mixed compose discards a failed ancestry probe from a trailing restore', async () => {
+  const s = ancestryFixture({ generationMetadata: true });
+  const file = s.file('base', 'original\n'),
+    base = s.state([file], [], 'base'),
+    side = s.state([], [], 'independent'),
+    main = s.state([file, s.file('main', 'main\n')], [base], 'main'),
+    lane = s.state([file, s.file('lane', 'lane\n')], [base, side], 'ordinary'),
+    unavailable = s.state([file], [], 'old restore history'),
+    restore = s.state([file, s.file('recovered', 'recovered\n')], [unavailable], 'restore');
+  const plan = s.plan(main, [lane, restore], base, 1),
+    oracle = await s.compose(plan, { complete: true }),
+    parents = s.verifiedParents();
+  delete parents[unavailable];
+  const selections = JSON.parse(s.objects.get(plan.plan.inputs.root.sha256)).entries;
+  // The old worker queued the restore's parent even though the ordinary tips'
+  // closed side lineage prevents a singleton frontier from retiring that probe.
+  const cursor = {
+    ...plan,
+    phase: 'graph',
+    head: main,
+    inventory: Object.fromEntries([main, lane, restore].map(id => [id, s.ref(id)])),
+    selections,
+    parents,
+    generationFallback: true,
+    states: [unavailable],
+    ancestryFailures: { [unavailable]: 'SOURCE_UNAVAILABLE' },
+  };
+  const selected = await s.compose(cursor);
+  assert.deepEqual(selected.output, oracle.output);
+  assert.deepEqual(selected.headBytes, oracle.headBytes);
+  assert.equal(JSON.parse(selected.output).result.status, 'clean');
+  delete parents[side];
+  await assert.rejects(
+    s.compose({
+      ...cursor,
+      states: [unavailable, side],
+      ancestryFailures: { ...cursor.ancestryFailures, [side]: 'SOURCE_HASH_MISMATCH' },
+    }),
+    { code: 'SOURCE_HASH_MISMATCH' },
+  );
 });
 test('unknown roots, invalid/cyclic levels and three-root plans preserve BFS', () => {
   assert.equal(sourceGenerationWalk({ L: ['R'], R: ['L'] }, { L: 2, R: 1 }, ['L', 'R']), null);

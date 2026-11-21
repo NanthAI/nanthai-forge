@@ -21,28 +21,36 @@ proof refresh without source churn is `CHECK_EVIDENCE_REFRESH`.
 which refused proofs still land on the Lane's own check: [landing modes](../../../pre-queue-checks.md#landing-modes).
 Hosted main-only finish retries can reuse a READY pass through
 `acceptance.hostedCrossHeadReuse` (absent means on). This is separate from the
-native `disjointFastPath` setting. Single-Candidate owner-agent automatic landings recompose their
-pinned inputs cleanly on current main. They land on their first check (rule
-`clean-disjoint-v1`, Issue 7fe54c7c) when the four verified manifests (checked
-base, checked head, current main, recomposed head) show: the recomposition is
-exactly the union of both deltas (modes and deletions included); the changed
-paths of the two deltas are disjoint, including file/directory prefixes; neither
-side touches a [global-risk file](../../../pre-queue-checks.md#global-risk-files); no
-changed path is a symlink or submodule on any side (untouched links do not count); the
-first run's own selection was the full check (or docs for a docs-only change);
-and main is green with a full audit baseline and no audit debt. It reads six
-small objects and no source text or import graph, so a path-disjoint semantic
-break (change 556) can reach main: the main audit, armed at once for these
-landings, catches it and recovery reverts a single proven culprit or fixes
-forward (see [hosted acceptance gate](../../../workflows.md#hosted-acceptance-gate)).
+native `disjointFastPath` setting. Under S2-reuse, the landing uses either the
+exact passing Candidate or a clean recomposition of the same pinned inputs
+onto current main. For recomposition, the reuse proof must show either that
+main's changes are outside the original check's inputs under the conservative
+impact rules, or that the entire file tree from a full passing check is
+unchanged. The original run still names the source it checked.
+A strict GitHub merge queue requires the checks to pass on the current merge group
+including the latest base and work ahead in the queue. See
+[hosted check reuse](../../../architecture.md#hosted-check-reuse-across-main-moves).
+
+The conservative first-check rule (`clean-disjoint-v2`) compares four verified
+manifests: checked base, checked head, current main and recomposed head. The
+recomposition must preserve both deltas, including modes and deletions. Paths
+must be disjoint, including file/directory prefixes, apart from verified
+identical entries and clean merges of Markdown that no test or script reads.
+Shared check inputs and unplaceable global risk still prevent reuse, and a
+changed symlink or submodule requires another check. The run must cover the full
+check or the docs selection for a docs-only change, with a green full main audit
+baseline and no debt. The proof reads manifests and pinned selection evidence.
+The prompt main audit covers semantic interactions the proof can miss and can
+trigger a single-culprit revert or a fix forward. See the
+[hosted acceptance gate](../../../workflows.md#hosted-acceptance-gate).
 Any doubt retains the ordinary exact recheck and records the reason on the
 receipt (`firstCheck`). A newer main race repeats the proof against the original
 checked head, without constructing a chain of inherited passes. Batches retain
 one shared exact recheck: their multiple same-head receipt snapshots do not yet
 provide the single-transition recovery proof required for this optimization.
 
-From risk rule v3 a manifest or lockfile inside a package is risk only for that package
-and its dependents, using the package graph the checked run pinned
+The checked run's pinned package graph can place a manifest or lockfile's risk
+in that package and its dependents
 ([placed manifests](../../../pre-queue-checks.md#global-risk-files)).
 
 When the proof is refused, an automatic-acceptance project's retry runs a scoped

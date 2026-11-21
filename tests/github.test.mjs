@@ -10,6 +10,7 @@ import { setup as r2Setup } from './r2-harness.mjs';
 import { GraphQuery } from '../dist/graph-query.js';
 import { hostedQuery } from '../dist/hosted-query.js';
 import { validateArtifact } from '../dist/artifact-validation.js';
+import { DEFAULT_LIMITS } from '../dist/snapshot.js';
 
 test('GitHub response reset deadlines survive hosted errors while ordinary denials stay unchanged', async t => {
   t.mock.method(Date, 'now', () => 1_000_000);
@@ -315,6 +316,8 @@ test('hosted linked documents retain exact revision bytes, nested ignores and ol
   assert.equal(doc.text, text);
   assert.equal(doc.scope, 'git-revision');
   assert.equal(doc.digest, createHash('sha256').update(text).digest('hex'));
+  assert.equal(doc.sourceIdentityIncludesReadme, true);
+  assert.equal(hostedQuery(artifact, 'readme', sha).sourceIdentityIncludesReadme, true);
   assert.ok(!hostedQuery(artifact, 'readme', sha).text.includes('Retained guide'));
   for (const file of [
     '../README.md',
@@ -450,8 +453,51 @@ test('GitHub analysis reads Go and C# and captures go.mod to resolve package imp
       edge => edge.from === 'main.go' && edge.target === 'util/util.go' && edge.resolution === 'resolved',
     ),
   );
-  // go.mod is captured; only README.md (a document, not downloaded as source) is left out.
-  assert.equal(artifact.pack.source.excluded['unsupported-language'], 1);
+  assert(artifact.pack.nodes.some(node => node.kind === 'File' && node.locator.file === 'README.md'));
+  assert.equal(artifact.pack.source.excluded['unsupported-language'], undefined);
   // The stored source still matches the manifest through the hosted integrity check.
-  assert.equal(hostedQuery(artifact, 'status', sha).files, 4);
+  assert.equal(hostedQuery(artifact, 'status', sha).files, 5);
+});
+
+test('GitHub analysis counts binary and oversized inventory files while keeping code and documents', async () => {
+  const f = fixture({
+    'main.go': 'package main\n',
+    'README.md': '# Project',
+    'docs/nul-bytes.md': 'not\0text',
+    'docs/invalid.md': Buffer.from([0xff]),
+    'docs/oversized.md': 'x'.repeat(1024 * 1024 + 1),
+    'NOTICE.dat': 'Existing text attribution',
+  });
+  const artifact = await captureGithub(f.repository, undefined, undefined, undefined, f.request);
+  assert.deepEqual(artifact.pack.source.excluded, {
+    'inventory-limit': 1,
+    'unsupported-language': 3,
+  });
+  assert.deepEqual(
+    artifact.pack.source.files.map(file => file.path),
+    ['main.go', 'README.md'],
+  );
+  assert.deepEqual(artifact.documents, {
+    'NOTICE.dat': 'Existing text attribution',
+    'README.md': '# Project',
+  });
+  assert.equal(hostedQuery(artifact, 'readme?file=NOTICE.dat', sha).sourceIdentityIncludesReadme, false);
+  assert.equal(f.requests.filter(request => request.url.includes('/git/blobs/')).length, 5);
+});
+
+test('GitHub import preserves Go manifests and documents when code fills the file budget', async () => {
+  const f = fixture({
+    ...Object.fromEntries(
+      Array.from({ length: DEFAULT_LIMITS.maxFiles }, (_, index) => [`source${index}.go`, 'package app\n']),
+    ),
+    'go.mod': 'module example.com/app\n',
+    'README.md': '# Project',
+  });
+  const artifact = await captureGithub(f.repository, undefined, undefined, undefined, f.request);
+  assert.equal(Object.keys(artifact.content).length, DEFAULT_LIMITS.maxFiles + 1);
+  assert.equal(artifact.content['go.mod'], 'module example.com/app\n');
+  assert.deepEqual(artifact.pack.source.excluded, { 'inventory-limit': 1 });
+  const readme = hostedQuery(artifact, 'readme', sha);
+  assert.equal(readme.text, '# Project');
+  assert.equal(readme.sourceIdentityIncludesReadme, false);
 });
