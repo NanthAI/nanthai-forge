@@ -5,6 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
+import { AGENT_DEFAULTS, effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 
 // Issue 47558a99: the advertised tool list is per-session context. Budgets are in characters of the
@@ -139,6 +140,39 @@ test('long tool prose and the project rules moved to help, not lost', async t =>
   assert.match(task.description, /Project rules:/);
   assert((await help('forge_wait')).description.includes('progressToken'));
   assert.equal((await help('no-such-topic')).error.code, 'BAD_ARGUMENT');
+});
+
+test('the live project settings remove and restore each configurable rule in forge_task help', async t => {
+  const { s, client, help } = await connect(t);
+  const taskDescription = async () => (await help('forge_task')).description;
+  const refresh = async agentDefaults => {
+    s.caps.agentDefaults = agentDefaults;
+    const start = s.calls.length;
+    const reply = await client.callTool({
+      name: 'forge_work_overview',
+      arguments: { command: { action: 'capabilities' } },
+    });
+    assert.ok(!reply.isError, JSON.stringify(reply.content));
+    const description = await taskDescription();
+    assert.deepEqual(
+      s.calls.slice(start).map(call => call.name),
+      ['projectHostedAgent:capabilities'],
+    );
+    return description;
+  };
+
+  for (const [setting, off, sentence] of [
+    ['affected-test preflight', { preflight: 'off' }, /land --save runs required preflight|Affected tests:/],
+    ['save reminders', { checkpointNudgeMinutes: 0 }, /save after each meaningful step/i],
+    ['agent urgent priority', { urgentRoles: ['owner', 'agents'] }, /never request urgent priority/i],
+    ['stall alerts', { stallAlerts: { enabled: false } }, /LANDING_STALLED receipt names its repair command/],
+  ]) {
+    await t.test(setting, async () => {
+      assert.match(await taskDescription(), sentence);
+      assert.doesNotMatch(await refresh(effectiveAgentDefaults(off)), sentence);
+      assert.match(await refresh(AGENT_DEFAULTS), sentence);
+    });
+  }
 });
 
 test('the compact listing changes nothing about validation', async t => {

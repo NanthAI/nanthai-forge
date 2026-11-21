@@ -40,7 +40,7 @@ For Forge itself, [AGENTS.md](../../AGENTS.md), [lead playbook](../../docs/agent
 
 ## Project defaults
 
-Read `capabilities` for current rules and `policy` for settings; projects may change these [defaults](../../docs/parallel-work-defaults.md).
+The list below shows Forge's shipped defaults. A project can turn off affected-test preflight, save reminders and stall alerts, and allow agents to request urgent priority. The three [always-on landing rules](../../docs/parallel-work-defaults.md#always-on-landing-rules) apply in every project. Read `capabilities` for the project's live rules and `policy` for its settings.
 
 <!-- agent-defaults:start (generated from scripts/agent-default-lines.mjs) -->
 - land --save runs required preflight within its local budget; on failure or budget exhaustion follow its command, then replay. Sets over 10 min are advisory.

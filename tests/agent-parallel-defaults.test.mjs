@@ -168,3 +168,11 @@ test('the packaged skill and llms.txt carry exactly the generated default lines'
   for (const line of agentDefaultLines(AGENT_DEFAULTS)) assert(llms.includes(line), line);
   assert(llms.includes('docs/parallel-work-defaults.md'));
 });
+
+test('the packaged skill identifies the shipped defaults and points to capabilities for live rules', () => {
+  const skill = readFileSync(new URL('../skills/forge-agent/SKILL.md', import.meta.url), 'utf8');
+  const guidance = /## Project defaults\n\n([^\n]+)/.exec(skill)?.[1];
+  assert.match(guidance, /shipped defaults/i);
+  assert.match(guidance, /\bprojects?\b.*\b(turn off|disable)\b/i);
+  assert.match(guidance, /`capabilities`[^.]*\blive\b/i);
+});
