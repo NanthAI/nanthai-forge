@@ -185,6 +185,11 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
         cargo: {
           paths: ['~/.cargo/registry/index', '~/.cargo/registry/cache', '~/.cargo/git/db'],
           lockfiles: ['**/Cargo.lock'],
+          seed: {
+            lockfile: 'Cargo.lock',
+            manifests: ['Cargo.toml'],
+            command: ['cargo', 'fetch', '--locked'],
+          },
         },
       },
     },
@@ -259,7 +264,24 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
             ],
           },
         },
-        uv: { paths: ['~/.cache/uv'], lockfiles: ['**/uv.lock'] },
+        uv: {
+          paths: ['~/.cache/uv'],
+          lockfiles: ['**/uv.lock'],
+          // --no-build alone still allows editable builds. Exclude all local packages.
+          seed: {
+            lockfile: 'uv.lock',
+            manifests: ['pyproject.toml'],
+            command: [
+              'uv',
+              'sync',
+              '--no-config',
+              '--no-python-downloads',
+              '--frozen',
+              '--no-install-local',
+              '--no-build',
+            ],
+          },
+        },
         poetry: { paths: ['~/.cache/pypoetry'], lockfiles: ['**/poetry.lock'] },
       },
     },

@@ -185,36 +185,59 @@ test('vcpkg, conan and zig cache presets: restored from the lockfiles, only Zig 
   assert.match(vcpkg.paths, /vcpkg\/archives\n~\/\.conan2\/p/);
 });
 
-test('the Zig seed copies only build.zig.zon and build.zig into an empty folder and runs zig build --fetch', t => {
-  const root = mkdtempSync(join(tmpdir(), 'forge-zig-seed-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const repo = join(root, 'repo'),
-    bin = join(root, 'bin'),
-    log = join(root, 'log.json');
-  for (const dir of [join(repo, 'src'), bin]) mkdirSync(dir, { recursive: true });
-  for (const [name, text] of [
-    ['build.zig.zon', '.{}'],
-    ['build.zig', 'pub fn build() void {}'],
-    ['src/main.zig', 'pub fn main() void {}'],
-    ['.npmrc', 'repository configuration'],
-  ])
-    writeFileSync(join(repo, name), text);
-  writeFileSync(
-    join(bin, 'zig'),
-    `#!/bin/sh\nnode -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({cwd: process.cwd(), files: require("fs").readdirSync(".").sort(), args: process.argv.slice(2)}))' ${JSON.stringify(log)} "$@"\n`,
-    { mode: 0o755 },
-  );
-  const result = spawnSync(process.execPath, ['-e', DEPS_SEED_PROGRAM, repo, 'zig'], {
-    env: { PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin` },
-    encoding: 'utf8',
+for (const { tool, args, lockfile, manifest, excluded } of [
+  {
+    tool: 'zig',
+    args: ['build', '--fetch'],
+    lockfile: 'build.zig.zon',
+    manifest: 'build.zig',
+    excluded: ['src/main.zig', '.npmrc'],
+  },
+  {
+    tool: 'cargo',
+    args: ['fetch', '--locked'],
+    lockfile: 'Cargo.lock',
+    manifest: 'Cargo.toml',
+    excluded: ['src/lib.rs', 'build.rs', '.cargo/config.toml', 'rust-toolchain.toml'],
+  },
+  {
+    tool: 'uv',
+    args: ['sync', '--no-config', '--no-python-downloads', '--frozen', '--no-install-local', '--no-build'],
+    lockfile: 'uv.lock',
+    manifest: 'pyproject.toml',
+    excluded: ['src/main.py', 'uv.toml', '.python-version', 'local/pyproject.toml'],
+  },
+]) {
+  test(`the ${tool} seed uses its download command with only the colocated lockfile and manifest`, t => {
+    const root = mkdtempSync(join(tmpdir(), `forge-${tool}-seed-`));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const repo = join(root, 'repo'),
+      project = join(repo, 'app'),
+      bin = join(root, 'bin'),
+      log = join(root, 'log.json');
+    for (const name of [lockfile, manifest, ...excluded]) {
+      const file = join(project, name);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, name);
+    }
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, tool),
+      `#!/bin/sh\nnode -e 'const fs = require("fs"); fs.writeFileSync(process.argv[1], JSON.stringify({cwd: process.cwd(), files: Object.fromEntries(fs.readdirSync(".").map(name => [name, fs.readFileSync(name, "utf8")])), args: process.argv.slice(2)}))' ${JSON.stringify(log)} "$@"\n`,
+      { mode: 0o755 },
+    );
+    const result = spawnSync(process.execPath, ['-e', DEPS_SEED_PROGRAM, repo, tool], {
+      env: { PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin` },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const ran = JSON.parse(readFileSync(log, 'utf8'));
+    assert.deepEqual(ran.files, { [lockfile]: lockfile, [manifest]: manifest });
+    assert.deepEqual(ran.args, args);
+    assert.ok(!ran.cwd.startsWith(repo), 'the download runs outside the Candidate');
+    assert.ok(result.stdout.includes(`Forge seed: ${tool} app/${lockfile} downloaded`));
   });
-  assert.equal(result.status, 0, result.stderr);
-  const ran = JSON.parse(readFileSync(log, 'utf8'));
-  assert.deepEqual(ran.files, ['build.zig', 'build.zig.zon']);
-  assert.deepEqual(ran.args, ['build', '--fetch']);
-  assert.ok(!ran.cwd.startsWith(repo), 'the download runs outside the Candidate');
-  assert.match(result.stdout, /Forge seed: zig build\.zig\.zon downloaded/);
-});
+}
 
 test('generated workflow snapshot per cache preset: restored before the check, seeded Candidate-free only by main', () => {
   for (const preset of Object.keys(CACHE_PRESETS)) {
@@ -388,7 +411,8 @@ test('hosted outputs: version files are Candidate-relative and the cache key fol
   assert.equal(entry.paths, '~/go/pkg/mod\n~/.cache/go-build');
   assert.equal(entry.save, false);
   assert.equal(entry.seed, 'go');
-  assert.equal(hostedDepsCache({ cache: { presets: ['cargo'] } }, input).seed, '');
+  const mixed = { cache: { presets: ['cargo', 'poetry', 'uv', 'maven', 'gradle', 'nuget', 'yarn'] } };
+  assert.equal(hostedDepsCache(mixed, input).seed, 'cargo uv');
   // Source edits keep the key; a lockfile edit, another project or another runner changes it.
   const edited = files.map(f => (f.path === 'main.go' ? { ...f, blob: '4'.repeat(64) } : f));
   assert.equal(hostedDepsCache(declared, { ...input, files: [...edited].reverse() }).key, entry.key);

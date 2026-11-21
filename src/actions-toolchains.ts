@@ -285,9 +285,8 @@ export function declaredSetupSteps(declaration: ActionsDeclaration | undefined) 
 /** Candidate-free seeds (Issue 432164bf): a dependency cache is saved only from a download that
  * runs no repository code. Forge copies just the named manifest files beside each lockfile into an
  * empty temporary folder (no repository configuration such as .npmrc or .pnpmfile.cjs comes along)
- * and runs a download-only command there. Presets with no such command (cargo, uv, poetry, maven,
- * gradle, nuget, yarn, hex, bundler: resolution there can run repository code or configured programs)
- * are restored only, never seeded. */
+ * and runs the seed command there. The checks documentation records why individual presets
+ * stay restore-only. */
 export const CACHE_SEEDS: Partial<
   Record<CachePreset, { lockfile: string; manifests: readonly string[]; command: readonly string[] }>
 > = Object.fromEntries(

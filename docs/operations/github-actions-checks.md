@@ -1420,17 +1420,25 @@ Candidate user too. A seed that fails skips that lockfile and never fails the ch
 | Preset | Seed |
 | --- | --- |
 | `go` | `go mod download` beside `go.sum` and `go.mod` |
+| `cargo` | `cargo fetch --locked` beside `Cargo.lock` and `Cargo.toml`. Cargo fetches without compiling or running build scripts. Manifests that need source files to infer their targets or require uncopied local crates may skip. |
 | `npm` | `npm ci --ignore-scripts --no-audit --no-fund` beside `package-lock.json` and `package.json` |
 | `pnpm` | `pnpm fetch --ignore-scripts --ignore-pnpmfile` beside `pnpm-lock.yaml` |
 | `pip` | `pip download --only-binary=:all:` of each `requirements*.txt` (wheels only, so no build code runs) |
+| `uv` | `uv sync --no-config --no-python-downloads --frozen --no-install-local --no-build` beside `uv.lock` and `pyproject.toml`. uv warms its cache with wheels in a disposable environment, omitting local packages including the project and editable paths. A dependency that needs a source build skips the seed. |
+| `poetry` | Restore only. `poetry install --no-root` can still build locked Git or source archive dependencies. Poetry's wheel-only chooser applies to repository packages, while direct origins use a separate install path. |
+| `maven` | Restore only. `dependency:go-offline` loads the project model, and `pom.xml` can declare Maven build extensions that load on that path. |
+| `gradle` | Restore only. Gradle evaluates Groovy or Kotlin build and settings scripts to configure dependency resolution. `gradle.lockfile` pins versions for those configurations. |
+| `nuget` | Restore only. `dotnet restore --locked-mode` still runs the MSBuild restore target. A project file can import or define tasks on that path, and `packages.lock.json` alone is not a restore project. |
+| `yarn` | Restore only. Yarn Classic can install and pack a Git dependency with a `prepare` script. That fetch path starts a nested install without the outer `--ignore-scripts` flag. |
 | `zig` | `zig build --fetch` beside `build.zig.zon` and `build.zig` (fetches and hash-checks; never compiles `build.zig`) |
 | `composer` | `composer install --no-scripts --no-plugins --no-autoloader --ignore-platform-reqs` beside `composer.lock` and `composer.json` |
 
-The other presets (`cargo`, `uv`, `poetry`, `maven`, `gradle`, `nuget`, `yarn`, `vcpkg`, `conan`, `hex`,
-`bundler`, `swiftpm`, `pub`) are restored only: their resolvers can run repository code or configured
-programs (a Gemfile, a mix.exs and a Package.swift are code), so Forge does not seed them yet, and
-a check that declares them downloads its own dependencies on every run. Every other check restores
-read-only. Lane code never writes an entry that another Lane restores.
+The uv seed needs `uv` on PATH with support for `--no-install-local` and an installed Python
+compatible with the lockfile.
+
+The `vcpkg`, `conan`, `hex`, `bundler`, `swiftpm` and `pub` presets are also restore-only.
+On cache misses, checks download any dependencies the seed did not populate. Lane code never writes
+an entry that another Lane restores.
 
 **Where the steps live.**
 
