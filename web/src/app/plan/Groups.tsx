@@ -132,7 +132,7 @@ function Head({
         <span className="plan-prog">
           <Roll breakdown={breakdown} />
           <span className="plan-pl">
-            <BreakdownWords breakdown={breakdown} />
+            <BreakdownWords breakdown={breakdown} responsive />
             {group.initiative.hidden ? ', hidden from the public plan' : ''}
           </span>
         </span>

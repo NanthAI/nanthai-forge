@@ -18,12 +18,15 @@
   .plan .tt .flag { color: var(--text-3); font-size: var(--t-meta); white-space: nowrap; }
   /* Group header (Items 4df3ee17, f49e3a5c): the roll is sized from its ticks (rows.tsx bandRollWidth) and the words
      sit in their own box beside it, so neither ever draws over the other. */
+  .plan .plan-gh { container: plan-group / inline-size; }
   .plan .plan-gh .plan-gn { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: inherit; }
+  .plan .plan-gh a.plan-gn { min-width: min(12ch, 100%); }
   .plan .plan-gh .grip, .plan .plan-gh .plan-gsp { margin-left: calc(-1 * var(--s-1)); }
   .plan .plan-gsp { width: 22px; flex: none; }
-  .plan .plan-prog { display: inline-flex; flex: none; gap: var(--s-2); align-items: center; min-width: 0; }
+  .plan .plan-prog { display: inline-flex; flex: 0 1 auto; gap: var(--s-2); align-items: center; min-width: 0; }
   .plan .plan-prog .roll { flex: none; }
   .plan .plan-pl { flex: none; font-weight: var(--w-regular); color: var(--text-3); white-space: nowrap; }
+  .plan .plan-prog .plan-pl { flex: 0 1 auto; min-width: 0; white-space: normal; }
   /* The breakdown (b7a0dff1): the roll's ticks and the words' swatches share one colour per part, in one order
      (web/src/app/progress.ts): done green, in progress blue, open the unreached rail, proposed a ring, removed grey. */
   .plan .roll i.prop, .plan .plan-bp i.prop { background: transparent; box-shadow: inset 0 0 0 1px var(--text-3); }
@@ -32,6 +35,29 @@
   .plan .plan-bp i { display: inline-block; width: 8px; height: 8px; margin-inline-end: 4px; border-radius: 1px; background: var(--rail-off); }
   .plan .plan-bp i.ok { background: var(--passed); }
   .plan .plan-bp i.run { background: var(--active); }
+  .plan .plan-bcompact { display: none; }
+  /* Compact counts give the title first claim to a readable width. The status words still appear on each count. */
+  @container plan-group (max-width: 860px) {
+    .plan .plan-gh .plan-prog { flex-wrap: wrap; }
+    .plan .plan-gh .plan-bd { display: inline-flex; flex-wrap: wrap; gap: var(--s-1) var(--s-2); }
+    .plan .plan-gh :is(.plan-bsep, .plan-bfull) { display: none; }
+    .plan .plan-gh .plan-bcompact { display: inline-block; }
+    .plan .plan-gh .plan-bp { position: relative; font-variant-numeric: tabular-nums; }
+    .plan .plan-gh .plan-bword {
+      position: absolute;
+      z-index: 1;
+      inset-block-end: 100%;
+      inset-inline-start: 0;
+      padding: var(--s-1) var(--s-2);
+      border: var(--rule) solid var(--line-strong);
+      border-radius: var(--r);
+      background: var(--surface);
+      color: var(--text);
+      display: none;
+    }
+    .plan .plan-gh .plan-bp:nth-last-child(-n + 3) .plan-bword { inset-inline: auto 0; }
+    .plan .plan-gh .plan-bp:is(:hover, :focus-within) .plan-bword { display: block; }
+  }
   .plan .plan-grp.shut > .band { padding-bottom: var(--s-3); }
   .plan .plan-over .plan-gh { padding: 0; min-width: 0; }
   .plan .plan-over .plan-gn { font-size: var(--t-small); color: var(--text); }

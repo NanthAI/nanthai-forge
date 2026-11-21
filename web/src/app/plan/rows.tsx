@@ -177,21 +177,40 @@ export function Roll({ breakdown, large = false }: { breakdown: Breakdown; large
 }
 
 /** The breakdown in words, each part after a swatch of its tick's colour, in the roll's order. */
-export function BreakdownWords({ breakdown }: { breakdown: Breakdown }) {
+export function BreakdownWords({
+  breakdown,
+  responsive = false,
+}: {
+  breakdown: Breakdown;
+  responsive?: boolean;
+}) {
   return (
     <span className="plan-bd" title={breakdownTotal(breakdown)}>
-      {breakdown.parts.map((part, index) => (
-        // The separator sits outside the part, so a narrow box breaks between parts, never inside one.
-        <Fragment key={part.key}>
-          {/* The dot keeps to the end of a line when the words wrap. */}
-          {index ? <span aria-hidden="true">{'\u00a0· '}</span> : null}
-          <span className="plan-bp">
-            <i className={part.tick} aria-hidden="true" />
-            {part.n.toLocaleString()}
-            {part.atLeast ? '+' : ''} {part.word}
-          </span>
-        </Fragment>
-      ))}
+      {breakdown.parts.map((part, index) => {
+        const count = `${part.n.toLocaleString()}${part.atLeast ? '+' : ''}`;
+        return (
+          <Fragment key={part.key}>
+            {/* The dot keeps to the end of a line when the words wrap. */}
+            {index ? (
+              <span className="plan-bsep" aria-hidden="true">
+                {'\u00a0· '}
+              </span>
+            ) : null}
+            <span className="plan-bp">
+              <i className={part.tick} aria-hidden="true" />
+              <span className="plan-bfull">
+                {count} {part.word}
+              </span>
+              {responsive ? (
+                <span className="plan-bcompact" role="img" aria-label={`${count} ${part.word}`} tabIndex={0}>
+                  {count}
+                  <span className="plan-bword">{part.word}</span>
+                </span>
+              ) : null}
+            </span>
+          </Fragment>
+        );
+      })}
     </span>
   );
 }

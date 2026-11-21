@@ -42,7 +42,8 @@ import ${JSON.stringify(join(root, 'web/src/app/app.css'))};
 const uuid = n => '00000000-0000-4000-8000-' + String(n).padStart(12, '0');
 const launch = { id: uuid(1), kind: 'initiative', title: 'Launch the parser', status: 'open', position: 0, version: 3 };
 const docs = { id: uuid(2), kind: 'initiative', title: 'Documentation and recovery paths', status: 'open', position: 1, version: 1 };
-const big = { id: uuid(3), kind: 'initiative', title: 'A long running release with a name that will not fit on a phone line', status: 'open', position: 2, version: 1 };
+const largeInitiative = new URLSearchParams(location.search).has('large-initiative');
+const big = { id: uuid(3), kind: 'initiative', title: 'A long running release with a name that will not fit on a phone line', status: 'open', position: 2, version: 1, hidden: largeInitiative };
 const item = (n, fields) => ({ id: uuid(n), kind: 'issue', status: 'open', position: n, version: 2, doneWhen: [1, 3], ...fields });
 const rows = [launch, docs, big,
   item(17, { title: 'Last open step of the long release', initiativeId: big.id, status: 'in-progress', inLane: true, order: 'a' }),
@@ -54,7 +55,16 @@ const rows = [launch, docs, big,
   item(15, { title: 'Examples for every reader option, including the rarely used ones', initiativeId: docs.id, order: 'b', doneWhen: [0, 12] }),
   item(16, { title: 'Tidy the old notes', order: 'a', doneWhen: [2, 2] }),
 ];
-const read = { rows: JSON.stringify(rows), more: false, settled: [{ initiativeId: launch.id, done: 4, dropped: 1, atLeast: false }, { initiativeId: docs.id, done: 0, dropped: 0, atLeast: false }, { initiativeId: big.id, done: 123, dropped: 7, atLeast: false }], canEdit: true };
+if (largeInitiative) {
+  for (const [index, [status, count]] of [['in-progress', 120], ['open', 200], ['proposed', 95]].entries())
+    rows.push(...Array.from({ length: count }, (_, n) =>
+      item(1000 + index * 500 + n, { title: 'Synthetic release step', status, initiativeId: big.id }),
+    ));
+}
+const bigSettled = largeInitiative
+  ? { done: 1000, dropped: 1000, atLeast: true }
+  : { done: 123, dropped: 7, atLeast: false };
+const read = { rows: JSON.stringify(rows), more: false, settled: [{ initiativeId: launch.id, done: 4, dropped: 1, atLeast: false }, { initiativeId: docs.id, done: 0, dropped: 0, atLeast: false }, { initiativeId: big.id, ...bigSettled }], canEdit: true };
 const settledRows = [item(20, { title: 'Old reader removed', status: 'closed', initiativeId: launch.id }), item(21, { title: 'Ship a second parser', status: 'abandoned' })];
 const settled = { rows: settledRows, more: false, loading: false, failed: false, loadMore() {} };
 // Archive and Deleted (Item 4c9e961e): each row says when it went and the status it left.
@@ -395,17 +405,21 @@ test('plan views and bulk bar: real components keep the view in the address and 
         const ticks = [...roll.children].map(tick => tick.getBoundingClientRect());
         // b7a0dff1: the chip, the words in order and the roll's ticks, read off the screen.
         const chip = head.querySelector('.cnt');
-        const parts = [...words.querySelectorAll('.plan-bp')].map(part => ({
-          swatch: part.querySelector('i').className,
-          n: Number(part.textContent.replace(/[^0-9]/g, '')),
-          word: part.textContent.replace(/^[\s·]*[0-9,]+\+?\s*/, ''),
-        }));
+        const parts = [...words.querySelectorAll('.plan-bp')].map(part => {
+          const label = part.querySelector('.plan-bfull').textContent;
+          return {
+            swatch: part.querySelector('i').className,
+            n: Number(label.replace(/[^0-9]/g, '')),
+            word: label.replace(/^[0-9,]+\+?\s*/, ''),
+            label,
+          };
+        });
         return [
           {
             chip: Number(chip?.textContent.replace(/[^0-9]/g, '')),
             parts,
             ticks: [...roll.children].map(tick => tick.className),
-            words: words.textContent.replace(/\u00a0/g, ' '), // the dot is held to its line by a no-break space
+            words: parts.map(part => part.label).join(' · '),
             meet: a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom,
             spill: ticks.some(tick => tick.right > a.right + 0.5 || tick.left < a.left - 0.5),
           },
@@ -413,11 +427,12 @@ test('plan views and bulk bar: real components keep the view in the address and 
       }),
     );
 
-  // f49e3a5c: a header's roll and its "N of M done" never meet, at 3-digit counts too, at three widths, both themes.
-  for (const width of [1440, 1024, 390])
+  // f49e3a5c: a header's roll and its breakdown never meet, at 3-digit counts too, in both themes.
+  for (const width of [1440, 1024, 700, 390])
     for (const theme of ['dark', 'light'])
       await t.test(`group header ${width} ${theme}: the roll never draws over its words`, async () => {
         const { page, errors, context } = await open(width, theme);
+        assert.equal(await page.locator('.plan-gh .plan-bfull').first().isVisible(), width === 1440);
         const boxes = await headers(page);
         assert.ok(
           boxes.some(
@@ -451,11 +466,84 @@ test('plan views and bulk bar: real components keep the view in the address and 
         const launch = boxes.find(box => box.chip === 9);
         assert.equal(launch?.words, '4 done · 1 in progress · 2 open · 1 proposed · 1 removed');
         assert.deepEqual(launch.ticks, ['ok', 'ok', 'ok', 'ok', 'run', 'open', 'open', 'prop', 'gone']);
-        if (shots && width === 1024)
+        if (shots && width !== 390)
           await page.screenshot({ path: join(shots, `plan-headers-${width}-${theme}.png`), fullPage: true });
         assert.deepEqual(errors, []);
         await context.close();
       });
+
+  await t.test('a narrow Initiative group keeps its title and names every compact status count', async () => {
+    const { page, context } = await open(1440, 'dark');
+    try {
+      const longName = 'A long running release with a name that will not fit on a phone line';
+      const title = page.getByRole('link', { name: longName, exact: true });
+      const longHeader = title.locator('..');
+      const launchTitle = page.getByRole('link', { name: 'Launch the parser', exact: true });
+      const launchHeader = launchTitle.locator('..');
+      const parts = launchHeader.locator('.plan-bp');
+      const labels = ['4 done', '1 in progress', '2 open', '1 proposed', '1 removed'];
+      assert.deepEqual(await parts.allInnerTexts(), labels);
+      await launchTitle.focus();
+      await page.keyboard.press('Tab');
+      const fold = launchHeader.getByRole('button', { name: 'Items of Launch the parser' });
+      assert.equal(await fold.evaluate(node => node === document.activeElement), true);
+
+      // The same desktop viewport can hold a narrow group. Its own width determines how it draws.
+      for (const header of [longHeader, launchHeader])
+        await header.evaluate(node => (node.style.maxInlineSize = '500px'));
+
+      const bounds = await title.evaluate(node => ({
+        width: node.clientWidth,
+        textWidth: node.scrollWidth,
+        overflow: getComputedStyle(node).textOverflow,
+      }));
+      assert.ok(bounds.width >= 80 && bounds.width < bounds.textWidth, JSON.stringify(bounds));
+      assert.equal(bounds.overflow, 'ellipsis');
+      assert.equal(await title.getAttribute('title'), longName);
+      assert.deepEqual(await parts.allInnerTexts(), ['4', '1', '2', '1', '1']);
+      for (const name of labels)
+        assert.equal(await launchHeader.getByRole('img', { name, exact: true }).count(), 1);
+
+      const done = launchHeader.getByRole('img', { name: '4 done', exact: true });
+      const word = done.getByText('done', { exact: true });
+      assert.equal(await word.isVisible(), false);
+      await done.hover();
+      assert.equal(await word.isVisible(), true);
+      await page.mouse.move(0, 0);
+      assert.equal(await word.isVisible(), false);
+      await launchTitle.focus();
+      await page.keyboard.press('Tab');
+      assert.equal(await done.evaluate(node => node === document.activeElement), true);
+      assert.equal(await word.isVisible(), true);
+    } finally {
+      await context.close();
+    }
+  });
+
+  await t.test(
+    'a hidden Initiative with large counts keeps its title and compact tips within the page',
+    async () => {
+      const { page, context } = await open(1180, 'dark', '?large-initiative');
+      try {
+        const title = page.getByRole('link', { name: /^A long running release/ });
+        const header = title.locator('..');
+        assert.ok((await title.boundingBox()).width >= 80);
+        assert.ok(await header.getByText('1,000+ done', { exact: true }).isVisible());
+        const fits = () => page.evaluate(() => document.documentElement.scrollWidth === innerWidth);
+        assert.equal(await fits(), true);
+
+        await page.setViewportSize({ width: 360, height: 844 });
+        const proposed = header.getByRole('img', { name: '95 proposed', exact: true });
+        assert.equal(await fits(), true);
+        await proposed.focus();
+        const tip = await proposed.getByText('proposed', { exact: true }).boundingBox();
+        assert.ok(tip && tip.x >= 0 && tip.x + tip.width <= 360, JSON.stringify(tip));
+        assert.equal(await fits(), true);
+      } finally {
+        await context.close();
+      }
+    },
+  );
 
   // Item 88c08511 (web guidance trial): the reorder list paints its rows a render after its group headers, which moved
   // every header below the first (CLS 0.34 at 390 with the owner's 325 Items, 0.20 here). The list keeps its rows'
@@ -582,6 +670,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
         });
         const progress = page.getByRole('region', { name: 'Initiative progress' });
         await progress.getByText('At least 2', { exact: true }).waitFor();
+        assert.ok(await progress.getByText(/^\d+ in progress$/).isVisible());
         assert.match(await progress.textContent(), /Lanes open1Landings2Files touchedAt least 2/);
         await page.getByRole('button', { name: 'Done and dropped Items' }).click();
         assert.deepEqual(calls, [{ initiativeId: launchId, cursor: null }]);
