@@ -59,7 +59,7 @@ the follower alarm, and an ownerless wait names the predecessor it waits behind.
 A `LANDING_STALLED` observation follows its receipt's exact repair command for the
 original operation. Do not resubmit a live landing: a replay resumes its retained
 operation and cannot restart a running check. When no repair command is available,
-read `queue {}` and `landing {operationId}` first. If the receipt explicitly records
+read `queue {}` and `observe {operationId}` first. If the receipt explicitly records
 `terminal-failed` and directs a retry, fix the cause and retry in the same Lane.
 
 Queued receipts show position, entries ahead, live predecessor and an approximate

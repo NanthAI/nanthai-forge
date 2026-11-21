@@ -260,7 +260,7 @@ async function runAgentCli(
     await options.beforeLocal?.();
     if (action === 'install-hooks' || action === 'uninstall-hooks') {
       process.stdout.write(
-        'Local first-write hooks: {scope?:"user"|"project",laneId?:"legacy ignored"}. Lane-independent; first CLI run installs by default. Uninstall persists off; undo with install-hooks. User switch: nforge settings firstWriteHooks false.\n',
+        `nforge x ROOT ${action} [JSON]\nLocal first-write hooks: {scope?:"user"|"project",laneId?:"legacy ignored"}. Lane-independent; first CLI run installs by default. Uninstall persists off; undo with nforge x ROOT install-hooks. User switch: nforge settings firstWriteHooks false.\n`,
       );
       return undefined;
     }
@@ -313,6 +313,18 @@ async function runAgentCli(
     );
     selected = { ...selected, message };
   }
+  // The wrapper emits these only on success. Canonical forms and internal facades stay quiet.
+  const notice = () => {
+    if (
+      options.notices === false ||
+      form!.operator ||
+      form!.flags.length ||
+      process.env[LAND_CHILD_ENV] === '1'
+    )
+      return;
+    const current = newForm(requestedAction!, selected, true);
+    if (current) notices.push(aliasNotice(rootArg ?? root, requestedAction!, current));
+  };
   if (action === 'install-hooks' || action === 'uninstall-hooks') {
     if (
       options.beforeDispatch &&
@@ -320,6 +332,7 @@ async function runAgentCli(
     )
       return;
     const { configureEditHooks } = await import('./agent-install-hooks.js');
+    notice();
     return configureEditHooks(resolve(root), selected, action === 'uninstall-hooks');
   }
   const hosted = hostedAgentAddress(root, selected);
@@ -368,18 +381,6 @@ async function runAgentCli(
     'BAD_ARGUMENT',
     'Command action differs from the selected action.',
   );
-  // Old spellings print their start/save/land or x form once; new forms and internal facades stay quiet.
-  const notice = (command: Record<string, unknown>) => {
-    if (
-      options.notices === false ||
-      form!.operator ||
-      form!.flags.length ||
-      process.env[LAND_CHILD_ENV] === '1'
-    )
-      return;
-    const current = newForm(requestedAction!, command, Boolean(hosted));
-    if (current) notices.push(aliasNotice(rootArg ?? root, requestedAction!, current));
-  };
   if (hosted) {
     // A unique short laneId of a Lane this machine opened resolves locally (no network).
     const short = resolveShortLaneId(selected, hosted.projectId);
@@ -487,7 +488,7 @@ async function runAgentCli(
         if (!(await options.beforeDispatch(stdin === undefined ? undefined : { stdin }))) return;
       }
       const [{ hostedAgentCli }, { hostedLandCli }, { HostedAgentTransport }] = await modules;
-      notice(selected);
+      notice();
       // The installed CLI detaches the submission and waits by default; in-process callers opt in.
       if (action === 'finish' && (options.process || client.wait !== undefined))
         return await hostedLandCli(here, command, hosted, {

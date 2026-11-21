@@ -3,6 +3,7 @@ import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
+import { mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
@@ -15,6 +16,7 @@ import {
   retiredActions,
 } from '../dist/agent-verbs.js';
 import { agentCli } from '../dist/agent-cli.js';
+import { editHooksEnabled, setEditHooksEnabled } from '../dist/agent-hook-settings.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import {
   hostedAgentAction,
@@ -47,7 +49,7 @@ const rows = [
   ['land-ready', 'retired'],
   ['withdraw', 'land --withdraw', 'withdraw', 'withdraw'],
   ['accept', 'retired'],
-  ['landing', null],
+  ['landing', 'observe', 'observe', 'observe'],
   ['observe', null],
   ['wait', null],
   ['log', null],
@@ -64,6 +66,10 @@ const rows = [
   ['take', 'retired'],
   ['link', 'retired'],
   ['status', null],
+  ['whoami', 'status', 'status', 'status'],
+  ['board-post', 'board --post', 'board-post', 'board-post'],
+  ['board-reply', 'board --reply', 'board-reply', 'board-reply'],
+  ['board-resolve', 'board --resolve', 'board-resolve', 'board-resolve'],
   ['pending-status', 'retired'],
   ['records', null],
   ['candidate', 'retired'],
@@ -133,6 +139,18 @@ async function help(args, options) {
   }
 }
 
+async function captureStderr(run) {
+  const done = captured('stderr');
+  let result;
+  let stderr;
+  try {
+    result = await run();
+  } finally {
+    stderr = done();
+  }
+  return { result, stderr };
+}
+
 test('save --overlap-answer is refused with the conflictNotice explanation (path notices were removed, Issue 853fcde3)', () => {
   assert.throws(
     () => parseVerbForm('save', ['--overlap-answer', '{}']),
@@ -179,7 +197,7 @@ for (const [action, form, nativeWire, hostedWire] of rows)
     assert.equal(lowerVerb(parsed, false), nativeWire);
     assert.equal(lowerVerb(parsed, true), hostedWire);
     // The CLI routes the new form to the old native action (same help, same refusal).
-    const before = await help([nativeWire]),
+    const before = await help([action]),
       after = await help(form.split(' '));
     assert.deepEqual(after, before);
   });
@@ -257,12 +275,14 @@ test('old and new spellings send the same hosted request; only the old one print
   const sent = [];
   t.mock.method(HostedAgentTransport.prototype, 'dispatch', async (action, command) => {
     // Compare what the transport executes: it already treats run/check and checkpoint/save as one action.
-    sent.push({ action: hostedAgentAction(action), command });
+    const canonical = ['run', 'checkpoint', 'landing'].includes(action) ? hostedAgentAction(action) : action;
+    sent.push({ action: canonical, command });
     return { schema: 1, transport: 'hosted', action, operationId: null, resolved: null, result: {} };
   });
   const laneId = randomUUID(),
     candidateId = randomUUID(),
     submissionId = randomUUID();
+  const operationId = randomUUID();
   const pairs = [
     ['checkpoint', ['save'], { laneId, message: 'Save' }],
     ['sync', ['save', '--sync'], { laneId }],
@@ -272,40 +292,61 @@ test('old and new spellings send the same hosted request; only the old one print
     ['open', ['start', '--open'], { laneId }],
     ['reopen', ['start', '--reopen'], { laneId }],
     ['finish', ['land', '--save'], { laneId, message: 'Land' }],
-    ['finish', ['land', '--save', '--check-only'], { laneId, message: 'Check', accept: false }],
+    [
+      'finish',
+      ['land', '--save', '--check-only'],
+      { laneId, message: 'Check', accept: false },
+      { laneId, message: 'Check' },
+    ],
+    ['withdraw', ['land', '--withdraw'], { laneId }],
     ['confirm-tests', ['save', '--contract'], { candidateId }],
     ['friction', ['save', '--friction'], { title: 'T' }],
     ['decide', ['save', '--decision'], { what: 'W' }],
     ['cancel', ['x', 'cancel'], { submissionId }],
     ['revert', ['x', 'revert'], { message: 'R' }],
     ['abandon', ['x', 'abandon'], { laneId }],
+    ['complete', ['x', 'complete'], { laneId }],
+    ['complete-merged', ['x', 'complete-merged'], {}],
+    ['abandon-dormant', ['x', 'abandon-dormant'], {}],
     ['prioritize', ['x', 'prioritize'], { submissionId, priority: 'urgent' }],
     ['pin', ['x', 'pin'], { laneId, pinned: true }],
+    [
+      'friction-triage',
+      ['x', 'friction-triage'],
+      { frictionIds: [operationId], status: 'dropped', reason: 'Duplicate' },
+    ],
+    ['set-policy', ['x', 'set-policy'], {}],
     ['configure-check', ['x', 'configure-check'], { name: 'verify' }],
     ['configure-runner', ['x', 'configure-runner'], { provider: 'self-hosted' }],
+    ['source-pack', ['x', 'source-pack'], {}],
+    ['snapshots', ['x', 'snapshots'], {}],
+    ['landing', ['observe'], { operationId }],
+    ['whoami', ['status'], {}, { whoami: true }],
+    ['board-post', ['board', '--post'], { to: 'project', text: 'Ready', operationId }],
+    ['board-reply', ['board', '--reply'], { id: operationId, text: 'Thanks', operationId }],
+    ['board-resolve', ['board', '--resolve'], { id: operationId, operationId }],
   ];
-  for (const [old, current, input] of pairs) {
-    const oldInput = input;
-    const newInput = current.includes('--check-only') ? (({ accept, ...rest }) => rest)(input) : input;
-    sent.length = 0;
-    let done = captured('stderr');
-    await agentCli([root, old, JSON.stringify({ ...address, ...oldInput })]);
-    const oldNotice = done();
-    done = captured('stderr');
-    const args =
-      current[0] === 'x'
-        ? [[root, current[1], JSON.stringify({ ...address, ...newInput })], { operator: true }]
-        : [[root, ...current, JSON.stringify({ ...address, ...newInput })]];
-    await agentCli(...args);
-    const newNotice = done();
-    // Budget: lowering is local; each spelling makes exactly one transport dispatch.
-    assert.equal(sent.length, 2);
-    assert.deepEqual(sent[1], sent[0], `${old} and ${current.join(' ')} send the same request`);
-    assert.equal(
-      oldNotice,
-      `Alias: ${old} is now nforge ${current[0] === 'x' ? 'x' : 'agent'} ${root} ${current[0] === 'x' ? current[1] : current.join(' ')} (same JSON and replay identity).\n`,
-    );
-    assert.equal(newNotice, '');
+  for (const [old, current, oldInput, newInput = oldInput] of pairs) {
+    await t.test(`${old} routes to ${current.join(' ')}`, async () => {
+      sent.length = 0;
+      const { stderr: oldNotice } = await captureStderr(() =>
+        agentCli([root, old, JSON.stringify({ ...address, ...oldInput })]),
+      );
+      const operator = current[0] === 'x';
+      const argv = operator ? current.slice(1) : current;
+      const { stderr: newNotice } = await captureStderr(() =>
+        agentCli([root, ...argv, JSON.stringify({ ...address, ...newInput })], { operator }),
+      );
+      assert.equal(sent.length, 2, 'one transport dispatch for each spelling');
+      assert.deepEqual(sent[1], sent[0]);
+      const parameters =
+        old === 'whoami' ? ' with "whoami":true in JSON' : ' (same JSON and replay identity)';
+      assert.equal(
+        oldNotice,
+        `Alias: ${old} is now nforge ${operator ? 'x' : 'agent'} ${root} ${argv.join(' ')}${parameters}.\n`,
+      );
+      assert.equal(newNotice, '');
+    });
   }
   // Kept verbs and reads stay quiet; the internal set-policy facade does too.
   for (const action of ['save', 'start', 'status', 'capabilities']) {
@@ -321,3 +362,33 @@ test('old and new spellings send the same hosted request; only the old one print
   await assert.rejects(agentCli([root, 'friction', JSON.stringify({ ...address, title: 'T' })]));
   assert.equal(failing(), '');
 });
+
+for (const [action, enabled] of [
+  ['install-hooks', true],
+  ['uninstall-hooks', false],
+]) {
+  test(`${action} routes to x ${action} and prints one success hint`, async t => {
+    const root = realpathSync(temporaryDirectory(t, 'forge-hook-verb-'));
+    mkdirSync(join(root, '.forge', 'work'), { recursive: true });
+    const args = [root, action, '{"scope":"project"}'];
+    setEditHooksEnabled(!enabled, root);
+    const { result: alias, stderr } = await captureStderr(() => agentCli(args));
+    assert.equal(
+      stderr,
+      `Alias: ${action} is now nforge x ${root} ${action} (same JSON and replay identity).\n`,
+    );
+    assert.equal(editHooksEnabled(root), enabled);
+    setEditHooksEnabled(!enabled, root);
+    const { result: canonical, stderr: canonicalNotice } = await captureStderr(() =>
+      agentCli(args, { operator: true }),
+    );
+    assert.equal(canonicalNotice, '');
+    assert.deepEqual(alias, canonical);
+    assert.equal(editHooksEnabled(root), enabled);
+
+    const { stderr: failureNotice } = await captureStderr(() =>
+      assert.rejects(agentCli([root, action, '{"scope":"invalid"}']), { code: 'BAD_ARGUMENT' }),
+    );
+    assert.equal(failureNotice, '', 'failure prints no alias hint');
+  });
+}

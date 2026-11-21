@@ -58,7 +58,7 @@ request for the same saved Lane/head returns the existing landing handle, includ
 its terminal outcome. The handle contains the canonical operationId and entryIds.
 Omitted wait and `wait:false` durably submit and return the current phase immediately.
 Requests submit to the hosted controller. Requester death does not cancel the goal.
-`nforge agent ROOT landing '{"operationId":"UUID"}'` reads its current phase and
+`nforge agent ROOT observe '{"operationId":"UUID"}'` reads its current phase and
 outcome without driving it or taking the owner writer lock.
 
 Inputs from the same Intent share a Candidate (the same grouping as `finish with`);

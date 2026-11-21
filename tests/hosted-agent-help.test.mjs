@@ -146,6 +146,20 @@ test('unsupported actions give a supported alternative without upgrade advice or
   assert.equal(s.calls.length, 0);
 });
 
+test('bare land help names the same explicit continuation as dispatch', async t => {
+  const s = agentFixture(t);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const before = s.calls.length;
+  const help = await output(() => agentCli([s.root, 'land', '--help']));
+  assert.match(help, /^Hosted action land is unavailable\. Use land --save/);
+  assert.doesNotMatch(help, /"properties"/);
+  await assert.rejects(
+    agentCli([s.root, 'land', '{}'], { beforeDispatch: () => assert.fail('Bare land cannot dispatch') }),
+    error => error.code === 'HOSTED_ACTION_UNSUPPORTED' && /Use land --save/.test(error.message),
+  );
+  assert.equal(s.calls.length, before);
+});
+
 test('observation BAD_ARGUMENT names supported targets and rejected fields', async t => {
   const s = agentFixture(t);
   await assert.rejects(

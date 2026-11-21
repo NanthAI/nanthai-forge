@@ -11,8 +11,8 @@ import { cliTeachContext, teach } from '../dist/error-teaching.js';
 import { hostedActionError, hostedFailureCause, hostedFailureDetail } from '../dist/hosted-action-error.js';
 import { cliCanaryNotice, cliNoticeAlways } from '../dist/cli-canary.js';
 
-test('land --help prints the land --save schema and points to save-only (friction 80c97c5c)', () => {
-  const text = hostedAgentHelp('land');
+test('land --save help prints the submission schema and points to save-only (friction 80c97c5c)', () => {
+  const text = hostedAgentHelp('finish');
   assert.doesNotMatch(text, /is unavailable/);
   assert.match(text, /land --save/);
   assert.match(text, /"message"/);

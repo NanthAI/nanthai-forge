@@ -13,6 +13,10 @@ Agents use three verbs: `start`, `save` and `land`. Reads keep their names (`sta
 | `open`, `reopen` | `start --open`, `start --reopen` |
 | `finish` | `land --save` |
 | `finish` with `accept:false` | `land --save --check-only` |
-| `cancel`, `revert`, `abandon`, `complete`, `complete-merged`, `abandon-dormant`, `pin`, `install-hooks`, `uninstall-hooks`, `friction-triage`, `set-policy`, `configure-check`, `configure-runner`, `prioritize`, `source-pack` | `nforge x ROOT ACTION` |
+| `withdraw` | `land --withdraw` |
+| `landing` | `observe` |
+| `whoami` | `status {"whoami":true}` |
+| `board-post`, `board-reply`, `board-resolve` | `board --post`, `board --reply`, `board --resolve` |
+| `cancel`, `revert`, `abandon`, `complete`, `complete-merged`, `abandon-dormant`, `pin`, `install-hooks`, `uninstall-hooks`, `friction-triage`, `set-policy`, `configure-check`, `configure-runner`, `prioritize`, `source-pack`, `snapshots` | `nforge x ROOT ACTION` |
 
-Old names keep working for at least one released version and print their new form once on stderr; stdout, JSON and replay identity do not change. Later sections still name the underlying actions (for example `finish`, `checkpoint`) where they describe receipts and wire fields; those are the actions the verbs above run. MCP tools keep their current names and arguments in this release.
+Old CLI names keep working for at least one released version. Successful calls print one hint on stderr and preserve stdout and replay identity. Later sections use underlying names such as `finish` and `checkpoint` for receipts and wire fields. Bare `land` returns `HOSTED_ACTION_UNSUPPORTED` and points to `land --save`. To continue an existing landing, replay its original request or run the receipt's wait command.

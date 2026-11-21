@@ -9,7 +9,7 @@ Lifecycle overlays can shorten pages; missing facts are `null`.
 No-Lane friction attaches to project/actor; inside a Lane it infers that Lane:
 
 ```sh
-nforge agent ROOT friction '{"title":"…","detail":"…","area":"cli"}'
+nforge agent ROOT save --friction '{"title":"…","detail":"…","area":"cli"}'
 ```
 
 Recording uses one mutation; field errors use zero network calls. Hosted roots

@@ -10,7 +10,7 @@ check output. Proposal reads never run project code.
 Confirm or edit with one CLI command (MCP: `forge_check`, action `confirm-tests`):
 
 ```sh
-nforge agent ROOT confirm-tests '{"operationId":"UUID","candidateId":"CANDIDATE_ID","expectedVersion":0,"runId":"RUN_ID","tests":["tests/example.test.mjs"]}'
+nforge agent ROOT save --contract '{"operationId":"UUID","candidateId":"CANDIDATE_ID","expectedVersion":0,"runId":"RUN_ID","tests":["tests/example.test.mjs"]}'
 ```
 
 Omit `tests` to confirm the proposal, or supply the exact edited list. Confirmation

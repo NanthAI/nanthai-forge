@@ -239,6 +239,12 @@ export function newForm(
   }
   if (Object.hasOwn(lifecycleAliases, action)) return lifecycleAliases[action];
   if ((operatorActions as readonly string[]).includes(action)) return `x ${action}`;
+  if (action === 'landing') return 'observe';
+  if (action === 'whoami') return 'status';
+  if (action.startsWith('board-')) {
+    const flag = `--${action.slice('board-'.length)}`;
+    if (Object.hasOwn(boardModes, flag)) return `board ${flag}`;
+  }
   return undefined;
 }
 
@@ -256,5 +262,6 @@ export function aliasNotice(root: string, action: string, form: string): string 
   const command = form.startsWith('x ')
     ? `nforge x ${quote(root)} ${form.slice(2)}`
     : `nforge agent ${quote(root)} ${form}`;
-  return `Alias: ${action} is now ${command} (same JSON and replay identity).\n`;
+  const parameters = action === 'whoami' ? ' with "whoami":true in JSON' : ' (same JSON and replay identity)';
+  return `Alias: ${action} is now ${command}${parameters}.\n`;
 }

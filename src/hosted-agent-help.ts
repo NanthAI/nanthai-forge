@@ -37,7 +37,7 @@ export const hostedAgentHelpEntries = [
   );
   return {
     action,
-    command: newForm(action, {}, true) ?? action.replace(/^board-/, 'board --'),
+    command: newForm(action, {}, true) ?? action,
     parameters,
     schema: json,
   };
@@ -86,17 +86,8 @@ const actionTopic: Record<string, HelpTopicId> = {
 };
 
 export function hostedAgentHelp(action?: string) {
-  // `land` is the CLI form of the finish action: its help is land --save's schema, not "unavailable".
   const canonical =
-    action === 'checkpoint'
-      ? 'save'
-      : action === 'run'
-        ? 'check'
-        : action === 'landing'
-          ? 'observe'
-          : action === 'land' || action === 'land-ready'
-            ? 'finish'
-            : action;
+    action === 'checkpoint' ? 'save' : action === 'run' ? 'check' : action === 'landing' ? 'observe' : action;
   if (canonical === 'log')
     return 'nforge agent ROOT log \'{"runId":"RUN_ID","tail":8192}\'\nPrints the retained, redacted output of a hosted check run (a bounded tail of what Forge keeps, at most 64 KiB per job): the output on stdout, one line about it on stderr. runId is the check run in a status, observe or wait receipt. Optional: tail (bytes, 1 to 65536, default 8192), stream "stdout"|"stderr", shard, attempt, json:true (structured result with streams, status and provider link). Same access as the run: project members, or anyone for a public project. The full log stays with the provider (the stderr line names its link). One manifest query, one per 50 streams and one signed download per chunk read; idle 0.\n';
   const entries = canonical
@@ -126,7 +117,7 @@ export function hostedAgentHelp(action?: string) {
             'Replaying an operationId keeps every original parameter, including message; use the receipt replay command.',
             'Errors show {code,message,next,learn}. Full receipts use --detail or MCP replyDetail:true.',
             helpTopicIndex(),
-            'MCP: forge_work_overview {action:"help",topic} returns any action\'s exact schema, or a topic.',
+            'MCP schemas: forge_work_overview {action:"help",topic}. Forms: nforge docs agents/workflow.',
             '',
           ]),
   ].join('\n');
