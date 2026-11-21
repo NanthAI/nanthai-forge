@@ -30,10 +30,12 @@ export function Activity({
   complete = true,
   loading = false,
   loadMore,
+  quietSessionsHref,
 }: {
   complete?: boolean;
   loading?: boolean;
   loadMore?: (() => void) | undefined;
+  quietSessionsHref?: string;
   items: readonly FeedItem[];
   paging?: { more: boolean; loading: boolean; loadMore: () => void };
   decisions: number;
@@ -104,6 +106,7 @@ export function Activity({
             <a href={nowHref}>History</a>
           </div>
           <h1>Activity</h1>
+          {quietSessionsHref && <a href={quietSessionsHref}>Quiet sessions</a>}
         </div>
         <Button
           variant="ghost"

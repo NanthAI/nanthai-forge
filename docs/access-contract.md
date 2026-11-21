@@ -73,17 +73,20 @@ fails after a takeover commits, the CLI reports that committed operation and its
 retry. Independent local directories preserve unsaved files; sharing one directory
 between processes remains an operating-system boundary, not an isolated workspace.
 
-The Sessions screen reads one presence page (25 returned rows, at most 100 rows
-or 64 KiB scanned) without a heartbeat. It groups the loaded observations by
-person and device and opens window details on demand. A session profile uses the
-same filtered read. The Holder screen uses one current-record read and the
-existing paginated activity feed, including archived history. No list invents
-unreported app, model, device or session provenance. Counts describe the loaded
-page, rather than an organisation total. Device labels are projected through the
-central owner-visibility policy; public source views omit holder provenance.
-The app reuses the existing design-system regions, rows, controls and activity
-feed. The source guards reuse existing reads; no ordinary save or landing RPC is
-added. Rollout remains off by default pending activation through the existing owner policy and cost review.
+The Sessions screen reads one presence page (25 returned observations, at most
+100 rows or 64 KiB scanned) without a heartbeat. The server applies name, person,
+app and device filters on every page. A device group shows its first session and
+the number of other matches on the page, with a link to the paged device list.
+Device labels remain visible to their owner through the central policy.
+
+After 30 minutes without a new observation, a session folds from the live list
+into Session activity, which is linked from the project's Activity page.
+
+The Holder screen uses one current-record read and the existing paginated
+activity feed, including archived history. Public source views omit holder
+provenance. The source guards reuse existing reads, with no added save or landing
+RPC. The holder policy remains off by default pending activation through the
+existing owner policy and cost review.
 
 
 ## Stable device approvals

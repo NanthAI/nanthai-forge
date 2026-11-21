@@ -6,6 +6,13 @@ export type SessionRow = Omit<AgentPresence, 'lane' | 'name'> & {
   intentId: string;
   title: string;
 };
+export type SessionFilters = {
+  find?: string;
+  person?: string;
+  app?: string;
+  device?: string;
+  deviceId?: string;
+};
 export type SessionsRead = {
   observedAt: number;
   rows: SessionRow[];

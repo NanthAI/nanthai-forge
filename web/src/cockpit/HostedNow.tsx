@@ -10,6 +10,8 @@ import { hostedHref } from './hosted-links';
 export { hostedHref } from './hosted-links';
 import { Activity } from './Activity';
 import { activityItems } from './activity-model';
+import { projectRouteIdentity } from '../../../src/project-routes';
+import { hrefFor } from '../app/paths';
 import { hostedFeed } from './coordination';
 import { overlapFileCount } from './overlap-model';
 import { useMemo, useState } from 'react';
@@ -167,12 +169,25 @@ export function HostedNowView({
   const empty = !loading && !failed && records.intents.length === 0;
   // Needs you and the situation line wait for every record they derive from: loading is not an all-clear.
   const reading = failed ? 'failed' : loading || live.initialLoading === true ? 'loading' : undefined;
-  if (activity)
+  if (activity) {
+    const address = typeof location === 'undefined' ? null : projectRouteIdentity(location.href);
+    const quietSessionsHref =
+      address && viewer
+        ? hrefFor({
+            frame: 'project',
+            handle: address.handle,
+            project: address.slug,
+            place: 'lanes',
+            section: 'sessions',
+            rest: '',
+          }) + '?activity=1'
+        : undefined;
     return (
       <Activity
         complete={live.eventsComplete ?? true}
         loading={live.eventsLoading ?? false}
         loadMore={live.loadMoreEvents}
+        {...(quietSessionsHref ? { quietSessionsHref } : {})}
         items={activityItems(
           {
             ...records,
@@ -190,6 +205,7 @@ export function HostedNowView({
         viewHref={id => hostedHref({ projectTab: 'intent', reviewView: id })}
       />
     );
+  }
   return (
     <WorkReferenceContext.Provider
       value={workReferences(records, {

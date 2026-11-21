@@ -7,6 +7,7 @@ import { moduleUrl } from './convex-module.mjs';
 const api = await import(moduleUrl('../convex/projectSessions.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 const peer = 'user_PEERACCOUNT01';
+const now = 1_800_000_000_000;
 
 test('session pages disclose public handles and device codes but device names follow the one owner policy', async () => {
   const f = await saveFixture();
@@ -78,10 +79,10 @@ test('presence stays a bounded page at current and doubled session scale and mis
         goal: 'Synthetic work',
         paths: [],
         pathCount: 0,
-        at: i,
+        at: now - i,
       });
     const result = JSON.parse(
-      await f.transaction('sessions', api.read, { projectId: f.projectId, cursor: null }),
+      await f.transaction('sessions', api.read, { projectId: f.projectId, cursor: null, observedAt: now }),
     );
     assert(result.rows.length <= 25);
     assert.equal(result.isDone, false);
@@ -128,6 +129,8 @@ test('public source replies omit holder provenance while current project writers
 test('session projection at current and doubled organisation scale reads one bounded page including distinct people', async () => {
   for (const scale of [1, 2]) {
     const f = await saveFixture();
+    for (let i = 0; i < 25 * scale; i++)
+      f.insert('teams', { owner: 'owner', name: `Team ${i}`, operationId: randomUUID() });
     for (let i = 0; i < 400 * scale; i++)
       f.insert('forgeAccounts', { owner: `person-${i}`, handle: `builder-${i}` });
     for (let i = 0; i < 1200 * scale; i++)
@@ -151,10 +154,10 @@ test('session projection at current and doubled organisation scale reads one bou
         goal: 'Synthetic work',
         paths: [],
         pathCount: 0,
-        at: i,
+        at: now - i,
       });
     const result = JSON.parse(
-      await f.transaction('sessions', api.read, { projectId: f.projectId, cursor: null }),
+      await f.transaction('sessions', api.read, { projectId: f.projectId, cursor: null, observedAt: now }),
     );
     assert.equal(result.rows.length, 25);
     assert.equal(result.isDone, false);
@@ -163,7 +166,14 @@ test('session projection at current and doubled organisation scale reads one bou
     assert(count.documents <= 55);
     assert.equal(count.writeBytes, 0);
     console.log(
-      JSON.stringify({ scale, people: 400 * scale, devices: 1200 * scale, sessions: 300 * scale, ...count }),
+      JSON.stringify({
+        scale,
+        people: 400 * scale,
+        teams: 25 * scale,
+        devices: 1200 * scale,
+        sessions: 300 * scale,
+        ...count,
+      }),
     );
   }
 });
@@ -247,7 +257,7 @@ test('own device labels are deduplicated and bounded at current and doubled orga
           goal: 'Synthetic work',
           paths: [],
           pathCount: 0,
-          at: i,
+          at: now - i,
           session: {
             sessionId: String(i).padStart(64, '0'),
             startedAt: 1,
@@ -256,7 +266,7 @@ test('own device labels are deduplicated and bounded at current and doubled orga
         });
     }
     const page = JSON.parse(
-      await f.transaction('sessions', api.read, { projectId: f.projectId, cursor: null }),
+      await f.transaction('sessions', api.read, { projectId: f.projectId, cursor: null, observedAt: now }),
     );
     assert.equal(page.rows.length, 25);
     assert(page.rows.every(row => row.device.name === 'Private current label'));
@@ -274,4 +284,112 @@ test('own device labels are deduplicated and bounded at current and doubled orga
       }),
     );
   }
+});
+
+test('name, person, app and device filters apply on later pages, and quiet observations belong in Activity', async () => {
+  const f = await saveFixture();
+  f.insert('forgeAccounts', { owner: peer, handle: 'peer-builder' });
+  f.insert('accountHandles', { owner: peer, handle: 'peer-builder' });
+  const device = { id: randomUUID(), code: 'dv-target', approvedAt: 1, owner: peer };
+  for (let i = 0; i < 60; i++) {
+    const matched = (i >= 25 && i < 34) || i === 59;
+    f.insert('projectHostedPresence', {
+      projectId: f.projectId,
+      laneId: randomUUID(),
+      intentId: randomUUID(),
+      actor: matched ? peer : 'owner',
+      agent: matched ? `target-${i}` : 'other',
+      goal: 'Synthetic work',
+      paths: [],
+      pathCount: 0,
+      at: i === 59 ? now - 30 * 60_000 : now - i,
+      session: { sessionId: randomUUID().replaceAll('-', '').repeat(2), startedAt: 1, app: 'codex', device },
+    });
+  }
+  const read = (cursor, activity = false, filters = { find: 'TARGET' }) =>
+    f
+      .transaction('filtered sessions', api.read, {
+        projectId: f.projectId,
+        cursor,
+        observedAt: now,
+        filters,
+        activity,
+      })
+      .then(JSON.parse);
+  const first = await read(null);
+  assert.deepEqual(first.rows, []);
+  assert.equal(first.isDone, false);
+  const second = await read(first.continueCursor);
+  assert.deepEqual(
+    second.rows.map(row => row.name).sort(),
+    Array.from({ length: 9 }, (_, i) => `target-${25 + i}`),
+  );
+  const third = await read(second.continueCursor);
+  assert.deepEqual(third.rows, []);
+  assert.equal(third.isDone, true);
+  const history = await read(null, true);
+  assert.deepEqual(
+    history.rows.map(row => row.name),
+    ['target-59'],
+  );
+  const scoped = await read(null, false, {
+    find: 'target',
+    person: 'peer-builder',
+    app: 'codex',
+    device: 'dv-target',
+    deviceId: device.id,
+  });
+  assert.deepEqual(
+    scoped.rows.map(row => row.name),
+    second.rows.map(row => row.name),
+  );
+  assert.equal(scoped.isDone, true);
+  assert.deepEqual((await read(null, false, { device: 'dv-target', deviceId: randomUUID() })).rows, []);
+  for (const count of f.counts.filter(count => count.name === 'filtered sessions')) {
+    assert((count.readDocumentsByTable.projectHostedPresence ?? 0) <= 25);
+    assert((count.readBytesByTable.projectHostedPresence ?? 0) <= 64 * 1024);
+    assert.equal(count.writes, 0);
+  }
+});
+
+test('a split required by the presence scan budget returns a continuation even when the page is empty', async () => {
+  const f = await saveFixture();
+  const original = api.read._handler;
+  const budgetSplit = {
+    page: [],
+    continueCursor: 'end-of-requested-range',
+    isDone: true,
+    pageStatus: 'SplitRequired',
+    splitCursor: 'end-of-scanned-range',
+  };
+  const reply = await f.transaction(
+    'split presence',
+    {
+      _handler: (ctx, args) =>
+        original(
+          {
+            ...ctx,
+            db: new Proxy(ctx.db, {
+              get(db, key) {
+                if (key !== 'query') return Reflect.get(db, key);
+                return table => {
+                  const query = db.query(table);
+                  if (table === 'projectHostedPresence')
+                    query.paginate = async options => {
+                      assert.equal(options.maximumRowsRead, 100);
+                      assert.equal(options.maximumBytesRead, 64 * 1024);
+                      return budgetSplit;
+                    };
+                  return query;
+                };
+              },
+            }),
+          },
+          args,
+        ),
+    },
+    { projectId: f.projectId, cursor: null, observedAt: now },
+  );
+  assert.equal(JSON.parse(reply).continueCursor, budgetSplit.splitCursor);
+  assert.equal(JSON.parse(reply).isDone, false);
 });

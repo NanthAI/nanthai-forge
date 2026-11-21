@@ -378,8 +378,13 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
               },
               filter: build => {
                 const predicate = build({
-                  field: name => row => row[name],
+                  field: name => row => fieldValue(row, name),
+                  eq: (value, expected) => row => value(row) === expected,
                   neq: (value, expected) => row => value(row) !== expected,
+                  and:
+                    (...conditions) =>
+                    row =>
+                      conditions.every(condition => condition(row)),
                 });
                 const indexed = match;
                 match = rows => indexed(rows).filter(predicate);
