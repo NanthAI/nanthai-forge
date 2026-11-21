@@ -21,7 +21,7 @@ export function FileHistory({
   const ask = useFileHistoryReader(projectId, path);
   const [retry, setRetry] = useState(0);
   const first = useRead('file-history', () => ask(before), retry);
-  const [more, setMore] = useState<CodeFileHistoryPage | null>(null);
+  const [more, setMore] = useState<CodeFileHistoryPage[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   if (first.error)
@@ -39,20 +39,20 @@ export function FileHistory({
         Reading landings…
       </p>
     );
-  const rows = [...first.value.landings, ...(more?.landings ?? [])];
-  const missing = first.value.missing + (more?.missing ?? 0);
-  const next = (more ?? first.value).nextBefore;
+  const pages = [first.value, ...more];
+  const rows = pages.flatMap(page => page.landings);
+  const missing = pages.reduce((total, page) => total + page.missing, 0);
+  const scanned = pages.every(page => page.scanned !== undefined)
+    ? pages.reduce((total, page) => total + (page.scanned ?? 0), 0)
+    : null;
+  const next = (more.at(-1) ?? first.value).nextBefore;
   const loadMore = () => {
     if (next === null || busy) return;
     setBusy(true);
     setError('');
     void ask(next).then(
       page => {
-        setMore(was => ({
-          landings: [...(was?.landings ?? []), ...page.landings],
-          missing: (was?.missing ?? 0) + page.missing,
-          nextBefore: page.nextBefore,
-        }));
+        setMore(was => [...was, page]);
         setBusy(false);
       },
       caught => {
@@ -89,6 +89,11 @@ export function FileHistory({
       ) : null}
       {missing ? (
         <p className="quietline">Change lists unavailable for {plural(missing, 'landing')}.</p>
+      ) : null}
+      {next !== null && scanned ? (
+        <p className="quietline" role="status">
+          Looked through {plural(scanned, 'landing')}.
+        </p>
       ) : null}
       {next !== null ? (
         <div className="pad">

@@ -32,6 +32,7 @@ function fixture(visibility = 'public') {
       recordHead = head,
       actor = 'owner',
       wrongDigest = false,
+      docsResolution,
     } = {},
   ) {
     const receiptId = `00000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`;
@@ -59,6 +60,7 @@ function fixture(visibility = 'public') {
         previous: { head: before },
         candidate: { id: candidateId, head, digest: wrongDigest ? '0'.repeat(64) : pinned },
         automatic: false,
+        docsResolution,
       }),
     });
     if (paths === undefined) return;
@@ -85,7 +87,7 @@ function fixture(visibility = 'public') {
   return { ...f, add, read, visit };
 }
 
-test('file history is newest first and continues past non-matches, a shared Candidate and missing exact evidence', async () => {
+test('file history preserves newest-first matches through a shared Candidate and missing exact evidence', async () => {
   const f = fixture('private');
   for (let i = 1; i <= 12; i++)
     f.add(i, i === 3 || i >= 11 ? [path] : ['src/entry.ts.old'], { wrongDigest: i === 10 });
@@ -96,22 +98,99 @@ test('file history is newest first and continues past non-matches, a shared Cand
   const first = await f.read();
   assert.deepEqual(
     first.landings.map(row => row.sequence),
-    [13, 12, 11],
+    [13, 12, 11, 3],
   );
   assert.equal(first.missing, 3);
-  assert.equal(first.nextBefore, 9);
-  // A new acceptance cannot move an in-progress continuation.
-  f.add(17, [path]);
-  const earlier = await f.read(first.nextBefore);
-  assert.deepEqual(
-    earlier.landings.map(row => row.sequence),
-    [3],
-  );
-  assert.equal(earlier.nextBefore, null);
+  assert.equal(first.scanned, 16);
+  assert.equal(first.nextBefore, null);
   assert.deepEqual(
     (await f.read(4)).landings.map(row => row.sequence),
     [3],
   );
+});
+
+test('the first page finds eight matches beyond the newest eight receipts and resumes at the last examined receipt', async () => {
+  const f = fixture('private');
+  for (let i = 1; i <= 80; i++) f.add(i, i <= 4 || (i >= 62 && i <= 70) ? [path] : ['other.ts']);
+  const first = await f.read();
+  assert.deepEqual(
+    first.landings.map(row => row.sequence),
+    [70, 69, 68, 67, 66, 65, 64, 63],
+  );
+  assert.equal(first.scanned, 18);
+  assert.equal(first.nextBefore, 63);
+  // A new acceptance cannot move an in-progress continuation.
+  f.add(81, [path]);
+  const earlier = await f.read(first.nextBefore);
+  assert.deepEqual(
+    earlier.landings.map(row => row.sequence),
+    [62, 4, 3, 2, 1],
+  );
+  assert.equal(earlier.nextBefore, null);
+});
+
+test('a sparse scan stops at its read budget and resumes without skipping a landing', async t => {
+  const f = fixture('private');
+  for (let i = 1; i <= 112; i++) f.add(i, i === 16 ? [path] : ['other.ts']);
+  const meter = meterWorkIO(f.ctx, f.tables);
+  t.after(() => meter.restore());
+  let first;
+  const io = await meter.cost(async () => {
+    first = await f.read();
+  });
+  assert.deepEqual(first, { landings: [], missing: 0, scanned: 96, nextBefore: 17 });
+  assert.ok(io.readDocuments <= 289, `read ${io.readDocuments} documents`);
+  assert.ok(io.readBytes <= 1_200_000, `read ${io.readBytes} bytes`);
+  assert.equal(io.writeDocuments, 0);
+  assert.deepEqual(
+    (await f.read(first.nextBefore)).landings.map(row => row.sequence),
+    [16],
+  );
+  t.diagnostic(JSON.stringify(io));
+});
+
+test('large receipt metadata stops the scan even before the first batch fills', async t => {
+  const f = fixture('private');
+  const folders = Array(8).fill('a'.repeat(170)).join('/');
+  const docsResolution = {
+    paths: Array.from({ length: 100 }, (_, index) => `docs/${folders}/file-${index}.md`),
+    rule: 'keep both sides, main first',
+    undo: 'Edit the affected files.',
+  };
+  for (let i = 1; i <= 9; i++) f.add(i, [path], { docsResolution });
+  const meter = meterWorkIO(f.ctx, f.tables);
+  t.after(() => meter.restore());
+  let first;
+  const io = await meter.cost(async () => {
+    first = await f.read();
+  });
+  assert.equal(first.scanned, 1);
+  assert.equal(first.nextBefore, 9);
+  assert.deepEqual(
+    first.landings.map(row => row.sequence),
+    [9],
+  );
+  assert.ok(io.readBytes <= 300_000, `read ${io.readBytes} bytes`);
+  assert.deepEqual(
+    (await f.read(first.nextBefore)).landings.map(row => row.sequence),
+    [8],
+  );
+});
+
+test('an unreadable older Candidate does not block a page already filled by newer matches', async () => {
+  const f = fixture('private');
+  for (let i = 1; i <= 20; i++) f.add(i, i > 12 ? ['other.ts'] : [path]);
+  f.tables.projectHostedRecords.set('duplicate', {
+    ...f.tables.projectHostedRecords.get('record-candidate-4'),
+    _id: 'duplicate',
+  });
+  const first = await f.read();
+  assert.deepEqual(
+    first.landings.map(row => row.sequence),
+    [12, 11, 10, 9, 8, 7, 6, 5],
+  );
+  assert.equal(first.nextBefore, 5);
+  await assert.rejects(f.read(first.nextBefore));
 });
 
 test('public file history uses the same matches and rechecks visibility on every page', async t => {
@@ -139,6 +218,7 @@ test('public file history uses the same matches and rechecks visibility on every
     visitor.landings,
     signed.landings.map(({ actor: _person, ...row }) => row),
   );
+  assert.equal(visitor.scanned, signed.scanned);
   assert.deepEqual(calls, ['publicCode:fileHistory'], 'one nested query per public HTTP call');
   assert.equal((await f.visit('0')).status, 404);
   assert.equal((await f.visit('-', fileHistoryUrl.replace(/[^/]+$/, '2e2e'))).status, 404);

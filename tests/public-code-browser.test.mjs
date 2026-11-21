@@ -126,16 +126,25 @@ const reads = {
   [`${code}/file-history/${hex('src/index.ts')}/-.json`]: {
     landings: [landing(3, HEAD, MID, 'Index: rebuild without downtime')],
     missing: 0,
+    scanned: 52,
     nextBefore: 2,
   },
   [`${code}/file-history/${hex('src/index.ts')}/2.json`]: {
     landings: [oldest],
     missing: 0,
+    scanned: 1,
     nextBefore: null,
   },
   [`${code}/file-history/${hex('README.md')}/-.json`]: {
+    landings: [],
+    missing: 0,
+    scanned: 96,
+    nextBefore: 3,
+  },
+  [`${code}/file-history/${hex('README.md')}/3.json`]: {
     landings: [landing(2, MID, BASE, 'Docs: the import format')],
     missing: 0,
+    scanned: 2,
     nextBefore: null,
   },
   [`${code}/${HEAD}/changes/${MID}.json`]: {
@@ -292,6 +301,7 @@ test('public code screens signed out: browse, read, history, nothing reaches Con
   await home.getByRole('region', { name: 'File' }).getByText('export const atlas = 1;').waitFor();
   const touching = home.getByRole('region', { name: 'In this file' });
   await touching.getByRole('link', { name: /Index: rebuild without downtime/ }).waitFor();
+  await touching.getByRole('status').getByText('Looked through 52 landings.').waitFor();
   assert.deepEqual(
     asked.filter(path => path.includes('/file-history/')),
     [`${code}/file-history/${hex('src/index.ts')}/-.json`],
@@ -345,6 +355,12 @@ test('public code screens signed out: browse, read, history, nothing reaches Con
   const deep = await open('/-/ada/atlas/code/files/README.md');
   await deep.getByRole('region', { name: 'File' }).getByText('A small index for cold reads.').waitFor();
   assert.ok(asked.includes(`${code}/${HEAD}/open/${hex('README.md')}.json`));
+  const deepHistory = deep.getByRole('region', { name: 'In this file' });
+  await deepHistory.getByText('No matches yet.').waitFor();
+  await deepHistory.getByRole('status').getByText('Looked through 96 landings.').waitFor();
+  await deepHistory.getByRole('button', { name: 'Show earlier landings' }).click();
+  await deepHistory.getByRole('link', { name: /Docs: the import format/ }).waitFor();
+  assert.equal(await deepHistory.getByText('Looked through 96 landings.').count(), 0);
 
   // A private project and a missing one look the same: the read answers 404 for both.
   for (const path of ['/-/ada/private-one/code/files', '/-/nobody/atlas/code'])

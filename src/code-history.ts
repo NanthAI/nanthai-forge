@@ -40,8 +40,10 @@ export type CodeHistoryRow = {
 
 export type CodeFileHistoryPage = {
   landings: CodeHistoryRow[];
-  /** Receipts in this window whose exact changed paths were not retained. */
+  /** Receipts examined on this page whose exact changed paths were not retained. */
   missing: number;
+  /** Every receipt examined on this page. Older cached responses omitted the count. */
+  scanned?: number;
   nextBefore: number | null;
 };
 
