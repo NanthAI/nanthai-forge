@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "0de95ef2 replaces covered metrics save history scans with one save identity index. Keep canonical history for older readers and until backfill completes.",
+  "date": "2026-11-21"
+}

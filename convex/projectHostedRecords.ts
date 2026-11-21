@@ -311,15 +311,20 @@ export async function hostedRecordPage(
     'Select a parent or status index.',
   );
   const query =
-    input.status === undefined || input.kind === 'lane'
-      ? ctx.db.query('projectHostedRecordHeads').withIndex('by_project_and_kind_and_parent', q => {
-          const prefix = q.eq('projectId', input.projectId).eq('kind', input.kind);
-          return input.parent === undefined ? prefix : prefix.eq('parent', input.parent);
-        })
-      : ctx.db
+    input.kind === 'save' && input.status === 'saved'
+      ? ctx.db
           .query('projectHostedRecordHeads')
-          .withIndex('by_project_and_kind_and_status', q =>
-            q.eq('projectId', input.projectId).eq('kind', input.kind).eq('status', input.status!),
+          .withIndex('by_project_and_kind', q => q.eq('projectId', input.projectId).eq('kind', 'save'))
+      : input.status === undefined || input.kind === 'lane'
+        ? ctx.db.query('projectHostedRecordHeads').withIndex('by_project_and_kind_and_parent', q => {
+            const prefix = q.eq('projectId', input.projectId).eq('kind', input.kind);
+            return input.parent === undefined ? prefix : prefix.eq('parent', input.parent);
+          })
+        : ctx.db.query('projectHostedRecordHeads').withIndex('by_project_and_kind_and_status', q =>
+            q
+              .eq('projectId', input.projectId)
+              .eq('kind', input.kind)
+              .eq('status', input.kind === 'save' ? '' : input.status!),
           );
   const result = await query.paginate({
     cursor: input.cursor,
@@ -327,6 +332,11 @@ export async function hostedRecordPage(
     maximumRowsRead: 100,
     maximumBytesRead: 128 * 1024,
   });
+  if (input.kind === 'save') {
+    // Public save descriptors have always had one status, including while
+    // private heads carry their derived coverage mark.
+    for (const head of result.page) head.status = 'saved';
+  }
   if (input.kind === 'lane') {
     const cascades = new Map<string, boolean>();
     for (const head of result.page) {

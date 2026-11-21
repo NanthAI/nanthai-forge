@@ -3,6 +3,15 @@ import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 /** Transactional read projections, never source bytes or controller state. */
 export const finishReadTables = {
+  // Only populated for report facts. Indexing optional fields on the canonical
+  // Work table would also charge for every unrelated Work record.
+  projectMetricFacts: defineTable({
+    projectId: v.id('hostedProjects'),
+    key: v.string(),
+    sourceCreatedAt: v.number(),
+    sourceId: v.string(),
+    value: v.string(),
+  }).index('by_project_and_key_and_source_time_and_id', ['projectId', 'key', 'sourceCreatedAt', 'sourceId']),
   projectFinishReadRows: defineTable({
     kind: v.string(),
     sourceId: v.string(),

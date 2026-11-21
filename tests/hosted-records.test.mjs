@@ -22,6 +22,7 @@ import {
 import { HOSTED_SNAPSHOT_EMPTY_ROOT, hostedSnapshotPageRoot } from '../dist/hosted-snapshot.js';
 const store = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const snapshots = await import(moduleUrl('../convex/projectHostedSnapshots.ts'));
+const recordReads = await import(moduleUrl('../convex/projectHostedRecordReads.ts'));
 const reads = await import(moduleUrl('../convex/projectHostedSnapshotRead.ts'));
 const projection = await import(moduleUrl('../convex/projectHostedProjection.ts'));
 const operations = await import(moduleUrl('../convex/projectHostedOperations.ts'));
@@ -603,6 +604,41 @@ test('generic Work metadata copies cannot publish a clean Candidate outside comp
     code('BAD_ARGUMENT'),
   );
   assert.equal([...s.tables.projectHostedRecords.values()].filter(row => row.kind === 'candidate').length, 0);
+});
+
+test('save-head marking preserves public saved filters and canonical record status', async () => {
+  const s = await setup();
+  const l = lane();
+  await s.put(l);
+  const first = save(l.id),
+    second = { ...save(l.id), head: hash };
+  await s.put(first);
+  await s.put(second);
+  const older = await store.recordHead(s.ctx, s.auth.projectId, 'save', first.id);
+  const newer = await store.recordHead(s.ctx, s.auth.projectId, 'save', second.id);
+  await s.ctx.db.patch(older._id, { status: 'saved' });
+  await s.ctx.db.patch(newer._id, { status: 'saved:metric-head' });
+
+  const ctx = { ...s.ctx, auth: { getUserIdentity: async () => ({ subject: s.auth.actor }) } };
+  const read = request =>
+    s
+      .run('save records', () =>
+        recordReads.journalRecordRead(ctx, {
+          projectId: s.auth.projectId,
+          request: JSON.stringify({ collection: 'saves', ...request }),
+        }),
+      )
+      .then(JSON.parse);
+  const listed = await read({ status: 'saved', cursor: null });
+  assert.deepEqual(
+    listed.items.map(item => [item.id, item.status, item.head]),
+    [
+      [first.id, 'saved', first.head],
+      [second.id, 'saved', second.head],
+    ],
+  );
+  assert.deepEqual((await read({ status: 'saved:metric-head', cursor: null })).items, []);
+  assert.equal((await read({ id: second.id, cursor: null })).record.status, 'saved');
 });
 
 // Reader-first rollout: immutable save records, rather than a mutable Lane, own historical attribution.

@@ -451,6 +451,13 @@ const projectFields = {
    * a project row written before the rollback still validates. Remove with `stateTree` on objects. */
   stateTrees: v.optional(v.any()),
   sourceCutover: v.optional(v.object({ minimumCliVersion: v.string(), at: v.string() })),
+  metricSaveHeadResume: v.optional(
+    v.object({
+      operationId: v.string(),
+      requestedAt: v.number(),
+      phase: v.union(v.literal('pending'), v.literal('watching'), v.literal('scheduled')),
+    }),
+  ),
   visibility: v.optional(v.union(v.literal('private'), v.literal('public'))),
   /** Public plan setting (src/planning-model.ts publicPlanVisible): absent = the plan of a public project is public;
    * 'members' keeps every Item, Initiative and comment to members. */

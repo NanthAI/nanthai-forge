@@ -1,0 +1,1 @@
+| `projectMetricFacts` | One indexed scalar fact per hosted save. It records the Lane and head key, canonical creation time, save ID and body timestamp. The canonical record keeps its source and provenance. Complete coverage replaces selected-Lane save scans in metrics. | Activity |
