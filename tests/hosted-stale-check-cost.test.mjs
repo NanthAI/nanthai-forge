@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { synthetic } from './hosted-landing-batches-fixture.mjs';
 import { seedTicket, ticketState } from './landing-ticket-fixture.mjs';
 import { fixture, drain, assertProgressOwners } from './hosted-stale-check-fixture.mjs';
+import { storageClock } from './storage-clock.mjs';
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -15,6 +16,7 @@ test.after(() => {
 });
 for (const history of [0, 575, 1150])
   test(`stale-check look-ahead reads bounded metadata with ${history} retained entries`, async t => {
+    storageClock(t, { elapsed: true });
     const f = await fixture(t, { count: 9, memberPaths: Array(9).fill('src/shared.ts') });
     const first = [...f.tables.projectHostedLandingRequests.values()][0];
     const state = ticketState(f, first);

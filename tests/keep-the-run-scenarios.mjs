@@ -16,38 +16,90 @@
 import { replayKeepTheRun } from './keep-the-run-replay.mjs';
 import { scopedRecheckPays } from '../dist/stale-check-keep.js';
 
-/** Today's code (main after compose settle 9a04d916), measured by tests/keep-the-run-cost.test.mjs
- * (harness reads excluded). */
+// Item f65d8024 and docs/operations/cost-to-serve.md: one 490-byte row per accepted Lane.
+const LANDED_FEED_ROW_BYTES = 490;
+
+/** Deterministic measurements from tests/keep-the-run-cost.test.mjs, excluding harness reads.
+ * Each write total shows its landed feed rows separately. Red baselines include the failed row. */
 export const MEASURED = {
-  'global-risk mover, strict': { calls: 60, documents: 1201, readBytes: 1173695, writeBytes: 438990 },
-  'global-risk mover, fast': { calls: 60, documents: 1205, readBytes: 1174617, writeBytes: 440490 },
-  'order-sensitive mover, strict': { calls: 60, documents: 1205, readBytes: 1175097, writeBytes: 440546 },
-  'order-sensitive mover, fast': { calls: 60, documents: 1205, readBytes: 1174649, writeBytes: 440510 },
-  'unrelated mover, fast': { calls: 67, documents: 1468, readBytes: 1558240, writeBytes: 506567 },
-  'global-risk mover, fast, carry off': {
-    calls: 60,
-    documents: 1205,
-    readBytes: 1181353,
-    writeBytes: 441052,
+  'global-risk mover, strict': {
+    calls: 59,
+    documents: 1194,
+    readBytes: 1_168_625,
+    writeBytes: 441_011 + 2 * LANDED_FEED_ROW_BYTES,
   },
-  'unrelated mover, fast, carry off': { calls: 74, documents: 1553, readBytes: 1604788, writeBytes: 563340 },
-  'global-risk mover, strict, red': { calls: 50, documents: 984, readBytes: 982008, writeBytes: 379701 },
-  // Item f65d8024 adds exact Lane attribution, feed events and expiry probes to existing terminal calls.
-  'unrelated mover, strict, red': { calls: 32, documents: 556, readBytes: 578285, writeBytes: 228843 },
+  'global-risk mover, fast': {
+    calls: 59,
+    documents: 1194,
+    readBytes: 1_168_185,
+    writeBytes: 440_975 + 2 * LANDED_FEED_ROW_BYTES,
+  },
+  'order-sensitive mover, strict': {
+    calls: 59,
+    documents: 1194,
+    readBytes: 1_168_657,
+    writeBytes: 441_031 + 2 * LANDED_FEED_ROW_BYTES,
+  },
+  'order-sensitive mover, fast': {
+    calls: 59,
+    documents: 1194,
+    readBytes: 1_168_217,
+    writeBytes: 440_995 + 2 * LANDED_FEED_ROW_BYTES,
+  },
+  'unrelated mover, fast': {
+    calls: 66,
+    documents: 1457,
+    readBytes: 1_553_962,
+    writeBytes: 506_960 + 2 * LANDED_FEED_ROW_BYTES,
+  },
+  'global-risk mover, fast, carry off': {
+    calls: 59,
+    documents: 1194,
+    readBytes: 1_174_805,
+    writeBytes: 441_537 + 2 * LANDED_FEED_ROW_BYTES,
+  },
+  'unrelated mover, fast, carry off': {
+    calls: 73,
+    documents: 1542,
+    readBytes: 1_600_969,
+    writeBytes: 564_092 + 2 * LANDED_FEED_ROW_BYTES,
+  },
+  'global-risk mover, strict, red': {
+    calls: 49,
+    documents: 978,
+    readBytes: 977_944,
+    writeBytes: 381_425 + LANDED_FEED_ROW_BYTES,
+  },
+  'unrelated mover, strict, red': {
+    calls: 32,
+    documents: 556,
+    readBytes: 578_128,
+    writeBytes: 228_157 + LANDED_FEED_ROW_BYTES,
+  },
   'global-risk mover, strict, C1 follower': {
-    calls: 130,
-    documents: 2632,
-    readBytes: 2607408,
-    writeBytes: 908526,
+    calls: 128,
+    documents: 2605,
+    readBytes: 2_593_619,
+    writeBytes: 908_583 + 3 * LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, strict, C1 follower': {
-    calls: 138,
-    documents: 2945,
-    readBytes: 3092965,
-    writeBytes: 993244,
+    calls: 136,
+    documents: 2924,
+    readBytes: 3_084_818,
+    writeBytes: 996_581 + 3 * LANDED_FEED_ROW_BYTES,
   },
-  'no checking row, strict': { calls: 23, documents: 431, readBytes: 438213, writeBytes: 168970 },
-  'no checking row, fast': { calls: 23, documents: 431, readBytes: 438049, writeBytes: 168952 },
+  'no checking row, strict': {
+    calls: 23,
+    documents: 432,
+    readBytes: 440_203,
+    writeBytes: 169_602 + LANDED_FEED_ROW_BYTES,
+  },
+  'no checking row, fast': {
+    calls: 23,
+    documents: 432,
+    readBytes: 440_039,
+    writeBytes: 169_584 + LANDED_FEED_ROW_BYTES,
+  },
 };
 
 /** The wired hold-order write: the kept run's landing row and one forked attempt (bindAdmissionProof's

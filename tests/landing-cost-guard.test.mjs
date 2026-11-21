@@ -33,7 +33,10 @@ import { addGuardFailure, ranEvidence } from '../dist/preflight-guard-learning.j
 import { formatCostVerdicts, judgeCost, judgeCosts } from '../dist/cost-budgets.js';
 
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
-test.beforeEach(() => Object.assign(process.env, synthetic));
+test.beforeEach(t => {
+  Object.assign(process.env, synthetic);
+  fixedClock(t);
+});
 test.after(() => {
   for (const [key, value] of Object.entries(prior)) {
     if (value === undefined) delete process.env[key];
