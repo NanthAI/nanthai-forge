@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkCause } from '../dist/hosted-check.js';
 // Pre-queue Lane checks (docs/pre-queue-checks.md): the runner contract on two
 // providers and the synthetic 12-Lane queue, before (admission off) and after.
 import test from 'node:test';
@@ -66,6 +67,10 @@ for (const [name, runner] of [
     const lane = f.runs();
     assert.equal(lane.length, 3, 'every arrival starts its own Lane check at once');
     for (const run of lane) {
+      assert.equal(
+        [...f.tables.projectHostedCheckRuns.values()].find(row => row.runId === run.id).cause,
+        checkCause.preQueue,
+      );
       assert.equal(run.configuration.provider, runner?.provider ?? 'github-actions');
       assert.equal(run.request.expectedConfiguration, f.rawChecks.configuration.digest);
       assert.notEqual(run.gate?.mode, 'scoped', 'the configured check, not the affected set');
@@ -101,8 +106,44 @@ test('a Lane check that ends without a failing test restarts twice, then enters 
   assert.equal(f.runs().filter(r => isAdmission(f, r)).length, 3, 'one check and two restarts');
   assert.equal(row.admission.status, 'unavailable');
   assert.equal(row.admission.retries, 2);
+  assert.deepEqual(
+    [...f.tables.projectHostedCheckRuns.values()]
+      .filter(row => isAdmission(f, JSON.parse(row.value)))
+      .map(row => row.cause),
+    [checkCause.preQueue, checkCause.retry, checkCause.retry],
+  );
   while (await round(f, []));
   assert.equal(landed(f), 1, 'unknown is not red');
+});
+
+test('a new submission of a red Intent records a needs-fix check at dispatch', async t => {
+  const f = await batchesFixture(t, { ...full, count: 1 });
+  await round(f, ['member-0']);
+  assert.equal(states(f)[0].error?.code, 'CHECK_FAILED');
+  await f.add(1);
+  const rows = [...f.tables.projectHostedCheckRuns.values()];
+  assert.deepEqual(
+    rows.map(row => row.cause),
+    [checkCause.preQueue, checkCause.needsFix],
+  );
+  assert.equal(JSON.parse(rows[1].value).status, 'queued');
+  for (let i = 0; i < 3; i++) {
+    const run = f.runs().at(-1);
+    await f.rawChecks.callback(
+      f.rawChecks.complete(await f.rawChecks.activate(run.id), 'runner-unavailable'),
+    );
+    await f.drain();
+  }
+  assert.deepEqual(
+    [...f.tables.projectHostedCheckRuns.values()].map(row => row.cause),
+    [
+      checkCause.preQueue,
+      checkCause.needsFix,
+      checkCause.retry,
+      checkCause.retry,
+      checkCause.admissionFollowup,
+    ],
+  );
 });
 
 test('an admitted change lands on its own Lane run when main is unchanged', async t => {

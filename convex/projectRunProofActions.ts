@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkCause } from '../src/hosted-check';
 import { v } from 'convex/values';
 import { mutation } from './cliServer';
 import { recordCaller } from './projectHostedFrictionStore';
@@ -24,6 +25,7 @@ export const runAll = mutation({
         await enqueueHostedCheck(ctx, {
           projectId: input.projectId,
           actor,
+          cause: checkCause.proof,
           fullCheck: { afterRunId: run.id },
           request: {
             ...run.request,

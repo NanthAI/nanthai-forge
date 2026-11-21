@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkCause } from '../dist/hosted-check.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -158,6 +159,8 @@ test('12 counted landings coalesce, audit newest main, and full-gated fix leaves
   assert(f.row().wake.at <= Date.now());
   await f.tick(f.pending()[0]);
   assert.equal(f.currentRun().gate.mode, 'audit');
+  const row = [...f.tables.projectHostedCheckRuns.values()].find(row => row.runId === f.currentRun().id);
+  assert.equal(row.cause, checkCause.audit);
   assert.equal(f.pending('projectHostedActionsDirect:dispatch').length, 1);
   await f.terminal();
   assert.equal(f.row().unaudited.count, 0);

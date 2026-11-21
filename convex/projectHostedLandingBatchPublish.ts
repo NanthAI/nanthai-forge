@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkCause } from '../src/hosted-check';
 import { attributeCheckTime } from '../src/check-time-added';
 import { requireLandingCheck } from './projectHostedCheckEntries';
 import { earlyPredecessor } from './projectHostedEarlyResolution';
@@ -217,6 +218,7 @@ export async function publishLandingBatch(
       ctx,
       key,
       batch,
+      checkCause.mainMoved,
       await cohortRecheckBasis(ctx, batch.recheck, batch.runId, attempt),
     );
     await releaseLandingQueue(ctx, queue, now);
@@ -308,7 +310,7 @@ export async function publishLandingBatch(
   // A scoped cohort recheck is accepted on the solo recheck's terms (Issue 28f08555). Refused now
   // (main red, policy or trust changed), the cohort recomposes for one full shared check instead.
   if (scoped && (await hostedAcceptGate(ctx, project, candidate, attempt.actor, run)) !== 'pass') {
-    await retryLandingBatch(ctx, key, batch);
+    await retryLandingBatch(ctx, key, batch, checkCause.evidenceRefresh);
     await releaseLandingQueue(ctx, queue, now);
     return {
       status: 'pending' as const,

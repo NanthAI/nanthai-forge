@@ -43,6 +43,7 @@ import {
   checkPin,
   hostedCheckTerminal,
   type HostedCheckRun,
+  checkCause,
 } from '../src/hosted-check';
 import { canonicalPayload, hostedPayloadHash, hostedOperationSchema } from '../src/hosted-source-operation';
 import { culpritId, culpritFailures, probeVerdict, bisectStep, type NeedsFix } from '../src/culprit-bisect';
@@ -482,6 +483,7 @@ async function probe(
       output: null,
       cost: { status: 'unknown' },
     }),
+    checkCause.culprit,
   );
 }
 /** Scheduled after a committed probe/reverse run; never imported by the check store. */
@@ -1266,6 +1268,7 @@ async function finishSystemRevert(
         output: null,
         cost: { status: 'unknown' },
       }),
+      checkCause.culprit,
     );
   const landingOperationId = culpritId({
     landRevert: state.audit.id,

@@ -375,6 +375,7 @@ export const page = query({
             return metricRunRow(
               JSON.parse(row.value) as HostedCheckRun,
               'reportFlakes' in row ? row.reportFlakes : undefined,
+              'cause' in row ? row.cause : undefined,
             );
           if (input.stream === 'requests') {
             const request = JSON.parse(row.value) as HostedLandingState;

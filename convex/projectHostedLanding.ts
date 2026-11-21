@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkCause, submittedCheckCause } from '../src/hosted-check';
 import { withoutAuthorship, personStampValid } from '../src/work-actor-types';
 import { sanitizeOutside } from '../src/run-evidence';
 import { validateNotVerified } from '../src/agent-handoff-types';
@@ -32,7 +33,11 @@ import {
 } from './projectHostedLandingRunnerCosts';
 import { startLandingAdmission } from './projectHostedLandingAdmission';
 import { pipelineAdmission } from './projectHostedLandingAdmissionPipeline';
-import { submissionReservation, landingReservationForReader } from './projectHostedLandingReservation';
+import {
+  priorLandingForReservation,
+  submissionReservation,
+  landingReservationForReader,
+} from './projectHostedLandingReservation';
 import { preQueueCheck } from '../src/hosted-landing-admission';
 import { landGateGuardEvidence, landGateTiming } from '../src/hosted-land-gates';
 import { v } from 'convex/values';
@@ -414,6 +419,7 @@ export async function enqueueHostedLanding(
     });
   const submissionId = first.ids.submission!;
   let intentId: string | undefined;
+  let prior: Awaited<ReturnType<typeof priorLandingForReservation>> = null;
   let paths: string[] | null = null;
   let mainMoved = false;
   const attempt = await pinLandingAttempt(ctx, {
@@ -427,7 +433,15 @@ export async function enqueueHostedLanding(
     number: 0,
     at: first.at,
     operations: { check: first.ids.check!, accept: first.ids.accept! },
-    intent: id => (intentId = id),
+    intent: async id => {
+      intentId = id;
+      prior = await priorLandingForReservation(ctx, { projectId: input.projectId, intentId: id });
+      const reason = request.retryReason ?? reserved?.retryReason ?? reused.retryReason;
+      if (reason && reason !== 'other') return submittedCheckCause(reason);
+      if (prior?.phase === 'terminal-failed' && prior.errorCode === 'CHECK_FAILED')
+        return checkCause.needsFix;
+      return submittedCheckCause(reason);
+    },
     paths: value => (paths = value),
     mainMoved: value => (mainMoved = value),
   });
@@ -441,11 +455,9 @@ export async function enqueueHostedLanding(
       ? null
       : await startLandingAdmission(ctx, { projectId: input.projectId, attempt, request });
   // Issue 10d253c6: the same work superseded after a passed check reserves its files now.
-  const reservation = await submissionReservation(
-    ctx,
-    { projectId: input.projectId, intentId, driven: Boolean(request.finish) },
-    Date.now(),
-  );
+  const reservation = intentId
+    ? submissionReservation(prior, intentId, Boolean(request.finish), Date.now())
+    : {};
   const sequence = queue.sequence + 1;
   const inherited = reserved?.counts ? reserved : reused;
   const carried = bindSupersededCheck(

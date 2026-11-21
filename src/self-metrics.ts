@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkCause } from './check-run-state.js';
+import type { CheckCause } from './hosted-check.js';
 import { firstAttemptLandRate } from './first-attempt-land-rate.js';
 import { calculateAuthorityMetrics } from './self-metrics-joins.js';
 import { calculateBillingMetrics } from './self-metrics-billing.js';
@@ -6,7 +8,13 @@ import { calculateRedMainMetrics } from './self-metrics-red-main.js';
 import { calculateBackstopMetrics } from './self-metrics-backstop.js';
 import { calculateStorageMetrics } from './self-metrics-storage.js';
 import { calculatePlacementMetrics } from './self-metrics-placement.js';
-import type { MetricInput, MetricPeriod, MetricRecords, SelfMetricsReader } from './self-metrics-types.js';
+import type {
+  MetricInput,
+  MetricPeriod,
+  MetricRecords,
+  MetricRun,
+  SelfMetricsReader,
+} from './self-metrics-types.js';
 
 /** Metrics 5.1 path names that count as a first try under the one rule (src/stats-estimate.ts#firstTry): a main race resolved by adopting the passing
  * run discarded nothing, and a recompose after main moved counts only when it threw a started check away
@@ -21,6 +29,56 @@ const unique = <T>(items: T[], key: (item: T) => string) => [
   ...new Map(items.map(item => [key(item), item])).values(),
 ];
 const ratio = (n: number, d: number) => (d ? n / d : null);
+const labels = {
+  [checkCause.first]: ['first'],
+  [checkCause.mainMoved]: ['main-moved'],
+  [checkCause.needsFix]: ['needs-fix'],
+  [checkCause.retry]: ['retry'],
+  [checkCause.preQueue]: ['pre-queue'],
+  [checkCause.audit]: ['audit'],
+  [checkCause.manual]: ['other', 'manual Candidate check'],
+  [checkCause.pull]: ['other', 'GitHub pull request'],
+  [checkCause.proof]: ['other', 'full check from proof page'],
+  [checkCause.culprit]: ['other', 'culprit recovery'],
+  [checkCause.cohortSplit]: ['other', 'cohort fallback'],
+  [checkCause.cohortRefresh]: ['other', 'retired predecessor'],
+  [checkCause.evidenceRefresh]: ['other', 'acceptance evidence refresh'],
+  [checkCause.admissionFollowup]: ['other', 'queue check after admission'],
+} as const satisfies Record<CheckCause, readonly [string, string?]>;
+
+type Cause = (typeof labels)[CheckCause][0] | 'unrecorded';
+type Totals = { runs: number; started: number; knownMinutes: number; unknownRunnerRuns: number };
+
+function summarizeRunCauses(runs: MetricRun[], landings: number) {
+  const byCause = new Map<Cause, Totals>();
+  const otherReasons: Record<string, number> = {};
+  for (const run of runs) {
+    if (run.reusedFrom) continue;
+    const [cause, reason] = run.cause === undefined ? (['unrecorded'] as const) : labels[run.cause];
+    const counts = byCause.get(cause) ?? { runs: 0, started: 0, knownMinutes: 0, unknownRunnerRuns: 0 };
+    counts.runs++;
+    if (run.started !== false) counts.started++;
+    if (run.runnerMinutes === undefined) counts.unknownRunnerRuns++;
+    else counts.knownMinutes += run.runnerMinutes;
+    byCause.set(cause, counts);
+    if (reason) otherReasons[reason] = (otherReasons[reason] ?? 0) + 1;
+  }
+  return {
+    unrecordedRuns: byCause.get('unrecorded')?.runs ?? 0,
+    byCause: [...byCause]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([cause, counts]) => ({
+        cause,
+        runs: counts.runs,
+        started: counts.started,
+        checksPerLanding: landings ? counts.started / landings : null,
+        runnerMinutes: counts.runs === counts.unknownRunnerRuns ? null : counts.knownMinutes,
+        unknownRunnerRuns: counts.unknownRunnerRuns,
+      })),
+    otherReasons,
+  };
+}
+
 const coverage = (
   records: MetricRecords,
   field: 'lifecycle' | 'mutations' | 'deliveries' | 'checkRequests',
@@ -476,6 +534,9 @@ export function calculateSelfMetrics(
       partial: !!runGaps.length,
       gaps: runGaps,
       runs: runs.length,
+      ...(records.source && records.source.kind !== 'native' && !records.error
+        ? { runCauses: summarizeRunCauses(runs, landings.length) }
+        : {}),
       runnerMinutes:
         unknownRunnerRuns === runs.filter(r => !r.reusedFrom).length && unknownRunnerRuns
           ? null

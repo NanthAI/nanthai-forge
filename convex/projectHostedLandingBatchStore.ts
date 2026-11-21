@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { CheckCause } from '../src/hosted-check';
 import { cancelPendingTask } from './schedulerCancel';
 import { armLandingAlarm } from './projectHostedLandingStallWake';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
@@ -252,6 +253,7 @@ export async function enqueueBatchCheck(
     projectId: Id<'hostedProjects'>;
     actor: string;
     request: unknown;
+    cause: CheckCause;
     usageSubmissions?: string[];
     recheck?: ScopedRecheckBasis[] | undefined;
     providerDelayReason?: string;
@@ -338,6 +340,7 @@ export async function retryLandingBatch(
   ctx: MutationCtx,
   input: BatchIdentity,
   batch: LandingBatch,
+  cause?: CheckCause,
   /** The cohort's own full pass, refused only because main moved: the basis of its scoped recheck. */
   recheck?: ScopedRecheckBasis,
 ) {
@@ -369,6 +372,8 @@ export async function retryLandingBatch(
     {
       ...retained,
       ...(recheck ? { recheck } : {}),
+      // Recomposition may repeat before a provider run exists. Carry the already selected cause.
+      ...(cause === undefined ? {} : { nextCheckCause: cause }),
       members: live.map(member => member.original),
       leaderId: live[0]!.state.id,
       composeOperationId: crypto.randomUUID(),

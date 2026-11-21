@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkCauseSchema } from '../src/hosted-check';
 import { z } from 'zod';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -38,6 +39,7 @@ export const batchSchema = z
       .max(3)
       .optional(),
     runId: z.uuid().optional(),
+    nextCheckCause: checkCauseSchema.optional(),
     /** The cohort's last whole pass, kept across main-race retries (Issue 28f08555). */
     recheck: scopedRecheckBasisSchema.optional(),
     included: z.array(z.uuid()).max(HOSTED_BATCH_MEMBERS).optional(),

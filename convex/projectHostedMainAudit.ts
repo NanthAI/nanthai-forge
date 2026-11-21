@@ -31,6 +31,7 @@ import {
   hostedCheckRunSchema,
   hostedCheckRunnerSchema,
   hostedCheckTerminal,
+  checkCause,
 } from '../src/hosted-check';
 import { hostedOperationSchema, canonicalPayload } from '../src/hosted-source-operation';
 import {
@@ -396,7 +397,7 @@ export const start = internalMutation({
       output: null,
       cost: { status: 'unknown' },
     });
-    await insertHostedCheckRun(ctx, run);
+    await insertHostedCheckRun(ctx, run, checkCause.audit);
     await ctx.db.patch(row._id, {
       audit: {
         runId: run.id,

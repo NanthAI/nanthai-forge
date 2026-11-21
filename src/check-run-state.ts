@@ -1,4 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
+/** Stable stored codes for dispatch, available to metrics without importing check requests or Work. */
+export const checkCause = {
+  first: 0,
+  mainMoved: 1,
+  needsFix: 2,
+  retry: 3,
+  preQueue: 4,
+  audit: 5,
+  manual: 6,
+  pull: 7,
+  proof: 8,
+  culprit: 9,
+  cohortSplit: 10,
+  cohortRefresh: 11,
+  evidenceRefresh: 12,
+  admissionFollowup: 13,
+} as const;
+
 /**
  * One check-run status vocabulary for every reader: web, CLI, MCP and receipts (Issue 68361cd5,
  * checks machine 1 / web W13). The stored `status` stays on the wire unchanged; this module names

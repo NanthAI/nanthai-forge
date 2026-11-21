@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { metricRunRow } from '../src/self-metrics-run';
-import type { HostedCheckRun } from '../src/hosted-check';
+import { type HostedCheckRun, checkCauseSchema } from '../src/hosted-check';
 
 export const metricRunKind = 'projectMetricCheckRuns';
 /** Unsupported legacy values stay on the canonical reader; never manufacture metric evidence. */
@@ -21,7 +21,7 @@ export function metricReadProjection(row: Record<string, unknown>) {
     projectId: row.projectId as HostedCheckRun['projectId'],
     runId: row.runId as string,
     sourceCreatedAt,
-    value: canonicalPayload(metricRunRow(run, row.reportFlakes)),
+    value: canonicalPayload(metricRunRow(run, row.reportFlakes, checkCauseSchema.safeParse(row.cause).data)),
   };
 }
 

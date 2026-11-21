@@ -291,6 +291,8 @@ test('c6b81429: an accepting wait ends when that entry re-checks instead', async
 // The required combined check must fit within 1.5 solo check durations.
 // Flow's receipt sequence and its earlier landing bucket add 122 read B and 144 write B
 // per pair (85f456c1). Keep this measured delta separate from other writers' exact bases.
+// The byte fixtures below include run cause attribution on their existing
+// dispatch and metrics rows. The two measured cases gained 220 read and 324 write bytes.
 const withoutFlowReceiptBytes = ({ calls, readBytes, writeBytes }) => ({
   calls,
   readBytes: readBytes - 122,
@@ -345,7 +347,7 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   const measured = withoutFlowReceiptBytes(pair);
   assert.deepEqual(
     measured,
-    { calls: 111, readBytes: 1_896_487, writeBytes: 608_528 },
+    { calls: 111, readBytes: 1_896_707, writeBytes: 608_852 },
     'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
@@ -391,7 +393,7 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   const measured = withoutFlowReceiptBytes(after);
   assert.deepEqual(
     measured,
-    { calls: 111, readBytes: 1_901_741, writeBytes: 611_029 },
+    { calls: 111, readBytes: 1_901_961, writeBytes: 611_353 },
     'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(after.idle, 0);

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkCause } from '../dist/hosted-check.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -363,6 +364,12 @@ test('replay (b): an overlapping Convex race runs one scoped recheck that lands 
     runId: before.check.runId,
   });
   assert.equal(f.tables.projectHostedCheckRuns.size, 3, 'one recheck replaces the full recheck');
+  const first = [...f.tables.projectHostedCheckRuns.values()].find(row => row.runId === before.check.runId);
+  const replacement = [...f.tables.projectHostedCheckRuns.values()].find(
+    row => row.runId === attempt.check.runId,
+  );
+  assert.equal(first.cause, checkCause.first);
+  assert.equal(replacement.cause, checkCause.mainMoved);
   const run = await f.rawChecks.status(attempt.check.runId);
   assert.deepEqual(run.gate, { mode: 'scoped', reason: `scoped-recheck:${before.main.head}` });
   await passWithSelection(f, run.id, selection);

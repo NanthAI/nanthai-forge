@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { CheckCause } from './hosted-check.js';
 import type { DiskSample } from './self-metrics-disk.js';
 import type { MetricObservation } from './self-metrics-observation-schema.js';
 import type { SelfMetricReceipt } from './self-metrics-journal.js';
@@ -98,6 +99,7 @@ export type MetricRun = {
   inputs: MetricInput[];
   wallMinutes?: number | undefined;
   runnerMinutes?: number | undefined;
+  cause?: CheckCause | undefined;
   /** Shard seconds of a terminal main audit, already on its run row. */
   auditRunnerSeconds?: number | null;
   /** Physical execution identities deduplicate adopted shards, including retries. */

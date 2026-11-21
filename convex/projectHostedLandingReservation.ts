@@ -11,34 +11,37 @@ import { landingReservation, reservationHolds } from '../src/landing-reservation
  * takes its Candidate's Intent from the pin that already read the Candidate, reads the Intent's
  * previous landing (one indexed row) and stores the count and the reservation end on its own new
  * row: no extra write. */
-export async function submissionReservation(
+export async function priorLandingForReservation(
   ctx: MutationCtx,
-  input: { projectId: Id<'hostedProjects'>; intentId: string | undefined; driven?: boolean },
-  now: number,
+  input: { projectId: Id<'hostedProjects'>; intentId: string },
 ) {
   const { intentId } = input;
-  if (!intentId) return {};
   const [prior] = await ctx.db
     .query('projectHostedLandingRequests')
     .withIndex('by_project_and_intent', q => q.eq('projectId', input.projectId).eq('intentId', intentId))
     .order('desc')
     .take(1);
-  const value = prior ? hostedLandingStateSchema.parse(JSON.parse(prior.value)) : null;
-  const granted = landingReservation(
-    prior && value
-      ? {
-          phase: prior.phase,
-          errorCode: value.error?.code ?? null,
-          checkPassed: prior.admission?.status === 'passed' || value.timing?.ciEndedAt !== undefined,
-          ...(prior.superseded !== undefined ? { superseded: prior.superseded } : {}),
-        }
-      : null,
-    now,
-  );
+  if (!prior) return null;
+  const value = hostedLandingStateSchema.parse(JSON.parse(prior.value));
+  return {
+    phase: prior.phase,
+    errorCode: value.error?.code ?? null,
+    checkPassed: prior.admission?.status === 'passed' || value.timing?.ciEndedAt !== undefined,
+    ...(prior.superseded !== undefined ? { superseded: prior.superseded } : {}),
+  };
+}
+
+export function submissionReservation(
+  prior: Awaited<ReturnType<typeof priorLandingForReservation>>,
+  intentId: string,
+  driven: boolean,
+  now: number,
+) {
+  const granted = landingReservation(prior, now);
   return {
     intentId,
     ...(granted.superseded ? { superseded: granted.superseded } : {}),
-    ...(input.driven && granted.until !== null ? { reservedUntil: granted.until } : {}),
+    ...(driven && granted.until !== null ? { reservedUntil: granted.until } : {}),
   };
 }
 

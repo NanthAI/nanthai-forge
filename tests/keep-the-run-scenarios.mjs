@@ -114,10 +114,12 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // Lane's mark now says 'queued', one byte longer than 'saved'.
 // Calls and reads unchanged.
 // e3082c24: source timings on compose settlement move the exact byte deltas.
+// Candidate 7: dispatch attribution rides on the run and metrics rows and on
+// a deferred replacement's existing attempt. The number of calls is the same.
 export const WIRED = {
-  carry: { calls: 7, readBytes: 404_403, writeBytes: 74_723 },
-  'scoped-recheck': { calls: 17, readBytes: 533_520, writeBytes: 143_002 },
-  red: { calls: -18, readBytes: -396_121, writeBytes: -144_390 },
+  carry: { calls: 7, readBytes: 404_443, writeBytes: 74_603 },
+  'scoped-recheck': { calls: 17, readBytes: 534_346, writeBytes: 143_217 },
+  red: { calls: -18, readBytes: -396_191, writeBytes: -144_510 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */

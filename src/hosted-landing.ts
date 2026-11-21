@@ -13,7 +13,7 @@ import { proofSummarySchema } from './landing-proof.js';
 import { landingMessageSchema } from './landing-message.js';
 import { landingStallSchema } from './landing-stall-schema.js';
 import { mainExpectationSchema } from './hosted-main.js';
-import { hostedCheckRequestSchema, checkNumber, checkTimeSchema } from './hosted-check.js';
+import { hostedCheckRequestSchema, checkNumber, checkTimeSchema, checkCauseSchema } from './hosted-check.js';
 import { autonomyPolicySchema } from './autonomy-policy.js';
 import { composeRequestSchema } from './hosted-compose.js';
 import { submissionOutcome } from './landing-submission-state.js';
@@ -106,6 +106,8 @@ export const hostedLandingAttemptSchema = z
     /** Why a fork outside the finish install moved this attempt onto another main than its
      * checked parent (`forkRaceReason`, Item c3c69c57). Metrics only: never unseals order. */
     forkReason: z.string().min(1).max(64).optional(),
+    /** Attribution for a fork whose check is dispatched after composition. */
+    checkCause: checkCauseSchema.optional(),
     scopedFallback: z.string().min(1).max(64).optional(),
     semanticPlan: semanticPlanSchema.optional(),
     deferredCheck: z.literal(true).optional(),

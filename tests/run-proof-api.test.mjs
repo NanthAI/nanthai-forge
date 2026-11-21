@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkCause } from '../dist/hosted-check.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -52,6 +53,10 @@ test('a full-check request keeps the original Candidate and source pins and repl
   assert.equal(run.status, 'queued');
   const replay = JSON.parse(await s.call('proof-full-replay', actions.runAll, input));
   assert.equal(replay.id, run.id);
+  assert.deepEqual(
+    [...s.tables.projectHostedCheckRuns.values()].map(row => row.cause),
+    [checkCause.manual, checkCause.proof],
+  );
   await assert.rejects(
     s.call('private-full', actions.runAll, { ...input, operationId: randomUUID() }, 'stranger'),
     code('PROJECT_UNAVAILABLE'),

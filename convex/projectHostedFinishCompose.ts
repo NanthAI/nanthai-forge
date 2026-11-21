@@ -40,7 +40,7 @@ import { invalidatePipeline } from './projectHostedLandingPipeline';
 import { scopedRecheckBasis, scopedRecheckFallback } from './projectHostedScopedRecheck';
 import { forkRaceReason } from '../src/fallback-reasons';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
-import type { HostedCheckRun } from '../src/hosted-check';
+import { type HostedCheckRun, checkCause } from '../src/hosted-check';
 async function wakeAfterPrecompose(
   ctx: MutationCtx,
   projectId: Doc<'projectHostedFinishes'>['projectId'],
@@ -529,7 +529,21 @@ export async function installFinishCompose(
       ? scopedRecheckFallback(previous, recheck)
       : undefined;
   const { id: attemptId, ...fork } = await forkLandingAttempt(ctx, state, pending);
+  const checked = previous?.check || landing.admission;
+  const moved =
+    previous &&
+    (previous.main.head !== pending.main.head || previous.main.receiptId !== pending.main.receiptId);
+  const cause = checked
+    ? moved
+      ? checkCause.mainMoved
+      : state.batchSolo
+        ? checkCause.cohortSplit
+        : checkCause.evidenceRefresh
+    : state.batchSolo
+      ? checkCause.cohortSplit
+      : previous?.checkCause;
   const attempt = await pinLandingAttempt(ctx, {
+    ...(cause === undefined ? {} : { checkCause: cause }),
     ...(recheck ? { recheck } : {}),
     ...input,
     actor: original.actor,

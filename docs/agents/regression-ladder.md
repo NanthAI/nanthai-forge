@@ -39,6 +39,8 @@ data and the break, recovery and Issue rules are in [speed budgets](speed-budget
   previous week and the latest verify script or runner change. Pass to land: the alert carries the
   [queue health alarm](lead.md#queue-health-alarm) rule (no new builders while broken), then `queue`
   (what each ready entry waits on) and `landings` (held after check, order waits) for the window.
+  In metric 5.6, use `runCauses` to split checks started per landing and known runner minutes
+  by recorded dispatch cause. Report unrecorded runs and unknown durations alongside the split.
 - **Cost drift.** Attempts, landing-state writes, the R2 requests its composes signed and the runner
   minutes of its accepted, discarded and audit checks are stamped in the same row and judged as a
   20-landing mean ([cost budgets](../operations.md#cost-budgets)). Dollars and billed usage are not

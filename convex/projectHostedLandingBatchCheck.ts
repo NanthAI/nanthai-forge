@@ -32,7 +32,7 @@ import { loadLanding, writeLanding } from './projectHostedLandingStore';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { enqueueHostedCheck } from './projectHostedChecks';
 import { retainLandingTrain, releaseLandingQueue } from './projectHostedLandingWake';
-import { hostedCheckTerminal } from '../src/hosted-check';
+import { hostedCheckTerminal, checkCause, submittedCheckCause } from '../src/hosted-check';
 import { landingObservation } from '../src/hosted-landing';
 import { hostedStartMain } from './projectHostedChannels';
 import { loadFinish } from './projectHostedFinishStore';
@@ -310,7 +310,17 @@ async function prepareLandingCheckOnce(
   if (selection?.kind !== 'request' || !attempt.candidate.head) return false;
   const { kind: _kind, ...settings } = selection;
   void _kind;
+  const cause =
+    (attempt.parentAttemptId ? attempt.checkCause : undefined) ??
+    (attempt.recheckReason
+      ? checkCause.mainMoved
+      : state.batchSolo
+        ? checkCause.cohortSplit
+        : selected.row.admission
+          ? checkCause.admissionFollowup
+          : (attempt.checkCause ?? submittedCheckCause(state.request.retryReason)));
   const run = await enqueueHostedCheck(ctx, {
+    cause,
     usageSubmissions: [state.id],
     projectId: claim.projectId,
     actor: attempt.actor.id,

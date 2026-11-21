@@ -3,7 +3,7 @@ import { providerRetryDelay } from '../src/ci-provider-recovery';
 import { settleBatchConflicts } from './projectHostedLandingCohortConflicts';
 import type { MutationCtx } from './_generated/server';
 import type { BatchFailure } from '../src/hosted-batch-diagnosis';
-import type { HostedCheckRun } from '../src/hosted-check';
+import { type HostedCheckRun, checkCause } from '../src/hosted-check';
 import { landingObservation, type HostedLandingAttempt } from '../src/hosted-landing';
 import { HOSTED_PLATFORM_RETRIES, recordOutcome, splitGroups } from '../src/hosted-landing-admission';
 import { clearCiDown, holdBatchForCiDown } from './projectHostedLandingCiDown';
@@ -261,7 +261,7 @@ export async function retryLandingBatchCheck(
       (main.head !== shared.main.head || main.receipt.id !== shared.main.receiptId))
   ) {
     if (pending.length === batch.members.length)
-      return retryLandingBatch(ctx, input, { ...batch, platformRetries: retries });
+      return retryLandingBatch(ctx, input, { ...batch, platformRetries: retries }, checkCause.retry);
     return splitLandingBatch(ctx, input, batch);
   }
   const settings = (
@@ -277,6 +277,7 @@ export async function retryLandingBatchCheck(
   const checkOperationId = crypto.randomUUID();
   const reason = providerRetryDelay(run.failureReason);
   const next = await enqueueBatchCheck(ctx, {
+    cause: checkCause.retry,
     usageSubmissions: pending.map(member => member.original.submissionId),
     ...(reason ? { providerDelayReason: reason } : {}),
     projectId: input.projectId,

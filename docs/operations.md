@@ -232,6 +232,33 @@ query over the same indexed read (at most 500 rows), nothing while idle and no n
 command; a failed check's row grows from about 300 to at most about 1 KB (a read of 500 rows is at most about 500 KB). Only landing
 codes `CHECK_FAILED`, `CHECK_NOT_PASSED` and `CONTRACT_OVER_BUDGET` are checks.
 
+Hosted metric 5.6 includes a check dispatch breakdown in `totals["5.6"].runCauses`.
+`nforge metrics ROOT --from DATE --to DATE --text` prints the same breakdown as
+the `metrics` agent and MCP action. Each run belongs to one cause. The run
+timestamp selects the window and the count of accepted task landings is the
+denominator, so a run and its acceptance can fall in different windows.
+Checks per landing counts starts, and the run count also includes requests
+that never started. Reusing an existing run creates no second run.
+
+The dispatch categories are first check, main moved, needs fix, retry, pre-queue
+Lane check, audit and other. Other includes reason counts for independent checks,
+cohort fallback and evidence refresh. A new submission after its Intent's
+latest landing ended with a test failure counts as needs fix, unless it has a
+more specific retry reason. A pre-queue run can likewise be the fix check.
+Earlier rows without a dispatch cause appear as unrecorded. Runner minutes use
+the existing observed execution stamp. Each category includes its unknown
+duration count, so minutes with missing durations are a lower bound. A category
+with only unknown durations shows null minutes.
+
+The breakdown uses the existing metrics pages, with no extra database calls or
+writes. A synthetic day with 1,000 landings and 3,000 projected runs and no
+context history uses 64 calls and 8,095 document reads across all metrics
+streams. Run pages hold up to 100 rows and 512 KiB each. The cause field adds
+39,000 bytes to the worst-width sample's 3.41 MB of serialized reads. The field
+adds up to 11 JSON bytes on the existing run row and 13 in the serialized
+compact projection, or up to 72 bytes for three runs per landing. Deferred
+replacements retain the selected cause on their existing attempt or cohort row.
+
 `metrics` replies are boundable: `--limit N` (`limit` in `nforge agent ROOT metrics`,
 1 to 200) pages every row list in the window totals (waste, landings by path, authority
 lag) by one shared offset, and `page.nextCursor` continues the same `from`/`to`.

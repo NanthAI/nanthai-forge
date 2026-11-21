@@ -40,6 +40,8 @@ import {
   hostedCheckTerminal,
   checkPin,
   checkNumber,
+  checkCause,
+  type CheckCause,
 } from '../src/hosted-check';
 import { checkSchema } from '../src/work-types';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -56,6 +58,7 @@ export const enqueue = mutation({
         await enqueueHostedCheck(ctx, {
           projectId: input.projectId,
           actor,
+          cause: checkCause.manual,
           request: JSON.parse(input.request),
         }),
       );
@@ -111,6 +114,7 @@ export async function enqueueHostedCheck(
     projectId: Id<'hostedProjects'>;
     actor: string;
     request: unknown;
+    cause: CheckCause;
     usageSubmissions?: string[];
     providerDelayReason?: string;
     /** Explicit proof-page action: execute the full configured command on these pins, without borrowing an old pass. */
@@ -318,19 +322,26 @@ export async function enqueueHostedCheck(
     });
     return reused;
   }
-  return insertHostedCheckRun(ctx, run, input.usageSubmissions);
+  return insertHostedCheckRun(
+    ctx,
+    run,
+    recoveryGate && input.cause === checkCause.first ? checkCause.needsFix : input.cause,
+    input.usageSubmissions,
+  );
 }
 
 /** Insert an already prepared run and retain the existing provider dispatch hooks. */
 export async function insertHostedCheckRun(
   ctx: MutationCtx,
   run: HostedCheckRun,
+  cause: CheckCause,
   usageSubmissions?: string[],
 ): Promise<HostedCheckRun> {
   const reportsInR2 =
     process.env.FORGE_CHECK_REPORTS_R2 === '1' && run.configuration.provider !== 'ci-status';
   if (reportsInR2) useObjectReports(run);
   await ctx.db.insert('projectHostedCheckRuns', {
+    cause,
     ...(usageSubmissions?.length ? { cancelledUsage: { submissions: [...new Set(usageSubmissions)] } } : {}),
     ...(reportsInR2 ? { reportStorage: 'r2' as const } : {}),
     projectId: run.projectId as Id<'hostedProjects'>,

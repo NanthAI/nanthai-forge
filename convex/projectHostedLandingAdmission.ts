@@ -25,7 +25,7 @@ import {
   writeLanding,
   type LandingRow,
 } from './projectHostedLandingStore';
-import { hostedCheckRunnerSchema, type HostedCheckRun } from '../src/hosted-check';
+import { hostedCheckRunnerSchema, type HostedCheckRun, checkCause } from '../src/hosted-check';
 import { hostedRecordSchema } from '../src/hosted-records';
 import {
   landingObservation,
@@ -77,6 +77,7 @@ export async function startLandingAdmission(
   const { kind: _kind, ...settings } = check;
   void _kind;
   const run = await enqueueHostedCheck(ctx, {
+    cause: retry ? checkCause.retry : (attempt.checkCause ?? checkCause.preQueue),
     usageSubmissions: [attempt.submissionId],
     ...(input.providerDelayReason ? { providerDelayReason: input.providerDelayReason } : {}),
     projectId: input.projectId,

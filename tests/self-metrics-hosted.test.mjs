@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkCause } from '../dist/hosted-check.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -153,6 +154,104 @@ test('2x dogfood budget: 60 landings/day, 3000 weekly runs, 1200 Intents plus a 
   const summary = await readHostedMetricPages(f.query, period, true);
   assert.equal(f.meter.calls - previous, 4);
   assert(summary.records.surfaceGaps.some(gap => gap.includes('Status read one hosted')));
+});
+
+test('run causes reconcile to metric 5.6 in a mixed window with both compact and legacy reads', async () => {
+  const f = fixture();
+  const window = { from: at(0), to: at(10) };
+  f.landing('landed', at(0), at(6));
+  f.landing('outside', at(7), window.to);
+  f.run('outside-before', at(-1), at(1), 240, {}, checkCause.audit);
+  f.run('legacy', at(0), at(2), 240, { gate: { mode: 'audit' } });
+  f.run('first', at(1), at(4), 120, {}, checkCause.first);
+  f.run(
+    'cancelled',
+    at(2),
+    at(5),
+    null,
+    { status: 'cancelled', cost: { status: 'unknown' } },
+    checkCause.mainMoved,
+  );
+  f.run(
+    'not-started',
+    at(3),
+    at(5),
+    null,
+    { executionId: null, cost: { status: 'unknown' } },
+    checkCause.proof,
+  );
+  f.run('outside-end', window.to, at(11), 240, {}, checkCause.preQueue);
+  f.projectRuns(row => row.cause !== undefined);
+  const read = async () => {
+    const { records } = await readHostedMetricPages(f.query, window);
+    return metricsSurface(records, window).totals['5.6'];
+  };
+  const mixed = await read();
+  assert.equal(mixed.runsPerLanding, 3);
+  assert.deepEqual(mixed.runCauses, {
+    unrecordedRuns: 1,
+    byCause: [
+      { cause: 'first', runs: 1, started: 1, checksPerLanding: 1, runnerMinutes: 2, unknownRunnerRuns: 0 },
+      {
+        cause: 'main-moved',
+        runs: 1,
+        started: 1,
+        checksPerLanding: 1,
+        runnerMinutes: null,
+        unknownRunnerRuns: 1,
+      },
+      { cause: 'other', runs: 1, started: 0, checksPerLanding: 0, runnerMinutes: null, unknownRunnerRuns: 1 },
+      {
+        cause: 'unrecorded',
+        runs: 1,
+        started: 1,
+        checksPerLanding: 1,
+        runnerMinutes: 4,
+        unknownRunnerRuns: 0,
+      },
+    ],
+    otherReasons: { 'full check from proof page': 1 },
+  });
+  f.projectRuns();
+  assert.deepEqual((await read()).runCauses, mixed.runCauses);
+});
+
+test('a 1,000-landing day adds no metric calls or reads beyond the cause bytes', async t => {
+  const f = fixture();
+  const window = { from: at(0), to: at(1440) };
+  for (let i = 0; i < 1000; i++) f.landing(`landing-${i}`, at(i), at(i + 1));
+  for (let i = 0; i < 3000; i++) f.run(`run-${i}`, at(i / 3), at(i / 3 + 2));
+  f.projectRuns();
+  const read = async () => {
+    const before = { ...f.meter };
+    const start = performance.now();
+    const { records } = await readHostedMetricPages(f.query, window, false, false, 0);
+    const totals = metricsSurface(records, window).totals;
+    return {
+      calls: f.meter.calls - before.calls,
+      documents: f.meter.documents - before.documents,
+      bytes: f.meter.bytes - before.bytes,
+      elapsedMs: Math.round(performance.now() - start),
+      landings: totals['5.1'].landings,
+      runs: totals['5.6'].runs,
+      ratio: totals['5.6'].runsPerLanding,
+      unrecorded: totals['5.6'].runCauses.unrecordedRuns,
+    };
+  };
+  const legacy = await read();
+  for (const row of f.tables.projectHostedCheckRuns) row.cause = checkCause.admissionFollowup;
+  f.projectRuns();
+  const recorded = await read();
+  t.diagnostic(JSON.stringify({ legacy, recorded, extraBytes: recorded.bytes - legacy.bytes }));
+  assert.equal(recorded.landings, 1000);
+  assert.equal(recorded.runs, 3000);
+  assert.equal(recorded.ratio, 3);
+  assert.equal(legacy.unrecorded, 3000);
+  assert.equal(recorded.unrecorded, 0);
+  assert.equal(recorded.calls, legacy.calls);
+  assert.equal(recorded.documents, legacy.documents);
+  assert.equal(f.meter.maxPage, 100);
+  assert(recorded.bytes - legacy.bytes <= 13 * recorded.runs);
 });
 
 test('old server returns METRICS_UNAVAILABLE plus coverage and never silently falls back', async () => {

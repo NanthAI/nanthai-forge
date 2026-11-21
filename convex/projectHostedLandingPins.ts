@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkCause, submittedCheckCause, type CheckCause } from '../src/hosted-check';
 import { requireLandingCheck } from './projectHostedCheckEntries';
 import { earlyPredecessor } from './projectHostedEarlyResolution';
 import { candidateOwnerInputs } from './projectHostedProvenance';
@@ -44,8 +45,9 @@ export async function pinLandingAttempt(
     deferCheck?: boolean;
     retainedSelection?: HostedLandingAttempt['candidate'];
     recheck?: ScopedRecheckBasis;
-    /** Receives the pinned Candidate's Intent (landing reservation, 10d253c6): no second read. */
-    intent?: (intentId: string) => void;
+    checkCause?: CheckCause;
+    /** Reuses the initial submission's reservation lookup for cause attribution. */
+    intent?: (intentId: string) => Promise<CheckCause>;
     paths?: (paths: string[] | null) => void;
     /** Current main is already read for pin validation; source preparation may have raced it. */
     mainMoved?: (moved: boolean) => void;
@@ -123,6 +125,8 @@ export async function pinLandingAttempt(
     !r.revertOf &&
     r.check?.kind === 'request' &&
     batchEligible(project, effectivePolicy(project), input.actor, candidate);
+  const cause =
+    input.checkCause ?? (await input.intent?.(candidate.intentId)) ?? submittedCheckCause(r.retryReason);
   let check = null;
   let semanticPlan: SemanticPlan | undefined;
   if (candidate.result.status === 'clean') {
@@ -143,6 +147,7 @@ export async function pinLandingAttempt(
         r.check.kind === 'run'
           ? (await loadHostedCheck(ctx, { projectId: input.projectId, runId: r.check.runId })).run
           : await enqueueHostedCheck(ctx, {
+              cause,
               usageSubmissions: [input.submissionId],
               projectId: input.projectId,
               actor: input.actor.id,
@@ -194,13 +199,14 @@ export async function pinLandingAttempt(
   }
   const selectedCheck = check?.checkId ?? (r.check?.kind === 'request' ? r.check.checkId : undefined);
   if (selectedCheck) await requireLandingCheck(ctx, project, input.actor, selectedCheck);
-  input.intent?.(candidate.intentId);
   const policy = effectivePolicy(project);
   const { parentAttemptId, number } = input;
   return hostedLandingAttemptSchema.parse({
     ...(semanticPlan ? { semanticPlan } : {}),
     ...(candidate.earlyResolutions?.length ? { earlyResolutions: candidate.earlyResolutions } : {}),
-    ...(deferredCheck ? { deferredCheck: true } : {}),
+    ...(deferredCheck
+      ? { deferredCheck: true, ...(cause !== checkCause.first ? { checkCause: cause } : {}) }
+      : {}),
     ...(input.recheck ? { recheck: input.recheck } : {}),
     schema: 1,
     projectId: input.projectId,

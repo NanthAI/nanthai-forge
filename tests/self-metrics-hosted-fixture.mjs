@@ -255,7 +255,7 @@ export function fixture() {
       accepted,
     );
   };
-  const run = (id, start, end, seconds = 240, extra = {}) =>
+  const run = (id, start, end, seconds = 240, extra = {}, cause) =>
     put(
       'projectHostedCheckRuns',
       {
@@ -263,6 +263,7 @@ export function fixture() {
         runId: id,
         candidateId: id,
         status: 'passed',
+        ...(cause === undefined ? {} : { cause }),
         value: JSON.stringify({
           id,
           at: start,

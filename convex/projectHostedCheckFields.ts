@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkCause } from '../src/hosted-check';
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { checkGate } from './projectHostedMainAuditFields';
@@ -48,6 +49,7 @@ export const hostedCheckTables = {
     'version',
   ]),
   projectHostedCheckRuns: defineTable({
+    cause: v.optional(v.union(...Object.values(checkCause).map(code => v.literal(code)))),
     // Dispatch attribution and one idempotent late usage receipt; never acceptance evidence.
     cancelledUsage: v.optional(
       v.object({

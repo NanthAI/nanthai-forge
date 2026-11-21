@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkCause } from '../src/hosted-check';
 import type { MutationCtx } from './_generated/server';
 import type { BatchIdentity, LandingBatch } from './projectHostedLandingBatchState';
 import { prepareBatchCompose } from './projectHostedLandingBatchCompose';
@@ -40,7 +41,7 @@ export async function settleBatchConflicts(ctx: MutationCtx, input: BatchIdentit
   }
   const predecessor = await predecessorStatus(ctx, input, batch);
   if (predecessor === 'invalid') {
-    await retryLandingBatch(ctx, input, batch);
+    await retryLandingBatch(ctx, input, batch, checkCause.cohortRefresh);
     return;
   }
   const source = await prepareBatchCompose(ctx, input);

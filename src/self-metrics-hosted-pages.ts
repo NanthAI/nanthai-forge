@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkCauseSchema } from './hosted-check.js';
 import { z } from 'zod';
 import {
   hydrateMetricInputs,
@@ -100,6 +101,7 @@ const rowSchemas = {
     head: z.string(),
     started: z.boolean(),
     runnerMinutes: z.number().nonnegative().nullable(),
+    cause: checkCauseSchema.optional(),
     fullSuite: z.boolean().nullable(),
     scopedRecheck: z.literal(true).optional(),
     inputPin: pin,

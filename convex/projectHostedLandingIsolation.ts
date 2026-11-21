@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './server';
-import type { HostedCheckRun } from '../src/hosted-check';
+import { type HostedCheckRun, checkCause } from '../src/hosted-check';
 import type { BatchFailure } from '../src/hosted-batch-diagnosis';
 import { landingObservation, type HostedLandingAttempt } from '../src/hosted-landing';
 import { failedGroupAction } from '../src/hosted-landing-suspect';
@@ -107,14 +107,19 @@ export async function isolateFailedBatch(
     await settleLandingOperation(ctx, next);
     return true;
   }
-  await retryLandingBatch(ctx, key, {
-    ...batch,
-    failure,
-    transition: {
-      code: 'STACKED_FAILURE_UNSTACKED',
-      message: `Shared run ${failure.runId} failed on files no member of this group changed while its predecessor ${batch.predecessor!.submissionId} had not passed; the group recomposes once on current main without it.`,
+  await retryLandingBatch(
+    ctx,
+    key,
+    {
+      ...batch,
+      failure,
+      transition: {
+        code: 'STACKED_FAILURE_UNSTACKED',
+        message: `Shared run ${failure.runId} failed on files no member of this group changed while its predecessor ${batch.predecessor!.submissionId} had not passed; the group recomposes once on current main without it.`,
+      },
     },
-  });
+    checkCause.cohortSplit,
+  );
   for (const member of pending) {
     const current = await loadLanding(ctx, { projectId: key.projectId, submissionId: member.state.id });
     if (current.state.phase === 'landed' || current.state.phase === 'terminal-failed') continue;

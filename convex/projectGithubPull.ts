@@ -21,7 +21,7 @@ import { submitHostedCompose } from './projectHostedComposeJobs';
 import { hostedWriteProject, readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { hostedLaneSchema } from '../src/hosted-lane';
-import { hostedCheckTerminal } from '../src/hosted-check';
+import { hostedCheckTerminal, checkCause } from '../src/hosted-check';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { checkRunStatus, pullOperationId } from '../src/github-pull-check';
 import { pullOf, settlePull } from './projectGithubPullQueue';
@@ -155,6 +155,7 @@ export const startCheck = internalMutation({
     const { kind: _kind, ...selected } = check;
     void _kind;
     const run = await enqueueHostedCheck(ctx, {
+      cause: checkCause.pull,
       projectId: project._id,
       actor: project.owner,
       request: {

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkCause, type CheckCause } from '../src/hosted-check';
 import { cancelPendingTask } from './schedulerCancel';
 import { retainedStallOwner } from '../src/hosted-landing-stall';
 import { exhaustFinishCompose } from './projectHostedComposeExhaustion';
@@ -144,10 +145,18 @@ export async function batchFinishStep(
         (main.head !== source.state.request.expectedMain.head ||
           main.receipt.id !== source.state.request.expectedMain.receiptId))
     ) {
-      await retryLandingBatch(ctx, key, batch);
+      await retryLandingBatch(
+        ctx,
+        key,
+        batch,
+        predecessor === 'invalid' ? checkCause.cohortRefresh : undefined,
+      );
       return { handled: true, command: null };
     }
     const included = batch.members.filter(m => !dropped.some(d => d.candidateId === m.candidate.id));
+    const unadmittedCauses = new Set<CheckCause>();
+    let hadAdmission = false;
+    let admissionMainMoved = false;
     for (const member of batch.members) {
       const current = await loadLanding(ctx, {
         projectId: input.projectId,
@@ -166,8 +175,16 @@ export async function batchFinishStep(
         await wakeBatch(ctx, key);
         return { handled: true, command: null };
       }
-      if (included.includes(member))
+      if (included.includes(member)) {
         await hostedWriteProject(ctx, input.projectId, member.actor.id, member.authorityEpoch);
+        if (current.row.admission) {
+          hadAdmission = true;
+          admissionMainMoved ||=
+            (member.parentAttemptId !== null && member.checkCause === checkCause.mainMoved) ||
+            (predecessor !== 'pending' &&
+              (member.main.head !== main.head || member.main.receiptId !== main.receipt.id));
+        } else unadmittedCauses.add(member.checkCause ?? checkCause.first);
+      }
     }
     for (const member of batch.members.filter(
       m => predecessor !== 'pending' && dropped.some(d => d.candidateId === m.candidate.id && d.againstMain),
@@ -216,7 +233,21 @@ export async function batchFinishStep(
     );
     const { kind: _kind, ...check } = settings;
     void _kind;
+    const cause =
+      batch.nextCheckCause ??
+      (batch.recheck || admissionMainMoved
+        ? checkCause.mainMoved
+        : batch.parentId
+          ? checkCause.cohortSplit
+          : unadmittedCauses.has(checkCause.needsFix)
+            ? checkCause.needsFix
+            : hadAdmission
+              ? checkCause.admissionFollowup
+              : unadmittedCauses.size === 1
+                ? [...unadmittedCauses][0]!
+                : checkCause.first);
     const run = await enqueueBatchCheck(ctx, {
+      cause,
       usageSubmissions: included.map(member => member.submissionId),
       projectId: input.projectId,
       actor: state.actor,
@@ -259,8 +290,10 @@ export async function batchFinishStep(
           environment: run.request.expectedEnvironment,
         },
       });
+    const { nextCheckCause: _cause, ...dispatched } = batch;
+    void _cause;
     await writeBatch(ctx, key, {
-      ...batch,
+      ...dispatched,
       phase: 'checking',
       runId: run.id,
       included: included.map(m => m.submissionId),

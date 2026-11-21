@@ -393,7 +393,7 @@ function assertRunMetrics(f) {
     );
     assert(projection, 'every landed run has its metric row from the existing mutation');
     assert.equal(row.metricsProjected, true);
-    assert.deepEqual(JSON.parse(projection.value), metricRunRow(JSON.parse(row.value)));
+    assert.deepEqual(JSON.parse(projection.value), metricRunRow(JSON.parse(row.value), undefined, row.cause));
   }
 }
 
@@ -1337,6 +1337,9 @@ test('GitHub inbound cost: one changed blob imports, composes, checks, lands and
 });
 
 test('storage per landing ratchets every table on fresh and dogfood-shaped checks before and after exhaust expiry', async t => {
+  // Candidate 7 adds one numeric cause to the run row and one copy to its
+  // compact metrics projection: 10 + 12 JSON bytes on the fresh dispatch,
+  // 20 + 24 across the two immediate dogfood dispatches.
   // e3082c24: compact source diagnostics retain up to 200 B per record. On the dogfood
   // fixture the compose and step copies add 121 B and 104 B respectively. Freeze elapsed
   // time so exact JSON byte ceilings measure fields rather than runner load.

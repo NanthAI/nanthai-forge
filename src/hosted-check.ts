@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { checkTerminal } from './check-run-state.js';
+import { checkCause, checkTerminal } from './check-run-state.js';
 import { checkGateSchema } from './bet2-gate.js';
 import { checkFileSummarySchema } from './check-file-summary.js';
 import { semanticPlanSchema, semanticReportsSchema } from './intent-semantic-conflict.js';
@@ -14,6 +14,23 @@ import { invariant } from './errors.js';
 import { contractTestPath } from './intent-test-contract.js';
 import { secretAllowEvidenceSchema } from './secret-allow.js';
 import { submoduleAllowListSchema } from './submodule-allowlist.js';
+
+export { checkCause };
+export const checkCauseSchema = z.literal(Object.values(checkCause));
+export type CheckCause = z.infer<typeof checkCauseSchema>;
+
+export function submittedCheckCause(reason?: 'flake' | 'main-moved' | 'infra' | 'other'): CheckCause {
+  switch (reason) {
+    case 'flake':
+    case 'infra':
+    case 'other':
+      return checkCause.retry;
+    case 'main-moved':
+      return checkCause.mainMoved;
+    default:
+      return checkCause.first;
+  }
+}
 
 /** Check-time evidence and the receipt line (src/check-time-added.ts, Issue a217b83e). They live here, not
  * there, so CLI and MCP schemas do not load that module (agent-weight ceilings). */

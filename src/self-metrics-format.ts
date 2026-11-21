@@ -60,6 +60,7 @@ export function formatMetricReport(current: MetricsSurface, before?: MetricsSurf
     ),
     `Main-race re-checks: ${current.totals.waste.mainRaceRecheckRuns} runs / ${number(current.totals.waste.mainRaceRecheckRunnerMinutes)} runner minutes; ${recheckShare(current)}. ${cell(current.totals.waste.gaps.join(' '))}`,
     '',
+    ...formatRunCauses(current),
     ...formatFallbacks(current),
     ...formatSecondChecks(current),
     ...formatFirstChecks(current),
@@ -160,6 +161,19 @@ export function formatFlakes(current: MetricsSurface) {
     ...flakes.gaps.map(gap => `  ${gap}`),
   ];
 }
+function formatRunCauses(current: MetricsSurface) {
+  const ledger = current.totals['5.6'].runCauses;
+  if (!ledger) return [];
+  return [
+    `Check dispatch causes (${ledger.unrecordedRuns} unrecorded)`,
+    ...ledger.byCause.map(
+      row =>
+        `  ${row.cause} · ${row.runs} runs (${number(row.checksPerLanding)} started per landing) · ${number(row.runnerMinutes)} known runner min, ${row.unknownRunnerRuns} unknown`,
+    ),
+    ...Object.entries(ledger.otherReasons).map(([reason, runs]) => `  Other · ${reason} ×${runs}`),
+  ];
+}
+
 export function formatMetrics(current: MetricsSurface) {
   const values = metricValues(current.totals);
   const rows = (Object.keys(metricNames) as (keyof typeof metricNames)[]).map(
@@ -177,6 +191,7 @@ export function formatMetrics(current: MetricsSurface) {
           `Waste ${row.cause}: ${number(row.elapsedMinutes)} elapsed / ${number(row.runnerMinutes)} runner min; discarded passed ${number(row.discardedPassedRunnerMinutes)} runner min`,
       ),
     `Main-race re-checks: ${current.totals.waste.mainRaceRecheckRuns} runs / ${number(current.totals.waste.mainRaceRecheckRunnerMinutes)} runner min; ${recheckShare(current)}`,
+    ...formatRunCauses(current),
     ...formatSpeedBudgets(current.totals.speedBudgets.rows),
     ...formatFallbacks(current),
     ...formatSecondChecks(current),

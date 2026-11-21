@@ -20,7 +20,7 @@ import { loadBatch, retryLandingBatch } from './projectHostedLandingBatchStore';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { cancelHostedCheck } from './projectHostedCheckCancel';
 import { hostedRecordSchema } from '../src/hosted-records';
-import { hostedCheckTerminal } from '../src/hosted-check';
+import { hostedCheckTerminal, checkCause } from '../src/hosted-check';
 import {
   landingObservation,
   type HostedLandingAttempt,
@@ -187,7 +187,7 @@ export async function cancelStaleLandingChecks(
       const { batch } = grouped!;
       if (batch.phase !== 'checking' || batch.runId !== runId) continue;
       // One replacement union, retaining member sequence and the shared check.
-      await retryLandingBatch(ctx, key, batch);
+      await retryLandingBatch(ctx, key, batch, checkCause.mainMoved);
     } else {
       const finish = await loadFinish(ctx, { projectId: input.projectId, submissionId: state.id });
       if (finish.value.pending) continue;

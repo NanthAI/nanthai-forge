@@ -3,7 +3,7 @@ import { providerRetryDelay } from '../src/ci-provider-recovery';
 import type { MutationCtx } from './_generated/server';
 import type { LandingClaim } from './projectHostedLandingControl';
 import type { HostedLandingAttempt } from '../src/hosted-landing';
-import type { HostedCheckRun } from '../src/hosted-check';
+import { type HostedCheckRun, checkCause } from '../src/hosted-check';
 import { HOSTED_PLATFORM_RETRIES, checkFailureKind } from '../src/hosted-landing-admission';
 import { enqueueHostedCheck } from './projectHostedChecks';
 import { installBatchAttempt } from './projectHostedLandingBatchStore';
@@ -28,6 +28,7 @@ export async function retrySoloLandingCheck(
   const operationId = crypto.randomUUID();
   const reason = providerRetryDelay(run.failureReason);
   const next = await enqueueHostedCheck(ctx, {
+    cause: checkCause.retry,
     usageSubmissions: [attempt.submissionId],
     ...(reason ? { providerDelayReason: reason } : {}),
     projectId: claim.projectId,
