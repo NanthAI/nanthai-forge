@@ -632,10 +632,11 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   check that pins less (`assertion-loosened`: strict to loose equality, an exact value to a bound,
   a pattern or a truthiness, a negation, `throws` without its matcher), a removed test
   (`test-removed`), a new skip (`skip-added`: `.skip`, `.todo`, `skipIf`, a `skip` option, a skip
-  call or a guarded early `return`), a name filter written into a test (`name-pattern-narrowed`:
+  call, a guarded early `return` or a bare `return` before assertions), a name filter written into a test (`name-pattern-narrowed`:
   `--test-name-pattern` and the like), `.only` (`only-added`), and, as a hint, a test whose input
-  changed under the same assertions (`input-changed`). A skip, early return or `.only` inside a file
-  helper counts for each test that calls it; aliased test functions (`const it = baseIt.skip`,
+  changed under the same assertions (`input-changed`), including a changed `test.each` table. Each
+  call to a file or suite helper contributes its assertions to the calling test. Skips, early returns
+  and `.only` count once per helper for each calling test. Aliased test functions (`const it = baseIt.skip`,
   `test.extend`) and tests that pass their body by reference (`test('t', runCase)`) are read too.
   Formatting (layout, comments, quote style, semicolons, trailing commas, a lone arrow parameter's
   parentheses), order, renamed locals, a renamed test with the same body, a renamed or moved

@@ -83,6 +83,110 @@ test('fewer assertion calls in a test are flagged with counts, never values', ()
   });
 });
 
+test('each call to a shared helper contributes its assertions, including through other helpers', () => {
+  const helpers = `function check(value) { assert.equal(value, 1); }
+function verify(value) { check(value); check(value + 1); }`;
+  const source = calls => `${STRICT}${helpers}\ntest('repeated checks', () => { ${calls} });`;
+  const before = source('verify(a); verify(b); check(c);');
+  const after = source('verify(a); check(c);');
+  assert.deepEqual(weakenedTestFlags([{ path: 'tests/a.test.mjs', before, after }]), [
+    {
+      file: 'tests/a.test.mjs',
+      test: 'repeated checks',
+      kind: 'assertions-removed',
+      assertions: { before: 5, after: 3 },
+    },
+  ]);
+  assert.deepEqual(one(before, source('check(c); verify(b); verify(a);')), []);
+  const guarded = calls => `${STRICT}
+function check(x) { if (!x) return; assert.equal(x, 1); }
+test('guarded', () => { ${calls} });`;
+  assert.deepEqual(one(guarded('check(1);'), guarded('check(1); check(1);')), []);
+  const recursive = cases => `${STRICT}
+function a(n) { assert.equal(aValue, 1); if (n) b(n - 1); }
+function b(n) { assert.equal(bValue, 2); if (n) a(n - 1); }
+${cases}`;
+  const first = "test('first', () => a(1));";
+  const second = "test('second', () => b(1));";
+  assert.deepEqual(one(recursive(`${first}\n${second}`), recursive(`${second}\n${first}`)), []);
+  // A shared call graph can have billions of paths through just a few declarations.
+  const shared = Array.from({ length: 31 }, (_, i) => {
+    const previous = i ? `f${i - 1}` : 'check';
+    return `function f${i}() { ${previous}(); ${previous}(); }`;
+  }).join('\n');
+  const wide = calls => `${STRICT}${helpers}\n${shared}\ntest('shared graph', () => { ${calls} });`;
+  assert.deepEqual(
+    weakenedTestFlags([{ path: 'tests/a.test.mjs', before: wide('f30(); f30();'), after: wide('f30();') }])[0]
+      ?.assertions,
+    { before: 2 ** 32, after: 2 ** 31 },
+  );
+});
+
+test('a suite helper contributes to the tests in its lexical scope, including reference callbacks', () => {
+  const before = `${STRICT}
+describe('first', () => {
+  it('inline', () => check());
+  function check() { assert.equal(a, 1); }
+  describe('nested', () => { it('reference', check); });
+});
+describe('second', () => {
+  const check = () => assert.equal(b, 2);
+  it('same helper name', () => check());
+});`;
+  assert.deepEqual(one(before, before.replace('assert.equal(a, 1)', 'read(a)')), [
+    ['first > inline', 'assertions-removed'],
+    ['first > nested > reference', 'assertions-removed'],
+  ]);
+  const inline = `${STRICT}describe('suite', () => { it('case', () => assert.equal(a, 1)); });`;
+  const extracted = `${STRICT}describe('suite', () => {
+  const check = () => assert.equal(a, 1);
+  it('case', () => check());
+});`;
+  assert.deepEqual(one(inline, extracted), []);
+  const namedSuite = `${STRICT}
+function group() {
+  function check() { assert.equal(a, 1); }
+  it('case', () => check());
+}
+describe('suite', group);`;
+  assert.deepEqual(one(namedSuite, namedSuite.replace('assert.equal(a, 1)', 'read(a)')), [
+    ['suite > case', 'assertions-removed'],
+  ]);
+  const shadowed = `${STRICT}describe('suite', () => {
+    const check = () => assert.equal(a, 1);
+    it('callback parameter', check => check());
+    it('declared callback', () => {
+      const check = () => assert.equal(b, 2);
+      [1].forEach(check);
+    });
+  });`;
+  assert.deepEqual(one(shadowed, shadowed.replace('assert.equal(b, 2)', 'read(b)')), [
+    ['suite > declared callback', 'assertions-removed'],
+  ]);
+});
+
+test('emptying a parameter table flags its test even when the callback is unchanged', () => {
+  const source = table => `${STRICT}
+const check = value => assert.equal(run(value), 1);
+test.each(${table})('inline', value => assert.equal(run(value), 1));
+test.each(${table})('reference', check);
+test('independent', check);`;
+  assert.deepEqual(one(source('[1, 2]'), source('[]')), [
+    ['inline', 'input-changed'],
+    ['reference', 'input-changed'],
+  ]);
+  assert.deepEqual(one(source('[1, 2]'), source('[1,\n2,]')), []);
+});
+
+test('an unconditional bare return before an assertion is a skip, while a final return is not', () => {
+  const source = body => `${STRICT}test('case', () => { ${body} });`;
+  const assertion = 'assert.equal(run(), 1);';
+  assert.deepEqual(one(source(assertion), source(`return; ${assertion}`)), [['case', 'skip-added']]);
+  assert.deepEqual(one(source(assertion), source(`${assertion} return;`)), [['case', 'input-changed']]);
+  const viaHelper = body => `${STRICT}function check() { ${assertion} }\ntest('case', () => { ${body} });`;
+  assert.deepEqual(one(viaHelper('check();'), viaHelper('return; check();')), [['case', 'skip-added']]);
+});
+
 test('added skips are flagged: modifiers, options, a skip call and a guarded early return', () => {
   const body = '  assert.equal(run(), 1);\n';
   const plain = `${STRICT}test('t', () => {\n${body}});\n`;

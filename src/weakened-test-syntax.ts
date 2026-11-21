@@ -7,6 +7,7 @@ import { loadTypescript } from './lazy-typescript.js';
 const TEST_FUNCTIONS = new Set(['test', 'it', 'describe', 'suite', 'context', 'specify']);
 const SKIP_PREFIXED = new Set(['xit', 'xtest', 'xdescribe', 'xcontext']);
 const ONLY_PREFIXED = new Set(['fit', 'ftest', 'fdescribe']);
+const SUITE_FUNCTIONS = new Set(['describe', 'suite', 'context', 'xdescribe', 'xcontext', 'fdescribe']);
 const MODIFIERS = new Set(
   'skip todo only each for skipIf runIf concurrent sequential serial fails failing'.split(' '),
 );
@@ -78,7 +79,7 @@ type FileContext = {
   objects: Set<string>;
   functions: Map<string, string>;
   /** File-scope names bound to a test function and its modifiers (`const it = baseIt.skip`). */
-  tests: Map<string, string[]>;
+  tests: Map<string, TestCallee>;
 };
 
 export function fileContext(source: ts.SourceFile): FileContext {
@@ -101,19 +102,18 @@ export function fileContext(source: ts.SourceFile): FileContext {
           value.expression.name.text === 'extend'
         )
           value = value.expression.expression;
-        const modifiers = value && calleeModifiers(value, context);
-        if (ts.isIdentifier(declaration.name) && modifiers)
-          context.tests.set(declaration.name.text, modifiers);
+        const callee = value && testCallee(value, context);
+        if (ts.isIdentifier(declaration.name) && callee) context.tests.set(declaration.name.text, callee);
       }
     if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
     const module = statement.moduleSpecifier.text;
     if (TEST_MODULES.has(module)) {
       const clause = statement.importClause;
-      if (clause?.name && module === 'node:test') context.tests.set(clause.name.text, []);
+      if (clause?.name && module === 'node:test') context.tests.set(clause.name.text, { modifiers: [] });
       const bindings = clause?.namedBindings;
       if (bindings && ts.isNamedImports(bindings))
         for (const element of bindings.elements) {
-          const imported = calleeModifiers((element.propertyName ?? element.name) as ts.Identifier, context);
+          const imported = testCallee((element.propertyName ?? element.name) as ts.Identifier, context);
           if (imported && element.propertyName) context.tests.set(element.name.text, imported);
         }
       continue;
@@ -196,38 +196,49 @@ type TestCall = {
   skips: number;
   conditional: number;
   only: boolean;
+  suite?: boolean;
   fn?: ts.FunctionLikeDeclaration;
   /** A test body passed by reference (`test('t', runCase)` or a factory call). */
   ref?: ts.Expression;
+  /** The input table declared in `test.each(table)(...)`. */
+  table?: ts.Expression;
 };
 
-/** Modifiers of a test callee (`test`, `it.skip`, `describe.each(table)`, `t.test`, a file-scope
- * alias), or null. */
-function calleeModifiers(node: ts.Expression, context: FileContext): string[] | null {
+type TestCallee = { modifiers: string[]; table?: ts.Expression; suite?: boolean };
+
+/** Modifiers and table of a test callee (`test`, `it.skip`, `describe.each(table)`, `t.test`, a
+ * file-scope alias), or null. */
+function testCallee(node: ts.Expression, context: FileContext): TestCallee | null {
   const ts = loadTypescript();
   if (ts.isIdentifier(node)) {
     const alias = context.tests.get(node.text);
     if (alias) return alias;
-    if (TEST_FUNCTIONS.has(node.text)) return [];
-    if (SKIP_PREFIXED.has(node.text)) return ['skip'];
-    if (ONLY_PREFIXED.has(node.text)) return ['only'];
+    const suite = SUITE_FUNCTIONS.has(node.text);
+    if (TEST_FUNCTIONS.has(node.text)) return { modifiers: [], suite };
+    if (SKIP_PREFIXED.has(node.text)) return { modifiers: ['skip'], suite };
+    if (ONLY_PREFIXED.has(node.text)) return { modifiers: ['only'], suite };
     return null;
   }
   if (ts.isPropertyAccessExpression(node)) {
     const name = node.name.text;
     if (MODIFIERS.has(name)) {
-      const inner = calleeModifiers(node.expression, context);
-      return inner && [...inner, name];
+      const inner = testCallee(node.expression, context);
+      return inner && { ...inner, modifiers: [...inner.modifiers, name] };
     }
     // node:test subtests: t.test(...), t.describe(...)
     if ((name === 'test' || name === 'describe' || name === 'it') && ts.isIdentifier(node.expression))
-      return [];
+      return { modifiers: [], suite: name === 'describe' };
     return null;
   }
   if (ts.isCallExpression(node)) {
-    const inner = calleeModifiers(node.expression, context);
-    const last = inner?.at(-1);
-    return inner && last && ['each', 'for', 'skipIf', 'runIf'].includes(last) ? inner : null;
+    const inner = testCallee(node.expression, context);
+    if (!inner) return null;
+    const last = inner.modifiers.at(-1);
+    if (last === 'each' || last === 'for') {
+      const table = node.arguments[0];
+      return table ? { ...inner, table } : inner;
+    }
+    return last === 'skipIf' || last === 'runIf' ? inner : null;
   }
   return null;
 }
@@ -238,8 +249,9 @@ export function testCall(
   context: FileContext,
 ): TestCall | null {
   const ts = loadTypescript();
-  const modifiers = calleeModifiers(call.expression, context);
-  if (!modifiers) return null;
+  const callee = testCallee(call.expression, context);
+  if (!callee) return null;
+  const { modifiers, table, suite } = callee;
   const fn = call.arguments.find(
     (arg): arg is ts.ArrowFunction | ts.FunctionExpression =>
       ts.isArrowFunction(arg) || ts.isFunctionExpression(arg),
@@ -268,6 +280,8 @@ export function testCall(
   const result: TestCall = {
     name,
     ...(ref ? { ref } : {}),
+    ...(table ? { table } : {}),
+    ...(suite ? { suite } : {}),
     skips: modifiers.filter(m => m === 'skip' || m === 'todo').length,
     conditional: modifiers.filter(m => m === 'skipIf' || m === 'runIf').length,
     only: modifiers.includes('only'),

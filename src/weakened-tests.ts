@@ -4,6 +4,12 @@
 // tests whose input changed while their assertions stayed the same. Static: it parses, never runs.
 import type ts from 'typescript';
 import { loadTypescript } from './lazy-typescript.js';
+import {
+  creditTestHelpers,
+  findTestHelper,
+  helperBindings,
+  type TestChecks,
+} from './weakened-test-helpers.js';
 import { assertionRank, fileContext, parse, testCall } from './weakened-test-syntax.js';
 
 type WeakenedKind =
@@ -32,16 +38,8 @@ const NAME_PATTERN =
   /--test-name-pattern|--test-skip-pattern|--test-only|--grep\b|testNamePatterns?|testSkipPatterns?/;
 /** Marks a nested test's placeholder token, so its parent's own code can be compared without it. */
 const NESTED = '\u0001';
-type Case = {
+type Case = TestChecks & {
   key: string;
-  ranks: number[];
-  skips: number;
-  /** Skip calls and skip options with a runtime condition. */
-  conditional: number;
-  /** Early returns under a branch: the rest of the test may never run. */
-  returns: number;
-  patterns: number;
-  only: boolean;
   /** Holds nested tests (a describe block): its removal shows in theirs. */
   container: boolean;
   /** Tokens of the test without comments, layout, quote style, semicolons, trailing commas or local
@@ -51,29 +49,9 @@ type Case = {
   core: string;
   /** Tokens of its assertion calls alone. */
   asserts: string;
-  /** File-local helper functions it calls, whose assertions count as its own. */
-  calls: Set<string>;
+  /** Tokens of the parameter table, when declared separately from the callback. */
+  table: string;
 };
-
-/** Top-level named functions of the file (declarations and `const name = () => …`). */
-function helperFunctions(source: ts.SourceFile) {
-  const ts = loadTypescript();
-  const helpers = new Map<ts.Node, string>();
-  for (const statement of source.statements) {
-    if (ts.isFunctionDeclaration(statement) && statement.name) helpers.set(statement, statement.name.text);
-    if (ts.isVariableStatement(statement))
-      for (const declaration of statement.declarationList.declarations) {
-        const value = declaration.initializer;
-        if (
-          ts.isIdentifier(declaration.name) &&
-          value &&
-          (ts.isArrowFunction(value) || ts.isFunctionExpression(value))
-        )
-          helpers.set(value, declaration.name.text);
-      }
-  }
-  return helpers;
-}
 
 /** Names declared inside a test function, so a local rename is not a change. */
 function localNames(fn: ts.Node) {
@@ -141,7 +119,7 @@ function collect(path: string, text: string): Map<string, Case> | null {
   const seen = new Map<string, number>();
   const blank = (key: string): Case => ({
     key,
-    ranks: [],
+    assertions: [0, 0, 0, 0],
     skips: 0,
     conditional: 0,
     returns: 0,
@@ -151,38 +129,46 @@ function collect(path: string, text: string): Map<string, Case> | null {
     body: '',
     core: '',
     asserts: '',
-    calls: new Set(),
+    table: '',
+    calls: [],
   });
-  const helperNodes = helperFunctions(source);
-  const helperNames = new Set(helperNodes.values());
-  const helpers = new Map<string, Case>();
-  const register = (scope: ts.Node, current: Case) => {
+  type Bindings = ReturnType<typeof helperBindings>;
+  const helperScopes = new WeakMap<ts.Node, NonNullable<Bindings>>();
+  const helpers = new Map<ts.Node, Case>();
+  const pendingHelpers = new Set<ts.Node>();
+  const namedSuites = new Set<ts.Node>();
+  const activeSuites = new Set<ts.Node>();
+  const register = (scope: ts.Node, current: Case, outer?: Bindings, suite = false) => {
     const nested = new Map<ts.Node, string>();
     const assertNodes: ts.Node[] = [];
-    const isHelper = helperNodes.has(scope);
+    const isHelper = current.key === OUTSIDE && helperScopes.has(scope);
+    let earlyReturn = false;
     // Whether a branch asserts (directly or through a helper): `if (x) { assert…; return; }` checks
     // its own case, while `if (x) return;` ends the test before the assertions that follow.
-    const asserts = (branch: ts.Node): boolean =>
+    const asserts = (branch: ts.Node, bindings: Bindings): boolean =>
       (ts.isCallExpression(branch) &&
-        (assertionRank(branch, context) !== null ||
-          (ts.isIdentifier(branch.expression) && helperNames.has(branch.expression.text)))) ||
-      !!ts.forEachChild(branch, child => asserts(child) || undefined);
-    const visit = (node: ts.Node, depth: number, branch: ts.Node | null) => {
-      const helper = node !== scope ? helperNodes.get(node) : undefined;
-      if (helper !== undefined) {
-        const item = blank(OUTSIDE);
-        helpers.set(helper, item);
-        register(node, item);
+        (assertionRank(branch, context) !== null || !!findTestHelper(branch.expression, bindings))) ||
+      !!ts.forEachChild(branch, child => asserts(child, bindings) || undefined);
+    const visit = (
+      node: ts.Node,
+      depth: number,
+      branch: ts.Node | null,
+      straightLine: boolean,
+      inherited: Bindings,
+    ) => {
+      if (node !== scope && helperScopes.has(node)) {
+        pendingHelpers.add(node);
         return;
       }
-      if (
-        ts.isCallExpression(node) &&
-        ts.isIdentifier(node.expression) &&
-        helperNames.has(node.expression.text)
-      )
-        current.calls.add(node.expression.text);
-      else if (ts.isCallExpression(node)) {
-        const found = testCall(node, source, context);
+      const fn = ts.isFunctionLike(node);
+      const block = ts.isBlock(node);
+      const bindings =
+        fn || block || node === source
+          ? helperBindings(node, inherited, helperScopes, node === source || (suite && depth === 0))
+          : inherited;
+      if (ts.isCallExpression(node)) {
+        const helper = findTestHelper(node.expression, bindings);
+        const found = helper ? null : testCall(node, source, context);
         if (found) {
           const base = current.key === OUTSIDE ? found.name : `${current.key} > ${found.name}`;
           const count = (seen.get(base) ?? 0) + 1;
@@ -193,23 +179,33 @@ function collect(path: string, text: string): Map<string, Case> | null {
             skips: found.skips,
             conditional: found.conditional,
             only: found.only,
+            table: found.table ? tokens(found.table, source, nested, new Map()).join(' ') : '',
           };
           // The leaf name only: renaming or moving the parent changes neither body.
           nested.set(node, found.name + suffix);
           current.container = true;
           cases.set(child.key, child);
-          if (found.fn) register(found.fn, child);
+          if (found.fn) register(found.fn, child, bindings, found.suite);
           else if (found.ref) {
-            if (ts.isIdentifier(found.ref) && helperNames.has(found.ref.text))
-              child.calls.add(found.ref.text);
-            register(found.ref, child);
+            const callback = findTestHelper(found.ref, bindings);
+            if (found.suite && callback && !activeSuites.has(callback)) {
+              namedSuites.add(callback);
+              activeSuites.add(callback);
+              register(callback, child, helperScopes.get(callback), true);
+              activeSuites.delete(callback);
+            } else {
+              if (callback && !found.suite) child.calls.push(callback);
+              register(found.ref, child, bindings);
+            }
           }
           return;
         }
-        const rank = assertionRank(node, context);
+        if (helper) current.calls.push(helper);
+        const rank = helper ? null : assertionRank(node, context);
         if (rank !== null) {
-          current.ranks.push(rank);
+          for (const level of [0, 1, 2, 3] as const) if (level < rank) current.assertions[level]++;
           assertNodes.push(node);
+          earlyReturn ||= current.returnBefore !== undefined;
         } else if (
           ts.isPropertyAccessExpression(node.expression) &&
           (node.expression.name.text === 'skip' || node.expression.name.text === 'todo') &&
@@ -221,25 +217,33 @@ function collect(path: string, text: string): Map<string, Case> | null {
           current.conditional++;
       }
       // In a helper only a bare `return;` stops what follows; `return value` computes.
-      if (
-        ts.isReturnStatement(node) &&
-        depth === 0 &&
-        branch &&
-        !(isHelper && node.expression) &&
-        !asserts(branch)
-      )
-        current.returns++;
+      if (ts.isReturnStatement(node) && depth === 0) {
+        if (branch && !(isHelper && node.expression) && !asserts(branch, bindings)) current.returns++;
+        if (straightLine && !node.expression) current.returnBefore ??= current.calls.length;
+      }
       if ((ts.isStringLiteralLike(node) || ts.isTemplateLiteralToken(node)) && NAME_PATTERN.test(node.text))
         current.patterns++;
-      const inner = ts.isFunctionLike(node) && node !== scope ? depth + 1 : depth;
+      const inner = fn && node !== scope ? depth + 1 : depth;
       // A return under a branch (not its condition) can end the test before its assertions run.
       const guarded = (child: ts.Node) =>
         ts.isIfStatement(node)
           ? child !== node.expression
           : ts.isConditionalExpression(node) || ts.isCaseClause(node) || ts.isCatchClause(node);
-      ts.forEachChild(node, child => visit(child, inner, guarded(child) ? child : branch));
+      ts.forEachChild(node, child =>
+        visit(
+          child,
+          inner,
+          guarded(child) ? child : branch,
+          straightLine && (node === scope || block),
+          bindings,
+        ),
+      );
     };
-    visit(scope, 0, null);
+    visit(scope, 0, null, true, outer);
+    if (earlyReturn) {
+      current.returns++;
+      delete current.returnBefore;
+    }
     // File scope and helpers are compared by their counts only: no token work.
     if (current.key === OUTSIDE) return;
     const names = localNames(scope);
@@ -256,37 +260,14 @@ function collect(path: string, text: string): Map<string, Case> | null {
   const outside = blank(OUTSIDE);
   cases.set(OUTSIDE, outside);
   register(source, outside);
-  // A helper's assertions and name filters count for every test that calls it (directly or through
-  // another helper), so extracting a test body into a helper is not a removal. Helpers no test calls
-  // stay with the file scope.
-  const reached = new Set<string>();
-  const credit = (item: Case) => {
-    const done = new Set<string>();
-    const stack = [...item.calls];
-    for (let name = stack.pop(); name !== undefined; name = stack.pop()) {
-      const found = helpers.get(name);
-      if (done.has(name) || !found) continue;
-      done.add(name);
-      reached.add(name);
-      item.ranks.push(...found.ranks);
-      item.patterns += found.patterns;
-      item.skips += found.skips;
-      item.conditional += found.conditional;
-      item.returns += found.returns;
-      item.only ||= found.only;
-      stack.push(...found.calls);
-    }
-  };
-  for (const item of cases.values()) if (item !== outside) credit(item);
-  // A helper no test calls keeps its counts at file scope (its early returns end only itself).
-  for (const [name, found] of helpers)
-    if (!reached.has(name)) {
-      outside.ranks.push(...found.ranks);
-      outside.patterns += found.patterns;
-      outside.skips += found.skips;
-      outside.conditional += found.conditional;
-      outside.only ||= found.only;
-    }
+  // Resolve suite references first. Their bodies are visited under the suite, not as file helpers.
+  for (const helper of pendingHelpers) {
+    if (namedSuites.has(helper)) continue;
+    const item = blank(OUTSIDE);
+    helpers.set(helper, item);
+    register(helper, item, helperScopes.get(helper));
+  }
+  creditTestHelpers(cases.values(), outside, helpers);
   return cases;
 }
 
@@ -300,19 +281,12 @@ function similarName(a: string, b: string) {
   return Math.min(x.length, y.length) >= 12 && (x.includes(y) || y.includes(x));
 }
 
-/** True when `after` pins less than `before`: fewer assertions at or above some strength. */
-function loosened(before: number[], after: number[]) {
-  for (const level of [4, 3, 2])
-    if (after.filter(rank => rank >= level).length < before.filter(rank => rank >= level).length) return true;
-  return false;
-}
-
 function compare(file: string, test: string, before: Case, after: Case): WeakenedFlag[] {
   const flags: WeakenedFlag[] = [];
-  const counts = { before: before.ranks.length, after: after.ranks.length };
+  const counts = { before: before.assertions[0], after: after.assertions[0] };
   if (counts.after < counts.before)
     flags.push({ file, test, kind: 'assertions-removed', assertions: counts });
-  else if (loosened(before.ranks, after.ranks))
+  else if (before.assertions.some((count, index) => count > after.assertions[index]!))
     flags.push({ file, test, kind: 'assertion-loosened', assertions: counts });
   if (after.skips > before.skips || after.conditional > before.conditional || after.returns > before.returns)
     flags.push({ file, test, kind: 'skip-added' });
@@ -321,9 +295,8 @@ function compare(file: string, test: string, before: Case, after: Case): Weakene
   if (
     !flags.length &&
     test !== OUTSIDE &&
-    before.asserts &&
     before.asserts === after.asserts &&
-    before.core !== after.core
+    (before.table !== after.table || (before.asserts && before.core !== after.core))
   )
     flags.push({ file, test, kind: 'input-changed', hint: true });
   return flags;
@@ -384,7 +357,7 @@ export function scanWeakenedTests(changes: readonly TestFileChange[], deadline: 
       }
     // A removed describe block shows in its tests; a test may have moved to a file not reached.
     for (const old of gone)
-      if (!headBodies.has(old.body) && !(old.container && !old.ranks.length) && !unchecked)
+      if (!headBodies.has(old.body) && !(old.container && !old.assertions[0]) && !unchecked)
         found.set(old, [{ file: path, test: old.key, kind: 'test-removed' }]);
     for (const old of before.values()) flags.push(...(found.get(old) ?? []));
   }
