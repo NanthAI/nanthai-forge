@@ -172,7 +172,7 @@ A brief or a lead comment on the Issue can override one for that slice.
 - **Core queue paths (Guard 4).** A change to queue, admission, acceptance, check, wake or
   scheduler code is core whatever it claims to do, including a cost-only change. It gets the same
   proof as any queue change: its tests, the queue simulation and incident replays, and a
-  cross-model review before landing. The landing check classifies these paths by path alone
+  fresh-context review before landing. The landing check classifies these paths by path alone
   (`scripts/core-queue-paths.mjs`) and always runs `tests/hosted-landing-queue-sim.test.mjs`,
   the cost guard and every file in `tests/fixtures/incident-replays.json` for them, in scoped checks
   and in re-checks of that change (a core change on main alone ran them in main's own check).
@@ -238,8 +238,10 @@ and together they must cover every changed core queue path.
 For an **incident replay**, identify the incident and exact test title in
 [`incident-replays.json`](../../tests/fixtures/incident-replays.json). Its `paths` list names
 the core source files the replay exercises. Retain the passing
-replay result and a fresh-context review by a different model on the Item or in the check
-records. Use a full receipt or comment UUID or a stable HTTPS link in each `receipt` field.
+replay result and a GO from a fresh-context review on the Item or in the check records.
+Record the full session or thread IDs in `authorSession` and `review.session`. The IDs must
+differ. The reviewer may use the same model as the author. Use a full receipt or comment UUID
+or a stable HTTPS link in each `receipt` field.
 The record has this shape (example digests and IDs):
 
 ```json
@@ -254,9 +256,11 @@ The record has this shape (example digests and IDs):
     "test": "incident 5e3c3a3c: passed followers land within the pass-to-land ceiling while the holder re-checks",
     "receipt": "11111111-1111-1111-1111-111111111111"
   },
-  "authorModel": "claude-opus-5-5",
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "33333333-3333-3333-3333-333333333333",
   "review": {
     "model": "gpt-6.2-sol",
+    "session": "44444444-4444-4444-4444-444444444444",
     "receipt": "22222222-2222-2222-2222-222222222222"
   }
 }

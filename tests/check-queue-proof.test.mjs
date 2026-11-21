@@ -23,8 +23,9 @@ const replayProof = {
   kind: 'replay',
   changes: { [wake]: digest },
   replay: { incident, test: replayTest, receipt: randomUUID() },
-  authorModel: 'claude-opus-5-5',
-  review: { model: 'gpt-6.2-sol', receipt: randomUUID() },
+  authorModel: 'gpt-6.2-sol',
+  authorSession: randomUUID(),
+  review: { model: 'gpt-6.2-sol', session: randomUUID(), receipt: randomUUID() },
 };
 const benchProof = {
   version: 1,
@@ -88,10 +89,26 @@ function fixture(t) {
   return { root, write, hosted, machine };
 }
 
-test('the 8bc06644 wake path accepts a registered incident replay with cross-model review', async t => {
+test('the 8bc06644 wake path accepts a replay reviewed by the same model in a fresh session', async t => {
   const { root, write, hosted } = fixture(t);
   write(proofPath, replayProof);
   await verifyQueueProof(hosted({ source: [wake], receipts: [proofPath] }), root);
+});
+
+test('the author session cannot review its own replay proof even with a different model', async t => {
+  const { root, write, hosted } = fixture(t);
+  write(proofPath, {
+    ...replayProof,
+    review: {
+      ...replayProof.review,
+      model: 'claude-opus-5-5',
+      session: ` ${replayProof.authorSession.toUpperCase()} `,
+    },
+  });
+  await assert.rejects(
+    verifyQueueProof(hosted({ source: [wake], receipts: [proofPath] }), root),
+    /QUEUE_PROOF_REQUIRED/,
+  );
 });
 
 test('the standard machine check accepts an on-path bench cell for the exact wake bytes', async t => {
@@ -117,7 +134,9 @@ test('only a matching replay and an independently reviewed change or a healthy o
   const { root, write, hosted } = fixture(t);
   const env = hosted({ source: [wake], receipts: [proofPath] });
   const invalid = [
-    { ...replayProof, review: { ...replayProof.review, model: replayProof.authorModel.toUpperCase() } },
+    { ...replayProof, authorSession: undefined },
+    { ...replayProof, review: { ...replayProof.review, session: ' ' } },
+    { ...replayProof, review: { ...replayProof.review, receipt: undefined } },
     { ...replayProof, replay: { ...replayProof.replay, test: 'unregistered replay' } },
     { ...replayProof, replay: { ...replayProof.replay, test: 'order replay' } },
     { ...replayProof, changes: { [wake]: hash('different wake bytes') } },

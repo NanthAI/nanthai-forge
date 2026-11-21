@@ -5,22 +5,29 @@ import { join } from 'node:path';
 import { queueProofPaths, REGISTRY, registeredQueueReplays } from './core-queue-paths.mjs';
 import { queueBenchPaths } from './bench-t3code/path-evidence.mjs';
 
+const uuid = /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i;
 const reference = value =>
-  typeof value === 'string' &&
-  (/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(value) || /^https:\/\/[^\s/]+\/\S+$/.test(value));
-const model = value => (typeof value === 'string' ? value.trim().toLowerCase() : '');
+  typeof value === 'string' && (uuid.test(value) || /^https:\/\/[^\s/]+\/\S+$/.test(value));
 const readJson = file => JSON.parse(readFileSync(file, 'utf8'));
+
+function sessionId(value) {
+  const id = typeof value === 'string' ? value.trim() : '';
+  if (/\s/.test(id)) return '';
+  return uuid.test(id) ? id.toLowerCase() : id;
+}
 
 function qualifiedPaths(proof, replays) {
   if (proof?.version !== 1 || !proof.changes || typeof proof.changes !== 'object') return [];
   if (proof.kind === 'replay') {
-    const { replay, review, authorModel } = proof;
+    const { replay, review } = proof;
+    const author = sessionId(proof.authorSession);
+    const reviewer = sessionId(review?.session);
     if (
       !reference(replay?.receipt) ||
       !reference(review?.receipt) ||
-      !model(authorModel) ||
-      !model(review?.model) ||
-      model(review.model) === model(authorModel)
+      !author ||
+      !reviewer ||
+      reviewer === author
     )
       return [];
     const registered = replays.find(
@@ -90,7 +97,7 @@ function assertQueueProof({ source, receipts }, root) {
   const paths = [...missing].sort();
   const more = paths.length > 5 ? ` and ${paths.length - 5} more` : '';
   throw new Error(
-    `QUEUE_PROOF_REQUIRED: Attach a registered incident replay with cross-model review or an on-path bench cell for ${paths.slice(0, 5).join(', ')}${more}. See “Attaching queue proof” in the agent briefings.`,
+    `QUEUE_PROOF_REQUIRED: Attach a registered incident replay with fresh-context review or an on-path bench cell for ${paths.slice(0, 5).join(', ')}${more}. See “Attaching queue proof” in the agent briefings.`,
   );
 }
 
