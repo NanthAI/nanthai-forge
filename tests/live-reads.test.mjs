@@ -235,6 +235,61 @@ test('web code never polls Convex reads on an interval', () => {
   assert.match(statusBar, /if \(asleep\) \{/);
 });
 
+test('switching to Flow and back replaces the tab’s live line subscription', async () => {
+  const fake = fakeConvex({
+    resolve: (_name, { includeChecks }) => (includeChecks === false ? {} : { checks: { runs: [] } }),
+  });
+  const { useLiveLine } = await import(moduleUrl('../web/src/shell/use-live-line.ts'));
+  let value;
+  function LineReader({ flow }) {
+    ({ value } = useLiveLine('p', flow));
+    return null;
+  }
+  const root = createRoot(host.container);
+  for (const flow of [false, true, false]) {
+    await React.act(async () =>
+      root.render(
+        React.createElement(
+          ConvexProvider,
+          { client: fake.client },
+          React.createElement(LineReader, { flow }),
+        ),
+      ),
+    );
+    assert.equal(fake.count('projectLiveLine:read'), 1);
+    assert.deepEqual(value.checks, flow ? { runs: [] } : undefined);
+  }
+  await React.act(async () => root.unmount());
+});
+
+test('the live line stays available when the web deploy reaches an older Convex validator first', async () => {
+  const latest = { lanes: [], more: 0, main: null, exit: null, checks: { runs: [] } };
+  const fake = fakeConvex({
+    resolve: (_name, args) => {
+      if ('includeChecks' in args)
+        throw new Error('ArgumentValidationError: Object contains extra field `includeChecks`');
+      return latest;
+    },
+  });
+  const { useLiveLine } = await import(moduleUrl('../web/src/shell/use-live-line.ts'));
+  let result;
+  function LineReader() {
+    result = useLiveLine('p');
+    return null;
+  }
+  const root = createRoot(host.container);
+  await React.act(async () =>
+    root.render(
+      React.createElement(ConvexProvider, { client: fake.client }, React.createElement(LineReader)),
+    ),
+  );
+  await settle();
+  assert.deepEqual(result, { value: latest, error: undefined });
+  assert.equal(fake.count('projectLiveLine:read'), 1);
+  assert.equal(fake.stats.executions, 2, 'one rejected attempt and one compatible subscription');
+  await React.act(async () => root.unmount());
+});
+
 // Exact spike's named regression: return after the tab was already idle/asleep.
 test('return-after-idle: a visible return wakes the live line exactly once with current state', async t => {
   let latest = { lanes: [], more: 0, main: null, exit: null };

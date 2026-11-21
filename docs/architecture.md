@@ -2224,9 +2224,11 @@ are deleted; the summary keeps main and the latest explicit exit. Starts write
 no shared counter.
 
 The Flow view's fields ride the same writes. A mark carries a short check key
-while it is checked (Lanes checked together share it). For checking marks,
-the line read joins bounded pages of active landing headers and running check
-records. A matching run reports its Lane count and first recorded shard start,
+while it is checked (Lanes checked together share it). Needs me requests check
+details on the tab's existing line subscription. It joins bounded pages of
+active landing headers and running check records for checking marks. Other
+pages skip the check and queue joins, so check wakes and stall alarms alone
+do not invalidate their subscription. A matching run reports its Lane count and first recorded shard start,
 or the reservation time when the shard start was not recorded. The retained train,
 the compact queue directory and the tail attempt’s pinned policy supply free
 speculative slots where those records cover the train. The check strip uses this same subscription and

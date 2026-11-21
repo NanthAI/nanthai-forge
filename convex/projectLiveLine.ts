@@ -58,9 +58,9 @@ export const liveLineResult = v.object({
   ),
 });
 export const read = finishQuery({
-  args: { projectId: v.id('hostedProjects') },
+  args: { projectId: v.id('hostedProjects'), includeChecks: v.optional(v.boolean()) },
   returns: liveLineResult,
-  handler: async (ctx, { projectId }) => {
+  handler: async (ctx, { projectId, includeChecks = true }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted work.');
@@ -123,9 +123,9 @@ export const read = finishQuery({
       const flow = flowDay(value.flow);
       if (!flow.main && !flow.audit && main)
         Object.assign(flow, await retainedMainVerdict(ctx.db, projectId));
-      const checks = await lineChecks(finishReadSourceDb(ctx), project, marks);
+      const checks = includeChecks ? await lineChecks(finishReadSourceDb(ctx), project, marks) : undefined;
       return {
-        checks,
+        ...(checks ? { checks } : {}),
         lanes: marks.slice(0, 60).map(({ laneId, stage, held, overlap, changedAt, check, mainRed }) => ({
           laneId,
           stage,

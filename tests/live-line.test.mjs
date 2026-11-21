@@ -18,7 +18,8 @@ test.after(() => {
     else process.env[key] = value;
   }
 });
-const read = (f, actor = 'owner') => f.tx('observerBudgetPage', line.read, { projectId: f.projectId }, actor);
+const read = (f, actor = 'owner', includeChecks = false) =>
+  f.tx('observerBudgetPage', line.read, { projectId: f.projectId, includeChecks }, actor);
 const marks = f => [...f.tables.projectLiveLineLanes.values()];
 
 async function seedLineLanes(f, count, holdFirst = false) {
@@ -46,53 +47,78 @@ async function seedLineLanes(f, count, holdFirst = false) {
   );
 }
 
-test('live line follows a real landing atomically, deletes landed marks and retains exact main evidence', async t => {
+async function measureLanding(t, count) {
   const f = await finishFixture(t);
   const state = await f.enqueue(f.request());
   assert.equal(marks(f).length, 1);
-  await seedLineLanes(f, 50);
-  assert.equal(marks(f).length, 50);
-  let readSet;
-  let latest;
-  let lastReply;
-  const observations = [];
-  const refresh = async trigger => {
-    if (readSet?.()) return;
-    const started = performance.now();
-    latest = await read(f);
-    const queryMs = performance.now() - started;
-    readSet = f.readSet();
-    const serialized = JSON.stringify(latest);
-    observations.push({
-      trigger,
-      stage: latest.lanes.find(lane => lane.laneId === f.lane.laneId)?.stage ?? 'left',
-      changed: serialized !== lastReply,
-      queryMs,
-      readBytes: f.counts.at(-1).readBytes,
-      replyBytes: Buffer.byteLength(serialized),
-    });
-    lastReply = serialized;
+  await seedLineLanes(f, count);
+  assert.equal(marks(f).length, count);
+  // Compare the same visible landing at both scales. Newer marks come first in the capped reply.
+  const first = marks(f)[0];
+  f.tables.projectLiveLineLanes.set(first._id, {
+    ...first,
+    _creationTime: marks(f).at(-1)._creationTime + 1,
+  });
+  const watch = includeChecks => {
+    let readSet;
+    let lastReply;
+    let tables;
+    return {
+      latest: undefined,
+      samples: [],
+      async refresh(trigger, writes = []) {
+        if (readSet?.()) return;
+        const started = performance.now();
+        this.latest = await read(f, 'owner', includeChecks);
+        const queryMs = performance.now() - started;
+        readSet = f.readSet();
+        const serialized = JSON.stringify(this.latest);
+        const changed = serialized !== lastReply;
+        const meter = f.counts.at(-1);
+        assert.equal(meter.writes, 0);
+        this.samples.push({
+          trigger,
+          stage: this.latest.lanes.find(lane => lane.laneId === f.lane.laneId)?.stage ?? 'left',
+          changed,
+          queryMs,
+          readBytes: meter.readBytes,
+          replyBytes: Buffer.byteLength(serialized),
+          ...(!changed && { overlappingWrites: writes.filter(table => tables.includes(table)) }),
+        });
+        lastReply = serialized;
+        tables = Object.keys(meter.readRangesByTable);
+      },
+    };
+  };
+  const line = watch(false);
+  const flow = watch(true);
+  const refresh = async (trigger, start = f.counts.length) => {
+    const writes = [...new Set(f.counts.slice(start).flatMap(meter => meter.written))];
+    await line.refresh(trigger, writes);
+    await flow.refresh(trigger, writes);
   };
   await refresh('initial read');
-  assert.equal(observations[0].stage, 'queued', 'a submitted Lane waits In queue (Item 85f456c1)');
-  const phases = new Set();
+  assert.equal(line.samples[0].stage, 'queued', 'a submitted Lane waits In queue (Item 85f456c1)');
+  assert.equal(line.latest.checks, undefined);
+  assert.deepEqual(flow.latest.checks?.runs, []);
   const drain = async () => {
     while (f.pending().length) {
       const task = f.pending()[0];
+      const start = f.counts.length;
       await f.execute(task);
-      await refresh(task.name);
-      for (const mark of latest.lanes) phases.add(mark.stage);
+      await refresh(task.name, start);
     }
   };
   await drain();
-  assert(phases.has('checking'));
+  const passageStart = f.counts.length;
   await f.passChecks();
-  await refresh('check passage');
+  await refresh('check passage', passageStart);
   await drain();
   assert.equal((await f.current(state.id)).submission.phase, 'landed');
-  assert.equal(latest.lanes.length, 49);
+  const { latest } = line;
+  assert.equal(latest.lanes.length, Math.min(60, count - 1));
   assert(!latest.lanes.some(lane => lane.laneId === f.lane.laneId));
-  assert.equal(latest.more, 0);
+  assert.equal(latest.more, Math.max(0, count - 1 - 60));
   assert.equal(latest.exit.kind, 'landed');
   assert.equal(latest.exit.laneId, f.lane.laneId);
   assert.equal(
@@ -101,16 +127,43 @@ test('live line follows a real landing atomically, deletes landed marks and reta
   );
   assert.equal(latest.main.check, 'passed');
   assert.equal(f.pending().length, 0, 'no line wake or idle server timer');
-  const before = observations.length;
+  const before = [line.samples.length, flow.samples.length];
   f.advanceClock(30 * 60_000);
   await refresh('idle');
-  assert.equal(observations.length, before, 'thirty simulated idle minutes add no execution or DB I/O');
-  assert(
-    observations.every(sample => sample.readBytes < 27_000),
-    'the 50-Lane landing keeps each feed read bounded',
+  assert.deepEqual(
+    [line.samples.length, flow.samples.length],
+    before,
+    'thirty simulated idle minutes add no execution or DB I/O',
   );
-  t.diagnostic(JSON.stringify({ lineLanding: { reruns: observations.length - 1, observations } }));
-});
+  assert.deepEqual(
+    line.samples.map(sample => sample.stage),
+    ['queued', 'checking', 'ready', 'left'],
+  );
+  assert(
+    line.samples.every(sample => sample.changed),
+    'every stage-only read advances the line',
+  );
+  const flowReadBudget = count === 50 ? 27_000 : 30_000;
+  assert(
+    line.samples.every(sample => sample.readBytes < 27_000) &&
+      flow.samples.every(sample => sample.readBytes < flowReadBudget),
+    'both subscriptions bound whole-document reads through a landing',
+  );
+  t.diagnostic(
+    JSON.stringify({
+      open: count,
+      fixturePeakRssKiB: process.resourceUsage().maxRSS,
+      line: { reruns: line.samples.length - 1, samples: line.samples },
+      flow: { reruns: flow.samples.length - 1, samples: flow.samples },
+    }),
+  );
+}
+
+test('live line follows a real landing atomically, deletes landed marks and retains exact main evidence', t =>
+  measureLanding(t, 50));
+
+test('the live line follows the same stages without check-only wakes at 100 open Lanes', t =>
+  measureLanding(t, 100));
 
 test('heartbeat, holder, name, device and same-stage submission writes do not invalidate the live line', async t => {
   const f = await finishFixture(t);

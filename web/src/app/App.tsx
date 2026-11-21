@@ -295,7 +295,9 @@ function ProjectView({
         .then(({ captureBrowserAnalytics }) => captureBrowserAnalytics('screen_opened', route, projectId))
         .catch(() => undefined);
   }, [route, projectId]);
-  const { value: line, error: lineError } = useLiveLine(projectId);
+  // Needs me's Flow checks share the line subscription; other places watch just the line.
+  const showFlow = route.place === 'needs' && !route.section;
+  const { value: line, error: lineError } = useLiveLine(projectId, showFlow);
   const connection = useConvexConnectionState();
   const feedError = !!lineError || (connection.hasEverConnected && !connection.isWebSocketConnected);
   const [lastLine, setLastLine] = useState({ projectId, line, at: Date.now() });
