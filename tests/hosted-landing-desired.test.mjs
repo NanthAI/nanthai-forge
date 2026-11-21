@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { finishFixture, desired, landingApi, code } from './hosted-finish-fixture.mjs';
+import { finishFixture, desired, api as finishApi, landingApi, code } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 const synthetic = {
@@ -208,6 +208,95 @@ test('a failed source job ends the hosted desired landing with its stated reason
   assert.equal(rest.length, 0);
   assert.equal(event.id, `landing.failed:${failed.id}:${f.lane.laneId}`);
   assert.equal(event.code, failed.error.code);
+});
+
+test('a project writer can observe the exact pre-admission feed failure until access is lost', async t => {
+  const startAt = Date.UTC(2026, 0, 1);
+  const f = await finishFixture(t, { startAt });
+  pauseSource(f);
+  const command = request(f);
+  const submitted = await submit(f, command);
+  const membership = f.insert('projectContributors', { projectId: f.projectId, contributor: 'writer' });
+  f.insert('projectReaders', { projectId: f.projectId, reader: 'reader' });
+  // Even with the project publicly readable, the desired outcome requires current write access.
+  f.patch('hostedProjects', f.projectId, { visibility: 'public' });
+  const readSubmission = (submissionId, actor = 'writer', version, projectId = f.projectId) =>
+    f
+      .tx('desiredSubmissionObservation', finishApi.status, { projectId, submissionId, version }, actor)
+      .then(JSON.parse);
+  await assert.rejects(readSubmission(submitted.id), code('NOT_FOUND'));
+  const desiredRow = [...f.tables.projectHostedLandingDesired.values()][0];
+  await f.tx('desiredAdmissionFailed', desired.fail, {
+    projectId: f.projectId,
+    submissionId: submitted.id,
+    wakeId: desiredRow.wake.id,
+    code: 'SOURCE_UNAVAILABLE',
+    message: 'Synthetic pre-admission failure.',
+  });
+  const page = await f.tx(
+    'desiredFeed',
+    feed.page,
+    { projectId: f.projectId, since: 1, project: true },
+    'writer',
+  );
+  const event = page.events.find(event => event.kind === 'landing.failed');
+  assert.equal(event.submissionId, submitted.id);
+  assert.equal(event.operationId, command.operationId);
+  await assert.rejects(read(f, event.operationId, 'writer'), code('NOT_FOUND'));
+  await assert.rejects(readSubmission(event.operationId), code('NOT_FOUND'));
+  const pending = f.pending().length;
+  const result = await readSubmission(event.submissionId);
+  const observationCost = f.counts.at(-1);
+  assert.equal(result.submission.id, event.submissionId);
+  assert.equal(result.submission.operationId, event.operationId);
+  assert.equal(result.submission.phase, 'terminal-failed');
+  assert.equal(result.submission.error.code, event.code);
+  assert.equal(result.submission.error.message, 'Synthetic pre-admission failure.');
+  assert.equal(result.pendingAttempt, null);
+  assert.equal(result.unchanged, false);
+  assert.equal((await readSubmission(event.submissionId, 'writer', result.version)).unchanged, true);
+  assert.equal(observationCost.readDocumentsByTable.projectHostedLandingDesired, 1);
+  assert.equal(observationCost.writes, 0);
+  assert.equal(f.pending().length, pending);
+  const otherProject = f.insert('hostedProjects', {
+    name: 'Another project',
+    key: 'another-project',
+    owner: 'writer',
+    visibility: 'private',
+    currentBackup: null,
+    revision: 0,
+  });
+  await assert.rejects(
+    readSubmission(event.submissionId, 'writer', undefined, otherProject),
+    code('NOT_FOUND'),
+  );
+  const device = { subject: 'writer', forgeCredential: randomUUID() };
+  const credential = f.insert('cliCredentials', {
+    owner: device.subject,
+    credentialId: device.forgeCredential,
+    name: 'Synthetic',
+    scope: 'cli',
+    tokenHash: 'synthetic',
+    issuedAt: startAt,
+    expiresAt: startAt + 60_000,
+    revoked: false,
+    settings: { source: 'write', projects: { kind: 'all' } },
+  });
+  assert.equal((await readSubmission(event.submissionId, device)).submission.id, event.submissionId);
+  f.patch('cliCredentials', credential, { settings: { source: 'read', projects: { kind: 'all' } } });
+  await assert.rejects(readSubmission(event.submissionId, device), code('AUTH_SCOPE_DENIED'));
+  for (const actor of [null, 'reader', 'outsider'])
+    await assert.rejects(readSubmission(event.submissionId, actor), code('PROJECT_UNAVAILABLE'));
+  f.tables.projectContributors.delete(membership);
+  await assert.rejects(readSubmission(event.submissionId, 'writer'), code('PROJECT_UNAVAILABLE'));
+  t.diagnostic(
+    JSON.stringify({
+      calls: 1,
+      documents: observationCost.documents,
+      ranges: observationCost.ranges,
+      readBytes: observationCost.readBytes,
+    }),
+  );
 });
 
 test('combined landing emits one independently replayable id for each original Lane', async t => {

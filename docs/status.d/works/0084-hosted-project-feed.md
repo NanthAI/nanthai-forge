@@ -5,3 +5,5 @@
   the event on standard input. Landing acceptance waits use the feed when the deployment
   advertises it and the CLI has the retained Lane selection. See [connect a host to
   Forge events](../../guides/event-feed.md).
+- A current project writer can use the submission ID from another member's
+  pre-admission landing failure to read the exact terminal outcome.

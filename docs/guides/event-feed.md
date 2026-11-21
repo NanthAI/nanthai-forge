@@ -33,6 +33,13 @@ fields when launching a read from a host. The read resolves the original
 operation and gives its current authoritative receipt. Landing and check
 events can appear once for each input Lane in a combined submission.
 
+If another member's landing failed before admission, use its `submissionId`
+to read the original outcome with your current project write access.
+
+```sh
+nforge agent ROOT observe '{"submissionId":"SUBMISSION_ID"}'
+```
+
 Deduplicate by event ID. If one downstream task should run per combined
 landing, also deduplicate that task by `operationId`. The same ID can be
 replayed after a crash, including a crash between a hook's side effect and

@@ -635,6 +635,15 @@
       ]
     },
     {
+      "incident": "f65d8024",
+      "what": "A project writer could receive another member's pre-admission landing failure without a way to read its exact terminal outcome",
+      "file": "tests/hosted-landing-desired.test.mjs",
+      "test": "a project writer can observe the exact pre-admission feed failure until access is lost",
+      "paths": [
+        "convex/projectHostedFinish.ts"
+      ]
+    },
+    {
       "incident": "39a68046",
       "what": "Publishing a resolution draft could strand the origin Lane's queued sync-required landing until acceptance",
       "file": "tests/hosted-landing-lineage.test.mjs",

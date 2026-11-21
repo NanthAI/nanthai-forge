@@ -8,6 +8,7 @@ import { landingOrderWaitForReader, landingStateForReader } from './projectHoste
 import { landingReservationForReader } from './projectHostedLandingReservation';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { finishPendingForReader } from '../src/hosted-finish';
+import { storedLandingStateSchema } from '../src/hosted-landing';
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
@@ -15,7 +16,14 @@ import { heldPolicyNote, heldReview, loadHeldPolicy, noteHeldPolicy } from './pr
 import { activeProject, accessibleProject } from './projectAuthority';
 import { loadFinish } from './projectHostedFinishStore';
 import { acceptancePage, acceptancePlan } from './projectHostedAcceptanceStore';
-import { loadLandingAttempt, landingAttemptRow, landingAttemptProgress } from './projectHostedLandingStore';
+import {
+  loadLandingAttempt,
+  landingAttemptRow,
+  landingAttemptProgress,
+  landingRow,
+  landingStateFromRow,
+} from './projectHostedLandingStore';
+import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { sourceSubmission } from '../src/landing-submission-state';
@@ -51,8 +59,8 @@ export const resume = mutation({
     }
   },
 });
-/** S05-style cursor: observers subscribe/reconnect to one request version. They
- * cause no wake or compute. A named pending source phase is visible immediately. */
+/** S05-style cursor over one submission. Reads cause no wake or compute.
+ * Current project writers can also read a failure recorded before admission. */
 export const status = query({
   args: { ...identity, version: v.optional(v.number()), priorityInfo: v.optional(v.literal(1)) },
   returns: v.string(),
@@ -61,7 +69,31 @@ export const status = query({
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted finish progress.');
       const project = await accessibleProject(ctx, input.projectId, user.subject);
-      const { row, state } = await loadLanding(ctx, input),
+      const row = await landingRow(ctx, input);
+      if (!row) {
+        await activeProject(ctx, input.projectId, user.subject);
+        const desired = await desiredLanding(ctx, input);
+        invariant(desired, 'NOT_FOUND', 'Hosted landing request not found.');
+        const state = storedLandingStateSchema.parse(JSON.parse(desired.value));
+        invariant(
+          state.id === input.submissionId &&
+            state.projectId === input.projectId &&
+            state.actor === desired.actor &&
+            state.operationId === desired.operationId,
+          'SOURCE_UNAVAILABLE',
+          'Landing request identity differs from its record.',
+        );
+        invariant(state.phase === 'terminal-failed', 'NOT_FOUND', 'Hosted landing request not found.');
+        return canonicalPayload({
+          version: state.version,
+          unchanged: input.version === state.version,
+          submission: landingStateForReader(state, input.priorityInfo),
+          queuePosition: null,
+          queue: null,
+          pendingAttempt: null,
+        });
+      }
+      const state = landingStateFromRow(row),
         { value } = await loadFinish(ctx, input);
       const wouldConflict = state.phase === 'queued' ? readWouldConflict(row) : undefined;
       const queue = await readQueueStatus(ctx, state);

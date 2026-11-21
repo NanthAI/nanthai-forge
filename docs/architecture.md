@@ -2285,7 +2285,10 @@ An Intent cascade makes its child closures visible together through the applied 
 Those children emit feed events during the existing materialization, which processes up to
 20 child Lanes per scheduled transaction. A stopped materializer delays the events until a
 later write or resumed materialization promotes the closures. For pre-admission terminal
-landings, the current operation-ID wait resolves the original submitter's operation.
+landings, the operation-ID wait resolves the original submitter's operation. A current
+project writer can read another member's terminal outcome with
+`observe {"submissionId":"SUBMISSION_ID"}`. This selects the exact submission within
+the project, rechecks write access on each read and schedules no work.
 
 Wide or already-staged legacy acceptance emits per-Lane landing events in the existing
 completion transactions after main moves. Each tick emits at most 20 events using the

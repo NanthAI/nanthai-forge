@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedFinish.ts": "e0a30fb8e77c7039791c89811fcc890534c553e65f13d61a99f86dd0095144fb"
+  },
+  "replay": {
+    "incident": "f65d8024",
+    "test": "a project writer can observe the exact pre-admission feed failure until access is lost",
+    "receipt": "3ad63486-ebe2-45c0-b952-6c8f3dccc36e"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A3b5b0ba6-8171-4943-b559-1c3e2e78cdff",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "/root/slice_c_review",
+    "receipt": "35c3feaf-b1b6-478c-9b97-82bd47991d31"
+  }
+}
