@@ -23,21 +23,35 @@ with `npm ci --ignore-scripts`, then `npm run build:core`. No fixed Node path,
 GitHub account, launchd, systemd, Keychain, Xcode or macOS sandbox is needed.
 The check's declared command and tools must be available on the runner's PATH, and `git` too when the project has submodules ([submodules in checks](github-actions-checks.md#submodules-in-checks)); the container image includes it. This runner fetches public submodules only: private and relative-URL submodules refuse with a message naming the alternatives.
 
-Registration and signing-key issuance require the owner person’s browser identity;
-a device credential from `nforge login` cannot register a machine or reconcile a registration
-to retrieve its key. The registration API verifies the exact configured machine/runtime/
-environment and returns only that machine’s derived signing key. Existing registered runner
-operation (work, control, heartbeat and callbacks) retains its account and signature checks.
-The current terminal worker registers at startup, so it requires person registration
-provisioning before it can start with a device credential. Deployment operators must account
-for this release boundary before restarting machine runners. The deployment signing key
-never leaves the backend.
+### Registration
+
+The worker registers at startup as the project owner person. An existing
+owner-person authentication integration can supply `FORGE_AUTH_TOKEN`
+privately to the worker. Set
+`FORGE_DEPLOYMENT_URL` in the worker environment to the same deployment URL
+you pass on the command line so Forge can bind the credential to its origin.
+
+The owner's device sign-in from `nforge login` can configure the first runner.
+After the first accepted landing, a device's runner configuration changes
+follow [the existing owner approval flow](governance.md#settings-changes-from-agents).
+Registration and signing-key issuance require owner-person authentication.
+If you only have a device sign-in, ask the deployment operator about
+provisioning or use the [GitHub Actions setup](../quickstart.md#configure-the-first-hosted-check)
+with a prepared runner repository.
+
+The registration API verifies the configured machine, runtime and environment.
+It returns only that machine’s derived signing key. Work, control, heartbeat and
+callbacks for registered runners keep their account and signature checks. The
+deployment signing key stays on the backend.
 
 Project children receive neither collector key nor account token.
 
-Choose a stable machine UUID (for example `node -p 'crypto.randomUUID()'`) and
-supply it on restarts. From the built package, this single command configures the
-runner using the existing configure-runner flow, registers it and waits for work:
+### Start the worker
+
+Once owner-person registration is provisioned, choose a stable machine UUID
+(for example `node -p 'crypto.randomUUID()'`) and supply it on restarts. From
+the built package, this command configures the runner, registers it and waits
+for work:
 
 ```sh
 node scripts/self-hosted-runner/start.mjs "$DEPLOYMENT_URL" "$PROJECT_ID" "$MACHINE_ID" '["build"]'
@@ -70,6 +84,7 @@ source/build inputs, uses a non-root `node` user and contains no credentials:
 docker build -f scripts/self-hosted-runner/Dockerfile -t forge-runner .
 docker run --rm --init --name forge-runner \
   --env FORGE_AUTH_TOKEN \
+  --env FORGE_DEPLOYMENT_URL="$DEPLOYMENT_URL" \
   --mount type=volume,src=forge-runner-state,dst=/var/lib/forge-runner \
   forge-runner "$DEPLOYMENT_URL" "$PROJECT_ID" "$MACHINE_ID" '["linux","build"]'
 ```

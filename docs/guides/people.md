@@ -4,7 +4,7 @@ Start with a small change whose result you can recognise.
 
 ## Get the CLI and sign in
 
-Ask the operator for access to the development app and its deployment URL. Follow the [source installation](../quickstart.md#install-the-development-cli) and [terminal sign-in](../quickstart.md#sign-in) steps.
+Follow the [development access and source installation](../quickstart.md) and [terminal sign-in](../quickstart.md#sign-in) steps.
 
 ## Bring your code
 
@@ -12,7 +12,12 @@ Ask the operator for access to the development app and its deployment URL. Follo
 
 ## Give the change to an agent
 
-Open the project Plan, add an Item with the outcome and the evidence that would show it is done, and give the agent the Item and the hosted clone path. The [agent guide](agents.md) explains connecting an MCP client and starting a Lane, the agent's isolated copy for that change.
+For MCP, [connect your agent app](../agents.md#connect-over-mcp) from the hosted
+clone and open a new agent session. An agent with a terminal can use the signed-in
+CLI from the clone directly. Open the project Plan, add an Item with the outcome
+and the evidence that would show it is done, and give the agent the Item and the
+hosted clone path. The [agent guide](agents.md#land-it) explains how to start a
+Lane, the agent's isolated copy for that change.
 
 Read the saved files in the Lane before deciding. [Review and land](review.md) explains check evidence, held work and failures. A passed check alone does not mean the change has landed; look for the accepted receipt and main's State.
 

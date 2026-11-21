@@ -3,9 +3,10 @@
 Bring a [GitHub repository](#import-from-github-in-the-app) or a [local folder](#host-a-local-folder) to Forge, then make a small change and see it land on hosted `main`.
 
 Forge is not published to npm or deployed as a public production service yet.
-Ask the operator for access to the development app and its deployment URL. The
-app URL opens in your browser. The deployment URL is the address you pass to
-`nforge login`. Install the CLI from the source repository you have access to.
+For a development trial, get the app URL, account access and the CLI deployment
+URL from the person who invited you. Open the app URL in your browser and pass
+the deployment URL to `nforge login`. You can build the CLI and read its packaged
+guides while you wait for access.
 
 ## Install the development CLI
 
@@ -152,7 +153,9 @@ cached objects and Lane directories.
 A new project has source but needs a check definition and a runner before the
 first checked landing. In the commands below, replace `ROOT` with the path to
 your hosted clone. The project owner can inspect existing setup with
-`nforge agent ROOT check-settings '{}'`.
+`nforge agent ROOT check-settings '{}'`. If a landing reports
+`RUNNER_UNAVAILABLE` and check settings say no hosted runner is configured, keep
+the saved Lane and have the owner configure a runner before retrying.
 
 For a repository with a README.md, this example defines a small onboarding smoke
 check. Replace it with the repository's real verification command for code changes.
@@ -177,7 +180,10 @@ nforge agent ROOT check-settings '{}'
 
 See [GitHub App dispatch and runner visibility](operations/github-actions-checks.md#convex-dispatch-with-the-github-app)
 and [runner grants](operations/github-app.md#runner-grants-checks-only) for setup
-and recovery. For a runner without GitHub, use the [self-hosted runner guide](operations/self-hosted-runner.md).
+and recovery. A project that uses a runner without GitHub needs
+[owner-person authentication for self-hosted runner registration](operations/self-hosted-runner.md#registration).
+The owner's saved terminal sign-in can configure the first runner, while the
+machine needs owner-person authentication when it starts.
 
 ## Work on a hosted project
 
