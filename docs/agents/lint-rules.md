@@ -3,6 +3,7 @@
 A bug class seen twice, or a fix that was reverted and retried, gets a guard that fails the
 build ([fix the class](improvement-loop.md#fix-the-class)). A reminder in a brief is not a guard.
 This page lists the guards and says where the next one goes.
+The [code structure audit](#code-structure-audit) records proposed path conventions for idle and hot code.
 
 ## Pick the cheapest guard
 
@@ -146,3 +147,141 @@ invalid entries and mismatched hashes fail. A lower count also fails until `--up
 
 JS plugins are alpha in oxlint and not covered by semver; the fixture tests catch an upgrade
 that changes the plugin API.
+
+## Code structure audit
+
+This audit describes the source at State `69d1a657049484239c1288b2869f2f9137a125629732099b11d6593c72e706ed`.
+The naming and placement choices below are proposals for Issue `88a83b49`.
+The idle and hot-path guard, including source moves and fixtures, belongs to Issue `70144f0c`.
+
+### Module boundaries
+
+| Boundary | What the code does today | Proposed placement |
+| --- | --- | --- |
+| Hosted agent client | [CLI](../../src/hosted-agent-cli.ts) and [MCP](../../src/mcp-hosted-agent.ts) share the hosted command surface. [Transport](../../src/hosted-agent-transport.ts) also coordinates local materialization and retry state. | Keep protocol validation and dispatch shared across the CLI and MCP. Use `hosted-<area>-client.ts` for remote calls and `local-<area>.ts` for machine-only state or I/O. Put orchestration at the entry point that owns the operation. |
+| Native source and shared contracts | [Native source](../../src/native-source.ts) reads and materializes filesystem States. [State format](../../src/state/format.ts) and [physical manifest codec](../../src/physical-manifest-codec.ts) have runtime-neutral consumers. [Work schemas](../../src/work-types.ts) are used by Node, Convex and the browser. | Keep filesystem and process I/O in the local adapter. Keep portable codecs, validators and rules in shared modules with type-only imports where possible. Prefer a role such as `-schema`, `-codec`, `-selection` or `-runner` when it identifies a specific responsibility. |
+| Hosted authority and storage | [Landing](../../convex/projectHostedLanding.ts) implements server-side authority. [Source storage](../../convex/projectConvexSourceStorage.ts) connects records to R2 data. [Browser](../../web/src/Hosted.tsx) and CLI are clients of that authority. | Keep access checks, current pins, operation replay and durable writes at the hosted boundary. Name adapters by what they select, store or execute. Use `native-` for Forge's native source representation or its existing implementation, and `local-` for the location of execution. An offline Lane remains a checkout of the hosted project. |
+| Convex API and server internals | [Mirror read](../../convex/projectGithubMirrorRead.ts) registers a client-facing query with validators and an access check. [Mirror store](../../convex/projectGithubMirrorStore.ts) registers server-only mutations. [Mirror status](../../convex/projectGithubMirrorStatus.ts) exports a plain helper. | Keep new client-facing endpoints in clearly named feature entry modules. Give server-only registrations an `Internal` or narrow worker-role name, and data helpers names such as `Rows`, `Store` or `Status` according to their actual role. Visibility comes from the Convex registration builder. Preserve existing function addresses, scheduled references, authority checks and the [mutation wrappers](../../convex/server.ts) when moving helpers. |
+
+A caller looking for a schema currently has to distinguish the shared [Work record schema](../../src/work-types.ts),
+the deployed [Convex schema](../../convex/schema.ts), and the [hosted agent contract](../../src/hosted-agent-contract.ts).
+Keep those responsibilities distinct. Use feature plus role in names, and preserve existing import paths
+where callers rely on them. Consider a feature directory when a cohesive group has enough files that the
+flat prefix is hard to scan. Keep the repository's 300-line aim as a review prompt and split at a
+responsibility boundary.
+
+### Path conventions for review
+
+**Idle paths.** Use `*.idle.ts` or `*.idle.tsx` for modules on event-driven observation paths
+that initiate zero Convex calls once quiescent. [Mirror status](../../convex/projectGithubMirrorStatus.ts)
+is a candidate leaf. Its callers use the existing [authorized query](../../convex/projectGithubMirrorRead.ts),
+which responds to server writes. [Import watch](../../web/src/import-watch.ts) is a browser candidate.
+It attaches a stable invalidation subscription, refreshes on a changed result, focus or reconnection,
+and removes its subscription and listeners on cleanup. Keep generated API paths stable by tagging or
+moving eligible helpers, with registered handlers retaining their paths.
+
+Start with direct timer and scheduler calls in tagged files. The guard fixture should fail on a
+refresh timer and a scheduled poll and pass for event registration and cleanup. Keep the current
+[idle query argument guard](../../scripts/check-idle-queries.mjs) for browser clock-driven resubscription
+across the whole tree. [Live reads](../../web/src/live-reads.ts) uses a one-shot timeout to *detach*
+subscriptions. [Mac worker](../../src/hosted-mac-worker.ts) starts deadline and lease timers for a
+claimed run. Keep those mixed lifecycle modules outside the idle suffix as written. Measure opaque
+helper calls through the existing call-budget evidence.
+
+**Hot loops.** Use `*.hot.ts` for narrow primitives with a documented input scale. In a mixed
+module, start with a `// hot-loop: <reason>` tag immediately above the specific loop. For example,
+[physical manifest binary primitives](../../src/physical-manifest-binary.ts) are used by the
+[digest bucket codec](../../src/physical-manifest-codec.ts) and [root codec](../../src/physical-manifest-root.ts).
+`PhysicalReader.integer` touches each byte of a variable-length field with scalar state and no
+per-byte object. `PhysicalWriter.hex` reserves capacity before walking character pairs. At manifest
+scale those paths repeat across encoded entries. The codec allocates returned entries and
+the writer grows its buffer on demand. Keep the initial check scoped to extra scratch objects,
+arrays or copies in the flagged bodies. The guard fixture should fail on a per-iteration scratch
+object and pass for scalar updates and a buffer reserved before the loop. Use
+[physical manifest tests](../../tests/physical-manifest-v2.test.mjs) for exact bytes and malformed input,
+and [manifest lookup budgets](../../tests/source-manifest-lookup-speed.test.mjs) for storage-call evidence.
+Syntax checks cover visible operations. A measured budget can detect overhead hidden behind calls.
+
+The suffixes make review and lint scope visible. The role names for hosted versus local and public versus
+internal are for navigation. Prove authority boundaries through registrations and existing contract
+tests. Keep guard timing and incident fixtures with `70144f0c`.
+
+### Oversized modules
+
+The Issue recorded seven files above 800 lines. The audited State has 2,222 TypeScript files in
+`src/` and `convex/` excluding generated files. Of those, 259 exceed 300 lines and 13 exceed 800
+lines. Counts include blank and comment lines and exclude browser code, tests and scripts.
+
+```sh
+rg --files src convex -g '*.ts' -g '!**/_generated/**' -0 |
+  xargs -0 wc -l |
+  awk '$2 != "total" && $1 > 800 { print $1, $2 }' |
+  sort -nr
+```
+
+| Module | Lines | Responsibilities worth tracing before a split |
+| --- | ---: | --- |
+| [Hosted agent transport](../../src/hosted-agent-transport.ts) | 2,695 | Command routing, caller context, lifecycle orchestration and machine-local Lane bookkeeping share one class. |
+| [Agent preflight](../../src/agent-preflight.ts) | 2,223 | Receipt schema, test selection and budget, execution and reporting. Several `agent-preflight-*` modules already have narrower roles. |
+| [Hosted culprit](../../convex/projectHostedCulprit.ts) | 1,948 | Classifies failed shared checks, drives recovery and records evidence through internal handlers. |
+| [Hosted agent actions](../../src/hosted-agent-actions.ts) | 1,425 | Routes commands, builds check selection and handles replies and materialization. |
+| [Work types](../../src/work-types.ts) | 1,351 | Persisted Work records, check and playbook validators, and command unions. Intent, Planning and inputs already have sibling schema modules. |
+| [Hosted agent planning](../../src/hosted-agent-planning.ts) | 1,246 | Resolves planning IDs, dispatches reads and writes, and reconciles Done-when status. |
+| [Landing speed alerts](../../src/landing-speed-alerts.ts) | 1,223 | Budget schemas, ratchet math, sample grouping and alert decisions. |
+| [Hosted save client](../../src/hosted-save-client.ts) | 1,172 | Captures local files, drives source preparation, publishes a save, and reconciles pending outcomes. |
+| [Work run](../../src/work-run.ts) | 1,107 | Recovers processes, adopts remote runs, executes owned runs and exposes the CLI-side run orchestration. |
+| [Work service](../../src/work.ts) | 1,048 | Materializes Work, runs transaction and command dispatch, recovers state and composes Views. |
+| [Convex schema](../../convex/schema.ts) | 1,043 | Composes deployed tables and indexes, with some import and access validators still in the file. |
+| [Hosted agent finish](../../src/hosted-agent-finish.ts) | 964 | Pre-admission, queued conflict and stack guidance, and durable landing orchestration. |
+| [Hosted main audit state](../../convex/projectHostedMainAuditState.ts) | 877 | Audit freshness, wake scheduling, holds, main coverage and red-run evidence. |
+
+`work-types.ts` has 237 matching import lines under `src/`, `convex/` and `web/src/`
+(`rg -n 'from .*work-types' src convex web/src`). Its schemas are part of live and retained records, including old Work
+formats. Keep `workSchema` composition, defaults, validation, serialized bytes and the existing
+imports stable while moving one independent family. [Current format](../../tests/work-current-format.test.mjs),
+[schema compatibility](../../tests/check-schema-compat.test.mjs), and
+[V8 Work command](../../tests/work-command-v8.test.mjs) check different parts of that contract.
+
+### Test placement
+
+Keep behaviour tests discoverable as `tests/<area>-<behaviour>.test.mjs`, grouped by the feature
+or boundary a caller uses. [Hosted planning](../../tests/hosted-planning.test.mjs) and
+[hosted agent planning](../../tests/hosted-agent-planning.test.mjs) distinguish backend semantics
+from command behaviour. [Live reads](../../tests/live-reads.test.mjs) covers browser subscription
+lifecycle; [guard fixtures](../../tests/lint-rules.test.mjs) cover lint diagnostics. Keep supporting
+fixtures beside the owning test family or in `tests/fixtures/` when shared. Test the same action
+after a helper moves. Preserve incident fixture and ledger paths or update every actual consumer
+in the same slice.
+
+The [package test command](../../package.json) expands `tests/*.test.mjs` and the
+[preflight selector](../../src/agent-preflight.ts) has special discovery for that layout.
+Use flat test names for now. A directory move would need a separate tooling slice that proves
+local discovery, scoped and full selection, shards, incident replays, and guard ledgers still see
+the same tests. Add runtime tests when they guard observable behaviour or a budget.
+
+### Refactor candidates for planning
+
+Each row is one independently checkable first extraction. Sizes are estimates of lines moved,
+plus import wiring in a small number of files. They are starting scopes for the lead's decision.
+Preserve public entry points, persisted formats, order of side effects, and diagnostic output.
+
+| Area | Proposed first slice and size | Done when |
+| --- | --- | --- |
+| Shared Work schemas | Extract check definition, evidence and run validators behind the existing exports (~175 lines, 2–3 files). | Existing records and inputs parse identically and current-format, schema compatibility and V8 fixtures pass. |
+| Hosted agent transport and actions | Extract local Lane activity and cache bookkeeping from transport (~100–180 lines, 2–4 files). | CLI and MCP still resolve and open the same Lane, retry with the original operation ID and make the same hosted requests. |
+| Agent preflight | Move local receipt and learned timing reads into their own module (~120–170 lines, 2–4 files). | Recorded receipt format, selected files, order and ceilings are unchanged in preflight fixtures. |
+| Shared-check culprit recovery | Extract pure failing-test and revert-message derivation from the registration module (~100–160 lines, 2–4 files). | Single and batch culprit replays preserve classification, emitted evidence, and scheduled handler addresses. |
+| Planning client | Extract Done-when parsing and status formatting (~80–150 lines, 2–3 files). | Completion and refusal cases preserve the same checklist, detail reply and reconciliation writes. |
+| Landing speed alerts | Extract the pure ratchet update and status math (~175–210 lines, 2–3 files). | Existing alert traces produce the same outcomes and stored ratchet shape. |
+| Save and source delivery | Extract observed save result application behind the current client entry point (~100–180 lines, 2–4 files). | Lost-reply and background-settle fixtures yield the same head, sync guidance and replay calls. |
+| Run and Work service | Extract run-output path and recovery decisions from Work execution (~100–160 lines, 2–4 files). | Run recovery and Work lifecycle fixtures preserve retained output, interruption reporting and record writes. |
+| Convex schema composition | Extract a cohesive import-job validator group (~80–120 lines, 2–4 files). | Deployed table IDs, validators and indexes match the existing schema, and index and compatibility checks pass. |
+| Landing finish client | Extract queue-conflict advice composition (~100–170 lines, 2–4 files). | Finish and queued-conflict replay fixtures preserve advice, operation state and calls before and after submission. |
+| Main audit state | Extract pure freshness and red-test summary derivation (~75–130 lines, 2–4 files). | Audit fixtures preserve holds, wakes and bounded read/write counts across fresh and red main. |
+
+Use the relevant core-path review and queue checks for slices that touch landing, wakes or checks.
+For each move, inspect the import graph and run the affected contracts and failure cases before landing.
+The expected deltas are zero idle or per-operation Convex calls, zero DB reads or writes, and zero
+bytes moved between stores. Compare peak memory and wall time at current and larger workloads where
+an extraction changes code in a measured path. This audit changes documentation only. Its runtime
+call, DB I/O, storage, memory and wall-time deltas are zero by construction, independent of workload.
