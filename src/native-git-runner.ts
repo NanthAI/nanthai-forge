@@ -4,17 +4,19 @@ import { nativeGitBatch } from './native-git-batch.js';
 import { gitCommand, gitFailure, gitPhase, gitTimeout } from './work-git-command.js';
 
 /** One lock-free export session. Keep stderr progress alive during Git subprocess waits. */
-export function nativeGitRunner() {
+export function nativeGitRunner(showProgress = true) {
   const began = Date.now();
   let phase = 'reading immutable States',
     pid: number | undefined,
     commandBegan = began,
     commands = 0;
-  const progress = setInterval(() => {
-    process.stderr.write(
-      `export-native-git: ${phase}; holder=git pid=${pid ?? 'none'}; commandWait=${Math.floor((Date.now() - commandBegan) / 1000)}s; commands=${commands}; elapsed=${Math.floor((Date.now() - began) / 1000)}s\n`,
-    );
-  }, 10_000);
+  const progress = showProgress
+    ? setInterval(() => {
+        process.stderr.write(
+          `export-native-git: ${phase}; holder=git pid=${pid ?? 'none'}; commandWait=${Math.floor((Date.now() - commandBegan) / 1000)}s; commands=${commands}; elapsed=${Math.floor((Date.now() - began) / 1000)}s\n`,
+        );
+      }, 10_000)
+    : undefined;
   const batches: ReturnType<typeof nativeGitBatch>[] = [];
   return {
     async close() {
@@ -39,9 +41,11 @@ export function nativeGitRunner() {
       commandBegan = Date.now();
       commands++;
       const command = gitCommand(root, args),
-        timeout = gitTimeout();
+        timeout = gitTimeout(),
+        tracksProgress = args.includes('--progress');
       return new Promise((resolve, reject) => {
         let timedOut = false,
+          interrupted: NodeJS.Signals | undefined,
           failure: NodeJS.ErrnoException | undefined;
         const stdout: Buffer[] = [],
           stderr: Buffer[] = [];
@@ -60,11 +64,20 @@ export function nativeGitRunner() {
             if ((error as NodeJS.ErrnoException).code !== 'ESRCH') child.kill('SIGKILL');
           }
         };
+        const stop = (signal: NodeJS.Signals) => {
+          interrupted ??= signal;
+          kill();
+        };
         pid = child.pid;
-        const timer = setTimeout(() => {
+        const expire = () => {
           timedOut = true;
           kill();
-        }, timeout);
+        };
+        let timer = setTimeout(expire, timeout);
+        if (tracksProgress) {
+          process.once('SIGINT', stop);
+          process.once('SIGTERM', stop);
+        }
         child.stdout.on('data', (bytes: Buffer) => {
           stdoutBytes += bytes.length;
           if (stdoutBytes <= 4 * 1024 * 1024) stdout.push(bytes);
@@ -74,6 +87,11 @@ export function nativeGitRunner() {
           }
         });
         child.stderr.on('data', (bytes: Buffer) => {
+          // Git redraws the progress meter with carriage returns. Diagnostics end in newlines.
+          if (tracksProgress && !timedOut && bytes.includes(13)) {
+            clearTimeout(timer);
+            timer = setTimeout(expire, timeout);
+          }
           stderrBytes += bytes.length;
           if (stderrBytes <= 4 * 1024 * 1024) stderr.push(bytes);
           else {
@@ -86,19 +104,24 @@ export function nativeGitRunner() {
         });
         child.on('close', (status, signal) => {
           clearTimeout(timer);
+          if (tracksProgress) {
+            process.off('SIGINT', stop);
+            process.off('SIGTERM', stop);
+          }
           pid = undefined;
           phase = 'projecting immutable States';
-          if (failure || timedOut || status !== 0)
+          if (failure || timedOut || interrupted || status !== 0)
             reject(
               gitFailure(
                 {
                   status,
                   code: timedOut ? 'ETIMEDOUT' : failure?.code,
-                  signal,
+                  signal: interrupted ?? signal,
                   stderr: Buffer.concat(stderr),
                 },
                 args,
                 timedOut,
+                tracksProgress,
               ),
             );
           else resolve(Buffer.concat(stdout).toString('utf8'));

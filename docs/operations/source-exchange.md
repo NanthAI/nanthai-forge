@@ -7,7 +7,11 @@ Run `nforge login DEPLOYMENT_URL` and approve the device in Forge. Saved credent
 `nforge host ROOT` creates a project through a one-time paged hosted seed. A plain
 directory is first captured into local Forge-native source without invoking Git;
 normal ignore rules apply, with exact file bytes and executable modes retained.
-Git worktrees keep their Git source/history path. It pins native main and its actual acceptance receipt
+Git worktrees keep their Git source and history in a verified bundle. Git's progress
+renews the local wait budget during bundle creation and verification. A bundle
+that stops reporting progress still returns `WORK_GIT_TIMEOUT`.
+This path uses Git's `--no-lazy-fetch` option, available in upstream Git 2.45 and later.
+Hosting pins native main and its actual acceptance receipt
 (or explicitly records the bootstrap State when no acceptance exists), portable
 Work bytes/revision, and journal-only commands, attempts, waits and unknown
 outcomes in recovery format 1. Immutable objects and Work records reuse the
@@ -1475,15 +1479,19 @@ On the bound native owner, run:
 nforge host ROOT --source-authority '{"operationId":"UUID","expected":{"mode":"native-owner","epoch":0},"mode":"server"}'
 ```
 
-The command records its exact request before network IO. Only a successful hosted
+The command records its exact request before network IO. The hosted transaction
+advances the project epoch and its selected main together, preserving the head
+and receipt. Only a successful hosted
 CAS installs its result in the local binding. If the process stops between the
 hosted commit and the local pin update, repeat the same command; its receipt
 finishes the local update without another transition. A known stale CAS updates
 the observed pin and releases the pending command; an unknown outcome retains it.
 Coordinate this command with the cutover's seeded source/Work pins and queue drain.
-It does not seed main, drain work or enable hosted routing on its own: a switch to
-`server` before hosted main is seeded is refused with `SOURCE_UNAVAILABLE` and
-changes nothing (seed first; `nforge host ROOT` resumes the seed).
+A switch to `server` before hosted main is seeded returns `SOURCE_UNAVAILABLE`.
+Complete the original seed and drain the owner before switching.
+If an earlier legacy transition left the project and main epochs out of sync,
+the owner can run a new transition with a new operation ID, the project's
+current authority as `expected`, and its current mode as `mode`.
 
 `requireSourceAuthority(project, expected?)` in `src/hosted-source-authority.ts` is
 the shared writer guard. `project` needs only an optional `sourceAuthority`;

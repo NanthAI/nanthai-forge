@@ -3,14 +3,14 @@ import { chmodSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { fingerprintPrivateFile } from './files.js';
 import { invariant } from './errors.js';
-import { workGit } from './work-git.js';
+import { nativeGitRunner } from './native-git-runner.js';
 
 export async function fullGitBundle(
   transport: string,
   refs: { ref: string; head: string }[],
   temp: string,
   code: string,
-  git: (root: string, args: string[]) => string | Promise<string> = workGit,
+  git: (root: string, args: string[]) => string | Promise<string> = nativeGitRunner(false).git,
 ) {
   for (const item of refs) await git(transport, ['update-ref', item.ref, item.head]);
   await git(transport, [
@@ -18,6 +18,9 @@ export async function fullGitBundle(
     '--no-replace-objects',
     'bundle',
     'create',
+    '--progress',
+    // Git 2.38 needs this to report progress while pack objects are written.
+    '--all-progress-implied',
     temp,
     ...refs.map(item => item.ref),
   ]);
@@ -35,11 +38,12 @@ export async function fullGitBundle(
   );
   // Verify without source alternates: native Git checks self-contained prerequisites, pack integrity and ancestry connectivity.
   await git(transport, ['--no-lazy-fetch', '--no-replace-objects', 'bundle', 'verify', temp]);
-  await git(transport, ['--no-lazy-fetch', '--no-replace-objects', 'bundle', 'unbundle', temp]);
+  await git(transport, ['--no-lazy-fetch', '--no-replace-objects', 'bundle', 'unbundle', '--progress', temp]);
   await git(transport, [
     '--no-lazy-fetch',
     '--no-replace-objects',
     'fsck',
+    '--progress',
     '--connectivity-only',
     '--no-reflogs',
   ]);

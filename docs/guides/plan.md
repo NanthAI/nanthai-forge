@@ -14,7 +14,7 @@ nforge agent ROOT lanes '{"planningItemId":"ITEM_ID"}'
 
 An active Plan read includes proposals and work in progress. Continue a returned cursor when reading more pages. Search for an existing match before adding duplicate work. The [generated reference](../reference/cli.md) gives the current fields for `put-planning-item` and `comment-planning-item`.
 
-An empty Plan read shows how to propose an Item. If Forge returns `PROJECT_WORK_INDEX_MISSING`, the project owner runs the exact command in `next` and then retries the read or write. From the clone, the repair is `nforge hosted-work ROOT '{"action":"rebuild-index"}'`. The rebuild resumes from the project's index state.
+An empty Plan read shows how to propose an Item. A fresh Forge-native host prepares Plan when its initial Work projection fits one transaction. Retained Work and larger projections can use the paged rebuild. If Forge returns `PROJECT_WORK_INDEX_MISSING`, follow the owner's recovery command in `next`. From the clone, run `nforge hosted-work ROOT '{"action":"rebuild-index"}'` and retry the read or write. The rebuild resumes from the project's index state.
 
 ## Start from the outcome
 

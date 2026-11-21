@@ -14,6 +14,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { seedPageSchema, seedRequestSchema, validateSeedPage } from '../src/hosted-seed-protocol';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { initialSeedIndex } from './projectHostedSeedIndex';
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
 export const stage = action({
   args: { ...identity, index: v.number(), body: v.string(), previous: v.string() },
@@ -104,6 +105,7 @@ export const finish = action({
         'The seed root differs from its pinned Work and manifest.',
       );
       let mainDigest: string | null = null;
+      let initialIndex: ReturnType<typeof initialSeedIndex>;
       if (request.format === 'native') {
         invariant(request.main, 'INVALID_WORK_BACKUP', 'Pin native main at seed start.');
         if (request.receipt) {
@@ -125,18 +127,20 @@ export const finish = action({
             'Bootstrap has no native acceptance receipt.',
           );
         const [main] = await reader.read(input.projectId, owner, [request.main]);
-        parseNativeState(main!);
+        const state = parseNativeState(main!);
         mainDigest = digest(main!);
         invariant(
           mainDigest === request.head,
           'SOURCE_HASH_MISMATCH',
           'Hosted main differs from native main.',
         );
+        if (metadata.schema === 2) initialIndex = initialSeedIndex(request, state);
       }
       return await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedSeed:commit'), {
         ...input,
         owner,
         mainDigest,
+        ...(initialIndex ? { initialIndex } : {}),
         ...(request.format === 'native' && metadata.schema === 2 ? { validatedWorkRecords: 1 } : {}),
       });
     } catch (error) {

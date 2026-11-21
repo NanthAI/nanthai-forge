@@ -23,6 +23,7 @@ import { updateHostState, readHostState } from '../dist/host-binding.js';
 import { transitionBoundSourceAuthority } from '../dist/source-authority-client.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { lanesFixture } from '../tests/hosted-lanes-fixture.mjs';
+import { seedAuthorityMain } from '../tests/source-authority-fixture.mjs';
 import { moduleUrl } from '../tests/convex-module.mjs';
 import { cloneRollbackOwner, scrubRollbackCopy } from './phase5-rollback-copy.mjs';
 
@@ -135,6 +136,8 @@ try {
     return act({ action: 'lane', intentId: intent.id, name: 'Rollback drill change' });
   });
   const fake = lanesFixture();
+  const native = { mode: 'native-owner', epoch: 0 },
+    server = { mode: 'server', epoch: 1 };
   const projectId = fake.insert('hostedProjects', {
     name: 'Synthetic rollback',
     owner: 'owner',
@@ -143,12 +146,7 @@ try {
     revision: 0,
   });
   // Server authority needs a seeded hosted main (2abda01f); the drill's fake has one.
-  fake.insert('projectHostedChannels', {
-    projectId,
-    name: 'main',
-    operationId: randomUUID(),
-    selection: JSON.stringify({ schema: 2, projectId, head: 'c'.repeat(64) }),
-  });
+  seedAuthorityMain(fake, projectId, lane.base, native);
   const client = {
     mutation: (ref, args) => {
       assert.equal(getFunctionName(ref), 'projectSourceAuthority:transition');
@@ -171,8 +169,6 @@ try {
       };
     });
   }
-  const native = { mode: 'native-owner', epoch: 0 },
-    server = { mode: 'server', epoch: 1 };
   bind(store, native);
   const forward = { operationId: randomUUID(), expected: native, mode: 'server' };
   assert.deepEqual(

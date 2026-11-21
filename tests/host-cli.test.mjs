@@ -15,6 +15,8 @@ import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
 const indexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 const hosting = await import(moduleUrl('../convex/projectHosting.ts'));
 const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
+const workCommand = await import(moduleUrl('../convex/projectWorkCommand.ts'));
+const planView = await import(moduleUrl('../convex/projectPlanView.ts'));
 const { activeProject } = await import(moduleUrl('../convex/projectAuthority.ts'));
 import { setup } from './host-cli-fixture.mjs';
 
@@ -33,6 +35,43 @@ test('host creates a brand-new empty native owner through schema-validated Conve
   assert.equal(project.autonomyPolicy.acceptance.disjointFastPath, false);
   assert.equal((await hostCli([f.root, '--status'])).binding.acceptanceOwner, false);
   assert.deepEqual(project.sourceAuthority, { mode: 'server', epoch: 1 });
+  const plan = () =>
+    workIndex.records._handler(f.s.ctx, {
+      projectId: result.projectId,
+      collection: 'planningItems',
+      planningFilter: { kind: 'issue' },
+      paginationOpts: { cursor: null, numItems: 10 },
+    });
+  const empty = await plan();
+  assert.equal(empty.generationId, project.work.generationId);
+  assert.ok(empty.generationId, 'fresh Plan reads its selected generation without repair');
+  assert.deepEqual(empty.page, []);
+  const workspace = JSON.parse(await workIndex.workspace._handler(f.s.ctx, { projectId: result.projectId }));
+  assert.equal(workspace.planningFilteredReads, true);
+  const generation = f.s.tables.projectWorkGenerations.get(empty.generationId);
+  assert.equal(generation.format, HOSTED_WORK_INDEX_FORMAT);
+  const tree = [...f.s.tables.projectWorkDataRecords.values()].find(
+    row => row.collection === 'sourceTreePaths',
+  );
+  assert.deepEqual(JSON.parse(tree.value).paths, ['hello.ts']);
+  const itemOperation = randomUUID();
+  await workCommand.command._handler(f.s.ctx, {
+    projectId: result.projectId,
+    operationId: itemOperation,
+    command: JSON.stringify({
+      action: 'put-planning-item',
+      operationId: itemOperation,
+      itemId: randomUUID(),
+      kind: 'issue',
+      title: 'First hosted Item',
+    }),
+  });
+  assert.equal(JSON.parse((await plan()).page[0].value).title, 'First hosted Item');
+  const view = await planView.read._handler(f.s.ctx, { projectId: result.projectId });
+  assert.deepEqual(
+    JSON.parse(view.rows).map(row => row.title),
+    ['First hosted Item'],
+  );
   const replay = await hosting.create._handler(f.s.ctx, {
     operationId,
     name: 'S1 live synthetic',
@@ -319,19 +358,38 @@ test('interrupted history stays unselected until the complete seed validates', a
     );
 });
 
-test('hosting never invokes full index preparation, including a lost initialization reply', async t => {
+test('hosting never invokes full index preparation for retained Work', async t => {
   const f = setup(t),
     action = f.dependencies.client.action;
-  let calls = 0;
   f.dependencies.client.action = async (ref, args) => {
     assert.notEqual(getFunctionName(ref), 'projectWorkIndexActions:ensure');
-    calls++;
     return action(ref, args);
   };
   const result = await hostProject(f.root, { deployment: 'https://fixture.convex.cloud' }, f.dependencies);
-  assert(calls > 0);
   assert.equal(readHostState(f.store).binding.projectId, result.projectId);
   assert.equal(f.s.tables.projectWorkGenerations.size, 0);
+});
+
+test('a lost fresh host initialization reply keeps the original ready Plan generation', async t => {
+  const f = setup(t, false, true),
+    action = f.dependencies.client.action;
+  let generationId;
+  f.dependencies.client.action = async (ref, args) => {
+    const result = await action(ref, args);
+    if (getFunctionName(ref) === 'projectWorkActions:initialize' && !generationId) {
+      generationId = result.work.generationId;
+      throw new Error('lost fresh initialization reply');
+    }
+    return result;
+  };
+  await assert.rejects(
+    hostProject(f.root, { deployment: 'https://fixture.convex.cloud' }, f.dependencies),
+    /lost fresh initialization reply/,
+  );
+  assert.ok(generationId);
+  const result = await hostProject(f.root, { deployment: 'https://fixture.convex.cloud' }, f.dependencies);
+  assert.equal(f.s.tables.hostedProjects.get(result.projectId).work.generationId, generationId);
+  assert.equal(f.s.tables.projectWorkGenerations.size, 1);
 });
 
 test('host --json and --status read pending hosting without writes or resuming; --resume is explicit', async t => {

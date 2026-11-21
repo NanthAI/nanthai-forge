@@ -43,7 +43,12 @@ export function gitCommand(root: string, args: string[]) {
 // Never report arguments (which can contain source text, credentials or URLs).
 export const gitPhase = (args: string[]) => args.find(arg => /^[a-z][a-z-]*$/.test(arg)) ?? 'operation';
 
-export function gitFailure(error: unknown, args: string[], timedOut = false): ForgeError {
+export function gitFailure(
+  error: unknown,
+  args: string[],
+  timedOut = false,
+  tracksProgress = false,
+): ForgeError {
   const failure = error as {
     stderr?: string | Buffer;
     status?: number;
@@ -67,6 +72,6 @@ export function gitFailure(error: unknown, args: string[], timedOut = false): Fo
   timedOut ||= failure.code === 'ETIMEDOUT';
   return new ForgeError(
     timedOut ? 'WORK_GIT_TIMEOUT' : 'WORK_GIT_FAILED',
-    `Git ${gitPhase(args)} ${timedOut ? `exceeded its ${gitTimeout()}ms wait budget (FORGE_GIT_TIMEOUT_MS)` : 'failed'} (status=${failure.status ?? 'unknown'}, code=${failure.code ?? 'none'}, signal=${failure.signal ?? 'none'}).${stderr ? ` stderr: ${stderr}` : ''} Existing branches and workspaces are retained; inspect work status before retrying.`,
+    `Git ${gitPhase(args)} ${timedOut ? `exceeded its ${gitTimeout()}ms ${tracksProgress ? 'progress wait' : 'wait'} budget (FORGE_GIT_TIMEOUT_MS)` : 'failed'} (status=${failure.status ?? 'unknown'}, code=${failure.code ?? 'none'}, signal=${failure.signal ?? 'none'}).${stderr ? ` stderr: ${stderr}` : ''} Existing branches and workspaces are retained; inspect work status before retrying.`,
   );
 }

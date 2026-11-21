@@ -8,6 +8,8 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { requireHostedOwnerDrained } from './projectSourceAuthorityDrain';
 import { channelRow } from './projectHostedChannels';
+import { hostedMainV2Schema } from '../src/hosted-main';
+import { canonicalPayload } from '../src/hosted-source-operation';
 
 /** One authorized project-row lookup, with no history scan or read-time migration. */
 export const current = query({
@@ -68,16 +70,28 @@ export const transition = mutation({
         'SOURCE_AUTHORITY_PIN_REQUIRED',
         'Use nforge host ROOT --cutover-file REQUEST.json with current main, receipt and recovery pins.',
       );
+      const channel = await channelRow(ctx, project._id);
       if (input.mode === 'server' && current.mode !== 'server') {
         // Server authority serves hosted main; without a seeded one every clone and Lane would fail (Item 2abda01f).
         invariant(
-          await channelRow(ctx, project._id),
+          channel,
           'SOURCE_UNAVAILABLE',
           'Hosted main has not been seeded, so the server cannot own source yet; nothing changed. Seed it first (nforge host ROOT resumes the seed), then switch.',
         );
         await requireHostedOwnerDrained(ctx, project, input.ownerDrain);
       }
       const authority = nextSourceAuthority(current, input.expected, input.mode);
+      if (channel) {
+        const main = hostedMainV2Schema.parse(JSON.parse(channel.selection));
+        invariant(
+          main.projectId === project._id,
+          'SOURCE_UNAVAILABLE',
+          'Hosted main belongs to another project.',
+        );
+        await ctx.db.patch(channel._id, {
+          selection: canonicalPayload({ ...main, authority }),
+        });
+      }
       await ctx.db.patch(project._id, { sourceAuthority: authority });
       await ctx.db.insert('projectSourceAuthorityTransitions', {
         projectId: input.projectId,

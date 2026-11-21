@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
+import { seedAuthorityMain } from './source-authority-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const authority = await import(moduleUrl('../convex/projectSourceAuthority.ts'));
 const work = await import(moduleUrl('../convex/projectWork.ts'));
@@ -16,14 +17,6 @@ const stale = current => error => {
   assert.deepEqual(error.data?.authority ?? error.authority, current);
   return true;
 };
-/** A hosted main row: server authority serves it, so a switch to server needs it (Item 2abda01f). */
-const seedMain = (s, projectId) =>
-  s.insert('projectHostedChannels', {
-    projectId,
-    name: 'main',
-    operationId: randomUUID(),
-    selection: JSON.stringify({ schema: 2, projectId, head: 'c'.repeat(64) }),
-  });
 function setup({ seeded = true } = {}) {
   const s = lanesFixture();
   const projectId = s.insert('hostedProjects', {
@@ -33,7 +26,7 @@ function setup({ seeded = true } = {}) {
     currentBackup: null,
     revision: 0,
   });
-  if (seeded) seedMain(s, projectId);
+  if (seeded) seedAuthorityMain(s, projectId, 'c'.repeat(64), native);
   const transition = (expected = native, mode = 'server', operationId = randomUUID(), actor) =>
     s.call(
       'transition',
@@ -51,6 +44,32 @@ function setup({ seeded = true } = {}) {
     );
   return { ...s, projectId, transition };
 }
+
+test('legacy authority transition leaves hosted main readable at its original source and new epoch (0667c0d8)', async () => {
+  const s = setup(),
+    operationId = randomUUID();
+  const [row] = s.tables.projectHostedChannels.values();
+  const original = JSON.parse(row.selection);
+  await s.transition(native, 'server', operationId);
+  const read = async () => JSON.parse(await s.call('current', channels.current, { projectId: s.projectId }));
+  assert.deepEqual(await read(), { ...original, authority: server });
+  const advanced = { mode: 'server', epoch: 2 };
+  assert.deepEqual(await s.transition(server), advanced);
+  assert.deepEqual(await s.transition(native, 'server', operationId), server);
+  assert.deepEqual(await read(), { ...original, authority: advanced });
+});
+
+test('an existing epoch mismatch is repaired by a new transition at the current epoch', async () => {
+  const s = setup();
+  const [row] = s.tables.projectHostedChannels.values();
+  const original = JSON.parse(row.selection);
+  s.patch('hostedProjects', s.projectId, { sourceAuthority: server });
+  const read = () => s.call('current', channels.current, { projectId: s.projectId });
+  await assert.rejects(read(), code('SOURCE_AUTHORITY_CHANGED'));
+  const authority = await s.transition(server, 'server');
+  assert.deepEqual(authority, { mode: 'server', epoch: 2 });
+  assert.deepEqual(JSON.parse(await read()), { ...original, authority });
+});
 
 test('transition CAS is idempotent across later transitions; rollback advances the epoch', async () => {
   const s = setup(),
@@ -268,6 +287,6 @@ test('a switch to server authority is refused until hosted main is seeded, and c
   });
   assert.equal(s.tables.hostedProjects.get(s.projectId).sourceAuthority, undefined);
   assert.equal(s.tables.projectSourceAuthorityTransitions.size, 0);
-  seedMain(s, s.projectId);
+  seedAuthorityMain(s, s.projectId, 'c'.repeat(64), native);
   assert.deepEqual(await s.transition(), server);
 });

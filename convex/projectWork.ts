@@ -9,6 +9,7 @@ import { retainedEventPage } from './projectWorkEventPage';
 import { verifyPurgedEvents } from './projectWorkPurgedRows';
 import { requireSourceAuthority } from '../src/hosted-source-authority';
 import { indexActivity } from '../src/work-hosted-index';
+import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { commandProjection } from './projectWorkProjection';
@@ -156,9 +157,10 @@ export const initialize = internalMutation({
     backupId: v.id('projectBackups'),
     operationId: v.string(),
     revision: v.number(),
+    workSchema: v.optional(v.number()),
   },
   returns: projectDocument,
-  handler: async (ctx, { projectId, owner, backupId, operationId, revision }) => {
+  handler: async (ctx, { projectId, owner, backupId, operationId, revision, workSchema }) => {
     try {
       const project = await activeOwnedProject(ctx, projectId, owner),
         backup = await ctx.db.get(backupId);
@@ -176,8 +178,29 @@ export const initialize = internalMutation({
         );
         return project;
       }
+      const initialGeneration =
+        workSchema === undefined || project.currentBackup !== backupId
+          ? null
+          : await ctx.db
+              .query('projectWorkGenerations')
+              .withIndex('by_project_and_backup_and_revision_and_format_and_work_schema', q =>
+                q
+                  .eq('projectId', projectId)
+                  .eq('backupId', backupId)
+                  .eq('revision', revision)
+                  .eq('format', HOSTED_WORK_INDEX_FORMAT)
+                  .eq('workSchema', workSchema),
+              )
+              .unique();
+      const generationId = initialGeneration?.status === 'ready' ? initialGeneration._id : undefined;
       await ctx.db.patch(projectId, {
-        work: { backupId, operationId, initialRevision: revision, revision },
+        work: {
+          backupId,
+          operationId,
+          initialRevision: revision,
+          revision,
+          ...(generationId ? { generationId } : {}),
+        },
         revision: project.revision + 1,
       });
       return (await ctx.db.get(projectId))!;

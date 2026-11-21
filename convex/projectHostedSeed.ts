@@ -22,6 +22,8 @@ import {
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { findObject } from './projectObjectFind';
+import { indexEntry } from './projectWorkIndexFields';
+import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
 
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
 async function caller(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
@@ -263,6 +265,7 @@ export const commit = internalMutation({
     owner: v.string(),
     mainDigest: v.union(v.string(), v.null()),
     validatedWorkRecords: v.optional(v.literal(1)),
+    initialIndex: v.optional(v.object({ metadata: v.string(), entries: v.array(indexEntry) })),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -325,6 +328,25 @@ export const commit = internalMutation({
         channels: [{ name: 'main', head: request.head }],
       },
     });
+    const initialIndex = input.initialIndex;
+    if (initialIndex) {
+      const generationId = await ctx.db.insert('projectWorkGenerations', {
+        recordTables: 'split',
+        projectId: input.projectId,
+        backupId,
+        revision: request.revision,
+        initialRevision: request.revision,
+        format: HOSTED_WORK_INDEX_FORMAT,
+        workSchema: JSON.parse(initialIndex.metadata).schema,
+        status: 'ready',
+        planningSearchVersion: 2,
+        nextBatch: 1,
+        objectCatalog: true,
+        metadata: initialIndex.metadata,
+      });
+      for (const entry of initialIndex.entries)
+        await ctx.db.insert('projectWorkRecords', { projectId: input.projectId, generationId, ...entry });
+    }
     // A new host becomes agent-writable only when its complete, verified source
     // and matching schema-2 main are selected in this same transaction. Legacy
     // seed requests never change authority, including retries after an upgrade.

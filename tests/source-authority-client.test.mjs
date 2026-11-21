@@ -16,6 +16,7 @@ import {
 } from '../dist/source-authority-client.js';
 import { hostedActionError } from '../dist/hosted-action-error.js';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
+import { seedAuthorityMain } from './source-authority-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const backend = await import(moduleUrl('../convex/projectSourceAuthority.ts'));
 const native = { mode: 'native-owner', epoch: 0 };
@@ -40,12 +41,7 @@ function setup(t) {
     revision: 0,
   });
   // Server authority serves hosted main, so the switch needs a seeded one (Item 2abda01f).
-  s.insert('projectHostedChannels', {
-    projectId,
-    name: 'main',
-    operationId: randomUUID(),
-    selection: JSON.stringify({ schema: 2, projectId, head: 'c'.repeat(64) }),
-  });
+  seedAuthorityMain(s, projectId, head, native);
   updateHostState(store, state => {
     state.binding = {
       projectId,

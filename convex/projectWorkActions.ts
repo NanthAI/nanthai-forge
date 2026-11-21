@@ -42,6 +42,9 @@ export const initialize = action({
         ...input,
         owner,
         revision: snapshot.data.revision,
+        ...(snapshot.backup.validatedWorkRecords === 1 && snapshot.data.revision === 0
+          ? { workSchema: snapshot.data.schema }
+          : {}),
       });
     } catch (error) {
       return report(error);

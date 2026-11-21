@@ -175,7 +175,7 @@ test('plain-directory host without Git clones exact paths, modes, empty/binary b
   assert.deepEqual(inventory(clone), expected);
 });
 
-test('fresh host authority publication uses the same Convex calls as a pinned legacy seed; idle makes none', async t => {
+test('fresh host authority and Plan publication use the same Convex calls as a pinned legacy seed; idle makes none', async t => {
   const legacy = plain(t),
     fresh = plain(t);
   for (const f of [legacy, fresh])
@@ -203,7 +203,11 @@ test('fresh host authority publication uses the same Convex calls as a pinned le
   // Existing storage-accounting shards depend on random object digests; their
   // occupied shard count is unrelated to server birth. Compare source/control
   // rows and bytes, without turning that random distribution into a test gate.
-  const tables = f => Object.entries(f.s.tables).filter(([name]) => name !== 'projectStorageUsage');
+  const indexTables = ['projectWorkGenerations', 'projectWorkDataRecords', 'projectFinishReadRows'];
+  const tables = f =>
+    Object.entries(f.s.tables).filter(
+      ([name]) => name !== 'projectStorageUsage' && !indexTables.includes(name),
+    );
   const stored = f => Object.fromEntries(tables(f).map(([name, rows]) => [name, rows.size]));
   assert.deepEqual(stored(fresh), stored(legacy), 'server birth adds no rows or per-file database records');
   const bytes = f =>
@@ -216,12 +220,32 @@ test('fresh host authority publication uses the same Convex calls as a pinned le
     Math.abs(bytes(fresh) - bytes(legacy)) < 1024,
     'authority metadata adds less than 1 KiB at 4000 files',
   );
+  assert.equal(fresh.s.tables.projectWorkGenerations.size, 1);
+  const projectionRows = [...fresh.s.tables.projectWorkDataRecords.values()];
+  assert.equal(projectionRows.filter(row => row.collection === 'sourceTreePaths').length, 40);
+  assert.equal(projectionRows.filter(row => row.collection === 'sourceBlobs').length, 0);
+  assert(fresh.s.tables.projectFinishReadRows.size - legacy.s.tables.projectFinishReadRows.size <= 2);
+  const indexBytes =
+    indexTables.reduce(
+      (total, name) =>
+        total +
+        [...fresh.s.tables[name].values()].reduce(
+          (sum, row) => sum + Buffer.byteLength(JSON.stringify(row)),
+          0,
+        ),
+      0,
+    ) -
+    [...legacy.s.tables.projectFinishReadRows.values()].reduce(
+      (sum, row) => sum + Buffer.byteLength(JSON.stringify(row)),
+      0,
+    );
+  assert(indexBytes < 128 * 1024, 'the 4000-file Plan projection stays under 128 KiB');
   const calls = b.length;
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(b.length, calls, 'hosting leaves no idle observer or timer');
   assert.equal(inventory(fresh.root).length, 4000);
   t.diagnostic(
-    `4000 files: ${calls} Convex executions per host, including nested calls; idle 0; process peak RSS ${process.resourceUsage().maxRSS} KiB`,
+    `4000 files: ${calls} Convex executions per host, including nested calls; ${indexBytes} initial index bytes; idle 0; process peak RSS ${process.resourceUsage().maxRSS} KiB`,
   );
 });
 
