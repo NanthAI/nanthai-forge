@@ -6,6 +6,7 @@ import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixt
 import { desired, landingApi } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { hostedVerdictKey } from '../dist/hosted-check-evidence.js';
+import { compactDiscardedChecks } from './landing-ticket-fixture.mjs';
 import { landingCosts } from '../dist/hosted-landings-view.js';
 const { statsLanding } = await import(moduleUrl('../convex/projectStats.ts'));
 const { notifyLandingCheck } = await import(moduleUrl('../convex/projectHostedLandingCheckWake.ts'));
@@ -107,6 +108,7 @@ for (const mode of ['direct', 'desired']) {
 
   for (const deferred of [false, true]) {
     test(`${mode} resubmission reuses a passed ${deferred ? 'queued shared' : 'immediate'} run without counting it as waste`, async t => {
+      compactDiscardedChecks(t);
       const { f, base, send, first } = await setup(t, mode, deferred);
       await f.drain();
       const runId = await pass(f, 300, true);

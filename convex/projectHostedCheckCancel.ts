@@ -18,8 +18,9 @@ export async function cancelHostedCheck(
   ctx: MutationCtx,
   input: CheckIdentity,
   preserveLiveConsumers = false,
+  loaded?: Awaited<ReturnType<typeof loadHostedCheck>>,
 ) {
-  const selected = await loadHostedCheck(ctx, input),
+  const selected = loaded ?? (await loadHostedCheck(ctx, input)),
     { row, run } = selected;
   if (hostedCheckTerminal(run)) return run;
   if (preserveLiveConsumers)
@@ -50,5 +51,8 @@ export async function cancelHostedCheck(
 
 /** A queued request already pins its check. Probe every live phase before
  * releasing shared work, independent of project/history/batch size. */
-export const cancelUnneededHostedCheck = (ctx: MutationCtx, input: CheckIdentity) =>
-  cancelHostedCheck(ctx, input, true);
+export const cancelUnneededHostedCheck = (
+  ctx: MutationCtx,
+  input: CheckIdentity,
+  loaded?: Awaited<ReturnType<typeof loadHostedCheck>>,
+) => cancelHostedCheck(ctx, input, true, loaded);

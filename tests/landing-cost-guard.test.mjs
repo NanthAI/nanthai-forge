@@ -5,6 +5,7 @@
 // per landing fails here, a saving asks the author to ratchet the ledger down.
 import { assertCommandWeight } from '../scripts/agent-weight.mjs';
 import test from 'node:test';
+import { compactDiscardedChecks } from './landing-ticket-fixture.mjs';
 import { randomUUID } from 'node:crypto';
 import { indexEntriesPerWrite, indexStorage, measureIndexExportClaims } from './convex-index-cost.mjs';
 const indexSchema = (await import(moduleUrl('../convex/schema.ts'))).default;
@@ -1117,6 +1118,7 @@ async function dogfoodControlTail(t, race) {
 }
 
 test('dogfood control tails budget finish reads across a completed solo landing and main-race recheck', async t => {
+  compactDiscardedChecks(t);
   const scenarios = [await dogfoodControlTail(t, false), await dogfoodControlTail(t, true)];
   const total = (name, key) => scenarios.reduce((sum, s) => sum + s[name][key], 0);
   const measured = {
@@ -1337,6 +1339,7 @@ test('GitHub inbound cost: one changed blob imports, composes, checks, lands and
 });
 
 test('storage per landing ratchets every table on fresh and dogfood-shaped checks before and after exhaust expiry', async t => {
+  compactDiscardedChecks(t);
   // Candidate 7 adds one numeric cause to the run row and one copy to its
   // compact metrics projection: 10 + 12 JSON bytes on the fresh dispatch,
   // 20 + 24 across the two immediate dogfood dispatches.

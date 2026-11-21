@@ -6,6 +6,7 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { landingTransition } from '../src/hosted-landing';
 import type { HostedLandingState } from '../src/hosted-landing';
+import { compactDiscardedChecksOn } from './projectHostedLandingRunnerCostSwitch';
 import { finishPendingForReader, type HostedFinish } from '../src/hosted-finish';
 export type LandingChannel = { projectId: Id<'hostedProjects'>; channel: 'main' };
 export const landingQueue = (ctx: QueryCtx | MutationCtx, input: LandingChannel) =>
@@ -77,12 +78,15 @@ export async function recordLandingObservation(
     projectId: state.projectId as Id<'hostedProjects'>,
     submissionId: state.id,
     version: state.version,
-    value: landingTransition({
-      submission: state,
-      pendingAttempt: finishPendingForReader(
-        (pendingAttempt ?? (finish ? JSON.parse(finish.value).pending : null)) as HostedFinish['pending'],
-      ),
-      ...(wouldConflict ? { wouldConflict } : {}),
-    }),
+    value: landingTransition(
+      {
+        submission: state,
+        pendingAttempt: finishPendingForReader(
+          (pendingAttempt ?? (finish ? JSON.parse(finish.value).pending : null)) as HostedFinish['pending'],
+        ),
+        ...(wouldConflict ? { wouldConflict } : {}),
+      },
+      compactDiscardedChecksOn(),
+    ),
   });
 }

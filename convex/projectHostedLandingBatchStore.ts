@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { CheckCause } from '../src/hosted-check';
+import { retiredCheckUsage } from './projectHostedLandingRunnerCosts';
 import { cancelPendingTask } from './schedulerCancel';
 import { armLandingAlarm } from './projectHostedLandingStallWake';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
@@ -398,6 +399,9 @@ export async function retryLandingBatch(
         phase: 'queued',
         observation: landingObservation('queued'),
         error: null,
+        ...(state.phase === 'ready' && row.runId && row.runId === batch.runId
+          ? retiredCheckUsage(state.counts)
+          : {}),
         timing: {
           submittedAt: state.at,
           ...(state.timing?.ms ? { ms: state.timing.ms } : {}),

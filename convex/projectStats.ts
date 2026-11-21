@@ -9,7 +9,7 @@ import { report } from './errors';
 import { invariant } from '../src/errors';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
-import type { HostedLandingState } from '../src/hosted-landing';
+import { expandUnreportedCounts, type HostedLandingState } from '../src/hosted-landing';
 import { discardedRunnerSeconds } from '../src/cost-budgets';
 import { closedDay, dayBudgetStateSchema, judgeClosedDay } from '../src/landing-speed-alerts';
 import { speedBudgets } from '../src/speed-budgets';
@@ -340,7 +340,9 @@ export const closeDay = internalMutation({
           q.eq('projectId', projectId).eq('submissionId', receipt.submissionId),
         )
         .unique();
-      const state = request ? (JSON.parse(request.value) as HostedLandingState) : null;
+      const state = request
+        ? (expandUnreportedCounts(JSON.parse(request.value)) as HostedLandingState)
+        : null;
       if (request) contributionIds.set(landings.length, request.submissionId);
       if (state) landedAttemptIds.add(state.attemptId);
       const resubmitted = request ? await resubmittedBefore(ctx, projectId, request) : false;

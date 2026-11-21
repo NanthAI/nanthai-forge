@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { loadHostedCheck } from './projectHostedCheckStore';
+import { compactDiscardedChecksOn } from './projectHostedLandingRunnerCostSwitch';
+import { retiredCheckUsage } from './projectHostedLandingRunnerCosts';
 import { failFinish } from './projectHostedFinishStore';
 import type { MutationCtx } from './_generated/server';
 import type { BatchIdentity } from './projectHostedLandingBatchState';
@@ -41,7 +44,7 @@ async function invalidatePipelineOnce(
   const retired = new Set<string>();
   const invalid = new Set(batch.members.map(member => member.submissionId));
   const removed = new Set<string>(retireMembers ? batch.members.map(member => member.submissionId) : []);
-  const runs = new Set<string>();
+  const runs = new Map<string, Awaited<ReturnType<typeof loadHostedCheck>> | undefined>();
   for (const submissionId of train.slice(last + 1)) {
     const current = await loadLanding(ctx, { projectId: input.projectId, submissionId });
     if (
@@ -75,7 +78,7 @@ async function invalidatePipelineOnce(
         submissionId: original.submissionId,
       });
       if (row.phase === 'landed' || row.phase === 'terminal-failed') continue;
-      if (row.runId) runs.add(row.runId);
+      if (row.runId && !runs.has(row.runId)) runs.set(row.runId, undefined);
       const parent = await loadLandingAttempt(ctx, {
         projectId: input.projectId,
         attemptId: state.attemptId,
@@ -86,6 +89,7 @@ async function invalidatePipelineOnce(
           { projectId: input.projectId, submissionId: original.submissionId },
           'STACK_PARENT_CHANGED',
           'The exact early-resolution predecessor changed or did not land. The speculative Lane returns to its retained author head; open it, sync main and resolve again.',
+          false,
         );
         continue;
       }
@@ -111,6 +115,29 @@ async function invalidatePipelineOnce(
         );
         continue;
       }
+      let usage;
+      if (parent.check && row.runId === parent.check.runId) {
+        if (state.phase === 'ready') usage = retiredCheckUsage(state.counts);
+        else if (compactDiscardedChecksOn()) {
+          // The provider can finish before its ticket leaves Checking. This is the
+          // existing release lookup, once per old run, moved before its binding is lost.
+          const selected =
+            runs.get(row.runId) ??
+            (await loadHostedCheck(ctx, { projectId: input.projectId, runId: row.runId }));
+          runs.set(row.runId, selected);
+          if (selected.run.status === 'passed') {
+            const members =
+              row.runId === descendant.batch.runId
+                ? (descendant.batch.included ?? descendant.batch.members).length
+                : 1;
+            const execution = selected.run.execution;
+            usage = retiredCheckUsage(
+              state.counts,
+              execution ? { seconds: Math.round(execution.seconds / members) } : {},
+            );
+          }
+        }
+      }
       const { forkReason: _fork, ...kept } = original;
       void _fork;
       const attempt = {
@@ -133,6 +160,7 @@ async function invalidatePipelineOnce(
           attemptId: attempt.id,
           version: state.version + 1,
           phase: 'queued',
+          ...usage,
           observation: landingObservation('queued'),
           error: null,
         },
@@ -143,7 +171,8 @@ async function invalidatePipelineOnce(
   }
   // All bindings move atomically. Release each old shared run once, after its
   // final waiter has left, rather than querying the same live peers per member.
-  for (const runId of runs) await cancelUnneededHostedCheck(ctx, { projectId: input.projectId, runId });
+  for (const [runId, loaded] of runs)
+    await cancelUnneededHostedCheck(ctx, { projectId: input.projectId, runId }, loaded);
   if (!removed.size) return false;
   await ctx.db.patch(queue!._id, { train: train.filter(id => !removed.has(id)) });
   // Removing only the settled root creates no runnable work. Its caller

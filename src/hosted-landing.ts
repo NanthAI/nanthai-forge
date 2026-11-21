@@ -277,6 +277,44 @@ export const hostedLandingProgressSchema = hostedLandingStateSchema
 export type HostedLandingRequest = z.infer<typeof hostedLandingRequestSchema>;
 export type HostedLandingAttempt = z.infer<typeof hostedLandingAttemptSchema>;
 export type HostedLandingState = z.infer<typeof hostedLandingStateSchema>;
+type Counts = NonNullable<HostedLandingState['counts']>;
+const unreportedCheck = 'superseded-check-execution-unreported';
+const compactCountsSchema = z.tuple([
+  hostedLandingStateSchema.shape.counts.unwrap().shape.r2.unwrap().nullish(),
+  z.number().nonnegative().nullish(),
+  z.number().nonnegative().nullish(),
+  z.literal(true).nullish(),
+]);
+type CompactCounts = z.infer<typeof compactCountsSchema>;
+
+/** Storage only: a tuple is the unknown marker and retains every exact count. */
+export function compactUnreportedCounts(counts: Counts): Counts | CompactCounts {
+  if (!counts.discardedRunnerUnknown) return counts;
+  const packed: CompactCounts = [
+    counts.r2 ?? null,
+    counts.runnerSeconds ?? null,
+    counts.discardedRunnerSeconds ?? null,
+    counts.runnerFull ?? null,
+  ];
+  while (packed.at(-1) === null) packed.pop();
+  return packed;
+}
+
+export function expandUnreportedCounts<T extends { counts?: unknown }>(state: T): T {
+  if (!Array.isArray(state.counts)) return state;
+  const [r2, runnerSeconds, discardedRunnerSeconds, runnerFull] = compactCountsSchema.parse(state.counts);
+  return {
+    ...state,
+    counts: {
+      discardedRunnerUnknown: unreportedCheck,
+      ...(r2 == null ? {} : { r2 }),
+      ...(runnerSeconds == null ? {} : { runnerSeconds }),
+      ...(discardedRunnerSeconds == null ? {} : { discardedRunnerSeconds }),
+      ...(runnerFull == null ? {} : { runnerFull }),
+    },
+  };
+}
+
 /** Exactly the S01 observation vocabulary; ready is still pending until H14's receipt. */
 export const landingObservation = (status: string, code?: string) => {
   const outcome = submissionOutcome({ status, ...(code ? { code } : {}) });
@@ -306,9 +344,11 @@ type Observation = {
   pendingAttempt: ReturnType<typeof finishPendingForReader>;
   wouldConflict?: unknown;
 };
-export function landingTransition(event: Observation) {
+export function landingTransition(event: Observation, compactDiscardedChecks = false) {
   const transition: Record<string, unknown> = { ...event.submission };
   for (const key of identityFields) delete transition[key];
+  if (compactDiscardedChecks && event.submission.counts)
+    transition.counts = compactUnreportedCounts(event.submission.counts);
   return semanticPayload({
     encoding: 'landing-transition-v1',
     transition,
@@ -331,7 +371,7 @@ export function readLandingTransition(value: string, current: HostedLandingState
     'Landing transition differs from its original request.',
   );
   return {
-    submission: { ...submission, ...stored.transition } as HostedLandingState,
+    submission: { ...submission, ...expandUnreportedCounts(stored.transition) } as HostedLandingState,
     pendingAttempt: stored.pendingAttempt,
     ...(stored.wouldConflict === undefined ? {} : { wouldConflict: stored.wouldConflict }),
   };

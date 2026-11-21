@@ -1,8 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
+import { expandUnreportedCounts } from '../dist/hosted-landing.js';
+
+export function compactDiscardedChecks(t) {
+  const name = 'FORGE_COMPACT_DISCARDED_CHECKS';
+  const previous = process.env[name];
+  process.env[name] = '1';
+  t.after(() => {
+    if (previous === undefined) delete process.env[name];
+    else process.env[name] = previous;
+  });
+}
+
+export function stampExecution(f, runId, seconds) {
+  const row = [...f.tables.projectHostedCheckRuns.values()].find(row => row.runId === runId);
+  const run = JSON.parse(row.value);
+  f.patch('projectHostedCheckRuns', row._id, {
+    value: JSON.stringify({ ...run, execution: { seconds, shards: run.plan.shardCount } }),
+  });
+}
+
 /** Fixture inspection keeps physical row budgets separate from the logical ticket contract. */
 export function ticketState(f, row) {
-  const state = JSON.parse(row.value);
+  const state = expandUnreportedCounts(JSON.parse(row.value));
   if (row.requestBodyId) {
     const body = JSON.parse(f.tables.projectHostedLandingBodies.get(row.requestBodyId).value);
     assert.equal(body.projectId, row.projectId);

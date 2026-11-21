@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import { storageClock } from './storage-clock.mjs';
+import { compactDiscardedChecks } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -8,11 +9,14 @@ import { readLandingTransition } from '../dist/hosted-landing.js';
 import { statsDay } from '../dist/stats-estimate.js';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { desired, landingApi } from './hosted-finish-fixture.mjs';
+import { current, drain, fixture, pendingTasks, requestRow } from './hosted-stale-check-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { landingCosts } from '../dist/hosted-landings-view.js';
 const { cancelledJobUsage, adjustClosedRunnerDay } = await import(
   moduleUrl('../convex/cancelledRunUsage.ts')
 );
 const usageApi = await import(moduleUrl('../convex/projectCancelledRunUsage.ts'));
+const acceptanceApi = await import(moduleUrl('../convex/projectHostedAcceptance.ts'));
 const { hostedVerdictKey } = await import('../dist/hosted-check-evidence.js');
 const statsApi = await import(moduleUrl('../convex/projectStats.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
@@ -167,6 +171,55 @@ const finish = async f => {
   }
   assert(states(f).every(s => s.phase === 'landed'));
 };
+
+test('a cancelled admission stays pending across replacement within the same landing and is priced once when it reports', async t => {
+  compactDiscardedChecks(t);
+  const f = await fixture(t, { conflict: false });
+  const [mover, original] = f.runs();
+  const before = current(f, 1);
+  const running = await f.rawChecks.activate(original.id);
+  const row = [...f.tables.projectHostedCheckRuns.values()].find(row => row.runId === original.id);
+  f.patch('projectHostedCheckRuns', row._id, { value: JSON.stringify({ ...running, executionId: '123' }) });
+  await f.rawChecks.pass(await f.rawChecks.activate(mover.id));
+  await drain(f, task => task.name === 'projectHostedAcceptance:complete');
+  const completion = pendingTasks(f)[0];
+  assert.equal(completion.name, 'projectHostedAcceptance:complete');
+  // Exercise the registered mutation's transaction tail. The generic queue
+  // fixture materializes accepted heads with the underlying helper alone.
+  await f.tx('replacementCancel', acceptanceApi.complete, completion.args[0]);
+  f.patch('_scheduled_functions', completion._id, { state: { kind: 'success' } });
+  await drain(f);
+  assert.equal(f.runs().find(run => run.id === original.id).status, 'cancelled');
+  const replacement = f.runs().find(run => run.status === 'queued');
+  assert(replacement && replacement.id !== original.id);
+  const next = await f.rawChecks.activate(replacement.id);
+  await f.rawChecks.pass(next);
+  const nextRow = [...f.tables.projectHostedCheckRuns.values()].find(row => row.runId === next.id);
+  f.patch('projectHostedCheckRuns', nextRow._id, {
+    value: JSON.stringify({
+      ...JSON.parse(nextRow.value),
+      execution: { seconds: 300, shards: next.plan.shardCount },
+    }),
+  });
+  await drain(f);
+  const costs = () => landingCosts(current(f, 1), 1, requestRow(f, 1).runnerAccounting?.pending);
+  assert.equal(current(f, 1).phase, 'landed');
+  assert.equal(current(f, 1).operationId, before.operationId);
+  assert.equal(costs().runnerAccepted, 5);
+  assert.equal(costs().runnerDiscarded, null);
+  assert.equal(costs().runnerDiscardedPending, true);
+  const report = {
+    projectId: f.projectId,
+    runId: original.id,
+    fence: running.fence,
+    executionId: '123',
+    usage: cancelledJobUsage(jobs(), '123'),
+  };
+  await f.tx('replacementLateUsage', usageApi.complete, report);
+  await f.tx('replacementLateUsageReplay', usageApi.complete, report);
+  assert.equal(costs().runnerDiscarded, 3.5);
+  assert.equal(costs().runnerDiscardedPending, undefined);
+});
 
 test('cancelled usage stays pending until completion, is shared once, and corrects its closed landing day idempotently', async t => {
   storageClock(t);

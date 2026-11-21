@@ -36,6 +36,8 @@ import { hostedLandingStateSchema, landingObservation } from '../src/hosted-land
 import { invariant } from '../src/errors';
 import { validCrossHeadProof, type CrossHeadProof } from '../src/hosted-cross-head-proof';
 import { carriedCostCounts } from '../src/landing-speed-alerts';
+import { retiredCheckUsage } from './projectHostedLandingRunnerCosts';
+import { compactDiscardedChecksOn } from './projectHostedLandingRunnerCostSwitch';
 import { invalidatePipeline } from './projectHostedLandingPipeline';
 import { scopedRecheckBasis, scopedRecheckFallback } from './projectHostedScopedRecheck';
 import { forkRaceReason } from '../src/fallback-reasons';
@@ -575,6 +577,20 @@ export async function installFinishCompose(
   await writeFinish(ctx, row, { ...value, pending: null });
   const { batchNeedsSoloCompose: _needsSolo, ...installedState } = state;
   void _needsSolo;
+  // A ready attempt's check is lost only when the replacement cannot reuse it.
+  // Live cancellations retain their own pending accounting for a late report.
+  const retired = !proof && state.phase === 'ready' && previous?.check ? retiredCheckUsage(state.counts) : {};
+  const checkCounts = retired.counts ?? state.counts;
+  const counts = carriedCostCounts(
+    checkCounts,
+    source.state.r2,
+    !!proof,
+    Boolean(
+      state.supersedes ||
+      retired.counts ||
+      (compactDiscardedChecksOn() && checkCounts?.discardedRunnerSeconds === 0),
+    ),
+  );
   await writeLanding(
     ctx,
     landing,
@@ -589,7 +605,7 @@ export async function installFinishCompose(
         composeStartedAt: pending.at,
         composedAt: new Date().toISOString(),
       },
-      counts: carriedCostCounts(state.counts, source.state.r2, !!proof, Boolean(state.supersedes)),
+      counts,
       observation: landingObservation('queued'),
       error: null,
     },

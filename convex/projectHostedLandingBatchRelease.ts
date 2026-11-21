@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { retiredCheckUsage } from './projectHostedLandingRunnerCosts';
 import type { MutationCtx } from './_generated/server';
 import type { BatchIdentity, LandingBatch } from './projectHostedLandingBatchStore';
 import { loadLanding, loadLandingAttempt, writeLanding } from './projectHostedLandingStore';
@@ -42,6 +43,7 @@ export async function releaseBatchMembers(ctx: MutationCtx, input: BatchIdentity
         ...state,
         batchOriginId: batch.id,
         batchSolo: true,
+        ...(!solo && state.phase === 'ready' && current.row.runId ? retiredCheckUsage(state.counts) : {}),
         ...(run
           ? {
               phase: run.status === 'passed' ? ('ready' as const) : ('checking' as const),

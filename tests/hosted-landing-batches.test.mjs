@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import { landingBodyCounts } from './observer-projection-budget.mjs';
-import { seedTicket } from './landing-ticket-fixture.mjs';
+import { compactDiscardedChecks, seedTicket, stampExecution } from './landing-ticket-fixture.mjs';
+import { landingCosts } from '../dist/hosted-landings-view.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
@@ -205,6 +206,33 @@ test('a main receipt race recomposes the whole cohort without transferring evide
   assertForkRacesNamed(f, 'cohort');
 });
 
+for (const firstSeconds of [undefined, 480])
+  test(`a cohort main race carries ${firstSeconds === undefined ? 'unknown' : 'shared, reported'} discarded usage once per member`, async t => {
+    compactDiscardedChecks(t);
+    const f = await batchesFixture(t);
+    await f.drain();
+    const [first] = f.runs();
+    f.moveMain();
+    await f.passChecks();
+    if (firstSeconds !== undefined) stampExecution(f, first.id, firstSeconds);
+    await f.drain();
+    const replacement = f.runs().find(run => run.status === 'queued');
+    assert.notEqual(replacement.id, first.id);
+    await f.passChecks();
+    stampExecution(f, replacement.id, 1200);
+    await f.drain();
+    for (const state of states(f)) {
+      assert.equal(state.phase, 'landed');
+      const cost = landingCosts(state, 1);
+      assert.equal(cost.runnerAccepted, 5);
+      assert.equal(cost.runnerDiscarded, firstSeconds === undefined ? null : 2);
+      assert.equal(
+        state.counts.discardedRunnerUnknown,
+        firstSeconds === undefined ? 'superseded-check-execution-unreported' : undefined,
+      );
+    }
+  });
+
 test('a replaced check attempt starts with empty progress, not the previous attempt test counts (9f94c28a)', async t => {
   const f = await batchesFixture(t, { count: 4 });
   await f.drain();
@@ -315,6 +343,40 @@ test('changed exact run pins cannot authorize any shared publication', async t =
     await f.drain();
   }
   assert(states(f).every(s => s.phase === 'landed'));
+});
+
+test('a completed unreported cohort remains unknown after its members fall back to solo checks', async t => {
+  compactDiscardedChecks(t);
+  const f = await batchesFixture(t);
+  await f.drain();
+  await f.passChecks();
+  for (let step = 0; states(f).some(state => state.phase !== 'ready'); step++) {
+    assert(step < 40, 'the shared verdict becomes ready before the policy changes');
+    await f.execute(f.pending()[0]);
+  }
+  const policy = policyPreset('trusted');
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, landing: 'serial' } },
+  });
+  await f.drain();
+  assert(
+    states(f).every(
+      state => state.counts?.discardedRunnerUnknown === 'superseded-check-execution-unreported',
+    ),
+  );
+  for (let wave = 0; states(f).some(state => state.phase !== 'landed'); wave++) {
+    assert(wave < 8, 'the individual replacements reach acceptance');
+    const queued = f.runs().filter(run => run.status === 'queued');
+    assert(queued.length);
+    await f.passChecks();
+    for (const run of queued) stampExecution(f, run.id, 300);
+    await f.drain();
+  }
+  for (const state of states(f)) {
+    const cost = landingCosts(state, 1);
+    assert.equal(cost.runnerAccepted, 5);
+    assert.equal(cost.runnerDiscarded, null);
+  }
 });
 
 test('formation reads two indexed windows, takes eight members and leaves overflow runnable', async t => {

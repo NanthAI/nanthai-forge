@@ -8,6 +8,8 @@ import { landingObservation } from '../dist/hosted-landing.js';
 import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { assertForkRacesNamed } from './fork-race-names.mjs';
+import { compactDiscardedChecks, stampExecution } from './landing-ticket-fixture.mjs';
+import { landingCosts } from '../dist/hosted-landings-view.js';
 const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
 const acceptance = await import(moduleUrl('../convex/projectHostedAcceptance.ts'));
 const pipelineEnv = { ...synthetic, FORGE_HOSTED_CHECK_KEY_SYNTHETIC: 'synthetic-admission-pipeline' };
@@ -319,6 +321,61 @@ for (const count of [10, 50])
         },
       }),
     );
+  });
+
+for (const observed of [true, false])
+  test(`a passed speculative check retired ${observed ? 'after' : 'before'} its queue observation stays unknown`, async t => {
+    compactDiscardedChecks(t);
+    const f = await batchesFixture(t, { count: 4, batching: 'default', batchMaxSize: 3 });
+    await drainActive(f);
+    const [predecessor, speculative] = f.runs();
+    assert(speculative);
+    assert.equal(f.runs().length, 2);
+    const member = () => states(f).find(state => state.id === f.entries[3].state.id);
+    const submission = member();
+    await f.rawChecks.pass(await f.rawChecks.activate(speculative.id));
+    if (observed) await drainActive(f);
+    assert.equal(member().phase, observed ? 'ready' : 'checking');
+    assert.equal(f.runs().find(run => run.id === speculative.id).status, 'passed');
+    if (observed) {
+      const active = await f.rawChecks.activate(predecessor.id);
+      await f.rawChecks.callback(
+        f.rawChecks.complete(active, 'failed', {
+          contractReports: { 'tests/synthetic.test.mjs': { failed: true, durationMs: 1 } },
+        }),
+      );
+    } else {
+      const finish = await import(moduleUrl('../convex/projectHostedFinishStore.ts'));
+      for (const { state } of f.entries.slice(0, 3))
+        await f.tx(
+          'retirePredecessorBeforeObserver',
+          {
+            _handler: ctx =>
+              finish.failFinish(
+                ctx,
+                { projectId: f.projectId, submissionId: state.id },
+                'SOURCE_UNAVAILABLE',
+                'Synthetic predecessor failure',
+              ),
+          },
+          {},
+        );
+    }
+    await drainActive(f);
+    assert.notEqual(member().attemptId, submission.attemptId);
+    const costs = () => landingCosts(member(), 1);
+    assert.equal(member().counts.discardedRunnerUnknown, 'superseded-check-execution-unreported');
+    for (let wave = 0; member().phase !== 'landed'; wave++) {
+      assert(wave < 8, 'the replacement reaches acceptance');
+      const queued = f.runs().filter(run => run.status === 'queued');
+      assert(queued.length);
+      await f.passChecks();
+      for (const run of queued) stampExecution(f, run.id, 300);
+      await drainActive(f);
+    }
+    assert.equal(member().operationId, submission.operationId);
+    assert(costs().runnerAccepted > 0);
+    assert.equal(costs().runnerDiscarded, null);
   });
 
 test('a failing predecessor discards speculative descendants, returns the bad member with tests, and lands good members', async t => {

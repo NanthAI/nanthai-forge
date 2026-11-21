@@ -197,7 +197,13 @@ export async function initializeFinish(ctx: MutationCtx, state: HostedLandingSta
   if (!deferWake) await scheduleFinish(ctx, row);
   return row;
 }
-export async function failFinish(ctx: MutationCtx, input: LandingIdentity, code: string, message: string) {
+export async function failFinish(
+  ctx: MutationCtx,
+  input: LandingIdentity,
+  code: string,
+  message: string,
+  releaseRun = true,
+) {
   const { row, state } = await loadLanding(ctx, input);
   if (state.phase === 'landed' || state.phase === 'terminal-failed') return;
   const next = {
@@ -210,7 +216,7 @@ export async function failFinish(ctx: MutationCtx, input: LandingIdentity, code:
         : landingObservation(code === 'COMPOSITION_CONFLICT' ? 'conflict' : 'failed', code),
     error: { code, message },
   };
-  await writeLanding(ctx, row, next, false);
+  await writeLanding(ctx, row, next, false, releaseRun);
   await settleLandingOperation(ctx, next);
   await wakeLandingQueue(ctx, { projectId: input.projectId, channel: state.request.channel });
 }

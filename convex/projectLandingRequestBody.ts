@@ -3,6 +3,8 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
+import { compactUnreportedCounts, expandUnreportedCounts } from '../src/hosted-landing';
+import { compactDiscardedChecksOn } from './projectHostedLandingRunnerCostSwitch';
 
 type Row = Record<string, unknown> & { _id?: string; value?: string; requestBodyId?: string };
 type Port = QueryCtx['db'];
@@ -60,7 +62,10 @@ export async function hydrateLandingRequest(db: Port, row: Row | null): Promise<
       'The landing request body belongs to another ticket.',
     );
     if (field === 'request')
-      result.value = canonicalPayload({ ...JSON.parse(row.value!), request: cold.request });
+      result.value = canonicalPayload({
+        ...expandUnreportedCounts(JSON.parse(row.value!)),
+        request: cold.request,
+      });
     else if (cold.batchSelection !== undefined) result.batchSelection = cold.batchSelection;
   }
   return result;
@@ -146,6 +151,7 @@ export function landingRequestBodies<C extends QueryCtx | MutationCtx>(ctx: C): 
     if (state?.request !== undefined) {
       await save('requestBodyId', 'request', state.request);
       delete state.request;
+      if (compactDiscardedChecksOn() && state.counts) state.counts = compactUnreportedCounts(state.counts);
       row.value = canonicalPayload(state);
     }
     if ('batchSelection' in row) {

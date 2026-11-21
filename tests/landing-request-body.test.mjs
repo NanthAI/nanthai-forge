@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { compactDiscardedChecks } from './landing-ticket-fixture.mjs';
 import { state } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
@@ -143,4 +144,26 @@ test('a copied body pointer cannot overwrite another landing ticket during an in
   );
   assert.deepEqual(s.tables.projectHostedLandingBodies.get(row.requestBodyId), before);
   assert.equal(s.tables.projectHostedLandingRequests.size, 1);
+});
+
+test('the projected and canonical landing requests expand compact discarded counts with the writer off', async t => {
+  compactDiscardedChecks(t);
+  const s = state([]);
+  const ctx = landingRequestBodies(finishReadWriter(s.ctx));
+  const value = ticket();
+  const counts = { runnerSeconds: 300, discardedRunnerUnknown: 'superseded-check-execution-unreported' };
+  value.value = canonicalPayload({ ...JSON.parse(value.value), counts });
+  const id = await ctx.db.insert('projectHostedLandingRequests', value);
+  const raw = s.tables.projectHostedLandingRequests.get(id);
+  assert.deepEqual(JSON.parse(raw.value).counts, [null, 300]);
+  delete process.env.FORGE_COMPACT_DISCARDED_CHECKS;
+  assert.deepEqual(logical(await ctx.db.get(id)), value);
+  const observer = finishReadReader(ctx);
+  const projected = await observer.db
+    .query('projectHostedLandingRequests')
+    .withIndex('by_project_and_submission', q =>
+      q.eq('projectId', value.projectId).eq('submissionId', value.submissionId),
+    )
+    .unique();
+  assert.deepEqual(JSON.parse(projected.value).counts, counts);
 });

@@ -59,3 +59,23 @@ test('landing transition retains absent fields, pending IO and oversized valid e
   invalid.transition.request = {};
   assert.throws(() => readLandingTransition(JSON.stringify(invalid), current), { code: 'EVIDENCE_CHANGED' });
 });
+
+test('compact unreported check usage round-trips the same public observation after rollback', async () => {
+  const f = await landingFixture();
+  const current = await f.enqueue();
+  const counts = {
+    r2: [3, 9, 1308310],
+    runnerSeconds: 300,
+    runnerFull: true,
+    discardedRunnerSeconds: 0,
+    discardedRunnerUnknown: 'superseded-check-execution-unreported',
+  };
+  for (const original of [counts, { discardedRunnerUnknown: counts.discardedRunnerUnknown }]) {
+    const event = { submission: { ...current, counts: original }, pendingAttempt: null };
+    const compact = landingTransition(event, true);
+    assert(Array.isArray(JSON.parse(compact).transition.counts));
+    assert(compact.length < landingTransition(event).length);
+    assert.deepEqual(readLandingTransition(compact, current), event);
+    assert.deepEqual(readLandingTransition(landingTransition(event), current), event);
+  }
+});

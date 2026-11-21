@@ -116,6 +116,13 @@ landing record, including each batch member's share. A cancellation awaiting Git
 `pending` (`runnerDiscardedPending: true` with `runnerDiscarded: null` in JSON). Missing usage
 without a pending cancellation shows `unknown`, including cancelled checks on providers with no final usage collector.
 
+On deployments with `FORGE_COMPACT_DISCARDED_CHECKS=1`, replacing a completed check inside the same
+landing also carries its reported discarded usage or the reason above. This applies to solo checks,
+shared checks, and a checked member whose old attempt returns to the queue. Reusing the exact check
+preserves its accepted usage. The existing request and observation rows fold the reason into the
+stored counts tuple. Readers expand both forms to the same public fields, including after the
+switch is turned off. The transition uses the same run evidence and writes as the existing queue.
+
 The carry uses the predecessor row already read during selection. A small server-only checkpoint
 on the existing desired/request row resolves exact-run reuse when the successor binds its solo,
 admission or shared check, inside that binding's existing write. It adds no function call, document

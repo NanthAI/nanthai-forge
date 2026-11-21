@@ -15,6 +15,9 @@ import {
   isFinishWake,
 } from './hosted-finish-fixture.mjs';
 import { hostedFinishBackoff } from '../dist/hosted-finish.js';
+import { compactDiscardedChecks, stampExecution } from './landing-ticket-fixture.mjs';
+import { landingCosts } from '../dist/hosted-landings-view.js';
+import { fixtureLayers } from './hosted-lanes-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const synthetic = {
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
@@ -46,6 +49,54 @@ async function complete(f) {
   await f.passChecks();
   await f.drain();
 }
+
+for (const firstSeconds of [undefined, 0, 120])
+  test(`a main-race recheck preserves ${firstSeconds === undefined ? 'unreported' : String(firstSeconds) + '-second'} discarded execution`, async t => {
+    compactDiscardedChecks(t);
+    const f = await finishFixture(t);
+    const { state } = await begin(f, { agent: false });
+    const first = (await f.status(state.id)).attempt.check.runId;
+    f.moveMain();
+    await f.passChecks();
+    if (firstSeconds !== undefined) stampExecution(f, first, firstSeconds);
+    await f.drain();
+    const second = (await f.status(state.id)).attempt.check.runId;
+    assert.notEqual(second, first);
+    await f.passChecks();
+    stampExecution(f, second, 300);
+    await f.drain();
+    const landed = (await f.current(state.id)).submission;
+    assert.equal(landed.phase, 'landed');
+    assert.equal(landed.operationId, state.operationId);
+    const costs = landingCosts(landed, 1);
+    assert.equal(costs.runnerAccepted, 5);
+    assert.equal(costs.runnerDiscarded, firstSeconds === undefined ? null : firstSeconds / 60);
+    if (firstSeconds !== undefined) assert.equal(landed.counts.discardedRunnerSeconds, firstSeconds);
+    assert.equal(
+      landed.counts.discardedRunnerUnknown,
+      firstSeconds === undefined ? 'superseded-check-execution-unreported' : undefined,
+    );
+    if (firstSeconds === undefined) {
+      const stats = await import(moduleUrl('../convex/projectStats.ts'));
+      const receipt = [...f.tables.projectHostedAcceptances.values()].find(
+        row => JSON.parse(row.value).id === landed.acceptance.receiptId,
+      );
+      const day = new Date(receipt._creationTime).toISOString().slice(0, 10);
+      const from = f.counts.length;
+      delete process.env.FORGE_COMPACT_DISCARDED_CHECKS;
+      fixtureLayers.outer = false;
+      try {
+        await f.tx('statsCloseDiscardedCheck', stats.closeDay, { projectId: f.projectId, day });
+      } finally {
+        fixtureLayers.outer = true;
+      }
+      const closed = [...f.tables.projectStatsDays.values()].find(record => record.day === day);
+      assert.deepEqual(JSON.parse(closed.value).firstTry, { counted: 1, first: 0 });
+      assert.equal(JSON.parse(closed.value).runner.unknown, 1);
+      const close = f.counts.slice(from).find(count => count.name === 'statsCloseDiscardedCheck');
+      assert.equal(close.readDocumentsByTable.projectHostedLandingBodies ?? 0, 0);
+    }
+  });
 
 test('finish lands through ordinary H13/H14 evidence and original operation retry is immutable', async t => {
   const f = await finishFixture(t),

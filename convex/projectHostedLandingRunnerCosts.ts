@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { hasDeferredCancelledUsage } from './projectCancelledRunWrites';
+import { compactDiscardedChecksOn } from './projectHostedLandingRunnerCostSwitch';
 import type { MutationCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import type { HostedLandingState } from '../src/hosted-landing';
@@ -7,6 +8,23 @@ import type { HostedLandingState } from '../src/hosted-landing';
 export type RunnerAccounting = Doc<'projectHostedLandingRequests'>['runnerAccounting'];
 export type SupersededCheck = NonNullable<Doc<'projectHostedLandingRequests'>['supersededCheck']>;
 type Counts = HostedLandingState['counts'];
+
+/** A completed check whose exact binding is retired becomes discarded once.
+ * Callers use the check state they already hold; pending cancellations price separately. */
+export function retiredCheckUsage(
+  counts: Counts,
+  report?: { seconds?: number },
+): Pick<HostedLandingState, 'counts'> {
+  if (!compactDiscardedChecksOn()) return {};
+  const { runnerSeconds: recorded, runnerFull: _full, ...carried } = counts ?? {};
+  void _full;
+  const runnerSeconds = report ? report.seconds : recorded;
+  if (runnerSeconds === undefined)
+    return { counts: { ...carried, discardedRunnerUnknown: 'superseded-check-execution-unreported' } };
+  return {
+    counts: { ...carried, discardedRunnerSeconds: (carried.discardedRunnerSeconds ?? 0) + runnerSeconds },
+  };
+}
 
 // The cancellation tail prices the run after the successor exists. Keep it out of the
 // permanent-unknown carry while that same transaction is still creating the successor.
