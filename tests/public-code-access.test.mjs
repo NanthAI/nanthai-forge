@@ -18,6 +18,13 @@ import {
 } from './project-exchange-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { interceptDefaultR2 } from './default-r2.mjs';
+import worker from '../dist/public-code-worker.js';
+import {
+  PUBLIC_CODE_DELIVERY,
+  PUBLIC_CODE_EXPIRY,
+  PUBLIC_CODE_INGRESS,
+  publicCodeIngressKey,
+} from '../dist/public-code-cache.js';
 
 const contract = await import(moduleUrl('../convex/projectAccessContract.ts'));
 const projectCode = await import(moduleUrl('../convex/projectCode.ts'));
@@ -232,47 +239,72 @@ async function visitor(s, path, method = 'GET') {
   return { status: response.status, body: await response.text(), headers: response.headers };
 }
 
-// Model one Worker with an edge cache per location and a private R2 binding shared across locations.
-// The backend is the real public Code handler. No Worker, network listener or bucket is provisioned.
-function publicR2Fixture(readOrigin, now) {
+// Run the real Worker with one cache per location, a shared private R2 binding and the real Convex route.
+async function publicR2Fixture(t, readOrigin, now) {
   const replica = new Map();
   const calls = { edgeHits: 0, r2Gets: 0, r2Puts: 0, r2BytesRead: 0, r2BytesWritten: 0, origin: 0 };
-  const fresh = entry => entry && entry.expiresAt > now();
-  const cacheable = reply =>
-    reply.status === 200 &&
-    reply.headers.get('content-type') === 'application/json; charset=utf-8' &&
-    reply.headers.get('netlify-cdn-cache-control') === route.PUBLIC_CACHE.shared &&
-    !reply.headers.has('set-cookie');
+  const ingress = await publicCodeIngressKey(KEY);
+  const bindings = {
+    FORGE_CONVEX_SITE_URL: 'https://backend.test',
+    FORGE_PUBLIC_READ_SECRET: KEY,
+    FORGE_PUBLIC_CODE_WORKER_KEY: ingress,
+    REPLICA: {
+      async get(key) {
+        calls.r2Gets++;
+        const stored = replica.get(key);
+        if (!stored) return null;
+        calls.r2BytesRead += Buffer.byteLength(stored.body);
+        return { body: new Response(stored.body).body, customMetadata: stored.customMetadata };
+      },
+      async put(key, body, { customMetadata }) {
+        calls.r2Puts++;
+        calls.r2BytesWritten += Buffer.byteLength(body);
+        replica.set(key, { body, customMetadata });
+      },
+    },
+  };
+  const cacheStorage = {};
+  const originalCaches = Object.getOwnPropertyDescriptor(globalThis, 'caches');
+  Object.defineProperty(globalThis, 'caches', { configurable: true, value: cacheStorage });
+  t.after(() => {
+    if (originalCaches) Object.defineProperty(globalThis, 'caches', originalCaches);
+    else delete globalThis.caches;
+  });
+  t.mock.method(Date, 'now', now);
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(new URL(url).origin, bindings.FORGE_CONVEX_SITE_URL);
+    assert.deepEqual(options.headers, { 'x-forge-public-key': KEY });
+    assert.equal(options.cache, 'no-store');
+    assert.equal(options.redirect, 'manual', 'Workerd only supports manual rejection of redirects');
+    calls.origin++;
+    const reply = await readOrigin(new URL(url).pathname.slice('/public/v1/code/'.length));
+    return new Response(reply.body, { status: reply.status, headers: reply.headers });
+  });
 
   function edge() {
     const cache = new Map();
-    return async path => {
-      const cached = cache.get(path);
-      if (fresh(cached)) {
-        calls.edgeHits++;
-        return { status: 200, body: cached.body };
-      }
-
-      calls.r2Gets++;
-      const stored = replica.get(path);
-      if (fresh(stored)) {
-        calls.r2BytesRead += Buffer.byteLength(stored.body);
-        cache.set(path, stored);
-        return { status: 200, body: stored.body };
-      }
-
-      // Use the authorization start, so a late fill can never extend disclosure.
-      const expiresAt = now() + 30_000;
-      calls.origin++;
-      const reply = await readOrigin(path);
-      const entry = { body: reply.body, expiresAt };
-      if (cacheable(reply) && fresh(entry)) {
-        replica.set(path, entry);
-        cache.set(path, entry);
-        calls.r2Puts++;
-        calls.r2BytesWritten += Buffer.byteLength(entry.body);
-      }
-      return { status: reply.status, body: reply.body };
+    return async (path, credential = ingress) => {
+      cacheStorage.default = {
+        async match(request) {
+          const entry = cache.get(request.url);
+          return entry && new Response(entry.body, { headers: entry.headers });
+        },
+        async put(request, response) {
+          cache.set(request.url, { body: await response.text(), headers: response.headers });
+        },
+      };
+      const writes = [];
+      const response = await worker.fetch(
+        new Request(`https://worker.test/public/v1/code/${path}`, {
+          headers: { [PUBLIC_CODE_INGRESS]: credential },
+        }),
+        bindings,
+        { waitUntil: promise => writes.push(promise) },
+      );
+      if (response.headers.get(PUBLIC_CODE_DELIVERY) === 'edge') calls.edgeHits++;
+      const body = await response.text();
+      await Promise.all(writes);
+      return { status: response.status, body, expiry: response.headers.get(PUBLIC_CODE_EXPIRY) };
     };
   }
   return { calls, edge };
@@ -281,7 +313,8 @@ function publicR2Fixture(readOrigin, now) {
 test('1,000 public Code file views: edge and fresh R2 hits serve exact bytes without Convex', async t => {
   const s = await setup(t, 'public');
   const path = `ada/atlas/${s.head}/page/${hex('a.ts')}/0.json`;
-  const delivery = publicR2Fixture(
+  const delivery = await publicR2Fixture(
+    t,
     path => visitor(s, path),
     () => 0,
   );
@@ -347,7 +380,8 @@ test('the replica never extends public file visibility and private member Code s
   const s = await setup(t, 'public');
   const path = `ada/atlas/${s.head}/page/${hex('a.ts')}/0.json`;
   let clock = 0;
-  const delivery = publicR2Fixture(
+  const delivery = await publicR2Fixture(
+    t,
     path => visitor(s, path),
     () => clock,
   );
@@ -383,7 +417,8 @@ test('a public reply arriving after its original deadline cannot fill the edge o
   const s = await setup(t, 'public');
   const path = `ada/atlas/${s.head}/page/${hex('a.ts')}/0.json`;
   let clock = 0;
-  const delivery = publicR2Fixture(
+  const delivery = await publicR2Fixture(
+    t,
     async path => {
       const reply = await visitor(s, path);
       clock = 30_000;
@@ -398,6 +433,37 @@ test('a public reply arriving after its original deadline cannot fill the edge o
   assert.equal((await read(path)).status, 404);
   assert.equal((await delivery.edge()(path)).status, 404);
   assert.equal(delivery.calls.edgeHits, 0);
+  assert.equal(delivery.calls.r2Puts, 0);
+});
+
+test('an unauthenticated Worker request cannot serve warm bytes or cause an origin read', async t => {
+  const s = await setup(t, 'public');
+  const path = `ada/atlas/${s.head}/open/${hex('a.ts')}.json`;
+  const delivery = await publicR2Fixture(
+    t,
+    path => visitor(s, path),
+    () => 0,
+  );
+  const read = delivery.edge();
+  assert.equal((await read(path)).status, 200);
+  assert.equal((await read(path, 'x'.repeat(64))).status, 401);
+  assert.equal((await read(path + '?variant')).status, 404);
+  assert.equal((await read(`ada/atlas/${s.head}/open/-.json`)).status, 404);
+  assert.equal(delivery.calls.edgeHits, 0);
+  assert.equal(delivery.calls.r2Gets, 1);
+  assert.equal(delivery.calls.origin, 1);
+});
+
+test('a public Code origin redirect is refused within one attempt and never cached', async t => {
+  const delivery = await publicR2Fixture(
+    t,
+    async () => ({ status: 302, body: '', headers: { location: 'https://elsewhere.example/' } }),
+    () => 0,
+  );
+  const read = delivery.edge();
+  const path = `ada/atlas/${'1'.repeat(64)}/page/${hex('a.ts')}/0.json`;
+  assert.deepEqual(await read(path), { status: 502, body: '', expiry: null });
+  assert.equal(delivery.calls.origin, 1);
   assert.equal(delivery.calls.r2Puts, 0);
 });
 

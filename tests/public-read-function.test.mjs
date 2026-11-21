@@ -11,6 +11,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { moduleUrl, moduleSource } from './convex-module.mjs';
+import {
+  PUBLIC_CODE_DELIVERY,
+  PUBLIC_CODE_EXPIRY,
+  PUBLIC_CODE_INGRESS,
+  publicCodeIngressKey,
+} from '../dist/public-code-cache.js';
 
 const functionSource = moduleSource('../netlify/functions/public-read.mts')
   .replace(
@@ -39,11 +45,17 @@ function backend(t, answers) {
   t.mock.method(fs, 'readFile', async (path, ...args) =>
     String(path).replaceAll('\\', '/').endsWith('/hosted-web-dist/app.html') ? APP : readFile(path, ...args),
   );
-  const names = ['FORGE_CONVEX_SITE_URL', 'FORGE_WEB_URL', 'FORGE_PUBLIC_READ_SECRET'];
+  const names = [
+    'FORGE_CONVEX_SITE_URL',
+    'FORGE_WEB_URL',
+    'FORGE_PUBLIC_READ_SECRET',
+    'FORGE_PUBLIC_CODE_WORKER_URL',
+  ];
   const previous = names.map(name => process.env[name]);
   process.env.FORGE_WEB_URL = 'https://site.example';
   process.env.FORGE_PUBLIC_READ_SECRET = 'synthetic-site-key';
   process.env.FORGE_CONVEX_SITE_URL = SITE;
+  delete process.env.FORGE_PUBLIC_CODE_WORKER_URL;
   t.mock.method(globalThis, 'fetch', async (input, init = {}) => {
     const url = String(input instanceof Request ? input.url : input);
     asked.push({ url, headers: new Headers(init.headers) });
@@ -85,6 +97,73 @@ test('a cached read is proxied without credentials and keeps only the cache head
   assert.equal(asked[0].headers.get('x-forge-public-origin'), null);
   assert.match(response.headers.get('netlify-cdn-cache-control'), /durable, s-maxage=30/);
   assert.equal(response.headers.get('set-cookie'), null);
+});
+
+const CODE_PATH = `/public/v1/code/ada/atlas/${'1'.repeat(64)}/page/612e7473/0.json`;
+const WORKER_URL = 'https://worker.example';
+
+test('a public file uses scoped Worker ingress and the site keeps only its remaining lifetime', async t => {
+  t.mock.method(Date, 'now', () => 15_250);
+  const asked = backend(
+    t,
+    () =>
+      new Response('{"file":{"available":true}}', {
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+          [PUBLIC_CODE_EXPIRY]: '30000',
+          [PUBLIC_CODE_DELIVERY]: 'r2',
+        },
+      }),
+  );
+  process.env.FORGE_PUBLIC_CODE_WORKER_URL = WORKER_URL;
+  const response = await serve(
+    new Request('https://site.example/-' + CODE_PATH, { headers: { cookie: 'session=secret' } }),
+  );
+  assert.equal(await response.text(), '{"file":{"available":true}}');
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].url, WORKER_URL + CODE_PATH);
+  assert.equal(asked[0].headers.get(PUBLIC_CODE_INGRESS), await publicCodeIngressKey('synthetic-site-key'));
+  assert.equal(asked[0].headers.get('x-forge-public-key'), null);
+  assert.equal(asked[0].headers.get('cookie'), null);
+  assert.equal(response.headers.get(PUBLIC_CODE_EXPIRY), null);
+  assert.equal(response.headers.get(PUBLIC_CODE_DELIVERY), 'r2');
+  assert.equal(
+    response.headers.get('netlify-cdn-cache-control'),
+    'public, durable, s-maxage=14, must-revalidate',
+  );
+});
+
+test('past or out-of-window Worker expiries cannot populate the site cache', async t => {
+  t.mock.method(Date, 'now', () => 30_000);
+  let expiry = '30000';
+  backend(
+    t,
+    () => new Response('{"file":{"available":true}}', { headers: { [PUBLIC_CODE_EXPIRY]: expiry } }),
+  );
+  process.env.FORGE_PUBLIC_CODE_WORKER_URL = WORKER_URL;
+  for (const value of ['30000', '60001', 'Infinity']) {
+    expiry = value;
+    const response = await serve(new Request('https://site.example/-' + CODE_PATH));
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('netlify-cdn-cache-control'), 'no-store', value);
+  }
+});
+
+test('an ambiguous Worker failure gets one upstream attempt while history uses the existing reader', async t => {
+  const asked = backend(t, url =>
+    url.startsWith(WORKER_URL) ? new Error('worker timed out') : json({ landings: [] }),
+  );
+  process.env.FORGE_PUBLIC_CODE_WORKER_URL = WORKER_URL;
+  assert.equal((await serve(new Request('https://site.example/-' + CODE_PATH))).status, 502);
+  assert.deepEqual(
+    asked.map(({ url }) => url),
+    [WORKER_URL + CODE_PATH],
+  );
+  const history = '/public/v1/code/ada/atlas/history.json';
+  assert.deepEqual(await (await serve(new Request('https://site.example/-' + history))).json(), {
+    landings: [],
+  });
+  assert.equal(asked[1].url, SITE + history);
 });
 
 test('a failed backend is cached for 30 seconds without stale serving', async t => {

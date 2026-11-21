@@ -34,7 +34,7 @@ Principle: R2 holds every blob. No database function receives or returns file by
 | R5 | Imports, zones, agents and proposals build artifacts into R2 | Done; server/runner artifacts and browser logical-object uploads write to R2 |
 | R6 | Backfill: export, upload each file after checking its digest, flip rows in pages; keep old storage 14 days as fallback | Landed; lead-run command implemented, deployment qualification and actual run remain |
 | R7 | Prefix purge, abandoned-upload sweep, scheduled database-only export, optional bucket lock | Landed |
-| R8 | Optional Worker and R2 replica for rendered public Code | Fixture only; dev and production activation require an owner decision |
+| R8 | Optional Worker and R2 replica for rendered public Code | Dev resources approved; production domain, spend and retention are P8 decisions |
 
 Order: R0, R1, R2, then R3a and R4 in parallel, R3b, R6, R5, R7. R0 to R2 alone remove egress for pulls and new pushes. During dual read every reader dispatches on the row's location, so old and new paths coexist. There is no rollback to Convex writes: R2 is the only write path (see [data placement](data-placement.md)); rows already in Convex storage stay readable; old storage stays for 14 days after verification unless the owner explicitly approves the guarded early-purge procedure below.
 
@@ -404,23 +404,24 @@ bytes are in R2; see [database-only backup and restore](operations/hosted-durabi
 ## R8 public Code delivery
 
 Forge's signed-out Code route serves rendered source pages through the existing
-site CDN. R8's fixture models an alternate backing cache. It uses the existing
-Code handler as the origin and measures one public project's rendered file page.
-Signed-in Code continues to use the authenticated reader. The proposed replica
+site CDN. R8 adds an optional backing cache for the dev site. It uses the existing
+Code handler as the origin. Signed-in Code continues to use the authenticated reader. The replica
 stores the same JSON the visitor receives, with no raw objects, archive plans or
 signed storage URLs.
 
-### Proposed request path
+### Request path
 
 Keep the site's canonical address, signed-out routing and abuse rules at ingress.
-On a site cache miss for a rendered file page, the site can call a Worker at a
-fixed, configured origin using a server credential. Before any cache lookup,
+On a site cache miss for a non-root Code open or file page, the site can call a
+Worker at a fixed, configured origin using a credential derived from the site's
+public-read key. Before any cache lookup,
 the Worker authenticates the site and checks the canonical Code page address.
 It then uses its edge cache and a dedicated private R2 bucket. Isolate the
 bucket and Worker credentials from source and Work storage. The cache key
 includes the canonical project address, exact State,
-file path and page offset. Code history, file trees, changes and signed-in
-routes keep their existing readers. A replica miss calls the existing public
+file path and page offset. Code history, folder pagination, changes and signed-in
+routes keep their existing readers. The origin identifies folder opens and the
+Worker passes those replies through without putting them in its caches. A replica miss calls the existing public
 Code authority directly, with no browser headers and without reusing an older
 site CDN response. The Worker stores only successful cacheable rendered
 file responses. It handles a replica read failure as a miss and returns the
@@ -438,7 +439,7 @@ visibility or project removal, subsequent authorization checks reject the
 read. An already-authorized read may complete against its original deadline.
 If it completes at or after that deadline, neither cache can store it. Restrict
 the bucket to the Worker and expire physically retained replicas under the
-owner-approved lifecycle. A JSON body and its absolute expiry are the only
+dev lifecycle. A JSON body and its absolute expiry are the only
 replica data needed.
 Preserve the origin's safe response type, no-sniff and browser revalidation
 policy; a replica carries no caller headers. Errors and origin refusals cannot
@@ -480,16 +481,30 @@ and [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing
 
 Run the fixture with `nforge heavy npm run build:core`, then
 `nforge heavy --no-build node --import ./tests/check-runtime.mjs --test tests/public-code-access.test.mjs`.
-It reports body bytes, cold Convex calls and local process memory and wall time.
-Counts are fixture observations; billed usage, edge latency, request
-coalescing across concurrent cold arrivals and actual multi-location cache
-hits need deployment measurements.
+It runs the Worker with a modeled Cloudflare cache and R2 bucket against the
+existing Code reader. It reports body bytes, cold Convex calls, process memory
+and wall time. Billed usage, latency and cache hits across locations use live
+deployment evidence.
 
-The remaining owner decision is whether to authorize a dev Worker and
-dedicated private R2 bucket for one synthetic public project, including
-routing, rate-rule parity, lifecycle and spend. Keeping the existing site CDN
-alone avoids the added Worker and replica cost. If approved, verify the
-current ingress rules, capture response bytes and hit/miss counts on one dev
-project, reconcile Cloudflare and Convex usage, and exercise the signed-in
-private file read and public-to-private cache expiry. Production domain and
-cost approval follow the P8 production move.
+### Dev deployment
+
+The Worker and private Standard R2 bucket are both named
+`nanthai-forge-public-code-dev`. The bucket has public access disabled and no
+custom domains. The lifecycle delete rule applies only to `v1/` replicas aged
+one day (lead-approved 2026-11-21, dev only; production retention is a P8 decision).
+Cloudflare processes lifecycle deletions on its own schedule. Serving eligibility
+still expires at the original 30-second deadline.
+
+Build the Worker with `nforge heavy --no-build node scripts/build-public-code-worker.mjs OUTPUT_DIRECTORY`.
+From the output directory, use `cf deploy --prebuilt --no-provision --secrets-file SECRET_FILE`
+with the pinned Cloudflare CLI `1.0.0-beta.17` and a private, temporary secret file.
+Supply the dev `FORGE_CONVEX_SITE_URL`, the existing dev `FORGE_PUBLIC_READ_SECRET` and
+`FORGE_PUBLIC_CODE_WORKER_KEY` derived with `publicCodeIngressKey`. Use the
+Worker's `workers.dev` origin for `FORGE_PUBLIC_CODE_WORKER_URL` on the dev site
+alone. An unset setting uses the existing site-to-Convex route. Remove that
+setting and redeploy the dev site to turn off the Worker route. The original
+source bucket is independent of the replica.
+
+On dev, verify the site ingress, capture delivered bytes and edge and R2 results,
+reconcile provider usage, and verify a signed-in private file read. Production
+domain and cost approval follow the P8 production move.

@@ -11,10 +11,20 @@ import type { Config } from '@netlify/functions';
 import fs from 'node:fs/promises';
 import { join } from 'node:path';
 import { networkFetch, networkTimeout } from '../../src/network-fetch.js';
+import {
+  PUBLIC_CODE_BROWSER,
+  PUBLIC_CODE_DELIVERY,
+  PUBLIC_CODE_EXPIRY,
+  PUBLIC_CODE_INGRESS,
+  PUBLIC_CODE_SHARED,
+  publicCodeFileAddress,
+  publicCodeIngressKey,
+  publicCodeRemaining,
+} from '../../src/public-code-cache.js';
 import { normalizeAccountPathname } from '../../web/src/app/paths.js';
 import { exploreMeta, profileMeta, projectMeta, withMeta, type PageMeta } from '../lib/public-meta.js';
 
-const SHARED = 'public, durable, s-maxage=30, must-revalidate';
+const SHARED = PUBLIC_CODE_SHARED;
 // Strip this reserved cache selector before reads so ordinary query parameters share one cache entry.
 const PAGE_KEY = '__forge_page';
 // Netlify copies the incoming query onto a redirect whose target has no query entries.
@@ -69,6 +79,11 @@ function publicDataHeaders(response: Response, status: number) {
   return headers;
 }
 
+function codeWorker(path: string) {
+  const worker = process.env.FORGE_PUBLIC_CODE_WORKER_URL;
+  return worker && /^https:\/\/[a-z0-9.-]+$/i.test(worker) && publicCodeFileAddress(path) ? worker : null;
+}
+
 async function proxy(path: string) {
   const site = backend();
   const key = process.env.FORGE_PUBLIC_READ_SECRET;
@@ -87,7 +102,14 @@ async function proxy(path: string) {
       });
     return unavailable(502, 'The public read is unavailable; try again.');
   }
-  const response = await get(cacheKey, { 'x-forge-public-key': key }).catch(() => null);
+  const worker = codeWorker(path);
+  // A Worker timeout may arrive after an origin call. In that case the existing failure
+  // response is the only safe continuation within the one-attempt public read budget.
+  const response = await (
+    worker
+      ? get(worker + path, { [PUBLIC_CODE_INGRESS]: await publicCodeIngressKey(key) })
+      : get(cacheKey, { 'x-forge-public-key': key })
+  ).catch(() => null);
   if (!response || response.status >= 500 || response.status === 401) {
     if (cache)
       await cache.put(
@@ -97,6 +119,17 @@ async function proxy(path: string) {
     return unavailable(502, 'The public read is unavailable; try again.');
   }
   const headers = publicDataHeaders(response, response.status);
+  if (worker && response.ok) {
+    const seconds = Math.floor(publicCodeRemaining(Number(response.headers.get(PUBLIC_CODE_EXPIRY))) / 1000);
+    headers.set('cache-control', seconds > 0 ? PUBLIC_CODE_BROWSER : 'no-store');
+    headers.set(
+      'netlify-cdn-cache-control',
+      seconds > 0 ? `public, durable, s-maxage=${seconds}, must-revalidate` : 'no-store',
+    );
+    const delivery = response.headers.get(PUBLIC_CODE_DELIVERY);
+    if (delivery === 'edge' || delivery === 'r2' || delivery === 'origin')
+      headers.set(PUBLIC_CODE_DELIVERY, delivery);
+  }
   if (response.status === 404 && cache) {
     const envelope = new Headers(headers);
     envelope.set('cache-control', 'public, max-age=30');
