@@ -242,6 +242,21 @@ const receiptMutations = new Set([
   'projectHostedLanding:enqueue',
   'projectHostedSync:prepare',
 ]);
+const memberBudgetMutations = new Set([
+  'projectHostedChecks:enqueue',
+  'projectHostedCompose:prepare',
+  'projectHostedLandingDesired:submit',
+  'projectHostedLanding:enqueue',
+]);
+const memberBudgetSchema = z
+  .object({
+    limit: z.enum(['member-checks', 'member-composes', 'member-submissions']),
+    left: z.int().nonnegative(),
+    of: z.int().positive(),
+    resetAt: z.iso.datetime(),
+  })
+  .refine(({ left, of }) => left * 5 < of);
+type MemberBudget = z.infer<typeof memberBudgetSchema>;
 export type HostedAgentExchange = Pick<
   ConvexExchange,
   | 'client'
@@ -280,6 +295,8 @@ export type HostedAgentResponse = {
   operationId: string | null;
   resolved: { operationId: string } | null;
   result: unknown;
+  /** The tightest member work budget reported by this command's mutations. */
+  budget?: MemberBudget;
   behindMain?: unknown;
   /** D2: an admitted peer touches this Lane's files; build on its pending head (sync stackOn). */
   stackOffer?: { peerLaneId: string; mode: string; text: string; command: string };
@@ -1270,6 +1287,7 @@ export class HostedAgentTransport {
           : authorship;
       // The finish gate's judgement of the checkout's saved head, sent again with the landing.
       let gatedLane: LandGateEntry | undefined;
+      let budget: MemberBudget | undefined;
       let carriedMain = mainFirstActions.has(action) ? capabilities.main : undefined;
       const session: HostedAgentSession = {
         root,
@@ -1312,7 +1330,17 @@ export class HostedAgentTransport {
             : {}),
         ...(this.serverFeatures?.includes('landing-tokens') ? { landingTokens: true as const } : {}),
         query: this.query.bind(this),
-        mutation: this.mutation.bind(this),
+        mutation: async <T>(name: string, args: Record<string, unknown>) => {
+          const reply = await this.mutation<T>(name, args);
+          if (!memberBudgetMutations.has(name) || !reply || typeof reply !== 'object' || !('budget' in reply))
+            return reply;
+          const { budget: reported, ...payload } = reply as T & { budget: unknown };
+          const parsed = memberBudgetSchema.safeParse(reported);
+          if (parsed.success && (!budget || parsed.data.left / parsed.data.of <= budget.left / budget.of))
+            budget = parsed.data;
+          // The legacy payload still goes through its original strict parser or journal.
+          return payload as T;
+        },
         action: this.action.bind(this),
         main: async () => {
           // A start, sync or compose reads main first: the capability read of this same command
@@ -1668,6 +1696,7 @@ export class HostedAgentTransport {
         if (done.status === 'done' && done.value) response.localLanes = done.value;
         else if (done.status === 'timeout') this.abandonedStart = true;
       }
+      if (budget) response.budget = budget;
       return response;
     } catch (error) {
       const owner = nativeOwner(existsSync(this.root) ? realpathSync(this.root) : this.root);

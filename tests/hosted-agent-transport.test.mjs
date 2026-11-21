@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { getFunctionName } from 'convex/server';
 import {
   existsSync,
   readFileSync,
@@ -21,9 +22,53 @@ import { hostedAgentAddress, hostedAgentCli } from '../dist/hosted-agent-cli.js'
 import { hostedAgentActions, hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
 import { hostedAgentRoot } from '../dist/hosted-agent-journal.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
+import { slimReceipt } from '../dist/receipt-slim.js';
 import { readLaneEntry, recordLane } from '../dist/lane-registry.js';
 import { laneCheckoutRoot, laneSuccessor } from '../dist/hosted-lane-location.js';
 const errorCode = expected => error => error.code === expected;
+
+test('the compact finish reply carries the tightest member budget without changing landing pins', async t => {
+  const s = agentFixture(t);
+  const resetAt = '2026-12-01T00:00:00.000Z';
+  const composes = { limit: 'member-composes', left: 59, of: 300, resetAt };
+  const submissions = { limit: 'member-submissions', left: 3, of: 300, resetAt };
+  let reportBudget = true;
+  let malformed = false;
+  const reported = [];
+  const mutation = s.exchange.client.mutation;
+  t.mock.method(s.exchange.client, 'mutation', async (ref, args) => {
+    const reply = await mutation(ref, args);
+    const name = getFunctionName(ref);
+    const budget =
+      name === 'projectHostedCompose:prepare'
+        ? composes
+        : name === 'projectHostedLanding:enqueue'
+          ? submissions
+          : undefined;
+    if (!reportBudget || !budget) return reply;
+    reported.push(name);
+    return JSON.stringify({
+      ...(typeof reply === 'string' ? JSON.parse(reply) : reply),
+      budget: malformed && name === 'projectHostedLanding:enqueue' ? null : budget,
+    });
+  });
+  const transport = s.transport();
+  const command = { laneId: s.lane.laneId, operationId: randomUUID() };
+  const response = await transport.dispatch('finish', command);
+  assert.deepEqual(reported, ['projectHostedCompose:prepare', 'projectHostedLanding:enqueue']);
+  assert.deepEqual(slimReceipt(response).budget, submissions);
+  malformed = true;
+  const partial = await transport.dispatch('finish', { ...command, operationId: randomUUID() });
+  assert.equal(partial.result.phase, 'finish');
+  assert.deepEqual(partial.budget, composes);
+  reportBudget = false;
+  const calls = s.calls.length;
+  const baseline = await transport.dispatch('finish', command);
+  assert.equal(baseline.budget, undefined);
+  assert.deepEqual(response.result, baseline.result);
+  assert.equal(s.calls.slice(calls).filter(call => call.name === 'projectHostedLanding:enqueue').length, 1);
+  assert.equal((await transport.dispatch('capabilities', {})).budget, undefined);
+});
 
 test('fresh open uses only its two checkout authorization reads and replay rechecks Lane access', async t => {
   const s = agentFixture(t),
