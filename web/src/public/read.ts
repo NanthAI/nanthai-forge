@@ -21,6 +21,7 @@ export type ListedProject = {
 export type ExploreOrder = 'active' | 'stars' | 'newest';
 export type ExplorePage = {
   asOf: number;
+  starLookup?: true;
   order: ExploreOrder;
   total: number;
   more: boolean;
@@ -28,6 +29,7 @@ export type ExplorePage = {
 };
 export type ProfilePage = {
   asOf: number;
+  starLookup?: true;
   handle: string;
   projects: ListedProject[];
   /** Contributions on public projects (Item 6a251b23); absent from a page cached before it shipped. */
@@ -44,6 +46,9 @@ export type PlanView =
     };
 export type ProjectPage = {
   asOf: number;
+  starLookup?: true;
+  /** The source deployment, absent from pages cached before it was included. */
+  deployment?: string;
   project: {
     id: string;
     handle: string;

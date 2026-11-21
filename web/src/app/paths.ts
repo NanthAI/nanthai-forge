@@ -118,6 +118,17 @@ export function hrefFor(route: AppRoute): string {
   }
 }
 
+/** Discovery links keep the public front page when the visitor signs in. The ordinary root still opens Needs me. */
+export function publicProjectHref(handle: string, project: string) {
+  return `${hrefFor({ frame: 'project', handle, project, place: 'needs', section: '', rest: '' })}?view=public`;
+}
+
+export function isPublicProjectView(route: AppRoute, signedIn: boolean, view: string | null) {
+  if (route.frame !== 'project') return false;
+  if (route.place === 'code') return !signedIn;
+  return route.place === 'needs' && !route.section && !route.rest && (!signedIn || view === 'public');
+}
+
 export function parseAppPath(pathname: string): AppRoute {
   if (!isAppPath(pathname)) return { frame: 'missing', path: pathname };
   const parts = pathname.slice(ROOT.length).split('/').filter(Boolean).map(dec);

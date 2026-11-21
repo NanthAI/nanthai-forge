@@ -13,6 +13,8 @@ export type PortfolioProject = {
   id: Id<'hostedProjects'>;
   name: string;
   shared: boolean;
+  visibility: 'private' | 'public';
+  starred?: boolean;
   role?: 'Owner' | 'Contributor' | 'Reader';
 };
 export type ProjectSummary = ReturnType<typeof portfolioWork> & {
@@ -31,6 +33,8 @@ export function usePortfolioProjects(_discoverReaders = true) {
         id: item.id,
         name: item.name,
         shared: item.role !== 'owner',
+        visibility: item.visibility,
+        starred: item.starred,
         role: roleWords[item.role],
       })),
     [read.results],

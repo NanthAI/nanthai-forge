@@ -93,6 +93,27 @@ function owner() {
   return s;
 }
 
+test('Projects pages include the viewer’s own star for each public project and none for private ones', async () => {
+  const s = state([]);
+  project(s, 'public-starred', { owner: 'owner', visibility: 'public' });
+  project(s, 'public-other', { owner: 'owner', visibility: 'public' });
+  project(s, 'private', { owner: 'owner', visibility: 'private' });
+  for (const [rowId, projectId, account] of [
+    ['own-star', 'public-starred', 'owner'],
+    ['other-star', 'public-other', 'someone-else'],
+    ['previously-public', 'private', 'owner'],
+  ])
+    s.tables.projectStars.set(rowId, { _id: rowId, projectId, account });
+  s.caller('owner');
+  await backfill(s);
+  const rows = await all(s, 1);
+  assert.deepEqual(Object.fromEntries(rows.map(row => [row.id, row.starred])), {
+    'public-starred': true,
+    'public-other': false,
+    private: undefined,
+  });
+});
+
 test('an owner with 25 newer removed projects sees the older active one on the first page', async () => {
   const s = owner();
   await backfill(s);

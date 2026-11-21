@@ -57,14 +57,28 @@ export const star = mutation({
   },
 });
 
-/** The projects the viewer starred, for the star toggles on explore and profile rows: one indexed read of at most
- * 200 rows, asked once per page. Signed out (or an agent) has none. */
+/** The viewer's stars for a single rendered page, in one query. Each shown project gets one exact indexed lookup.
+ * Old clients can still read the first 200 stars. Signed-out visitors and agents have none. */
 export const myStars = query({
-  args: {},
+  args: { projectIds: v.optional(v.array(v.id('hostedProjects'))) },
   returns: v.array(v.id('hostedProjects')),
-  handler: async ctx => {
+  handler: async (ctx, { projectIds }) => {
     const user = await ctx.auth.getUserIdentity();
     if (!user || isDeviceIdentity(user)) return [];
+    if (projectIds) {
+      const ids = [...new Set(projectIds.slice(0, 200))];
+      const stars = await Promise.all(
+        ids.map(projectId =>
+          ctx.db
+            .query('projectStars')
+            .withIndex('by_project_and_account', q =>
+              q.eq('projectId', projectId).eq('account', user.subject),
+            )
+            .unique(),
+        ),
+      );
+      return stars.flatMap(star => (star ? [star.projectId] : []));
+    }
     const rows = await ctx.db
       .query('projectStars')
       .withIndex('by_account', q => q.eq('account', user.subject))

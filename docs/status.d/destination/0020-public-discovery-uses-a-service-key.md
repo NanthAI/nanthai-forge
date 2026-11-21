@@ -14,3 +14,9 @@ coverage is labelled “recorded this week”. See [security](../../security.md)
 A public project with a stored fork pointer links to its upstream while the upstream is public. If the upstream
 is private, removed or missing, the page reports it as unavailable without naming it. The link follows the
 same 30-second cache period as the rest of the page.
+
+Explore and profile links keep the public project page available after sign-in. A person can star or
+unstar there, and the owner can open a paged list of who starred. Public browser-only stars from the
+legacy Projects list do not carry over. Public projects use account stars and private projects keep
+their browser bookmarks. The signed-in Clone sheet and the CLI/MCP lookup use the same
+deployment-pinned command format.

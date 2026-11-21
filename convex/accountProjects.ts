@@ -8,14 +8,15 @@
  * for a member row only, the role re-check (≤ 2 indexed reads; owner rows 0); per shown project the owner's account
  * (once per owner), the line summary, ≤ 21 held and ≤ 61 open Lane marks, and on compact planning partitions ≤ 4
  * pages per live Item state plus ≤ 40 done pages (positions only). A device limited to one project reads only that
- * project. Nothing is written; no per-project client query. */
+ * project. For a person, the page includes their one indexed star lookup per public row.
+ * Nothing is written; no per-project client query. */
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { projectRole } from './projectRole';
 import { HOUR_MS } from './accountProjectOrderHour';
 import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
-import { query } from './cliServer';
+import { isDeviceIdentity, query } from './cliServer';
 import { accountFor } from './urlIdentity';
 import { lineSummary } from './projectLiveLineStore';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
@@ -36,6 +37,7 @@ export const accountProject = v.object({
   slug: v.optional(v.string()),
   role,
   visibility: v.union(v.literal('private'), v.literal('public')),
+  starred: v.optional(v.boolean()),
   /** The hour (as ms) of the last landing on main or the project's creation: the list's order key. */
   activityAt: v.number(),
   /** Lanes held for a person: what needs someone. */
@@ -95,6 +97,7 @@ async function row(
   project: Doc<'hostedProjects'>,
   role: Role,
   handles: Map<string, Promise<string | undefined>>,
+  starAccount: string | undefined,
 ): Promise<AccountProject> {
   if (!handles.has(project.owner))
     handles.set(
@@ -107,12 +110,21 @@ async function row(
       .withIndex('by_project_and_held', q => q.eq('projectId', project._id).eq('held', held))
       .order('desc')
       .take(limit + 1);
-  const [handle, summary, held, open, items] = await Promise.all([
+  const starred =
+    starAccount && project.visibility === 'public'
+      ? ctx.db
+          .query('projectStars')
+          .withIndex('by_project_and_account', q => q.eq('projectId', project._id).eq('account', starAccount))
+          .unique()
+          .then(Boolean)
+      : undefined;
+  const [handle, summary, held, open, items, star] = await Promise.all([
     handles.get(project.owner)!,
     lineSummary(ctx.db, project._id),
     marks(true, HELD_LIMIT),
     marks(false, OPEN_LIMIT),
     itemCounts(ctx, project),
+    starred,
   ]);
   const value = (summary ? JSON.parse(summary.value) : {}) as {
     main?: { at?: string; check?: string };
@@ -132,6 +144,7 @@ async function row(
     ...(project.slug ? { slug: project.slug } : {}),
     role,
     visibility: project.visibility === 'public' ? 'public' : 'private',
+    ...(star === undefined ? {} : { starred: star }),
     activityAt,
     held: capped(held.length, HELD_LIMIT),
     lanes: capped(open.length, OPEN_LIMIT),
@@ -150,12 +163,13 @@ export const list = query({
     const none = { page: [], isDone: true, continueCursor: '' };
     if (!user) return none;
     const handles = new Map<string, Promise<string | undefined>>();
+    const starAccount = !isDeviceIdentity(user) ? user.subject : undefined;
     // A device limited to one project reads that project directly: no page of other projects is ever taken.
     const device = (ctx as { forgeDevice?: Doc<'cliCredentials'> | null }).forgeDevice;
     if (device?.settings?.projects.kind === 'project') {
       const project = await ctx.db.get(device.settings.projects.projectId as Id<'hostedProjects'>);
       const role = project && !project.removal ? await projectRole(ctx, project, user.subject) : null;
-      return role ? { ...none, page: [await row(ctx, project!, role, handles)] } : none;
+      return role ? { ...none, page: [await row(ctx, project!, role, handles, starAccount)] } : none;
     }
     const numItems = Math.max(1, Math.min(ACCOUNT_PROJECTS_PAGE_MAX, Math.floor(paginationOpts.numItems)));
     // Activity order (whole hours, ties by project id) with Convex's own cursor; removal and grant writes keep the
@@ -176,7 +190,7 @@ export const list = query({
       ...result,
       page: await Promise.all(
         page.map(async ({ project, role, activityAt }) => ({
-          ...(await row(ctx, project, role, handles)),
+          ...(await row(ctx, project, role, handles, starAccount)),
           activityAt,
         })),
       ),

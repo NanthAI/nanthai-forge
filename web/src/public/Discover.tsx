@@ -6,16 +6,28 @@
 // Everything shown here already passed the backend's visibility rule (convex/publicVisibility.ts): hidden Items,
 // members-only plans and Lane titles without the owner's opt-in never reach this page. A public project's code and
 // history (Item 4c164732) are the members' Code views on the same cached read (PublicCode.tsx).
-import { lazy, Suspense, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
-import { useMutation, useQuery } from 'convex/react';
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
+import { useConvex, useMutation, useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
+import type { FunctionReturnType } from 'convex/server';
 import { Avatar, Glyph, Sheet, Standing, State, initials } from '../ds';
 import { ForgeMark } from '../shell/brand';
 import { followLink } from '../app/router';
 import { stopWords } from '../app/lane-state';
 import { lineStops, type LineStage } from '../app/Line';
-import { hrefFor, type AppRoute } from '../app/paths';
+import { hrefFor, publicProjectHref, type AppRoute } from '../app/paths';
+import { shellQuote } from '../../../src/shell-quote';
+import { publicProjectClone, publicProjectLogin } from '../../../src/public-project-commands';
 import {
   usePublicRead,
   type ExploreOrder,
@@ -38,15 +50,18 @@ const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFra
 const big = (n: number) => (n >= 100_000 ? compact.format(n) : nf.format(n));
 const day = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 const clock = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
-const projectHref = (handle: string, slug: string) =>
-  hrefFor({ frame: 'project', handle, project: slug, place: 'needs', section: '', rest: '' });
+const projectHref = publicProjectHref;
 const codeHref = (handle: string, slug: string) =>
   hrefFor({ frame: 'project', handle, project: slug, place: 'code', section: 'files', rest: '' });
 const profileHref = (handle: string) => hrefFor({ frame: 'discover', page: 'profile', handle });
-const signInHref = () =>
-  `${hrefFor({ frame: 'public', page: 'signin' })}?next=${encodeURIComponent(location.pathname)}`;
+const signInHref = (next = location.pathname + location.search) =>
+  `${hrefFor({ frame: 'public', page: 'signin' })}?next=${encodeURIComponent(next)}`;
 
 export default function Discover({ route, signedIn, viewerHandle }: Props) {
+  const projectNext =
+    route.frame === 'project' && route.place === 'needs'
+      ? projectHref(route.handle, route.project)
+      : undefined;
   const page =
     route.frame === 'discover' && route.page === 'explore' ? (
       <Explore signedIn={signedIn} />
@@ -55,7 +70,7 @@ export default function Discover({ route, signedIn, viewerHandle }: Props) {
     ) : route.frame === 'project' && route.place === 'code' ? (
       <Code route={route} />
     ) : route.frame === 'project' ? (
-      <Project handle={route.handle} slug={route.project} />
+      <Project handle={route.handle} slug={route.project} signedIn={signedIn} viewerHandle={viewerHandle} />
     ) : null;
   return (
     <>
@@ -101,7 +116,7 @@ export default function Discover({ route, signedIn, viewerHandle }: Props) {
               ) : null}
             </>
           ) : (
-            <a className="btn sm" href={signInHref()} onClick={followLink}>
+            <a className="btn sm" href={signInHref(projectNext)} onClick={followLink}>
               Sign in
             </a>
           )}
@@ -170,7 +185,17 @@ function StarGlyph() {
 }
 
 /** Why a visitor must sign in first, titled with what they were doing. Nothing happened yet. */
-function Gate({ what, name, onClose }: { what: 'star' | 'clone'; name: string; onClose: () => void }) {
+function Gate({
+  what,
+  name,
+  onClose,
+  next,
+}: {
+  what: 'star' | 'clone';
+  name: string;
+  onClose: () => void;
+  next?: string;
+}) {
   return (
     <Sheet
       open
@@ -178,7 +203,7 @@ function Gate({ what, name, onClose }: { what: 'star' | 'clone'; name: string; o
       title={what === 'star' ? `Sign in to star ${name}` : `Sign in to clone ${name}`}
       footer={
         <>
-          <a className="btn primary" href={signInHref()} onClick={followLink}>
+          <a className="btn primary" href={signInHref(next)} onClick={followLink}>
             Sign in
           </a>
           <button type="button" className="btn ghost" onClick={onClose}>
@@ -196,49 +221,97 @@ function Gate({ what, name, onClose }: { what: 'star' | 'clone'; name: string; o
   );
 }
 
-/** The star in a project row: a count for visitors (the press asks for sign-in), a toggle for a signed-in person. */
-function RowStar({
+/** The same account star on a project page or a discovery row. */
+function ProjectStar({
   project,
-  id,
+  stars,
   mine,
+  signedIn,
+  inRow = false,
+  ownStarredList = false,
   onGate,
 }: {
-  project: ListedProject;
-  id: Id<'hostedProjects'>;
+  project: { id: string; name: string; handle: string };
+  stars: number;
   mine: ReadonlySet<string> | null;
-  onGate: (project: ListedProject) => void;
+  signedIn: boolean;
+  inRow?: boolean;
+  ownStarredList?: boolean;
+  onGate: () => void;
 }) {
   const star = useMutation(api.publicDiscovery.star);
   const [given, setGiven] = useState<{ starred: boolean; stars: number } | null>(null);
-  const starred = given?.starred ?? Boolean(mine?.has(id));
-  const count = given?.stars ?? project.stars;
-  const press = () => {
-    if (!mine) return onGate(project);
-    void star({ projectId: id, starred: !starred }).then(setGiven, () => undefined);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const writing = useRef(false);
+  const starred = ownStarredList ? (given?.starred ?? true) : Boolean(mine?.has(project.id));
+  const shown = given?.stars ?? stars;
+  const printed = big(shown);
+  const exact = shown >= 100_000 ? ` (${nf.format(shown)})` : '';
+  const press = async () => {
+    if (!signedIn) return onGate();
+    if ((!mine && !ownStarredList) || writing.current) return;
+    writing.current = true;
+    setPending(true);
+    setError('');
+    try {
+      setGiven(await star({ projectId: project.id as Id<'hostedProjects'>, starred: !starred }));
+    } catch (error) {
+      const data = (error as { data?: { message?: string } })?.data;
+      setError(data?.message ?? 'Could not update the star. Try again.');
+    } finally {
+      writing.current = false;
+      setPending(false);
+    }
   };
   return (
-    <button
-      type="button"
-      className="star in-row"
-      aria-pressed={starred}
-      title={starred ? 'Starred by you' : 'Star'}
-      onClick={press}
-    >
-      <StarGlyph />
-      <span className="sr">
-        Star {project.handle}/{project.name}:{' '}
-      </span>
-      <span>{big(count)}</span>
-      <span className="sr"> {count === 1 ? 'star' : 'stars'}</span>
-    </button>
+    <>
+      <button
+        type="button"
+        className={inRow ? 'star in-row' : 'btn star'}
+        aria-pressed={starred}
+        title={starred ? 'Starred by you' : 'Star'}
+        aria-disabled={signedIn && ((!mine && !ownStarredList) || pending)}
+        onClick={() => void press()}
+      >
+        <StarGlyph />
+        <span className={inRow ? 'sr' : undefined}>Star</span>{' '}
+        <b className={inRow ? undefined : 'n'}>{printed}</b>
+        <span className="sr">
+          {` ${shown === 1 ? 'star' : 'stars'}${exact} for ${project.handle}/${project.name}`}
+        </span>
+      </button>
+      {error ? (
+        <span className="note" role="alert">
+          {error}
+        </span>
+      ) : null}
+    </>
   );
 }
 
 /** Projects as table rows: who and what, landings this week, main, stars. */
-function Rows({ projects, signedIn }: { projects: readonly ListedProject[]; signedIn: boolean }) {
-  const mineList = useQuery(api.publicDiscovery.myStars, signedIn ? {} : 'skip');
+function Rows({
+  projects,
+  visibleProjects = projects,
+  ownStarredList = false,
+  signedIn,
+  starLookup,
+}: {
+  projects: readonly ListedProject[];
+  visibleProjects?: readonly ListedProject[];
+  ownStarredList?: boolean;
+  signedIn: boolean;
+  starLookup?: true;
+}) {
+  const projectIds = useMemo(() => projects.map(project => project.id as Id<'hostedProjects'>), [projects]);
+  const mineList = useQuery(
+    api.publicDiscovery.myStars,
+    signedIn && !ownStarredList && projectIds.length ? (starLookup ? { projectIds } : {}) : 'skip',
+  );
   const mine = useMemo(() => (mineList ? new Set<string>(mineList) : null), [mineList]);
   const [gate, setGate] = useState<ListedProject | null>(null);
+  if (!visibleProjects.length) return null;
   return (
     <>
       <div className="th xrow lean">
@@ -249,7 +322,7 @@ function Rows({ projects, signedIn }: { projects: readonly ListedProject[]; sign
         <span title="Whether the check on main passes">Main</span>
         <span className="r">Stars</span>
       </div>
-      {projects.map(project => {
+      {visibleProjects.map(project => {
         const n = project.landings;
         return (
           <div className="row xrow lean" key={`${project.handle}/${project.slug}`}>
@@ -283,11 +356,14 @@ function Rows({ projects, signedIn }: { projects: readonly ListedProject[]; sign
               </span>
             </div>
             <div className="stc">
-              <RowStar
+              <ProjectStar
                 project={project}
-                id={project.id as Id<'hostedProjects'>}
-                mine={signedIn ? (mine ?? new Set()) : null}
-                onGate={setGate}
+                stars={project.stars}
+                mine={mine}
+                signedIn={signedIn}
+                inRow
+                ownStarredList={ownStarredList}
+                onGate={() => setGate(project)}
               />
             </div>
           </div>
@@ -442,7 +518,14 @@ function Explore({ signedIn }: { signedIn: boolean }) {
             </div>
           </>
         ) : null}
-        {shown.length ? <Rows projects={shown} signedIn={signedIn} /> : null}
+        {projects.length ? (
+          <Rows
+            projects={projects}
+            visibleProjects={shown}
+            signedIn={signedIn}
+            starLookup={read.data.starLookup}
+          />
+        ) : null}
         {term && !shown.length && !people.length ? (
           <div className="empty">
             <h3>No match for “{query.trim()}”</h3>
@@ -479,7 +562,7 @@ function Profile({ handle, signedIn }: { handle: string; signedIn: boolean }) {
       signedIn={signedIn}
       publicRead={read.data.contributions}
       projectCount={projects.length}
-      rows={listed => <Rows projects={listed} signedIn={signedIn} />}
+      rows={listed => <Rows projects={listed} signedIn={signedIn} ownStarredList />}
       projects={
         <section className="region" aria-label="Public projects">
           <div className="ph">
@@ -488,7 +571,7 @@ function Profile({ handle, signedIn }: { handle: string; signedIn: boolean }) {
             <span className="hint">most starred first</span>
           </div>
           {projects.length ? (
-            <Rows projects={projects} signedIn={signedIn} />
+            <Rows projects={projects} signedIn={signedIn} starLookup={read.data.starLookup} />
           ) : (
             <p className="quietline">Nothing public here yet. Private projects are never listed.</p>
           )}
@@ -504,16 +587,42 @@ function Profile({ handle, signedIn }: { handle: string; signedIn: boolean }) {
 const STOPS = lineStops.map(stop => [stop.stage, stop.label, stop.of] as const);
 const isStop = (stage: string): stage is LineStage => stage in stopWords;
 
-function Project({ handle, slug }: { handle: string; slug: string }) {
+function Project({
+  handle,
+  slug,
+  signedIn,
+  viewerHandle,
+}: {
+  handle: string;
+  slug: string;
+  signedIn: boolean;
+  viewerHandle: string | undefined;
+}) {
   const [read, retry] = usePublicRead<ProjectPage>(
     `project/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}.json`,
   );
-  const [sheet, setSheet] = useState<'star' | 'clone' | 'share' | null>(null);
+  const [sheet, setSheet] = useState<'star' | 'clone' | 'share' | 'stargazers' | null>(null);
+  const data = read.state === 'ok' ? read.data : null;
+  const id = data ? (data.project.id as Id<'hostedProjects'>) : null;
+  const mineList = useQuery(
+    api.publicDiscovery.myStars,
+    signedIn && id ? (data?.starLookup ? { projectIds: [id] } : {}) : 'skip',
+  );
+  const mine = useMemo(() => (mineList ? new Set<string>(mineList) : null), [mineList]);
   if (read.state === 'loading') return <Loading what={`${handle}/${slug}`} />;
   if (read.state === 'missing') return <NotFound what="No public project at this address" />;
   if (read.state !== 'ok') return <Failed what={`${handle}/${slug}`} retry={retry} />;
   const { project, activity, lanes, plan, stars } = read.data;
+  const workspace = `${location.origin}${hrefFor({
+    frame: 'project',
+    handle: project.handle,
+    project: project.slug,
+    place: 'needs',
+    section: '',
+    rest: '',
+  })}`;
   const link = `${location.origin}${projectHref(project.handle, project.slug)}`;
+  const owner = signedIn && viewerHandle === project.handle;
   const facts: ReactNode[] = [
     <span key="main">
       {activity.main === 'passing' ? <b>Main is passing.</b> : <b>Main is not checked.</b>}
@@ -552,15 +661,14 @@ function Project({ handle, slug }: { handle: string; slug: string }) {
           </div>
         </div>
         <div className="tools">
-          <button type="button" className="btn star" aria-pressed="false" onClick={() => setSheet('star')}>
-            <StarGlyph />
-            <span>Star</span>
-            <b className="n">{big(stars)}</b>
-            <span className="sr">
-              {' '}
-              {stars === 1 ? 'star' : 'stars'} for {project.name}
-            </span>
-          </button>
+          <ProjectStar
+            key={`${project.id}:${viewerHandle ?? ''}`}
+            project={project}
+            stars={stars}
+            mine={mine}
+            signedIn={signedIn}
+            onGate={() => setSheet('star')}
+          />
           <a className="btn" href={codeHref(project.handle, project.slug)} onClick={followLink}>
             Browse the code
           </a>
@@ -570,6 +678,11 @@ function Project({ handle, slug }: { handle: string; slug: string }) {
           <button type="button" className="btn primary" onClick={() => setSheet('clone')}>
             Clone
           </button>
+          {signedIn ? (
+            <a className="btn" href={workspace} onClick={followLink}>
+              Open workspace
+            </a>
+          ) : null}
         </div>
       </div>
       <div className="glance">
@@ -664,15 +777,37 @@ function Project({ handle, slug }: { handle: string; slug: string }) {
               <dd>
                 <Main main={activity.main} />
               </dd>
-              <dt>Stars</dt>
-              <dd>{nf.format(stars)}</dd>
+              {owner ? (
+                <>
+                  <dt>Stars</dt>
+                  <dd>
+                    <button type="button" className="btn sm" onClick={() => setSheet('stargazers')}>
+                      Who starred
+                    </button>
+                  </dd>
+                </>
+              ) : null}
             </dl>
           </section>
         </aside>
       </div>
-      {sheet === 'star' || sheet === 'clone' ? (
-        <Gate what={sheet} name={project.name} onClose={() => setSheet(null)} />
+      {sheet === 'star' || (sheet === 'clone' && !signedIn) ? (
+        <Gate
+          what={sheet}
+          name={project.name}
+          next={projectHref(project.handle, project.slug)}
+          onClose={() => setSheet(null)}
+        />
       ) : null}
+      {sheet === 'clone' && signedIn ? (
+        <CloneProject
+          project={project}
+          link={workspace}
+          deployment={read.data.deployment}
+          onClose={() => setSheet(null)}
+        />
+      ) : null}
+      {sheet === 'stargazers' && owner && id ? <Stargazers id={id} onClose={() => setSheet(null)} /> : null}
       {sheet === 'share' ? (
         <Sheet
           open
@@ -700,6 +835,125 @@ function Project({ handle, slug }: { handle: string; slug: string }) {
         </Sheet>
       ) : null}
     </>
+  );
+}
+
+function CloneProject({
+  project,
+  link,
+  deployment,
+  onClose,
+}: {
+  project: ProjectPage['project'];
+  link: string;
+  deployment?: string;
+  onClose: () => void;
+}) {
+  return (
+    <Sheet
+      open
+      onOpenChange={open => !open && onClose()}
+      title={`Clone ${project.name}`}
+      footer={
+        <button type="button" className="btn ghost" onClick={onClose}>
+          Close
+        </button>
+      }
+    >
+      {deployment ? (
+        <>
+          <p>If this device needs approval, run:</p>
+          <div className="cmd mono">
+            <code>{publicProjectLogin(deployment)}</code>
+          </div>
+          <p>Clone the project:</p>
+          <div className="cmd mono">
+            <code>{publicProjectClone(link, project.slug, deployment)}</code>
+          </div>
+        </>
+      ) : (
+        <>
+          <p>Find the clone and device approval commands for this site:</p>
+          <div className="cmd mono">
+            <code>{`nforge clone --find ${shellQuote(`${project.handle}/${project.slug}`)} --site ${shellQuote(location.origin)}`}</code>
+          </div>
+        </>
+      )}
+    </Sheet>
+  );
+}
+
+type StargazerPage = FunctionReturnType<typeof api.publicDiscovery.stargazers>;
+
+function Stargazers({ id, onClose }: { id: Id<'hostedProjects'>; onClose: () => void }) {
+  const client = useConvex();
+  const [handles, setHandles] = useState<StargazerPage['page']>([]);
+  const [request, setRequest] = useState({ cursor: null as string | null, attempt: 0 });
+  const [next, setNext] = useState<string | null>(null);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
+  useEffect(() => {
+    let live = true;
+    void client
+      .query(api.publicDiscovery.stargazers, {
+        projectId: id,
+        paginationOpts: { cursor: request.cursor, numItems: 25 },
+      })
+      .then(
+        result => {
+          if (!live) return;
+          setHandles(previous => (request.cursor ? [...previous, ...result.page] : result.page));
+          setNext(result.isDone ? null : result.continueCursor);
+          setStatus('ready');
+        },
+        () => live && setStatus('failed'),
+      );
+    return () => {
+      live = false;
+    };
+  }, [client, id, request]);
+  const load = (cursor: string | null) => {
+    setStatus('loading');
+    setRequest(previous => ({ cursor, attempt: previous.attempt + 1 }));
+  };
+  return (
+    <Sheet
+      open
+      onOpenChange={open => !open && onClose()}
+      title="Who starred"
+      footer={
+        <button type="button" className="btn ghost" onClick={onClose}>
+          Close
+        </button>
+      }
+    >
+      {handles.length ? (
+        <ul>
+          {handles.map(({ handle }) => (
+            <li key={handle}>
+              <a href={profileHref(handle)} onClick={followLink}>
+                @{handle}
+              </a>
+            </li>
+          ))}
+        </ul>
+      ) : status === 'ready' && !next ? (
+        <p>No one has starred this project yet.</p>
+      ) : null}
+      {status === 'loading' ? <p role="status">Reading stars…</p> : null}
+      {status === 'failed' ? (
+        <>
+          <p role="alert">Could not read who starred this project.</p>
+          <button type="button" className="btn sm" onClick={() => load(request.cursor)}>
+            Retry
+          </button>
+        </>
+      ) : null}
+      {status === 'ready' && next ? (
+        <button type="button" className="btn sm" onClick={() => load(next)}>
+          Show more
+        </button>
+      ) : null}
+    </Sheet>
   );
 }
 

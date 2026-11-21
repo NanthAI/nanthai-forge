@@ -3,7 +3,7 @@ import { useInventory } from './useInventory';
 import { usePageCritical } from './ui/page-critical';
 import { ErrorToast } from './ui/Toast';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useConvex, usePaginatedQuery, useQuery } from 'convex/react';
+import { useConvex, useMutation, usePaginatedQuery, useQuery } from 'convex/react';
 import { useUser } from '@clerk/react';
 import type { FunctionArgs, FunctionReturnType } from 'convex/server';
 import { api } from '../../convex/_generated/api';
@@ -51,7 +51,9 @@ function ProjectList({
   const pendingStars = useRef(new Map<string, FunctionArgs<typeof api.savedViewActions.save>>());
   const { user } = useUser();
   const starsKey = `forge.project-stars.${user?.id ?? ''}`;
-  const [projectStars, setProjectStars] = useState<string[]>(() => {
+  const starProject = useMutation(api.publicDiscovery.star);
+  const projectStarWrites = useRef(new Set<string>());
+  const [privateBookmarks, setPrivateBookmarks] = useState<string[]>(() => {
     try {
       const value: unknown = JSON.parse(localStorage.getItem(starsKey) ?? '[]');
       return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
@@ -59,15 +61,30 @@ function ProjectList({
       return [];
     }
   });
-  const toggleProjectStar = (id: string) => {
-    const next = projectStars.includes(id)
-      ? projectStars.filter(value => value !== id)
-      : [...projectStars, id];
+  const isSaved = (project: (typeof projects)[number]) =>
+    project.visibility === 'public' ? !!project.starred : privateBookmarks.includes(project.id);
+  const toggleProjectStar = async (project: (typeof projects)[number]) => {
+    const { id, visibility } = project;
+    if (visibility === 'public') {
+      if (projectStarWrites.current.has(id)) return;
+      projectStarWrites.current.add(id);
+      try {
+        await starProject({ projectId: id, starred: !isSaved(project) });
+      } catch (e) {
+        setError(hostedError(e));
+      } finally {
+        projectStarWrites.current.delete(id);
+      }
+      return;
+    }
+    const next = isSaved(project)
+      ? privateBookmarks.filter(value => value !== id)
+      : [...privateBookmarks, id];
     try {
       localStorage.setItem(starsKey, JSON.stringify(next));
-      setProjectStars(next);
+      setPrivateBookmarks(next);
     } catch {
-      setError('Could not save this star in your browser.');
+      setError('Could not save this bookmark in your browser.');
     }
   };
 
@@ -154,15 +171,12 @@ function ProjectList({
   const projectRows = (loading ? [] : projects)
     .filter(
       p =>
-        (['all', p.shared ? 'shared' : 'yours'].includes(filter) ||
-          (filter === 'starred' && projectStars.includes(p.id))) &&
+        (['all', p.shared ? 'shared' : 'yours'].includes(filter) || (filter === 'starred' && isSaved(p))) &&
         p.name.toLowerCase().includes(query.toLowerCase()),
     )
     .sort(
       (a, b) =>
-        Number(projectStars.includes(b.id)) - Number(projectStars.includes(a.id)) ||
-        a.name.localeCompare(b.name) ||
-        a.id.localeCompare(b.id),
+        Number(isSaved(b)) - Number(isSaved(a)) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id),
     );
   const importRows = rows.filter(
     row =>
@@ -316,8 +330,8 @@ function ProjectList({
                 <HomeProjectRow
                   project={project}
                   summary={summaries[project.id]}
-                  starred={projectStars.includes(project.id)}
-                  toggleStar={() => toggleProjectStar(project.id)}
+                  starred={isSaved(project)}
+                  toggleStar={() => void toggleProjectStar(project)}
                   choose={() => choose(project.id)}
                 />
               </PortfolioBoundary>

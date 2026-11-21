@@ -25,7 +25,7 @@ import { Device } from './Device';
 import { AccountFrame, BareFrame, ProjectFrame, PublicFrame, type FrameControls } from './frames';
 import { needsCount, needsRead } from './needs/count';
 import { Keys, useFrameKeys, type Go } from './keys';
-import { hrefFor, parseAppPath, type AppRoute } from './paths';
+import { hrefFor, isPublicProjectView, parseAppPath, type AppRoute } from './paths';
 import { Head } from './Place';
 import { AccountScreen, PlaceScreen } from './screens';
 import { followLink, navigate, useRoute, useSearch } from './router';
@@ -132,10 +132,7 @@ function Pages() {
   // Anyone can browse signed out: explore, profiles, a project's front page (owner decision 2026-11-16) and its code
   // and history, read only (Item 4c164732). A private or missing project answers "No public project" alike.
   const discovering =
-    route.frame === 'discover' ||
-    (route.frame === 'project' &&
-      !isAuthenticated &&
-      ((route.place === 'needs' && !route.section && !route.rest) || route.place === 'code'));
+    route.frame === 'discover' || isPublicProjectView(route, isAuthenticated, search.get('view'));
   const needsSignIn =
     !isLoading &&
     !isAuthenticated &&

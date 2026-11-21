@@ -157,6 +157,10 @@ export const serve = httpAction(async (ctx, request) => {
   const path = publicPath(new URL(request.url).pathname);
   if (!path) return missing();
   const now = Date.now();
+  // Clone commands use this public system origin, which can differ from the cached site's origin.
+  const deployment = process.env.CONVEX_CLOUD_URL;
+  // This response can be cached while web and backend deploy at different times.
+  const starLookup = true;
   if (path.kind === 'project') {
     const page = await ctx.runQuery(internal.publicRead.projectPage, {
       handle: path.handle,
@@ -170,18 +174,16 @@ export const serve = httpAction(async (ctx, request) => {
         projectId: body.project.id as never,
         activity: body.activity as never,
       });
-    return json(body);
+    return json({ ...body, deployment, starLookup });
   }
   if (path.kind === 'code') return code(ctx, path);
   if (path.kind === 'explore') {
     const page = await ctx.runQuery(internal.publicRead.explorePage, { order: path.order, now });
-    // The website and its Convex API can have different origins. Pin agent clone commands
-    // to this deployment using public system configuration, never a request header.
-    return json({ ...page, deployment: process.env.CONVEX_CLOUD_URL });
+    return json({ ...page, deployment, starLookup });
   }
   if (path.kind === 'profile') {
     const page = await ctx.runQuery(internal.publicRead.profilePage, { handle: path.handle, now });
-    return page ? json(page) : missing();
+    return page ? json({ ...page, starLookup }) : missing();
   }
   const origin = process.env.FORGE_WEB_URL;
   if (!origin || !/^https:\/\/[a-z0-9.-]+$/i.test(origin))

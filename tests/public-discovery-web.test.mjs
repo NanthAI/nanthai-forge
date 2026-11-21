@@ -47,15 +47,19 @@ const projects = [
 ];
 const explore = order => ({
   v: 1,
+  starLookup: true,
   asOf: NOW,
   order,
   total: projects.length,
   more: false,
   projects: order === 'stars' ? [...projects].sort((a, b) => b.stars - a.stars) : projects,
 });
+const sourceDeployment = 'https://source-project.convex.cloud';
 const project = ({ plan = 'public', titles = false, upstream } = {}) => ({
   v: 1,
   asOf: NOW,
+  deployment: sourceDeployment,
+  starLookup: true,
   project: { id: 'p1', handle: 'ada', slug: 'atlas', name: 'atlas', since: NOW - 60 * DAY, upstream },
   stars: 310,
   activity: { landings: 42, days: [3, 6, 4, 8, 7, 9, 5], main: 'passing', lastAt: NOW - 3_600_000 },
@@ -309,6 +313,7 @@ const reads = {
     contributions,
   },
   '/-/public/v1/project/ada/atlas.json': project(),
+  '/-/public/v1/project/ada/legacy.json': { ...project(), starLookup: undefined, deployment: undefined },
   '/-/public/v1/project/ada/fork.json': project({ upstream: { handle: 'wren', slug: 'original-atlas' } }),
   '/-/public/v1/project/ada/fork-unavailable.json': project({ upstream: null }),
   '/-/public/v1/project/ada/members.json': project({ plan: 'members' }),
@@ -330,8 +335,25 @@ async function fixture(out) {
     import {useRoute} from ${JSON.stringify(join(root, 'web/src/app/router.ts'))};
     import ${JSON.stringify(join(root, 'web/src/app/app.css'))};
     const signed = ${JSON.stringify(signed)};
-    const self = new URLSearchParams(location.search).get('as') === 'self';
+    const viewer = new URLSearchParams(location.search).get('as');
+    const self = viewer === 'self' || viewer === 'owner-after-removal';
+    const signedIn = self || viewer === 'visitor';
+    const mine = new Set(signed['publicDiscovery:myStars']);
+    const watchers = new Set();
+    let stars = 310;
+    window.writes = [];
     const answer = (name, args) => {
+      if (name === 'publicDiscovery:myStars') {
+        if (location.pathname.endsWith('/legacy') && args.projectIds) throw new Error('old server rejects new lookup args');
+        return args.projectIds ? args.projectIds.filter(id => mine.has(id)) : [...mine];
+      }
+      if (name === 'publicDiscovery:stargazers') {
+        if (!self) throw new Error('only the owner should request stargazers');
+        if (viewer === 'owner-after-removal') throw new Error('the project is unavailable');
+        return args.paginationOpts.cursor === null 
+          ? { page: [{handle: 'wren'}], isDone: false, continueCursor: 'second-page' } 
+          : { page: [{handle: 'kit'}], isDone: true, continueCursor: '' };
+      }
       if (!(name in signed)) throw new Error('unexpected read ' + name);
       return name === 'personDays:profile' ? signed[name][args.handle] : signed[name];
     };
@@ -340,15 +362,28 @@ async function fixture(out) {
     const noop = () => {};
     const fake = {
       query: async (ref, args) => (window.asked.push(getFunctionName(ref)), answer(getFunctionName(ref), args)),
-      watchQuery: (ref, args) => ({ onUpdate: () => noop, localQueryResult: () => answer(getFunctionName(ref), args), journal: noop }),
-      mutation: async () => null,
+      watchQuery: (ref, args) => ({
+        onUpdate: notify => (watchers.add(notify), () => watchers.delete(notify)),
+        localQueryResult: () => answer(getFunctionName(ref), args),
+        journal: noop,
+      }),
+      mutation: async (ref, args) => {
+        if (getFunctionName(ref) !== 'publicDiscovery:star') throw new Error('unexpected mutation');
+        window.writes.push(args);
+        if (mine.has(args.projectId) !== args.starred) {
+          stars += args.starred ? 1 : -1;
+          args.starred ? mine.add(args.projectId) : mine.delete(args.projectId);
+        }
+        for (const update of watchers) update();
+        return { starred: args.starred, stars };
+      },
       action: async () => null,
       logger: { warn: noop, log: noop, error: noop, logVerbose: noop },
       connectionState: () => ({ isWebSocketConnected: true, hasInflightRequests: false }),
       subscribeToConnectionState: () => noop,
     };
-    const client = self ? fake : new ConvexReactClient('https://example.convex.cloud', {skipConvexDeploymentUrlCheck: true});
-    function Root() { return h(Discover, {route: useRoute(), signedIn: self, viewerHandle: self ? 'ada' : undefined}); }
+    const client = signedIn ? fake : new ConvexReactClient('https://example.convex.cloud', {skipConvexDeploymentUrlCheck: true});
+    function Root() { return h(Discover, {route: useRoute(), signedIn, viewerHandle: self ? 'ada' : signedIn ? 'wren' : undefined}); }
     createRoot(document.getElementById('root')).render(h(ConvexProvider, {client}, h(Root)));`;
   const result = await build({
     configFile: join(root, 'web/vite.config.ts'),
@@ -475,11 +510,73 @@ test('public discovery screens: explore, a profile signed out and as its person,
   await pp.getByRole('button', { name: 'Clone' }).click();
   await pp.getByRole('dialog', { name: 'Sign in to clone atlas' }).waitFor();
 
+  const cloneGate = pp.getByRole('dialog', { name: 'Sign in to clone atlas' });
+  const next = '/-/ada/atlas?view=public';
+  assert.equal(
+    await pp.getByRole('banner').getByRole('link', { name: 'Sign in' }).getAttribute('href'),
+    `/-/signin?next=${encodeURIComponent(next)}`,
+  );
+  assert.equal(
+    await cloneGate.getByRole('link', { name: 'Sign in' }).getAttribute('href'),
+    `/-/signin?next=${encodeURIComponent(next)}`,
+  );
+  await cloneGate.getByRole('button', { name: 'Not now' }).click();
+  await pp.getByRole('button', { name: /Star .* for ada\/atlas/ }).click();
+  const starGate = pp.getByRole('dialog', { name: 'Sign in to star atlas' });
+  assert.equal(
+    await starGate.getByRole('link', { name: 'Sign in' }).getAttribute('href'),
+    `/-/signin?next=${encodeURIComponent(next)}`,
+  );
+  assert.equal(await pp.getByRole('button', { name: 'Who starred' }).count(), 0);
+
+  // A signed-in visitor can star, unstar, and clone without leaving the public page.
+  const visitor = await open(`${next}&as=visitor`);
+  const star = visitor.getByRole('button', { name: /Star .* for ada\/atlas/ });
+  await star.click();
+  await visitor.getByRole('button', { name: 'Star 311 stars for ada/atlas', pressed: true }).waitFor();
+  await star.click();
+  await visitor.getByRole('button', { name: 'Star 310 stars for ada/atlas', pressed: false }).waitFor();
+  assert.deepEqual(await visitor.evaluate(() => window.writes), [
+    { projectId: 'p1', starred: true },
+    { projectId: 'p1', starred: false },
+  ]);
+  assert.equal(await visitor.getByRole('button', { name: 'Who starred' }).count(), 0);
+  await visitor.getByRole('button', { name: 'Clone' }).click();
+  const clone = visitor.getByRole('dialog', { name: 'Clone atlas' });
+  await clone.waitFor();
+  assert.deepEqual(await clone.locator('code').allTextContents(), [
+    `nforge login '${sourceDeployment}'`,
+    `nforge clone 'https://forge.test/-/ada/atlas' 'atlas' --deployment '${sourceDeployment}'`,
+  ]);
+
+  // The owner's view requests and paginates handles only when opened.
+  const owner = await open(`${next}&as=self`);
+  assert.equal(await owner.getByRole('link', { name: '@wren' }).count(), 0);
+  await owner.getByRole('button', { name: 'Who starred' }).click();
+  const people = owner.getByRole('dialog', { name: 'Who starred' });
+  await people.getByRole('link', { name: '@wren' }).waitFor();
+  await people.getByRole('button', { name: 'Show more' }).click();
+  await people.getByRole('link', { name: '@kit' }).waitFor();
+  assert.equal(await people.getByRole('link', { name: '@wren' }).getAttribute('href'), '/-/wren');
+
+  const removed = await open(`${next}&as=owner-after-removal`);
+  await removed.getByRole('button', { name: 'Who starred' }).click();
+  await removed.getByRole('alert').filter({ hasText: 'Could not read who starred this project.' }).waitFor();
+  await removed.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  assert.equal(await removed.getByRole('heading', { level: 1 }).count(), 1);
+
+  const legacy = await open('/-/ada/legacy?view=public&as=visitor');
+  await legacy.getByRole('button', { name: 'Clone' }).click();
+  assert.equal(
+    await legacy.getByRole('dialog').locator('code').textContent(),
+    "nforge clone --find 'ada/atlas' --site 'https://forge.test'",
+  );
+
   const fork = await open('/-/ada/fork');
   assert.match(await fork.locator('.phead .fl').textContent(), /Forked from wren\/original-atlas/);
   assert.equal(
     await fork.getByRole('link', { name: 'wren/original-atlas' }).getAttribute('href'),
-    '/-/wren/original-atlas',
+    '/-/wren/original-atlas?view=public',
   );
   const forkUnavailable = await open('/-/ada/fork-unavailable');
   assert.match(

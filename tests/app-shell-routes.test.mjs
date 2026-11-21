@@ -47,6 +47,17 @@ test('every frame address parses back to the same place (stable deep links)', ()
   assert.equal(hrefFor(project('needs')), `${ROOT}/mara/tide-pool`, 'Needs me is the project front page');
 });
 
+test('a project discovery link survives sign-in while the ordinary signed-in address opens Needs me', () => {
+  const href = paths.publicProjectHref('mara', 'tide-pool');
+  assert.equal(safeNext(href), href);
+  const url = new URL(href, 'https://forge.invalid');
+  const route = parseAppPath(url.pathname);
+  assert.equal(paths.isPublicProjectView(route, true, url.searchParams.get('view')), true);
+  assert.equal(paths.isPublicProjectView(route, true, null), false);
+  assert.equal(paths.isPublicProjectView(route, false, null), true);
+  assert.equal(paths.isPublicProjectView(project('settings'), true, 'public'), false);
+});
+
 test('addresses outside the rebuilt app or with unknown places are not app pages', () => {
   assert.equal(paths.isAppPath('/mara/tide-pool'), false);
   assert.equal(paths.isAppPath('/-x/a'), false);

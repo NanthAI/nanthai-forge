@@ -42,6 +42,8 @@ export function HomeProjectRow({
   const working = counts ? counts.activeAgents + counts.activeSubagents + counts.activePeople : null;
   const actor = main?.actor || main?.acceptedBy?.name;
   const named = actor && !/^(user_|contributor_)/.test(actor) ? actor : null;
+  const isPublic = project.visibility === 'public';
+  const saveWord = isPublic ? (starred ? 'Unstar' : 'Star') : starred ? 'Remove bookmark for' : 'Bookmark';
   return (
     <div className="fx-home-row">
       <div>
@@ -52,12 +54,12 @@ export function HomeProjectRow({
         {project.role && <span className="fx-home-tag">{project.role}</span>}
         <button
           className="fx-home-star"
-          aria-label={`${starred ? 'Unstar' : 'Star'} ${project.name}`}
+          aria-label={`${saveWord} ${project.name}`}
           aria-pressed={starred}
-          title="Star in this browser"
+          title={isPublic ? saveWord : `${saveWord} in this browser`}
           onClick={toggleStar}
         >
-          {starred ? '★' : '☆'}
+          {isPublic ? (starred ? '★' : '☆') : starred ? '◆' : '◇'}
         </button>
         <div className="fx-home-fact">
           <b>main</b>
