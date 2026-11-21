@@ -51,6 +51,10 @@ export function finishGates(
   const advisories: Record<string, unknown> = {};
   if (!defaults) return advisories;
   if (defaults.preflight !== 'off') {
+    const heavyOptions = {
+      heavySlot: true,
+      ...(typeof runRequired === 'function' ? { afterHeavyWait: runRequired } : {}),
+    };
     let receipt = readPreflightReceipt(root, lane.laneId);
     const sameSource =
       receipt?.laneId === lane.laneId &&
@@ -148,19 +152,9 @@ export function finishGates(
               estimateMinutes: 0,
               command: null,
             };
-      if (
-        runRequired &&
-        !requireTests &&
-        staticPlan.static?.selected.length &&
-        !(sameSource && receipt?.static?.length)
-      ) {
-        if (typeof runRequired === 'function') runRequired();
-        receipt = runPreflight(root, lane.laneId, lane.head, staticPlan, lane.tree, true, changed);
-        refuseStaticFailure(receipt);
-      }
-      // Land would run no test because the plan is over the gate's minutes: after the static checks
-      // pass, it runs the top of the same run order for LAND_QUICK_SECONDS, once per head.
-      // Only under require: a quick failure cached before the project switched to advise refuses nothing.
+      // Over-budget landings run one quick preflight with static checks, so its typechecks and
+      // tests can share a slot. Only under require: a quick failure cached before a switch to advise
+      // refuses nothing.
       let quick = sameSource && receipt?.quick && defaults.preflight === 'require' ? receipt : null;
       // Not when this head already has a full run (it failed: its advice stands), nor for a plan with
       // no local wall-time budget (a package-graph plan, trim:false), which only the ceiling bounds.
@@ -177,7 +171,7 @@ export function finishGates(
         gateMinutes > defaults.preflightMaxMinutes
       ) {
         if (typeof runRequired === 'function') runRequired();
-        // This head's static results just ran (or ran before): the quick run reuses them.
+        // Reuse static results already recorded for this head.
         const staticDone =
           receipt?.laneId === lane.laneId && receipt.head === lane.head ? receipt.static : undefined;
         // The plan land just made, in its run order, with only the budget cut: re-planning would cost
@@ -190,8 +184,26 @@ export function finishGates(
           lane.tree,
           false,
           changed,
-          { heavySlot: true, quick: true, ...(staticDone ? { staticDone } : {}) },
+          { ...heavyOptions, quick: true, ...(staticDone ? { staticDone } : {}) },
         );
+      } else if (
+        runRequired &&
+        !requireTests &&
+        staticPlan.static?.selected.length &&
+        !(sameSource && receipt?.static?.length)
+      ) {
+        if (typeof runRequired === 'function') runRequired();
+        receipt = runPreflight(
+          root,
+          lane.laneId,
+          lane.head,
+          staticPlan,
+          lane.tree,
+          true,
+          changed,
+          heavyOptions,
+        );
+        refuseStaticFailure(receipt);
       }
       if (quick) {
         refuseStaticFailure(quick);
@@ -248,9 +260,16 @@ export function finishGates(
             if (typeof runRequired === 'function') runRequired();
             // Reuse this plan and its existing local wall-time budget. No hosted read, new
             // operation or recursive dispatch: the caller continues the original finish.
-            const result = runPreflight(root, lane.laneId, lane.head, plan, lane.tree, false, changed, {
-              heavySlot: true,
-            });
+            const result = runPreflight(
+              root,
+              lane.laneId,
+              lane.head,
+              plan,
+              lane.tree,
+              false,
+              changed,
+              heavyOptions,
+            );
             refuseStaticFailure(result);
             const next = result.incomplete?.finish ?? result.stoppedRerun ?? run;
             if (

@@ -17,6 +17,7 @@ import { digest } from '../dist/hash.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { recordTurnWork, settleTurnWork } from '../dist/agent-turn-work.js';
+import { readHoldHistory } from '../dist/heavy-queue.js';
 import {
   planWithBudget,
   preflightPlan,
@@ -577,6 +578,39 @@ test('a static-only pass never satisfies required tests after a policy change; p
   assert.equal(receipt.static[0].outcome, 'passed');
   assert.throws(() => finishGates(root, defaults({}), lane, advice()), code('PREFLIGHT_REQUIRED'));
   assert.deepEqual(finishGates(root, defaults({ preflight: 'off' }), lane, advice(), true), {});
+});
+
+test('7008ff18: over-budget inline preflight shares one slot across typechecks and quick tests', t => {
+  const root = repo(t, {
+    'forge.json': JSON.stringify({
+      preflight: {
+        static: [
+          {
+            name: 'typecheck',
+            command: ['node', '-e', 'if (!process.env.FORGE_HEAVY_PARENT) process.exit(1)'],
+          },
+        ],
+      },
+    }),
+  });
+  const slots = `${root}-slots`;
+  const settings = `${root}-settings.json`;
+  writeFileSync(settings, JSON.stringify({ localHeavySlots: 1 }));
+  for (const [key, value] of [
+    ['FORGE_HEAVY_DIR', slots],
+    ['FORGE_CLIENT_SETTINGS', settings],
+  ]) {
+    const prior = process.env[key];
+    process.env[key] = value;
+    t.after(() => (prior === undefined ? delete process.env[key] : (process.env[key] = prior)));
+  }
+  const result = finishGates(root, defaults({ preflightMaxMinutes: 0 }), lane, advice(), true);
+  assert.equal(result.preflight.static[0].outcome, 'passed');
+  assert.equal(result.preflight.quick.ran, 1);
+  assert.deepEqual(
+    readHoldHistory(slots).map(hold => hold.kind),
+    ['test'],
+  );
 });
 
 test('static-only changes still run configured static checks', t => {

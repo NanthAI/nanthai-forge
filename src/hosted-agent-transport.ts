@@ -1439,7 +1439,7 @@ export class HostedAgentTransport {
             selected?.laneId === laneId && selected.head === head
               ? () =>
                   invariant(
-                    !hostedLaneDirty(root, { refresh: true }),
+                    !hostedLaneDirty(root, { refresh: true, selection: { laneId, head } }),
                     'LANE_DIRTY',
                     'Save first: inline preflight records a result for the saved head, and the files here differ from it. Replay land --save to save them.',
                   )
@@ -2192,11 +2192,15 @@ export class HostedAgentTransport {
     // File times can miss an edit made while a save was uploading (the marker is rewritten after it).
     // The receipt must name the bytes under test, so confirm them against the saved baseline: a local
     // digest pass that skips files the stat index vouches for (and refreshes its racy entries).
-    invariant(
-      !hostedLaneDirty(root, { refresh: true }),
-      'LANE_DIRTY',
-      `Save first: preflight records a result for the saved head, and the files here differ from it. ${rerun}`,
-    );
+    const checkSource = (afterWait = false) =>
+      invariant(
+        !hostedLaneDirty(root, { refresh: true, selection: { laneId, head } }),
+        'LANE_DIRTY',
+        afterWait
+          ? `The Lane changed while preflight waited for a heavy slot. ${rerun}`
+          : `Save first: preflight records a result for the saved head, and the files here differ from it. ${rerun}`,
+      );
+    checkSource();
     const receipt = runPreflight(
       root,
       laneId,
@@ -2206,7 +2210,7 @@ export class HostedAgentTransport {
       false,
       changed?.complete ? changed.paths : null,
       // Preflight takes its own `nforge heavy` slot; wrapped in `nforge heavy`, it reuses that one.
-      { heavySlot: true },
+      { heavySlot: true, afterHeavyWait: () => checkSource(true) },
     );
     // Nothing failed (passed, NOT COMPLETE, or this machine's environment): the next step is to land,
     // since the landing check runs every test; only a failure sends the agent back to fix and rerun.

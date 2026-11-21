@@ -135,6 +135,8 @@ export function acquireHeavySlot(
     command?: string | null;
     cwd?: string | null;
     tickMs?: number;
+    /** The request is about to join the queue, even if its first retry gets the slot. */
+    onQueue?: () => void;
     /** The process the slot is held for (default this one): preflight claims it through a child. */
     holder?: number;
   } = {},
@@ -154,6 +156,7 @@ export function acquireHeavySlot(
     const slot = tryHeavySlot(directory, count, holder);
     if (slot) return Promise.resolve(slot);
   }
+  info.onQueue?.();
   let ticket = joinQueue(directory, info),
     reported = 0;
   return new Promise<string>((resolve, reject) => {
@@ -231,7 +234,7 @@ nforge heavy --no-build [--] CMD [ARGS...]
 nforge heavy --status | status
 nforge heavy --help | -h | help
 Run bounded builds and test batches under the machine-wide slot limit.
-Nested commands reuse their live parent slot; project-declared static commands run directly.
+Nested commands reuse their live parent slot.
 --no-build runs tests against the existing dist/ without rebuilding it (failing-first checks).
 Callers wait first come, first served; a waiting caller prints its queue position and an estimate.
 --status lists the holders and the queue by Lane, command and time, never folders or arguments,
@@ -393,37 +396,6 @@ export function inheritedHeavySlot(directory: string): string | null {
   }
 }
 
-/** Only commands the project already declares static bypass the build/test queue. */
-async function staticHeavyCommand(args: string[], cwd: string): Promise<boolean> {
-  try {
-    // This emitted core sibling loads only for heavy commands. A bundle split here would
-    // also split the shared config code onto unrelated agent commands' startup paths.
-    const { declaredPreflight, FORGE_CONFIG_FILE } = (await import(
-      /* @vite-ignore */ new URL('./project-config.js', import.meta.url).href
-    )) as typeof import('./project-config.js');
-    const text = (name: string) => {
-      try {
-        return readFileSync(join(cwd, name), 'utf8');
-      } catch {
-        return undefined;
-      }
-    };
-    const declared = declaredPreflight('static', text('package.json'), text(FORGE_CONFIG_FILE))?.value;
-    if (!Array.isArray(declared)) return false;
-    const entries: Array<{ script?: string; command?: string[] }> = declared;
-    return entries.some(
-      entry =>
-        JSON.stringify(entry.command) === JSON.stringify(args) ||
-        ((args.length === 3 || (args.length === 4 && ['-s', '--silent'].includes(args[2]!))) &&
-          /^(?:npm|pnpm|yarn|bun)(?:\.cmd)?$/.test(basename(args[0]!)) &&
-          args[1] === 'run' &&
-          entry.script === args.at(-1)),
-    );
-  } catch {
-    return false;
-  }
-}
-
 /** nforge heavy CMD [ARGS...]: run one heavy local command under the machine-wide slot limit. */
 export async function heavyCli(
   args: string[],
@@ -483,7 +455,7 @@ export async function heavyCli(
   const inherited = inheritedHeavySlot(heavySlotDirectory());
   const queuedAt = Date.now();
   const slot =
-    slots === 0 || inherited || (await staticHeavyCommand(args, process.cwd()))
+    slots === 0 || inherited
       ? null
       : await acquireHeavySlot(
           heavySlotDirectory(),
@@ -501,7 +473,7 @@ export async function heavyCli(
     ? null
     : join(tmpdir(), `forge-test-modules-${process.pid}-${heldSince.toString(36)}`);
   // Every runner the command (and the core build before it) starts, at any depth, gets the slot's
-  // core share (Item 7008ff18). A command outside any slot (static, slots off) is not capped.
+  // core share (Item 7008ff18) when slots are enabled.
   const cap = slotCapEnv(process.env, availableParallelism(), slot || inherited ? slots : 0);
   const before = Object.keys(cap.env).map(name => [name, process.env[name]] as const);
   Object.assign(process.env, cap.env);

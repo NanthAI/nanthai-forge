@@ -23,6 +23,7 @@ import {
 } from '../dist/agent-preflight.js';
 import { canonicalRoot, clientCacheRoot } from '../dist/root-paths.js';
 import { tryHeavySlot } from '../dist/heavy-slots.js';
+import { readHoldHistory } from '../dist/heavy-queue.js';
 import { parsePeakRssMb } from '../dist/agent-preflight-measure.js';
 import { deltaPaths, savedInventory } from '../dist/agent-preflight-evidence.js';
 const laneId = '11111111-1111-4111-8111-111111111111';
@@ -643,6 +644,23 @@ function heavyEvidence(f, t, slots) {
     t.after(() => (prior === undefined ? delete process.env[key] : (process.env[key] = prior)));
   }
   const evidence = join(dir, 'evidence.json');
+  const typecheckEvidence = join(dir, 'typecheck.json');
+  const typecheck = (declared = false) => {
+    f.put(
+      'package.json',
+      JSON.stringify({
+        type: 'module',
+        scripts: { typecheck: 'node typecheck.mjs' },
+        ...(declared ? { forge: { preflight: { static: [{ name: 'types', script: 'typecheck' }] } } } : {}),
+      }),
+    );
+    f.put(
+      'typecheck.mjs',
+      `import { writeFileSync } from 'node:fs';
+const parent = JSON.parse(process.env.FORGE_HEAVY_PARENT || 'null');
+writeFileSync(${JSON.stringify(typecheckEvidence)}, JSON.stringify({ parent, capped: Number(process.env.GOMAXPROCS) > 0 }));`,
+    );
+  };
   f.put(
     'tests/a.test.mjs',
     `import test from 'node:test'; import { readdirSync, readFileSync, writeFileSync } from 'node:fs'; import {n} from '../src/a.ts';
@@ -653,12 +671,18 @@ test('a', () => {
   writeFileSync(${JSON.stringify(evidence)}, JSON.stringify({ parent, held, n }));
 });`,
   );
-  return { slotsDir, read: () => JSON.parse(readFileSync(evidence, 'utf8')) };
+  return {
+    slotsDir,
+    read: () => JSON.parse(readFileSync(evidence, 'utf8')),
+    typecheck,
+    readTypecheck: () => JSON.parse(readFileSync(typecheckEvidence, 'utf8')),
+  };
 }
 
-test('c180152a: a preflight run holds one heavy slot for its build and tests and releases it', t => {
+test('7008ff18: preflight holds one heavy slot from its typecheck through its tests and releases it', t => {
   const f = fixture(t);
   const heavy = heavyEvidence(f, t, 2);
+  heavy.typecheck();
   const receipt = f.run(f.plan(), { heavySlot: true });
   assert.equal(receipt.passed, true);
   const seen = heavy.read();
@@ -666,16 +690,22 @@ test('c180152a: a preflight run holds one heavy slot for its build and tests and
   assert.deepEqual(seen.held, [{ slot: '1', pid: process.pid }]);
   assert.equal(seen.parent?.slot, '1');
   assert.equal(seen.parent?.pid, process.pid);
+  assert.deepEqual(heavy.readTypecheck(), { parent: seen.parent, capped: true });
+  assert.deepEqual(
+    readHoldHistory(heavy.slotsDir).map(hold => hold.kind),
+    ['test'],
+  );
   assert.deepEqual(
     readdirSync(heavy.slotsDir).filter(name => /^[0-9]+$/.test(name)),
     [],
   );
 });
 
-test('c180152a: a preflight inside nforge heavy reuses the parent slot instead of waiting for another', t => {
+test('7008ff18: a nested preflight reuses the parent slot for its typecheck and tests', t => {
   const f = fixture(t);
   // One slot, already held by this process as an nforge heavy parent would hold it.
   const heavy = heavyEvidence(f, t, 1);
+  heavy.typecheck(true);
   const slot = tryHeavySlot(heavy.slotsDir, 1, process.pid);
   assert.ok(slot);
   const prior = process.env.FORGE_HEAVY_PARENT;
@@ -692,8 +722,23 @@ test('c180152a: a preflight inside nforge heavy reuses the parent slot instead o
   const seen = heavy.read();
   assert.deepEqual(seen.held, [{ slot: '1', pid: process.pid }]);
   assert.equal(seen.parent?.slot, '1');
+  assert.deepEqual(heavy.readTypecheck(), { parent: seen.parent, capped: true });
   // The parent's slot is the parent's to release.
   assert.ok(readdirSync(heavy.slotsDir).includes('1'));
+});
+
+test('7008ff18: a declared typecheck still takes a slot when preflight has no tests to run', t => {
+  const f = fixture(t);
+  const heavy = heavyEvidence(f, t, 1);
+  heavy.typecheck(true);
+  const receipt = f.run({ ...f.plan(), tests: [] }, { heavySlot: true });
+  assert.equal(receipt.static[0].outcome, 'passed');
+  assert.equal(heavy.readTypecheck().parent?.pid, process.pid);
+  assert.equal(heavy.readTypecheck().capped, true);
+  assert.deepEqual(
+    readHoldHistory(heavy.slotsDir).map(hold => hold.kind),
+    ['typecheck'],
+  );
 });
 
 test('c180152a: a fixture run inside a test takes no slot, so a full machine never stalls it', t => {

@@ -53,7 +53,13 @@ import {
   type StaticCheck,
   type StaticScope,
 } from './agent-preflight-static.js';
-import { isTypecheck, runTypecheckSetup, selectTypechecks, typecheckEnv } from './preflight-typecheck.js';
+import {
+  isTypecheck,
+  isTypecheckCommand,
+  runTypecheckSetup,
+  selectTypechecks,
+  typecheckEnv,
+} from './preflight-typecheck.js';
 import { baseStateFiles, cachedObject } from './hosted-changed-paths.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import type { NativeFile } from './state/format.js';
@@ -1547,8 +1553,13 @@ const observationSchema = z.union([
  * static job would reject, and a failure there ends the run before any build or test. Tests then
  * run mandatory first in groups sized from the speed already observed; an earlier failure or the
  * spent time budget stops later groups and names them. */
-type HeldHeavySlot = { env: Record<string, string>; release(): void };
-/** One `nforge heavy` slot for this preflight's build and tests, held for this process (c180152a). The
+type PreflightHeavyKind = 'test' | 'typecheck';
+type HeldHeavySlot = {
+  env: Record<string, string>;
+  waited: boolean;
+  release(kind: PreflightHeavyKind): void;
+};
+/** One `nforge heavy` slot for this preflight's typecheck, build and tests, held for this process. The
  * synchronous run waits for it in a child (FIFO with every other heavy command); a preflight inside
  * `nforge heavy` reuses that slot. Null when slots are off or the claim fails (the run goes on, said once). */
 function holdHeavySlot(cwd: string, base: NodeJS.ProcessEnv): HeldHeavySlot | null {
@@ -1557,7 +1568,7 @@ function holdHeavySlot(cwd: string, base: NodeJS.ProcessEnv): HeldHeavySlot | nu
     [fileURLToPath(new URL('./preflight-heavy-claim.js', import.meta.url)), String(process.pid), cwd],
     { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
   );
-  let held: { slot: string | null; parent: string | null; slots?: number } | undefined;
+  let held: { slot: string | null; parent: string | null; slots?: number; waited?: boolean } | undefined;
   try {
     held = claim.status === 0 ? JSON.parse(claim.stdout) : undefined;
   } catch {}
@@ -1572,18 +1583,19 @@ function holdHeavySlot(cwd: string, base: NodeJS.ProcessEnv): HeldHeavySlot | nu
   // test groups already run --test-concurrency=1.
   const cap = slotCapEnv(base, availableParallelism(), held.slots ?? 0);
   return {
+    waited: held.waited === true,
     env: {
       ...cap.env,
       FORGE_HEAVY_PARENT: held.parent,
       ...(process.env.FORGE_HEAVY_DIR ? { FORGE_HEAVY_DIR: process.env.FORGE_HEAVY_DIR } : {}),
     },
-    release() {
+    release(kind) {
       cap.dispose();
       if (!slot) return;
       rmSync(slot, { recursive: true, force: true });
       // A synchronous run cannot sample its tree; the load when it ends is the one reading.
       const load = process.platform === 'win32' ? null : Math.round(loadavg()[0]! * 10) / 10;
-      recordHold(dirname(slot), Date.now() - since, { at: since, lane: laneOf(cwd), kind: 'test', load });
+      recordHold(dirname(slot), Date.now() - since, { at: since, lane: laneOf(cwd), kind, load });
     },
   };
 }
@@ -1598,10 +1610,12 @@ export function runPreflight(
   /** The saved paths base to head (null: unknown). Given, a static failure blocks only when it is the
    * change's (src/agent-preflight-static.ts); omitted, every static failure blocks. */
   changed?: string[] | null,
-  /** Hold one `nforge heavy` slot for the build and tests (c180152a). The preflight action and the
+  /** Hold one `nforge heavy` slot for the typecheck, build and tests. The preflight action and the
    * land gate's inline run set it; a fixture run inside a test (already in its runner's slot) does not. */
   options: {
     heavySlot?: boolean;
+    /** The saved source pin must still match after this run waited for its slot. */
+    afterHeavyWait?: () => void;
     quick?: boolean;
     /** This head's static results from the run just before: kept, not run again (land's quick run). */
     staticDone?: NonNullable<PreflightReceipt['static']>;
@@ -1649,7 +1663,18 @@ export function runPreflight(
   };
   // Browser test files that did not run their browser (not installed here, or a skip): NOT COMPLETE.
   const needsBrowser: string[] = [];
-  let heavy: HeldHeavySlot | null = null;
+  let heavy: HeldHeavySlot | null | undefined;
+  let heavyKind: PreflightHeavyKind = 'typecheck';
+  const heavyEnv = (kind: PreflightHeavyKind) => {
+    const env = cleanEnv();
+    if (options.heavySlot && heavy === undefined) {
+      heavy = holdHeavySlot(root, env);
+      if (heavy?.waited) options.afterHeavyWait?.();
+      if (heavy) Object.assign(env, heavy.env);
+    }
+    heavyKind = kind;
+    return env;
+  };
   try {
     if (options.staticDone) {
       // The receipt kept every field the earlier run returned.
@@ -1661,14 +1686,14 @@ export function runPreflight(
       staticResults = runStaticChecks(
         root,
         checks.filter(check => !isTypecheck(check)),
-        cleanEnv(),
+        check => (isTypecheckCommand(check) ? heavyEnv('typecheck') : cleanEnv()),
         undefined,
         scope,
       );
       // The typecheck script's compiler steps (fix 6): only those whose program holds a changed path.
       const typechecks = checks.filter(isTypecheck);
       if (typechecks.length) {
-        const env = typecheckEnv(root, cleanEnv());
+        const env = typecheckEnv(root, heavyEnv('typecheck'));
         const narrowed = selectTypechecks(root, typechecks, changed, env, command =>
           runTypecheckSetup(root, command, env, STATIC_CHECK_TIMEOUT_MS),
         );
@@ -1682,10 +1707,8 @@ export function runPreflight(
       if (staticResults.some(result => result.outcome === 'failed')) exitCode = 1;
     }
     if (!staticOnly && plan.tests.length && exitCode === 0) {
-      // The build and tests count against the machine-wide `nforge heavy` limit (c180152a); their own
-      // nested `nforge heavy` calls inherit this lease instead of waiting for a second slot.
-      heavy = options.heavySlot ? holdHeavySlot(root, cleanEnv()) : null;
-      if (heavy) Object.assign(cleanEnv(), heavy.env);
+      // Keep the typecheck's lease if one was needed so this preflight waits at most once.
+      const buildAndTestEnv = heavyEnv('test');
       // Only Forge's own Node layout (no project runner) builds first; another project's script of
       // that name is not Forge's to run, and its runner builds what it needs.
       const scripts = (() => {
@@ -1704,7 +1727,7 @@ export function runPreflight(
         const buildStarted = Date.now();
         const build = spawnSync('npm', ['run', '-s', 'build:core'], {
           cwd: root,
-          env: cleanEnv(),
+          env: buildAndTestEnv,
           stdio: ['ignore', 2, 2],
         });
         exitCode = build.status;
@@ -1715,7 +1738,7 @@ export function runPreflight(
       if (exitCode === 0) {
         // The clean environment also drops a surrounding test runner's protocol variable
         // (NODE_TEST_CONTEXT), which would swallow this run's own exit code.
-        const env = { ...cleanEnv() };
+        const env = { ...buildAndTestEnv };
         const directory = mkdtempSync(join(tmpdir(), 'forge-preflight-'));
         // Every group shares one compiled-module cache, removed with the directory (Item dceb1bef).
         // The clean environment never carries an outer one, so this preflight always owns it.
@@ -1924,7 +1947,7 @@ export function runPreflight(
       }
     }
   } finally {
-    heavy?.release();
+    heavy?.release(heavyKind);
     clean?.dispose();
   }
   if (!environment && missingPrograms.length)
@@ -1984,15 +2007,18 @@ export function runPreflight(
           ...(needsBrowser.length ? { needs: { ...NEEDS_CHROMIUM, files: [...needsBrowser].sort() } } : {}),
         })
       : undefined;
+  // When a quick landing stops at its static gate, retain the static-only failure receipt.
+  const receiptStaticOnly =
+    staticOnly || (options.quick === true && staticResults.some(result => result.outcome === 'failed'));
   const receipt: PreflightReceipt = {
     schema: 1,
     laneId,
     head,
     ...(tree ? { tree } : {}),
-    tests: staticOnly ? 0 : plan.tests.length - skipped,
-    ...(staticOnly ? { staticOnly: true as const } : {}),
-    ...(options.quick && !staticOnly ? { quick: true as const } : {}),
-    ...(!staticOnly && evidence && tree === sourceTree(evidence.files)
+    tests: receiptStaticOnly ? 0 : plan.tests.length - skipped,
+    ...(receiptStaticOnly ? { staticOnly: true as const } : {}),
+    ...(options.quick && !receiptStaticOnly ? { quick: true as const } : {}),
+    ...(!receiptStaticOnly && evidence && tree === sourceTree(evidence.files)
       ? {
           evidence: writePreflightEvidence(root, {
             ...evidence,
@@ -2000,17 +2026,20 @@ export function runPreflight(
           }),
         }
       : {}),
-    ...(!staticOnly && !(evidence && tree === sourceTree(evidence.files)) && plan.tests.length
+    ...(!receiptStaticOnly && !(evidence && tree === sourceTree(evidence.files)) && plan.tests.length
       ? (() => {
           const ran = ranEvidence([...passedTests, ...(plan.reusedTests ?? [])]);
           return ran === undefined ? {} : { ran };
         })()
       : {}),
-    ...(!staticOnly && plan.reusedTests?.length
+    ...(!receiptStaticOnly && plan.reusedTests?.length
       ? { reusedTests: plan.reusedTests.length, reusedFrom: plan.reusedFrom }
       : {}),
-    ...(plan.deferredTests?.length || skipped || (staticOnly && plan.tests.length)
-      ? { deferredTests: (plan.deferredTests?.length ?? 0) + skipped + (staticOnly ? plan.tests.length : 0) }
+    ...(plan.deferredTests?.length || skipped || (receiptStaticOnly && plan.tests.length)
+      ? {
+          deferredTests:
+            (plan.deferredTests?.length ?? 0) + skipped + (receiptStaticOnly ? plan.tests.length : 0),
+        }
       : {}),
     ...(notRun.length ? { stoppedForTime: notRun.length, stopped: notRun, stoppedRerun } : {}),
     ...(skippedFiles.length ? { skipped: skippedFiles } : {}),
@@ -2026,7 +2055,7 @@ export function runPreflight(
           ...(plan.deferredTests?.length || skipped ? { deferredTo: plan.local.deferredTo } : {}),
         }
       : {}),
-    ...(!staticOnly && plan.tests.length
+    ...(!receiptStaticOnly && plan.tests.length
       ? {
           ceiling: {
             seconds: ceilingMs / 1000,

@@ -2,14 +2,17 @@
 import { assertCommandWeight } from '../scripts/agent-weight.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { once } from 'node:events';
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { submitHostedLand } from '../dist/hosted-land-cli.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { finishGates } from '../dist/agent-default-gates.js';
+import { tryHeavySlot } from '../dist/heavy-slots.js';
 import {
   preflightRuntime,
   readPreflightReceipt,
@@ -44,6 +47,63 @@ async function fixture(t, policy = 'require', reader = common['tests/docs.test.m
   };
   return s;
 }
+
+test('7008ff18: preflight refuses an edit made while it queued before any typecheck runs', async t => {
+  const s = await fixture(t, 'require', undefined, {
+    'forge.json': JSON.stringify({
+      preflight: { static: [{ name: 'typecheck', command: ['node', 'check-type.mjs'] }] },
+    }),
+    'check-type.mjs':
+      "import { writeFileSync } from 'node:fs'; writeFileSync('../typecheck-started', 'ran');",
+  });
+  const slots = `${s.root}-slots`;
+  const settings = `${s.root}-settings.json`;
+  writeFileSync(settings, JSON.stringify({ localHeavySlots: 1 }));
+  for (const [key, value] of [
+    ['FORGE_HEAVY_DIR', slots],
+    ['FORGE_CLIENT_SETTINGS', settings],
+  ]) {
+    const prior = process.env[key];
+    process.env[key] = value;
+    t.after(() => (prior === undefined ? delete process.env[key] : (process.env[key] = prior)));
+  }
+  const held = tryHeavySlot(slots, 1);
+  assert.ok(held);
+  const editor = spawn(
+    process.execPath,
+    [
+      '-e',
+      `const { readdirSync, rmSync, watch, writeFileSync } = require('node:fs');
+      const [slots, held, file] = process.argv.slice(1);
+      const watcher = watch(slots, () => {
+        if (!readdirSync(slots).some(name => name.startsWith('q-'))) return;
+        watcher.close();
+        writeFileSync(file, 'edited while queued\\n');
+        rmSync(held, { recursive: true });
+      });
+      process.stdout.write('ready');`,
+      slots,
+      held,
+      join(s.root, 'README.md'),
+    ],
+    { stdio: ['ignore', 'pipe', 'inherit'] },
+  );
+  t.after(() => editor.kill());
+  const exited = once(editor, 'exit');
+  await once(editor.stdout, 'data');
+  await assert.rejects(s.transport().dispatch('preflight', { laneId: s.lane.laneId, run: true }), error => {
+    assert.equal(error.code, 'LANE_DIRTY');
+    assert.match(error.message, /changed while preflight waited for a heavy slot/);
+    return true;
+  });
+  assert.deepEqual(await exited, [0, null]);
+  assert.equal(existsSync(join(s.root, '..', 'typecheck-started')), false);
+  assert.equal(readPreflightReceipt(s.root, s.lane.laneId), null);
+  assert.deepEqual(
+    readdirSync(slots).filter(name => /^\d+$/.test(name)),
+    [],
+  );
+});
 
 test('incident e0cedfb5: one land --save lands a one-file docs change after inline preflight, preserving operationId and call budget', async t => {
   const calls = [];

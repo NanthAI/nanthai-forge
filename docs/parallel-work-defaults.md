@@ -95,7 +95,8 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 ### localHeavySlots
 
 - `nforge heavy CMD [ARGS...]` runs one heavy local command (build, typecheck, lint, tests). It
-  waits for a free slot, which every Lane and agent on the machine shares. A leading `--`
+  waits for a free slot, including for commands the project declares as static. Every Lane and
+  agent on the machine shares the slots. A leading `--`
   (`nforge heavy -- CMD`) ends heavy's own options.
 - Slots are granted first come, first served. A caller that finds anyone waiting joins the back of
   the queue (one small ticket file per waiter); only the caller at the front tries the slots, so a
@@ -124,7 +125,7 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
     read-only temp folder costs the test cap, never the slot.
   - Go tools (the native TypeScript checker, esbuild) get `GOMAXPROCS=N` and Rust tools using
     rayon (oxlint) get `RAYON_NUM_THREADS=N`, unless the command already sets them.
-  - Preflight's own slot gives its build and tests the same variables (so its tests see a
+  - Preflight's own slot gives its typechecks, build and tests the same variables (so its tests see a
     `NODE_OPTIONS` preload the landing check's do not); its tests run `--test-concurrency=1`.
   - The full `npm test` is the landing check's.
 - A `node --test` that leaves out a preload the project's own `test` script passes (`--import`,
@@ -136,11 +137,10 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   OS temp folder) unless one is already set, and removes it when the command ends: every test file
   the command runs reuses modules earlier files compiled. Preflight does the same for all its
   groups ([module cache](development.md)).
-- Preflight takes a slot itself for its build and tests (c180152a): `nforge agent . preflight`
-  waits for one like any heavy command, and its build and tests inherit it, so their own
-  `nforge heavy` calls reuse it. Wrapped in `nforge heavy`, it reuses that slot instead of taking a
-  second one. Its tests run `--test-concurrency=1`, one group at a time, under the cap. A preflight
-  that a test runs on a fixture takes no slot (the test already runs in one).
+- Preflight takes one slot for its typechecks, build and tests. A typecheck-only preflight takes
+  the same slot and records a typecheck hold. Nested `nforge heavy` and preflight commands reuse a
+  live parent slot. Preflight's tests run `--test-concurrency=1`, one group at a time, under the cap.
+  A preflight that a test runs on a fixture takes no slot (the test already runs in one).
 - A slot is never held by a command nobody waits for. A signal to heavy (an agent run ending, Ctrl-C)
   reaches the command; one that has not exited 10 s later is killed and the slot freed. A command
   still running after `localHeavyMaxMinutes` is stopped by its own heavy (exit 124). A holder that

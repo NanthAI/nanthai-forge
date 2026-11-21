@@ -25,12 +25,26 @@ const LARGE_FILE = 256 * 1024 * 1024;
  * `refresh` (a command working in this Lane), a clean pass also refreshes racy stat-index entries,
  * as Git status does, so files installed or saved inside the racy window are read once more, not on
  * every check. Housekeeping probes leave it off: they write nothing, so they never look like use. */
-export function hostedLaneDirty(root: string, options: { refresh?: boolean } = {}): boolean {
+export function hostedLaneDirty(
+  root: string,
+  {
+    refresh,
+    selection,
+  }: {
+    refresh?: boolean;
+    selection?: Pick<HostedLaneCheckoutMarker['selection'], 'laneId' | 'head'>;
+  } = {},
+): boolean {
   try {
     if (deltaApplyPending(root)) return true;
     const marker = readHostedLaneCheckout(root);
-    if (!marker) return true;
-    return laneChanges(root, marker, { ...options, limit: 1 }).length > 0;
+    if (
+      !marker ||
+      (selection &&
+        (marker.selection.laneId !== selection.laneId || marker.selection.head !== selection.head))
+    )
+      return true;
+    return laneChanges(root, marker, { ...(refresh === undefined ? {} : { refresh }), limit: 1 }).length > 0;
   } catch {
     return true;
   }

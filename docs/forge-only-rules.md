@@ -139,7 +139,6 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/explicit-test-runner.ts` | `package-json-config` | 2 | the project test runner declaration (any-ecosystem slice F, e89be958) | after F: a neutral root file |
 | `src/heavy-build.ts` | `package-json-config` | 1 | Forge's own CLI build | not used |
 | `src/heavy-test-preloads.ts` | `package-json-config` | 1 | reads the project's own `test` script to name preloads a focused run skips | the same notice for any project with a `test` script |
-| `src/heavy-slots.ts` | `package-json-config` | 1 | reads the optional package fallback for declared static checks through the common project-config reader | every ecosystem can declare static commands in forge.json |
 | `src/hosted-mac-execute.ts` | `package-json-config` | 1 | the project test runner declaration for union tests (any-ecosystem slice F, e89be958) | after F: a neutral root file |
 | `src/integration-preview-checks.ts` | `package-json-config` | 2 | native integration previews infer static checks from package.json scripts (audit 875a57cc finding 14) | explicitly marked static checks |
 | `src/intent-contract-selection.ts` | `package-json-config` | 2 | the project test runner declaration (any-ecosystem slice F, e89be958) | after F: a neutral root file |

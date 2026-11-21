@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { availableParallelism, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { acquireHeavySlot, heavyStatus, tryHeavySlot, wakeHeavyWaiters } from '../dist/heavy-slots.js';
@@ -232,9 +232,14 @@ test('friction 25f56c0a: nforge settings localHeavySlots wakes a queued nforge h
   assert(existsSync(held), 'the waiter ran in the new slot, not after a release');
 });
 
-function heavyProcess(directory, args, settings) {
+function heavyProcess(directory, args, settings, cwd) {
+  const env = { ...process.env, FORGE_HEAVY_DIR: directory, FORGE_CLIENT_SETTINGS: settings };
+  delete env.FORGE_HEAVY_TEST_CONCURRENCY;
+  delete env.GOMAXPROCS;
+  delete env.RAYON_NUM_THREADS;
   const child = spawn(process.execPath, [cli, 'heavy', ...args], {
-    env: { ...process.env, FORGE_HEAVY_DIR: directory, FORGE_CLIENT_SETTINGS: settings },
+    cwd,
+    env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const result = { stdout: '', stderr: '', exited: new Promise(done => child.once('exit', done)), child };
@@ -311,36 +316,28 @@ test('incident b30c3e35: nested heavy reuses one live parent slot and leaves its
   assert.deepEqual(slotFiles(directory), [], 'parent releases its lease');
 });
 
-test('incident 8a2f17df: static checks declared in forge.json or the package fallback run while the heavy slot is occupied', async t => {
+test('incident 7008ff18: a project-declared static command waits for a slot and gets its cap', async t => {
   const directory = isolated(t),
     settings = join(directory, 'settings.json');
   writeFileSync(settings, JSON.stringify({ localHeavySlots: 1 }));
   const held = tryHeavySlot(directory, 1);
-  const command = [process.execPath, '-e', 'process.stdout.write("static")'];
-  writeFileSync(
-    join(directory, 'package.json'),
-    JSON.stringify({
-      scripts: { check: `node -e "process.stdout.write('static')"` },
-      forge: { preflight: { static: [{ command }, { script: 'check' }] } },
-    }),
-  );
-  const run = async args => {
-    const child = spawn(process.execPath, [cli, 'heavy', ...args], {
-      cwd: directory,
-      env: { ...process.env, FORGE_HEAVY_DIR: directory, FORGE_CLIENT_SETTINGS: settings },
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 15_000,
-    });
-    t.after(() => child.kill());
-    let output = '';
-    child.stdout.on('data', data => (output += data));
-    assert.equal(await new Promise(done => child.once('exit', done)), 0, args.join(' '));
-    assert.equal(output, 'static');
-    assert(existsSync(held), 'unrelated holder stays claimed');
-  };
-  for (const args of [command, ['npm', 'run', '-s', 'check'], ['npm', 'run', '--silent', 'check']])
-    await run(args);
-  rmSync(join(directory, 'package.json'));
+  assert.ok(held);
+  const command = [
+    process.execPath,
+    '-e',
+    `process.stdout.write(JSON.stringify({parent: JSON.parse(process.env.FORGE_HEAVY_PARENT || "null"),
+      capped: Number(process.env.GOMAXPROCS) === ${availableParallelism()}}))`,
+  ];
   writeFileSync(join(directory, 'forge.json'), JSON.stringify({ preflight: { static: [{ command }] } }));
-  await run(command);
+  const run = heavyProcess(directory, command, settings, directory);
+  t.after(() => run.child.kill());
+  await until(() => queuedNames(directory).length > 0 || run.stdout.length > 0);
+  assert.equal(run.stdout, '', 'the command could not start while the slot was occupied');
+  assert.equal(queuedNames(directory).length, 1);
+  rmSync(held, { recursive: true });
+  assert.equal(await run.exited, 0, run.stderr);
+  const seen = JSON.parse(run.stdout);
+  assert.equal(seen.parent?.pid, run.child.pid);
+  assert.equal(seen.capped, true);
+  assert.deepEqual(slotFiles(directory), []);
 });

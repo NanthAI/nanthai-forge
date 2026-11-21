@@ -153,6 +153,21 @@ export function typecheckChecks(
 export const isTypecheck = <T extends { typecheck?: TypecheckStep | undefined }>(
   check: T,
 ): check is T & { typecheck: TypecheckStep } => check.typecheck !== undefined;
+
+/** A declared compiler command or a conventional typecheck script, kept in its declared order. */
+export function isTypecheckCommand(check: StaticCheck): boolean {
+  const [program, action, first, second] = check.command;
+  const script = first === '-s' || first === '--silent' ? second : first;
+  return (
+    TYPECHECK_SCRIPTS.includes(check.name) ||
+    compilerProject(check.command) !== undefined ||
+    (action === 'run' &&
+      /(?:^|[\\/])(?:npm|pnpm|yarn|bun)(?:\.cmd)?$/i.test(program ?? '') &&
+      script !== undefined &&
+      TYPECHECK_SCRIPTS.includes(script))
+  );
+}
+
 type Step = { name: string; command: string[]; typecheck: TypecheckStep };
 
 /** ENV with the project's own bin folder first on PATH, as its package scripts run (`tsc` alone). */
