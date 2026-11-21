@@ -1,20 +1,26 @@
 # Contract suites
 
 A fake of an outside system is only as good as its match with the real system. Each such fake
-has a contract suite in `tests/contracts/<system>.contract.test.mjs`. Every case is written once
-and runs twice: against the fake, and against the real system. A fake helper names its suite on
+has a contract suite in `tests/contracts/<system>.contract.test.mjs`. Each case runs
+against the real system and each fake that implements the behavior. A fake helper names its suite on
 its second line (`// contract: tests/contracts/<system>.contract.test.mjs`). The audit that set
 this up is in [test doubles audit](../research/test-doubles-audit.md#contract-suites-one-per-outside-system).
 
 | Suite | Fake it checks | Real target | Cases |
 | --- | --- | --- | --- |
-| `r2` | `tests/fake-r2.mjs` | R2 test bucket | create-only PUT (412 on repeat), sha256 mismatch (400), HEAD length and checksum, missing HEAD, GET and `Range` (206), missing GET (404), expired and tampered signatures (403), 100-key list pages and continuation, DELETE and repeat DELETE |
+| `r2` | `tests/default-r2.mjs`, `tests/fake-r2.mjs` | R2 test bucket | create-only PUT (412 on repeat), HEAD length and checksum, missing HEAD, GET and `Range` (206), missing GET (404), 100-key list pages with byte totals and continuation, DELETE and repeat DELETE |
 | `github` | `tests/github-api-fake.mjs` (also used by `hosted-github-mirror-retry`) | Public scratch repository with the contract GitHub App | contents-read token cannot write (403), contents-only token cannot touch `.github/workflows/` (403, incident 708b6943), workflows token can, fast-forward ref update, non-fast-forward refusal (422), refusal text keeps rate-limit diagnostics and never the token |
 
-Production code runs on both sides: the R2 suite signs with `convex/r2.ts` and lists with
-`convex/r2Operations.ts`; the GitHub suite mints tokens with `convex/githubAppToken.ts` and calls
-GitHub through `src/hosted-github-api.ts`. When the two sides disagree, fix the fake (or the
-production code), never the case.
+The R2 suite installs the default fake's in-memory route for its five storage cases so it can run
+even when the test preload leaves existing R2 settings in place. The HTTP fake and the real bucket
+also run the two request validation cases:
+checksum mismatch (400), and expired or tampered signatures (403). The default fake adds no
+live R2 requests.
+
+All targets run the production client code. The R2 suite signs with `convex/r2.ts` and lists with
+`convex/r2Operations.ts`. The GitHub suite mints tokens with `convex/githubAppToken.ts` and calls
+GitHub through `src/hosted-github-api.ts`. When a contract fails, fix the fake or the production
+code.
 
 ## Running
 

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+// contract: tests/contracts/r2.contract.test.mjs
 // Forge has no Convex byte mode, so every test process gets R2 settings and an in-memory
 // bucket behind them. It stores what is PUT and answers HEAD/GET/DELETE like R2, without
 // checking signatures; tests of R2 behaviour itself use the stricter fake-r2.mjs.
@@ -29,7 +30,12 @@ function list(url) {
     truncated = keys.length > page.length;
   return new Response(
     `<ListBucketResult><IsTruncated>${truncated}</IsTruncated>` +
-      page.map(key => `<Contents><Key>${encodeURIComponent(key)}</Key></Contents>`).join('') +
+      page
+        .map(key => {
+          const size = defaultR2Objects.get(`${bucket}/${key}`).length;
+          return `<Contents><Key>${encodeURIComponent(key)}</Key><Size>${size}</Size></Contents>`;
+        })
+        .join('') +
       (truncated ? `<NextContinuationToken>${page.at(-1)}</NextContinuationToken>` : '') +
       '</ListBucketResult>',
     { status: 200, headers: { 'content-type': 'application/xml' } },
@@ -46,15 +52,21 @@ export function interceptDefaultR2(handler) {
 }
 
 export function installDefaultR2() {
+  const { accountId, bucket, accessKeyId, secretAccessKey } = defaultR2Config;
   const env = {
-    R2_ACCOUNT_ID: defaultR2Config.accountId,
-    R2_BUCKET: defaultR2Config.bucket,
-    R2_ACCESS_KEY_ID: defaultR2Config.accessKeyId,
-    R2_SECRET_ACCESS_KEY: defaultR2Config.secretAccessKey,
+    R2_ACCOUNT_ID: accountId,
+    R2_BUCKET: bucket,
+    R2_ACCESS_KEY_ID: accessKeyId,
+    R2_SECRET_ACCESS_KEY: secretAccessKey,
   };
   // A test that sets its own settings (or none) keeps them.
   if (Object.keys(env).some(name => process.env[name] !== undefined)) return;
   Object.assign(process.env, env);
+  installDefaultR2Fetch();
+}
+
+/** Install the in-memory route without changing the caller's R2 environment. */
+export function installDefaultR2Fetch() {
   const serve = async (input, init = {}) => {
     const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
     if ((init.method ?? 'GET').toUpperCase() === 'GET' && url.searchParams.get('list-type') === '2')
@@ -98,6 +110,9 @@ export function installDefaultR2() {
     const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
     if (url.host !== host) return base(input, init);
     return interceptor ? interceptor(input, init, serve) : serve(input, init);
+  };
+  return () => {
+    globalThis.fetch = base;
   };
 }
 

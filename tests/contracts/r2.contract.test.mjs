@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Contract: the R2 behaviour tests/fake-r2.mjs promises is what
-// real R2 does. Every case runs against the fake, and against a real test bucket when the
+// Contract: both R2 fakes share storage cases with the real test bucket. Upload validation
+// and signature checks exercise the HTTP fake and the real bucket. The real cases run when
 // CONTRACT_R2_* settings are present (the nightly contract workflow). Production signing and
 // request code runs on both sides: convex/r2.ts and convex/r2Operations.ts.
 // Real cost per run: about 115 class A and 15 class B operations on a bucket that expires
@@ -9,6 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { moduleUrl } from '../convex-module.mjs';
+import { defaultR2Config, installDefaultR2Fetch } from '../default-r2.mjs';
 import { startFakeR2, fakeR2Config } from '../fake-r2.mjs';
 import { contractTargets } from './targets.mjs';
 
@@ -56,11 +57,15 @@ const targets = contractTargets(
           accessKeyId: env.CONTRACT_R2_ACCESS_KEY_ID,
           secretAccessKey: env.CONTRACT_R2_SECRET_ACCESS_KEY,
         },
-        close: async () => {},
       };
     },
   },
 );
+targets.push({
+  name: 'default fake',
+  open: () => ({ config: defaultR2Config, close: installDefaultR2Fetch() }),
+  validatesRequests: false,
+});
 
 for (const target of targets) {
   test(`R2 contract (${target.name})`, { skip: target.skip }, async t => {
@@ -75,7 +80,7 @@ for (const target of targets) {
     };
     t.after(async () => {
       for (const name of written) await deleteR2Object(config, name).catch(() => {});
-      await close();
+      await close?.();
     });
 
     await t.test(
@@ -88,16 +93,17 @@ for (const target of targets) {
       },
     );
 
-    await t.test(
-      'a body that does not match the signed sha256 is refused with 400 and stores nothing',
-      async () => {
-        const value = object('contract bytes A'),
-          other = object('contract bytes B'),
-          name = key('bad-digest');
-        assert.equal(await status(await put(config, name, value, other)), 400);
-        assert.deepEqual(await headObject(config, name), { status: 'missing' });
-      },
-    );
+    if (target.validatesRequests !== false)
+      await t.test(
+        'a body that does not match the signed sha256 is refused with 400 and stores nothing',
+        async () => {
+          const value = object('contract bytes A'),
+            other = object('contract bytes B'),
+            name = key('bad-digest');
+          assert.equal(await status(await put(config, name, value, other)), 400);
+          assert.deepEqual(await headObject(config, name), { status: 'missing' });
+        },
+      );
 
     await t.test('HEAD reports the stored length and the sha256 checksum the PUT signed', async () => {
       const value = object('contract head bytes'),
@@ -125,26 +131,34 @@ for (const target of targets) {
       assert.equal(await status(await fetch(await presignGet(config, key('missing-get')))), 404);
     });
 
-    await t.test('an expired presigned URL and a tampered signature are both refused with 403', async () => {
-      const value = object('contract signature bytes'),
-        name = key('signature');
-      assert.equal(await status(await put(config, name, value)), 200);
-      const { endpoint = { scheme: 'https', host: `${config.accountId}.r2.cloudflarestorage.com` } } = config;
-      const expired = await presign({
-        method: 'GET',
-        ...endpoint,
-        path: `/${config.bucket}/${name}`,
-        accessKeyId: config.accessKeyId,
-        secretAccessKey: config.secretAccessKey,
-        expires: 60,
-        now: new Date(Date.now() - 10 * 60_000),
-      });
-      assert.equal(await status(await fetch(expired)), 403);
-      const url = new URL(await presignGet(config, name)),
-        signature = url.searchParams.get('X-Amz-Signature');
-      url.searchParams.set('X-Amz-Signature', (signature.startsWith('0') ? '1' : '0') + signature.slice(1));
-      assert.equal(await status(await fetch(url)), 403);
-    });
+    if (target.validatesRequests !== false)
+      await t.test(
+        'an expired presigned URL and a tampered signature are both refused with 403',
+        async () => {
+          const value = object('contract signature bytes'),
+            name = key('signature');
+          assert.equal(await status(await put(config, name, value)), 200);
+          const { endpoint = { scheme: 'https', host: `${config.accountId}.r2.cloudflarestorage.com` } } =
+            config;
+          const expired = await presign({
+            method: 'GET',
+            ...endpoint,
+            path: `/${config.bucket}/${name}`,
+            accessKeyId: config.accessKeyId,
+            secretAccessKey: config.secretAccessKey,
+            expires: 60,
+            now: new Date(Date.now() - 10 * 60_000),
+          });
+          assert.equal(await status(await fetch(expired)), 403);
+          const url = new URL(await presignGet(config, name)),
+            signature = url.searchParams.get('X-Amz-Signature');
+          url.searchParams.set(
+            'X-Amz-Signature',
+            (signature.startsWith('0') ? '1' : '0') + signature.slice(1),
+          );
+          assert.equal(await status(await fetch(url)), 403);
+        },
+      );
 
     await t.test(
       'listing pages 100 keys at a time and its continuation cursor reaches every key once',
@@ -160,10 +174,12 @@ for (const target of targets) {
           );
         const first = await listR2Prefix(config, `${prefix}list/`, null);
         assert.equal(first.keys.length, 100);
+        assert.equal(first.bytes, 290); // 10 two-byte objects, followed by 90 three-byte objects.
         assert.equal(first.isDone, false);
         assert.ok(first.cursor);
         const second = await listR2Prefix(config, `${prefix}list/`, first.cursor);
         assert.equal(second.isDone, true);
+        assert.equal(second.bytes, 4);
         assert.deepEqual([...first.keys, ...second.keys].sort(), names.sort());
       },
     );
