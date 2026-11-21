@@ -7,3 +7,9 @@ it, so fresh sandboxes get it on their first start. It is Automatic, with a
 Files main's own red audit fails are never learned as a Lane's, even when a
 check pinned to the last red head ends after recovery. When a plan is over `preflightMaxMinutes`, `land --save` still runs the top of the run order
 for 90 s and refuses on a failure.
+
+An inline budget overrun returns `PREFLIGHT_BUDGET_EXCEEDED` with its continuation
+and the exact replay. If a running quick group hits the cap, replay reuses its
+receipt and leaves the remaining tests to the hosted check.
+Preflight surfaces hosted secret scanner findings early when it can verify
+changed saved files against observed main.

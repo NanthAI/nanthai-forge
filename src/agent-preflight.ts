@@ -1619,7 +1619,7 @@ export function runPreflight(
     /** This head's static results from the run just before: kept, not run again (land's quick run). */
     staticDone?: NonNullable<PreflightReceipt['static']>;
   } = {},
-) {
+): PreflightReceipt & { quickTimedOut?: true } {
   const started = Date.now();
   // Before anything runs: a long run must never be silent about what it is doing and why.
   process.stderr.write(
@@ -1635,6 +1635,7 @@ export function runPreflight(
   const ceiling = planCeiling(plan);
   const ceilingMs = ceiling.seconds * 1000;
   let ceilingReached = false;
+  let quickTimedOut = false;
   const failedFiles: string[] = [];
   // Units whose program is not installed here: an environment result, never a failed run.
   const missingPrograms: string[] = [];
@@ -1860,6 +1861,7 @@ export function runPreflight(
             left === null,
           );
           if (left !== null && run.errorCode === 'ETIMEDOUT') {
+            quickTimedOut = true;
             notRun.push(...group);
             process.stderr.write(
               `preflight: the quick run reached its ${budgetMs / 1000} s cap; ${group.length} file(s) left\n`,
@@ -1945,6 +1947,10 @@ export function runPreflight(
               planned += seconds;
             }
             spent += runGroup(group);
+            if (quickTimedOut) {
+              notRun.push(...queue);
+              break;
+            }
             if (ran) observed = spent / 1000 / ran;
           }
           secondsPerFile = observed;
@@ -2120,7 +2126,7 @@ export function runPreflight(
       /* Estimates never invalidate a completed run. */
     }
   }
-  return receipt;
+  return quickTimedOut ? { ...receipt, quickTimedOut: true } : receipt;
 }
 
 /** Why a run stopped at its ceiling, and how to run longer once; undefined when the ceiling did not stop it. */

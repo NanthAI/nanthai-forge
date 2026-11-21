@@ -537,10 +537,18 @@ function brief(out: Json): Json {
       ? briefSubmittedLanding(slim, out.operationId, result)
       : (slim ?? result);
   // Weakened-test flags advise the agent before review (Issue 11901a0c): never --detail only.
-  const weakenedTests = obj(result.defaults)?.weakenedTests;
+  const { weakenedTests, secretScan } = obj(result.defaults) ?? {};
   out.result = compactReplyDetail(action, {
     ...kept,
-    ...(weakenedTests !== undefined ? { defaults: { ...obj(kept.defaults), weakenedTests } } : {}),
+    ...(weakenedTests !== undefined || secretScan !== undefined
+      ? {
+          defaults: {
+            ...obj(kept.defaults),
+            ...(weakenedTests !== undefined ? { weakenedTests } : {}),
+            ...(secretScan !== undefined ? { secretScan } : {}),
+          },
+        }
+      : {}),
     ...(urgent && ['finish', 'land', 'wait', 'observe'].includes(String(action))
       ? { urgentNotApplied: urgent }
       : {}),

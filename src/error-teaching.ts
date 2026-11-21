@@ -48,6 +48,7 @@ export const teachingByCode: Record<string, Entry> = {
   CHECK_NOT_PASSED: { learn: 'check', next: land },
   SYNC_REQUIRED: { learn: 'queue', next: land },
   PREFLIGHT_REQUIRED: { learn: 'land', next: `nforge agent <root> preflight '<lane>'` },
+  PREFLIGHT_BUDGET_EXCEEDED: { learn: 'land', next: '<replay>' },
   CONFLICT_MARKERS: { learn: 'conflict' },
   CONFLICT_SIDE_REQUIRED: { learn: 'conflict' },
   LANDING_MESSAGE_TOO_LARGE: { learn: 'limits' },

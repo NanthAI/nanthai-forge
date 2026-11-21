@@ -6,6 +6,8 @@ It looks for known credential shapes (private key blocks with a key body, AWS ac
 
 A finding fails the check like a failing test: the landing stops with `CHECK_FAILED`, and the notice names the file, line, kind and a 16-character fingerprint, never the value. The fingerprint is a salted SHA-256 of path, kind and value. At most 20 findings are listed, with a count of the rest.
 
+From a Lane checkout, preflight can report the same findings early for changed saved files it can verify locally against observed main. When main has an allow file, the preview needs a locally verifiable copy within its 1 MiB file bound. The hosted check still scans the composed Candidate with the full allow file from the composition base.
+
 Remove a real credential first, and rotate it at its provider: once it reached a Lane save it may be retained.
 
 If a finding is not a secret, override it with an entry in `.forge-secret-allow.json` at the repository root: `{"allow":[{"fingerprint":"…","path":"…","reason":"…"}]}`. The notice prints the exact entry for each finding with an empty `reason`; paste it into the `allow` list and write why. An entry needs a non-empty reason and covers only that value in that path. Entries count only from main (the composition base), never from the change under check, so a change cannot allow its own finding: land the entry on its own first, then land the change. A change that adds both a finding and its matching entry still fails, and its notice says so. This file is a root file, so changing it always rechecks in full.

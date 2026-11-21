@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 1,
+  "reason": "Replace generic hosted failure for inline preflight overruns with a distinct original-operation replay result. Keep PREFLIGHT_REQUIRED for actual preflight failures and existing server refusals.",
+  "date": "2026-11-21"
+}

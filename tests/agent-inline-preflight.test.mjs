@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { existsSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { agentFixture } from './hosted-agent-fixture.mjs';
@@ -13,6 +13,10 @@ import { submitHostedLand } from '../dist/hosted-land-cli.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { finishGates } from '../dist/agent-default-gates.js';
 import { tryHeavySlot } from '../dist/heavy-slots.js';
+import { clientCacheRoot } from '../dist/root-paths.js';
+import { digest } from '../dist/hash.js';
+import { rememberConflictPaths } from '../dist/hosted-conflict-precheck.js';
+import { scanSecretPaths, SECRET_SCAN_ALLOW_FILE } from '../dist/secret-scan.js';
 import {
   preflightRuntime,
   readPreflightReceipt,
@@ -201,7 +205,7 @@ test('inline preflight exhaustion keeps the existing budget and returns the exac
   } catch (error) {
     failure = error;
   }
-  assert.equal(failure?.code, 'PREFLIGHT_REQUIRED');
+  assert.equal(failure?.code, 'PREFLIGHT_BUDGET_EXCEEDED');
   assert.match(failure.message, /exceeded its budget/);
   const receipt = readPreflightReceipt(s.root, s.lane.laneId);
   assert.equal(receipt.budgetSeconds, PREFLIGHT_LOCAL_BUDGET_SECONDS);
@@ -294,6 +298,159 @@ const staticProject = (bad, readers = 'throw') => ({
         : "import test from 'node:test'; import fs from 'node:fs'; test('document reader', () => { fs.readFileSync(new URL('../README.md', import.meta.url)); });\n",
     ]),
   ),
+});
+
+test('incident a1a8505b: a timed-out first quick group stops new groups and replays the original landing', async t => {
+  const files = staticProject(false, 'pass');
+  files['forge.json'] = JSON.stringify({
+    preflight: {
+      tests: { glob: 'tests/*.test.mjs', command: ['node', 'quick-runner.mjs', '{files}'] },
+      guards: [
+        {
+          name: 'Quick readers',
+          tests: Object.keys(files)
+            .filter(path => path.startsWith('tests/'))
+            .slice(0, 15),
+        },
+      ],
+    },
+  });
+  files['quick-runner.mjs'] = `
+    import { appendFileSync, existsSync } from 'node:fs';
+    const log = '.forge/quick-starts';
+    const first = !existsSync(log);
+    appendFileSync(log, JSON.stringify(process.argv.slice(2)) + '\\n');
+    if (first) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0); // test-signal: allow this synthetic runner blocks until the quick timeout kills it under the injected clock
+  `;
+  const s = await fixture(t, 'require', undefined, files);
+  s.caps.agentDefaults = effectiveAgentDefaults({ preflight: 'require', preflightMaxMinutes: 0 });
+  const log = join(s.root, '.forge', 'quick-starts');
+  const fixed = Date.parse('2026-01-01T00:00:00.000Z');
+  const jump = t.mock.method(Date, 'now', () => fixed + (existsSync(log) ? 101_000 : 0));
+  const command = { operationId: randomUUID(), message: 'Replay quick preflight', priority: 'normal' };
+  let replay;
+  try {
+    await assert.rejects(submitHostedLand(s.root, command, s.address, s.transport()), error => {
+      assert.equal(error.code, 'PREFLIGHT_BUDGET_EXCEEDED');
+      assert.match(error.message, /90 s budget.*Replay to submit the original landing/);
+      assert.match(error.recovery.replayCommand, /land --save/);
+      assert.equal(error.recovery.command, error.recovery.replayCommand);
+      replay = error.recovery.replay.parameters;
+      for (const [key, value] of Object.entries(command)) assert.equal(replay[key], value);
+      return true;
+    });
+  } finally {
+    jump.mock.restore();
+  }
+  assert(!s.calls.some(c => /Compose|Landing/.test(c.name)), 'the first attempt has not submitted');
+  const groups = readFileSync(log, 'utf8')
+    .trim()
+    .split('\n')
+    .map(line => JSON.parse(line));
+  assert.equal(groups.length, 1, 'no test group starts after the first one times out');
+  const receipt = readPreflightReceipt(s.root, s.lane.laneId);
+  assert.equal(receipt.tests, 0);
+  assert(receipt.stoppedForTime > groups[0].length, 'the rest of the queue is recorded as stopped');
+  // Replay must use the quick receipt even if today's gate would require the full run.
+  s.caps.agentDefaults = effectiveAgentDefaults({ preflight: 'require', preflightMaxMinutes: 10 });
+  const result = await submitHostedLand(s.root, replay, s.address, s.transport());
+  assert.equal(result.result.submission.operationId, command.operationId);
+  assert.equal(result.result.submission.phase, 'landed');
+  assert.equal(result.result.defaults.preflight.quick.ran, 0);
+  assert.deepEqual(readPreflightReceipt(s.root, s.lane.laneId), receipt);
+  assert.equal(s.calls.filter(c => c.name === 'projectHostedLanding:enqueue').length, 1);
+});
+
+test('preflight and land scan a saved resolution against the main it merged in and honor only main allowances', async t => {
+  const path = 'config.txt';
+  const other = 'extra-config.txt';
+  const token = ['gh', 'p_', 'FORGEfake0TEST1never2REAL3token4XYZ5ab'].join('');
+  const contents = Buffer.from(`Synthetic fixture\n${token}\n`);
+  const expected = scanSecretPaths([path, other], () => contents, { baseAllow: undefined });
+  assert.equal(expected.findings.length, 2);
+  const allow = JSON.stringify({
+    allow: [
+      { path, fingerprint: expected.findings[0].fingerprint, reason: 'Synthetic token for scanner test' },
+    ],
+  });
+  const prepare = async (baseAllow, proposedAllow) => {
+    const s = agentFixture(t, {
+      base: { [path]: 'before', ...(baseAllow ? { [SECRET_SCAN_ALLOW_FILE]: baseAllow } : {}) },
+      lane: {
+        [path]: contents,
+        [other]: contents,
+        ...(proposedAllow ? { [SECRET_SCAN_ALLOW_FILE]: proposedAllow } : {}),
+      },
+    });
+    s.caps.main = s.main;
+    s.caps.agentDefaults = effectiveAgentDefaults({ preflight: 'advise' });
+    await s.transport().dispatch('open', { laneId: s.lane.laneId });
+    const objects = join(clientCacheRoot(s.root), 'objects');
+    mkdirSync(objects, { recursive: true });
+    const base = s.main.head;
+    const baseState = JSON.parse(s.objects.get(base));
+    const moved = Buffer.from('Both branches changed this file');
+    const blob = digest(moved);
+    const main = Buffer.from(
+      JSON.stringify({
+        ...baseState,
+        files: baseState.files.map(file => (file.path === path ? { ...file, blob } : file)),
+      }),
+    );
+    s.main.head = digest(main);
+    s.objects.set(blob, moved);
+    s.objects.set(s.main.head, main);
+    for (const [id, bytes] of s.objects) writeFileSync(join(objects, id), bytes, { mode: 0o600 });
+    rememberConflictPaths(s.root, s.lane.laneId, [], undefined, false, undefined, {
+      head: s.main.head,
+      base,
+    });
+    return s;
+  };
+  const s = await prepare(undefined, allow);
+  const output = [];
+  let early = false;
+  const write = process.stderr.write.bind(process.stderr);
+  t.mock.method(process.stderr, 'write', (chunk, ...args) => {
+    output.push(String(chunk));
+    if (String(chunk).includes('hosted secret scanner'))
+      early = !s.calls.some(call => call.name === 'projectHostedCompose:prepare');
+    return write(chunk, ...args);
+  });
+  writeFileSync(join(s.root, path), 'unsaved clean bytes');
+  const before = s.calls.length;
+  const preflight = await s.transport().dispatch('preflight', { run: false });
+  assert.deepEqual(
+    preflight.result.secretScan?.findings,
+    expected.findings,
+    JSON.stringify({
+      plan: preflight.result.plan,
+      calls: s.calls.slice(before).map(call => call.name),
+    }),
+  );
+  assert.equal(preflight.result.secretScan.selfAllowed, 1);
+  const calls = s.calls.slice(before).map(call => call.name);
+  writeFileSync(join(s.root, path), contents);
+  const finish = await s.transport().dispatch('finish', { message: 'Synthetic scanner parity' });
+  assert.deepEqual(finish.result.defaults.secretScan, preflight.result.secretScan);
+  assert(output.some(line => line.includes(expected.findings[0].fingerprint)));
+  assert(!JSON.stringify({ preflight, finish, output }).includes(token), 'no matched value is serialized');
+  assert(early, 'the scan reports before hosted composition');
+
+  const accepted = await prepare(allow, allow);
+  // The unchanged allow file is still verifiable in the checkout when its cache blob is gone.
+  rmSync(join(clientCacheRoot(accepted.root), 'objects', digest(allow)));
+  const start = accepted.calls.length;
+  const allowed = await accepted.transport().dispatch('preflight', { run: false });
+  assert.deepEqual(
+    allowed.result.secretScan?.findings,
+    expected.findings.filter(finding => finding.path === other),
+  );
+  assert.deepEqual(
+    accepted.calls.slice(start).map(call => call.name),
+    calls,
+    'the scan makes no new calls',
+  );
 });
 
 test('incident 229147a2: over-budget land with a format error refuses locally before any hosted check', async t => {

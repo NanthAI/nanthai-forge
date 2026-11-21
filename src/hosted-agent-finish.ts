@@ -524,7 +524,10 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
       // stale pins, so the next shorthand land is new work on the folder's pins (593fc2d7).
       else if (staleBeforeCompose(session, error))
         await session.journal.retain(finishRefusedKey, () => 'WORK_STALE');
-      if (error instanceof ForgeError && code === 'PREFLIGHT_REQUIRED') {
+      if (
+        error instanceof ForgeError &&
+        (code === 'PREFLIGHT_REQUIRED' || code === 'PREFLIGHT_BUDGET_EXCEEDED')
+      ) {
         const parameters = {
           ...(input as Record<string, unknown>),
           operationId: session.journal.operationId,
@@ -535,6 +538,7 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
           `${error.message} Source is pinned to this operation. If source is unchanged, replay: ${replayCommand}. If you edit or save different source after this pre-submit refusal, run land --save with the same options and a fresh operationId; replaying this id keeps the original source pins.`,
           undefined,
           {
+            ...(code === 'PREFLIGHT_BUDGET_EXCEEDED' ? { command: replayCommand } : {}),
             ...error.recovery,
             operationId: session.journal.operationId,
             replayCommand,

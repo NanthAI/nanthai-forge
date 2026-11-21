@@ -47,6 +47,7 @@ export function finishGates(
   lane: { laneId: string; head: string; tree?: string },
   advice: Advice | undefined,
   runRequired: boolean | (() => void) = false,
+  replayBudgetRefusal = false,
 ) {
   const advisories: Record<string, unknown> = {};
   if (!defaults) return advisories;
@@ -135,12 +136,17 @@ export function finishGates(
               ),
             )
           : Infinity;
+      // A replay may price the same head differently. Honor the quick receipt that already
+      // exhausted its budget on this operation, even if the new estimate would require a full run.
+      let quick = sameSource && receipt?.quick && defaults.preflight === 'require' ? receipt : null;
+      const replayQuick = replayBudgetRefusal && Boolean(quick);
       const requireTests =
         plan.status === 'planned' &&
         plan.tests.length > 0 &&
         defaults.preflight === 'require' &&
         gateMinutes <= defaults.preflightMaxMinutes &&
-        !plan.advisory;
+        !plan.advisory &&
+        !replayQuick;
       const staticPlan =
         plan.status === 'planned'
           ? plan
@@ -155,7 +161,6 @@ export function finishGates(
       // Over-budget landings run one quick preflight with static checks, so its typechecks and
       // tests can share a slot. Only under require: a quick failure cached before a switch to advise
       // refuses nothing.
-      let quick = sameSource && receipt?.quick && defaults.preflight === 'require' ? receipt : null;
       // Not when this head already has a full run (it failed: its advice stands), nor for a plan with
       // no local wall-time budget (a package-graph plan, trim:false), which only the ceiling bounds.
       if (
@@ -176,7 +181,7 @@ export function finishGates(
           receipt?.laneId === lane.laneId && receipt.head === lane.head ? receipt.static : undefined;
         // The plan land just made, in its run order, with only the budget cut: re-planning would cost
         // as much again (about 12 s on Forge itself) for the same head.
-        receipt = quick = runPreflight(
+        const result = runPreflight(
           root,
           lane.laneId,
           lane.head,
@@ -186,6 +191,12 @@ export function finishGates(
           changed,
           { ...heavyOptions, quick: true, ...(staticDone ? { staticDone } : {}) },
         );
+        receipt = quick = result;
+        if (result.quickTimedOut)
+          throw new ForgeError(
+            'PREFLIGHT_BUDGET_EXCEEDED',
+            `Inline quick preflight reached its ${result.budgetSeconds ?? LAND_QUICK_SECONDS} s budget for saved head ${lane.head.slice(0, 12)}. Its result is recorded. Replay to submit the original landing with the remaining tests left to the hosted check.`,
+          );
       } else if (
         runRequired &&
         !requireTests &&
@@ -272,14 +283,15 @@ export function finishGates(
             );
             refuseStaticFailure(result);
             const next = result.incomplete?.finish ?? result.stoppedRerun ?? run;
+            const failed = preflightOutcome(result) === 'failed';
             if (
-              preflightOutcome(result) === 'failed' ||
+              failed ||
               result.stoppedForTime ||
               result.static?.some(check => check.outcome === 'timed-out')
             )
               throw new ForgeError(
-                'PREFLIGHT_REQUIRED',
-                `Inline preflight ${preflightOutcome(result) === 'failed' ? 'failed' : 'exceeded its budget'} for saved head ${lane.head.slice(0, 12)}.${result.failure ? ` ${result.failure.excerpt}` : ''} Continue with: ${next}. Then replay the same land operation.`,
+                failed ? 'PREFLIGHT_REQUIRED' : 'PREFLIGHT_BUDGET_EXCEEDED',
+                `Inline preflight ${failed ? 'failed' : 'exceeded its budget'} for saved head ${lane.head.slice(0, 12)}.${result.failure ? ` ${result.failure.excerpt}` : ''} Continue with: ${next}. Then replay the same land operation.`,
                 undefined,
                 { command: next },
               );
@@ -297,9 +309,11 @@ export function finishGates(
           ...(quick ? { quick: quickSummary(quick, plan.tests.length) } : {}),
           ...(plan.advisory
             ? { reason: plan.advisory }
-            : defaults.preflight === 'require'
-              ? { reason: `over ${defaults.preflightMaxMinutes} min` }
-              : {}),
+            : replayQuick
+              ? { reason: 'inline quick preflight reached its local budget' }
+              : defaults.preflight === 'require'
+                ? { reason: `over ${defaults.preflightMaxMinutes} min` }
+                : {}),
         };
       } else if (plan.deferredTests?.length) {
         advisories.preflight = {

@@ -37,7 +37,7 @@ NOT_FOUND names what was looked up: run from the Lane root start printed, or pas
 - NOTHING_TO_LAND: the Lane equals its base; save first.
 - After a failed check: land --save with "retry":true,"reason":"flake"|"main-moved"|"infra"|"other" (next.retryReason).
 - LANDED is acceptance; CHECK PASSED is not. Fix in the same Lane and land again; never abandon and re-create it.
-- Required preflight runs inline in its local budget; PREFLIGHT_REQUIRED names the command, then replay the same land.
+- Inline preflight failure or budget exhaustion gives recovery and the original land replay.
 - Local preflight tests stop at a 600 s ceiling (the rest goes to the landing check); preflight {budgetSeconds} above 600 raises it for one run.
 More: help wait, help conflict, help check, help overlap.`,
   },

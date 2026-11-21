@@ -779,10 +779,15 @@ with nothing to answer ([exact conflicts at save](agents/workflow.md#exact-confl
 
 ### Server enforcement of preflight
 
-The CLI checks `preflight: require` before it composes. From the Lane checkout, `land --save` runs an unsatisfied required preflight inline, reusing the existing local budget and operationId. Failure or budget exhaustion names the exact preflight continuation; run it and replay the same landing. The server checks it again when it accepts
+The CLI checks `preflight: require` before it composes. From the Lane checkout, `land --save` runs an unsatisfied required preflight inline with its local budget and operation ID. `PREFLIGHT_REQUIRED` names a failure and its recovery. `PREFLIGHT_BUDGET_EXCEEDED` names the continuation and includes the exact original landing replay. When a running group hits the quick-run cap, replay uses the saved preflight receipt and leaves the remaining tests to the hosted check. The server checks preflight again when it accepts
 a new agent landing (`projectHostedLanding:enqueue` or `projectHostedLandingDesired:submit`). A
 landing from an older or hand-written client that skips the CLI check is refused with the same
 code (`PREFLIGHT_REQUIRED`) and next step.
+
+Preflight and inline preflight also run the hosted secret scanner on changed
+saved files they can verify locally against observed main. Findings give the
+path, line, kind and fingerprint. Allow entries come from main. The hosted
+check scans the composed Candidate and decides the outcome.
 
 - The landing carries `gates`: the CLI's preflight result for each Lane head it composed. The
   server finds those Lanes and heads in one indexed read of the composition. A landing that names

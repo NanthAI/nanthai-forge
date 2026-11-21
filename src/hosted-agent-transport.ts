@@ -154,7 +154,7 @@ import {
   takeEarlyCapabilities,
 } from './hosted-capabilities-early.js';
 import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
-import { selectHostedFinish, unsavedFiles } from './hosted-agent-finish-identity.js';
+import { finishRefusedKey, selectHostedFinish, unsavedFiles } from './hosted-agent-finish-identity.js';
 import {
   backgroundSaveOperation,
   reconcileHostedSave,
@@ -179,6 +179,13 @@ import { checkoutRequired, laneSuccessor, openLaneRoot } from './hosted-lane-loc
 import { localObjects } from './machine-object-store.js';
 import { digest } from './state/hash.js';
 import { parseNativeState } from './state/format.js';
+import { readSource } from './files.js';
+import {
+  changedStatePaths,
+  scanSecretPaths,
+  SECRET_SCAN_ALLOW_FILE,
+  SECRET_SCAN_MAX_FILE_BYTES,
+} from './secret-scan.js';
 
 /** The weakened-test check's local reads (Issue 11901a0c), passed in so its lazy chunk stays small. */
 const weakenedReads = {
@@ -1447,6 +1454,18 @@ export class HostedAgentTransport {
           if (advice.changedPaths?.complete) this.protectedPaths(advice.changedPaths.paths);
           // The paths this landing carries, so its check failure can teach the next preflight.
           if (advice.changedPaths?.complete) rememberLandingPaths(root, laneId, advice.changedPaths.paths);
+          const checkout = readHostedLaneCheckout(root);
+          const secretScan =
+            capabilities.agentDefaults?.preflight !== 'off' &&
+            checkout?.selection.laneId === laneId &&
+            checkout.selection.head === head
+              ? await this.preflightSecretScan(
+                  root,
+                  checkout,
+                  changeBase ?? checkout.selection.base.head,
+                  advice.changedPaths,
+                )
+              : undefined;
           // The gates read the preflight planner and the test-selection graph; only a finish loads them.
           const { finishGates } = await import('./agent-default-gates.js');
           const gates = finishGates(
@@ -1466,9 +1485,10 @@ export class HostedAgentTransport {
                     'Save first: inline preflight records a result for the saved head, and the files here differ from it. Replay land --save to save them.',
                   )
               : false,
+            journal.get(finishRefusedKey) === 'PREFLIGHT_BUDGET_EXCEEDED',
           );
+          if (secretScan) gates.secretScan = secretScan;
           // Weakened-test flags advise (never refuse); a reason line in the message clears them.
-          const checkout = readHostedLaneCheckout(root);
           if (checkout?.selection.laneId === laneId && checkout.selection.head === head) {
             const { laneWeakenedTestsReply } = await import('./preflight-weakened-tests.js');
             const weakened = laneWeakenedTestsReply(
@@ -2178,6 +2198,7 @@ export class HostedAgentTransport {
       base !== marker.selection.base.head,
     );
     if (changed?.complete) this.protectedPaths(changed.paths);
+    const secretScan = await this.preflightSecretScan(root, marker, base, changed);
     const plan = preflightPlan(
       root,
       changed,
@@ -2202,6 +2223,7 @@ export class HostedAgentTransport {
         laneId,
         head,
         plan,
+        ...(secretScan ? { secretScan } : {}),
         ...weakenedTests,
         ...(plan.status === 'unavailable' ? landNext : planNext),
       });
@@ -2247,9 +2269,36 @@ export class HostedAgentTransport {
       failed: receipt.failed ?? 0,
       plan,
       receipt,
+      ...(secretScan ? { secretScan } : {}),
       ...weakenedTests,
       ...(outcome === 'failed' ? planNext : landNext),
     });
+  }
+  private async preflightSecretScan(
+    root: string,
+    marker: NonNullable<ReturnType<typeof readHostedLaneCheckout>>,
+    base: string,
+    changed: { paths: string[]; complete: boolean } | undefined,
+  ) {
+    if (!this.knownMain || (changed?.complete && !changed.paths.length)) return undefined;
+    const { reportPreflightSecretScan } = await import('./preflight-secret-scan.js');
+    // Keep these shared readers on the eager side so the preview does not split them
+    // into extra imports on the CLI's ordinary command path.
+    return reportPreflightSecretScan(
+      {
+        ...weakenedReads,
+        readSource,
+        changedStatePaths,
+        scanSecretPaths,
+        allowFile: SECRET_SCAN_ALLOW_FILE,
+        maxFileBytes: SECRET_SCAN_MAX_FILE_BYTES,
+      },
+      root,
+      changed?.complete ? changed.paths : undefined,
+      marker.state.files,
+      base,
+      this.knownMain,
+    );
   }
   async query<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
     if (name === 'projectHostedCheckRead:status' && !args.features)
