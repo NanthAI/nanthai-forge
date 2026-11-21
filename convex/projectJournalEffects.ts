@@ -8,7 +8,9 @@ import { canonicalPayload, HOSTED_OPERATION_RETENTION_MS } from '../src/hosted-s
 import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 import { canonical } from './coordinationWrite';
+import { archivedEventItem, indexArchiveTargets } from './projectPlanningArchiveIndex';
 export async function applyJournal(ctx: MutationCtx, pending: Pending, rows: JournalRow[], keys: string[]) {
+  const itemEvents = new Map<string, Set<string>>();
   const pointerFor = (n: number) => keys[pending.groups.findIndex(group => group.refs.includes(n))]!;
   for (const [n, ref] of pending.refs.entries()) {
     const row = rows[n]!;
@@ -64,6 +66,14 @@ export async function applyJournal(ctx: MutationCtx, pending: Pending, rows: Jou
             ...(command.base ? { base: command.base } : {}),
             ...(command.intentIds ? { intentIds: command.intentIds } : {}),
           };
+        // Current captures keep these commands hot. An older pending capture still publishes atomically.
+        const itemId = archivedEventItem(body.operationId, command);
+        if (itemId !== undefined) {
+          const key = pointerFor(n);
+          const targets = itemEvents.get(key) ?? new Set<string>();
+          targets.add(itemId);
+          itemEvents.set(key, targets);
+        }
         await ctx.db.patch(body._id, {
           command: undefined,
           journalSegment: '1',
@@ -105,4 +115,12 @@ export async function applyJournal(ctx: MutationCtx, pending: Pending, rows: Jou
       await ctx.db.delete(event._id);
     } else await ctx.db.delete(row._id);
   }
+  for (const [key, targets] of itemEvents)
+    await indexArchiveTargets(
+      ctx,
+      pending.input.projectId,
+      key,
+      [...targets].map(itemId => ({ kind: 'events', itemId })),
+    );
+  return itemEvents.size > 0;
 }

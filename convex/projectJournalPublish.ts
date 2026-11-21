@@ -181,7 +181,7 @@ export const page = internalMutation({
       pending.until = 0;
       await putControl(ctx, pending.input, { ...control, pending }, row, claimRow);
     } else {
-      await applyJournal(
+      const indexedEvents = await applyJournal(
         ctx,
         pending,
         rows,
@@ -193,6 +193,9 @@ export const page = internalMutation({
         await ctx.db.patch(project._id, {
           journalRevision: (project.journalRevision ?? 0) + 1,
           journalRecordReceipts: true,
+          ...(indexedEvents
+            ? { planningArchiveEventRevision: (project.planningArchiveEventRevision ?? 0) + 1 }
+            : {}),
         });
       if (pending.input.laneId && pending.done) await putControl(ctx, pending.input, null, row, claimRow);
       else

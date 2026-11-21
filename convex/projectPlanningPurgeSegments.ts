@@ -9,6 +9,8 @@ import { landingCapsulePointer } from './projectLandingCapsuleFields';
 import { purgeRows, type ItemPurge } from './projectPlanningPurgeRedact';
 import { purgeIntentChain } from './projectPlanningPurgeSelect';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
+import { indexedSweepPage } from './projectPlanningArchiveSweep';
+import { archiveSegmentRow } from './projectPlanningArchiveIndex';
 
 export const purgeSegmentIdentity = {
   projectId: v.id('hostedProjects'),
@@ -50,9 +52,17 @@ export const page = internalQuery({
   args: {
     projectId: v.id('hostedProjects'),
     after: v.union(v.string(), v.null()),
+    indexed: v.optional(v.object({ ids: v.array(v.string()), intentKeys: v.array(v.string()) })),
   },
   returns: v.any(),
   handler: async (ctx, input) => {
+    if (input.indexed) {
+      const result = await indexedSweepPage(ctx, input.projectId, input.indexed, input.after);
+      return {
+        ...result,
+        entries: result.entries.map(row => ({ key: row.key, index: JSON.parse(row.value) as JournalIndex })),
+      };
+    }
     const selected = ctx.db.query('projectJournalSegments').withIndex('by_project_and_key', q => {
       const project = q.eq('projectId', input.projectId);
       return input.after === null ? project : project.gt('key', input.after);
@@ -112,11 +122,16 @@ export const progress = internalMutation({
     requireClaim(sweep, input.claim);
     if (input.advance) {
       invariant(
-        !sweep.pending || (sweep.pending.retire && sweep.pending.key === input.advance.after),
+        !sweep.pending ||
+          (sweep.pending.retire && (sweep.indexed ? sweep.after : sweep.pending.key) === input.advance.after),
         'WORK_STALE',
         'Finish retiring this segment before advancing.',
       );
-      await save({ ...input.advance, ...(input.advance.done ? {} : { claim: sweep.claim }) });
+      await save({
+        ...input.advance,
+        ...(sweep.indexed ? { indexed: sweep.indexed } : {}),
+        ...(input.advance.done ? {} : { claim: sweep.claim }),
+      });
     } else if (input.release) {
       const next = { ...sweep };
       delete next.claim;
@@ -125,12 +140,6 @@ export const progress = internalMutation({
     return null;
   },
 });
-
-const journalIndexRow = (ctx: MutationCtx, projectId: Id<'hostedProjects'>, key: string) =>
-  ctx.db
-    .query('projectJournalSegments')
-    .withIndex('by_project_and_key', q => q.eq('projectId', projectId).eq('key', key))
-    .unique();
 
 export const stage = internalMutation({
   args: {
@@ -144,7 +153,7 @@ export const stage = internalMutation({
   handler: async (ctx, input) => {
     const { sweep, purges, save } = await sweepEntry(ctx, input);
     requireClaim(sweep, input.claim);
-    const row = await journalIndexRow(ctx, input.projectId, input.key);
+    const row = await archiveSegmentRow(ctx, input.projectId, input.key);
     const current = row && (JSON.parse(row.value) as JournalIndex);
     invariant(current?.pointer.sha256 === input.expected, 'WORK_STALE', 'Journal segment changed.');
     invariant(
@@ -189,7 +198,7 @@ export const publish = internalMutation({
     requireClaim(sweep, input.claim);
     invariant(sweep.pending?.key === input.key, 'WORK_STALE', 'Journal rewrite was not staged.');
     if (sweep.pending.retire) return sweep.pending.retire;
-    const row = await journalIndexRow(ctx, input.projectId, input.key);
+    const row = await archiveSegmentRow(ctx, input.projectId, input.key);
     const current = row && (JSON.parse(row.value) as JournalIndex);
     const [pointer, ...parts] = input.pointers;
     invariant(
@@ -208,7 +217,7 @@ export const publish = internalMutation({
     else delete next.parts;
     await ctx.db.patch(row!._id, { value: canonicalPayload(next) });
     for (const part of current.parts ?? []) {
-      const old = await journalIndexRow(ctx, input.projectId, part.sha256);
+      const old = await archiveSegmentRow(ctx, input.projectId, part.sha256);
       if (old?.category === 'fragment') await ctx.db.delete(old._id);
     }
     for (const event of input.events) {

@@ -9,6 +9,12 @@ import type { QueryCtx, MutationCtx } from './_generated/server';
 import { internalQuery, internalMutation } from './server';
 import { receiptRow } from './projectJournalMaintenance';
 import type { selectEventRows } from './projectPlanningPurgeSelect';
+import {
+  archivedSegmentRows,
+  archivedTargetPage,
+  archiveTargetCursor,
+  type TargetCursor,
+} from './projectPlanningArchiveIndex';
 
 export type ArchiveSelection = ReturnType<typeof selectEventRows>;
 export const archiveSelectionValues = v.object({
@@ -21,10 +27,15 @@ export const archiveSelectionValues = v.object({
 });
 
 const frontier = v.union(v.null(), v.object({ from: v.number(), key: v.string(), sha256: v.string() }));
-export const archivePin = v.object({ frontier, rewriteRevision: v.number() });
+export const archivePin = v.object({
+  frontier,
+  rewriteRevision: v.number(),
+  indexedRevision: v.optional(v.number()),
+});
 export type ArchivePin = typeof archivePin.type;
 export type SelectionProgress = ArchivePin & {
   request: string;
+  indexedAfter?: TargetCursor;
   done: boolean;
   selected: ArchiveSelection;
 };
@@ -56,6 +67,11 @@ export async function archiveSelectionCurrent(
     'WORK_STALE',
     archiveChanged,
   );
+  if (pin?.indexedRevision !== undefined)
+    return (
+      project.planningArchiveIndexed === true &&
+      pin.indexedRevision === (project.planningArchiveEventRevision ?? 0)
+    );
   const [last] = project.journalRevision ? await eventSegments(ctx, project._id).order('desc').take(1) : [];
   const current = last ? segmentEntry(last).pin : null;
   const selected = pin?.frontier ?? null;
@@ -78,15 +94,23 @@ async function selection(
   const row = await receiptRow(ctx, input.projectId, key(input.operationId));
   const request = digest(canonicalPayload([input.itemId, input.ids]));
   const rewriteRevision = project.journalEventRewriteRevision ?? 0;
+  const indexedRevision = project.planningArchiveIndexed
+    ? (project.planningArchiveEventRevision ?? 0)
+    : undefined;
   const prior = row && (JSON.parse(row.envelope) as SelectionProgress);
   // A legacy receipt never has this fence. Its cursor pinned the entire journal revision.
   const progress: SelectionProgress =
-    prior?.request === request && prior.rewriteRevision === rewriteRevision
+    prior?.request === request &&
+    prior.rewriteRevision === rewriteRevision &&
+    prior.indexedRevision === indexedRevision
       ? prior
       : {
           request,
           rewriteRevision,
           frontier: null,
+          ...(indexedRevision === undefined
+            ? {}
+            : { indexedRevision, indexedAfter: { target: 0, after: null } }),
           done: false,
           selected: { rows: [], decisions: [], created: null, creates: false },
         };
@@ -106,9 +130,33 @@ export const resume = internalQuery({
 
 /** The event publisher advances one durable revision-ordered frontier, including across fragmented pages. */
 export const page = internalQuery({
-  args: { projectId: identity.projectId, after: frontier },
+  args: {
+    projectId: identity.projectId,
+    after: frontier,
+    indexed: v.optional(v.object({ ids: v.array(v.string()), cursor: archiveTargetCursor })),
+  },
   returns: v.any(),
-  handler: async (ctx, input): Promise<{ entries: ReturnType<typeof segmentEntry>[]; done: boolean }> => {
+  handler: async (
+    ctx,
+    input,
+  ): Promise<{
+    entries: ReturnType<typeof segmentEntry>[];
+    done: boolean;
+    indexed?: { itemId: string | null; target: number; next: TargetCursor };
+  }> => {
+    if (input.indexed) {
+      const page = await archivedTargetPage(
+        ctx,
+        input.projectId,
+        input.indexed.ids.map(itemId => ({ kind: 'events', itemId })),
+        input.indexed.cursor,
+      );
+      return {
+        entries: (await archivedSegmentRows(ctx, input.projectId, page.keys)).map(segmentEntry),
+        done: page.done,
+        indexed: { itemId: page.itemId, target: page.target, next: page.next },
+      };
+    }
     const page = await eventSegments(ctx, input.projectId, input.after?.from).paginate({
       cursor: null,
       numItems: 16,
@@ -125,6 +173,7 @@ export const checkpoint = internalMutation({
     ...args,
     expected: archivePin,
     next: frontier,
+    indexed: v.optional(v.object({ expected: archiveTargetCursor, next: archiveTargetCursor })),
     done: v.boolean(),
     selected: archiveSelectionValues,
   },
@@ -132,13 +181,21 @@ export const checkpoint = internalMutation({
   handler: async (ctx, input): Promise<SelectionProgress> => {
     const { row, progress } = await selection(ctx, input);
     invariant(progress.rewriteRevision === input.expected.rewriteRevision, 'WORK_STALE', archiveChanged);
-    if (canonicalPayload(progress.frontier) !== canonicalPayload(input.expected.frontier)) return progress;
+    if (
+      progress.indexedRevision !== input.expected.indexedRevision ||
+      canonicalPayload(progress.indexedAfter ?? null) !== canonicalPayload(input.indexed?.expected ?? null) ||
+      canonicalPayload(progress.frontier) !== canonicalPayload(input.expected.frontier)
+    )
+      return progress;
     const previous = progress.selected;
     const created = input.selected.created;
     const next: SelectionProgress = {
       request: progress.request,
       rewriteRevision: progress.rewriteRevision,
       frontier: input.next,
+      ...(input.indexed
+        ? { indexedRevision: progress.indexedRevision!, indexedAfter: input.indexed.next }
+        : {}),
       done: input.done,
       selected: {
         rows: [...previous.rows, ...input.selected.rows],

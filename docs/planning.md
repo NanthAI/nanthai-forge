@@ -121,10 +121,16 @@ Intent and every successor Intent a later start continued it on: the head become
 keeps status and Lane pin, and every older version is purged; the chain ends at a successor id that names an Issue of
 its own), the outcome copy on each of their Lanes' overlap rows, lifecycle plan reasons and their copies in
 lifecycle events, and the store fingerprints.
-The purge checkpoints its verified event segment position by page. Publication of new segments leaves that
-position intact. Before the tombstone transaction, the purge catches up to the latest event segment. Rewriting
-earlier event bytes invalidates that selection. Selection and rewrites read small batches of verified segments,
-and long scans schedule a continuation from their saved position. The purge replaces only segments
+The purge uses the work store's retained record pointers and a sparse index of older archived Item
+commands and records. On a project whose archive has yet to be indexed, it uses a full archive scan.
+The operator can run `projectPlanningArchiveBackfillRun:run` with the project id, repeating until
+`done: true`. Each call resumes one bounded page of verified legacy archives. Modern record segments
+already have their pointers in Convex, so the backfill does not fetch them. There is no idle job.
+Current archive publication keeps the same writes for ordinary records and commands. If a captured legacy
+Item command is published, its index entry is written in the same transaction.
+The purge checkpoints selection and sweep pages. Before the tombstone, it accounts for newly
+published Item commands. Rewriting earlier event bytes invalidates that selection. Long scans continue
+from their saved position. The purge replaces only segments
 that contain affected rows, keeps their logical positions, and deletes their superseded R2 objects and fragments
 before reporting completion. The completion revision invalidates Work exports and recovery selections that carried
 older bytes. A stopped purge resumes selection or retirement using the original operation id. Superseded Intent

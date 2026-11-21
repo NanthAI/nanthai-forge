@@ -79,13 +79,15 @@ function reportSlice(
   tally: Metrics,
   started: number,
   done: boolean,
+  indexed: boolean,
 ) {
-  if (tally.segments)
+  if (tally.segments || indexed)
     console.log(
       `FORGE_ITEM_PURGE_ARCHIVE ${JSON.stringify({
         projectId: id.projectId,
         operationId: id.operationId,
         phase,
+        indexed,
         ...tally,
         wallMs: Math.round(performance.now() - started),
         sampledRss: process.memoryUsage().rss,
@@ -111,18 +113,24 @@ export const select = internalAction({
     const tally = metrics();
     const signal = networkTimeout(Math.max(1, deadline - Date.now()));
     let progress: SelectionProgress = await ctx.runQuery(selection.resume, request);
+    const pin = (): ArchivePin => ({
+      frontier: progress.frontier,
+      rewriteRevision: progress.rewriteRevision,
+      ...(progress.indexedRevision === undefined ? {} : { indexedRevision: progress.indexedRevision }),
+    });
     try {
       while (!progress.done && Date.now() < deadline) {
         const page = await ctx.runQuery(selection.page, {
           projectId: input.projectId,
           after: progress.frontier,
+          ...(progress.indexedAfter ? { indexed: { ids: input.ids, cursor: progress.indexedAfter } } : {}),
         });
         const selected: ArchiveSelection = { rows: [], decisions: [], created: null, creates: false };
         let scanned = 0;
         for await (const { segment } of verifiedEntries(input, page.entries, tally, deadline, signal)) {
           const matched = selectEventRows(
             (segment.tables.projectHostedRecordBodies ?? []).map(row => JSON.parse(row)),
-            input.ids,
+            page.indexed?.itemId ? [page.indexed.itemId] : input.ids,
           );
           selected.rows.push(...matched.rows);
           selected.decisions.push(...matched.decisions);
@@ -145,20 +153,31 @@ export const select = internalAction({
         if (scanned || !page.entries.length)
           progress = await ctx.runMutation(selection.checkpoint, {
             ...request,
-            expected: { frontier: progress.frontier, rewriteRevision: progress.rewriteRevision },
-            next: page.entries[scanned - 1]?.pin ?? progress.frontier,
+            expected: pin(),
+            next: page.indexed ? null : (page.entries[scanned - 1]?.pin ?? progress.frontier),
+            ...(page.indexed && progress.indexedAfter
+              ? {
+                  indexed: {
+                    expected: progress.indexedAfter,
+                    next:
+                      scanned === page.entries.length
+                        ? page.indexed.next
+                        : { target: page.indexed.target, after: page.entries[scanned - 1]!.pin.key },
+                  },
+                }
+              : {}),
             done: page.done && scanned === page.entries.length,
             selected,
           });
         if (scanned < page.entries.length) break;
       }
     } finally {
-      reportSlice(input, 'selection', tally, started, progress.done);
+      reportSlice(input, 'selection', tally, started, progress.done, progress.indexedRevision !== undefined);
     }
     return {
       done: progress.done,
       selected: progress.selected,
-      pin: { frontier: progress.frontier, rewriteRevision: progress.rewriteRevision },
+      pin: pin(),
     };
   },
 });
@@ -180,39 +199,43 @@ export const run = internalAction({
     const started = performance.now();
     const tally = metrics();
     const signal = networkTimeout(Math.max(1, deadline - Date.now()));
+    let after = state.sweep.after;
     const retire = async (key: string, hashes: string[]) => {
       for (const hash of hashes)
         await deleteR2Object(r2Config(), journalObjectKey(input.projectId, hash), signal);
-      await ctx.runMutation(store.progress, { ...id, advance: { after: key, done: false } });
+      if (!state.sweep.indexed) after = key;
+      await ctx.runMutation(store.progress, { ...id, advance: { after, done: false } });
     };
     let completed = false;
     try {
-      let after = state.sweep.after;
       if (state.sweep.pending?.retire) {
         await retire(state.sweep.pending.key, state.sweep.pending.retire);
-        after = state.sweep.pending.key;
       }
       const rows = new Map(state.rows);
+      const scannedKeys = new Set<string>();
+      const indexed = state.sweep.indexed
+        ? { ids: state.purge.ids, intentKeys: state.purge.intentKeys! }
+        : undefined;
       while (Date.now() < deadline) {
-        const page: Page = await ctx.runQuery(store.page, { projectId: input.projectId, after });
+        const page: Page = await ctx.runQuery(store.page, {
+          projectId: input.projectId,
+          after,
+          ...(indexed ? { indexed } : {}),
+        });
+        const entries = indexed ? page.entries.filter(entry => !scannedKeys.has(entry.key)) : page.entries;
         let scanned = 0;
-        for await (const { entry, segment } of verifiedEntries(
-          input,
-          page.entries,
-          tally,
-          deadline,
-          signal,
-        )) {
+        for await (const { entry, segment } of verifiedEntries(input, entries, tally, deadline, signal)) {
           const redacted = redactSegment(segment, state.purge, rows);
           if (redacted.next !== segment) {
             if (signal.aborted || Date.now() >= deadline) break;
             const hashes = await rewrite(ctx, id, entry, redacted, signal);
             await retire(entry.key, hashes);
           }
+          if (indexed) scannedKeys.add(entry.key);
           scanned++;
         }
-        if (scanned < page.entries.length) {
-          if (scanned)
+        if (scanned < entries.length) {
+          if (scanned && !indexed)
             await ctx.runMutation(store.progress, {
               ...id,
               advance: { after: page.entries[scanned - 1]!.key, done: false },
@@ -231,7 +254,7 @@ export const run = internalAction({
       if (!signal.aborted) throw error;
       return false;
     } finally {
-      reportSlice(input, 'sweep', tally, started, completed);
+      reportSlice(input, 'sweep', tally, started, completed, !!state.sweep.indexed);
       if (!completed) await ctx.runMutation(store.progress, { ...id, release: true });
     }
   },

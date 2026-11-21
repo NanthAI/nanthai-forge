@@ -360,6 +360,12 @@ const projectFields = {
   journalRevision: v.optional(v.number()),
   /** Purge selection pins event bytes independently of append-only journal publication. */
   journalEventRewriteRevision: v.optional(v.number()),
+  /** Indexed purge is safe once every legacy archive is covered. New word-bearing publications advance its fence. */
+  planningArchiveIndexed: v.optional(v.literal(true)),
+  planningArchiveBackfill: v.optional(
+    v.object({ legacyRecords: v.boolean(), cursor: v.union(v.string(), v.null()) }),
+  ),
+  planningArchiveEventRevision: v.optional(v.number()),
   journalRecordReceipts: v.optional(v.literal(true)),
   /** Flip 5 Work store mode (Issue 0695ab24): absent = journal only; dual = planning writes also store
    * their Issue version, comment or note record in the same mutation; records = dual, and the planning
@@ -412,6 +418,7 @@ const projectFields = {
         segmentSweep: v.optional(
           v.object({
             after: v.union(v.string(), v.null()),
+            indexed: v.optional(v.literal(true)),
             done: v.boolean(),
             claim: v.optional(v.object({ id: v.string(), until: v.number() })),
             pending: v.optional(

@@ -175,7 +175,15 @@ export const begin = internalMutation({
       rows: input.selection.rows.length,
       created: input.selection.created,
       startedAt: Date.now(),
-      ...(project.journalRevision || journalEnabled() ? { segmentSweep: { after: null, done: false } } : {}),
+      ...(project.journalRevision || journalEnabled()
+        ? {
+            segmentSweep: {
+              after: null,
+              done: false,
+              ...(input.selection.archive?.indexedRevision === undefined ? {} : { indexed: true }),
+            },
+          }
+        : {}),
     };
     if (input.selection.archive) await clearArchiveSelection(ctx, input.projectId, input.operationId);
     const others = project.itemPurges ?? [];
