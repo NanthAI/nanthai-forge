@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { getFunctionName } from 'convex/server';
+import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { resolutionFixture } from './hosted-agent-resolution-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
@@ -16,6 +16,7 @@ import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { hostedAgentDirectory } from '../dist/hosted-agent-journal.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
 import speedBudgets from '../src/speed-budgets.json' with { type: 'json' };
+import { fakeSourceR2 } from './convex-source-r2-fixture.mjs';
 
 // save-then-resolve (1eef1b43): the resolve's save names the sync that follows it; the save's
 // completion schedules the chain, and the CLI's one save subscription sees that sync finish.
@@ -40,7 +41,7 @@ async function until(condition) {
 /** A conflicted Lane with its chosen bytes written, and a transport whose source subscription the
  * test pushes by hand (`pump`). */
 async function conflicted(t) {
-  const s = await resolutionFixture(t, { overlap: true }),
+  const s = await resolutionFixture(t, { overlap: true, sourceChain: true }),
     f = s.f;
   f.moveMain({ overlap: true });
   const conflict = (await s.transport().dispatch('finish', { laneId: f.lane.laneId })).result.recovery
@@ -48,19 +49,24 @@ async function conflicted(t) {
   writeFileSync(join(conflict.root, 'a.txt'), 'chosen\nb\nc\n');
   s.eagerSource(false);
   const live = new Set();
+  const read = entry => {
+    const [module, member] = entry.name.split(':');
+    return f.tx(`subscription:${entry.name}`, modules[module][member], entry.args);
+  };
   const subscribe = () => ({
-    onUpdate(ref, args, update) {
+    onUpdate(ref, args, update, error) {
       const entry = { name: getFunctionName(ref), args, update };
       live.add(entry);
+      void read(entry).then(
+        value => live.has(entry) && update(value),
+        reason => live.has(entry) && error(reason),
+      );
       return () => live.delete(entry);
     },
     close: async () => {},
   });
   const pump = async () => {
-    for (const entry of [...live]) {
-      const [module, member] = entry.name.split(':');
-      entry.update(await f.tx(`subscription:${entry.name}`, modules[module][member], entry.args));
-    }
+    for (const entry of [...live]) entry.update(await read(entry));
   };
   const transport = () => new HostedAgentTransport(conflict.root, s.address, s.exchange, subscribe);
   // Calls and syncs from here on are the resolve's (the finish above made its own conflict sync).
@@ -111,10 +117,11 @@ async function runChain(f, task) {
 }
 const clientCalls = (c, name) => c.s.calls.slice(c.mark).filter(call => call.name === name).length;
 const newSyncs = c => c.f.tables.projectHostedSyncs.size - c.syncs;
-async function saveSubmitted(c) {
+async function saveSubmitted(c, inline = false) {
   await until(() => [...c.f.tables.projectHostedSaves.values()].some(row => row.jobId) && c.live.size);
   const save = [...c.f.tables.projectHostedSaves.values()].at(-1);
-  await completeSource(c.f, 'Save', save.operationId);
+  if (inline) await publishInline(c.f, save.operationId);
+  else await completeSource(c.f, 'Save', save.operationId);
   return save;
 }
 
@@ -171,6 +178,74 @@ test('a chain that never runs (crash between save and sync): the CLI resolves it
   assert.equal(newSyncs(c), 1);
 });
 
+test('retrying a completed save observes its scheduled resolve without preparing, uploading or submitting it', async t => {
+  const c = await conflicted(t);
+  const controller = new AbortController();
+  const command = { laneId: c.conflict.laneId, operationId: randomUUID() };
+  const original = c.transport().dispatch('resolve', command, controller.signal);
+  await saveSubmitted(c, true);
+  controller.abort();
+  assert.equal((await original).result.phase, 'save');
+  const [task] = chainTasks(c.f);
+  const upload = t.mock.method(c.s.exchange, 'upload');
+  c.s.eagerSource(true);
+  const retry = c.transport().dispatch('resolve', command);
+  await until(() => c.live.size || clientCalls(c, 'projectHostedSync:prepare'));
+  if (c.live.size) await c.pump();
+  const chained = await runChain(c.f, task);
+  await c.pump();
+  const result = await retry;
+  assert.equal(result.result.source.outcome.result.status, 'resolved');
+  assert.equal(clientCalls(c, 'projectHostedSync:prepare'), 0);
+  assert.equal(clientCalls(c, 'projectHostedSyncJobs:submit'), 0);
+  assert.equal(upload.mock.callCount(), 0);
+  assert.deepEqual(result.result.source, chained);
+  assert.equal(newSyncs(c), 1);
+  assert.equal(c.live.size, 0);
+});
+
+for (const delayed of [false, true])
+  test(`a submitted chain past the stall bound keeps one execution (delayed update=${delayed})`, async t => {
+    const c = await conflicted(t);
+    const waiting = c.transport().dispatch('resolve', { laneId: c.conflict.laneId });
+    await saveSubmitted(c);
+    const [task] = chainTasks(c.f);
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    await c.pump(); // Observe the completed save before the chain has submitted.
+    ranTask(c.f, task);
+    const { operationId, input } = JSON.parse(
+      await c.f.tx('chain:prepare', chainStore.prepare, task.args[0]),
+    );
+    c.f.c.put(saveBytes(input));
+    await c.f.tx('chain:submit', modules.projectHostedSyncJobs.submit, {
+      projectId: c.f.projectId,
+      operationId,
+    });
+    if (!delayed) await c.pump();
+    const upload = t.mock.method(c.s.exchange, 'upload');
+    const saveReads = clientCalls(c, 'projectHostedSaves:progress');
+    c.s.eagerSource(true);
+    t.mock.timers.tick(chainStallMs);
+    await until(
+      () =>
+        [...c.live].some(entry => entry.name === 'projectHostedSync:progress') ||
+        clientCalls(c, 'projectHostedSync:prepare'),
+    );
+    t.mock.timers.reset();
+    if (!clientCalls(c, 'projectHostedSync:prepare')) {
+      await completeSource(c.f, 'Sync', operationId);
+      await c.pump();
+    }
+    const result = await waiting;
+    assert.equal(result.result.source.outcome.result.status, 'resolved');
+    assert.equal(clientCalls(c, 'projectHostedSync:prepare'), 0);
+    assert.equal(clientCalls(c, 'projectHostedSyncJobs:submit'), 0);
+    assert.equal(clientCalls(c, 'projectHostedSaves:progress') - saveReads, delayed ? 1 : 0);
+    assert.equal(upload.mock.callCount(), 0);
+    assert.equal(newSyncs(c), 1);
+    assert.equal(c.live.size, 0);
+  });
+
 test('a chain that stops before its submit records it, and the CLI resolves itself at once', async t => {
   const c = await conflicted(t);
   const waiting = c.transport().dispatch('resolve', { laneId: c.conflict.laneId });
@@ -194,6 +269,18 @@ test('a chain that stops before its submit records it, and the CLI resolves itse
 });
 function ranTask(f, task) {
   f.patch('_scheduled_functions', task._id, { state: { kind: 'success' } });
+}
+
+async function settleScheduledChain(c, fail = false) {
+  await until(() => chainTasks(c.f).length > 0 && c.live.size > 0);
+  const [task] = chainTasks(c.f);
+  if (fail) {
+    ranTask(c.f, task);
+    await c.f.tx('chain:failed', chainStore.failed, { ...task.args[0], code: 'R2_UPLOAD_FAILED' });
+  } else {
+    await runChain(c.f, task);
+  }
+  await c.pump();
 }
 
 test('the chain submit records its own input write and dispatches the sync inline for its action', async t => {
@@ -281,7 +368,65 @@ async function savedWithThen(c) {
   return { then, command };
 }
 
-test('a save published inside its own call keeps only a delayed chain fallback; the chain prepare cancels it (1eef1b43 item 3)', async t => {
+async function chainCoordinator(t, c) {
+  const r2 = fakeSourceR2(t);
+  r2.hooks.echo = true;
+  const { runPreparedResolveChain } = await import(moduleUrl('../convex/projectHostedResolveChainRun.ts'));
+  const transactions = [];
+  const runMutation = (ref, args) => {
+    const name = getFunctionName(ref).split(':')[1];
+    transactions.push(name);
+    return c.f.tx(`chain:${name}`, chainStore[name], args);
+  };
+  return {
+    r2,
+    transactions,
+    runMutation,
+    run: (args, step) => runPreparedResolveChain({ runMutation }, args, step),
+  };
+}
+
+test('a fresh chain prepares and submits once with a single checksum-echo PUT', async t => {
+  const c = await conflicted(t);
+  await savedWithThen(c);
+  const [task] = chainTasks(c.f);
+  const chain = await chainCoordinator(t, c);
+  const result = await chain.run(task.args[0], async ({ jobId }, preloaded) => {
+    assert([...c.f.tables.projectHostedSyncs.values()].some(row => row.jobId === jobId));
+    assert.deepEqual(savePin(JSON.parse(preloaded.text)), { sha256: preloaded.sha256, size: preloaded.size });
+    return 'dispatched';
+  });
+  assert.equal(result, 'dispatched');
+  assert.deepEqual(chain.transactions, ['prepare', 'submit']);
+  assert.deepEqual(chain.r2.requests, ['PUT']);
+});
+
+test('the scheduled fallback confirms an input uploaded before the inline chain stopped', async t => {
+  const c = await conflicted(t);
+  const { then } = await savedWithThen(c);
+  const [task] = chainTasks(c.f);
+  const chain = await chainCoordinator(t, c);
+  const prepared = JSON.parse(
+    await chain.runMutation(makeFunctionReference('projectHostedResolveChainStore:prepare'), task.args[0]),
+  );
+  assert.equal(prepared.operationId, then.operationId);
+  const { storeSourceBytes } = await import(moduleUrl('../convex/projectSourceBytes.ts'));
+  const pin = savePin(prepared.input);
+  await storeSourceBytes({}, c.f.projectId, saveBytes(prepared.input), pin);
+  assert.deepEqual(chain.r2.requests, ['PUT'], 'the original fresh input takes one request');
+  const [fallback] = chainTasks(c.f);
+  assert.equal(fallback?._id, task._id, 'a crash before submit leaves the scheduled recovery available');
+  ranTask(c.f, fallback);
+  const result = await chain.run(fallback.args[0], async (_job, preloaded) => {
+    assert.deepEqual(savePin(JSON.parse(preloaded.text)), pin);
+    return 'dispatched';
+  });
+  assert.equal(result, 'dispatched');
+  assert.deepEqual(chain.transactions, ['prepare', 'prepare', 'submit']);
+  assert.deepEqual(chain.r2.requests, ['PUT', 'HEAD']);
+});
+
+test('an inline chain keeps its delayed fallback until the sync submission commits (1eef1b43 item 3)', async t => {
   const c = await conflicted(t);
   const { then, command } = await savedWithThen(c);
   const [task] = chainTasks(c.f);
@@ -293,7 +438,7 @@ test('a save published inside its own call keeps only a delayed chain fallback; 
     [...c.f.tables.projectHostedSaves.values()].find(r => r.operationId === command.operationId).value,
   );
   assert.equal(state.chainFallbackId, task._id);
-  // The action's own chain prepares: that cancels the fallback, so no second chain is scheduled.
+  // Preparing alone leaves no durable sync job, so the fallback still owns crash recovery.
   const prepared = JSON.parse(
     await c.f.tx('chain:prepare', chainStore.prepare, {
       projectId: c.f.projectId,
@@ -302,6 +447,13 @@ test('a save published inside its own call keeps only a delayed chain fallback; 
     }),
   );
   assert.equal(prepared.operationId, then.operationId);
+  assert.equal(chainTasks(c.f).length, 1);
+  await c.f.tx('chain:submit', chainStore.submit, {
+    ...task.args[0],
+    operationId: prepared.operationId,
+    input: savePin(prepared.input),
+    fallbackId: prepared.fallbackId,
+  });
   assert.equal(chainTasks(c.f).length, 0);
   assert.equal(c.f.tables._scheduled_functions.get(task._id).state.kind, 'canceled');
 });
@@ -363,6 +515,13 @@ test('the submit action reply with its chained resolve settles the save wait at 
   // The chained step did not finish: the CLI waits on the save subscription for its receipt.
   const running = JSON.parse(publishedReply({ ...save, chainRun }, null, true));
   assert.deepEqual(chainSettle(running), { waitMs: chainStallMs });
+  const failed = { outcome: { status: 'failed', error: { code: 'SOURCE_WORKER_FAILED' } } };
+  const failedReply = JSON.parse(
+    publishedReply({ ...save, chainRun }, JSON.stringify({ ...sync, terminal: failed }), true),
+  );
+  assert.deepEqual(chainSettle(failedReply), {
+    value: { save: save.terminal, chained: { terminal: failed, state: sync.state } },
+  });
   // An older CLI asked for the bare receipt.
   assert.deepEqual(JSON.parse(publishedReply({ ...save, chainRun }, null, false)), save.terminal);
   assert.deepEqual(JSON.parse(publishedReply(save, null, true)), save);
@@ -438,7 +597,9 @@ test('a resolve whose save never began re-journals its then after an epoch chang
   const epoch = nextEpoch(c.f);
   // Before the fix every replay of this operation was refused SOURCE_AUTHORITY_CHANGED: the retained
   // save request and its then kept the old epoch, and nothing began to reconcile with.
-  const result = await resolve();
+  const retry = resolve();
+  await settleScheduledChain(c);
+  const result = await retry;
   assert.equal(result.result.source.outcome.result.status, 'resolved');
   const save = [...c.f.tables.projectHostedSaves.values()].map(row => JSON.parse(row.value).request);
   assert.equal(save.length, 1, 'one save began, at the current epoch');
@@ -453,7 +614,9 @@ test('a resolve whose save completed but whose sync never began rebuilds the syn
   dropFirst(c, 'projectHostedSync:prepare');
   const operationId = randomUUID(),
     resolve = () => c.transport().dispatch('resolve', { laneId: c.conflict.laneId, operationId });
-  await assert.rejects(resolve());
+  const first = assert.rejects(resolve());
+  await settleScheduledChain(c, true);
+  await first;
   assert.equal(newSyncs(c), 0, 'the resolve sync never began');
   const epoch = nextEpoch(c.f);
   const result = await resolve();
@@ -496,7 +659,9 @@ test('a resolve whose save began at an older epoch is refused with the one next 
   assert.equal(next.action, 'resolve');
   assert.notEqual(next.operationId, operationId, 'a new operation, not a replay of this one');
   const { action, ...parameters } = next;
-  const result = await c.transport().dispatch(action, parameters);
+  const resumed = c.transport().dispatch(action, parameters);
+  await settleScheduledChain(c);
+  const result = await resumed;
   assert.equal(result.result.source.outcome.result.status, 'resolved');
 });
 
@@ -506,7 +671,9 @@ test('a resolve whose sync began at an older epoch is refused with the one next 
   dropFirst(c, 'projectHostedSyncJobs:submit');
   const operationId = randomUUID(),
     resolve = () => c.transport().dispatch('resolve', { laneId: c.conflict.laneId, operationId });
-  await assert.rejects(resolve());
+  const first = assert.rejects(resolve());
+  await settleScheduledChain(c, true);
+  await first;
   assert.equal(newSyncs(c), 1, 'the resolve sync began at the old epoch');
   nextEpoch(c.f);
   const refused = await resolve().catch(error => error);
@@ -514,6 +681,8 @@ test('a resolve whose sync began at an older epoch is refused with the one next 
   const { action, ...parameters } = refused.recovery.next;
   assert.equal(action, 'resolve');
   assert.notEqual(parameters.operationId, operationId);
-  const result = await c.transport().dispatch(action, parameters);
+  const resumed = c.transport().dispatch(action, parameters);
+  await settleScheduledChain(c);
+  const result = await resumed;
   assert.equal(result.result.source.outcome.result.status, 'resolved');
 });

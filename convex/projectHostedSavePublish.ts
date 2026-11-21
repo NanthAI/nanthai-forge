@@ -30,7 +30,7 @@ import { requireLaneHolder } from './projectLaneHolder';
 /** One small transaction: exact signed worker evidence, committed immutable State,
  * Lane CAS, one save record and original terminal receipt. No page/history walk. */
 /** How long a chain whose publication ran inside a step's commit waits before its scheduled
- * fallback runs; the action that made that commit runs the chain at once and cancels it. */
+ * fallback runs; the action that made that commit runs the chain at once and cancels it on submit. */
 export const chainFallbackMs = 5_000;
 export async function publishHostedSave(
   ctx: MutationCtx,

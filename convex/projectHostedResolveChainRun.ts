@@ -19,15 +19,27 @@ export async function runPreparedResolveChain(
   try {
     const prepared: string | null = await ctx.runMutation(reference('prepare'), args);
     if (!prepared) return null;
-    const { operationId, input } = JSON.parse(prepared) as { operationId: string; input: unknown };
+    const { operationId, input, replayed, fallbackId } = JSON.parse(prepared) as {
+      operationId: string;
+      input: unknown;
+      replayed?: boolean;
+      fallbackId?: Id<'_scheduled_functions'>;
+    };
     const pin = savePin(input),
       bytes = saveBytes(input);
-    await storeSourceBytes(ctx, args.projectId, bytes, pin);
+    // A retained preparation may have uploaded the input before its process stopped.
+    // A fresh preparation has no prior upload from this chain, so keep its single checksum-bound PUT.
+    await storeSourceBytes(ctx, args.projectId, bytes, pin, replayed);
     const result: { run: string | null } = JSON.parse(
-      await ctx.runMutation(reference('submit'), { ...args, operationId, input: pin }),
+      await ctx.runMutation(reference('submit'), {
+        ...args,
+        operationId,
+        input: pin,
+        ...(fallbackId ? { fallbackId } : {}),
+      }),
     );
     submitted = true;
-    // The step reads the input this action just wrote and HEAD-verified from memory, not from R2.
+    // The step reads the exact verified input from memory.
     if (!result.run) return null;
     const next = { projectId: args.projectId, jobId: result.run, step: 0 },
       preloaded = { ...pin, text: new TextDecoder().decode(bytes) };

@@ -54,9 +54,9 @@ export const prepare = receiptMutation({
     try {
       const request = syncRequestSchema.parse(JSON.parse(input.request)),
         auth = await caller(ctx, { projectId: input.projectId, operationId: request.operationId });
-      const prepared = await prepareHostedSync(ctx, auth, request);
+      const { value } = await prepareHostedSync(ctx, auth, request);
+      const prepared = canonicalPayload(value);
       if (!input.targets) return prepared;
-      const value = JSON.parse(prepared) as { terminal?: unknown; input?: unknown };
       if (value.terminal || !value.input) return prepared;
       const pin = savePin(value.input);
       return canonicalPayload({
@@ -76,7 +76,7 @@ export async function prepareHostedSync(
   ctx: MutationCtx,
   auth: { projectId: Id<'hostedProjects'>; operationId: string; actor: string },
   request: ReturnType<typeof syncRequestSchema.parse>,
-): Promise<string> {
+) {
   const expected = {
     authorityEpoch: request.authorityEpoch,
     ...('expected' in request
@@ -117,11 +117,14 @@ export async function prepareHostedSync(
     invariant(old, 'SOURCE_UNAVAILABLE', 'The original sync is unavailable.');
     const state = JSON.parse(old.value) as SyncState;
     // The same receipt as the first prepare, so a retried prepare also skips the progress read.
-    return canonicalPayload({
-      state,
-      terminal: prepared.operation.terminal,
-      input: hostedSyncInput(state, prepared.operation.firstAttempt.at),
-    });
+    return {
+      replayed: true,
+      value: {
+        state,
+        terminal: prepared.operation.terminal,
+        input: hostedSyncInput(state, prepared.operation.firstAttempt.at),
+      },
+    };
   }
   const project = await activeProject(ctx, auth.projectId, auth.actor);
   let ownerInputs = false,
@@ -335,18 +338,15 @@ export async function prepareHostedSync(
     jobId: prepared.operation.firstAttempt.ids.job!,
     value: canonicalPayload(state),
   });
-  if (upToDate)
-    return canonicalPayload({
-      state,
-      terminal: await finishUpToDateSync(ctx, auth, state, prepared.operation.firstAttempt),
-      input: hostedSyncInput(state, prepared.operation.firstAttempt.at),
-    });
   // The exact input the client uploads before submit, so it needs no progress read for it.
-  return canonicalPayload({
-    state,
-    terminal: null,
-    input: hostedSyncInput(state, prepared.operation.firstAttempt.at),
-  });
+  return {
+    replayed: false,
+    value: {
+      state,
+      terminal: upToDate ? await finishUpToDateSync(ctx, auth, state, prepared.operation.firstAttempt) : null,
+      input: hostedSyncInput(state, prepared.operation.firstAttempt.at),
+    },
+  };
 }
 export const progress = query({
   args: { ...identity, board: v.optional(v.object({ laneId: v.string(), after: v.number() })) },

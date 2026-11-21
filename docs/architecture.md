@@ -331,6 +331,10 @@ Complete points preserve exact raw/pack nonce keys, recipe pins and imported
 State dimensions. Row promotion preserves every existing State/recipe field;
 generation repair promotes a point or legacy catalog State before changing its
 metadata instead of rewriting its dense page.
+The read-only generation-repair preview carries newly computed levels in its
+cursor so children on later pages can use them. The cursor grows with the
+generations the preview would assign. Live repair reads the levels committed by
+earlier pages.
 
 The existing internal catalog compactor accepts an explicit `points:true`
 operation that qualifies point authority without changing client protocol policy. It first
@@ -1536,13 +1540,17 @@ when retained parents already prove descent. Larger, unknown and continued saves
 independent chain path; the existing 20 s re-entry boundary and action allocation are unchanged.
 The private chained result is consumed by the submitting action, never exposed as a new reply field.
 The publication schedules `projectHostedResolveChain:run` only as a fallback 5 s
-out, which the chain's prepare cancels. Any other publication schedules it at once. The chain builds the resolve request
+out, which the chain cancels when its submit commits or it records a pre-submit failure.
+Any other publication schedules it at once. The chain builds the resolve request
 from the save's own result with the same function the CLI uses, prepares it as the save's actor,
-writes its input to R2 (checksum-bound PUT, then HEAD), submits with the dispatch inline and runs
+verifies its R2 input, submits with the dispatch inline and runs
 the first step. `projectHostedSaves:progress` reports that sync as `chain`, so the CLI's one save
-subscription receives the resolve receipt without a second round of calls. The CLI resolves
-itself, replaying the identical idempotent request, when the chain records a failure before its
-submit (`chainFailure`), or when 10 s pass after the save completed with no chained receipt.
+subscription receives the resolve receipt, including on a retry of an already completed save.
+The first preparation sends a checksum-bound PUT. A replay checks the exact key, size and
+checksum by HEAD so it can reuse an input uploaded before the first attempt stopped.
+When the chain records a pre-submit failure (`chainFailure`), or remains unsubmitted 10 s after
+the save completed, the CLI can submit the identical idempotent request. Once the chain has
+submitted, the CLI observes the original sync and drives recovery only if it becomes retryable.
 
 A trusted source-job completion schedules the save finalizer independently of the
 editing client. A save, sync or compose step whose result manifest is at most 64 KiB publishes

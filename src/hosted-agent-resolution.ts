@@ -385,46 +385,52 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     }
   }
   let chained: { terminal: unknown; state: unknown } | undefined;
-  const direct = chain && completed(saved) && reply ? chainSettle(reply) : undefined;
+  let chainSubmitted = false;
+  const savedLocally = !!completed(saved);
+  const watchChain = chain && then.authorityEpoch === epoch;
+  const direct = chain && savedLocally ? chainSettle(reply) : undefined;
   if (direct && 'value' in direct) chained = direct.value.chained;
-  else if (direct) {
-    // The save published in its action but the chained resolve is still running: its receipt
-    // arrives on the save's subscription, bounded by the same stall rule.
-    const waited = await session.waitSource(
+  else if (!savedLocally || (watchChain && (!reply || direct))) {
+    // A retained save receipt can predate its scheduled resolve. Observe the original save
+    // subscription in that case too, even when this client already applied the save.
+    let observed: unknown;
+    const observe = (value: unknown) => {
+      observed = value;
+      // The submit-action reply can hint "submitted" even before a chain job exists.
+      // Only the durable sync state in save progress establishes that it was submitted.
+      if (
+        watchChain &&
+        (value as { chain?: { state?: { status?: string } } } | null)?.chain?.state?.status === 'submitted'
+      )
+        chainSubmitted = true;
+    };
+    let waited = await session.waitSource(
       saveOperationId,
-      { status: 'submitted' },
+      savedLocally ? { status: 'submitted' } : saved,
       'Saves',
       undefined,
-      undefined,
-      chainSettle,
+      observe,
+      watchChain ? chainSettle : undefined,
     );
+    const last = watchChain ? chainSettle(observed) : undefined;
+    if (!chainSubmitted && last && 'waitMs' in last && !session.signal?.aborted) {
+      // A submit can commit before the stall deadline while its live update is still in transit.
+      const latest = await session.query('projectHostedSaves:progress', { operationId: saveOperationId });
+      observe(latest);
+      const settled = chainSettle(latest);
+      if (settled && 'value' in settled) waited = settled.value;
+    }
     if (waited && typeof waited === 'object' && 'chained' in waited)
       chained = (waited as { chained: typeof chained }).chained;
     saveTiming.mark('hostedWait');
-  }
-  if (!completed(saved)) {
-    let observed: unknown;
-    saved = await session.waitSource(
-      saveOperationId,
-      saved,
-      'Saves',
-      undefined,
-      value => {
-        observed = value;
-      },
-      chain ? chainSettle : undefined,
-    );
-    if (saved && typeof saved === 'object' && 'chained' in saved) {
-      chained = (saved as { chained: typeof chained }).chained;
-      saved = (saved as { save: unknown }).save;
-    }
-    saveTiming.mark('hostedWait');
     saveTiming.server(observed);
-    if (!completed(saved)) return { phase: 'save', saveOperationId, progress: saved, ...continuation };
-    // Advance the marker from the original capture and the observed receipt before resolving its
-    // exact head, as a plain save does: no replay of the save's preparation.
-    applyObservedSaveOutcome(session.root, saveOperationId, saved as { outcome: { status: string } });
-    saveTiming.mark('apply');
+    if (!savedLocally) {
+      saved = chained ? (waited as { save: unknown }).save : waited;
+      if (!completed(saved)) return { phase: 'save', saveOperationId, progress: saved, ...continuation };
+      // Advance the marker from the original capture and the observed receipt, without replaying prepare.
+      applyObservedSaveOutcome(session.root, saveOperationId, saved as { outcome: { status: string } });
+      saveTiming.mark('apply');
+    }
   }
   timing.nest(saveTiming.value());
   const resolveRequest = (pin: SaveThen) =>
@@ -443,29 +449,55 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
       timing.mark('hostedWait');
       timing.server({ state: chained.state });
     } else {
-      const drive = (value: typeof request) =>
-        driveAgentSource(session, 'Sync', session.journal.operationId, value, [], false, false, true);
-      try {
-        progress = await drive(request);
-      } catch (error) {
-        if (!(error instanceof AuthorityPinRefused)) throw error;
-        // Refused before the resolve sync began: its request (from a `then` an earlier save may still
-        // hold) can never begin at an older epoch, so a replay rebuilds it, never resends it (N3).
-        session.journal.forget('resolve-request');
-        if (request.authorityEpoch === epoch) throw error.refusal;
+      const waitSync = (initial: unknown) =>
+        session.waitSource(session.journal.operationId, initial, 'Sync', undefined, value => {
+          observed = value;
+        });
+      const drive = async (observeSubmitted: boolean) => {
+        const send = (value: typeof request) =>
+          driveAgentSource(
+            session,
+            'Sync',
+            session.journal.operationId,
+            value,
+            [],
+            false,
+            false,
+            true,
+            observeSubmitted,
+          );
         try {
-          sent = epoch;
-          progress = await drive(await resolveRequest({ ...then, authorityEpoch: epoch }));
-        } catch (again) {
-          if (!(again instanceof AuthorityPinRefused)) throw again;
+          return await send(request);
+        } catch (error) {
+          if (!(error instanceof AuthorityPinRefused)) throw error;
+          // Refused before the resolve sync began: its request (from a `then` an earlier save may still
+          // hold) can never begin at an older epoch, so a replay rebuilds it, never resends it (N3).
           session.journal.forget('resolve-request');
-          throw again.refusal;
+          if (request.authorityEpoch === epoch) throw error.refusal;
+          try {
+            sent = epoch;
+            return await send(await resolveRequest({ ...then, authorityEpoch: epoch }));
+          } catch (again) {
+            if (!(again instanceof AuthorityPinRefused)) throw again;
+            session.journal.forget('resolve-request');
+            throw again.refusal;
+          }
         }
+      };
+      // The chain stall bound is only a deadline for submission. A submitted sync owns its
+      // execution; only an observed retryable job needs the original request driven again.
+      const initial = chainSubmitted ? { status: 'submitted' } : await drive(watchChain);
+      if (!chainSubmitted) timing.mark('submit');
+      progress = await waitSync(initial);
+      if (
+        (chainSubmitted ||
+          Boolean((initial as { observedSubmission?: boolean } | null)?.observedSubmission)) &&
+        (progress as { status?: string } | null)?.status === 'retryable'
+      ) {
+        const recovered = await drive(false);
+        timing.mark('submit');
+        progress = await waitSync(recovered);
       }
-      timing.mark('submit');
-      progress = await session.waitSource(session.journal.operationId, progress, 'Sync', undefined, value => {
-        observed = value;
-      });
       timing.mark('hostedWait');
       timing.server(observed);
     }

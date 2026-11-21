@@ -5,11 +5,14 @@ import { findObject } from './projectObjectFind';
 import { nextStateGeneration, validStateGeneration, validStateParents } from '../src/state/generation';
 import { invariant } from '../src/errors';
 
+const previewPrefix = 'generation-preview:';
+
 /** Operator repair, one page of 100 published States per call (review 3aa618e2 F1): a hosted State
  * published since `since` whose object row has no generation gets one from the parents the trusted
  * worker recorded on that row, in publication order, so a repaired parent serves its children in the
  * same page. A State keeps none while any parent has none; a recorded generation never changes.
- * No source bytes are read. `apply: false` only counts. Idempotent: rerun from `cursor: null`. */
+ * No source bytes are read. `apply: false` carries computed levels in its cursor and only counts.
+ * Idempotent: rerun from `cursor: null`. */
 export const fromParents = internalMutation({
   args: {
     projectId: v.id('hostedProjects'),
@@ -27,12 +30,18 @@ export const fromParents = internalMutation({
   }),
   handler: async (ctx, input) => {
     invariant(Number.isFinite(input.since), 'BAD_ARGUMENT', 'Name the first publication time.');
+    const [cursor, carried] =
+      !input.apply && input.cursor?.startsWith(previewPrefix)
+        ? (JSON.parse(input.cursor.slice(previewPrefix.length)) as [string, [string, number][]])
+        : ([input.cursor, []] as const);
+    const previewLevels = new Map<string, number>(carried);
     const page = await ctx.db
       .query('projectHostedStates')
       .withIndex('by_project', q => q.eq('projectId', input.projectId).gte('_creationTime', input.since))
-      .paginate({ cursor: input.cursor, numItems: 100 });
+      .paginate({ cursor, numItems: 100 });
     const known = new Map<string, number>();
     const level = async (id: string) => {
+      if (previewLevels.has(id)) return previewLevels.get(id);
       if (known.has(id)) return known.get(id);
       const row = await findObject(ctx, input.projectId, id);
       const value =
@@ -51,8 +60,10 @@ export const fromParents = internalMutation({
       for (const parent of row.stateParents) levels.set(parent, await level(parent));
       const generation = nextStateGeneration(row.stateParents, id => levels.get(id));
       if (generation === undefined) continue;
-      known.set(state.head, generation);
-      if (input.apply) await ctx.db.patch(row._id, { stateGeneration: generation });
+      if (input.apply) {
+        known.set(state.head, generation);
+        await ctx.db.patch(row._id, { stateGeneration: generation });
+      } else previewLevels.set(state.head, generation);
       assigned++;
     }
     return {
@@ -60,7 +71,11 @@ export const fromParents = internalMutation({
       missing,
       assigned,
       unresolved: missing - assigned,
-      cursor: page.isDone ? null : page.continueCursor,
+      cursor: page.isDone
+        ? null
+        : previewLevels.size
+          ? previewPrefix + JSON.stringify([page.continueCursor, [...previewLevels]])
+          : page.continueCursor,
       done: page.isDone,
     };
   },

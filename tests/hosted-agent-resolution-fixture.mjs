@@ -61,6 +61,10 @@ export async function resolutionFixture(t, options = {}) {
     const name = getFunctionName(ref),
       [module, member] = name.split(':');
     assert(modules[module]?.[member], `Only synthetic registered API handlers: ${name}`);
+    // Most clients in this fixture use direct sync and do not run scheduled resolve chains.
+    // The chain replays opt in and provide their own live progress and scheduler.
+    if (name === 'projectHostedAgent:capabilities' && !options.sourceChain && args.features)
+      args = { ...args, features: args.features.filter(feature => feature !== 'save-then-resolve') };
     calls.push({ name, args: structuredClone(args) });
     let result;
     try {

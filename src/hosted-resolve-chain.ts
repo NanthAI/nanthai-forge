@@ -24,12 +24,11 @@ export function resolveSyncRequest(then: SaveThen, laneId: string, saved: unknow
   });
 }
 
-/** How long the CLI waits, after its save completed, for the server's chained resolve before it
- * resolves itself (an identical, idempotent request, so both converge). */
+/** How long the CLI waits, after its save completed, before checking whether it needs to
+ * submit the chained resolve itself. */
 export const chainStallMs = 10_000;
-/** End a resolve's save wait (save-then-resolve) at the chained resolve's receipt; at a chain
- * failure, or once the stall bound passes without that receipt, end it at the save's own receipt
- * so the CLI resolves itself. A save that did not complete ends the wait as before. */
+/** End a resolve's save wait at its chained resolve's receipt. At the stall bound or a chain
+ * failure, the save receipt lets the caller continue with the sync's last observed status. */
 export const chainSettle = (
   progress: unknown,
 ):
@@ -40,9 +39,8 @@ export const chainSettle = (
     terminal?: { outcome?: { status?: string } } | null;
     chain?: { status?: string; terminal?: unknown; state?: unknown };
   } | null;
-  if (p?.terminal?.outcome?.status !== 'completed' || !p.chain || p.chain.status === 'failed')
-    return undefined;
+  if (p?.terminal?.outcome?.status !== 'completed' || !p.chain) return undefined;
   if (p.chain.terminal)
     return { value: { save: p.terminal, chained: { terminal: p.chain.terminal, state: p.chain.state } } };
-  return { waitMs: chainStallMs };
+  return p.chain.status === 'failed' ? undefined : { waitMs: chainStallMs };
 };

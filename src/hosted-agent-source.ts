@@ -79,6 +79,8 @@ export async function driveAgentSource(
   /** Report an authority-epoch prepare refusal as AuthorityPinRefused (the caller rebuilds), and a
    * replayed operation that began at an older epoch as BeganAtOlderEpoch (N3). */
   authorityPinned = false,
+  /** A server resolve chain may have submitted between the last observation and prepare. */
+  observeSubmitted = false,
 ) {
   const features = session.capabilities.features ?? [],
     // prepare-upload-targets: a sync prepare also returns its input's upload target, asked only
@@ -91,6 +93,7 @@ export async function driveAgentSource(
       !!session.exchange.uploadPrepared &&
       !!session.exchange.uploadLazyBatch;
   let prepared: SourceProgress & {
+    state?: { status?: string };
     targets?: Parameters<NonNullable<HostedAgentSession['exchange']['uploadPrepared']>>[1];
   };
   try {
@@ -116,6 +119,8 @@ export async function driveAgentSource(
       epoch = session.capabilities.authority.epoch;
     if (beganAtOlderEpoch(began, epoch, prepared.terminal)) throw new BeganAtOlderEpoch(began!, epoch);
   }
+  if (observeSubmitted && prepared.state?.status === 'submitted')
+    return { status: 'submitted', observedSubmission: true };
   for (const page of pages) {
     await session.exchange.upload(page.pin, Buffer.from(saveBytes(page.value)));
     await session.mutation(`projectHosted${kind}:stage`, {

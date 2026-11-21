@@ -12,14 +12,17 @@ export async function chainProgress(
   state: { request: { then?: { operationId: string } }; chainFailure?: string },
 ) {
   const operationId = state.request.then!.operationId;
-  if (state.chainFailure) return { status: 'failed' as const, code: state.chainFailure };
   const row = await syncRow(ctx, { ...auth, operationId });
-  if (!row) return { status: 'pending' as const };
+  const failure = state.chainFailure ? { status: 'failed' as const, code: state.chainFailure } : null;
+  if (!row) return failure ?? { status: 'pending' as const };
   const sync = syncStateSchema.parse(JSON.parse(row.value)),
     operation = await hostedOperationRow(ctx, auth.projectId, auth.actor, operationId);
+  const terminal = operation ? hostedOperationSchema.parse(JSON.parse(operation.value)).terminal : null;
+  // A recorded pre-submit failure may survive after a CLI recovery submitted the same operation.
+  if (failure && !terminal && sync.status === 'ready') return failure;
   return {
     status: sync.status,
     state: sync,
-    terminal: operation ? hostedOperationSchema.parse(JSON.parse(operation.value)).terminal : null,
+    terminal,
   };
 }

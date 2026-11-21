@@ -24,40 +24,45 @@ export const prepare = internalMutation({
   handler: async (ctx, args) => {
     try {
       const { state, operation } = await loadSave(ctx, args);
-      // The publication's delayed fallback of this chain is not needed once the chain runs here;
-      // Request ownership also protects a mutation fallback whose row is still pending.
-      if (state.chainFallbackId) {
-        await cancelPendingTask(ctx, state.chainFallbackId as Id<'_scheduled_functions'>);
-      }
       const then = state.request.then;
       if (!then || operation.terminal?.outcome.status !== 'completed') return null;
       const request = resolveSyncRequest(then, state.request.laneId, operation.terminal.outcome.result);
-      const prepared = JSON.parse(
-        await prepareHostedSync(
-          ctx,
-          { projectId: args.projectId, actor: args.actor, operationId: then.operationId },
-          request,
-        ),
+      const { replayed, value: prepared } = await prepareHostedSync(
+        ctx,
+        { projectId: args.projectId, actor: args.actor, operationId: then.operationId },
+        request,
       );
       if (prepared.terminal || prepared.state.status !== 'ready') return null;
-      return canonicalPayload({ operationId: then.operationId, input: prepared.input });
+      return canonicalPayload({
+        operationId: then.operationId,
+        input: prepared.input,
+        replayed,
+        ...(state.chainFallbackId ? { fallbackId: state.chainFallbackId } : {}),
+      });
     } catch (error) {
       return report(error);
     }
   },
 });
 
-/** Record the chain's own R2 write of the sync input (checksum-bound PUT and HEAD done), then
+/** Record the chain's exact, already verified R2 sync input, then
  * submit with the dispatch inline, as projectSourceRunStore:submit does for the CLI. */
 export const submit = internalMutation({
-  args: { ...save, input: v.object({ sha256: v.string(), size: v.number() }) },
+  args: {
+    ...save,
+    input: v.object({ sha256: v.string(), size: v.number() }),
+    fallbackId: v.optional(v.id('_scheduled_functions')),
+  },
   returns: v.string(),
-  handler: async (ctx, { input, ...auth }) => {
+  handler: async (ctx, { input, fallbackId, ...auth }) => {
     try {
       await storeSourceOutputs(ctx, auth.projectId, `resolve-chain:${auth.operationId}`, [
         { ...input, r2Key: r2Key(auth.projectId, input.sha256) },
       ]);
-      return JSON.stringify(await submitHostedSync(ctx, auth, true));
+      const result = await submitHostedSync(ctx, auth, true);
+      // Keep the fallback until submission is durable, including the gap after the R2 PUT.
+      if (fallbackId) await cancelPendingTask(ctx, fallbackId);
+      return JSON.stringify(result);
     } catch (error) {
       return report(error);
     }
@@ -71,6 +76,8 @@ export const failed = internalMutation({
   returns: v.null(),
   handler: async (ctx, { code, ...args }) => {
     const { row, state } = await loadSave(ctx, args);
+    if (state.chainFallbackId)
+      await cancelPendingTask(ctx, state.chainFallbackId as Id<'_scheduled_functions'>);
     if (!state.chainFailure)
       await writeSaveState(ctx, row._id, { ...state, chainFailure: code.slice(0, 64) });
     return null;
