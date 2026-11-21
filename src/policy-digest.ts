@@ -11,9 +11,10 @@ import { effectiveAgentDefaults } from './agent-parallel-defaults.js';
  * not change an attempt, so editing them never invalidates a pinned landing. Neither does the landing
  * mode: it is read live when a first-check proof is decided and again when it is published. Unchecked
  * person authority is also read live at final publication, so its edits never restart checked landings. Optional
- * proof on landing adds evidence only, so it also never invalidates an attempt. */
+ * proof on landing and the standalone placement writer only change evidence written by future
+ * checks. Existing attempts retain their pins. */
 function landingPolicy(policy: AutonomyPolicy) {
-  const kept: Partial<AutonomyPolicy> = { ...policy, acceptance: withoutLandingMode(policy) };
+  const kept: Partial<AutonomyPolicy> = { ...policy, acceptance: pinnedAcceptance(policy) };
   delete kept.agentDefaults;
   delete kept.notify;
   delete kept.githubMirror;
@@ -21,17 +22,19 @@ function landingPolicy(policy: AutonomyPolicy) {
   if (!policy.trust?.enabled) delete kept.trust;
   return kept;
 }
-function withoutLandingMode(policy: AutonomyPolicy) {
+function pinnedAcceptance(policy: AutonomyPolicy) {
   const {
     landingMode: _mode,
     proofOnLanding: _proof,
     earlyResolve: _earlyResolve,
+    standaloneNestedPackages: _standaloneNestedPackages,
     withoutCheck: _withoutCheck,
     ...acceptance
   } = policy.acceptance;
   void _mode;
   void _proof;
   void _earlyResolve;
+  void _standaloneNestedPackages;
   void _withoutCheck;
   return acceptance;
 }
@@ -41,7 +44,7 @@ export const acceptancePolicyDigest = (policy: AutonomyPolicy) =>
 /** Attempts pinned before the narrower digest used the policy minus agent defaults; they stay valid
  * until the policy changes in a way that matters to them (or, for them, any other field). */
 const legacyDigest = (policy: AutonomyPolicy) => {
-  const legacy: Partial<AutonomyPolicy> = { ...policy, acceptance: withoutLandingMode(policy) };
+  const legacy: Partial<AutonomyPolicy> = { ...policy, acceptance: pinnedAcceptance(policy) };
   delete legacy.agentDefaults;
   return digest(canonicalPayload(legacy));
 };
@@ -157,6 +160,12 @@ export const OWNER_GATE: Readonly<Record<string, GateClass>> = {
   'acceptance.disjointFastPath': 'gated',
   'acceptance.autoRevert': 'gated',
   'acceptance.hostedCrossHeadReuse': 'gated',
+  'acceptance.standaloneNestedPackages': {
+    relax: 'enabling standalone placement evidence is held',
+    held: (previous, policy) =>
+      previous.acceptance.standaloneNestedPackages !== true &&
+      policy.acceptance.standaloneNestedPackages === true,
+  },
   // Outside the pinned digest so queued landings survive a switch; back to strict needs no one.
   'acceptance.landingMode': {
     relax: 'switching fast landing on is held',

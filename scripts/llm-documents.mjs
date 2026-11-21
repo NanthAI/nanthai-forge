@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { packageDocuments, packageDocumentData, readDocument } from './package-documents.mjs';
 import { AGENT_DEFAULTS, agentDefaultLines } from './agent-default-lines.mjs';
 
-import { lifecycleVerbs, landSaveForm } from './agent-verb-forms.mjs';
+import { coreVerbs, landSaveForm } from './agent-verb-forms.mjs';
 
 const repository = 'https://github.com/NanthAI/nanthai-forge/blob/main';
 
@@ -44,7 +44,7 @@ export const llmsFullWarnBytes = 400 * 1024;
 
 // The measured-results block comes from Why Forge, also retained verbatim in the skill.
 // Commands derive from the same verb contract as CLI dispatch.
-const workflow = `Lifecycle verbs: ${lifecycleVerbs.map(verb => `\`${verb}\``).join(', ')}. Use \`${landSaveForm}\` to save, update from main, check and land under project policy. Run \`preflight {laneId}\` for affected checks of a saved Lane; \`tests {candidateId}\` reads a Candidate's test selection.`;
+const workflow = `Lifecycle verbs: ${coreVerbs.map(verb => `\`${verb}\``).join(', ')}. Use \`${landSaveForm}\` to save, update from main, check and land under project policy. Run \`preflight {laneId}\` for affected checks of a saved Lane; \`tests {candidateId}\` reads a Candidate's test selection.`;
 
 const agentRules = [
   workflow,

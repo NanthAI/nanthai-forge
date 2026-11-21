@@ -91,7 +91,7 @@ const row = (presence: Presence, replacedBy: ReadonlyMap<string, string>) => {
     ...(by
       ? {
           replacedBy: by,
-          next: `nforge x ROOT abandon ${JSON.stringify({ laneId: presence.laneId, reason: `Replaced by Lane ${by}` })}`,
+          next: `nforge agent ROOT abandon ${JSON.stringify({ laneId: presence.laneId, reason: `Replaced by Lane ${by}` })}`,
         }
       : {}),
   };

@@ -33,7 +33,7 @@ export async function executeHostedWithdraw(session: HostedAgentSession, input: 
   if (!session.capabilities.features?.includes('landing-withdraw'))
     throw new ForgeError(
       'HOSTED_FEATURE_UNAVAILABLE',
-      `This server cannot withdraw by Lane yet. Read the Lane's submissionId with lanes {} or the land receipt, then run nforge x ${shellQuote(session.root)} cancel '{"submissionId":"SUBMISSION_ID"}'.`,
+      `This server cannot withdraw by Lane yet. Read the Lane's submissionId with lanes {} or the land receipt, then run nforge agent ${shellQuote(session.root)} cancel '{"submissionId":"SUBMISSION_ID"}'.`,
     );
   const epoch = session.capabilities.authority.epoch;
   const landing = await sendAuthorityPinned(

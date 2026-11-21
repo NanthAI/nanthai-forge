@@ -22,8 +22,8 @@ server. Use `apply:false` to restore just the hosted Lane.
 Other Lanes and main keep their source and history. A later landing composes the
 restored State onto current main, merging concurrent work or reporting a
 conflict. To take a landed change out of main, use
-`nforge x ROOT revert '{"target":{"kind":"receipt","receiptId":"RECEIPT_ID"}}'`
-and land the resulting compensating Lane through the usual checks. The original
+`nforge agent ROOT revert '{"target":{"kind":"receipt","receiptId":"RECEIPT_ID"}}'`
+and run `land --save` in the resulting Lane for a checked compensating landing. The original
 landing and the new landing both remain in history.
 
 After a sync, you can select a saved State from before it. The sync receipt

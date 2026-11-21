@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "src/first-check-risk.ts": "afaab53cf7590118d28f4fe2dfbfe3d27f7ca254e57058397747428711986f1c",
+    "src/hosted-actions-job-client.ts": "79076b212cd621a9e55eeecf743683c375ccae6dcec23d10a62a64f39c791e86",
+    "src/hosted-actions-job-plan.ts": "8e59b9c963c1bd0eebf9ce97ada280fa6c052674e75b8d080a6a0e2b1616a44b",
+    "src/js-inbound-imports.ts": "19ce4cf4b8375469d59ec25e6abd48b94dfb195bac2f8d69f3323c14bf177e8c",
+    "src/js-inbound-specifiers.ts": "d51fd92812c2bf30f75294ce811943624e9924fe8f5e746797a9789e240663c0",
+    "src/package-placement-js.ts": "2f93430beb7d550bd1c8dead246a40887868d73d11a761284a38383806e4252a",
+    "src/package-placement-pin.ts": "f9892eecec433341c0ace2f51c6891301d57cc3c1df35d1f90604c7aad64bde8",
+    "src/package-placement.ts": "2cf5afde74ff7d323e3af7a84b09c4c6051e585e090d17d7c715fe4bc4b2163f"
+  },
+  "replay": {
+    "incident": "1018d0f8",
+    "test": "incident 1018d0f8: planning adds only placement evidence with no extra source or Convex requests",
+    "receipt": "f3d22cae-01ca-400c-9ebe-f049d6551f63"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Ae3ea2a66-2eb6-4697-a615-a2695ad5993b",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "01a1ffe1-cba5-7473-abe5-d0b4870f8182",
+    "receipt": "32719c18-6ee6-4c4d-b16f-c5a03f1578a0"
+  }
+}

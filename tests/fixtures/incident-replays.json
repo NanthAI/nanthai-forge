@@ -2598,6 +2598,61 @@
       "test": "incident 1018d0f8: only a standalone pin from the side adding the nested package carries its check"
     },
     {
+      "incident": "1018d0f8",
+      "file": "tests/hosted-actions-direct.test.mjs",
+      "paths": [
+        "convex/projectHostedActionsDirect.ts",
+        "convex/projectHostedActionsSession.ts",
+        "convex/projectHostedCheckDefinitions.ts",
+        "convex/projectHostedCheckEntries.ts",
+        "convex/projectHostedCheckLease.ts",
+        "convex/projectHostedCheckReports.ts",
+        "convex/projectHostedCheckStore.ts",
+        "convex/projectHostedCheckVerdictReuse.ts",
+        "convex/projectHostedChecks.ts",
+        "convex/projectHostedKeepSwitch.ts",
+        "convex/projectHostedLandingCheckWake.ts",
+        "convex/schedulerCancel.ts",
+        "src/first-check-risk.ts",
+        "src/hosted-check-evidence.ts",
+        "src/hosted-check.ts",
+        "src/scoped-recheck-policy.ts"
+      ],
+      "test": "incident 1018d0f8: placement opt-in reuses the authorized planning session with identical DB I/O"
+    },
+    {
+      "incident": "1018d0f8",
+      "file": "tests/hosted-actions-job.test.mjs",
+      "paths": [
+        "src/first-check-risk.ts",
+        "src/hosted-actions-job-client.ts",
+        "src/hosted-actions-job-plan.ts",
+        "src/hosted-check.ts",
+        "src/js-inbound-imports.ts",
+        "src/js-inbound-specifiers.ts",
+        "src/package-placement-js.ts",
+        "src/package-placement-pin.ts",
+        "src/package-placement.ts",
+        "src/scoped-recheck-policy.ts"
+      ],
+      "test": "incident 1018d0f8: planning adds only placement evidence with no extra source or Convex requests"
+    },
+    {
+      "incident": "1018d0f8",
+      "file": "tests/package-placement-standalone.test.mjs",
+      "paths": [
+        "src/first-check-risk.ts",
+        "src/hosted-cross-head-analysis.ts",
+        "src/hosted-cross-head-proof.ts",
+        "src/js-inbound-imports.ts",
+        "src/js-inbound-specifiers.ts",
+        "src/package-placement-js.ts",
+        "src/package-placement-pin.ts",
+        "src/package-placement.ts"
+      ],
+      "test": "incident 1018d0f8: the writer carries all three nested-manifest movers and preserves actual refusals"
+    },
+    {
       "incident": "f5c45985",
       "what": "A discarded operation stamp was hidden by a missing accepted-run stamp, understating the alert window",
       "file": "tests/landing-speed-alerts.test.mjs",

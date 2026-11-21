@@ -6,6 +6,7 @@ import { digest } from '../dist/hash.js';
 import { analyzeCrossHeadReuse } from '../dist/hosted-cross-head-analysis.js';
 import { validCrossHeadProof } from '../dist/hosted-cross-head-proof.js';
 import { pinnedPackagePlacement, placedRiskBetween } from '../dist/package-placement.js';
+import { checkedPackagePlacement } from '../dist/package-placement-pin.js';
 
 const dir = 'spikes/workers-source-step';
 const rootCode = 'src/root.ts';
@@ -127,7 +128,7 @@ test('invalid v3 rows cannot certify standalone ownership', () => {
   }
 });
 
-function race(packageSide, packagePin, { staleAudit = false, fast = false } = {}) {
+function race(packageSide, packagePin, { staleAudit = false, fast = false, packagePaths = manifests } = {}) {
   const pins = new Map();
   const put = object => {
     const bytes = Buffer.from(JSON.stringify(object));
@@ -146,9 +147,9 @@ function race(packageSide, packagePin, { staleAudit = false, fast = false } = {}
     });
   const candidateOwnsPackage = packageSide === 'candidate';
   const base = state(['package.json']);
-  const candidate = state(['package.json', ...(candidateOwnsPackage ? manifests : [rootCode])]);
-  const main = state(['package.json', ...(candidateOwnsPackage ? [rootCode] : manifests)]);
-  const combined = state(['package.json', ...manifests, rootCode]);
+  const candidate = state(['package.json', ...(candidateOwnsPackage ? packagePaths : [rootCode])]);
+  const main = state(['package.json', ...(candidateOwnsPackage ? [rootCode] : packagePaths)]);
+  const combined = state(['package.json', ...packagePaths, rootCode]);
   const select = placement => put({ scope: 'full', ...(placement ? { packagePlacement: placement } : {}) });
   const checkedSelection = select(candidateOwnsPackage ? packagePin : undefined);
   const auditSelection = select(candidateOwnsPackage ? undefined : packagePin);
@@ -222,6 +223,63 @@ test('incident 1018d0f8: only a standalone pin from the side adding the nested p
     false,
   );
   assert.equal(validCrossHeadProof({ ...proof, riskRule: 'first-check-risk-v6' }), false);
+});
+
+test('incident 1018d0f8: the writer carries all three nested-manifest movers and preserves actual refusals', async () => {
+  const source = {
+    'package.json': '{"name":"root","scripts":{"test":"node --test"}}',
+    'package-lock.json': '{}',
+    [manifests[0]]: '{"name":"worker"}',
+    [rootCode]: 'export const worker = path => import(path);',
+  };
+  const modes = [
+    { label: 'off', settings: undefined, changes: {} },
+    { label: 'dynamic read accepted for main audit', carry: true, changes: {} },
+    {
+      label: 'shell entrypoint',
+      changes: { 'package.json': '{"scripts":{"test":"cd spikes && npm test"}}' },
+    },
+    { label: 'workspace glob', changes: { 'package.json': '{"workspaces":["spikes/*"]}' } },
+    {
+      label: 'static import',
+      changes: { [rootCode]: 'import "../spikes/other/../workers-source-step/module.js";' },
+    },
+    { label: 'no own test command', changes: { [dir + '/tests/unit.ts']: 'export {};' } },
+  ];
+  for (const { label, settings = { checkEntries: [], commandLines: [] }, changes, carry } of modes) {
+    const tree = { ...source, ...changes };
+    const { packagePlacement } = checkedPackagePlacement(
+      Object.keys(tree),
+      path => tree[path],
+      label === 'off' ? undefined : settings,
+    );
+    for (const side of ['candidate', 'main', 'main']) {
+      const scenario = race(side, packagePlacement, { packagePaths: [manifests[0]] });
+      const decision = await scenario.run();
+      if (carry) {
+        assert.deepEqual(
+          decision.proof.placedRisk,
+          manifests.slice(0, 1).map(path => ({
+            path,
+            reach: ['js:' + dir],
+            standalone: 'js-non-member',
+          })),
+          label,
+        );
+        assert.deepEqual(scenario.windows, [4, 2]);
+      } else {
+        if (label === 'workspace glob') {
+          // The workspace member takes the ordinary rule. In this fixture the root is unowned.
+          assert.equal(
+            decision.proof?.placedRisk?.some(item => item.standalone),
+            undefined,
+          );
+        } else {
+          assert.deepEqual(decision, { reason: 'global-risk' }, label);
+        }
+      }
+    }
+  }
 });
 
 test('an already effective fast landing keeps its existing global-risk relaxation with a v3 pin', async () => {

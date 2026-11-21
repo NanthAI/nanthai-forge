@@ -47,6 +47,7 @@ export const hostedAgentHelpEntries = [
 const actionTopic: Record<string, HelpTopicId> = {
   finish: 'land',
   withdraw: 'land',
+  revert: 'land',
   'land-ready': 'land',
   preflight: 'land',
   wait: 'wait',
@@ -155,7 +156,9 @@ function helpExample(entry: (typeof hostedAgentHelpEntries)[number]) {
   const example =
     entry.action === 'start'
       ? { outcome: 'Improve the README', model: 'unknown' }
-      : Object.fromEntries(required.map(field => [field, placeholder(field, properties[field])]));
+      : entry.action === 'revert'
+        ? { target: { kind: 'receipt', receiptId: 'RECEIPT_ID' } }
+        : Object.fromEntries(required.map(field => [field, placeholder(field, properties[field])]));
   const command = entry.command.startsWith('x ')
     ? `nforge x ROOT ${entry.command.slice(2)}`
     : `nforge agent ROOT ${entry.command}`;

@@ -12,7 +12,7 @@ What replaces it on the hosted queue:
   a fix. A project earns fast mode from its own audit history. See
   [landing modes](../pre-queue-checks.md#landing-modes) for the rules, the flake policy and
   the command that turns it on.
-- **Compensating a landing.** `nforge x ROOT revert '{"target":...}'` makes a compensating
+- **Compensating a landing.** `nforge agent ROOT revert '{"target":...}'` makes a compensating
   Lane. It lands through the queue with an ordinary check and acceptance; main never rewinds
   ([agent workflow](../agents/workflow.md)).
 

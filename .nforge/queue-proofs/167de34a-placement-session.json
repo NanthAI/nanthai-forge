@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedActionsSession.ts": "efa8aac657e2e70dd0193e4b23600df54b2ef3ffcac74562acbea0c91e6403d9"
+  },
+  "replay": {
+    "incident": "1018d0f8",
+    "test": "incident 1018d0f8: placement opt-in reuses the authorized planning session with identical DB I/O",
+    "receipt": "f3d22cae-01ca-400c-9ebe-f049d6551f63"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Ae3ea2a66-2eb6-4697-a615-a2695ad5993b",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "01a1ffe1-cba5-7473-abe5-d0b4870f8182",
+    "receipt": "32719c18-6ee6-4c4d-b16f-c5a03f1578a0"
+  }
+}

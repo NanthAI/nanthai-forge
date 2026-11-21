@@ -502,10 +502,10 @@ mirror only fast-forwards.
   receives one commit per skipped State in order, with no duplicate and no force.
   The failure, restore, resume and catch-up were drilled on a throwaway repository.
   The dedicated error code and retained detail are covered by response fixtures.
-- **Forge `main` is wrong** (a bad landing). Do not touch GitHub. Land
-  `nforge x ROOT revert '{"target":{"kind":"receipt","receiptId":"…"}}'` (or accept a
-  retained earlier State as a person); the mirror adds a fast-forward commit and
-  history stays. Drilled the same way.
+- **Forge `main` is wrong** (a bad landing). Prepare a compensating Lane with
+  `nforge agent ROOT revert '{"target":{"kind":"receipt","receiptId":"…"}}'` and
+  run `land --save` there. A person can also accept a retained earlier State.
+  The mirror adds a fast-forward commit and keeps history. Drilled the same way.
 - **GitHub `main` moved outside Forge** (`GITHUB_SYNC_CHANGED`). Forge keeps its
   accepted `main` and sync stops without overwriting. Bring a wanted change in with
   **Bring GitHub's commit into Forge** (owner person, Settings → GitHub mirror), or

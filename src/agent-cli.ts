@@ -14,10 +14,10 @@ import {
 import { hostedAgentRoot } from './hosted-agent-journal.js';
 import { LAND_CHILD_ENV, MEASUREMENT_LAND_RECORD } from './hosted-land-child-env.js';
 import { canonicalOperationIds } from './operation-id-case.js';
+import { coreVerbs } from '../scripts/agent-verb-forms.mjs';
 import {
   aliasNotice,
   landSaveCommand,
-  lifecycleVerbs,
   lowerVerb,
   namedReads,
   newForm,
@@ -315,14 +315,8 @@ async function runAgentCli(
   }
   // The wrapper emits these only on success. Canonical forms and internal facades stay quiet.
   const notice = () => {
-    if (
-      options.notices === false ||
-      form!.operator ||
-      form!.flags.length ||
-      process.env[LAND_CHILD_ENV] === '1'
-    )
-      return;
-    const current = newForm(requestedAction!, selected, true);
+    if (options.notices === false || form!.flags.length || process.env[LAND_CHILD_ENV] === '1') return;
+    const current = newForm(requestedAction!, selected, true, form!.operator);
     if (current) notices.push(aliasNotice(rootArg ?? root, requestedAction!, current));
   };
   if (action === 'install-hooks' || action === 'uninstall-hooks') {
@@ -346,9 +340,7 @@ async function runAgentCli(
     process.env.DO_NOT_TRACK !== '1' &&
     process.env[LAND_CHILD_ENV] !== '1'
   ) {
-    const known = [...lifecycleVerbs, ...namedReads, ...operatorActions].find(
-      verb => verb === requestedAction,
-    );
+    const known = [...coreVerbs, ...namedReads, ...operatorActions].find(verb => verb === requestedAction);
     effective.analytics = {
       address: hosted,
       command: action === 'finish' ? 'land' : action === 'checkpoint' ? 'save' : (known ?? 'agent'),
@@ -537,7 +529,7 @@ async function runAgentCli(
  * The top-level CLI loads this on that error path only, from the agent chunk it already has. */
 export function refuseTopLevelAgentVerb(command: string) {
   const lists: Array<[readonly string[], string]> = [
-    [lifecycleVerbs, 'agent'],
+    [coreVerbs, 'agent'],
     [namedReads, 'agent'],
     [operatorActions, 'x'],
   ];

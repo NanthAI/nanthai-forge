@@ -495,7 +495,7 @@ export class HostedAgentTransport {
       invariant(
         command.success && typeof operationId === 'string' && z.uuid().safeParse(operationId).success,
         'BAD_ARGUMENT',
-        'Use nforge x ROOT abandon with an operationId, authorityEpoch, reason and the Intent selections from lanes.',
+        'Use nforge agent ROOT abandon with an operationId, authorityEpoch, reason and the Intent selections from lanes.',
       );
       const { authorityEpoch, intents, reason } = command.data;
       try {

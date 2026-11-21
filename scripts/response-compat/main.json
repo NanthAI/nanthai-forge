@@ -146,6 +146,9 @@
                 "hostedCrossHeadReuse": {
                   "type": "boolean"
                 },
+                "standaloneNestedPackages": {
+                  "type": "boolean"
+                },
                 "landingMode": {
                   "type": "string",
                   "enum": [

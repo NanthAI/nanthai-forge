@@ -16,6 +16,7 @@ import type { ResultBatchTargets } from './hosted-actions-result-batch.js';
 import { networkFetch } from './network-fetch.js';
 import { actionsPreflightTicketSchema, type ActionsPreflightTicket } from './hosted-actions-preflight.js';
 import type { HostedCheckRun } from './hosted-check.js';
+
 import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import { sourcePackDownloadSchema, type SourcePackDownload } from './source-pack.js';
 import { digest } from './hash.js';
@@ -53,6 +54,7 @@ import {
 export const runnerTokenNames = ['ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'ACTIONS_RUNTIME_TOKEN'] as const;
 export class ActionsJobClient {
   run: HostedCheckRun | null = null;
+  standalonePlacement: { checkEntries: string[] } | undefined;
   timings: Record<string, number> = {};
   capabilities: string[] = [];
   sourcePack: SourcePackDownload | null = null;
@@ -205,20 +207,23 @@ export class ActionsJobClient {
       'CHECK_CANCELLED',
       'The check was cancelled.',
     );
-    this.run = run as HostedCheckRun;
+    this.run = run;
     this.capabilities = Array.isArray(capabilities)
       ? capabilities.filter(value => typeof value === 'string')
       : [];
     this.timings = {};
+    this.standalonePlacement = undefined;
     this.sourcePack = null;
     this.invalidSourcePack = false;
     if (timings && this.capabilities.includes('session.timingHistory')) {
       const result = (await this.call({ kind: 'session', timings: true })) as {
         run: HostedCheckRun;
+        standalonePlacement?: { checkEntries: string[] };
         timingHistory: string;
         sourcePack?: SourcePackDownload;
       };
       this.run = result.run;
+      this.standalonePlacement = result.standalonePlacement;
       if (this.capabilities.includes('sourcePack')) {
         const pack = sourcePackDownloadSchema.safeParse(result.sourcePack);
         this.sourcePack = pack.success ? pack.data : null;

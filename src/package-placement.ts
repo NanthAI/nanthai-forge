@@ -71,6 +71,7 @@ const pinV3 = z
   .strict();
 const pinSchema = z.discriminatedUnion('rule', [pinV2, pinV3]);
 export type PackagePlacement = z.infer<typeof pinV2>;
+type PlacementPin = z.infer<typeof pinSchema>;
 type Graph = Extract<PackageGraph, { status: 'available' }> & {
   standalone?: {
     byDir: ReadonlyMap<string, StandaloneEvidence>;
@@ -84,8 +85,12 @@ const standaloneEcosystem = {
 } as const;
 
 /** Runner side: the pin for one head's graph, or undefined (no graph, no package below the root, too large). */
-export function packagePlacement(graph: PackageGraph): PackagePlacement | undefined {
-  if (graph.status !== 'available' || !graph.packages.some(pkg => pkg.dir)) return undefined;
+export function packagePlacement(
+  graph: PackageGraph,
+  standalone: readonly string[] = [],
+): PlacementPin | undefined {
+  if (graph.status !== 'available' || (!standalone.length && !graph.packages.some(pkg => pkg.dir)))
+    return undefined;
   const index = new Map(graph.packages.map((pkg, i) => [packageKey(pkg), i]));
   const pin: PackagePlacement = {
     rule: PACKAGE_PLACEMENT_RULE,
@@ -100,9 +105,29 @@ export function packagePlacement(graph: PackageGraph): PackagePlacement | undefi
     ...(graph.crossEcosystem ? { crossEcosystem: graph.crossEcosystem } : {}),
   };
   // TextEncoder, not Buffer: proof validation runs in the Convex V8 runtime too.
-  return new TextEncoder().encode(JSON.stringify(pin)).length <= PACKAGE_PLACEMENT_MAX_BYTES
-    ? pin
-    : undefined;
+  const fits = (value: PlacementPin) =>
+    new TextEncoder().encode(JSON.stringify(value)).length <= PACKAGE_PLACEMENT_MAX_BYTES;
+  const { packages, ...fields } = pin;
+  if (standalone.length && packages.length + standalone.length <= 4096) {
+    const extended: PlacementPin = {
+      ...fields,
+      rule: 'package-placement-v3',
+      packages: [
+        ...packages.map((row): [...typeof row, 0] => [...row, 0]),
+        ...standalone.map((dir): ['js', string, 0, 0, [], 1, 'js-non-member'] => [
+          'js',
+          dir,
+          0,
+          0,
+          [],
+          1,
+          'js-non-member',
+        ]),
+      ],
+    };
+    if (fits(extended)) return extended;
+  }
+  return graph.packages.some(pkg => pkg.dir) && fits(pin) ? pin : undefined;
 }
 
 /** The pinned graph from a check selection, or undefined (every manifest stays global). */

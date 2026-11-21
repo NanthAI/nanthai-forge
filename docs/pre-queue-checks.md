@@ -351,9 +351,14 @@ counts only when it is Markdown or under `docs/`); the proof records `placedRisk
 risk file, a missing pin, and placed manifests on both sides keep the recheck. Works
 for every ecosystem the [package graph](workflows.md#check-command-scope) reads (npm, Cargo, Go, Gradle, …).
 
-The placement reader also accepts `package-placement-v3` pins. The runner still writes
-v2 pins, which keep the existing decisions. To certify a nested package as standalone
-in a v3 row, the runner must have complete evidence of all five facts.
+The placement reader also accepts `package-placement-v3` pins. An Actions runner
+writes v3 when `acceptance.standaloneNestedPackages` is enabled and it certifies a
+JavaScript folder. The setting defaults off. A v3 pin appends placement-only rows
+for the outermost certified nonmembers, including eligible dot folders. The
+ordinary package graph and test selection use the same inputs in both modes.
+If the added rows exceed the pin size limit, the runner keeps the v2 pin
+whenever ordinary placement fits.
+To certify a nested package, the runner needs complete evidence of all five facts.
 
 1. The toolchain keeps the package outside the enclosing build. Go has its own
    `go.mod`. Cargo names the folder in a workspace's `exclude` or has no enclosing
@@ -361,8 +366,12 @@ in a v3 row, the runner must have complete evidence of all five facts.
    own lockfile or no dependencies. Other ecosystems have no standalone rule.
 2. No other package depends on or claims the folder. The package has no unresolved
    references, and cross-ecosystem widening cannot make the change reach other packages.
-3. Where Forge reads the ecosystem's module graph, the graph is complete for this
-   question and shows no import into the package from outside it.
+3. The JavaScript writer scans captured JS/TS code and alias configuration outside
+   the package, including dot folders. It refuses relative specifiers pointing
+   into the package even when the target is missing, absolute specifiers, aliases
+   that can point into the package, computed imports with matching literal
+   prefixes, and direct mentions of the folder in code. Unreadable inputs,
+   syntax errors and exceeded analysis bounds keep the existing placement.
 4. No check entry, CI file, declared `globalRiskPaths` entry or enclosing package
    script names the folder or a parent below the root. A shell command entering
    the folder or a script glob naming a parent keeps the recheck. A workspace glob
@@ -377,7 +386,7 @@ manifest or lockfile reaches only its own package, and the receipt records the
 evidence as `standalone: go-module`, `cargo-exclude` or `js-non-member`. Root and
 workspace files, CI and check entries, manifests on both sides and a shared sequence
 folder still keep the recheck. The rule uses the same six pinned objects and leaves
-test selection unchanged.
+test selection unchanged. Go and Cargo evidence kinds are available in the reader.
 
 A dynamic read that walks the repository or a new import on the other side can
 still couple two path-disjoint changes. Each side passed its own full check.

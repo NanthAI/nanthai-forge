@@ -11,7 +11,7 @@ import { cliColdStartSamples, cpuMs, options } from '../scripts/perf-harness.mjs
 import { agentCommands, firstNetworkSamples } from '../scripts/perf/cli-first-network.mjs';
 import { agentSurfaceFindings, readWeightBaseline } from '../scripts/agent-weight.mjs';
 import { agentActionNames } from '../scripts/check-growth.mjs';
-import { lifecycleVerbs } from '../scripts/agent-verb-forms.mjs';
+import { coreVerbs } from '../scripts/agent-verb-forms.mjs';
 import { successfulSample } from '../scripts/perf/browser.mjs';
 
 test('budget medians include the boundary, and an empty or incomplete run never passes', () => {
@@ -111,7 +111,7 @@ test('ad80e037: the agent actions and runtime dependencies on this source match 
   const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
   const report = {
     boundary: Object.keys(manifest.dependencies).sort(),
-    agentActions: [...agentActionNames(readFileSync('src/agent-verbs.ts', 'utf8'), lifecycleVerbs)].sort(),
+    agentActions: [...agentActionNames(readFileSync('src/agent-verbs.ts', 'utf8'), coreVerbs)].sort(),
   };
   assert.deepEqual(agentSurfaceFindings(report, baseline), []);
 });

@@ -5,7 +5,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { agentActionNames, cliCommandNames, errorCodes } from './check-growth.mjs';
-import { lifecycleVerbs } from './agent-verb-forms.mjs';
+import { coreVerbs } from './agent-verb-forms.mjs';
 
 const skip = new Set(['_generated', 'node_modules']);
 function sources(dir, root) {
@@ -49,7 +49,7 @@ export async function errorTeachingFindings(root) {
   ];
   const known = {
     actions: new Set([
-      ...agentActionNames(read('src/agent-verbs.ts'), lifecycleVerbs),
+      ...agentActionNames(read('src/agent-verbs.ts'), coreVerbs),
       ...clientReads.map(m => m[1]),
       'help',
     ]),

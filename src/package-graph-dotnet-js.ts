@@ -164,10 +164,11 @@ const strings = (value: unknown) =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 const NO_TEST = /^echo "Error: no test specified" && exit 1$/;
 /** A JS/TS test file by the names test runners pick up by default. */
-const JS_TEST = /(?:(?:^|\/)(?:__tests__|__specs?__|tests?|specs?)\/.*|\.(?:test|spec)s?)\.[cm]?[jt]sx?$/;
+export const JS_TEST =
+  /(?:(?:^|\/)(?:__tests__|__specs?__|tests?|specs?)\/.*|\.(?:test|spec)s?)\.[cm]?[jt]sx?$/;
 
 /** The workspace globs of pnpm-workspace.yaml's `packages:` list (a plain YAML sequence). */
-function pnpmGlobs(text: string) {
+export function pnpmGlobs(text: string) {
   const globs: string[] = [];
   let inside = false;
   for (const line of text.split(/\r?\n/)) {
@@ -202,6 +203,18 @@ function managerOf(manifest: Record<string, unknown>, dir: string, present: Set<
   );
 }
 
+/** The matcher used by both selection and placement. Placement checks its inputs separately. */
+export function jsWorkspaceMembership(globs: readonly string[]) {
+  const include = globs
+    .filter(glob => !glob.startsWith('!'))
+    .map(glob => globRegExp(glob.replace(/^\.\//, '').replace(/\/$/, '')));
+  const exclude = globs
+    .filter(glob => glob.startsWith('!'))
+    .map(glob => globRegExp(glob.slice(1).replace(/^\.\//, '').replace(/\/$/, '')));
+  return (dir: string) =>
+    !!dir && include.some(glob => glob.test(dir)) && !exclude.some(glob => glob.test(dir));
+}
+
 /** JS/TS packages: the root package.json `workspaces` (or pnpm-workspace.yaml `packages`) list the
  * workspace packages; any other package.json with its own lockfile (`web/`, `server/`, the root of a
  * repository without workspaces) is a standalone package. Edges are dependencies (any kind) named
@@ -231,14 +244,7 @@ export function jsWorkspaceGraph(paths: string[], read: ManifestReader): Ecosyst
   }
   const declared = record(root.workspaces) ? strings(root.workspaces.packages) : strings(root.workspaces);
   const globs = present.has('pnpm-workspace.yaml') ? pnpmGlobs(read('pnpm-workspace.yaml') ?? '') : declared;
-  const include = globs
-    .filter(glob => !glob.startsWith('!'))
-    .map(glob => globRegExp(glob.replace(/^\.\//, '').replace(/\/$/, '')));
-  const exclude = globs
-    .filter(glob => glob.startsWith('!'))
-    .map(glob => globRegExp(glob.slice(1).replace(/^\.\//, '').replace(/\/$/, '')));
-  const member = (dir: string) =>
-    !!dir && include.some(glob => glob.test(dir)) && !exclude.some(glob => glob.test(dir));
+  const member = jsWorkspaceMembership(globs);
   const ownLock = (dir: string) => LOCKFILES.some(file => present.has(dir ? `${dir}/${file}` : file));
   const packages = new Map<string, { pkg: GraphPackage; manifest: Record<string, unknown>; tool?: string }>();
   for (const path of manifests) {

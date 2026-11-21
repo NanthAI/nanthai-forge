@@ -15,7 +15,10 @@ Use `nforge agent ROOT ACTION --help` for CLI parameters and `forge_work_overvie
 | Wait | `wait` with `--budget` or `timeoutSeconds` in seconds | `forge_wait` also accepts `maxWaitMs` in milliseconds and can stream progress. |
 | List Lanes | `lanes` accepts `planningItemId` (aliases `id` and `itemId`) and `state` | `forge_work_overview` action `lanes` accepts `id`, `intentId`, `cursor`, `limit`, and `view`. |
 | Read imported Git history | `history` with `op` | `forge_review` action `history` with `op:status\|log\|blame\|show`. The owner operations `limit` and `retry` are CLI-only. |
-| Run an operator action | `nforge x ROOT ACTION` | `forge_task` actions `cancel`, `revert`, `abandon`, `pin`, `friction-triage`, and `prioritize`. |
+| Run an operator action | `nforge x ROOT ACTION` | `forge_task` actions `pin`, `friction-triage`, and `prioritize`. |
+| Close a Lane or Intent as abandoned | `abandon` | `forge_task` action `abandon`. |
+| Prepare a checked compensating landing | `revert {target}`, then `land --save` in the resulting Lane | `forge_task` action `revert`, then action `land` with mode `save`. |
+| Stop one named submission or the Lane's own live landing | `cancel {submissionId}` or `land --withdraw` | `forge_task` action `cancel` with `submissionId` or action `land` with mode `withdraw`. |
 
 The CLI also provides `landings`, `lane-history`, `flow`, `policy`, `check-settings`, `approve-link`, `request-approval`, and operator actions `complete`, `complete-merged`, `abandon-dormant`, `install-hooks`, `uninstall-hooks`, `set-policy`, `configure-check`, `configure-runner`, `source-pack`, and `snapshots`. MCP can observe approval via `forge_wait`. MCP-only `forge_current` and `forge_source` select saved source and read line ranges.
 

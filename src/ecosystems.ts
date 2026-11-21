@@ -634,6 +634,10 @@ export const pinLockfiles = (entries = ECOSYSTEMS) =>
 /** Lockfiles that identify a manager, by manager name. */
 export const managerLockfiles = (entries = ECOSYSTEMS) =>
   new Map(all(entry => entry.managers, entries).map(m => [m.name, [...(m.lockfiles ?? [])]]));
+/** The shared JS package manifest, registered on the default npm manager. */
+export const JS_PACKAGE_MANIFEST = ecosystemEntry('js').managers!.find(manager => manager.name === 'npm')!
+  .manifests![0]!;
+
 /** Exact manifest names the package graph reads. */
 export const manifestNames = (entries = ECOSYSTEMS) =>
   new Set(all(entry => entry.managers?.flatMap(m => m.manifests ?? []), entries));

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { lifecycleVerbs, landSaveForm } from '../scripts/agent-verb-forms.mjs';
+import { lifecycleVerbs, landSaveForm, promotedVerbs } from '../scripts/agent-verb-forms.mjs';
 export { lifecycleVerbs };
 import { invariant } from './errors.js';
 
 /**
- * V2a public verbs (plans/p5c-v1-vocabulary.md). Agents learn start, save and land; mode flags and
+ * Core agent verbs (plans/p5c-v1-vocabulary.md). Mode flags and
  * `nforge x ROOT ACTION` lower to the existing wire actions before parsing, so request identity,
  * replay journals, metrics and hosted schema-1 names stay unchanged. Old spellings keep working and
  * print their new form to stderr once per invocation; stdout never changes.
@@ -32,10 +32,7 @@ export const boardModes: Readonly<Record<string, string>> = {
 
 /** Operator and repair actions, reached with `nforge x ROOT ACTION`. Same schemas and authority. */
 export const operatorActions = [
-  'cancel',
-  'revert',
   'undo',
-  'abandon',
   'complete',
   'complete-merged',
   'abandon-dormant',
@@ -50,6 +47,10 @@ export const operatorActions = [
   'source-pack',
   'snapshots',
 ] as const;
+
+function isPromotedVerb(verb: string): boolean {
+  return (promotedVerbs as readonly string[]).includes(verb);
+}
 
 /** Named reads keep their names; no notice. `resolve` is the hosted conflict save, kept as-is. The planning
  * actions are the hosted backlog: one read and two writes under their Work names. */
@@ -109,9 +110,9 @@ export const retiredActions: Readonly<Record<string, string>> = {
   improve: 'friction-list groups recorded friction',
   integrate: 'preflight {laneId} and land --save --check-only check saved work without landing',
   'land-ready': 'land --save with the original request (or wait {operationIds}) resumes a landing',
-  'undo-sync': 'x undo restores a retained Lane save; x revert {target} compensates a landing',
+  'undo-sync': 'x undo restores a retained Lane save. Use revert {target} for a checked compensating landing',
   accept: 'land --save lands under project policy',
-  'undo-revert': 'x revert {target} compensates a landing',
+  'undo-revert': 'revert {target} prepares a checked compensating landing',
   clean: 'nforge prune removes local roots of landed or abandoned Lanes',
   take: 'start --open {laneId} opens another Lane here',
   guidance: 'repository AGENTS.md and the project guidance page hold agent instructions',
@@ -181,7 +182,7 @@ export function parseVerbForm(verb: string, rest: string[], operator = false): [
   );
   if (operator)
     invariant(
-      (operatorActions as readonly string[]).includes(verb),
+      (operatorActions as readonly string[]).includes(verb) || isPromotedVerb(verb),
       'BAD_ARGUMENT',
       `x runs operator actions: ${operatorActions.join(', ')}.`,
     );
@@ -240,7 +241,9 @@ export function newForm(
   action: string,
   selected: Record<string, unknown>,
   hosted: boolean,
+  operator = false,
 ): string | undefined {
+  if (operator) return isPromotedVerb(action) ? action : undefined;
   if (action === 'finish') {
     const checkOnly = hosted ? selected.accept === false : selected.accept === undefined;
     return checkOnly ? `${landSaveForm} --check-only` : landSaveForm;

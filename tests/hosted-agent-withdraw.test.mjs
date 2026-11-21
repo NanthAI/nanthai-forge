@@ -92,12 +92,12 @@ test('withdraw replays a lost reply, keeps the Lane and a later identical withdr
   assert.equal((await s.f.current(first.id)).submission.error.code, 'LANDING_CANCELLED', 'evidence kept');
 });
 
-test('a server without landing-withdraw is refused before any mutation, naming x cancel', async t => {
+test('a server without landing-withdraw is refused before any mutation, naming cancel by submission', async t => {
   const s = await setup(t, { features: false });
   await landing(s.f);
   await assert.rejects(
     s.transport().dispatch('withdraw', { laneId: s.f.lane.laneId }),
-    error => error.code === 'HOSTED_FEATURE_UNAVAILABLE' && /x .* cancel/.test(error.message),
+    error => error.code === 'HOSTED_FEATURE_UNAVAILABLE' && /nforge agent .* cancel/.test(error.message),
   );
   assert(!s.calls.includes('projectHostedLandingWithdraw:withdraw'));
 });

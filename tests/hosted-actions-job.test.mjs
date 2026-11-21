@@ -60,6 +60,7 @@ function fixture(
     reader = false,
     queue = false,
     submodule = null,
+    placement = false,
     // A browser test plus a web change, so the standard plan selects browser coverage (pinned Playwright).
     browser = false,
   } = {},
@@ -81,6 +82,14 @@ function fixture(
       browser ? JSON.stringify({ packages: { 'node_modules/playwright': { version: '1.2.3' } } }) : '{}',
     ),
     ...(browser ? [entry('tests/demo-browser.test.mjs', "import './browser-runtime.mjs';")] : []),
+    ...(placement
+      ? [
+          entry('package.json', '{"name":"root","scripts":{"test":"node --test"}}'),
+          entry('.repos/vendor/package.json', '{"name":"vendor"}'),
+          entry('tools/normal/package.json', '{"name":"normal"}'),
+          entry('tools/normal/package-lock.json', '{}'),
+        ]
+      : []),
     ...(queue
       ? [
           entry('tests/demo.test.mjs', 'import "../convex/projectHostedFinishWake.ts";'),
@@ -234,6 +243,7 @@ function fixture(
           ? {
               run,
               timingHistory: JSON.stringify(timingHistory),
+              ...(session.standalonePlacement ? { standalonePlacement: session.standalonePlacement } : {}),
               ...(session.sourcePack ? { sourcePack: session.sourcePack } : {}),
               ...(capabilities ? { capabilities } : {}),
             }
@@ -473,6 +483,43 @@ test('Actions partial run signs only the requested singleton on the fallback pat
     s.calls.filter(call => call.kind === 'source' && !call.runs).map(call => call.digests),
     [[s.pins[1].sha256]],
   );
+});
+
+test('incident 1018d0f8: planning adds only placement evidence with no extra source or Convex requests', async t => {
+  for (const options of [{}, { reader: true }, { browser: true }, { queue: true }]) {
+    const s = fixture(t, { ...options, placement: true });
+    const plan = async label => {
+      const before = s.calls.length;
+      const gets = s.traffic.downloads;
+      const result = await prepareActionsJob(
+        s.client,
+        join(s.directory, label),
+        join(s.directory, label + '-cache'),
+      );
+      return {
+        selection: result.recipe.selection,
+        calls: s.calls.slice(before).map(call => (call.kind === 'plan' ? { kind: call.kind } : call)),
+        downloads: s.traffic.downloads - gets,
+      };
+    };
+    const off = await plan('off');
+    s.session.standalonePlacement = { checkEntries: [] };
+    const on = await plan('on');
+    assert.deepEqual(on.calls, off.calls);
+    assert.equal(on.downloads, off.downloads);
+    const { packagePlacement: before, ...offSelection } = off.selection;
+    const { packagePlacement: after, ...onSelection } = on.selection;
+    assert.equal(JSON.stringify(onSelection), JSON.stringify(offSelection));
+    assert.equal(before.rule, 'package-placement-v2');
+    assert.equal(after.rule, 'package-placement-v3');
+    assert.deepEqual(
+      after.packages.filter(row => row[5] === 1),
+      [['js', '.repos/vendor', 0, 0, [], 1, 'js-non-member']],
+    );
+    s.session.standalonePlacement = { checkEntries: ['.repos/**'] };
+    const named = await plan('named');
+    assert.deepEqual(named.selection, off.selection);
+  }
 });
 
 test('proof off adds no planning output, artifact data, source bytes or Convex calls', async t => {

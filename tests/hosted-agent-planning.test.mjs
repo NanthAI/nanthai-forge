@@ -2049,7 +2049,7 @@ test('d9e1ac62: start names the Lane an open resolution Lane replaces, with the 
       laneId: origin,
       replacedBy: resolution,
       note: `Lane ${origin} continues in its resolution Lane ${resolution}. Once its work is confirmed there, abandon it.`,
-      next: `nforge x ROOT abandon {"laneId":"${origin}","reason":"Replaced by Lane ${resolution}"}`,
+      next: `nforge agent ROOT abandon {"laneId":"${origin}","reason":"Replaced by Lane ${resolution}"}`,
     };
     assert.deepEqual(started.result.replaced, [hint]);
     assert.equal(s.calls.filter(call => call.name.endsWith(':abandon')).length, 0, 'advice only');

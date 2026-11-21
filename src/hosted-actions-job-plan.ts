@@ -39,6 +39,7 @@ import { refreshSourcePack } from './source-pack.js';
 import { refreshActionsSourcePack } from './hosted-actions-job-pack.js';
 import { testedDocs } from './tested-docs.js';
 import { checkedPackagePlacement } from './package-placement-pin.js';
+import { checkRunEntryPaths } from './first-check-risk.js';
 import { declaredTestedDocs, docsOnlyChange } from './docs-paths.js';
 import { selectionFallback } from './fallback-reasons.js';
 import { resolveTestRunner } from './project-test-runner.js';
@@ -185,7 +186,29 @@ export async function prepareActionsJob(
     ...('trial' in selected && selected.trial ? { trial: selected.trial } : {}),
     ...(docs ? { testedDocs: docs } : {}),
     // The checked head's manifest package graph: the first-check proof places in-package manifests by it.
-    ...checkedPackagePlacement(files.keys(), path => files.get(path)),
+    ...checkedPackagePlacement(
+      files.keys(),
+      path => files.get(path),
+      client.standalonePlacement
+        ? {
+            regularFile: path => {
+              const mode = inventory.get(path)?.mode;
+              return mode === 'file' || mode === 'executable';
+            },
+            checkEntries: [
+              ...new Set([...checkRunEntryPaths(run.check), ...client.standalonePlacement.checkEntries]),
+            ],
+            commandLines: [
+              ...(workflow ? [workflow] : []),
+              run.check.executable,
+              ...run.check.args,
+              ...(run.check.actions?.setup
+                ? [run.check.actions.setup.executable, ...run.check.actions.setup.args]
+                : []),
+            ],
+          }
+        : undefined,
+    ),
     // Any other command reads this as its changed-paths file (FORGE_CHECK_CHANGES).
     ...('changes' in selected ? { changes: selected.changes } : {}),
     ...(queueProof ? { queueProof } : {}),

@@ -521,7 +521,7 @@ test('d9e1ac62: a version 2 start names the Lane each open resolution Lane resol
       laneId: origin.lane.laneId,
       replacedBy: resolution.lane.laneId,
       note: `Lane ${origin.lane.laneId} continues in its resolution Lane ${resolution.lane.laneId}. Once its work is confirmed there, abandon it.`,
-      next: `nforge x ROOT abandon {"laneId":"${origin.lane.laneId}","reason":"Replaced by Lane ${resolution.lane.laneId}"}`,
+      next: `nforge agent ROOT abandon {"laneId":"${origin.lane.laneId}","reason":"Replaced by Lane ${resolution.lane.laneId}"}`,
     },
   ]);
   assert.deepEqual(laneHint.replacedOpenLanes(v1.openLanes), [], 'no hint without the field');

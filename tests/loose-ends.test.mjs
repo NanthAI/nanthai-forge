@@ -599,7 +599,7 @@ test('d9e1ac62: a quiet Lane whose Item has a live Lane says what replaced it an
   const result = await read(s, 'owner');
   const [quiet] = result.groups.stopped.rows;
   assert.equal(quiet.replacedBy, 'busy');
-  assert.equal(quiet.next, 'nforge x ROOT abandon {"laneId":"quiet","reason":"Replaced by Lane busy"}');
+  assert.equal(quiet.next, 'nforge agent ROOT abandon {"laneId":"quiet","reason":"Replaced by Lane busy"}');
   // A Lane alone on its Item is never called replaced.
   assert.equal(result.groups.idle.rows.find(row => row.laneId === 'dormant').replacedBy, undefined);
 });
@@ -667,7 +667,10 @@ test('d9e1ac62 (real case, Item 1dd4e095): a quiet Lane whose quiet resolution L
   meter.restore();
   const origin = result.groups.idle.rows.find(row => row.laneId === 'dormant');
   assert.equal(origin.replacedBy, 'quiet');
-  assert.equal(origin.next, 'nforge x ROOT abandon {"laneId":"dormant","reason":"Replaced by Lane quiet"}');
+  assert.equal(
+    origin.next,
+    'nforge agent ROOT abandon {"laneId":"dormant","reason":"Replaced by Lane quiet"}',
+  );
   assert.equal(result.groups.stopped.rows[0].replacedBy, undefined, 'the resolution Lane is not replaced');
   const record = JSON.stringify(s.tables.projectHostedRecords.get('record-quiet')).length;
   const before = JSON.stringify(overlap).length;

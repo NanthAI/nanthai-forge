@@ -122,7 +122,7 @@ export function replacedOpenLanes(openLanes: readonly OpenLane[] | undefined) {
             laneId: lane.resolves,
             replacedBy: lane.laneId,
             note: `Lane ${lane.resolves} continues in its resolution Lane ${lane.laneId}. Once its work is confirmed there, abandon it.`,
-            next: `nforge x ROOT abandon ${JSON.stringify({ laneId: lane.resolves, reason: `Replaced by Lane ${lane.laneId}` })}`,
+            next: `nforge agent ROOT abandon ${JSON.stringify({ laneId: lane.resolves, reason: `Replaced by Lane ${lane.laneId}` })}`,
           },
         ]
       : [],

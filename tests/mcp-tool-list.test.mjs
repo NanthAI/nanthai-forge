@@ -82,6 +82,7 @@ test('the hosted tool list stays inside its context budget', async t => {
   assert(listBytes <= LIST_CHARS, 'tool list UTF-8 byte budget');
   t.diagnostic(`tools/list ${chars} chars (~${Math.ceil(chars / 4)} tokens); descriptions ${descriptions}`);
   assert(chars <= LIST_CHARS, `tool list characters: ${chars}`);
+  assert(listBytes <= LIST_CHARS, `tool list UTF-8 bytes: ${listBytes}`);
   // Codex sends each tool as a function definition under a server-prefixed name: same budget.
   const codex = JSON.stringify(
     tools.map(tool => ({
@@ -138,6 +139,9 @@ test('every action stays reachable: listed, with its exact schema and fields beh
 test('long tool prose and the project rules moved to help, not lost', async t => {
   const { help } = await connect(t);
   const task = await help('forge_task');
+  assert.match(task.description, /cancel \{submissionId\} stops one named submission/);
+  assert.match(task.description, /land withdraw selects the current Lane’s live landing/);
+  assert.match(task.description, /revert \{target\} prepares a Lane for a checked compensating landing/);
   assert.match(task.description, /Finish always requests agent acceptance/);
   assert.match(task.description, /Pinned Lanes skip/);
   assert.match(task.description, /Project rules:/);

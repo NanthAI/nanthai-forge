@@ -33,10 +33,11 @@ NOT_FOUND names what was looked up: run from the Lane root start printed, or pas
 - To save without submitting: nforge agent . save '{}' (an agent action, not top-level).
 - Review what will land: diff '{"summary":true}' lists changed paths, diff '{}' the hunks.
 - It waits by default; --no-wait returns after submission. Clients that wake on background exit (Claude Code; FORGE_AGENT_WAKE=background-exit|off) get result.wake.command: run it once in the background. --wait keeps the foreground wait; --check-only checks without landing.
-- land --withdraw {laneId?,reason?} ends a live landing whose check will fail; confirm.waitCommand returns LANDING_CANCELLED; then fix, save, land --save.
+- land --withdraw {laneId?,reason?} ends the Lane's live landing; confirm.waitCommand returns LANDING_CANCELLED. Fix, save and land again. cancel {submissionId} stops one named submission.
 - NOTHING_TO_LAND: the Lane equals its base; save first.
 - After a failed check: land --save with "retry":true,"reason":"flake"|"main-moved"|"infra"|"other" (next.retryReason).
 - LANDED is acceptance; CHECK PASSED is not. Fix in the same Lane and land again; never abandon and re-create it.
+- revert {target} prepares a Lane. Run land --save there for a checked compensating landing.
 - Inline preflight failure or budget exhaustion gives recovery and the original land replay.
 - Local preflight tests stop at a 600 s ceiling (the rest goes to the landing check); preflight {budgetSeconds} above 600 raises it for one run.
 More: help wait, help conflict, help check, help overlap.`,
@@ -108,7 +109,7 @@ CHECK_NOT_PASSED: acceptance needs a passed check for this exact head; land --sa
 - lane-history {laneId?} reads one Lane's history: openedAt, startBase, lastSyncedBase, state, head and landing {receiptId,commit,current,revertedBy?,mainRedHolds?}.
 - flow {} shows the top bar's stops, Lane counts, longest wait, main today and CI minutes in one read.
 - LANE_DIRTY: unsaved edits; save '{}' first. LANE_NOT_ACTIVE: the Lane landed or was abandoned; keep your edits and start a new Lane.
-- x abandon {laneId,reason} closes a Lane without deleting anything; keepPatch:true keeps unsaved edits as a patch. For selected Loose ends Intents use {operationId,authorityEpoch,reason,intents:[selection,...]}.`,
+- abandon {laneId,reason} closes a Lane without deleting anything; keepPatch:true keeps unsaved edits as a patch. For selected Loose ends Intents use {operationId,authorityEpoch,reason,intents:[selection,...]}.`,
   },
   review: {
     title: 'Reading source and changes',
@@ -125,9 +126,10 @@ CHECK_NOT_PASSED: acceptance needs a passed check for this exact head; land --sa
 - queue {submissionId,beforeAttempt?} shows attempts newest first with phase times and causes. Continue with nextBeforeAttempt.
 - queue {batchId} shows retained phase and members. queue {submissionId,attemptId,afterLaneId?} shows Candidate pins and Lane inputs. Continue with nextAfterLaneId.
 - SYNC_REQUIRED while queued: main landed a file your entry changes; run the one land --save it names instead of waiting.
+- cancel {submissionId} stops one named submission. land --withdraw selects the Lane's own live landing by default.
 - LANDING_CANCELLED: the landing was withdrawn or cancelled; the Lane and its saves stay. Fix if needed and land --save again.
 - LANDING_STALLED: run the receipt's exact repair command; do not resubmit a live landing. If none is present, read queue '{}' and observe {operationId}. A terminal-failed receipt may explicitly direct a retry in the same Lane.
-- REVIEW_REQUIRED: acceptance needs a person under the project policy; wait {approval:LANE_ID} after request-approval, or ask the owner.
+- REVIEW_REQUIRED: wait {approval:LANE_ID} after request-approval, or ask the owner.
 - landings {from,to,limit?,cursor?} lists accepted landings in a UTC window, oldest first. Continue with nextCursor. For a file, use history {op:"log",path:"FILE"} or history {op:"blame",path:"FILE",start:1,end:100}.`,
   },
   board: {

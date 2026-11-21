@@ -1,6 +1,6 @@
 ### Abandon work without losing it
 
-`nforge x ROOT abandon '{"laneId":"UUID","reason":"Superseded by …"}'` closes a Lane as `abandoned`. To abandon an Intent, pass `target:{"kind":"intent","intentId":"UUID","version":N,"cascade":true}` (use the observed Intent version); omit `cascade` when its Lanes are already closed. Hosted abandonment pins the observed Lane versions itself; `expectedHead` is not an argument. Unsaved source edits return `LANE_DIRTY`; `saveFirst:true` explicitly saves them before closing (including staging all Git Lane changes). On a hosted checkout, `keepPatch:true` instead keeps them in a patch file next to the checkout and abandons; re-apply it in a fresh Lane with `patch -p1`. A concurrent edit after saving leaves the Lane open. Saving for abandon retains unresolved conflict markers and merge context; reopening lets you resolve them later. No source, saves, history or workspace files are deleted. Ignored/excluded files remain on disk and follow the existing capture and clean rules.
+`nforge agent ROOT abandon '{"laneId":"UUID","reason":"Superseded by …"}'` closes a Lane as `abandoned`. To abandon an Intent, pass `target:{"kind":"intent","intentId":"UUID","version":N,"cascade":true}` (use the observed Intent version); omit `cascade` when its Lanes are already closed. Hosted abandonment pins the observed Lane versions itself; `expectedHead` is not an argument. Unsaved source edits return `LANE_DIRTY`; `saveFirst:true` explicitly saves them before closing (including staging all Git Lane changes). On a hosted checkout, `keepPatch:true` instead keeps them in a patch file next to the checkout and abandons; re-apply it in a fresh Lane with `patch -p1`. A concurrent edit after saving leaves the Lane open. Saving for abandon retains unresolved conflict markers and merge context; reopening lets you resolve them later. No source, saves, history or workspace files are deleted. Ignored/excluded files remain on disk and follow the existing capture and clean rules.
 
 The receipt records reason, actor, time and operation id. Retry with the original operation id and identical input (including returned `resolved` fields); a retry after `reopen` returns the original abandonment without closing the work again. `reopen` restores an abandoned Lane or Intent as active; reopen child Lanes separately after an Intent cascade. `clean` can reclaim abandoned Lane workspaces under its existing capture checks. Abandoned Lanes leave Now and open lists, and appear as grey **Abandoned** under Done/Closed.
 
@@ -16,7 +16,7 @@ even through an empty page when the cursor is present.
 
 The project owner can explicitly set aside reviewed Intents in batches of up to 25.
 Pass the top-level `setAside.authorityEpoch` and the chosen rows' `selection` objects to
-`nforge x ROOT abandon '{"operationId":"UUID","authorityEpoch":N,"reason":"…","intents":[…]}'`.
+`nforge agent ROOT abandon '{"operationId":"UUID","authorityEpoch":N,"reason":"…","intents":[…]}'`.
 A row that gained a save or Item link, or whose Intent or Lane changed since the read,
 returns its own skip reason. If the original reply is lost, replay exactly the same
 request, including its UUID, to recover the receipt. For a skipped row you still want

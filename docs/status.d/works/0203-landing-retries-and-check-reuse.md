@@ -4,5 +4,5 @@ A deferred resubmission that binds an exact retained pass can land from that ver
 `nforge metrics` reports the mean and p90 builder-side measurement hold beside hosted finish-to-main.
 `landings` reports measured order-wait seconds for recorded waits, including waits under a minute.
 
-The strict first-check reader accepts v3 package-placement pins with standalone evidence for nested packages. Runners still write v2 pins. See [package placement](../../pre-queue-checks.md#decision).
+The strict first-check reader accepts v3 package-placement pins with standalone evidence for nested packages. Actions runners can write v3 evidence for certified JavaScript folders with the default-off `acceptance.standaloneNestedPackages` setting. See [package placement](../../pre-queue-checks.md#decision).
 

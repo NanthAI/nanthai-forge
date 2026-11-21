@@ -60,6 +60,8 @@ export const autonomyPolicySchema = z.object({
     autoRevert: z.boolean().optional(),
     /** Hosted clean-recomposition proof; absent means on. Independent of native fast path. */
     hostedCrossHeadReuse: z.boolean().optional(),
+    /** Temporary opt-in to standalone package placement evidence from the Actions plan. */
+    standaloneNestedPackages: z.boolean().optional(),
     /** Hosted landing mode (src/landing-mode.ts); absent is strict. `fast` also lands a change on its
      * own check across a tested-doc or non-order-sensitive global-risk overlap, only while the project
      * has a clear circuit breaker and the main audit is fresh. Read live, so a change never invalidates a landing. */

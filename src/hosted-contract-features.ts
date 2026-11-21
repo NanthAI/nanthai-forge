@@ -81,7 +81,7 @@ export const hostedContractFeatures = [
    * and, when declared, the model), recorded on the receipt. Without it the CLI sends none. */
   'landing-agent-client',
   /** projectHostedLandingWithdraw:withdraw exists (78a97771): `land --withdraw` cancels a Lane's
-   * live landing by Lane. Without it the CLI refuses and names `x cancel {submissionId}`. */
+   * live landing by Lane. Without it the CLI refuses and names `cancel {submissionId}`. */
   'landing-withdraw',
   /** Terminal history is read through an authorized, redacting server action; capsuleProtocol:1. */
   'landing-capsules-v1',

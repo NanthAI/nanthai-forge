@@ -144,7 +144,7 @@ export const session = internalMutation({
   // JSON text (Issue 0c457ae4): a finished run's reports are keyed by test file.
   returns: v.string(),
   handler: async (ctx, input) => {
-    const { row, run } = await actionsSession(ctx, input);
+    const { row, run, project } = await actionsSession(ctx, input);
     // Keep the run (fa2c1383, review 563c595b F2): the plan job opens its sessions before the plan
     // exists, so the first session after it is the first test shard's runner. One write per run, and
     // only with the switch on: the keep rule counts progress from here, never runner wait.
@@ -162,9 +162,15 @@ export const session = internalMutation({
     const capabilities = hostedActionsCapabilities;
     if (!input.timings) return JSON.stringify({ ...run, capabilities });
     const { history } = await hostedTimingHistory(ctx, input.projectId);
+    // The authority read already loaded the project. Carry the opt-in in the existing plan session.
+    const standalonePlacement =
+      project.autonomyPolicy?.acceptance.standaloneNestedPackages === true
+        ? { checkEntries: [...(project.checkEntries ?? []), ...(project.globalRiskPaths ?? [])] }
+        : undefined;
     return JSON.stringify({
       run,
       capabilities,
+      ...(standalonePlacement ? { standalonePlacement } : {}),
       timingHistory: JSON.stringify(history),
       sourcePack: await latestSourcePack(ctx, input.projectId),
     });

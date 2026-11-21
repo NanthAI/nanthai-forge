@@ -43,7 +43,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { lifecycleVerbs } from './agent-verb-forms.mjs';
+import { coreVerbs } from './agent-verb-forms.mjs';
 
 export const GROWTH_BASELINE = 'tests/growth-baseline.json';
 const LEDGER = 'tests/growth-ledger';
@@ -249,7 +249,7 @@ export function currentCounts(root = '.') {
   return {
     tables: countTables(convex),
     errorCodes: countErrorCodes([...servers, ...convex]),
-    agentActions: agentActionNames(read('src/agent-verbs.ts'), lifecycleVerbs).size,
+    agentActions: agentActionNames(read('src/agent-verbs.ts'), coreVerbs).size,
     cliCommands: cliCommandNames(read('src/cli.ts')).size,
     glossaryTerms: glossaryTerms(read('docs/concepts.md')).size,
     machineDependencies: readMachineDependencies(root).machineDependencies.length,

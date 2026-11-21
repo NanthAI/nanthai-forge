@@ -165,19 +165,19 @@ export function registerHostedAgentWorkflow(
   const prose: Record<string, string> = Object.fromEntries(
     groups.map(group => [group.name, group.description]),
   );
-  const verificationClaim =
-    ' Save and land mode save accept optional notVerified (verification limits on that exact operation). Omit it for no report. [] claims full verification. Check evidence is recorded separately.';
+  const taskHelp =
+    ' Core actions include abandon (close a Lane or Intent), revert and cancel. revert {target} prepares a Lane for a checked compensating landing via land save. cancel {submissionId} stops one named submission. land withdraw selects the current Lane’s live landing by default. Save and land mode save accept optional notVerified (verification limits on that exact operation). Omit it for no report. [] claims full verification. Check evidence is recorded separately.';
   let fullTools: () => Promise<Parameters<typeof toolHelp>[0]> = async () => [];
   const help: ToolHelp = { prose };
   const refreshRules = <T>(value: T) => {
     const live = transport.agentDefaults;
     if (live && canonicalPayload(live) !== applied) {
       applied = canonicalPayload(live);
-      prose.forge_task = `${groups[0]!.description}${verificationClaim}${rules(live)}`;
+      prose.forge_task = `${groups[0]!.description}${taskHelp}${rules(live)}`;
     }
     return value;
   };
-  prose.forge_task += verificationClaim + rules(effectiveAgentDefaults(undefined));
+  prose.forge_task += taskHelp + rules(effectiveAgentDefaults(undefined));
   for (const group of groups)
     prose[group.name] +=
       ' command.replyDetail:true returns the full receipt, including available inline bodies; replay mutations with their original operationId.';

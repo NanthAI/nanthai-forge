@@ -1136,6 +1136,7 @@ test('each policy field is held, exempt or relax-only for an agent edit, one cas
   };
   const lowered = {
     'acceptance.landingMode': ['strict', 'fast'],
+    'acceptance.standaloneNestedPackages': [false, true],
     'agentDefaults.stallAlerts.enabled': [true, false],
     'agentDefaults.stallAlerts.webhook': ['ntfy', 'off'],
   };
@@ -1174,6 +1175,15 @@ test('optional landing proof adds evidence without changing oversight or invalid
   assert.equal(ownerGated(base, enabled), false);
   assert.equal(ownerGated(enabled, base), false);
   assert.equal(acceptancePolicyDigest(enabled), acceptancePolicyDigest(base));
+});
+
+test('standalone placement opt-in follows the existing owner gate and preserves queued policy pins', async () => {
+  const { ownerGated, landingPolicyMayChange } = await import(moduleUrl('../src/policy-digest.ts'));
+  const base = policyPreset('trusted');
+  const enabled = { ...base, acceptance: { ...base.acceptance, standaloneNestedPackages: true } };
+  assert.equal(ownerGated(base, enabled), true);
+  assert.equal(ownerGated(enabled, base), false);
+  assert.equal(landingPolicyMayChange(base, enabled), false);
 });
 
 test('explicit owner paths retain every defined check entry on private projects', () => {

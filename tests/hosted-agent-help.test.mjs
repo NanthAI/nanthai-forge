@@ -94,6 +94,17 @@ test('hosted help and packaged docs are generated from every enforced schema', a
     assert(!text.includes(unsupported), unsupported);
 });
 
+test('core maintenance help distinguishes submission cancellation, Lane withdrawal and checked revert', () => {
+  for (const action of ['abandon', 'revert', 'cancel']) {
+    assert.match(hostedAgentHelp(action), new RegExp(`Example: nforge agent ROOT ${action} `));
+  }
+  assert.match(hostedAgentHelp('cancel'), /cancel \{submissionId\} stops one named submission/);
+  assert.match(hostedAgentHelp('cancel'), /land --withdraw selects the Lane's own live landing/);
+  const revert = hostedAgentHelp('revert');
+  assert.match(revert, /land --save.*checked compensating landing/);
+  assert.match(revert, /"target":\{"kind":"receipt","receiptId":"RECEIPT_ID"\}/);
+});
+
 test('hosted coordination entry points retain supported reads and their coverage limits', () => {
   for (const path of ['AGENTS.md', 'skills/forge-agent/SKILL.md', 'docs/agents/workflow.md']) {
     const text = readDocument(repo, path);

@@ -8,7 +8,7 @@ Use ordinary file tools for source questions. For delivery, use the installed `n
 `nforge agent ROOT VERB [--MODE] --help` gives parameters; `help TOPIC` gives one how-to. `nforge docs agents/hosted` is generated from the enforced contract. Use `--command-file FILE` for nested JSON. Refusals name `{code,message,next,learn}`: follow `next`, reading `learn` once. First-write hooks are advisory; `help hosted` explains opting out.
 
 <!-- agent-workflow:start -->
-Lifecycle verbs: `start`, `save`, `land`. Use `land --save` to save, update from main, check and land under project policy. Run `preflight {laneId}` for affected checks of a saved Lane; `tests {candidateId}` reads a Candidate's test selection.
+Lifecycle verbs: `start`, `save`, `land`, `abandon`, `revert`, `cancel`. Use `land --save` to save, update from main, check and land under project policy. Run `preflight {laneId}` for affected checks of a saved Lane; `tests {candidateId}` reads a Candidate's test selection.
 <!-- agent-workflow:end -->
 
 Before picking what to land next, `lanes {"view":"tree"}` shows stacks, overlaps, each Lane's state and its next step in one read.
@@ -19,7 +19,7 @@ Report verification limits in the optional `notVerified` array on `save` or `lan
 
 ## Hosted checkouts
 
-- Start with a fresh operation id; edit only its returned Lane path. A new Lane that replaces one of the Issue's `openLanes` (for example a resolution Lane) abandons the old one: `x abandon {laneId,reason:"Replaced by Lane NEW"}`. Save after meaningful steps. Read `behindMain`, presence and `conflictNotice`: saves trial-merge against main and peers, but unsaved peer edits are excluded. `peers {laneId,path?,detail?}` reads saved overlap evidence; missing evidence never proves independence.
+- Start with a fresh operation id; edit only its returned Lane path. A new Lane that replaces one of the Issue's `openLanes` (for example a resolution Lane) abandons the old one: `abandon {laneId,reason:"Replaced by Lane NEW"}`. Save after meaningful steps. Read `behindMain`, presence and `conflictNotice`: saves trial-merge against main and peers, but unsaved peer edits are excluded. `peers {laneId,path?,detail?}` reads saved overlap evidence; missing evidence never proves independence.
 - `diff {laneId,paths?,byteBudget?,cursor?}` compares pinned base to saved head. `show {state?,candidateId?,laneId?,path}` reads exact bytes, never unsaved files or a substituted revision. Follow `nextCursor` on the original pair.
 - `history {op:"log",path:"FILE"}` reads file history; `history {op:"blame",path:"FILE",start:1,end:100}` answers who changed lines; `op:"show",commit,path` reads an old file. MCP: `forge_review` action `history`.
 - Declare your model with `FORGE_AGENT_MODEL` in the launcher or shell (for example `export FORGE_AGENT_MODEL=gpt-6.1-sol`); receipts retain harness/model as declared attribution.

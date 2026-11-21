@@ -23,7 +23,7 @@ import { childEnv } from './child-env.mjs';
 import { agentCommands, firstNetworkSamples } from './perf/cli-first-network.mjs';
 import { measurement } from './perf/report.mjs';
 import { agentActionNames } from './check-growth.mjs';
-import { lifecycleVerbs } from './agent-verb-forms.mjs';
+import { coreVerbs } from './agent-verb-forms.mjs';
 import {
   agentSurfaceFindings,
   installedWeight,
@@ -149,7 +149,7 @@ export function measureAgentWeight(prefix, count = 5, enforceBoundary = true) {
       moduleInventory: inventories,
       boundary,
       agentActions: [
-        ...agentActionNames(readFileSync(join(root, 'src/agent-verbs.ts'), 'utf8'), lifecycleVerbs),
+        ...agentActionNames(readFileSync(join(root, 'src/agent-verbs.ts'), 'utf8'), coreVerbs),
       ].sort(),
       packages: installation.packages,
       node: process.version,

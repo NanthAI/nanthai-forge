@@ -49,11 +49,18 @@ const firstPatterns: Pattern[] = [
     test: /(?:^|\/)(?:tsconfig[^/]*\.json|jsconfig\.json|[^/]+\.config\.[cm]?[jt]s|\.oxlintrc[^/]*|\.oxfmtrc[^/]*|\.eslintrc[^/]*|eslint\.config\.[^/]+|\.prettierrc[^/]*|\.babelrc[^/]*|babel\.config\.[^/]+|\.swcrc|\.editorconfig|\.nvmrc|\.node-version|\.tool-versions|Makefile|Dockerfile)$/,
   },
 ];
+const CI_PROVIDER_PATH =
+  /^(?:\.gitlab-ci\.yml$|\.gitlab\/|\.circleci\/|\.buildkite\/|\.forgejo\/|\.woodpecker|Jenkinsfile$|azure-pipelines\.yml$|bitbucket-pipelines\.yml$)/;
+
+export function ciConfigurationPath(path: string) {
+  return /^\.github\/(?:actions|workflows)\//.test(path) || CI_PROVIDER_PATH.test(path);
+}
+
 const patterns: Pattern[] = [
   // CI configuration, on any provider (`.github/` is `githubCi`, matched before this list).
   {
     reason: 'CI configuration',
-    test: /^(?:\.gitlab-ci\.yml$|\.gitlab\/|\.circleci\/|\.buildkite\/|\.forgejo\/|\.woodpecker|Jenkinsfile$|azure-pipelines\.yml$|bitbucket-pipelines\.yml$)/,
+    test: CI_PROVIDER_PATH,
   },
   // The check contract Forge's Actions executor reads from every Candidate, before any check
   // command (scripts/check-contract.mjs, CHECK_CONTRACT_MISMATCH), whatever the repository.
@@ -105,7 +112,7 @@ const patterns: Pattern[] = [
 /** A check entry: an exact path, or a glob where `*` stays inside one path
  * segment and `{a,b}` is a choice (no nesting). A declared global-risk glob may also
  * use `**`, `?` and `[...]`; one that does not compile matches every path (widen). */
-function entryMatcher(entry: string): (path: string) => boolean {
+export function checkEntryMatcher(entry: string): (path: string) => boolean {
   if (/\*\*|[?[]/.test(entry)) {
     try {
       const pattern = globPattern(entry);
@@ -138,7 +145,7 @@ const rootConfig = (path: string, rule: FirstCheckRiskRule) =>
  * (a ci-status runner's CI file, or a declared `.github/` path), so the project's own CI runs the check. */
 type Entries = { matchers: ((path: string) => boolean)[]; projectWorkflow: boolean };
 const compile = (checkEntries: readonly string[]): Entries => ({
-  matchers: checkEntries.map(entryMatcher),
+  matchers: checkEntries.map(checkEntryMatcher),
   projectWorkflow: checkEntries.some(entry => entry.startsWith('.github/')),
 });
 /** The GitHub files Forge's Actions executor runs for every check: its entry workflow, which it

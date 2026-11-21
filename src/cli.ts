@@ -53,6 +53,7 @@ Usage:
   nforge prune [--apply] [--scan DIRECTORY]   # remove local roots of landed/abandoned Lanes
   nforge settings [KEY [VALUE | --reset]]   # client parallel-work defaults (docs/parallel-work-defaults.md)
   nforge agent <root> <read> [json | --command-file FILE]
+  nforge agent <root> abandon|revert|cancel [json | --command-file FILE|-]
   nforge x <root> <operator-action> [json | --command-file FILE]
   nforge recover NEW_RUNNER --command-file REQUEST.json
   nforge policy <root>

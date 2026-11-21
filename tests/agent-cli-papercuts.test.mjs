@@ -177,7 +177,8 @@ test('593fc2d7: an agent action typed as a top-level command names the agent com
   for (const [verb, prefix] of [
     ['save', 'agent'],
     ['preflight', 'agent'],
-    ['abandon', 'x'],
+    ['abandon', 'agent'],
+    ['pin', 'x'],
   ]) {
     const result = spawnSync(process.execPath, [cli, verb, '.', '{}'], { cwd, encoding: 'utf8' });
     assert.equal(result.status, 1, result.stderr);

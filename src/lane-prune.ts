@@ -479,7 +479,7 @@ export function housekeepingLines(
       lines.push(
         `  ${lane.laneId} ${lane.idleHours}h ${lane.outcome ? JSON.stringify(lane.outcome.slice(0, 60)) : ''}`.trimEnd(),
       );
-    lines.push(`  nforge x ${root} abandon '{"laneId":"LANE_ID","reason":"..."}'`);
+    lines.push(`  nforge agent ${root} abandon '{"laneId":"LANE_ID","reason":"..."}'`);
   }
   // Same account, another agent run: never an abandon offer (d730121f); their owner decides.
   if (otherRuns.length)

@@ -23,10 +23,10 @@
 | `x source-pack` | `operationId?` |
 | `x snapshots` | `laneId?, undo?, redo?, restore?, paths?, purge?, operationId?` |
 | `x undo` | `laneId?, saveId?, version?, apply?, operationId?` |
-| `x cancel` | `submissionId, operationId?` |
+| `cancel` | `submissionId, operationId?` |
 | `land --withdraw` | `laneId?, submissionId?, reason?, operationId?` |
-| `x revert` | `message?, target, operationId?` |
-| `x abandon` | `laneId?, reason, authorityEpoch?, intents?, saveFirst?, keepPatch?, target?, operationId?` |
+| `revert` | `message?, target, operationId?` |
+| `abandon` | `laneId?, reason, authorityEpoch?, intents?, saveFirst?, keepPatch?, target?, operationId?` |
 | `x complete` | `laneId?, operationId?` |
 | `x pin` | `laneId?, pinned?, operationId?` |
 | `x complete-merged` | `operationId?` |

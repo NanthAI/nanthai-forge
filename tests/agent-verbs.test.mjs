@@ -6,8 +6,8 @@ import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import { mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { coreVerbs } from '../scripts/agent-verb-forms.mjs';
 import {
-  lifecycleVerbs,
   lowerVerb,
   namedReads,
   newForm,
@@ -53,11 +53,11 @@ const rows = [
   ['observe', null],
   ['wait', null],
   ['log', null],
-  ['cancel', 'x cancel'],
-  ['revert', 'x revert'],
+  ['cancel', null],
+  ['revert', null],
   ['undo', 'x undo'],
   ['undo-revert', 'retired'],
-  ['abandon', 'x abandon'],
+  ['abandon', null],
   ['reopen', 'start --reopen', 'reopen', 'reopen'],
   ['complete', 'x complete'],
   ['complete-merged', 'x complete-merged'],
@@ -177,10 +177,7 @@ for (const [action, form, nativeWire, hostedWire] of rows)
     }
     assert.equal(newForm(action, accept, false) ?? null, form);
     if (!form) {
-      assert.ok(
-        [...lifecycleVerbs, ...namedReads].includes(action),
-        `${action} is a kept verb or named read`,
-      );
+      assert.ok([...coreVerbs, ...namedReads].includes(action), `${action} is a kept verb or named read`);
       return;
     }
     if (form.startsWith('x ')) {
@@ -301,9 +298,6 @@ test('old and new spellings send the same hosted request; only the old one print
     ['confirm-tests', ['save', '--contract'], { candidateId }],
     ['friction', ['save', '--friction'], { title: 'T' }],
     ['decide', ['save', '--decision'], { what: 'W' }],
-    ['cancel', ['x', 'cancel'], { submissionId }],
-    ['revert', ['x', 'revert'], { message: 'R' }],
-    ['abandon', ['x', 'abandon'], { laneId }],
     ['complete', ['x', 'complete'], { laneId }],
     ['complete-merged', ['x', 'complete-merged'], {}],
     ['abandon-dormant', ['x', 'abandon-dormant'], {}],
@@ -345,6 +339,29 @@ test('old and new spellings send the same hosted request; only the old one print
       assert.equal(newNotice, '');
     });
   }
+  for (const [action, input] of [
+    ['abandon', { laneId, reason: 'Superseded' }],
+    ['revert', { target: { kind: 'receipt', receiptId: randomUUID() } }],
+    ['cancel', { submissionId }],
+  ]) {
+    const command = { ...input, operationId };
+    const args = [root, action, JSON.stringify({ ...address, ...command })];
+    await t.test(`agent ROOT ${action} dispatches the requested action without an alias notice`, async () => {
+      sent.length = 0;
+      const { stderr } = await captureStderr(() => agentCli(args));
+      assert.deepEqual([...sent], [{ action, command }]);
+      assert.equal(stderr, '');
+    });
+    await t.test(`x ROOT ${action} dispatches the same request with one success hint`, async () => {
+      sent.length = 0;
+      const { stderr } = await captureStderr(() => agentCli(args, { operator: true }));
+      assert.deepEqual([...sent], [{ action, command }]);
+      assert.equal(
+        stderr,
+        `Alias: ${action} is now nforge agent ${root} ${action} (same JSON and replay identity).\n`,
+      );
+    });
+  }
   // Kept verbs and reads stay quiet; the internal set-policy facade does too.
   for (const action of ['save', 'start', 'status', 'capabilities']) {
     const done = captured('stderr');
@@ -358,6 +375,12 @@ test('old and new spellings send the same hosted request; only the old one print
   const failing = captured('stderr');
   await assert.rejects(agentCli([root, 'friction', JSON.stringify({ ...address, title: 'T' })]));
   assert.equal(failing(), '');
+  const failedOperator = await captureStderr(() =>
+    assert.rejects(
+      agentCli([root, 'cancel', JSON.stringify({ ...address, submissionId })], { operator: true }),
+    ),
+  );
+  assert.equal(failedOperator.stderr, '');
 });
 
 for (const [action, enabled] of [

@@ -602,6 +602,38 @@ test('Actions timing history is advisory, project-scoped and records completed f
   assert.equal(s.tables.projectHostedTestTimings.size, 1);
 });
 
+test('incident 1018d0f8: placement opt-in reuses the authorized planning session with identical DB I/O', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  const { legacyPolicy } = await import('../dist/autonomy-policy.js');
+  const policy = legacyPolicy();
+  policy.acceptance.standaloneNestedPackages = false;
+  s.patch('hostedProjects', s.projectId, {
+    autonomyPolicy: policy,
+    checkEntries: ['scripts/verify.sh'],
+    globalRiskPaths: ['.repos/**'],
+  });
+  // The bootstrap session binds the workflow SHA in either mode, before the plan asks for timings.
+  const bootstrap = await s.call(sessions, 'session', s.input());
+  assert.equal(Object.hasOwn(bootstrap, 'standalonePlacement'), false);
+  const off = await s.call(sessions, 'session', { ...s.input(), timings: true });
+  const before = s.counts.at(-1);
+  s.patch('hostedProjects', s.projectId, {
+    autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, standaloneNestedPackages: true } },
+  });
+  const on = await s.call(sessions, 'session', { ...s.input(), timings: true });
+  const after = s.counts.at(-1);
+  const { standalonePlacement, ...rest } = on;
+  assert.deepEqual(standalonePlacement, { checkEntries: ['scripts/verify.sh', '.repos/**'] });
+  assert.deepEqual(rest, off);
+  assert.deepEqual(after.readDocumentsByTable, before.readDocumentsByTable);
+  assert.deepEqual(after.readRangesByTable, before.readRangesByTable);
+  assert.equal(after.writes, before.writes);
+  assert(after.readBytes <= before.readBytes);
+  const legacy = await s.call(sessions, 'session', s.input());
+  assert.equal(Object.hasOwn(legacy, 'standalonePlacement'), false);
+});
+
 test('first planning session bootstraps weights from bounded, already retained terminal reports', async t => {
   const s = await fixture(t);
   const previousId = randomUUID(),

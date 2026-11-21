@@ -80,7 +80,7 @@ MCP `forge_review` exposes hosted `show`, `diff`, `peers` and `queue`.
   is `records {"collection":"saves","parentId":LANE_ID}`: each save with its full
   saved State id (`head`) and time (`at`), oldest first, 100 per page (one small
   body read per save).
-- `x revert {target}` makes a compensating Lane; landing it (`land --save`, the
+- `revert {target}` prepares a compensating Lane. Its checked landing (`land --save`, the
   browser, or main-audit recovery) records `revertOf` on the landing (shown as
   compensating, with "Reverted by" on the original). When it lands, each Lane of the
   reverted receipt gets one board note with its reopen command

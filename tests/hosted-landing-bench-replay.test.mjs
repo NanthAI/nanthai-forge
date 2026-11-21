@@ -3,6 +3,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { regressions, calibration } from './queue-sim/replay-gate.mjs';
+import { checkedPackagePlacement } from '../dist/package-placement-pin.js';
+import { pinnedPackagePlacement, placedRiskBetween } from '../dist/package-placement.js';
 const directory = new URL('./fixtures/queue-traces/', import.meta.url);
 const baseline = JSON.parse(readFileSync(new URL('baseline.json', directory)));
 const traces = readdirSync(directory)
@@ -115,4 +117,54 @@ test('uncalibrated old rules cannot qualify a comparison or replace the observed
   assert(calibration(observed, { ...observed, wallSeconds: 230 }).length);
   assert(calibration(observed, { ...observed, recomposes: 4 }).length);
   assert(calibration(observed, { ...observed, ciBilledMinutes: null }).length);
+});
+
+test('standalone placement may change only a queue pair with a path under a certified folder', () => {
+  const dir = '.repos/vendor';
+  const manifest = dir + '/package.json';
+  const tree = {
+    'package.json': '{"name":"root","scripts":{"test":"node --test"}}',
+    'package-lock.json': '{}',
+    'apps/pinned/package.json': '{"name":"pinned"}',
+    'apps/pinned/package-lock.json': '{}',
+    [manifest]: '{}',
+  };
+  const pin = settings => checkedPackagePlacement(Object.keys(tree), path => tree[path], settings);
+  const off = pin(undefined);
+  const on = pin({ checkEntries: [], commandLines: [] });
+  const baseline = pinnedPackagePlacement({
+    packagePlacement: {
+      rule: 'package-placement-v2',
+      packages: [
+        ['js', '', 0, 1, []],
+        ['js', 'apps/pinned', 0, 0, []],
+      ],
+      unresolved: [],
+    },
+  });
+  const offGraph = pinnedPackagePlacement(off),
+    onGraph = pinnedPackagePlacement(on);
+  const standalone = on.packagePlacement.packages.filter(row => row[5] === 1).map(row => row[1]);
+  assert.deepEqual(standalone, [dir]);
+  let pairs = 0;
+  const compare = (candidate, main) => {
+    const previous = placedRiskBetween(candidate, main, [], baseline);
+    const disabled = placedRiskBetween(candidate, main, [], offGraph);
+    assert.deepEqual(disabled, previous);
+    const enabled = placedRiskBetween(candidate, main, [], onGraph);
+    if (![...candidate, ...main].some(path => standalone.some(folder => path.startsWith(folder + '/'))))
+      assert.deepEqual(enabled, previous);
+    return enabled;
+  };
+  for (const { tasks } of traces)
+    for (const candidate of tasks)
+      for (const main of tasks) {
+        if (candidate === main || !candidate.paths?.length || !main.paths?.length) continue;
+        compare(candidate.paths, main.paths);
+        pairs++;
+      }
+  assert(pairs > 0, 'retained bench task paths exercised the guard');
+  assert.deepEqual(compare([manifest], ['apps/pinned/module.ts']), [
+    { path: manifest, reach: ['js:' + dir], standalone: 'js-non-member' },
+  ]);
 });
