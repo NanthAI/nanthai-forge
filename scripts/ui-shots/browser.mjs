@@ -1,7 +1,55 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ShotError } from './options.mjs';
+import { botHandle } from './bot-credentials.mjs';
+import { observePasskeySession, signInWithPasskey } from './passkey-session.mjs';
 
-export async function signIn(page, base, credentials) {
+export async function launchBotBrowser(credentials, options = {}) {
+  // Playwright wire logging can include the credential and both browser session tokens.
+  // Clear debug output before importing Playwright on either private CLI path.
+  delete process.env.DEBUG;
+  delete process.env.DEBUG_FILE;
+  delete process.env.PWDEBUG;
+  const { chromium } = await import('playwright');
+  return chromium.launch({
+    ...options,
+    ...(credentials.kind === 'clerk' ? { args: ['--disable-blink-features=AutomationControlled'] } : {}),
+  });
+}
+
+export async function botBrowserIdentity(browser, credentials) {
+  if (credentials.kind === 'passkey') return {};
+  const cdp = await browser.newBrowserCDPSession();
+  try {
+    const { userAgent } = await cdp.send('Browser.getVersion');
+    return { userAgent: userAgent.replace('HeadlessChrome', 'Chrome') };
+  } finally {
+    await cdp.detach();
+  }
+}
+
+export function observeBotSession(page, credentials) {
+  if (credentials.kind === 'passkey') {
+    const session = observePasskeySession(page, credentials.deployment);
+    return {
+      ...session,
+      deployment: () => credentials.deployment,
+      authenticated: () => session.viewer() === botHandle,
+    };
+  }
+  let deployment;
+  page.on('websocket', socket => {
+    const url = new URL(socket.url());
+    if (url.hostname.endsWith('.convex.cloud')) deployment = `https://${url.hostname}`;
+  });
+  return {
+    deployment: () => deployment,
+    token: () => convexToken(page),
+    authenticated: () => page.evaluate(() => Boolean(window.Clerk?.user)),
+  };
+}
+
+export async function signIn(page, base, credentials, session, timeout) {
+  if (credentials.kind === 'passkey') return signInWithPasskey(page, credentials, session, timeout);
   // The public landing deliberately loads no auth client; sign-in lives in the app.
   await page.goto(new URL('/projects', base).href, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.Clerk?.loaded);
@@ -44,43 +92,66 @@ export async function signIn(page, base, credentials) {
     throw new ShotError('Signed-in identity does not match the configured bot.');
 }
 
-export async function waitForPage(page, kind) {
-  await page.waitForFunction(kind => {
-    const visible = element =>
-      Boolean(element.getClientRects().length) && getComputedStyle(element).visibility !== 'hidden';
-    const main = document.querySelector('main');
-    if (!main || !window.Clerk?.user) return false;
-    // Source may itself contain strings such as "Reading…"; those are review content.
-    const text = [...main.querySelectorAll('p,h1,h2,h3,[role="status"]')]
-      .filter(element => visible(element) && !element.closest('.fx-diff,.review-code,pre,code'))
-      .map(element => element.textContent)
-      .join('\n');
-    if (/(?:Loading|Connecting|Checking|Reading|Preparing)[^\n]*(?:…|\.\.\.)/.test(text)) return false;
-    const headings = [...main.querySelectorAll('h1,h2,h3')].filter(visible).map(e => e.textContent.trim());
-    const patterns = {
-      now: /^Now$/,
-      intents: /^(Intents|Work)$/,
-      lanes: /^(Lanes|Work)$/,
-      home: /^Projects$/,
-      settings:
-        /^(?:General|How agents work|Autonomy|Checks|Access|Backups|Transfer & backups|Contributions|Appearance|Signed-in devices|GitHub)$/,
-      planning: /^(Planning|Work)$/,
-      activity: /^Activity$/,
-      code: /^Code$/,
-      'code-graph': /^Code$/,
-      lane: /.+/,
-      intent: /.+/,
-      initiative: /.+/,
-      view: /^View /,
-      review: /.+/,
-      device: /terminal|device|computer/i,
-    };
-    if (!headings.some(h => patterns[kind].test(h))) return false;
-    if (kind === 'initiative' && !main.querySelector('.fx-initiative')) return false;
-    if (kind === 'review' && !main.querySelector('.fx-review-page')) return false;
-    if (kind === 'lane' && !main.querySelector('.fx-lane-page, .lane-context-bar')) return false;
-    return ![...main.querySelectorAll('[role="alert"]')].some(e => visible(e) && e.textContent.trim());
-  }, kind);
+export async function waitForPage(page, kind, passkey = false) {
+  if (passkey) {
+    await page.waitForFunction(kind => {
+      const main = document.querySelector('main');
+      const visible = element =>
+        Boolean(element.getClientRects().length) && getComputedStyle(element).visibility !== 'hidden';
+      if (
+        !main?.querySelector('h1') ||
+        [...main.querySelectorAll('[aria-busy="true"], [role="alert"]')].some(visible)
+      )
+        return false;
+      if (
+        [...main.querySelectorAll('.head .tools a')].some(link =>
+          /^Open the current .* screen$/.test(link.textContent),
+        )
+      )
+        return false;
+      if (['intents', 'planning'].includes(kind) && !main.querySelector('.plan-with-views')) return false;
+      if (kind === 'initiative' && !main.querySelector('.plan-ini')) return false;
+      if (kind === 'lane' && !main.querySelector('.lr-file, .lr-lead, .stops')) return false;
+      return true;
+    }, kind);
+  } else {
+    await page.waitForFunction(kind => {
+      const visible = element =>
+        Boolean(element.getClientRects().length) && getComputedStyle(element).visibility !== 'hidden';
+      const main = document.querySelector('main');
+      if (!main || !window.Clerk?.user) return false;
+      // Source may itself contain strings such as "Reading…"; those are review content.
+      const text = [...main.querySelectorAll('p,h1,h2,h3,[role="status"]')]
+        .filter(element => visible(element) && !element.closest('.fx-diff,.review-code,pre,code'))
+        .map(element => element.textContent)
+        .join('\n');
+      if (/(?:Loading|Connecting|Checking|Reading|Preparing)[^\n]*(?:…|\.\.\.)/.test(text)) return false;
+      const headings = [...main.querySelectorAll('h1,h2,h3')].filter(visible).map(e => e.textContent.trim());
+      const patterns = {
+        now: /^Now$/,
+        intents: /^(Intents|Work)$/,
+        lanes: /^(Lanes|Work)$/,
+        home: /^Projects$/,
+        settings:
+          /^(?:General|How agents work|Autonomy|Checks|Access|Backups|Transfer & backups|Contributions|Appearance|Signed-in devices|GitHub)$/,
+        planning: /^(Planning|Work)$/,
+        activity: /^Activity$/,
+        code: /^Code$/,
+        'code-graph': /^Code$/,
+        lane: /.+/,
+        intent: /.+/,
+        initiative: /.+/,
+        view: /^View /,
+        review: /.+/,
+        device: /terminal|device|computer/i,
+      };
+      if (!headings.some(h => patterns[kind].test(h))) return false;
+      if (kind === 'initiative' && !main.querySelector('.fx-initiative')) return false;
+      if (kind === 'review' && !main.querySelector('.fx-review-page')) return false;
+      if (kind === 'lane' && !main.querySelector('.fx-lane-page, .lane-context-bar')) return false;
+      return ![...main.querySelectorAll('[role="alert"]')].some(e => visible(e) && e.textContent.trim());
+    }, kind);
+  }
   await page.evaluate(async () => {
     await document.fonts.ready;
     await Promise.all(

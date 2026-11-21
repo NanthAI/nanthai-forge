@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ShotError } from './options.mjs';
+import { convexFrames } from './convex-frames.mjs';
 
 /** Observe the app's real Convex subscriptions without retaining values, arguments or auth frames. */
-export function observeData(page) {
+export function observeData(page, deployment) {
   let current;
   page.on('websocket', socket => {
     const url = new URL(socket.url());
-    if (!url.hostname.endsWith('.convex.cloud')) return;
+    if (deployment ? `https://${url.host}` !== deployment : !url.hostname.endsWith('.convex.cloud')) return;
     const state = { pending: new Set(), queries: new Map(), seen: false, failed: false, changed: Date.now() };
     current = state;
-    socket.on('framesent', ({ payload }) => {
-      try {
-        const message = JSON.parse(String(payload));
-        if (message.type !== 'ModifyQuerySet') return;
+    convexFrames(socket, {
+      sent(message) {
+        if (message.type !== 'ModifyQuerySet' || !Array.isArray(message.modifications)) return;
         state.changed = Date.now();
         for (const change of message.modifications) {
           if (change.type === 'Add') {
@@ -21,14 +21,9 @@ export function observeData(page) {
             state.queries.set(change.queryId, change.udfPath);
           } else if (change.type === 'Remove') state.pending.delete(change.queryId);
         }
-      } catch {
-        /* Non-query frames have no bearing on readiness. */
-      }
-    });
-    socket.on('framereceived', ({ payload }) => {
-      try {
-        const message = JSON.parse(String(payload));
-        if (message.type !== 'Transition') return;
+      },
+      received(message) {
+        if (message.type !== 'Transition' || !Array.isArray(message.modifications)) return;
         state.changed = Date.now();
         for (const change of message.modifications) {
           state.pending.delete(change.queryId);
@@ -43,9 +38,7 @@ export function observeData(page) {
           )
             state.failed = true;
         }
-      } catch {
-        /* Do not log frame contents. */
-      }
+      },
     });
   });
   return async function settled(required = true) {

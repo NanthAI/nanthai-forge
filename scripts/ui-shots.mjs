@@ -1,14 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 import { routeUrlState, projectIdentity } from '../src/project-routes.ts';
-import { readFile, lstat, mkdir, writeFile } from 'node:fs/promises';
-import { chromium } from 'playwright';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { deadlineConvexClient } from '../dist/network-convex-client.js';
 import { makeFunctionReference } from 'convex/server';
-import { captureLanding } from './ui-shots/landing.mjs';
 import { options, usage, destination, selectedReviewRoute, ShotError } from './ui-shots/options.mjs';
-import { signIn, waitForPage, convexToken } from './ui-shots/browser.mjs';
+import {
+  botBrowserIdentity,
+  launchBotBrowser,
+  observeBotSession,
+  signIn,
+  waitForPage,
+} from './ui-shots/browser.mjs';
+import { readBotCredentials, botHandle } from './ui-shots/bot-credentials.mjs';
+import { passkeyDestination, passkeyLaneFile } from './ui-shots/passkey-routes.mjs';
 import { observeData } from './ui-shots/data.mjs';
-import { explainBotAccess } from './ui-bot-grant.mjs';
+import { BotNoReaderGrant, explainBotAccess } from './ui-bot-grant.mjs';
 import { join } from 'node:path';
 
 let stage = 'arguments';
@@ -24,70 +30,78 @@ try {
     await captureBootstrap(config);
   } else if (config.pages[0] === 'landing') {
     stage = 'signed-out landing';
+    const { captureLanding } = await import('./ui-shots/landing.mjs');
     await captureLanding(config);
   } else {
     stage = 'credentials';
-    const info = await lstat(config.credentials);
-    if (!info.isFile() || (info.mode & 0o777) !== 0o600 || info.uid !== process.getuid?.())
-      throw new ShotError('Bot credentials must be a user-owned 0600 regular file.');
-    const credentials = JSON.parse(await readFile(config.credentials, 'utf8'));
-    if (![credentials.email, credentials.password, credentials.userId].every(v => typeof v === 'string' && v))
-      throw new ShotError('Bot credentials need email, password and userId.');
+    const credentials = await readBotCredentials(config.credentials, config.base);
+    const passkey = credentials.kind === 'passkey';
     const projectId = config.project || credentials.projectId;
-    if (config.pages.some(p => p !== 'device') && !projectId)
-      throw new ShotError('Set --project or credentials.projectId.');
+    const needsProject = config.pages.some(
+      p => p !== 'device' && !(passkey && ['home', 'settings:devices'].includes(p)),
+    );
+    if (needsProject && !projectId) throw new ShotError('Set --project or credentials.projectId.');
+    if (
+      passkey &&
+      config.pages.some(p => p.startsWith('lane:')) &&
+      config.variants.some(v => v !== 'unified')
+    )
+      throw new ShotError('The requested Lane variants are only available in the Clerk screenshot flow.');
     stage = 'launch (install Chromium with npx playwright install chromium)';
-    // Clerk classifies headless/WebDriver browsers as offline during uncached token refresh.
-    browser = await chromium.launch({ args: ['--disable-blink-features=AutomationControlled'] });
-    const cdp = await browser.newBrowserCDPSession();
-    const { userAgent } = await cdp.send('Browser.getVersion');
-    await cdp.detach();
+    browser = await launchBotBrowser(credentials);
     const context = await browser.newContext({
-      userAgent: userAgent.replace('HeadlessChrome', 'Chrome'),
+      ...(await botBrowserIdentity(browser, credentials)),
       viewport: { width: config.widths[0], height: config.height },
     });
     const page = await context.newPage();
-    page.setDefaultTimeout(60_000);
-    const settled = observeData(page);
-    let deployment;
-    page.on('websocket', socket => {
-      const url = new URL(socket.url());
-      if (url.hostname.endsWith('.convex.cloud')) deployment = `https://${url.hostname}`;
-    });
+    const timeout = 60_000;
+    page.setDefaultTimeout(timeout);
+    const settled = observeData(page, credentials.deployment);
+    const session = observeBotSession(page, credentials);
     let runtimeError = false;
     page.on('pageerror', () => {
       runtimeError = true;
     });
-    stage = 'Clerk sign-in';
-    await signIn(page, config.base, credentials);
+    stage = 'browser sign-in';
+    await signIn(page, config.base, credentials, session, timeout);
     stage = 'project access';
     // Use this site's actual deployment and the bot's browser identity. Queries only; no admin key.
     async function query(name, args) {
-      const token = await convexToken(page);
+      const token = await session.token();
+      const deployment = session.deployment();
       if (!token || !deployment) throw new ShotError('Could not identify the signed-in Convex connection.');
       const client = deadlineConvexClient(deployment, { logger: false });
       client.setAuth(token);
       return client.query(makeFunctionReference(name), args);
     }
-    let workspace;
-    if (config.pages.some(p => p !== 'device')) {
-      await page.goto(destination(config.base, projectId, 'now'), { waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(() => Boolean(window.Clerk?.session));
-      try {
-        await query('projectWork:state', { projectId });
-      } catch (error) {
-        throw explainBotAccess(error, deployment, projectId);
+    let workspace, identity;
+    if (needsProject) {
+      if (!passkey) {
+        await page.goto(destination(config.base, projectId, 'now'), { waitUntil: 'domcontentloaded' });
+        await page.waitForFunction(() => Boolean(window.Clerk?.session));
+        try {
+          await query('projectWork:state', { projectId });
+        } catch (error) {
+          throw explainBotAccess(error, session.deployment(), projectId);
+        }
+        const raw = await query('projectWorkIndex:workspace', { projectId });
+        if (!raw)
+          throw new ShotError('Project Work is not indexed yet. Open the project and retry after it loads.');
+        workspace = JSON.parse(raw);
       }
-      const raw = await query('projectWorkIndex:workspace', { projectId });
-      if (!raw)
-        throw new ShotError('Project Work is not indexed yet. Open the project and retry after it loads.');
-      workspace = JSON.parse(raw);
-      const identity = await query('urlProjects:resolve', { projectId });
-      if (identity) projectIdentity(identity.id, identity.handle, identity.name, identity.slug);
+      identity = await query('urlProjects:resolve', { projectId });
+      if (passkey && !identity) throw new BotNoReaderGrant(session.deployment(), projectId, credentials.kind);
+      if (passkey && identity?.id !== projectId)
+        throw new ShotError('Could not resolve the requested project.');
+      if (!passkey && identity) projectIdentity(identity.id, identity.handle, identity.name, identity.slug);
     }
     const routes = [];
     for (const selected of config.pages) {
       const [kind, id] = selected.split(':');
+      if (passkey) {
+        routes.push({ selected, kind, url: passkeyDestination(config.base, identity, selected, config) });
+        continue;
+      }
       let intentId;
       if (kind === 'lane' || kind === 'review') {
         stage = `${kind} selection`;
@@ -128,7 +142,11 @@ try {
             runtimeError = false;
             await page.goto(route.url, { waitUntil: 'domcontentloaded' });
             await settled(route.kind !== 'device');
-            await waitForPage(page, route.kind);
+            await waitForPage(page, route.kind, passkey);
+            if (passkey && config.diffFile && route.kind === 'lane') {
+              await passkeyLaneFile(page, config.diffFile).click();
+              await page.getByLabel(`Changes to ${config.diffFile}`, { exact: true }).waitFor();
+            }
             if (variant === 'map') {
               await page
                 .getByRole('group', { name: 'Changed file display' })
@@ -140,7 +158,12 @@ try {
                 .first()
                 .waitFor();
             }
-            if (variant !== 'map' && config.diffFile && ['lane', 'review', 'view'].includes(route.kind)) {
+            if (
+              !passkey &&
+              variant !== 'map' &&
+              config.diffFile &&
+              ['lane', 'review', 'view'].includes(route.kind)
+            ) {
               if (route.kind === 'view') {
                 const file = page
                   .locator('.fx-provenance-file')
@@ -162,7 +185,11 @@ try {
               );
             const requested = routeUrlState(route.url),
               observed = routeUrlState(page.url());
-            if (route.kind === 'review') {
+            if (passkey) {
+              if (page.url() !== route.url) throw new ShotError('Navigation left the requested route.');
+              if ((await session.waitForViewer(timeout)) !== botHandle)
+                throw new ShotError('Signed-in identity does not match the configured bot.');
+            } else if (route.kind === 'review') {
               if (!selectedReviewRoute(page.url(), route.url, projectId, route.selected.split(':')[1]))
                 throw new ShotError('Navigation left the requested route.');
             } else {

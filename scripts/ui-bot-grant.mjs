@@ -26,9 +26,11 @@ export function setupCommand(deployment, projectId) {
 /** Typed error for a bot that cannot read the project, with the exact repair command. */
 export class BotNoReaderGrant extends ShotError {
   code = 'BOT_NO_READER_GRANT';
-  constructor(deployment, projectId) {
+  constructor(deployment, projectId, kind) {
     super(
-      `The UI bot has no reader grant on project ${projectId}. Re-grant it with (owner login required): ${setupCommand(deployment, projectId)}`,
+      kind === 'passkey'
+        ? 'The native UI bot cannot read the requested project. The project owner can grant the native account reader access.'
+        : `The UI bot has no reader grant on project ${projectId}. Re-grant it with (owner login required): ${setupCommand(deployment, projectId)}`,
     );
   }
 }

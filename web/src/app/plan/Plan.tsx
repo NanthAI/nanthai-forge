@@ -22,6 +22,7 @@ import { isLive, itemStatus, itemStatusLabel } from '../../../../src/planning-mo
 import type { PlanRow } from '../../../../src/planning-model';
 import { planningBatchLimit } from '../../../../src/planning-batch';
 import { useSafePaginatedQuery, useSafeQuery } from '../../safe-query';
+import { usePageCritical } from '../../ui/page-critical';
 import { A } from '../frames';
 import { currentScreenHref, hrefFor } from '../paths';
 import { Head, crumbsFor } from '../Place';
@@ -130,6 +131,10 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
   const query = useMemo(() => readQuery(search), [search.toString()]);
   const live = useSafeQuery(planRead, { projectId });
   const counts = useSafeQuery(api.projectPlanCounts.read, { projectId });
+  usePageCritical('Plan', {
+    plan: live.value !== undefined,
+    planCounts: counts.value !== undefined,
+  });
   // A failed or offline refresh keeps the last rows and the chosen view; the page says so.
   const last = useRef<PlanRead | undefined>(undefined);
   if (live.value) last.current = live.value;

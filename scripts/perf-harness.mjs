@@ -154,6 +154,7 @@ export async function main(args) {
       const { browserSamples } = await import('./perf/browser.mjs');
       const observed = await browserSamples(config);
       record.browser.version = observed.browserVersion;
+      record.browser.auth = observed.auth;
       for (const name of ['now', 'work', 'laneFirstDiff'])
         record.measurements[name] = measurement(name, observed.samples[name], observed.reason);
     } catch (error) {

@@ -41,6 +41,7 @@ import { heldWhyState, laneState } from '../lane-state';
 import { LaneDecision, useHeldView } from '../needs/LaneDecision';
 import { holdLine, parkLine } from '../needs/model';
 import { uniqueBy } from '../../ui/unique';
+import { usePageCritical } from '../../ui/page-critical';
 import './lane.css';
 
 type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
@@ -674,6 +675,7 @@ function DiffBox({
   encoding?: 'not-utf-8' | undefined;
 }) {
   const tokens = useTokens(path, hunks);
+  usePageCritical('Lane first diff', { sourceDiff: tokens !== null && hunks.length > 0 });
   return (
     <>
       {rough || encoding ? (

@@ -42,6 +42,7 @@ import {
   type DockLayout,
 } from '../../ds';
 import { Announcer, useAnnounce } from '../../ds/behaviour/announce';
+import { usePageCritical } from '../../ui/page-critical';
 import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { Head, Placeholder, crumbsFor } from '../Place';
@@ -132,6 +133,12 @@ function NeedsMeScreen({ route, projectId, projectName, feed, feedError, feedRea
     [fyiLive],
   );
   const counts = useQuery(api.projectPlanCounts.read, { projectId });
+  usePageCritical('Needs me', {
+    feed: Boolean(feed),
+    needs: read !== undefined,
+    fyi: fyiLive !== undefined,
+    planCounts: counts !== undefined,
+  });
   const decide = useProjectDecide(projectId);
   const publish = useMutation(api.projectCoordination.publish);
   const dismissMutation = useMutation(fyiDismiss);
