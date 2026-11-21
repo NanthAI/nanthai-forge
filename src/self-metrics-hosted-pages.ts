@@ -3,6 +3,9 @@ import { checkCauseSchema } from './hosted-check.js';
 import { z } from 'zod';
 import {
   hydrateMetricInputs,
+  resolveMetricInputPins,
+  type MetricInputLookup,
+  type MetricInputPages,
   joinMetricAttempts,
   type MetricObjects,
   type MetricAttempt,
@@ -14,7 +17,8 @@ import { hostedActionError } from './hosted-action-error.js';
 import { invariant } from './errors.js';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
 import { minutesBetween, type MetricPeriod, type MetricRecords } from './self-metrics-types.js';
-import { readHostedBills } from './self-metrics-bills.js';
+import { applyHostedBills, currentBills, hostedBillRows, type RecordedBill } from './self-metrics-bills.js';
+import type { readExactHostedContext } from './self-metrics-hosted-context.js';
 import { metricReceiptRowSchema } from './self-metric-receipts.js';
 import { hostedCallerReceipts } from './self-metrics-hosted-receipts.js';
 import { readPlacement } from './self-metrics-placement.js';
@@ -176,6 +180,7 @@ const pageSchema = (stream: keyof typeof rowSchemas) =>
     runProjectionVersion: z.literal(1).optional(),
     inputReferencesVersion: z.literal(1).optional(),
     exactSaveHeads: z.literal(true).optional(),
+    contextGeneration: z.string().nullable().optional(),
     saveHeadsPage: z
       .object({
         page: z.array(rowSchemas.saves).max(100),
@@ -275,6 +280,99 @@ export async function readHostedMetricPages(
   const receiptRows: z.infer<typeof rowSchemas.receipts>[] = [];
   const retries: (MetricRecords['receipts'][number] & { submissionId: string })[] = [];
   let receiptCoverage: Record<string, string | null> | undefined;
+  let bills: RecordedBill[] | null | undefined;
+  const objects = query.objects;
+  const inputPages: MetricInputPages = new Map();
+  const inputLookup =
+    (epoch: number, includeSaveTimes: boolean): MetricInputLookup =>
+    async references => {
+      const lookup = async (exactSaveHeads: boolean) => {
+        const selected = { lanes: [] as MetricLane[], saves: [] as MetricSave[] };
+        const saved = new Set<string>();
+        const wanted = new Set(references.map(reference => `${reference.laneId}:${reference.head}`));
+        const addSaves = (rows: MetricSave[]) => {
+          for (const row of rows) if (wanted.has(`${row.laneId}:${row.head}`)) selected.saves.push(row);
+        };
+        for (let offset = 0; offset < references.length; offset += 100) {
+          const batch = references.slice(offset, offset + 100);
+          const saveReferences = batch.filter(reference => {
+            const key = exactSaveHeads ? `${reference.laneId}:${reference.head}` : reference.laneId;
+            if (saved.has(key)) return false;
+            saved.add(key);
+            return true;
+          });
+          let savesPage: StreamPage['saveHeadsPage'];
+          for (const stream of ['lanes', 'saves'] as const) {
+            if (stream === 'saves' && !includeSaveTimes) continue;
+            const inputReferences = stream === 'lanes' ? batch : saveReferences;
+            if (!inputReferences.length || (stream === 'saves' && savesPage?.isDone)) continue;
+            let cursor = stream === 'saves' ? (savesPage?.continueCursor ?? null) : null;
+            const seen = new Set<string>(cursor === null ? [] : [cursor]);
+            do {
+              const includeSaves =
+                includeSaveTimes &&
+                exactSaveHeads &&
+                stream === 'lanes' &&
+                cursor === null &&
+                saveReferences.length;
+              const raw = await query('projectSelfMetrics:page', {
+                stream,
+                from: period.from,
+                to: period.to,
+                contextDays,
+                cursor,
+                inputReferences,
+                ...(includeSaves ? { saveHeadReferences: saveReferences } : {}),
+                ...(stream === 'saves' && exactSaveHeads ? { exactSaveHeads: true } : {}),
+              });
+              const page = pageSchema(stream).parse(typeof raw === 'string' ? JSON.parse(raw) : raw);
+              invariant(
+                page.authority.mode === 'server' &&
+                  page.authority.epoch === epoch &&
+                  page.cutover === cutover,
+                'SOURCE_AUTHORITY_CHANGED',
+                'Authority changed during metric input hydration.',
+              );
+              if (stream === 'lanes') {
+                selected.lanes.push(...page.page.map(row => rowSchemas.lanes.parse(row)));
+                if (includeSaves) {
+                  savesPage = page.saveHeadsPage;
+                  invariant(
+                    savesPage && (savesPage.isDone || savesPage.continueCursor),
+                    'EVIDENCE_CHANGED',
+                    'The metric save selection did not start.',
+                  );
+                  addSaves(savesPage.page);
+                }
+              } else addSaves(page.page.map(row => rowSchemas.saves.parse(row)));
+              if (page.isDone) break;
+              invariant(
+                page.continueCursor && !seen.has(page.continueCursor),
+                'EVIDENCE_CHANGED',
+                'Hosted metric cursor did not advance.',
+              );
+              cursor = page.continueCursor;
+              seen.add(cursor);
+            } while (true);
+          }
+        }
+        return selected;
+      };
+      try {
+        return await lookup(exactSaveHeads);
+      } catch (error) {
+        const code = hostedActionError(error, 'metrics').code;
+        if (
+          !exactSaveHeads ||
+          !['EVIDENCE_CHANGED', 'HOSTED_ACTION_FAILED', 'HOSTED_REQUEST_FAILED'].includes(code)
+        )
+          throw error;
+        // A cached probe can outlive coverage or a compatible server.
+        // A downgraded validator refuses the extra fields before the handler.
+        return lookup(false);
+      }
+    };
+
   try {
     const streams: (keyof typeof rowSchemas)[] = runsOnly
       ? (['runs'] as const)
@@ -287,9 +385,72 @@ export async function readHostedMetricPages(
     const probe = await metricPage(query, streams[0]!, period, contextDays, null);
     inputReferences = probe.inputReferencesVersion === 1;
     exactSaveHeads = probe.exactSaveHeads === true;
+    const scoped = !summary && !runsOnly && inputReferences && objects && probe.contextGeneration;
+    let exact: Awaited<ReturnType<typeof readExactHostedContext>> | undefined;
+    let acceptances: StreamPage[] | undefined;
+    if (scoped) {
+      invariant(
+        probe.authority.mode === 'server',
+        'SOURCE_AUTHORITY_CHANGED',
+        'Hosted metrics require server source authority.',
+      );
+      cutover = probe.cutover;
+      [acceptances, bills] = await Promise.all([
+        readStream(query, 'acceptances', period, contextDays, false, probe),
+        hostedBillRows(query, period),
+      ]);
+      try {
+        const { readExactHostedContext: readContext } = await import('./self-metrics-hosted-context.js');
+        exact = await readContext(
+          query,
+          period,
+          contextDays,
+          scoped,
+          probe.authority.epoch,
+          cutover,
+          acceptances.flatMap(page => page.page.map(row => rowSchemas.acceptances.parse(row))),
+          currentBills(bills ?? []).flatMap(bill =>
+            bill.provider === 'github-actions'
+              ? [{ from: Date.parse(bill.periodFrom), to: Date.parse(bill.periodTo) }]
+              : [],
+          ),
+          (stream, row) => rowSchemas[stream].parse(row),
+          pins =>
+            resolveMetricInputPins(
+              pins,
+              [],
+              [],
+              objects,
+              inputLookup(probe.authority.epoch, false),
+              inputPages,
+            ),
+        );
+      } catch (error) {
+        const code = hostedActionError(error, 'metrics').code;
+        if (!['EVIDENCE_CHANGED', 'HOSTED_ACTION_FAILED', 'HOSTED_REQUEST_FAILED'].includes(code))
+          throw error;
+        // The fact generation can be invalidated while the report is in flight.
+        // No selected request, attempt or run has reached the report yet.
+      }
+    }
     const fetched = await Promise.all(
-      streams.map((stream, index) =>
-        readStream(
+      streams.map((stream, index) => {
+        if (stream === 'acceptances' && acceptances) return acceptances;
+        if ((stream === 'requests' || stream === 'attempts' || stream === 'runs') && exact) {
+          const pages: StreamPage[] = [];
+          for (let offset = 0; offset < exact[stream].length; offset += 100)
+            pages.push(
+              pageSchema(stream).parse({
+                authority: probe.authority,
+                cutover: probe.cutover,
+                page: exact[stream].slice(offset, offset + 100),
+                isDone: true,
+                continueCursor: '',
+              }),
+            );
+          return pages;
+        }
+        return readStream(
           query,
           stream,
           period,
@@ -297,8 +458,8 @@ export async function readHostedMetricPages(
           summary,
           index === 0 ? probe : undefined,
           !summary && !runsOnly && probe.runProjectionVersion === 1,
-        ),
-      ),
+        );
+      }),
     );
     // Lane/save history is used only to resolve immutable input pins.
     if (
@@ -486,9 +647,11 @@ export async function readHostedMetricPages(
     });
   if (!records.error && !summary && !runsOnly) {
     records.billHistoryFrom = contextFrom;
-    await readHostedBills(query, period, records).catch(error => {
-      throw hostedActionError(error, 'metrics');
-    });
+    if (bills === undefined)
+      bills = await hostedBillRows(query, period).catch(error => {
+        throw hostedActionError(error, 'metrics');
+      });
+    applyHostedBills(records, bills);
     hostedCallerReceipts(records, receiptRows, receiptCoverage, period);
     await readPlacement(query, period, records);
     const requests = records.submissions;
@@ -498,91 +661,9 @@ export async function readHostedMetricPages(
       pins,
       lanes,
       saves,
-      query.objects,
-      inputReferences
-        ? async references => {
-            const lookup = async (exactSaveHeads: boolean) => {
-              const selected = { lanes: [] as MetricLane[], saves: [] as MetricSave[] };
-              const saved = new Set<string>();
-              const wanted = new Set(references.map(reference => `${reference.laneId}:${reference.head}`));
-              const addSaves = (rows: MetricSave[]) => {
-                for (const row of rows) if (wanted.has(`${row.laneId}:${row.head}`)) selected.saves.push(row);
-              };
-              for (let offset = 0; offset < references.length; offset += 100) {
-                const batch = references.slice(offset, offset + 100);
-                const saveReferences = batch.filter(reference => {
-                  const key = exactSaveHeads ? `${reference.laneId}:${reference.head}` : reference.laneId;
-                  if (saved.has(key)) return false;
-                  saved.add(key);
-                  return true;
-                });
-                let savesPage: StreamPage['saveHeadsPage'];
-                for (const stream of ['lanes', 'saves'] as const) {
-                  const inputReferences = stream === 'lanes' ? batch : saveReferences;
-                  if (!inputReferences.length || (stream === 'saves' && savesPage?.isDone)) continue;
-                  let cursor = stream === 'saves' ? (savesPage?.continueCursor ?? null) : null;
-                  const seen = new Set<string>(cursor === null ? [] : [cursor]);
-                  do {
-                    const includeSaves =
-                      exactSaveHeads && stream === 'lanes' && cursor === null && saveReferences.length;
-                    const raw = await query('projectSelfMetrics:page', {
-                      stream,
-                      from: period.from,
-                      to: period.to,
-                      contextDays,
-                      cursor,
-                      inputReferences,
-                      ...(includeSaves ? { saveHeadReferences: saveReferences } : {}),
-                      ...(stream === 'saves' && exactSaveHeads ? { exactSaveHeads: true } : {}),
-                    });
-                    const page = pageSchema(stream).parse(typeof raw === 'string' ? JSON.parse(raw) : raw);
-                    invariant(
-                      page.authority.mode === 'server' &&
-                        page.authority.epoch === records.source?.revision &&
-                        page.cutover === cutover,
-                      'SOURCE_AUTHORITY_CHANGED',
-                      'Authority changed during metric input hydration.',
-                    );
-                    if (stream === 'lanes') {
-                      selected.lanes.push(...page.page.map(row => rowSchemas.lanes.parse(row)));
-                      if (includeSaves) {
-                        savesPage = page.saveHeadsPage;
-                        invariant(
-                          savesPage && (savesPage.isDone || savesPage.continueCursor),
-                          'EVIDENCE_CHANGED',
-                          'The metric save selection did not start.',
-                        );
-                        addSaves(savesPage.page);
-                      }
-                    } else addSaves(page.page.map(row => rowSchemas.saves.parse(row)));
-                    if (page.isDone) break;
-                    invariant(
-                      page.continueCursor && !seen.has(page.continueCursor),
-                      'EVIDENCE_CHANGED',
-                      'Hosted metric cursor did not advance.',
-                    );
-                    cursor = page.continueCursor;
-                    seen.add(cursor);
-                  } while (true);
-                }
-              }
-              return selected;
-            };
-            try {
-              return await lookup(exactSaveHeads);
-            } catch (error) {
-              const code = hostedActionError(error, 'metrics').code;
-              if (
-                !exactSaveHeads ||
-                !['EVIDENCE_CHANGED', 'HOSTED_ACTION_FAILED', 'HOSTED_REQUEST_FAILED'].includes(code)
-              )
-                throw error;
-              // A cached probe can outlive coverage or a compatible server.
-              // A downgraded validator refuses the extra fields before the handler.
-              return lookup(false);
-            }
-          }
-        : undefined,
+      objects,
+      inputReferences ? inputLookup(records.source!.revision as number, true) : undefined,
+      inputPages,
     );
     const selectedByEntry = new Map<string, Set<string>>();
     for (const row of records.submissions) {

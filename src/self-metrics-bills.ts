@@ -144,10 +144,9 @@ const billPage = z.object({
   continueCursor: z.string(),
 });
 /** Full reports only. A missing module is a visible gap, never a zero bill. */
-export async function readHostedBills(
+export async function hostedBillRows(
   query: (name: string, args: Record<string, unknown>) => Promise<unknown>,
   period: MetricPeriod,
-  records: MetricRecords,
 ) {
   const bills: RecordedBill[] = [];
   const seen = new Set<string>();
@@ -176,6 +175,13 @@ export async function readHostedBills(
       )
     )
       throw error;
+    return null;
+  }
+  return bills;
+}
+
+export function applyHostedBills(records: MetricRecords, bills: RecordedBill[] | null) {
+  if (!bills) {
     records.gaps.push('Hosted bills need the deployed projectSelfMetricBills module.');
     return;
   }

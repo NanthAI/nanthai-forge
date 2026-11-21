@@ -452,6 +452,15 @@ const projectFields = {
    * a project row written before the rollback still validates. Remove with `stateTree` on objects. */
   stateTrees: v.optional(v.any()),
   sourceCutover: v.optional(v.object({ minimumCliVersion: v.string(), at: v.string() })),
+  metricContextCoverage: v.optional(
+    v.object({
+      generation: v.string(),
+      authorityEpoch: v.number(),
+      cutover: v.union(v.string(), v.null()),
+      from: v.number(),
+      to: v.number(),
+    }),
+  ),
   metricSaveHeadResume: v.optional(
     v.object({
       operationId: v.string(),

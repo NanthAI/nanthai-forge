@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { buildComposePages } from '../dist/hosted-compose.js';
 import { readHostedMetricPages } from '../dist/self-metrics-hosted-pages.js';
+import { metricContextFacts, metricContextStreams } from '../dist/self-metrics-context.js';
+import { resolveMetricInputPins } from '../dist/self-metrics-hosted-inputs.js';
 import { metricsSurface } from '../dist/self-metrics-surface.js';
 import { calculateSelfMetrics } from '../dist/self-metrics.js';
 import { runResourceWorker, assertMetricResources } from './resource-budget.mjs';
@@ -856,6 +858,22 @@ test('a cached exact save capability survives an older server rejecting new argu
   assert.deepEqual(metricsSurface(records, period), metricsSurface(previous.records, period));
 });
 
+test('full metrics discover capabilities without sending unfamiliar arguments to an older server', async () => {
+  const f = fixture();
+  f.run('legacy-run', at(1), at(2), 60);
+  const canonical = await readHostedMetricPages(f.query, period);
+  const query = async (name, args) => {
+    if (name !== 'projectSelfMetrics:page') return f.query(name, args);
+    if (args.compactRuns || args.contextSelection)
+      throw new Error('ArgumentValidationError: unexpected field');
+    const page = JSON.parse(await f.query(name, args));
+    delete page.runProjectionVersion;
+    return JSON.stringify(page);
+  };
+  const legacy = await readHostedMetricPages(query, period);
+  assert.deepEqual(metricsSurface(legacy.records, period), metricsSurface(canonical.records, period));
+});
+
 test('P6 exact Lane context includes lifecycle-backed versions inside the original horizon', async () => {
   const f = fixture(),
     e = evidence(f);
@@ -1010,6 +1028,276 @@ test('tenfold unrelated pre-window requests, attempts, runs and same-Lane saves 
     assert(bytes <= ceiling.bytes, `${scale}x fixture serialized bytes read`);
     assert(calls <= ceiling.calls, `${scale}x fixture query calls`);
   }
+});
+
+test('tenfold unrelated pre-window requests, attempts and runs preserve the report and bill inputs', async t => {
+  const f = fixture();
+  const e = evidence(f);
+  const pin = e.input(randomUUID(), randomUUID(), head('a'), at(-90));
+  const retry = e.input(randomUUID(), randomUUID(), head('b'), at(-90));
+  const standalone = e.input(randomUUID(), randomUUID(), head('c'), at(-90));
+  const noise = e.input(randomUUID(), randomUUID(), head('d'), at(-90));
+  const otherNoise = e.input(randomUUID(), randomUUID(), head('e'), at(-90));
+  const boundary = e.input(randomUUID(), randomUUID(), head('f'), at(-90));
+  const combinedNoise = e.combined(noise, otherNoise);
+  const standaloneFailure = (id, start, end, inputs, stamped = start) => {
+    const run = f.run(id, start, end, 120, { at: stamped, status: 'failed', candidate: { inputs } });
+    run.status = 'failed';
+  };
+  e.landing('current', at(1), at(2), pin);
+  e.landing('bill-history', at(-20), at(-19), pin);
+  f.run('bill-history', at(-20), at(-19), 60);
+  f.run('shifted-bill-history', at(-90), at(-24), 60, { at: at(-25) });
+  e.fail('combined-history', at(-80), at(-70), e.combined(noise, retry));
+  e.landing('retried', at(3), at(4), retry);
+  standaloneFailure('standalone-history', at(-80), at(-70), standalone);
+  e.landing('after-standalone', at(5), at(6), standalone);
+  e.fail('unlinked-boundary-settlement', at(-50), at(7), null);
+  f.tables.projectHostedLandingAttempts.pop();
+  e.fail('run-ended-boundary', at(-50), at(8), boundary);
+  const request = f.tables.projectHostedLandingRequests.at(-1);
+  const requestValue = JSON.parse(request.value);
+  delete requestValue.timing.settledAt;
+  request.value = JSON.stringify(requestValue);
+  await f.recordBill({
+    operationId: randomUUID(),
+    provider: 'github-actions',
+    periodFrom: at(-30),
+    periodTo: period.to,
+    billedUsd: 2,
+    listUsd: 2,
+    usage: { 'runner-minute': 1 },
+    rates: { 'runner-minute': 0.008 },
+    basis: 'Synthetic bill parity',
+  });
+  assert.deepEqual(await f.backfillSaveHeads(), { complete: true, inserted: 6 });
+  const addUnrelated = (from, to) => {
+    for (let index = from; index < to; index++) {
+      const id = `unrelated-${index}`;
+      e.fail(id, at(-90), at(-80), combinedNoise);
+      // Restored runs can be created after their recorded start. A bill that
+      // excludes those starts must not scan unrelated restored checks either.
+      standaloneFailure(`standalone-${id}`, at(-90), at(-80), otherNoise, at(-95));
+    }
+    f.projectRuns();
+  };
+  const projected = new Set();
+  const projectContext = async () => {
+    const tables = {
+      requests: ['projectHostedLandingRequests', 'submissionId'],
+      attempts: ['projectHostedLandingAttempts', 'attemptId'],
+      runs: ['projectHostedCheckRuns', 'runId'],
+    };
+    let bytes = 0;
+    let writes = 0;
+    const byStream = {};
+    const lanes = f.tables.projectHostedRecordBodies
+      .map(row => JSON.parse(row.value))
+      .filter(row => row.kind === 'lane');
+    for (const stream of metricContextStreams) {
+      const counted = (byStream[stream] = { bytes: 0, writes: 0 });
+      const [table, id] = tables[stream];
+      const source = new Map(f.tables[table].map(row => [row[id], row]));
+      let cursor = null;
+      do {
+        const results = JSON.parse(
+          await f.query('projectSelfMetrics:page', {
+            ...period,
+            stream,
+            cursor,
+            contextDays: 2,
+            ...(stream === 'runs' ? { compactRuns: true } : {}),
+          }),
+        );
+        const newRows = results.page.filter(row => !projected.has(source.get(row.id)._id));
+        const inputs = await resolveMetricInputPins(
+          newRows.flatMap(row => (row.inputPin ? [row.inputPin] : [])),
+          lanes,
+          [],
+          f.query.objects,
+        );
+        for (const row of newRows) {
+          const { _id: sourceId, _creationTime: sourceCreatedAt } = source.get(row.id);
+          const facts = metricContextFacts(
+            'complete',
+            { stream, sourceId, sourceCreatedAt, row },
+            inputs.get(row.inputPin?.sha256) ?? [],
+          );
+          for (const fact of facts) {
+            const stored = f.put('projectMetricFacts', { ...fact, projectId: f.project._id }, at(10));
+            const size = Buffer.byteLength(JSON.stringify(stored));
+            counted.bytes += size;
+            counted.writes++;
+            bytes += size;
+            writes++;
+          }
+          projected.add(sourceId);
+        }
+        cursor = results.isDone ? null : results.continueCursor;
+      } while (cursor !== null);
+    }
+    return { bytes, writes, byStream };
+  };
+  const read = async () => {
+    const before = { ...f.meter };
+    const { records } = await readHostedMetricPages(f.query, period);
+    assert.equal(f.meter.writes, before.writes);
+    return {
+      surface: metricsSurface(records, period),
+      documents: f.meter.documents - before.documents,
+      bytes: f.meter.bytes - before.bytes,
+      calls: f.meter.calls - before.calls,
+    };
+  };
+  addUnrelated(0, 100);
+  const canonical = await read();
+  const fixtureFacts = await projectContext();
+  const coverage = {
+    authorityEpoch: f.project.sourceAuthority.epoch,
+    cutover: f.project.sourceCutover.at,
+    generation: 'complete',
+    from: Date.parse(at(-3 * 1440)),
+    to: Date.parse(period.to),
+  };
+  f.project.metricContextCoverage = coverage;
+  const baseline = await read();
+  assert.deepEqual(baseline.surface, canonical.surface);
+  addUnrelated(100, 1000);
+  const growthFacts = await projectContext();
+  const grown = await read();
+  assert.deepEqual(grown, baseline);
+  assert.deepEqual(Object.fromEntries(grown.surface.totals['5.1'].rows.map(row => [row.id, row.path])), {
+    current: 'first-try',
+    retried: 'after-retry',
+    'after-standalone': 'unknown',
+  });
+  assert(grown.surface.totals.waste.rows.some(row => row.id === 'run-ended-boundary'));
+  assert(grown.surface.totals.waste.rows.some(row => row.id === 'unlinked-boundary-settlement'));
+  const [bill] = grown.surface.totals['5.8'].periods;
+  assert.equal(bill.landings, 4, 'the requested bill counts the pre-window landing');
+  assert.equal(
+    bill.usage['runner-minute'],
+    2,
+    'the bill includes both pre-window runs, including the shifted start',
+  );
+
+  f.actor('stranger');
+  await assert.rejects(
+    f.query('projectSelfMetrics:page', {
+      ...period,
+      stream: 'requests',
+      cursor: null,
+      contextDays: 2,
+      contextSelection: { generation: 'complete', lookups: [{ kind: 'created', stream: 'requests' }] },
+    }),
+    error =>
+      (typeof error.data === 'string' ? JSON.parse(error.data) : error.data)?.code === 'PROJECT_UNAVAILABLE',
+  );
+  f.actor('owner');
+  const staleQuery = async (name, args) => {
+    if (args.contextSelection) delete f.project.metricContextCoverage;
+    return f.query(name, args);
+  };
+  staleQuery.objects = f.query.objects;
+  const afterInvalidation = await readHostedMetricPages(staleQuery, period);
+  assert.deepEqual(metricsSurface(afterInvalidation.records, period), grown.surface);
+  f.project.metricContextCoverage = { ...coverage, authorityEpoch: coverage.authorityEpoch + 1 };
+  assert.deepEqual((await read()).surface, grown.surface);
+
+  // A long bill overlaps the report. Its starts before the creation-time
+  // horizon would still appear in the event index, but the report excludes them.
+  f.project.metricContextCoverage = {
+    ...coverage,
+    from: Date.parse(at(-6 * 1440)),
+  };
+  await f.recordBill({
+    operationId: randomUUID(),
+    provider: 'github-actions',
+    periodFrom: at(-5 * 1440),
+    periodTo: period.to,
+    billedUsd: 2,
+    listUsd: 2,
+    usage: { 'runner-minute': 1 },
+    rates: { 'runner-minute': 0.008 },
+    basis: 'Synthetic long bill',
+  });
+  const addExpiredBillRuns = (start, end) => {
+    for (let i = start; i < end; i++) {
+      const created = at(-3 * 1440);
+      const row = {
+        id: `expired-run-${i}`,
+        at: i % 2 ? at(-4 * 1440) : created,
+        endedAt: at(-3 * 1440 + 1),
+        started: true,
+      };
+      const source = f.run(row.id, created, row.endedAt, 60, { at: row.at });
+      for (const fact of metricContextFacts(
+        'complete',
+        { stream: 'runs', sourceId: source._id, sourceCreatedAt: source._creationTime, row },
+        [],
+      ))
+        f.put('projectMetricFacts', { ...fact, projectId: f.project._id }, at(10));
+    }
+  };
+  addExpiredBillRuns(0, 100);
+  const longBill = await read();
+  addExpiredBillRuns(100, 1000);
+  assert.deepEqual(await read(), longBill);
+  assert(canonical.documents <= 500);
+  assert(canonical.bytes <= 280_000);
+  assert(canonical.calls <= 13);
+  for (const [scale, { documents, bytes, calls }] of [
+    [1, baseline],
+    [10, grown],
+  ])
+    t.diagnostic(JSON.stringify({ scale, documents, bytes, calls }));
+  t.diagnostic(JSON.stringify({ fixtureFacts, growthFacts }));
+});
+
+test('exact bill selection preserves a pre-window run with fractional context bounds', async () => {
+  const f = fixture();
+  evidence(f);
+  const generation = 'fractional-context';
+  const contextDays = 0.000001;
+  const start = at(-0.001);
+  const source = f.run('recent-bill-run', start, at(-0.0005), 60);
+  await f.recordBill({
+    operationId: randomUUID(),
+    provider: 'github-actions',
+    periodFrom: at(-1),
+    periodTo: period.to,
+    billedUsd: 2,
+    listUsd: 2,
+    usage: { 'runner-minute': 1 },
+    rates: { 'runner-minute': 0.008 },
+    basis: 'Synthetic fractional context',
+  });
+  const metrics = () => readHostedMetricPages(f.query, period, false, false, contextDays);
+  const canonical = metricsSurface((await metrics()).records, period);
+  const runs = JSON.parse(
+    await f.query('projectSelfMetrics:page', { ...period, stream: 'runs', cursor: null, contextDays }),
+  );
+  assert.equal(runs.page.length, 1);
+  for (const fact of metricContextFacts(
+    generation,
+    {
+      stream: 'runs',
+      sourceId: source._id,
+      sourceCreatedAt: source._creationTime,
+      row: runs.page[0],
+    },
+    [],
+  ))
+    f.put('projectMetricFacts', { ...fact, projectId: f.project._id }, at(10));
+  f.project.metricContextCoverage = {
+    generation,
+    authorityEpoch: f.project.sourceAuthority.epoch,
+    cutover: f.project.sourceCutover.at,
+    from: Date.parse(at(-1)),
+    to: Date.parse(period.to),
+  };
+  assert.equal(canonical.totals['5.8'].periods[0].usage['runner-minute'], 1);
+  assert.deepEqual(metricsSurface((await metrics()).records, period), canonical);
 });
 
 test('one first-try rule: a recompose after main moved counts against first try only when it threw a started check away', async () => {

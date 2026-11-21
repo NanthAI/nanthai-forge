@@ -286,11 +286,13 @@ only exact immutable Lane versions in batches of 100 references, memoized for on
 Once the save-head backfill is complete, the reader selects only saves matching
 the Lane and head within the original creation-time horizon. The earliest canonical
 save time wins when a Lane saved the same head more than once. Older clients and
-projects with incomplete coverage use the bounded Lane save scan. Other streams
-retain the requested context for unlinked, legacy and combined classifications and
-bill-period evidence. Issue `0de95ef2` tracks the remaining exact lookups. Streams
-run side by side, fetching input history after verifying its pins. Missing or
-out-of-horizon versions remain explicitly unknown.
+projects with incomplete coverage use the bounded Lane save scan. The full report
+can select requests, attempts and runs by event time and exact relationships when
+the server certifies a complete projection for the requested creation-time horizon.
+The selection keeps cross-window settlements, combined Candidate members, standalone
+failed checks, prior passing reuse evidence and runs in requested provider bill periods.
+A missing or invalidated coverage marker selects the canonical history streams.
+Missing or out-of-horizon input versions remain explicitly unknown.
 
 New saves publish the compact fact and mark their existing save heads in the same
 transaction. Reports detect any unmarked saves through the existing status index and

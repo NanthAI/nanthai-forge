@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+import {
+  metricContextCoverage,
+  metricContextLookupValidator,
+  metricContextPage,
+} from './projectMetricContext';
 import { metricInputReferences } from './projectMetricInputReferences';
 import { saveHeadsCovered } from './projectMetricSaveHeads';
 import { journalLaneMetricsPage } from './projectJournalLaneMetrics';
@@ -139,6 +144,12 @@ export const page = query({
     contextDays: v.optional(v.number()),
     compactRuns: v.optional(v.boolean()),
     exactSaveHeads: v.optional(v.boolean()),
+    contextSelection: v.optional(
+      v.object({
+        generation: v.string(),
+        lookups: v.array(metricContextLookupValidator),
+      }),
+    ),
     saveHeadReferences: v.optional(
       v.array(v.object({ laneId: v.string(), version: v.number(), head: v.string() })),
     ),
@@ -163,6 +174,20 @@ export const page = query({
         Math.max(0, Number.isFinite(input.contextDays) ? input.contextDays! : 30),
       );
       const context = from - contextDays * 86400000;
+      if (input.contextSelection) {
+        return canonicalPayload({
+          ...(await metricContextPage(ctx, project, {
+            ...input.contextSelection,
+            context,
+            from,
+            to,
+            cursor: input.cursor,
+          })),
+          contextFrom: new Date(context).toISOString(),
+          cutover: project.sourceCutover?.at ?? null,
+          authority: project.sourceAuthority ?? { mode: 'native-owner', epoch: 0 },
+        });
+      }
       if (input.exactSaveHeads || input.saveHeadReferences)
         invariant(
           input.inputReferences &&
@@ -483,15 +508,18 @@ export const page = query({
           return { id: row._id, ...('metricMutation' in row ? { mutation: row.metricMutation } : {}) };
         }),
       );
+      const firstAcceptances = input.stream === 'acceptances' && input.cursor === null;
+      const contextGeneration = firstAcceptances ? metricContextCoverage(project, context, to) : null;
       return canonicalPayload({
         page: values,
         inputReferencesVersion: 1,
         runProjectionVersion: 1,
-        ...(input.stream === 'acceptances' && input.cursor === null
+        ...(firstAcceptances
           ? {
               audits: await mainAuditEvents(ctx, input.projectId, from, to),
               ...(await landingSpeedSummary(ctx, input.projectId)),
               ...((await saveHeadsCovered(ctx, project)) ? { exactSaveHeads: true } : {}),
+              ...(contextGeneration ? { contextGeneration } : {}),
             }
           : {}),
         contextFrom: new Date(context).toISOString(),

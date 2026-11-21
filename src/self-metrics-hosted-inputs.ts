@@ -20,27 +20,45 @@ export type MetricAttempt = {
 export type MetricLane = { id: string; version: number; intentId: string; revert: boolean };
 export type MetricSave = { id: string; laneId: string; head: string; at: string };
 
+export type MetricInputLookup = (
+  references: { laneId: string; version: number; head: string }[],
+) => Promise<{ lanes: MetricLane[]; saves: MetricSave[] }>;
+
+type MetricInputReference = Parameters<MetricInputLookup>[0][number];
+export type MetricInputPages = Map<
+  string,
+  { size: number; entries: MetricInputReference[]; next: MetricPin | null }
+>;
+
 /** Read only compose metadata, in byte-bounded batches. Never hydrate source trees. */
-export async function hydrateMetricInputs(
-  records: MetricRecords,
-  pins: Map<string, MetricPin>,
+export async function resolveMetricInputPins(
+  pins: Iterable<MetricPin>,
   lanes: MetricLane[],
   saves: MetricSave[],
   objects?: MetricObjects,
-  lookup?: (
-    references: { laneId: string; version: number; head: string }[],
-  ) => Promise<{ lanes: MetricLane[]; saves: MetricSave[] }>,
+  lookup?: MetricInputLookup,
+  cached: MetricInputPages = new Map(),
 ) {
-  const pages = new Map<string, ReturnType<typeof composePageSchema.parse>>();
-  const pending = new Map([...pins.values()].map(pin => [pin.sha256, pin]));
+  const selectedPins = [...pins];
+  const pages: MetricInputPages = new Map();
+  const pending = new Map(selectedPins.map(pin => [pin.sha256, pin]));
+  const remember = (pin: MetricPin, page: NonNullable<ReturnType<MetricInputPages['get']>>) => {
+    invariant(page.size === pin.size, 'EVIDENCE_CHANGED', 'Metric input page differs from its pin.');
+    pages.set(pin.sha256, page);
+    pending.delete(pin.sha256);
+    if (page.next && !pages.has(page.next.sha256)) pending.set(page.next.sha256, page.next);
+  };
   if (objects)
     while (pending.size) {
       // Select one transfer window without copying the entire remaining queue each time.
       const batch: MetricPin[] = [];
       for (const pin of pending.values()) {
-        batch.push(pin);
+        const known = cached.get(pin.sha256);
+        if (known) remember(pin, known);
+        else batch.push(pin);
         if (batch.length === 8) break;
       }
+      if (!batch.length) continue;
       for (const pin of batch) {
         invariant(
           pin.size <= 128 * 1024,
@@ -59,21 +77,22 @@ export async function hydrateMetricInputs(
           'Metric input page differs from its pin.',
         );
         const page = composePageSchema.parse(JSON.parse(Buffer.from(data).toString('utf8')));
-        pages.set(pin.sha256, page);
-        if (page.next && !pages.has(page.next.sha256)) pending.set(page.next.sha256, page.next);
+        const selected = {
+          size: data.length,
+          entries: page.entries.flatMap(entry =>
+            'laneId' in entry ? [{ laneId: entry.laneId, version: entry.version, head: entry.head }] : [],
+          ),
+          next: page.next,
+        };
+        cached.set(pin.sha256, selected);
+        remember(pin, selected);
       });
       for (const pin of batch) pending.delete(pin.sha256);
     }
   if (lookup) {
-    const references = new Map<string, { laneId: string; version: number; head: string }>();
+    const references = new Map<string, MetricInputReference>();
     for (const page of pages.values())
-      for (const entry of page.entries)
-        if ('laneId' in entry)
-          references.set(`${entry.laneId}:${entry.version}`, {
-            laneId: entry.laneId,
-            version: entry.version,
-            head: entry.head,
-          });
+      for (const entry of page.entries) references.set(`${entry.laneId}:${entry.version}`, entry);
     ({ lanes, saves } = await lookup([...references.values()]));
   }
   const laneIndex = new Map(lanes.map(lane => [`${lane.id}:${lane.version}`, lane]));
@@ -83,7 +102,7 @@ export async function hydrateMetricInputs(
     if (!saved.has(key) || save.at < saved.get(key)!) saved.set(key, save.at);
   }
   const resolved = new Map<string, MetricInput[]>();
-  for (const pin of pins.values()) {
+  for (const pin of selectedPins) {
     if (resolved.has(pin.sha256)) continue;
     const selected: MetricInput[] = [],
       seen = new Set<string>();
@@ -97,25 +116,37 @@ export async function hydrateMetricInputs(
         incomplete = true;
         break;
       }
-      for (const entry of page.entries)
-        if ('laneId' in entry) {
-          const lane = laneIndex.get(`${entry.laneId}:${entry.version}`);
-          if (!lane) {
-            incomplete = true;
-            continue;
-          }
-          selected.push({
-            laneId: lane.id,
-            intentId: lane.intentId,
-            head: entry.head,
-            savedAt: saved.get(`${lane.id}:${entry.head}`),
-            ...(lane.revert ? { compensating: true } : {}),
-          });
+      for (const entry of page.entries) {
+        const lane = laneIndex.get(`${entry.laneId}:${entry.version}`);
+        if (!lane) {
+          incomplete = true;
+          continue;
         }
+        selected.push({
+          laneId: lane.id,
+          intentId: lane.intentId,
+          head: entry.head,
+          savedAt: saved.get(`${lane.id}:${entry.head}`),
+          ...(lane.revert ? { compensating: true } : {}),
+        });
+      }
       next = page.next;
     }
     resolved.set(pin.sha256, incomplete ? [] : selected);
   }
+  return resolved;
+}
+
+export async function hydrateMetricInputs(
+  records: MetricRecords,
+  pins: Map<string, MetricPin>,
+  lanes: MetricLane[],
+  saves: MetricSave[],
+  objects?: MetricObjects,
+  lookup?: MetricInputLookup,
+  cached?: MetricInputPages,
+) {
+  const resolved = await resolveMetricInputPins(pins.values(), lanes, saves, objects, lookup, cached);
   const rowIndex = new Map<string, { inputs: MetricInput[] }>([
     ...records.moves.map(row => [`move:${row.id}`, row] as const),
     ...records.runs.map(row => [`run:${row.id}`, row] as const),
