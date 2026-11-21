@@ -214,8 +214,13 @@ healthy-path control call or database write.
 
 Compose and sync journal native per-file results in bounded object/byte windows.
 Replaying assembly uses those immutable outcomes, preserving recursive merge
-bases, text insertion orientation and conflict alternatives. Final flat State
-assembly stays serial; publication still uses the existing single atomic CAS.
+bases, text insertion orientation and conflict alternatives. A single-base
+merge walks the three verified file lists in path order and sorts a private
+copy of any list stored out of order. Recursive bases keep their alternative
+entries. Compose uses one full-tree index for the change list and retains only
+changed-path entries for the Candidate listing. State decoding validates and
+reuses canonical file entries and normalizes other valid encodings. Final flat
+State assembly stays serial and publication uses one atomic CAS.
 Resolution-marker checks stream through recipe windows. A verified non-text
 prefix establishes the native binary-conflict outcome without buffering a large
 file. Overlapping text calculations use the native whole-file text/import

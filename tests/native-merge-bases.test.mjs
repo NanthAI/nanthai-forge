@@ -114,6 +114,28 @@ test('single-base merges retain content/mode behavior and unrelated histories st
   );
 });
 
+test('single-base merge walks paths in order while preserving unsorted retained States', t => {
+  const { source, file } = fixture(t);
+  const store = (files, parents) =>
+    source.put(
+      Buffer.from(JSON.stringify({ schema: 1, kind: 'forge-source-state', parents, files, message: '', at })),
+    );
+  const keep = file('keep\n', 'a'),
+    removed = file('delete\n', 'z'),
+    original = file('original\n', 'm'),
+    modified = file('modified\n', 'm', 'executable'),
+    leftOnly = file('left\n', 'b'),
+    rightOnly = file('right\n', 'y');
+  const base = store([removed, keep, original], []),
+    left = store([original, leftOnly, keep], [base]),
+    right = store([rightOnly, removed, modified, keep], [base]);
+  const merged = source.compose(left, right, 'merge', at);
+  assert.deepEqual(merged.conflicts, []);
+  assert.deepEqual(source.state(merged.head).files, [keep, leftOnly, modified, rightOnly]);
+  assert.deepEqual(source.state(merged.head).parents, [left, right]);
+  assert.deepEqual(source.state(left).files, [original, leftOnly, keep]);
+});
+
 test('three maximal bases fold in stable order without writing virtual States', t => {
   const { source, file, state } = fixture(t);
   const root = state([]);

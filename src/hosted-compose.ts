@@ -74,7 +74,8 @@ export function candidateFileList(
   after: NativeFile[],
   selections: unknown[],
 ) {
-  const selected = new Map(after.map(file => [file.path, file]));
+  const selected = new Map<string, NativeFile>();
+  for (const file of after) if (bases.has(file.path)) selected.set(file.path, file);
   const files = [...bases]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .flatMap(([path, original]) => {

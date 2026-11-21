@@ -3,7 +3,8 @@ import { conversationSchema } from '../agent-edit-types.js';
 import { z } from 'zod';
 import { safeRelative } from '../safe-relative.js';
 import { ForgeError, invariant } from '../errors.js';
-export const oid = z.string().regex(/^[0-9a-f]{64}$/);
+const oidPattern = /^[0-9a-f]{64}$/;
+export const oid = z.string().regex(oidPattern);
 export const gitImport = z
   .object({
     bundle: oid,
@@ -11,11 +12,13 @@ export const gitImport = z
     format: z.enum(['sha1', 'sha256']),
   })
   .strict();
+const fileModes = ['file', 'executable', 'symlink', 'gitlink'] as const;
+const validModes: ReadonlySet<unknown> = new Set(fileModes);
 const entry = z
   .object({
     path: z.string().refine(safeRelative),
     blob: oid,
-    mode: z.enum(['file', 'executable', 'symlink', 'gitlink']),
+    mode: z.enum(fileModes),
   })
   .strict();
 export const stateSchema = z
@@ -32,11 +35,16 @@ export const stateSchema = z
   .strict();
 export type NativeFile = z.infer<typeof entry>;
 export type NativeState = z.infer<typeof stateSchema>;
+const decodedState = stateSchema.extend({ files: z.custom<unknown[]>(Array.isArray) });
 // A '.forge' or '.git' segment in any case (the names contain only ASCII letters).
 const reservedSegment = /(?:^|\/)\.(?:forge|git)(?:\/|$)/i;
 export function overlappingPaths(files: readonly { path: string }[]): string[] {
-  const paths = new Set(files.map(file => file.path)),
-    seen = new Set<string>(),
+  const paths = new Set<string>();
+  for (const { path } of files) paths.add(path);
+  return overlappingPathSet(paths);
+}
+function overlappingPathSet(paths: ReadonlySet<string>): string[] {
+  const seen = new Set<string>(),
     conflicts = new Set<string>();
   // Check each distinct ancestor once: climbing from a path stops at the first ancestor an
   // earlier path already climbed, because all of that ancestor's own parents were checked then.
@@ -73,14 +81,36 @@ export function foldedCollisions(files: readonly { path: string }[], folding: Na
   return [...conflicts].sort();
 }
 export function parseNativeState(bytes: Uint8Array): NativeState {
-  let value: unknown;
+  let state: NativeState;
   try {
-    value = JSON.parse(new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes));
+    const value: unknown = JSON.parse(new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes));
+    const parsed = decodedState.parse(value);
+    // These objects came from this JSON decode. Reuse entries in the schema's
+    // key order and normalize other valid encodings before a writer reuses them.
+    for (let i = 0; i < parsed.files.length; i++) {
+      const file = parsed.files[i];
+      if (!canonicalDecodedFile(file)) parsed.files[i] = entry.parse(file);
+    }
+    state = { ...parsed, files: parsed.files as NativeFile[] };
   } catch (error) {
-    if (!(error instanceof SyntaxError)) throw error;
+    if (!(error instanceof SyntaxError || error instanceof z.ZodError)) throw error;
     throw new ForgeError('INVALID_NATIVE_SOURCE', 'Native source manifest encoding is invalid.');
   }
-  return parseNativeStateValue(value);
+  validateNativeStateFiles(state);
+  return state;
+}
+function canonicalDecodedFile(value: unknown): value is NativeFile {
+  if (typeof value !== 'object' || value === null) return false;
+  const keys = Object.keys(value);
+  if (keys.length !== 3 || keys[0] !== 'path' || keys[1] !== 'blob' || keys[2] !== 'mode') return false;
+  const { path, blob, mode } = value as Record<string, unknown>;
+  return (
+    typeof path === 'string' &&
+    safeRelative(path) &&
+    typeof blob === 'string' &&
+    oidPattern.test(blob) &&
+    validModes.has(mode)
+  );
 }
 /** Validate an already decoded marker without serializing and cloning its manifest again. */
 export function parseNativeStateValue(value: unknown): NativeState {
@@ -96,14 +126,17 @@ export function parseNativeStateValue(value: unknown): NativeState {
 }
 /** Semantic checks shared by decoded reads and already schema-checked writers. */
 export function validateNativeStateFiles(state: NativeState) {
+  const paths = new Set<string>();
+  for (const { path } of state.files) {
+    invariant(
+      !paths.has(path) && !reservedSegment.test(path),
+      'INVALID_NATIVE_SOURCE',
+      'Native source manifest paths are invalid.',
+    );
+    paths.add(path);
+  }
   invariant(
-    new Set(state.files.map(file => file.path)).size === state.files.length &&
-      state.files.every(file => !reservedSegment.test(file.path)),
-    'INVALID_NATIVE_SOURCE',
-    'Native source manifest paths are invalid.',
-  );
-  invariant(
-    overlappingPaths(state.files).length === 0,
+    overlappingPathSet(paths).length === 0,
     'INVALID_NATIVE_SOURCE',
     'Source file and directory paths overlap.',
   );

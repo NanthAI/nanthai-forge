@@ -10,6 +10,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { LegacyWorkService as WorkService } from './autonomy-fixture.mjs';
 import { initLegacyNative as initNative } from './autonomy-fixture.mjs';
 import { NativeSource } from '../dist/native-source.js';
+import { parseNativeState } from '../dist/state/format.js';
 import { withWorkLockOptions } from '../dist/work-lock.js';
 import { nativeObjects } from '../dist/native-objects.js';
 import { restoreNativeWork } from '../dist/native-backup.js';
@@ -150,6 +151,30 @@ test('inspection preserves format and collection retains all old source, dirty w
   } finally {
     process.env.PATH = path;
   }
+});
+
+test('decoded State entries retain canonical writer order and the existing path and shape checks', () => {
+  const blob = digest('fixture'),
+    at = '2026-01-01T00:00:00.000Z';
+  const file = { path: 'src/tool', blob, mode: 'executable' };
+  const decode = files =>
+    parseNativeState(
+      Buffer.from(
+        JSON.stringify({ schema: 1, kind: 'forge-source-state', parents: [], files, message: '', at }),
+      ),
+    );
+  const legacy = { mode: file.mode, path: file.path, blob: file.blob };
+  assert.equal(JSON.stringify(decode([legacy]).files), JSON.stringify(decode([file]).files));
+  for (const files of [
+    [{ ...file, path: '../escape' }],
+    [{ ...file, path: 'src/.FORGE/marker' }],
+    [{ ...file, blob: blob.toUpperCase() }],
+    [{ ...file, mode: 'unknown' }],
+    [{ ...file, extra: true }],
+    [file, file],
+    [file, { ...file, path: 'src/tool/child' }],
+  ])
+    assert.throws(() => decode(files), code('INVALID_NATIVE_SOURCE'));
 });
 
 test('invalid retained closure blocks every deletion and interrupted collection reconciles', t => {

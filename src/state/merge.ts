@@ -33,6 +33,15 @@ const conflictReason = (source: NativeSource, path: string) => {
 };
 const unique = (items: Variant[]) => items.filter((item, i) => !items.slice(0, i).some(x => same(x, item)));
 
+function orderedFiles(files: NativeFile[]): readonly NativeFile[] {
+  // Native writers sort paths. An older or imported State may still have a
+  // different valid order; leave its verified file list intact.
+  for (let i = 1; i < files.length; i++)
+    if (files[i - 1]!.path > files[i]!.path)
+      return [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return files;
+}
+
 /** Virtual bases live only for this operation: no synthetic State or timestamp is persisted. */
 export function mergeNativeFiles(
   source: NativeSource,
@@ -167,18 +176,28 @@ export function mergeNativeFiles(
     return base;
   }
   const base = baseFor(left, right, a, b, false);
-  // Keep ordinary single-base composition on a direct path without variant allocation.
+  // Walk the ordinary single-base inputs in path order. Retain only the
+  // merged file list and any conflicts instead of indexing all three States.
   if (!virtual.has(base)) {
-    const original = new Map(source.state(base).files.map(file => [file.path, file])),
-      l = new Map(source.state(left).files.map(file => [file.path, file])),
-      r = new Map(source.state(right).files.map(file => [file.path, file]));
+    const original = orderedFiles(source.state(base).files),
+      l = orderedFiles(source.state(left).files),
+      r = orderedFiles(source.state(right).files);
     const files: NativeFile[] = [],
       conflicts: NativeMergeConflict[] = [],
       resolutions: NativeMergeResolution[] = [];
-    for (const path of [...new Set([...original.keys(), ...l.keys(), ...r.keys()])].sort()) {
-      const before = original.get(path),
-        x = l.get(path),
-        y = r.get(path);
+    let baseIndex = 0,
+      leftIndex = 0,
+      rightIndex = 0;
+    while (baseIndex < original.length || leftIndex < l.length || rightIndex < r.length) {
+      const baseFile = original[baseIndex],
+        leftFile = l[leftIndex],
+        rightFile = r[rightIndex];
+      let path = baseFile?.path ?? leftFile?.path ?? rightFile!.path;
+      if (leftFile && leftFile.path < path) path = leftFile.path;
+      if (rightFile && rightFile.path < path) path = rightFile.path;
+      const before = baseFile?.path === path ? original[baseIndex++] : undefined,
+        x = leftFile?.path === path ? l[leftIndex++] : undefined,
+        y = rightFile?.path === path ? r[rightIndex++] : undefined;
       const selected = entry(before, x, y, resolutions);
       if (selected === null)
         conflicts.push({

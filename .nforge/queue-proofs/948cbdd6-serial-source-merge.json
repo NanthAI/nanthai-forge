@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "src/hosted-compose-worker.ts": "80bf8fb753585b5a74bf3030e55d344de7d156ad0792d2a3984c7b6e9c3cb53d",
+    "src/hosted-compose.ts": "88ef5fc21b57f2a80c396845dea0004d7187b71add8dad45655e3126ee20f4b6"
+  },
+  "replay": {
+    "incident": "5e3c3a3c",
+    "test": "incident 5e3c3a3c: passed followers land within the pass-to-land ceiling while the holder re-checks",
+    "receipt": "fe5ffc4f-a3e2-4c14-ac1d-92e5f2bfd113"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Ad311fb0c-b6cd-4dbb-8044-8682464e84a2",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "/root/serial_merge_review",
+    "receipt": "23260caf-b29c-4345-9ce5-e0c6f0f57fb8"
+  }
+}

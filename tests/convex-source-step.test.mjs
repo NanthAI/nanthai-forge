@@ -596,6 +596,17 @@ test('changed paths span every composition step and action; old cursors sign no 
     assert(!('candidateFiles' in result), 'unknown coverage never produces a partial listing');
   }
 });
+test('composed paths retain an earlier base deletion and omit paths restored to base', () => {
+  const file = (path, text, mode = 'file') => ({ path, mode, blob: digest(text) });
+  const removed = file('removed', 'base'),
+    modified = file('modified', 'base'),
+    restored = file('restored', 'base'),
+    transient = file('transient', 'temp');
+  const bases = new Map();
+  changedPaths(bases, [restored, removed, modified], [transient, modified]);
+  const next = { ...modified, mode: 'executable' };
+  assert.deepEqual(changedPaths(bases, [transient, modified], [restored, next]), ['modified', 'removed']);
+});
 test('dogfood-size changed-path bases stay compact in durable progress', async t => {
   const blob = i => digest(`blob-${i}`),
     before = Array.from({ length: 26000 }, (_, i) => ({
