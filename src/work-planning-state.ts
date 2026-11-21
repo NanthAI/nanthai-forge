@@ -5,6 +5,7 @@ import type { PlanningWrite } from './work-planning-types.js';
 import type { WorkData } from './work-types.js';
 import { isUnifiedWork } from './work-unified-types.js';
 import { plannedLinkIds } from './work-planning-lifecycle.js';
+import type { landingNoteExport } from './intent-landing-note.js';
 import {
   bodyWithDecision,
   decisionOperationId,
@@ -173,7 +174,10 @@ export function stampPlanningAuthor(
   }
   if (author) item.author = author;
 }
-export function exportPlanning(data: WorkData, project?: { key: string; name: string }) {
+export function exportPlanning(
+  data: WorkData,
+  project?: { key: string; name: string; landingNotes?: ReturnType<typeof landingNoteExport>[] },
+) {
   // Issues link their planned Intent (id = Issue id) even with empty legacy intentIds; linkedIntents lists the ones that exist.
   const linked = new Set(data.planningItems.flatMap(plannedLinkIds));
   const manifest = {
@@ -187,6 +191,7 @@ export function exportPlanning(data: WorkData, project?: { key: string; name: st
       ? {
           projectKey: project.key,
           name: project.name,
+          landingNotes: project.landingNotes ?? [],
           events: data.hostedEvents.filter(
             item =>
               item.command.action === 'put-planning-item' || item.command.action === 'comment-planning-item',
@@ -194,7 +199,7 @@ export function exportPlanning(data: WorkData, project?: { key: string; name: st
         }
       : {}),
     coverage: project
-      ? 'Private owner project planning versions, user-declared discussion and original server-recorded actor observations; not offline authenticated authorship, source objects, provider grants or acceptance decisions.'
+      ? 'Private owner project planning versions, user-declared discussion, system landing notes and original server-recorded actor observations; not offline authenticated authorship, source objects, provider grants or full acceptance receipts.'
       : 'Private local planning versions and user-declared discussion with original Intent metadata; no source objects, provider grants, verified identity or acceptance decision.',
   };
   const json = JSON.stringify(manifest, null, 2) + '\n';

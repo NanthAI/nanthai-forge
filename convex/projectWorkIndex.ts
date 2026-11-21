@@ -25,7 +25,7 @@ import { report } from './errors';
 import { actorSummary } from './projectActorNames';
 import { planningFilter, planningPage } from './projectPlanningList';
 import { readsStore, storeItem, storePage } from './projectWorkStoreReads';
-import { intentLandingComments } from './projectIntentLandingNotes';
+import { linkedLandingCursor, withLandingNotes } from './projectWorkIndexLandingNotes';
 const selection = {
   projectId: v.id('hostedProjects'),
   generationId: v.optional(v.id('projectWorkGenerations')),
@@ -225,45 +225,6 @@ export const revision = query({
   },
 });
 
-type RecordRow = { id: string; position: number; value: string };
-/** Issue 3a733ee8: an Item's comment page at its newest end (the first newest-first page, or the last
- * ascending page, so a reader that pages through sees each note once) also carries the Item's system
- * landing notes, in the page's order. Store positions are creation times, as the notes' are; journal
- * positions are not, so there a note sits right after the newest comment written before it. */
-async function withLandingNotes(
-  ctx: QueryCtx,
-  projectId: Id<'hostedProjects'>,
-  input: { collection: string; parentId?: string; newestFirst?: boolean; paginationOpts: PaginationOptions },
-  isDone: boolean,
-  rows: RecordRow[],
-  timePositions: boolean,
-): Promise<RecordRow[]> {
-  const newestEnd = input.newestFirst ? !input.paginationOpts.cursor : isDone;
-  if (input.collection !== 'planningComments' || !input.parentId || !newestEnd) return rows;
-  const notes = await intentLandingComments(ctx, projectId, input.parentId);
-  if (!notes.length) return rows;
-  const at = (row: RecordRow) => {
-    try {
-      return Date.parse((JSON.parse(row.value) as { at?: string }).at ?? '') || 0;
-    } catch {
-      return 0;
-    }
-  };
-  const ordered = [...rows].sort((a, b) => a.position - b.position);
-  const merged: RecordRow[] = [...rows];
-  for (const note of notes) {
-    let position = note.position;
-    if (!timePositions) {
-      const time = Date.parse(note.value.at);
-      const before = ordered.filter(row => at(row) <= time).at(-1);
-      // Fractions keep the note between the comment before it and the next one.
-      position = before ? before.position + 0.5 : (ordered[0]?.position ?? 0) - 0.5;
-    }
-    merged.push({ id: note.value.id, position, value: JSON.stringify(note.value) });
-  }
-  return merged.sort((a, b) => (input.newestFirst ? b.position - a.position : a.position - b.position));
-}
-
 export async function journalWorkRecordsRead(
   ctx: QueryCtx,
   input: {
@@ -293,17 +254,43 @@ export async function journalWorkRecordsRead(
     if (!generation || (input.generationId && input.generationId !== generation._id))
       return { generationId: null, revision: null, page: [], isDone: true, continueCursor: '' };
     const numItems = Math.min(input.paginationOpts.numItems, 100);
-    if (
-      (input.collection === 'planningItems' && input.planningFilter) ||
-      readsStore(project, input.collection, input.parentId)
-    ) {
+    const store = readsStore(project, input.collection, input.parentId);
+    const partition = recordPartition(generation);
+    const payloads = new Map<string, Promise<Map<string, string>>>();
+    const readItem = async (id: string) => {
+      if (store) return storeItem(ctx, project._id, id);
+      const item = await record(ctx, partition, 'planningItems', id);
+      return item ? JSON.parse(await hostedRecordValue(ctx, partition, item, payloads)) : null;
+    };
+    const continuation = linkedLandingCursor(input.paginationOpts.cursor, input);
+    if (continuation)
+      return {
+        generationId: generation._id,
+        revision: generation.initialRevision,
+        ...(await withLandingNotes(
+          ctx,
+          project,
+          input,
+          { page: [], isDone: continuation.recordsDone, continueCursor: continuation.recordsCursor },
+          readItem,
+          store,
+          continuation,
+        )),
+      };
+    const end = linkedLandingCursor(input.paginationOpts.endCursor, input);
+    const paginationOpts = {
+      ...input.paginationOpts,
+      numItems,
+      ...(end ? { endCursor: end.recordsCursor } : {}),
+    };
+    if ((input.collection === 'planningItems' && input.planningFilter) || store) {
       const actors = new Map<string, Promise<boolean>>();
       const page =
         input.planningFilter && input.collection === 'planningItems'
           ? await planningPage(ctx, project, generation, { ...input, planningFilter: input.planningFilter })
           : await storePage(ctx, project._id, {
               ...input,
-              paginationOpts: { ...input.paginationOpts, numItems },
+              paginationOpts,
             });
       const rows = await Promise.all(
         page.page.map(async row => ({
@@ -316,8 +303,7 @@ export async function journalWorkRecordsRead(
         ...page,
         generationId: generation._id,
         revision: generation.initialRevision,
-        // Store comment positions are head creation times, the same clock as the notes'.
-        page: await withLandingNotes(ctx, project._id, input, page.isDone, rows, true),
+        ...(await withLandingNotes(ctx, project, input, { ...page, page: rows }, readItem, true, null)),
       };
     }
     const rows =
@@ -337,10 +323,7 @@ export async function journalWorkRecordsRead(
             );
     const main = await hostedMain(ctx, generation);
     const actors = new Map<string, Promise<boolean>>();
-    const payloads = new Map<string, Promise<Map<string, string>>>();
-    const page = await rows
-      .order(input.newestFirst ? 'desc' : 'asc')
-      .paginate({ ...input.paginationOpts, numItems });
+    const page = await rows.order(input.newestFirst ? 'desc' : 'asc').paginate(paginationOpts);
     const values = await Promise.all(
       page.page.map(async row => ({
         id: row.key,
@@ -360,7 +343,7 @@ export async function journalWorkRecordsRead(
       ...page,
       generationId: generation._id,
       revision: generation.initialRevision,
-      page: await withLandingNotes(ctx, project._id, input, page.isDone, values, false),
+      ...(await withLandingNotes(ctx, project, input, { ...page, page: values }, readItem, false, null)),
     };
   } catch (error) {
     if (error instanceof JournalNeeded)

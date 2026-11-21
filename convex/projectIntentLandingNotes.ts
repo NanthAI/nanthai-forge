@@ -5,28 +5,31 @@
 // rows as `system` comments.
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
+import { v } from 'convex/values';
+import { internalQuery } from './server';
+import { ownedProject } from './projectAuthority';
 import { recordHead } from './projectHostedRecords';
 import { intentFinished, maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
 import {
   LANDING_NOTE_LANES,
   LANDING_NOTES_PER_ITEM,
   landingNoteComment,
+  landingNoteExport,
   type LandingNote,
 } from '../src/intent-landing-note';
 
-/** Who published a landing and whether a person reviewed it, from the publishing call path (no read):
+/** Who published a landing and whether a person accepted it, from the publishing call path (no read):
  * the queue's driver and the internal publish are `queue`; the explicit accept is the accepting agent or
- * person; an owner approval is a person. `reviewed`: a person accepted it, or an owner approval carried. */
+ * person; an owner approval is a person. The stored `review` field records acceptance. */
 export function landingPublisher(
   by: 'queue' | 'agent' | 'person',
-  reviewed: boolean,
+  personAccepted: boolean,
 ): NonNullable<LandingNote['landedBy']> {
-  return { by, review: reviewed ? 'person' : 'none' };
+  return { by, review: personAccepted ? 'person' : 'none' };
 }
 
-/** Writes the note once per (Intent, receipt, kind): one indexed probe, then one insert. A replayed or
- * resumed completion tick, a guard replay or a repeated revert notice finds the row and writes nothing.
- * Never throws for a well-formed note: a note must not fail the landing's completion. */
+/** Upsert one note per (Intent, receipt, kind). Later pages and completion ticks merge their
+ * Lanes into the same row. A replay that adds no facts writes nothing. */
 export async function postIntentLandingNote(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
@@ -42,14 +45,20 @@ export async function postIntentLandingNote(
         .eq('kind', note.kind),
     )
     .unique();
-  if (old) return false;
+  if (old) {
+    const laneIds = [...new Set([...old.laneIds, ...note.laneIds])].slice(0, LANDING_NOTE_LANES);
+    const viaLaneId = old.viaLaneId ?? note.viaLaneId;
+    if (laneIds.length === old.laneIds.length && viaLaneId === old.viaLaneId) return false;
+    await ctx.db.patch(old._id, { laneIds, ...(viaLaneId ? { viaLaneId } : {}) });
+    return true;
+  }
   await ctx.db.insert('projectIntentLandingNotes', {
     projectId,
     intentId: note.intentId,
     receiptId: note.receiptId,
     kind: note.kind,
     at: note.at,
-    laneIds: note.laneIds.slice(0, LANDING_NOTE_LANES),
+    laneIds: [...new Set(note.laneIds)].slice(0, LANDING_NOTE_LANES),
     commit: note.commit,
     sequence: note.sequence,
     actor: note.actor,
@@ -87,17 +96,24 @@ export async function itemIntentChain(ctx: QueryCtx, projectId: Id<'hostedProjec
   return { intents, state };
 }
 
-/** The Item's system landing comments, newest first: the Intents of its chain (the Issue's own id, then
- * `successorIntentId` hops while the Intent is finished, the same walk as `intentStates`), and per Intent
- * one index range of its newest notes. At most LANDING_NOTES_PER_ITEM in all. An Item with no started
- * Intent costs one head read. */
+/** System landing comments from the Item's own Intent chain and its linked chains, newest first. */
 export async function intentLandingComments(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
   itemId: string,
   limit = LANDING_NOTES_PER_ITEM,
+  links: readonly string[] = [itemId],
+  chainRoots?: ReadonlySet<string>,
 ) {
-  const { intents } = await itemIntentChain(ctx, projectId, itemId);
+  const intents = new Set<string>();
+  for (const link of links) {
+    if (intents.has(link)) continue;
+    for (const intentId of (await itemIntentChain(ctx, projectId, link)).intents) {
+      // An explicitly linked successor owns its chain, even on a different comment page.
+      if (intentId !== link && chainRoots?.has(intentId)) break;
+      intents.add(intentId);
+    }
+  }
   const notes = [];
   for (const intentId of intents) {
     const rows = await ctx.db
@@ -106,9 +122,26 @@ export async function intentLandingComments(
       .order('desc')
       .take(limit);
     notes.push(...rows);
+    notes.sort((a, b) => b._creationTime - a._creationTime);
+    if (notes.length > limit) notes.length = limit;
   }
-  return notes
-    .sort((a, b) => b._creationTime - a._creationTime)
-    .slice(0, limit)
-    .map(row => ({ position: row._creationTime, value: landingNoteComment(itemId, row) }));
+  return notes.map(row => ({ position: row._creationTime, value: landingNoteComment(itemId, row) }));
 }
+
+/** The owner-only planning export scans the existing project index in pages. */
+export const exportPage = internalQuery({
+  args: { projectId: v.id('hostedProjects'), owner: v.string(), cursor: v.union(v.string(), v.null()) },
+  returns: v.object({ notes: v.string(), continueCursor: v.string(), isDone: v.boolean() }),
+  handler: async (ctx, { projectId, owner, cursor }) => {
+    await ownedProject(ctx, projectId, owner);
+    const page = await ctx.db
+      .query('projectIntentLandingNotes')
+      .withIndex('by_project_and_intent', q => q.eq('projectId', projectId))
+      .paginate({ cursor, numItems: 200 });
+    return {
+      notes: JSON.stringify(page.page.map(landingNoteExport)),
+      continueCursor: page.continueCursor,
+      isDone: page.isDone,
+    };
+  },
+});

@@ -7,6 +7,7 @@ import { internalAction } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { exportPlanning as planningExport } from '../src/work-planning-state';
+import type { landingNoteExport } from '../src/intent-landing-note';
 import { invariant } from '../src/errors';
 import { workDigest } from '../src/work-metadata';
 import { report } from './errors';
@@ -160,9 +161,29 @@ export const exportPlanning = action({
       const owner = await caller(ctx);
       await ctx.runQuery(internal.projectWork.owner, { projectId, owner });
       const snapshot = await load(ctx, projectId, owner);
+      const notes: ReturnType<typeof landingNoteExport>[] = [];
+      let cursor: string | null = null;
+      for (;;) {
+        const page: { notes: string; continueCursor: string; isDone: boolean } = await ctx.runQuery(
+          internal.projectIntentLandingNotes.exportPage,
+          { projectId, owner, cursor },
+        );
+        notes.push(...(JSON.parse(page.notes) as typeof notes));
+        if (page.isDone) break;
+        cursor = page.continueCursor;
+      }
       // Name people by handle before the digest is taken, so the returned digest covers them.
-      const data = (await actionPublicPeople(ctx, { projectId }, snapshot.data)) as typeof snapshot.data,
-        result = planningExport(data, { key: snapshot.project.key, name: snapshot.project.name });
+      const exported = { data: snapshot.data, landingNotes: notes };
+      const { data, landingNotes } = (await actionPublicPeople(
+        ctx,
+        { projectId },
+        exported,
+      )) as typeof exported;
+      const result = planningExport(data, {
+        key: snapshot.project.key,
+        name: snapshot.project.name,
+        landingNotes,
+      });
       await ctx.runQuery(internal.projectWork.owner, { projectId, owner });
       return JSON.stringify(result);
     } catch (error) {

@@ -337,7 +337,7 @@ export async function publishLandingBatch(
     identity: ReceiptIdentity;
     planId: Id<'projectHostedAcceptancePlans'>;
     alarm?: Id<'_scheduled_functions'>;
-    reviewed: boolean;
+    publisher: ReturnType<typeof landingPublisher>;
   }[] = [];
   const messages = [];
   for (const member of members) messages.push(await acceptedLandingMessage(ctx, member.state));
@@ -463,7 +463,11 @@ export async function publishLandingBatch(
         identity,
         planId: member.plan._id,
         alarm: completionAlarm,
-        reviewed: next.acceptance.acceptedBy.kind === 'person',
+        // An explicit accept publishes the cohort, but only the claimed submission was accepted by that caller.
+        publisher: landingPublisher(
+          member.state.id === claim.submissionId ? by : 'queue',
+          member.state.id === claim.submissionId && by === 'person',
+        ),
       });
     receipts.push(receipt);
   }
@@ -493,13 +497,13 @@ export async function publishLandingBatch(
   const precompose = {
     receiptIds: receipts.map(receipt => receipt.id),
   };
-  for (const [index, { identity, planId, alarm, reviewed }] of completions.entries())
+  for (const [index, { identity, planId, alarm, publisher }] of completions.entries())
     await scheduleAcceptanceCompletion(
       ctx,
       planId,
       { ...identity, ...(index === 0 ? { precompose } : {}) },
       alarm,
-      landingPublisher(by, reviewed),
+      publisher,
     );
   if (!completions.length) {
     await cancelStaleLandingChecks(ctx, {

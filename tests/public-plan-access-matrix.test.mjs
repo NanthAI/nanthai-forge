@@ -222,6 +222,30 @@ const cli = (p, input) =>
     undefined,
   ).then(reply => reply.result);
 
+test('a public Item link preserves the source Item’s landing-note visibility', async t => {
+  const { s, items, p } = await world(t, 'hidden-item');
+  const survivor = items.loose;
+  const hidden = items.lone;
+  await s.send({
+    ...survivor,
+    operationId: randomUUID(),
+    expectedVersion: 1,
+    intentIds: [hidden.itemId],
+  });
+  for (const viewer of ['owner', 'stranger']) {
+    as(s, viewer);
+    const reply = await cli(p, { id: survivor.itemId, reconcile: false });
+    assert.deepEqual(
+      reply.comments
+        .filter(comment => comment.system)
+        .map(comment => comment.landing.intentId)
+        .sort(),
+      (viewer === 'owner' ? [survivor.itemId, hidden.itemId] : [survivor.itemId]).sort(),
+      viewer,
+    );
+  }
+});
+
 for (const policy of POLICIES)
   test(`plan access matrix: ${policy}`, async t => {
     const { s, items, p } = await world(t, policy);

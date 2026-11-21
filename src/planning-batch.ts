@@ -257,6 +257,7 @@ export type MergeComment = {
   at: string;
   authorLabel?: string;
   author?: string;
+  system?: boolean;
 };
 /**
  * Merge duplicates into the surviving Item: the survivor takes their Lane links (each duplicate's planned Intent and
@@ -285,7 +286,7 @@ export function mergeItems(
       reason: `Merged ${duplicates.map(duplicate => duplicate.id.slice(0, 8)).join(', ')}`,
     },
   ];
-  for (const comment of comments.filter(entry => merged.has(entry.itemId)))
+  for (const comment of comments.filter(entry => merged.has(entry.itemId) && !entry.system))
     writes.push({
       action: 'comment-planning-item',
       itemId: survivor.id,

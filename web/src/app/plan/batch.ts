@@ -48,7 +48,14 @@ export type FullItem = {
   parentId?: string | null;
   type?: string | null;
 };
-export type ItemComment = { id: string; itemId: string; text: string; at: string; authorLabel: string };
+export type ItemComment = {
+  id: string;
+  itemId: string;
+  text: string;
+  at: string;
+  authorLabel: string;
+  system?: boolean;
+};
 
 async function workspace(client: Pick<ConvexReactClient, 'query'>, projectId: Id<'hostedProjects'>) {
   const value = await client.query(workIndex.workspace, { projectId });

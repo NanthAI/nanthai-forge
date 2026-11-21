@@ -2,8 +2,15 @@
 import type { z } from 'zod';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import { readHostedRecord, writeHostedRecord } from './projectHostedRecords';
+import {
+  hostedRecordBody,
+  readHostedRecord,
+  recordHead,
+  recordVersion,
+  writeHostedRecord,
+} from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
+import type { composeLaneSchema } from '../src/hosted-compose';
 import { supersedeLaneFinishes } from './projectHostedLaneFinish';
 import { supersedeLane } from './projectHostedSuperseded';
 import type { MainRedHold } from '../src/hosted-acceptance';
@@ -11,6 +18,36 @@ import type { MainRedHold } from '../src/hosted-acceptance';
 /** A conflict inside a resolution makes a short chain; the walk stays bounded. */
 const DEPTH = 4;
 type Lane = z.infer<typeof hostedLaneSchema>;
+
+/** Read the accepted resolution's origin even after a sync replaced the Lane's current version. */
+export async function noteResolutionOrigins(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  accepted: z.infer<typeof composeLaneSchema>,
+  reached: (intentId: string, laneId: string, viaLaneId?: string) => void,
+) {
+  const pinned = await recordVersion(ctx, projectId, 'lane', accepted.laneId, accepted.version);
+  if (!pinned) return;
+  const lane = hostedLaneSchema.parse(JSON.parse(await hostedRecordBody(ctx, pinned)));
+  if (
+    lane.head !== accepted.head ||
+    lane.sourceVersion !== accepted.sourceVersion ||
+    lane.lifecycleVersion !== accepted.lifecycleVersion
+  )
+    return;
+  let origin = lane.resolution?.origin;
+  for (let depth = 0; origin && depth < DEPTH; depth++) {
+    const laneId: string = origin.laneId;
+    const head = await recordHead(ctx, projectId, 'lane', laneId);
+    if (!head) break;
+    reached(head.parent, laneId, head.parent === lane.intentId ? undefined : lane.id);
+    const row = await ctx.db.get(head.recordId);
+    if (!row) break;
+    const current = hostedLaneSchema.parse(JSON.parse(await hostedRecordBody(ctx, row)));
+    if (current.head !== origin.head || current.sourceVersion !== origin.sourceVersion) break;
+    origin = current.resolution?.origin;
+  }
+}
 
 /** A landed resolution Lane completes the conflicted Lane it was made for, so the original never
  * stays open as unfinished work. Only when that Lane is still active, unpinned and at the recorded

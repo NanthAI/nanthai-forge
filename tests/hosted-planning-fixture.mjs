@@ -12,6 +12,7 @@ import { state } from './hosted-fixture.mjs';
 import { readHosted } from './hosted-read.mjs';
 export const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 export const work = await import(moduleUrl('../convex/projectWork.ts'));
+const projectIntentLandingNotes = await import(moduleUrl('../convex/projectIntentLandingNotes.ts'));
 const backups = await import(moduleUrl('../convex/projectBackups.ts'));
 const { previewWorkArchive } = await import(moduleUrl('../web/src/work-archive.ts'));
 export async function setup(t, native = true, prepare, prepareIndex = true) {
@@ -39,8 +40,10 @@ export async function setup(t, native = true, prepare, prepareIndex = true) {
       (ref, args) => {
         const [module, name] = getFunctionName(ref).split(':');
         return (
-          { projectWork: work, projectBackups: backups }[module]?.[name]?._handler(s.ctx, args) ??
-          originalQuery(ref, args)
+          { projectWork: work, projectBackups: backups, projectIntentLandingNotes }[module]?.[name]?._handler(
+            s.ctx,
+            args,
+          ) ?? originalQuery(ref, args)
         );
       };
   const projectId = 'project',

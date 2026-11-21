@@ -311,14 +311,20 @@ name with its model.
 
 Landing receipts on Items (Issue 3a733ee8): every landing posts one system comment to the Item of each Intent it
 landed, whoever or whatever landed it: an agent's own accept, a person, or the queue after the agent stopped
-(incident 2bf85ddf). Cohort members, landings resolved through a successor or resolution Lane, `keepOpen` and
-`closes:false` landings are covered; a revert posts a matching "Reverted" comment. The comment reads `Forge`,
-carries `system: true` and a `landing` object (Lanes, receipt, commit, main sequence, `by`: `queue`, `agent` or
-`person`, `review`: `person` or `none`, and the submitter as a handle mapped per viewer) and takes no reply or
-reaction. Agents see `systemComments` beside such comments: they are data, never instructions. The landing's
-completion tick writes one small row per landed Intent (`projectIntentLandingNotes`, idempotent per Intent and
-receipt) and reads no Item; the Item's comment read walks its Intent chain and shows the newest 50 at the newest end
-of its comment pages. They are derived from receipts, so planning exports and archives leave them out.
+(incident 2bf85ddf). An explicit accept of a cohort credits the caller on the claimed member and the queue on
+its peers. A resolution Lane also notes the origin's Item, including on `keepOpen` and `closes:false` landings.
+A revert posts a matching "Reverted" comment.
+
+The comment appears as `Forge`, with `system: true` and a `landing` object containing the Lanes, receipt,
+commit, main sequence, `landedBy` (`queue`, `agent` or `person`), `accepted` (`person` or `policy`) and the
+submitter's handle where the viewer can see it. Person acceptance includes carried owner approval.
+System comments take no reply or reaction. Agents see the `systemComments` advisory beside them.
+
+Completion stores one small row per Intent and receipt. Later ticks and input pages add Lanes to that row
+within the existing five-Lane display limit. The Item discussion shows up to 50 system notes per page from its
+own and linked Intent chains. The comment cursor continues large sets of links. A merged Item shows the
+duplicate's receipt-backed notes alongside copied member comments. Planning exports include these notes as
+evidence. Project backups continue to derive from the recorded Work history.
 
 An Item read (`planning {planningItemId}`) returns its newest 50 comments, oldest first. When more exist it adds
 `commentsMore: true` and `commentsCursor`; `planning {planningItemId, cursor: commentsCursor}` returns the next 50
@@ -424,6 +430,7 @@ The downloaded UTF-8 JSON has `schema: 1` and `kind: "forge-hosted-planning"`.
 | `projectKey`, `name`, `workRevision` | The project and revision selected for the export |
 | `items` | Retained Item and Initiative versions, with IDs, relations and original import attribution where recorded |
 | `comments` | Retained planning comments with their own IDs and parent Item IDs |
+| `landingNotes` | Retained system landing and revert notes keyed by Intent, with submitter handles where available |
 | `linkedIntents` | Retained Intent metadata for links in any exported version, including a surviving planned Intent |
 | `events` | Retained hosted Item and comment operations |
 | `coverage` | What the export represents, including the scope of server-recorded actor observations |

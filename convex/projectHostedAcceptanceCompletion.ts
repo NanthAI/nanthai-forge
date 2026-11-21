@@ -14,7 +14,7 @@ import {
 import { readHostedRecord, recordHead, writeHostedRecord } from './projectHostedRecords';
 import { retireLandedOverlapLanes } from './projectHostedOverlapLanded';
 import { completeIntentWhenLanesDone } from './projectHostedIntentCompletion';
-import { completeResolutionOrigins } from './projectHostedResolutionOrigin';
+import { completeResolutionOrigins, noteResolutionOrigins } from './projectHostedResolutionOrigin';
 import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
 import { validateComposePage, composeLaneSchema } from '../src/hosted-compose';
 import { hostedLaneSchema } from '../src/hosted-lane';
@@ -169,7 +169,15 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
   // A landing that neither completes Lanes nor declares Intents (closes:false) still tells its Items
   // (Issue 3a733ee8): the same head-only walk as keepOpen, notes only, no record writes.
   const notesOnly = !lanesDone && !declares;
-  if (plan.appliedEntry === 0) await retireLandedOverlapLanes(ctx, input, landed, plan.appliedPage);
+  const resolutionCandidates = new Set<string>();
+  if (plan.appliedEntry === 0)
+    await retireLandedOverlapLanes(
+      ctx,
+      input,
+      landed,
+      plan.appliedPage,
+      lanesDone ? undefined : resolutionCandidates,
+    );
   const project = await ctx.db.get(input.projectId);
   if (notesOnly && !project) return settleCompletion(ctx, plan);
   invariant(
@@ -263,6 +271,12 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
       ))
         finished.add(intentId);
   }
+  // Retirement already read the whole input page. Note its origins once, even when the resolution
+  // Lane's own record is handled by a later tick of this page.
+  if (resolutionCandidates.size)
+    for (const entry of entries)
+      if ('laneId' in entry && resolutionCandidates.has(entry.laneId))
+        await noteResolutionOrigins(ctx, input.projectId, entry, note);
   for (const [intentId, { laneIds, viaLaneId }] of noted)
     await postIntentLandingNote(ctx, input.projectId, {
       intentId,

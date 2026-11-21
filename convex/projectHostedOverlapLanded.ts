@@ -22,6 +22,7 @@ export async function retireLandedOverlapLanes(
   identity: ReceiptIdentity,
   landed: { commit: string; at: string; sequence?: number; mainRedHolds?: MainRedHold[] },
   index = 0,
+  resolutionCandidates?: Set<string>,
 ) {
   if (index === 0) await stampLegacyOverlapActivity(ctx, identity.projectId);
   const page = await acceptancePage(ctx, { ...identity, kind: 'inputs', index });
@@ -40,6 +41,13 @@ export async function retireLandedOverlapLanes(
         q.eq('projectId', identity.projectId).eq('laneId', lane.data.laneId),
       )
       .unique();
+    // A later record can replace the resolution. The completion tick opens the pinned record
+    // only for a known resolution or when the current overlap row cannot rule one out.
+    if (
+      resolutionCandidates &&
+      (!row || row.resolutionOrigin || row.head !== lane.data.head || row.recordVersion !== lane.data.version)
+    )
+      resolutionCandidates.add(lane.data.laneId);
     if (!row || row.head !== lane.data.head) continue;
     // The drift nudge names landings: the first landed Lane's public identity goes on the landing's
     // main log row (one account read for the handle, one point read and one patch of a ~0.3 KB row per

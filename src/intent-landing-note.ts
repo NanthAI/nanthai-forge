@@ -53,26 +53,25 @@ export function landingNoteText(note: LandingNote) {
         : by === 'person'
           ? 'Landed by a person'
           : 'Landed';
-  const review =
+  const accepted =
     note.landedBy?.review === 'person'
-      ? ' A person reviewed and accepted it.'
+      ? ' A person accepted it.'
       : note.landedBy
-        ? ' No person review recorded; project policy accepted it after its check passed.'
+        ? ' Project policy accepted it after its check passed.'
         : '';
   const via = note.viaLaneId ? ` through Lane ${short(note.viaLaneId)}` : '';
   return (
     `${landed}: ${lanes(note.laneIds)}${via}, receipt ${short(note.receiptId)}, ` +
-    `commit ${short(note.commit)}, main #${note.sequence}.${review}`
+    `commit ${short(note.commit)}, main #${note.sequence}.${accepted}`
   );
 }
 
 /** The note as a planning comment row value: the comment fields every reader already draws, plus
  * `system: true` and the structured `landing` facts. `actor` is the submitter (`account` or
  * `account/agent`), mapped to a public handle per viewer; no other `landing` key is a person key. */
-export function landingNoteComment(itemId: string, note: LandingNote) {
+function noteComment(note: LandingNote) {
   return {
     id: landingNoteId(note),
-    itemId,
     authorLabel: SYSTEM_COMMENT_AUTHOR,
     system: true as const,
     text: landingNoteText(note),
@@ -88,9 +87,24 @@ export function landingNoteComment(itemId: string, note: LandingNote) {
       actor: note.agentRun ? `${note.actor}/${note.agentRun}` : note.actor,
       ...(note.agentClient ? { agentClient: note.agentClient } : {}),
       // `landedBy`, never `by`: `by` is a person key the identity mapper would resolve as a handle (66f9ed38).
-      ...(note.landedBy ? { landedBy: note.landedBy.by, review: note.landedBy.review } : {}),
+      ...(note.landedBy
+        ? {
+            landedBy: note.landedBy.by,
+            accepted: note.landedBy.review === 'person' ? ('person' as const) : ('policy' as const),
+            review: note.landedBy.review,
+          }
+        : {}),
       ...(note.viaLaneId ? { viaLaneId: note.viaLaneId } : {}),
       ...(note.revertOf ? { revertOf: note.revertOf } : {}),
     },
   };
+}
+
+export function landingNoteComment(itemId: string, note: LandingNote) {
+  return { itemId, ...noteComment(note) };
+}
+
+/** A receipt can appear on several Items. The export keeps one note per Intent. */
+export function landingNoteExport(note: LandingNote) {
+  return { intentId: note.intentId, ...noteComment(note) };
 }

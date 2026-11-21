@@ -3,7 +3,7 @@ import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 
 /** Who published a landing (Issue 3a733ee8): the queue (a scheduled step, no signed-in caller), an
- * agent's explicit accept, or a person's. `review`: a person accepted it or an owner grant carried. */
+ * agent's explicit accept, or a person's. The stored `review` field records person acceptance. */
 export const landingNoteBy = v.object({
   by: v.union(v.literal('queue'), v.literal('agent'), v.literal('person')),
   review: v.union(v.literal('person'), v.literal('none')),
@@ -11,7 +11,7 @@ export const landingNoteBy = v.object({
 
 /** System landing notes (Issue 3a733ee8): one small row per landed or reverted Intent per receipt,
  * written by the landing's completion tick (or the revert notice), read as `system` comments on the
- * Item whose Intent chain holds it. Derived from receipts: not source, not exported or backed up. */
+ * Item whose Intent chain holds it. Included in planning exports as receipt-derived evidence. */
 export const intentLandingNoteTables = {
   projectIntentLandingNotes: defineTable({
     projectId: v.id('hostedProjects'),

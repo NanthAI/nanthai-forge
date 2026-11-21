@@ -50,7 +50,7 @@ export const hostedAcceptanceTables = {
     root: v.string(),
     appliedPage: v.number(),
     appliedEntry: v.number(),
-    /** Who published it and whether a person reviewed it (Issue 3a733ee8), set with the completion tick
+    /** Who published it and whether a person accepted it (Issue 3a733ee8), set with the completion tick
      * from facts publication holds; the tick copies it into each Item's system landing note. */
     landedBy: v.optional(landingNoteBy),
     /** The retained completion tick and its stall guard (Issue 13c63abe); absent once complete.

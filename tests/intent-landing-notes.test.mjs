@@ -99,7 +99,7 @@ test('incident replay 2bf85ddf: a parked Lane the queue lands after its agent st
       commit: comment.landing.commit,
       sequence: comment.landing.sequence,
       landedBy: comment.landing.landedBy,
-      review: comment.landing.review,
+      accepted: comment.landing.accepted,
     },
     {
       receiptId,
@@ -107,10 +107,11 @@ test('incident replay 2bf85ddf: a parked Lane the queue lands after its agent st
       commit: receipt.candidate.head,
       sequence: receipt.snapshot.revision,
       landedBy: 'queue',
-      review: 'none',
+      accepted: 'policy',
     },
   );
   assert.match(comment.text, /^Landed by the queue/);
+  assert.match(comment.text, /Project policy accepted it after its check passed\.$/);
   assert(comment.text.includes(`receipt ${receiptId.slice(0, 8)}`));
   assert(comment.text.includes(`Lane ${laneId.slice(0, 8)}`));
   assert(!comment.text.includes(receipt.actor.id), 'the text names no account');
@@ -225,8 +226,9 @@ test('a landing note reads as a system comment with a stable UUID id and no pers
   assert.equal(comment.landing.actor, 'account-id/bronze-oriole', 'mapped to a handle per viewer on read');
   assert.equal(
     comment.text,
-    'Landed by its agent run: Lane 33333333, receipt 22222222, commit aaaaaaaa, main #1234. A person reviewed and accepted it.',
+    'Landed by its agent run: Lane 33333333, receipt 22222222, commit aaaaaaaa, main #1234. A person accepted it.',
   );
+  assert.equal(comment.landing.accepted, 'person');
   assert(!comment.text.includes('account-id'));
 });
 
