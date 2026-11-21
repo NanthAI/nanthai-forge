@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
-import { ticketState } from '../landing-ticket-fixture.mjs';
+import { logicalTicket, ticketState } from '../landing-ticket-fixture.mjs';
 import { moduleUrl } from '../convex-module.mjs';
 import { hostedCheckTerminal } from '../../dist/hosted-check.js';
 const { holdsLandingOrder, olderLandingAhead } = await import(
   moduleUrl('../convex/projectHostedLandingOrder.ts')
 );
+const { pipelinePredecessor } = await import(moduleUrl('../convex/projectHostedLandingPipeline.ts'));
 const terminal = row => ['landed', 'terminal-failed'].includes(row.phase);
+const readOnly = ctx => ({ db: { get: ctx.db.get.bind(ctx.db), query: ctx.db.query.bind(ctx.db) } });
 export const requestRows = f => [...f.tables.projectHostedLandingRequests.values()];
 export const armed = (f, id) =>
   Boolean(id && ['pending', 'inProgress'].includes(f.tables._scheduled_functions.get(id)?.state.kind));
@@ -32,12 +34,7 @@ const claimDue = (f, id, by) =>
 export async function decide(f, row) {
   return f.runAcceptance(
     'queueInvariantRead',
-    async ctx => {
-      const readonly = {
-        db: { get: ctx.db.get.bind(ctx.db), query: ctx.db.query.bind(ctx.db) },
-      };
-      return olderLandingAhead(readonly, row, ticketState(f, row), Date.now(), []);
-    },
+    ctx => olderLandingAhead(readOnly(ctx), row, ticketState(f, row), Date.now(), []),
     {},
   );
 }
@@ -49,6 +46,10 @@ const armedTasks = (f, name, match) =>
   [...f.tables._scheduled_functions.values()].some(
     task => armed(f, task._id) && task.name === name && match(task.args?.[0] ?? {}),
   );
+const checkRun = (f, id) => {
+  const row = [...f.tables.projectHostedCheckRuns.values()].find(row => row.runId === id);
+  return row && JSON.parse(row.value);
+};
 /** A check that still owns its own progress (review e7137e30 finding 1): the entry is checking a
  * non-terminal run, and that run has a bounded driver: an armed verdict confirmation, an armed
  * execution watchdog once the provider accepted the dispatch, or a runner lease with its exact
@@ -56,8 +57,7 @@ const armedTasks = (f, name, match) =>
  * a bare lease timestamp, drives nothing. */
 export function liveCheck(f, row, now = Date.now()) {
   if (row.phase !== 'checking' || !row.runId) return false;
-  const saved = [...f.tables.projectHostedCheckRuns.values()].find(r => r.runId === row.runId);
-  const run = saved && JSON.parse(saved.value);
+  const run = checkRun(f, row.runId);
   if (!run || hostedCheckTerminal(run)) return false;
   if (armed(f, run.actions?.confirm)) return true;
   if (run.actions?.outcome === 'accepted' && armed(f, run.actions.watchdog)) return true;
@@ -244,7 +244,8 @@ export async function assertQueueProgress(
   const rows = requestRows(f),
     byId = new Map(rows.map(row => [row.submissionId, row]));
   const queue = [...f.tables.projectHostedLandingQueues.values()].find(row => row.projectId === f.projectId);
-  const claimed = alarmOwns ? id => pendingClaim(f, id) : id => claimDue(f, id, Date.now() + CHECK_WALL_MS);
+  const now = Date.now();
+  const claimed = alarmOwns ? id => pendingClaim(f, id) : id => claimDue(f, id, now + CHECK_WALL_MS);
   const waits = new Map();
   for (const row of rows.filter(row => row.orderWait && !terminal(row))) {
     const ahead = await decide(f, row);
@@ -254,6 +255,73 @@ export async function assertQueueProgress(
   const batches = new Map(
     [...f.tables.projectHostedLandingBatches.values()].map(row => [row.batchId, JSON.parse(row.value)]),
   );
+  const waitsForTrainSlot = row =>
+    row.projectId === f.projectId && row.phase === 'queued' && row.runnable && row.batchable && !row.runId;
+  let hasOwnedFullTrain = false;
+  if (
+    queue?.train?.length &&
+    rows.some(row => waitsForTrainSlot(row) && !queue.train.includes(row.submissionId))
+  ) {
+    const members = queue.train
+      .map(id => byId.get(id))
+      .filter(row => {
+        if (!row || terminal(row) || row.hold) return false;
+        const reason = ticketState(f, row).observation.pendingReason;
+        return reason !== 'waiting-for-review' && reason !== 'waiting-for-dependency';
+      });
+    let full = false;
+    const predecessor = await f.runAcceptance(
+      'queueInvariantRead',
+      ctx =>
+        pipelinePredecessor(
+          readOnly(ctx),
+          queue,
+          members.map(row => logicalTicket(f, row)),
+          undefined,
+          {
+            requireSlot: false,
+            onCapacity: value => {
+              full = value;
+            },
+          },
+        ),
+      {},
+    );
+    const checkWakes = [...f.tables.projectHostedLandingCheckWakes.values()];
+    const checkWakeOwns = row =>
+      ['queued', 'checking'].includes(row.phase) &&
+      checkWakes.some(wake => {
+        if (
+          wake.projectId !== row.projectId ||
+          wake.runId !== row.runId ||
+          (row.checkWakeVersion ?? -1) >= (wake.version ?? 1) ||
+          !dueBy(f, wake.wake?.taskId, now + CHECK_WALL_MS)
+        )
+          return false;
+        const task = f.tables._scheduled_functions.get(wake.wake.taskId);
+        const run = checkRun(f, row.runId);
+        return (
+          task.name === 'projectHostedLandingDriver:checkWake' &&
+          task.args?.[0]?.wakeId === wake.wake.id &&
+          run &&
+          hostedCheckTerminal(run)
+        );
+      });
+    // Only capacity may block an otherwise usable train. A member's own finish or check
+    // must be able to free a slot. Unrelated tasks that happen to name its run cannot.
+    hasOwnedFullTrain = Boolean(
+      full &&
+      predecessor &&
+      members.some(
+        row =>
+          deliveredContinuations.has(row.submissionId) ||
+          claimed(row.submissionId) ||
+          externalRuns.has(row.runId) ||
+          liveCheck(f, row) ||
+          checkWakeOwns(row),
+      ),
+    );
+  }
   function driven(id, seen = new Set()) {
     if (seen.has(id) || seen.size >= 16) return false;
     const row = byId.get(id);
@@ -261,15 +329,14 @@ export async function assertQueueProgress(
     seen = new Set([...seen, id]);
     if (deliveredContinuations.has(id) || claimed(id) || (alarmOwns && armed(f, row.alarm?.taskId)))
       return true;
-    if (row.runnable && (armed(f, queue?.wake?.taskId) || queue?.lease?.until > Date.now())) return true;
+    if (row.runnable && (armed(f, queue?.wake?.taskId) || queue?.lease?.until > now)) return true;
     if (waits.has(id) && driven(waits.get(id), seen)) return true;
     const pending = finish(id);
     if (pending?.parentSubmissionId && pending.waiting && driven(pending.parentSubmissionId, seen))
       return true;
     if (row.runId) {
       if (externalRuns.has(row.runId)) return true;
-      const check = [...f.tables.projectHostedCheckRuns.values()].find(r => r.runId === row.runId);
-      if (check && armed(f, JSON.parse(check.value).actions?.watchdog)) return true;
+      if (armed(f, checkRun(f, row.runId)?.actions?.watchdog)) return true;
       if (
         [...f.tables._scheduled_functions.values()].some(
           task => armed(f, task._id) && task.args?.some(arg => arg?.runId === row.runId),
@@ -280,6 +347,7 @@ export async function assertQueueProgress(
     const state = ticketState(f, row),
       batch = state.batchId && batches.get(state.batchId);
     if (batch && batch.leaderId !== id && driven(batch.leaderId, seen)) return true;
+    if (hasOwnedFullTrain && waitsForTrainSlot(row) && !queue.train.includes(id)) return true;
     return Boolean(batch?.predecessor && driven(batch.predecessor.submissionId, seen));
   }
   for (const row of rows.filter(row => !terminal(row)))

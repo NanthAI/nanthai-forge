@@ -46,6 +46,7 @@ export async function pinLandingAttempt(
     retainedSelection?: HostedLandingAttempt['candidate'];
     recheck?: ScopedRecheckBasis;
     checkCause?: CheckCause;
+    providerDelayReason?: string;
     /** Reuses the initial submission's reservation lookup for cause attribution. */
     intent?: (intentId: string) => Promise<CheckCause>;
     paths?: (paths: string[] | null) => void;
@@ -152,6 +153,7 @@ export async function pinLandingAttempt(
               projectId: input.projectId,
               actor: input.actor.id,
               ...(input.recheck ? { recheck: input.recheck } : {}),
+              ...(input.providerDelayReason ? { providerDelayReason: input.providerDelayReason } : {}),
               request: {
                 ...(recoveryGate ? { gate: recoveryGate } : r.check.gate ? { gate: r.check.gate } : {}),
                 operationId: input.operations.check,

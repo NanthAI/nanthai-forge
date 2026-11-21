@@ -43,6 +43,8 @@ import { scopedRecheckBasis, scopedRecheckFallback } from './projectHostedScoped
 import { forkRaceReason } from '../src/fallback-reasons';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 import { type HostedCheckRun, checkCause } from '../src/hosted-check';
+import { providerRetryDelay } from '../src/ci-provider-recovery';
+import { loadHostedCheck } from './projectHostedCheckStore';
 async function wakeAfterPrecompose(
   ctx: MutationCtx,
   projectId: Doc<'projectHostedFinishes'>['projectId'],
@@ -545,9 +547,32 @@ export async function installFinishCompose(
     : state.batchSolo
       ? checkCause.cohortSplit
       : previous?.checkCause;
+  const admission = landing.admission;
+  // A kept admission is bound to the first attempt until its verdict. Only its platform retire
+  // records an end time with main-moved. Read the old run once for the replacement's display hint.
+  let providerDelayReason: string | undefined;
+  if (
+    !proof &&
+    candidate.result.status === 'clean' &&
+    value.check?.kind === 'request' &&
+    state.batchNeedsSoloCompose &&
+    pending.parentAttemptId === state.firstAttemptId &&
+    admission?.status === 'unavailable' &&
+    admission.recheck === 'main-moved' &&
+    admission.endedAt !== undefined
+  ) {
+    const key = { projectId: row.projectId, runId: admission.runId };
+    const retiredRun = await ctx.db
+      .query('projectHostedCheckRuns')
+      .withIndex('by_project_and_run', q => q.eq('projectId', key.projectId).eq('runId', key.runId))
+      .unique();
+    const reason = retiredRun && (await loadHostedCheck(ctx, key, false, retiredRun)).run.failureReason;
+    providerDelayReason = providerRetryDelay(reason ?? undefined, admission.endedAt);
+  }
   const attempt = await pinLandingAttempt(ctx, {
     ...(cause === undefined ? {} : { checkCause: cause }),
     ...(recheck ? { recheck } : {}),
+    ...(providerDelayReason ? { providerDelayReason } : {}),
     ...input,
     actor: original.actor,
     deferCheck: proof ? false : !state.batchSolo,

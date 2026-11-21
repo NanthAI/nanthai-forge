@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedFinishCompose.ts": "f9e29bd3f7221ade98f7376326c6eca40997bcace90057eee7a74f3c3df6f274",
+    "convex/projectHostedLandingAdmission.ts": "34246ed3ce777fcc2036e9c5ca5f001030838e2fa1bee90a267dee2eec41b6a1",
+    "convex/projectHostedLandingPins.ts": "fc8a2a6461b5dbff2ac96ac2ea3bf877c49be93c0a7f6dff54bfdb3730e8b723",
+    "convex/projectHostedLandingStaleChecks.ts": "424213fd9efcf7360660fad35a3cda16bf5a151f73d466d715d504f65cecbafe"
+  },
+  "replay": {
+    "incident": "fa2c1383",
+    "test": "incident fa2c1383 wiring: the guards fail on the incident, stranded followers, a parked kept run, a stale-base restart and a dropped conflict",
+    "receipt": "10ed1c8c-774c-4191-b2e2-bfc5525fd4f2"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "receipt": "e7ed3bce-e1cc-4563-b562-e59e804236c4",
+    "session": "01a1fe63-bd2f-79b3-b210-05cd5cf3dc1f"
+  },
+  "authorSession": "01a1fe5d-5a8d-7052-a0f7-29504ad2954e"
+}

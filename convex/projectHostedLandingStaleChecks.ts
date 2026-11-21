@@ -210,6 +210,7 @@ export async function retireSoloCheck(
     attempt: HostedLandingAttempt;
     finish: Awaited<ReturnType<typeof loadFinish>>;
     main: Awaited<ReturnType<typeof hostedStartMain>>;
+    platformEndedAt?: number;
   },
 ) {
   const { row, state, attempt, finish, main } = input;
@@ -223,6 +224,7 @@ export async function retireSoloCheck(
           status: 'unavailable' as const,
           reuse: 'tried' as const,
           recheck: 'main-moved',
+          ...(input.platformEndedAt === undefined ? {} : { endedAt: input.platformEndedAt }),
         }
       : row.admission;
   if (admission !== row.admission) await ctx.db.patch(row._id, { admission });

@@ -149,6 +149,7 @@ export async function settleLandingAdmission(
         attempt: await loadLandingAttempt(ctx, { projectId: row.projectId, attemptId: state.attemptId }),
         finish,
         main: await hostedStartMain(ctx, row.projectId),
+        platformEndedAt: Date.now(),
       });
       return true;
     }
@@ -221,10 +222,10 @@ export async function settleLandingAdmission(
     return Boolean(row.admission.kept);
   }
   // A kept run settles here like any admission (review 563c595b F3c): its first check is recorded
-  // below, and installFinishCompose names why it did not carry. `kept` stays for the receipt.
+  // below, and installFinishCompose names why it did not carry. Only a test verdict retains `kept`.
   const admission = {
     ...(row.admission.full ? { full: true as const, ...(retries ? { retries } : {}) } : {}),
-    ...(row.admission.kept ? { kept: true as const } : {}),
+    ...(row.admission.kept && kind !== 'platform' ? { kept: true as const } : {}),
     runId: run.id,
     status:
       kind === 'passed'

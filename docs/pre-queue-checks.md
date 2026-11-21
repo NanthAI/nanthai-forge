@@ -469,9 +469,10 @@ cancels). A kept pre-queue admission run takes queue order in the write that wou
 (`admission.kept`), so followers compose behind it while the pipeline has a slot; with the pipeline full a
 follower checks on its own in strict, as today; fast stacks it behind the kept row in its train, as it
 stacks behind today's retired entry, and the kept run's settle wakes it, including when the kept run
-parks on main's red tests (it gives up its place). A kept run that ends without a
-test result (the platform) is not restarted on its old base: it retires as the main move would have, onto
-current main, so the entry pays what today's retire pays. Coverage movers, red main or audit debt, cohorts, recoveries,
+parks on main's red tests (it gives up its place). When the platform ends a kept run without a test
+result, the entry clears the kept marker. An ordinary finish already in progress continues on its
+existing attempt. Otherwise, the queue retires the check, recomposes on current main, and passes the
+provider-delay reason to the replacement check. Coverage movers, red main or audit debt, cohorts, recoveries,
 reverts and partial runs retire as today, and today's unrelated keep reads nothing more. Each landing
 row records its check kind (full, scoped or batch) when the check starts. With the switch off the sweep
 is unchanged.

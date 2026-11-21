@@ -20,8 +20,13 @@ import {
 import { moduleUrl } from './convex-module.mjs';
 import { WIRED } from './keep-the-run-scenarios.mjs';
 import { storageClock } from './storage-clock.mjs';
+import { armed, assertQueueProgress } from './queue-sim/invariants.mjs';
 const stale = await import(moduleUrl('../convex/projectHostedLandingStaleChecks.ts'));
 const mainAudit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
+const { reserveFinishRetry } = await import(moduleUrl('../convex/projectHostedFinishCompose.ts'));
+const { loadFinish } = await import(moduleUrl('../convex/projectHostedFinishStore.ts'));
+const { writableHostedCheck } = await import(moduleUrl('../convex/projectHostedCheckStore.ts'));
+const { settleDirectActions } = await import(moduleUrl('../convex/projectHostedActionsDirect.ts'));
 const SWITCH = 'FORGE_QUEUE_KEEP_THE_RUN';
 const prior = Object.fromEntries([...Object.keys(synthetic), SWITCH].map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic, { [SWITCH]: '1' }));
@@ -274,8 +279,7 @@ for (const timing of ['follower passes first', 'both pass together', 'kept run p
 /** Review a09af93a nit 6: fast seeds from its train, which holds the kept row, so with the pipeline full
  * an overlapping follower stacks behind the kept run exactly as it stacks behind today's retired entry
  * (switch off: the same rows, the same outcome). It has no run of its own: the kept run's settle is
- * its owner. Static L5b cannot see that capacity wait (it has no recorded holder; the reviewer's
- * switch-off scratch flagged the same), so this row proves the owner by running: every entry reaches
+ * its owner. L5b must recognize that capacity wait using the retained train. Every entry also reaches
  * its end with the stall alarm never run, whether the kept run passes, goes red, or parks on main's
  * own red tests (review 018569e9 finding 1: that park released the place but woke no queue). */
 const MAIN_RED_TEST = 'tests/main-red.test.mjs';
@@ -304,6 +308,29 @@ for (const end of ['passes', 'red', 'parks on main red'])
     await owned();
     assert.equal(f.runs().length, 2, 'the follower stacks: no run of its own');
     assert.equal(current(f, 2).phase, 'queued');
+    await assertProgressOwners(f);
+    if (end === 'passes') {
+      const queue = queueRow(f);
+      assert(queue.train.includes(current(f, 1).id), 'the live kept run occupies the train');
+      const tasks = [...f.tables._scheduled_functions.values()].filter(task => armed(f, task._id));
+      for (const task of tasks) f.patch('_scheduled_functions', task._id, { state: { kind: 'canceled' } });
+      const until = Date.parse(current(f, 1).at) + 20 * 60_000;
+      const staleLease = f.insert('_scheduled_functions', {
+        name: 'projectHostedCheckLease:expire',
+        args: [{ projectId: f.projectId, runId: runs[1].id, fence: -1, until }],
+        scheduledTime: until,
+        state: { kind: 'pending' },
+      });
+      try {
+        await assert.rejects(
+          assertQueueProgress(f, { alarmOwns: false }),
+          new RegExp(`L5b: stranded ${current(f, 2).id}`),
+        );
+      } finally {
+        f.tables._scheduled_functions.delete(staleLease);
+        for (const task of tasks) f.patch('_scheduled_functions', task._id, { state: task.state });
+      }
+    }
     const audit = [...f.tables.projectHostedMainAudits.values()].find(r => r.projectId === f.projectId);
     if (end === 'passes') await passRun(f, runs[1].id);
     else if (end === 'red') await failRun(f, runs[1].id);
@@ -311,7 +338,7 @@ for (const end of ['passes', 'red', 'parks on main red'])
       // Main is red on one test; the kept run fails on that test alone.
       f.patch('projectHostedMainAudits', audit._id, {
         red: {
-          since: new Date().toISOString(),
+          since: current(f, 1).at,
           head: f.currentMain().head,
           runId: 'red-audit',
           tests: [MAIN_RED_TEST],
@@ -375,11 +402,25 @@ for (const [name, options] of [
     assert.equal(requestRow(f, 1).admission.kept, true);
     if (options.stop)
       assert(finishPending(f, 1)?.precompose, 'the platform ends the run while its probe runs');
-    // Actions completed (failure) without complete job evidence: no test failed.
-    await f.rawChecks.callback(f.rawChecks.complete(runOf(f, b.id), 'runner-unavailable'));
+    const outage = 'Provider outage: synthetic Actions runner lost its execution without a verdict.';
+    if (name === 'strict')
+      await f.runAcceptance(
+        'settle provider outage',
+        async (ctx, input) => {
+          const selected = await writableHostedCheck(ctx, input);
+          await settleDirectActions(ctx, selected, 'runner-unavailable', outage);
+        },
+        { projectId: f.projectId, runId: b.id },
+      );
+    else
+      // Actions completed (failure) without complete job evidence: no test failed.
+      await f.rawChecks.callback(f.rawChecks.complete(runOf(f, b.id), 'runner-unavailable'));
     await drain(f);
     const fresh = f.runs().filter(r => r.id !== runs[0].id && r.id !== b.id);
     assert.equal(fresh.length, 1, 'one replacement run');
+    if (name === 'strict') assert.equal(fresh[0].failureReason, `provider-delayed: retrying after ${outage}`);
+    else assert.match(fresh[0].failureReason, /^provider-delayed: waiting for check infrastructure since /);
+    assert.equal(current(f, 1).observation.pendingReason, 'pending-infra');
     const bound = attempts(f, 1).find(a => a.candidate.id === fresh[0].request.candidateId);
     assert(bound, 'the replacement checks an attempt of this entry');
     assert.notEqual(bound.main.head, before.main.head, 'never a fresh run on the old base');
@@ -399,6 +440,32 @@ for (const [name, options] of [
       }),
     );
   });
+
+test('platform end with an ordinary finish pending clears kept and preserves the reserved replacement', async t => {
+  const { f, runs } = await mainMoves(t, { paths: ORDER_SENSITIVE });
+  const b = runs[1];
+  const submissionId = current(f, 1).id;
+  await f.runAcceptance(
+    'reserve ordinary finish',
+    async (ctx, input) => {
+      const { row, value } = await loadFinish(ctx, input);
+      await reserveFinishRetry(ctx, row, value);
+    },
+    { projectId: f.projectId, submissionId },
+  );
+  const pending = finishPending(f, 1);
+  assert(pending && !pending.precompose);
+  const held = new Set([finishRow(f, 1).wake.taskId]);
+  await f.rawChecks.callback(f.rawChecks.complete(runOf(f, b.id), 'runner-unavailable'));
+  await drainExcept(f, held);
+  assert.equal(requestRow(f, 1).admission.status, 'unavailable');
+  assert.equal(requestRow(f, 1).admission.kept, undefined);
+  assert.deepEqual(finishPending(f, 1), pending, 'the ordinary finish still owns its original claim');
+  await settle(f);
+  assert.equal(current(f, 1).phase, 'landed');
+  assert.equal(f.runs().length, 3, 'one replacement check on the reserved Candidate');
+  assert.equal(attemptOf(f, 1).main.head, pending.main.head);
+});
 
 test('A3: a fast kept run carries only through the cross-head proof', async t => {
   const { f, runs } = await mainMoves(t, { paths: ['package.json', 'src/b.ts'], mode: 'fast' });
