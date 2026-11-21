@@ -327,8 +327,8 @@ never replaced with an original date. Search and compact agent rows retain the a
 that original identities were authenticated or that imported work landed in Forge.
 
 The backlog writer is staged default off; web review, import Undo and a full project archive remain open.
-The existing internal planning export contains all retained Item and Initiative versions, comments, relations
-and linked Intent metadata. It is narrower than a full source and Work archive.
+The [planning history download](#planning-export-and-full-archives) retains import attribution alongside each
+exported version.
 
 ## Backlog import
 
@@ -406,11 +406,27 @@ archive store, worker or idle scheduler is added.
 
 ## Planning export and full archives
 
-The existing internal planning export reducer contains retained Item and Initiative versions, comments, relations,
-import attribution and linked Intent metadata. A hosted planning download/action and full project archive are not
-yet available. Full archive work must preserve source/history, planning, comments, receipts and Lane metadata,
-apply current visibility, and distinguish imported historical receipts from acceptance authority in a fresh
-project. Existing same-project recovery is not that fresh-project round trip.
+Project owners can download `forge-planning.json` from their project’s `/planning` page.
+Choose **More planning actions** → **Export planning history**. This exports retained planning history across the project. Forge checks current
+ownership before loading the history and again before returning it.
+
+The downloaded UTF-8 JSON has `schema: 1` and `kind: "forge-hosted-planning"`.
+
+| Field | Contents |
+| --- | --- |
+| `projectKey`, `name`, `workRevision` | The project and revision selected for the export |
+| `items` | Retained Item and Initiative versions, with IDs, relations and original import attribution where recorded |
+| `comments` | Retained planning comments with their own IDs and parent Item IDs |
+| `linkedIntents` | Retained Intent metadata for links in any exported version, including a surviving planned Intent |
+| `events` | Retained hosted Item and comment operations |
+| `coverage` | What the export represents, including the scope of server-recorded actor observations |
+
+The file contains planning data. Source and history, check and acceptance receipts, and Lane metadata
+have separate [source and recovery paths](guides/export.md). The [backlog importer](#backlog-import)
+takes source-keyed rows. It does not read this file as an archive or replay comments or receipts.
+
+A portable project archive and fresh-project import are planned. Existing hosted recovery
+restores the original project from retained checkpoints and history.
 
 ## Plan list projection
 

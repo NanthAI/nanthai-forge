@@ -1,6 +1,6 @@
 # Keep a copy of your work
 
-Accepted source, saved Lane work and account metadata are different exports.
+You can keep copies of accepted source, planning history, saved Lane work and account metadata.
 
 ## Accepted source and history
 
@@ -14,15 +14,13 @@ A mirror can lag the accepted State. The status reports that gap. [Git serving](
 
 ## Planning and project metadata
 
-The source mirror does not contain Forge Items, Initiatives, their comments or versions,
-relations, check/acceptance receipts or Lane metadata. Saved Lane source refs are a source
-copy, not the complete Lane record. [Planning](../planning.md#planning-export-and-full-archives)
-describes the retained planning data and the staged import path.
+Project owners can open their project’s `/planning` page and choose **More planning actions** →
+**Export planning history** to save `forge-planning.json`. The download covers retained Items, Initiatives, comments
+and versions across the project. See the [planning export format](../planning.md#planning-export-and-full-archives).
 
-A single downloadable project archive with a fresh-project round trip is not available yet.
-Its receipt-ID mapping and visibility contract remain open. Existing same-project recovery
-is not that portable archive; a source download or Git mirror must not be described as
-“everything”. Keeping a copy is independent of deletion and adds no required removal step.
+The source mirror omits Forge Items, Initiatives, their comments, versions and relations,
+check and acceptance receipts, and Lane metadata. A saved Lane ref carries that Lane's
+source. A single project archive that can be imported into a fresh project is still planned.
 
 ## Saved work and recovery
 
