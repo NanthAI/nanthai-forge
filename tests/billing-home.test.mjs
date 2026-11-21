@@ -30,7 +30,9 @@ test('billing home: monthly pool, bounded project list, chart/table, navigation 
 
   const worst = await open(390, 'worst');
   await worst.getByRole('button', { name: 'Show 2 more', exact: true }).click();
-  assert.equal(await worst.locator('table.stack tbody tr').count(), 10);
+  const projectRows = worst.locator('table.stack tbody tr');
+  await projectRows.nth(9).waitFor();
+  assert.equal(await projectRows.count(), 10);
   const member = await open(390, 'pro', 'member');
   assert.equal(await member.getByRole('region', { name: 'Payment', exact: true }).count(), 0);
   assert.doesNotMatch(await member.locator('main').textContent(), /SAMPLE-0004|ending 0000/);

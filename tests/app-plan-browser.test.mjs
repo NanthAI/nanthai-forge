@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { chromium } from 'playwright';
 import { itemWorkFixture } from './item-work-fixture.mjs';
+import { settleBrowserPage } from './browser-runtime.mjs';
 const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL('../', import.meta.url));
 const shots = process.env.FORGE_PLAN_SHOTS;
@@ -211,15 +212,22 @@ test('plan views and bulk bar: real components keep the view in the address and 
               : file.endsWith('.woff2')
                 ? 'font/woff2'
                 : 'application/octet-stream',
-        body: readFileSync(asset ? file : join(out, 'fixture.html')),
+        body: asset
+          ? readFileSync(file)
+          : // Start in the chosen theme so axe cannot race the fixture's color change.
+            readFileSync(join(out, 'fixture.html'), 'utf8').replace(
+              'data-ds>',
+              `data-ds data-theme="${theme}">`,
+            ),
       });
     });
     await page.goto(`https://forge.test/example-builder/synthetic/plan${search}`);
     await page.locator('.plan h1, .plan .ph').first().waitFor();
-    await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
+    assert.equal(await page.locator('html').getAttribute('data-theme'), theme);
     return { page, errors, context };
   };
   const check = async (page, label) => {
+    await settleBrowserPage(page);
     assert.equal(
       await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
       false,

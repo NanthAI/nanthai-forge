@@ -6,6 +6,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
+import { finished } from 'node:stream/promises';
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
@@ -16,6 +18,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -100,9 +103,25 @@ else if (step === 'planning-item') out({ schema: 1, cliCommit: head, result: { i
 else if (step === 'wait') { process.stdout.write('PUT-PLANNING-ITEM x finished\\n'); out({ schema: 1, cliCommit: head, result: {} }); }
 `;
 
+function publishCanaryGate(installation, outcome) {
+  const gate = join(installation, 'canary-gate');
+  const pending = gate + '.pending';
+  writeFileSync(pending, outcome);
+  renameSync(pending, gate);
+}
+
 function fixture(t) {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'forge-test-cli-canary-')));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const launcherChildren = new Set();
+  t.after(async () => {
+    if (launcherChildren.size) {
+      // Release a held canary even if an assertion failed before the test could release it.
+      const installation = join(directory, 'forge-cli');
+      if (!existsSync(join(installation, 'canary-gate'))) publishCanaryGate(installation, 'fail');
+      await Promise.all(launcherChildren);
+    }
+    rmSync(directory, { recursive: true, force: true });
+  });
   const settings = join(directory, 'client.json');
   writeFileSync(settings, JSON.stringify({ localHeavySlots: 0 }));
   const previousSettings = process.env.FORGE_CLIENT_SETTINGS;
@@ -178,7 +197,7 @@ function fixture(t) {
   }
   rememberCanaryClone(installation, clone);
   landed();
-  return { directory, installation, home, clone, old, build, hooks, landed };
+  return { directory, installation, home, clone, old, build, hooks, landed, launcherChildren };
 }
 const dependencies = (f, head, canary) => ({
   source: { current: async () => ({ head, projectId: address.projectId }) },
@@ -679,20 +698,43 @@ function launcherEnv(f) {
     },
   });
 }
-function launch(f, args) {
-  return new Promise((done, reject) => {
-    const child = spawn(process.execPath, [join(f.installation, 'launcher.mjs'), ...args], {
+// A detached updater keeps fd 3 open until it exits, even if it has not acquired its lock yet.
+const watchUpdaterExit =
+  'data:text/javascript,' +
+  encodeURIComponent(`
+  import childProcess from 'node:child_process';
+  import { syncBuiltinESMExports } from 'node:module';
+  const spawn = childProcess.spawn;
+  childProcess.spawn = function(command, args, options) {
+    if (options?.detached && args.includes('--background'))
+      return spawn(command, args, { ...options, stdio: [...options.stdio, 'inherit'] });
+    return spawn(command, args, options);
+  };
+  syncBuiltinESMExports();
+`);
+
+async function launch(f, args) {
+  const child = spawn(
+    process.execPath,
+    ['--import', watchUpdaterExit, join(f.installation, 'launcher.mjs'), ...args],
+    {
       env: launcherEnv(f),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stdout = '',
-      stderr = '';
-    child.stdout.on('data', chunk => (stdout += chunk));
-    child.stderr.on('data', chunk => (stderr += chunk));
-    child.once('error', reject);
-    child.once('exit', status => done({ status, stdout, stderr }));
-  });
+      stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+    },
+  );
+  const closed = new Promise(done => child.once('close', done));
+  f.launcherChildren.add(closed);
+  void closed.then(() => f.launcherChildren.delete(closed));
+  child.stdio[3].resume();
+  let stdout = '',
+    stderr = '';
+  child.stdout.on('data', chunk => (stdout += chunk));
+  child.stderr.on('data', chunk => (stderr += chunk));
+  // The caller can finish while the updater is still held at its canary gate.
+  const [[status]] = await Promise.all([once(child, 'exit'), finished(child.stdout), finished(child.stderr)]);
+  return { status, stdout, stderr };
 }
+
 async function releaseFixture(t, f, head) {
   const counter = new Int32Array(new SharedArrayBuffer(4));
   const worker = new Worker(new URL('../scripts/package-cli-release-worker.mjs', import.meta.url), {
@@ -802,12 +844,13 @@ for (const outcome of ['fail', 'pass']) {
     }
     assert.equal(current(f), a, 'every call ran on the current build during the canary');
     await until(() => existsSync(join(f.installation, 'canary-runs.log')), 'the canary to start');
-    writeFileSync(join(f.installation, 'canary-gate'), outcome === 'fail' ? 'fail' : 'pass');
-    await until(
-      () =>
-        !existsSync(join(f.installation, 'update-lock', '1')) &&
-        (outcome === 'fail' ? !!readCliCanaryRefusal(f.installation) : current(f) === b),
-      'the background canary to finish',
+    assert(f.launcherChildren.size > 0, 'the updater is still live after its caller exited');
+    publishCanaryGate(f.installation, outcome);
+    await Promise.all(f.launcherChildren);
+    assert.equal(
+      existsSync(join(f.installation, 'update-lock', '1')),
+      false,
+      'every updater released its lock',
     );
     const runs = () => readFileSync(join(f.installation, 'canary-runs.log'), 'utf8').trim().split('\n');
     assert.equal(runs().length, 1, 'one canary run; other updaters never repeat it');
@@ -902,7 +945,7 @@ test('rollback switches atomically to the one previous build and holds main unti
   controller(f, f.old, 'old');
   controller(f, main, 'main');
   installLauncher(f, f.old);
-  writeFileSync(join(f.installation, 'canary-gate'), 'pass');
+  publishCanaryGate(f.installation, 'pass');
   const migrated = [];
   // Nothing retained yet.
   await assert.rejects(cliRollback(f.installation, { migrate: () => {}, lockWaitMs: 0 }), {
@@ -913,10 +956,9 @@ test('rollback switches atomically to the one previous build and holds main unti
   const first = await launch(f, ['agent', f.directory, 'save']);
   assert.equal(first.status, 0, first.stderr);
   assert.deepEqual(JSON.parse(first.stdout), { build: 'old', ran: ['agent', f.directory, 'save'] });
-  await until(
-    () => current(f) === b && !existsSync(join(f.installation, 'update-lock', '1')),
-    'the background update',
-  );
+  await Promise.all(f.launcherChildren);
+  assert.equal(current(f), b);
+  assert.equal(existsSync(join(f.installation, 'update-lock', '1')), false, 'the updater released its lock');
   assert.equal(realpathSync(join(f.installation, 'previous')), f.old);
   const reads = Atomics.load(counter, 0);
   const result = await cliRollback(f.installation, {
