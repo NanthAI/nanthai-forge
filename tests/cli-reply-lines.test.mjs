@@ -35,6 +35,26 @@ test('terminal landing lines use retained titles, explicit units, human times an
     assert.match(agent('landings', { landings: [{ ...landing, costs }] })[0], expected);
 });
 
+test('landing lines distinguish a supervised agent, an old client and a person-only receipt', () => {
+  const approved = { kind: 'person', actor: 'river' };
+  const lines = agent('landings', {
+    landings: [
+      { builderModel: 'model-one', acceptedBy: approved },
+      { builderModel: 'model not declared', acceptedBy: approved },
+      { builderModel: 'not-declared', acceptedBy: { kind: 'person', actor: '7dev' } },
+      { builderModel: null, acceptedBy: approved },
+      { builderModel: null, acceptedBy: { kind: 'auto', actor: 'river' } },
+      { builderModel: 'unknown', acceptedBy: { kind: 'person' } },
+    ],
+  });
+  assert.match(lines[0], /built by model-one, approved by @river/);
+  assert.match(lines[1], /built by an agent \(model not declared\), approved by @river/);
+  assert.match(lines[2], /built by not-declared, approved by @7dev/);
+  assert.match(lines[3], / · accepted by @river · /);
+  assert.match(lines[4], /built by @river, accepted automatically/);
+  assert.match(lines[5], /built by unknown, approved by a person/);
+});
+
 test('terminal read lines identify the actual Lane, Item and selected source without inferring missing facts', () => {
   assert.deepEqual(
     agent('lanes', { page: [{ laneId: 'abcdefgh-full', intent: 'Fix reader', state: 'active' }] }),

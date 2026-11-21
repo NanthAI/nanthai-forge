@@ -556,6 +556,45 @@ test('landings label pending cancelled usage without pricing its lower bound or 
   assert.equal(waiting.meter.queries, complete.meter.queries);
 });
 
+test('landings read the source builder model separately from approval without adding lookups', async () => {
+  const f = fixture();
+  f.landing(1, { at: 100 });
+  const row = f.tables.projectHostedAcceptances[0];
+  const person = {
+    ...JSON.parse(row.value),
+    actor: { id: 'owner', kind: 'person' },
+  };
+  row.value = JSON.stringify(person);
+  const before = f.meter.queries;
+  assert.equal((await f.read()).landings[0].builderModel, null);
+  const personReads = f.meter.queries - before;
+  const receipt = {
+    ...person,
+    authorship: { kind: 'agent', actor: 'user_fixtureBuilder' },
+    agentClient: 'fixture:model-one',
+  };
+  row.value = JSON.stringify(receipt);
+  const beforeStamped = f.meter.queries;
+  const result = await f.read();
+  assert.equal(result.landings[0].builderModel, 'model-one');
+  assert.equal(result.landings[0].acceptedBy.kind, 'person');
+  assert.doesNotMatch(result.raw, /user_fixtureBuilder/);
+  assert.equal(f.meter.queries - beforeStamped, personReads);
+  row.value = JSON.stringify({ ...receipt, agentClient: 'fixture:not-declared' });
+  assert.equal((await f.read()).landings[0].builderModel, 'not-declared');
+  // A legacy supervised receipt only named its approver, while its attempt still names the builder.
+  row.value = JSON.stringify(person);
+  const attempt = f.tables.projectHostedLandingAttempts[0];
+  attempt.value = JSON.stringify({
+    ...JSON.parse(attempt.value),
+    actor: { id: 'user_fixtureBuilder', kind: 'agent' },
+  });
+  const legacy = await f.read();
+  assert.equal(legacy.landings[0].builderModel, 'model not declared');
+  assert.equal(legacy.landings[0].acceptedBy.kind, 'person');
+  assert.doesNotMatch(legacy.raw, /user_fixtureBuilder/);
+});
+
 test('landings title comes from the retained receipt message without additional record reads', async () => {
   const f = fixture();
   f.landing(1, { at: 60, message: 'Fix source comparison\n\nRemoves duplicate source parsing.' });

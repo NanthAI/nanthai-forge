@@ -595,6 +595,14 @@ test('response-shape guard itself rejects dead ends, stale terminal advice and i
   );
 });
 
+test('CLI help names the required agent declaration and explicit unknown', async () => {
+  const { hostedAgentHelp } = await import('../dist/hosted-agent-help.js');
+  const help = hostedAgentHelp('start');
+  assert.match(help, /\* = required for a new agent session unless FORGE_AGENT_MODEL supplies it/);
+  assert.match(help, /start: model\*/);
+  assert.match(help, /\\"unknown\\"/);
+});
+
 test('CLI agent start requires model once and accepts explicit unknown through the negotiated contract', async t => {
   const s = agentFixture(t);
   s.caps.features = ['source-authorship-v1', 'agent-slug'];

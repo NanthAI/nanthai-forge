@@ -12,12 +12,18 @@ const code = value => error => (error.data?.code ?? error.code) === value;
 
 test('proof reads exact saved claims and never turns a missing check into a passing check', async t => {
   const s = await saveFixture();
-  const x = await s.prepare([], { notVerified: ['Platform coverage was not run'] });
+  const x = await s.prepare([], {
+    notVerified: ['Platform coverage was not run'],
+    authorship: { kind: 'agent' },
+    agentClient: 'fixture:model-one',
+  });
   const saved = (await s.submit(x)).outcome.result;
   const data = JSON.parse(
     await s.call('proof', proof.read, { projectId: s.projectId, laneId: s.laneId, saveId: saved.saveId }),
   );
   assert.equal(data.save.id, saved.saveId);
+  assert.equal(data.save.app, 'fixture');
+  assert.equal(data.save.model, 'model-one');
   assert.deepEqual(data.save.notVerified, ['Platform coverage was not run']);
   assert.equal(data.check, null);
   assert.equal(data.claimMatchesCheck, null);

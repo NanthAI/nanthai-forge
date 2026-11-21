@@ -18,6 +18,9 @@ export const hostedAgentHelpEntries = [
   // Client envelope fields are accepted outside the action schema by dispatch.
   json.properties = { ...json.properties };
   if (action === 'start') {
+    const model = json.properties.model;
+    if (model && typeof model === 'object')
+      model.description ??= 'Declare the model ID or "unknown" when an agent session starts.';
     json.properties.path = { type: 'string', minLength: 1 };
     json.properties.open = { type: 'boolean' };
     json.properties.installScripts = { type: 'boolean' };
@@ -30,7 +33,7 @@ export const hostedAgentHelpEntries = [
     json.properties.operationId = { type: 'string', format: 'uuid' };
   const required = new Set(json.required ?? []);
   const parameters = Object.keys(json.properties ?? {}).map(
-    name => `${name}${required.has(name) ? '' : '?'}`,
+    name => `${name}${action === 'start' && name === 'model' ? '*' : required.has(name) ? '' : '?'}`,
   );
   return {
     action,
@@ -105,7 +108,7 @@ export function hostedAgentHelp(action?: string) {
     'Forge hosted agent workflow',
     'nforge agent ROOT ACTION [JSON | --command-file FILE]; actions listed as `x ACTION` run as nforge x ROOT ACTION [JSON | --command-file FILE].',
     'Address: hosted checkout ROOT, retained address, or JSON url + projectId. Guide: nforge docs agent.',
-    'Parameters (? = optional; nested fields and constraints follow the command schema):',
+    'Parameters (? = optional, * = required for a new agent session unless FORGE_AGENT_MODEL supplies it):',
     ...entries.map(
       entry =>
         `  ${entry.command}: ${entry.parameters.join(', ') || '{}'}${entry.action === 'history' ? ' — log, blame, show' : ''}`,
@@ -182,7 +185,7 @@ export const allHelpTopics = () =>
 export function hostedAgentHelpMarkdown() {
   return [
     '<!-- hosted-agent-contract:start -->',
-    '| Hosted command | Accepted parameters (`?` = optional) |',
+    '| Hosted command | Accepted parameters (`?` = optional, `*` = required for a new agent session unless `FORGE_AGENT_MODEL` supplies it) |',
     '| --- | --- |',
     ...hostedAgentHelpEntries.map(
       entry => `| \`${entry.command}\` | ${`\`${entry.parameters.join(', ') || '{}'}\``} |`,

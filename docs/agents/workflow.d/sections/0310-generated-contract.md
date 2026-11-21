@@ -1,5 +1,5 @@
 <!-- hosted-agent-contract:start -->
-| Hosted command | Accepted parameters (`?` = optional) |
+| Hosted command | Accepted parameters (`?` = optional, `*` = required for a new agent session unless `FORGE_AGENT_MODEL` supplies it) |
 | --- | --- |
 | `pull` | `operationId?` |
 | `save --friction` | `laneId?, title, detail, area, cost?, workaround?, evidence?, operationId?` |
@@ -9,7 +9,7 @@
 | `decisions` | `target?, cursor?, operationId?` |
 | `tests` | `candidateId, runId?, timingBasis?, tests?, expectedHead?, expectedVersion?, operationId?` |
 | `save --contract` | `candidateId, runId?, timingBasis?, tests?, expectedHead?, expectedVersion?, operationId?` |
-| `start` | `model?, outcome?, constraints?, intentId?, initialHead?, stackOn?, stackEntry?, planningItemId?, id?, itemId?, scope?, path?, open?, installScripts?, operationId?` |
+| `start` | `model*, outcome?, constraints?, intentId?, initialHead?, stackOn?, stackEntry?, planningItemId?, id?, itemId?, scope?, path?, open?, installScripts?, operationId?` |
 | `start --open` | `laneId, takeover?, acceptHandoff?, reason?, handoff?, expected?, paths?, operationId?` |
 | `save` | `laneId?, message?, model?, supersedeFinish?, park?, notVerified?, operationId?` |
 | `save --candidate` | `laneId?, message?, intentId?, inputs?, dependencies?, operationId?` |

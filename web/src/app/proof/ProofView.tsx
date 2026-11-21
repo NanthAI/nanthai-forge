@@ -12,7 +12,15 @@ import './proof.css';
 type Check = NonNullable<ReturnType<typeof checkEvidence>>;
 export type ProofData = {
   lane: { id: string; intentId: string; head: string; state: string };
-  save: { id: string; head: string; at: string; author?: string; notVerified?: string[] } | null;
+  save: {
+    id: string;
+    head: string;
+    at: string;
+    author?: string;
+    app?: string | null;
+    model?: string | null;
+    notVerified?: string[];
+  } | null;
   agentClient?: string | null;
   declaration?: {
     kind: 'landing';
@@ -30,6 +38,7 @@ export type ProofData = {
     receiptId: string;
     head: string;
     candidateId: string;
+    builderModel?: string | null;
     acceptedBy?: { kind: 'person' | 'auto'; actor?: string; note: string } | null;
   } | null;
   afterLandingCheck: { landings: number; minutes: number } | null;
@@ -98,7 +107,16 @@ export function ProofView({
   const save = data.declaration ?? data.save;
   const claimKind = data.declaration ? 'landing' : 'save';
   const lines = save?.notVerified;
-  const [app, model] = (data.agentClient ?? '').split(':');
+  const [landingApp, landingModel] = (data.agentClient ?? '').split(':');
+  const app = data.landing ? landingApp : (data.save?.app ?? landingApp);
+  const model = data.landing
+    ? (data.landing.builderModel ?? landingModel)
+    : (data.save?.model ?? landingModel);
+  const approval = data.landing?.acceptedBy;
+  const builder =
+    data.landing?.builderModel === 'model not declared'
+      ? 'an agent (model not declared)'
+      : data.landing?.builderModel;
   const state = check ? checkRunState({ status: check.status }) : null;
   const sentence = !check
     ? 'No check is recorded for this selection. Test execution is not reported.'
@@ -340,24 +358,39 @@ export function ProofView({
               </dd>
               <dt>Agent app</dt>
               <dd>
-                {app || 'Not reported'}
-                {app ? <small className="src proof-source">reported by the agent</small> : null}
+                {app && app !== 'agent' ? app : 'Not reported'}
+                {app && app !== 'agent' ? (
+                  <small className="src proof-source">reported by the agent</small>
+                ) : null}
               </dd>
               <dt>Model</dt>
               <dd>
-                {model || 'Not reported'}
-                {model ? <small className="src proof-source">declared, not verified</small> : null}
+                {model === 'model not declared' ? 'Model not declared' : model || 'Not reported'}
+                {model && model !== 'model not declared' ? (
+                  <small className="src proof-source">declared, not verified</small>
+                ) : null}
               </dd>
+              {data.landing && data.save?.model ? (
+                <>
+                  <dt>Save model</dt>
+                  <dd>{data.save.model === 'model not declared' ? 'Model not declared' : data.save.model}</dd>
+                </>
+              ) : null}
               <dt>Tokens</dt>
               <dd>Not reported</dd>
               <dt>Approved by</dt>
               <dd>
-                {data.landing?.acceptedBy ? (
+                {approval ? (
                   <>
-                    {data.landing.acceptedBy.kind === 'person' && data.landing.acceptedBy.actor ? (
-                      <Who handle={data.landing.acceptedBy.actor} />
+                    {approval.kind === 'person' && builder ? (
+                      <span>
+                        Built by {builder}, approved by{' '}
+                        {approval.actor ? <Who handle={approval.actor} /> : 'a person'}.
+                      </span>
+                    ) : approval.kind === 'person' && approval.actor ? (
+                      <Who handle={approval.actor} />
                     ) : null}
-                    <span className="meta any">{data.landing.acceptedBy.note}</span>
+                    <span className="meta any">{approval.note}</span>
                   </>
                 ) : (
                   'Not reported'

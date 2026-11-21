@@ -54,6 +54,7 @@ test('browser person accept lands through hosted queue with no owner machine or 
     id = randomUUID();
   const submitted = await client.accept(id, f.candidate.id);
   assert.equal(submitted.request.agent, false);
+  assert.deepEqual(submitted.request.authorship, { kind: 'person' });
   assert.equal(submitted.request.finish.reviewedSource.intentId, f.candidate.intentId);
   await f.drain();
   assert.equal((await f.current(submitted.id)).submission.phase, 'landed');
@@ -73,7 +74,9 @@ test('browser person accept lands through hosted queue with no owner machine or 
     }),
   );
   assert.equal(observed.request.phase, 'landed');
-  assert.ok(observed.receipt);
+  assert.deepEqual(observed.receipt.authorship, { kind: 'person', actor: 'owner' });
+  assert.equal(observed.receipt.agentClient, undefined);
+  assert.equal(observed.receipt.agentRun, undefined);
   assert.ok(calls.every(name => !name.includes('ownerAcceptance') && !name.includes('acceptChannel')));
 });
 test('browser reviewed roots survive main movement before click without following later saves', async t => {

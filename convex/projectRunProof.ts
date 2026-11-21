@@ -10,6 +10,7 @@ import { checkEvidence } from '../src/run-evidence';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { authorshipLabel } from './projectAuthorshipLabel';
 
 /** One bounded read for the page. No source bytes, report-body fetch, per-test calls or polling. */
 export const read = query({
@@ -110,6 +111,16 @@ export const read = query({
         : null;
       const landedState = landed ? JSON.parse(landed.value) : null;
       const acceptance = landedState?.acceptance;
+      const saveStamp = saved ? authorshipLabel(saved) : null;
+      const landingStamp =
+        landed && landedState
+          ? authorshipLabel({
+              authorship: landedState.request.authorship,
+              agentClient: landed.agentClient,
+              agentRun: landed.agentRun,
+              actor: { id: landed.actor, kind: landedState.request.agent ? 'agent' : 'person' },
+            })
+          : null;
       const declaration =
         landedState?.request.notVerified !== undefined
           ? {
@@ -131,6 +142,7 @@ export const read = query({
               head: saved.head,
               at: saved.at,
               author: saved.actor,
+              ...saveStamp,
               ...(saved.notVerified === undefined ? {} : { notVerified: saved.notVerified }),
             }
           : null,
@@ -143,6 +155,7 @@ export const read = query({
               head: acceptance.head,
               candidateId: run!.request.candidateId,
               acceptedBy: acceptance.acceptedBy ?? null,
+              builderModel: landingStamp?.model ?? null,
             }
           : null,
         // A composed Candidate can differ from its Lane save: no false association with a newer save.

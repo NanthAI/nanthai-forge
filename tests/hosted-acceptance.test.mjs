@@ -22,7 +22,7 @@ test.after(() => {
   else process.env.FORGE_HOSTED_CHECK_KEY_ID = keyId;
   console.log('H14 synthetic per-invocation maxima', JSON.stringify(maxima));
 });
-async function checked(f, item = null, policy = policyPreset('trusted')) {
+async function checked(f, item = null, policy = policyPreset('trusted'), request = {}) {
   f.patch('hostedProjects', f.projectId, { autonomyPolicy: policy });
   item ??= await f.makeCandidate([], [], {
     governance: { version: 1, paths: ['src/leaf.ts'], ownerInputs: false },
@@ -31,7 +31,7 @@ async function checked(f, item = null, policy = policyPreset('trusted')) {
     f.rawChecks.selection({ candidateId: item.candidate.id, expectedHead: item.candidate.result.head }),
   );
   await f.rawChecks.pass(await f.rawChecks.activate(run.id));
-  return f.ready(item, { agent: true, check: { kind: 'run', runId: run.id } });
+  return f.ready(item, { agent: true, check: { kind: 'run', runId: run.id }, ...request });
 }
 
 test('clean unchecked person acceptance publishes receipt, snapshot, event and original operation exactly once', async () => {
@@ -936,4 +936,16 @@ test('receipt writers distinguish source builder from person approval without cl
   assert.deepEqual(accepted.receipt.authorship, { kind: 'person', actor: 'owner' });
   assert.equal(accepted.receipt.agentClient, undefined);
   assert.equal(accepted.receipt.agentRun, undefined);
+});
+
+test('supervised publication preserves the declared builder separately from the person who approved it', async () => {
+  const f = await acceptanceFixture();
+  const { state } = await checked(f, null, policyPreset('supervised'), {
+    authorship: { kind: 'agent', declaration: 'unknown' },
+  });
+  assert.equal((await f.accept(state)).request.observation.pendingReason, 'waiting-for-review');
+  const { receipt } = JSON.parse(await f.transaction('acceptanceApprove', api.approve, f.select(state)));
+  assert.deepEqual(receipt.actor, { id: 'owner', kind: 'person' });
+  assert.deepEqual(receipt.authorship, { kind: 'agent', declaration: 'unknown', actor: 'owner' });
+  assert.equal(receipt.agentClient, undefined);
 });

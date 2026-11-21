@@ -12,7 +12,8 @@ const short = (value: unknown) => text(value).slice(0, 8);
 const rows = (value: unknown) => (Array.isArray(value) ? value.map(row) : []);
 const count = (value: unknown) =>
   typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : 'unknown';
-const handle = (value: unknown) => (/^[a-z][a-z0-9-]{1,38}$/i.test(text(value)) ? `@${text(value)}` : '');
+const handle = (value: unknown) =>
+  /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])$/.test(text(value)) ? `@${text(value)}` : '';
 function when(value: unknown) {
   const date = typeof value === 'number' || typeof value === 'string' ? new Date(value) : null;
   return date && Number.isFinite(date.valueOf())
@@ -122,7 +123,19 @@ export function cliReplyLines(args: string[], output: unknown): string[] {
     return rows(result.landings).map(landing => {
       const costs = row(landing.costs),
         accepted = row(landing.acceptedBy);
-      return `Landed: ${text(landing.title) || `Lane ${short(landing.laneId) || 'unknown'} (title unavailable)`} · ${when(landing.committedAt)} · State ${short(landing.landedHead)} · ${accepted.kind === 'auto' ? 'accepted automatically' : accepted.kind === 'person' ? `accepted by ${handle(accepted.actor) || 'a person'}` : 'acceptance unknown'} · ${count(costs.runnerAccepted)} accepted runner-minutes, ${costs.runnerDiscardedPending === true ? 'pending' : count(costs.runnerDiscarded)} discarded runner-minutes.`;
+      const model = text(landing.builderModel);
+      const approver = handle(accepted.actor) || 'a person';
+      const builder = model === 'model not declared' ? 'an agent (model not declared)' : model;
+      const autoBuilder = builder || (landing.builderModel === null ? handle(accepted.actor) : '');
+      const attribution =
+        accepted.kind === 'person'
+          ? builder
+            ? `built by ${builder}, approved by ${approver}`
+            : `accepted by ${approver}`
+          : accepted.kind === 'auto'
+            ? `${autoBuilder ? `built by ${autoBuilder}, ` : ''}accepted automatically`
+            : 'acceptance unknown';
+      return `Landed: ${text(landing.title) || `Lane ${short(landing.laneId) || 'unknown'} (title unavailable)`} · ${when(landing.committedAt)} · State ${short(landing.landedHead)} · ${attribution} · ${count(costs.runnerAccepted)} accepted runner-minutes, ${costs.runnerDiscardedPending === true ? 'pending' : count(costs.runnerDiscarded)} discarded runner-minutes.`;
     });
   if (action === 'lanes' || action === 'planning') {
     if (!result.item && !Array.isArray(result.page ?? result.items)) return [];

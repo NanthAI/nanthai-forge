@@ -31,11 +31,12 @@ local write does not prevent the current command from sending its declaration.
 Without a detected app, an explicit model applies only to that command and is
 never retained for later shell commands. The app label comes from the existing
 best-effort harness detection, and can be absent. Each canonical save records its
-own stamp,
-so a later agent or person save never relabels earlier source. Receipt builder
-identity is assigned by the authenticated server, independently of approval;
-supervised evidence keeps both built-by and approved-by identities. A client
-cannot supply a builder account.
+own stamp, so a later save never relabels earlier source. The server records the
+builder account from the original submission. Browser landings declare person
+authorship. For older receipts, the readers use the recorded submitter's kind
+and any app or model already recorded. The proof view shows a save's model
+separately from the landing's model. The proof view and `landings` name the
+agent builder and the approving person on a supervised landing.
 
 No server model guessing or other app's session-file reads are used. Stamps never
 grant access. The labels reuse existing calls and records: no added DB reads,

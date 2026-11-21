@@ -263,3 +263,29 @@ test('a later plain command in the same shell stays a person after a one-off env
   });
   assert.equal(existsSync(join(directory, 'forge')), false, 'no shell declaration is persisted');
 });
+
+test('a lost landing reply pins its original model while new work inherits a switch', async t => {
+  const { env } = session(t);
+  for (const [name, value] of Object.entries({ ...env, FORGE_HUMAN: '0' })) {
+    const prior = process.env[name];
+    process.env[name] = value;
+    t.after(() => {
+      if (prior === undefined) delete process.env[name];
+      else process.env[name] = prior;
+    });
+  }
+  const f = agentFixture(t);
+  f.caps.features = ['source-authorship-v1', 'agent-slug'];
+  const transport = f.transport(`model-retry-${randomUUID()}`);
+  const command = { laneId: f.lane.laneId, operationId: randomUUID() };
+  f.lose('projectHostedLanding:enqueue');
+  await assert.rejects(transport.dispatch('finish', { ...command, model: 'model-one' }));
+  await transport.dispatch('finish', { ...command, model: 'model-two' });
+  const enqueues = f.calls.filter(c => c.name === 'projectHostedLanding:enqueue');
+  assert.equal(enqueues.length, 2);
+  assert.match(enqueues[0].args.agentClient, /:model-one$/);
+  assert.deepEqual(enqueues[1].args, enqueues[0].args);
+  await transport.dispatch('start', { outcome: 'Another Lane after the switch', open: false });
+  const start = f.calls.find(c => c.name === 'projectHostedStart:start');
+  assert.match(start.args.agentClient, /:model-two$/);
+});

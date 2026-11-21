@@ -65,7 +65,7 @@ test('hosted help and packaged docs are generated from every enforced schema', a
   );
   for (const entry of hostedAgentHelpEntries)
     assert.deepEqual(
-      entry.parameters.map(p => p.replace(/\?$/, '')),
+      entry.parameters.map(p => p.replace(/[?*]$/, '')),
       Object.keys(entry.schema.properties),
     );
   const doc = readDocument(repo, 'docs/agents/workflow.md');

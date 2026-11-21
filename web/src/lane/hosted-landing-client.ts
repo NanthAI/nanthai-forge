@@ -86,6 +86,7 @@ export class BrowserLanding {
           candidateId,
           expectedHead: candidate.result.status === 'clean' ? candidate.result.head : null,
           agent: false,
+          authorship: { kind: 'person' as const },
           check: runId ? { kind: 'run' as const, runId } : null,
           finish: { reviewedSource: source, after: null },
         };
@@ -278,6 +279,7 @@ export class BrowserLanding {
           candidateId: candidate.id,
           expectedHead: candidate.result.status === 'clean' ? candidate.result.head : null,
           agent: false,
+          authorship: { kind: 'person' },
           check,
           revertOf: receiptId,
           finish: { composeOperationId: pins.compose, after: null },

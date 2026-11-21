@@ -51,8 +51,8 @@ function receiptFixture(kind) {
   return {
     ...original,
     lane: {...original.lane, head: saved},
-    save: {...original.save, id: 'save-' + kind, head: saved},
-    landing: {receiptId: 'receipt-' + kind, candidateId: 'candidate-' + kind, head: accepted, acceptedBy: {kind:'auto', note:'Project landing policy'}},
+    save: {...original.save, id: 'save-' + kind, head: saved, app: 'save-editor', model: 'save-model'},
+    landing: {receiptId: 'receipt-' + kind, candidateId: 'candidate-' + kind, head: accepted, ...(kind === 'single' ? {builderModel:'test-model', acceptedBy:{kind:'person', actor:'river', note:'The owner reviewed the exact source'}} : {acceptedBy:{kind:'auto', note:'Project landing policy'}})},
     check: {...original.check, runId: 'accepted-run-' + kind, head: accepted},
     currentHead: accepted,
     claimMatchesCheck: saved === accepted,
@@ -232,8 +232,17 @@ setData({...original,save:kind==='hiddenauthor'?{...original.save,author:undefin
       const mismatch = page.getByText('Its coverage of the composed check source is not established.', {
         exact: false,
       });
-      if (kind === 'single') await mismatch.waitFor({ state: 'hidden' });
-      else await mismatch.waitFor();
+      if (kind === 'single') {
+        await mismatch.waitFor({ state: 'hidden' });
+        await page.getByText('Built by test-model, approved by', { exact: false }).waitFor();
+        await page.getByText('@river', { exact: true }).waitFor();
+        const evidence = page.getByRole('region', { name: 'This landing' });
+        await evidence
+          .locator('dd')
+          .filter({ hasText: /^test-model/ })
+          .waitFor();
+        await evidence.getByText('save-model', { exact: true }).waitFor();
+      } else await mismatch.waitFor();
       await page.getByRole('button', { name: 'Make it an Item', exact: true }).first().click();
       await page.getByText('1 linked Item in Plan.', { exact: false }).waitFor();
       const batch = page.getByRole('button', { name: 'Make all 2 Items' });

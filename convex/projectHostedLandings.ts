@@ -13,6 +13,7 @@ import type { HostedLandingAttempt, HostedLandingState } from '../src/hosted-lan
 import { invariant } from '../src/errors';
 import { nextCreationCursor, readCreationCursor } from './creationTimeCursor';
 import { landingAcceptedBySchema, receiptAcceptedBy } from '../src/landing-accepted-by';
+import { authorshipLabel } from './projectAuthorshipLabel';
 import {
   LANDINGS_ATTEMPTS,
   LANDINGS_DEFAULT_LIMIT,
@@ -166,6 +167,8 @@ async function evidence(
   bytes += near.length * 160;
   const admissionBase = attempts[0]?.main ?? null;
   const landedBase = receipt.previous;
+  // Before builder stamps, the attempt named the submitter while the receipt named the approver.
+  const builder = attempts[0]?.actor ?? receipt.actor;
   return {
     bytes,
     row: {
@@ -217,6 +220,9 @@ async function evidence(
       // The agent run and its declared client (harness, model) that submitted it (81d12a32).
       agentRun: receipt.agentRun ?? null,
       agentClient: receipt.agentClient ?? null,
+      ...(builder || receipt.authorship || receipt.agentClient || receipt.agentRun
+        ? { builderModel: authorshipLabel({ ...receipt, actor: builder }).model }
+        : {}),
       // A shared cohort check that failed before this member landed: counted, never hidden by the fallback.
       sharedBatch: state?.batchDiagnostic?.sharedRunId
         ? {
