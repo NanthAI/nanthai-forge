@@ -216,9 +216,13 @@ export async function writeHostedCheck(
     ...(providerDelayChanged ? { providerDelayed: true } : {}),
   });
 }
-export async function completeHostedCheck(ctx: MutationCtx, run: HostedCheckRun) {
+export async function completeHostedCheck(
+  ctx: MutationCtx,
+  run: HostedCheckRun,
+  usageSubmissions?: readonly string[],
+) {
   if (run.status === 'cancelled')
-    deferCancelledRunWrite(ctx, run.id, () =>
+    deferCancelledRunWrite(ctx, run.id, usageSubmissions ?? [], () =>
       markCancelledRunPending(ctx, run.projectId as Id<'hostedProjects'>, run.id),
     );
   if (run.configuration.provider !== 'ci-status')

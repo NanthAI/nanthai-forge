@@ -231,7 +231,7 @@ export async function receiveHostedCheckCallback(
             environmentFingerprint: run.configuration.environmentFingerprint,
           }),
         };
-      await completeHostedCheck(ctx, run);
+      await completeHostedCheck(ctx, run, row.cancelledUsage?.submissions);
       if (!objectReportTransport(run)) await recordHostedTestTimings(ctx, input.projectId, run);
       else if (result.contractReports)
         await recordHostedTestTimings(

@@ -49,7 +49,7 @@ export async function settleCiStatus(
     status,
     reason,
   });
-  await completeHostedCheck(ctx, run);
+  await completeHostedCheck(ctx, run, row.cancelledUsage?.submissions);
   await writeHostedCheck(ctx, row._id, run, status === 'passed');
 }
 

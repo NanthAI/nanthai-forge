@@ -1,1 +1,3 @@
 Per-landing [speed and cost budgets](../../agents/speed-budgets.md) cover submit-to-main, checks, settlement, save/preflight, attempts, Work writes, price-weighted R2 compose requests and bytes, and runner minutes; rolling-window breaks and recoveries share the existing alert and Issue path. [Flip 5's Work store](../../architecture.md) supports item versions and independent primary writers, with explicit reader/writer cutover and comparison rather than a claim that every deployment has switched.
+
+The `landings` reply shows pending cancelled-run usage separately from unknown discarded runner-minutes.

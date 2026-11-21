@@ -12,7 +12,11 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 import type { HostedLandingRequest, HostedLandingState } from '../src/hosted-landing';
-import { supersededCheckCosts, type SupersededCheck } from './projectHostedLandingRunnerCosts';
+import {
+  latestCancelledRun,
+  supersededCheckCosts,
+  type SupersededCheck,
+} from './projectHostedLandingRunnerCosts';
 
 export const landingAlias = (
   ctx: QueryCtx | MutationCtx,
@@ -121,7 +125,7 @@ export async function reuseHostedLanding(
         state,
         existing.runId ?? existing.admission?.runId,
         existing.supersededCheck,
-        existing.runnerAccounting?.lastCancelled,
+        latestCancelledRun(ctx, existing),
       ),
     };
   if (!input.workCharged) await chargeMemberWork(ctx, input.project, input.actor, 'submissions');

@@ -7,7 +7,7 @@ import { convexFetch } from './networkFetch';
 import { actionsToken, githubAppRequest } from './githubAppToken';
 import { requireStoredRepositoryBinding, runnerTokenScope, type RunnerScope } from './githubBindingAccess';
 import { correctCancelledRun } from './projectCancelledRunOwners';
-import { cancelledJobUsage } from './cancelledRunUsage';
+import { cancelledJobUsage, cancelledUsageRepository } from './cancelledRunUsage';
 import { hostedCheckTerminal } from '../src/hosted-check';
 import { invariant } from '../src/errors';
 import type { Id } from './_generated/dataModel';
@@ -33,12 +33,7 @@ export async function cancelledUsageTarget(
   if ((run.status !== 'cancelled' && !providerCancelled) || row.cancelledUsage?.corrected || !run.executionId)
     return null;
   const provider = run.configuration;
-  const repository =
-    provider.provider === 'github-actions'
-      ? provider.repository
-      : provider.provider === 'ci-status' && provider.ci.adapter === 'github-actions'
-        ? provider.ci.repository
-        : null;
+  const repository = cancelledUsageRepository(provider);
   if (!repository) return null;
   // Accounting authorization failure must not roll back the existing verdict,
   // report collection or cleanup decision. Usage stays pending/unknown instead.

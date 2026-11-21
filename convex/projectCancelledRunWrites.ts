@@ -6,7 +6,8 @@ import type { MutationCtx } from './_generated/server';
 // or record a stale budget sample after cancelling a run. No RPC/timer is used.
 const contextKey = Symbol('cancelled-run-accounting');
 type AccountingContext = MutationCtx & { [contextKey]?: object };
-const pending = new WeakMap<object, Map<string, () => Promise<void>>>();
+type DeferredCancellation = { submissions: readonly string[]; apply: () => Promise<void> };
+const pending = new WeakMap<object, Map<string, DeferredCancellation>>();
 /** CLI custom contexts copy enumerable symbols along with the existing ports. */
 export function cancelledRunWriter(ctx: MutationCtx): MutationCtx {
   const identity = {};
@@ -23,16 +24,25 @@ export function cancelledRunWriter(ctx: MutationCtx): MutationCtx {
   });
 }
 const key = (ctx: MutationCtx) => (ctx as AccountingContext)[contextKey] ?? ctx;
-export function deferCancelledRunWrite(ctx: MutationCtx, runId: string, apply: () => Promise<void>) {
+export function deferCancelledRunWrite(
+  ctx: MutationCtx,
+  runId: string,
+  submissions: readonly string[],
+  apply: () => Promise<void>,
+) {
   let work = pending.get(key(ctx));
   if (!work) pending.set(key(ctx), (work = new Map()));
-  work.set(runId, apply);
+  work.set(runId, { submissions, apply });
 }
+export function hasDeferredCancelledUsage(ctx: MutationCtx, runId: string, submissionId: string): boolean {
+  return pending.get(key(ctx))?.get(runId)?.submissions.includes(submissionId) ?? false;
+}
+
 export function finishCancelledRunWrites(ctx: MutationCtx): Promise<void> | undefined {
   const work = pending.get(key(ctx));
   if (!work?.size) return;
   pending.delete(key(ctx));
   return (async () => {
-    for (const apply of work.values()) await apply();
+    for (const { apply } of work.values()) await apply();
   })();
 }

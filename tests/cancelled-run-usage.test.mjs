@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { readLandingTransition } from '../dist/hosted-landing.js';
 import { statsDay } from '../dist/stats-estimate.js';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
+import { desired, landingApi } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-const { cancelledJobUsage, adjustClosedRunnerDay, pendingRunnerState } = await import(
+const { cancelledJobUsage, adjustClosedRunnerDay } = await import(
   moduleUrl('../convex/cancelledRunUsage.ts')
 );
 const usageApi = await import(moduleUrl('../convex/projectCancelledRunUsage.ts'));
@@ -170,11 +172,11 @@ test('cancelled usage stays pending until completion, is shared once, and correc
   for (const r of f.tables.projectHostedLandingRequests.values()) assert.equal(r.runnerAccounting.pending, 1);
   assert.equal(JSON.parse(row.value).cost.status, 'unknown');
   const { landingCosts } = await import('../dist/hosted-landings-view.js');
-  for (const r of f.tables.projectHostedLandingRequests.values())
-    assert.equal(
-      landingCosts(pendingRunnerState(JSON.parse(r.value), r.runnerAccounting.pending), 0).runnerDiscarded,
-      null,
-    );
+  for (const r of f.tables.projectHostedLandingRequests.values()) {
+    const costs = landingCosts(JSON.parse(r.value), 0, r.runnerAccounting.pending);
+    assert.equal(costs.runnerDiscarded, null);
+    assert.equal(costs.runnerDiscardedPending, true);
+  }
   await finish(f);
   const { repairLandingSpeedPage } = await import(moduleUrl('../convex/projectLandingSpeedRepair.ts'));
   await f.tx(
@@ -243,6 +245,30 @@ test('cancelled usage stays pending until completion, is shared once, and correc
       ...closed.runnerContributions,
       ...synthetic.map(l => ({ submissionId: l.id, reruns: 0 })),
     ],
+  });
+  const cappedDay = f.tables.projectStatsDays.get(closed._id);
+  const statsRange = { projectId: f.projectId, from: day, to: day };
+  const withAttribution = await f.tx('statsReadWithAttribution', statsApi.read, statsRange);
+  const withMeter = f.counts.at(-1);
+  f.patch('projectStatsDays', closed._id, { runnerContributions: undefined });
+  const withoutAttribution = await f.tx('statsReadWithoutAttribution', statsApi.read, statsRange);
+  const withoutMeter = f.counts.at(-1);
+  f.patch('projectStatsDays', closed._id, { runnerContributions: cappedDay.runnerContributions });
+  assert.equal(withAttribution, withoutAttribution, 'Stats does not return its correction metadata');
+  assert.equal(withMeter.ranges, withoutMeter.ranges);
+  assert.equal(withMeter.documents, withoutMeter.documents);
+  const { runnerContributions, ...withoutColumn } = cappedDay;
+  assert.equal(runnerContributions.length, 1000);
+  const documentDelta =
+    Buffer.byteLength(JSON.stringify(cappedDay)) - Buffer.byteLength(JSON.stringify(withoutColumn));
+  assert.equal(withMeter.readBytes - withoutMeter.readBytes, documentDelta);
+  assert(documentDelta < 90 * 1024, `1,000 correction contributions use ${documentDelta} bytes`);
+  console.log('stats-runner-contributions', {
+    documentDelta,
+    withBytes: withMeter.readBytes,
+    withoutBytes: withoutMeter.readBytes,
+    documents: withMeter.documents,
+    ranges: withMeter.ranges,
   });
   const original = JSON.parse(f.tables.projectStatsDays.get(closed._id).value);
   f.advanceClock(86_400_000); // The provider completion arrives after the landing day closed.
@@ -516,6 +542,278 @@ test('provider timings arriving before Forge cancellation survive the existing r
   assert.equal(f.counts.at(-1).writes, 0);
 });
 
+for (const failure of ['missing', 'unreadable', 'invalid JSON', 'invalid schema', 'unwritable']) {
+  test(`a closed Stats day with a ${failure} record cannot roll back a provider cancellation or its usage`, async t => {
+    const f = await batchesFixture(t, { count: 1, batching: false });
+    await f.drain();
+    const row = [...f.tables.projectHostedCheckRuns.values()].find(r => r.status === 'queued');
+    const run = JSON.parse(row.value);
+    f.patch('projectHostedCheckRuns', row._id, { value: JSON.stringify({ ...run, executionId: '123' }) });
+    const day = new Date(row._creationTime).toISOString().slice(0, 10);
+    if (failure !== 'missing' && failure !== 'unreadable') {
+      const tally = { runs: 1, seconds: 0, unknown: 1 };
+      const ci = {
+        all: tally,
+        accepted: tally,
+        pending: tally,
+        unlinked: tally,
+        audits: tally,
+        soloFull: tally,
+        discarded: { mainMoved: tally, failed: tally, cancelled: tally, superseded: tally },
+      };
+      const value =
+        failure === 'invalid JSON'
+          ? '{'
+          : failure === 'invalid schema'
+            ? '{}'
+            : JSON.stringify({ ...statsDay(day, []), ci });
+      await f.tx(
+        'seedUnavailableStats',
+        {
+          _handler: ctx =>
+            ctx.db.insert('projectStatsDays', {
+              projectId: f.projectId,
+              day,
+              value,
+              lateRuns: [{ runId: run.id, bucket: 'cancelled' }],
+            }),
+        },
+        {},
+      );
+    }
+    const report = {
+      projectId: f.projectId,
+      runId: run.id,
+      fence: run.fence,
+      executionId: '123',
+      usage: cancelledJobUsage(jobs(), '123'),
+    };
+    await f.tx('earlyUsageBeforeCancel', usageApi.complete, report);
+    const { internalMutation } = await import(moduleUrl('../convex/server.ts'));
+    const { cancelHostedCheck } = await import(moduleUrl('../convex/projectHostedCheckCancel.ts'));
+    const { v } = await import('convex/values');
+    const cancel = internalMutation({
+      args: {},
+      returns: v.null(),
+      handler: async ctx => {
+        const db = new Proxy(ctx.db, {
+          get(target, property) {
+            if (property === 'query' && failure === 'unreadable')
+              return table => {
+                if (table === 'projectStatsDays') throw new Error('Stats read unavailable');
+                return target.query(table);
+              };
+            if (property === 'patch' && failure === 'unwritable')
+              return (id, patch) => {
+                if (f.tables.projectStatsDays.has(id)) throw new Error('Stats write unavailable');
+                return target.patch(id, patch);
+              };
+            return Reflect.get(target, property);
+          },
+        });
+        await cancelHostedCheck({ ...ctx, db }, { projectId: f.projectId, runId: run.id });
+        return null;
+      },
+    });
+    await f.tx('cancelWithUnavailableStats', cancel, {});
+    const cancelled = JSON.parse(f.tables.projectHostedCheckRuns.get(row._id).value);
+    assert.equal(cancelled.status, 'cancelled');
+    assert.equal(cancelled.cost.seconds, 210);
+    const [owner] = f.tables.projectHostedLandingRequests.values();
+    assert.equal(owner.runnerAccounting.pending, 0);
+    assert.equal(JSON.parse(owner.value).counts.discardedRunnerSeconds, 210);
+    await f.tx('replayCorrectedCancellation', usageApi.complete, report);
+    assert.equal(f.counts.at(-1).writes, 0);
+  });
+}
+
+for (const failure of ['unreadable receipt', 'unwritable day']) {
+  test(`a final report corrects the last applied landing contribution after an ${failure}`, async t => {
+    const { f, row, runId, fence } = await cancelledFixture(t, false);
+    await finish(f);
+    // Start from a priced landing day, before this run's cancellation was attributed.
+    for (const owner of f.tables.projectHostedLandingRequests.values()) {
+      const state = JSON.parse(owner.value);
+      f.patch('projectHostedLandingRequests', owner._id, {
+        value: JSON.stringify({
+          ...state,
+          counts: {
+            ...state.counts,
+            runnerSeconds: 300,
+            discardedRunnerSeconds: 0,
+            discardedRunnerUnknown: undefined,
+          },
+        }),
+      });
+    }
+    const [receipt] = f.tables.projectHostedAcceptances.values();
+    const day = new Date(receipt._creationTime).toISOString().slice(0, 10);
+    await f.tx('closeBeforePending', statsApi.closeDay, { projectId: f.projectId, day });
+    const [dayRow] = f.tables.projectStatsDays.values();
+    const prior = JSON.parse(dayRow.value).runner;
+    assert.equal(prior.priced, 2);
+    assert.equal(prior.unknown, 0);
+    f.patch('projectHostedCheckRuns', row._id, { cancelledUsage: row.cancelledUsage });
+    const { internalMutation } = await import(moduleUrl('../convex/server.ts'));
+    const { markCancelledRunPending } = await import(moduleUrl('../convex/projectCancelledRunOwners.ts'));
+    const { v } = await import('convex/values');
+    const mark = internalMutation({
+      args: {},
+      returns: v.null(),
+      handler: async ctx => {
+        const db = new Proxy(ctx.db, {
+          get(target, property) {
+            if (property === 'query' && failure === 'unreadable receipt')
+              return table => {
+                if (table === 'projectHostedAcceptances') throw new Error('Receipt temporarily unreadable');
+                return target.query(table);
+              };
+            if (property === 'patch' && failure === 'unwritable day')
+              return (id, patch) => {
+                if (id === dayRow._id) throw new Error('Day temporarily unwritable');
+                return target.patch(id, patch);
+              };
+            return Reflect.get(target, property);
+          },
+        });
+        await markCancelledRunPending({ ...ctx, db }, f.projectId, runId);
+        return null;
+      },
+    });
+    await f.tx('pendingWithMissedStatsDelta', mark, {});
+    assert([...f.tables.projectHostedLandingRequests.values()].every(r => r.runnerAccounting.pending === 1));
+    assert.deepEqual(JSON.parse(f.tables.projectStatsDays.get(dayRow._id).value).runner, prior);
+    await f.tx('completeAfterMissedStatsDelta', usageApi.complete, {
+      projectId: f.projectId,
+      runId,
+      fence,
+      executionId: '123',
+      usage: cancelledJobUsage(jobs(), '123'),
+    });
+    assert.deepEqual(JSON.parse(f.tables.projectStatsDays.get(dayRow._id).value).runner, {
+      ...prior,
+      discardedSeconds: prior.discardedSeconds + 210,
+    });
+    assert(
+      [...f.tables.projectHostedLandingRequests.values()].every(
+        r => r.runnerAccounting.pending === 0 && r.runnerAccounting.statsBaseline === undefined,
+      ),
+    );
+  });
+}
+
+test('a cancelled machine check with no final usage collector stays unknown in its landing costs', async t => {
+  const name = 'FORGE_HOSTED_CHECK_KEY_SYNTHETIC';
+  const previous = process.env[name];
+  process.env[name] = 'f'.repeat(64);
+  t.after(() => {
+    if (previous === undefined) delete process.env[name];
+    else process.env[name] = previous;
+  });
+  const f = await batchesFixture(t, {
+    count: 1,
+    batching: false,
+    runner: { provider: 'mac', machineId: randomUUID(), environmentFingerprint: 'd'.repeat(64) },
+  });
+  await f.drain();
+  const [run] = f.runs();
+  await f.rawChecks.cancel(run.id);
+  const [owner] = f.tables.projectHostedLandingRequests.values();
+  const { landingCosts } = await import('../dist/hosted-landings-view.js');
+  const costs = landingCosts(JSON.parse(owner.value), 0, owner.runnerAccounting.pending);
+  assert.equal(owner.runnerAccounting.pending, 0);
+  assert.equal(
+    JSON.parse(owner.value).counts.discardedRunnerUnknown,
+    'superseded-check-execution-unreported',
+  );
+  assert.equal(costs.runnerDiscarded, null);
+  assert.equal(costs.runnerDiscardedPending, undefined);
+});
+
+for (const [mode, reportFirst] of [
+  ['direct', false],
+  ['direct', true],
+  ['desired', false],
+  ['desired', true],
+]) {
+  test(`${mode} resubmission in the cancellation transaction carries ${reportFirst ? 'early reported' : 'pending'} usage`, async t => {
+    const f = await batchesFixture(t, { count: 0, batching: false });
+    const request = f.request({ agent: true });
+    const command = {
+      operationId: request.operationId,
+      authorityEpoch: 1,
+      composeOperationId: request.finish.composeOperationId,
+      check: request.check,
+      after: null,
+    };
+    const original =
+      mode === 'direct'
+        ? await f.enqueue(request)
+        : JSON.parse(
+            await f.tx('originalDesired', desired.submit, {
+              projectId: f.projectId,
+              request: JSON.stringify(command),
+            }),
+          );
+    await f.drain();
+    const row = [...f.tables.projectHostedCheckRuns.values()].find(r => r.status === 'queued');
+    assert.deepEqual(row.cancelledUsage.submissions, [original.id]);
+    const run = JSON.parse(row.value);
+    f.patch('projectHostedCheckRuns', row._id, { value: JSON.stringify({ ...run, executionId: '123' }) });
+    const report = {
+      projectId: f.projectId,
+      runId: run.id,
+      fence: run.fence,
+      executionId: '123',
+      usage: cancelledJobUsage(jobs(), '123'),
+    };
+    if (reportFirst) await f.tx('earlyReport', usageApi.complete, report);
+    const { internalMutation } = await import(moduleUrl('../convex/server.ts'));
+    const { cancelHostedCheck } = await import(moduleUrl('../convex/projectHostedCheckCancel.ts'));
+    const { cancelHostedLanding } = await import(moduleUrl('../convex/projectHostedLandingCancel.ts'));
+    const { v } = await import('convex/values');
+    const cancelAndResubmit = internalMutation({
+      args: {},
+      returns: v.string(),
+      handler: async ctx => {
+        await cancelHostedCheck(ctx, { projectId: f.projectId, runId: run.id });
+        await cancelHostedLanding(ctx, {
+          projectId: f.projectId,
+          actor: original.actor,
+          request: { operationId: randomUUID(), submissionId: original.id, authorityEpoch: 1 },
+        });
+        const operationId = randomUUID();
+        const actor = { kind: 'agent', id: original.actor };
+        const next =
+          mode === 'direct'
+            ? await landingApi.enqueueHostedLanding(
+                ctx,
+                { projectId: f.projectId },
+                { ...request, operationId },
+                actor,
+              )
+            : JSON.parse(
+                await desired.submitDesiredLanding(ctx, f.projectId, { ...command, operationId }, actor),
+              );
+        return next.id;
+      },
+    });
+    const nextId = await f.tx('cancelAndResubmit', cancelAndResubmit, {});
+    const canonical = () =>
+      [...f.tables.projectHostedLandingRequests.values()].find(r => r.submissionId === nextId);
+    const successor = () =>
+      canonical() ?? [...f.tables.projectHostedLandingDesired.values()].find(r => r.submissionId === nextId);
+    assert.equal(JSON.parse(successor().value).supersedes, original.id);
+    assert.equal(successor().runnerAccounting.pending, reportFirst ? 0 : 1);
+    await f.drain();
+    await f.tx('finishReport', usageApi.complete, report);
+    assert.equal(f.tables.projectHostedCheckRuns.get(row._id).status, 'cancelled');
+    assert.equal(canonical().runnerAccounting.pending, 0);
+    assert.equal(JSON.parse(canonical().value).counts.discardedRunnerSeconds, 210);
+    assert.equal(JSON.parse(canonical().value).counts.discardedRunnerUnknown, undefined);
+  });
+}
+
 test('an eight-member cancelled cohort accounts by original submission in bounded metadata work', async t => {
   const f = await batchesFixture(t, { count: 8 });
   await f.drain();
@@ -598,8 +896,14 @@ test('a late cancelled-run report keeps a resubmitted landing off the first-try 
   const day = '2026-11-18';
   const at = Date.parse(`${day}T10:00:00.000Z`);
   const iso = ms => new Date(ms).toISOString();
-  const receipt = { id: 'receipt-1', submissionId: 's1', at: iso(at), agentRun: 'amber-fox' };
-  const state = { id: 's1', phase: 'landed', at: iso(at - 600_000), acceptance: { receiptId: 'receipt-1' } };
+  const receipt = {
+    id: randomUUID(),
+    submissionId: 's1',
+    at: iso(at),
+    agentRun: 'amber-fox',
+    actor: { id: 'owner', kind: 'agent' },
+  };
+  const state = { id: 's1', phase: 'landed', at: iso(at - 600_000), acceptance: { receiptId: receipt.id } };
   state.timing = { submittedAt: iso(at - 600_000), committedAt: iso(at) };
   // Before: the cancelled run's minutes are pending. After: it reported none, so no check was discarded; only the
   // earlier failed submission of the Intent keeps this landing from being a first try.

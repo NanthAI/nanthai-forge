@@ -104,6 +104,7 @@ function fixture() {
       revert,
       version,
       counts,
+      pending,
       message,
       created = minute(at),
     } = {},
@@ -125,6 +126,7 @@ function fixture() {
         runId: null,
         attemptId: sub,
         ...(revert ? { revertOf: revert } : {}),
+        ...(pending ? { runnerAccounting: { root: sub, pending } } : {}),
         ...(admitted
           ? { admission: { runId: `adm-${n}`, status: 'passed', endedAt: minute(at - 20), full: true } }
           : {}),
@@ -533,6 +535,25 @@ test('landings expose stamped costs and unknown legacy counts without another ro
   assert.equal(page.landings.length, 30);
   assert(page.bytesRead - old.bytesRead < 4096, 'only the pre-existing stamps enlarge DB bytes');
   assert(Buffer.byteLength(page.raw) < 64 * 1024);
+});
+
+test('landings label pending cancelled usage without pricing its lower bound or reading another row', async () => {
+  const waiting = fixture();
+  const complete = fixture();
+  const input = { at: 60, counts: { runnerSeconds: 300, discardedRunnerSeconds: 120 } };
+  waiting.landing(1, { ...input, pending: 1 });
+  complete.landing(1, input);
+  const [
+    {
+      landings: [pending],
+    },
+    {
+      landings: [known],
+    },
+  ] = await Promise.all([waiting.read(), complete.read()]);
+  assert.deepEqual(pending.costs, { ...known.costs, runnerDiscarded: null, runnerDiscardedPending: true });
+  assert.equal(waiting.meter.documents, complete.meter.documents);
+  assert.equal(waiting.meter.queries, complete.meter.queries);
 });
 
 test('landings title comes from the retained receipt message without additional record reads', async () => {

@@ -14,7 +14,7 @@ test('terminal landing lines use retained titles, explicit units, human times an
         laneId: '12345678-full-lane',
         landedHead: 'a'.repeat(64),
         acceptedBy: { kind: 'person', actor: 'river' },
-        costs: { runnerAccepted: 95.65, runnerDiscarded: null },
+        costs: { runnerAccepted: 95.65, runnerDiscarded: null, runnerDiscardedPending: true },
       },
     ],
   };
@@ -27,6 +27,12 @@ test('terminal landing lines use retained titles, explicit units, human times an
   assert(!line.includes('a'.repeat(64)));
   assert.deepEqual(result, original, 'machine evidence stays intact');
   assert.match(agent('landings', { landings: [{}] })[0], /title unavailable.*time unknown/);
+  const [landing] = result.landings;
+  for (const [costs, expected] of [
+    [{ runnerDiscarded: null }, /unknown discarded runner-minutes/],
+    [{ runnerDiscarded: 0 }, /0 discarded runner-minutes/],
+  ])
+    assert.match(agent('landings', { landings: [{ ...landing, costs }] })[0], expected);
 });
 
 test('terminal read lines identify the actual Lane, Item and selected source without inferring missing facts', () => {

@@ -141,7 +141,7 @@ export async function settleDirectActions(
     status,
     reason,
   });
-  await completeHostedCheck(ctx, run);
+  await completeHostedCheck(ctx, run, row.cancelledUsage?.submissions);
   if (!deferWrite) await writeHostedCheck(ctx, row._id, run);
   return run;
 }

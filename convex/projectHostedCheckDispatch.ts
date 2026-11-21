@@ -166,7 +166,7 @@ export async function controlHostedCheck(
       if (hostedCheckTerminal(run)) {
         run.endedAt = new Date(now).toISOString();
         run.terminalDigest = checkPin({ dispatchKey: run.dispatchKey, result: command.result });
-        await completeHostedCheck(ctx, run);
+        await completeHostedCheck(ctx, run, row.cancelledUsage?.submissions);
       }
     }
   }

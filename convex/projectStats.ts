@@ -67,7 +67,7 @@ const ms = (iso: string | undefined) => {
 };
 /** One accepted landing for the replay, from its receipt and landing row only. */
 export function statsLanding(
-  receipt: HostedAcceptance,
+  receipt: Pick<HostedAcceptance, 'id' | 'at' | 'agentRun' | 'actor'>,
   state: HostedLandingState | null,
   pending = 0,
   /** An earlier submission of the same Intent ended without landing before this one (metrics 5.1's retry rule). */

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { supersededCheckCosts } from './projectHostedLandingRunnerCosts';
+import { latestCancelledRun, supersededCheckCosts } from './projectHostedLandingRunnerCosts';
 import { withoutAuthorship, personStampValid } from '../src/work-actor-types';
 import { cancelPendingTask } from './schedulerCancel';
 import { chargeMemberWork } from './abuseLimits';
@@ -249,7 +249,8 @@ export async function submitDesiredLanding(
           : existingCanonical
             ? existingCanonical.supersededCheck
             : existing?.supersededCheck,
-        previousAccounting?.lastCancelled,
+        latestCancelledRun(ctx, queuedState ? queued : (existingCanonical ?? undefined)) ??
+          previousAccounting?.lastCancelled,
       )
     : undefined;
   const id = crypto.randomUUID(),

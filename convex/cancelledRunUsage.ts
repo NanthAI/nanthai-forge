@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { checkPin } from '../src/hosted-check';
+import { checkPin, type HostedCheckRun } from '../src/hosted-check';
 import type { HostedLandingState } from '../src/hosted-landing';
 import type { StatsDay, StatsLanding } from '../src/stats-estimate';
+
+export function cancelledUsageRepository(provider: HostedCheckRun['configuration']) {
+  if (provider.provider === 'github-actions') return provider.repository;
+  if (provider.provider === 'ci-status' && provider.ci.adapter === 'github-actions')
+    return provider.ci.repository;
+  return null;
+}
 
 /** One complete provider page. Missing/unfinished intervals remain unknown; skipped
  * or never-started cancelled jobs consumed no runner. All jobs bind the same run. */

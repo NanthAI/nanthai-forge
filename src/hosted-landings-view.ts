@@ -12,11 +12,13 @@ export const landingCostsSchema = z.object({
   r2BytesPut: z.number().nonnegative().nullable(),
   runnerAccepted: z.number().nonnegative().nullable(),
   runnerDiscarded: z.number().nonnegative().nullable(),
+  runnerDiscardedPending: z.literal(true).optional(),
   /** The accepted run's minutes when it was a full check; absent when scoped or unknown (Issue a217b83e). */
   runnerFull: z.number().nonnegative().optional(),
 });
 /** Same units as the ledger: runner seconds become minutes. No source or run lookup. */
-export function landingCosts(state: HostedLandingState | null, attempt: number | undefined) {
+export function landingCosts(state: HostedLandingState | null, attempt: number | undefined, pending = 0) {
+  const discarded = pending > 0 ? null : discardedRunnerSeconds(state);
   return {
     attempts: attempt === undefined ? null : attempt + 1,
     writes: Number.isSafeInteger(state?.version) ? state!.version + 1 : null,
@@ -24,7 +26,8 @@ export function landingCosts(state: HostedLandingState | null, attempt: number |
     r2ClassB: state?.counts?.r2?.[1] ?? null,
     r2BytesPut: state?.counts?.r2?.[2] ?? null,
     runnerAccepted: state?.counts?.runnerSeconds === undefined ? null : state.counts.runnerSeconds / 60,
-    runnerDiscarded: discardedRunnerSeconds(state) === null ? null : discardedRunnerSeconds(state)! / 60,
+    runnerDiscarded: discarded === null ? null : discarded / 60,
+    ...(pending > 0 ? { runnerDiscardedPending: true as const } : {}),
     ...(state?.counts?.runnerFull && state.counts.runnerSeconds !== undefined
       ? { runnerFull: state.counts.runnerSeconds / 60 }
       : {}),

@@ -4,7 +4,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import type { HostedCheckRun } from '../src/hosted-check';
 import type { HostedLandingState } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { pendingRunnerState } from './cancelledRunUsage';
+import { cancelledUsageRepository, pendingRunnerState } from './cancelledRunUsage';
 import {
   adjustCancelledRunDays,
   adjustClosedRunCi,
@@ -63,6 +63,54 @@ export async function cancelledRunOwner(
   };
 }
 
+type CancelledOwner = NonNullable<Awaited<ReturnType<typeof cancelledRunOwner>>>;
+type OwnerChange = CancelledOwnerChange & { owner: CancelledOwner; accounting: CancelledOwner['accounting'] };
+
+function ownerChange(
+  owner: CancelledOwner,
+  state: HostedLandingState,
+  pending: number,
+  runId: string,
+): OwnerChange {
+  const accounting = {
+    ...owner.accounting,
+    pending,
+    ...(!('runId' in owner.row) || !owner.row.runId || owner.row.runId === runId
+      ? { lastCancelled: runId }
+      : {}),
+  };
+  return {
+    owner,
+    accounting,
+    before: owner.state,
+    state,
+    beforePending: owner.accounting.pending,
+    pending,
+    statsBaseline: owner.accounting.statsBaseline,
+  };
+}
+
+/** Write canonical usage once, including any recovery input from the derived
+ * day. This is deliberately outside writeLanding so it cannot run queue work. */
+async function persistOwnerChanges(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  changes: OwnerChange[],
+) {
+  const missed = await adjustCancelledRunDays(ctx, projectId, changes);
+  for (const { owner, accounting, before, state } of changes) {
+    const runnerAccounting = { ...accounting };
+    const baseline = missed.get(state.id);
+    if (baseline) runnerAccounting.statsBaseline = baseline;
+    else delete runnerAccounting.statsBaseline;
+    await ctx.db.patch(owner.row._id, {
+      runnerAccounting,
+      ...(before === state ? {} : { value: canonicalPayload(state) }),
+    });
+  }
+  return changes.map(({ state, pending }) => pendingRunnerState(state, pending));
+}
+
 /** Same cancellation transaction; no terminal, version, source, order or wake field
  * changes. The run row fences duplicate pending increments by its immutable id. */
 export async function markCancelledRunPending(
@@ -80,59 +128,24 @@ export async function markCancelledRunPending(
     await correctCancelledRun(ctx, row, run, row.cancelledUsage.final);
     return;
   }
-  const changed = [];
-  const days: CancelledOwnerChange[] = [];
+  const awaitsProvider = Boolean(cancelledUsageRepository(run.configuration));
+  const changes: OwnerChange[] = [];
   const roots = new Set<string>();
   for (const id of row.cancelledUsage.submissions) {
     const owner = await cancelledRunOwner(ctx, projectId, id);
     if (!owner || roots.has(owner.accounting.root)) continue;
     roots.add(owner.accounting.root);
-    const accounting = {
-      ...owner.accounting,
-      pending: owner.accounting.pending + 1,
-      ...(!('runId' in owner.row) || !owner.row.runId || owner.row.runId === runId
-        ? { lastCancelled: runId }
-        : {}),
-    };
-    await ctx.db.patch(owner.row._id, { runnerAccounting: accounting });
-    changed.push(pendingRunnerState(owner.state, accounting.pending));
-    days.push({
-      before: owner.state,
-      state: owner.state,
-      beforePending: owner.accounting.pending,
-      pending: accounting.pending,
-    });
+    const state: HostedLandingState = awaitsProvider
+      ? owner.state
+      : {
+          ...owner.state,
+          counts: { ...owner.state.counts, discardedRunnerUnknown: 'superseded-check-execution-unreported' },
+        };
+    changes.push(ownerChange(owner, state, owner.accounting.pending + Number(awaitsProvider), runId));
   }
   await ctx.db.patch(row._id, { cancelledUsage: { ...row.cancelledUsage, pending: true } });
+  const changed = await persistOwnerChanges(ctx, projectId, changes);
   await correctLandingRunnerCosts(ctx, projectId, changed);
-  await adjustCancelledRunDays(ctx, projectId, days);
-}
-
-/** Patch only usage and its private pending count. In particular this is not
- * writeLanding: an accounting event cannot schedule or advance queue work. */
-export async function writeCancelledOwner(
-  ctx: MutationCtx,
-  owner: NonNullable<Awaited<ReturnType<typeof cancelledRunOwner>>>,
-  seconds: number,
-  wasPending: boolean,
-  runId: string,
-) {
-  const accounting = {
-    ...owner.accounting,
-    pending: Math.max(0, owner.accounting.pending - Number(wasPending)),
-    ...(!('runId' in owner.row) || !owner.row.runId || owner.row.runId === runId
-      ? { lastCancelled: runId }
-      : {}),
-  };
-  const state = {
-    ...owner.state,
-    counts: {
-      ...owner.state.counts,
-      discardedRunnerSeconds: (owner.state.counts?.discardedRunnerSeconds ?? 0) + seconds,
-    },
-  };
-  await ctx.db.patch(owner.row._id, { runnerAccounting: accounting, value: canonicalPayload(state) });
-  return { before: owner.state, state, beforePending: owner.accounting.pending, pending: accounting.pending };
 }
 
 /** One atomic correction, shared by late completion and the existing terminal hook. */
@@ -154,20 +167,23 @@ export async function correctCancelledRun(
     if (previous) previous.shares++;
     else owners.set(owner.accounting.root, { owner, shares: 1 });
   }
-  const corrected = [];
-  const changes: CancelledOwnerChange[] = [];
-  for (const { owner, shares } of owners.values()) {
-    const updated = await writeCancelledOwner(
-      ctx,
+  const changes = [...owners.values()].map(({ owner, shares }) => {
+    const seconds = (usage.seconds * shares) / submissions.length;
+    const state = {
+      ...owner.state,
+      counts: {
+        ...owner.state.counts,
+        discardedRunnerSeconds: (owner.state.counts?.discardedRunnerSeconds ?? 0) + seconds,
+      },
+    };
+    return ownerChange(
       owner,
-      (usage.seconds * shares) / submissions.length,
-      Boolean(row.cancelledUsage?.pending),
+      state,
+      Math.max(0, owner.accounting.pending - Number(Boolean(row.cancelledUsage?.pending))),
       run.id,
     );
-    corrected.push(pendingRunnerState(updated.state, updated.pending));
-    changes.push(updated);
-  }
-  await adjustCancelledRunDays(ctx, row.projectId, changes);
+  });
+  const corrected = await persistOwnerChanges(ctx, row.projectId, changes);
   await adjustClosedRunCi(ctx, row.projectId, { id: run.id, startedAt: row._creationTime }, usage.seconds);
   await correctLandingRunnerCosts(ctx, row.projectId, corrected);
   run.cost = { status: 'observed', ...usage, estimatedCostUsd: null };

@@ -88,7 +88,11 @@ Facts from the project's check runs and accepted landings, each with its unit:
 
 A run whose runner minutes are unknown is counted and adds nothing ("12 runs without minutes", by
 cause); it is never priced as zero. A cancelled run whose minutes arrive after its day closed adds them
-to that day's every-run figures, in its own cause, once (`lateRuns` on the day row). A day whose runs
+to that day's every-run figures, in its own cause, once (`lateRuns` on the day row). The landing's
+discarded minutes are credited separately to its acceptance day. Closed-day adjustments are best
+effort. If a day row is unavailable or invalid, the cancelled run and the landing still retain
+the reported minutes. A later correction can use the last values the day counted if a previous
+adjustment failed. A day whose runs
 could not be read (closed before every run was recorded) leaves the CI figures and is counted: a
 window of such days shows "not recorded" and why, never "landings to go". A day the close read only in
 part (past a cap) is marked `partial`, and the page says so wherever its figures show. Check runs left unread make
@@ -107,6 +111,10 @@ carries zero. An unreported execution carries the reason `superseded-check-execu
 later passes do not turn that missing usage into zero, and Stats excludes it from CI figures.
 Older resubmissions that lack a discarded-usage stamp are unknown too; their predecessor link
 identifies the missing carry, rather than implying zero waste. A recorded zero remains known on reuse.
+`nforge agent ROOT landings` reports accepted and discarded runner-minutes from the existing
+landing record, including each batch member's share. A cancellation awaiting GitHub provider usage shows
+`pending` (`runnerDiscardedPending: true` with `runnerDiscarded: null` in JSON). Missing usage
+without a pending cancellation shows `unknown`, including cancelled checks on providers with no final usage collector.
 
 The carry uses the predecessor row already read during selection. A small server-only checkpoint
 on the existing desired/request row resolves exact-run reuse when the successor binds its solo,

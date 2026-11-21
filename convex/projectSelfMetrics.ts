@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { pendingRunnerState } from './cancelledRunUsage';
 import { metricInputReferences } from './projectMetricInputReferences';
 import { journalLaneMetricsPage } from './projectJournalLaneMetrics';
 import { capsuleMetricsPage } from './projectLandingCapsuleMetrics';
@@ -359,8 +358,9 @@ export const page = query({
               // The submitting agent run's declared client: harness and model (81d12a32).
               agentClient: move.agentClient ?? null,
               costs: landingCosts(
-                pendingRunnerState(submitted, request?.runnerAccounting?.pending),
+                submitted,
                 attempt?.number ?? selected?.number,
+                request?.runnerAccounting?.pending,
               ),
               ...(submitted?.timing?.ms?.[0] == null ? {} : { saveMs: submitted.timing.ms[0] }),
               ...(submitted?.timing?.ms?.[1] == null ? {} : { preflightMs: submitted.timing.ms[1] }),

@@ -15,6 +15,17 @@ export const runnerAccounting = v.optional(
     root: v.string(),
     pending: v.number(),
     lastCancelled: v.optional(v.string()),
+    // Last applied Stats contribution after a derived day write or read failed.
+    // Retained only until the day can be corrected or a newer close includes the current state.
+    statsBaseline: v.optional(
+      v.object({
+        at: v.number(),
+        lastMissedAt: v.number(),
+        pending: v.boolean(),
+        discardedSeconds: v.union(v.number(), v.null()),
+        unknown: v.boolean(),
+      }),
+    ),
   }),
 );
 /** One main-red hold of a landing (receipt and Lane landing stamp `mainRedHolds`, Item 687d1eda). */
