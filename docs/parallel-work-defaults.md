@@ -1,6 +1,20 @@
 # Parallel-work defaults
 
-These defaults support parallel work. They are configurable except for the always-on rules below.
+Forge ships three always-on landing rules alongside configurable defaults for parallel work.
+
+## Always-on landing rules
+
+- **Freeze after submission.** Pause edits, saves and syncs while waiting for a submitted landing.
+  Resume when the landing settles or Forge directs you to recover it.
+- **Retry in the same Lane.** If a landing fails, fix the failure in that Lane and land it again.
+- **Follow queued conflict recovery.** If a queued landing reports `wouldConflict`, follow the reply's
+  recommended command. When main has changed, `land --save` syncs and lands the same Lane again.
+  If Forge recommends early resolution, sync to the exact pending predecessor, resolve the conflict
+  and land the same Lane. If Forge recommends waiting, keep waiting for the outcome.
+
+These rules apply with any [project settings](#project-settings), including when
+[affected-test preflight](#preflight) is off. See the [agent workflow](agents/workflow.md) for landing
+and recovery commands.
 
 ## Client settings (this machine)
 
