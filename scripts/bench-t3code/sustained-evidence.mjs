@@ -10,6 +10,7 @@ import { ConvexLaneTransport } from '../../dist/hosted-lane-transport.js';
 import { selectExactHostedSource, selectHostedMain } from '../../dist/mcp-hosted-source.js';
 import { parseNativeState } from '../../dist/state/format.js';
 import { readBenchJobs } from './sustained-capacity.mjs';
+import { certifyingSustainedCheck } from './sustained-score.mjs';
 
 const time = value => (typeof value === 'number' ? value : Date.parse(value));
 const unique = values => [...new Set(values.filter(Boolean))];
@@ -140,15 +141,9 @@ export async function collectSustained({
     if (landing.landedHead === lastHead) continue;
     if (lastHead && landing.landedBase.head !== lastHead) publicationsComplete = false;
     lastHead = landing.landedHead;
-    const exactRunId = landing.checkRunIds.findLast(
-      id =>
-        runs.get(id)?.status === 'passed' &&
-        runs.get(id)?.request.expectedHead === lastHead &&
-        runs.get(id)?.gate?.mode !== 'audit',
-    );
     const proofRunId = submissions.find(submission => submission.acceptance?.receiptId === landing.receiptId)
       ?.acceptance.proofRunId;
-    const runId = runs.get(proofRunId)?.status === 'passed' ? proofRunId : exactRunId;
+    const runId = certifyingSustainedCheck({ ...landing, head: lastHead, proofRunId }, runs);
     used.add(runId);
     publications.push({
       head: lastHead,

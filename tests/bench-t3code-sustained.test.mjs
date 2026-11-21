@@ -8,7 +8,7 @@ import test from 'node:test';
 import { replayDigest } from '../scripts/bench-t3code/replay-schedule.mjs';
 import { sustainedVerdict } from '../scripts/bench-t3code/sustained-oracle.mjs';
 import { fixtureFiles, releaseSustained, sustainedPlan } from '../scripts/bench-t3code/sustained-plan.mjs';
-import { scoreSustained } from '../scripts/bench-t3code/sustained-score.mjs';
+import { certifyingSustainedCheck, scoreSustained } from '../scripts/bench-t3code/sustained-score.mjs';
 import { sustainedWorkflow } from '../scripts/bench-t3code/sustained-workflow.mjs';
 import {
   sampleOrg,
@@ -87,6 +87,34 @@ test('main oracle distinguishes green overlaps, planted reds and mutated accepte
   const [path] = redFiles.keys();
   redFiles.set(path, 'corrupt');
   assert.deepEqual(sustainedVerdict(plan, redFiles).mismatches, [path]);
+});
+
+test('fast-mode s03 joins the one retained passed check pinned to its earlier head', () => {
+  const run = (expectedHead, status = 'passed', mode = 'full') => ({
+    status,
+    request: { expectedHead },
+    gate: { mode },
+  });
+  const runs = new Map([
+    ['admission', run('earlier-head')],
+    ['failed', run('another-head', 'failed')],
+    ['audit', run('published-head', 'passed', 'audit')],
+    ['other-pass', run('another-head')],
+    ['exact', run('published-head')],
+  ]);
+  const receipt = {
+    head: 'published-head',
+    firstCheck: { landedOn: 'admission-run' },
+    checkRunIds: ['admission', 'failed', 'audit'],
+  };
+  assert.equal(certifyingSustainedCheck(receipt, runs), 'admission');
+  assert.equal(certifyingSustainedCheck({ ...receipt, firstCheck: null }, runs), undefined);
+  assert.equal(certifyingSustainedCheck({ ...receipt, moreCheckRunIds: 1 }, runs), undefined);
+  assert.equal(certifyingSustainedCheck({ ...receipt, checkRunIdsPartial: true }, runs), undefined);
+  receipt.checkRunIds.push('other-pass');
+  assert.equal(certifyingSustainedCheck(receipt, runs), undefined);
+  receipt.checkRunIds.push('exact');
+  assert.equal(certifyingSustainedCheck(receipt, runs), 'exact');
 });
 
 test('scorer uses exact published States and keeps planted reds apart from discarded runner minutes', () => {
