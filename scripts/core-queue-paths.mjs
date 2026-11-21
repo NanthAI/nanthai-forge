@@ -15,6 +15,7 @@ const CORE = [
   /^convex\/(?:projectConvexSourceLease|projectConvexSourceActive|projectSourceJobs)\.ts$/,
   /^src\/(?:landing-(?!capsule|accepted-by|message|preview-records)|hosted-landing|hosted-finish|hosted-acceptance|hosted-batch|hosted-compose|hosted-cross-head|hosted-would-conflict|hosted-land-gates|hosted-queue-status|scoped-recheck|check-reuse|queue-|first-check-risk)[^/]*\.ts$/,
   /^src\/hosted-check(?:-evidence|-verdict|-controller|-only-compose)?\.ts$/,
+  /^src\/package-placement\.ts$/,
 ];
 /** True for a core queue path. */
 export const coreQueuePath = path => CORE.some(pattern => pattern.test(path));

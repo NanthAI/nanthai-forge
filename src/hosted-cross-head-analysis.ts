@@ -191,9 +191,13 @@ export async function analyzeCrossHeadReuse(
   const checkedScope = selection.scope;
   if (checkedScope !== 'full' && checkedScope !== 'docs') return { reason: 'checked-not-full' };
   if (audit.scope !== 'full') return { reason: 'audit-not-full' };
-  // A placed manifest is the stronger evidence, so it is tried first even in fast mode.
+  // Main-side standalone evidence must come from a full check of main itself. An older
+  // audit may prove coverage, but its graph cannot describe a package added since that check.
   const placement = risky
-    ? placedRiskBetween(candidatePaths, mainPaths, checkEntries, pinnedPackagePlacement(selection))
+    ? placedRiskBetween(candidatePaths, mainPaths, checkEntries, pinnedPackagePlacement(selection), {
+        standalone: !fast && checkedScope === 'full',
+        ...(basis.audit.head === basis.main.head ? { mainSelection: audit } : {}),
+      })
     : [];
   if (!placement && !relaxRisk) return { reason: riskRefusal };
   if (!placement) relaxed.push('global-risk');

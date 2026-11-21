@@ -351,6 +351,39 @@ counts only when it is Markdown or under `docs/`); the proof records `placedRisk
 risk file, a missing pin, and placed manifests on both sides keep the recheck. Works
 for every ecosystem the [package graph](workflows.md#check-command-scope) reads (npm, Cargo, Go, Gradle, …).
 
+The placement reader also accepts `package-placement-v3` pins. The runner still writes
+v2 pins, which keep the existing decisions. To certify a nested package as standalone
+in a v3 row, the runner must have complete evidence of all five facts.
+
+1. The toolchain keeps the package outside the enclosing build. Go has its own
+   `go.mod`. Cargo names the folder in a workspace's `exclude` or has no enclosing
+   workspace. JavaScript has no matching enclosing workspace pattern and has its
+   own lockfile or no dependencies. Other ecosystems have no standalone rule.
+2. No other package depends on or claims the folder. The package has no unresolved
+   references, and cross-ecosystem widening cannot make the change reach other packages.
+3. Where Forge reads the ecosystem's module graph, the graph is complete for this
+   question and shows no import into the package from outside it.
+4. No check entry, CI file, declared `globalRiskPaths` entry or enclosing package
+   script names the folder or a parent below the root. A shell command entering
+   the folder or a script glob naming a parent keeps the recheck. A workspace glob
+   that includes the folder keeps the ordinary workspace-member placement.
+5. The package has a command for its own tests if it contains any.
+
+For strict reuse the Candidate-side proof reads the Candidate check's pin. For a
+main-side manifest or lockfile, standalone evidence comes from the already-read
+audit pin only when the audit checked current main exactly. Missing, unreadable
+or incomplete evidence keeps the existing placement decision. A standalone
+manifest or lockfile reaches only its own package, and the receipt records the
+evidence as `standalone: go-module`, `cargo-exclude` or `js-non-member`. Root and
+workspace files, CI and check entries, manifests on both sides and a shared sequence
+folder still keep the recheck. The rule uses the same six pinned objects and leaves
+test selection unchanged.
+
+A dynamic read that walks the repository or a new import on the other side can
+still couple two path-disjoint changes. Each side passed its own full check.
+The main audit checks the combination and can revert a proven culprit. A reader
+added via a manifest, workspace file or CI entry already keeps the recheck.
+
 The Lane check never re-runs because main moved. Re-running it would race main
 again (model finding 5, moving-main starvation) and add a full run per move; the
 combined check verifies the same interaction once per cohort.

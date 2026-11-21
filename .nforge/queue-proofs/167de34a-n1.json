@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "src/hosted-cross-head-analysis.ts": "a71278ac453258f6245aaf03003501bfa7ca8614bdc872a3f2f5af376b94220c",
+    "src/hosted-cross-head-proof.ts": "a2c57ab7c433332ecbdf2580ccf0e37c76a6e5047536ea7599ee3085fc0da14f",
+    "src/package-placement.ts": "38c3e65bbd1705960f5d4648cd0f818e4e4f54988c2fde45788c4f874969bb80"
+  },
+  "replay": {
+    "incident": "1018d0f8",
+    "test": "incident 1018d0f8: only a standalone pin from the side adding the nested package carries its check",
+    "receipt": "0a1854f1-5b45-42b5-bc0f-c0ae92a5115f"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "01a1ff71-c1ea-74c0-a6c6-e35193e30e16",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "01a1ff7b-9261-7fe1-8c2b-12ddf2ff044b",
+    "receipt": "cb0d7219-57de-437e-bfa7-ccec1bd967d5"
+  }
+}

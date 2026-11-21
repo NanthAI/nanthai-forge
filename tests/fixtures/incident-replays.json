@@ -2586,6 +2586,18 @@
       "test": "incident 1018d0f8: alert refresh preserves every outstanding Done-when line and reconciliation holds it open"
     },
     {
+      "incident": "1018d0f8",
+      "what": "Three nested-package additions discarded passing checks as global risk",
+      "file": "tests/package-placement-standalone.test.mjs",
+      "paths": [
+        "src/first-check-risk.ts",
+        "src/hosted-cross-head-analysis.ts",
+        "src/hosted-cross-head-proof.ts",
+        "src/package-placement.ts"
+      ],
+      "test": "incident 1018d0f8: only a standalone pin from the side adding the nested package carries its check"
+    },
+    {
       "incident": "f5c45985",
       "what": "A discarded operation stamp was hidden by a missing accepted-run stamp, understating the alert window",
       "file": "tests/landing-speed-alerts.test.mjs",
