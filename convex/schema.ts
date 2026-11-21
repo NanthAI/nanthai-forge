@@ -28,6 +28,7 @@ import { sourceStepTables } from './projectSourceStepFields';
 import { workDetailMigration, workDetailTables } from './projectWorkDetailFields';
 import { hostedSeedTables } from './projectHostedSeedFields';
 import { backfillFields } from './r2BackfillFields';
+import { r2ReferencePosition } from './projectPurgeReferenceFields';
 import { sourceAuthority, sourceAuthorityTables } from './projectSourceAuthorityFields';
 import { actorTables } from './projectActorFields';
 import { autonomyPolicy, autonomyTables, automaticAction } from './autonomyFields';
@@ -324,6 +325,7 @@ export const projectPurgeBlocked = v.union(
   v.literal('R2_MAINTENANCE_DISABLED'),
   v.literal('R2_PURGE_RETRY_EXHAUSTED'),
   v.literal('R2_PURGE_UNAUTHORIZED'),
+  v.literal('R2_PURGE_SHARED'),
 );
 export const projectRetention = v.object({
   purgeAt: v.number(),
@@ -352,6 +354,8 @@ export const projectPurge = v.object({
   /** R2 objects and bytes removed under the project prefix. */
   r2Objects: v.optional(v.number()),
   r2Bytes: v.optional(v.number()),
+  /** Whether this purge kept the original alias-to-key metadata through the row phase. */
+  artifactInventoryIntact: v.optional(v.boolean()),
   completedAt: v.optional(v.number()),
 });
 const projectFields = {
@@ -444,7 +448,14 @@ const projectFields = {
     ),
   ),
   r2Purge: v.optional(
-    v.object({ generation: v.number(), cursor: v.union(v.string(), v.null()), failures: v.number() }),
+    v.object({
+      generation: v.number(),
+      cursor: v.union(v.string(), v.null()),
+      failures: v.number(),
+      references: v.optional(
+        v.object({ operationId: v.string(), next: v.union(r2ReferencePosition, v.null()) }),
+      ),
+    }),
   ),
   sourceAuthority: v.optional(sourceAuthority),
   /** Minimum State-source reader after a trusted complete physical root is committed. */

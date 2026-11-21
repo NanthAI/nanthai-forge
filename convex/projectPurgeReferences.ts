@@ -3,6 +3,7 @@ import { getDocumentSize, v, type Infer } from 'convex/values';
 import type { PaginationOptions, PaginationResult } from 'convex/server';
 import type { Id } from './_generated/dataModel';
 import type { QueryCtx } from './server';
+import { r2ReferencePosition, r2Sections } from './projectPurgeReferenceFields';
 import { projectPrefix } from './r2Operations';
 import { invariant } from '../src/errors';
 
@@ -71,15 +72,19 @@ const foreignRows = {
         .query('projectUploadCleanup')
         .withIndex('by_project_and_pending', q => q[side]('projectId', projectId)),
   ],
-} satisfies Record<string, [string, (ctx: QueryCtx, projectId: ProjectId, side: Side) => PageQuery<KeyRow>]>;
+} satisfies Record<
+  string,
+  [string, (ctx: Pick<QueryCtx, 'db'>, projectId: ProjectId, side: Side) => PageQuery<KeyRow>]
+>;
 
 type Section = keyof typeof candidates | keyof typeof foreignRows | 'artifactKeys';
-const sections = [...Object.keys(candidates), ...Object.keys(foreignRows), 'artifactKeys'] as Section[];
+const sections = [...Object.keys(candidates), ...r2Sections] as Section[];
 const cursor = v.union(v.string(), v.null());
 const scan = v.object({
   section: v.union(...sections.map(section => v.literal(section))),
   cursor,
-  side: v.optional(v.union(v.literal('lt'), v.literal('gt'))),
+  side: r2ReferencePosition.fields.side,
+  single: r2ReferencePosition.fields.single,
 });
 const alias = v.object({
   id: v.string(),
@@ -112,7 +117,7 @@ function readPage<Row>(selection: PageQuery<Row>, cursor: string | null, numItem
   return selection.paginate({ cursor, numItems, maximumRowsRead: numItems, maximumBytesRead: 512 * 1024 });
 }
 
-async function importReference(ctx: QueryCtx, key: string) {
+async function importReference(ctx: Pick<QueryCtx, 'db'>, key: string) {
   const jobs = await ctx.db
     .query('imports')
     .withIndex('by_artifactKey', q => q.eq('artifactKey', key))
@@ -184,7 +189,7 @@ const isStorage = (section: Section): section is keyof typeof candidates =>
 async function scanSection(
   ctx: QueryCtx,
   projectId: ProjectId,
-  { section, cursor, side = 'lt' }: Infer<typeof scan>,
+  { section, cursor, side = 'lt', single }: Infer<typeof scan>,
   references: Reference[],
 ): Promise<Position | null> {
   const following = sections[sections.indexOf(section) + 1];
@@ -207,32 +212,70 @@ async function scanSection(
     );
   }
 
+  return (
+    await scanR2References(
+      ctx,
+      projectId,
+      { section, side, cursor, ...(single ? { single } : {}) },
+      references,
+    )
+  ).next;
+}
+
+/** Returns the next unchecked R2 range. A split-required page can prove presence
+ * but cannot prove absence, so retry its original range one document at a time. */
+export async function scanR2References(
+  ctx: Pick<QueryCtx, 'db'>,
+  projectId: ProjectId,
+  position: Infer<typeof r2ReferencePosition> = { section: 'objectKeys', cursor: null },
+  references: Reference[] = [],
+) {
+  const { section, cursor, side = 'lt', single } = position;
+  const following = r2Sections[r2Sections.indexOf(section) + 1];
+  const resume = following ? { section: following, cursor: null } : null;
   const prefix = projectPrefix(projectId);
+  const read = <Row>(selection: PageQuery<Row>, size: number) =>
+    single ? selection.paginate({ cursor, numItems: 1 }) : readPage(selection, cursor, size);
+  const advance = <Row>(page: PaginationResult<Row>, end: Infer<typeof r2ReferencePosition> | null) => {
+    if (page.pageStatus === 'SplitRequired') {
+      invariant(!single, 'WORK_STALE', 'The R2 reference range could not be read completely.');
+      return { ...position, single: true as const };
+    }
+    invariant(
+      page.isDone || page.continueCursor !== cursor,
+      'WORK_STALE',
+      'The R2 reference range did not advance.',
+    );
+    return page.isDone ? end : { section, side, cursor: page.continueCursor };
+  };
+
   if (section === 'artifactKeys') {
     // Artifact keys derive from the namespace. The import aliases use its id.
-    const page = await readPage(
+    const page = await read(
       ctx.db
         .query('artifactBlobs')
         .withIndex('by_namespace_and_digest', q =>
           q.gte('namespace', prefix).lt('namespace', prefix.slice(0, -1) + '0'),
         ),
-      cursor,
       4,
     );
     for (const row of page.page) {
       const table = await importReference(ctx, `r2blob:${row._id}`);
-      if (table) references.push({ key: row.r2Key, table });
+      if (table && row.r2Key.startsWith(prefix)) references.push({ key: row.r2Key, table });
     }
-    return page.isDone ? resume : { section, cursor: page.continueCursor };
+    return { next: advance(page, resume), references };
   }
 
   const [table, range] = foreignRows[section];
-  const page = await readPage<KeyRow>(range(ctx, projectId, side), cursor, 256);
+  const page = await read<KeyRow>(range(ctx, projectId, side), 256);
   for (const row of page.page)
     for (const key of [row.r2Key, row.archiveReceipt?.r2Key])
       if (key?.startsWith(prefix)) references.push({ key, table });
-  if (!page.isDone) return { section, side, cursor: page.continueCursor };
-  return side === 'lt' ? { section, side: 'gt', cursor: null } : resume;
+
+  return {
+    next: advance(page, side === 'lt' ? { section, side: 'gt', cursor: null } : resume),
+    references,
+  };
 }
 
 export async function referencePage(

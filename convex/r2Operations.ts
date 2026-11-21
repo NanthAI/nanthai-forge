@@ -74,7 +74,8 @@ export async function listR2Prefix(
     'Object storage returned an invalid project-prefix page.',
   );
   // Size appears only inside each listed object's Contents; the purge reports bytes freed.
-  const bytes = [...body.matchAll(/<Size>(\d+)<\/Size>/g)].reduce((n, match) => n + Number(match[1]), 0);
+  const sizes = [...body.matchAll(/<Size>(\d+)<\/Size>/g)].map(match => Number(match[1]));
+  const bytes = sizes.reduce((sum, size) => sum + size, 0);
   const truncated = /<IsTruncated>true<\/IsTruncated>/.test(body);
   const next = body.match(/<NextContinuationToken>([\s\S]*?)<\/NextContinuationToken>/)?.[1];
   invariant(!truncated || !!next, 'R2_LIST_FAILED', 'Object storage omitted a continuation cursor.');
@@ -83,5 +84,5 @@ export async function listR2Prefix(
     Date.parse(match[1]!),
   );
   const modified = keys.map((_, index) => (times.length === keys.length ? times[index]! : NaN));
-  return { keys, bytes, modified, cursor: next ? xml(next) : null, isDone: !truncated };
+  return { keys, bytes, sizes, modified, cursor: next ? xml(next) : null, isDone: !truncated };
 }

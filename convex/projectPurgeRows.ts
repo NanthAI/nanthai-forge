@@ -53,8 +53,8 @@ async function chunk(ctx: MutationCtx, step: number, projectId: Id<'hostedProjec
 /** Steps: every `projectPurgeTables` entry in order, then the artifact namespace. */
 export const purgeSteps = projectPurgeOrder.length + 1;
 
-/** Delete one bounded page of project-owned rows (plus their exclusive Convex files and
- * pending scheduled functions). Records progress on the project; true when nothing is left. */
+/** Delete one bounded page of project-owned rows, leaving artifact bindings until R2
+ * finishes. Returns true when this phase reaches its end. */
 export async function purgeProjectRowsPage(ctx: MutationCtx, project: Doc<'hostedProjects'>) {
   const progress = project.purge ?? {
     operationId: project.lifecycle?.operationId ?? `purge:${project._id}`,
@@ -67,7 +67,8 @@ export async function purgeProjectRowsPage(ctx: MutationCtx, project: Doc<'hoste
   let step = progress.table ?? 0,
     rows = 0,
     bytes = 0;
-  while (step < purgeSteps && rows < purgePageBudget.rows && bytes < purgePageBudget.bytes) {
+  const end = project.r2PrefixPurged ? purgeSteps : projectPurgeOrder.length;
+  while (step < end && rows < purgePageBudget.rows && bytes < purgePageBudget.bytes) {
     const batch = await chunk(ctx, step, project._id);
     if (!batch.length) {
       step++;
@@ -94,15 +95,17 @@ export async function purgeProjectRowsPage(ctx: MutationCtx, project: Doc<'hoste
         for (const id of valuesAt(row, path)) await removeExclusive(ctx, id as Id<'_storage'>, row._id);
     }
   }
-  if (project.purge && !rows && step === (progress.table ?? 0)) return step >= purgeSteps;
+  if (project.purge && !rows && step === (progress.table ?? 0)) return step >= end;
   await ctx.db.patch(project._id, {
     purge: {
       ...progress,
+      // Rows with an old cursor may already have removed some artifact bindings.
+      artifactInventoryIntact: progress.artifactInventoryIntact ?? progress.table === undefined,
       table: step,
       rows: progress.rows + rows,
       bytes: progress.bytes + bytes,
       pages: progress.pages + 1,
     },
   });
-  return step >= purgeSteps;
+  return step >= end;
 }

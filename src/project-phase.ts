@@ -49,6 +49,7 @@ export type ProjectPhase = {
 /** Reason sentences for every purge-blocked code. Typed so a new code cannot ship without one. */
 export const purgeBlockedReasons = {
   R2_PURGE_RETRY_EXHAUSTED: 'R2 purge stopped after repeated storage errors.',
+  R2_PURGE_SHARED: 'Stored bytes still have a reference outside this project.',
   R2_PURGE_UNAUTHORIZED: 'The R2 prefix purge has no confirmed permanent-delete grant; retrying confirms it.',
   /** Retired code kept for existing rows: the prefix purge no longer reads the global switch. */
   R2_MAINTENANCE_DISABLED: 'The R2 prefix purge was stopped by a retired maintenance switch.',
@@ -56,6 +57,7 @@ export const purgeBlockedReasons = {
 export type PurgeBlockedCode = keyof typeof purgeBlockedReasons;
 const blockedNext = {
   R2_PURGE_RETRY_EXHAUSTED: 'Resolve the R2 storage failure, then retry removal.',
+  R2_PURGE_SHARED: 'Retry after the shared reference has been removed.',
   R2_PURGE_UNAUTHORIZED: 'Retry removal to confirm the grant and resume.',
   R2_MAINTENANCE_DISABLED: 'Retry removal to resume.',
 } as const satisfies Record<PurgeBlockedCode, string>;

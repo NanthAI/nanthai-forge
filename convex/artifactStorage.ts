@@ -139,6 +139,11 @@ export const removed = internalQuery({
   handler: async (ctx, { ref }) => {
     const id = artifactBlobId(ref),
       row = id ? await ctx.db.get(id) : null;
-    return row?.removed ? row : null;
+    if (!row?.removed) return null;
+    // Old per-archive cleanup tasks must defer to the guarded project-prefix purge.
+    const owner = /^v1\/p\/([^/]+)\//.exec(row.namespace)?.[1];
+    const projectId = owner ? ctx.db.normalizeId('hostedProjects', owner) : null;
+    const removal = projectId ? (await ctx.db.get(projectId))?.removal : undefined;
+    return removal === 'deleting' || removal === 'deleted' ? null : row;
   },
 });

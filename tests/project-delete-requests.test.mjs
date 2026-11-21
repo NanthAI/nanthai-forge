@@ -13,7 +13,7 @@ import { state } from './hosted-fixture.mjs';
 const requests = await import(moduleUrl('../convex/projectDeleteRequests.ts'));
 const { noteDeleteOutcome } = await import(moduleUrl('../convex/projectDeleteRequestOutcome.ts'));
 const lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
-const { prefixComplete } = await import(moduleUrl('../convex/projectR2Maintenance.ts'));
+const { pageResult, prefixComplete } = await import(moduleUrl('../convex/projectR2Maintenance.ts'));
 const { purgeSettleMs } = await import(moduleUrl('../convex/projectRetention.ts'));
 const code = expected => error => error.data?.code === expected;
 const fixtureNow = Date.parse('2026-11-17T08:00:00Z');
@@ -83,14 +83,17 @@ async function finishPurge(f, projectId) {
   for (let page = 0; get().removal === 'deleting'; page++) {
     assert.ok(page < 250, 'permanent deletion reaches a terminal receipt');
     const project = get();
-    if (project.r2Purge && !project.r2PrefixPurged)
-      await prefixComplete._handler(f.s.ctx, {
-        projectId,
-        generation: project.r2Purge.generation,
-        operationId: project.purge.operationId,
-        objects: 1,
-        bytes: 32,
-      });
+    if (project.r2Purge && !project.r2PrefixPurged) {
+      const args = { projectId, generation: project.r2Purge.generation };
+      if (project.r2Purge.references?.next === null)
+        await prefixComplete._handler(f.s.ctx, {
+          ...args,
+          operationId: project.purge.operationId,
+          objects: 1,
+          bytes: 32,
+        });
+      else await pageResult._handler(f.s.ctx, { ...args, outcome: 'references' });
+    }
     await lifecycle.purge._handler(f.s.ctx, { projectId });
   }
 }

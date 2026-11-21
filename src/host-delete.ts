@@ -21,7 +21,7 @@ import { readHostState, updateHostState, retirePendingHost } from './host-bindin
 import { WorkStore } from './work-store.js';
 import { ForgeError, invariant } from './errors.js';
 import { syncDirectory } from './state/durability.js';
-import { deriveProjectPhase } from './project-phase.js';
+import { deriveProjectPhase, type PurgeBlockedCode } from './project-phase.js';
 import type { HostedRunSubscription } from './hosted-agent-observe.js';
 import { deadlineConvexSubscription } from './network-convex-client.js';
 
@@ -32,7 +32,7 @@ type Project = {
   revision: number;
   currentBackup: string | null;
   removal?: 'trash' | 'deleting' | 'deleted';
-  purgeBlocked?: 'R2_MAINTENANCE_DISABLED' | 'R2_PURGE_RETRY_EXHAUSTED' | 'R2_PURGE_UNAUTHORIZED';
+  purgeBlocked?: PurgeBlockedCode;
   retention?: { purgeAt: number; revoking?: boolean };
   purge?: { completedAt?: number };
 };

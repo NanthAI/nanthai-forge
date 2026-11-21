@@ -375,7 +375,7 @@ export async function retainUploadCleanup(
     .unique();
   if (old) return old;
   const r2Only = row.location === 'r2' && !row.storageId;
-  if (r2Only) {
+  if (r2Only && project.removal !== 'deleting') {
     const artifact = await ctx.db
       .query('artifactBlobs')
       .withIndex('by_namespace_and_digest', q =>
@@ -508,15 +508,14 @@ export const purge = internalMutation({
       await schedule(ctx, (await ctx.db.get(projectId))!);
       return null;
     }
-    // Every remaining project-owned row (inventory-guarded), one bounded page per call.
+    // The row phase leaves the artifact namespace for after the guarded R2 stage.
     if (!(await purgeProjectRowsPage(ctx, project))) {
       await ctx.db.patch(projectId, { task: undefined });
       await schedule(ctx, (await ctx.db.get(projectId))!);
       return null;
     }
-    // Every project writes R2, so every deletion purges its R2 prefix once.
     if (!project.r2PrefixPurged) {
-      await scheduleR2Purge(ctx, project);
+      await scheduleR2Purge(ctx, (await ctx.db.get(projectId))!);
       return null;
     }
     // Root projections predate projectId coverage; remove by their source identity too.

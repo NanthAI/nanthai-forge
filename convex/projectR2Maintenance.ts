@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { projectExecution } from './projectExecution';
-import { v } from 'convex/values';
+import { v, type Infer } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalMutation, internalAction, internalQuery, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -11,6 +11,7 @@ import { r2Config, r2Key, headObject, checksumOf } from './r2';
 import { deleteR2Object, listR2Prefix, projectPrefix } from './r2Operations';
 import { ForgeError, invariant } from '../src/errors';
 import { scheduleR2Purge } from './projectPurgeScheduling';
+import { scanR2References } from './projectPurgeReferences';
 import { authorizedKeys, purgeAuthority, type PurgeAuthority } from './projectPurgeAuthority';
 import { noteDeleteOutcome } from './projectDeleteRequestOutcome';
 
@@ -129,19 +130,37 @@ export const sweepPage = internalAction({
   },
 });
 const authority = v.object({ prefix: v.string(), operationId: v.string() });
+const purgeState = v.object({
+  authority: v.union(v.null(), authority),
+  cursor: v.union(v.string(), v.null()),
+  referencesReady: v.boolean(),
+  artifactInventoryIntact: v.boolean(),
+});
+function referenceProof(project: Doc<'hostedProjects'>, grant: PurgeAuthority | null) {
+  const proof = project.r2Purge?.references;
+  return proof && proof.operationId === grant?.operationId ? proof : undefined;
+}
 /** A fenced delivery for a deleting project, with its scoped R2 grant (or none). */
 export const deletingProject = internalQuery({
   args: { projectId: v.id('hostedProjects'), generation: v.optional(v.number()) },
-  returns: v.union(v.null(), v.object({ authority: v.union(v.null(), authority) })),
+  returns: v.union(v.null(), purgeState),
   handler: async (ctx, { projectId, generation }) => {
     const project = await ctx.db.get(projectId);
     projectExecution(ctx, projectId, project?.name, project?.key);
-    return project?.removal === 'deleting' &&
-      !project.r2PrefixPurged &&
-      !project.purgeBlocked &&
-      (generation === undefined || project.r2Purge?.generation === generation)
-      ? { authority: purgeAuthority(project) }
-      : null;
+    if (
+      project?.removal !== 'deleting' ||
+      project.r2PrefixPurged ||
+      project.purgeBlocked ||
+      (generation !== undefined && project.r2Purge?.generation !== generation)
+    )
+      return null;
+    const grant = purgeAuthority(project);
+    return {
+      authority: grant,
+      cursor: project.r2Purge?.cursor ?? null,
+      referencesReady: referenceProof(project, grant)?.next === null,
+      artifactInventoryIntact: project.purge?.artifactInventoryIntact === true,
+    };
   },
 });
 const progress = { operationId: v.string(), objects: v.number(), bytes: v.number() };
@@ -177,6 +196,7 @@ export const prefixComplete = internalMutation({
       project.r2Purge?.generation === generation &&
       !project.r2PrefixPurged &&
       !project.purgeBlocked &&
+      referenceProof(project, purgeAuthority(project))?.next === null &&
       (await counted(ctx, project, page))
     ) {
       const task = await ctx.scheduler.runAfter(0, mutation('projectLifecycle:purge'), { projectId });
@@ -190,7 +210,12 @@ export const pageResult = internalMutation({
   args: {
     projectId: v.id('hostedProjects'),
     generation: v.number(),
-    outcome: v.union(v.literal('page'), v.literal('unauthorized'), v.literal('failed')),
+    outcome: v.union(
+      v.literal('references'),
+      v.literal('page'),
+      v.literal('unauthorized'),
+      v.literal('failed'),
+    ),
     cursor: v.optional(v.union(v.string(), v.null())),
     page: v.optional(v.object(progress)),
   },
@@ -205,35 +230,46 @@ export const pageResult = internalMutation({
       project.r2Purge?.generation !== generation
     )
       return null;
-    if (outcome === 'page') {
-      if (page && (await counted(ctx, project, page)))
-        await scheduleR2Purge(ctx, (await ctx.db.get(projectId))!, cursor ?? null);
-      else if (!page) {
-        await ctx.db.patch(projectId, { task: undefined, purgeBlocked: 'R2_PURGE_UNAUTHORIZED' });
+    const grant = purgeAuthority(project);
+    const proof = referenceProof(project, grant);
+    if (outcome === 'references' && grant) {
+      if (proof?.next === null) return null;
+      const scan = await scanR2References(ctx, projectId, proof?.next);
+      if (scan.references.length) {
+        await ctx.db.patch(projectId, { task: undefined, purgeBlocked: 'R2_PURGE_SHARED' });
         await noteDeleteOutcome(ctx, project, 'failed');
+      } else {
+        await scheduleR2Purge(ctx, project, {
+          failures: project.r2Purge.failures,
+          references: { operationId: grant.operationId, next: scan.next },
+        });
       }
+    } else if (outcome === 'page' && proof?.next === null && page) {
+      if (await counted(ctx, project, page))
+        await scheduleR2Purge(ctx, project, { cursor: cursor ?? null, references: proof });
     } else {
+      const unauthorized = outcome !== 'failed' || !grant;
       const failures = project.r2Purge.failures + 1;
-      if (outcome === 'unauthorized' || failures >= 8) {
+      if (unauthorized || failures >= 8) {
         await ctx.db.patch(projectId, {
           task: undefined,
-          purgeBlocked: outcome === 'unauthorized' ? 'R2_PURGE_UNAUTHORIZED' : 'R2_PURGE_RETRY_EXHAUSTED',
+          purgeBlocked: unauthorized ? 'R2_PURGE_UNAUTHORIZED' : 'R2_PURGE_RETRY_EXHAUSTED',
           r2Purge: { ...project.r2Purge, failures },
         });
         await noteDeleteOutcome(ctx, project, 'failed');
       } else
-        await scheduleR2Purge(
-          ctx,
-          project,
-          project.r2Purge.cursor,
+        await scheduleR2Purge(ctx, project, {
           failures,
-          Math.min(60_000 * 2 ** (failures - 1), 15 * 60_000),
-        );
+          delay: Math.min(60_000 * 2 ** (failures - 1), 15 * 60_000),
+          // Retry an incomplete reference page at the same cursor. A failed
+          // physical page needs a fresh full scan before another DELETE.
+          references: proof?.next ? proof : undefined,
+        });
     }
     return null;
   },
 });
-/** One prefix page per delivery: 1 query, 1 LIST, <= 100 DELETEs, 1 mutation. Deletes need the
+/** Each delivery scans one reference range or processes one R2 page. Deletes need the
  * project's own scoped purge grant (projectPurgeAuthority), never the global maintenance flag.
  * Legacy unfenced deliveries stop; an owner retry starts or resumes the tracked chain. */
 export const purgeDeletedProjectPage = internalAction({
@@ -245,18 +281,38 @@ export const purgeDeletedProjectPage = internalAction({
   returns: v.null(),
   handler: async (ctx, { projectId, generation, cursor = null }): Promise<null> => {
     if (generation === undefined) return null;
-    const state: { authority: PurgeAuthority | null } | null = await ctx.runQuery(
+    const state: Infer<typeof purgeState> | null = await ctx.runQuery(
       ref('projectR2Maintenance:deletingProject'),
       { projectId, generation },
     );
-    if (!state) return null;
+    if (!state || state.cursor !== cursor) return null;
     try {
       const grant = state.authority;
       invariant(grant, 'R2_PURGE_UNAUTHORIZED', 'This project has no confirmed or expired purge.');
-      const config = r2Config(),
-        page = await listR2Prefix(config, grant.prefix, cursor);
-      await Promise.all(authorizedKeys(grant, projectId, page.keys).map(key => deleteR2Object(config, key)));
-      const done = { operationId: grant.operationId, objects: page.keys.length, bytes: page.bytes };
+      if (!state.referencesReady) {
+        await ctx.runMutation(mutation('projectR2Maintenance:pageResult'), {
+          projectId,
+          generation,
+          outcome: 'references',
+        });
+        return null;
+      }
+      const config = r2Config();
+      const page = await listR2Prefix(config, grant.prefix, cursor);
+      // Old row-first purges can leave an import alias without its artifact
+      // binding. Preserve keys that could belong to that missing inventory.
+      const keys = authorizedKeys(grant, projectId, page.keys);
+      let bytes = page.bytes;
+      const deletable = state.artifactInventoryIntact
+        ? keys
+        : keys.filter((key, index) => {
+            if (!/\/a\/[a-f0-9]{64}$/.test(key)) return true;
+            invariant(page.sizes.length === keys.length, 'R2_LIST_FAILED', 'R2 omitted an object size.');
+            bytes -= page.sizes[index]!;
+            return false;
+          });
+      await Promise.all(deletable.map(key => deleteR2Object(config, key)));
+      const done = { operationId: grant.operationId, objects: deletable.length, bytes };
       if (!page.isDone)
         await ctx.runMutation(mutation('projectR2Maintenance:pageResult'), {
           projectId,

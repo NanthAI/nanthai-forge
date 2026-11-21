@@ -12,6 +12,7 @@ const names = [
   'r2ArchiveSource',
   'projectLifecycle',
   'projectRetention',
+  'artifactStorage',
 ];
 const modules = Object.fromEntries(
   await Promise.all(names.map(async name => [name, await import(moduleUrl(`../convex/${name}.ts`))])),
@@ -103,12 +104,21 @@ async function fixture(t) {
     }
     return task;
   };
-  x.startPrefix = async () => {
+  x.scanReferences = async () => {
+    for (let i = 0; ; i++) {
+      const project = await x.s.ctx.db.get('project');
+      if (project.r2Purge.references?.next === null || project.purgeBlocked) return;
+      assert.ok(i < 20, 'the reference scan reaches the end of the synthetic ranges');
+      await x.step();
+    }
+  };
+  x.startPrefix = async (scan = true) => {
     await x.s.ctx.db.patch('project', deleting());
     for (let i = 0; !x.s.tables.hostedProjects.get('project').r2Purge; i++) {
       assert.ok(i < 5, 'metadata cleanup reaches the prefix');
       await x.run('projectLifecycle:purge', { projectId: 'project' });
     }
+    if (scan) await x.scanReferences();
   };
   return x;
 }
@@ -323,6 +333,136 @@ test('project-prefix cleanup pages R2 and never touches another prefix or an act
   assert.equal(x.fake.objects.size, 1);
   assert.equal((await x.s.ctx.db.get('project')).r2PrefixPurged, true);
 });
+test('permanent purge resumes a failed reference page before deciding whether its prefix can be deleted', async t => {
+  const x = await fixture(t);
+  const key = 'v1/p/project/o/shared';
+  const exclusive = 'v1/p/project/o/exclusive';
+  x.fake.objects.set(x.fake.key(key), Buffer.from('shared'));
+  x.fake.objects.set(x.fake.key(exclusive), Buffer.from('exclusive'));
+  for (let i = 0; i < 257; i++)
+    await x.s.ctx.db.insert('projectObjects', {
+      projectId: 'z-other-project',
+      digest: String(i).padStart(4, '0'),
+      size: 6,
+      nonce: `fixture-${i}`,
+      removed: false,
+      ...(i === 256 ? { r2Key: key } : {}),
+    });
+  await x.startPrefix(false);
+  await x.step();
+  await x.step();
+  const get = () => x.s.ctx.db.get('project');
+  const boundary = (await get()).r2Purge.references;
+  assert.equal(boundary.next.section, 'objectKeys');
+  assert.ok(boundary.next.cursor);
+  const query = x.s.ctx.db.query;
+  x.s.ctx.db.query = table =>
+    table === 'projectObjects'
+      ? {
+          withIndex: () => ({
+            paginate: async () => ({
+              page: [],
+              isDone: true,
+              continueCursor: 'unproven-end',
+              pageStatus: 'SplitRequired',
+            }),
+          }),
+        }
+      : query(table);
+  try {
+    await x.step();
+  } finally {
+    x.s.ctx.db.query = query;
+  }
+  const previous = (await get()).r2Purge.references;
+  assert.deepEqual(previous.next, { ...boundary.next, single: true });
+  assert.deepEqual(x.fake.requests, []);
+
+  x.s.ctx.db.query = table => {
+    if (table === 'projectObjects') throw new Error('Synthetic reference page failure');
+    return query(table);
+  };
+  const failed = x.s.scheduled.at(-1);
+  try {
+    await assert.rejects(x.step(), /Synthetic reference page failure/);
+  } finally {
+    x.s.ctx.db.query = query;
+  }
+  assert.deepEqual((await get()).r2Purge.references, previous);
+  const retry = x.s.scheduled.at(-1);
+  assert.ok(retry.args.generation > failed.args.generation);
+  await x.step(failed);
+  assert.deepEqual((await get()).r2Purge.references, previous);
+  await x.step(retry);
+  assert.equal((await get()).purgeBlocked, 'R2_PURGE_SHARED');
+  assert.deepEqual(x.fake.requests, []);
+  assert.equal(x.fake.objects.size, 2);
+
+  const foreign = [...x.s.tables.projectObjects.values()].find(row => row.r2Key === key);
+  await x.s.ctx.db.delete(foreign._id);
+  const project = await get();
+  await x.run('projectLifecycle:permanentlyDelete', {
+    projectId: 'project',
+    operationId: project.purge.operationId,
+    expectedRevision: project.revision,
+  });
+  assert.equal((await get()).r2Purge.references, undefined);
+  assert.equal((await runToTombstone(x)).purge.r2Objects, 2);
+  assert.equal(x.fake.objects.size, 0);
+});
+
+test('an import alias protects its archive during permanent removal, including an older archive cleanup delivery', async t => {
+  const x = await fixture(t);
+  const pin = pinOf('archive');
+  const namespace = 'v1/p/project/archives/shared-backup';
+  const key = `${namespace}/a/${pin.digest}`;
+  x.fake.objects.set(x.fake.key(key), Buffer.from('archive'));
+  x.s.tables.projectBackups.set('shared-backup', {
+    _id: 'shared-backup',
+    ...backupFields(),
+    ...pin,
+    location: 'r2',
+    r2Key: key,
+    projectId: 'project',
+  });
+  const id = await x.s.ctx.db.insert('artifactBlobs', {
+    namespace,
+    r2Key: key,
+    ...pin,
+    contentType: 'application/gzip',
+    committed: true,
+    removed: false,
+  });
+  await x.s.ctx.db.insert('importArtifacts', { importId: 'synthetic-import', artifactKey: `r2blob:${id}` });
+  await x.startPrefix();
+  assert.equal((await x.s.ctx.db.get(id)).removed, false, 'archive cleanup leaves the binding live');
+  await x.s.ctx.db.patch(id, { removed: true });
+  await x.run('artifactStorage:deleteBytes', { ref: `r2blob:${id}` });
+
+  assert.equal((await x.s.ctx.db.get('project')).purgeBlocked, 'R2_PURGE_SHARED');
+  assert.ok(await x.s.ctx.db.get(id), 'the import retains its artifact binding');
+  assert.ok(x.fake.objects.has(x.fake.key(key)));
+  assert.deepEqual(x.fake.requests, []);
+});
+
+test('an old row-first purge keeps unverified artifact keys and counts only the exclusive bytes it deletes', async t => {
+  const x = await fixture(t);
+  const artifact = `v1/p/project/archives/erased/a/${pinOf('legacy archive').digest}`;
+  x.fake.objects.set(x.fake.key(artifact), Buffer.from('legacy archive'));
+  x.fake.objects.set(x.fake.key('v1/p/project/o/exclusive'), Buffer.from('only'));
+  await x.startPrefix(false);
+  const { purge } = await x.s.ctx.db.get('project');
+  await x.s.ctx.db.patch('project', {
+    purge: { ...purge, artifactInventoryIntact: undefined },
+    r2Purge: { generation: 1, cursor: null, failures: 0 },
+  });
+
+  const project = await runToTombstone(x);
+  assert.equal(project.purge.r2Objects, 1);
+  assert.equal(project.purge.r2Bytes, 4);
+  assert.deepEqual([...x.fake.objects.keys()], [x.fake.key(artifact)]);
+});
+
 test('R2 list rejects provider keys outside the requested project prefix and errors hide response bodies', async t => {
   const x = await fixture(t),
     saved = globalThis.fetch;
@@ -396,9 +536,7 @@ test('permanent project deletion discovers pre-existing R2 rows and waits for pr
   assert.ok(
     x.s.scheduled.some(task => getFunctionName(task.fn) === 'projectR2Maintenance:purgeDeletedProjectPage'),
   );
-  await x.step();
-  await x.step();
-  assert.equal((await x.s.ctx.db.get('project')).removal, 'deleted');
+  assert.equal((await runToTombstone(x)).removal, 'deleted');
   assert.equal(x.fake.objects.size, 0);
 });
 
@@ -411,9 +549,7 @@ test('enabled project deletion removes untracked R2 prefix keys even without obj
   assert.ok(
     x.s.scheduled.some(task => getFunctionName(task.fn) === 'projectR2Maintenance:purgeDeletedProjectPage'),
   );
-  await x.step();
-  await x.step();
-  assert.equal((await x.s.ctx.db.get('project')).removal, 'deleted');
+  assert.equal((await runToTombstone(x)).removal, 'deleted');
   assert.equal(x.fake.objects.size, 0);
 });
 
@@ -497,9 +633,7 @@ for (const failure of ['unauthorized', 'list', 'delete'])
     await x.step(continuation);
     assert.equal(x.s.scheduled.length, count);
     assert.equal((await x.s.ctx.db.get('project')).r2PrefixPurged, undefined);
-    await x.step(retry);
-    await x.step();
-    assert.equal((await x.s.ctx.db.get('project')).removal, 'deleted');
+    assert.equal((await runToTombstone(x)).removal, 'deleted');
     assert.equal(x.fake.objects.size, 1);
     assert.ok(x.fake.objects.has(x.fake.key('v1/p/other/o/keep')));
   });
@@ -512,7 +646,7 @@ test('prefix retries exhaust a finite capped backoff and owner retry resumes the
   const delays = [],
     runAfter = x.s.ctx.scheduler.runAfter;
   x.s.ctx.scheduler.runAfter = (delay, ...args) => {
-    delays.push(delay);
+    if (delay > 0) delays.push(delay);
     return runAfter(delay, ...args);
   };
   for (let i = 0; i < 8; i++) {
@@ -531,6 +665,7 @@ test('prefix retries exhaust a finite capped backoff and owner retry resumes the
       expectedRevision: project.revision,
     });
     assert.equal(x.s.scheduled.length, count);
+    await x.scanReferences();
     await assert.rejects(x.step(), error => error.code === 'R2_DELETE_FAILED');
   }
   assert.deepEqual(delays, [60_000, 120_000, 240_000, 480_000, 900_000, 900_000, 900_000]);
@@ -546,9 +681,7 @@ test('prefix retries exhaust a finite capped backoff and owner retry resumes the
     expectedRevision: project.revision,
   });
   assert.equal((await x.s.ctx.db.get('project')).purgeBlocked, undefined);
-  await x.step();
-  await x.step();
-  assert.equal((await x.s.ctx.db.get('project')).removal, 'deleted');
+  assert.equal((await runToTombstone(x)).removal, 'deleted');
   assert.equal(x.fake.objects.size, 0);
 });
 

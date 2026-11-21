@@ -966,21 +966,41 @@ explicit retry refreshes pins after a definite `WORK_STALE` rejection, or when a
 newer active project revision proves the earlier deletion could not have committed.
 Unknown outcomes retain the original operation and revision.
 
-Projects with R2 data remain `deleting` until every prefix DELETE succeeds. The
-prefix purge never needs `FORGE_R2_MAINTENANCE`: it deletes only under the
+Projects with R2 data remain `deleting` while the prefix is checked and cleared.
+The prefix purge never needs `FORGE_R2_MAINTENANCE`: it deletes only under the
 project's own prefix, with a grant that exists only for an owner-confirmed or
 expired day-90 purge (`convex/projectPurgeAuthority.ts`). Without that grant the
 purge records `R2_PURGE_UNAUTHORIZED` and schedules nothing further; retrying the
-same command confirms it and resumes the saved page. Each page is one query, one
-LIST, at most 100 DELETEs and one mutation; the purge receipt counts `r2Objects`
-and `r2Bytes`.
-Transient R2 errors retry the saved page up to eight attempts, with delays doubling
-from one minute to a fifteen-minute cap. Exhaustion records
-`R2_PURGE_RETRY_EXHAUSTED`; resolve the storage error and retry the command. Retries
-reuse one tracked chain per project, and completed tombstones schedule no purge.
+same command confirms it and resumes the saved page. Before the first LIST, the
+server walks the R2 sections of the reference check below. It records the next
+range under the exact purge operation and schedules one continuation. If it finds
+a foreign-project key or an import alias, it records `R2_PURGE_SHARED` and stops the
+prefix purge. The owner can retry after the reference is removed. The scan keeps
+archive artifact bindings available. Ordinary writers derive keys from their
+own project or import namespace. A legacy backup key can move to a cleanup
+receipt, which the scan visits after backups and proposals.
 
-Permanent removal deletes every project-owned record, Convex file and R2 object
-through the scheduled purge. Only a nameless tombstone remains (owner, key,
+Each scan delivery makes one action, one query and one mutation. It reads one
+index page and at most two project records. The artifact section adds up to
+eight indexed alias probes. Per delivery the document-read budget is under 4 MiB
+for the foreign-project ranges and under 8 MiB for artifacts. The scan keeps only
+one page in memory and makes zero R2 requests. The work scales with foreign rows
+in the four indexed families and artifacts in the selected namespace. It adds
+zero maintained indexes, idle calls or landing-path calls.
+
+After the reference scan completes, each prefix page makes one query, one LIST,
+at most 100 DELETEs and one mutation. The receipt counts removed `r2Objects` and
+`r2Bytes`. Legacy row-first purges may already have discarded the metadata that
+links an artifact key to an import. Those purges retain keys shaped like artifact
+bindings. Transient errors retry the saved page up to eight attempts, with
+delays doubling from one minute to fifteen minutes. An interrupted reference
+page resumes from its saved cursor. A failed R2 page or owner retry starts the
+reference scan again before any further DELETE. Exhaustion records
+`R2_PURGE_RETRY_EXHAUSTED`. Retries reuse one tracked chain per project, and
+completed tombstones schedule no purge.
+
+Permanent removal clears project-owned records, exclusive Convex files and
+unshared R2 objects through the scheduled purge. Only a nameless tombstone remains (owner, key,
 `removal: "deleted"` and the purge progress); the slug and all cleanup receipts are
 removed. Deletion is permanent; local recovery copies remain
 separate. The command retains the local owner, source and hosting binding. When the confirmed
@@ -1031,9 +1051,9 @@ At the deadline, or when the owner chooses **Delete permanently now** and types 
 project slug (`confirm` on `projectLifecycle:permanentlyDelete`; `nforge host
 --delete` sends it), the project moves to `deleting`. The purge first waits for
 signed uploads issued before deletion to expire (R2 PUT expiry plus five
-minutes), then runs bounded pages: special stages (imports, backups, proposals,
-exchange objects), then every project-owned table in the
-`convex/projectPurgeInventory.ts` inventory, then the R2 prefix. A row page stops at
+minutes), then runs bounded pages through the special stages (imports, backups,
+proposals and exchange objects) and the `convex/projectPurgeInventory.ts` inventory.
+The artifact namespace is cleared after the guarded R2 prefix stage. A row page stops at
 1,000 rows or 4 MiB read and also removes the rows' exclusive Convex files and
 cancels their pending scheduled functions. Progress (operation id, rows, bytes,
 pages) is visible in Settings. A build test fails when a schema table with a
@@ -1083,8 +1103,8 @@ downloads zero file bytes and schedules zero work.
 The report covers the named indexes at each page's read time. References in
 legacy Work cursors, snapshots and serialized task bodies require the
 [separate legacy storage audit](operations/legacy-storage-cleanup.md).
-Pages can see concurrent writes. Purge authorization and skip decisions still
-come from the existing delete paths.
+Pages can see concurrent writes. The purge runs its own scan under the active
+purge operation and tracks its progress server-side.
 
 With owner approval the lead
 runs `projectRetention:repurgeLegacyTombstone '{"projectId":"ID","operationId":"UUID","confirm":"SLUG"}'`.

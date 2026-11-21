@@ -7,9 +7,12 @@ import type { MutationCtx } from './_generated/server';
 export async function scheduleR2Purge(
   ctx: MutationCtx,
   project: Doc<'hostedProjects'>,
-  cursor = project.r2Purge?.cursor ?? null,
-  failures = 0,
-  delay = 0,
+  {
+    cursor = project.r2Purge?.cursor ?? null,
+    failures = 0,
+    delay = 0,
+    references,
+  }: Partial<NonNullable<Doc<'hostedProjects'>['r2Purge']>> & { delay?: number } = {},
 ) {
   const generation = (project.r2Purge?.generation ?? 0) + 1;
   const task = await ctx.scheduler.runAfter(
@@ -19,7 +22,12 @@ export async function scheduleR2Purge(
   );
   await ctx.db.patch(project._id, {
     task,
-    r2Purge: { generation, cursor, failures },
+    r2Purge: {
+      generation,
+      cursor,
+      failures,
+      ...(references ? { references } : {}),
+    },
     purgeBlocked: undefined,
   });
 }
