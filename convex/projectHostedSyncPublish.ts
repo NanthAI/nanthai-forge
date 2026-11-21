@@ -346,22 +346,39 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
         await supersedeLaneFinishes(ctx, { projectId: input.projectId, laneId: lane.id, head: lane.head });
     }
   }
-  if (result.status === 'conflict' && state.lane) {
+  invariant(lane, 'SOURCE_JOB_INVALID', 'Retain the resulting Lane.');
+  if (result.status === 'conflict') {
+    const original = state.lane;
+    const origin = state.origin;
     const ownMain =
       request.kind === 'sync' &&
       !request.cleanOnly &&
       request.target.kind === 'main' &&
       !request.predecessor &&
-      state.lane.actor === input.actor;
-    if (ownMain || early)
+      original?.actor === input.actor;
+    // An explicit Candidate resolution can name a Lane that has since saved a different head.
+    // Retire its sync-required entry only if the draft continues the exact saved source.
+    const handedOff =
+      lane.id === state.resolutionLaneId &&
+      origin &&
+      (origin.head === result.left || origin.head === result.right)
+        ? { laneId: origin.laneId, fromHead: origin.head, scope: 'handoff' as const }
+        : null;
+    const supersede =
+      original && (ownMain || early)
+        ? {
+            laneId: original.id,
+            ...(ownMain ? { scope: 'live' as const, fromHead: original.head } : {}),
+          }
+        : handedOff;
+    if (supersede)
       await supersedeLaneFinishes(ctx, {
         projectId: input.projectId,
-        laneId: state.lane.id,
-        head: lane!.head,
-        ...(ownMain ? { scope: 'live', fromHead: state.lane.head } : {}),
+        ...supersede,
+        head: lane.head,
+        replacementLaneId: lane.id,
       });
   }
-  invariant(lane, 'SOURCE_JOB_INVALID', 'Retain the resulting Lane.');
   if (result.status === 'resolved' && lane.earlyResolution)
     await recordEarlyResolutionTiming(ctx, input.projectId, lane.earlyResolution, lane.id);
   const selection = await syncLaneSelection(ctx, input.projectId, lane);

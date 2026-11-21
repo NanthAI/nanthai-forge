@@ -594,6 +594,12 @@
       "what": "A CI-down probe whose check ended on another infrastructure cause (interrupted after runner-unavailable) restarted the streak, so a later pass released nothing and the other held entries were stranded (review 2bf14e44 B1)",
       "file": "tests/hosted-landing-ci-down.test.mjs",
       "test": "incident replay e62d834b line 5 (review 2bf14e44 B1): a probe that ends on another infrastructure cause keeps the hold, so a later verdict releases every held entry"
+    },
+    {
+      "incident": "39a68046",
+      "what": "Publishing a resolution draft could strand the origin Lane's queued sync-required landing until acceptance",
+      "file": "tests/hosted-landing-lineage.test.mjs",
+      "test": "39a68046: a conflict draft retires only the origin queued sync-required entry at publication"
     }
   ]
 }

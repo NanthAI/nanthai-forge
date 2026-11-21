@@ -7,6 +7,7 @@ import { drainReady } from './early-resolution-replay.mjs';
 import { syncFixture } from './hosted-sync-fixture.mjs';
 import { compose, isFinishWake } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { syncRequiredAdvice } from '../dist/hosted-would-conflict.js';
 const desired = await import(moduleUrl('../convex/projectHostedLandingDesired.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
@@ -17,14 +18,20 @@ test.after(() => {
   }
 });
 const live = f => states(f).filter(s => !['landed', 'terminal-failed'].includes(s.phase));
-async function fixture(t, laneActor) {
+async function fixture(t, laneActor, { earlyResolve } = {}) {
   const f = await batchesFixture(t, {
     count: 0,
     batchMaxSize: 1,
     baselineFiles: [['shared.txt', 'alpha\nmiddle\nomega\n']],
-    memberPaths: ['shared.txt', 'shared.txt'],
-    memberContents: ['alpha-a\nmiddle\nomega\n', 'alpha-b\nmiddle\nomega\n'],
+    memberPaths: ['shared.txt', 'shared.txt', 'shared.txt'],
+    memberContents: ['alpha-a\nmiddle\nomega\n', 'alpha-b\nmiddle\nomega\n', 'alpha-c\nmiddle\nomega\n'],
   });
+  if (earlyResolve) {
+    const { autonomyPolicy } = f.tables.hostedProjects.get(f.projectId);
+    f.patch('hostedProjects', f.projectId, {
+      autonomyPolicy: { ...autonomyPolicy, acceptance: { ...autonomyPolicy.acceptance, earlyResolve } },
+    });
+  }
   await f.add(0);
   await drainReady(f);
   if (laneActor) f.insert('projectContributors', { projectId: f.projectId, contributor: laneActor });
@@ -146,6 +153,158 @@ test('8c9b84fc: conflicting main sync supersedes an ownerless submission before 
   assert.equal(live(f).length, 0, 'the entire lineage is terminal after acceptance');
   assert(!states(f).some(s => s.error?.code === 'EVIDENCE_CHANGED'));
   assert.equal(f.pending().length, 0);
+});
+
+function markSyncRequired(f, submission, laneId) {
+  const row = [...f.tables.projectHostedLandingRequests.values()].find(
+    row => row.submissionId === submission.id,
+  );
+  f.patch('projectHostedLandingRequests', row._id, {
+    wouldConflict: JSON.stringify({
+      paths: ['shared.txt'],
+      more: 0,
+      landedSubmissionId: f.entries[0].state.id,
+      ...(laneId ? { laneId } : {}),
+      at: submission.at,
+      next: 'Sync required',
+    }),
+  });
+}
+
+async function replaySyncRequiredHandoff(t, target) {
+  const { f, s } = await fixture(t);
+  const original = f.entries[1];
+  await f.add(2);
+  const unrelated = f.entries[2];
+  const skip = task =>
+    isFinishWake(task.name) && [original.state.id, unrelated.state.id].includes(task.args[0].submissionId);
+  await f.rawChecks.pass(await f.rawChecks.activate(f.runs()[0].id));
+  await drainReady(f, skip);
+  // Seed the accepted-main advice on both queued entries so the replay covers the handoff transition.
+  for (const entry of [original, unrelated]) markSyncRequired(f, entry.state, entry.lane.laneId);
+  const before = await f.current(unrelated.state.id);
+  assert.equal(before.submission.phase, 'queued');
+  assert.equal(before.wouldConflict?.laneId, unrelated.lane.laneId);
+  assert.equal((await f.current(original.state.id)).wouldConflict?.laneId, original.lane.laneId);
+  const main = f.currentMain();
+  let request;
+  if (target === 'conflict draft') {
+    const selection = f.c.selection([original.lane]);
+    selection.request.expectedMain = { head: main.head, receiptId: main.receipt.id };
+    const candidate = await compose(f.c, selection);
+    assert.equal(candidate.result.status, 'conflict');
+    // A same-Intent Lane can be named as the origin, but its different head is absent from this draft.
+    await s.execute(
+      s.request('resolution', {
+        candidateId: candidate.id,
+        conflicts: candidate.result.conflicts,
+        originLaneId: unrelated.lane.laneId,
+      }),
+    );
+    assert.deepEqual((await f.current(unrelated.state.id)).submission, before.submission);
+    request = s.request('resolution', {
+      candidateId: candidate.id,
+      conflicts: candidate.result.conflicts,
+      originLaneId: original.lane.laneId,
+    });
+  } else {
+    const candidate = f.entries[0].candidate;
+    request = s.request('sync', {
+      laneId: original.lane.laneId,
+      expected: s.pins(original.lane),
+      target:
+        target === 'main'
+          ? { kind: 'main', head: main.head, receiptId: main.receipt.id }
+          : { kind: 'candidate', candidateId: candidate.id, head: candidate.result.head },
+    });
+  }
+  await s.prepareSync(request);
+  await s.submitSync(request);
+  const output = await s.workSync(request);
+  assert.equal((await f.current(original.state.id)).submission.phase, 'queued');
+  const callsBeforePublish = f.counts.length;
+  const receipt = await s.publishSync(output);
+  const publish = f.counts.slice(callsBeforePublish).find(call => call.name === 'syncPublish');
+  t.diagnostic(JSON.stringify({ reads: publish.documents, writes: publish.writes }));
+  const source = receipt.outcome.result;
+  assert.equal(source.status, 'conflict');
+  assert.notEqual(source.lane.laneId, original.lane.laneId);
+  assert.equal(source.resolution.origin.laneId, original.lane.laneId);
+  const ended = (await f.current(original.state.id)).submission;
+  assert.equal(ended.phase, 'terminal-failed');
+  assert.equal(ended.error.code, 'LANDING_SUPERSEDED');
+  assert.ok(ended.error.message.includes(source.lane.laneId), 'the entry names its resolution Lane');
+  assert.equal(ended.observation.state, 'superseded');
+  assert.deepEqual((await f.current(unrelated.state.id)).submission, before.submission);
+
+  const readsBeforeRetry = f.counts.length;
+  assert.deepEqual(await s.publishSync(output), receipt);
+  assert.equal(
+    f.counts.slice(readsBeforeRetry).reduce((sum, call) => sum + call.writes, 0),
+    0,
+  );
+  assert.deepEqual((await f.current(original.state.id)).submission, ended);
+  assert.deepEqual((await f.current(unrelated.state.id)).submission, before.submission);
+}
+
+test('39a68046: a main handoff retires only the origin queued sync-required entry at publication', t =>
+  replaySyncRequiredHandoff(t, 'main'));
+test('39a68046: a candidate handoff retires only the origin queued sync-required entry at publication', t =>
+  replaySyncRequiredHandoff(t, 'candidate'));
+test('39a68046: a conflict draft retires only the origin queued sync-required entry at publication', t =>
+  replaySyncRequiredHandoff(t, 'conflict draft'));
+
+test('39a68046: a single-Lane handoff preserves headless older and multi-Lane submissions', async t => {
+  const { f, s } = await fixture(t, undefined, { earlyResolve: 'off' });
+  const original = f.entries[1];
+  const olderSelection = [...f.tables.projectHostedComposeSelections.values()].find(
+    row => row.operationId === original.selection.request.operationId && row.key === original.lane.laneId,
+  );
+  // Replay the pre-029138ef index format. The older Candidate's manifest still pins its actual head.
+  f.patch('projectHostedComposeSelections', olderSelection._id, { head: undefined });
+  const files = JSON.parse(f.c.objects.get(original.lane.head)).files;
+  const newer = await s.save(original.lane, [...files, f.c.file('newer.txt', 'newer save')]);
+  const sibling = await f.c.lane(
+    f.c.state(
+      [...JSON.parse(f.c.objects.get(f.c.baseline.sha256)).files, f.c.file('sibling.txt', 'sibling work')],
+      [f.c.baseline.sha256],
+    ),
+  );
+  const selection = f.c.selection([newer, sibling]);
+  const combined = await compose(f.c, selection);
+  assert.equal(combined.result.status, 'clean');
+  const aggregate = await f.enqueue(
+    f.request({
+      candidateId: combined.id,
+      expectedHead: combined.result.head,
+      expectedMain: selection.request.expectedMain,
+      governanceVersion: 1,
+      finish: { composeOperationId: selection.request.operationId, after: null },
+    }),
+  );
+  const protectedIds = [original.state.id, aggregate.id];
+  const skip = task => isFinishWake(task.name) && protectedIds.includes(task.args[0].submissionId);
+  await f.rawChecks.pass(await f.rawChecks.activate(f.runs()[0].id));
+  await drainReady(f, skip);
+  markSyncRequired(f, original.state, original.lane.laneId);
+  markSyncRequired(f, aggregate);
+  const before = await Promise.all(protectedIds.map(f.current));
+  for (const entry of before) {
+    assert.equal(entry.submission.phase, 'queued');
+    assert.ok(syncRequiredAdvice(entry.wouldConflict));
+  }
+  const target = f.entries[0].candidate;
+  const { terminal } = await s.execute(
+    s.request('sync', {
+      laneId: newer.laneId,
+      expected: s.pins(newer),
+      target: { kind: 'candidate', candidateId: target.id, head: target.result.head },
+    }),
+  );
+  assert.equal(terminal.outcome.result.status, 'conflict');
+  assert.equal(terminal.outcome.result.resolution.origin.head, newer.head);
+  for (const entry of before)
+    assert.deepEqual((await f.current(entry.submission.id)).submission, entry.submission);
 });
 
 test('8c9b84fc: a clean main sync preserves a live submission', async t => {
@@ -380,11 +539,13 @@ test('8c9b84fc: an authorized peer main sync supersedes none of the Lane actor w
 });
 
 test('8c9b84fc: accepting a directly composed resolution supersedes the origin as a completion backstop', async t => {
-  const { f, s } = await fixture(t);
+  const { f, s } = await fixture(t, undefined, { earlyResolve: 'off' });
   const original = f.entries[1];
   const skip = task => isFinishWake(task.name) && task.args[0].submissionId === original.state.id;
   await f.rawChecks.pass(await f.rawChecks.activate(f.runs()[0].id));
-  await drainReady(f, skip);
+  // The backstop still covers work whose advice has not arrived when the draft publishes.
+  await drainReady(f, task => skip(task) || task.name === 'projectHostedLandingWouldConflict:mark');
+  assert.equal(syncRequiredAdvice((await f.current(original.state.id)).wouldConflict), undefined);
   const selection = f.c.selection([original.lane]);
   selection.request.expectedMain = { head: f.currentMain().head, receiptId: f.currentMain().receipt.id };
   const candidate = await compose(f.c, selection);

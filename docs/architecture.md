@@ -1645,6 +1645,9 @@ sync registers its exact State and CAS-updates its original Lane. A conflict
 retains the original Lane and creates an isolated resolution sibling, with the
 exact left/right States, conflict root and draft head. Starting a resolution
 from an older Candidate never substitutes newer Lane saves or current main.
+When the draft carries its origin Lane's exact saved head, publication also
+supersedes queued entries that require a sync and were composed from that head alone
+in the same transaction.
 Drafts keep the left parent and local conflict markers (binary/path conflicts
 keep the Lane side); they do not claim the right input as a resolved ancestor.
 

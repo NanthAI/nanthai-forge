@@ -38,7 +38,7 @@ export async function liveLaneFinish(
 export async function laneFinishes(
   ctx: QueryCtx | MutationCtx,
   input: { projectId: Id<'hostedProjects'>; laneId: string; headWrittenAt: string },
-  options: { queuedConflicts?: true; all?: true; head?: string } = {},
+  options: { queuedConflicts?: true; all?: true; head?: string; exactOrigin?: true } = {},
 ) {
   const liveSubmissions: string[] = [];
   let live: {
@@ -55,10 +55,12 @@ export async function laneFinishes(
     .order('desc')
     .take(RECENT_COMPOSITIONS);
   for (const selection of selections) {
-    if (options.head && selection.head && selection.head !== options.head) continue;
+    if (options.head && (options.exactOrigin || selection.head) && selection.head !== options.head) continue;
     const compose = await composeRow(ctx, selection);
     if (!compose) continue;
-    const { candidateId } = composeStateSchema.parse(JSON.parse(compose.value));
+    const { candidateId, request } = composeStateSchema.parse(JSON.parse(compose.value));
+    // Only this Lane's pinned source moves to the draft. Keep aggregate work in the queue.
+    if (options.exactOrigin && (request.inputs.count !== 1 || request.dependencies.count !== 0)) continue;
     const requests = await ctx.db
       .query('projectHostedLandingRequests')
       .withIndex('by_project_and_candidate_and_sequence', q =>
@@ -127,19 +129,20 @@ export async function refuseLiveLaneFinish(
   invariant(!finish, 'LANE_FINISH_ACTIVE', finish ? laneFinishActiveMessage(input.laneId, finish) : '');
 }
 
-/** A new head of the Lane (save or sync) ends its queued entries that need a sync in the same
- * transaction (f7539ebb item 5): they were composed from the old head and can no longer be accepted,
- * so leaving them queued only strands a queue place. Each ends LANDING_SUPERSEDED through the
+/** A save, sync or resolution handoff ends the superseded head's queued entries that need a sync in
+ * the same transaction. Leaving them queued only strands a queue place. Each ends LANDING_SUPERSEDED through the
  * cancellation path (peers reselected, finish IO fenced, queue released). Bounded by the lookup:
- * at most RECENT_COMPOSITIONS * 3 entries; nothing runs when none is marked. */
+ * at most RECENT_COMPOSITIONS * 3 entries; nothing runs when none is marked.
+ * A conflict handoff uses the origin for lookup and the resolution Lane for the receipt. */
 export async function supersedeLaneFinishes(
   ctx: MutationCtx,
   input: {
     projectId: Id<'hostedProjects'>;
     laneId: string;
     head: string;
+    replacementLaneId?: string;
     submissionIds?: string[];
-    scope?: 'live';
+    scope?: 'live' | 'handoff';
     fromHead?: string;
   },
 ) {
@@ -148,9 +151,15 @@ export async function supersedeLaneFinishes(
     : await laneFinishes(
         ctx,
         { ...input, headWrittenAt: '' },
-        { queuedConflicts: true, all: true, ...(input.fromHead ? { head: input.fromHead } : {}) },
+        {
+          queuedConflicts: true,
+          all: true,
+          ...(input.fromHead ? { head: input.fromHead } : {}),
+          ...(input.scope === 'handoff' ? { exactOrigin: true } : {}),
+        },
       );
   const ids = input.submissionIds ?? (input.scope === 'live' ? found!.liveSubmissions : found!.syncRequired);
+  const replacement = { laneId: input.replacementLaneId ?? input.laneId, head: input.head };
   const superseded: string[] = [];
   for (const submissionId of ids) {
     const key = { projectId: input.projectId, submissionId };
@@ -162,13 +171,13 @@ export async function supersedeLaneFinishes(
         await cancelHostedLanding(ctx, {
           projectId: input.projectId,
           actor: state.actor,
-          supersede: { laneId: input.laneId, head: input.head },
+          supersede: replacement,
           request: {
             operationId: crypto.randomUUID(),
             authorityEpoch: state.request.authorityEpoch,
             submissionId,
           },
-          reason: `Superseded by Lane ${input.laneId} head ${input.head}: the original source preparation continues in its resolution.`,
+          reason: `Superseded by Lane ${replacement.laneId} head ${replacement.head}: the original source preparation continues in its resolution.`,
         });
         superseded.push(submissionId);
       }
@@ -191,13 +200,13 @@ export async function supersedeLaneFinishes(
     await cancelHostedLanding(ctx, {
       projectId: input.projectId,
       actor: state.actor,
-      supersede: { laneId: input.laneId, head: input.head },
+      supersede: replacement,
       request: {
         operationId: crypto.randomUUID(),
         authorityEpoch: state.request.authorityEpoch,
         submissionId,
       },
-      reason: `Superseded by Lane ${input.laneId} head ${input.head}: this work continues in a newer resolution or landing. The original source and checks remain retained.`,
+      reason: `Superseded by Lane ${replacement.laneId} head ${replacement.head}: this work continues in a newer resolution or landing. The original source and checks remain retained.`,
     });
     superseded.push(submissionId);
   }
