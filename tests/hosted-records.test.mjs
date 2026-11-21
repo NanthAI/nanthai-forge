@@ -3,8 +3,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
+import { ConvexHttpClient } from 'convex/browser';
 import { moduleUrl } from './convex-module.mjs';
 import { recordsFixture } from './hosted-records-fixture.mjs';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
+import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
+import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import {
   canonicalPayload,
   hostedPayloadHash,
@@ -193,6 +197,66 @@ test('canonical Lane/save/Candidate/job versions have exact indexed identity, si
       .length,
     0,
   );
+});
+
+test('exact job records keep retained versions and structured refusals through the CLI (friction 9bf13493)', async t => {
+  const s = await setup(),
+    first = job();
+  const latest = { ...first, version: 1, status: 'running', fence: 1, executionId: 'provider-execution' };
+  await s.put(first);
+  await s.put(latest, 0);
+
+  const root = temporaryDirectory(t, 'forge-exact-job-');
+  const address = { url: 'https://forge.example.invalid', projectId: s.auth.projectId };
+  const client = new ConvexHttpClient(address.url, {
+    logger: false,
+    fetch: async (_url, options) => {
+      const { path, args } = JSON.parse(options.body);
+      assert.equal(path, 'projectHostedRecordReads:read');
+      const ctx = { ...s.ctx, auth: { getUserIdentity: async () => ({ subject: s.auth.actor }) } };
+      try {
+        const value = await s.run('exact source job', () => recordReads.read._handler(ctx, args[0]));
+        assert(Buffer.byteLength(value) < 64_000);
+        return Response.json({ status: 'success', value, logLines: [] });
+      } catch (error) {
+        if (!error.data) throw error;
+        return Response.json(
+          { status: 'error', errorMessage: 'Server Error', errorData: error.data, logLines: [] },
+          { status: 560 },
+        );
+      }
+    },
+  });
+  const transport = new HostedAgentTransport(root, address, { client });
+  const read = async selection => {
+    const before = s.counts.length;
+    try {
+      return (await hostedAgentCli(root, 'records', { collection: 'jobs', ...selection }, address, transport))
+        .result.record;
+    } finally {
+      assert.equal(s.counts.length - before, 1, 'one hosted query');
+      const { documents, readBytes, writes } = s.counts.at(-1);
+      assert(documents <= 5);
+      assert(readBytes < 64_000);
+      assert.equal(writes, 0);
+    }
+  };
+  for (const [selection, expected] of [
+    [{ id: first.id }, latest],
+    [{ id: first.id, version: 0 }, first],
+  ]) {
+    const record = await read(selection);
+    const { digest, bytes } = hostedRecordRef(expected);
+    assert.deepEqual(record.value, expected);
+    assert.deepEqual(
+      { id: record.id, version: record.version, digest: record.source.digest, bytes: record.source.bytes },
+      { id: expected.id, version: expected.version, digest, bytes },
+    );
+  }
+  for (const selection of [{ id: randomUUID() }, { id: first.id, version: 2 }])
+    await assert.rejects(read(selection), code('NOT_FOUND'));
+  await s.ctx.db.patch(s.auth.projectId, { owner: 'different-owner' });
+  await assert.rejects(read({ id: first.id, version: 0 }), code('PROJECT_UNAVAILABLE'));
 });
 
 test('canonical writes/read/replays enforce current project access, epoch and project identity', async () => {
