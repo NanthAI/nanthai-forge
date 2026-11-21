@@ -13,8 +13,6 @@ export const actionsSourceRunsCapability = 'source.runs';
 export const actionsSourceStateCapability = 'source.state';
 /** Root replacement refresh and explicit source protocol 2, before retirement. */
 export const actionsSourceStateV2Capability = 'source.state.v2';
-/** Verified pack members can seed the pinned Candidate without resolving a pack State. */
-export const actionsAnchoredPackCapability = 'sourcePack.anchored';
 /** The result call carries the log bytes; the server stores them, so a job skips
  * its separate output call and the result's session read. */
 export const actionsInlineLogCapability = 'results.inlineLog';

@@ -6,12 +6,7 @@ import { SourceWorkerReader } from './hosted-source-worker-reader.js';
 import { parseNativeState, type NativeState } from './state/format.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
 import { directSourceWindow, sourceWindowOrder } from './hosted-actions-direct.js';
-import {
-  fileDigest,
-  downloadSourcePack,
-  unpackSourcePack,
-  unpackSourcePackObjects,
-} from './source-pack-archive.js';
+import { fileDigest, downloadSourcePack, unpackSourcePackObjects } from './source-pack-archive.js';
 import { digest } from './hash.js';
 import { invariant, type ForgeError } from './errors.js';
 import { retryActionsInfrastructure, actionsInfrastructureResponse } from './hosted-actions-retry.js';
@@ -23,7 +18,6 @@ import {
   type MaterializedSubmodule,
 } from './submodule-materialize.js';
 import {
-  actionsAnchoredPackCapability,
   actionsSubmoduleAccessCapability,
   actionsSourceRunsCapability,
 } from './hosted-actions-capabilities.js';
@@ -105,20 +99,16 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
   const state = parseNativeState(stateBytes),
     base = parseNativeState(baseBytes);
   phases.stateFetchMs = performance.now() - phaseStarted;
-  const anchored = client.capabilities.includes(actionsAnchoredPackCapability);
   const notes: string[] = [];
   let selected = state.files,
-    reason = anchored && client.invalidSourcePack ? 'invalid or unavailable pack' : 'no pack',
-    // Only the legacy path reads a pack State. Refresh consumes this as a cache-use signal.
-    packed: NativeState | true | null = null,
+    reason = client.invalidSourcePack ? 'invalid or unavailable pack' : 'no pack',
+    packed: true | null = null,
     packFallback: string | undefined;
   const recordFallback = () => {
-    if (anchored) {
-      packFallback = reason;
-      console.log(`Source pack fallback: ${reason}.`);
-    }
+    packFallback = reason;
+    console.log(`Source pack fallback: ${reason}.`);
   };
-  if (anchored && client.invalidSourcePack) recordFallback();
+  if (client.invalidSourcePack) recordFallback();
   const discardPack = async (failure: string) => {
     reason = failure;
     packed = null;
@@ -132,19 +122,6 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
   if (client.capabilities.includes('sourcePack') && client.sourcePack) {
     try {
       const pack = client.sourcePack;
-      const packState = anchored
-        ? null
-        : pack.stateRef === heads[0]
-          ? state
-          : pack.stateRef === heads[1]
-            ? base
-            : await timed('packStateMs', async () => {
-                await connection.resolveHeads([pack.stateRef]);
-                await prepareRecipes([pack.stateRef]);
-                return parseNativeState(
-                  await reader.bytes((await transport.describeBatch!([pack.stateRef]))[0]!),
-                );
-              });
       console.log(`source: downloading pack ${pack.stateRef} (${pack.size} bytes, ${pack.fileCount} files)`);
       await timed('packFetchMs', () =>
         retryActionsInfrastructure(
@@ -157,21 +134,14 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
         ),
       );
       console.log(`source: pack downloaded in ${((Date.now() - started) / 1000).toFixed(1)}s; unpacking`);
-      if (packState) {
-        await timed('unpackMs', () => unpackSourcePack(pack, packState, archive, cache));
-        const old = new Map(packState.files.map(file => [file.path, file]));
-        selected = state.files.filter(file => old.get(file.path)?.blob !== file.blob);
-        packed = packState;
-      } else {
-        const held = new Set<string>();
-        for (const manifest of [state, base, ...extraStates])
-          for (const file of manifest?.files ?? []) held.add(file.blob);
-        const written = new Set(
-          await timed('unpackMs', () => unpackSourcePackObjects(pack, archive, cache, id => held.has(id))),
-        );
-        selected = state.files.filter(file => !written.has(file.blob));
-        packed = true;
-      }
+      const held = new Set<string>();
+      for (const manifest of [state, base, ...extraStates])
+        for (const file of manifest?.files ?? []) held.add(file.blob);
+      const written = new Set(
+        await timed('unpackMs', () => unpackSourcePackObjects(pack, archive, cache, id => held.has(id))),
+      );
+      selected = state.files.filter(file => !written.has(file.blob));
+      packed = true;
     } catch (error) {
       // Codes only: messages of network errors may carry signed URLs into public logs.
       console.log(
@@ -337,7 +307,7 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     await materialize();
   } catch (error) {
     if (!packed) throw error;
-    await discardPack(anchored ? materializeFailure : 'pack tree verification failed');
+    await discardPack(materializeFailure);
     await materialize();
   }
   // After verification: the pointer bytes are Forge source, the fetched trees are not.
@@ -366,17 +336,8 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
         return [];
       }),
     );
-  const old = new Map(packed && packed !== true ? packed.files.map(file => [file.path, file]) : []);
-  const deltaPaths = packed === true ? new Set(selected.map(file => file.path)) : null;
-  let deltaFiles = selected.length;
-  if (packed && packed !== true) {
-    const inventory = new Map(state.files.map(file => [file.path, file]));
-    deltaFiles = [...new Set([...old.keys(), ...inventory.keys()])].filter(path => {
-      const before = old.get(path),
-        after = inventory.get(path);
-      return before?.blob !== after?.blob || before?.mode !== after?.mode;
-    }).length;
-  }
+  const deltaPaths = packed ? new Set(selected.map(file => file.path)) : null;
+  const deltaFiles = selected.length;
   let deltaBytes = 0,
     totalBytes = 0;
   await timed('statMs', async () => {
@@ -389,7 +350,7 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
       }
       const size = await pending;
       totalBytes += size;
-      if (deltaPaths ? deltaPaths.has(file.path) : old.get(file.path)?.blob !== file.blob) deltaBytes += size;
+      if (!deltaPaths || deltaPaths.has(file.path)) deltaBytes += size;
     });
   });
   console.log(`source: phases ${JSON.stringify(phases)}`);

@@ -698,9 +698,9 @@ The server still derives retained summaries from `contractReports`; the optional
 `testFiles` field is a compatibility summary, not independent evidence. The runner
 reads the session's `sourcePack` field and sends pack prepare/commit commands only
 when the server advertised `sourcePack`. Without it, planning uses W2 full download
-and skips pack refresh. The server advertises `sourcePack.anchored` only when its
-`FORGE_ACTIONS_ANCHORED_SOURCE_PACK` setting is `1`.
-Backend and runner updates can be deployed in any order.
+and skips pack refresh. Backend and runner updates can be deployed in any order.
+Older runners that still try to resolve a historical pack State outside their
+run fall back to the full download.
 
 Command and result metadata strip unknown fields. The identity envelope, known
 field types, logs, object pins and recipes remain strict. Refusals include a fixed
@@ -821,23 +821,17 @@ The existing planning session optionally returns `sourcePack`: the newest projec
 `stateRef`, `objectKey`, `sha256`, `size`, `fileCount`, `createdAt` and a five-minute
 signed GET. It reuses the negotiated timing-history session; no additional
 pack session or polling is needed. Planning resolves and verifies the pinned
-Candidate and base manifests. By default it also resolves a different pack State
-through the ordinary hash-verified source path and records that phase as `packStateMs`.
-A historical pack State can be recipe-backed without a physical manifest. Its
-authorized State descriptor binds the recipe metadata and leaves to that exact State;
-it does not use unbound object reads or substitute the current Candidate.
-One pack GET seeds a freshly emptied, job-private blob cache. With
-`sourcePack.anchored`, planning skips the pack State body and follow-up descriptor
-windows. Existing servers can still include the historical State descriptor in
-the initial reply. Anchored planning keeps only verified,
+Candidate and base manifests, plus any scoped recheck States. The pack's State
+reference identifies the archive. It grants no access to the historical State.
+One pack GET seeds a freshly emptied, job-private blob cache. Planning keeps only verified,
 hash-named members referenced by a held manifest and computes the Candidate's
 missing content from the set of members it wrote. Pack paths and modes supply
 neither the cache keys nor the tree layout. Only missing content uses W2's paged,
 three-worker downloader. A fresh tree applies deletions, mode changes and path-type
 changes, creates symlinks last, and hashes every final file/link against the Candidate
-with Forge's SHA-256 digest. Cache inventory, size, checksum, State, gzip, or final
-tree failures discard all extracted bytes and run the full W2 transfer. The
-anchored path records a fallback reason in the plan log and pack-refresh artifact.
+with Forge's SHA-256 digest. Pack framing or verification errors, missing delta
+bytes, and final tree failures discard all extracted bytes and run the full W2
+transfer. The plan log and pack-refresh artifact record the fallback reason.
 The execution plan pin stays stable across retries. Older
 servers without `sourcePack` use that same full path.
 
@@ -854,7 +848,7 @@ When there is no usable pack, or the delta exceeds 300 paths or 10% of Candidate
 content bytes, the optional `hosted-pack` job runs alongside the check shards after
 matrix and Candidate artifact publication. It uses that artifact to seed its cache,
 fetches any missing accepted-base blobs, verifies them, and packs the pinned accepted
-base. Anchored planning counts the Candidate paths and bytes the pack did not serve
+base. Planning counts the Candidate paths and bytes the pack did not serve
 for this refresh decision. The plan carries the negotiated State-source requirement in the existing
 artifact. A fresh pack job uses it to bind its missing-file requests to the pinned
 base, with current authorization and no separate State discovery request.
@@ -879,9 +873,8 @@ The previous or abandoned slot is deleted before its next replacement, after its
 15-minute signed PUT plus two-minute transfer grace has expired. Failed deletion
 retains the slot and skips refresh; later refresh retries it. At most two pack
 objects are tracked, with no idle calls, sweeps, timers or schedulers. Latest pack
-metadata is never removed by that cleanup. Pack readers verify member hashes.
-The legacy Actions plan also matches the inventory to the pack State. The anchored
-plan gets its tree inventory from the pinned Candidate manifest.
+metadata is never removed by that cleanup. Pack readers verify member hashes, and
+the Actions plan gets its tree inventory from the pinned Candidate manifest.
 
 For 6,000 unique raw files with 20 changed blobs and a pack of the base, planning
 uses two source requests (one manifest window and one delta window), versus W2's

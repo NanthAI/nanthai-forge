@@ -391,7 +391,6 @@ export class ActionsJobClient {
                 sourceVersion?: 2;
                 physical?: { state: string; pin: { sha256: string; size: number } };
                 plan?: PhysicalGrantPlan;
-                extraStates?: StateSourceRow[];
               };
           const envelope = Array.isArray(found) ? null : found;
           if (envelope?.sourceVersion === 2) requiredStateSource = true;
@@ -403,9 +402,9 @@ export class ActionsJobClient {
             'Source descriptor window is incomplete.',
           );
           const pageKey = sourcePage++;
-          [...values, ...(envelope?.extraStates ?? [])].forEach((row, index) => {
+          values.forEach((row, index) => {
             invariant(
-              index >= values.length || row.descriptor.object.sha256 === page[index],
+              row.descriptor.object.sha256 === page[index],
               'SOURCE_HASH_MISMATCH',
               'Source descriptor changed.',
             );

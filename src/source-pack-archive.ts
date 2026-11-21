@@ -19,8 +19,7 @@ export async function fileDigest(path: string) {
   return hash.digest('hex');
 }
 /** Deterministic gzip of a length-prefixed JSON inventory followed by exact file
- * bytes. No tar extensions, directories, links or archive-controlled writes.
- * Inventory is compared with a separately hash-verified State before extraction. */
+ * bytes. No tar extensions, directories, links or archive-controlled writes. */
 export async function createSourcePack(stateRef: string, state: NativeState, cache: string, path: string) {
   const files: (NativeFile & { size: number })[] = [];
   let total = 0;
@@ -93,24 +92,8 @@ export async function downloadSourcePack(
     'Pack checksum differs.',
   );
 }
-export async function unpackSourcePack(pack: SourcePack, state: NativeState, path: string, cache: string) {
-  const expected = [...state.files].sort((a, b) => (a.path < b.path ? -1 : 1));
-  await readSourcePack(pack, path, cache, files => {
-    invariant(files.length === expected.length, 'SOURCE_HASH_MISMATCH', 'Pack State differs.');
-    for (let i = 0; i < expected.length; i++) {
-      const file = files[i]!,
-        selected = expected[i]!;
-      invariant(
-        file.path === selected.path && file.blob === selected.blob && file.mode === selected.mode,
-        'SOURCE_HASH_MISMATCH',
-        'Pack inventory differs.',
-      );
-    }
-    return () => true;
-  });
-}
-/** Client cache fill: every written object is checked against its own digest, so the
- * pack needs no State match; `keep` selects which verified objects are written. */
+type PackFile = { blob: string; size: number };
+/** Verify every member by digest and write the verified objects selected by `keep`. */
 export async function unpackSourcePackObjects(
   pack: SourcePack,
   path: string,
@@ -121,31 +104,6 @@ export async function unpackSourcePackObjects(
   listed?: (blobs: ReadonlySet<string>) => void,
 ) {
   const written = new Set<string>();
-  // Files with identical content share one blob: write and report it once.
-  await readSourcePack(
-    pack,
-    path,
-    directory,
-    files => {
-      listed?.(new Set(files.map(file => file.blob)));
-      return blob => {
-        if (written.has(blob) || !keep(blob)) return false;
-        written.add(blob);
-        return true;
-      };
-    },
-    observe,
-  );
-  return [...written];
-}
-type PackFile = { path: string; blob: string; mode: string; size: number };
-async function readSourcePack(
-  pack: SourcePack,
-  path: string,
-  directory: string,
-  inventory: (files: PackFile[]) => (blob: string) => boolean,
-  observe?: (blob: string, bytes: Buffer) => void,
-) {
   const input = checkoutReadStream(path);
   const stream = createGunzip();
   const decompression = pipeline(input, stream);
@@ -205,12 +163,15 @@ async function readSourcePack(
       total += file.size;
       invariant(total <= sourcePackTreeBytes, 'SOURCE_HASH_MISMATCH', 'Pack tree exceeds cache bound.');
     }
-    const keep = inventory(header.files);
+    const files: PackFile[] = header.files;
+    listed?.(new Set(files.map(file => file.blob)));
     await checkoutIo(() => mkdir(directory, { recursive: true }));
-    for (const file of header.files as PackFile[]) {
+    for (const file of files) {
       const bytes = await take(file.size);
       invariant(digest(bytes) === file.blob, 'SOURCE_HASH_MISMATCH', 'Pack file differs.');
-      if (!(await checkoutIo(async () => keep(file.blob)))) continue;
+      // Files with identical content share one blob: write and report it once.
+      if (!(await checkoutIo(async () => !written.has(file.blob) && keep(file.blob)))) continue;
+      written.add(file.blob);
       observe?.(file.blob, bytes);
       // Bounded concurrent writes (16 files, 64 MiB): small-file latency dominates large trees.
       const write: Promise<void> = checkoutIo(() =>
@@ -237,6 +198,7 @@ async function readSourcePack(
       'Trailing pack bytes.',
     );
     await decompression;
+    return [...written];
   } finally {
     await Promise.allSettled(writes);
     stream.destroy();

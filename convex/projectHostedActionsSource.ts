@@ -2,7 +2,6 @@
 import { requireSourceProtocol } from './projectSourceProtocol';
 import { v } from 'convex/values';
 import { internalMutation } from './server';
-import { sourceObjectLocation } from './projectSourceBeginReads';
 import { actionsSourceStates } from './projectStateSourceSelection';
 import { actionsSession, sessionArgs } from './projectHostedActionsSession';
 import { isStored } from './projectObjectFields';
@@ -37,11 +36,8 @@ export const resolve = internalMutation({
       'SOURCE_UNAVAILABLE',
       'Read source through a selected State.',
     );
-    let packState: string | undefined;
     if (input.bound) {
-      const scope = await actionsSourceStates(ctx, input.projectId, run);
-      const allowed = scope.allowed;
-      packState = scope.packState;
+      const allowed = actionsSourceStates(run);
       invariant(
         input.digests.every(id => allowed.has(id)),
         'SOURCE_UNAVAILABLE',
@@ -68,27 +64,6 @@ export const resolve = internalMutation({
     }[] = [];
     const packed: { index: number; size: number; pack: ObjectPack; key: string }[] = [];
     const reply = async () => {
-      const extraStates = [];
-      if (input.bound && packState && !input.digests.includes(packState)) {
-        const [row] = await findObjects(ctx, input.projectId, [packState]);
-        if (row && !row.removed && isStored(row)) {
-          const location = await sourceObjectLocation(
-            ctx,
-            input.projectId,
-            { sha256: packState, size: row.size },
-            row,
-          );
-          const url =
-            location.url ?? (location.storageId ? await blobStore(ctx).getUrl(location.storageId) : null);
-          extraStates.push({
-            descriptor: location.descriptor,
-            ...(location.statePhysical ? { statePhysical: location.statePhysical } : {}),
-            url,
-            ...(location.range ? { range: location.range } : {}),
-            ...(location.closure ? { closure: location.closure } : {}),
-          });
-        }
-      }
       for (;;) {
         if (input.runs) await signRuns(result, packed);
         const text = JSON.stringify(result);
@@ -99,7 +74,6 @@ export const resolve = internalMutation({
                 rows: result,
                 ...(project.sourceManifestVersion === 2 ? { sourceVersion: 2 } : {}),
                 ...(physical ? { physical } : {}),
-                ...(extraStates.length ? { extraStates } : {}),
               })
             : input.batch
               ? text

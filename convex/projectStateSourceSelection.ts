@@ -5,7 +5,6 @@ import { internalMutation, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { sessionArgs, actionsSession } from './projectHostedActionsSession';
 import { scopedRecheckBase, scopedRecheckPairs } from '../src/scoped-recheck-policy';
-import { selectedSourcePacks } from './projectSourcePackStore';
 import { findStoredObject as findObject, isRegisteredState } from './projectObjectFind';
 import { isStored } from './projectObjectFields';
 import { describeObjects } from './projectObjectDownloads';
@@ -14,24 +13,15 @@ import { blobStore } from './blobStore';
 import { sourceObjectLocation } from './projectSourceBeginReads';
 import { invariant } from '../src/errors';
 import type { HostedCheckRun } from '../src/hosted-check';
-export async function actionsSourceStates(
-  ctx: MutationCtx,
-  projectId: Id<'hostedProjects'>,
-  run: HostedCheckRun,
-) {
+export function actionsSourceStates(run: HostedCheckRun) {
   const base = scopedRecheckBase(run.gate),
-    pairs = scopedRecheckPairs(run.gate),
-    pack = await selectedSourcePacks(ctx, projectId);
-  return {
-    allowed: new Set([
-      run.request.expectedHead,
-      run.candidate.base.head,
-      ...(base ? [base] : []),
-      ...(pairs?.flatMap(pair => [pair.base, pair.checked]) ?? []),
-      ...(pack?.latest ? [pack.latest.stateRef] : []),
-    ]),
-    packState: pack?.latest?.stateRef,
-  };
+    pairs = scopedRecheckPairs(run.gate);
+  return new Set([
+    run.request.expectedHead,
+    run.candidate.base.head,
+    ...(base ? [base] : []),
+    ...(pairs?.flatMap(pair => [pair.base, pair.checked]) ?? []),
+  ]);
 }
 async function selection(
   ctx: MutationCtx,
@@ -81,11 +71,7 @@ export const runner = internalMutation({
   handler: async (ctx, input) => {
     const { run, project } = await actionsSession(ctx, input, false);
     requireSourceProtocol(project, input.version);
-    invariant(
-      (await actionsSourceStates(ctx, input.projectId, run)).allowed.has(input.state),
-      'SOURCE_UNAVAILABLE',
-      'State is outside this run.',
-    );
+    invariant(actionsSourceStates(run).has(input.state), 'SOURCE_UNAVAILABLE', 'State is outside this run.');
     return selection(ctx, input.projectId, input.state, false, input.recheck);
   },
 });

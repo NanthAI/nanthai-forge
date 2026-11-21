@@ -260,7 +260,7 @@ test('a cold29k job with a historical source pack and300 raw changes stays under
   const source = await materializeActionsSource(client, join(directory, 'candidate'), cache);
   assert(source.packed, 'historical pack supplies the unchanged28700 files');
   assert.equal(source.deltaFiles, 300);
-  assert.equal(requests, 2, 'historical State descriptor rides the first head reply');
+  assert.equal(requests, 2, 'one head request and one Candidate delta request');
   const resolverCalls = f.calls.length;
   assert.equal(resolverCalls, 3, 'head resolver and two fresh State authority selections');
   const dbBytes = f.s.counts.slice(start).reduce((sum, row) => sum + row.readBytes, 0);
@@ -269,24 +269,26 @@ test('a cold29k job with a historical source pack and300 raw changes stays under
   for (const [index, file] of f.files.entries())
     assert.equal(readFileSync(join(directory, 'candidate', file.path), 'utf8'), `source ${index}`);
 
-  const flag = 'FORGE_STATE_SOURCE_REUSE_LOCATION',
-    previous = process.env[flag];
-  t.after(() => (previous === undefined ? delete process.env[flag] : (process.env[flag] = previous)));
-  const readHistorical = async enabled => {
-    if (enabled) process.env[flag] = '1';
-    else delete process.env[flag];
-    const { extraStates } = await f.heads(),
-      { url, ...location } = extraStates[0],
-      { documents, readBytes } = f.s.counts.at(-1);
-    assert.equal(location.descriptor.object.sha256, packState.sha256);
-    return { location, path: new URL(url).pathname, documents, readBytes };
-  };
-  const before = await readHistorical(false),
-    after = await readHistorical(true);
-  assert.deepEqual(after.location, before.location);
-  assert.equal(after.path, before.path);
-  assert.equal(after.documents, before.documents - 1);
-  assert(after.readBytes < before.readBytes);
+  const heads = await f.heads();
+  assert.equal(heads.extraStates, undefined);
+  assert.deepEqual(
+    heads.rows.map(row => row.descriptor.object.sha256),
+    [f.s.state.sha256],
+  );
+  const r2Requests = f.r2.requests.length;
+  await assert.rejects(
+    f.ctx.runMutation(makeFunctionReference('projectHostedActionsSource:resolve'), {
+      ...f.input,
+      digests: [packState.sha256],
+      bound: true,
+    }),
+    error => (error.data?.code ?? error.code) === 'SOURCE_UNAVAILABLE',
+  );
+  await assert.rejects(
+    f.source({ state: packState.sha256, digests: [packState.sha256] }),
+    error => (error.data?.code ?? error.code) === 'SOURCE_UNAVAILABLE',
+  );
+  assert.equal(f.r2.requests.length, r2Requests, 'historical State grants are refused before storage I/O');
   t.diagnostic(
     JSON.stringify({
       files: 29000,
@@ -296,7 +298,6 @@ test('a cold29k job with a historical source pack and300 raw changes stays under
       sourceRequests: requests,
       dbBytes,
       replyBytes,
-      historicalSelectorReadBytes: [before.readBytes, after.readBytes],
     }),
   );
 });

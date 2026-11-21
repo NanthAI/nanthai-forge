@@ -16,7 +16,7 @@ import { recordRepositoryVisibility } from './githubRepositoryVisibility';
 import { actionsClaimsSchema, validateActionsClaims } from '../src/github-actions-oidc';
 import { invariant } from '../src/errors';
 import { githubHostedRunsOn } from '../src/github-actions-runner-label';
-import { actionsAnchoredPackCapability, hostedActionsCapabilities } from '../src/hosted-actions-capabilities';
+import { hostedActionsCapabilities } from '../src/hosted-actions-capabilities';
 import { latestSourcePack } from './projectSourcePackStore';
 import { hostedTimingHistory } from './projectHostedTestTimings';
 import { submoduleAllowListSchema, type SubmoduleAllow } from '../src/submodule-allowlist';
@@ -159,10 +159,7 @@ export const session = internalMutation({
             ? await runnerTokenScope(ctx, input.projectId, run.configuration.repository)
             : null,
       });
-    const capabilities =
-      process.env.FORGE_ACTIONS_ANCHORED_SOURCE_PACK === '1'
-        ? [...hostedActionsCapabilities, actionsAnchoredPackCapability]
-        : hostedActionsCapabilities;
+    const capabilities = hostedActionsCapabilities;
     if (!input.timings) return JSON.stringify({ ...run, capabilities });
     const { history } = await hostedTimingHistory(ctx, input.projectId);
     return JSON.stringify({

@@ -26,7 +26,6 @@ import {
   actionsInlineLogCapability,
   actionsJobCalls,
   actionsSourceBatchCapability,
-  actionsAnchoredPackCapability,
 } from '../dist/hosted-actions-capabilities.js';
 import { z } from 'zod';
 import { ConvexHttpClient } from 'convex/browser';
@@ -2409,7 +2408,7 @@ function replacePack(s, unpacked) {
 }
 
 test('anchored pack reads only the pinned States, uses content ids across paths and retains base-only blobs', async t => {
-  const s = fixture(t, { capabilities: [...hostedActionsCapabilities, actionsAnchoredPackCapability] });
+  const s = fixture(t);
   s.run.check = { executable: 'true', args: [], definition: 'c'.repeat(64) };
   const baseOnly = s.entry('base-only', 'accepted base only'),
     unused = s.entry('historical-only', 'unused historical bytes'),
@@ -2468,7 +2467,7 @@ for (const fault of [
   'missing archive',
 ])
   test(`anchored pack discards the cache and records fallback after ${fault}`, async t => {
-    const s = fixture(t, { capabilities: [...hostedActionsCapabilities, actionsAnchoredPackCapability] });
+    const s = fixture(t);
     s.run.check = { executable: 'true', args: [], definition: 'c'.repeat(64) };
     const stale = s.entry('old-base-only', 'discarded pack cache bytes'),
       unused = s.entry('zz-unheld', 'unheld history'),
@@ -2510,7 +2509,7 @@ for (const fault of [
 
 for (const fault of ['missing delta', 'corrupt delta', 'final link mismatch'])
   test(`anchored pack retries the full Candidate after ${fault} and records why`, async t => {
-    const s = fixture(t, { capabilities: [...hostedActionsCapabilities, actionsAnchoredPackCapability] });
+    const s = fixture(t);
     await cachedPack(s);
     const delta = digest('synthetic after'),
       link = s.files.find(file => file.mode === 'symlink'),
@@ -2552,7 +2551,7 @@ for (const fault of ['missing delta', 'corrupt delta', 'final link mismatch'])
     }
   });
 
-test('pack round-trip preserves bytes, modes and links; delta applies added, changed, deleted and mode paths', async t => {
+test('pack round-trip applies deletions and modes while fetching only new content', async t => {
   const s = fixture(t);
   await cachedPack(s);
   const candidateFiles = [
@@ -2572,7 +2571,7 @@ test('pack round-trip preserves bytes, modes and links; delta applies added, cha
   assert.equal(readFileSync(join(s.directory, 'candidate/test-link'), 'utf8'), 'new content');
   assert.equal(lstatSync(join(s.directory, 'candidate/scripts/example.sh')).mode & 0o111, 0);
   assert.equal(existsSync(join(s.directory, 'candidate/README.md')), false);
-  assert.equal(result.packRefresh.deltaFiles, 4);
+  assert.equal(result.packRefresh.deltaFiles, 2);
   assert.equal(s.calls.filter(call => call.kind === 'source').length, 2);
   assert.equal(s.traffic.downloads, 5); // two manifests, pack and two changed blobs
 });
@@ -2615,7 +2614,7 @@ test('6000-file pack plus 20 changes uses two source windows instead of W2 sixte
 });
 
 test('anchored 6000-file historical pack plus 20 changes stays at two source windows and 23 GETs', async t => {
-  const s = fixture(t, { capabilities: [...hostedActionsCapabilities, actionsAnchoredPackCapability] });
+  const s = fixture(t);
   const files = Array.from({ length: 6000 }, (_, i) => s.entry(`source/file-${i}.txt`, `before-${i}`));
   const historical = s.state(files).sha256;
   await cachedPack(s, files, historical);
@@ -2643,7 +2642,7 @@ test('anchored 6000-file historical pack plus 20 changes stays at two source win
   t.diagnostic(JSON.stringify({ elapsedMs: performance.now() - started, rssGrowth }));
 });
 
-test('historical source-pack State recipes stay bound and download only the changed objects', async t => {
+test('a 29,000-file pack skips its historical State recipe and fetches only the Candidate delta', async t => {
   const s = fixture(t);
   s.files.push(
     ...Array.from({ length: 29000 - s.files.length }, (_, index) =>
@@ -2685,10 +2684,6 @@ test('historical source-pack State recipes stay bound and download only the chan
   const call = s.client.call.bind(s.client),
     metadata = new Set([s.recipes.get(historical).sha256, tree.sha256, ...leaves.map(leaf => leaf.sha256)]);
   t.mock.method(s.client, 'call', async command => {
-    if (command.kind === 'source' && command.digests.some(id => metadata.has(id))) {
-      assert.equal(command.state, historical, 'State recipe reads retain their authorized State');
-      assert.equal(command.object, historical, 'metadata belongs to the historical logical State');
-    }
     const result = await call(command);
     return command.kind === 'source' && command.bound ? { rows: result, sourceVersion: 2 } : result;
   });
@@ -2697,33 +2692,25 @@ test('historical source-pack State recipes stay bound and download only the chan
   mkdirSync(cache);
   const rssBefore = process.memoryUsage().rss;
   const result = await materializeActionsSource(s.client, directory, cache);
-  t.diagnostic(JSON.stringify({ readerRssGrowthBytes: process.memoryUsage().rss - rssBefore }));
-  assert.ok(result.packed, 'a valid historical pack must be used');
-  assert.equal(typeof result.phases.packStateMs, 'number');
-  assert.equal(result.packed.files.length, s.files.length);
+  assert.equal(result.packed, true);
   assert.equal(result.deltaFiles, 1);
   assert.equal(readFileSync(join(directory, 'README.md'), 'utf8'), 'synthetic after');
-  assert.equal(
-    s.traffic.downloads,
-    8 + leaves.length,
-    'two current States, recipe/tree traversal and read, leaves, pack and one changed object',
+  const windows = s.calls.filter(call => call.kind === 'source');
+  assert.deepEqual(
+    windows.map(window => window.digests),
+    [[s.run.request.expectedHead, s.run.candidate.base.head], [digest('synthetic after')]],
   );
-  assert.equal(
-    s.calls.filter(call => call.kind === 'source').length,
-    6,
-    'batched State metadata and one delta window',
-  );
-  assert(
-    process.memoryUsage().rss - rssBefore < 256 * 1024 * 1024,
-    'historical pack reader stays within the existing 256 MiB growth budget',
-  );
+  assert(windows.every(window => window.digests.every(id => !metadata.has(id))));
+  assert.equal(s.traffic.downloads, 4, 'two pinned States, one pack and one delta blob');
+  const rssGrowth = process.memoryUsage().rss - rssBefore;
+  assert(rssGrowth < 256 * 1024 * 1024, 'pack reader stays within the existing 256 MiB growth budget');
   t.diagnostic(
     JSON.stringify({
       files: s.files.length,
-      sourceCalls: 6,
-      gets: 8 + leaves.length,
+      sourceCalls: windows.length,
+      gets: s.traffic.downloads,
       deltaFiles: result.deltaFiles,
-      rssBytes: process.memoryUsage().rss,
+      rssGrowth,
     }),
   );
 });
