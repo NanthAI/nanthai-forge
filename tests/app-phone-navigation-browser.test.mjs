@@ -158,6 +158,28 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
       await assets(page);
+      const detail = '/lanes/11223344-5566-4778-8990-112233445566';
+      for (const width of [1440, 1024]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto(origin + project);
+        const heading = page.getByRole('heading', { level: 1, name: 'Now', exact: true });
+        await heading.waitFor();
+        const { width: headingWidth, height: headingHeight } = await heading.boundingBox();
+        assert.deepEqual([headingWidth, headingHeight], [1, 1], 'the top-level heading is visually hidden');
+        assert.equal(await heading.getByRole('link').count(), 0, 'the hidden heading adds no Tab stops');
+        assert.equal(await heading.evaluate(node => getComputedStyle(node).clipPath), 'inset(50%)');
+        if (shots) await page.screenshot({ path: join(shots, `head-place-${width}-${theme}.png`) });
+
+        await page.goto(origin + project + detail);
+        const parent = page
+          .getByRole('heading', { level: 1 })
+          .getByRole('link', { name: 'Open', exact: true });
+        await parent.waitFor();
+        assert.equal(await parent.getAttribute('href'), project + '/lanes');
+        assert.ok((await parent.boundingBox()).width > 1, 'detail pages keep the trail back to the place');
+        if (shots) await page.screenshot({ path: join(shots, `head-detail-${width}-${theme}.png`) });
+      }
+      await page.setViewportSize({ width: 1440, height: 800 });
       await page.goto(origin + project + '/lanes/history');
       const nav = page.locator('.rail');
       const lanes = nav.getByRole('link', { name: 'Lanes', exact: true });
@@ -303,7 +325,7 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
     await settings.tap();
     await secrets.waitFor({ state: 'hidden' });
     await settings.tap();
-    await page.locator('main h1').tap();
+    await page.locator('main .sit').tap();
     await secrets.waitFor({ state: 'hidden' });
     await settings.tap();
     await secrets.tap();
@@ -338,6 +360,12 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
         }, theme);
         await assets(page, layerGate);
         await page.goto(origin + base);
+        if (name === 'Project') {
+          await page
+            .getByRole('heading', { level: 1 })
+            .getByRole('button', { name: 'Needs me: Now. Choose a page' })
+            .waitFor();
+        }
         const nav = page.getByRole('navigation', { name, exact: true });
         const trigger = nav.getByRole('button', { name: 'More', exact: true });
         const menu = page.getByRole('menu', { name: 'More', exact: true });

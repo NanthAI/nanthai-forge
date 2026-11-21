@@ -277,6 +277,10 @@ test('plan views and bulk bar: real components keep the view in the address and 
   {
     const { page, errors, context } = await open(1440, 'dark');
     const main = page.locator('main');
+    const heading = main.getByRole('heading', { level: 1 });
+    const openTitle = main.getByRole('heading', { level: 1, name: 'Open work', exact: true });
+    await openTitle.waitFor();
+    assert.equal((await openTitle.boundingBox()).width, 1, 'Open work is the top-level Plan view');
     assert.match(await main.textContent(), /Stream parser/);
     assert.equal(await main.getByText('in Lane', { exact: true }).count(), 1);
     await page.getByRole('link', { name: /^No owner/ }).click();
@@ -301,6 +305,10 @@ test('plan views and bulk bar: real components keep the view in the address and 
     await page.getByRole('button', { name: 'Expand sidebar' }).click();
     await saved.click();
     assert.match(page.url(), /type=bug/);
+    const parent = heading.getByRole('link', { name: 'Plan', exact: true });
+    await parent.waitFor();
+    assert.equal(await parent.getAttribute('href'), '/-/example-builder/synthetic/plan');
+    assert.ok((await parent.boundingBox()).width > 1, 'a query-backed saved view keeps the way back to Plan');
     await page.getByRole('button', { name: 'Remove Type bug' }).click();
     await page
       .getByRole('checkbox', { name: 'Select Stream parser: preserve split bytes across reads' })

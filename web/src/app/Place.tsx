@@ -6,7 +6,7 @@ const You = lazy(() => import('./You'));
 const InvitationHome = lazy(() => import('./people/InvitationHome'));
 import { A } from './frames';
 import { currentScreenHref, hrefFor, placeSections, type AppRoute } from './paths';
-import { PhonePageTitle } from './project-pages';
+import { PhonePageTitle, useProjectPages } from './project-pages';
 import {
   accountPlaceLabels,
   accountSentence,
@@ -44,7 +44,7 @@ export function crumbsFor(route: AppRoute, projectName: string): Crumb[] {
   return trail;
 }
 
-/** The page head (DESIGN.md frames): the trail as the h1, the place's sentence, then its tools. */
+/** The page head: the heading, the place's sentence, then its tools. */
 export function Head({
   trail,
   sentence,
@@ -54,28 +54,40 @@ export function Head({
   sentence: ReactNode;
   children?: ReactNode;
 }) {
+  const project = useProjectPages();
+  const route = project?.route;
+  const planView =
+    project?.route.place === 'plan' ? project.pages.plan.find(page => page.current) : undefined;
+  const topLevel = route && !route.section && !route.rest && (!planView || planView.id === 'open');
+  const placeTitle = topLevel ? trail.at(-1) : undefined;
   return (
     <div className="head">
-      <h1 className="crumb">
+      <h1 className="crumb" data-top-level={placeTitle ? true : undefined}>
         <PhonePageTitle />
-        {trail.map((crumb, index) => (
-          <span key={index} className="crumb-step">
-            {index ? (
-              <span className="t3" aria-hidden="true">
-                /
-              </span>
-            ) : null}
-            {crumb.href ? (
-              <A href={crumb.href} className="cut" translate="no">
-                {crumb.label}
-              </A>
-            ) : (
-              <span className="cut" aria-current="page" translate="no">
-                {crumb.label}
-              </span>
-            )}
+        {placeTitle ? (
+          <span className="crumb-step" translate="no">
+            {placeTitle.label}
           </span>
-        ))}
+        ) : (
+          trail.map((crumb, index) => (
+            <span key={index} className="crumb-step">
+              {index ? (
+                <span className="t3" aria-hidden="true">
+                  /
+                </span>
+              ) : null}
+              {crumb.href ? (
+                <A href={crumb.href} className="cut" translate="no">
+                  {crumb.label}
+                </A>
+              ) : (
+                <span className="cut" aria-current="page" translate="no">
+                  {crumb.label}
+                </span>
+              )}
+            </span>
+          ))
+        )}
       </h1>
       <p className="sit">{sentence}</p>
       {children ? <div className="tools">{children}</div> : null}

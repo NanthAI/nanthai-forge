@@ -12,6 +12,9 @@
   .head .crumb-step { display: inline-flex; align-items: center; gap: var(--s-2); min-width: 0; }
   .head .crumb a { color: var(--text-2); }
   .head .crumb [aria-current] { color: var(--text); }
+  @media (width > 860px) {
+    .head .crumb[data-top-level] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  }
   .top .brand .st { letter-spacing: normal; }
   .top .brand .st svg { width: 13px; height: 13px; }
   .keylist { display: grid; gap: var(--s-2); margin: 0; }
