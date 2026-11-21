@@ -3,7 +3,14 @@ import { readdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { ForgeError } from './errors.js';
 import { metricErrorCodes } from './self-metrics-journal.js';
-import { CALLER_RECEIPT_BATCH, callerReceiptSchema, type CallerReceipt } from './self-metric-receipts.js';
+import {
+  CALLER_RECEIPT_BATCH,
+  callerReceiptSchema,
+  cliProvenanceSchema,
+  type CallerReceipt,
+  type CliProvenance,
+} from './self-metric-receipts.js';
+import { callerReceiptFile } from './hosted-metric-outbox-write.js';
 export { metricOutboxDirectory, writeCallerReceipts } from './hosted-metric-outbox-write.js';
 
 const lifecycle: Record<string, 'start' | 'checkpoint' | 'sync' | 'finish'> = {
@@ -62,9 +69,11 @@ export function callerReceipts(input: {
   operationId: string | null;
   actor: string | null;
   at: string;
+  cli?: CliProvenance;
   result?: unknown;
   error?: unknown;
 }): CallerReceipt[] {
+  const cli = input.cli && cliProvenanceSchema.safeParse(input.cli).data;
   const errorCodes =
     input.error === undefined
       ? metricErrorCodes(input.result)
@@ -78,6 +87,7 @@ export function callerReceipts(input: {
       kind: 'outcome',
       actor: input.actor,
       at: input.at,
+      ...(cli ? { cli } : {}),
       action,
       operationId: input.operationId,
       errorCodes: errorCodes.slice(0, 8),
@@ -93,6 +103,7 @@ export function callerReceipts(input: {
         kind: 'delivery',
         actor: input.actor,
         at: input.at,
+        ...(cli ? { cli } : {}),
         action: input.action,
         operationId: input.operationId,
         entryId: state.id,
@@ -106,20 +117,21 @@ export function callerReceipts(input: {
     return parsed.success ? [parsed.data] : [];
   });
 }
-/** Oldest pending receipts for this requester, bounded to one mutation's batch. */
-export function takeCallerReceipts(directory: string, actor: string) {
+/** Pending receipts for this requester, bounded to one mutation's batch. */
+export function takeCallerReceipts(directory: string, actor: string, withProvenance = true) {
   let names: string[];
   try {
-    names = readdirSync(directory)
-      .filter(name => name.endsWith('.json'))
-      .sort();
+    names = readdirSync(directory).filter(callerReceiptFile).sort();
   } catch {
     return null;
   }
   const files: string[] = [],
     receipts: CallerReceipt[] = [];
+  const included = new Map<string, number>();
   for (const name of names) {
-    if (receipts.length >= CALLER_RECEIPT_BATCH) break;
+    const key = name.slice(0, name.lastIndexOf('.'));
+    const previous = included.get(key);
+    if (previous === undefined && receipts.length >= CALLER_RECEIPT_BATCH) break;
     const file = join(directory, name);
     try {
       let raw: unknown;
@@ -137,12 +149,19 @@ export function takeCallerReceipts(directory: string, actor: string) {
       }
       if (parsed.data.actor !== null && parsed.data.actor !== actor) continue;
       files.push(file);
-      receipts.push(parsed.data);
+      if (previous === undefined) {
+        included.set(key, receipts.length);
+        receipts.push(parsed.data);
+      } else if (Date.parse(parsed.data.at) < Date.parse(receipts[previous]!.at)) {
+        // Old and new processes can both retain a replay. Keep the first observation.
+        receipts[previous] = parsed.data;
+      }
     } catch {
       // A concurrent flusher already removed it; a later mutation retries the rest.
     }
   }
-  return receipts.length ? { payload: JSON.stringify(receipts), files } : null;
+  const payload = withProvenance ? receipts : receipts.map(({ cli: _cli, ...legacy }) => legacy);
+  return receipts.length ? { payload: JSON.stringify(payload), files } : null;
 }
 export function clearCallerReceipts(files: string[]) {
   for (const file of files)

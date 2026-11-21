@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ForgeError } from '../dist/errors.js';
+import { cliBuildIdentity } from '../dist/cli-installation.js';
 import {
   callerReceipts,
   clearCallerReceipts,
@@ -200,6 +201,16 @@ test('caller receipts record what the caller received, with no-owner cause, and 
     ],
   );
   assert.deepEqual(finished[0].errorCodes, ['LANDING_STALLED']);
+  const withoutProvenance = callerReceipts({
+    action: 'finish',
+    operationId,
+    actor: 'owner',
+    at: now(),
+    cli: { cliChannel: 'stable', cliVersion: '0.3.1', cliCommit: 'invalid build marker' },
+    result: { phase: 'finish', submission },
+  });
+  assert.equal(withoutProvenance.length, 2, 'a missing build identity must not lose the outcomes');
+  assert(withoutProvenance.every(receipt => receipt.cli === undefined));
   const failed = callerReceipts({
     action: 'save',
     operationId,
@@ -262,6 +273,10 @@ test('a later existing CLI mutation carries pending receipts; unsupported server
   await f.transport().dispatch('start', { operationId: randomUUID(), outcome: 'Carry' });
   assert.equal(f.calls.length - before, plain, 'no extra call carries receipts');
   const carried = JSON.parse(starts().at(-1).args.metricReceipts);
+  assert(
+    carried.every(r => !r.cli),
+    'the old strict receipt schema still receives its original fields',
+  );
   assert.deepEqual(
     carried.map(r => [r.action, r.operationId, r.errorCodes]).sort((a, b) => a[2].length - b[2].length),
     [
@@ -270,6 +285,29 @@ test('a later existing CLI mutation carries pending receipts; unsupported server
     ],
   );
   assert.equal(readdirSync(directory).length, 1, 'carried receipts are cleared; the new outcome waits');
+  f.caps.features = [...(f.caps.features ?? []), 'metric-cli-provenance'];
+  before = f.calls.length;
+  await f.transport().dispatch('start', { operationId: randomUUID(), outcome: 'Carry build identity' });
+  assert.equal(f.calls.length - before, plain, 'build provenance adds no Convex call');
+  const { cliChannel, cliVersion, cliCommit } = cliBuildIdentity();
+  assert.deepEqual(JSON.parse(starts().at(-1).args.metricReceipts)[0].cli, {
+    cliChannel,
+    cliVersion,
+    cliCommit,
+  });
+});
+
+test('a build-aware and an older pinned CLI can retain the same metric without carrying it twice', t => {
+  const directory = metricOutboxDirectory({ url: 'https://outbox.invalid', projectId: randomUUID() });
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const legacy = outcome();
+  const cli = { cliChannel: 'stable', cliVersion: '0.3.1', cliCommit: 'a'.repeat(64) };
+  const newReplay = { ...legacy, at: new Date(Date.parse(legacy.at) + 1).toISOString(), cli };
+  writeCallerReceipts(directory, [legacy, newReplay]);
+  const pending = takeCallerReceipts(directory, 'owner');
+  assert.deepEqual(JSON.parse(pending.payload), [legacy], 'retain the older CLI’s first outcome');
+  clearCallerReceipts(pending.files);
+  assert.equal(takeCallerReceipts(directory, 'owner'), null);
 });
 
 test('hosted reader makes 5.2, 5.3 and 5.5 complete after collection starts and partial for unreported callers', async () => {

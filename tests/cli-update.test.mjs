@@ -40,6 +40,7 @@ import {
 import { publishCliBuild } from '../dist/cli-update-install.js';
 import {
   cliBuildCommit,
+  cliBuildIdentity,
   pruneCliBuilds,
   permitCliRetirement,
   reconcileRetiredOwnerServices,
@@ -674,7 +675,11 @@ test('unleased legacy processes launched through current protect every possible 
 test('hosted agent receipt envelopes name the executing CLI build', async t => {
   const { agentFixture } = await import('./hosted-agent-fixture.mjs');
   const hosted = agentFixture(t);
-  assert.equal((await hosted.transport().dispatch('capabilities', {})).cliCommit, cliBuildCommit());
+  const receipt = await hosted.transport().dispatch('capabilities', {});
+  const { cliChannel, cliVersion } = cliBuildIdentity();
+  assert.equal(receipt.cliCommit, cliBuildCommit());
+  assert.equal(receipt.cliChannel, cliChannel);
+  assert.equal(receipt.cliVersion, cliVersion);
 });
 
 test('a failing release service gets exactly one HTTP attempt and cached typed refusal', async t => {

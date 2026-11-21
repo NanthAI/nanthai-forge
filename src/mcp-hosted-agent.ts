@@ -12,6 +12,7 @@ import {
   hostedQueueSchema,
 } from './hosted-agent-reads.js';
 import { slimReceipt } from './receipt-slim.js';
+import { withCliBuildProvenance } from './cli-installation.js';
 import { waitEventLine } from './hosted-wait-line.js';
 import { installCompactToolList, toolHelp, type ToolHelp } from './mcp-tool-list.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -62,7 +63,7 @@ async function result(action: () => Promise<unknown>, replyDetail = false, repla
     ];
   };
   try {
-    const value = await action();
+    const value = withCliBuildProvenance(await action());
     return {
       content: content(replyDetail ? value : slimReceipt(value)),
     };

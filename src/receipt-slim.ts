@@ -499,8 +499,8 @@ function briefLaneStatus(result: Json, now = Date.now()): Json | undefined {
 }
 
 function brief(out: Json): Json {
-  // Constant per CLI: `nforge version` names it; the hosted wire contract keeps all three.
-  delete out.cliCommit;
+  // Legacy receipts have only a commit. A producing CLI with full build identity keeps it together.
+  if (out.cliVersion === undefined) delete out.cliCommit;
   delete out.schema;
   delete out.transport;
   if (sameOperation(out.resolved, out.operationId)) delete out.resolved;

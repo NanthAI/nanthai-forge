@@ -24,7 +24,11 @@ export function capabilityOptions(
     features: status
       ? [...hostedContractFeatures]
       : [
-          ...hostedContractFeatures.filter(feature => feature !== 'main-today'),
+          // Check detail is negotiated on the check reads that already ask for it.
+          ...hostedContractFeatures.filter(
+            feature => feature !== 'main-today' && feature !== 'check-report-detail',
+          ),
+          'metric-cli-provenance',
           ...(startWithIntent ? [startLaneTitle] : []),
         ],
     noticeVersion: 1,
@@ -43,7 +47,10 @@ export function capabilityOptions(
 
 /** Explicit discovery for observers can use the main-today slot reserved for bare status. */
 export function requestFeedCapability(options: Record<string, unknown>) {
-  return { ...options, features: [...(options.features as string[]), feedCommitOrder] };
+  const features = (options.features as string[]).map(feature =>
+    feature === 'metric-cli-provenance' ? 'check-report-detail' : feature,
+  );
+  return { ...options, features: [...features, feedCommitOrder] };
 }
 
 /** Actions whose first server call is capability discovery. Others (lists, board, policy, a clone's

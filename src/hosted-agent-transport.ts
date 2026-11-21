@@ -7,7 +7,8 @@ import { workIndexRecovery } from './error-teaching.js';
 import { suppliedLandingMessage } from './landing-message.js';
 import { keptApplyEnvelope } from './hosted-apply-kept.js';
 import { laneScratchPath } from './forge-cache-paths.js';
-import { cliBuildCommit } from './cli-installation.js';
+import { cliBuildProvenance, withCliBuildProvenance } from './cli-installation.js';
+import type { CliProvenance } from './self-metric-receipts.js';
 import { describeIssues, missingObserveId, retryReasonHint } from './argument-errors.js';
 import { liveLanes } from './hosted-live-lanes.js';
 import { cloneFreshness, mainCheckoutTransport, mainTodayFrom, pullHostedProject } from './hosted-pull.js';
@@ -100,6 +101,7 @@ import {
   metricOperationId,
   metricRequesterActor,
   recordOwnerMutation,
+  setMetricCliBuild,
 } from './self-metrics-journal.js';
 import { SourceAuthorityStaleError } from './hosted-source-authority.js';
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
@@ -285,8 +287,7 @@ export type HostedAgentExchange = Pick<
   | 'uploadLazyBatch'
 > &
   Partial<Pick<ConvexExchange, 'uploadPrepared' | 'sourceStateReads' | 'sourceStateVersion'>>;
-export type HostedAgentResponse = {
-  cliCommit?: string;
+export type HostedAgentResponse = Partial<CliProvenance> & {
   schema: 1;
   transport: 'hosted';
   action:
@@ -435,6 +436,7 @@ export class HostedAgentTransport {
   waitBoard?: BoardWaitOption | undefined;
   /** Plain status in a Lane: the operation read replaces the overlap read it does not display. */
   plainStatus = false;
+  readonly cli = cliBuildProvenance();
   constructor(
     readonly root: string,
     readonly address: HostedAgentAddress,
@@ -448,8 +450,16 @@ export class HostedAgentTransport {
     readonly subscribeSource?: () => HostedRunSubscription,
   ) {
     this.root = hostedAgentRoot(root);
+    setMetricCliBuild(this.cli);
   }
   async dispatch(
+    requestedAction: string,
+    input: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<HostedAgentResponse> {
+    return withCliBuildProvenance(await this.dispatchReceipt(requestedAction, input, signal));
+  }
+  private async dispatchReceipt(
     requestedAction: string,
     input: Record<string, unknown>,
     signal?: AbortSignal,
@@ -806,6 +816,7 @@ export class HostedAgentTransport {
         operationId,
         actor: this.callerActor,
         at: new Date().toISOString(),
+        ...(this.cli ? { cli: this.cli } : {}),
         ...outcome,
       }),
     );
@@ -2118,7 +2129,6 @@ export class HostedAgentTransport {
     const missing = this.serverFeatures ? missingRequiredFeatures(this.serverFeatures) : [];
     return {
       schema: 1,
-      cliCommit: cliBuildCommit(),
       transport: 'hosted',
       action,
       operationId,
@@ -2455,7 +2465,13 @@ export class HostedAgentTransport {
     }
     const outbox = metricOutboxDirectory(this.address);
     const pending =
-      this.receiptActor && receiptMutations.has(name) ? takeCallerReceipts(outbox, this.receiptActor) : null;
+      this.receiptActor && receiptMutations.has(name)
+        ? takeCallerReceipts(
+            outbox,
+            this.receiptActor,
+            this.serverFeatures?.includes('metric-cli-provenance') === true,
+          )
+        : null;
     const request = {
       ...args,
       projectId: this.address.projectId,

@@ -10,6 +10,9 @@ New managed installs default to stable. Stable uses the same authorized release
 read in a detached updater after a command exits. A cached CLI or protocol floor
 can require an update. An exact signed State pin survives channel movement and
 is visible in version and auth status. The first stable publication is owner-gated.
+
+Agent receipts, CLI metric receipts and hosted friction captures carry the producing
+CLI's channel, version and build commit. Hosted records use the existing writes.
 See [CLI updates](../../operations/cli-update.md).
 
 Under a CLI measurement hold, `land --save --no-wait` returns a local receipt and

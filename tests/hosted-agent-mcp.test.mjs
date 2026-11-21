@@ -23,6 +23,7 @@ import { agentFixture } from './hosted-agent-fixture.mjs';
 import { slimReceipt } from '../dist/receipt-slim.js';
 import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
 import { replies } from './agent-reply-fixture.mjs';
+import { cliBuildIdentity } from '../dist/cli-installation.js';
 
 test('MCP replyDetail preserves every receipt field and body without changing the dispatched action', async t => {
   const s = agentFixture(t),
@@ -44,7 +45,9 @@ test('MCP replyDetail preserves every receipt field and body without changing th
     return expected.receipt;
   });
   const controller = new AbortController();
-  for (const [name, receipt] of Object.entries(replies)) {
+  const { cliChannel, cliVersion, cliCommit } = cliBuildIdentity();
+  for (const [name, full] of Object.entries(replies)) {
+    const receipt = { ...full, cliChannel, cliVersion, cliCommit };
     const action =
       name === 'land' ? 'finish' : name === 'conflict' ? 'sync' : name === 'wait' ? 'observe' : name;
     expected.action = action;

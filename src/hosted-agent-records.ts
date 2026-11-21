@@ -79,7 +79,8 @@ export async function executeHostedRecords(
       parsed.data,
       operationId as string | undefined,
     );
-    const command = { ...parsed.data, operationId: journal.operationId };
+    const cli = action === 'friction' ? transport.cli : undefined;
+    const command = { ...parsed.data, operationId: journal.operationId, ...(cli ? { cli } : {}) };
     const endpoint =
       action === 'friction'
         ? 'projectHostedFriction:capture'

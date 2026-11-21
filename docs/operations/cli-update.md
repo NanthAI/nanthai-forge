@@ -138,10 +138,17 @@ re-run child gets the concrete build path. Publication compares the current obse
 a concurrent change is preserved with `CLI_UPDATE_CHANGED`, rather than downgraded
 from an earlier release read. A failed hook migration retains old build bytes.
 
-Agent receipts include `cliCommit`: the accepted Forge State hash for managed
-builds. Source development checkouts run their own code for tests and report
-`development` when no accepted-source marker is available. Development checkouts
-are not released installations.
+Compact and detailed agent receipts report `cliChannel`, `cliVersion` and
+`cliCommit` for the producing CLI. The commit is the accepted Forge State hash
+for managed builds. Source development builds report `development` when no
+accepted-source marker is available.
+
+CLI metric receipts and hosted friction reports retain the same fields under
+`cli`. Caller metrics carry them in the existing deferred receipt write when the
+server supports the fields. Friction attaches them to the first successful
+capture, with room in its existing row. Older records and captures at the
+physical document limit can lack them. These fields report what the client
+declared.
 
 First-write hooks use the stable `current/dist/agent-edit-hook.js` path. The
 updater also migrates existing Claude and Codex Forge hook commands after the

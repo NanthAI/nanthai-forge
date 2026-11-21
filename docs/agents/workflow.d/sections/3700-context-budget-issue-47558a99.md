@@ -26,15 +26,16 @@ same one). `node scripts/measure-agent-context.mjs` prints the hosted MCP tool l
   does not exist (`scripts/check-error-teaching.mjs`; the table is `src/error-teaching.ts`, the topics
   `src/help-topics.ts`). Help and teaching are local: no Convex call.
 - **Receipts.** The CLI prints, and MCP replies carry, a brief receipt of about 300 characters when
-  healthy: `action`, `operationId` and the next step's facts. `start`: Lane id and path; `save`: the saved
+  healthy, plus the build fields: `action`, `operationId` and the next step's facts. `start`: Lane id and path; `save`: the saved
   head; `sync`: `up-to-date|merged|resolved` and the head; a landed landing: the acceptance receipt, State
-  and test counts. Dropped as constant or derivable: `cliCommit`, a `resolved` that
+  and test counts. Build fields are `cliChannel`, `cliVersion` and `cliCommit` (122 JSON bytes for
+  stable version 0.3.1 and a 64-character build). The brief drops a `resolved` that
   is only the operation id, timings (`landTiming`, sync steps), Lane versions, a clean
   main-distance report and idle-Lane paths (the stderr hint lists them). A Lane behind main keeps
   its conflicting paths; a conflicted sync keeps file summaries and recovery; a failed landing
   keeps its error and recovery. Replies retain `resolved` replay inputs, failed test files in full and flaky ones by
   name, `retry` (`passed`: it failed an attempt and then passed; a file whose retry failed is under `failed`)
-  and the start of their error. A normal submit has a 1,200-character budget once Forge registers a
+  and the start of their error. A normal submit has a 1,200-character budget before build fields once Forge registers a
   durable submission, including while the server is preparing source. The brief keeps the phase and
   any assigned queue position, with `wake.command` for a background wake or `waitCommand` and the
   structured `next` target for a foreground wait. The brief summarizes routine preflight advice by

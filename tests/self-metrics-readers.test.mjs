@@ -8,8 +8,10 @@ import { randomUUID } from 'node:crypto';
 import { hostedSelfMetricsReader } from '../dist/self-metrics-hosted.js';
 import { readSelfMetrics } from '../dist/self-metrics.js';
 import { readSelfMetricReceipts, withLifecycleMetric } from '../dist/self-metrics-journal.js';
+import { cliBuildIdentity } from '../dist/cli-installation.js';
 import { saveBytes } from '../dist/hosted-save.js';
 import { buildComposePages } from '../dist/hosted-compose.js';
+import { agentFixture } from './hosted-agent-fixture.mjs';
 const period = { from: '2026-10-14T00:00:00.000Z', to: '2026-10-25T03:30:00.000Z' };
 const at = time => `2026-10-23T${time}:00.000Z`;
 const h = 'a'.repeat(64),
@@ -111,10 +113,11 @@ test('hosted reader hydrates table bodies and immutable input pages, counts fail
   );
 });
 
-test('Oct 21 concurrency replay records seven caller-visible WORK_STALE errors and hides successful internal retries', async () => {
+test('Oct 21 concurrency replay records seven caller-visible WORK_STALE errors and hides successful internal retries', async t => {
   const { withLifecycleMetric } = await import('../dist/self-metrics-journal.js');
   const { ForgeError } = await import('../dist/errors.js');
   const { calculateSelfMetrics } = await import('../dist/self-metrics.js');
+  agentFixture(t).transport();
   const directory = mkdtempSync(join(tmpdir(), 'forge-m1-eight-'));
   try {
     await Promise.allSettled(
@@ -136,6 +139,8 @@ test('Oct 21 concurrency replay records seven caller-visible WORK_STALE errors a
       ),
     );
     const receipts = readSelfMetricReceipts(directory);
+    const { cliChannel, cliVersion, cliCommit } = cliBuildIdentity();
+    for (const receipt of receipts) assert.deepEqual(receipt.cli, { cliChannel, cliVersion, cliCommit });
     const result = calculateSelfMetrics(
       {
         moves: [],

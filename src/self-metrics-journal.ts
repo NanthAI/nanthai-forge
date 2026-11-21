@@ -75,6 +75,11 @@ function closeRequest(identity: Requester) {
 /** Scratch benchmark only; production callers leave recording enabled. */
 export const selfMetricsTestHooks = { disabled: false };
 const lifecycle = new Set(['start', 'checkpoint', 'sync', 'finish', 'land']);
+let cliBuild: CliProvenance | undefined;
+/** The hosted CLI transport supplies its build to the local journal at runtime. */
+export function setMetricCliBuild(cli: CliProvenance | undefined) {
+  cliBuild = cli;
+}
 export const selfMetricsJournalPath = (directory: string, name = 'self-metrics.jsonl') =>
   join(directory, name);
 
@@ -97,7 +102,8 @@ export function appendSelfMetric(directory: string, receipt: SelfMetricReceipt, 
       }
       destination = fd;
     }
-    appendFileSync(destination, `${JSON.stringify(receipt)}\n`, { mode: 0o600 });
+    const cli = receipt.cli ?? cliBuild;
+    appendFileSync(destination, `${JSON.stringify(cli ? { ...receipt, cli } : receipt)}\n`, { mode: 0o600 });
   } catch {
     // Never turn an already committed action into an apparent failure/retry.
     process.emitWarning('Self-metric receipt could not be recorded.', { code: 'METRIC_RECEIPT_UNAVAILABLE' });

@@ -20,6 +20,7 @@ import {
 import { canonicalRoot } from './root-paths.js';
 import { ForgeError, invariant } from './errors.js';
 import { linkDirectory } from './source-links.js';
+import type { CliProvenance } from './self-metric-receipts.js';
 
 export const cliPackageRoot = (url = import.meta.url) => dirname(dirname(fileURLToPath(url)));
 export function cliInstallation(root = cliPackageRoot()): string | null {
@@ -124,7 +125,7 @@ export function cliBuildPackage(root: string) {
 }
 
 /** Print paths share installation metadata only. They do not import the release or network code. */
-export function cliBuildIdentity(root = cliPackageRoot()) {
+export function cliBuildIdentity(root = cliPackageRoot()): CliProvenance & { cliPin: string | null } {
   const installation = cliInstallation(root);
   const stable = installation ? stableSelection(installation) : null;
   return {
@@ -133,6 +134,36 @@ export function cliBuildIdentity(root = cliPackageRoot()) {
     cliChannel: stable || !installation ? 'stable' : 'main',
     cliPin: stable?.pin ?? null,
   };
+}
+
+let provenance: CliProvenance | null | undefined;
+/** Capture the producing process's own build once, independently of its target checkout. */
+export function cliBuildProvenance(): CliProvenance | undefined {
+  if (provenance === undefined) {
+    try {
+      const { cliChannel, cliVersion, cliCommit } = cliBuildIdentity();
+      provenance = { cliChannel, cliVersion, cliCommit };
+    } catch {
+      // A diagnostic annotation must never change the outcome of a command.
+      provenance = null;
+    }
+  }
+  return provenance ?? undefined;
+}
+
+/** Preserve provenance when this process is printing a receipt it got from a submitter. */
+export function withCliBuildProvenance<T>(receipt: T): T {
+  if (
+    !receipt ||
+    typeof receipt !== 'object' ||
+    !('transport' in receipt) ||
+    receipt.transport !== 'hosted' ||
+    'cliVersion' in receipt
+  )
+    return receipt;
+  const cli = cliBuildProvenance();
+  if ('cliCommit' in receipt && receipt.cliCommit !== cli?.cliCommit) return receipt;
+  return cli ? { ...receipt, ...cli } : receipt;
 }
 
 export function stableCliRunner(runner: string) {

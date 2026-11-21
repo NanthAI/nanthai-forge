@@ -6,7 +6,7 @@ import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { ForgeError, invariant } from './errors.js';
 import { describeFailure, recordFailure } from './system-errors.js';
 import { agentDeadEnd, cliTeachContext, teachReceipt } from './error-teaching.js';
-import { cliBuildIdentity } from './cli-installation.js';
+import { cliBuildIdentity, withCliBuildProvenance } from './cli-installation.js';
 
 const HELP = `Forge is a source host and workspace for humans and AI agents working on the same code.
 
@@ -421,15 +421,15 @@ try {
       for (const line of (await import('./cli-reply-lines.js')).cliReplyLines(process.argv.slice(2), output))
         process.stderr.write(`${line}\n`);
     // Hosted agent receipts leave the process without the facts the agent already holds; --detail keeps all.
-    const receipt = printedReceipt(output, {
+    const agentCommand = process.argv[2] === 'agent' || process.argv[2] === 'x';
+    const receipt = printedReceipt(agentCommand ? withCliBuildProvenance(output) : output, {
       agent: process.argv[2] === 'agent',
       detail: process.argv.includes('--detail'),
       // The land submitter's stdout is parsed by its parent, which needs the full receipt.
       landChild: process.env.FORGE_LAND_CHILD === '1',
     });
     // A terminal error inside an agent receipt (a conflict, a failed check) names its help topic.
-    const agentReply =
-      (process.argv[2] === 'agent' || process.argv[2] === 'x') && process.env.FORGE_LAND_CHILD !== '1';
+    const agentReply = agentCommand && process.env.FORGE_LAND_CHILD !== '1';
     const printed = agentReply ? teachReceipt(receipt, cliTeachContext(process.argv.slice(2))) : receipt;
     const deadEnd = agentReply ? agentDeadEnd(printed) : undefined;
     process.stdout.write(

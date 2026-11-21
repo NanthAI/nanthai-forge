@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { getFunctionName } from 'convex/server';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { recordsFixture } from './hosted-context-records-fixture.mjs';
+import { cliBuildIdentity } from '../dist/cli-installation.js';
 
 const code = expected => error => error.code === expected;
 function fixture(t) {
@@ -44,7 +45,17 @@ test('friction-list pages newest first, filters by status, and triage dismisses 
     ['gamma', 'beta', 'alpha'],
   );
   assert.equal(open.nextCursor, null);
-  assert.deepEqual(Object.keys(open.items[0]).sort(), ['area', 'at', 'detail', 'id', 'status', 'title']);
+  assert.deepEqual(Object.keys(open.items[0]).sort(), [
+    'area',
+    'at',
+    'cli',
+    'detail',
+    'id',
+    'status',
+    'title',
+  ]);
+  const { cliChannel, cliVersion, cliCommit } = cliBuildIdentity();
+  assert.deepEqual(open.items[0].cli, { cliChannel, cliVersion, cliCommit });
 
   const issue = randomUUID();
   const dismissed = await s.transport.dispatch('friction-triage', {

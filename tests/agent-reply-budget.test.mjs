@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { printedReceipt, slimReceipt } from '../dist/receipt-slim.js';
 import { replies, replyBytes, head } from './agent-reply-fixture.mjs';
+import { cliProvenanceSchema } from '../dist/self-metric-receipts.js';
 
 const ledger = JSON.parse(readFileSync(new URL('./fixtures/agent-reply-budget.json', import.meta.url)));
+const build = { cliChannel: 'stable', cliVersion: '0.3.1', cliCommit: head };
 test('the byte ratchet covers every common agent reply and has no unmeasured entry', () => {
   const actions = [
     'start',
@@ -24,8 +26,12 @@ test('the byte ratchet covers every common agent reply and has no unmeasured ent
 });
 for (const [action, full] of Object.entries(replies)) {
   test(`default ${action} reply bytes cannot grow past the ratcheted ledger (b078515d)`, t => {
-    const actual = replyBytes(printedReceipt(full, { agent: true, detail: false, landChild: false }));
-    t.diagnostic(`${action}: ${ledger.before[action]} -> ${actual} bytes`);
+    const receipt = printedReceipt({ ...full, ...build }, { agent: true, detail: false, landChild: false });
+    const { cliChannel, cliVersion, cliCommit, ...payload } = receipt;
+    assert.deepEqual(cliProvenanceSchema.parse({ cliChannel, cliVersion, cliCommit }), build);
+    const actual = replyBytes(payload);
+    assert.equal(replyBytes(receipt) - actual, 122, 'one build identity per reply');
+    t.diagnostic(`${action}: ${ledger.before[action]} -> ${actual} bytes plus 122 build bytes`);
     assert(
       actual <= ledger.maxBytes[action],
       `${action}: ${actual} > ${ledger.maxBytes[action]}; fix growth or record the Issue decision and ratchet this entry`,
