@@ -121,13 +121,14 @@ CHECK_NOT_PASSED: acceptance needs a passed check for this exact head; land --sa
   },
   queue: {
     title: 'The landing queue',
-    text: `queue {limit?,laneId?} lists the landing queue in dispatch order: Lane, Intent title, phase, suspect, last failing test files and recompose count. yourLane names your position when it is in the page. Held entries (waiting for a person or a dependency) follow with position null and hold {kind,reason,paths,next}. One bounded read, no idle cost.
-- queue {submissionId,beforeAttempt?} shows one landing's attempts, newest first, with recorded phase times and failure causes. Take submissionId from queue or the landing reply. Continue with nextBeforeAttempt.
+    text: `queue {limit?,laneId?} lists Lane, Intent, phase, suspect, failing files and recompose count in dispatch order. yourLane gives your position. Held entries follow with position null and hold {kind,reason,paths,next}. One bounded read, no idle cost.
+- queue {submissionId,beforeAttempt?} shows attempts newest first with phase times and causes. Continue with nextBeforeAttempt.
+- queue {batchId} shows retained phase and members. queue {submissionId,attemptId,afterLaneId?} shows Candidate pins and Lane inputs. Continue with nextAfterLaneId.
 - SYNC_REQUIRED while queued: main landed a file your entry changes; run the one land --save it names instead of waiting.
 - LANDING_CANCELLED: the landing was withdrawn or cancelled; the Lane and its saves stay. Fix if needed and land --save again.
 - LANDING_STALLED: run the receipt's exact repair command; do not resubmit a live landing. If none is present, read queue '{}' and landing {operationId}. A terminal-failed receipt may explicitly direct a retry in the same Lane.
 - REVIEW_REQUIRED: acceptance needs a person under the project policy; wait {approval:LANE_ID} after request-approval, or ask the owner.
-- landings {from,to,limit?,cursor?} lists accepted landings in a UTC window, oldest first (30 per page): receipt, Lane, times, bases, checks, waits and who accepted. Follow nextCursor until null. For a file, use history {op:"log",path:"FILE"} or history {op:"blame",path:"FILE",start:1,end:100}.`,
+- landings {from,to,limit?,cursor?} lists accepted landings in a UTC window, oldest first. Continue with nextCursor. For a file, use history {op:"log",path:"FILE"} or history {op:"blame",path:"FILE",start:1,end:100}.`,
   },
   board: {
     title: 'The agent board',

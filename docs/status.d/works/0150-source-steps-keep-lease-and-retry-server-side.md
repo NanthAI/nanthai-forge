@@ -8,4 +8,6 @@
   storage with 503 `reason: storage` inside the runner's 30 s timeout.
 - `queue {submissionId}` reads earlier landing attempts and the current one, with
   retained phase durations and causes, including a source failure during recomposition.
-  It reads one bounded page on demand.
+  `queue {batchId}` shows a retained batch's phase and members.
+  `queue {submissionId,attemptId}` shows the installed attempt's exact Candidate
+  pins and a page of its retained Lane inputs. Each read is bounded and on demand.

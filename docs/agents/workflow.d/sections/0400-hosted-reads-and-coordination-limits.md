@@ -14,6 +14,23 @@ MCP `forge_review` exposes hosted `show`, `diff`, `peers` and `queue`.
   omitted. The read flags gaps it finds in live history as partial.
   For older attempts, pass `nextBeforeAttempt` as `beforeAttempt` with the same
   submission ID. Each page is one authorized read with no source download or writes.
+  The history also names the submission's current and origin batch IDs when recorded.
+- `queue {batchId}` returns that retained batch's phase, parent, run and member
+  submission and Candidate pins. Use the current or origin ID to inspect that batch
+  directly, including after a split or supersession.
+- `queue {submissionId,attemptId,afterLaneId?}` returns the exact installed
+  attempt's main and Candidate pins, both selection roots, and up to 32 indexed
+  Lane inputs in ID order. Continue with `nextAfterLaneId` using the same submission
+  and attempt. A retained compose gives Lane and dependency counts. A null
+  selection means those counts and Lane records are unavailable. A null Lane list
+  means the records for a nonempty selection were unavailable at its start.
+  A null head means the selected Lane's saved head was never indexed. A zero Lane
+  count with an empty list is a recorded empty input set, as for a shared Candidate
+  composed entirely from dependencies. Compare the total Lane rows with the count
+  to identify incomplete history. The selector uses transactional attempt pins,
+  including the terminal attempt retained for a capsule. Earlier capsule-only
+  attempts and unavailable batch IDs return `NOT_FOUND`.
+  Both selectors use one authorized query per reply, without source downloads or writes.
 
 - `peers {laneId,path?,detail?}` reads saved peer evidence in one query,
   including paths before their first save, as `peerEvidence`. Detail shows 50 items

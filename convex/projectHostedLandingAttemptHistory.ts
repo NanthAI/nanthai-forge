@@ -7,6 +7,7 @@ import { accessibleProject } from './projectAuthority';
 import { report } from './errors';
 import { sanitizeFailureMessage } from './projectFailureLog';
 import { loadLandingAttempt } from './projectHostedLandingAttemptRead';
+import { landingSelectionRead } from './projectHostedLandingSelectionRead';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { landingAttemptProgress, landingRow, landingStateFromRow } from './projectHostedLandingStore';
 import { finishRow } from './projectHostedFinishWake';
@@ -139,25 +140,48 @@ async function reservedAttempt(
 export const read = query({
   args: {
     projectId: v.id('hostedProjects'),
-    submissionId: v.string(),
+    submissionId: v.optional(v.string()),
     beforeAttempt: v.optional(v.number()),
+    batchId: v.optional(v.string()),
+    attemptId: v.optional(v.string()),
+    afterLaneId: v.optional(v.string()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const { projectId, submissionId, beforeAttempt } = input;
+      const { projectId, submissionId, beforeAttempt, batchId, attemptId, afterLaneId } = input;
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read landing attempt history.');
       await accessibleProject(ctx, projectId, user.subject);
+      if (batchId !== undefined) {
+        invariant(
+          submissionId === undefined &&
+            beforeAttempt === undefined &&
+            attemptId === undefined &&
+            afterLaneId === undefined,
+          'BAD_ARGUMENT',
+          'Select only batchId to read a retained batch.',
+        );
+        return JSON.stringify(await landingSelectionRead(ctx, projectId, { batchId }));
+      }
+      invariant(submissionId, 'BAD_ARGUMENT', 'Select submissionId to read a landing attempt.');
+      if (attemptId !== undefined) {
+        invariant(beforeAttempt === undefined, 'BAD_ARGUMENT', 'Select attemptId without beforeAttempt.');
+        return JSON.stringify(
+          await landingSelectionRead(ctx, projectId, { submissionId, attemptId, afterLaneId }),
+        );
+      }
+      invariant(afterLaneId === undefined, 'BAD_ARGUMENT', 'Use afterLaneId with an exact attemptId.');
       invariant(
         beforeAttempt === undefined || (Number.isSafeInteger(beforeAttempt) && beforeAttempt >= 0),
         'BAD_ARGUMENT',
         'Use the previous page’s nextBeforeAttempt for beforeAttempt.',
       );
       const observedAt = new Date(Date.now()).toISOString();
-      const row = await landingRow(ctx, input, false);
+      const key = { projectId, submissionId };
+      const row = await landingRow(ctx, key, false);
       if (!row) {
-        const desired = await desiredLanding(ctx, input);
+        const desired = await desiredLanding(ctx, key);
         invariant(desired, 'NOT_FOUND', 'Hosted landing request not found.');
         const state = hostedLandingStateSchema.parse(JSON.parse(desired.value));
         const at = state.timing?.composeStartedAt ?? state.at;
@@ -193,7 +217,7 @@ export const read = query({
           })
           .order('desc')
           .take(PAGE + 1),
-        state.phase !== 'landed' ? finishRow(ctx, input) : null,
+        state.phase !== 'landed' ? finishRow(ctx, key) : null,
       ]);
       const reservation = finish ? hostedFinishSchema.parse(JSON.parse(finish.value)).pending : null;
       // Advisory precomposition can coexist with a valid check and does not replace its attempt.
@@ -261,6 +285,8 @@ export const read = query({
         observedAt,
         currentAttemptId,
         nextBeforeAttempt,
+        ...(state.batchId ? { batchId: state.batchId } : {}),
+        ...(state.batchOriginId ? { batchOriginId: state.batchOriginId } : {}),
         ...(gap || missingFirst ? { historyPartial: true } : {}),
         attempts: [...current, ...attempts],
       });

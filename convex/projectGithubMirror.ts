@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { legacyBlob } from './legacyStorageRead';
 import { convexFetch, networkTimeout } from './networkFetch';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
@@ -64,7 +65,7 @@ export function projectSource(ctx: ActionCtx, resolve: (digests: string[]) => Pr
         'SOURCE_HASH_MISMATCH',
         'Mirror source size changed.',
       );
-      const blob = !row.url && row.storageId ? await ctx.storage.get(row.storageId) : null;
+      const blob = !row.url && row.storageId ? await legacyBlob(ctx, row.storageId) : null;
       if (blob) return blob.stream() as unknown as AsyncIterable<Uint8Array>;
       invariant(row.url, 'SOURCE_UNAVAILABLE', 'Mirror source bytes are unavailable.');
       const response = await convexFetch(row.url, {

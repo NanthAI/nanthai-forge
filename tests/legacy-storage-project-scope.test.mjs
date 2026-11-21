@@ -4,11 +4,13 @@ import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { fakeSourceR2 } from './convex-source-r2-fixture.mjs';
+import { digest } from '../dist/hash.js';
 import { initialSourceStep } from '../dist/hosted-source-step.js';
 import { saveSourceProgress, loadSourceProgress } from '../dist/hosted-source-step-progress.js';
 import { storeTaskData, loadTaskData } from '../dist/hosted-source-task-data.js';
 const { sourceStorage } = await import(moduleUrl('../convex/projectConvexSourceStorage.ts'));
 const { owns } = await import(moduleUrl('../convex/projectConvexSourceOwnership.ts'));
+const { tombstone } = await import(moduleUrl('../convex/legacyStorageRead.ts'));
 const { objectTables } = await import(moduleUrl('../convex/projectObjectFields.ts'));
 
 function fixture() {
@@ -20,6 +22,7 @@ function fixture() {
     { projectId: 'project', storageId: 'missing', removed: false },
   ];
   const blobs = new Map([['owned', new Uint8Array([11, 22, 33])]]);
+  const retired = new Map();
   const counts = { calls: 0, lookups: 0, returnedRows: 0, storageReads: [] };
   const db = {
     system: {
@@ -29,11 +32,12 @@ function fixture() {
       },
     },
     query(table) {
-      assert.equal(table, 'projectObjects');
+      const ownership = table === 'projectObjects';
+      assert(ownership || table === 'legacyStorageTombstones');
       const terms = {};
       return {
         withIndex(name, select) {
-          assert.equal(name, 'by_project_and_storage_and_removed');
+          assert.equal(name, ownership ? 'by_project_and_storage_and_removed' : 'by_storage');
           const q = {
             eq(key, value) {
               terms[key] = value;
@@ -41,8 +45,14 @@ function fixture() {
             },
           };
           select(q);
-          assert.deepEqual(Object.keys(terms), ['projectId', 'storageId', 'removed']);
+          assert.deepEqual(
+            Object.keys(terms),
+            ownership ? ['projectId', 'storageId', 'removed'] : ['storageId'],
+          );
           return this;
+        },
+        async unique() {
+          return retired.get(terms.storageId) ?? null;
         },
         async first() {
           counts.lookups++;
@@ -55,19 +65,23 @@ function fixture() {
   };
   const ctx = {
     async runQuery(ref, args) {
-      assert.equal(getFunctionName(ref), 'projectConvexSourceOwnership:owns');
+      const name = getFunctionName(ref);
       counts.calls++;
+      if (name === 'legacyStorageRead:tombstone') return tombstone._handler({ db }, args);
+      assert.equal(name, 'projectConvexSourceOwnership:owns');
       return owns._handler({ db }, args);
     },
     storage: {
       async get(ref) {
         counts.storageReads.push(ref);
         // Refusal must happen even if storage would return bytes for an unowned ID.
-        return ref === 'missing' ? null : new Blob([blobs.get(ref) ?? new Uint8Array([99])]);
+        return ref === 'missing' || retired.has(ref)
+          ? null
+          : new Blob([blobs.get(ref) ?? new Uint8Array([99])]);
       },
     },
   };
-  return { ctx, rows, blobs, counts, storage: sourceStorage(ctx, 'project') };
+  return { ctx, rows, blobs, counts, retired, storage: sourceStorage(ctx, 'project') };
 }
 
 test('legacy ownership index covers project, storage ID and live membership', () => {
@@ -107,7 +121,7 @@ test('SOURCE_REF_UNOWNED tells the caller to start the operation again', async (
 test('an owned ref whose bytes are absent retains SOURCE_UNAVAILABLE', async () => {
   const f = fixture();
   await assert.rejects(f.storage.read('missing'), { code: 'SOURCE_UNAVAILABLE' });
-  assert.deepEqual(f.counts, { calls: 1, lookups: 1, returnedRows: 1, storageReads: ['missing'] });
+  assert.deepEqual(f.counts, { calls: 2, lookups: 1, returnedRows: 1, storageReads: ['missing'] });
 });
 
 test('ownership is checked again on each read after the binding is removed', async () => {
@@ -146,6 +160,68 @@ test('cursor sections and fanout progress use the same ownership boundary', asyn
   await assert.rejects(loadTaskData(task, f.storage.read), { code: 'SOURCE_REF_UNOWNED' });
   assert.equal(f.counts.storageReads.filter(ref => ref === task.id).length, 1);
   assert.equal(f.counts.lookups, f.counts.calls);
+});
+
+test('eight stale cursor shapes read five legacy roots and eleven gzip sections through exact copy pins', async t => {
+  const { objects, requests } = fakeSourceR2(t);
+  t.mock.method(console, 'info', () => {});
+  const f = fixture(),
+    cursors = [],
+    legacy = new Map();
+  let serial = 0;
+  for (let i = 0; i < 8; i++) {
+    const cursor = initialSourceStep({ sha256: String(i).repeat(64), size: 0 });
+    // Each cursor externalizes parents, and three also externalize generations.
+    const ids = Array.from({ length: 200 }, (_, n) => String(i * 200 + n).padStart(64, '0'));
+    cursor.parents = Object.fromEntries(ids.map(id => [id, []]));
+    if (i < 3) cursor.generations = Object.fromEntries(ids.map(id => [id, 1]));
+    const saved = await saveSourceProgress(cursor, null, async bytes => {
+      const id = `cursor-file-${serial++}`;
+      legacy.set(id, bytes);
+      return id;
+    });
+    let root = saved.id;
+    if (i >= 5) {
+      // The other three roots already use canonical R2 refs but can still link legacy sections.
+      const bytes = legacy.get(root);
+      const sha256 = digest(bytes);
+      legacy.delete(root);
+      objects.set(`/synthetic/v1/p/project/o/${sha256}`, bytes);
+      root = `r2source:${sha256}:${bytes.length}`;
+    }
+    cursors.push({ root, cursor });
+  }
+  assert.equal(legacy.size, 16);
+  for (const [id, bytes] of legacy) {
+    f.blobs.set(id, bytes);
+    f.rows.push({ projectId: 'project', storageId: id, removed: false });
+  }
+  const verify = async () => {
+    for (const { root, cursor } of cursors)
+      assert.deepEqual((await loadSourceProgress(await f.storage.read(root), f.storage.read)).cursor, cursor);
+  };
+  await verify();
+  assert.equal(requests.length, 3, 'only the existing R2 roots fetched externally');
+  assert.equal(f.counts.calls, 16, 'native legacy hits add only the existing ownership checks');
+  for (const [id, bytes] of legacy) {
+    const sha256 = digest(bytes),
+      copyKey = `v1/p/project/o/${sha256}`;
+    objects.set('/synthetic/' + copyKey, bytes);
+    f.retired.set(id, {
+      digest: sha256,
+      size: bytes.length,
+      copyKey,
+      operationId: 'synthetic-cursor-switch',
+    });
+    f.blobs.delete(id);
+  }
+  await verify();
+  assert.equal(requests.length, 3 + 3 + 16, 'one extra GET per retired copy');
+  assert.equal(f.counts.calls, 16 + 16 * 2, 'one extra indexed lookup per retired copy');
+  const legacyId = legacy.keys().next().value,
+    before = requests.length;
+  await assert.rejects(sourceStorage(f.ctx, 'other').read(legacyId), { code: 'SOURCE_REF_UNOWNED' });
+  assert.equal(requests.length, before, 'a tombstone grants no authority');
 });
 
 test('R2 refs stay project-scoped with no Convex calls or legacy reads', async t => {

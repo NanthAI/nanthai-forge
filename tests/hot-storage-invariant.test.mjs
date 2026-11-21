@@ -16,7 +16,7 @@ const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
 // Each entry permits exactly `count` uses of one kind in one convex/ file, with an
 // owner reason and an expiry date. New uses, expired entries and stale counts fail.
 //   write  storage.store / generateUploadUrl (Convex file-storage writes)
-//   read   storage.get / storage.getUrl (Convex file-storage byte reads)
+//   read   storage.get / getUrl / getMetadata (Convex file-storage reads)
 //   handle a ctx.storage handle passed on, which could write or read elsewhere
 //   field  v.id('_storage') (a record that names a Convex file)
 const legacy =
@@ -37,27 +37,13 @@ const storageAllowlist = {
     'Backfill-time repair pins a legacy storageId to its R2 copy for Issue 1323a44c; moves no bytes.',
     '2027-01-31',
   ],
-  'blobStore.ts handle': [
-    1,
-    'Blob reader: legacy ids read Convex storage; every write goes to R2.',
-    '2027-01-31',
-  ],
-  'blobStore.ts read': [2, legacy, '2027-01-31'],
-  'projectConvexSourceTransport.ts read': [1, legacy, '2027-01-31'],
-  'projectConvexSourceStorage.ts read': [1, legacy, '2027-01-31'],
-  'projectGithubMirror.ts read': [1, legacy, '2027-01-31'],
-  'projectR2Backfill.ts read': [
-    1,
-    'Backfill signs a download of each legacy Convex copy it moves to R2.',
-    '2027-01-31',
-  ],
-  'projectWorkIndexRetry.ts read': [2, legacy, '2027-01-31'],
+  'blobStore.ts handle': [1, 'Deletes existing legacy copies; every upload goes to R2.', '2027-01-31'],
+  'legacyStorageRead.ts read': [3, 'The sole native read seam, with verified R2 fall-through.', '2027-01-31'],
   'projectWorkIndexRetry.ts handle': [
     1,
     'Wraps the storage reader with retry for legacy Work index reads.',
     '2027-01-31',
   ],
-  'storageMeter.ts read': [1, 'Meters legacy Convex byte reads (Convex File Storage egress).', '2027-01-31'],
   'storageMeter.ts handle': [1, 'Wraps the storage reader to meter legacy reads.', '2027-01-31'],
   'projectBackupActions.ts field': [1, legacy, '2027-01-31'],
   'projectBackups.ts field': [2, legacy, '2027-01-31'],
@@ -87,33 +73,47 @@ const storageAllowlist = {
   'projectSourceStepFields.ts field': [1, legacy, '2027-01-31'],
   'projectWorkIndexFields.ts field': [2, legacy, '2027-01-31'],
   'r2BackfillFields.ts field': [1, 'Backfill pins name the legacy Convex id they move.', '2027-01-31'],
-  'schema.ts field': [3, legacy, '2027-01-31'],
+  'schema.ts field': [4, legacy, '2027-01-31'],
 };
-const storageCalls = { store: 'write', generateUploadUrl: 'write', get: 'read', getUrl: 'read' };
+const storageCalls = new Set(['store', 'generateUploadUrl', 'get', 'getUrl', 'getMetadata']);
+const member = node => {
+  if (ts.isPropertyAccessExpression(node)) return node.name.text;
+  if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression))
+    return node.argumentExpression.text;
+};
 const isStorage = node =>
-  (ts.isPropertyAccessExpression(node) && node.name.text === 'storage') ||
+  member(node) === 'storage' ||
   (ts.isIdentifier(node) && node.text === 'storage') ||
   (ts.isNonNullExpression(node) && isStorage(node.expression));
 function storageUses(name, source) {
   const uses = [];
   const visit = (node, parent) => {
-    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-      const method = node.expression.name.text,
-        receiver = node.expression.expression,
-        literal = node.arguments[0];
-      if (method === 'generateUploadUrl' || (isStorage(receiver) && storageCalls[method]))
-        uses.push(method === 'generateUploadUrl' ? 'write' : storageCalls[method]);
-      else if (method === 'id' && ts.isIdentifier(receiver) && receiver.text === 'v' && literal)
-        if (ts.isStringLiteralLike(literal) && literal.text === '_storage') uses.push('field');
+    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+      const method = member(node);
+      if (method === 'generateUploadUrl' || (isStorage(node.expression) && storageCalls.has(method)))
+        uses.push(method === 'store' || method === 'generateUploadUrl' ? 'write' : 'read');
+      else if (
+        method === 'storage' &&
+        !(
+          parent &&
+          parent.expression === node &&
+          (storageCalls.has(member(parent)) || member(parent) === 'delete')
+        ) &&
+        !(parent && ts.isNonNullExpression(parent))
+      )
+        uses.push('handle');
     }
-    // Any other `x.storage` value (argument, spread, alias) is a handle that can escape this guard.
     if (
-      ts.isPropertyAccessExpression(node) &&
-      node.name.text === 'storage' &&
-      !(parent && ts.isPropertyAccessExpression(parent) && parent.expression === node) &&
-      !(parent && ts.isNonNullExpression(parent))
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === 'id' &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.expression.expression.text === 'v' &&
+      node.arguments[0] &&
+      ts.isStringLiteralLike(node.arguments[0]) &&
+      node.arguments[0].text === '_storage'
     )
-      uses.push('handle');
+      uses.push('field');
     ts.forEachChild(node, child => visit(child, node));
   };
   visit(ts.createSourceFile(name, source, ts.ScriptTarget.Latest), undefined);
@@ -145,8 +145,8 @@ function storageFindings(files, allowlist = storageAllowlist, today = new Date()
   return findings;
 }
 const convexFiles = () =>
-  readdirSync(new URL('../convex', import.meta.url))
-    .filter(x => x.endsWith('.ts'))
+  readdirSync(new URL('../convex', import.meta.url), { recursive: true })
+    .filter(path => path.endsWith('.ts') && !path.startsWith('_generated/'))
     .map(name => [name, readFileSync(new URL(`../convex/${name}`, import.meta.url), 'utf8')]);
 
 test('Convex file storage is reached only through dated allowlist entries', () => {
@@ -159,13 +159,15 @@ test('the storage guard fails on a new write, read, handle or field and on expir
     '  await ctx.storage.store(new Blob([]));',
     '  await ctx.storage.generateUploadUrl();',
     '  await ctx.storage.get(id);',
+    '  await ctx.storage.getMetadata(id);',
+    '  await ctx["storage"]["getUrl"](id);',
     '  const alias = ctx.storage;',
     "  return v.id('_storage');",
     '}',
   ].join('\n');
   assert.deepEqual(storageFindings([['leak.ts', fixture]], {}), [
     'leak.ts write: 2 unlisted; bytes go to R2 (docs/data-placement.md)',
-    'leak.ts read: 1 unlisted; bytes go to R2 (docs/data-placement.md)',
+    'leak.ts read: 3 unlisted; bytes go to R2 (docs/data-placement.md)',
     'leak.ts handle: 1 unlisted; bytes go to R2 (docs/data-placement.md)',
     'leak.ts field: 1 unlisted; bytes go to R2 (docs/data-placement.md)',
   ]);

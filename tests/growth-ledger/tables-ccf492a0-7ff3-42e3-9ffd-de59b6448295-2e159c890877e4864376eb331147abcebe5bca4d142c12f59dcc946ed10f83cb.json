@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "Issue 779d17be expands readers with a small indexed tombstone table and consolidates legacy storage reads in one seam. The cleanup window table remains necessary for the existing operator workflow until the separate contract landing.",
+  "date": "2026-11-21"
+}

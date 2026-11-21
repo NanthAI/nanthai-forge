@@ -91,6 +91,33 @@ export function cliReplyLines(args: string[], output: unknown): string[] {
   }
   if (!['agent', 'x'].includes(args[0] ?? '')) return [];
   const action = text(envelope.action) || args[2];
+  const batch = row(result.batch);
+  if (action === 'queue' && batch.id)
+    return [
+      `Batch ${text(batch.id)} · ${text(batch.phase)}${batch.parentId ? ` · parent ${text(batch.parentId)}` : ''}${batch.runId ? ` · run ${text(batch.runId)}` : ''}`,
+      ...rows(batch.members).map(
+        member => `Submission ${text(member.submissionId)} · Candidate ${text(member.candidateId)}`,
+      ),
+    ];
+  const candidate = row(result.candidate);
+  if (action === 'queue' && result.attemptId && candidate.id) {
+    const selection = row(result.selection);
+    return [
+      `Candidate ${text(candidate.id)} · attempt ${text(result.attemptId)} · main ${text(row(result.main).head)}`,
+      result.selection === null
+        ? 'Retained input selection unavailable.'
+        : `${count(selection.inputCount)} Lane inputs · ${count(selection.dependencyCount)} Candidate dependencies`,
+      ...(selection.lanes === null ? ['Retained Lane input records unavailable.'] : []),
+      ...rows(selection.lanes).map(
+        lane => `Lane ${text(lane.laneId)} · ${text(lane.head) || 'saved head unavailable'}`,
+      ),
+      ...(selection.nextAfterLaneId
+        ? [
+            `More inputs: nforge agent ROOT queue '${JSON.stringify({ submissionId: result.submissionId, attemptId: result.attemptId, afterLaneId: selection.nextAfterLaneId })}'`,
+          ]
+        : []),
+    ];
+  }
   if (action === 'queue' && Array.isArray(result.attempts)) {
     const attempts = rows(result.attempts);
     const lines = attempts.map(attempt => {
@@ -107,10 +134,13 @@ export function cliReplyLines(args: string[], output: unknown): string[] {
         ...past,
         ...(source.code ? [`source step ${count(source.step)}: ${text(source.code)}`] : []),
         ...(cause.code ? [`${text(cause.code)}${cause.message ? `: ${text(cause.message)}` : ''}`] : []),
+        ...(attempt.candidateId ? [text(attempt.id)] : []),
       ].join(' · ');
     });
     if (!lines.length) lines.push('No retained attempts in this page.');
     if (result.historyPartial) lines.push('Some earlier attempt records are unavailable in this read.');
+    if (result.batchId) lines.push(`Batch ${text(result.batchId)}`);
+    if (result.batchOriginId) lines.push(`Origin batch ${text(result.batchOriginId)}`);
     if (typeof result.nextBeforeAttempt === 'number')
       lines.push(
         `Earlier attempts: nforge agent ROOT queue '${JSON.stringify({ submissionId: result.submissionId, beforeAttempt: result.nextBeforeAttempt })}'`,

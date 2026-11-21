@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { StorageActionWriter } from 'convex/server';
+import { nativeLegacyBlob } from './legacyStorageRead';
 import type { Id } from './_generated/dataModel';
 
 /** Storage bytes one action read: Blob sizes from ctx.storage.get plus bytes a
@@ -15,7 +16,7 @@ export function meteredStorage<Ctx extends { storage: StorageActionWriter }>(ctx
     storage: {
       ...ctx.storage,
       get: async (id: Id<'_storage'>) => {
-        const blob = await ctx.storage.get(id);
+        const blob = await nativeLegacyBlob(ctx, id);
         if (blob) {
           meter.reads++;
           meter.bytes += blob.size;

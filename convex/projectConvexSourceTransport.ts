@@ -8,6 +8,7 @@ import { sourcePutMetrics } from './projectSourceBytes';
 import { sourceStateChunks } from './projectConvexSourceChunks';
 import { copyRecipeClosure } from '../src/object-pack-range';
 import type { SignedDownload } from '../src/blob-download-format';
+import { legacyBlob } from './legacyStorageRead';
 import { convexFetch, networkTimeout } from './networkFetch';
 import { makeFunctionReference } from 'convex/server';
 import type { ActionCtx } from './_generated/server';
@@ -567,7 +568,7 @@ export function convexSourceTransport(
     );
     reads.objects++;
     reads.bytes += pin.size;
-    const blob = !row.url && row.storageId ? await ctx.storage.get(row.storageId) : null;
+    const blob = !row.url && row.storageId ? await legacyBlob(ctx, row.storageId, clock) : null;
     if (blob)
       return (async function* () {
         const reader = blob.stream().getReader();

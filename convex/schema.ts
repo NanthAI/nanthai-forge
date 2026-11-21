@@ -606,6 +606,14 @@ export default defineSchema({
   ...landingReadTables,
   ...statsTables,
   ...personDayTables,
+  legacyStorageTombstones: defineTable({
+    storageId: v.id('_storage'),
+    digest: v.string(),
+    size: v.number(),
+    copyKey: v.string(),
+    operationId: v.string(),
+    contentType: v.optional(v.string()),
+  }).index('by_storage', ['storageId']),
   legacyStorageCleanupWindows: defineTable({
     operationId: v.string(),
     deployment: v.string(),

@@ -11,6 +11,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { invariant } from '../src/errors';
 import { storageWritesAvailable } from './legacyStoragePause';
+import { legacyBlob, legacyMetadata, nativeLegacyUrl } from './legacyStorageRead';
 
 /** Opaque legacy storage ID or r2blob:<artifactBlobs ID>. Owning callers always
  * authorize before resolving a reference; storage metadata never grants access. */
@@ -37,7 +38,6 @@ export function blobStore(ctx: { storage: StorageActionWriter }): BlobStore;
 export function blobStore(ctx: { storage: StorageWriter }): BlobWriter;
 export function blobStore(ctx: { storage: StorageReader }): BlobReader;
 export function blobStore(ctx: Context): BlobStore {
-  const storage = ctx.storage as StorageActionWriter;
   const row = async (ref: string): Promise<Doc<'artifactBlobs'> | null> => {
     invariant(ctx.runQuery, 'INVALID_ARTIFACT', 'Artifact bytes require an action.');
     const value = await ctx.runQuery(internal.artifactStorage.get, { ref });
@@ -45,7 +45,7 @@ export function blobStore(ctx: Context): BlobStore {
   };
   return {
     get: async id => {
-      if (!artifactBlobId(id)) return storage.get(id);
+      if (!artifactBlobId(id)) return legacyBlob(ctx as Context & { storage: StorageActionWriter }, id);
       const value = await row(id);
       if (!value) return null;
       const response = await exchangeFetch(
@@ -91,7 +91,7 @@ export function blobStore(ctx: Context): BlobStore {
     },
     delete: async id => {
       storageWritesAvailable();
-      if (!artifactBlobId(id)) return storage.delete(id);
+      if (!artifactBlobId(id)) return (ctx.storage as StorageWriter).delete(id);
       if (ctx.db && ctx.scheduler) {
         const value = await ctx.db.get(artifactBlobId(id)!);
         if (value && !value.removed) {
@@ -104,12 +104,13 @@ export function blobStore(ctx: Context): BlobStore {
       }
     },
     getUrl: async id => {
-      if (!artifactBlobId(id)) return storage.getUrl(id);
+      // Legacy URL fall-through awaits placement review (Issue 779d17be).
+      if (!artifactBlobId(id)) return nativeLegacyUrl(ctx, id);
       const value = await row(id);
       return value ? presignGet(r2Config(), value.r2Key) : null;
     },
     getMetadata: async id => {
-      if (!artifactBlobId(id)) return storage.getMetadata(id);
+      if (!artifactBlobId(id)) return legacyMetadata(ctx, id);
       if (ctx.db) return artifactMetadata({ db: ctx.db }, id);
       const value = await row(id);
       return value ? { size: value.size, sha256: value.digest, contentType: value.contentType } : null;

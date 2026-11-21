@@ -21,6 +21,14 @@ then deletes the files. The CLI no longer has a Convex upload path (`uploadUrl` 
 read and record-field allowlist entries remain while those files and the legacy
 `storageId` columns exist.
 
+The expand reader checks one indexed tombstone on a legacy file miss. A recorded
+copy is fetched from R2 and verified against its pinned size and SHA-256 before
+its bytes are returned. A native hit performs no tombstone lookup. This reader
+adds no scheduled work. Source cursors and their nested Forge sections use the
+existing authorized byte reader. The synthetic cursor fixture covers the shape
+of the 16-file inventory. URL readers continue to use native URLs. The maintenance operations described below still use
+their existing write pause and approval.
+
 Each pause ended with both maintenance flags proven absent by name. The first
 stopped on a HEAD fetch failure; the remaining-only run stopped when the delete
 guard refused four files the dry run had not evaluated. Issue 1323a44c added

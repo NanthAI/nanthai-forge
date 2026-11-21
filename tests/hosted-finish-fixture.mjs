@@ -39,6 +39,7 @@ const convexSourceModules = Object.fromEntries(
       'projectConvexSourceFanout',
       'projectConvexSourceStore',
       'projectConvexSourceObjects',
+      'legacyStorageRead',
       // A step's lease renewal and its lease-end repair wake (incident e62d834b).
       'projectConvexSourceLease',
       // save-then-resolve: the real chain action, with this fixture's R2 and source steps.
@@ -210,6 +211,9 @@ export async function finishFixture(
       convexStorageCalls: 0,
     };
   const sourceStorage = {
+    async delete(id) {
+      blobs.delete(id);
+    },
     async getMetadata(id) {
       return blobs.get(id)?.metadata ?? null;
     },
@@ -533,6 +537,11 @@ export async function finishFixture(
         };
         const sourceContext = {
           storage: sourceStorage,
+          runQuery: (ref, args) => {
+            const name = getFunctionName(ref);
+            metrics.convexSourceCalls.push(name);
+            return executeSource(name, args);
+          },
           runAction: (ref, args) => {
             const name = getFunctionName(ref);
             metrics.convexSourceCalls.push(name);
@@ -688,6 +697,7 @@ export async function finishFixture(
     drain,
     passChecks,
     runReuseAction,
+    sourceStorage,
     moveMain,
     metrics,
     reuseDecisions,

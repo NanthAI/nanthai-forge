@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { nativeLegacyBlob, nativeLegacyMetadata, nativeLegacyUrl } from './legacyStorageRead';
 import { ConvexError } from 'convex/values';
 import type { ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -61,9 +62,9 @@ export function indexReadContext(ctx: ActionCtx): ActionCtx {
     runAction: (ref, args) => indexRead(() => ctx.runAction(ref, args)),
     storage: {
       ...ctx.storage,
-      get: (id: Id<'_storage'>) => indexRead(() => ctx.storage.get(id)),
-      getMetadata: (id: Id<'_storage'>) => indexRead(() => ctx.storage.getMetadata(id)),
-      getUrl: (id: Id<'_storage'>) => indexRead(() => ctx.storage.getUrl(id)),
+      get: (id: Id<'_storage'>) => indexRead(() => nativeLegacyBlob(ctx, id)),
+      getMetadata: (id: Id<'_storage'>) => indexRead(() => nativeLegacyMetadata(ctx, id)),
+      getUrl: (id: Id<'_storage'>) => indexRead(() => nativeLegacyUrl(ctx, id)),
     },
   };
   contexts.add(result);

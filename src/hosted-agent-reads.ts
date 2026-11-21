@@ -110,26 +110,28 @@ export const hostedQueueSchema = z
     submissionId: z.uuid().optional(),
     /** Continue with the selected submission's nextBeforeAttempt. */
     beforeAttempt: z.number().int().nonnegative().optional(),
+    /** Read the Candidate and its inputs for this exact attempt of submissionId. */
+    attemptId: z.uuid().optional(),
+    /** Continue with the selected Candidate's nextAfterLaneId. */
+    afterLaneId: z.uuid().optional(),
+    /** Read one retained batch's phase and members. */
+    batchId: z.uuid().optional(),
   })
   .strict()
-  .refine(
-    input =>
-      input.submissionId
-        ? input.limit === undefined && input.laneId === undefined
-        : input.beforeAttempt === undefined,
-    'Use submissionId with beforeAttempt, or list the queue with limit and laneId.',
-  );
+  .refine(({ batchId, submissionId, beforeAttempt, attemptId, afterLaneId, limit, laneId }) => {
+    const list = limit !== undefined || laneId !== undefined;
+    if (batchId) return !list && !submissionId && beforeAttempt === undefined && !attemptId && !afterLaneId;
+    if (!submissionId) return beforeAttempt === undefined && !attemptId && !afterLaneId;
+    return !list && (attemptId ? beforeAttempt === undefined : !afterLaneId);
+  }, 'Select a batch, a submission or its exact attempt, or list the queue with limit and laneId.');
 /** One bounded read of the landing queue (09e637f7): Lane, Intent title, phase,
  * last failing test files and recompose count per entry, in dispatch order. */
 export async function queueHostedSource(transport: HostedAgentTransport, input: unknown) {
   const parsed = hostedQueueSchema.safeParse(input);
   invariant(parsed.success, 'BAD_ARGUMENT', 'Invalid hosted queue parameters. Use queue --help.');
-  const { laneId: selected, limit, submissionId, beforeAttempt } = parsed.data;
-  if (submissionId)
-    return transport.query('projectHostedLandingAttemptHistory:read', {
-      submissionId,
-      ...(beforeAttempt === undefined ? {} : { beforeAttempt }),
-    });
+  const { laneId: selected, limit, ...selection } = parsed.data;
+  if (selection.submissionId || selection.batchId)
+    return transport.query('projectHostedLandingAttemptHistory:read', selection);
   const view = await transport.query('projectHostedQueueView:read', limit === undefined ? {} : { limit });
   return markQueueLane(view, selected ?? readHostedLaneCheckout(transport.root)?.selection.laneId);
 }

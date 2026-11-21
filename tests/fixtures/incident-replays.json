@@ -543,6 +543,16 @@
       "test": "incident c329d191: running-check progress writes the queue row at most once a minute"
     },
     {
+      "incident": "c329d191",
+      "what": "The stuck queue's exact Candidate inputs and the origin batch's retained phase required raw table dumps",
+      "file": "tests/hosted-landing-selection-read.test.mjs",
+      "test": "incident replay c329d191: CLI and MCP read an exact Candidate selection and the retained origin batch phase",
+      "paths": [
+        "convex/projectHostedLandingAttemptHistory.ts",
+        "convex/projectHostedLandingSelectionRead.ts"
+      ]
+    },
+    {
       "incident": "a7de3a93",
       "what": "Core claim: a check dispatch threw, the run stayed unknown with no executionId and the queue head sat checking for up to 12 h",
       "file": "tests/hosted-lost-dispatch.test.mjs",
@@ -8816,6 +8826,12 @@
         "src/scoped-recheck-policy.ts"
       ],
       "test": "withdraw by Lane cancels the live landing, keeps the Lane and fences the late check"
+    },
+    {
+      "incident": "779d17be",
+      "what": "The November 5 legacy maintenance required a 22-minute write outage. An online copy-and-switch fixture keeps ordinary landings moving in their original order.",
+      "file": "tests/maintenance-online.test.mjs",
+      "test": "incident 779d17be: the 22-minute maintenance replay preserves every landing and its order"
     }
   ]
 }

@@ -1,0 +1,1 @@
+| `legacyStorageTombstones` | One legacy storage ID and its verified R2 copy pin, plus the retirement operation ID and optional media type. Indexed by storage ID. No file bytes. | Legacy read-through after a Convex file miss |

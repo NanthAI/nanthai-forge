@@ -3,6 +3,7 @@ import { v } from 'convex/values';
 import { internalMutation, internalQuery, internalAction, type QueryCtx, type MutationCtx } from './server';
 import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
+import { legacySystemMetadata } from './legacyStorageRead';
 import { artifactBlobId } from './artifactBlobFields';
 import { r2Config, headObject, checksumOf, presignDelete } from './r2';
 import { invariant } from '../src/errors';
@@ -12,7 +13,7 @@ import { exchangeFetch } from '../src/exchange-request';
  * remains the owning action's responsibility, just as for legacy storage IDs. */
 export async function artifactMetadata(ctx: Pick<QueryCtx, 'db'>, ref: string) {
   const id = artifactBlobId(ref);
-  if (!id) return ctx.db.system.get(ref as Id<'_storage'>);
+  if (!id) return legacySystemMetadata(ctx, ref as Id<'_storage'>);
   const row = await ctx.db.get(id);
   return row && row.committed && !row.removed
     ? {

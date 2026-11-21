@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { legacyBlob } from './legacyStorageRead';
 import { convexFetch, networkTimeout } from './networkFetch';
 import type { ActionCtx } from './server';
 import type { Id } from './_generated/dataModel';
@@ -78,7 +79,7 @@ export function sourceStorage(
           'Start the operation again from its input; Forge never reads an unowned legacy reference.',
       );
       const get = async () => {
-        const blob = await ctx.storage.get(ref as Id<'_storage'>);
+        const blob = await legacyBlob(ctx, ref, clock);
         invariant(blob, 'SOURCE_UNAVAILABLE', 'Durable source data is absent.');
         return new Uint8Array(await blob.arrayBuffer());
       };

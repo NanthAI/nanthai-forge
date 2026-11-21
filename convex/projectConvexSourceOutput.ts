@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { legacyMetadata } from './legacyStorageRead';
 import { validStateSize, type StateSize } from '../src/state/size';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -53,7 +54,7 @@ export async function storeSourceOutputs(
       'Output needs one physical encoding.',
     );
     if (pin.storageId) {
-      const metadata = await ctx.storage.getMetadata(pin.storageId);
+      const metadata = await legacyMetadata(ctx, pin.storageId);
       invariant(
         metadata?.sha256 === pin.sha256 && metadata.size === pin.size,
         'SOURCE_HASH_MISMATCH',
