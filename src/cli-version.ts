@@ -9,6 +9,7 @@ import {
   cliPackageRoot,
   cliSelectedBuild,
   retainCliRuntime,
+  stableSelection,
 } from './cli-installation.js';
 import { CLI_RUNTIME_WAIT_MS, resolveCliPointer } from './cli-launcher.js';
 import { ForgeError } from './errors.js';
@@ -99,7 +100,12 @@ export async function startBackgroundCliUpdate(
   if (cliBackgroundUpdateFailedRecently(installation)) return 'failed';
   const { canaryCloneHint, rememberCanaryClone } = await import('./cli-canary.js');
   rememberCanaryClone(installation, canaryCloneHint(args));
-  const log = openSync(join(installation, 'update.log'), 'w', 0o600);
+  spawnBackgroundCliUpdate(installation, root, released);
+  return 'started';
+}
+
+function spawnBackgroundCliUpdate(installation: string, root: string, released?: string) {
+  const log = released ? openSync(join(installation, 'update.log'), 'w', 0o600) : undefined;
   try {
     spawn(
       process.execPath,
@@ -107,23 +113,24 @@ export async function startBackgroundCliUpdate(
         join(root, 'dist', 'cli-entry.js'),
         'update',
         '--background',
-        '--release-head',
-        released,
+        ...(released ? ['--release-head', released] : []),
         '--directory',
         installation,
       ],
       {
         cwd: installation,
         detached: true,
-        stdio: ['ignore', log, log],
+        stdio: ['ignore', log ?? 'ignore', log ?? 'ignore'],
         env: childEnv({ allow: [...RUNTIME_ENV, 'FORGE_HEAVY_DIR'] }),
       },
-    ).unref();
+    )
+      .on('error', () => undefined)
+      .unref();
   } finally {
-    closeSync(log);
+    if (log !== undefined) closeSync(log);
   }
-  return 'started';
 }
+let stableScheduled = false;
 /** Run the command in a fresh process on the selected build; no command ran in this one. */
 async function redispatch(
   installation: string,
@@ -217,6 +224,36 @@ export async function cliStartup(
       'CLI_UPDATE_SOURCE_REQUIRED',
       'This CLI has no configured Forge release source. Next: nforge update .',
     );
+  if (existsSync(join(installation, 'stable-selection.json'))) {
+    const selection = stableSelection(installation);
+    if (selection) {
+      const { stableCheckDue, requireStableCompatibility } = await import('./cli-stable.js');
+      if (!stableScheduled && stableCheckDue(installation) && !existsSync(join(installation, '.freeze'))) {
+        stableScheduled = true;
+        process.once('exit', () => {
+          // No work or stdio is left in this command. The worker claims the interval under its lock.
+          try {
+            if (stableCheckDue(installation) && !existsSync(join(installation, '.freeze')))
+              spawnBackgroundCliUpdate(installation, root);
+          } catch {
+            // A later invocation can start the advisory check.
+          }
+        });
+      }
+      // Keep account recovery available when the updater needs credentials.
+      if (args[0] === 'auth' || args[0] === 'login' || args[0] === 'logout') return true;
+      const installed = cliBuildCommit(root);
+      if (selection.pin && selection.pin !== installed) {
+        const { cliUpdateCommand } = await import('./cli-update-source.js');
+        throw new ForgeError(
+          'CLI_UPDATE_REQUIRED',
+          `The installed Forge CLI does not match the recorded pin. Next: ${cliUpdateCommand(installation)}`,
+        );
+      }
+      requireStableCompatibility(installation, root, selection);
+      return true;
+    }
+  }
   const { cliCommandProject, cliLandingCommand, waitForCliMeasurement } =
     await import('./cli-measurement-hold.js');
   // Resolved from local files at most once, and only while a measurement hold exists.

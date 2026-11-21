@@ -184,8 +184,9 @@ Details: docs/git-serving.md.`,
   },
   'cli-update': {
     title: 'The Forge CLI and releases',
-    text: `The CLI updates itself to main and refuses to run on an unsupported Node.
+    text: `Main tracks accepted Forge main. Stable checks for signed releases after commands and can run an exact CI pin.
 - UNSUPPORTED_NODE: install Node 24.22.1 or newer (24.x), then retry.
+- CLI_UPGRADE_REQUIRED: this stable build is below the advertised compatibility floor. Run the update command in the error.
 - CLI_UPDATE_BUSY / CLI_UPDATE_FROZEN: another update is running or updates are frozen for a measurement; the running build still works. Retry later.
 - CLI_UPDATE_BUILD_FAILED / CLI_UPDATE_BUILD_OBSTRUCTED: the new build did not install; the old one stays active; retry later.
 - HOSTED_PROTOCOL_INVALID: this CLI and the deployment disagree on a reply shape; the message names how to check the outcome. Update the CLI.

@@ -99,7 +99,10 @@ test('version probe is stable, one line, and rejects extra flags', () => {
   const probe = () => spawnSync(process.execPath, [cli, '--version'], { encoding: 'utf8' });
   const first = probe();
   assert.equal(first.status, 0);
-  assert.match(first.stdout, /^nforge version \d+\.\d+\.\d+\n$/);
+  assert.match(
+    first.stdout,
+    /^nforge version \d+\.\d+\.\d+ \(channel stable, pin none, build (?:development|[a-f0-9]{64})\)\n$/,
+  );
   assert.equal(probe().stdout, first.stdout);
   const invalid = spawnSync(process.execPath, [cli, '--version', '--bogus'], { encoding: 'utf8' });
   assert.equal(invalid.status, 1);

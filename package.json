@@ -9,6 +9,7 @@
     "node": ">=24.22.1 <25"
   },
   "forge": {
+    "cliProtocolVersion": 1,
     "preflight": {
       "static": [
         {

@@ -48,6 +48,10 @@ export const ghFields = {
   checkout: ['laneId', 'head', 'path'],
   repo: ['id', 'name', 'nameWithOwner', 'url', 'path', 'engine', 'defaultBranchRef'],
   auth: [
+    'cliVersion',
+    'cliCommit',
+    'cliChannel',
+    'cliPin',
     'deployment',
     'host',
     'authenticated',

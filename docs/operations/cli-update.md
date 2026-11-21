@@ -1,10 +1,12 @@
 # CLI updates
 
-`nforge update FORGE_CHECKOUT` installs the accepted `main` State from a hosted
-Forge source checkout. This must be the Forge source project, not a project you
-are building with Forge. The command records its deployment and project in the
-installation's private `source.json`. It never reads GitHub. The default install
-is `~/.local/share/forge-cli`; `--directory DIR` selects an existing installation.
+`nforge update FORGE_CHECKOUT` installs from the hosted Forge source project.
+New installations default to `stable`, the versioned release channel.
+`nforge update FORGE_CHECKOUT --channel main` selects accepted Forge main for
+dogfooding. Existing managed installations keep main. The command records the
+deployment and project in the installation's private `source.json`. The default install
+is `~/.local/share/forge-cli`. Use `--directory DIR` to select an installation or
+keep independent main and stable installations.
 The installer writes the product launcher at `~/.local/bin/nforge`; `--bin FILE`
 selects another PATH location. It enters `DIR/launcher.mjs`, which fences a runtime
 lease before importing the version-aware controller. Repeated updates keep one
@@ -14,7 +16,6 @@ The internal `manager` pointer normally shares current's build. Explicit histori
 rollback preserves the main controller, so even a target predating freshness
 checks cannot become an unguarded PATH entry. The next ordinary invocation restores
 verified main before dispatch; the controller and current then share one build again.
-There is no second user-selectable CLI.
 
 A separate installation (`--directory DIR`, for example a benchmark's own CLI home whose
 measurement hold must not reach anyone else) stays separate. Its update keeps the default
@@ -22,22 +23,54 @@ launcher `~/.local/bin/nforge` when that launcher enters another existing instal
 stderr line names it; `--bin FILE` writes a launcher for DIR instead), and its hook migration
 leaves Claude and Codex hooks whose runner lives in another existing installation alone.
 
-Managed commands check configured Forge main before hooks or execution.
+Main-channel commands check configured Forge main before hooks or execution.
 `--version`, help, heavy status and local agent/heavy/pull/clone argument errors make zero
 network calls. `--version` and help only print: they also install no hooks, sweep no
 disk and load no command module (Issue 381c62df). Valid commands make one authorized metadata query, cached
 for that process in addition to its action calls. There is no timer,
 periodic check or idle network activity.
 
-The authorized `projectHostedChannels:current` query accepts `cliRelease: 1` on
-servers that support the extension. The reply includes a `cliRelease` object
-for the selected release, currently `channel: "main"`. The deployment can
-advertise `minimumCliVersion` (a release version such as `0.3.1`) and
-`minimumProtocolVersion` (a positive integer) via
-`FORGE_MINIMUM_CLI_VERSION` and `FORGE_MINIMUM_CLI_PROTOCOL_VERSION`.
-Unset or invalid values are omitted independently. The normal updater uses the
-original request and leaves these values unenforced. The extension takes no
-additional database reads or network calls.
+## Stable releases and CI pins
+
+Stable commands read the last advertised compatibility floor locally. A build
+below the CLI version or protocol floor exits before work with one stderr line
+and an update command. Help, version, and account and updater recovery remain
+available. Compatible builds run without waiting for discovery or installation.
+At process exit, a command can start the existing detached updater. It makes
+at most one metadata query per installation per ten minutes when commands run,
+and writes the result to the local cache for the next invocation. Failed or
+legacy responses without metadata preserve the known floor. The updater runs
+the existing signature and canary checks before selecting a new build, and the
+runtime lease protects any command already running. Idle installations make no calls.
+
+The deployment can advertise `minimumCliVersion` via `FORGE_MINIMUM_CLI_VERSION`
+and `minimumProtocolVersion` via `FORGE_MINIMUM_CLI_PROTOCOL_VERSION`. Raise
+these only when a protocol or schema break requires it. Unset or invalid values
+are omitted independently. An owner-approved stable release names its Forge
+project and full signed State in `FORGE_STABLE_CLI_PROJECT_ID` and
+`FORGE_STABLE_CLI_STATE`. The authorized `projectHostedChannels:current` query
+returns these fields in its opt-in `cliRelease: 2` response, with the stable
+State only on the configured project. Legacy main and `cliRelease: 1` replies
+keep their original shapes. The extension adds no database reads.
+
+To reproduce a CI run, keep the full signed Forge State in the project's CI
+configuration and use a dedicated installation and launcher:
+
+```sh
+nforge update FORGE_CHECKOUT --directory CLI_DIR --bin CLI_BIN --pin FULL_FORGE_STATE_HASH
+CLI_BIN --version
+```
+
+Each install checks the signature for that exact project and State, checks out
+its exact source, and provisions dependencies from its lockfile. Keep the same
+Node and build platform when comparing build bytes. Later commands and ordinary
+updates keep the pin even when main or stable moves. Pinned installations still
+refresh the floor in the background. If it passes the pinned build, choose a
+new signed pin or run `nforge update --directory CLI_DIR --unpin` to follow stable.
+`nforge --version` and `nforge auth status` show the version, build State, channel,
+and pin. `--version` makes zero hosted calls and auth status uses its existing lookup.
+
+## Main-channel freshness
 
 When main moves, no command waits for the install or its canary. A command runs on
 the complete, vetted current build, prints one stderr line (`Forge CLI main HEAD is

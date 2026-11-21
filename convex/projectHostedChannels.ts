@@ -7,7 +7,7 @@ import { activeOwnedProject, accessibleProject } from './projectAuthority';
 import { query } from './cliServer';
 import { report } from './errors';
 import { sourceAuthority, requireSourceAuthority } from '../src/hosted-source-authority';
-import { cliReleaseMetadataSchema, hostedMainV2Schema } from '../src/hosted-main';
+import { cliStableReleaseMetadataSchema, hostedMainV2Schema } from '../src/hosted-main';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { beginHostedOperation, finishHostedOperation } from './projectHostedOperations';
 import { invariant } from '../src/errors';
@@ -122,18 +122,23 @@ export const seed = internalMutation({
   },
 });
 
-function cliReleaseMetadata(channel: 'main') {
-  const minimumCliVersion = cliReleaseMetadataSchema.shape.minimumCliVersion.safeParse(
+function cliReleaseMetadata(channel: 'main', stableProject?: Id<'hostedProjects'>) {
+  const minimumCliVersion = cliStableReleaseMetadataSchema.shape.minimumCliVersion.safeParse(
     process.env.FORGE_MINIMUM_CLI_VERSION,
   ).data;
   const protocol = process.env.FORGE_MINIMUM_CLI_PROTOCOL_VERSION;
-  const minimumProtocolVersion = cliReleaseMetadataSchema.shape.minimumProtocolVersion.safeParse(
+  const minimumProtocolVersion = cliStableReleaseMetadataSchema.shape.minimumProtocolVersion.safeParse(
     protocol && /^[1-9]\d*$/.test(protocol) ? Number(protocol) : undefined,
   ).data;
+  const stableHead =
+    stableProject && stableProject === process.env.FORGE_STABLE_CLI_PROJECT_ID
+      ? cliStableReleaseMetadataSchema.shape.stableHead.safeParse(process.env.FORGE_STABLE_CLI_STATE).data
+      : undefined;
   return {
     channel,
     ...(minimumCliVersion === undefined ? {} : { minimumCliVersion }),
     ...(minimumProtocolVersion === undefined ? {} : { minimumProtocolVersion }),
+    ...(stableHead === undefined ? {} : { stableHead }),
   };
 }
 
@@ -144,7 +149,7 @@ export const current = query({
   args: {
     projectId: v.id('hostedProjects'),
     today: v.optional(v.literal(1)),
-    cliRelease: v.optional(v.literal(1)),
+    cliRelease: v.optional(v.union(v.literal(1), v.literal(2))),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -163,7 +168,15 @@ export const current = query({
       );
       const selected = input.today ? { ...main, mainDay: await readMainDay(ctx.db, input.projectId) } : main;
       return canonicalPayload(
-        input.cliRelease ? { ...selected, cliRelease: cliReleaseMetadata(main.channel) } : selected,
+        input.cliRelease
+          ? {
+              ...selected,
+              cliRelease: cliReleaseMetadata(
+                main.channel,
+                input.cliRelease === 2 ? input.projectId : undefined,
+              ),
+            }
+          : selected,
       );
     } catch (error) {
       return report(error);

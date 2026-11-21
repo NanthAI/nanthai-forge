@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { cliReleaseMetadataSchema, hostedMainV2Schema, type HostedMain } from './hosted-main.js';
+import { cliStableReleaseMetadataSchema, hostedMainV2Schema, type HostedMain } from './hosted-main.js';
 import { resolveAuthToken } from './auth-store.js';
 import { deadlineConvexClient } from './network-convex-client.js';
 import { exchangeConvexFetch } from './exchange-convex-fetch.js';
@@ -13,7 +13,9 @@ import { shellQuote } from './shell-quote.js';
 import { parseHostedResponse } from './hosted-response.js';
 import { cliReleaseSignaturesSchema, type CliReleaseSignature } from './cli-release-signature.js';
 export type CliSource = { url: string; projectId: string };
-const cliReleaseReadSchema = hostedMainV2Schema.extend({ cliRelease: cliReleaseMetadataSchema.optional() });
+const cliReleaseReadSchema = hostedMainV2Schema.extend({
+  cliRelease: cliStableReleaseMetadataSchema.optional(),
+});
 /** The release check reads only these (and one query); the updater module loads only to install. */
 export const sourceSchema = z.object({ url: z.url(), projectId: z.string().min(1) }).strict();
 export const CLI_UPDATE_WAIT_MS = 600_000;
@@ -42,10 +44,10 @@ export function cliReleaseSource(address: CliSource) {
   });
   client.setAuth(token);
   // Only request the extension when the caller knows the server supports it.
-  const current = async (options?: { includeCompatibility: true }) => {
+  const current = async (options?: { includeCompatibility: true } | { stable: true }) => {
     const raw = await client.query(makeFunctionReference<'query'>('projectHostedChannels:current'), {
       projectId: address.projectId,
-      ...(options?.includeCompatibility ? { cliRelease: 1 } : {}),
+      ...(options ? { cliRelease: 'stable' in options ? 2 : 1 } : {}),
     });
     const selected = cliReleaseReadSchema.parse(typeof raw === 'string' ? JSON.parse(raw) : raw);
     invariant(

@@ -42,7 +42,7 @@ export const hostedMainV2Schema = z
 export const hostedMainSchema = z.discriminatedUnion('schema', [hostedMainV1Schema, hostedMainV2Schema]);
 export type HostedMain = z.infer<typeof hostedMainSchema>;
 export type HostedMainV2 = z.infer<typeof hostedMainV2Schema>;
-export const cliReleaseMetadataSchema = z
+const cliReleaseMetadataSchema = z
   .object({
     channel: z.enum(['main', 'stable']),
     minimumCliVersion: z
@@ -53,6 +53,9 @@ export const cliReleaseMetadataSchema = z
     minimumProtocolVersion: z.number().int().positive().optional(),
   })
   .strict();
+export const cliStableReleaseMetadataSchema = cliReleaseMetadataSchema.extend({
+  stableHead: head.optional(),
+});
 export const mainExpectationSchema = z
   .object({
     head,

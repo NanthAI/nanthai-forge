@@ -37,7 +37,16 @@ import {
   type CliSource,
 } from './cli-update-source.js';
 export { CLI_UPDATE_WAIT_MS, cliUpdateCommand, readCliSource };
-import { cliBuildCommit, cliInstallation, withCliLock } from './cli-installation.js';
+import {
+  cliBuildCommit,
+  cliBuildPackage,
+  cliInstallation,
+  cliPackageRoot,
+  stableSelection,
+  withCliLock,
+  writeStableSelection,
+  type StableSelection,
+} from './cli-installation.js';
 import {
   activateCliBuild,
   cliCurrentCommit,
@@ -49,7 +58,6 @@ import { migrateEditHookRunner } from './agent-install-hooks.js';
 import type { HostedMain } from './hosted-main.js';
 import { canonicalRoot, clientCacheRoot } from './root-paths.js';
 import { processAlive } from './local-process.js';
-import { cliPackageRoot } from './cli-installation.js';
 import { shellQuote } from './shell-quote.js';
 import { mkdirBelow } from './mkdir-below.js';
 import {
@@ -59,6 +67,12 @@ import {
   rememberCanaryClone,
 } from './cli-canary.js';
 import { checkCliRelease, recordCliReleaseNumber, type ReleaseCheckHooks } from './cli-release-check.js';
+import {
+  recordStableCheck,
+  requireStableRuntime,
+  stableCheckDue,
+  stableReleaseTarget,
+} from './cli-stable.js';
 
 /** How long a write command waits for a live concurrent updater (a dead one is reclaimed at once).
  * A normal update takes seconds; this only bounds a wedged updater process. */
@@ -294,6 +308,7 @@ export async function updateCli(
       {
         ...options,
         expectedCurrent: result.expectedCurrent,
+        expectedStable: result.expectedStable,
       },
       lease,
     );
@@ -306,6 +321,9 @@ export async function updateCli(
 
 type UpdateCliOptions = {
   expectedCurrent?: string | null;
+  stable?: StableSelection;
+  expectedStable?: StableSelection | null;
+  stableCheck?: boolean;
   rollback?: boolean;
   /** Wait this long for a concurrent updater, then continue from whatever it installed. */
   lockWaitMs?: number;
@@ -318,6 +336,19 @@ type UpdateCliOptions = {
    * detached updater outliving its deleted installation then fails with ENOENT. */
   installed?: boolean;
 };
+type UpdateResult = {
+  status: string;
+  cliCommit: string | null;
+  installation: string;
+  removed: string[];
+  undo?: string;
+};
+type UpdateBuildRequired = {
+  buildRequired: HostedMain;
+  expectedCurrent: string | null;
+  expectedStable: StableSelection | null;
+  inherited: string | null;
+};
 
 async function updateCliLocked(
   installation: string,
@@ -326,7 +357,7 @@ async function updateCliLocked(
   dependencies: NonNullable<Parameters<typeof updateCli>[3]>,
   options: UpdateCliOptions,
   buildLease?: UpdateBuildLease,
-) {
+): Promise<UpdateResult | UpdateBuildRequired> {
   let expectedCurrent =
     options.expectedCurrent !== undefined ? options.expectedCurrent : cliCurrentCommit(installation);
   address = sourceSchema.parse(address);
@@ -357,6 +388,19 @@ async function updateCliLocked(
         'CLI_UPDATE_SOURCE_CHANGED',
         'Keep the configured Forge CLI source.',
       );
+    const installedStable = stableSelection(installation, true);
+    if (options.expectedStable !== undefined)
+      invariant(
+        JSON.stringify(installedStable) === JSON.stringify(options.expectedStable),
+        'CLI_UPDATE_CHANGED',
+        `The CLI selection changed while waiting for a build slot. Next: ${cliUpdateCommand(installation)}.`,
+      );
+    const stable = options.stable ?? installedStable;
+    invariant(
+      !stable || !options.rollback,
+      'BAD_ARGUMENT',
+      'Use nforge update --pin STATE to select an exact signed build on stable.',
+    );
     if (options.skipIfCurrent && cliCurrentCommit(installation) === options.skipIfCurrent)
       return { status: 'current', cliCommit: options.skipIfCurrent, installation, removed: [] };
     // A detached updater that got the lock just after another one refused this head (several
@@ -376,6 +420,11 @@ async function updateCliLocked(
       const installed = cliCurrentCommit(installation);
       if (installed !== expectedCurrent && installed && existsSync(join(installation, 'manager'))) {
         invariant(
+          !options.stable,
+          'CLI_UPDATE_CHANGED',
+          `Current changed; retry ${cliUpdateCommand(installation)} with the original options.`,
+        );
+        invariant(
           !buildLease || !existsSync(join(installation, 'rollback.json')),
           'CLI_UPDATE_CHANGED',
           `The selected CLI changed to a historical State while waiting for a build slot. Next: ${cliUpdateCommand(installation)}.`,
@@ -385,7 +434,21 @@ async function updateCliLocked(
       }
       expectedCurrent = installed;
     }
-    const release = selected ?? (await dependencies.source.current());
+    let release = selected;
+    if (!release && stable) {
+      if (options.stableCheck && !stableCheckDue(installation))
+        return { status: 'deferred', cliCommit: cliCurrentCommit(installation), installation, removed: [] };
+      recordStableCheck(installation);
+      const observed = await dependencies.source.current({ stable: true });
+      // The stable extension only exists on a v2 provider. A legacy reply carries no new floor.
+      invariant(observed.schema === 2, 'CLI_UPDATE_SOURCE_INVALID', 'Read a current Forge release source.');
+      release = stableReleaseTarget(installation, observed, stable);
+      if (options.stableCheck && stable.pin)
+        return { status: 'pinned', cliCommit: stable.pin, installation, removed: [] };
+      if (options.stableCheck && activeCliCanaryRefusal(installation, release.head))
+        return { status: 'held', cliCommit: cliCurrentCommit(installation), installation, removed: [] };
+    }
+    release ??= await dependencies.source.current();
     invariant(
       release.projectId === address.projectId && /^[a-f0-9]{64}$/.test(release.head),
       'CLI_UPDATE_SOURCE_INVALID',
@@ -401,7 +464,31 @@ async function updateCliLocked(
         );
     }
     const build = join(installation, 'builds', release.head);
+    const verifyRelease = () =>
+      checkCliRelease(
+        installation,
+        {
+          projectId: address.projectId,
+          head: release.head,
+          ...(stable ? { stable: true, exact: !!stable.pin } : {}),
+          ...(dependencies.source.signatures ? { signatures: dependencies.source.signatures } : {}),
+        },
+        dependencies.releaseCheck,
+      );
+    const rememberRelease = (verdict: Awaited<ReturnType<typeof verifyRelease>>) => {
+      if (stable?.pin) return;
+      try {
+        recordCliReleaseNumber(installation, release.head, verdict, !!stable);
+      } catch {
+        /* the next verified update records it */
+      }
+    };
     if (cliCurrentCommit(installation) === release.head) {
+      if (stable) requireStableRuntime(installation, build, stable);
+      // Pinning a currently installed State still requires a signature. Unpinning a
+      // rolled-back State also has to clear the floating channel's downgrade check.
+      const changedSelection = options.stable && (!installedStable || installedStable.pin !== stable?.pin);
+      const verdict = changedSelection ? await verifyRelease() : undefined;
       // Adoption/repair and clearing an explicit pin never perform no-op GC.
       const adopt =
         !existsSync(join(installation, 'manager')) ||
@@ -409,7 +496,7 @@ async function updateCliLocked(
         (!options.rollback &&
           canManageCli(build) &&
           cliBuildCommit(join(installation, 'manager')) !== release.head);
-      if (adopt || (!options.rollback && existsSync(join(installation, 'rollback.json'))))
+      if (adopt || options.stable || (!options.rollback && existsSync(join(installation, 'rollback.json'))))
         withCliLock(installation, () => {
           invariant(
             cliCurrentCommit(installation) === release.head,
@@ -417,10 +504,12 @@ async function updateCliLocked(
             `Current changed; retry ${cliUpdateCommand(installation)}.`,
           );
           if (adopt) ensureCliManager(installation, build, !options.rollback);
+          if (options.stable) writeStableSelection(installation, options.stable);
           if (!existsSync(sourcePath)) durableReplace(sourcePath, JSON.stringify(address));
           if (!options.rollback) rmSync(join(installation, 'rollback.json'), { force: true });
         });
       rmSync(failureMark(installation), { force: true });
+      if (verdict) rememberRelease(verdict);
       return { status: 'current', cliCommit: release.head, installation, removed: [] };
     }
     const retainedBuild =
@@ -429,22 +518,12 @@ async function updateCliLocked(
       const slots = heavySlots(readClientSettings().localHeavySlots);
       if (slots > 0) {
         const inherited = inheritedHeavySlot(heavySlotDirectory());
-        return { buildRequired: release, expectedCurrent, inherited };
+        return { buildRequired: release, expectedCurrent, expectedStable: installedStable, inherited };
       }
     }
     // Signed releases: checked with this (already installed) build's keys before the new State is
     // downloaded, provisioned or built. Explicit --state selection is the owner's own recovery path.
-    const verdict = options.rollback
-      ? null
-      : await checkCliRelease(
-          installation,
-          {
-            projectId: address.projectId,
-            head: release.head,
-            ...(dependencies.source.signatures ? { signatures: dependencies.source.signatures } : {}),
-          },
-          dependencies.releaseCheck,
-        );
+    const verdict = options.rollback ? null : await verifyRelease();
     const publish = async (prepared?: string) => {
       const input = {
         installation,
@@ -454,10 +533,13 @@ async function updateCliLocked(
         stage: prepared,
         expectedCurrent,
         rollback: options.rollback,
+        ...(stable ? { stable } : {}),
+        ...(options.stable ? { nextStable: options.stable } : {}),
         migrate: dependencies.migrate,
         retireGraceMs: options.retireGraceMs,
       };
       installCliBuild(input);
+      if (stable) requireStableRuntime(installation, build, stable);
       // Nothing to fall back on (first install) means nothing to protect: the canary needs a
       // selected build to keep serving callers when it refuses.
       if (!options.rollback && cliCurrentCommit(installation))
@@ -469,12 +551,7 @@ async function updateCliLocked(
       rmSync(failureMark(installation), { force: true });
       clearCliCanaryRefusal(installation, release.head);
       // Anti-downgrade floor: the highest verified release number now installed here.
-      if (verdict)
-        try {
-          recordCliReleaseNumber(installation, release.head, verdict);
-        } catch {
-          /* the next verified update records it */
-        }
+      if (verdict) rememberRelease(verdict);
       return value;
     };
     const install = (directory: string) =>
@@ -500,7 +577,7 @@ async function updateCliLocked(
     } finally {
       rmSync(transferCache, { recursive: true, force: true });
     }
-    const packageJson = JSON.parse(readFileSync(join(stage, 'package.json'), 'utf8'));
+    const packageJson = cliBuildPackage(stage);
     invariant(
       packageJson.name === '@nanthai/forge',
       'CLI_UPDATE_SOURCE_INVALID',
@@ -568,12 +645,15 @@ export async function cliUpdateCli(args: string[]) {
   if (args.includes('--help'))
     return {
       usage:
-        'nforge update [FORGE_CHECKOUT] [--directory DIR] [--bin FILE] [--state STATE] [--login]\nUpdates from accepted Forge main; --state explicitly selects a retained State for rollback.',
+        'nforge update [FORGE_CHECKOUT] [--directory DIR] [--bin FILE] [--channel main|stable] [--pin STATE | --unpin | --state STATE] [--login]\nNew installs default to stable. Use --pin for an exact signed stable build or --state to roll back main.',
     };
   const flags = [...args];
   let root: string | undefined,
     installation = cliInstallation() ?? defaultCliInstallation(),
     state: string | undefined,
+    channel: 'main' | 'stable' | undefined,
+    pin: string | undefined,
+    unpin = false,
     bin = join(homedir(), '.local', 'bin', 'nforge'),
     binGiven = false,
     login = false,
@@ -598,6 +678,15 @@ export async function cliUpdateCli(args: string[]) {
     } else if (flag === '--state') {
       state = flags.shift();
       invariant(state && /^[a-f0-9]{64}$/.test(state), 'BAD_ARGUMENT', 'Use a full Forge State hash.');
+    } else if (flag === '--channel') {
+      const value = flags.shift();
+      invariant(value === 'main' || value === 'stable', 'BAD_ARGUMENT', 'Choose main or stable.');
+      channel = value;
+    } else if (flag === '--pin') {
+      pin = flags.shift();
+      invariant(pin && /^[a-f0-9]{64}$/.test(pin), 'BAD_ARGUMENT', 'Use a full signed Forge State hash.');
+    } else if (flag === '--unpin') {
+      unpin = true;
     } else {
       invariant(!root && !flag.startsWith('-'), 'BAD_ARGUMENT', 'Use nforge update --help.');
       root = resolve(flag);
@@ -607,7 +696,7 @@ export async function cliUpdateCli(args: string[]) {
   // wait. A busy updater already does the work; the update lock comes before any release read.
   if (background) {
     invariant(
-      !root && !state && !login,
+      !root && !state && !login && !channel && !pin && !unpin,
       'BAD_ARGUMENT',
       'nforge update --background takes only --directory and --release-head.',
     );
@@ -616,15 +705,29 @@ export async function cliUpdateCli(args: string[]) {
     mkdirBelow(installation, pendingDirectory);
     const reservation = tryHeavySlot(pendingDirectory, 1, process.pid, true, false);
     if (!reservation) return { status: 'busy', installation };
+    // The reservation holder alone replaces the bounded stable log.
+    const stableLog = !expected && existsSync(join(installation, 'stable-selection.json'));
+    const note = (value: object) => {
+      if (!stableLog) return;
+      try {
+        durableReplace(join(installation, 'update.log'), JSON.stringify(value) + '\n');
+      } catch {
+        /* advisory */
+      }
+    };
     try {
-      return await updateCli(installation, readCliSource(installation), undefined, undefined, {
+      const result = await updateCli(installation, readCliSource(installation), undefined, undefined, {
         lockWaitMs: 0,
         installed: true,
+        stableCheck: true,
         ...(expected ? { skipIfCurrent: expected } : {}),
       });
+      if (result.status !== 'deferred') note(result);
+      return result;
     } catch (error) {
       if (error instanceof ForgeError && error.code === 'CLI_UPDATE_BUSY')
         return { status: 'busy', installation };
+      note({ code: error instanceof ForgeError ? error.code : 'CLI_UPDATE_FAILED' });
       // A canary refusal or hold carries its own retry time (canary-refused.json); the generic
       // 10-minute mark would delay a deploy-window retry (Issue 3205f7e6).
       if (error instanceof ForgeError && error.code === 'CLI_CANARY_FAILED') throw error;
@@ -638,6 +741,24 @@ export async function cliUpdateCli(args: string[]) {
     }
   }
   const address = root ? hostedAgentAddress(root, {}) : readCliSource(installation);
+  const priorStable = stableSelection(installation);
+  const configured = existsSync(join(installation, 'stable-selection.json'))
+    ? 'stable'
+    : existsSync(join(installation, 'source.json'))
+      ? 'main'
+      : null;
+  channel ??= configured ?? (state ? 'main' : 'stable');
+  invariant(
+    !configured || configured === channel,
+    'BAD_ARGUMENT',
+    'Use a separate --directory for a different CLI release channel.',
+  );
+  invariant(
+    !(pin && unpin) && (channel === 'stable' ? !state : !pin && !unpin),
+    'BAD_ARGUMENT',
+    'Use --pin or --unpin on stable, or --state on main.',
+  );
+  const stable = channel === 'stable' ? (pin ? { pin } : unpin ? {} : (priorStable ?? {})) : undefined;
   rememberCanaryClone(installation, root);
   invariant(
     address,
@@ -663,7 +784,7 @@ export async function cliUpdateCli(args: string[]) {
     );
   }
   let expectedCurrent = cliCurrentCommit(installation);
-  const selected = await source.current();
+  const selected = stable ? undefined : await source.current();
   if (state && !existsSync(join(installation, 'manager'))) {
     const initialized = await updateCli(installation, address, selected, undefined, {
       expectedCurrent,
@@ -677,9 +798,14 @@ export async function cliUpdateCli(args: string[]) {
   const result = await updateCli(
     installation,
     address,
-    state ? { ...selected, head: state } : selected,
+    state ? { ...selected!, head: state } : selected,
     undefined,
-    { expectedCurrent, rollback: !!state, lockWaitMs: CLI_UPDATE_WAIT_MS },
+    {
+      expectedCurrent,
+      rollback: !!state,
+      ...(stable ? { stable, expectedStable: priorStable } : {}),
+      lockWaitMs: CLI_UPDATE_WAIT_MS,
+    },
   );
   // The default launcher belongs to one installation: an update of another one (a bench's own
   // CLI home) keeps it unless --bin names it, so it never repoints the user's `nforge`.

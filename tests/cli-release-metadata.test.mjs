@@ -13,20 +13,7 @@ import { testDeploymentOrigin } from './trusted-origin.mjs';
 const { current } = await import(moduleUrl('../convex/projectHostedChannels.ts'));
 const endpoint = 'projectHostedChannels:current';
 
-function fixture(t, cliVersion, protocolVersion) {
-  const config = {
-    FORGE_MINIMUM_CLI_VERSION: cliVersion,
-    FORGE_MINIMUM_CLI_PROTOCOL_VERSION: protocolVersion,
-  };
-  for (const [name, value] of Object.entries(config)) {
-    const previous = process.env[name];
-    t.after(() => {
-      if (previous === undefined) delete process.env[name];
-      else process.env[name] = previous;
-    });
-    if (value === undefined) delete process.env[name];
-    else process.env[name] = value;
-  }
+function fixture(t, cliVersion, protocolVersion, stableHead) {
   const s = lanesFixture();
   const authority = { mode: 'server', epoch: 1 };
   const projectId = s.insert('hostedProjects', {
@@ -38,11 +25,53 @@ function fixture(t, cliVersion, protocolVersion) {
     revision: 0,
     sourceAuthority: authority,
   });
+  const config = {
+    FORGE_MINIMUM_CLI_VERSION: cliVersion,
+    FORGE_MINIMUM_CLI_PROTOCOL_VERSION: protocolVersion,
+    FORGE_STABLE_CLI_PROJECT_ID: stableHead ? projectId : undefined,
+    FORGE_STABLE_CLI_STATE: stableHead,
+  };
+  for (const [name, value] of Object.entries(config)) {
+    const previous = process.env[name];
+    t.after(() => {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    });
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
   seedAuthorityMain(s, projectId, 'a'.repeat(64), authority);
   const url = testDeploymentOrigin('https://cli-release-metadata.convex.cloud');
   const query = (args, actor) => s.call(endpoint, current, args, actor);
   return { s, projectId, query, release: cliReleaseSource({ url, projectId }) };
 }
+
+test('stable selects an explicitly configured State through the same authorized metadata read', async t => {
+  const stableHead = 'b'.repeat(64);
+  const { s, projectId, query, release } = fixture(t, '0.3.1', '1', stableHead);
+  const rpc = t.mock.method(ConvexHttpClient.prototype, 'query', (ref, args) => {
+    assert.equal(getFunctionName(ref), endpoint);
+    return query(args);
+  });
+  const main = await release.current({ includeCompatibility: true });
+  const stable = await release.current({ stable: true });
+  assert.equal(main.head, 'a'.repeat(64));
+  assert.equal(main.cliRelease.stableHead, undefined);
+  assert.deepEqual(stable, { ...main, cliRelease: { ...main.cliRelease, stableHead } });
+  assert.equal(rpc.mock.callCount(), 2);
+  assert.deepEqual(s.counts[1], s.counts[0]);
+  assert.equal(s.counts[1].writes, 0);
+  assert.equal(s.scheduled.length, 0);
+  t.diagnostic(
+    `Stable selection adds ${Buffer.byteLength(JSON.stringify(stable)) - Buffer.byteLength(JSON.stringify(main))} response bytes to the floor-aware reply.`,
+  );
+  await assert.rejects(
+    query({ projectId, cliRelease: 2 }, 'stranger'),
+    error => error.data?.code === 'PROJECT_UNAVAILABLE',
+  );
+  process.env.FORGE_STABLE_CLI_PROJECT_ID = 'different-project';
+  assert.equal((await release.current({ stable: true })).cliRelease.stableHead, undefined);
+});
 
 test('opt-in release metadata uses the same authorized query and database reads as strict legacy main', async t => {
   const { s, projectId, query, release } = fixture(t, '0.3.1', '2');

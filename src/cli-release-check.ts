@@ -25,11 +25,15 @@ export const releaseVerdictPath = (installation: string) => join(installation, '
 
 /** The highest signed release number this machine installed (anti-downgrade floor). Written only
  * after a verified numbered release is selected; an explicit --state selection never lowers it. */
-export const releaseNumberPath = (installation: string) => join(installation, 'release-number.json');
+export const releaseNumberPath = (installation: string, stable = false) =>
+  join(installation, stable ? 'stable-release-number.json' : 'release-number.json');
 
-export function readCliReleaseNumber(installation: string): { release: number; head: string } | null {
+export function readCliReleaseNumber(
+  installation: string,
+  stable = false,
+): { release: number; head: string } | null {
   try {
-    const value = JSON.parse(readFileSync(releaseNumberPath(installation), 'utf8'));
+    const value = JSON.parse(readFileSync(releaseNumberPath(installation, stable), 'utf8'));
     return Number.isSafeInteger(value?.release) && value.release >= 0 && typeof value.head === 'string'
       ? { release: value.release, head: value.head }
       : null;
@@ -39,21 +43,31 @@ export function readCliReleaseNumber(installation: string): { release: number; h
 }
 
 /** After a verified numbered release is installed: keep the highest number seen (never lower). */
-export function recordCliReleaseNumber(installation: string, head: string, verdict: CliReleaseVerdict) {
+export function recordCliReleaseNumber(
+  installation: string,
+  head: string,
+  verdict: CliReleaseVerdict,
+  stable = false,
+) {
   if (verdict.status !== 'verified' || verdict.release === undefined) return;
-  const floor = readCliReleaseNumber(installation);
+  const floor = readCliReleaseNumber(installation, stable);
   if (floor && floor.release >= verdict.release) return;
   durableReplace(
-    releaseNumberPath(installation),
+    releaseNumberPath(installation, stable),
     JSON.stringify({ release: verdict.release, head, at: new Date().toISOString() }),
   );
 }
 
 /** A lower number than the installed floor, or the same number on another State, is a downgrade:
  * an earlier signed State put back on main. Only the owner's explicit --state selection allows it. */
-function antiDowngrade(installation: string, head: string, verdict: CliReleaseVerdict): CliReleaseVerdict {
+function antiDowngrade(
+  installation: string,
+  head: string,
+  verdict: CliReleaseVerdict,
+  stable?: boolean,
+): CliReleaseVerdict {
   if (verdict.status !== 'verified' || verdict.release === undefined) return verdict;
-  const floor = readCliReleaseNumber(installation);
+  const floor = readCliReleaseNumber(installation, stable);
   if (!floor || verdict.release > floor.release || (verdict.release === floor.release && floor.head === head))
     return verdict;
   return {
@@ -82,6 +96,8 @@ export async function checkCliRelease(
   input: {
     projectId: string;
     head: string;
+    stable?: boolean;
+    exact?: boolean;
     signatures?: (head: string) => Promise<readonly CliReleaseSignature[]>;
   },
   hooks: ReleaseCheckHooks = {},
@@ -90,11 +106,13 @@ export async function checkCliRelease(
   const now = hooks.now ?? Date.now;
   let signatures: readonly CliReleaseSignature[] | null = null;
   if (input.signatures) signatures = await input.signatures(input.head).catch(() => null);
-  let verdict = antiDowngrade(
-    installation,
-    input.head,
-    verifyCliRelease({ projectId: input.projectId, head: input.head, signatures, keys: trust.keys }),
-  );
+  let verdict = verifyCliRelease({
+    projectId: input.projectId,
+    head: input.head,
+    signatures,
+    keys: trust.keys,
+  });
+  if (!input.exact) verdict = antiDowngrade(installation, input.head, verdict, input.stable);
   if (verdict.status === 'verified' && verdict.release === undefined && trust.required)
     verdict = { status: 'unsigned', reason: 'signed without a release number' };
   try {

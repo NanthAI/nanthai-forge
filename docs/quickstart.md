@@ -25,6 +25,14 @@ This builds and links your source checkout; it does not install a published npm
 release. Keep that checkout to update it from GitHub. `nforge docs quickstart`
 opens this guide from the installed source.
 
+Managed installs from the hosted Forge source project default to the signed
+stable channel once an owner has published a stable State. Forge builders use
+`nforge update FORGE_CHECKOUT --channel main` to track accepted main. For CI,
+`nforge update FORGE_CHECKOUT --directory CLI_DIR --bin CLI_BIN --pin FULL_FORGE_STATE_HASH`
+selects the same signed build on every run until the advertised compatibility
+floor passes it. Run `nforge --version` to see the channel and pin.
+See [CLI updates](operations/cli-update.md#stable-releases-and-ci-pins).
+
 The first `nforge` run installs advisory Claude Code/Codex hooks for every Lane
 and prints changed files plus the exact undo command. It edits two files,
 `~/.claude/settings.json` and `~/.codex/hooks.json`, and in each adds two hook

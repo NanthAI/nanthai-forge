@@ -135,7 +135,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/gh-cli-options.ts` | `build-folders` | 1 | a `gh` JSON field named `coverage`, not a folder | — |
 | `src/js-import-graph.ts` | `build-folders` | 1 | reads a JS package's built `exports` target as its `src/` source | the same for every JS/TS repository |
 | `src/agent-preflight.ts` | `package-json-config` | 5 | preflight config, guards, the Forge-layout inventory and independent static selection read the optional package.json fallback | a neutral root forge.json; package.json is optional for every ecosystem |
-| `src/cli-update.ts` | `package-json-config` | 1 | Forge's own CLI package manifest | not used |
+| `src/cli-installation.ts` | `package-json-config` | 1 | Forge's own CLI package name, version and protocol | project manifests are untouched |
 | `src/explicit-test-runner.ts` | `package-json-config` | 2 | the project test runner declaration (any-ecosystem slice F, e89be958) | after F: a neutral root file |
 | `src/heavy-build.ts` | `package-json-config` | 1 | Forge's own CLI build | not used |
 | `src/heavy-test-preloads.ts` | `package-json-config` | 1 | reads the project's own `test` script to name preloads a focused run skips | the same notice for any project with a `test` script |

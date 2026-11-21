@@ -6,7 +6,7 @@ import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { ForgeError, invariant } from './errors.js';
 import { describeFailure, recordFailure } from './system-errors.js';
 import { agentDeadEnd, cliTeachContext, teachReceipt } from './error-teaching.js';
-import { readFileSync } from 'node:fs';
+import { cliBuildIdentity } from './cli-installation.js';
 
 const HELP = `Forge is a source host and workspace for humans and AI agents working on the same code.
 
@@ -19,7 +19,7 @@ Usage:
   nforge import <github-url|OWNER/NAME> [--ref REF] [--name NAME] [--deployment URL] [--operation-id UUID] [--no-wait]
   nforge import --resume OPERATION_UUID   # resume a pinned GitHub source import; reports project and readiness
   nforge pull [ROOT]           # refresh a clean clone to accepted main (ROOT: cwd clone)
-  nforge update [FORGE_CHECKOUT] [--directory DIR] [--state STATE]
+  nforge update [FORGE_CHECKOUT] [--directory DIR] [--channel main|stable] [--pin STATE | --unpin | --state STATE]
   nforge cli rollback [--directory DIR]   # switch to the one retained previous CLI build
   nforge cli release-sign --key FILE [--state STATE --release N]   # owner: sign released main for the CLI updater
   nforge cli release-verify [--state STATE]...   # re-check stored release signatures with this build's keys
@@ -118,10 +118,10 @@ async function main(args: string[]): Promise<unknown> {
   if (args[0] === 'secret') return (await import('./sealed-cli.js')).sealedCli(args.slice(1));
   if (args[0] === '--version') {
     invariant(args.length === 1, 'UNSUPPORTED_FLAG', `Unsupported flag: ${args[1]}`);
-    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
-      version: string;
-    };
-    process.stdout.write(`nforge version ${pkg.version}\n`);
+    const { cliVersion, cliCommit, cliChannel, cliPin } = cliBuildIdentity();
+    process.stdout.write(
+      `nforge version ${cliVersion} (channel ${cliChannel}, pin ${cliPin ?? 'none'}, build ${cliCommit})\n`,
+    );
     return undefined;
   }
   if (['login', 'logout', 'auth'].includes(args[0]!))

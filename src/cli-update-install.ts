@@ -9,8 +9,11 @@ import {
   permitCliRetirement,
   pruneCliBuilds,
   selectCliBuild,
+  stageStableSelection,
   unretireCliBuild,
   withCliLock,
+  writeStableSelection,
+  type StableSelection,
 } from './cli-installation.js';
 import { invariant } from './errors.js';
 import { canonicalRoot } from './root-paths.js';
@@ -36,6 +39,8 @@ export function ensureCliManager(installation: string, build: string, promote = 
   if (!existsSync(launcher) || !readFileSync(launcher).equals(bytes)) durableReplace(launcher, bytes);
 }
 type PublishInput = {
+  stable?: StableSelection;
+  nextStable?: StableSelection;
   installation: string;
   address: CliSource;
   head: string;
@@ -94,10 +99,12 @@ export function activateCliBuild(input: PublishInput) {
       'CLI_UPDATE_BUILD_FAILED',
       'Install the build before activating it.',
     );
+    if (input.nextStable) stageStableSelection(installation, head, input.nextStable);
     unretireCliBuild(build);
     ensureCliManager(installation, build, !input.rollback);
     durableReplace(join(installation, 'source.json'), JSON.stringify(address));
     selectCliBuild(installation, build);
+    if (input.nextStable) writeStableSelection(installation, input.nextStable);
     // Exactly one previous build is kept for `nforge cli rollback` (exempt from pruning).
     if (previousBuild && canonicalRoot(previousBuild) !== canonicalRoot(build))
       selectCliBuild(installation, previousBuild, 'previous');
@@ -119,7 +126,9 @@ export function activateCliBuild(input: PublishInput) {
     cliCommit: head,
     installation,
     removed,
-    ...(published && /^[a-f0-9]{64}$/.test(published) ? { undo: `${next} --state ${published}` } : {}),
+    ...(published && /^[a-f0-9]{64}$/.test(published)
+      ? { undo: `${next} ${input.stable ? '--pin' : '--state'} ${published}` }
+      : {}),
   };
 }
 /** Install then activate with no check in between (explicit selection and tests). */

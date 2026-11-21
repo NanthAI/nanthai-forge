@@ -13,7 +13,7 @@ import {
   withCliRuntimeLock,
 } from './cli-launcher.js';
 import { canonicalRoot } from './root-paths.js';
-import { ForgeError } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { linkDirectory } from './source-links.js';
 
 export const cliPackageRoot = (url = import.meta.url) => dirname(dirname(fileURLToPath(url)));
@@ -49,6 +49,87 @@ export function cliSelectedBuild(
     throw error;
   }
 }
+
+export type StableSelection = { pin?: string };
+type StoredStableSelection = StableSelection & {
+  initializing?: true;
+  pending?: { head: string; selection: StableSelection };
+};
+const selectionPath = (installation: string) => join(installation, 'stable-selection.json');
+
+export function stableSelection(installation: string, settlePending = false): StableSelection | null {
+  let stored: StoredStableSelection;
+  try {
+    stored = JSON.parse(readFileSync(selectionPath(installation), 'utf8')) as StoredStableSelection;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+  invariant(
+    stored &&
+      typeof stored === 'object' &&
+      !Array.isArray(stored) &&
+      (stored.initializing === undefined || stored.initializing === true) &&
+      (stored.pending === undefined ||
+        (stored.pending &&
+          typeof stored.pending.head === 'string' &&
+          stored.pending.selection &&
+          typeof stored.pending.selection === 'object' &&
+          !Array.isArray(stored.pending.selection))),
+    'CLI_UPDATE_SOURCE_INVALID',
+    'The stable CLI selection could not be read.',
+  );
+  let selected: StableSelection | null = stored.initializing ? null : stored;
+  if (stored.pending) {
+    const current = cliSelectedBuild(installation);
+    if (current && cliBuildCommit(current) === stored.pending.head) selected = stored.pending.selection;
+  }
+  if (!selected) return null;
+  const pin = selected.pin;
+  invariant(
+    pin === undefined || (typeof pin === 'string' && /^[a-f0-9]{64}$/.test(pin)),
+    'CLI_UPDATE_SOURCE_INVALID',
+    'The recorded stable pin must be a full Forge State hash.',
+  );
+  selected = pin ? { pin } : {};
+  if (settlePending && stored.pending) writeStableSelection(installation, selected);
+  return selected;
+}
+
+export function writeStableSelection(installation: string, selection: StableSelection) {
+  durableReplace(selectionPath(installation), JSON.stringify(selection));
+}
+
+/** The current symlink commits the pin. Either side of an interrupted activation has
+ * an unambiguous selection until the next update compacts the record. */
+export function stageStableSelection(installation: string, head: string, selection: StableSelection) {
+  const prior = stableSelection(installation);
+  durableReplace(
+    selectionPath(installation),
+    JSON.stringify({ ...(prior ?? { initializing: true }), pending: { head, selection } }),
+  );
+}
+
+export function cliBuildPackage(root: string) {
+  return JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+    name: string;
+    version: string;
+    forge?: { cliProtocolVersion?: number };
+  };
+}
+
+/** Print paths share installation metadata only. They do not import the release or network code. */
+export function cliBuildIdentity(root = cliPackageRoot()) {
+  const installation = cliInstallation(root);
+  const stable = installation ? stableSelection(installation) : null;
+  return {
+    cliVersion: cliBuildPackage(root).version,
+    cliCommit: cliBuildCommit(root),
+    cliChannel: stable || !installation ? 'stable' : 'main',
+    cliPin: stable?.pin ?? null,
+  };
+}
+
 export function stableCliRunner(runner: string) {
   const installation = cliInstallation(dirname(dirname(runner)));
   return installation && existsSync(join(installation, 'current'))

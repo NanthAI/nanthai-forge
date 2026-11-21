@@ -59,6 +59,7 @@ const server = createServer((request, response) => {
       return;
     }
     Atomics.add(calls, 0, 1);
+    Atomics.notify(calls, 0);
     if (workerData.status) {
       response.writeHead(workerData.status).end('synthetic release unavailable');
       return;
@@ -72,6 +73,9 @@ const server = createServer((request, response) => {
       channel: 'main',
       head: workerData.head,
       receipt: { id: 'synthetic-acceptance', kind: 'server', previousHead: null, previousReceiptId: null },
+      ...((input.args?.[0]?.cliRelease ?? input.args?.cliRelease) === 2 && workerData.cliRelease
+        ? { cliRelease: workerData.cliRelease }
+        : {}),
     };
     response.setHeader('content-type', 'application/json');
     response.end(JSON.stringify({ status: 'success', value: JSON.stringify(selection), logLines: [] }));

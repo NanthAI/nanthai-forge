@@ -271,7 +271,11 @@ async function launch() {
   const manager = withCliRuntimeLock(
     installation,
     () => {
-      const selected = resolveCliPointer(installation, 'manager');
+      // Stable commits the runtime and its pin at the current-pointer rename.
+      // Main keeps its separate manager for historical runtimes.
+      const stable =
+        existsSync(join(installation, 'stable-selection.json')) && existsSync(join(installation, 'current'));
+      const selected = resolveCliPointer(installation, stable ? 'current' : 'manager');
       const value = cliProcessIdentity(),
         users = join(selected, '.users');
       mkdirSync(users, { recursive: true, mode: 0o700 });

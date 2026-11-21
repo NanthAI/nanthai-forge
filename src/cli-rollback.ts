@@ -6,6 +6,8 @@ import {
   cliInstallation,
   cliSelectedBuild,
   permitCliRetirement,
+  stableSelection,
+  writeStableSelection,
 } from './cli-installation.js';
 import { selectCliBuild, unretireCliBuild, withCliLock } from './cli-installation.js';
 import { canManageCli, ensureCliManager } from './cli-update-install.js';
@@ -14,6 +16,7 @@ import { clearCliCanaryRefusal, readCliCanaryRefusal, writeCliCanaryRefusal } fr
 import { migrateEditHookRunner } from './agent-install-hooks.js';
 import { invariant } from './errors.js';
 import { shellQuote } from './shell-quote.js';
+import { requireStableRuntime } from './cli-stable.js';
 
 /** `nforge cli rollback`: atomically select the one retained previous build as current (and
  * manager), keep the build it replaced as the new previous, and hold main's head off until main
@@ -51,6 +54,16 @@ export async function cliRollback(
         `The retained previous build ${target.slice(0, 8)} is incomplete.`,
       );
       invariant(target !== from, 'CLI_ROLLBACK_UNAVAILABLE', 'The previous build is the current build.');
+      const stable = stableSelection(installation);
+      if (stable) {
+        invariant(
+          !stable.pin,
+          'CLI_ROLLBACK_UNAVAILABLE',
+          'This stable installation has an exact pin. Use nforge update --pin STATE or --unpin.',
+        );
+        requireStableRuntime(installation, previous, stable);
+        writeStableSelection(installation, stable);
+      }
       unretireCliBuild(previous);
       // Current moves with one atomic symlink rename; the build being left becomes the previous.
       if (canManageCli(previous)) ensureCliManager(installation, previous, true);
@@ -83,7 +96,9 @@ export async function cliRollback(
         from,
         installation,
         undo: `nforge cli rollback --directory ${shellQuote(installation)}`,
-        notice: `Main ${from.slice(0, 8)} stays off this machine until main moves; nforge update installs it explicitly.`,
+        notice: stable
+          ? `Stable ${from.slice(0, 8)} stays off this machine until the release moves; nforge update installs it explicitly.`
+          : `Main ${from.slice(0, 8)} stays off this machine until main moves; nforge update installs it explicitly.`,
       };
     });
   } finally {

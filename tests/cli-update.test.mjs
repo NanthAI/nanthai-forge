@@ -28,14 +28,22 @@ import { dependencyKey } from '../dist/shared-dependencies.js';
 import { withCliRuntimeLock, cliProcessIdentity } from '../dist/cli-launcher.js';
 import { cliUpdateRunning, launcherElsewhere } from '../dist/cli-update.js';
 import { cliStartup, cliVersionCheck } from '../dist/cli-version.js';
+import { signCliRelease } from '../dist/cli-release-trust.js';
 import { updateCli as updateCliChecked } from '../dist/cli-update.js';
-import { testReleaseSigner, trustedDist, withSignedReleases } from './release-trust-fixture.mjs';
+import {
+  testReleasePem,
+  testReleaseSigner,
+  trustedDist,
+  withSignedReleases,
+} from './release-trust-fixture.mjs';
 import { publishCliBuild } from '../dist/cli-update-install.js';
 import {
   cliBuildCommit,
   pruneCliBuilds,
   permitCliRetirement,
   selectCliBuild,
+  stableSelection,
+  stageStableSelection,
   stableCliRunner,
   withCliLock,
 } from '../dist/cli-installation.js';
@@ -384,7 +392,7 @@ test('successful updater builds and smoke-checks before selection, then migrates
   assert.equal(existsSync(f.old), false);
 });
 
-async function releaseFixture(t, f, head, status) {
+async function releaseFixture(t, f, head, status, cliRelease) {
   // [0] release reads, [1] agent capability reads (refused by the synthetic service).
   const calls = new Int32Array(new SharedArrayBuffer(8));
   const worker = new Worker(new URL('../scripts/package-cli-release-worker.mjs', import.meta.url), {
@@ -393,6 +401,7 @@ async function releaseFixture(t, f, head, status) {
       projectId: address.projectId,
       calls: calls.buffer,
       status,
+      cliRelease,
       signer: testReleaseSigner(),
     },
   });
@@ -724,6 +733,273 @@ function installLauncher(f, manager) {
   selectCliBuild(f.installation, manager, 'manager');
   copyFileSync(new URL('../dist/cli-launcher.js', import.meta.url), join(f.installation, 'launcher.mjs'));
 }
+
+function stableFixtureBuild(build, cliVersion = '0.3.1', cliProtocolVersion = 1) {
+  writeFileSync(
+    join(build, 'package.json'),
+    JSON.stringify({
+      name: '@nanthai/forge',
+      type: 'module',
+      version: cliVersion,
+      forge: { cliProtocolVersion },
+    }),
+  );
+  writeFileSync(join(build, 'dist', 'cli-stable.js'), '// stable-capable build');
+}
+
+test('stable starts one release check after dispatch has finished, then keeps foreground reads free of discovery', async t => {
+  const f = fixture(t);
+  const calls = await releaseFixture(t, f, b, undefined, {
+    channel: 'main',
+    stableHead: a,
+    minimumCliVersion: '0.3.1',
+    minimumProtocolVersion: 1,
+  });
+  stableFixtureBuild(f.old);
+  writeFileSync(join(f.installation, 'stable-selection.json'), '{}');
+  installLauncher(f, f.old);
+  writeFileSync(
+    join(f.old, 'dist', 'cli-entry.js'),
+    `import { once } from 'node:events';
+import { cliStartup } from ${JSON.stringify(trustedDist().url('cli-version.js'))};
+if (await cliStartup(process.argv.slice(2), ${JSON.stringify(f.old)}, undefined, { validated: true })) {
+  process.stdout.write('dispatch-in-progress');
+  await once(process.stdin, 'data');
+  process.stdin.pause();
+  process.stdout.write('-finished');
+}
+`,
+  );
+  const run = spawn(process.execPath, [join(f.installation, 'launcher.mjs'), 'queue', 'list'], {
+    env: launcherEnv(f),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  t.after(() => run.kill());
+  let stdout = '';
+  const dispatched = new Promise(done => {
+    run.stdout.on('data', chunk => {
+      stdout += chunk;
+      if (stdout.includes('dispatch-in-progress')) done();
+    });
+  });
+  const exited = new Promise((done, reject) => {
+    run.once('error', reject);
+    run.once('close', done);
+  });
+  await Promise.race([
+    dispatched,
+    exited.then(status => assert.fail(`Stable command exited before dispatch (${status}).`)),
+  ]);
+  assert.equal(Atomics.load(calls, 0), 0);
+  assert.equal(existsSync(join(f.installation, 'update.log')), false);
+  const observed = Atomics.waitAsync(calls, 0, 0, 20_000);
+  run.stdin.end('finish');
+  assert.equal(await exited, 0);
+  assert.equal(stdout, 'dispatch-in-progress-finished');
+  assert.equal(await observed.value, 'ok');
+  const { cliUpdateCli } = await import('../dist/cli-update.js');
+  await cliUpdateCli(['--background', '--directory', f.installation]);
+  assert.equal(Atomics.load(calls, 0), 1);
+  assert.equal(cliBuildCommit(join(f.installation, 'current')), a);
+});
+
+test('stable checks the cached CLI and protocol floors with one stderr line, while version and auth show the exact pin', t => {
+  const f = fixture(t);
+  stableFixtureBuild(f.old);
+  installLauncher(f, f.old);
+  // Run the real CLI entry and its chunks at the installed path.
+  const dist = fileURLToPath(new URL('../dist/', import.meta.url));
+  for (const name of readdirSync(dist).filter(name => /^cli-(entry|bundle-).*\.js$/.test(name))) {
+    copyFileSync(join(dist, name), join(f.old, 'dist', name));
+  }
+  symlinkSync(fileURLToPath(new URL('../node_modules', import.meta.url)), join(f.old, 'node_modules'), 'dir');
+  writeFileSync(
+    join(f.directory, 'client.json'),
+    JSON.stringify({ localHeavySlots: 0, firstWriteHooks: false }),
+  );
+  writeFileSync(join(f.installation, 'stable-selection.json'), JSON.stringify({ pin: a }));
+  const fixtureNow = Date.parse('2026-11-20T12:00:00Z');
+  const clock = join(f.directory, 'clock.mjs');
+  writeFileSync(clock, `Date.now = () => ${fixtureNow};\n`);
+  const cache = (minimumCliVersion, minimumProtocolVersion) =>
+    writeFileSync(
+      join(f.installation, 'stable-release.json'),
+      JSON.stringify({
+        checkedAt: fixtureNow,
+        metadata: { channel: 'main', minimumCliVersion, minimumProtocolVersion },
+      }),
+    );
+  const run = (...args) =>
+    spawnSync(process.execPath, ['--import', clock, join(f.installation, 'launcher.mjs'), ...args], {
+      cwd: f.directory,
+      env: {
+        ...launcherEnv(f),
+        FORGE_AUTH_TOKEN: '',
+        XDG_CONFIG_HOME: join(f.home, '.config'),
+        XDG_CACHE_HOME: join(f.home, '.cache'),
+        XDG_STATE_HOME: join(f.home, '.state'),
+      },
+      encoding: 'utf8',
+    });
+  cache('0.3.0', 1);
+  const allowed = run('settings');
+  assert.equal(allowed.status, 0, allowed.stderr);
+  assert.equal(allowed.stderr, '');
+  for (const floor of [
+    ['0.3.2', 1],
+    ['0.3.1', 2],
+  ]) {
+    cache(...floor);
+    const denied = run('settings');
+    assert.equal(denied.status, 1);
+    assert.equal(denied.stdout, '');
+    assert.equal(denied.stderr.trim().split('\n').length, 1);
+    const { error } = JSON.parse(denied.stderr);
+    assert.equal(error.code, 'CLI_UPGRADE_REQUIRED');
+    assert.match(error.message, /nforge update .* --unpin/);
+  }
+  const version = run('--version');
+  assert.equal(version.status, 0, version.stderr);
+  assert.equal(version.stdout, `nforge version 0.3.1 (channel stable, pin ${a}, build ${a})\n`);
+  const auth = run('auth', 'status', '--json', 'cliVersion,cliChannel,cliPin,cliCommit');
+  assert.equal(auth.status, 1, auth.stderr); // No test credentials.
+  assert.deepEqual(JSON.parse(auth.stdout), {
+    cliVersion: '0.3.1',
+    cliChannel: 'stable',
+    cliPin: a,
+    cliCommit: a,
+  });
+});
+
+test('interrupted pin publication keeps the launcher and pin on the same State', t => {
+  const f = fixture(t);
+  const next = f.build(b);
+  stableFixtureBuild(f.old);
+  stableFixtureBuild(next);
+  controllerEntry(f.old, 'original pin');
+  controllerEntry(next, 'new pin');
+  installLauncher(f, next);
+  writeFileSync(join(f.installation, 'stable-selection.json'), JSON.stringify({ pin: a }));
+  stageStableSelection(f.installation, b, { pin: b });
+  const run = () =>
+    spawnSync(process.execPath, [join(f.installation, 'launcher.mjs'), '--version'], {
+      env: launcherEnv(f),
+      encoding: 'utf8',
+    });
+  assert.deepEqual(stableSelection(f.installation), { pin: a });
+  assert.equal(run().stdout, 'original pin\n');
+  selectCliBuild(f.installation, next);
+  assert.deepEqual(stableSelection(f.installation), { pin: b });
+  assert.equal(run().stdout, 'new pin\n');
+});
+
+test('changing a stable pin rechecks a same-State signature and unpinning respects the release-number floor', async t => {
+  const f = fixture(t);
+  stableFixtureBuild(f.old);
+  installLauncher(f, f.old);
+  writeFileSync(join(f.installation, 'stable-selection.json'), '{}');
+  let signatures = [];
+  const dependencies = {
+    source: {
+      current: async () => ({
+        schema: 2,
+        projectId: address.projectId,
+        snapshotId: 'synthetic',
+        sourceRevision: 1,
+        authority: { mode: 'server', epoch: 1 },
+        channel: 'main',
+        head: b,
+        receipt: { id: 'synthetic', kind: 'server', previousHead: null, previousReceiptId: null },
+        cliRelease: { channel: 'main', stableHead: a },
+      }),
+      signatures: async () => signatures,
+    },
+    releaseCheck: { alert: async () => undefined },
+  };
+  const pin = stable => updateCli(f.installation, address, undefined, dependencies, { stable });
+  await assert.rejects(pin({ pin: a }), error => error.code === 'CLI_CANARY_FAILED');
+  assert.deepEqual(stableSelection(f.installation), {});
+  signatures = [signCliRelease(testReleasePem, address.projectId, a, 1)];
+  assert.equal((await pin({ pin: a })).cliCommit, a);
+  writeFileSync(join(f.installation, 'stable-release-number.json'), JSON.stringify({ release: 2, head: b }));
+  await assert.rejects(pin({}), error => error.code === 'CLI_CANARY_FAILED');
+  assert.deepEqual(stableSelection(f.installation), { pin: a });
+});
+
+test('two stable CI installs select the same signed pin bytes after main and stable move', async t => {
+  const installs = [fixture(t), fixture(t)];
+  const pin = 'c'.repeat(64);
+  const selectedPayloads = [];
+  for (const [index, f] of installs.entries()) {
+    const checkout = [];
+    const minimum = { minimumCliVersion: '0.3.1', minimumProtocolVersion: 1 };
+    const observed = {
+      schema: 2,
+      projectId: address.projectId,
+      snapshotId: 'synthetic',
+      sourceRevision: index,
+      authority: { mode: 'server', epoch: 1 },
+      channel: 'main',
+      head: index ? b : a,
+      receipt: { id: 'synthetic', kind: 'server', previousHead: null, previousReceiptId: null },
+      cliRelease: { channel: 'main', stableHead: index ? a : b, ...minimum },
+    };
+    const dependencies = {
+      source: {
+        current: async () => observed,
+        signatures: async head =>
+          head === pin ? [signCliRelease(testReleasePem, address.projectId, pin, 1)] : [],
+        checkout: async (stage, release) => {
+          checkout.push(release.head);
+          writeFileSync(
+            join(stage, 'package.json'),
+            JSON.stringify({
+              name: '@nanthai/forge',
+              type: 'module',
+              version: '0.3.1',
+              forge: { cliProtocolVersion: 1 },
+            }),
+          );
+          writeFileSync(join(stage, 'package-lock.json'), '{}');
+          writeFileSync(join(stage, 'source.txt'), 'immutable signed fixture bytes\n');
+        },
+      },
+      run: async (stage, args) => {
+        if (args[1] === 'ci') return mkdirSync(join(stage, 'node_modules'));
+        if (args[1] !== 'run') return;
+        mkdirSync(join(stage, 'dist'));
+        stableFixtureBuild(stage);
+        copyFileSync(
+          new URL('../dist/cli-launcher.js', import.meta.url),
+          join(stage, 'dist', 'cli-launcher.js'),
+        );
+        for (const file of ['cli-version.js', 'cli-entry.js', 'agent-edit-hook.js'])
+          writeFileSync(join(stage, 'dist', file), readFileSync(join(stage, 'source.txt')));
+      },
+      migrate: () => {},
+    };
+    const result = await updateCli(f.installation, address, undefined, dependencies, { stable: { pin } });
+    assert.equal(result.cliCommit, pin);
+    assert.deepEqual(checkout, [pin]);
+    assert.deepEqual(stableSelection(f.installation), { pin });
+    assert.equal((await updateCli(f.installation, address, undefined, dependencies)).cliCommit, pin);
+    assert.deepEqual(checkout, [pin]);
+    selectedPayloads.push(readFileSync(join(f.installation, 'current', 'dist', 'cli-entry.js')));
+    observed.cliRelease.minimumProtocolVersion = 2;
+    await assert.rejects(
+      updateCli(f.installation, address, undefined, dependencies),
+      error => error.code === 'CLI_UPGRADE_REQUIRED',
+    );
+    delete observed.cliRelease;
+    await assert.rejects(
+      updateCli(f.installation, address, undefined, dependencies),
+      error => error.code === 'CLI_UPGRADE_REQUIRED',
+    );
+    assert.equal(cliBuildCommit(join(f.installation, 'current')), pin);
+    assert.deepEqual(stableSelection(f.installation), { pin });
+  }
+  assert.deepEqual(selectedPayloads[0], selectedPayloads[1]);
+});
 
 test('stable launcher refuses a gate-less historical runtime instead of executing its old entry', async t => {
   const f = fixture(t),

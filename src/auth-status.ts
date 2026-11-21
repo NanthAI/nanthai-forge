@@ -7,12 +7,14 @@ import { AUTH_STATE_NEXT_STEP, authState, deploymentUrl, readAuth, writeAuth } f
 import { hostedAgentAddress } from './hosted-agent-address.js';
 import { ForgeError, invariant } from './errors.js';
 import { parseGhOptions, projectGh } from './gh-cli-options.js';
+import { cliBuildIdentity } from './cli-installation.js';
 
 /** Verifies the same current credential as hosted commands; only allowlisted identity fields leave here. */
 export async function authStatus(args: string[]): Promise<unknown> {
   const options = parseGhOptions(args, 'auth', ['--hostname']),
     store = readAuth(),
     requested = options.values['--hostname'];
+  const cli = cliBuildIdentity();
   invariant(
     options.positional.length <= 1 && !(requested && options.positional.length),
     'BAD_ARGUMENT',
@@ -48,6 +50,7 @@ export async function authStatus(args: string[]): Promise<unknown> {
     process.exitCode = 1;
     return projectGh(
       {
+        ...cli,
         deployment,
         host,
         authenticated: false,
@@ -136,6 +139,7 @@ export async function authStatus(args: string[]): Promise<unknown> {
     account = identity.handle ?? 'no handle yet';
   return projectGh(
     {
+      ...cli,
       deployment,
       host,
       authenticated: true,
