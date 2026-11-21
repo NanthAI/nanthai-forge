@@ -241,6 +241,12 @@ Ordinary incremental State writes share unchanged manifest buckets. The ordinary
 100-object windows and their call counts stay unchanged. Ancestry
 prefetch bounds attempted lookups, including absent hints, rather than only
 successful descriptors; verified State parents still drive subsequent reads.
+
+With the default-off `FORGE_STATE_SOURCE_REUSE_LOCATION` switch enabled, the
+State selector and Actions source-pack descriptor reuse the exact stored row
+already read in their transaction. Each selection still checks current authority
+and signs through the same source location reader.
+
 Output staging also counts nested recipe leaves and physical projections in its
 query allowance: at most 2,048 estimated lookups, with the rest reserved for
 step observations and publication. Oversized projections stage their verified

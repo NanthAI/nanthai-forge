@@ -5,7 +5,7 @@ import { useConvex, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import type { Id } from '../../convex/_generated/dataModel';
 import { api } from '../../convex/_generated/api';
-import { Avatar } from './ui/primitives';
+import { Avatar, Button } from './ui/primitives';
 import { hostedError } from './snapshot';
 
 type ProjectId = Id<'hostedProjects'>;
@@ -37,7 +37,14 @@ export default function ProjectContributors({
     api.projectContributors.handles,
     active && contributor.startsWith('@') ? { projectId, prefix: contributor } : 'skip',
   );
-  const invites = useQuery(api.projectContributors.pending, active ? { projectId } : 'skip');
+  const [invitationPage, setInvitationPage] = useState<{ projectId: ProjectId; cursor: string } | null>(null);
+  const invitationCursor = invitationPage?.projectId === projectId ? invitationPage.cursor : null;
+  const invitations = useQuery(
+    api.projectAccess.people,
+    active ? { projectId, limit: 1, invitationCursor } : 'skip',
+  );
+  const invites = invitations?.invited.filter(invite => invite.state === 'pending');
+  const nextInvitationCursor = invitations?.invitationCursor;
   const rows = useQuery(contributors, active ? { projectId } : 'skip');
   const [names, setNames] = useState<Record<string, { label: string; handle?: string }>>({});
   const memberIds = rows?.map(row => row.contributor).join(',') ?? '';
@@ -72,7 +79,7 @@ export default function ProjectContributors({
         invitation.current = null;
       } else await client.mutation(remove, { projectId, contributor: person });
       if (grant) setContributor('');
-      setMessage(grant ? 'Access saved.' : 'Contributor access removed.');
+      setMessage(grant ? 'Invitation submitted.' : 'Contributor access removed.');
     } catch (e) {
       setError(hostedError(e));
     } finally {
@@ -150,6 +157,20 @@ export default function ProjectContributors({
             </li>
           ))}
         </ul>
+      )}
+      {(nextInvitationCursor || invitationCursor) && (
+        <nav aria-label="Invitation pages">
+          {nextInvitationCursor && (
+            <Button size="sm" onClick={() => setInvitationPage({ projectId, cursor: nextInvitationCursor })}>
+              More invitations
+            </Button>
+          )}
+          {invitationCursor && (
+            <Button size="sm" variant="ghost" onClick={() => setInvitationPage(null)}>
+              Newest invitations
+            </Button>
+          )}
+        </nav>
       )}
       {message && <p role="status">{message}</p>}
       {error && <ErrorToast>{error}</ErrorToast>}

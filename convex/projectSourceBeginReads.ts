@@ -4,7 +4,8 @@ import type { Id } from './_generated/dataModel';
 import { saveObjects, saveStateSchema } from './projectHostedSaveStore';
 import { signRecipeClosure } from './projectRecipeClosure';
 import { presignGet, r2Config } from './r2';
-import { findStoredObject as findObject } from './projectObjectFind';
+import { findStoredObject as findObject, type ObjectView } from './projectObjectFind';
+import { isStored } from './projectObjectFields';
 import { packRange, packHeaders } from '../src/object-pack-range';
 import { invariant } from '../src/errors';
 import { smallSavePageBytes, smallSaveStateBytes } from '../src/hosted-source-small-save';
@@ -14,8 +15,18 @@ export async function sourceObjectLocation(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   pin: { sha256: string; size: number },
+  selected?: ObjectView,
 ) {
-  const object = await findObject(ctx, projectId, pin.sha256);
+  const known =
+    selected &&
+    process.env.FORGE_STATE_SOURCE_REUSE_LOCATION === '1' &&
+    selected.projectId === projectId &&
+    selected.digest === pin.sha256 &&
+    !selected.removed &&
+    isStored(selected)
+      ? selected
+      : undefined;
+  const object = known ?? (await findObject(ctx, projectId, pin.sha256));
   invariant(object, 'SOURCE_UNAVAILABLE', 'Source input is absent.');
   const [descriptor] = await saveObjects(ctx, projectId, [pin], [object]);
   const url =

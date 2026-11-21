@@ -49,7 +49,7 @@ async function selection(
       .unique();
     invariant(known, 'SOURCE_UNAVAILABLE', 'Select a registered source State.');
   }
-  const value = await sourceObjectLocation(ctx, projectId, { sha256: state, size: row.size });
+  const value = await sourceObjectLocation(ctx, projectId, { sha256: state, size: row.size }, row);
   if (!value.url && value.storageId) value.url = await blobStore(ctx).getUrl(value.storageId);
   return JSON.stringify(value);
 }

@@ -6,6 +6,42 @@ import { expandSourceGrants } from '../dist/source-grant-wire.js';
 import { digest } from '../dist/hash.js';
 import { moduleUrl } from './convex-module.mjs';
 const { makeFunctionReference } = await import('convex/server');
+test('the runner reuses its authorized State row without a second descriptor read', async t => {
+  const f = await physicalStateSourceFixture(t, 1000, { protocol: 2 });
+  await f.heads();
+  const flag = 'FORGE_STATE_SOURCE_REUSE_LOCATION',
+    previous = process.env[flag];
+  t.after(() => (previous === undefined ? delete process.env[flag] : (process.env[flag] = previous)));
+  const read = async enabled => {
+    if (enabled) process.env[flag] = '1';
+    else delete process.env[flag];
+    const start = f.s.counts.length,
+      value = JSON.parse(
+        await f.ctx.runMutation(makeFunctionReference('projectStateSourceSelection:runner'), {
+          ...f.input,
+          state: f.s.state.sha256,
+          version: 2,
+        }),
+      ),
+      { url, ...binding } = value;
+    const reads = f.s.counts.slice(start).reduce(
+      (totals, row) => ({
+        documents: totals.documents + row.documents,
+        bytes: totals.bytes + row.readBytes,
+      }),
+      { documents: 0, bytes: 0 },
+    );
+    return { binding, path: new URL(url).pathname, reads };
+  };
+  const before = await read(false),
+    after = await read(true);
+  assert.deepEqual(after.binding, before.binding);
+  assert.equal(after.path, before.path);
+  assert.equal(after.reads.documents, before.reads.documents - 1);
+  assert(after.reads.bytes < before.reads.bytes);
+  t.diagnostic(JSON.stringify({ before: before.reads, after: after.reads }));
+});
+
 test('full29k State signer includes fresh run authority and stays under100KB DB/reply in three resolver mutations', async t => {
   const f = await physicalStateSourceFixture(t, 29000, { protocol: 2 }),
     start = f.s.counts.length;

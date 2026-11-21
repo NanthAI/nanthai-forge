@@ -25,7 +25,10 @@ projectIdentity('synthetic', 'dino', 'NanthAi Forge', 'nanthai-forge');
 installRoutes(true);
 Object.assign(globalThis, { __forgeTree: { queries: {
   'projectContributors:list': () => params.has('empty') ? [] : [{ id: 'member', contributor: 'maya', at: Date.now() }],
-  'projectContributors:pending': () => [{ id: 'invite', email: 'new-person@example.test' }],
+  'projectAccess:people': () => ({
+    invited: [{ id: 'invite', email: 'new-person@example.test', state: 'pending' }],
+    invitationCursor: null,
+  }),
   'projectContributors:handles': () => [{ handle: 'maya' }],
   'agentGuidance:read': () => ({ project: 'Keep changes small.', personal: 'Explain the outcome.', projectEditable: true }),
 }, pages: { 'projectProposals:list': () => params.has('proposals') ? [{ _id: 'proposal', _creationTime: Date.now() - 3600000, actor: 'maya', status: 'stored', head: 'b'.repeat(64), baseState: 'a'.repeat(64), baseArchiveSha256: 'c'.repeat(64), intentId: 'intent', viewId: 'view', digest: 'd'.repeat(64), size: 512, operationId: 'synthetic-operation', projectId: 'synthetic', baseBackupId: 'backup' }] : [] }, actions: {

@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { contributors, inbox, access, refusal } from './invitation-fixture.mjs';
 const day = 86400000;
-function seed(total) {
+function seed(total, distinctRecipients = false) {
   const f = lanesFixture();
   const projectId = f.insert('hostedProjects', {
     owner: 'owner',
@@ -19,13 +19,15 @@ function seed(total) {
   f.insert('forgeAccounts', { owner: 'owner', handle: 'olive' });
   f.insert('users', { accountKey: 'owner', email: 'owner@example.test', emailVerified: true });
   for (let i = 0; i < total; i++) {
-    f.insert('forgeAccounts', { owner: `person-${i}`, handle: `person-${i}` });
-    f.insert('projectContributors', { projectId, contributor: `person-${i}` });
+    const actor = `person-${i}`;
+    f.insert('forgeAccounts', { owner: actor, handle: actor });
+    f.insert('projectContributors', { projectId, contributor: actor });
+    if (distinctRecipients) f.insert('projectActorNames', { projectId, actor, displayName: actor });
     f.insert('projectInvites', {
       projectId,
-      email: `@person-${i}`,
+      email: `@${actor}`,
       kind: 'handle',
-      recipient: 'guest',
+      recipient: distinctRecipients ? actor : 'guest',
       inviter: 'owner',
       role: 'read',
       operationId: `invitation-${i}`,
@@ -65,6 +67,35 @@ test('People and recipient pages bound whole-document reads at 400 and 800 peopl
         recipientDocuments: count.documents,
         recipientBytes: count.readBytes,
         recipientRanges: count.ranges,
+      }),
+    );
+  }
+});
+test('Access settings pages invitation history with a distinct revocation record per invitee', async () => {
+  for (const total of [400, 800]) {
+    const { f, projectId } = seed(total, true);
+    const first = await f.call('Access settings first invitation page', access.people, {
+      projectId,
+      limit: 1,
+    });
+    const next = await f.call('Access settings next invitation page', access.people, {
+      projectId,
+      limit: 1,
+      invitationCursor: first.invitationCursor,
+    });
+    assert.equal(next.write.rows.length, 1);
+    assert.equal(next.invited.length, 50);
+    assert.equal(new Set([...first.invited, ...next.invited].map(row => row.id)).size, 100);
+    const count = f.counts.at(-1);
+    assert.equal(count.readDocumentsByTable.projectInvites, 50);
+    assert.equal(count.readDocumentsByTable.projectActorNames, 50);
+    assert.ok(count.documents < 120 && count.readBytes < 40000, JSON.stringify(count));
+    assert.equal(count.writes, 0);
+    console.log(
+      JSON.stringify({
+        invitations: total,
+        accessSettingsDocuments: count.documents,
+        accessSettingsBytes: count.readBytes,
       }),
     );
   }

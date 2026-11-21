@@ -70,12 +70,14 @@ export const resolve = internalMutation({
     const reply = async () => {
       const extraStates = [];
       if (input.bound && packState && !input.digests.includes(packState)) {
-        const row = await findObjects(ctx, input.projectId, [packState]);
-        if (row[0] && !row[0].removed && isStored(row[0])) {
-          const location = await sourceObjectLocation(ctx, input.projectId, {
-            sha256: packState,
-            size: row[0].size,
-          });
+        const [row] = await findObjects(ctx, input.projectId, [packState]);
+        if (row && !row.removed && isStored(row)) {
+          const location = await sourceObjectLocation(
+            ctx,
+            input.projectId,
+            { sha256: packState, size: row.size },
+            row,
+          );
           const url =
             location.url ?? (location.storageId ? await blobStore(ctx).getUrl(location.storageId) : null);
           extraStates.push({

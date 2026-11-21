@@ -117,6 +117,8 @@ resend keeps the original expiry. An interrupted send becomes retryable after te
 minutes; a late completion cannot settle a newer attempt. Invitation states and
 mail state are retained and paged on People and access. Existing invitations use
 their creation time plus seven days when they have no explicit expiry.
+The older Access settings show pending invitations from the same pages. Use
+**More invitations** to continue through earlier pages.
 Rows from before this change must prove their inviter through the original
 invitation operation, and that inviter must still own the project.
 

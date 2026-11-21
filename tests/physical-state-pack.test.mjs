@@ -171,21 +171,42 @@ test('a cold29k job with a historical source pack and300 raw changes stays under
   assert(source.packed, 'historical pack supplies the unchanged28700 files');
   assert.equal(source.deltaFiles, 300);
   assert.equal(requests, 2, 'historical State descriptor rides the first head reply');
-  assert.equal(f.calls.length, 3, 'head resolver and two fresh State authority selections');
+  const resolverCalls = f.calls.length;
+  assert.equal(resolverCalls, 3, 'head resolver and two fresh State authority selections');
   const dbBytes = f.s.counts.slice(start).reduce((sum, row) => sum + row.readBytes, 0);
   assert(dbBytes < 100000, `${dbBytes} serialized DB bytes`);
   assert(replyBytes < 100000, `${replyBytes} grant reply bytes including signed source pack`);
   for (const [index, file] of f.files.entries())
     assert.equal(readFileSync(join(directory, 'candidate', file.path), 'utf8'), `source ${index}`);
+
+  const flag = 'FORGE_STATE_SOURCE_REUSE_LOCATION',
+    previous = process.env[flag];
+  t.after(() => (previous === undefined ? delete process.env[flag] : (process.env[flag] = previous)));
+  const readHistorical = async enabled => {
+    if (enabled) process.env[flag] = '1';
+    else delete process.env[flag];
+    const { extraStates } = await f.heads(),
+      { url, ...location } = extraStates[0],
+      { documents, readBytes } = f.s.counts.at(-1);
+    assert.equal(location.descriptor.object.sha256, packState.sha256);
+    return { location, path: new URL(url).pathname, documents, readBytes };
+  };
+  const before = await readHistorical(false),
+    after = await readHistorical(true);
+  assert.deepEqual(after.location, before.location);
+  assert.equal(after.path, before.path);
+  assert.equal(after.documents, before.documents - 1);
+  assert(after.readBytes < before.readBytes);
   t.diagnostic(
     JSON.stringify({
       files: 29000,
       packedFiles: 28700,
       rawChanges: 300,
-      resolverCalls: f.calls.length,
+      resolverCalls,
       sourceRequests: requests,
       dbBytes,
       replyBytes,
+      historicalSelectorReadBytes: [before.readBytes, after.readBytes],
     }),
   );
 });
