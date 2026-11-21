@@ -395,7 +395,7 @@ test('the CLI Loose ends view reads the reply the hosted transport already decod
     };
     const result = await liveLanes(transport, { view: 'loose-ends' });
     assert.deepEqual(result.result, reply);
-    assert.deepEqual(calls, [['projectLooseEnds:read', {}]]);
+    assert.deepEqual(calls, [['projectLooseEnds:read', { details: true }]]);
   }
 });
 

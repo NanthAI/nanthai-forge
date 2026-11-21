@@ -161,6 +161,7 @@ export function purgedIndexValue(
       'titleTruncated',
       'bodyTruncated',
       'doneWhen',
+      'dueCheck',
       'type',
       'owner',
       'imported',

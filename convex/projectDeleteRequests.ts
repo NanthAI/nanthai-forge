@@ -15,6 +15,7 @@ import { STORAGE_QUOTA } from './abuseLimits';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { latestLanding } from './projectLatestLanding';
 import { DELETE_REQUEST_OPERATION as OPERATION } from './projectDeleteRequestOutcome';
 
 /** A request holds at most this many projects (owner request, Item 7456856f). */
@@ -54,14 +55,6 @@ async function ownRequest(ctx: QueryCtx | MutationCtx, requestId: string, owner:
   invariant(row && row.owner === owner, 'NOT_FOUND', 'This delete request was not found.');
   return row;
 }
-const newestLanding = async (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) =>
-  (
-    await ctx.db
-      .query('projectHostedAcceptances')
-      .withIndex('by_project', q => q.eq('projectId', projectId))
-      .order('desc')
-      .take(1)
-  )[0] ?? null;
 async function storedBytes(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
   const shards = await ctx.db
     .query('projectStorageUsage')
@@ -185,7 +178,7 @@ export const prepare = accountMutation('write')({
       );
       const projects = [];
       for (const project of matched) {
-        const landing = await newestLanding(ctx, project._id);
+        const landing = await latestLanding(ctx, project._id);
         projects.push({
           projectId: project._id as string,
           slug: project.slug ?? project.name,
@@ -342,7 +335,7 @@ async function purgeOne(
     project.removal === 'deleting' ||
     project.removal === 'deleted' ||
     project.revision !== frozen.revision ||
-    ((await newestLanding(ctx, project._id))?._id ?? null) !== frozen.landing
+    ((await latestLanding(ctx, project._id))?._id ?? null) !== frozen.landing
   )
     return 'changed';
   await transition(

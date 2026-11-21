@@ -57,6 +57,9 @@ Stored status words never change. Screens and agent replies show the visible wor
 Status follows real work: starting a Lane from an Item moves it to In progress, and landing with its Done-when lines
 met closes it. Done-when lines are the body's Markdown task lines (`- [ ]` and `- [x]`); planning rows carry their
 count as `doneWhen: [ticked, total]`.
+Put `@due YYYY-MM-DD` before the text of an unchecked line to date it. The agent Loose ends read lists the earliest
+pending date on each open Issue, with the exact line number in its body. Dates are calendar dates in UTC and the Issue
+body retains every annotation, including dates that have been checked off.
 
 ### Archive and Deleted
 

@@ -21,6 +21,7 @@ import { hostedRecordBody } from './projectHostedRecords';
 
 import { looseEndIntentCursor } from '../src/hosted-lifecycle';
 import { readLooseEndIntents } from './projectLooseEndIntents';
+import { datedChecks, inactiveProjects, looseEndsPosition } from './projectLooseEndsDetails';
 
 /** The Lane a resolution Lane continues, from its record; nothing for any other Lane or an unreadable record. */
 const resolutionOrigin = (value: string): string | undefined => {
@@ -36,11 +37,9 @@ const resolutionOrigin = (value: string): string | undefined => {
 /** Rows per group. */
 const LOOSE_ENDS_LIMIT = 25;
 const stoppedCursorPrefix = 'forge-loose-ends-stopped-v1:';
+const idleCursorPrefix = 'forge-loose-ends-idle-v1:';
 const badCursor = () =>
-  new ForgeError(
-    'BAD_ARGUMENT',
-    'Use the stopped group\'s continueCursor. Run nforge agent ROOT lanes \'{"view":"loose-ends"}\' to start over.',
-  );
+  new ForgeError('BAD_ARGUMENT', 'Use a Loose ends group’s continueCursor or start a new read.');
 
 type StoppedCursor = {
   projectId: Id<'hostedProjects'>;
@@ -48,11 +47,15 @@ type StoppedCursor = {
   after: [at: number, creationTime: number, id: Id<'projectHostedPresence'>];
 };
 
-function stoppedPosition(projectId: Id<'hostedProjects'>, token: string): StoppedCursor {
-  if (!token.startsWith(stoppedCursorPrefix)) throw badCursor();
+function lanePosition(
+  projectId: Id<'hostedProjects'>,
+  token: string,
+): StoppedCursor & { group: 'idle' | 'stopped' } {
+  const prefix = token.startsWith(idleCursorPrefix) ? idleCursorPrefix : stoppedCursorPrefix;
+  if (!token.startsWith(prefix)) throw badCursor();
   let position: StoppedCursor | null;
   try {
-    position = JSON.parse(token.slice(stoppedCursorPrefix.length));
+    position = JSON.parse(token.slice(prefix.length));
   } catch {
     throw badCursor();
   }
@@ -67,7 +70,7 @@ function stoppedPosition(projectId: Id<'hostedProjects'>, token: string): Stoppe
     typeof position.after[2] !== 'string'
   )
     throw badCursor();
-  return position;
+  return { ...position, group: prefix === idleCursorPrefix ? 'idle' : 'stopped' };
 }
 
 /** Open Lanes read per Item to find the one that replaced a quiet Lane (Item d9e1ac62). */
@@ -168,7 +171,7 @@ function presenceBetween(ctx: QueryCtx, projectId: Id<'hostedProjects'>, after: 
 }
 
 /** Resume strictly after an index key, even if the Lane at that key was removed or saved meanwhile. */
-async function continueStopped(ctx: QueryCtx, { projectId, upTo, after }: StoppedCursor) {
+async function continueLanes(ctx: QueryCtx, { projectId, upTo, after }: StoppedCursor) {
   const rows: Presence[] = [];
   for await (const [presence] of streamQuery(ctx, {
     table: 'projectHostedPresence',
@@ -216,9 +219,13 @@ async function currentHolders(
  * found. Re-runs only when a Lane in those ranges, or
  * an open Lane of their Items, is written; nothing polls and nothing is scheduled. */
 export const read = query({
-  args: { projectId: v.id('hostedProjects'), cursor: v.optional(v.string()) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    cursor: v.optional(v.string()),
+    details: v.optional(v.literal(true)),
+  },
   returns: v.string(),
-  handler: async (ctx, { projectId, cursor }) => {
+  handler: async (ctx, { projectId, cursor, details }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read loose ends.');
@@ -226,17 +233,34 @@ export const read = query({
       if (cursor?.startsWith(looseEndIntentCursor))
         return canonicalPayload(await readLooseEndIntents(ctx, projectId, user.subject, cursor, now));
       const project = await accessibleProject(ctx, projectId, user.subject);
+      const extraPosition = looseEndsPosition(cursor, now);
+      if (extraPosition) {
+        const groups =
+          extraPosition.group === 'projects'
+            ? { projects: await inactiveProjects(ctx, project, user.subject, now, extraPosition) }
+            : { dated: await datedChecks(ctx, project, user.subject, now, extraPosition) };
+        return canonicalPayload({ at: now, groups });
+      }
       const quietFrom = now - QUIET_MS;
-      const position = cursor === undefined ? null : stoppedPosition(projectId, cursor);
+      const position = cursor === undefined ? null : lanePosition(projectId, cursor);
       const cutoff = position ? null : dormantCutoff(project, now);
-      const upTo = position?.upTo ?? quietFrom;
-      const [idle, stopped] = await Promise.all([
-        cutoff === null ? null : presenceBetween(ctx, projectId, null, cutoff),
-        position
-          ? continueStopped(ctx, position)
-          : cutoff !== null && cutoff >= quietFrom
+      const [idle, stopped, extra] = await Promise.all([
+        position?.group === 'idle'
+          ? continueLanes(ctx, position)
+          : cutoff === null
+            ? null
+            : presenceBetween(ctx, projectId, null, cutoff),
+        position?.group === 'stopped'
+          ? continueLanes(ctx, position)
+          : position?.group === 'idle' || (cutoff !== null && cutoff >= quietFrom)
             ? []
             : presenceBetween(ctx, projectId, cutoff, quietFrom),
+        details && !position
+          ? Promise.all([
+              inactiveProjects(ctx, project, user.subject, now),
+              datedChecks(ctx, project, user.subject, now),
+            ])
+          : null,
       ]);
       const quiet = [...(idle ?? []), ...stopped];
       const [replacedBy, holders] = await Promise.all([
@@ -248,35 +272,55 @@ export const read = query({
           now,
         ),
       ]);
-      const boundary = stopped.length > LOOSE_ENDS_LIMIT ? stopped[LOOSE_ENDS_LIMIT - 1] : undefined;
-      const stoppedGroup = {
-        ...listed(stopped, replacedBy),
-        continueCursor: boundary
-          ? stoppedCursorPrefix +
-            canonicalPayload({ projectId, upTo, after: [boundary.at, boundary._creationTime, boundary._id] })
-          : null,
+      const group = (rows: Presence[], kind: 'idle' | 'stopped', upTo: number) => {
+        const boundary = rows.length > LOOSE_ENDS_LIMIT ? rows[LOOSE_ENDS_LIMIT - 1] : undefined;
+        const prefix = kind === 'idle' ? idleCursorPrefix : stoppedCursorPrefix;
+        const value = listed(rows, replacedBy);
+        const reason = kind === 'idle' ? 'Past the project’s dormant cutoff' : 'Quiet for 90 minutes';
+        return {
+          ...value,
+          ...(details || position?.group === 'idle'
+            ? { rows: value.rows.map(row => ({ ...row, reason })) }
+            : {}),
+          continueCursor: boundary
+            ? prefix +
+              canonicalPayload({
+                projectId,
+                upTo,
+                after: [boundary.at, boundary._creationTime, boundary._id],
+              })
+            : null,
+        };
       };
+      const stoppedGroup = group(stopped, 'stopped', position?.upTo ?? quietFrom);
+      const idleGroup = idle ? group(idle, 'idle', position?.upTo ?? cutoff!) : null;
       return canonicalPayload({
         at: now,
         // The owner sets Lanes aside through projectHostedDormant:abandon, which needs the current authority epoch.
         setAside: project.owner === user.subject ? { authorityEpoch: sourceAuthority(project).epoch } : null,
         groups: withLooseEndsHolders(
           position
-            ? { stopped: stoppedGroup }
+            ? position.group === 'idle'
+              ? { idle: idleGroup, stopped: stoppedGroup }
+              : { stopped: stoppedGroup }
             : {
-                idle: idle
-                  ? listed(idle, replacedBy)
+                idle: idleGroup
+                  ? details
+                    ? idleGroup
+                    : listed(idle!, replacedBy)
                   : notReported('This project turned dormant Lanes off (agentDefaults.dormantAfterDays 0).'),
                 stopped: stoppedGroup,
                 checked: notReported(
                   'A passed check that nobody asked to land is not recorded per Lane yet.',
                 ),
-                projects: notReported(
-                  'Projects with no landing for 30 days need an account-wide read; it is not built yet.',
-                ),
-                dated: notReported(
-                  'Done-when lines carry no date yet; that needs the planning contract change.',
-                ),
+                projects:
+                  extra?.[0] ??
+                  notReported(
+                    'Projects with no landing for 30 days need an account-wide read; it is not built yet.',
+                  ),
+                dated:
+                  extra?.[1] ??
+                  notReported('Done-when lines carry no date yet; that needs the planning contract change.'),
               },
           holders,
         ),

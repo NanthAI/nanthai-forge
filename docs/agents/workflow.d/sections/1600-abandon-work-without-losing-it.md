@@ -23,3 +23,18 @@ request, including its UUID, to recover the receipt. For a skipped row you still
 to set aside, review a fresh selection and submit that row with a new UUID. Each
 successful row carries its lifecycle receipt and the version to use with
 `nforge agent ROOT start --reopen '{"target":{"kind":"intent","intentId":"UUID","version":N}}'`.
+
+Run `nforge agent ROOT lanes '{"view":"loose-ends"}'` or the same command through MCP `forge_work_overview`
+for dormant Lanes, stopped Lanes, checked work, inactive projects and dated Issue checks in one read.
+A group reports why its evidence is unavailable. Pass its `continueCursor` as `cursor` to read
+its next page. The inactive-project search follows the account's accessible project list in bounded
+pages, so a page can be empty before the end. It looks for 30 days since the last landing receipt, or
+since creation when a project has no receipt. A project-scoped device sees only its selected project.
+
+Add a date to an unchecked Done-when line with `- [ ] @due 2026-12-01 Review the changes`.
+Loose ends reports the earliest pending date per Issue, the line number in its body and the viewed
+version. Date results follow open Issues in bounded pages and a page can be empty before the end. A date added before date support appears when its Issue's search record is next written or rebuilt.
+Set Issues aside with `status:"archived"` or hand them to an agent with `owner:"@handle/agent"`. Send
+the selected rows' `selection` fields with the chosen change in a `put-planning-item` batch. The
+existing batch returns a version-pinned Undo for changed rows and a result for each stale row. For a
+held Lane, use the existing `open` handoff with the saved pins and recipient session.

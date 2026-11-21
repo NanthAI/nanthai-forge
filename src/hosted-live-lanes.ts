@@ -13,7 +13,10 @@ import { hostedAgentRoot } from './hosted-agent-journal.js';
 import { backgroundSave } from './hosted-save-pending.js';
 import { looseEndIntentCursor } from './hosted-lifecycle.js';
 const isLooseEndsCursor = (value: string) =>
-  value.startsWith('forge-loose-ends-stopped-v1:') || value.startsWith(looseEndIntentCursor);
+  value.startsWith('forge-loose-ends-stopped-v1:') ||
+  value.startsWith('forge-loose-ends-idle-v1:') ||
+  value.startsWith('forge-loose-ends-details-v1:') ||
+  value.startsWith(looseEndIntentCursor);
 export const liveLanesInput = z
   .object({
     planningItemId: issueRef
@@ -44,8 +47,8 @@ export const liveLanesInput = z
     /** `live` hides dormant Lanes; `dormant` lists only them, each with `abandonable`; default lists all.
      * `loose-ends` is one compact read of five groups (dormant, stopped, checked never landed, leftover projects,
      * dated checks), each listed or marked not reported with the reason; a quiet Lane beside a live Lane of the same
-     * Issue carries `replacedBy` and the abandon command as `next`. Pass `groups.stopped.continueCursor` as `cursor`
-     * with the same view to read the next stopped page. `tree` adds a compact text `tree`: which Lanes
+     * Issue carries `replacedBy` and the abandon command as `next`. Pass a group's `continueCursor` as `cursor`
+     * with the same view to read its next page. `tree` adds a compact text `tree`: which Lanes
      * stack on which, which overlap, and each Lane's state and next step, from the same one page read. */
     // A checked string, not an enum, so the per-session MCP tool listing names `view` without its values
     // (tests/mcp-tool-list.test.mjs budget); help and docs list them.
@@ -74,6 +77,29 @@ export const liveLanesInput = z
 /** The read returns canonical JSON text; the hosted transport already decodes JSON replies, so the reply may arrive as
  * the object itself (a second JSON.parse made every `view:"loose-ends"` read fail). */
 const looseEnds = (reply: unknown) => (typeof reply === 'string' ? JSON.parse(reply) : reply);
+
+async function readLooseEnds(transport: HostedAgentTransport, cursor: string | null, intents?: true) {
+  const current = cursor ?? (intents ? looseEndIntentCursor : null);
+  const args = current ? { cursor: current } : {};
+  const details = !current || current.startsWith('forge-loose-ends-stopped-v1:');
+  try {
+    return looseEnds(
+      await transport.query('projectLooseEnds:read', details ? { ...args, details: true } : args),
+    );
+  } catch (error) {
+    // The original read remains available during a rolling CLI/server update.
+    if (
+      !(
+        details &&
+        error instanceof Error &&
+        /ArgumentValidationError/.test(error.message) &&
+        /details/.test(error.message)
+      )
+    )
+      throw error;
+    return looseEnds(await transport.query('projectLooseEnds:read', args));
+  }
+}
 
 /** Every Lane of one Issue in any state: one page of the shared Item work read, in the `lanes` page shape. */
 async function itemLanes(
@@ -169,12 +195,7 @@ export async function liveLanes(transport: HostedAgentTransport, input: Record<s
         state === 'all'
           ? await itemLanes(transport, input.planningItemId!, input)
           : input.view === 'loose-ends'
-            ? looseEnds(
-                await transport.query(
-                  'projectLooseEnds:read',
-                  input.cursor || input.intents ? { cursor: input.cursor ?? looseEndIntentCursor } : {},
-                ),
-              )
+            ? await readLooseEnds(transport, input.cursor, input.intents)
             : input.view === 'tree'
               ? await laneTree(transport, input)
               : {

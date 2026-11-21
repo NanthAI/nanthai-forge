@@ -77,7 +77,7 @@ function fixture() {
   return s;
 }
 const read = async (s, subject, args = {}) => {
-  s.ctx.auth.getUserIdentity = async () => ({ subject });
+  s.ctx.auth.getUserIdentity = async () => (typeof subject === 'string' ? { subject } : subject);
   return JSON.parse(await loose.read._handler(s.ctx, { projectId: 'project', ...args }));
 };
 
@@ -101,6 +101,198 @@ test('one read lists dormant and quiet Lanes oldest first and names the groups i
   assert.equal(view.listed, 3);
   assert.match(view.sentence.rest, /Nothing here is deleted\. 3 of 5 groups are not reported yet/);
   assert.equal(view.groups[0].rows[0].who, 'owner/quiet-otter');
+});
+
+test('an agent lists dated checks and inactive projects in bounded pages without exposing revoked projects', async t => {
+  const { HOSTED_WORK_INDEX_FORMAT } = await import(moduleUrl('../src/work-hosted-summary.ts'));
+  const { planningSearchEntries } = await import(moduleUrl('../src/planning-search.ts'));
+  const now = 2_000_000_000_000;
+  t.mock.method(Date, 'now', () => now);
+  const s = fixture();
+  s.tables.hostedProjects.set(
+    'project',
+    projectRow({
+      _id: 'project',
+      _creationTime: now - 60 * day,
+      work: {
+        generationId: 'dates',
+        backupId: 'backup',
+        operationId: 'work',
+        initialRevision: 0,
+        revision: 1,
+      },
+    }),
+  );
+  s.tables.projectWorkGenerations.set('dates', {
+    _id: 'dates',
+    _creationTime: 1,
+    format: HOSTED_WORK_INDEX_FORMAT,
+    status: 'ready',
+    planningSearchVersion: 2,
+    projectId: 'project',
+    backupId: 'backup',
+  });
+  const addDate = (id, position, body, status = 'open') => {
+    const [entry] = planningSearchEntries(
+      {
+        id,
+        kind: 'issue',
+        status,
+        title: 'Release checklist',
+        body,
+        version: 3,
+      },
+      position,
+    );
+    s.tables.projectPlanningRecords.set(id, {
+      ...entry,
+      _id: id,
+      _creationTime: position,
+      projectId: 'project',
+      generationId: 'dates',
+    });
+  };
+  for (let n = 1; n <= 26; n++) {
+    const id = `owned-${String(n).padStart(2, '0')}`;
+    s.tables.hostedProjects.set(id, projectRow({ _id: id, _creationTime: now - 60 * day }));
+    const order = { _id: `order-${id}`, _creationTime: n, projectId: id, person: 'owner', activityHour: n };
+    s.tables.accountProjectOrder.set(order._id, order);
+    addDate(
+      id,
+      n,
+      'A long note. '.repeat(100) +
+        '\n- [x] @due 2000-01-01 Done\n- [ ] @due 2000-02-30 Invalid\n' +
+        (n === 26 ? '- [x] @due 2000-03-01 Inspected' : '- [ ] @due 2000-03-01 Inspect receipts') +
+        '\n- [ ] @due 2099-06-06 Retain another date',
+      n === 26 ? 'proposed' : 'open',
+    );
+  }
+  addDate('closed', 27, '- [ ] @due 2000-01-01 Closed', 'closed');
+  for (const [id, patch] of [
+    ['recent-landing', {}],
+    ['new-project', { _creationTime: now - day }],
+    ['removed', { removal: 'trash' }],
+    ['revoked', { owner: 'stranger' }],
+  ]) {
+    s.tables.hostedProjects.set(id, projectRow({ _id: id, _creationTime: now - 60 * day, ...patch }));
+    const order = { _id: `order-${id}`, _creationTime: 0, projectId: id, person: 'owner', activityHour: 0 };
+    s.tables.accountProjectOrder.set(order._id, order);
+  }
+  for (const [id, age] of [
+    ['recent-landing', 29],
+    ['owned-01', 30],
+  ]) {
+    s.tables.projectHostedAcceptances.set(id, { _id: id, _creationTime: now - age * day, projectId: id });
+  }
+  const meter = meterReads(s.ctx);
+  const started = performance.now(),
+    heapAtStart = process.memoryUsage().heapUsed;
+  let initial;
+  const cost = await meter.cost(async () => {
+    initial = await read(s, 'owner', { details: true });
+  });
+  const initialHeap = process.memoryUsage().heapUsed - heapAtStart;
+  t.diagnostic(
+    `all five groups: ${cost.documents} documents, ${cost.bytes} fixture B, ${Buffer.byteLength(JSON.stringify(initial))} reply B, ${Math.round(performance.now() - started)} ms, ${initialHeap} sampled heap B`,
+  );
+  const { idle, stopped, checked, dated, projects } = initial.groups;
+  assert.ok(idle.rows[0].reason && stopped.rows[0].reason);
+  assert.equal(checked.reported, false);
+  assert.match(checked.why, /passed check/);
+  assert.equal(dated.rows.length, 25);
+  assert.deepEqual(dated.rows[0], {
+    selection: { itemId: 'owned-01', expectedVersion: 3 },
+    title: 'Release checklist',
+    date: '2000-03-01',
+    line: 4,
+    text: 'Inspect receipts',
+    reason: 'Date passed',
+  });
+  assert.equal(projects.rows.length, 21);
+  assert.ok(projects.rows.every(row => row.projectId.startsWith('owned-')));
+  assert.equal(projects.rows[0].lastLandingAt, now - 30 * day);
+  assert.match(projects.rows[1].reason, /since creation/);
+  assert.ok(cost.documents <= 110);
+  meter.restore();
+
+  // A missing boundary does not repeat rows and a page only returns the selected group.
+  s.tables.projectPlanningRecords.delete('owned-25');
+  const later = await read(s, 'owner', { cursor: dated.continueCursor });
+  assert.deepEqual(Object.keys(later.groups), ['dated']);
+  assert.deepEqual(
+    later.groups.dated.rows.map(row => row.selection.itemId),
+    ['owned-26'],
+  );
+  assert.equal(later.groups.dated.rows[0].reason, 'Upcoming date');
+  const moreProjects = await read(s, 'owner', { cursor: projects.continueCursor });
+  assert.deepEqual(Object.keys(moreProjects.groups), ['projects']);
+  assert.deepEqual(
+    moreProjects.groups.projects.rows.map(row => row.projectId),
+    ['owned-22', 'owned-23', 'owned-24', 'owned-25', 'owned-26'],
+  );
+
+  s.tables.cliCredentials.set('credential', {
+    _id: 'credential',
+    _creationTime: 1,
+    credentialId: 'synthetic-device',
+    owner: 'owner',
+    scope: 'cli',
+    issuedAt: now,
+    expiresAt: now + 60_000,
+    revoked: false,
+    settings: { projects: { kind: 'project', projectId: 'project' } },
+  });
+  const scoped = await read(
+    s,
+    { subject: 'owner', forgeCredential: 'synthetic-device' },
+    { cursor: projects.continueCursor },
+  );
+  assert.deepEqual(
+    scoped.groups.projects.rows.map(row => row.projectId),
+    ['project'],
+  );
+  assert.equal(scoped.groups.projects.continueCursor, null);
+
+  s.tables.projectWorkHeads.set('work-head', {
+    _id: 'work-head',
+    _creationTime: 1,
+    projectId: 'project',
+    backupId: 'backup',
+    revision: 2,
+  });
+  await assert.rejects(
+    read(s, 'owner', { cursor: dated.continueCursor }),
+    error => error.data?.code === 'WORK_STALE',
+  );
+
+  // Date results still advance when each matched root is wider than the byte target.
+  s.tables.projectPlanningRecords.clear();
+  const wide = '- [ ] @due 2050-01-01 Inspect receipts\n' + 'scope '.repeat(100_000);
+  addDate('wide-a', 1, wide);
+  addDate('wide-b', 2, wide);
+  const firstWide = (await read(s, 'owner', { details: true })).groups.dated;
+  assert.deepEqual(
+    firstWide.rows.map(row => row.selection.itemId),
+    ['wide-a'],
+  );
+  const secondWide = (await read(s, 'owner', { cursor: firstWide.continueCursor })).groups.dated;
+  assert.deepEqual(
+    secondWide.rows.map(row => row.selection.itemId),
+    ['wide-b'],
+  );
+  assert.equal(secondWide.continueCursor, null);
+
+  // An empty result page still advances across open Issues without date annotations.
+  s.tables.projectPlanningRecords.clear();
+  for (let n = 1; n <= 25; n++) addDate(`undated-${n}`, n, '- [ ] Inspect receipts');
+  addDate('dated', 26, '- [ ] @due 2050-01-01 Inspect receipts');
+  const empty = (await read(s, 'owner', { details: true })).groups.dated;
+  assert.deepEqual(empty.rows, []);
+  const next = (await read(s, 'owner', { cursor: empty.continueCursor })).groups.dated;
+  assert.deepEqual(
+    next.rows.map(row => row.selection.itemId),
+    ['dated'],
+  );
 });
 
 test('another account cannot read loose ends', async () => {

@@ -81,8 +81,31 @@ const doneWhenField = (item: PlanningItem) => {
   const doneWhen = item.kind === 'issue' ? doneWhenCounts(item.body) : null;
   return doneWhen ? { doneWhen } : {};
 };
+/** Put `@due YYYY-MM-DD` at the start of a Markdown Done-when line. Keep the earliest open date in the
+ * compact Issue row; the body retains all dates and the exact text. */
+function dueCheck(item: PlanningItem) {
+  if (
+    item.kind !== 'issue' ||
+    !['proposed', 'open', 'in-progress'].includes(item.status) ||
+    !item.body.includes('@due ')
+  )
+    return null;
+  let first: { date: string; line: number; text: string } | null = null;
+  for (const [line, text] of item.body.split('\n').entries()) {
+    const match = /^\s*[-*]\s+\[ \]\s+@due (\d{4}-\d{2}-\d{2}) (.+)$/.exec(text.trimEnd());
+    if (!match) continue;
+    const date = match[1]!;
+    if (first && date >= first.date) continue;
+    const time = Date.parse(date);
+    if (!Number.isFinite(time) || new Date(time).toISOString().slice(0, 10) !== date) continue;
+    first = { date, line: line + 1, text: match[2]!.slice(0, 160) };
+  }
+  return first;
+}
+
 /** Search previews are bounded independently of the full, unchanged planning record. */
 export function planningSearchEntry(item: PlanningItem, position: number): IndexEntry {
+  const due = dueCheck(item);
   return {
     collection: 'planningSearch',
     key: item.id,
@@ -105,6 +128,7 @@ export function planningSearchEntry(item: PlanningItem, position: number): Index
       hasDoneWhen: /done\s+when\s*:/i.test(item.body),
       ...planningModelRow(item),
       ...doneWhenField(item),
+      ...(due ? { dueCheck: due } : {}),
     }),
     planning: {
       text: `${item.title}\n${item.body}`.replace(/[\uD800-\uDFFF]/gu, '\uFFFD'),
