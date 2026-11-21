@@ -42,11 +42,13 @@ jobs:
       - name: Build the web app
         run: npm run build:web
         env:
-          # Public build-time config from the netlify-dev environment variables; the deploy below uploads this build as is.
+          # Public build-time config; the deploy below uploads this build as is.
           VITE_CONVEX_URL: ${{ vars.VITE_CONVEX_URL }}
           VITE_CONVEX_SITE_URL: ${{ vars.VITE_CONVEX_SITE_URL }}
           VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.VITE_CLERK_PUBLISHABLE_KEY }}
           VITE_GITHUB_APP_SLUG: ${{ vars.VITE_GITHUB_APP_SLUG }}
+          VITE_FORGE_POSTHOG_PROJECT_TOKEN: ${{ secrets.VITE_FORGE_POSTHOG_PROJECT_TOKEN }}
+          VITE_FORGE_POSTHOG_REGION: ${{ vars.VITE_FORGE_POSTHOG_REGION }}
           # Same value as netlify.toml [build.environment].
           VITE_FORGE_DEMO_REPOSITORY: thevarsek/nanthai-edge-oss
       - name: Guard the browser bundle against Node-only code

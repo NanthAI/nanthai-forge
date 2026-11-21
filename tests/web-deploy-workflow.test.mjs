@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -9,6 +9,11 @@ import test from 'node:test';
 
 const workflow = readFileSync('.github/workflows/web-deploy.yml', 'utf8');
 const step = name => workflow.indexOf(name);
+const namedStep = name => {
+  const entry = workflow.split(/^      - /m).find(text => text.startsWith(`name: ${name}\n`));
+  assert(entry, `missing step: ${name}`);
+  return entry;
+};
 
 test('dev web deploys only from main pushes inside the locked environment', () => {
   assert.match(workflow, /push:\n\s+branches: \[main\]/);
@@ -21,7 +26,7 @@ test('dev web deploys only from main pushes inside the locked environment', () =
     assert(workflow.includes(`      - '${path}'`), `paths filter covers ${path}`);
 });
 
-test('the deploy builds, guards, smoke-loads, then deploys the same build, and never exposes the token', () => {
+test('the deploy checks and uploads the same build, with the Netlify credential scoped to upload', () => {
   const order = [
     'npm run build:web',
     'tests/web-bundle-node-free.test.mjs',
@@ -30,9 +35,11 @@ test('the deploy builds, guards, smoke-loads, then deploys the same build, and n
   ].map(step);
   assert(order.every(index => index > 0) && order.every((index, i) => i === 0 || index > order[i - 1]));
   assert.match(workflow, /deploy --prod --no-build --dir hosted-web-dist --site "\$NETLIFY_SITE_ID"/);
-  assert.match(workflow, /NETLIFY_AUTH_TOKEN: \$\{\{ secrets\.NETLIFY_AUTH_TOKEN \}\}/);
+  const deploy = namedStep('Deploy to the dev site');
+  assert.match(deploy, /NETLIFY_AUTH_TOKEN: \$\{\{ secrets\.NETLIFY_AUTH_TOKEN \}\}/);
+  assert.doesNotMatch(workflow.replace(deploy, ''), /\bNETLIFY_AUTH_TOKEN\b/);
   assert.match(workflow, /NETLIFY_SITE_ID: \$\{\{ vars\.NETLIFY_SITE_ID \}\}/);
-  assert.equal(workflow.match(/secrets\./g).length, 1);
+  assert.equal(workflow.match(/secrets\./g).length, 2);
   for (const name of ['VITE_CONVEX_URL', 'VITE_CONVEX_SITE_URL', 'VITE_CLERK_PUBLISHABLE_KEY']) {
     assert.equal(
       workflow.match(new RegExp(`${name}: \\$\\{\\{ vars\\.${name} \\}\\}`, 'g'))?.length,
@@ -47,6 +54,24 @@ test('the deploy builds, guards, smoke-loads, then deploys the same build, and n
   // The build step carries the demo repository that netlify.toml gives Netlify's own build.
   const demo = readFileSync('netlify.toml', 'utf8').match(/VITE_FORGE_DEMO_REPOSITORY = "([^"]+)"/)?.[1];
   assert(demo && workflow.includes(`VITE_FORGE_DEMO_REPOSITORY: ${demo}`));
+});
+
+test('PostHog build configuration is scoped to the dev web build', () => {
+  const build = namedStep('Build the web app');
+  assert.match(
+    build,
+    /^          VITE_FORGE_POSTHOG_PROJECT_TOKEN: \$\{\{ secrets\.VITE_FORGE_POSTHOG_PROJECT_TOKEN \}\}$/m,
+  );
+  assert.match(build, /^          VITE_FORGE_POSTHOG_REGION: \$\{\{ vars\.VITE_FORGE_POSTHOG_REGION \}\}$/m);
+
+  const postHogConfig = /\bVITE_FORGE_POSTHOG_(?:PROJECT_TOKEN|REGION)\b/;
+  assert.doesNotMatch(workflow.replace(build, ''), postHogConfig);
+  assert.doesNotMatch(readFileSync('netlify.toml', 'utf8'), postHogConfig, 'Netlify build configuration');
+  for (const name of readdirSync('.github/workflows')) {
+    if (name !== 'web-deploy.yml' && /\.ya?ml$/.test(name)) {
+      assert.doesNotMatch(readFileSync(`.github/workflows/${name}`, 'utf8'), postHogConfig, name);
+    }
+  }
 });
 
 test('the headless smoke fails on a module-evaluation error or unbaked build config', () => {
@@ -181,13 +206,12 @@ test('the landing web build fails on an unevaluated lazy chunk without rebuildin
 });
 
 test('the dev web build receives the GitHub App slug through its public Vite environment variable', () => {
-  const build = workflow.slice(step('Build the web app'), step('Guard the browser bundle'));
+  const build = namedStep('Build the web app');
   assert.match(build, /^          VITE_GITHUB_APP_SLUG: \$\{\{ vars\.VITE_GITHUB_APP_SLUG \}\}$/m);
   assert.doesNotMatch(build, /^\s+GITHUB_APP_SLUG:/m, 'GitHub reserves the GITHUB_ variable prefix');
 });
 
-test('workflow executables come from the lockfile rather than unlocked npx installs', async () => {
-  const { readdirSync } = await import('node:fs');
+test('workflow executables come from the lockfile rather than unlocked npx installs', () => {
   for (const name of readdirSync('.github/workflows').filter(name => /\.ya?ml$/.test(name))) {
     const source = readFileSync(`.github/workflows/${name}`, 'utf8');
     assert.doesNotMatch(source, /\bnpx\s+(?:--yes\b|[^\n]*?\b[\w/.-]+@[\w*.^~><=+-]+)/, name);

@@ -80,10 +80,12 @@ the dev project ingestion token privately. Use a project token, never a personal
 - CLI configuration uses `FORGE_POSTHOG_PROJECT_TOKEN`, `FORGE_POSTHOG_DEV_DEPLOYMENT`
   (the exact development Convex origin), and optionally `FORGE_POSTHOG_REGION` (`us` by
   default or `eu`). Remove the token or set `DO_NOT_TRACK=1` to turn capture off.
-- Supply `VITE_FORGE_POSTHOG_PROJECT_TOKEN` and optionally `VITE_FORGE_POSTHOG_REGION`
-  when running `npm run build:web` for the dev site. The automated Deploy dev web workflow
-  does not pass these settings. Deploy the configured build to the dev site to validate capture
-  there. Rebuild without the token to turn web capture off.
+- The Deploy dev web workflow passes the GitHub repository secret `VITE_FORGE_POSTHOG_PROJECT_TOKEN`
+  and repository variable `VITE_FORGE_POSTHOG_REGION` to its build step. Set the region to `eu`
+  for the EU development project. Supply the same variables when building the dev site manually
+  with `npm run build:web`. The production web build leaves capture off.
+- After a dev deploy, the owner verifies ingestion while signed in on the dev site. To turn
+  dev web capture off, remove the token from the build configuration and redeploy the dev site.
 
 Forge uses PostHog's [batch capture endpoint](https://posthog.com/tutorials/api-capture-events).
 The project token is public ingestion configuration when bundled into the dev browser app.
