@@ -5,6 +5,7 @@ import { wakeLandingCapsule, landingCapsuleGraceMs } from './projectLandingCapsu
 import { withLandingCapsule } from './projectLandingCapsuleStore';
 import { unsealedBy } from '../src/landing-overtake';
 export { landingAttemptRow, loadLandingAttempt } from './projectHostedLandingAttemptRead';
+import { recordLandingFeed } from './projectFeedTerminal';
 import { landingAttemptRow, loadLandingAttempt, pinsFor } from './projectHostedLandingAttemptRead';
 import { holdsLandingOrder, landingPriorityState } from './projectHostedLandingOrder';
 import { invalidatePipeline } from './projectHostedLandingPipelineInvalidation';
@@ -153,9 +154,13 @@ export async function writeLanding(
   runnable: boolean,
   releaseRun = true,
   consumedAlarm?: Id<'_scheduled_functions'>,
-  /** Fix D (Item 687d1eda): only parkLanding passes 'main-red'. Never inferred from the row. */
-  hold?: 'main-red' | 'ci-down',
+  options?: {
+    /** Fix D (Item 687d1eda): only parkLanding passes 'main-red'. Never inferred from the row. */
+    hold?: 'main-red' | 'ci-down';
+    feedLanes?: readonly { laneId: string; actor?: string }[];
+  },
 ) {
+  const hold = options?.hold;
   invariant(
     input.phase !== 'composing',
     'WORK_OPERATION_CHANGED',
@@ -467,15 +472,14 @@ export async function writeLanding(
         },
       );
   }
-  if (
-    ['landed', 'terminal-failed'].includes(state.phase) &&
-    !['landed', 'terminal-failed'].includes(previous.phase)
-  )
+  if (ended && !['landed', 'terminal-failed'].includes(previous.phase)) {
+    await recordLandingFeed(ctx, state, runId ?? row.runId, options?.feedLanes);
     await wakeLandingCapsule(ctx, {
       projectId: row.projectId,
       submissionId: state.id,
       dueAt: Date.parse(state.timing!.settledAt!) + landingCapsuleGraceMs,
     });
+  }
   await notifyFinish(ctx, state);
   // Lanes stacked on a Lane this landing carried are told once (Issue dc62b120): failed and cancelled alike.
   if (state.phase === 'terminal-failed' && previous.phase !== 'terminal-failed')

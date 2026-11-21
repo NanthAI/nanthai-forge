@@ -25,6 +25,10 @@ test.after(() => {
   }
 });
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
+const feed = await import(moduleUrl('../convex/projectFeed.ts'));
+const proof = await import(moduleUrl('../convex/projectRunProofActions.ts'));
+const feedRows = (f, operationId) =>
+  [...f.tables.projectFeedEvents.values()].filter(event => event.operationId === operationId);
 const request = f => ({
   operationId: randomUUID(),
   authorityEpoch: 1,
@@ -199,6 +203,64 @@ test('a failed source job ends the hosted desired landing with its stated reason
   assert(failed.timing.settledAt);
   assert.equal(f.tables.projectHostedCheckRuns.size, 0);
   assert.equal(f.pending().length, 0);
+  assert.equal((await submit(f, command)).id, failed.id);
+  const [event, ...rest] = feedRows(f, command.operationId);
+  assert.equal(rest.length, 0);
+  assert.equal(event.id, `landing.failed:${failed.id}:${f.lane.laneId}`);
+  assert.equal(event.code, failed.error.code);
+});
+
+test('combined landing emits one independently replayable id for each original Lane', async t => {
+  const f = await finishFixture(t, { inputCount: 2 });
+  const command = request(f);
+  const submission = await submit(f, command);
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  const landed = (await read(f, command.operationId)).submission;
+  assert.equal(landed.phase, 'landed');
+  assert.equal((await submit(f, command)).id, submission.id);
+  const events = feedRows(f, command.operationId);
+  assert.equal(events.length, 2);
+  assert.equal(new Set(events.map(event => event.laneId)).size, 2);
+  for (const event of events) {
+    assert.equal(event.id, `landing.landed:${submission.id}:${event.laneId}`);
+    assert.equal(event.receiptId, landed.acceptance.receiptId);
+  }
+});
+
+test('check-only success and failure wake the selected Lane once per run', async t => {
+  const f = await finishFixture(t);
+  for (const status of ['failed', 'passed']) {
+    const command = f.rawChecks.selection();
+    const run = await f.rawChecks.enqueue(command);
+    if (status === 'passed') await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+    else {
+      const active = await f.rawChecks.activate(run.id);
+      await f.rawChecks.callback(f.rawChecks.shard(active, 0, 'failed'));
+      await f.rawChecks.callback(f.rawChecks.complete(active, 'failed'));
+    }
+    assert.equal((await f.rawChecks.enqueue(command)).id, run.id);
+    const events = feedRows(f, command.operationId);
+    assert.deepEqual(
+      events.map(event => event.id),
+      [`check.${status}:${run.id}:${f.lane.laneId}`],
+    );
+  }
+});
+
+test('queue feed projects a Lane position only when requested and leaves no stored queue event', async t => {
+  const f = await finishFixture(t);
+  const command = f.request();
+  const pending = await f.enqueue(command);
+  const input = { projectId: f.projectId, lanes: [f.lane.laneId], since: Date.parse(pending.at) };
+  const queued = await f.tx('readFeed', feed.page, { ...input, queue: { laneId: f.lane.laneId } });
+  const event = queued.events.find(event => event.kind === 'queue.moved');
+  assert.equal(event?.id, `queue.moved:${pending.id}:1`);
+  assert.equal(event.position, 1);
+  assert.deepEqual(event.resume.input.operationIds, [command.operationId]);
+  assert.deepEqual((await f.tx('readFeed', feed.page, input)).events, []);
+  assert(![...f.tables.projectFeedEvents.values()].some(event => event.kind === 'queue.moved'));
 });
 
 test('a newer agent Lane head supersedes the goal with the replacement named', async t => {
@@ -214,6 +276,7 @@ test('a newer agent Lane head supersedes the goal with the replacement named', a
   const superseded = (await read(f, state.operationId)).submission;
   assert.equal(superseded.observation.state, 'superseded');
   assert.equal(superseded.error.code, 'LANDING_SUPERSEDED');
+  assert.equal(feedRows(f, state.operationId)[0]?.kind, 'landing.cancelled');
   assert.match(superseded.error.message, new RegExp(newer.sha256));
   assert.equal(f.tables.projectHostedAcceptances.size, 0);
 });
@@ -336,6 +399,47 @@ test('a reserved desired landing survives main moving before admission and remai
   const files = JSON.parse(f.c.objects.get(f.currentMain().head)).files;
   assert(files.some(file => file.path === 'accepted.txt'));
   assert(files.some(file => file.path === 'selected.txt'));
+  const operationId = randomUUID();
+  const proofRun = JSON.parse(
+    await f.tx('proofCheckFeed', proof.runAll, {
+      projectId: f.projectId,
+      runId: attempt.check.runId,
+      operationId,
+    }),
+  );
+  assert.equal(proofRun.request.candidateId, attempt.candidate.id);
+  await f.passChecks();
+  assert.deepEqual(
+    feedRows(f, operationId).map(event => event.id),
+    [`check.passed:${proofRun.id}:${f.lane.laneId}`],
+  );
+});
+
+test('cancelling browser-reviewed source emits for the canonical Candidate Lane', async t => {
+  const f = await finishFixture(t);
+  const original = f.request({ agent: false, check: null });
+  const command = {
+    ...original,
+    finish: {
+      reviewedSource: { ...f.selection.request, operationId: original.operationId },
+      after: null,
+    },
+  };
+  const pending = await f.enqueue(command);
+  const cancelled = {
+    projectId: f.projectId,
+    request: JSON.stringify({
+      operationId: randomUUID(),
+      authorityEpoch: 1,
+      submissionId: pending.id,
+    }),
+  };
+  await f.tx('reviewedCancelFeed', landingApi.cancel, cancelled);
+  await f.tx('reviewedCancelFeed', landingApi.cancel, cancelled);
+  assert.deepEqual(
+    feedRows(f, command.operationId).map(event => event.id),
+    [`landing.cancelled:${pending.id}:${f.lane.laneId}`],
+  );
 });
 
 test('owner urgent priority survives desired composition into its canonical queued submission', async t => {

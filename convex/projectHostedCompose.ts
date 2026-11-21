@@ -207,6 +207,7 @@ export const stage = mutation({
           )
           .unique();
         invariant(!duplicate || input.kind === 'dependencies', 'BAD_ARGUMENT', 'Select each Lane once.');
+        let laneActor: string | undefined;
         if ('laneId' in entry) {
           const { lane, ownerOnly } = await saveLaneRecord(ctx, { ...auth, laneId: entry.laneId });
           // Landing a Lane's work is its author's (or the project owner's) choice.
@@ -231,6 +232,7 @@ export const stage = mutation({
             'CONFLICT_MARKERS',
             'Complete the pinned resolution before composing its Lane.',
           );
+          laneActor = lane.holder?.actor ?? lane.actor;
         } else {
           const row = await readHostedRecord(ctx, { ...auth, kind: 'candidate', key: entry.candidateId });
           invariant(row, 'NOT_FOUND', 'Pinned dependency Candidate is unavailable.');
@@ -281,6 +283,7 @@ export const stage = mutation({
             kind: input.kind,
             key,
             ...('laneId' in entry ? { head: entry.head } : {}),
+            ...(laneActor && laneActor !== auth.actor ? { laneActor } : {}),
           });
         // Lead-time record of exact conflicts at save: this Lane's first land.
         if (!duplicate && 'laneId' in entry) await markConflictLand(ctx, input.projectId, entry.laneId);

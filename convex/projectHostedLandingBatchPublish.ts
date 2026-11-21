@@ -336,6 +336,7 @@ export async function publishLandingBatch(
   const completions: {
     identity: ReceiptIdentity;
     planId: Id<'projectHostedAcceptancePlans'>;
+    feedCompletion?: { operationId: string; runId: string };
     alarm?: Id<'_scheduled_functions'>;
     publisher: ReturnType<typeof landingPublisher>;
   }[] = [];
@@ -456,12 +457,17 @@ export async function publishLandingBatch(
     invariant(currentRow, 'SOURCE_UNAVAILABLE', 'The batch member disappeared.');
     // The shared run was just proved passed; preserve cleanup for any different retained run.
     const completionAlarm = member.plan.inputPages ? currentRow.alarm?.taskId : undefined;
-    await writeLanding(ctx, currentRow, next, false, currentRow.runId !== run.id, completionAlarm);
+    await writeLanding(ctx, currentRow, next, false, currentRow.runId !== run.id, completionAlarm, {
+      feedLanes: member.plan.feedLanes,
+    });
     await settleLandingOperation(ctx, next);
     if (member.plan.inputPages)
       completions.push({
         identity,
         planId: member.plan._id,
+        ...(member.plan.feedLanes === undefined
+          ? { feedCompletion: { operationId: next.operationId, runId: run.id } }
+          : {}),
         alarm: completionAlarm,
         // An explicit accept publishes the cohort, but only the claimed submission was accepted by that caller.
         publisher: landingPublisher(
@@ -497,13 +503,14 @@ export async function publishLandingBatch(
   const precompose = {
     receiptIds: receipts.map(receipt => receipt.id),
   };
-  for (const [index, { identity, planId, alarm, publisher }] of completions.entries())
+  for (const [index, { identity, planId, alarm, publisher, feedCompletion }] of completions.entries())
     await scheduleAcceptanceCompletion(
       ctx,
       planId,
       { ...identity, ...(index === 0 ? { precompose } : {}) },
       alarm,
       publisher,
+      feedCompletion,
     );
   if (!completions.length) {
     await cancelStaleLandingChecks(ctx, {

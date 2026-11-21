@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
+import { digest } from '../src/state/hash';
+import { recordFeedAttention } from './projectFeedStore';
 
 /** A notice is already retained; advance the existing Lane inbox so its running wait sees it.
  * Only a changed real conflict reaches here. No message copy, scheduler work or extra call.
@@ -10,6 +12,8 @@ export async function wakeConflictLane(
   projectId: Id<'hostedProjects'>,
   laneId: string,
   now: number,
+  actor: string,
+  peer: string,
 ) {
   const counter = await ctx.db
     .query('projectBoardProjects')
@@ -25,5 +29,13 @@ export async function wakeConflictLane(
   else await ctx.db.insert('projectBoardProjects', { projectId, live: 0, firstPostAt: now, lastAt: at });
   if (inbox) await ctx.db.patch(inbox._id, { latestAt: at });
   else await ctx.db.insert('projectBoardInboxes', { projectId, key, latestAt: at, count: 0 });
+  await recordFeedAttention(
+    ctx,
+    projectId,
+    laneId,
+    digest(JSON.stringify([laneId, peer, at])),
+    'conflict',
+    actor,
+  );
   return at;
 }

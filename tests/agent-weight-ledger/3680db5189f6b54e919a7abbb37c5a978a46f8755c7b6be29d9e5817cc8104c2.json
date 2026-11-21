@@ -1,0 +1,4 @@
+{
+  "issue": "f65d8024-0b02-4297-9aac-cde3526caa42",
+  "reason": "The feed uses existing changed-save and solo-landing mutations. Each fixture adds one empty indexed expiry probe. Landing publication reuses the loaded acceptance plan. Both fixtures keep their existing call ceilings."
+}

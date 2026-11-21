@@ -446,7 +446,14 @@ export const record = internalMutation({
           await ctx.db.patch(existing._id, { earlyResolution });
         return;
       }
-      const updatedAt = await wakeConflictLane(ctx, input.projectId, owner.laneId, now);
+      const updatedAt = await wakeConflictLane(
+        ctx,
+        input.projectId,
+        owner.laneId,
+        now,
+        owner.holderActor ?? owner.actor,
+        peer,
+      );
       const value = {
         paths,
         ...(earlyResolution ? { earlyResolution } : {}),

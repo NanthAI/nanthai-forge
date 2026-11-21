@@ -1,0 +1,1 @@
+| `projectFeedEvents` | Compact Lane wake-up records. Two indexes order events by project or by Lane, then event time and identity. A new event prunes up to two older-than-14-day rows in the same project. Only identifiers and bounded status fields are stored. Project purge includes the feed. | Activity, inline retention |

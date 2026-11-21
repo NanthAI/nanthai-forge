@@ -177,23 +177,23 @@
   },
   "tenLandingIndexes": {
     "landings": 10,
-    "written": 13812,
+    "written": 13832,
     "stored": [
       {
-        "entries": 864,
-        "keyBytes": 52131
+        "entries": 866,
+        "keyBytes": 52472
       },
       {
-        "entries": 1058,
-        "keyBytes": 67099
+        "entries": 1060,
+        "keyBytes": 67440
       },
       {
-        "entries": 2153,
-        "keyBytes": 151690
+        "entries": 2161,
+        "keyBytes": 153054
       },
       {
-        "entries": 2153,
-        "keyBytes": 151690
+        "entries": 2161,
+        "keyBytes": 153054
       }
     ]
   }

@@ -481,7 +481,9 @@ export async function publishAcceptance(
   // pages. Publication clears the ticket alarm in its normal write; no second
   // cleanup job or scheduler cancellation belongs in the main CAS.
   const completionAlarm = plan.inputPages ? row.alarm?.taskId : undefined;
-  await writeLanding(ctx, row, next, false, row.runId !== run?.id, completionAlarm);
+  await writeLanding(ctx, row, next, false, row.runId !== run?.id, completionAlarm, {
+    feedLanes: plan.feedLanes,
+  });
   await endLandedApprovals(ctx, approvals);
   await settleLandingOperation(ctx, next);
   await releaseLandingQueue(ctx, queue, now);
@@ -505,6 +507,9 @@ export async function publishAcceptance(
       { ...identity, precompose },
       completionAlarm,
       landingPublisher(by, acceptedBy.kind === 'person' || Boolean(grant)),
+      plan.feedLanes === undefined
+        ? { operationId: next.operationId, ...(run?.id ? { runId: run.id } : {}) }
+        : undefined,
     );
   else {
     await cancelStaleLandingChecks(ctx, {

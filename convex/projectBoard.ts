@@ -25,6 +25,7 @@ import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { tightestBudget } from './abuseLimits';
+import { recordFeedAttention } from './projectFeedStore';
 
 const day = 24 * 60 * 60 * 1000;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -131,6 +132,7 @@ export const post = mutation({
         fromLaneId = lane.laneId;
       }
       let targetKey: string, recipients: number | null, replyTo: string | undefined;
+      let recipientActor: string | undefined;
       if (input.replyTo) {
         // A reply goes to the Lane that wrote the original, else to the original's target.
         const original = await messageRow(ctx, projectId, input.replyTo);
@@ -143,6 +145,7 @@ export const post = mutation({
           const lane = await laneRow(ctx, projectId, target.ref);
           invariant(lane.open, 'LANE_NOT_ACTIVE', `Lane ${lane.laneId.slice(0, 8)} is no longer open.`);
           targetKey = `lane:${lane.laneId}`;
+          recipientActor = lane.holderActor ?? lane.actor;
           recipients = 1;
         } else if (target.kind === 'issue') {
           targetKey = `issue:${target.id}`;
@@ -248,6 +251,8 @@ export const post = mutation({
         .unique();
       if (inbox) await ctx.db.patch(inbox._id, { latestAt: at, count: inbox.count + 1 });
       else await ctx.db.insert('projectBoardInboxes', { projectId, key: targetKey, latestAt: at, count: 1 });
+      if (targetKey.startsWith('lane:'))
+        await recordFeedAttention(ctx, projectId, targetKey.slice(5), id, 'note', recipientActor);
       if (counter) await ctx.db.patch(counter._id, { live: live + 1, lastAt: at });
       else await ctx.db.insert('projectBoardProjects', { projectId, live: 1, firstPostAt: now, lastAt: at });
       await sendBoardAlerts(ctx, alerts);

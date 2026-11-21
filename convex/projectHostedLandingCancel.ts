@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { cancelPendingTask } from './schedulerCancel';
+import { recordLandingFeed } from './projectFeedTerminal';
 import { loadBatch, writeBatch } from './projectHostedLandingBatchStore';
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
 import type { MutationCtx } from './_generated/server';
@@ -142,6 +143,7 @@ export async function cancelHostedLanding(
       alarm: null,
       preparing: undefined,
     });
+    if (previous.phase !== 'terminal-failed') await recordLandingFeed(ctx, state);
     await notifyStackedLandingEnded(ctx, {
       projectId,
       actor: state.actor,

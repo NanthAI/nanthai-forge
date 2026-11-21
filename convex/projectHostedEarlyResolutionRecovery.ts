@@ -111,6 +111,8 @@ export async function recoverEarlyResolutions(
       author: lane.actor,
       fromLaneId: earlyResolution.laneId,
       toLaneId: lane.id,
+      reason: 'stack',
+      recipientActor: lane.holder?.actor ?? lane.actor,
       text: `The exact predecessor ${state.id} changed or did not land. Forge removed its speculative content by restoring your original saved State ${earlyResolution.originalHead}. The prior resolution State ${retained} remains retained; open this Lane to install the restored head, then sync onto main and resolve again. To inspect or recover the prior resolution use show {"state":"${retained}","path":"FILE"}. Its old stacked check cannot accept.`,
     });
   }

@@ -15,6 +15,7 @@ export function observerProjectionBudget(count) {
     (count.readBytesByTable?.projectFinishReadRows ?? 0) + (line.markReadBytes ?? 0);
   const projectionWriteBytes =
     (count.writeBytesByTable?.projectFinishReadRows ?? 0) + (line.markWriteBytes ?? 0);
+  const feed = feedProjectionCounts(count);
   // Expiry allocates delayed system work, not another controller step. Preserve the
   // original controller bounds; raw meters and landing-cost guards include this cost.
   const maintenanceWrites = count.maintenanceWrites ?? 0;
@@ -23,7 +24,7 @@ export function observerProjectionBudget(count) {
   // controller ceilings, and guard physical companion fanout separately. Byte meters
   // below and landing-cost-guard still include every cold read/write.
   const { reads: bodyReads, writes: bodyWrites, ranges: bodyRanges } = landingBodyCounts(count);
-  const sourceWrites = count.writes - projectionWrites - maintenanceWrites - bodyWrites;
+  const sourceWrites = count.writes - projectionWrites - maintenanceWrites - bodyWrites - feed.writes;
   assert(
     projectionReads - markReads - lineMetaReads <= 2 * sourceWrites + 2,
     'at most two selected observer roles per source write, plus project lookup',
@@ -47,15 +48,16 @@ export function observerProjectionBudget(count) {
     'bounded selected metadata encoding per source write',
   );
   return {
-    documents: count.documents - projectionReads - bodyReads,
+    documents: count.documents - projectionReads - bodyReads - feed.reads,
     ranges:
       count.ranges -
       bodyRanges -
       (count.readRangesByTable?.projectFinishReadRows ?? projectionReads) -
-      (line.markRanges ?? 0),
+      (line.markRanges ?? 0) -
+      feed.ranges,
     writes: sourceWrites,
-    readBytes: count.readBytes - projectionReadBytes,
-    writeBytes: count.writeBytes - projectionWriteBytes - maintenanceWriteBytes,
+    readBytes: count.readBytes - projectionReadBytes - feed.readBytes,
+    writeBytes: count.writeBytes - projectionWriteBytes - maintenanceWriteBytes - feed.writeBytes,
     maintenanceWrites,
     maintenanceWriteBytes,
     bodyReads,
@@ -64,6 +66,20 @@ export function observerProjectionBudget(count) {
     projectionWrites,
     projectionReadBytes,
     projectionWriteBytes,
+  };
+}
+
+/** Feed I/O is charged in the physical totals and its own fixture budget. */
+export function feedProjectionCounts(count) {
+  const reads = count.readDocumentsByTable?.projectFeedEvents ?? 0;
+  const writes = count.written.filter(table => table === 'projectFeedEvents').length;
+  if (!count.query) assert(reads <= writes, 'expiry probes and reads accompany event writes or deletes');
+  return {
+    reads,
+    writes,
+    ranges: count.readRangesByTable?.projectFeedEvents ?? 0,
+    readBytes: count.readBytesByTable?.projectFeedEvents ?? 0,
+    writeBytes: count.writeBytesByTable?.projectFeedEvents ?? 0,
   };
 }
 

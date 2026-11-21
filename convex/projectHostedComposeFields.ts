@@ -6,6 +6,8 @@ export const hostedComposeTables = {
   projectHostedComposes: defineTable({
     culpritRunId: v.optional(v.string()),
     candidateId: v.optional(v.string()),
+    /** Main-race compose reuses the original Candidate's immutable Lane selection. */
+    selectionCandidateId: v.optional(v.string()),
     ...identity,
     jobId: v.string(),
     value: v.string(),
@@ -32,6 +34,7 @@ export const hostedComposeTables = {
     /** The selected Lane's saved head (inputs; absent on rows staged before Issue 029138ef): the
      * server land gate confirms what a landing lands from this one indexed read. */
     head: v.optional(v.string()),
+    laneActor: v.optional(v.string()),
   })
     .index('by_project_and_actor_and_operation_and_kind_and_key', [
       'projectId',

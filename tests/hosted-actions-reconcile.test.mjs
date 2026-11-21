@@ -417,8 +417,18 @@ test('fake ctx bounds reconciliation reads independently of ten thousand histori
   assert(
     counts.every(c => {
       const source = observerProjectionBudget(c);
-      return source.ranges <= 12 && source.documents <= 12 && c.readBytes < 32 * 1024;
+      // Terminal check settlement probes its exact Candidate for feed attribution.
+      const composeReads = c.readDocumentsByTable?.projectHostedComposes ?? 0;
+      return (
+        composeReads <= 1 &&
+        source.ranges - composeReads <= 12 &&
+        source.documents - composeReads <= 12 &&
+        c.readBytes < 32 * 1024
+      );
     }),
+    JSON.stringify(
+      counts.map(c => ({ name: c.name, ...observerProjectionBudget(c), reads: c.readDocumentsByTable })),
+    ),
   );
   console.log(
     'Actions reconciliation maximum fake ctx counts:',

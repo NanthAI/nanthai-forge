@@ -229,9 +229,12 @@ export const hostedRequiredFeatures: readonly HostedContractFeature[] = [];
 
 export const MAX_CONTRACT_FEATURES = 64;
 
-/** The subset of the asked names this server implements (server side). */
-export const advertisedFeatures = (asked: readonly string[]) =>
-  hostedContractFeatures.filter(feature => asked.includes(feature));
+/** The subset of the asked names this server implements (server side). Feed consumers
+ * ask explicitly; the installed CLI's general discovery already uses its full feature budget. */
+export const advertisedFeatures = (asked: readonly string[]) => [
+  ...hostedContractFeatures.filter(feature => asked.includes(feature)),
+  ...(asked.includes('feed') ? ['feed'] : []),
+];
 
 /** Required features the server did not advertise (client side). */
 export const missingRequiredFeatures = (

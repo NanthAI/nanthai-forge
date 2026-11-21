@@ -2,6 +2,7 @@
 import { latestCancelledRun, supersededCheckCosts } from './projectHostedLandingRunnerCosts';
 import { withoutAuthorship, personStampValid } from '../src/work-actor-types';
 import { cancelPendingTask } from './schedulerCancel';
+import { recordLandingFeed } from './projectFeedTerminal';
 import { chargeMemberWork, memberWorkBudgetReply } from './abuseLimits';
 import { landingPriority } from './projectHostedLandingOrder';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
@@ -446,6 +447,7 @@ export const fail = internalMutation({
     await cancelPendingTask(ctx, row.wake?.taskId);
     await scheduleLandingAlarm(ctx, failed);
     await ctx.db.patch(row._id, { value: canonicalPayload(failed), wake: null, preparing: undefined });
+    await recordLandingFeed(ctx, failed);
     await failedLanding(ctx, failed);
     // This failure never reaches writeLanding: Lanes stacked on the Lanes it carried are told here (dc62b120).
     await notifyStackedLandingEnded(ctx, {

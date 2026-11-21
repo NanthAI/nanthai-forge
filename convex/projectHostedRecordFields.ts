@@ -52,6 +52,7 @@ export const hostedRecordFields = {
       sourceVersion: v.number(),
       lifecycleVersion: v.number(),
       revert: v.boolean(),
+      holderActor: v.optional(v.string()),
     }),
   ),
   lifecyclePlanId: v.optional(v.id('projectHostedLifecyclePlans')),

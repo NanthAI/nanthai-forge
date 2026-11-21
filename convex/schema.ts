@@ -64,6 +64,7 @@ import { hostedAcceptanceTables } from './projectHostedAcceptanceFields';
 import { intentLandingNoteTables } from './projectIntentLandingNoteFields';
 import { deleteRequestTables } from './projectDeleteRequestFields';
 import { defineSchema, defineTable } from 'convex/server';
+import { feedTables } from './projectFeedFields';
 import { accountFields, accountItemFields } from './accountTypes';
 import { v } from 'convex/values';
 import { authTables } from './authFields';
@@ -731,6 +732,7 @@ export default defineSchema({
   ...hostedOutputTables,
   ...hostedActionsTables,
   ...hostedLandingTables,
+  ...feedTables,
   ...landingSpeedTables,
   ...failureLogTables,
   ...hostedFinishTables,

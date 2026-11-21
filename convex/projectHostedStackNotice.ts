@@ -181,6 +181,8 @@ async function announce(
       projectId: parent.projectId,
       id: stackNoticeId(row.laneId, parent.laneId, key),
       toLaneId: row.laneId,
+      reason: 'stack',
+      recipientActor: child.holderActor ?? child.actor,
       fromLaneId: parent.laneId,
       author: parent.actor,
       ...(parent.agent ? { agent: parent.agent } : {}),

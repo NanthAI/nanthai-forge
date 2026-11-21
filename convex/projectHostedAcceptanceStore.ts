@@ -5,6 +5,7 @@ import { capsuleAcceptancePage } from './projectLandingCapsuleLedger';
 import { capsulePlan } from './projectLandingCapsuleStore';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
+import type { z } from 'zod';
 import { activeProject } from './projectAuthority';
 import { loadLanding, loadLandingAttempt } from './projectHostedLandingStore';
 import {
@@ -125,9 +126,12 @@ export async function stageAcceptance(
     'Stage the next original input/dependency page in order.',
   );
   await saveObject(ctx, input.projectId, pin);
+  const laneActors: Record<string, string> = {};
+  const feedLanes: { laneId: string; actor?: string }[] = [];
   for (const value of page.entries) {
     if (input.kind === 'inputs') {
       const entry = composeLaneSchema.parse(value);
+      let latest: z.infer<typeof hostedLaneSchema> | null = null;
       if (state.request.agent && state.request.finish) {
         const current = await readHostedRecord(ctx, {
           projectId: input.projectId,
@@ -135,7 +139,7 @@ export async function stageAcceptance(
           kind: 'lane',
           key: entry.laneId,
         });
-        const latest = current ? hostedLaneSchema.parse(JSON.parse(current.value)) : null;
+        latest = current ? hostedLaneSchema.parse(JSON.parse(current.value)) : null;
         invariant(
           !latest || latest.head === entry.head,
           'LANDING_SUPERSEDED',
@@ -146,13 +150,23 @@ export async function stageAcceptance(
       // validated the composition; this verifies the completion ledger binding.
       const row = await recordVersion(ctx, input.projectId, 'lane', entry.laneId, entry.version);
       invariant(row, 'SOURCE_UNAVAILABLE', 'The exact included Lane version is unavailable.');
-      const lane =
-        journalLaneSourcePins(row) ?? hostedLaneSchema.parse(JSON.parse(await hostedRecordBody(ctx, row)));
+      const pins = journalLaneSourcePins(row);
+      const lane = pins ? null : hostedLaneSchema.parse(JSON.parse(await hostedRecordBody(ctx, row)));
       invariant(
-        sameSaveLane(lane, entry),
+        sameSaveLane(pins ?? lane!, entry),
         'EVIDENCE_CHANGED',
         'Included Lane pins differ from the Candidate.',
       );
+      const actor =
+        latest?.holder?.actor ??
+        latest?.actor ??
+        lane?.holder?.actor ??
+        lane?.actor ??
+        row.journalLane?.holderActor ??
+        plan.actor;
+      const recipient = actor === plan.actor ? undefined : actor;
+      if (recipient) laneActors[entry.laneId] = recipient;
+      feedLanes.push({ laneId: entry.laneId, ...(recipient ? { actor: recipient } : {}) });
     } else {
       const entry = composeDependencySchema.parse(value);
       const row = await readHostedRecord(ctx, {
@@ -185,11 +199,17 @@ export async function stageAcceptance(
     digest: pin.sha256,
     root,
     value: canonicalPayload(page),
+    ...(Object.keys(laneActors).length ? { laneActors } : {}),
   });
   const patch = {
     root,
     ...(input.kind === 'inputs'
-      ? { inputsNext: page.next, inputPages: plan.inputPages + 1, lanes: plan.lanes + page.entries.length }
+      ? {
+          inputsNext: page.next,
+          inputPages: plan.inputPages + 1,
+          lanes: plan.lanes + page.entries.length,
+          ...(plan.inputPages === 0 && page.next === null ? { feedLanes } : {}),
+        }
       : { dependenciesNext: page.next, dependencyPages: plan.dependencyPages + 1 }),
   };
   await ctx.db.patch(plan._id, patch);

@@ -206,6 +206,7 @@ export async function noteDecision(
     // Deterministic per decision, so a replay returns the first note.
     id: operationId,
     toLaneId: row.laneId,
+    reason: 'approval',
     fromLaneId: row.laneId,
     author: by,
     text: fitNote(

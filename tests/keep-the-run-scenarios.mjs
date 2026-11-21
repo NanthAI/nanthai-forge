@@ -32,7 +32,8 @@ export const MEASURED = {
   },
   'unrelated mover, fast, carry off': { calls: 74, documents: 1553, readBytes: 1604788, writeBytes: 563340 },
   'global-risk mover, strict, red': { calls: 50, documents: 984, readBytes: 982008, writeBytes: 379701 },
-  'unrelated mover, strict, red': { calls: 32, documents: 549, readBytes: 572370, writeBytes: 225824 },
+  // Item f65d8024 adds exact Lane attribution, feed events and expiry probes to existing terminal calls.
+  'unrelated mover, strict, red': { calls: 32, documents: 556, readBytes: 578285, writeBytes: 228843 },
   'global-risk mover, strict, C1 follower': {
     calls: 130,
     documents: 2632,
@@ -121,10 +122,12 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // The scenarios read different existing receipts. Call counts are unchanged.
 // Item 0930a720: prefetch saves a descriptor call and 11,410 read bytes on the
 // replacement compose in the red retire arm, narrowing the keep's savings.
+// Item f65d8024 adds a bounded feed projection to terminal settlement and reuses the loaded
+// acceptance plan during publication. The arms settle different rows and calls stay unchanged.
 export const WIRED = {
-  carry: { calls: 7, readBytes: 404_578, writeBytes: 74_602 },
-  'scoped-recheck': { calls: 17, readBytes: 534_448, writeBytes: 143_217 },
-  red: { calls: -17, readBytes: -384_815, writeBytes: -144_510 },
+  carry: { calls: 7, readBytes: 405_020, writeBytes: 74_728 },
+  'scoped-recheck': { calls: 17, readBytes: 534_892, writeBytes: 143_345 },
+  red: { calls: -17, readBytes: -385_993, writeBytes: -144_697 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */

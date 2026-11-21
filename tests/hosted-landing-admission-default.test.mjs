@@ -29,7 +29,7 @@ for (const { cell, history } of [
       admissionQueueOnlyAudits: result.audits + result.deferredAudits,
       admissionQueueOnlyCalls: result.calls,
       admissionQueueOnlyDocumentsRead: result.documentsRead,
-      admissionQueueOnlyDocumentsWritten: result.documentsWritten - result.liveLineWrites,
+      admissionQueueOnlyDocumentsWritten: result.documentsWritten - result.liveLineWrites - result.feedWrites,
       admissionQueueOnlySubmitOverServiceMs:
         result.submitMaxMs - Math.max(...cell.entries.map(e => e.checkMs)),
     };
@@ -43,12 +43,14 @@ for (const { cell, history } of [
     assert.deepEqual(over, [], JSON.stringify(result.callCounts));
     assert.equal(result.idle, 0);
     assert.equal(result.landed.length, 10);
+    assert.equal(result.feedWrites, result.landed.length, 'one feed insert per landed Lane');
     t.diagnostic(
       JSON.stringify({
         N: cell.concurrency,
         metrics,
         physicalWrites: result.documentsWritten,
         liveLineWrites: result.liveLineWrites,
+        feedWrites: result.feedWrites,
         peakRssBytes: process.resourceUsage().maxRSS * 1024,
       }),
     );

@@ -329,6 +329,20 @@ function meter(
           return tables;
         }, {}),
         writeBytes: sum('writeBytes'),
+        feed: {
+          events: f.tables.projectFeedEvents.size,
+          readBytes: counts.reduce((n, c) => n + (c.readBytesByTable.projectFeedEvents ?? 0), 0),
+          writeBytes: counts.reduce((n, c) => n + (c.writeBytesByTable.projectFeedEvents ?? 0), 0),
+          expiryProbes: counts.reduce((n, c) => n + (c.readRangesByTable.projectFeedEvents ?? 0), 0),
+          acceptanceReadBytes: counts.reduce(
+            (n, c) =>
+              n +
+              (c.written.includes('projectFeedEvents')
+                ? (c.readBytesByTable.projectHostedAcceptancePages ?? 0)
+                : 0),
+            0,
+          ),
+        },
         indexEntriesWritten: sum('indexEntriesWritten'),
         indexEntriesRemoved: sum('indexEntriesRemoved'),
         exportIndexEntriesWritten: exports.reduce((n, c) => n + c.indexEntriesWritten, 0),
@@ -763,6 +777,38 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   baseline = await measureLandingCosts(t, { indexExports: true });
   t.diagnostic(`liveLinePairedMix ${JSON.stringify(baseline.measured)}`);
   t.diagnostic(`scenarios ${JSON.stringify(baseline.scenarios)}`);
+  const mixed = Object.values(baseline.scenarios);
+  const calls = mixed.reduce(
+    (n, s) => n + s.queries + s.observerQueries + s.mutations + s.v8Actions + s.nodeActions,
+    0,
+  );
+  const feedEvents = mixed.reduce((n, s) => n + s.feed.events, 0);
+  assert.equal(calls, 275, 'feed writes introduce no Convex call in the current six-landing mix');
+  assert.equal(feedEvents, 6, 'one terminal feed row per accepted Lane on the fixture mix');
+  assert.equal(
+    mixed.reduce((n, s) => n + s.feed.expiryProbes, 0),
+    6,
+  );
+  assert.equal(
+    mixed.reduce((n, s) => n + s.feed.readBytes, 0),
+    0,
+    'no retained feed row is read before it expires',
+  );
+  assert.equal(
+    mixed.reduce((n, s) => n + s.feed.acceptanceReadBytes, 0),
+    0,
+    'publication reuses staged Lane pins without rereading the acceptance input pages',
+  );
+  t.diagnostic(
+    `feedFixture ${JSON.stringify({
+      calls,
+      events: feedEvents,
+      documentBytes: mixed.reduce((n, s) => n + s.feed.writeBytes, 0),
+      acceptanceReadBytes: mixed.reduce((n, s) => n + s.feed.acceptanceReadBytes, 0),
+      wallMs: performance.now() - started,
+      peakRssKiB: process.resourceUsage().maxRSS,
+    })}`,
+  );
   const solo = baseline.scenarios.solo;
   const landServer = {
     calls: solo.queries + solo.observerQueries + solo.mutations + solo.v8Actions + solo.nodeActions,
@@ -770,6 +816,7 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   };
   // 1122c9c9: lead approved solo 492 -> 494 reads; measured +908 B/landing = +$0.0001816/1,000 for pending-only scheduler safety.
   // 9a04d916: compose settle, solo 647 -> 685 reads (owner-approved +$0.02/1,000; ledger reason recorded).
+  // f65d8024: 685 -> 686, one empty expiry probe. The loaded acceptance plan holds the exact Lane pins.
   assertCommandWeight('landServerSolo', landServer);
   t.diagnostic(JSON.stringify({ landServerSolo: landServer }));
   const verdicts = judgeCosts(costs, costGuard, 'landing-fixture', baseline.measured);
@@ -808,6 +855,7 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   // in the mutations ledger below and docs/data-placement.md). The In-queue binding write adds a few entries.
   // Stored keys in the two batch scenarios 150,180 -> 151,690 B: the touch stamps each of the 151 person rows with
   // this hour (about 10 B of key each). Fixed per person and overwritten each hour, so it does not grow with history.
+  // f65d8024: two custom entries per terminal event, ten events. Feed bytes expire on new writes.
   const indexBudget = storageBudgets.tenLandingIndexes;
   assert.equal(
     ten.reduce((n, s) => n + s.landings, 0),

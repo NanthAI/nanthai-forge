@@ -134,6 +134,32 @@ rewritten; main/exit has one small row. Attention retains the replaced strip's
 shared reads, so browser offsets are zero credited. Live browser cost, frames,
 latency and thirty-minute idle I/O remain unverified.
 
+### Hosted project feed
+
+The six-landing fixture records six feed events and 2,940 document-write bytes, or
+490 bytes per landing. Its existing mutations publish the events, with 275 total
+fixture calls and zero additional scheduled work. The fresh history incurs six
+empty expiry probes. Reusing the loaded acceptance plan reduced publication's
+feed-related acceptance input page reads from 4,410 bytes to zero. A one-Lane
+plan stages 64 extra bytes. Publication drops them from its plan, while a
+superseded plan retains them until capsule cleanup.
+The six-landing fixture took 1.58 s with 517,280 KiB peak RSS for the Node test
+process, including its database fake and source fixtures.
+The ten-landing fixture stores 20 additional custom index entries.
+
+With the indexed-patch fit below, 490 document bytes plus 181 bytes of row overhead
+and two 128-byte custom entries model 927 write bytes per fixture landing, or about
+$0.00019 per 1,000 at Professional I/O rates. This fixture measures one
+terminal event per Lane. Saves, check-only runs, attention notes, expiry deletes
+and active subscribers contribute their own I/O in projects that use them.
+
+Idle has zero calls. A live page reads a bounded window of at most 34 records per
+selected Lane or project range, plus the existing access check. An optional queue
+position reads the existing queue directory for the selected Lane. A 32-Lane
+fixture with 70 events concentrated in one Lane read 66 documents including empty
+probes, 8,580 document bytes and took 2.62 ms. Live billed
+usage and real-landing delivery remain to be checked on dev.
+
 ### Empty journal frontiers
 
 The journal capture mutation commits an empty selection directly, including its

@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "Issue f65d8024: the transactional feed replaces the three wait riders and the peer live query when slice C2 deletes them; expand first without changing installed clients.",
+  "date": "2026-11-21"
+}

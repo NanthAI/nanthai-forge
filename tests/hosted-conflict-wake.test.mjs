@@ -235,7 +235,12 @@ for (const mode of ['off', 'on'])
     boardWakeEnvelope(root, w.laneId, initial);
     await w.record();
     const cost = w.f.counts.at(-1);
-    assert(cost.documents <= 8 && cost.ranges <= 8, 'notice recording keeps its existing read/probe budget');
+    const expiryProbes = cost.readRangesByTable.projectFeedEvents ?? 0;
+    assert.equal(expiryProbes, mode === 'on' ? 1 : 0, 'only a new directed event probes inline expiry');
+    assert(
+      cost.documents - expiryProbes <= 8 && cost.ranges - expiryProbes <= 8,
+      'the existing notice read budget stays intact apart from feed expiry',
+    );
     console.log(
       `notice retry (${mode}): ${JSON.stringify({ documents: cost.documents, ranges: cost.ranges, writes: cost.writes, readBytes: cost.readBytes })}`,
     );

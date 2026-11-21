@@ -396,7 +396,7 @@ test('writeLanding announces a cancelled landing of a stacked Lane through the r
   assert.ok(store.writeLanding, 'cancel ends in writeLanding');
 });
 
-test('a project with no stacked Lane keeps the landing budget: cancel and failure read no compose selections', async () => {
+test('a project with no stacked Lane reads the terminal feed selection once and skips stack notification', async () => {
   const f = await landingFixture();
   const compose = randomUUID();
   const state = await f.enqueue(f.request());
@@ -406,9 +406,9 @@ test('a project with no stacked Lane keeps the landing budget: cancel and failur
   const value = ticketState(f, stored[1]);
   value.request.finish = { composeOperationId: compose, after: null };
   patchTicketState(f, stored[1], value);
-  // f.call applies the fixture guard: a touch of projectHostedComposeSelections would fail the call.
+  // The terminal feed resolves this exact compose selection even when there is no stack.
   const cancelled = JSON.parse(
-    await f.call('landingCancel', api.cancel, {
+    await f.transaction('landingCancel', api.cancel, {
       projectId: f.projectId,
       request: JSON.stringify({ submissionId: state.id, operationId: randomUUID(), authorityEpoch: 1 }),
     }),
@@ -416,7 +416,11 @@ test('a project with no stacked Lane keeps the landing budget: cancel and failur
   assert.equal(cancelled.error.code, 'LANDING_CANCELLED');
   const counts = f.counts.filter(c => c.name === 'landingCancel');
   assert.ok(counts.length);
-  assert.ok(counts.every(c => !c.touched.includes('projectHostedComposeSelections')));
+  assert.equal(
+    counts.reduce((n, c) => n + (c.readRangesByTable.projectHostedComposeSelections ?? 0), 0),
+    1,
+  );
+  assert.equal(f.tables.projectFeedEvents.size, 0, 'a composition with no selected Lane emits no Lane event');
   assert.equal(f.tables.projectBoardMessages.size, 0);
 });
 
@@ -441,6 +445,8 @@ test('budget: the calls one parent event costs, per table', async () => {
   const withDependent = tally();
   // A plain save also refreshes the line owner head: two small reads and one metadata write.
   assert.deepEqual(plain, {
+    'read:projectFeedEvents': 1,
+    'write:projectFeedEvents': 1,
     'read:projectHostedOverlapLanes': 1,
     'write:projectHostedOverlapLanes': 1,
     'read:projectLiveLineLanes': 1,
@@ -454,6 +460,8 @@ test('budget: the calls one parent event costs, per table', async () => {
   // A parent save with one dependent: 1 dependents range, 1 child overlap read, then the note
   // (replay, 2 switches and counter reads; message, inbox and counter writes) and 1 mark write.
   assert.deepEqual(withDependent, {
+    'read:projectFeedEvents': 2,
+    'write:projectFeedEvents': 2,
     'read:projectHostedOverlapLanes': 2,
     'write:projectHostedOverlapLanes': 1,
     'read:projectLiveLineLanes': 1,

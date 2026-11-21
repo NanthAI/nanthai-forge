@@ -28,7 +28,7 @@ import {
 const { capabilities } = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 
 /** The capability read exactly as the current CLI sends it (src/hosted-agent-transport.ts). */
-async function candidateCapabilities() {
+async function candidateCapabilities(features = hostedContractFeatures) {
   const s = lanesFixture();
   const projectId = s.insert('hostedProjects', {
     key: 'synthetic',
@@ -41,7 +41,7 @@ async function candidateCapabilities() {
   });
   const options = {
     clientVersion: '0.0.0-test',
-    features: [...hostedContractFeatures],
+    features: [...features],
     noticeVersion: 1,
     resolveVersion: 1,
     overlapVersion: 1,
@@ -57,6 +57,13 @@ async function candidateCapabilities() {
 }
 const released = JSON.parse(readFileSync(new URL(`../${responseSnapshotPath}`, import.meta.url), 'utf8'));
 const releasedSchema = id => z.fromJSONSchema(released.schemas[id]);
+
+test('feed capability is negotiated within the existing discovery request budget', async () => {
+  const normal = await candidateCapabilities();
+  const feed = await candidateCapabilities(['feed']);
+  assert(!normal.features.includes('feed'));
+  assert.deepEqual(feed.features, ['feed']);
+});
 
 test('incident replay: a strict CLI rejects an added agentDefaults field; the reply boundary drops it', async () => {
   const reply = await candidateCapabilities();

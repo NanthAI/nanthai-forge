@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { landingBodyCounts, observerProjectionBudget } from './observer-projection-budget.mjs';
+import {
+  feedProjectionCounts,
+  landingBodyCounts,
+  observerProjectionBudget,
+} from './observer-projection-budget.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { finishFixture, api } from './hosted-finish-fixture.mjs';
@@ -86,6 +90,7 @@ export async function hostedMachineLifecycleDrill(t, interruption, history = fal
     retainedAcceptances: history ? 1150 : 0,
     functionTransactions: counts.length,
     documentsRead: counts.reduce((sum, count) => sum + count.documents - landingBodyCounts(count).reads, 0),
+    feedDocumentsRead: counts.reduce((sum, count) => sum + feedProjectionCounts(count).reads, 0),
     physicalDocumentsRead: counts.reduce((sum, count) => sum + count.documents, 0),
     documentsWritten: counts.reduce((sum, count) => sum + count.writes, 0),
     sourceDocumentsWritten: source.reduce((sum, count) => sum + count.writes, 0),

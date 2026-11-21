@@ -12,6 +12,7 @@ import { closeConflictNotices, planTrialMerge } from './projectHostedConflicts';
 import { appendOverlapMainLog } from './projectHostedOverlapMainLog';
 import { addPlanLane, planLaneItem, removePlanLanes } from './projectPlanLaneMarks';
 import { recordHead } from './projectHostedRecords';
+import { recordFeedEvent } from './projectFeedStore';
 
 export async function trackHostedOverlapLane(
   ctx: MutationCtx,
@@ -127,6 +128,7 @@ export async function trackHostedOverlapLane(
     laneId: lane.id,
     intentId: lane.intentId,
     actor: lane.actor,
+    ...(lane.holder ? { holderActor: lane.holder.actor } : {}),
     ...(savedBy ? { savedBy } : {}),
     ...(lane.holder?.sessionId
       ? {
@@ -210,6 +212,11 @@ export async function trackHostedOverlapLane(
   const sourceId = old ? old._id : await ctx.db.insert('projectHostedOverlapLanes', stored);
   if (old) await ctx.db.replace(old._id, stored);
   await trackLineLane(ctx, sourceId, stored, old, false);
+  const feedLane = { projectId, laneId: lane.id, actor: lane.holder?.actor ?? lane.actor };
+  if (old && !sameHead)
+    await recordFeedEvent(ctx, { ...feedLane, kind: 'lane.saved', sourceVersion: lane.sourceVersion });
+  if (old?.open && !open && (old.landed?.laneHead !== lane.head || lane.state === 'abandoned'))
+    await recordFeedEvent(ctx, { ...feedLane, kind: 'lane.closed', recordVersion: lane.version });
   // Exact conflicts at save (flip 4): a moved head of an open Lane plans a trial merge; a Lane that
   // lands or is abandoned ends the notices on both sides.
   if (old?.open && !open && old.conflicted)
@@ -300,5 +307,13 @@ export async function materializeHostedOverlapLifecycle(
       planLaneMark: undefined,
       planLanePin: undefined,
       presenceRow: undefined,
+    });
+  if (row?.open)
+    await recordFeedEvent(ctx, {
+      projectId,
+      laneId,
+      actor: row.holderActor ?? row.actor,
+      kind: 'lane.closed',
+      recordVersion,
     });
 }

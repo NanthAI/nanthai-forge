@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { infraWaitPrefix } from '../src/ci-provider-recovery';
+import { recordCheckFeed } from './projectFeedTerminal';
 import { deferCancelledRunWrite } from './projectCancelledRunWrites';
 import { markCancelledRunPending } from './projectCancelledRunOwners';
 import { cancelPendingTask } from './schedulerCancel';
@@ -224,10 +225,10 @@ export async function writeHostedCheck(
 export async function completeHostedCheck(
   ctx: MutationCtx,
   run: HostedCheckRun,
-  usageSubmissions?: readonly string[],
+  source?: Pick<Doc<'projectHostedCheckRuns'>, 'cancelledUsage' | 'cause'>,
 ) {
   if (run.status === 'cancelled')
-    deferCancelledRunWrite(ctx, run.id, usageSubmissions ?? [], () =>
+    deferCancelledRunWrite(ctx, run.id, source?.cancelledUsage?.submissions ?? [], () =>
       markCancelledRunPending(ctx, run.projectId as Id<'hostedProjects'>, run.id),
     );
   if (run.configuration.provider !== 'ci-status')
@@ -277,12 +278,14 @@ export async function completeHostedCheck(
     run.request.operationId,
   );
   invariant(row, 'SOURCE_UNAVAILABLE', 'The original check operation is unavailable.');
-  await completeCheckOperation(ctx, hostedOperationSchema.parse(JSON.parse(row.value)), {
+  const operation = hostedOperationSchema.parse(JSON.parse(row.value));
+  await completeCheckOperation(ctx, operation, {
     runId: run.id,
     status: run.status,
     head: run.request.expectedHead,
     terminalDigest: run.terminalDigest,
   });
+  if (!operation.terminal) await recordCheckFeed(ctx, run, source?.cause);
 }
 
 /** Structured across internal function/HTTP boundaries; never includes source or credentials. */

@@ -133,7 +133,7 @@ export async function parkLanding(
     await cancelPendingTask(ctx, finish.wake.taskId);
     await ctx.db.patch(finish._id, { wake: null });
   }
-  await writeLanding(ctx, row, next, false, true, undefined, hold);
+  await writeLanding(ctx, row, next, false, true, undefined, { hold });
   // The hold's record (Item 687d1eda), closed by releaseMainHolds; the same row in this mutation.
   if (hold === 'main-red')
     await ctx.db.patch(row._id, {

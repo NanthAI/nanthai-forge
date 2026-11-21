@@ -53,6 +53,7 @@ export async function applyJournal(ctx: MutationCtx, pending: Pending, rows: Jou
                 sourceVersion: lane.sourceVersion ?? lane.version,
                 lifecycleVersion: lane.lifecycleVersion ?? 0,
                 revert: !!lane.revert,
+                holderActor: lane.holder?.actor ?? lane.actor,
               },
             }
           : {}),

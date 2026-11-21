@@ -117,11 +117,20 @@ export async function landingFixture(source = null) {
             'projectWorkGenerations',
             'projectWorkEvents',
             'projectHostedComposePages',
-            'projectHostedComposeSelections',
             'projectHostedCheckShards',
           ].includes(t),
         ),
         `${name}: no source pages, shards or history hydration`,
+      );
+      const pinRanges = c.readRangesByTable?.projectHostedComposeSelections ?? 0;
+      // A terminal feed projection reads one immutable input page for this fixture's one Lane.
+      // Keep all other controller paths out of the compose selection index.
+      assert(
+        pinRanges === 0 ||
+          (pinRanges === 1 &&
+            (c.readDocumentsByTable?.projectHostedComposeSelections ?? 0) <= 1 &&
+            (c.writeBytesByTable?.projectFeedEvents ?? 0) > 0),
+        `${name}: only feed settlement reads a bounded immutable input page`,
       );
       const max = (maxima[name] ??= {
         ranges: 0,

@@ -47,6 +47,10 @@ export const hostedAcceptanceTables = {
     inputPages: v.number(),
     dependencyPages: v.number(),
     lanes: v.number(),
+    /** Single-page input IDs already validated by staging; wide and older plans use retained pages. */
+    feedLanes: v.optional(v.array(v.object({ laneId: v.string(), actor: v.optional(v.string()) }))),
+    /** A wide or already-staged selection emits on the existing completion windows. */
+    feedCompletion: v.optional(v.object({ operationId: v.string(), runId: v.optional(v.string()) })),
     root: v.string(),
     appliedPage: v.number(),
     appliedEntry: v.number(),
@@ -75,6 +79,7 @@ export const hostedAcceptanceTables = {
     ...identity,
     kind: v.union(v.literal('inputs'), v.literal('dependencies')),
     index: v.number(),
+    laneActors: v.optional(v.record(v.string(), v.string())),
     digest: v.string(),
     root: v.string(),
     value: v.string(),

@@ -29,6 +29,7 @@ export const hostedOverlapTables = {
     laneId: v.string(),
     intentId: v.string(),
     actor: v.string(),
+    holderActor: v.optional(v.string()),
     session,
     /** The agent session's word-list slug (c29d0780); absent for a person. Shown as `handle/slug`. */
     agent: v.optional(v.string()),

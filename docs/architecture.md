@@ -2243,6 +2243,41 @@ Source and logs stay in R2; upkeep shares existing mutations and adds no RPC,
 poll, server timer or delay. Synthetic guards measure dependency parity and
 bounded I/O; live billed savings need matched-load deployment evidence.
 
+### Hosted project feed
+
+Ask for `feed` in the existing capability request to discover the reactive
+`projectFeed:page` query. A signed-in
+member with current write access supplies `projectId`, `since` in integer milliseconds,
+and either `project: true` or up to 32 full Lane IDs in `lanes`. `mine: true` in project
+scope selects events attributed to the caller as Lane holder. `kinds` filters event types.
+`queue: {laneId}` can add the selected Lane's current position from the queue directory.
+
+The query returns up to 33 events ordered by time and ID. If `more` is true, pass the
+returned opaque `cursor` alongside the same selection for a finite continuation. A page
+can be empty when the indexed window contains only filtered events. Live subscriptions
+start with `since` and no cursor. The server checks current access on each run and reads
+indexed event ranges. It has no heartbeat or scheduled expiry.
+
+Single-page acceptance, terminal landing failures, check outcomes, saved-head changes,
+direct Lane closures and directed attention emit with their source transition.
+Landing and check events include the original operation and one stable event ID per
+selected Lane. The payload is versioned and carries one structured `resume` command that
+reads the authoritative outcome. The feed keeps operational identifiers and typed statuses.
+A new event removes up to two expired rows in the project after 14 days. Canonical Lane records,
+receipts and check evidence retain their own lifecycle.
+
+An Intent cascade makes its child closures visible together through the applied marker.
+Those children emit feed events during the existing materialization, which processes up to
+20 child Lanes per scheduled transaction. A stopped materializer delays the events until a
+later write or resumed materialization promotes the closures. For pre-admission terminal
+landings, the current operation-ID wait resolves the original submitter's operation.
+
+Wide or already-staged legacy acceptance emits per-Lane landing events in the existing
+completion transactions after main moves. Each tick emits at most 20 events using the
+original landing operation and receipt. Event writes commit with advancement of the
+completion cursor. The feed adds no per-Lane work to wide publication and uses the
+same completion and recovery ticks for delivery.
+
 ### Live Lane line
 
 `projectLiveLine:read` reads at most 101 slim rows and returns sixty held-first

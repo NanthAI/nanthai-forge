@@ -271,6 +271,7 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
   const fields = {
     ...auth,
     jobId: prepared.operation.firstAttempt.ids.job!,
+    selectionCandidateId: state.request.candidateId,
     value: semanticPayload(stateValue),
   };
   const id = await ctx.db.insert('projectHostedComposes', fields);

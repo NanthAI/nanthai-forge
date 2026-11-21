@@ -40,7 +40,7 @@ export async function cancelHostedCheck(
   run.endedAt = new Date().toISOString();
   run.exitCode = null;
   run.terminalDigest = checkPin({ kind: 'cancelled', runId: run.id, fence: run.fence });
-  await completeHostedCheck(ctx, run, row.cancelledUsage?.submissions);
+  await completeHostedCheck(ctx, run, row);
   await writeHostedCheck(ctx, row._id, run);
   await requestDirectCancel(ctx, run);
   await requestCiCancel(ctx, selected);

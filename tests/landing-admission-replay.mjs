@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { liveLineProjectionCounts } from './observer-projection-budget.mjs';
+import { feedProjectionCounts, liveLineProjectionCounts } from './observer-projection-budget.mjs';
 // Event-driven production queue, composition, check completion and audit controllers.
 // Inputs retain relative arrivals only; source bodies use independent synthetic lines.
 import assert from 'node:assert/strict';
@@ -197,6 +197,7 @@ export async function replayAdmission(
     documentsRead: f.counts.reduce((n, c) => n + c.documents, 0),
     documentsWritten: f.counts.reduce((n, c) => n + c.writes, 0),
     liveLineWrites: f.counts.reduce((n, c) => n + liveLineProjectionCounts(c).writes, 0),
+    feedWrites: f.counts.reduce((n, c) => n + feedProjectionCounts(c).writes, 0),
     readBytes: f.counts.reduce((n, c) => n + c.readBytes, 0),
     writeBytes: f.counts.reduce((n, c) => n + c.writeBytes, 0),
     idle: activeTasks().length - deferredAudits,

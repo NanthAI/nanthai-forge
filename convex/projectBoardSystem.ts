@@ -4,6 +4,8 @@ import type { Id } from './_generated/dataModel';
 import { boardStopped, BOARD_PROJECT_LIVE_CAP, BOARD_RETENTION_MS } from './projectBoardLimits';
 import { boardTextProblem } from '../src/board-text';
 import { digest } from '../src/state/hash';
+import type { FeedAttentionReason } from '../src/feed-event';
+import { recordFeedAttention } from './projectFeedStore';
 
 /**
  * A system-written note to one Lane (Issue dc62b120): the same board row a member's `board --post`
@@ -28,6 +30,8 @@ export async function postSystemLaneNote(
     author: string;
     agent?: string;
     text: string;
+    reason?: FeedAttentionReason;
+    recipientActor?: string;
     now?: number;
   },
 ): Promise<'posted' | 'duplicate' | 'skipped'> {
@@ -66,6 +70,15 @@ export async function postSystemLaneNote(
     .unique();
   if (inbox) await ctx.db.patch(inbox._id, { latestAt: at, count: inbox.count + 1 });
   else await ctx.db.insert('projectBoardInboxes', { projectId, key: targetKey, latestAt: at, count: 1 });
+  if (input.toLaneId !== 'project')
+    await recordFeedAttention(
+      ctx,
+      projectId,
+      input.toLaneId,
+      input.id,
+      input.reason ?? 'note',
+      input.recipientActor,
+    );
   if (counter) await ctx.db.patch(counter._id, { live: counter.live + 1, lastAt: at });
   else await ctx.db.insert('projectBoardProjects', { projectId, live: 1, firstPostAt: now, lastAt: at });
   return 'posted';

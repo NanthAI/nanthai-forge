@@ -22,6 +22,7 @@ import { completeIntentWhenLanesDone } from './projectHostedIntentCompletion';
 import { completeResolutionOrigins, noteResolutionOrigins } from './projectHostedResolutionOrigin';
 import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
 import { validateComposePage, composeLaneSchema } from '../src/hosted-compose';
+import { recordLandedFeedPage } from './projectFeedTerminal';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { invariant } from '../src/errors';
 import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
@@ -54,10 +55,14 @@ export async function scheduleAcceptanceCompletion(
   input: CompletionInput,
   alarm?: Id<'_scheduled_functions'>,
   landedBy?: LandingNote['landedBy'],
+  feedCompletion?: Plan['feedCompletion'],
 ) {
   const tick = await ctx.scheduler.runAfter(0, COMPLETE, input);
   await ctx.db.patch(planId, {
     completion: { tick, guard: await armGuard(ctx, input), ...(alarm ? { alarm } : {}) },
+    // Publication already emitted the feed events using these staged Lane pins.
+    feedLanes: undefined,
+    ...(feedCompletion ? { feedCompletion } : {}),
     // Issue 3a733ee8: in the same patch, so the Item notes cost publication no extra write.
     ...(landedBy ? { landedBy } : {}),
   });
@@ -69,12 +74,19 @@ async function settleCompletion(ctx: MutationCtx, plan: Plan, patch: Partial<Pla
   if (plan.capsuleWake) await wakeLandingCapsule(ctx, { projectId: plan.projectId, ...plan.capsuleWake });
   // `landedBy` only carries the publisher to the notes of the completion ticks (Issue 3a733ee8); the
   // landing capsule keeps the settled plan for good, so it leaves with the completion.
-  if (plan.completion || plan.capsuleWake || plan.landedBy || Object.keys(patch).length)
+  if (
+    plan.completion ||
+    plan.capsuleWake ||
+    plan.landedBy ||
+    plan.feedCompletion ||
+    Object.keys(patch).length
+  )
     await ctx.db.patch(plan._id, {
       ...patch,
       completion: undefined,
       capsuleWake: undefined,
       landedBy: undefined,
+      feedCompletion: undefined,
     });
   return { complete: true };
 }
@@ -200,6 +212,22 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
   // A byte-sized source page can contain 100 inputs. Materialize at most 20
   // canonical records per tick; counters are transaction windows, not Lane caps.
   const end = Math.min(entries.length, plan.appliedEntry + 20);
+  const window = entries.slice(plan.appliedEntry, end);
+  if (plan.feedCompletion)
+    await recordLandedFeedPage(
+      ctx,
+      {
+        ...plan.feedCompletion,
+        projectId: plan.projectId,
+        submissionId: plan.submissionId,
+        receiptId: plan.receiptId,
+        actor: plan.actor,
+      },
+      window.map(value => {
+        const { laneId } = composeLaneSchema.parse(value);
+        return { laneId, actor: page.laneActors?.[laneId] };
+      }),
+    );
   const finished = new Set<string>();
   // The first landed Lane of each Intent: earlier quiet attempts of that Intent leave presence and
   // advisory notices when the Intent completion reads its sibling heads (friction b7f93deb).
@@ -213,7 +241,7 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
     if (viaLaneId && !entry.viaLaneId) entry.viaLaneId = viaLaneId;
     noted.set(intentId, entry);
   };
-  for (const value of entries.slice(plan.appliedEntry, end)) {
+  for (const value of window) {
     const entry = composeLaneSchema.parse(value);
     if (!lanesDone) {
       // Lanes stay as they are: the head row (parent, status, pin) is the whole read, no record body.

@@ -54,6 +54,7 @@ test('205 included Lanes and 10,050 retained receipts keep final CAS constant; c
   assert(source.ranges <= 41 && source.documents <= 41 && source.writes <= 20, JSON.stringify(final));
   assert(source.readBytes < 40 * 1024 && source.writeBytes < 16 * 1024);
   assert(!final.touched.includes('projectHostedAcceptancePages'));
+  assert(!final.touched.includes('projectFeedEvents'), 'wide publication leaves Lane events to completion');
   // 41 = 39 plus the one submission-order read before claiming main (incident e4aee4fe) and the
   // landing-speed row (45f49fb7); still constant.
   assert(!final.touched.includes('projectHostedRecordHeads') || source.documents <= 41);
@@ -62,10 +63,19 @@ test('205 included Lanes and 10,050 retained receipts keep final CAS constant; c
     assert(++ticks < 30, 'only outstanding finite completion work schedules itself');
     const task = f.pendingTasks().find(t => t.name === 'projectHostedAcceptance:complete');
     f.patch('_scheduled_functions', task._id, { state: { kind: 'inProgress' } });
+    const before = f.tables.projectFeedEvents.size;
     await f.materialize(task.args[0].receiptId, task.args[0].precompose);
+    assert(f.tables.projectFeedEvents.size - before <= 20, 'each completion emits one bounded window');
     f.patch('_scheduled_functions', task._id, { state: { kind: 'success' } });
   }
   assert.equal(ticks, 11);
+  const feed = [...f.tables.projectFeedEvents.values()];
+  assert.equal(feed.length, lanes.length);
+  assert.deepEqual(
+    new Set(feed.map(event => event.id)),
+    new Set(lanes.map(lane => `landing.landed:${state.id}:${lane.laneId}`)),
+  );
+  assert(feed.every(event => event.operationId === state.operationId && event.receiptId === receipt.id));
   for (const lane of lanes) assert.equal((await f.readLane(lane.laneId)).state, 'completed');
   // Only finite work stays: the one person-order touch this landing's new hour scheduled (Item 3d5d8839).
   assert.deepEqual(
@@ -77,6 +87,7 @@ test('205 included Lanes and 10,050 retained receipts keep final CAS constant; c
   const scheduled = f.metrics.scheduled;
   await f.materialize(receipt.id, firstCompletion.precompose);
   assert.equal(f.metrics.scheduled, scheduled, 'idle completed plans schedule nothing');
+  assert.equal(f.tables.projectFeedEvents.size, feed.length, 'completed windows do not re-emit on replay');
   console.log(
     'H14 scale evidence',
     JSON.stringify({

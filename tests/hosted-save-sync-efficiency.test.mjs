@@ -259,7 +259,14 @@ function assertSaveWriteBudget(run, ceiling) {
     .flatMap(row => row.written)
     .filter(table => table === 'projectMetricFacts').length;
   assert.equal(metricWrites, 1, 'one indexed save-head fact per changed save');
-  assert(run.stats.writes - run.stats.overlapWrites - metricWrites <= ceiling, JSON.stringify(run.stats));
+  const feedWrites = run.s.counts
+    .flatMap(row => row.written)
+    .filter(table => table === 'projectFeedEvents').length;
+  assert.equal(feedWrites, 1, 'one feed event per changed save');
+  assert(
+    run.stats.writes - run.stats.overlapWrites - metricWrites - feedWrites <= ceiling,
+    JSON.stringify(run.stats),
+  );
 }
 
 test('ten changed files in a 3,000-file tree fit the complete save budget at dogfood history size', async t => {

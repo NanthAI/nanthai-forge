@@ -56,9 +56,10 @@ for (const history of [0, 1150])
     // per submitted Lane, owner-accepted: +3), and each of the two batch publishes reads and replaces the line summary
     // so main's snapshot moves (+2 reads, +2 writes, inside finishSettle); no call. Equal in both arms.
     // Item 0930a720: compose root prefetch removes four descriptor calls and 44 document reads in each arm.
+    // Item f65d8024: three terminal events add three inserts and three empty expiry probes in both arms.
     assert.deepEqual(
       [after.calls, after.reads, after.writes, after.lateTaskMs, after.idle],
-      [161, 3147, 1135, 180000, 0],
+      [161, 3150, 1138, 180000, 0],
       '8c9b84fc: disjoint baseline must not grow',
     );
     t.diagnostic(JSON.stringify({ history, before, after }));

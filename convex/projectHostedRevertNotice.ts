@@ -78,6 +78,8 @@ export async function noticeRevert(ctx: MutationCtx, input: Revert) {
       projectId: input.projectId,
       id: revertNoticeId(input.receiptId, laneId),
       toLaneId: laneId,
+      reason: 'revert',
+      ...(row ? { recipientActor: row.holderActor ?? row.actor } : {}),
       fromLaneId: revertLane ?? laneId,
       author: input.actor,
       ...(input.agent ? { agent: input.agent } : {}),

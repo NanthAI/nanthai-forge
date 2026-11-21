@@ -8,6 +8,7 @@ export const projectPurgeTables = {
   sealedSecretSets: 'by_project_and_kind_and_active',
   sealedSecretHistory: 'by_project_and_setId',
   projectFinishReadRows: 'by_project',
+  projectFeedEvents: 'by_project_and_at_and_id',
   projectMetricFacts: 'by_project_and_key_and_source_time_and_id',
   projectLiveLineLanes: 'by_project_and_lane',
   projectPublic: 'by_projectId',
