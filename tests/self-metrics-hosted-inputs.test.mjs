@@ -13,18 +13,12 @@ import { fixture, period, at } from './self-metrics-hosted-fixture.mjs';
 const head = char => char.repeat(64);
 function evidence(f) {
   const objects = new Map();
-  const input = (lane, intent, h, savedAt, version = 0) => {
-    const built = buildComposePages([
-      {
-        laneId: lane,
-        head: h,
-        version,
-        sourceVersion: version,
-        lifecycleVersion: 0,
-        state: { object: { sha256: h, size: 0 }, recipe: null },
-      },
-    ]);
+  const compose = entries => {
+    const built = buildComposePages(entries);
     for (const page of built.pages) objects.set(page.pin.sha256, saveBytes(page.value));
+    return built.manifest.root;
+  };
+  const input = (lane, intent, h, savedAt, version = 0) => {
     const body = f.put(
       'projectHostedRecordBodies',
       {
@@ -55,6 +49,19 @@ function evidence(f) {
       },
       savedAt,
     );
+    save(lane, h, savedAt);
+    return compose([
+      {
+        laneId: lane,
+        head: h,
+        version,
+        sourceVersion: version,
+        lifecycleVersion: 0,
+        state: { object: { sha256: h, size: 0 }, recipe: null },
+      },
+    ]);
+  };
+  const save = (lane, h, savedAt) => {
     const saveId = randomUUID();
     const saved = f.put(
       'projectHostedRecordBodies',
@@ -85,7 +92,6 @@ function evidence(f) {
       },
       savedAt,
     );
-    return built.manifest.root;
   };
   const attempt = (id, start, pin, runId, main = head('1'), parent = null) => {
     const row = f.tables.projectHostedLandingAttempts.find(row => row.attemptId === id);
@@ -138,6 +144,7 @@ function evidence(f) {
     });
     f.run(id, start, end, 120);
     const run = f.tables.projectHostedCheckRuns.at(-1);
+    run.status = 'failed';
     const value = JSON.parse(run.value);
     value.status = 'failed';
     run.value = JSON.stringify(value);
@@ -150,11 +157,10 @@ function evidence(f) {
     return pins.map(pin => objects.get(pin.sha256));
   };
   // A stacked batch Candidate is composed with empty inputs; its members ride on memberCandidate.
-  const stack = () => {
-    const built = buildComposePages([]);
-    for (const page of built.pages) objects.set(page.pin.sha256, saveBytes(page.value));
-    return built.manifest.root;
-  };
+  const stack = () => compose([]);
+  // Each input fixture has one entry and fits on one page.
+  const combined = (...pins) =>
+    compose(pins.flatMap(pin => JSON.parse(Buffer.from(objects.get(pin.sha256))).entries));
   const batch = (id, start, end, member, runId = id) => {
     landing(id, start, end, stack(), runId);
     const row = f.tables.projectHostedLandingAttempts.find(row => row.attemptId === id);
@@ -164,6 +170,8 @@ function evidence(f) {
   };
   return {
     input,
+    save,
+    combined,
     attempt,
     landing,
     batch,
@@ -770,6 +778,105 @@ test('P6 context fallback preserves an unlinked pre-window request that settles 
     [],
     'the request has no referenced identity in the window; zero context changes the required report',
   );
+});
+
+test('unlinked legacy submissions and standalone checks preserve classification across compact reads', async () => {
+  const f = fixture();
+  const e = evidence(f);
+  const fixerIntent = randomUUID();
+  const priorLane = e.input(randomUUID(), fixerIntent, head('a'), at(-30));
+  e.fail('other-lane-failure', at(-20), at(-15), priorLane);
+  const fixerLane = randomUUID();
+  const fixer = e.input(fixerLane, fixerIntent, head('b'), at(-10));
+  e.landing('fixer', at(1), at(2), fixer);
+
+  const retryIntent = randomUUID();
+  const retryLane = randomUUID();
+  const retry = e.input(retryLane, retryIntent, head('c'), at(-30));
+  const unrelated = e.input(randomUUID(), randomUUID(), head('d'), at(-30));
+  e.fail('combined-failure', at(-20), at(-15), e.combined(unrelated, retry));
+  e.save(retryLane, head('c'), at(-10));
+  e.landing('retry', at(3), at(4), retry);
+
+  const standalone = e.input(randomUUID(), randomUUID(), head('e'), at(-30));
+  const standaloneRun = f.run('standalone', at(-20), at(-15), 120, {
+    status: 'failed',
+    candidate: { inputs: standalone },
+  });
+  standaloneRun.status = 'failed';
+  e.landing('unknown', at(5), at(6), standalone);
+
+  const report = records =>
+    Object.fromEntries(calculateSelfMetrics(records, period).metric1.rows.map(row => [row.id, row.path]));
+  const canonical = (await readHostedMetricPages(f.query, period)).records;
+  assert.deepEqual(report(canonical), {
+    fixer: 'after-fixer',
+    retry: 'after-retry',
+    unknown: 'unknown',
+  });
+  f.projectRuns();
+  const compact = (await readHostedMetricPages(f.query, period)).records;
+  assert.deepEqual(report(compact), report(canonical));
+  assert.deepEqual(metricsSurface(compact, period), metricsSurface(canonical, period));
+});
+
+test('tenfold unrelated pre-window requests, attempts, runs and same-Lane saves preserve the report', async t => {
+  const f = fixture();
+  const e = evidence(f);
+  const lane = randomUUID();
+  const pin = e.input(lane, randomUUID(), head('a'), at(-10));
+  e.landing('current', at(1), at(2), pin);
+  e.landing('bill-history', at(-20), at(-19), pin);
+  f.run('bill-history', at(-20), at(-19), 60);
+  await f.recordBill({
+    operationId: randomUUID(),
+    provider: 'github-actions',
+    periodFrom: at(-30),
+    periodTo: period.to,
+    billedUsd: 2,
+    listUsd: 2,
+    usage: { 'runner-minute': 1 },
+    rates: { 'runner-minute': 0.008 },
+    basis: 'Synthetic bill parity',
+  });
+  const addUnrelated = (from, to) => {
+    for (let index = from; index < to; index++) {
+      const id = `unrelated-${index}`;
+      e.fail(id, at(-90), at(-80), null);
+      e.save(lane, head('b'), at(-85));
+    }
+    f.projectRuns();
+  };
+  const read = async () => {
+    const before = { ...f.meter };
+    const { records } = await readHostedMetricPages(f.query, period);
+    assert.equal(f.meter.writes, before.writes);
+    return {
+      surface: metricsSurface(records, period),
+      documents: f.meter.documents - before.documents,
+      bytes: f.meter.bytes - before.bytes,
+      calls: f.meter.calls - before.calls,
+    };
+  };
+  addUnrelated(0, 100);
+  const baseline = await read();
+  addUnrelated(100, 1000);
+  const grown = await read();
+  assert.deepEqual(grown.surface, baseline.surface);
+  const [bill] = grown.surface.totals['5.8'].periods;
+  assert.equal(bill.landings, 2, 'the requested bill counts the pre-window landing');
+  assert.equal(bill.usage['runner-minute'], 1, 'the requested bill counts the pre-window run');
+  // Fixture DB read ceilings while the complete fallback remains required.
+  // An exact reader can reduce any of these costs without changing the report.
+  for (const [scale, { documents, bytes, calls }, ceiling] of [
+    [1, baseline, { documents: 555, bytes: 250_000, calls: 14 }],
+    [10, grown, { documents: 5150, bytes: 2_410_000, calls: 50 }],
+  ]) {
+    t.diagnostic(JSON.stringify({ scale, documents, bytes, calls }));
+    assert(documents <= ceiling.documents, `${scale}x fixture document reads`);
+    assert(bytes <= ceiling.bytes, `${scale}x fixture serialized bytes read`);
+    assert(calls <= ceiling.calls, `${scale}x fixture query calls`);
+  }
 });
 
 test('one first-try rule: a recompose after main moved counts against first try only when it threw a started check away', async () => {
