@@ -20,8 +20,8 @@ import { urgentNotApplied } from '../src/receipt-slim';
 import { invariant } from '../src/errors';
 import { sourceStepFailureField } from '../src/hosted-source-retry';
 import { preparingSourceStep } from './projectHostedPreparingSource';
-import type { QueueStatusKey } from '../src/hosted-queue-status';
-import { QUEUE_VIEW_LIMIT, QUEUE_VIEW_PAGES } from '../src/hosted-queue-view';
+import { QUEUE_VIEW_LIMIT } from '../src/hosted-queue-view';
+import { queueComposeLanes, queueIntentLanes, queueViewKeys } from './projectHostedQueueEntries';
 import { auditRow, mainRedField } from './projectHostedMainAuditState';
 import { usualCheck } from './projectFailureCause';
 import { landingOrderWaitForReader } from './projectHostedLandingOrder';
@@ -48,14 +48,7 @@ export const read = query({
         .query('projectHostedLandingQueues')
         .withIndex('by_project_and_channel', q => q.eq('projectId', projectId).eq('channel', 'main'))
         .unique();
-      const pages = await ctx.db
-        .query('projectHostedLandingQueueStatus')
-        .withIndex('by_project_and_page', q => q.eq('projectId', projectId))
-        .order('asc')
-        .take(QUEUE_VIEW_PAGES);
-      const keys = pages
-        .flatMap(page => JSON.parse(page.value) as QueueStatusKey[])
-        .sort((a, b) => (a.position ?? Infinity) - (b.position ?? Infinity));
+      const keys = await queueViewKeys(ctx, projectId);
       const train = new Set(queue?.train ?? []);
       const entries = [];
       for (const key of keys.slice(0, take)) {
@@ -77,28 +70,10 @@ export const read = query({
         // A title is display only: an unreadable body leaves it null, not the view failed.
         const body = record ? await hostedRecordBody(ctx, record).catch(() => null) : null;
         const parsed = body ? hostedRecordSchema.safeParse(JSON.parse(body)) : null;
-        const lanes = intentId
-          ? await ctx.db
-              .query('projectHostedRecordHeads')
-              .withIndex('by_project_and_kind_and_parent', q =>
-                q.eq('projectId', projectId).eq('kind', 'lane').eq('parent', intentId),
-              )
-              .take(2)
-          : [];
-        // The Lane this landing composed (friction a0faf3a9): its compose selection, one indexed read.
-        // A resolution Lane shares its origin's Intent, so the Intent's first Lane can be the wrong one.
-        const composed = state.request.finish?.composeOperationId
-          ? await ctx.db
-              .query('projectHostedComposeSelections')
-              .withIndex('by_project_and_actor_and_operation_and_kind_and_key', q =>
-                q
-                  .eq('projectId', projectId)
-                  .eq('actor', state.actor)
-                  .eq('operationId', state.request.finish!.composeOperationId!)
-                  .eq('kind', 'inputs'),
-              )
-              .take(2)
-          : [];
+        const [composed, lanes] = await Promise.all([
+          queueComposeLanes(ctx, projectId, state),
+          queueIntentLanes(ctx, projectId, intentId),
+        ]);
         const laneId = composed.length === 1 ? composed[0]!.key : (lanes[0]?.key ?? null);
         const hold = landingHold(state, laneId ?? undefined);
         // Main already took files this entry changes: it needs its Lane synced, not more waiting (f7539ebb).

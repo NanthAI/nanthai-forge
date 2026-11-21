@@ -68,9 +68,11 @@ test('48049998: every hold that waits for the owner has a decision target; a req
         held('policy', 'review', 10, { submissionId: 's1', attemptId: 'a1' }),
         held('asked', 'review', 20, { submissionId: 's2', attemptId: 'a2' }),
         held('conflict', 'conflict', 30, { submissionId: 's3' }),
+        held('request-only', 'unknown', 40),
       ],
       [
         request('asked', 'lane', { head: 'b'.repeat(64) }),
+        request('request-only', 'lane', { head: 'c'.repeat(64) }),
         request('setting:runner', 'setting', { reason: 'Run 8 checks at once.' }),
       ],
     ),
@@ -83,8 +85,13 @@ test('48049998: every hold that waits for the owner has a decision target; a req
   );
   assert.deepEqual(
     target('asked'),
-    { head: 'b'.repeat(64) },
-    "a Lane's request decides its held landing too",
+    { landing: { submissionId: 's2', attemptId: 'a2' } },
+    'the exact submission stays the decision target when its Lane also has a request',
+  );
+  assert.deepEqual(
+    target('request-only'),
+    { head: 'c'.repeat(64) },
+    'a standalone Lane request still names its own head',
   );
   assert.equal(
     decideTarget(view.fyi.find(row => row.laneId === 'conflict')),

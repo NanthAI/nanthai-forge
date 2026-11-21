@@ -127,7 +127,7 @@ export function startOfDay(now: number) {
 /** Held Lanes that ask nobody, as FYI rows: the version is why and since, so a new hold shows again. */
 function heldRows(held: readonly NowRow[]): FyiRow[] {
   return held.map(row => ({
-    key: `held:${row.laneId}@${row.why}.${row.since}`,
+    key: `held:${row.landing?.submissionId ?? row.laneId}@${row.why}.${row.since}`,
     at: row.since,
     area: 'code',
     event: false,
@@ -136,7 +136,7 @@ function heldRows(held: readonly NowRow[]): FyiRow[] {
     title: row.head,
     who: row.who,
     fact: [row.next ? `next: ${row.next}` : '', row.note ?? ''].filter(Boolean).join(' · '),
-    links: [{ label: 'Open the Lane', to: { place: 'lanes', rest: row.laneId } }],
+    links: row.laneId ? [{ label: 'Open the Lane', to: { place: 'lanes', rest: row.laneId } }] : [],
   }));
 }
 

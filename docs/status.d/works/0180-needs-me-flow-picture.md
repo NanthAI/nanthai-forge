@@ -16,3 +16,4 @@
   and quiets its loops after a minute without input. Reduced motion removes the animation.
 
 - The Lane yard, Lane review, History, Needs you and Item discussion use the same public byline. It links the handle and agent run when the viewer may see them. The Yard names the latest save. Lane review names the save that published the pinned head. Held reviews, History and discussion use the recorded submission, receipt or comment.
+- Needs you and `nforge agent ROOT approve-link '{}'` list held reviews from the landing queue, with one approval link per submission. Overlapping Lanes and later Lane saves leave those reviews visible.

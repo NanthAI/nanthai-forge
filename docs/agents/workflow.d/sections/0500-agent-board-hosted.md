@@ -142,8 +142,12 @@ Issue (`issue:ISSUE_ID`), or to the whole project (`project`).
 - The owner finds requests without a board note: Needs you shows an approval item for each
   open request that waits for them (Lane approval, fork pull request run, held settings
   change) with its `/approve` link, and `approve-link '{}'` (no `operationId`) prints the
-  same list: `requests` (each with `kind`, `state`, `needsOwner`, `label`, `nextStep`, `url`),
-  `attention` (the ones waiting) and `next`. `complete:false` means a read bound was hit, so
+  same decisions: `requests` (each with `kind`, `state`, `needsOwner`, `label`, `nextStep`, `url`),
+  `reviews` (queue submissions held for owner review, when present),
+  `attention` (the ones waiting) and `next`. Needs you and the agent inbox find those
+  reviews by submission in the queue's read window, even when a Lane overlaps or its live mark has moved.
+  Each review has the submission's `/approve` link. `reviewsComplete:false` means more reviews were
+  found in the queue window than the agent reply lists. `complete:false` means a request read bound was hit, so
   an absent request is not confirmed absent. `projectHostedApprovals:list` returns every
   open kind (it used to return only Lane requests that hold a landing).
 - Settings changes can come back as an approval request. From an agent sign-in (any

@@ -174,12 +174,23 @@ const openRequestSchema = z.looseObject({
 const openRequestsSchema = z.looseObject({
   requests: z.array(openRequestSchema),
   complete: z.boolean().optional(),
+  reviewsComplete: z.boolean().optional(),
+  reviews: z
+    .array(
+      z.object({
+        laneId: z.string().nullable(),
+        submissionId: z.string(),
+        attemptId: z.string(),
+        url: z.string().nullable(),
+      }),
+    )
+    .optional(),
 });
 
 /**
  * `approve-link` without an operationId: the owner's attention list. Every open approval request of
- * the project (Lane approval, fork pull request run, held settings change) with its page link, the
- * same set and words Needs you shows in the web app. An older server that returns fewer fields is read
+ * the project and each queue submission held for review with its page link. The review submissions
+ * are the same ones Needs you reads from the queue. An older server that returns fewer fields is read
  * through the same derive, so the words match either way.
  */
 export function openApprovalsReply(value: unknown) {
@@ -195,17 +206,25 @@ export function openApprovalsReply(value: unknown) {
       nextStep: request.nextStep ?? state.nextStep,
     };
   });
-  const waiting = requests.filter(request => request.needsOwner);
+  const reviews = read.reviews ?? [];
+  const reviewedLanes = new Set(reviews.map(review => review.laneId));
+  const waiting = requests.filter(
+    request => request.needsOwner && (request.kind !== 'lane' || !reviewedLanes.has(request.laneId)),
+  );
+  const count = waiting.length + reviews.length;
   return {
     ...read,
     requests,
-    attention: waiting.map(request => ({
-      laneId: request.laneId,
-      kind: request.kind,
-      url: request.url ?? null,
-    })),
-    next: waiting.length
-      ? `${waiting.length} approval request${waiting.length === 1 ? ' waits' : 's wait'} for the project owner. Hand each url to them; only the owner approves or declines.`
+    attention: [
+      ...waiting.map(request => ({
+        laneId: request.laneId,
+        kind: request.kind,
+        url: request.url ?? null,
+      })),
+      ...reviews.map(review => ({ ...review, kind: 'review' as const })),
+    ],
+    next: count
+      ? `${count} approval request${count === 1 ? ' waits' : 's wait'} for the project owner. Hand each url to them; only the owner approves or declines.`
       : read.complete === false
         ? "No open request is waiting in the part of the list this read covered; it can't confirm there are none."
         : 'No approval request is waiting for the project owner.',

@@ -23,7 +23,8 @@ import type { LooseEndsRead } from '../../web/src/app/needs/loose-ends';
 const params = new URLSearchParams(location.search);
 const stall = params.get('data') === 'stall';
 document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
-const first = params.get('data') === 'first';
+const review = params.get('data') === 'review';
+const first = params.get('data') === 'first' || review;
 const connect = params.get('data') === 'connect';
 const calm = params.get('data') === 'calm' || stall;
 const variant = params.get('data');
@@ -70,12 +71,22 @@ const baseRead: NeedsRead = first
           agent: 'amber-fox',
           agentClient: 'codex:gpt-example',
           agentAuthored: true,
+          ...(review
+            ? {
+                submissionId: uuid(501),
+                attemptId: uuid(502),
+                url: `/approve?project=synthetic&submission=${uuid(501)}`,
+                note: 'needs owner approval: protected paths .github/workflows/ci.yml',
+              }
+            : {}),
         }),
       ],
       more: 0,
       moreIsLowerBound: false,
       approvals: JSON.stringify({
-        requests: [approval(uuid(1), 'Every landing waits for you until you choose otherwise.', 6)],
+        requests: review
+          ? []
+          : [approval(uuid(1), 'Every landing waits for you until you choose otherwise.', 6)],
         complete: true,
       }),
       canDecide: true,

@@ -282,6 +282,17 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       await checkPhoneDock(page);
     });
 
+    await t.test('a workflow hold opens the approval page for the exact submission', async t => {
+      const page = await open(t, DESK, 'review');
+      const needs = region(page, 'Needs you');
+      const link = needs.getByRole('link', { name: 'Open approval' });
+      assert.equal(
+        await link.getAttribute('href'),
+        '/approve?project=synthetic&submission=5d1c7a0e-0000-4000-8000-000000000501',
+      );
+      assert.match(await needs.locator('.why').textContent(), /\.github\/workflows\/ci\.yml/);
+    });
+
     await t.test('Needs you holds what waits on a person; agent conflicts and refusals are FYI', async t => {
       const page = await open(t, DESK);
       const shell = await page.locator('header.top a.needs .cnt').textContent();

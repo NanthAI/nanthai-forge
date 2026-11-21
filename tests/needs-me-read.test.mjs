@@ -4,15 +4,22 @@
 // approval requests come from the same bounded reads as projectHostedApprovals:list, and an idle view re-runs nothing.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { synthetic } from './hosted-landing-batches-fixture.mjs';
+import { batchesFixture, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { openApprovalsReply } from '../dist/hosted-agent-approval.js';
 const needs = await import(moduleUrl('../convex/projectNeedsMe.ts'));
+const queue = await import(moduleUrl('../convex/projectHostedQueueView.ts'));
+const { needsView } = await import(moduleUrl('../web/src/app/needs/model.ts'));
+const { needsCount } = await import(moduleUrl('../web/src/app/needs/count.ts'));
 const line = await import(moduleUrl('../convex/projectLiveLine.ts'));
 const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
 const landing = await import(moduleUrl('../convex/projectHostedLandingStore.ts'));
-const previousEnvironment = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
-test.before(() => Object.assign(process.env, synthetic));
+const testEnvironment = { ...synthetic, FORGE_WEB_URL: 'https://forge.example.invalid' };
+const previousEnvironment = Object.fromEntries(
+  Object.keys(testEnvironment).map(key => [key, process.env[key]]),
+);
+test.before(() => Object.assign(process.env, testEnvironment));
 test.after(() => {
   for (const [key, value] of Object.entries(previousEnvironment)) {
     if (value === undefined) delete process.env[key];
@@ -37,6 +44,68 @@ const observe = (f, submissionId, patch) =>
     },
     {},
   );
+
+test('4e7a258a: every queued review reaches Needs you and the agent inbox with its approve link', async t => {
+  const f = await batchesFixture(t, {
+    count: 3,
+    memberPaths: ['.github/workflows/ci.yml', 'src/main.ts', 'notes.md'],
+  });
+  const [workflow, other] = f.entries;
+  for (const [entry, path] of [
+    [workflow, '.github/workflows/ci.yml'],
+    [other, 'src/main.ts'],
+  ]) {
+    await observe(f, entry.state.id, before => ({
+      phase: 'ready',
+      observation: { ...before.observation, cause: null, pendingReason: 'waiting-for-review' },
+      error: { code: 'REVIEW_REQUIRED', message: `needs owner approval: protected paths ${path}` },
+    }));
+  }
+  const markFor = entry =>
+    [...f.tables.projectLiveLineLanes.values()].find(mark => mark.laneId === entry.lane.laneId);
+  // Dogfood: the workflow hold overlaps a peer. A newer Lane head can also clear
+  // its held mark while the originally submitted attempt stays in the queue.
+  f.patch('projectLiveLineLanes', markFor(workflow)._id, { overlap: true });
+  f.patch('projectLiveLineLanes', markFor(other)._id, { held: false });
+  const [lineup, attention, agent] = await Promise.all([
+    f.tx('queueView', queue.read, { projectId: f.projectId }).then(JSON.parse),
+    read(f),
+    f
+      .tx('approvalsList', approvals.list, { projectId: f.projectId })
+      .then(JSON.parse)
+      .then(openApprovalsReply),
+  ]);
+  const expected = lineup.entries
+    .filter(entry => entry.landingState.state === 'held-review')
+    .map(entry => ({
+      laneId: entry.laneId,
+      submissionId: entry.submissionId,
+      url: `https://forge.example.invalid/approve?project=${encodeURIComponent(f.projectId)}&submission=${entry.submissionId}`,
+    }));
+  assert.equal(lineup.entries.length, 3);
+  assert.equal(expected.length, 2, 'only the two held reviews need a decision');
+  const projectReview = ({ laneId, submissionId, url }) => ({ laneId, submissionId, url });
+  const sort = rows => rows.map(projectReview).sort((a, b) => a.submissionId.localeCompare(b.submissionId));
+  const view = needsView(attention);
+  assert.deepEqual(sort(view.now), sort(expected));
+  assert.equal(needsCount(attention).n, expected.length);
+  assert.deepEqual(sort(agent.attention.filter(row => row.kind === 'review')), sort(expected));
+  assert.match(agent.next, /^2 approval requests wait/);
+  assert.match(
+    view.now.find(row => row.landing.submissionId === workflow.state.id).note,
+    /\.github\/workflows\/ci\.yml/,
+  );
+
+  await observe(f, workflow.state.id, before => ({
+    observation: { ...before.observation, pendingReason: 'queued' },
+    error: null,
+  }));
+  assert.deepEqual(
+    needsView(await read(f)).now.map(row => row.landing.submissionId),
+    [other.state.id],
+    'a resolved review leaves Needs you even when the Lane still overlaps',
+  );
+});
 
 test('Needs me lists the line’s held Lanes with the recorded reason, and an idle view re-runs nothing', async t => {
   const f = await finishFixture(t);

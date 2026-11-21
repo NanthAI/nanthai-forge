@@ -8,10 +8,22 @@ import { githubContinue } from '../../review/github-continue';
 
 export function useDecideRun(decide: Decide, announce: (text: string) => void) {
   const [busy, setBusy] = useState<string | null>(null);
-  const run = async (laneId: string, target: DecideTarget, decision: 'grant' | 'decline', done: string) => {
-    setBusy(`${laneId}:${decision}`);
+  const run = async (
+    laneId: string | null,
+    target: DecideTarget,
+    decision: 'grant' | 'decline',
+    done: string,
+  ) => {
+    const input =
+      'landing' in target
+        ? { ...target, ...(laneId ? { laneId } : {}), decision }
+        : laneId
+          ? { ...target, laneId, decision }
+          : null;
+    if (!input) return;
+    setBusy(decision);
     try {
-      const reply = await decide({ laneId, decision, ...target });
+      const reply = await decide(input);
       const failed = /"error"\s*:/.test(reply)
         ? (JSON.parse(reply).error?.message as string | undefined)
         : undefined;
@@ -34,7 +46,7 @@ export function DecisionKeys({
   decide,
   announce,
 }: {
-  laneId: string;
+  laneId: string | null;
   target: DecideTarget;
   decide: Decide;
   announce: (text: string) => void;

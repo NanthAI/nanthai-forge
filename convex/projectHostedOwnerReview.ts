@@ -172,13 +172,13 @@ export function noteHeldPolicy<T extends { error?: { code: string; message: stri
   const error = submission.error ?? { code: 'REVIEW_REQUIRED', message: 'Waiting for review by a person' };
   return { ...submission, error: { ...error, message: `${error.message}. ${heldPolicyNote(pin)}` } };
 }
+export function approvePath(projectId: string, submissionId: string) {
+  return `/approve?${new URLSearchParams({ project: projectId, submission: submissionId })}`;
+}
+
 export function approveUrl(projectId: string, submissionId: string) {
   const web = process.env.FORGE_WEB_URL;
-  if (!web) return null;
-  const url = new URL('/approve', web);
-  url.searchParams.set('project', projectId);
-  url.searchParams.set('submission', submissionId);
-  return url.href;
+  return web ? new URL(approvePath(projectId, submissionId), web).href : null;
 }
 /** Only the current held operation needs the project's public address handle. Never infer it from
  * the owner subject, the submitter, a provider name or an email. No lookup on an unheld operation. */

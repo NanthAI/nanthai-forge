@@ -37,6 +37,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { deriveApproval } from '../src/approval-state';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { openLandingReviews } from './projectHostedReviewInbox';
 
 /** Issue fe5bea80: a builder asks the project owner for a go on one saved Lane; the owner grants or
  * declines in one step; a waiting builder's subscription (`observe`) returns on that write. */
@@ -412,7 +413,22 @@ export const list = query({
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read approval requests.');
       await accessibleProject(ctx, input.projectId, user.subject);
-      return await openApprovalRequests(ctx, input.projectId);
+      const [requests, { reviews, reviewsComplete }] = await Promise.all([
+        openApprovalRequests(ctx, input.projectId),
+        openLandingReviews(ctx, input.projectId),
+      ]);
+      return reviews.length || !reviewsComplete
+        ? canonicalPayload({
+            ...JSON.parse(requests),
+            reviews: reviews.map(({ laneId, submissionId, attemptId, url }) => ({
+              laneId,
+              submissionId,
+              attemptId,
+              url,
+            })),
+            ...(!reviewsComplete ? { reviewsComplete: false } : {}),
+          })
+        : requests;
     } catch (error) {
       return report(error);
     }

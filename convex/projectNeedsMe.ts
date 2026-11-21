@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Needs me (Items 9e748e41, 12fde646): what holds work until a person decides, in one bounded subscription.
-// It starts from the live line's held marks (the same set the top bar counts as "Needs you"), so the count
-// beside Needs you, the screen's count and its rows always agree. For each held Lane it adds the Lane's title
-// and holder (its slim presence row) and why Forge holds it (the bound landing's recorded observation), and
+// Review decisions come from the queue's submissions. Other holds start from the live line's held marks.
+// The screen and top bar share this read. For each held Lane it adds the Lane's title and holder
+// (its slim presence row) and why Forge holds it (the bound landing's recorded observation), and
 // it adds the open approval requests, and the Lanes parked for the reader (Item e1633718: one index range on the parked
 // Lanes' routing rows, plus each one's slim presence row). No paths, source, activity or check output; idle costs nothing.
 import { v } from 'convex/values';
@@ -10,12 +10,13 @@ import { query } from './cliServer';
 import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
-import { lineOwner, type LineOwnerValue } from './projectLiveLineOwners';
+import { lineOwner } from './projectLiveLineOwners';
 import { landingRow } from './projectHostedLandingStore';
 import { finishRow } from './projectHostedFinishWake';
 import { openApprovalRequests } from './projectHostedApprovals';
 import { messagesTo } from './projectNeedsFyi';
-import { splitAgentActor } from '../src/agent-slug';
+import { openLandingReviews, reviewSubmitter } from './projectHostedReviewInbox';
+import { approvePath, approveUrl } from './projectHostedOwnerReview';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { report } from './errors';
 import { invariant } from '../src/errors';
@@ -47,7 +48,7 @@ export const needsMeWhy = v.union(
 export const needsMeResult = v.object({
   held: v.array(
     v.object({
-      laneId: v.string(),
+      laneId: v.union(v.string(), v.null()),
       /** The Lane's Intent, so several held Lanes of one Item can be told apart and grouped. */
       intentId: v.union(v.string(), v.null()),
       title: v.union(v.string(), v.null()),
@@ -64,6 +65,8 @@ export const needsMeResult = v.object({
        * here with the calls the /approve page makes (projectHostedAcceptance:approve, projectHostedOwnerReview:decline).
        * A landing-policy hold (protected paths, supervised) has no Lane approval request to decide instead. */
       attemptId: v.optional(v.string()),
+      /** The owner's review page for this submission, when the deployment has a web address. */
+      url: v.optional(v.union(v.string(), v.null())),
       /** When the hold began, as far as the records say (ms). */
       since: v.number(),
       /** A Lane held for a dependency: the Lane it lands after, and its title, when the records name it (Item
@@ -122,49 +125,48 @@ export const needsMeResult = v.object({
 type Held = Doc<'projectLiveLineLanes'>;
 
 /** Why one held Lane is held: the landing its mark is bound to, read once. Its recorded cause wins over an overlap mark. */
-async function reason(ctx: QueryCtx, projectId: Id<'hostedProjects'>, mark: Held) {
+async function reason(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  mark: Held,
+  reviewIds: ReadonlySet<string>,
+) {
   const owner = await lineOwner(ctx.db, mark.laneId);
-  const pageId = owner ? (JSON.parse(owner.value) as LineOwnerValue).pageId : undefined;
-  const submissionId = pageId ? (await ctx.db.get(pageId))?.submissionId : undefined;
+  // Binding stamps the submission on the owner row. A new save clears it in
+  // the same transaction that detaches the page.
+  const submissionId = owner?.projectId === projectId ? owner.submissionId : undefined;
+  if (submissionId && reviewIds.has(submissionId)) return null;
   const row = submissionId ? await landingRow(ctx, { projectId, submissionId }) : null;
   const parsed = row ? hostedLandingStateSchema.safeParse(JSON.parse(row.value)) : null;
   const state = parsed?.success ? parsed.data : null;
   const observed = state?.observation;
-  // A withdrawal first (its observation reads as a refusal), then the landing's recorded cause; an overlap mark is only
-  // the fallback (owner dogfood 2026-11-17: a failed admission check on an overlapping Lane read as "Conflict").
+  // A recorded landing hold or failure wins over an incidental overlap mark.
   const why =
     state?.error?.code === 'LANDING_CANCELLED'
       ? 'withdrawn'
-      : observed?.cause
-        ? observed.cause
-        : mark.overlap
-          ? 'conflict'
-          : observed?.pendingReason === 'waiting-for-review'
-            ? 'review'
+      : observed?.pendingReason === 'waiting-for-review'
+        ? 'review'
+        : (observed?.cause ??
+          (mark.overlap
+            ? 'conflict'
             : observed?.pendingReason === 'waiting-for-dependency'
               ? 'dependency'
-              : 'unknown';
+              : 'unknown'));
   const ended = state?.timing?.ciEndedAt ?? state?.timing?.settledAt;
   const parentLaneId = why === 'dependency' && state ? await dependencyLane(ctx, projectId, state.id) : null;
-  const agentAuthored = state?.request.authorship
-    ? state.request.authorship.kind === 'agent'
-    : Boolean(row?.agentRun || row?.agentClient || state?.request.agent);
   return {
     why,
     note: state?.error?.message ? state.error.message.replace(/\s+/g, ' ').slice(0, NOTE_CHARS) : null,
     submissionId: state?.id ?? null,
-    ...(why === 'review' && state?.attemptId ? { attemptId: state.attemptId } : {}),
+    ...(why === 'review' && state
+      ? {
+          attemptId: state.attemptId,
+          url: approveUrl(projectId, state.id) ?? approvePath(projectId, state.id),
+        }
+      : {}),
     since: ended ? Date.parse(ended) : mark.changedAt,
     parentLaneId,
-    submitter:
-      row && state
-        ? {
-            actor: row.actor,
-            agent: agentAuthored ? (row.agentRun ?? splitAgentActor(row.actor)?.agent ?? null) : null,
-            ...(agentAuthored && row.agentClient ? { agentClient: row.agentClient } : {}),
-            ...(agentAuthored ? { agentAuthored: true as const } : {}),
-          }
-        : null,
+    submitter: row && state ? reviewSubmitter(row, state) : null,
   } as const;
 }
 
@@ -198,7 +200,7 @@ export const read = query({
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read what needs you.');
       const project = await accessibleProject(ctx, projectId, user.subject);
-      const [marks, approvals, asks, parks] = await Promise.all([
+      const [marks, approvals, asks, parks, { reviews }] = await Promise.all([
         ctx.db
           .query('projectLiveLineLanes')
           .withIndex('by_project_and_held', q => q.eq('projectId', projectId).eq('held', true))
@@ -211,7 +213,9 @@ export const read = query({
             q.eq('projectId', projectId).eq('parkedFor', user.subject),
           )
           .take(NEEDS_ME_PARKED_LIMIT + 1),
+        openLandingReviews(ctx, projectId),
       ]);
+      const reviewIds = new Set(reviews.map(review => review.submissionId));
       const shown = marks.slice(0, NEEDS_ME_HELD_LIMIT);
       // A goal that is only a raw id names its Item instead (the Lane's Intent is the Item it started from): one
       // point read, only for such a row.
@@ -233,12 +237,14 @@ export const read = query({
           .query('projectHostedPresence')
           .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
           .unique();
-      const held = await Promise.all(
+      const marked = await Promise.all(
         shown.map(async mark => {
-          const [presence, { parentLaneId, submitter, ...why }] = await Promise.all([
-            presenceOf(mark.laneId),
-            reason(ctx, projectId, mark),
-          ]);
+          const recorded = await reason(ctx, projectId, mark, reviewIds);
+          // One decision for all the Lane marks on this exact submission.
+          // A different submission on the same Lane can still have its own hold.
+          if (!recorded) return null;
+          const { parentLaneId, submitter, ...why } = recorded;
+          const presence = await presenceOf(mark.laneId);
           // A review is for the submitted landing; for other holds the byline names who
           // acts next. Select only one account so privacy mapping reads no second person.
           const by = why.why === 'review' ? (submitter ?? presence) : presence;
@@ -259,6 +265,19 @@ export const read = query({
           };
         }),
       );
+      const reviewRows = await Promise.all(
+        reviews.map(async review => {
+          const presence = review.laneId ? await presenceOf(review.laneId) : null;
+          return {
+            ...review,
+            intentId: review.intentId ?? presence?.intentId ?? null,
+            title: await titleOf(presence),
+            why: 'review' as const,
+            note: review.note?.replace(/\s+/g, ' ').slice(0, NOTE_CHARS) ?? null,
+          };
+        }),
+      );
+      const held = [...marked.filter(mark => mark !== null), ...reviewRows];
       // parkedFor is the named holder's account, or the starter's when no one is named (projectHostedPresence.ts
       // routeLanePark); the Lane's slim presence row holds its title, people, park and last activity.
       const parked = [];

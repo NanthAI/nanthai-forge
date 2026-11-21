@@ -329,7 +329,7 @@ export function NeedsMeView({
             waiting={
               view
                 ? [
-                    ...view.now.map(r => r.laneId),
+                    ...view.now.map(r => r.landing?.submissionId ?? r.laneId),
                     ...view.asks.map(r => r.id),
                     ...view.parked.map(r => r.laneId),
                   ].join()
@@ -376,17 +376,31 @@ export function NeedsMeView({
                           ) : (
                             <Held
                               project={route}
-                              key={row.laneId}
+                              key={row.landing?.submissionId ?? row.laneId}
                               row={row}
                               drawnAt={drawnAt}
-                              laneHref={at({ place: 'lanes', rest: row.laneId })}
+                              laneHref={row.laneId ? at({ place: 'lanes', rest: row.laneId }) : null}
+                              anchor={
+                                view.now.find(entry => entry.laneId === row.laneId) === row
+                                  ? (row.laneId ?? row.submissionId)
+                                  : row.submissionId
+                              }
                               decide={decide}
                               canDecide={read!.canDecide}
                               announce={announce}
                             />
                           );
                         return drawerContent && !phone ? (
-                          <details key={'choices' in row ? row.id : row.laneId} className="sumdec">
+                          <details
+                            key={
+                              'choices' in row
+                                ? row.id
+                                : 'park' in row
+                                  ? `park:${row.laneId}`
+                                  : (row.landing?.submissionId ?? row.laneId)
+                            }
+                            className="sumdec"
+                          >
                             <summary>
                               <span className="ttl" dir="auto">
                                 {'choices' in row ? row.text : row.head}
@@ -587,6 +601,7 @@ function Held({
   project,
   drawnAt,
   laneHref,
+  anchor,
   decide,
   canDecide,
   announce,
@@ -594,7 +609,8 @@ function Held({
   row: NowRow;
   project: WhoProject;
   drawnAt: number;
-  laneHref: string;
+  laneHref: string | null;
+  anchor: string | null;
   decide: Decide;
   canDecide: boolean;
   announce: (text: string) => void;
@@ -613,7 +629,7 @@ function Held({
     <div
       className="dec"
       tabIndex={-1}
-      id={`d-${row.laneId}`}
+      id={anchor ? `d-${anchor}` : undefined}
       data-st={row.word === 'Conflict' ? 'conflict' : undefined}
     >
       <div className="dtop">
@@ -621,7 +637,7 @@ function Held({
         <span>
           holds{' '}
           <span className="mono" translate="no">
-            Lane {row.mark}
+            {row.laneId ? 'Lane' : 'Submission'} {row.mark}
           </span>
           {row.siblings > 1 ? `, 1 of ${row.siblings} held for this Item` : ''}
         </span>
@@ -645,9 +661,16 @@ function Held({
         {target && canDecide ? (
           <DecisionKeys laneId={row.laneId} target={target} decide={decide} announce={announce} />
         ) : null}
-        <A className="btn ghost sm" href={laneHref}>
-          {link}
-        </A>
+        {row.url ? (
+          <A className="btn ghost sm" href={row.url}>
+            Open approval
+          </A>
+        ) : null}
+        {laneHref ? (
+          <A className="btn ghost sm" href={laneHref}>
+            {link}
+          </A>
+        ) : null}
         <Key kind="ghost" size="sm" onClick={() => setLater(true)}>
           Later
         </Key>

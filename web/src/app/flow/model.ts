@@ -44,7 +44,13 @@ export type Station = {
   passed: number;
 };
 /** What Needs you knows of a held Lane: its row's state word, head and person. */
-export type HeldRow = { laneId: string; word: StateWord; tag: string; head: string; who: string | null };
+export type HeldRow = {
+  laneId: string | null;
+  word: StateWord;
+  tag: string;
+  head: string;
+  who: string | null;
+};
 
 const colourOf = (word: StateWord): BlockState =>
   word === 'Check failed' || word === 'Not run' ? 'failed' : word === 'Conflict' ? 'conflict' : 'waiting';

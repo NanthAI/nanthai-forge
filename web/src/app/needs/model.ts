@@ -154,9 +154,14 @@ export function whoOf(actor: string | null | undefined, agent: string | null | u
 
 /** A bare id (a UUID, or a long hex digest) is never a title: such a goal falls back to the short Lane mark. */
 const BARE_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{12,64})$/i;
-export function laneTitle(lane: Pick<HeldLane, 'title' | 'laneId'>) {
+export function laneTitle(
+  lane: Pick<HeldLane, 'title' | 'laneId'> & Partial<Pick<HeldLane, 'submissionId'>>,
+) {
   const title = lane.title?.replace(/\s+/g, ' ').trim();
-  return title && !BARE_ID.test(title) ? title : `Lane ${lane.laneId.slice(0, 8)}`;
+  if (title && !BARE_ID.test(title)) return title;
+  return lane.laneId
+    ? `Lane ${lane.laneId.slice(0, 8)}`
+    : `Submission ${lane.submissionId?.slice(0, 8) ?? ''}`;
 }
 
 function approvalsOf(payload: string): { requests: Approval[]; complete: boolean } {
@@ -211,10 +216,10 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
     if (lane.intentId) perItem.set(lane.intentId, (perItem.get(lane.intentId) ?? 0) + 1);
   const rows = read.held
     .map(lane => {
-      const approval = laneApprovals.get(lane.laneId) ?? null;
+      const approval = laneApprovals.get(lane.laneId ?? '') ?? null;
       const why: HeldWhy = lane.why === 'unknown' && approval ? 'review' : lane.why;
       const who = whoOf(lane.actor, lane.agent);
-      const waits = waitsOnPerson({ why }, asked.has(lane.laneId), read.canDecide);
+      const waits = waitsOnPerson({ why }, asked.has(lane.laneId ?? ''), read.canDecide);
       // A dependency the read names: the Lane it lands after, by name (Item 9e748e41).
       const after =
         why === 'dependency' && lane.dependsOn
@@ -235,7 +240,7 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
           why === 'review' && lane.submissionId && lane.attemptId
             ? { submissionId: lane.submissionId, attemptId: lane.attemptId }
             : null,
-        mark: lane.laneId.slice(0, 8),
+        mark: (lane.laneId ?? lane.submissionId ?? '').slice(0, 8),
         siblings: lane.intentId ? (perItem.get(lane.intentId) ?? 1) : 1,
         next: waits ? null : after ? `it lands after ${after}` : nextStep(why, who),
       };

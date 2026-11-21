@@ -21,7 +21,7 @@ export type HeldWhy =
 
 /** One held Lane as projectNeedsMe:read returns it (convex/projectNeedsMe.ts `needsMeResult`). */
 export type HeldLane = {
-  laneId: string;
+  laneId: string | null;
   intentId?: string | null;
   title: string | null;
   actor: string | null;
@@ -33,6 +33,7 @@ export type HeldLane = {
   submissionId: string | null;
   /** The held attempt of a landing held for review (the owner decides that exact attempt). */
   attemptId?: string;
+  url?: string | null;
   since: number;
   /** A Lane held for a dependency: the Lane it lands after, when the records name it. */
   dependsOn?: { laneId: string; title: string | null };
@@ -121,7 +122,9 @@ export function needsCount(
 ): { n: number; atLeast: boolean } | undefined {
   if (!read) return undefined;
   const asked = laneRequests(read.approvals);
-  const held = read.held.filter(lane => waitsOnPerson(lane, asked.has(lane.laneId), read.canDecide)).length;
+  const held = read.held.filter(lane =>
+    waitsOnPerson(lane, asked.has(lane.laneId ?? ''), read.canDecide),
+  ).length;
   const parked = (read.parked ?? []).filter(row => parkShown(row, now)).length;
   return { n: held + (read.asks?.length ?? 0) + parked, atLeast: read.more > 0 || read.parkedMore === true };
 }
