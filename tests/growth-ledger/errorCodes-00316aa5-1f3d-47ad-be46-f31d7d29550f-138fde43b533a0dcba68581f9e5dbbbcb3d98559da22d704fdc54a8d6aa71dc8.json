@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 1,
+  "reason": "660abe45: a dedicated ruleset refusal code replaces generic reporting for these ref writes. The generic code remains necessary for all other GitHub API failures.",
+  "date": "2026-11-21"
+}

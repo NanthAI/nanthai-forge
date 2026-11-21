@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
+export function githubRulesetRefusal(detail: string): boolean {
+  return /\bGH013\b|\brepository rule violations\b/i.test(detail);
+}
+
 /** Explicit ref/access rejections establish non-execution, independently of transience. */
 export function gitPushRejectionClass(detail: string): string | undefined {
   if (/without\s+['"`]?workflow['"`]?\s+scope/i.test(detail)) return 'workflow-scope';
-  if (/protected (?:branch|ref)|GH006|GH013|repository rule violations/i.test(detail)) return 'ref-policy';
+  if (/protected (?:branch|ref)|GH006/i.test(detail) || githubRulesetRefusal(detail)) return 'ref-policy';
   if (
     /invalid ref(?:name|spec|erence)?|not a valid ref|funny refname|deny updating a hidden ref|ref name[^\n]*(?:invalid|not allowed)/i.test(
       detail,

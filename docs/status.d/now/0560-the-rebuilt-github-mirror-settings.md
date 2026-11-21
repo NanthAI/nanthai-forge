@@ -7,3 +7,5 @@ and short receipt ids (first 20, then a remainder count), without waiting for an
 landing. Pre-Pause off mirrors keep their Turn the mirror on panel and recorded
 direction. Owner CLI recovery remains available for enabled mirrors; Pause,
 un-pause and Disconnect require the person ([mirror workflow](../../workflows.md#automatic-main-mirror)).
+GitHub ruleset refusals on mirror ref writes surface as `GITHUB_RULE_BLOCKED`
+with the rule details GitHub supplies and the retained job's recovery step.

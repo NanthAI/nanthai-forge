@@ -251,6 +251,88 @@ test('real action: GitHub 422 on trees fails once with its bounded message in jo
   assert.match(hostedMirrorStatusText(status, Date.now()), /GitRPC::BadObjectState/);
 });
 
+for (const { status, body, code, detail } of [
+  {
+    status: 422,
+    body: { message: 'Repository rule violations found\nCannot update this protected ref.' },
+    code: 'GITHUB_RULE_BLOCKED',
+    detail: /Cannot update this protected ref/,
+  },
+  {
+    status: 422,
+    body: {
+      message: `Validation Failed ${'Details omitted from the display. '.repeat(20)}`,
+      errors: [{ code: 'GH013', message: 'Commits must have verified signatures.' }],
+    },
+    code: 'GITHUB_RULE_BLOCKED',
+    detail: /Commits must have verified signatures/,
+  },
+  {
+    status: 422,
+    body: { message: 'Reference update failed' },
+    code: 'GITHUB_SYNC_API',
+    detail: /Reference update failed/,
+  },
+  {
+    status: 403,
+    body: { message: 'Resource not accessible by integration' },
+    code: 'GITHUB_SYNC_API',
+    detail: /Resource not accessible by integration/,
+  },
+])
+  test(`real action: a ref write refusal matching ${detail} is retained as ${code}`, async t => {
+    const gitCalls = [];
+    const f = await fixture(
+      t,
+      () => false,
+      undefined,
+      (url, init) => {
+        const path = new URL(url).pathname;
+        if (!path.includes('/git/')) return;
+        gitCalls.push(`${init.method} ${path.split('/git/')[1]}`);
+        if (path.endsWith('/git/refs/heads/main')) return Response.json(body, { status });
+      },
+    );
+    await f.step();
+    const job = f.job();
+    assert.equal(job.status, 'failed');
+    assert.equal(job.error, code);
+    assert.equal(job.httpStatus, status);
+    assert.equal(job.apiOperation, 'PATCH git/refs');
+    assert.match(job.detail, detail);
+    assert.match(job.detail, /nforge github resume PROJECT/);
+    if (code === 'GITHUB_RULE_BLOCKED') assert.match(job.detail, /Review the blocking rule in GitHub/);
+    assert.equal(f.scheduled.length, 1, 'the refusal enqueues no retry');
+    assert.equal(f.github.remote(), f.github.root.commit);
+    assert.deepEqual(gitCalls, [
+      'POST blobs',
+      'POST trees',
+      'GET ref/heads/main',
+      'POST commits',
+      'PATCH refs/heads/main',
+    ]);
+    const mirrorStatus = await f.status();
+    assert.equal(mirrorStatus.error, code);
+    assert.match(hostedMirrorStatusText(mirrorStatus, Date.parse(f.github.seed.at)), detail);
+  });
+
+test('a ruleset refusing Candidate ref creation has the dedicated mirror error', async () => {
+  const api = githubRequest('synthetic-token', async () =>
+    Response.json(
+      { message: 'GH013: Repository rule violations found. Cannot create this ref.' },
+      { status: 422 },
+    ),
+  );
+  await assert.rejects(
+    api('/repos/git/trees/git/refs', 'POST', { ref: 'refs/heads/candidate', sha: 'a'.repeat(40) }),
+    {
+      code: 'GITHUB_RULE_BLOCKED',
+      operation: 'POST git/refs',
+      githubError: 'GH013: Repository rule violations found. Cannot create this ref.',
+    },
+  );
+});
+
 // adff6f58: GitHub read-after-write lag on objects this job just created.
 const treeSha = gitHash('blob', Buffer.from('new'));
 const commitReply = () =>

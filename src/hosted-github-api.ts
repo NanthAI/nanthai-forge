@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { networkFetch, networkTimeout } from './network-fetch.js';
 import { ForgeError } from './errors.js';
+import { githubRulesetRefusal } from './github-sync-classification.js';
 export type GithubRequest = <T>(path: string, method?: string, body?: unknown) => Promise<T>;
 function responseDiagnostics(headers?: Headers): string {
   const fields: string[] = [];
@@ -20,14 +21,18 @@ export const githubErrorChars = 500;
 /** GitHub's JSON error `message` and `errors[]` explain a 4xx (for example
  * which tree entry a 422 rejected). Only those fields of a JSON body are kept:
  * controls stripped, token-shaped and request-token text redacted, bounded. */
-export function githubErrorSummary(body: string, token?: string): string | undefined {
+function githubErrorDiagnostics(
+  body: string,
+  token?: string,
+  refWrite422 = false,
+): { summary?: string; ruleBlocked?: boolean } {
   let value: unknown;
   try {
     value = JSON.parse(body);
   } catch {
-    return undefined;
+    return {};
   }
-  if (!value || typeof value !== 'object') return undefined;
+  if (!value || typeof value !== 'object') return {};
   const { message, errors } = value as { message?: unknown; errors?: unknown };
   const field = (item: unknown) =>
     typeof item === 'string'
@@ -46,11 +51,19 @@ export function githubErrorSummary(body: string, token?: string): string | undef
       .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ')
       .trim();
   };
-  const details = Array.isArray(errors) ? errors.slice(0, 10).map(field) : [];
-  const text = [typeof message === 'string' ? message : '', ...details].map(clean).filter(Boolean).join('; ');
-  if (!text) return undefined;
+  const headline = typeof message === 'string' ? clean(message) : '';
+  const details = Array.isArray(errors) ? errors.slice(0, 10).map(item => clean(field(item))) : [];
+  const ruleBlocked = refWrite422 && (githubRulesetRefusal(headline) || details.some(githubRulesetRefusal));
+  // Classify before truncating and give the rule details priority over the headline.
+  const text = (ruleBlocked ? [...details, headline] : [headline, ...details]).filter(Boolean).join('; ');
+  if (!text) return {};
   const chars = [...text];
-  return chars.length > githubErrorChars ? `${chars.slice(0, githubErrorChars - 1).join('')}…` : text;
+  const summary =
+    chars.length > githubErrorChars ? `${chars.slice(0, githubErrorChars - 1).join('')}…` : text;
+  return { summary, ruleBlocked };
+}
+export function githubErrorSummary(body: string, token?: string): string | undefined {
+  return githubErrorDiagnostics(body, token).summary;
 }
 export class GithubMirrorApiError extends ForgeError {
   constructor(
@@ -59,10 +72,17 @@ export class GithubMirrorApiError extends ForgeError {
     readonly requestBytes: number,
     responseHeaders?: Headers,
     readonly githubError?: string,
+    ruleBlocked = false,
   ) {
+    const { code, next } = ruleBlocked
+      ? {
+          code: 'GITHUB_RULE_BLOCKED',
+          next: 'Review the blocking rule in GitHub before resuming the mirror.',
+        }
+      : { code: 'GITHUB_SYNC_API', next: 'Retry the retained mirror step.' };
     super(
-      'GITHUB_SYNC_API',
-      `GitHub mirror API returned HTTP ${status} for ${operation} (${requestBytes} request bytes).${responseDiagnostics(responseHeaders)}${githubError ? ` GitHub error: ${JSON.stringify(githubError)}.` : ''} Retry the retained mirror step.`,
+      code,
+      `GitHub mirror API returned HTTP ${status} for ${operation} (${requestBytes} request bytes).${responseDiagnostics(responseHeaders)}${githubError ? ` GitHub error: ${JSON.stringify(githubError)}.` : ''} ${next}`,
     );
   }
 }
@@ -86,14 +106,20 @@ export function githubRequest(token: string, request: typeof fetch = networkFetc
     });
     if (!response.ok) {
       // Only fixed operation names leave the transport, never arbitrary URL text.
-      const route = path.match(/\/git\/(blobs|trees|commits|refs?)(?:[/?]|$)/)?.[1];
+      const route = path.match(/^\/repos\/[^/]+\/[^/]+\/git\/(blobs|trees|commits|refs?)(?:[/?]|$)/)?.[1];
       const verb = ['GET', 'POST', 'PATCH'].includes(method) ? method : 'request';
+      const { summary, ruleBlocked } = githubErrorDiagnostics(
+        (await response.text().catch(() => '')).slice(0, 64 * 1024),
+        token,
+        response.status === 422 && route === 'refs' && (verb === 'PATCH' || verb === 'POST'),
+      );
       throw new GithubMirrorApiError(
         response.status,
         `${verb} ${route ? `git/${route}` : path.endsWith('/installation') ? 'installation lookup' : /\/app\/installations\/\d+\/access_tokens$/.test(path) ? 'installation token' : 'GitHub API'}`,
         payload === undefined ? 0 : new TextEncoder().encode(payload).byteLength,
         response.headers,
-        githubErrorSummary((await response.text().catch(() => '')).slice(0, 64 * 1024), token),
+        summary,
+        ruleBlocked,
       );
     }
     if (response.status === 204) return undefined as T;

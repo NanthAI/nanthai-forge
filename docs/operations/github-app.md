@@ -311,9 +311,10 @@ All of these must hold:
   take-out commit), status and the web say so, and the mirror stops as moved
   again. To keep that change, fix and land its Lane, then reset GitHub `main` to
   the commit Forge pushed last and resume: Forge pushes the change on top. GitHub's own
-  branch protection on `main` also applies to the `PATCH`; a block surfaces as a
-  retained `GITHUB_SYNC_API` failure. That last point is GitHub behavior this
-  repository does not test.
+  branch protection on `main` also applies to the `PATCH`. When GitHub's 422
+  response identifies a ruleset violation, Forge retains `GITHUB_RULE_BLOCKED`
+  and shows the blocking rule if GitHub supplies it. Other ref API errors
+  retain `GITHUB_SYNC_API`.
 
 ### Two-way sync
 
@@ -490,15 +491,17 @@ Recovery. Accepted work is never lost: Forge `main` is the source of truth and t
 mirror only fast-forwards.
 
 - **A rule blocks the sync** (the App lost its bypass). The landing succeeds on Forge;
-  the mirror job is retained as failed with `GITHUB_SYNC_API`, HTTP 422 and GitHub's
-  "Repository rule violations" text, and `nforge status` shows the failing State and
-  lag. GitHub `main` does not move. Put the App back on the ruleset's bypass list
+  the mirror job is retained as failed with `GITHUB_RULE_BLOCKED` and HTTP 422.
+  `nforge status` shows the failing State, lag and GitHub's explanation of the
+  blocking rule when provided. GitHub `main` does not move. Put the App back on
+  the ruleset's bypass list
   (`gh api -X PUT repos/OWNER/NAME/rulesets/RULESET_ID --input RULESET.json`), then the
   project owner runs `nforge github resume PROJECT` (the operator mutation
   `projectGithubMirrorStore:resume '{"jobId":"…"}'` stays available, see
   [workflows](../workflows.md#automatic-main-mirror)). It returns `scheduled`; GitHub then
   receives one commit per skipped State in order, with no duplicate and no force.
-  Drilled on a throwaway repository: failure, restore, resume, catch-up.
+  The failure, restore, resume and catch-up were drilled on a throwaway repository.
+  The dedicated error code and retained detail are covered by response fixtures.
 - **Forge `main` is wrong** (a bad landing). Do not touch GitHub. Land
   `nforge x ROOT revert '{"target":{"kind":"receipt","receiptId":"…"}}'` (or accept a
   retained earlier State as a person); the mirror adds a fast-forward commit and
