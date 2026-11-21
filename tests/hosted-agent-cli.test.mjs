@@ -21,6 +21,8 @@ import { ForgeError } from '../dist/errors.js';
 import { agentCli } from '../dist/agent-cli.js';
 import { LAND_CHILD_ENV } from '../dist/hosted-land-child-env.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
+import { hostedAgentHelp } from '../dist/hosted-agent-help.js';
+import { slimReceipt } from '../dist/receipt-slim.js';
 const errorCode = expected => error => error.code === expected;
 /** One client session for this test (as Claude Code sets it): an identical start replays only within it. */
 function agentSession(t, id) {
@@ -610,9 +612,18 @@ test('CLI agent start requires model once and accepts explicit unknown through t
     e => e.code === 'BAD_ARGUMENT' && /model/.test(e.message) && /FORGE_AGENT_MODEL/.test(e.message),
   );
   assert.equal(s.calls.filter(c => c.name === 'projectHostedStart:start').length, 0);
-  await agentCli([s.root, 'start', JSON.stringify({ ...input, model: 'unknown' })]);
+  const help = hostedAgentHelp('start');
+  assert.match(help, /Required for a new agent start unless FORGE_AGENT_MODEL is set/);
+  const example = JSON.parse(/^Example: nforge agent ROOT start '(.*)'$/m.exec(help)[1]);
+  const start = await agentCli([s.root, 'start', JSON.stringify({ ...input, ...example })]);
+  const reply = slimReceipt(start);
   const request = s.calls.find(c => c.name === 'projectHostedStart:start').args;
   assert.deepEqual(request.authorship, { kind: 'agent', declaration: 'unknown' });
+  assert.match(reply.result.rules, /nforge agent ROOT capabilities.*forge_work_overview/);
+  const withoutRules = structuredClone(reply);
+  delete withoutRules.result.rules;
+  const added = Buffer.byteLength(JSON.stringify(reply)) - Buffer.byteLength(JSON.stringify(withoutRules));
+  assert(added <= 200, `start rules added ${added} bytes`);
   assert(
     !request.agentClient?.includes(':'),
     'unknown has one explicit state rather than a second model carrier',

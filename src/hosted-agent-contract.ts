@@ -204,7 +204,12 @@ export const hostedAgentCommandSchemas = {
     .strict(),
   start: z
     .object({
-      model: z.string().optional(),
+      model: z
+        .string()
+        .optional()
+        .describe(
+          'Required for a new agent start unless FORGE_AGENT_MODEL is set or the agent session already has a model declaration. Use "unknown" if unknown.',
+        ),
       outcome: z.string().min(1).optional(),
       constraints: z.string().optional(),
       intentId: uuid.optional(),

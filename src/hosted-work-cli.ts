@@ -6,7 +6,8 @@ import { requireHostedBinding } from './host-binding.js';
 import { readFileSync } from 'node:fs';
 import { coordinationClient } from './coordination-client.js';
 import { dispatchHostedWork } from './hosted-work-client.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
+import { workIndexRecovery } from './error-teaching.js';
 export const HOSTED_WORK_HELP = `Forge scoped hosted Work and autonomy policy
 nforge hosted-work ROOT JSON
 nforge hosted-work DEPLOYMENT PROJECT_ID JSON
@@ -22,8 +23,9 @@ Page/detail revision is the archive baseline; planning puts and comments need no
 Detail: {"action":"detail","collection":"planningItems","id":"ITEM_UUID"} hydrates only this record's full attributes.
 Collections: intents, lanes, views, runs, planningItems (current), planningVersions, planningComments, notes, lifecycle, channels, channelMoves, hostedChannels, hostedChannelMoves, events.
 Use parentId to scope notes/lifecycle to an Intent or comments/planningVersions to an item. Intent detail excludes these separately paged histories.
-An absent derived index reports PROJECT_WORK_INDEX_MISSING; the operator can explicitly prepare it from the authorized backup/journal. Warm reads do not load the full Work snapshot; records remain attributed untrusted data.
-MCP: forge_hosted_work is available in mcp-coordination (configured project), or local mcp --agent after login or when FORGE_AUTH_TOKEN is configured (explicit deployment/project). Scoped source-read tokens gain no Work access.
+Missing index (project owner): nforge hosted-work ROOT '{"action":"rebuild-index"}'
+Use that exact JSON object. The rebuild resumes from the project's index state and takes no operationId. Warm reads use the selected index.
+MCP: forge_hosted_work is available in mcp-coordination for its configured project. Scoped source-read tokens gain no Work access.
 `;
 export async function hostedWorkCli(args: string[]) {
   if (!args.length || args.includes('--help')) {
@@ -66,6 +68,13 @@ export async function hostedWorkCli(args: string[]) {
     );
   } catch (error) {
     if (store) rememberSourceAuthorityError(store, error, projectId);
+    if (error instanceof ForgeError && error.code === 'PROJECT_WORK_INDEX_MISSING')
+      throw new ForgeError(
+        error.code,
+        error.message,
+        error.retryAt,
+        workIndexRecovery(deployment, projectId),
+      );
     throw error;
   }
 }

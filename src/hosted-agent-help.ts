@@ -155,7 +155,10 @@ const placeholder = (field: string, schema: Record<string, unknown> | undefined)
 function helpExample(entry: (typeof hostedAgentHelpEntries)[number]) {
   const properties = (entry.schema.properties ?? {}) as Record<string, Record<string, unknown>>;
   const required = (entry.schema.required ?? []) as string[];
-  const example = Object.fromEntries(required.map(field => [field, placeholder(field, properties[field])]));
+  const example =
+    entry.action === 'start'
+      ? { outcome: 'Improve the README', model: 'unknown' }
+      : Object.fromEntries(required.map(field => [field, placeholder(field, properties[field])]));
   const command = entry.command.startsWith('x ')
     ? `nforge x ROOT ${entry.command.slice(2)}`
     : `nforge agent ROOT ${entry.command}`;

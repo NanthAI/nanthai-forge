@@ -335,7 +335,10 @@ budgets. The numbers are modeled relative times, not a service measurement.
 
 First checks, preflight, standard scoped selection and scoped rechecks classify JSON data
 through import/file paths, conservative basename readers, directory loaders, computed filenames
-joined to JSON folders and matching globs, including transitive helpers. A non-Markdown,
+joined to JSON folders and matching globs, including transitive helpers. A recursive listing of
+the repository root reaches JSON files across the inventory. A literal filename suffix
+filter limits coverage when the reader uses those filenames directly. Each unproven read
+keeps conservative coverage. A non-Markdown,
 non-JS/config reader naming the JSON retains full coverage when present in the supplied inventory;
 the standard inventory includes package files but excludes shell, YAML and workflow files.
 Unknown or unobserved data stays broad. JSON reach stops at static tools reached through a

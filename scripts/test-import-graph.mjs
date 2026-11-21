@@ -12,7 +12,7 @@ import {
   repositoryWorkspaceUsers,
   shadowsRequire,
 } from './test-directory-path.mjs';
-import { docsPackager, packageScriptGraph, scriptPath } from './script-impact.mjs';
+import { docsPackager, packageScriptGraph, recursiveJsonReader, scriptPath } from './script-impact.mjs';
 import {
   byNameDispatch,
   convexApiBindings,
@@ -24,6 +24,7 @@ import {
   templateStrings,
 } from './convex-function-names.mjs';
 import { moduleSymbols, siteOf } from './test-symbols.mjs';
+import { recursiveRootListings } from './test-tree-readers.mjs';
 
 export function testImportGraph(files, scriptsChanged = [], { typeImports = false } = {}) {
   const reverse = new Map(),
@@ -40,6 +41,7 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
     // A workspace path is the narrowest evidence; dynamic is replaced by specific evidence.
     if (
       !previous ||
+      (previous.detail === recursiveJsonReader && kind === 'import') ||
       previous.kind === 'workspace-path' ||
       (previous.kind === 'dynamic' && kind !== 'workspace-path')
     )
@@ -181,6 +183,7 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
     const ast = ts.createSourceFile(path, files.get(path), ts.ScriptTarget.Latest, true);
     if (ast.parseDiagnostics.length)
       return { error: `Unparseable ${scriptPath(path) ? 'script' : 'module'}: ${path}` };
+    const rootListings = recursiveRootListings(ast);
     symbols?.set(
       path,
       moduleSymbols(ast, value => resolve(path, value)),
@@ -289,6 +292,11 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
       // A class's `extends` is ExpressionWithTypeArguments too: its expression
       // executes, so retain it (and only discard its nested type arguments).
       if (ts.isTypeNode(node) && !ts.isExpressionWithTypeArguments(node)) return;
+      if (rootListings.has(node)) {
+        const suffix = rootListings.get(node);
+        for (const target of jsonFiles)
+          if (!suffix || target.endsWith(suffix)) edge(target, path, 'runtime-path', recursiveJsonReader);
+      }
       if (ts.isIdentifier(node) && apiNames.has(node.text) && !declarationName(node)) {
         if (!ts.isPropertyAccessExpression(node.parent) && !ts.isElementAccessExpression(node.parent))
           widenFunctions(path, '', `Whole Convex API object: ${node.text}`);
@@ -331,7 +339,11 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
         ];
         const folders = locations.map(value => jsonFolders.get(value.replace(/\/$/, ''))).filter(Boolean);
         const glob = /[*?{[(]/.test(value);
-        if (value && (folders.length || glob) && directoryDependency(node, ast, false, jsonReaders)) {
+        if (
+          value &&
+          (folders.length || glob) &&
+          directoryDependency(node, ast, false, jsonReaders, rootListings)
+        ) {
           for (const folder of folders)
             for (const target of folder) edge(target, path, 'runtime-path', 'JSON directory reader');
           if (glob)

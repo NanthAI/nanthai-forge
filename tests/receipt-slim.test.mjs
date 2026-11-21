@@ -331,6 +331,14 @@ test('a healthy brief still names what the next step needs', () => {
   assert.equal(start.result.path, laneRoot);
   assert.deepEqual(start.result.checkout, { downloadedObjects: 0 }, 'the warm-start proof stays');
   assert.deepEqual(start.localLanes, { idle: 2 }, 'the stderr hint lists them; the count stays');
+  const rules =
+    'nforge agent ROOT capabilities or MCP forge_work_overview {command:{action:"capabilities"}}.';
+  const withRules = slimReceipt({
+    ...healthy.start,
+    result: { ...healthy.start.result, rules },
+  });
+  assert.equal(withRules.result.rules, rules, 'the compact checkout receipt keeps the project rules pointer');
+  assert(Buffer.byteLength(JSON.stringify(withRules)) - Buffer.byteLength(JSON.stringify(start)) <= 200);
   // A start whose checkout did not finish keeps its reason and continuation, never a bare `{}`.
   const continuation = { reason: 'failed', path: laneRoot, command: 'nforge agent ROOT start …' };
   const stalled = slimReceipt({

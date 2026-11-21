@@ -92,7 +92,7 @@ export function registerHostedAgentWorkflow(
   const groups = [
     {
       name: 'forge_task',
-      short: 'Lane writes. Wait for land. Lost reply: replay same UUID.',
+      short: 'Start with model or FORGE_AGENT_MODEL. Wait for landings.',
       actions: [
         'start',
         'open',
@@ -245,7 +245,7 @@ export function registerHostedAgentWorkflow(
       }),
   );
   prose.forge_planning =
-    'Planning: indexed title/body search; active by default, status:all includes history. Filter kind/status/initiativeId/type/owner/relation; cursor pages or id+comments. reconcile:false skips Intent updates. New Issues/friction return advisory likelyDuplicates. put-planning-item sets only named fields (0 creates); model fields (order, type, parentId, owner, relations, hidden) go in `fields`, docs/planning.md; comment-planning-item adds discussion. batch:[…] ≤100 puts/comments: one call, per-Item results, one undo. Issue key: planningItemId; id/itemId are aliases. Full UUID or unique 8+ hex prefix. Start via forge_task {action:start,planningItemId}.';
+    'Planning: indexed title/body search; active by default, status:all includes history. Filter kind/status/initiativeId/type/owner/relation; cursor pages or id+comments. reconcile:false skips Intent updates. New Issues/friction return advisory likelyDuplicates. put-planning-item sets only named fields (0 creates); model fields (order, type, parentId, owner, relations, hidden) go in `fields`, docs/planning.md; comment-planning-item adds discussion. batch:[…] ≤100 puts/comments: one call, per-Item results, one undo. Issue key: planningItemId; id/itemId are aliases. Full UUID or unique 8+ hex prefix. Start via forge_task {action:start,planningItemId,model:"unknown"}; use the model ID when known.';
   prose.forge_planning +=
     ' Import attribution goes in fields.imported. planning.transfer {mode:import,rows,apply} prepares or applies source-keyed pages; docs/planning.md.';
   server.registerTool(

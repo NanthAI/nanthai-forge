@@ -83,7 +83,7 @@ nforge agent ROOT put-planning-item '{"kind":"initiative","title":"Phase 6","sta
 nforge agent ROOT put-planning-item '{"kind":"issue","title":"Fix X","body":"Why and acceptance","status":"open","initiativeId":"INITIATIVE_ID"}'
 nforge agent ROOT comment-planning-item '{"planningItemId":"ITEM_ID","text":"Use A, because B","decision":true}'   # also adds a dated line to the body's Decisions
 nforge agent ROOT comment-planning-item '{"planningItemId":"ITEM_ID","replyTo":"COMMENT_ID","text":"Done in landing 5c1e"}'  # a reply joins that comment's thread
-nforge agent ROOT start '{"planningItemId":"ISSUE_ID"}'                  # your own Lane on the Issue; Issue becomes in-progress; openLanes lists others
+nforge agent ROOT start '{"planningItemId":"ISSUE_ID","model":"unknown"}' # your Lane on the Issue; Issue moves to in-progress
 ```
 
 **Who wrote a comment.** A hosted server records the writer from your sign-in (`author`, read as `@handle`, or `handle/agent` for a device credential: the session slug it sent, or one derived from the credential). It does not store `authorLabel` from a signed-in writer, so put a role in the text. A comment is at most 65,536 characters (`BAD_ARGUMENT` above). Reactions are a person's; agent credentials cannot react.

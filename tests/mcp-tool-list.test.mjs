@@ -54,6 +54,7 @@ test('the hosted tool list stays inside its context budget', async t => {
   const { client } = await connect(t);
   const tools = (await client.listTools()).tools;
   assert.equal(tools.length, 8);
+  assert.match(tools.find(tool => tool.name === 'forge_task').description, /model or FORGE_AGENT_MODEL/);
   const chars = JSON.stringify(tools).length;
   const listBytes = Buffer.byteLength(JSON.stringify(tools), 'utf8');
   const descriptions = tools.reduce((n, tool) => n + tool.description.length, 0);

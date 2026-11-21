@@ -6,7 +6,7 @@ import ts from 'typescript';
 // Escaping values and unsupported uses remain directory dependencies. An optional
 // reader set follows aliases to those directory APIs instead of treating metadata
 // and unrelated calls as directory reads. Exported path values still escape.
-export function directoryDependency(literal, ast, requireComparison = false, readers) {
+export function directoryDependency(literal, ast, requireComparison = false, readers, rootListings) {
   const { identifiers, functions, initializers, pathFunctions, declarations } = directoryBindings(ast);
   const scope = name => {
     let parent = name.parent;
@@ -127,6 +127,8 @@ export function directoryDependency(literal, ast, requireComparison = false, rea
         return true;
       if (!alias(parent.name) && !readers) return true;
     } else if (ts.isCallExpression(parent) || ts.isNewExpression(parent)) {
+      // Recursive root listings already have edges from the actual listing site.
+      if (rootListings?.has(parent)) continue;
       const expression = parent.expression;
       const name = ts.isIdentifier(expression)
         ? expression.text

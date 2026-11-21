@@ -19,6 +19,7 @@ const docsTests = [
 ];
 
 export const scriptPath = path => /^scripts\/.+\.(?:mjs|js|ts)$/.test(path);
+export const recursiveJsonReader = 'Recursive repository JSON reader';
 const commandNode = name => `package-script:${name}`;
 const scriptReferences = text =>
   [...text.matchAll(/(?:^|[^\w./-])(?:\.\/)?(scripts\/[\w./-]+\.(?:mjs|js|ts))(?=$|[^\w./-])/g)].map(
@@ -114,35 +115,38 @@ export function scriptSelectionReason(item, roots, tests, reverse, graph) {
   const matching = tests.filter(path => posix.basename(path) === `${basename}.test.mjs`);
   // Only claim a consumer when it is reachable from this particular changed script.
   const docs = docsPackager(item.path);
+  const json = item.path.endsWith('.json');
   const visited = new Set([item.path]),
-    queue = [item.path];
+    scanned = new Set(),
+    queue = [{ path: item.path, throughScan: false }];
   while (queue.length) {
-    const current = queue.shift();
+    const { path: current, throughScan } = queue.shift();
     // The wrapper only spawns the docs check; the runner importing it is not a consumer.
     if (docs && docsWrapper(current, item.path)) continue;
     for (const importer of reverse.get(current) ?? []) {
+      const edge = graph.evidence.get(current)?.get(importer);
+      const scansData = throughScan || (current === item.path && edge?.detail === recursiveJsonReader);
       // Static tools run on the exact Candidate; their data walks do not make
-      // JSON an input to the orchestration that invokes those tools.
-      if (
-        item.path.endsWith('.json') &&
-        graph.packageGraph.staticTools?.has(importer) &&
-        graph.evidence.get(current)?.get(importer)?.kind !== 'import'
-      )
+      // JSON an input to the orchestration that invokes those tools, even
+      // when a tool imports a helper that reads the data.
+      if (json && graph.packageGraph.staticTools?.has(importer) && (scansData || edge?.kind !== 'import'))
         continue;
-      if (!visited.has(importer)) {
-        visited.add(importer);
-        queue.push(importer);
+      const reached = scansData ? scanned : visited;
+      if (!reached.has(importer)) {
+        reached.add(importer);
+        queue.push({ path: importer, throughScan: scansData });
       }
     }
   }
-  const critical = [...visited].find(
+  const readers = new Set([...visited, ...scanned]);
+  const critical = [...readers].find(
     path => roots.has(path) && !(docs && (docsPackager(path) || docsWrapper(path, item.path))),
   );
   if (critical)
     return { full: `Check pipeline, packaging or build dependency: ${item.path} reaches ${critical}` };
   if (scriptPath(item.path) && [...visited].some(path => /^(?:src|web\/src|convex|netlify)\//.test(path)))
     return { full: `Product runtime dependency: ${item.path}` };
-  const consuming = tests.filter(path => visited.has(path));
+  const consuming = tests.filter(path => readers.has(path));
   return {
     tests: [...matching, ...(docs ? docsTests.filter(path => tests.includes(path)) : [])],
     reason: `${item.path}: ${consuming.length ? `${consuming.length} importing/runtime/package-command test(s)` : 'no importing tests; static checks and smoke'}${matching.length ? '; basename test coverage' : ''}`,

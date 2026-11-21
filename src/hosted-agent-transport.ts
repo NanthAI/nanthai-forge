@@ -3,6 +3,7 @@ import { protectedPathNotice, type ProtectedPathPolicy } from './public-governan
 import type { SaveContract } from './hosted-save-client.js';
 import { capsuleHistoryQueries, hydrateLandingHistory, hasJournalHistory } from './landing-capsule-client.js';
 import { agentClient, agentAuthorship } from './agent-turn-work.js';
+import { workIndexRecovery } from './error-teaching.js';
 import { suppliedLandingMessage } from './landing-message.js';
 import { keptApplyEnvelope } from './hosted-apply-kept.js';
 import { cliBuildCommit } from './cli-installation.js';
@@ -1568,6 +1569,12 @@ export class HostedAgentTransport {
           // An open resolution Lane beside the Lane it resolves: name both and the abandon command (d9e1ac62).
           const replaced = replacedOpenLanes(started.openLanes);
           if (replaced.length) result = { ...(result as object), replaced };
+          if (started.lane)
+            result = {
+              ...(result as object),
+              rules:
+                'nforge agent ROOT capabilities or MCP forge_work_overview {command:{action:"capabilities"}}.',
+            };
         }
         if (planning) result = { ...(result as object), planning };
         const startedIntent = (result as { intentId?: string }).intentId;
@@ -1676,6 +1683,13 @@ export class HostedAgentTransport {
           ? protocolMismatchError(replyIssuePaths(error.issues))
           : localShapeError(action, error);
       const safe = hostedActionError(error, `agent ${action}`);
+      if (safe.code === 'PROJECT_WORK_INDEX_MISSING')
+        throw new ForgeError(
+          safe.code,
+          'The Work index is unavailable. Ask the project owner to run the recovery command, then retry.',
+          undefined,
+          workIndexRecovery(this.address.url, this.address.projectId),
+        );
       // A write pause, OCC conflict or 429/503 refusal ran nothing: keep its structured
       // retryable flag and retryAt instead of rebuilding it from code and message (72d50375).
       const refused =

@@ -29,6 +29,11 @@ import { namedPaths, suggestSchedule } from '../dist/work-schedule.js';
 import { speedBudgets } from '../dist/speed-budgets.js';
 import { judgeCosts } from '../dist/cost-budgets.js';
 import { checkArgs } from './convex-args.mjs';
+import { withTeaching } from '../dist/error-teaching.js';
+import { helpTopicText } from '../dist/help-topics.js';
+import { hostedWorkCli } from '../dist/hosted-work-cli.js';
+import { hostedWorkRequestSchema } from '../dist/hosted-work-client.js';
+import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
 
 /** Judge planning write costs against the ledger (src/speed-budgets.json, flip 5): any rise fails. */
 const withinLedger = measured =>
@@ -120,6 +125,7 @@ function port(s, states = new Map(), serverFeatures = [...hostedContractFeatures
       client: {
         query: (ref, args) => invoke(reference(ref), args),
         action: (ref, args) => invoke(reference(ref), args),
+        mutation: (ref, args) => invoke(reference(ref), args),
       },
     },
     query: async (name, args) => {
@@ -1543,6 +1549,71 @@ function transport(s, { planning, features = false }) {
     }),
   };
 }
+
+test('a fresh hosted project with no selected index reports an exact repair for planning and the first put', async t => {
+  const s = await setup(t, true, undefined, false);
+  const { transport: agent } = transport(s, { planning: true, features: hostedContractFeatures });
+  const tools = new Map();
+  t.after(
+    registerHostedAgentWorkflow(
+      {
+        registerTool(name, config, call) {
+          tools.set(name, call);
+        },
+      },
+      agent,
+    ),
+  );
+  const rebuild = `nforge hosted-work https://fixture.invalid ${s.projectId} '{"action":"rebuild-index"}'`;
+  const first = { kind: 'issue', title: 'First Item', status: 'proposed', operationId: randomUUID() };
+  for (const [action, fields] of [
+    ['planning', { status: 'open' }],
+    ['put-planning-item', first],
+  ]) {
+    await assert.rejects(agent.dispatch(action, fields), error => {
+      assert.equal(error.code, 'PROJECT_WORK_INDEX_MISSING');
+      assert.equal(withTeaching(error, { surface: 'cli', root: agent.root }).next, rebuild);
+      return true;
+    });
+    const mcp = await tools.get('forge_planning')({ command: { action, ...fields } });
+    assert(mcp.isError);
+    assert.equal(JSON.parse(mcp.content[0].text).error.next, rebuild);
+  }
+  const output = [];
+  const write = t.mock.method(process.stdout, 'write', chunk => {
+    output.push(chunk);
+    return true;
+  });
+  await hostedWorkCli(['--help']);
+  write.mock.restore();
+  const helpRequest = JSON.parse(/nforge hosted-work ROOT '([^']+)'/.exec(output.join(''))[1]);
+  const request = JSON.parse(/'([^']+)'/.exec(rebuild)[1]);
+  assert.deepEqual(helpRequest, request);
+  assert(helpTopicText('storage').includes(`nforge hosted-work ROOT '${JSON.stringify(request)}'`));
+  assert.deepEqual(hostedWorkRequestSchema.parse(request), { action: 'rebuild-index' });
+
+  const { ensure } = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
+  await ensure._handler(s.ctx, { projectId: s.projectId, rebuild: true });
+  assert.equal((await agent.dispatch('put-planning-item', first)).result.version, 1);
+});
+
+test('the empty Plan points CLI and MCP agents to a working first proposal', async t => {
+  const s = await setup(t);
+  const p = port(s);
+  const active = { status: 'active', reconcile: false };
+  const empty = await list(p, active);
+  assert.deepEqual(empty.items, []);
+  assert.match(empty.next, /nforge agent ROOT put-planning-item.*MCP forge_planning/);
+  const input = JSON.parse(empty.next.match(/\{.*\}/)[0].replace('TITLE', 'First Item'));
+  const { result: created } = await put(p, input);
+  const proposed = await list(p, active);
+  assert.equal(proposed.items[0].id, created.itemId);
+  assert.equal(proposed.items[0].status, 'proposed');
+  assert.equal(proposed.next, undefined);
+  const filtered = await list(p, { status: 'open', reconcile: false });
+  assert.deepEqual(filtered.items, []);
+  assert.equal(filtered.next, undefined);
+});
 
 test('the transport serves planning actions from the advertised capability and tells older servers apart', async t => {
   const s = await setup(t);

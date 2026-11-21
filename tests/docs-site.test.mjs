@@ -37,12 +37,15 @@ test('docs are static, contract-generated and usable without account or backend 
   // Every docs page links the draft Terms and Privacy pages (a9f4654f).
   assert.match(home, /<a href="\/-\/terms">Terms<\/a><a href="\/-\/privacy">Privacy policy<\/a>/);
   const cli = read(out, 'docs/reference/cli.md');
+  const modelRequirement = 'Required for a new agent start unless FORGE_AGENT_MODEL is set';
+  assert(cli.includes(modelRequirement));
   for (const entry of hostedAgentHelpEntries) {
     assert.ok(cli.includes(`## ${entry.command}\n`), entry.command);
     assert.ok(cli.includes(JSON.stringify(entry.schema, null, 2)), `${entry.command} schema drift`);
   }
   assert.match(read(out, 'docs/reference/errors.md'), /COMPOSITION_CONFLICT.*help conflict/);
   const mcp = read(out, 'docs/reference/mcp.md');
+  assert(mcp.includes(modelRequirement));
   for (const name of [
     'forge_task',
     'forge_check',

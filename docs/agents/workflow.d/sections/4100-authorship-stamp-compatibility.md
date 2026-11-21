@@ -17,15 +17,15 @@ Attribution is excluded from start, save and landing retry identity; a resumed
 operation retains the original source request and its first declaration.
 
 The writer negotiates `source-authorship-v1`, deployed after compatible readers.
-On CLI and MCP agent `start`, supply `model` or set `FORGE_AGENT_MODEL` in the
-launcher. Use the exact model ID, or `unknown`; an agent start missing both is
-refused with one error naming the field and environment variable. A person
+On the first CLI or MCP agent `start`, supply `model` or set `FORGE_AGENT_MODEL` in
+the launcher. Use the exact model ID, or `unknown`. If no model is declared or
+retained for the session, the error names the field and environment variable. A person
 outside an agent session is never asked for a model. Without the feature, clients
 keep the previous wire format; older clients that send no stamp stay readable as
 “not declared”.
 
 For detected agent apps, Forge retains the declaration in its own local session
-record on a best-effort basis. `save` and `land` inherit it; their optional `model`
+record on a best-effort basis. Later `start`, `save` and `land` calls inherit it. An optional `model`
 or a changed `FORGE_AGENT_MODEL` declares a model switch for later work. A failed
 local write does not prevent the current command from sending its declaration.
 Without a detected app, an explicit model applies only to that command and is

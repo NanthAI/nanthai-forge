@@ -781,6 +781,16 @@ async function readPlanning(
   const closed = new Map(
     (sync?.changed as { id: string; to: string }[] | undefined)?.map(entry => [entry.id, entry.to]),
   );
+  // An indexed filter can return zero rows even when the Plan has Items.
+  const emptyPlan =
+    !scanned &&
+    done &&
+    input.cursor === null &&
+    !Object.keys(planningFilter).length &&
+    !multiple &&
+    !input.type &&
+    !input.owner &&
+    !input.relation;
   return {
     workRevision: ws.revision,
     items: matches.map(item =>
@@ -814,6 +824,11 @@ async function readPlanning(
         }
       : {}),
     nextCursor: done ? null : prefix + encode(ws, cursor!),
+    ...(emptyPlan
+      ? {
+          next: 'The project owner can use nforge agent ROOT put-planning-item or MCP forge_planning (action put-planning-item) with {"kind":"issue","title":"TITLE","status":"proposed"}.',
+        }
+      : {}),
     ...(sync?.changed.length || sync?.failed || sync?.held?.length ? { reconciled: sync } : {}),
   };
 }

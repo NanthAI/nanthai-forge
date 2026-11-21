@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   selectTests,
+  selectImpactPair,
   pinnedPaths,
   pinnedComparison,
   standardSelection,
@@ -603,6 +604,66 @@ test('source inventory includes package commands for script selection', t => {
   assert.deepEqual(selectTests({ paths: ['scripts/inspect.mjs'], files: inventory }).tests, [
     'tests/consumer.test.mjs',
   ]);
+});
+
+test('paired recheck selection keeps recursive JSON readers from the runner inventory', t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-json-inventory-'));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  for (const dir of ['src/data', 'web', 'convex', 'netlify', 'tests', 'scripts/data'])
+    mkdirSync(join(root, dir), { recursive: true });
+  const leaf = "import '../src/leaf.ts';\n";
+  const fs = "import { readdirSync, readFileSync } from 'node:fs';\n";
+  const walk = "readdirSync('.', { recursive: true })";
+  const files = new Map(
+    Object.entries({
+      'package.json': '{"scripts":{}}',
+      'package-lock.json': '{"packages":{}}',
+      'src/leaf.ts': 'export const leaf = 1;',
+      'src/data/locales.json': '{}',
+      'scripts/data/settings.json': '{}',
+      'scripts/reader.mjs':
+        fs +
+        `export const read = () => ${walk}
+        .filter(name => name.endsWith('.json')).map(name => JSON.parse(readFileSync(name, 'utf8')));`,
+      'tests/helper-consumer.test.mjs': leaf + "import { read } from '../scripts/reader.mjs'; read();",
+      'tests/direct-reader.test.mjs':
+        fs +
+        `${walk}
+        .filter(name => name.endsWith('.json')).map(name => JSON.parse(readFileSync(name, 'utf8')));`,
+      'tests/partial-reader.test.mjs':
+        fs +
+        `${walk}.filter(name => name.endsWith('.js'));
+        const options = { recursive: true };
+        const accepts = name => name.endsWith('.json');
+        readdirSync('.', options).filter(accepts).map(name => readFileSync(name, 'utf8'));`,
+      'tests/js-only.test.mjs':
+        fs +
+        `${walk}
+        .filter(name => name.endsWith('.js')).map(name => readFileSync(name, 'utf8'));`,
+      'tests/unrelated.test.mjs': leaf,
+    }),
+  );
+  for (const [path, content] of files) writeFileSync(join(root, path), content);
+  const inventory = sourceFiles(root);
+  for (const path of ['src/data/locales.json', 'scripts/data/settings.json']) {
+    const [lane, main] = selectImpactPair(inventory, [['src/leaf.ts'], [path]]);
+    assert.equal(main.scope, 'scoped', main.reason);
+    assert.deepEqual(main.affectedTests, [
+      'tests/direct-reader.test.mjs',
+      'tests/helper-consumer.test.mjs',
+      'tests/partial-reader.test.mjs',
+    ]);
+    assert.deepEqual(
+      lane.affectedTests.filter(test => main.affectedTests.includes(test)),
+      ['tests/helper-consumer.test.mjs', 'tests/partial-reader.test.mjs'],
+    );
+  }
+  // Finding one reader cannot make an inventory containing an unreadable
+  // reader safe to scope. A later parse failure retains the whole suite.
+  writeFileSync(join(root, 'tests/z-broken-reader.test.mjs'), fs + `${walk}.filter(`);
+  const [, incomplete] = selectImpactPair(sourceFiles(root), [['src/leaf.ts'], ['src/data/locales.json']]);
+  assert.equal(incomplete.scope, 'full');
+  assert.equal(incomplete.reason, 'Unparseable module: tests/z-broken-reader.test.mjs');
 });
 
 test('computed script domains include their tests and keep runner dependencies full', () => {

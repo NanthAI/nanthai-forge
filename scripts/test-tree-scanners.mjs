@@ -8,7 +8,7 @@
 // only: no file read, no process, no server call.
 import ts from 'typescript';
 import { posix } from 'node:path';
-import { treeReaders } from './test-tree-readers.mjs';
+import { listingSuffix, treeReaders } from './test-tree-readers.mjs';
 
 const testFile = path => /^tests\/[^/]+\.test\.mjs$/.test(path);
 const ENUMERATE = /^(?:readdir|readdirSync|opendir|opendirSync|glob|globSync)$/;
@@ -163,9 +163,15 @@ function analyse(path, text) {
     }
     // Rooted with no folder piece: the repository root itself, named through `import.meta`.
     if (!folders.size && argument.meta) folders.add('');
-    for (const folder of folders)
-      if (!scans.some(item => item.folder === folder && item.recursive === !!recursive))
-        scans.push({ folder, recursive: !!recursive });
+    for (const folder of folders) {
+      const suffix = !folder && recursive ? listingSuffix(call) : undefined;
+      if (
+        !scans.some(
+          item => item.folder === folder && item.recursive === !!recursive && item.suffix === suffix,
+        )
+      )
+        scans.push({ folder, recursive: !!recursive, ...(suffix ? { suffix } : {}) });
+    }
   }
   return scans;
 }
@@ -187,17 +193,32 @@ export function treeScanners(files) {
     }
     if (scans.length) found.set(path, scans);
   }
-  // A walk from a plain relative path, or a recursive reader, scans too (test-tree-readers.mjs).
-  for (const [path, scans] of treeReaders(files, testFile, new Set(found.keys()))) found.set(path, scans);
+  // A rooted scan in one part of a test can coexist with a relative root walk elsewhere.
+  for (const [path, scans] of treeReaders(files, testFile)) {
+    const rooted = found.get(path);
+    if (!rooted) found.set(path, scans);
+    else
+      for (const scan of scans)
+        if (
+          !scan.folder &&
+          !scan.code &&
+          scan.recursive &&
+          !rooted.some(
+            item => !item.folder && item.recursive && item.suffix === scan.suffix && item.code === scan.code,
+          )
+        )
+          rooted.push(scan);
+  }
   memo.set(files, found);
   return found;
 }
 
 /** A scan covers a path inside its folder (anywhere below it when recursive, directly in it when not);
  * an import walk (`code`) covers no Markdown document. */
-export const scanCovers = ({ folder, recursive, code }, path) => {
+export const scanCovers = ({ folder, recursive, code, suffix }, path) => {
   if (folder && !path.startsWith(`${folder}/`)) return false;
   if (code && /\.md$/.test(path)) return false;
+  if (suffix && !path.endsWith(suffix)) return false;
   return recursive || !path.slice(folder ? folder.length + 1 : 0).includes('/');
 };
 

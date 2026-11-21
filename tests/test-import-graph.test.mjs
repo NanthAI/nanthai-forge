@@ -96,6 +96,75 @@ test('directory enumeration, built web bundles and directory aliases keep their 
   assert.ok(!selected(files).tests.includes('tests/bundle.test.mjs'));
 });
 
+test('recursive root scans use the listing site and leave nonmatching helper consumers out', () => {
+  const data = 'scripts/data/deep/catalog.json';
+  const files = fixture({
+    [data]: '{}',
+    'scripts/readers.mjs': `
+      import { readdir as list, readFile } from 'node:fs/promises';
+      export async function readJson() {
+        const root = new URL('../', import.meta.url);
+        return (await list(root, { recursive: true }))
+          .filter(name => name.endsWith('.json')).map(name => readFile(name, 'utf8'));
+      }
+      export const unrelated = true;`,
+    'scripts/read-js.mjs': `
+      import fs from 'node:fs';
+      export const readJs = () => fs.readdirSync('./', { recursive: true })
+        .filter(name => name.endsWith('.js')).map(name => fs.readFileSync(name, 'utf8'));`,
+    'tests/json-reader.test.mjs': "import { readJson } from '../scripts/readers.mjs'; readJson();",
+    'tests/unused-reader.test.mjs': "import { unrelated } from '../scripts/readers.mjs';",
+    'tests/js-reader.test.mjs': "import { readJs } from '../scripts/read-js.mjs'; readJs();",
+  });
+  const selection = selected(files, [data]);
+  assert.equal(selection.scope, 'scoped', selection.reason);
+  assert.deepEqual(selection.affectedTests, ['tests/json-reader.test.mjs']);
+});
+
+test('equivalent root walks and transformed file reads keep their consumers beside a direct reader', () => {
+  const data = 'src/data/catalog.json';
+  for (const [setup, walk, read] of [
+    ['', "fs['readdirSync']('.')", 'name'],
+    ['const { readdirSync: list } = fs;', "list('.')", 'name'],
+    ['const list = fs.readdirSync;', "list('src/..')", 'name'],
+    ['', "fs.readdirSync('.')", "name.slice(0, -3) + '.json'"],
+  ]) {
+    const call = walk.replace(')', ', { recursive: true })');
+    const suffix = read === 'name' ? '.json' : '.js';
+    const files = fixture({
+      [data]: '{}',
+      'src/data/catalog.js': '',
+      'scripts/root-reader.mjs': `import fs from 'node:fs'; ${setup}
+        export const scan = () => ${call}.filter(name => name.endsWith('${suffix}'))
+          .map(name => fs.readFileSync(${read}, 'utf8'));`,
+      'tests/direct-reader.test.mjs': `import '../${data}' with { type: 'json' };`,
+      'tests/library-reader.test.mjs': "import { scan } from '../scripts/root-reader.mjs'; scan();",
+    });
+    const result = selected(files, [data]);
+    assert.equal(result.scope, 'scoped', result.reason);
+    assert.deepEqual(result.affectedTests, ['tests/direct-reader.test.mjs', 'tests/library-reader.test.mjs']);
+  }
+});
+
+test('recursive reads through a static check helper keep the reader test without widening the pipeline', () => {
+  const data = 'scripts/data/deep/catalog.json';
+  const helper = 'scripts/tree-read.mjs';
+  const files = fixture({
+    'package.json': '{"scripts":{"check":"node scripts/check-catalog.mjs"}}',
+    [data]: '{}',
+    [helper]: `import { readdirSync, readFileSync } from 'node:fs';
+      export const read = () => readdirSync('.', { recursive: true })
+        .filter(name => name.endsWith('.json')).map(name => readFileSync(name, 'utf8'));`,
+    'scripts/check-catalog.mjs': "import { read } from './tree-read.mjs'; read();",
+    'tests/catalog-reader.test.mjs': "import { read } from '../scripts/tree-read.mjs'; read();",
+  });
+  const result = selected(files, [data]);
+  assert.equal(result.scope, 'scoped', result.reason);
+  assert.deepEqual(result.affectedTests, ['tests/catalog-reader.test.mjs']);
+  files.set(helper, files.get(helper) + "\nimport './data/deep/catalog.json' with { type: 'json' };");
+  assert.equal(selected(files, [data]).scope, 'full');
+});
+
 test('unknown and partially known loaders stay broad across source and helper domains', () => {
   for (const text of [
     'await import(variable)',

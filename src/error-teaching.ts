@@ -31,6 +31,10 @@ export const teachingByCode: Record<string, Entry> = {
   WORK_CONFLICT: { learn: 'conflict' },
   CHECK_FAILED: { learn: 'check', next: `nforge agent <root> log '{"runId":"<runId>"}'` },
   HOSTED_CHECKOUT_REQUIRED: { learn: 'hosted' },
+  PROJECT_WORK_INDEX_MISSING: {
+    learn: 'storage',
+    next: `nforge hosted-work <root> '{"action":"rebuild-index"}'`,
+  },
   WORK_OPERATION_CHANGED: { learn: 'retry' },
   INTERNAL_ERROR: { learn: 'errors', next: '<replay>' },
   RESOLUTION_REQUIRED: { learn: 'conflict', next: `nforge agent <root> resolve '<lane>'` },
@@ -140,6 +144,11 @@ const REPLAY_MAX = 300;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const shell = (word: string) => (/^[\w./:@=+-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);
 const commandLine = (words: readonly string[]) => ['nforge', ...words].map(shell).join(' ');
+
+export function workIndexRecovery(url: string, projectId: string) {
+  return { command: commandLine(['hosted-work', url, projectId, '{"action":"rebuild-index"}']) };
+}
+
 const commandIn = (recovery: unknown): string | undefined => {
   if (!recovery || typeof recovery !== 'object') return undefined;
   const value = recovery as Record<string, unknown>;

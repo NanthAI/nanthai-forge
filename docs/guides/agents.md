@@ -17,10 +17,12 @@ nforge mcp ROOT --agent
    ```sh
    nforge agent ROOT planning '{"id":"ITEM_ID","reconcile":false}'
    nforge agent ROOT lanes '{"planningItemId":"ITEM_ID"}'
-   nforge agent ROOT start '{"planningItemId":"ITEM_ID","operationId":"FRESH_UUID"}'
+   nforge agent ROOT start '{"planningItemId":"ITEM_ID","operationId":"FRESH_UUID","model":"unknown"}'
    ```
 
-   Start returns your Lane path. Edit only there; an existing Lane owned by another agent is coordination context, not permission to take it. For unplanned work, use `outcome` instead of `planningItemId`.
+   For your first start as a CLI or MCP agent, supply your model ID in `model` or in the launcher's `FORGE_AGENT_MODEL`. Use `"unknown"` when you don't know the ID. Forge can reuse a declaration from the same detected session. For unplanned work, use `outcome` instead of `planningItemId`.
+
+   Start returns your Lane path and the command to read project rules. Edit only in your Lane. Earlier Lanes show who else is working on the Item.
 
 2. Make the smallest complete change. Save after meaningful steps. Read `behindMain`, presence and any `conflictNotice`; saved overlap evidence excludes unsaved edits and never proves independence.
 

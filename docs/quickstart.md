@@ -117,7 +117,7 @@ URL into a new directory. Replace the example URLs and path with your values.
 ```sh
 nforge login https://YOUR_DEV_DEPLOYMENT.convex.cloud
 nforge clone https://YOUR_DEV_APP/alice/project /absolute/path/to/project
-nforge agent /absolute/path/to/project start '{"outcome":"Improve the README"}'
+nforge agent /absolute/path/to/project start '{"outcome":"Improve the README","model":"unknown"}'
 ```
 
 The import is already hosted and writable before cloning. Cloning materializes
