@@ -47,10 +47,14 @@ export function printedCommand(text, cwd) {
 }
 
 export function continuation(value, root) {
-  // Current replies pair structured next with command. Older releases advertised
+  // Brief submits advertise one wait or wake command. Older releases advertised
   // next:"retry", retry parameters and retryCommand for the same documented action.
   const legacyRetry = value.next === 'retry';
-  const advertised = value.command ?? (legacyRetry ? value.retryCommand : undefined);
+  const advertised =
+    value.command ??
+    value.wake?.command ??
+    value.waitCommand ??
+    (legacyRetry ? value.retryCommand : undefined);
   const expected = legacyRetry
     ? value.retry && typeof value.retry === 'object'
       ? { action: 'finish', ...value.retry }

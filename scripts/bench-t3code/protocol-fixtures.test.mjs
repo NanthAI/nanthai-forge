@@ -544,6 +544,17 @@ test('structured-only land save continuation encodes the CLI flag without leakin
   });
 });
 
+test('a brief landing wake follows its original operation through the advertised command', async () => {
+  const body = { operationIds: ['original-op'], until: 'acceptance', timeoutSeconds: 7080 };
+  const reply = response({
+    submission: { phase: 'composing' },
+    wake: { command: `nforge agent '${root}' wait '${JSON.stringify(body)}'` },
+  });
+  const f = await fixture([reply, landed]);
+  assert.deepEqual(f.calls[1], { root, action: 'wait', flags: [], body });
+  assert.equal(f.result.landAttempts, 1);
+});
+
 test('flag-aware continuation still refuses missing save flags, wrong lanes and wrong operations', () => {
   for (const [body, flags, key] of [
     [{ laneId: 'lane', operationId: 'op' }, '', 'save'],

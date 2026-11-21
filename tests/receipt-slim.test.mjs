@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { operationWait } from '../dist/agent-operation-wait.js';
 import { agentDeadEnd } from '../dist/error-teaching.js';
 import { slimReceipt, printedReceipt } from '../dist/receipt-slim.js';
+import { publicLogsNotice } from '../dist/runner-visibility.js';
 import { shellQuote } from '../dist/shell-quote.js';
 
 // Issue 47558a99: receipts leave the process without facts the agent already holds. Budgets are
@@ -526,39 +527,52 @@ test('a submitted landing names its composed State and passed static checks, not
   );
 });
 
-test('a normal queued submit prints one exact continuation within 1,200 characters in either harness', t => {
+test('queued and durable composing submits print one exact continuation within 1,200 characters', t => {
   const root = `/srv/workspaces/nanthai/forge/nanthai-forge.forge-client/lanes/${laneId}`;
   const targets = { operationIds: [opId], until: 'acceptance' };
   const foreground = operationWait(root, targets);
   const budgetSeconds = 7080;
   const background = operationWait(root, { ...targets, timeoutSeconds: budgetSeconds });
-  for (const continuation of [
-    foreground,
-    {
-      ...background,
-      wake: { delivery: 'background-exit', command: background.command, budgetSeconds },
-      instruction: 'Run the command in the background and stay with the original operation. '.repeat(8),
-    },
+  const wake = {
+    ...background,
+    wake: { delivery: 'background-exit', command: background.command, budgetSeconds },
+    instruction: 'Run the command in the background and stay with the original operation. '.repeat(8),
+  };
+  for (const [phase, continuation] of [
+    ['queued', foreground],
+    ['queued', wake],
+    ['composing', foreground],
+    ['composing', wake],
   ]) {
     const full = structuredClone(healthy.land);
     full.as = 'synthetic/warm-quail';
+    if (phase === 'composing') {
+      full.behindMain.commits = 3;
+      full.behindMain.conflictingPaths = ['docs/agents/workflow.d/sections/2200-asynchronous-land.md'];
+    }
     const { submission } = full.result;
     delete submission.acceptance;
     delete submission.testFiles;
     Object.assign(submission, {
-      phase: 'queued',
+      phase,
+      ...(phase === 'composing' ? { preparing: true } : {}),
       message: 'm'.repeat(1024),
       observation: { state: 'pending', pendingReason: 'queued', cause: null },
       counts: { r2: [3, 11, 11000] },
     });
     Object.assign(full.result, {
       ...continuation,
-      queuePosition: 3,
-      queue: { position: 3, total: 6, entriesAhead: 2, predecessor: { id: randomUUID() } },
-      queueAheadSelection: { ahead: [{ head: sha, id: randomUUID() }], more: false },
-      queueAheadUnavailable: true,
+      ...(phase === 'queued'
+        ? {
+            queuePosition: 3,
+            queue: { position: 3, total: 6, entriesAhead: 2, predecessor: { id: randomUUID() } },
+            queueAheadSelection: { ahead: [{ head: sha, id: randomUUID() }], more: false },
+            queueAheadUnavailable: true,
+          }
+        : {}),
       landingState: { state: 'queued', label: 'Queued', nextStep: 'Waits for its turn on main.' },
-      landingAdvice: 'Landing mode: strict; effective: strict. The full check gates acceptance.',
+      landingAdvice: 'Landing mode: fast; effective: fast. Nothing to do.',
+      checkLogs: publicLogsNotice('synthetic/forge'),
       changedPaths: 3,
       progress: {
         terminal: { outcome: { status: 'completed', result: { result: { status: 'clean', head: sha } } } },
@@ -573,31 +587,35 @@ test('a normal queued submit prints one exact continuation within 1,200 characte
           local: 'trimmed by the local budget',
           run: `nforge agent '${root}' preflight '{"laneId":"${laneId}"}'`,
           selected: Array.from({ length: 20 }, (_, i) => `tests/forge-${i}.test.mjs`),
-          static: [
-            { name: 'lint', outcome: 'passed' },
-            { name: 'format', outcome: 'passed' },
-          ],
-          quick: { ran: 5, notStarted: 26, budgetSeconds: 90, outcome: 'incomplete' },
+          static: Array.from({ length: 11 }, (_, i) => ({
+            name: `static check ${i}`,
+            outcome: 'passed',
+          })),
+          quick: { ran: 5, notStarted: 26, budgetSeconds: 90, seconds: 94, outcome: 'incomplete' },
         },
       },
     });
     const options = { agent: true, detail: false, landChild: false };
     const brief = printedReceipt(full, options);
-    const mode = continuation.wake ? 'background wake' : 'foreground wait';
+    const mode = `${phase} ${continuation.wake ? 'background wake' : 'foreground wait'}`;
     t.diagnostic(`${mode}: ${chars(full)} -> ${chars(brief)} chars`);
     assert(chars(brief) <= MAX_QUEUED_SUBMIT, `${mode}: ${chars(brief)} chars`);
     assert.equal(brief.operationId, opId);
     assert.equal(brief.result.submission.id, submission.id);
-    assert.equal(brief.result.submission.phase, 'queued');
-    assert.deepEqual(brief.result.next, continuation.next);
+    assert.equal(brief.result.submission.phase, phase);
+    assert.deepEqual(brief.result.next, continuation.wake ? undefined : continuation.next);
     assert.equal(brief.result.wake?.command ?? brief.result.waitCommand, continuation.command);
     assert.equal(brief.result.command, undefined);
     assert.equal(brief.result.waitCommand, continuation.wake ? undefined : continuation.command);
     assert.equal(brief.result.replayParameters, undefined);
-    assert.equal(brief.result.queuePosition, 3);
-    assert.deepEqual(brief.result.queue, { total: 6 });
+    assert.equal(brief.result.queuePosition, phase === 'queued' ? 3 : undefined);
+    assert.deepEqual(brief.result.queue, phase === 'queued' ? { total: 6 } : undefined);
+    if (phase === 'composing')
+      assert.deepEqual(brief.behindMain.conflictingPaths, full.behindMain.conflictingPaths);
+    assert.equal(brief.result.checkLogs, 'Public GitHub Actions logs: synthetic/forge.');
+    assert.equal(brief.result.landingAdvice, 'Landing mode: fast.');
     assert.equal(brief.result.progress.composed.head, sha);
-    assert.equal(brief.result.defaults.preflight.static, 'passed: lint, format');
+    assert.equal(brief.result.defaults.preflight.staticPassed, 11);
     assert.equal(brief.result.defaults.preflight.quick.ran, 5);
     assert.equal(agentDeadEnd(brief), undefined);
     assert.deepEqual(slimReceipt(full), brief);
@@ -625,10 +643,26 @@ test('source preparation and queued conflict advice keep their original replay a
   });
   assert.deepEqual(slimReceipt(preparation).result, preparation.result);
 
+  const composing = envelope('finish', {
+    ...preparation.result,
+    phase: 'finish',
+    submission: {
+      id: randomUUID(),
+      phase: 'composing',
+      preparing: true,
+      observation: { state: 'pending', pendingReason: 'queued' },
+    },
+  });
+  const retryable = slimReceipt(composing).result;
+  assert.deepEqual(retryable.next, preparation.result.next);
+  assert.deepEqual(retryable.replayParameters, replayParameters);
+  assert.equal(retryable.command, command);
+
   const wait = operationWait(laneRoot, { operationIds: [opId], until: 'acceptance' });
   const queued = envelope('finish', {
     phase: 'finish',
     submission: {
+      id: randomUUID(),
       phase: 'queued',
       observation: { state: 'pending', pendingReason: 'queued', cause: null },
     },
@@ -652,7 +686,11 @@ test('a queued submit preserves the preflight commands associated with an incomp
   ]) {
     const queued = envelope('finish', {
       phase: 'finish',
-      submission: { phase: 'queued', observation: { state: 'pending', pendingReason: 'queued' } },
+      submission: {
+        id: randomUUID(),
+        phase: 'queued',
+        observation: { state: 'pending', pendingReason: 'queued' },
+      },
       ...wait,
       defaults: { preflight },
     });

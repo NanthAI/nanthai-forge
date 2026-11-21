@@ -277,7 +277,7 @@ function briefTestFiles(value: unknown): Json | undefined {
 function briefPending(result: Json): Json | undefined {
   const submission = obj(result.submission);
   if (!submission || submission.phase === 'landed' || result.inProgress !== true) return undefined;
-  // `command`, `waitCommand`, `next` and `instruction` are the exact continuation (no dead ends): kept.
+  // Keep the exact continuation here. A durable submit can remove duplicate wait fields below.
   const slim: Json = result.pendingAttempt === null ? omit(result, 'pendingAttempt') : { ...result };
   const testFiles = briefTestFiles(submission.testFiles),
     request = obj(submission.request);
@@ -346,18 +346,24 @@ function briefPending(result: Json): Json | undefined {
   return slim;
 }
 
-/** A queued submit has a durable wait target. Keep one runnable command and the structured
- * target, while source preparation and exceptional outcomes keep their own replay and recovery. */
-function briefQueuedSubmit(result: Json, operationId: unknown): Json {
+/** The queue and its durable composing submission share a canonical wait. Source work without
+ * that submission, and exceptional results that need recovery, keep their exact replay. */
+function briefSubmittedLanding(result: Json, operationId: unknown, detail: Json): Json {
   const submission = obj(result.submission),
     observation = obj(submission?.observation),
+    progress = obj(result.progress),
     next = obj(result.next),
     wake = obj(result.wake),
     wait = result.waitCommand,
     targets = next?.operationIds;
+  const preparing = submission?.phase === 'composing' && submission.preparing === true;
+  const sourceStatus = progress?.status ?? obj(progress?.outcome)?.status;
   if (
     result.phase !== 'finish' ||
-    submission?.phase !== 'queued' ||
+    typeof submission?.id !== 'string' ||
+    (submission.phase !== 'queued' && !preparing) ||
+    sourceStatus === 'retryable' ||
+    sourceStatus === 'failed' ||
     observation?.state !== 'pending' ||
     observation.pendingReason !== 'queued' ||
     observation.stall ||
@@ -391,11 +397,24 @@ function briefQueuedSubmit(result: Json, operationId: unknown): Json {
     'replayParameters',
     'composeOperationId',
   );
-  if (wake) delete slim.waitCommand;
+  if (wake) {
+    delete slim.waitCommand;
+    delete slim.next;
+  }
   if (obj(result.landingState)?.state === 'queued') delete slim.landingState;
-  const queued = omit(submission, 'observation', 'message', 'counts', 'error');
+  const queued = omit(submission, 'observation', 'message', 'counts', 'error', 'preparing');
   if (submission.operationId === operationId) delete queued.operationId;
   slim.submission = queued;
+  if (typeof result.checkLogs === 'string')
+    slim.checkLogs = result.checkLogs.replace(
+      /^Check logs are public: this runner runs in (.+), whose GitHub Actions logs,.*$/,
+      'Public GitHub Actions logs: $1.',
+    );
+  if (typeof result.landingAdvice === 'string')
+    slim.landingAdvice = result.landingAdvice.replace(
+      /^Landing mode: (strict|fast); effective: \1\. Nothing to do\.$/,
+      'Landing mode: $1.',
+    );
   const queue = obj(result.queue);
   if (queue) {
     slim.queue = { total: queue.total };
@@ -412,11 +431,20 @@ function briefQueuedSubmit(result: Json, operationId: unknown): Json {
     !preflight.lastRun &&
     !preflight.staticAdvisory &&
     !Array.isArray(preflight.static)
-  )
+  ) {
+    const compact = omit(preflight, 'selected', 'local', 'run', 'estimateMinutes', 'totalEstimateMinutes');
+    const staticChecks = obj(obj(detail.defaults)?.preflight)?.static;
+    if (typeof preflight.static === 'string' && Array.isArray(staticChecks)) {
+      delete compact.static;
+      compact.staticPassed = staticChecks.length;
+    }
+    const quick = obj(preflight.quick);
+    if (quick) compact.quick = omit(quick, 'budgetSeconds', 'seconds');
     slim.defaults = {
       ...defaults,
-      preflight: omit(preflight, 'selected', 'local', 'run', 'estimateMinutes', 'totalEstimateMinutes'),
+      preflight: compact,
     };
+  }
   return slim;
 }
 
@@ -506,7 +534,7 @@ function brief(out: Json): Json {
     .find(Boolean);
   const kept =
     slim && (action === 'finish' || action === 'land')
-      ? briefQueuedSubmit(slim, out.operationId)
+      ? briefSubmittedLanding(slim, out.operationId, result)
       : (slim ?? result);
   // Weakened-test flags advise the agent before review (Issue 11901a0c): never --detail only.
   const weakenedTests = obj(result.defaults)?.weakenedTests;

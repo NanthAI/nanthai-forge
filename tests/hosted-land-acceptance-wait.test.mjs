@@ -45,6 +45,7 @@ async function fixture(t, checkOnly = false, memberBudget) {
             phase: 'finish',
             ...(stalePending ?? {}),
             submission: {
+              id: operationId,
               phase:
                 conflictRecovery || terminalFailure
                   ? 'terminal-failed'
@@ -563,7 +564,7 @@ test('agent land returns at once after submission with the one background wake c
   });
   const brief = printedReceipt(result, { agent: true, detail: false, landChild: false }).result;
   assert.deepEqual(brief.wake, wake);
-  assert.deepEqual(brief.next, next);
+  assert.equal(brief.next, undefined);
   assert.equal(brief.waitCommand, undefined);
   assert.equal(brief.command, undefined);
   const err = s.err.join('');

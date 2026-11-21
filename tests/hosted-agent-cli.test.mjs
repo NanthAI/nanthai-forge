@@ -505,6 +505,9 @@ for (const wrapper of ['cli', 'mcp'])
       const first = await invoke();
       const firstNext = assertAgentResponseShape(first, s.root);
       if (outcome === 'terminal-submission') {
+        const original = wrapper === 'mcp' ? await invoke(true) : first;
+        assert.equal(original.operationId, first.operationId);
+        assert.equal(original.result.submission.id, first.result.submission.id);
         const submission = s.operations.get(first.operationId);
         submission.phase = 'terminal-failed';
         submission.observation = { state: 'terminal-failed', cause: 'rejected', pendingReason: null };
@@ -517,8 +520,8 @@ for (const wrapper of ['cli', 'mcp'])
           2,
           'discovery plus original admission only; no normalization reads',
         );
-        const { operationId: _original, ...selection } = first.result.replayParameters;
-        void _original;
+        const { operationId, ...selection } = original.result.replayParameters;
+        assert.equal(operationId, command.operationId);
         assert.deepEqual(next.body, { ...selection, retry: true, reason: 'other' });
         assert.equal(replay.result.next.operationId, undefined);
         if (wrapper === 'mcp') {
@@ -557,8 +560,15 @@ for (const wrapper of ['cli', 'mcp'])
         assert.deepEqual(firstNext.body.operationIds, [command.operationId]);
         assert.equal(firstNext.action, 'wait');
         assert.equal(firstNext.body.until, 'acceptance');
-        assert.equal(first.result.command, first.result.waitCommand);
-        assert.match(first.result.instruction, /Keep this turn active/);
+        const detailed = wrapper === 'mcp' ? await invoke(true) : first;
+        assert.equal(detailed.result.command, first.result.waitCommand);
+        assert.equal(detailed.result.waitCommand, first.result.waitCommand);
+        assert.match(detailed.result.instruction, /Keep this turn active/);
+        if (wrapper === 'mcp') {
+          assert.equal(first.result.command, undefined);
+          assert.equal(first.result.instruction, undefined);
+          assert.equal(first.result.replayParameters, undefined);
+        }
       }
     });
 
