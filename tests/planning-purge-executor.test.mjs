@@ -37,6 +37,9 @@ const modules = {
   projectJournalPublish: await import(moduleUrl('../convex/projectJournalPublish.ts')),
   projectJournalRun: await import(moduleUrl('../convex/projectJournalRun.ts')),
 };
+const { readArchiveCoverage } = await import(moduleUrl('../convex/projectPlanningArchiveCoverage.ts'));
+const coverage = async s =>
+  (await readArchiveCoverage(s.ctx, s.tables.hostedProjects.get(s.projectId))).state;
 const { phaseKey, pageKey } = await import(moduleUrl('../convex/projectJournalMaintenance.ts'));
 const { ensure } = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 const { purgeSteps, partitionsOf } = await import(moduleUrl('../convex/projectPlanningPurgeRedact.ts'));
@@ -928,7 +931,8 @@ async function purgeArchiveFixture(t, { history, indexed }) {
   const operationId = randomUUID();
   if (indexed) {
     const { ctx } = executor(s);
-    const pages = await backfillArchive(s, ctx, pages => {
+    const projectBefore = canonicalPayload(project);
+    const pages = await backfillArchive(s, ctx, async pages => {
       assert.equal(
         project.planningArchiveIndexed,
         undefined,
@@ -950,6 +954,11 @@ async function purgeArchiveFixture(t, { history, indexed }) {
         gets: 0,
         bytes: 0,
       },
+    );
+    assert.equal(
+      canonicalPayload(project),
+      projectBefore,
+      'backfill leaves the hot project document byte-identical',
     );
     r2.requests.length = 0;
   }
@@ -1058,10 +1067,10 @@ test('backfill indexes older scoped records without a retained header and can re
   const bytes = r2.objects.get(key);
   r2.objects.delete(key);
   await assert.rejects(step(), code('SOURCE_UNAVAILABLE'));
-  assert.equal(project.planningArchiveIndexed, undefined);
+  assert.equal((await coverage(s)).ready, undefined);
   r2.objects.set(key, bytes);
   assert.equal((await step()).done, false, 'archive reads finish before the independent inventory');
-  assert.equal(project.planningArchiveIndexed, undefined);
+  assert.equal((await coverage(s)).ready, undefined);
   assert.equal((await step()).done, false);
   assert.equal((await step()).done, true);
   r2.requests.length = 0;
@@ -1091,7 +1100,7 @@ test('the first archive page reads this project even when a preceding index rang
   const first = await modules.projectPlanningArchiveBackfillRun.run._handler(ctx, { projectId: s.projectId });
   assert.deepEqual([first.done, first.segments, first.gets], [false, 1, 1]);
   assert.deepEqual(r2.requests, [{ key: own, method: 'GET' }]);
-  assert.equal(project.planningArchiveIndexed, undefined);
+  assert.equal((await coverage(s)).ready, undefined);
   const remaining = await backfillArchive(s, ctx);
   assert.ok(
     remaining.every(page => page.gets === 0),
@@ -1133,7 +1142,7 @@ test('a native page split by the physical read budget resumes its remaining arch
   const ctx = executor(s).ctx;
   const first = await modules.projectPlanningArchiveBackfillRun.run._handler(ctx, { projectId: s.projectId });
   assert.ok(keys.length > 16 && first.gets <= 16 && first.segments < 9);
-  assert.equal(project.planningArchiveIndexed, undefined);
+  assert.equal((await coverage(s)).ready, undefined);
   const remaining = await backfillArchive(s, ctx);
   assert.ok(remaining.every(page => page.gets <= 16));
   assert.deepEqual(r2.requests.map(request => request.key).sort(), keys.sort());
@@ -1156,7 +1165,7 @@ test('a census mismatch keeps indexed purge disabled until a new pass verifies c
   assert.equal((await step()).done, false);
   const result = await step();
   assert.deepEqual([result.done, result.advanced], [false, false]);
-  assert.equal(project.planningArchiveIndexed, undefined);
+  assert.equal((await coverage(s)).ready, undefined);
   assert.ok(r2.objects.has(own), 'the incomplete migration has not removed any archive');
   await backfillArchive(s, ctx);
   assert.equal((await step()).done, true);
@@ -1199,6 +1208,60 @@ test('an unchecked selection receipt is not reused after the verified index beco
     hash: digest(receipt),
   });
   assert.ok((await worker.run(itemId, operationId)).purgedAt);
+  assert.equal(r2.objects.has(own), false);
+});
+
+test('a verified project marker moves into the receipt without reopening archived objects', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const own = await archiveOneNote(s, r2, itemId);
+  const project = s.tables.hostedProjects.get(s.projectId);
+  project.journalRevision = 1;
+  const worker = executor(s);
+  await backfillArchive(s, worker.ctx);
+  const { row } = await readArchiveCoverage(s.ctx, project);
+  await s.ctx.db.delete(row._id);
+  project.planningArchiveIndexed = 2;
+  project.planningArchiveEventRevision = 4;
+  r2.requests.length = 0;
+  const migrated = await modules.projectPlanningArchiveBackfillRun.run._handler(worker.ctx, {
+    projectId: s.projectId,
+  });
+  assert.deepEqual(migrated, { advanced: true, done: true, segments: 0, gets: 0, bytes: 0 });
+  assert.deepEqual(r2.requests, []);
+  assert.equal(project.planningArchiveIndexed, undefined);
+  assert.equal(project.planningArchiveEventRevision, undefined);
+  assert.deepEqual(await coverage(s), { ready: true, eventRevision: 4 });
+  project.planningArchiveEventRevision = 1;
+  assert.equal(
+    (await coverage(s)).eventRevision,
+    5,
+    'an older publisher after relocation invalidates the pin',
+  );
+  const replayed = await modules.projectPlanningArchiveBackfillRun.run._handler(worker.ctx, {
+    projectId: s.projectId,
+  });
+  assert.deepEqual(replayed, migrated);
+  assert.equal(project.planningArchiveEventRevision, undefined);
+  assert.deepEqual(await coverage(s), { ready: true, eventRevision: 5 });
+  assert.ok((await worker.run(itemId, randomUUID())).purgedAt);
+  assert.equal(r2.objects.has(own), false);
+});
+
+test('a stale archive coverage receipt cannot enable indexed purge', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const own = await archiveOneNote(s, r2, itemId);
+  s.tables.hostedProjects.get(s.projectId).journalRevision = 1;
+  const envelope = canonicalPayload({ indexVersion: 1, ready: true, eventRevision: 6 });
+  await s.ctx.db.insert('projectJournalReceipts', {
+    projectId: s.projectId,
+    operationId: 'planning-archive-coverage',
+    envelope,
+    hash: digest(envelope),
+  });
+  assert.deepEqual(await coverage(s), { eventRevision: 6 });
+  assert.ok((await executor(s).run(itemId, randomUUID())).purgedAt);
   assert.equal(r2.objects.has(own), false);
 });
 
@@ -1558,7 +1621,7 @@ test('a pending legacy publication adds its index entry and invalidates an index
   const result = await worker.run(itemId, randomUUID());
   assert.ok(result.purgedAt);
   assert.equal(result.rows, 8, 'the selected note moved from hot to archived exactly once');
-  assert.equal(s.tables.hostedProjects.get(s.projectId).planningArchiveEventRevision, 1);
+  assert.equal((await coverage(s)).eventRevision, 1);
   assert.equal(r2.objects.has(key), false);
   assert.ok(unrelated.every(key => !r2.requests.some(request => request.key === key)));
 });

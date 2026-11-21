@@ -135,7 +135,8 @@ commands and records. On a project whose archive has yet to be indexed, it uses 
 The operator can run `projectPlanningArchiveBackfillRun:run` with the project id, repeating until
 `done: true`. Each call resumes one bounded page. The backfill reads legacy archive bytes and compares
 the number of verified segments with a second pass over archive metadata. Modern record
-segments already have their pointers in Convex. There is no idle job.
+segments already have their pointers in Convex. The backfill stores its progress and verified
+coverage in the journal receipt table. There is no idle job.
 Current archive publication keeps the same writes for ordinary records and commands. If a captured legacy
 Item command is published, its index entry is written in the same transaction.
 The purge checkpoints selection and sweep pages. Before the tombstone, it accounts for newly

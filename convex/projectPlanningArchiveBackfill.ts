@@ -5,7 +5,12 @@ import type { JournalIndex } from '../src/journal-segment';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import type { Doc, Id } from './_generated/dataModel';
 import { internalMutation, internalQuery, type QueryCtx } from './server';
-import { planningArchiveBackfillProgress, planningArchiveIndexVersion } from './projectJournalFields';
+import { planningArchiveBackfillProgress } from './projectJournalFields';
+import {
+  hasProjectArchiveCoverage,
+  readArchiveCoverage,
+  saveArchiveCoverage,
+} from './projectPlanningArchiveCoverage';
 import {
   archiveIndexKind,
   archiveIndexPageSize,
@@ -21,16 +26,11 @@ const pageResult = v.union(
   v.null(),
   v.object({
     from: position,
-    next: planningArchiveBackfillProgress,
+    next: position,
     entries: v.array(entry),
     finish: v.boolean(),
   }),
 );
-
-function progress(project: Doc<'hostedProjects'>) {
-  const saved = project.planningArchiveBackfill;
-  return saved && 'mode' in saved ? saved : null;
-}
 
 const archiveRows = (ctx: QueryCtx, projectId: Id<'hostedProjects'>, legacyRecords: boolean) =>
   ctx.db.query('projectJournalSegments').withIndex('by_project_and_scope_and_from', q => {
@@ -61,9 +61,13 @@ export const page = internalQuery({
   returns: pageResult,
   handler: async (ctx, input) => {
     const project = await ctx.db.get(input.projectId);
-    if (!project || project.removal || project.planningArchiveIndexed === planningArchiveIndexVersion)
-      return null;
-    const from = progress(project);
+    if (!project || project.removal) return null;
+    const { state } = await readArchiveCoverage(ctx, project);
+    if (state.ready)
+      return hasProjectArchiveCoverage(project)
+        ? { from: null, next: null, entries: [], finish: true }
+        : null;
+    const from = state.progress ?? null;
     const current: Progress = from ?? {
       mode: 'index',
       legacyRecords: false,
@@ -116,7 +120,7 @@ export const commit = internalMutation({
   args: {
     projectId,
     from: position,
-    next: planningArchiveBackfillProgress,
+    next: position,
     finish: v.boolean(),
     entries: v.array(
       v.object({
@@ -128,10 +132,16 @@ export const commit = internalMutation({
   returns: v.object({ advanced: v.boolean(), done: v.boolean() }),
   handler: async (ctx, input) => {
     const project = await ctx.db.get(input.projectId);
-    if (!project || project.removal || project.planningArchiveIndexed === planningArchiveIndexVersion)
-      return { advanced: false, done: false };
-    if (canonicalPayload(progress(project)) !== canonicalPayload(input.from))
-      return { advanced: false, done: false };
+    if (!project || project.removal) return { advanced: false, done: false };
+    const { row, state } = await readArchiveCoverage(ctx, project);
+    if (!input.next) {
+      if (!state.ready || !hasProjectArchiveCoverage(project))
+        return { advanced: false, done: !!state.ready };
+      await saveArchiveCoverage(ctx, project, row, state);
+      return { advanced: true, done: true };
+    }
+    if (state.ready || canonicalPayload(state.progress ?? null) !== canonicalPayload(input.from))
+      return { advanced: false, done: !!state.ready };
     invariant(
       input.next.indexed === (input.from?.indexed ?? 0) + input.entries.length,
       'EVIDENCE_CHANGED',
@@ -141,12 +151,12 @@ export const commit = internalMutation({
       await indexArchiveTargets(ctx, input.projectId, key, targets);
     if (input.finish && input.next.expected !== input.next.indexed) {
       // A pre-existing fragment can publish during the count. Start a fresh count.
-      await ctx.db.patch(input.projectId, { planningArchiveBackfill: undefined });
+      await saveArchiveCoverage(ctx, project, row, { eventRevision: state.eventRevision });
       return { advanced: false, done: false };
     }
-    await ctx.db.patch(input.projectId, {
-      planningArchiveBackfill: input.finish ? undefined : input.next,
-      ...(input.finish ? { planningArchiveIndexed: planningArchiveIndexVersion } : {}),
+    await saveArchiveCoverage(ctx, project, row, {
+      eventRevision: state.eventRevision,
+      ...(input.finish ? { ready: true } : { progress: input.next }),
     });
     return { advanced: true, done: input.finish };
   },

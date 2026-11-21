@@ -19,6 +19,7 @@ import {
   type Control,
 } from './projectJournalMaintenance';
 import { applyJournal } from './projectJournalEffects';
+import { readArchiveCoverage, saveArchiveCoverage } from './projectPlanningArchiveCoverage';
 export const page = internalMutation({
   args: {
     ...journalRunArgs,
@@ -189,13 +190,14 @@ export const page = internalMutation({
       );
       const project = await ctx.db.get(input.projectId);
       invariant(project && !project.removal, 'WORK_STALE', 'Archive project changed.');
+      if (indexedEvents) {
+        const { row, state } = await readArchiveCoverage(ctx, project);
+        await saveArchiveCoverage(ctx, project, row, { ...state, eventRevision: state.eventRevision + 1 });
+      }
       if (rows.length)
         await ctx.db.patch(project._id, {
           journalRevision: (project.journalRevision ?? 0) + 1,
           journalRecordReceipts: true,
-          ...(indexedEvents
-            ? { planningArchiveEventRevision: (project.planningArchiveEventRevision ?? 0) + 1 }
-            : {}),
         });
       if (pending.input.laneId && pending.done) await putControl(ctx, pending.input, null, row, claimRow);
       else

@@ -8,6 +8,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import { internalQuery, internalMutation } from './server';
 import { planningArchiveIndexVersion } from './projectJournalFields';
+import { readArchiveCoverage, type ArchiveCoverage } from './projectPlanningArchiveCoverage';
 import { receiptRow } from './projectJournalMaintenance';
 import type { selectEventRows } from './projectPlanningPurgeSelect';
 import {
@@ -63,18 +64,21 @@ export async function archiveSelectionCurrent(
   ctx: QueryCtx,
   project: Doc<'hostedProjects'>,
   pin?: ArchivePin,
+  archive?: ArchiveCoverage,
 ) {
   invariant(
     !pin || (project.journalEventRewriteRevision ?? 0) === pin.rewriteRevision,
     'WORK_STALE',
     archiveChanged,
   );
-  if (pin?.indexedRevision !== undefined)
+  if (pin?.indexedRevision !== undefined) {
+    const coverage = archive ?? (await readArchiveCoverage(ctx, project)).state;
     return (
       pin.indexedVersion === planningArchiveIndexVersion &&
-      project.planningArchiveIndexed === planningArchiveIndexVersion &&
-      pin.indexedRevision === (project.planningArchiveEventRevision ?? 0)
+      coverage.ready === true &&
+      pin.indexedRevision === coverage.eventRevision
     );
+  }
   const [last] = project.journalRevision ? await eventSegments(ctx, project._id).order('desc').take(1) : [];
   const current = last ? segmentEntry(last).pin : null;
   const selected = pin?.frontier ?? null;
@@ -94,13 +98,13 @@ async function selection(
 ) {
   const project = await ctx.db.get(input.projectId);
   invariant(project && !project.removal, 'WORK_STALE', archiveChanged);
-  const row = await receiptRow(ctx, input.projectId, key(input.operationId));
+  const [row, { state: coverage }] = await Promise.all([
+    receiptRow(ctx, input.projectId, key(input.operationId)),
+    readArchiveCoverage(ctx, project),
+  ]);
   const request = digest(canonicalPayload([input.itemId, input.ids]));
   const rewriteRevision = project.journalEventRewriteRevision ?? 0;
-  const indexedRevision =
-    project.planningArchiveIndexed === planningArchiveIndexVersion
-      ? (project.planningArchiveEventRevision ?? 0)
-      : undefined;
+  const indexedRevision = coverage.ready ? coverage.eventRevision : undefined;
   const indexedVersion = indexedRevision === undefined ? undefined : planningArchiveIndexVersion;
   const prior = row && (JSON.parse(row.envelope) as SelectionProgress);
   // A legacy receipt never has this fence. Its cursor pinned the entire journal revision.
@@ -120,15 +124,15 @@ async function selection(
           done: false,
           selected: { rows: [], decisions: [], created: null, creates: false },
         };
-  return { project, row, progress };
+  return { project, row, progress, coverage };
 }
 
 export const resume = internalQuery({
   args,
   returns: v.any(),
   handler: async (ctx, input): Promise<SelectionProgress> => {
-    const { project, progress } = await selection(ctx, input);
-    if (progress.done && !(await archiveSelectionCurrent(ctx, project, progress)))
+    const { project, progress, coverage } = await selection(ctx, input);
+    if (progress.done && !(await archiveSelectionCurrent(ctx, project, progress, coverage)))
       return { ...progress, done: false };
     return progress;
   },
