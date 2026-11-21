@@ -86,6 +86,8 @@ export function calculateWaste(records: MetricRecords, period: MetricPeriod) {
           id: row.id,
           entryId: row.entryId,
           cause,
+          // The request's admission reason and its replacement attempt's reason are independent.
+          ...(request.firstCheckRecheck ? { firstCheckRecheck: request.firstCheckRecheck } : {}),
           // A main-race row names why its replacement rechecked (7c2e69e1).
           ...(cause === 'main-race' && row.raceRecheckReason ? { recheckReason: row.raceRecheckReason } : {}),
           ...(adoptedAt ? { reusedAfterRace: true } : {}),

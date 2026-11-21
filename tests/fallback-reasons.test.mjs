@@ -12,6 +12,7 @@ import {
   selectionFallback,
 } from '../dist/fallback-reasons.js';
 import { readHostedMetricPages } from '../dist/self-metrics-hosted-pages.js';
+import { pageMetrics } from '../dist/self-metrics-page.js';
 import { metricsSurface } from '../dist/self-metrics-surface.js';
 import { formatMetrics, metricsHeadline, formatMetricsHeadline } from '../dist/self-metrics-format.js';
 import { scopedRecheckSelection } from '../dist/scoped-recheck.js';
@@ -259,6 +260,7 @@ test('metrics count fallbacks per stage and reason from the pages it already rea
     race.map(row => [row.entryId, row.recheckReason]),
     [['b', 'path-overlap']],
   );
+  assert.equal(Object.hasOwn(race[0], 'firstCheckRecheck'), false);
   // Flagged in the text output and in the status headline, once.
   const text = formatMetrics(surface);
   assert.match(text, /Fast-path fallbacks: 5 \(3 limitation\)/);
@@ -274,6 +276,27 @@ test('metrics count fallbacks per stage and reason from the pages it already rea
   assert.equal(cell.limitations, 3);
   assert.deepEqual(Object.keys(cell.byReason[0]).sort(), ['count', 'kind', 'reason', 'stage']);
   assert.match(cellFallbacks({ result: {} }).error, /totals\.fallbacks/);
+});
+
+test('waste output keeps the request admission reason distinct from the replacement attempt reason', async () => {
+  const f = seeded();
+  f.tables.projectHostedLandingRequests.at(-1).admission = {
+    runId: 'b-run',
+    status: 'passed',
+    full: true,
+    recheck: 'global-risk',
+  };
+  const { records } = await readHostedMetricPages(f.query, period);
+  const before = { ...f.meter };
+  const surface = metricsSurface(records, period);
+  const output = JSON.parse(JSON.stringify(pageMetrics(surface, period, { limit: 1 })));
+  const [row] = output.totals.waste.rows;
+  assert.equal(row.entryId, 'b');
+  assert.equal(row.firstCheckRecheck, 'global-risk');
+  assert.equal(row.recheckReason, 'path-overlap');
+  assert.equal(row.runnerMinutes, 2);
+  assert.equal(row.discardedPassedRunnerMinutes, 2);
+  assert.deepEqual(f.meter, before);
 });
 
 test('an older deployment without the projection reports fallbacks as partial, not zero', async () => {
@@ -413,6 +436,9 @@ test('request pages carry second-check evidence for failed entries too; an older
   const callsBefore = f.meter.calls;
   const surface = metricsSurface(records, period);
   const value = surface.totals.secondChecks;
+  const failed = surface.totals.waste.rows.find(row => row.entryId === 'x');
+  assert.equal(failed.firstCheckRecheck, 'path-overlap');
+  assert.equal(Object.hasOwn(failed, 'recheckReason'), false);
   // The landed main-race recheck of the seed, and the failed entry with its first-check reason.
   assert.deepEqual(
     value.byReason.map(row => [row.reason, row.landed, row.unknown]),
@@ -436,8 +462,17 @@ test('request pages carry second-check evidence for failed entries too; an older
     page.page = page.page.map(({ firstCheckRecheck: _r, sharedBatch: _s, agentClient: _c, ...row }) => row);
     return JSON.stringify(page);
   };
-  const stale = metricsSurface((await readHostedMetricPages(older, period)).records, period).totals
-    .secondChecks;
-  assert.equal(stale.partial, true);
-  assert.match(stale.gaps[0], /predate the second-check projection/);
+  const stale = metricsSurface((await readHostedMetricPages(older, period)).records, period).totals;
+  assert.equal(stale.secondChecks.partial, true);
+  assert.match(stale.secondChecks.gaps[0], /predate the second-check projection/);
+  assert.equal(
+    Object.hasOwn(
+      stale.waste.rows.find(row => row.entryId === 'x'),
+      'firstCheckRecheck',
+    ),
+    false,
+  );
+  const race = stale.waste.rows.find(row => row.entryId === 'b');
+  assert.equal(Object.hasOwn(race, 'firstCheckRecheck'), false);
+  assert.equal(race.recheckReason, 'path-overlap');
 });

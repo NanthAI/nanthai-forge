@@ -437,8 +437,10 @@ conflict or risk (`path-overlap`, `global-risk`, `text-conflict`, red main), or 
 project's own policy (`reuse-policy`, supervised acceptance). An unknown code counts as a
 limitation. Text output flags each limitation reason (`⚑ limitation`); the status metrics
 headline shows one `fallbackWarning` line naming them, computed on that read and never
-polled. Each main-race row in `totals.waste.rows` carries the `recheckReason` of the attempt
-that replaced it. The exit bench copies the counts into each Forge cell's `result.json`
+polled. In JSON, a row in `totals.waste.rows` carries `firstCheckRecheck` when the landing
+request recorded an admission recheck reason (`admission.recheck`). A main-race row can
+also carry the `recheckReason` of the attempt that replaced it. Missing reasons are omitted.
+The exit bench copies the counts into each Forge cell's `result.json`
 (`forgeFallbacks`).
 
 `totals.secondChecks` counts every entry that did not land on its own first check, by reason
