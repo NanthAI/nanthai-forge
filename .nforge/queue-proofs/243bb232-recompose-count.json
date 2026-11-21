@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingAttemptRead.ts": "3f5035002d13764cc30ae73de5ffde7d701cca9cf16a7465f971406d9fa23ad5",
+    "convex/projectHostedLandings.ts": "39016a8ea9e36f281760d6989a8caa716d8f3145f2ff852b7a7e842b49db66fe",
+    "convex/projectHostedQueueView.ts": "d7e799f9772325416ef39b3064ef79efb7c47e6a9fa573d460449640f2cf262b",
+    "src/hosted-landings-view.ts": "158ae85c8804076432b7dfa6ce3bdd2c57b7b7f5c328a3f5463729d20c73ca92"
+  },
+  "replay": {
+    "incident": "19328518",
+    "test": "replay 19328518: a parked passed landing names the older submission it waits for in every status read",
+    "receipt": "42bde829-3e05-4ab5-9d3e-73f34203b9f0"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Af27f2749-5aab-4d08-8478-1f201588f042",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Af27f2749-5aab-4d08-8478-1f201588f042#/root/queue_recompose_review",
+    "receipt": "16a91384-6bf7-4bc5-a9da-ea1a7e8f0254"
+  }
+}

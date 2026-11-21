@@ -2,6 +2,10 @@
 
 MCP `forge_review` exposes hosted `show`, `diff`, `peers` and `queue`.
 
+- `queue {}` counts distinct Candidates after the first in each listed landing.
+  Like its landing receipt, it counts each attempt beyond the first eight as a
+  possible recompose. Rebinding a check for a Candidate in the observed history
+  does not add a recompose.
 - `queue {"submissionId":"SUBMISSION_ID"}` shows why one landing is still in flight.
   Copy the submission ID from the queue or landing reply. The page shows the current
   source reservation, if any, and up to eight installed attempts newest first.

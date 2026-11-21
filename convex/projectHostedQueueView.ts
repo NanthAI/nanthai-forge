@@ -8,9 +8,10 @@ import { hostedRecordBody } from './projectHostedRecords';
 import { landingRow } from './projectHostedLandingStore';
 import { readWouldConflict } from './projectHostedLandingWouldConflict';
 import { syncRequiredAdvice, syncRequiredNext } from '../src/hosted-would-conflict';
-import { loadLandingAttempt } from './projectHostedLandingAttemptRead';
+import { landingAttemptPrefix, loadLandingAttempt } from './projectHostedLandingAttemptRead';
 import { finishRow } from './projectHostedFinishWake';
-import { storedLandingStateSchema } from '../src/hosted-landing';
+import { storedLandingStateSchema, type HostedLandingAttempt } from '../src/hosted-landing';
+import { landingRecomposeCount } from '../src/hosted-landings-view';
 import { hostedFinishSchema } from '../src/hosted-finish';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { landingSuspect } from '../src/hosted-landing-suspect';
@@ -29,9 +30,9 @@ import { readProviderDelay } from './projectHostedLandingCheckProgress';
 
 /** One bounded read of the landing queue (09e637f7 minimal slice): who is in it,
  * in dispatch order, with Lane, Intent title, phase, last failing test files
- * and how many generations each entry went through. Reads the maintained queue
- * directory (at most QUEUE_VIEW_PAGES pages) plus about seven indexed rows per
- * listed entry; no queue scan, history, source bytes, scheduler or idle work. Entries held
+ * and how many times each entry recomposed. Reads the maintained queue directory
+ * (at most QUEUE_VIEW_PAGES pages), indexed rows for each entry and the same bounded
+ * attempt prefix as the receipt reader. No queue scan, source bytes, scheduler or idle work. Entries held
  * for a person or a dependency follow the dispatch order with no position and a `hold`.
  * A checking entry carries its check's start (from the landing row already read); while any does, the reply carries
  * the project's usual check times, one more indexed read of the landing-speed row (Item ecd6e610). */
@@ -55,7 +56,12 @@ export const read = query({
         const row = await landingRow(ctx, { projectId, submissionId: key.id });
         if (!row) continue;
         const state = storedLandingStateSchema.parse(JSON.parse(row.value));
-        const attempt = await loadLandingAttempt(ctx, { projectId, attemptId: state.attemptId });
+        const chain = await landingAttemptPrefix(ctx, projectId, state.id);
+        const attempt = await loadLandingAttempt(
+          ctx,
+          { projectId, attemptId: state.attemptId },
+          chain.find(row => row.attemptId === state.attemptId),
+        );
         const finish = await finishRow(ctx, { projectId, submissionId: state.id });
         const intentId = finish ? hostedFinishSchema.parse(JSON.parse(finish.value)).source.intentId : null;
         const intent = intentId
@@ -120,8 +126,13 @@ export const read = query({
           suspect: landingSuspect(state),
           lastFailingTests: failed.slice(0, 10),
           ...(failed.length > 10 ? { moreFailingTests: failed.length - 10 } : {}),
-          // Every recompose or recheck generation inserts one landing attempt.
-          recomposeCount: Math.max(0, attempt.number - 1),
+          recomposeCount:
+            landingRecomposeCount(
+              chain.map(row =>
+                row.attemptId === attempt.id ? attempt : (JSON.parse(row.value) as HostedLandingAttempt),
+              ),
+              attempt.number,
+            ) ?? attempt.number,
           submittedAt: state.at,
           lastProgressAt: state.timing?.ciProgressAt ?? state.timing?.selectedAt ?? state.at,
           // When its check was reserved: the start the usual check time counts from (Item ecd6e610).

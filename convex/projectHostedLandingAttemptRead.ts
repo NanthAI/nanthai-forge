@@ -5,6 +5,17 @@ import type { Id, Doc } from './_generated/dataModel';
 import { hostedLandingAttemptSchema, type HostedLandingAttempt } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
 import { HOSTED_PLATFORM_RETRIES } from '../src/hosted-landing-admission';
+import { LANDINGS_ATTEMPTS } from '../src/hosted-landings-view';
+
+/** The earliest attempt pins shared by the queue view and landing receipts. */
+export const landingAttemptPrefix = (ctx: QueryCtx, projectId: Id<'hostedProjects'>, submissionId: string) =>
+  ctx.db
+    .query('projectHostedLandingAttempts')
+    .withIndex('by_project_and_submission_and_number', q =>
+      q.eq('projectId', projectId).eq('submissionId', submissionId),
+    )
+    .order('asc')
+    .take(LANDINGS_ATTEMPTS);
 export const landingAttemptRow = (
   ctx: QueryCtx | MutationCtx,
   input: { projectId: Id<'hostedProjects'>; attemptId: string },

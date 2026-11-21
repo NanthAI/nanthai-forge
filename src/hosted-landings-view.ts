@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { discardedRunnerSeconds } from './cost-budgets.js';
-import type { HostedLandingState } from './hosted-landing.js';
+import type { HostedLandingAttempt, HostedLandingState } from './hosted-landing.js';
+
+/** Distinct Candidates after the first, plus at most one recompose per unread attempt. */
+export function landingRecomposeCount(attempts: HostedLandingAttempt[], lastNumber: number | undefined) {
+  const lastRead = attempts.at(-1);
+  if (!lastRead || lastNumber === undefined) return null;
+  const candidates = new Set(attempts.map(attempt => attempt.candidate?.id ?? `n${attempt.number}`));
+  return candidates.size - 1 + Math.max(0, lastNumber - lastRead.number);
+}
 
 /** The builder's own pre-submission measurement hold. Older submissions remain unknown. */
 export function landingClientHoldSeconds(state: HostedLandingState | null) {

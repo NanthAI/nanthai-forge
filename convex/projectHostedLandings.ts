@@ -6,6 +6,7 @@ import type { Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
 import { report } from './errors';
 import { landingCapsulePointer } from './projectLandingCapsuleStore';
+import { landingAttemptPrefix } from './projectHostedLandingAttemptRead';
 import { landingRow } from './projectHostedLandingStore';
 import { finishRow } from './projectHostedFinishWake';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
@@ -26,18 +27,13 @@ import {
   LANDINGS_RUN_IDS,
   landingClientHoldSeconds,
   landingCosts,
+  landingRecomposeCount,
 } from '../src/hosted-landings-view';
 
 type AttemptProgress = {
   timing?: { composeStartedAt?: string; ciEndedAt?: string; settledAt?: string };
   error?: { code: string; message: string } | null;
 };
-/** Recomposes in the read chain, plus at most one per attempt past it (the count stays exact when not partial). */
-function recomposes(attempts: HostedLandingAttempt[], lastNumber: number | undefined) {
-  if (!attempts.length || lastNumber === undefined) return null;
-  const candidates = new Set(attempts.map(attempt => attempt.candidate?.id ?? `n${attempt.number}`)).size;
-  return Math.max(0, candidates - 1) + Math.max(0, lastNumber - attempts.at(-1)!.number);
-}
 /** A passed check whose attempt waited before it settled: an older submission taking main first,
  * a lease or a main move. Stored reason, never inferred. Read from attempt rows already loaded. */
 function heldAfterCheck(attempts: HostedLandingAttempt[], progress: Array<AttemptProgress | null>) {
@@ -90,13 +86,7 @@ async function evidence(
   bytes += request?.value.length ?? 0;
   // Use the existing attempt read first: ordinary landings add no pointer seek. A partial
   // removal has lost the immutable first attempt, so its complete archived chain wins.
-  const liveChain = await ctx.db
-    .query('projectHostedLandingAttempts')
-    .withIndex('by_project_and_submission_and_number', q =>
-      q.eq('projectId', projectId).eq('submissionId', receipt.submissionId),
-    )
-    .order('asc')
-    .take(LANDINGS_ATTEMPTS);
+  const liveChain = await landingAttemptPrefix(ctx, projectId, receipt.submissionId);
   const pointer =
     request?.capsule ??
     (request &&
@@ -207,7 +197,7 @@ async function evidence(
           }
         : null,
       // A check binding replaces an attempt without composing again: count distinct Candidates.
-      recomposeCount: recomposes(attempts, last?.number),
+      recomposeCount: landingRecomposeCount(attempts, last?.number),
       costs: landingCosts(state, last?.number, request?.runnerAccounting?.pending),
       // Each attempt restamps timing.composeStartedAt; the first compose is the first attempt's (19328518).
       firstComposeStartedAt: progress[0]?.timing?.composeStartedAt ?? state?.timing?.composeStartedAt ?? null,

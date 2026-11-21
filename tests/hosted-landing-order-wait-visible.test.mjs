@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { landingApi } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+const queueView = await import(moduleUrl('../convex/projectHostedQueueView.ts'));
+const landings = await import(moduleUrl('../convex/projectHostedLandings.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 const { claimReadyLanding } = await import(moduleUrl('../convex/projectHostedLandingControl.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
@@ -33,7 +35,7 @@ const PARKED_MS = 7.5 * 60_000;
  * READY with no reason; the older landing's commit woke it, it recomposed and landed. Its
  * receipt then read compose start 15 min 38 s after submission (each attempt restamps
  * timing.composeStartedAt) and recomposeCount 0, so the wait read as a lost compose driver. */
-async function orderWaitJourney(t, waitedMs, ending) {
+async function orderWaitJourney(t, waitedMs, ending, { onStep, retryOlder = 0 } = {}) {
   const f = await batchesFixture(t, { count: 2, batching: false, requestCheck: true });
   const [older, newer] = f.entries.map(entry => entry.state);
   assert(older.sequence < newer.sequence);
@@ -42,6 +44,7 @@ async function orderWaitJourney(t, waitedMs, ending) {
   for (let tick = 0; states(f).some(s => s.phase !== 'landed' && s.phase !== 'terminal-failed'); tick++) {
     assert(tick < 400, JSON.stringify(states(f).map(s => [s.sequence, s.phase])));
     const parked = [...f.tables.projectHostedLandingRequests.values()].find(row => row.orderWait);
+    await onStep?.(f, parked);
     if (parked && !seen) {
       // Every reader names the wait: finish status, landing status and the observe page.
       const status = await f.current(newer.id);
@@ -99,10 +102,17 @@ async function orderWaitJourney(t, waitedMs, ending) {
     }
     for (const run of f.runs().filter(run => run.status === 'queued')) {
       // The older check finishes only after the newer one has passed and parked.
-      if (runOwner(f, run) === older.id && !seen) continue;
-      if (runOwner(f, run) === older.id) released = true;
-      if (runOwner(f, run) === older.id && ending === 'failed') await f.fail(run.id);
-      else await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+      const holdsOrder = runOwner(f, run) === older.id;
+      if (holdsOrder && !seen) continue;
+      if (holdsOrder) released = true;
+      if (holdsOrder && ending === 'failed') await f.fail(run.id);
+      else {
+        const active = await f.rawChecks.activate(run.id);
+        if (holdsOrder && retryOlder > 0) {
+          retryOlder--;
+          await f.rawChecks.callback(f.rawChecks.complete(active, 'runner-unavailable'));
+        } else await f.rawChecks.pass(active);
+      }
     }
     const task = f.pending()[0];
     if (!task) break;
@@ -114,7 +124,27 @@ async function orderWaitJourney(t, waitedMs, ending) {
 }
 
 test('replay 19328518: a parked passed landing names the older submission it waits for in every status read', async t => {
-  const { f, older, newer, seen } = await orderWaitJourney(t, PARKED_MS, 'landed');
+  const queued = new Map();
+  let parkedCount;
+  const { f, older, newer, seen } = await orderWaitJourney(t, PARKED_MS, 'landed', {
+    // The older check binds two replacement runs to the same Candidate while the newer one waits.
+    retryOlder: 2,
+    async onStep(f, parked) {
+      const live = states(f).filter(s => s.observation.state === 'pending');
+      if (
+        live.every(state => queued.get(state.id)?.attemptId === state.attemptId) &&
+        (!parked || parkedCount !== undefined)
+      )
+        return;
+      const reply = JSON.parse(await f.tx('queueView', queueView.read, { projectId: f.projectId }));
+      for (const entry of reply.entries) {
+        const state = live.find(s => s.id === entry.submissionId);
+        if (state) queued.set(state.id, { attemptId: state.attemptId, count: entry.recomposeCount });
+        if (entry.submissionId === parked?.submissionId && parkedCount === undefined)
+          parkedCount = entry.recomposeCount;
+      }
+    },
+  });
   for (const [name, value] of [
     ['finish status', seen.status],
     ['landing status', seen.landing],
@@ -150,6 +180,30 @@ test('replay 19328518: a parked passed landing names the older submission it wai
   assert.match(chain[0].progress.error.message, /landed, submitted before this one/);
   const receipt = [...f.tables.projectHostedAcceptances.values()].find(row => row.submissionId === newer.id);
   assert.equal(JSON.parse(receipt.value).orderWaits[0].seconds, PARKED_MS / 1000);
+  assert.equal(parkedCount, 0, 'the passed check had not yet recomposed while it was parked');
+  for (const [submission, recomposes] of [
+    [older, 0],
+    [newer, 1],
+  ]) {
+    const accepted = [...f.tables.projectHostedAcceptances.values()].find(
+      row => row.submissionId === submission.id,
+    );
+    const reply = JSON.parse(
+      await f.tx('landingsRead', landings.read, {
+        projectId: f.projectId,
+        receiptId: accepted.receiptId,
+      }),
+    );
+    const final = queued.get(submission.id);
+    assert.equal(final.attemptId, accepted.attemptId, 'the queue read the attempt that landed');
+    assert.equal(final.count, recomposes, 'the queue counts distinct Candidates after the first');
+    assert.equal(reply.landings[0].recomposeCount, recomposes, 'the receipt agrees');
+  }
+  const olderChain = attempts(f, older.id);
+  assert(
+    olderChain.length === 3 && new Set(olderChain.map(attempt => attempt.candidate.id)).size === 1,
+    'replay repeats a Candidate binding',
+  );
 });
 
 test('a failed holder releases a measured order wait shorter than one minute', async t => {
