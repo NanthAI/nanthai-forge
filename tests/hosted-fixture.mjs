@@ -359,8 +359,11 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
             .filter(
               row =>
                 equal.every(([key, value]) => equalConvexValue(field(row, key), value)) &&
-                low.every(([key, value]) => row[key] > value) &&
-                high.every(([key, value]) => row[key] <= value) &&
+                low.every(([key, value]) => {
+                  const actual = field(row, key);
+                  return value === undefined ? actual !== undefined : actual > value;
+                }) &&
+                high.every(([key, value]) => field(row, key) <= value) &&
                 bounds.every(test => test(row)),
             )
             .sort((a, b) => {
@@ -414,12 +417,12 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
               },
               gte: (key, value) => {
                 step('gte', key);
-                bounds.push(row => row[key] >= value);
+                bounds.push(row => field(row, key) >= value);
                 return q;
               },
               lt: (key, value) => {
                 step('lt', key);
-                bounds.push(row => row[key] < value);
+                bounds.push(row => field(row, key) < value);
                 return q;
               },
             };

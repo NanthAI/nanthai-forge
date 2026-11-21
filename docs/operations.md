@@ -1043,7 +1043,45 @@ them with the internal `projectRetention:armLegacyTrash` (one owner, 50 projects
 per page); projects removed more than 90 days earlier purge immediately.
 
 Older purges left `deleted` tombstones (name cleared, slug kept, no `purge`
-receipt) that still hold project rows and R2 objects. With owner approval the lead
+receipt) that still hold project rows and R2 objects. A deployment operator can
+check the retained project's indexed references without downloading a snapshot:
+
+```sh
+npx convex run projectRetention:references '{"projectId":"ID"}'
+```
+
+Pass the returned `next` object alongside the same `projectId` until `next` is
+`null`. Each result includes the checked section, matching keys and a reference
+table, and transaction counts for queries, documents and bytes read. A file may
+appear on multiple pages. Each file match names the first external reference
+found. Legacy storage checks cover objects, backups, archive receipts,
+proposals and import artifact aliases. R2 checks page foreign object, backup,
+proposal and upload cleanup records using their existing project indexes. They
+compare the direct keys, including nested archive receipt keys, to the selected
+project's exact prefix. The project artifact namespace page checks import links
+to those artifacts. Source point bindings validate their own project's key at
+publication and read time. Foreign keys in the selected project's rows fall
+outside the prefix that its purge can delete.
+
+One invocation reads at most one index page and one project record. A legacy
+file page reads up to four candidate rows and probes up to eight distinct ids
+with six indexed lookups each. It carries unfinished probes and saturated alias
+ranges into the returned continuation. A fast probe starts below 4 MiB read and
+can read up to nine documents. The maximum is 50 database queries and 13 MiB of
+documents. Exact alias and R2 pages use a 512 KiB pagination threshold plus up to
+one document, with up to 100 alias rows or 256 R2 records. The artifact section
+uses four rows and up to eight alias lookups, for at most ten queries and 7 MiB
+of documents. R2 scan work scales with foreign rows in the four indexed
+families. The preflight adds zero maintained indexes, makes zero R2 requests,
+downloads zero file bytes and schedules zero work.
+
+The report covers the named indexes at each page's read time. References in
+legacy Work cursors, snapshots and serialized task bodies require the
+[separate legacy storage audit](operations/legacy-storage-cleanup.md).
+Pages can see concurrent writes. Purge authorization and skip decisions still
+come from the existing delete paths.
+
+With owner approval the lead
 runs `projectRetention:repurgeLegacyTombstone '{"projectId":"ID","operationId":"UUID","confirm":"SLUG"}'`.
 It refuses anything except such a tombstone, re-enters the inventory-guarded purge
 as an owner-confirmed delete and ends at the normal tombstone; a replay of the same

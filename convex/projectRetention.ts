@@ -8,6 +8,7 @@ import { projectPurgeOrder, type ProjectPurgeTable } from './projectPurgeInvento
 import { putExpiry } from './r2';
 import { projectRows } from './projectPurgeRows';
 import { projectExecution } from './projectExecution';
+import { referenceArgs, referencePage, referenceResult } from './projectPurgeReferences';
 import { invariant } from '../src/errors';
 
 /** Owner decision 2026-11-05: deleted projects stay restorable for 90 days (GitHub parity). */
@@ -27,6 +28,13 @@ export const revokedTables = [
 const revokePageRows = 100;
 const measurePageRows = 1000;
 const fn = (name: string) => makeFunctionReference<'mutation'>(`projectRetention:${name}`);
+
+/** Deployment-operator preflight for retained projects, including legacy tombstones. */
+export const references = internalQuery({
+  args: referenceArgs,
+  returns: referenceResult,
+  handler: referencePage,
+});
 
 /** Cancel a project's expiry and measurement before restore or permanent deletion. */
 export async function stopRetention(ctx: MutationCtx, project: Doc<'hostedProjects'>) {
