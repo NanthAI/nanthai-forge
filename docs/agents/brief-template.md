@@ -26,6 +26,12 @@ Use this portable template for one finite slice. The [standard builder block](br
 
 ## Standard safety and delivery block
 
+When running unattended, edit files only with the file-edit tool inside your Lane.
+Keep temporary files, including logs, in the Lane outside `node_modules`.
+Do not start local dev servers or pipe a read into a write.
+Read first, then pass a literal argument to the write command.
+If a command waits for approval and nobody can answer, cancel it and use the routes above.
+
 1. Read Lane AGENTS.md, DESIGN.md, linked rules, the Issue and all its comments. Start from the Issue with your own fresh `operationId` (shared identity on one machine); edit only the Lane's returned root. Never commit in a Git mirror or edit another builder's Lane.
 2. Keep private source, prompts, evidence and credentials private. Use synthetic fixtures. Never print secrets or environment values, read credentials raw, or run `npx convex env list`, `env`, `printenv`, `pgrep -fl` or `ps -E`. Compare secrets by hash through approved private delivery.
 3. No production, deployment, publication, account changes, outside-user trials or backfills without explicit authorization. Do not add restrictions, limits, pricing, extra steps, access conditions, retention or deletion policy without owner approval. Clear maintenance mode after any approved maintenance.

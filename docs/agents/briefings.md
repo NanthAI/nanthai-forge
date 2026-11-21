@@ -33,6 +33,12 @@ when copied, and supplies its Issue, owned files/concepts, dependencies, scale
 budget, time box, acceptance bar, metrics that must not regress, and what it removes or
 merges (or why nothing can go).
 
+When running unattended, edit files only with the file-edit tool inside your Lane.
+Keep temporary files, including logs, in the Lane outside `node_modules`.
+Do not start local dev servers or pipe a read into a write.
+Read first, then pass a literal argument to the write command.
+If a command waits for approval and nobody can answer, cancel it and use the routes above.
+
 1. Read Lane AGENTS.md, DESIGN.md, the Issue body and **every comment**
    (`planning {"planningItemId":"ISSUE_ID","reconcile":false}`); comments can amend Done-when. Own one
    finite task. Builders on one machine share a root and identity, so generate your own
@@ -64,8 +70,8 @@ merges (or why nothing can go).
    regenerable roots. Live processes, unknown coverage, pins and unresolved state
    retain their copies; the result explains unresolved state and recovery. Never
    remove another builder's files to meet the floor. Run builds and test batches
-   through `nforge heavy` ([what it bounds](../parallel-work-defaults.md#localheavyslots)); start servers or
-   browsers only when needed and stop them afterwards. Slot count, disk reserve and
+   through `nforge heavy` ([what it bounds](../parallel-work-defaults.md#localheavyslots)); start browsers
+   or attended local dev servers only when needed and stop them afterwards. Slot count, disk reserve and
    builder count come from local machine setup and the brief, not from the repo. Format only with `npm run format` (oxfmt);
    never `npx prettier`, which rewrites files in another style.
 6. Save after each meaningful step (at least every ~30 minutes): each save runs the exact conflict check; read the head and capture coverage. Use `mktemp`
