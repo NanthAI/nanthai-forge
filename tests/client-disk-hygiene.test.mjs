@@ -15,6 +15,7 @@ import {
   utimesSync,
   readFileSync,
   realpathSync,
+  renameSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -24,6 +25,7 @@ import { gcNestedLanes, gcNestedLanesHourly, touchNestedLane } from '../dist/cli
 import { hostedLaneDirty } from '../dist/hosted-lane-dirty.js';
 import { laneHousekeeping } from '../dist/lane-prune.js';
 import { lanePruneLogFile } from '../dist/lane-prune-log.js';
+import { snapshotDirectory, snapshotLockPath } from '../dist/lane-snapshot-hint.js';
 import { recordLane } from '../dist/lane-registry.js';
 import { digest } from '../dist/hash.js';
 import { createServer } from 'node:net';
@@ -315,6 +317,106 @@ test('prune removes a clean active Lane idle past the active age, and keeps an e
   });
   assert.equal(checks, 8);
   assert.equal(bounded.pruned.length, 8);
+});
+
+test('finished Lane prune ignores snapshot maintenance without losing dirty or held copies', async t => {
+  const directory = isolated(t);
+  const settings = { autoPruneHours: 3, idleLaneHours: 1, activeLanePruneHours: 3 };
+  const now = Date.parse('2026-01-02T00:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const states = new Map();
+  const prepare = async (name, state) => {
+    const root = join(directory, name);
+    const laneId = await realCheckout(root);
+    const snapshots = snapshotDirectory(root);
+    mkdirSync(snapshots, { recursive: true });
+    ageTree(root, 10);
+    ageTree(`${root}.forge-client`, 10);
+    age(`${root}.forge-metrics.jsonl`, 10);
+    recordLane({ laneId, root, ...address, lastActionAt: now - 10 * hour }, now);
+    states.set(laneId, state);
+    const stat = join(snapshots, 'stat.json');
+    const temporary = `${stat}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify({ entries: 'x'.repeat(32 * 1024) }));
+    renameSync(temporary, stat);
+    writeFileSync(join(snapshots, 'worker'), '');
+    for (const path of [snapshots, stat]) age(path, 0);
+    age(join(snapshots, 'worker'), 2 / 60);
+    return { root, laneId, stat, snapshots };
+  };
+  const done = await prepare('landed', 'completed');
+  const abandoned = await prepare('abandoned', 'abandoned');
+  const dirty = await prepare('dirty', 'completed');
+  const inUse = await prepare('snapshot in use', 'abandoned');
+  const starting = await prepare('snapshot starting', 'abandoned');
+  const racing = await prepare('snapshot raced prune', 'completed');
+  const pending = await prepare('pending', 'completed');
+  const recent = await prepare('recent', 'abandoned');
+  const pinned = await prepare('pinned', { state: 'completed', pinned: true });
+  const active = await prepare('active', 'active');
+  const edited = join(dirty.root, 'src', 'a.txt');
+  writeFileSync(edited, 'unsaved\n');
+  age(edited, 10);
+  writeFileSync(snapshotLockPath(inUse.root), String(process.pid));
+  writeFileSync(join(pending.snapshots, 'pending.json'), '{}');
+  writeFileSync(join(recent.root, 'src', 'a.txt'), 'first\n');
+  for (const path of [
+    snapshotLockPath(inUse.root),
+    join(starting.snapshots, 'worker'),
+    join(pending.snapshots, 'pending.json'),
+    join(recent.root, 'src', 'a.txt'),
+  ])
+    age(path, 0);
+  const input = {
+    readStates: async () => states,
+    address,
+    now,
+    settings,
+    processes: () => ({ paths: [], unknown: false }),
+  };
+  const dry = await laneHousekeeping({ ...input, apply: false });
+  assert.deepEqual(
+    new Set(dry.wouldPrune.map(row => row.laneId)),
+    new Set([done.laneId, abandoned.laneId, racing.laneId]),
+  );
+  assert.deepEqual(dry.pruned, []);
+  assert(existsSync(done.stat) && existsSync(abandoned.stat));
+  const bytes = path => {
+    const stat = lstatSync(path);
+    const children = stat.isDirectory() ? readdirSync(path) : [];
+    return stat.blocks * 512 + children.reduce((total, name) => total + bytes(join(path, name)), 0);
+  };
+  const expectedBytes =
+    bytes(done.root) + bytes(`${done.root}.forge-client`) + bytes(`${done.root}.forge-metrics.jsonl`);
+  assert.equal(dry.wouldPrune.find(row => row.laneId === done.laneId).bytes, expectedBytes);
+
+  const applied = await laneHousekeeping({
+    ...input,
+    apply: true,
+    isDirty: root => {
+      if (root === realpathSync(racing.root)) {
+        const lock = snapshotLockPath(root);
+        writeFileSync(lock, String(process.pid));
+        age(lock, 0);
+      }
+      return hostedLaneDirty(root);
+    },
+  });
+  assert.deepEqual(
+    applied.pruned,
+    dry.wouldPrune.filter(row => row.laneId !== racing.laneId),
+  );
+  assert(!existsSync(done.root) && !existsSync(abandoned.root));
+  assert(!existsSync(done.stat) && !existsSync(abandoned.stat));
+  assert.equal(readFileSync(edited, 'utf8'), 'unsaved\n');
+  const kept = new Map(applied.kept.map(row => [row.laneId, row.reason]));
+  assert.equal(kept.get(dirty.laneId), 'unsaved edits');
+  for (const lane of [inUse, starting, racing]) assert.equal(kept.get(lane.laneId), 'snapshot running');
+  assert.equal(kept.get(pinned.laneId), 'pinned');
+  for (const lane of [pending, recent, active]) assert.equal(kept.get(lane.laneId), 'modified within 3h');
+  assert([inUse, starting, racing, pending, recent, pinned, active].every(lane => existsSync(lane.root)));
+  const logged = readFileSync(lanePruneLogFile(), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(logged.find(row => row.laneId === done.laneId).bytes, expectedBytes);
 });
 
 test('an idle active Lane root survives housekeeping by default and a removal is logged', async t => {

@@ -22,6 +22,9 @@ const hour = 3_600_000;
 const DEFAULT_ACTIVE_PRUNE_HOURS = 168;
 /** Unsaved-edit checks hash a whole checkout; bound them per pass. */
 const DIRTY_CHECKS = 8;
+/** The detached snapshot worker writes its launch stamp before it can take the lock.
+ * Keep a launch window as long as the worker's one-minute deadline. */
+const SNAPSHOT_LAUNCH_MS = 60_000;
 const terminal = new Set(['completed', 'abandoned']);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export type LaneAddress = { url: string; projectId: string };
@@ -76,19 +79,31 @@ export function markerIdentity(root: string): { laneId: string; url: string; pro
   }
 }
 /** Newest change and allocated bytes; symlinks (node_modules) are never followed. */
-function scanTree(paths: string[]) {
+function scanTree(paths: string[], snapshots: string | null) {
   let newest = 0,
+    snapshotNewest = 0,
     bytes = 0;
+  const snapshotPrefix = snapshots === null ? null : snapshots + sep;
   const stack = [...paths];
   while (stack.length) {
     const path = stack.pop()!;
     const stat = exists(path);
     if (!stat) continue;
-    newest = Math.max(newest, stat.mtimeMs);
+    // The worker replaces the stat index and creates/removes its lock, touching the directory
+    // as well. Keep counting those bytes and the age of other entries, including recovery data.
+    if (
+      (path === snapshots && stat.isDirectory()) ||
+      (snapshotPrefix &&
+        stat.isFile() &&
+        path.startsWith(snapshotPrefix) &&
+        /^(?:stat\.json(?:\.\d+\.tmp)?|worker|lock)$/.test(path.slice(snapshotPrefix.length)))
+    )
+      snapshotNewest = Math.max(snapshotNewest, stat.mtimeMs);
+    else newest = Math.max(newest, stat.mtimeMs);
     bytes += stat.blocks * 512;
     if (stat.isDirectory()) for (const name of readdirSync(path)) stack.push(join(path, name));
   }
-  return { newest, bytes };
+  return { newest, snapshotNewest, bytes };
 }
 const siblings = (root: string) => [root, clientCacheRoot(root), rootSibling(root, '.forge-metrics.jsonl')];
 const nestedLanes = (root: string) => {
@@ -269,6 +284,9 @@ export async function laneHousekeeping(input: {
   }
   const isDirty = input.isDirty ?? hostedLaneDirty;
   let dirtyChecks = 0;
+  let snapshotHelpers: typeof import('./lane-snapshot-hint.js') | undefined;
+  const checkUnsaved = (root: string) =>
+    dirtyChecks++ >= DIRTY_CHECKS ? 'unsaved-edit check deferred' : isDirty(root) ? 'unsaved edits' : null;
   for (const entry of due) {
     const state = states.get(entry.laneId) ?? null,
       idleFor = now - entry.lastActionAt;
@@ -321,22 +339,37 @@ export async function laneHousekeeping(input: {
             : nestedLanes(root)
               ? 'contains other Lane roots'
               : (processBlocker(root, (processes ??= (input.processes ?? workingProcesses)())) ?? null);
-    if (!reason && activeIdle)
-      reason =
-        dirtyChecks++ >= DIRTY_CHECKS
-          ? 'unsaved-edit check deferred'
-          : isDirty(root)
-            ? 'unsaved edits'
-            : null;
+    if (!reason && activeIdle) reason = checkUnsaved(root);
     if (reason) {
       if (activeIdle && idleMs > 0 && idleFor >= idleMs) listIdle();
       result.kept.push({ laneId: entry.laneId, reason });
       continue;
     }
-    const tree = scanTree(siblings(root));
+    if (!activeIdle)
+      snapshotHelpers ??= (await import(
+        /* @vite-ignore */ new URL('./lane-snapshot-hint.js', import.meta.url).href
+      )) as typeof import('./lane-snapshot-hint.js');
+    const snapshots = activeIdle ? null : (snapshotHelpers?.snapshotDirectory(root) ?? null);
+    const tree = scanTree(siblings(root), snapshots);
     if (now - tree.newest < limit) {
       result.kept.push({ laneId: entry.laneId, reason: `modified within ${limit / hour}h` });
       continue;
+    }
+    if (snapshots && snapshotHelpers && now - tree.snapshotNewest < limit) {
+      // Where maintenance was the last age blocker, verify the working files against the saved
+      // baseline, including edits whose mtime was preserved.
+      const { snapshotLockHeld } = snapshotHelpers;
+      const busy = (time: number) => {
+        const worker = exists(join(snapshots, 'worker'));
+        return (worker !== null && time - worker.mtimeMs < SNAPSHOT_LAUNCH_MS) || snapshotLockHeld(root);
+      };
+      reason = busy(now) ? 'snapshot running' : checkUnsaved(root);
+      // A worker may start while the synchronous dirty scan reads the checkout.
+      if (!reason && input.apply && busy(input.now ?? Date.now())) reason = 'snapshot running';
+      if (reason) {
+        result.kept.push({ laneId: entry.laneId, reason });
+        continue;
+      }
     }
     if (input.apply) {
       logLanePrune(

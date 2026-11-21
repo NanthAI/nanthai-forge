@@ -49,11 +49,15 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   - the root is not where the command runs;
   - the root holds no other Lane roots;
   - the checkout marker still names that Lane.
+  A finished Lane's snapshot stat index and worker bookkeeping still count toward its size.
+  If those are the only recent writes, prune checks that no snapshot is running and that
+  the checkout matches its saved baseline. Fresh source changes and snapshot recovery data
+  still count as activity.
 - An `active` Lane with no Forge action for `activeLanePruneHours` (7 days) is also removed, but only when no
   Forge command of this machine runs in it and its
   checkout has no unsaved edits: every file is hashed in place against the Lane's baseline
-  State and nothing is written. At most 8 such checks run per pass; an edited root stays and is
-  listed as idle. `open` restores a removed root from the saved head.
+  State and nothing is written. At most 8 unsaved-edit checks run per pass across both cases;
+  an edited active root stays and is listed as idle. `open` restores a removed root from the saved head.
 - Every removal appends one JSON line (time, Lane, root, server state, reason, idle hours, bytes) to
   `$XDG_STATE_HOME/forge/lane-prune.jsonl` (default `~/.local/state/forge/lane-prune.jsonl`) before the
   root is deleted; the file rotates to `lane-prune.jsonl.1` past 1 MB.
