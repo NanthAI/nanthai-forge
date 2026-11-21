@@ -5,7 +5,14 @@
  * from one file: declaring it in both is an error, never a silent pick. Unknown keys are ignored, so
  * later settings can join the file. Reading never runs repository code. */
 export const FORGE_CONFIG_FILE = 'forge.json';
-export type PreflightKey = 'tests' | 'static' | 'guards' | 'guardSet' | 'wrappers';
+export type PreflightKey =
+  | 'tests'
+  | 'static'
+  | 'guards'
+  | 'guardSet'
+  | 'wrappers'
+  | 'budgetSeconds'
+  | 'ceilingSeconds';
 export type DeclaredPreflight = {
   value: unknown;
   /** The file that declares it. */

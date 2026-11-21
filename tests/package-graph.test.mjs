@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import { digest } from '../dist/state/hash.js';
 import { sourceTree } from '../dist/source-tree.js';
 import { preflightPlan, preflightRuntime, runPreflight } from '../dist/agent-preflight.js';
+import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
+import { finishGates } from '../dist/agent-default-gates.js';
 import {
   buildPackageGraph,
   cachedPackageGraph,
@@ -371,10 +373,14 @@ function lane(t, bytes) {
   }
   const files = () =>
     Object.entries(bytes).map(([path, body]) => ({ path, blob: digest(body), mode: 'file' }));
+  const head = digest(JSON.stringify(files()));
+  const tree = sourceTree(files());
   return {
     root,
+    head,
+    tree,
     plan: paths => preflightPlan(root, { paths, complete: true }, { laneId, files: files() }),
-    run: plan => runPreflight(root, laneId, digest(JSON.stringify(files())), plan, sourceTree(files())),
+    run: plan => runPreflight(root, laneId, head, plan, tree),
   };
 }
 
@@ -412,6 +418,39 @@ test('preflight on a Go repository with no package.json plans and runs package c
   assert.equal(fail.passed, false);
   assert.equal(fail.exitCode, 4);
   assert.equal(fail.stoppedForFailure, 1);
+});
+
+test('a project ceiling that stops a package command leaves the saved preflight incomplete for landing', t => {
+  const before = process.env.FORGE_PREFLIGHT_TIME_SETTINGS;
+  t.after(() => {
+    if (before === undefined) delete process.env.FORGE_PREFLIGHT_TIME_SETTINGS;
+    else process.env.FORGE_PREFLIGHT_TIME_SETTINGS = before;
+  });
+  process.env.FORGE_PREFLIGHT_TIME_SETTINGS = '1';
+  const repo = lane(t, { ...go, 'forge.json': '{"preflight":{"ceilingSeconds":1}}' });
+  const plan = repo.plan(['lib/sum/sum.go']);
+  assert.equal(plan.tests.length, 2);
+  assert.deepEqual(plan.ceiling, { seconds: 1 });
+  const pass = [process.execPath, '-e', 'process.exit(0)'];
+  let now = Date.UTC(2026, 0, 1);
+  t.mock.method(Date, 'now', () => (now += 2000));
+  const receipt = repo.run({
+    ...plan,
+    packageCommands: Object.fromEntries(
+      plan.tests.map(key => [key, { ...plan.packageCommands[key], argv: pass }]),
+    ),
+  });
+  assert.equal(receipt.outcome, 'incomplete');
+  assert.equal(receipt.tests, 1);
+  assert.deepEqual(receipt.stopped, [plan.tests[1]]);
+  assert.deepEqual(receipt.ceiling, { seconds: 1, reached: true });
+  const result = finishGates(repo.root, effectiveAgentDefaults({ preflight: 'require' }), {
+    laneId,
+    head: repo.head,
+    tree: repo.tree,
+  });
+  assert.equal(result.preflight.status, 'incomplete');
+  assert.equal(result.preflight.mustRunNotRun, 1);
 });
 
 test('forge.json declares a runner for any language; package.json keeps working; both is an error', t => {

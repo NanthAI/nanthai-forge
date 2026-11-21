@@ -6,7 +6,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { digest } from '../dist/state/hash.js';
 import { sourceTree } from '../dist/source-tree.js';
-import { preflightPlan, preflightRuntime, runPreflight } from '../dist/agent-preflight.js';
+import {
+  planLine,
+  planWithBudget,
+  preflightPlan,
+  preflightRuntime,
+  runPreflight,
+} from '../dist/agent-preflight.js';
 import { preflightGuards, staticChecks } from '../dist/agent-preflight-static.js';
 import { projectTestRunner } from '../dist/project-test-runner.js';
 import { intentContractSelection } from '../dist/intent-contract-selection.js';
@@ -33,7 +39,8 @@ function lane(t, bytes) {
   }
   const files = () => Object.keys(bytes).map(path => ({ path, blob: digest(bytes[path]), mode: 'file' }));
   return {
-    plan: paths => preflightPlan(root, { paths, complete: true }, { laneId, files: files() }),
+    plan: (paths, options) =>
+      preflightPlan(root, { paths, complete: true }, { laneId, files: files() }, options),
     run: plan => runPreflight(root, laneId, digest(JSON.stringify(files())), plan, sourceTree(files())),
   };
 }
@@ -82,6 +89,51 @@ test('a Go repository declares tests, static checks and guards in forge.json, an
   const other = repo.plan(['sum/sum_test.go']);
   assert.deepEqual(other.tests, ['sum/sum_test.go']);
   assert.equal(other.local.guards, undefined);
+});
+
+test('preflight time settings preserve the defaults when off and report project and per-run overrides when on', t => {
+  const before = process.env.FORGE_PREFLIGHT_TIME_SETTINGS;
+  t.after(() => {
+    if (before === undefined) delete process.env.FORGE_PREFLIGHT_TIME_SETTINGS;
+    else process.env.FORGE_PREFLIGHT_TIME_SETTINGS = before;
+  });
+  process.env.FORGE_PREFLIGHT_TIME_SETTINGS = '0';
+  const config = JSON.parse(goConfig);
+  config.preflight.budgetSeconds = 240;
+  config.preflight.ceilingSeconds = 300;
+  const repo = lane(t, { ...goRepo, 'forge.json': JSON.stringify(config) });
+  const paths = ['sum/sum_test.go'];
+  const legacy = repo.plan(paths);
+  assert.equal(legacy.local.budgetSeconds, 180);
+  assert.deepEqual(legacy.local.ceiling, { seconds: 600 });
+  assert.equal(legacy.timeSettings, undefined);
+
+  process.env.FORGE_PREFLIGHT_TIME_SETTINGS = '1';
+  const planned = repo.plan(paths);
+  assert.equal(planned.local.budgetSeconds, 240);
+  assert.deepEqual(planned.local.ceiling, { seconds: 300 });
+  assert.match(planLine(planned), /240 s budget, 300 s ceiling.*Set in forge.json preflight.budgetSeconds/);
+  const receipt = repo.run(planned);
+  assert.equal(receipt.passed, true);
+  assert.deepEqual(receipt.timeSettings, planned.timeSettings);
+  assert.deepEqual(receipt.ceiling, { seconds: 300 });
+
+  const override = repo.plan(paths, { budgetSeconds: 360, trim: false });
+  assert.equal(override.local.budgetSeconds, 360);
+  assert.deepEqual(override.local.ceiling, { seconds: 360, override: true });
+  assert.match(planLine(override), /no time budget \(trim:false\), 360 s ceiling \(budgetSeconds override\)/);
+  const quick = planWithBudget(planned, 90);
+  assert.equal(quick.local.budgetSeconds, 90);
+  assert.equal(quick.timeSettings.budget.seconds, 90);
+  assert.equal(quick.timeSettings.budget.source, 'quick');
+  assert.equal(quick.timeSettings.ceiling.seconds, 300);
+  const shorter = lane(t, {
+    ...goRepo,
+    'forge.json': JSON.stringify({ ...config, preflight: { ...config.preflight, budgetSeconds: 30 } }),
+  }).plan(paths);
+  const quickShorter = planWithBudget(shorter, 90);
+  assert.equal(quickShorter.local.budgetSeconds, 30);
+  assert.equal(quickShorter.timeSettings.budget.source, 'project');
 });
 
 test('a project build:core script runs only for Forge’s own Node layout, never before another runner', t => {

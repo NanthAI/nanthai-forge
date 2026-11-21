@@ -847,6 +847,13 @@ most reds before queue entry, but a stale admission may be cancelled before its
 red verdict and the replacement then isolates it in the queue. Existing stale-run
 cancellation is preserved.
 
+To replay this matrix, build core and run the sensitivity test once for each
+`FORGE_ADMISSION_REPLAY_WIDTH` of 3, 5 and 10. Each process compares both policies for
+one clean wave and all ten rotations at each red rate. The test reports mean billed
+CI minutes and green-survivor latency, and verifies the cheaper mode and the
+outcome of every submitted change. These synthetic runs use the checked-in
+timelines and do not qualify a change against the live regression ladder.
+
 Linear interpolation between the measured 10% and 30% points puts the CI-cost
 crossovers near 15.6%, 27.9% and 28.0% respectively. These are sensitivity estimates
 for these timelines, not universal thresholds: survivor-latency crossovers are

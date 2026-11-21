@@ -20,10 +20,15 @@ type Advice = Awaited<ReturnType<typeof readHostedOverlapAdvice>>;
 export const LAND_QUICK_SECONDS = 90;
 /** The quick run in one line of the advisory: its budget, how many files ran and how many it left. */
 const quickSummary = (
-  quick: { tests: number; testMs?: number | undefined; outcome?: string | undefined },
+  quick: {
+    tests: number;
+    budgetSeconds?: number | undefined;
+    testMs?: number | undefined;
+    outcome?: string | undefined;
+  },
   planned: number,
 ) => ({
-  budgetSeconds: LAND_QUICK_SECONDS,
+  budgetSeconds: quick.budgetSeconds ?? LAND_QUICK_SECONDS,
   ran: quick.tests,
   // Every planned file it did not run: stopped for time, or not run here (a missing runner).
   notStarted: Math.max(0, planned - quick.tests),
@@ -193,7 +198,7 @@ export function finishGates(
         if (preflightOutcome(quick) === 'failed')
           throw new ForgeError(
             'PREFLIGHT_REQUIRED',
-            `Inline preflight failed for saved head ${lane.head.slice(0, 12)}: the plan is over ${defaults.preflightMaxMinutes} min, so land ran its top-ranked tests for ${LAND_QUICK_SECONDS} s, and ${quick.failure?.files.length ? quick.failure.files.join(', ') : 'one'} failed.${quick.failure ? ` ${quick.failure.excerpt}` : ''} Fix it, save, then run land --save with the same options and a fresh operationId.`,
+            `Inline preflight failed for saved head ${lane.head.slice(0, 12)}: the plan is over ${defaults.preflightMaxMinutes} min, so land ran its top-ranked tests for ${quick.budgetSeconds ?? LAND_QUICK_SECONDS} s, and ${quick.failure?.files.length ? quick.failure.files.join(', ') : 'one'} failed.${quick.failure ? ` ${quick.failure.excerpt}` : ''} Fix it, save, then run land --save with the same options and a fresh operationId.`,
             undefined,
             {
               command: run,

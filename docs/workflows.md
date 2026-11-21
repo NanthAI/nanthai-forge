@@ -461,6 +461,13 @@ The window counts landed outcomes from the landing-speed record the server alrea
 
 A file joins when the saving is positive and it failed at least twice, and leaves when either stops holding. Files join in order of saving until their seconds would pass the run's local budget, so guards count inside the 180 s budget and the 600 s ceiling. Runner minutes a catch saves are an extra the formula does not count. The plan names each file in `local.guardSet` with `p`, `C`, `r`, `t` and the saving. The summary line says why each one is in, and `local.guardSet.setting` declares the signal, formula, bounds and override. Learned guards join `local.guards` as `learned guard set` and are never trimmed, stopped or reused across saves. A project with no check failures, or a machine the set has not reached yet, has an empty set, so nothing changes. Override it in `forge.json` as `preflight.guardSet` (or `forge.preflight.guardSet` in `package.json`): `{"mode": "automatic" | "manual" | "off", "pin": [test], "unpin": [test]}`. `pin` always runs a file. `unpin` never learns one. `manual` runs only the pinned files and names what Automatic would pick, and `off` runs none. A malformed value, or a pin the project lacks, makes the plan unavailable. `FORGE_PREFLIGHT_GUARD_SET=automatic|manual|off` sets the mode for one environment over `forge.json`; the bench sets `off` for comparison cells, since they share one project and must never depend on cell order. The setting is judged on the shared flow measure (landings that stay landed, save-to-main time), not on its own catch count.
 
+The preflight timing experiment is off by default. With `FORGE_PREFLIGHT_TIME_SETTINGS=1`, a
+project can set `preflight.budgetSeconds` and `preflight.ceilingSeconds` in the same project
+configuration. An omitted setting uses 180 s for the budget and 600 s for the ceiling. A per-run
+`budgetSeconds` takes priority for that run and raises its ceiling if needed. Preflight checks the
+ceiling before starting the next group of test files or package command. Package commands use
+only the ceiling. The preflight plan and run receipt show the source of each time setting.
+
 The hosted check stays the full run. See [parallel work defaults](parallel-work-defaults.md#preflight) for the rest of the selection rule.
 
 ## Channels and releases

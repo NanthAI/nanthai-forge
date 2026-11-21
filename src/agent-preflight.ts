@@ -89,6 +89,14 @@ import {
 } from './project-test-runner.js';
 import { CODE_FILE, importGraphTests, jsImportGraph } from './js-import-graph.js';
 import { declaredPreflight, FORGE_CONFIG_FILE } from './project-config.js';
+import {
+  PREFLIGHT_LOCAL_BUDGET_SECONDS,
+  PREFLIGHT_RUN_CEILING_SECONDS,
+  preflightTimeSettings,
+  preflightTimeSettingsSchema,
+  type PreflightTimeSettings,
+} from './preflight-time-settings.js';
+export { PREFLIGHT_LOCAL_BUDGET_SECONDS, PREFLIGHT_RUN_CEILING_SECONDS } from './preflight-time-settings.js';
 import { cleanCommandEnvironment } from './clean-command-env.js';
 import {
   packageCommandLine,
@@ -124,23 +132,23 @@ export const PREFLIGHT_SECONDS_PER_PACKAGE_COMMAND = 60;
 /** Why a plan from a runner Forge inferred never blocks landing (src/agent-default-gates.ts). */
 export const INFERRED_RUNNER_ADVISORY =
   'Forge inferred these commands (no runner declared): their result is reported, never required, because they can need setup only CI does (fixtures, services, a toolchain). Declare preflight.tests in forge.json to require it.';
-/** Local time budget (seconds). The plan trims unprotected tiers by estimated time, never by file
- * count; the run is a wall-time cap on the test phase: it starts no file once the budget is spent and
- * names every file it did not start. Whatever either cuts runs in the pre-queue Lane check. */
-export const PREFLIGHT_LOCAL_BUDGET_SECONDS = 180;
-/** Longest any one local test phase runs (seconds), whatever its budget, trim:false, finish or retry
- * (Item 8dbd2683): on 2026-11-19, runs over 600 s held half of all preflight slot time and caught
- * nothing. No file starts past it, declared guards included; what it stops goes to the landing check
- * as a budget stop does. An explicit budgetSeconds above it raises it for that one run. */
-export const PREFLIGHT_RUN_CEILING_SECONDS = 600;
 /** The ceiling a run keeps: the default, or the caller's explicit larger budget (named as an override). */
-export const runCeiling = (budgetSeconds: number | undefined): { seconds: number; override?: true } =>
-  budgetSeconds !== undefined && budgetSeconds > PREFLIGHT_RUN_CEILING_SECONDS
+export const runCeiling = (
+  budgetSeconds: number | undefined,
+  settings?: PreflightTimeSettings,
+): { seconds: number; override?: true } => {
+  if (settings)
+    return {
+      seconds: settings.ceiling.seconds,
+      ...(settings.ceiling.source === 'run' ? { override: true } : {}),
+    };
+  return budgetSeconds !== undefined && budgetSeconds > PREFLIGHT_RUN_CEILING_SECONDS
     ? { seconds: budgetSeconds, override: true }
     : { seconds: PREFLIGHT_RUN_CEILING_SECONDS };
+};
 /** The ceiling a planned run keeps, wherever its plan carries it; the default when it carries none. */
 const planCeiling = (plan: PreflightPlan & { status: 'planned' }) =>
-  plan.local?.ceiling ?? plan.ceiling ?? runCeiling(undefined);
+  plan.local?.ceiling ?? plan.ceiling ?? runCeiling(undefined, plan.timeSettings);
 /** Longest a group is planned to run (seconds). The run re-checks the budget between groups and sizes
  * the next one from the speed it observed and the time left, so this is only how finely it can stop,
  * never how many tests may run. */
@@ -223,6 +231,7 @@ export const preflightReceiptSchema = z
     /** Selection rule, budget and cut, so a receipt says what was left for the pre-queue check. */
     rule: z.string().optional(),
     budgetSeconds: z.number().nonnegative().optional(),
+    timeSettings: preflightTimeSettingsSchema.optional(),
     /** The run's wall-time ceiling (8dbd2683): `override` when an explicit budget raised it, `reached`
      * when it stopped files. */
     ceiling: z
@@ -346,6 +355,7 @@ export type PreflightPlan =
       packages?: SelectedPackage[];
       /** A package-graph plan's run ceiling (8dbd2683); other plans keep it on `local`. */
       ceiling?: { seconds: number; override?: true };
+      timeSettings?: PreflightTimeSettings;
     };
 
 const preparedEvidence = new WeakMap<PreflightPlan, PreflightEvidence>();
@@ -360,7 +370,19 @@ export function planWithBudget(
   budgetSeconds: number,
 ): PreflightPlan & { status: 'planned' } {
   if (!plan.local) return plan;
-  const copy = { ...plan, local: { ...plan.local, budgetSeconds } };
+  if (plan.timeSettings && plan.timeSettings.budget.seconds <= budgetSeconds) return plan;
+  const copy = {
+    ...plan,
+    local: { ...plan.local, budgetSeconds },
+    ...(plan.timeSettings
+      ? {
+          timeSettings: {
+            ...plan.timeSettings,
+            budget: { seconds: budgetSeconds, source: 'quick' as const, reason: "Land's short preflight." },
+          },
+        }
+      : {}),
+  };
   const evidence = preparedEvidence.get(plan);
   if (evidence) preparedEvidence.set(copy, evidence);
   const paths = plannedPaths.get(plan);
@@ -375,10 +397,17 @@ export function readPreflightReceipt(root: string, laneId: string): PreflightRec
     return null;
   }
 }
+function retainedReceipt(receipt: PreflightReceipt) {
+  // Earlier CLIs validate this cache strictly. Keep its format across CLI rollbacks.
+  const { timeSettings, ...retained } = receipt;
+  void timeSettings;
+  return JSON.stringify(retained);
+}
+
 function writePreflightReceipt(root: string, receipt: PreflightReceipt) {
   const path = receiptPath(root, receipt.laneId);
   mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
-  writeFileSync(`${path}.tmp`, JSON.stringify(receipt), { mode: 0o600 });
+  writeFileSync(`${path}.tmp`, retainedReceipt(receipt), { mode: 0o600 });
   renameSync(`${path}.tmp`, path);
 }
 
@@ -601,6 +630,7 @@ function runnerPlan(
   graph?: () => PackageGraph,
   forgeJson?: string,
   modules?: () => ModuleGraph,
+  timeSettings?: PreflightTimeSettings,
 ): PreflightPlan {
   const checks = planStatic(packageJson, paths, forgeJson);
   if ('reason' in checks) return { status: 'unavailable', reason: checks.reason };
@@ -664,7 +694,10 @@ function runnerPlan(
       wrappers?.value === true,
     );
     // Same object: plannedPaths keys on it. Package commands have no time budget, but the ceiling holds.
-    if (plan.status === 'planned') plan.ceiling = runCeiling(options.budgetSeconds);
+    if (plan.status === 'planned') {
+      if (timeSettings) plan.timeSettings = timeSettings;
+      plan.ceiling = runCeiling(options.budgetSeconds, timeSettings);
+    }
     return plan;
   }
   const selection = runnerSelection(runner, allPaths, paths, preflightImports(root, runner, allPaths, paths));
@@ -687,7 +720,8 @@ function runnerPlan(
   const timing = preflightSecondsPerFile(root);
   const stats = preflightFileStats(root);
   const secondsFor = (test: string) => (stats[test] ? stats[test].ms / 1000 : timing.secondsPerFile);
-  const budgetSeconds = options.budgetSeconds ?? PREFLIGHT_LOCAL_BUDGET_SECONDS;
+  const budgetSeconds =
+    timeSettings?.budget.seconds ?? options.budgetSeconds ?? PREFLIGHT_LOCAL_BUDGET_SECONDS;
   const declaredTests = new Set(guards.flatMap(guard => guard.tests));
   // The learned guard set joins the declared guards for every runner (13ea93bf), inside what they and
   // the change's own tests leave of the budget.
@@ -701,7 +735,7 @@ function runnerPlan(
           localSeconds: test => (stats[test] ? stats[test].ms / 1000 : undefined),
           defaultSeconds: timing.secondsPerFile,
           capSeconds: learnedGuardCap(
-            budgetSeconds,
+            Math.min(budgetSeconds, timeSettings?.ceiling.seconds ?? Infinity),
             [...declaredTests, ...selection.changedTests],
             secondsFor,
           ),
@@ -755,7 +789,7 @@ function runnerPlan(
     protected: tests.length,
     deferred: 0,
     ...(trim ? {} : { trim: false as const }),
-    ceiling: runCeiling(options.budgetSeconds),
+    ceiling: runCeiling(options.budgetSeconds, timeSettings),
     ...(only ? { only: 'stopped' as const } : {}),
     deferredTo: 'pre-queue',
     summary: `Local rule: ${rule}. ${reason}.${guardSet ? ` ${guardSetLine(guardSet)}` : ''}`,
@@ -781,6 +815,7 @@ function runnerPlan(
     deferredTests: [],
     ...statics,
     local,
+    ...(timeSettings ? { timeSettings } : {}),
     reusedTests: [],
     estimateMinutes: Math.ceil(
       Math.min(
@@ -989,9 +1024,11 @@ function planTests(
       });
     // The language-neutral project file, read once per plan (src/project-config.ts).
     const forgeJson = laneText(root, FORGE_CONFIG_FILE);
+    const packageJson = files.get('package.json');
+    const timeSettings = preflightTimeSettings({ packageJson, forgeJson }, options?.budgetSeconds);
     let resolved: TestRunnerResolution;
     try {
-      resolved = projectTestRunner(files.get('package.json'), allPaths, {
+      resolved = projectTestRunner(packageJson, allPaths, {
         forgeJson,
         packages: graph,
       });
@@ -1004,21 +1041,22 @@ function planTests(
         resolved,
         changed.paths,
         allPaths(),
-        files.get('package.json'),
+        packageJson,
         options,
         graph,
         forgeJson,
         modules,
+        timeSettings,
       );
       if (plan.status === 'planned' && changed.source === 'manifests') plan.changedPathsFrom = 'manifests';
       return plan;
     }
     const timing = preflightSecondsPerFile(root);
     const stats = preflightFileStats(root);
-    const budgetSeconds = options?.budgetSeconds ?? PREFLIGHT_LOCAL_BUDGET_SECONDS;
+    const budgetSeconds =
+      timeSettings?.budget.seconds ?? options?.budgetSeconds ?? PREFLIGHT_LOCAL_BUDGET_SECONDS;
     const trim = options?.trim !== false;
     const secondsFor = (test: string) => (stats[test] ? stats[test].ms / 1000 : timing.secondsPerFile);
-    const packageJson = files.get('package.json');
     const declaredGuards = preflightGuards(packageJson, path => files.has(path), forgeJson);
     const guards = selectGuards(declaredGuards, changed.paths);
     const declaredTests = new Set(guards.selected.flatMap(guard => guard.tests));
@@ -1035,7 +1073,7 @@ function planTests(
             localSeconds: test => (stats[test] ? stats[test].ms / 1000 : undefined),
             defaultSeconds: timing.secondsPerFile,
             capSeconds: learnedGuardCap(
-              budgetSeconds,
+              Math.min(budgetSeconds, timeSettings?.ceiling.seconds ?? Infinity),
               [...declaredTests, ...changed.paths.filter(isTest)],
               secondsFor,
             ),
@@ -1240,7 +1278,7 @@ function planTests(
       commentOnly,
       only: !!only,
     });
-    local.ceiling = runCeiling(options?.budgetSeconds);
+    local.ceiling = runCeiling(options?.budgetSeconds, timeSettings);
     const checks = planStatic(files.get('package.json'), changed.paths, forgeJson);
     if ('reason' in checks) return { status: 'unavailable', reason: checks.reason };
     const plan: PreflightPlan = {
@@ -1264,6 +1302,7 @@ function planTests(
           }
         : {}),
       ...(selection.tiers.length ? { local } : {}),
+      ...(timeSettings ? { timeSettings } : {}),
       reusedTests,
       ...(reusedFrom ? { reusedFrom } : {}),
       ...(delta ? { deltaPaths: delta } : {}),
@@ -1331,13 +1370,17 @@ export function planLine(plan: PreflightPlan & { status: 'planned' }) {
   // A caller-built plan may carry no reason; the line still prints.
   const reason = plan.reason ?? '';
   const why = reason.length > PLAN_REASON_CHARS ? `${reason.slice(0, PLAN_REASON_CHARS)}…` : reason;
+  const settings = plan.timeSettings
+    ? ` ${plan.local && plan.local.trim !== false ? `Budget: ${plan.timeSettings.budget.reason} ` : ''}Ceiling: ${plan.timeSettings.ceiling.reason}`
+    : '';
   return (
     `preflight plan: scope ${plan.scope}, ${plan.tests.length} test file(s) here` +
     (reused ? `, ${reused} passed before (reused)` : '') +
     `, ${deferred} deferred to the pre-queue check; ${budget}, about ${plan.estimateMinutes} min.` +
     (plan.runner ? ` Runner: ${plan.runner.label}.` : '') +
     checks +
-    (why ? ` Why: ${why}` : '')
+    (why ? ` Why: ${why}` : '') +
+    settings
   );
 }
 const PLAN_REASON_CHARS = 400;
@@ -1930,7 +1973,12 @@ export function runPreflight(
       ? incompletePreflight({
           root,
           laneId,
-          tierTests: plan.local?.tierTests,
+          // Package plans list only selected commands, so a configured ceiling stopping one
+          // leaves required coverage outstanding even though the plan has no file tiers.
+          tierTests:
+            plan.packageCommands && plan.timeSettings && ceilingReached
+              ? { mandatory: plan.tests }
+              : plan.local?.tierTests,
           notRun,
           secondsPerFile,
           ...(needsBrowser.length ? { needs: { ...NEEDS_CHROMIUM, files: [...needsBrowser].sort() } } : {}),
@@ -1988,6 +2036,7 @@ export function runPreflight(
         }
       : {}),
     ...(buildMs !== undefined ? { buildMs } : {}),
+    ...(plan.timeSettings ? { timeSettings: plan.timeSettings } : {}),
     ...(testMs !== undefined ? { testMs } : {}),
     ...(peakRssMb !== null ? { peakRssMb } : {}),
     selection: plan.deferredTests?.length || skipped ? 'local' : plan.scope,
@@ -2025,7 +2074,7 @@ export function runPreflight(
     const path = join(retainedRootSibling(root, '.forge-client'), 'agent', 'preflight-estimate.json');
     try {
       mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
-      durableReplace(path, JSON.stringify(receipt));
+      durableReplace(path, retainedReceipt(receipt));
     } catch {
       /* Estimates never invalidate a completed run. */
     }
