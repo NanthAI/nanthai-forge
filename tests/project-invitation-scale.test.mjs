@@ -22,7 +22,7 @@ function seed(total, distinctRecipients = false) {
     const actor = `person-${i}`;
     f.insert('forgeAccounts', { owner: actor, handle: actor });
     f.insert('projectContributors', { projectId, contributor: actor });
-    if (distinctRecipients) f.insert('projectActorNames', { projectId, actor, displayName: actor });
+    if (distinctRecipients) f.insert('projectActorNames', { projectId, actor, wasMember: true });
     f.insert('projectInvites', {
       projectId,
       email: `@${actor}`,

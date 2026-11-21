@@ -6,8 +6,8 @@ import assert from 'node:assert/strict';
 import { makeFunctionReference } from 'convex/server';
 import { state } from './hosted-fixture.mjs';
 
-const scheduledRef = makeFunctionReference('projectActorNames:purgeDisplayNames');
-const scheduledArgs = { cursor: null };
+const scheduledRef = makeFunctionReference('projectWorkIndexStore:retire');
+const scheduledArgs = { generationId: 'generation' };
 
 const project = (owner, key) => ({ owner, key, name: key, currentBackup: null, revision: 0 });
 
@@ -38,7 +38,7 @@ test('indexes and range order come from convex/schema.ts', async () => {
 
   // "project" in the index name is actually the projectId schema field.
   for (const actor of ['c', 'a', 'b'])
-    await ctx.db.insert('projectActorNames', { projectId: 'project', actor, displayName: actor });
+    await ctx.db.insert('projectActorNames', { projectId: 'project', actor, wasMember: true });
   const actors = await ctx.db
     .query('projectActorNames')
     .withIndex('by_project_and_actor', q => q.eq('projectId', 'project').gte('actor', 'b').lt('actor', 'd'))
@@ -106,21 +106,36 @@ test('a successful nested mutation is undone when the outer transaction fails', 
 
 test('runMutation rolls back a real handler that writes before rejecting', async () => {
   const s = state([]),
-    purge = makeFunctionReference('projectActorNames:purgeDisplayNames');
-  for (const actor of ['a', 'b'])
-    await s.ctx.db.insert('projectActorNames', { projectId: 'project', actor, displayName: actor });
+    { ctx } = s;
+  const projectId = await ctx.db.insert('hostedProjects', project('owner', 'kept'));
+  const generationId = await ctx.db.insert('projectWorkGenerations', {
+    projectId,
+    backupId: 'backup',
+    revision: 0,
+    initialRevision: 0,
+    status: 'building',
+    nextBatch: 0,
+    metadata: '{}',
+  });
+  for (const position of [0, 1])
+    await ctx.db.insert('projectReturnPages', {
+      projectId,
+      partitionId: generationId,
+      key: 'cursor',
+      position,
+      body: 'derived',
+    });
   const remove = s.ctx.db.delete;
   let deletes = 0;
   s.ctx.db.delete = async id => {
     if (++deletes === 2) throw new Error('second delete failed');
     return remove.call(s.ctx.db, id);
   };
-  await assert.rejects(s.ctx.runMutation(purge, { cursor: null }), /second delete failed/);
-  assert.equal(s.tables.projectActorNames.size, 2, 'the first delete rolled back');
+  await assert.rejects(ctx.runMutation(scheduledRef, { generationId }), /second delete failed/);
+  assert.equal(s.tables.projectReturnPages.size, 2, 'the first delete rolled back');
   s.ctx.db.delete = remove;
-  const result = await s.ctx.runMutation(purge, { cursor: null });
-  assert.equal(result.deleted, 2);
-  assert.equal(s.tables.projectActorNames.size, 0);
+  assert.equal(await ctx.runMutation(scheduledRef, { generationId }), null);
+  assert.equal(s.tables.projectReturnPages.size, 0);
 });
 
 test('query results stay ordered and detached when only returned pages are cloned', async () => {

@@ -48,45 +48,17 @@ test('hostname() only identifies a process or hashes a runner id; it never becom
     assert.doesNotMatch(readFileSync(join(root, file), 'utf8'), /hostname\s*[,}]|\bhostname\(\)/, file);
 });
 
-test('the purge deletes name-only rows, strips names from membership rows and keeps provenance', async () => {
-  // Convex cursors are key positions, so deleting already-visited rows cannot skip later ones.
-  const s = state([], { keysetPaging: true });
-  const add = fields => s.ctx.db.insert('projectActorNames', { projectId: 'project', ...fields });
-  for (let i = 0; i < 230; i++) await add({ actor: `a${i}`, displayName: `Person ${i}` });
-  await add({ actor: 'gone', displayName: 'Gone Person', wasMember: true });
-  await add({ actor: 'plain-former', displayName: '', wasMember: true });
-  await add({ actor: 'clean-former', wasMember: true });
-  let cursor = null,
-    calls = 0,
-    deleted = 0,
-    cleared = 0,
-    done = false;
-  while (!done) {
-    const result = await actors.purgeDisplayNames._handler(s.ctx, { cursor });
-    calls++;
-    deleted += result.deleted;
-    cleared += result.cleared;
-    ({ cursor, isDone: done } = result);
-    assert(calls < 10);
-  }
-  assert.deepEqual({ deleted, cleared }, { deleted: 230, cleared: 2 });
-  assert.equal(calls, 3, '233 rows at 100 per call');
-  assert.deepEqual(
-    [...s.tables.projectActorNames.values()].map(r => [
-      r.actor,
-      'displayName' in r && r.displayName !== undefined,
-    ]),
-    [
-      ['gone', false],
-      ['plain-former', false],
-      ['clean-former', false],
-    ],
+test('the project actor schema rejects stored provider display names', async () => {
+  const { ctx } = state([]);
+  await assert.rejects(
+    ctx.db.insert('projectActorNames', {
+      projectId: 'project',
+      actor: 'person',
+      wasMember: true,
+      displayName: 'Synthetic Person',
+    }),
+    /DocumentValidationError.*displayName/,
   );
-  s.tables.hostedProjects.set('project', { _id: 'project', owner: 'owner' });
-  assert.equal((await actors.withActorName(s.ctx, 'project', { actor: 'gone' })).actorFormerMember, true);
-  // A second pass has nothing to do.
-  const again = await actors.purgeDisplayNames._handler(s.ctx, { cursor: null });
-  assert.deepEqual([again.deleted, again.cleared], [0, 0]);
 });
 
 test('retaining membership stores no name, and the removed writer is gone', async () => {

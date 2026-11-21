@@ -200,17 +200,13 @@ test('removed Forge grant and access changed during provider calls hide personal
 test('former members keep server-retained identity and get a label, never a provider name; current readers and unknown imported actors do not', async () => {
   const f = state([]);
   f.tables.hostedProjects.set('p', row('p', { owner: 'owner', name: 'Project', key: 'p' }));
-  f.tables.projectActorNames.set(
-    'name',
-    row('name', { projectId: 'p', actor: 'person', displayName: 'Alex' }),
-  );
   f.tables.projectContributors.set('member', row('member', { projectId: 'p', contributor: 'person' }));
-  const event = { id: 'action', actor: 'person', at: 123, summary: local };
+  const event = { id: 'action', actor: 'person', at: 123, summary: local, actorDisplayName: 'Alex' };
   assert.equal((await actors.withActorName(f.ctx, 'p', event)).actorFormerMember, undefined);
   await contributors.remove._handler(f.ctx, { projectId: 'p', contributor: 'person' });
   const former = await actors.withActorName(f.ctx, 'p', event);
   assert.equal(former.actor, 'person');
-  assert.equal(former.actorDisplayName, undefined, 'retained provider names are never returned');
+  assert.equal(former.actorDisplayName, undefined, 'imported provider names are never returned');
   assert.equal(former.actorFormerMember, true);
   assert.equal(former.at, 123);
   assert.doesNotMatch(former.summary, /Users/);
@@ -227,10 +223,6 @@ test('former members keep server-retained identity and get a label, never a prov
     operationId: randomUUID(),
   });
   assert.equal((await actors.withActorName(f.ctx, 'p', event)).actorFormerMember, true);
-  f.tables.projectActorNames.set(
-    'unrelated',
-    row('unrelated', { projectId: 'p', actor: 'unknown', displayName: 'Private' }),
-  );
   const forged = { actor: 'unknown', actorDisplayName: 'Forged', actorFormerMember: true };
   assert.deepEqual(await actors.withActorName(f.ctx, 'p', forged), { actor: 'unknown' });
   assert.deepEqual(JSON.parse(await actors.actorSummary(f.ctx, 'p', JSON.stringify(forged))), {
@@ -241,7 +233,6 @@ test('former members keep server-retained identity and get a label, never a prov
     row('other-project', {
       projectId: 'other',
       actor: 'unknown',
-      displayName: 'Other project member',
       wasMember: true,
     }),
   );

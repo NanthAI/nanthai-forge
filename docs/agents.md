@@ -83,7 +83,7 @@ their Forge handle; public readers and signed-out viewers see no person field at
 owner's own settings, email addresses are never returned. Person arguments may be
 handles. `tests/public-identity-guard.test.mjs` fails if a return validator exposes a
 subject, display name or unreviewed email, or a public function bypasses the mapping.
-No provider display name is stored: `projectActorNames` keeps only former-member provenance (`wasMember`), and the one-time `projectActorNames:purgeDisplayNames` cleanup removed legacy rows. `tests/neutral-names.test.mjs` fails if any default label (device, local-checks runner, Lane setup machine) derives from the hostname.
+`projectActorNames` stores membership and invitation revocation metadata. Its schema rejects provider display names. `tests/neutral-names.test.mjs` guards that schema and checks that default device, runner and Lane setup labels never derive from the hostname.
 
 Hosted Candidate/run summaries report `main {head,included}` against current
 hosted main (imported main before selection). State and Git bundle parents are

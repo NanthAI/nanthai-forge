@@ -591,12 +591,6 @@ test('summary pages resolve a repeated actor once per request and keep fresh han
   const workspace = JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId }));
   const generation = s.tables.projectWorkGenerations.get(workspace.generationId);
   const partition = generation.recordsGenerationId ?? generation._id;
-  s.tables.projectActorNames.set('perf-name', {
-    _id: 'perf-name',
-    projectId: s.projectId,
-    actor: 'owner',
-    displayName: 'First name',
-  });
   s.tables.forgeAccounts.set('perf-account', { _id: 'perf-account', owner: 'owner', handle: 'first-handle' });
   for (let position = 0; position < 30; position++)
     setWorkRecord(s.tables, `actor-perf-${position}`, {

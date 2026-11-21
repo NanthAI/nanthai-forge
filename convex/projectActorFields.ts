@@ -5,8 +5,6 @@ export const actorTables = {
   projectActorNames: defineTable({
     projectId: v.id('hostedProjects'),
     actor: v.string(),
-    /** Retired: no provider name is stored. Legacy rows are removed by purgeDisplayNames; drop this field after. */
-    displayName: v.optional(v.string()),
     wasMember: v.optional(v.boolean()),
     invitationsEndedBeforeEpoch: v.optional(v.number()),
   }).index('by_project_and_actor', ['projectId', 'actor']),

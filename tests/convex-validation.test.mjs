@@ -12,8 +12,8 @@ import { readFileSync } from 'node:fs';
 import { moduleUrl } from './convex-module.mjs';
 
 const project = { owner: 'owner', key: 'test', name: 'Test', currentBackup: null, revision: 0 };
-const ref = makeFunctionReference('projectActorNames:purgeDisplayNames');
-const args = { cursor: null };
+const ref = makeFunctionReference('projectWorkIndexStore:retire');
+const args = { generationId: 'generation' };
 
 test('exported argument validators are cached and enforce all Convex value kinds', () => {
   const validator = v.object({
@@ -78,7 +78,7 @@ test('exported argument validators are cached and enforce all Convex value kinds
 test('dispatchers and schedulers reject invalid args before executing or enqueueing', async () => {
   const s = state([]);
   for (const method of ['runMutation', 'runQuery', 'runAction']) {
-    for (const input of [{ ...args, index: 0, generation: 1 }, { cursor: 1 }, {}])
+    for (const input of [{ ...args, index: 0, generation: 1 }, { generationId: 1 }, {}])
       await assert.rejects(s.ctx[method](ref, input), /ArgumentValidationError/);
   }
   for (const method of ['runAfter', 'runAt']) {

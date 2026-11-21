@@ -2,7 +2,7 @@
 import { workRecordTables } from './projectWorkRecordTables';
 import { hostedPaths } from '../src/hosted-paths';
 import { v } from 'convex/values';
-import { internalMutation, internalQuery, type QueryCtx, type MutationCtx } from './server';
+import { internalQuery, type QueryCtx, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { selectedGeneration, recordPartition } from './projectWorkIndexStore';
 import { accessibleProject } from './projectAuthority';
@@ -16,7 +16,7 @@ async function known(
   reader: string,
 ) {
   if (actor === project.owner || actor === reader) return true;
-  // A cached name alone is never membership or identity authority.
+  // Retained membership provides project provenance.
   if (
     (
       await ctx.db
@@ -92,34 +92,6 @@ export const authorize = internalQuery({
       result.push(actor);
     }
     return result;
-  },
-});
-/** One-time cleanup of stored provider display names (personal data we must not hold). Retry the
- * returned cursor until `isDone`. Former-member provenance (`wasMember`) is kept; every other row
- * existed only for its name and is deleted. Each call touches at most 100 rows. */
-export const purgeDisplayNames = internalMutation({
-  args: { cursor: v.union(v.string(), v.null()) },
-  returns: v.object({
-    cursor: v.string(),
-    isDone: v.boolean(),
-    deleted: v.number(),
-    cleared: v.number(),
-  }),
-  handler: async (ctx, input) => {
-    const page = await ctx.db.query('projectActorNames').paginate({ cursor: input.cursor, numItems: 100 });
-    let deleted = 0,
-      cleared = 0;
-    for (const row of page.page) {
-      if (row.displayName === undefined) continue;
-      if (row.wasMember) {
-        await ctx.db.patch(row._id, { displayName: undefined });
-        cleared++;
-      } else {
-        await ctx.db.delete(row._id);
-        deleted++;
-      }
-    }
-    return { cursor: page.continueCursor, isDone: page.isDone, deleted, cleared };
   },
 });
 /** Only call after current project read authority has been established. People are named

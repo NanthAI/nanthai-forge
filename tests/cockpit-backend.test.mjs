@@ -140,7 +140,7 @@ test('native hosted summaries track actual ancestry when main moves without read
       key: 'main',
       parent: '',
       position: 0,
-      value: JSON.stringify({ ...move, actor: 'owner' }),
+      value: JSON.stringify({ ...move, actor: 'owner', actorDisplayName: 'Maya' }),
     };
     if (old) await s.ctx.db.patch(old._id, row);
     else await s.ctx.db.insert('projectWorkRecords', row);
@@ -179,16 +179,10 @@ test('native hosted summaries track actual ancestry when main moves without read
     id: pins.views[3].id,
   });
   assert.equal(JSON.parse(detail.value).main.included, true);
-  s.tables.projectActorNames.set('label', {
-    _id: 'label',
-    projectId: s.projectId,
-    actor: 'owner',
-    displayName: 'Maya',
-  });
   assert.equal(
     JSON.parse((await readPage(s, 'hostedChannels')).page[0].value).actorDisplayName,
     undefined,
-    'retained provider names are never returned',
+    'project summaries omit provider names',
   );
   const beforeQuery = s.ctx.db.query;
   s.ctx.db.query = table => {
@@ -310,16 +304,14 @@ test('hosted actor labels are project scoped Forge handles and never look up the
     people.labels._handler(s.ctx, { projectId: 'project', actors: ['hidden-member'] }),
     /already visible/,
   );
-  s.tables.projectActorNames.set('unrelated-cache', {
-    _id: 'unrelated-cache',
-    projectId: 'project',
-    actor: 'unrelated',
-    displayName: 'Private identity',
-  });
   assert.equal(
-    await actorNames.actorSummary(s.ctx, 'project', JSON.stringify({ actor: 'unrelated' })),
+    await actorNames.actorSummary(
+      s.ctx,
+      'project',
+      JSON.stringify({ actor: 'unrelated', actorDisplayName: 'Private identity' }),
+    ),
     JSON.stringify({ actor: 'unrelated' }),
-    'untrusted source actor declarations cannot disclose cached identities',
+    'untrusted source actor declarations cannot supply display names',
   );
   assert.equal(calls, 0, 'no identity-provider lookup');
 });
