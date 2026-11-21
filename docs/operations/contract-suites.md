@@ -1,7 +1,7 @@
 # Contract suites
 
 A fake of an outside system is only as good as its match with the real system. Each such fake
-has a contract suite in `tests/contracts/<system>.contract.test.mjs`. Each case runs
+has a contract suite in `tests/contracts/<system>.contract.test.mjs`. Qualified cases run
 against the real system and each fake that implements the behavior. A fake helper names its suite on
 its second line (`// contract: tests/contracts/<system>.contract.test.mjs`). The audit that set
 this up is in [test doubles audit](../research/test-doubles-audit.md#contract-suites-one-per-outside-system).
@@ -21,6 +21,11 @@ All targets run the production client code. The R2 suite signs with `convex/r2.t
 `convex/r2Operations.ts`. The GitHub suite mints tokens with `convex/githubAppToken.ts` and calls
 GitHub through `src/hosted-github-api.ts`. When a contract fails, fix the fake or the production
 code.
+
+GitHub's synthetic cases cover workflow dispatch with and without a returned run ID, Actions Link
+pagination, check-run import across a page boundary, and LFS batch downloads. Live qualification
+for these cases awaits owner-approved scratch App access and seed data. The existing nightly live
+target still runs the Git data and installation cases.
 
 ## Running
 
