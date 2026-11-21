@@ -7,7 +7,7 @@ import { activeOwnedProject, accessibleProject } from './projectAuthority';
 import { query } from './cliServer';
 import { report } from './errors';
 import { sourceAuthority, requireSourceAuthority } from '../src/hosted-source-authority';
-import { hostedMainV2Schema } from '../src/hosted-main';
+import { cliReleaseMetadataSchema, hostedMainV2Schema } from '../src/hosted-main';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { beginHostedOperation, finishHostedOperation } from './projectHostedOperations';
 import { invariant } from '../src/errors';
@@ -122,10 +122,30 @@ export const seed = internalMutation({
   },
 });
 
-/** Version-2 start observation, separate from legacy projectMain generation reads. */
+function cliReleaseMetadata(channel: 'main') {
+  const minimumCliVersion = cliReleaseMetadataSchema.shape.minimumCliVersion.safeParse(
+    process.env.FORGE_MINIMUM_CLI_VERSION,
+  ).data;
+  const protocol = process.env.FORGE_MINIMUM_CLI_PROTOCOL_VERSION;
+  const minimumProtocolVersion = cliReleaseMetadataSchema.shape.minimumProtocolVersion.safeParse(
+    protocol && /^[1-9]\d*$/.test(protocol) ? Number(protocol) : undefined,
+  ).data;
+  return {
+    channel,
+    ...(minimumCliVersion === undefined ? {} : { minimumCliVersion }),
+    ...(minimumProtocolVersion === undefined ? {} : { minimumProtocolVersion }),
+  };
+}
+
+/** Version-2 start observation, separate from legacy projectMain generation reads.
+ * Release clients opt in to compatibility metadata so strict main readers keep their reply. */
 export const current = query({
   /** `today: 1`: a clone's bare status also wants the top bar's main figure (Item 32e8de50). */
-  args: { projectId: v.id('hostedProjects'), today: v.optional(v.literal(1)) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    today: v.optional(v.literal(1)),
+    cliRelease: v.optional(v.literal(1)),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
@@ -141,8 +161,9 @@ export const current = query({
         'SOURCE_AUTHORITY_CHANGED',
         'Hosted main and project authority differ.',
       );
+      const selected = input.today ? { ...main, mainDay: await readMainDay(ctx.db, input.projectId) } : main;
       return canonicalPayload(
-        input.today ? { ...main, mainDay: await readMainDay(ctx.db, input.projectId) } : main,
+        input.cliRelease ? { ...selected, cliRelease: cliReleaseMetadata(main.channel) } : selected,
       );
     } catch (error) {
       return report(error);

@@ -42,6 +42,17 @@ export const hostedMainV2Schema = z
 export const hostedMainSchema = z.discriminatedUnion('schema', [hostedMainV1Schema, hostedMainV2Schema]);
 export type HostedMain = z.infer<typeof hostedMainSchema>;
 export type HostedMainV2 = z.infer<typeof hostedMainV2Schema>;
+export const cliReleaseMetadataSchema = z
+  .object({
+    channel: z.enum(['main', 'stable']),
+    minimumCliVersion: z
+      .string()
+      .max(64)
+      .regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/)
+      .optional(),
+    minimumProtocolVersion: z.number().int().positive().optional(),
+  })
+  .strict();
 export const mainExpectationSchema = z
   .object({
     head,

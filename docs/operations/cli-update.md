@@ -29,6 +29,16 @@ disk and load no command module (Issue 381c62df). Valid commands make one author
 for that process in addition to its action calls. There is no timer,
 periodic check or idle network activity.
 
+The authorized `projectHostedChannels:current` query accepts `cliRelease: 1` on
+servers that support the extension. The reply includes a `cliRelease` object
+for the selected release, currently `channel: "main"`. The deployment can
+advertise `minimumCliVersion` (a release version such as `0.3.1`) and
+`minimumProtocolVersion` (a positive integer) via
+`FORGE_MINIMUM_CLI_VERSION` and `FORGE_MINIMUM_CLI_PROTOCOL_VERSION`.
+Unset or invalid values are omitted independently. The normal updater uses the
+original request and leaves these values unenforced. The extension takes no
+additional database reads or network calls.
+
 When main moves, no command waits for the install or its canary. A command runs on
 the complete, vetted current build, prints one stderr line (`Forge CLI main HEAD is
 installing; this read|write ran on OLD`), and starts one detached `nforge update

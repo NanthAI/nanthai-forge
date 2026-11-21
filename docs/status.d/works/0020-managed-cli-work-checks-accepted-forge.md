@@ -6,6 +6,8 @@ in-flight runtime leases protect lazy imports. Releases are signed (Ed25519, rel
 by the owner or the automated `release-sign` GitHub job, and required: an unsigned main holds on
 the current build until its signature appears. `nforge cli release-verify` re-checks stored
 signatures.
+The authorized release read can also return its channel and configured minimum CLI
+and protocol versions in the same response when explicitly requested.
 See [CLI updates](../../operations/cli-update.md).
 
 Under a CLI measurement hold, `land --save --no-wait` returns a local receipt and
