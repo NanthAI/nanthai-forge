@@ -1,0 +1,4 @@
+{
+  "issue": "e7812d8f",
+  "reason": "Issue e7812d8f adds Lane undo through an on-demand implementation. The 100-file fixture measures one server mutation, 35 document probes, nine writes and no source object uploads. Installed startup and tool-list measurements remain inside all existing ceilings."
+}

@@ -1391,6 +1391,7 @@
     "status",
     "sync",
     "tests",
+    "undo",
     "uninstall-hooks",
     "wait",
     "whoami",
@@ -1398,218 +1399,241 @@
   ],
   "report": {
     "actual": {
-      "installedBytes": 135191297,
-      "versionCpuMs": 38.274,
+      "installedBytes": 138905642,
+      "versionCpuMs": 54.622,
       "versionModules": 19,
-      "helpCpuMs": 37.718,
+      "helpCpuMs": 56.541,
       "helpModules": 19,
-      "mcpCpuMs": 539.934,
-      "mcpModules": 826,
-      "toolListBytes": 5697,
-      "cliAgentStatusCpuMs": 389,
+      "mcpCpuMs": 514.092,
+      "mcpModules": 827,
+      "toolListBytes": 5718,
+      "cliAgentStatusCpuMs": 357,
       "cliAgentStatusCpuModules": 170,
-      "cliAgentPlanningCpuMs": 341,
+      "cliAgentPlanningCpuMs": 342,
       "cliAgentPlanningCpuModules": 170,
-      "cliAgentSaveCpuMs": 345,
+      "cliAgentSaveCpuMs": 312,
       "cliAgentSaveCpuModules": 170,
-      "cliAgentLandCpuMs": 296,
-      "cliAgentLandCpuModules": 177
+      "cliAgentLandCpuMs": 334,
+      "cliAgentLandCpuModules": 174,
+      "calibrationCpuMs": 79.493
     },
     "samples": {
       "version": [
         {
-          "cpuMs": 39.734,
+          "cpuMs": 54.426,
           "modules": 19,
-          "maxRssKiB": 54464
+          "maxRssKiB": 54352
         },
         {
-          "cpuMs": 34.253,
+          "cpuMs": 57.025,
           "modules": 19,
-          "maxRssKiB": 54608
+          "maxRssKiB": 54448
         },
         {
-          "cpuMs": 39.734,
+          "cpuMs": 54.553,
           "modules": 19,
-          "maxRssKiB": 54480
+          "maxRssKiB": 54400
         },
         {
-          "cpuMs": 38.032,
+          "cpuMs": 54.622,
           "modules": 19,
           "maxRssKiB": 54416
         },
         {
-          "cpuMs": 38.274,
+          "cpuMs": 57.655,
           "modules": 19,
-          "maxRssKiB": 54368
+          "maxRssKiB": 54288
         }
       ],
       "help": [
         {
-          "cpuMs": 37.684,
+          "cpuMs": 56.541,
           "modules": 19,
-          "maxRssKiB": 54464
+          "maxRssKiB": 54176
         },
         {
-          "cpuMs": 37.718,
+          "cpuMs": 57.387,
           "modules": 19,
-          "maxRssKiB": 54608
+          "maxRssKiB": 54192
         },
         {
-          "cpuMs": 38.652,
+          "cpuMs": 52.77,
           "modules": 19,
-          "maxRssKiB": 54752
+          "maxRssKiB": 54352
         },
         {
-          "cpuMs": 37.353,
+          "cpuMs": 57.828,
           "modules": 19,
-          "maxRssKiB": 54368
+          "maxRssKiB": 54320
         },
         {
-          "cpuMs": 38.94,
+          "cpuMs": 53.381,
           "modules": 19,
-          "maxRssKiB": 54432
+          "maxRssKiB": 54384
         }
       ],
       "mcp": [
         {
-          "cpuMs": 336.22,
-          "modules": 826,
-          "maxRssKiB": 152224
+          "cpuMs": 494.155,
+          "modules": 827,
+          "maxRssKiB": 148000
         },
         {
-          "cpuMs": 455.703,
-          "modules": 826,
-          "maxRssKiB": 152064
+          "cpuMs": 514.092,
+          "modules": 827,
+          "maxRssKiB": 148416
         },
         {
-          "cpuMs": 539.934,
-          "modules": 826,
-          "maxRssKiB": 152672
+          "cpuMs": 513.064,
+          "modules": 827,
+          "maxRssKiB": 148288
         },
         {
-          "cpuMs": 664.356,
-          "modules": 826,
-          "maxRssKiB": 152128
+          "cpuMs": 559.096,
+          "modules": 827,
+          "maxRssKiB": 147856
         },
         {
-          "cpuMs": 927.718,
-          "modules": 826,
-          "maxRssKiB": 152176
+          "cpuMs": 550.691,
+          "modules": 827,
+          "maxRssKiB": 148544
         }
       ],
       "cliAgentStatusCpu": [
         {
-          "cpuMs": 413,
+          "cpuMs": 372,
           "modules": 170,
-          "maxRssKiB": 114704
+          "maxRssKiB": 115152
         },
         {
-          "cpuMs": 389,
+          "cpuMs": 357,
           "modules": 170,
-          "maxRssKiB": 115856
+          "maxRssKiB": 115488
         },
         {
-          "cpuMs": 394,
+          "cpuMs": 328,
           "modules": 170,
-          "maxRssKiB": 116496
+          "maxRssKiB": 114352
         },
         {
-          "cpuMs": 379,
+          "cpuMs": 337,
           "modules": 170,
-          "maxRssKiB": 115872
+          "maxRssKiB": 115296
         },
         {
-          "cpuMs": 360,
+          "cpuMs": 416,
           "modules": 170,
-          "maxRssKiB": 116912
+          "maxRssKiB": 114128
         }
       ],
       "cliAgentPlanningCpu": [
         {
-          "cpuMs": 374,
+          "cpuMs": 358,
           "modules": 170,
-          "maxRssKiB": 117216
+          "maxRssKiB": 115264
         },
         {
-          "cpuMs": 324,
+          "cpuMs": 336,
           "modules": 170,
-          "maxRssKiB": 116240
+          "maxRssKiB": 115440
         },
         {
-          "cpuMs": 327,
+          "cpuMs": 342,
           "modules": 170,
-          "maxRssKiB": 116256
+          "maxRssKiB": 115360
         },
         {
-          "cpuMs": 341,
+          "cpuMs": 347,
           "modules": 170,
-          "maxRssKiB": 116224
+          "maxRssKiB": 114864
         },
         {
-          "cpuMs": 389,
+          "cpuMs": 323,
           "modules": 170,
-          "maxRssKiB": 114768
+          "maxRssKiB": 114048
         }
       ],
       "cliAgentSaveCpu": [
         {
-          "cpuMs": 320,
+          "cpuMs": 318,
           "modules": 170,
-          "maxRssKiB": 114880
+          "maxRssKiB": 114496
         },
         {
-          "cpuMs": 345,
+          "cpuMs": 305,
           "modules": 170,
-          "maxRssKiB": 116464
+          "maxRssKiB": 113968
         },
         {
-          "cpuMs": 345,
+          "cpuMs": 315,
           "modules": 170,
-          "maxRssKiB": 115472
+          "maxRssKiB": 114704
         },
         {
-          "cpuMs": 371,
+          "cpuMs": 312,
           "modules": 170,
-          "maxRssKiB": 116944
+          "maxRssKiB": 114896
         },
         {
-          "cpuMs": 300,
+          "cpuMs": 282,
           "modules": 170,
-          "maxRssKiB": 116176
+          "maxRssKiB": 114080
         }
       ],
       "cliAgentLandCpu": [
         {
-          "cpuMs": 322,
-          "modules": 177,
-          "maxRssKiB": 125920
+          "cpuMs": 334,
+          "modules": 174,
+          "maxRssKiB": 120176
         },
         {
-          "cpuMs": 296,
-          "modules": 177,
-          "maxRssKiB": 126416
+          "cpuMs": 328,
+          "modules": 174,
+          "maxRssKiB": 119536
         },
         {
-          "cpuMs": 312,
-          "modules": 177,
-          "maxRssKiB": 121968
+          "cpuMs": 404,
+          "modules": 174,
+          "maxRssKiB": 119776
         },
         {
-          "cpuMs": 293,
-          "modules": 177,
-          "maxRssKiB": 122032
+          "cpuMs": 358,
+          "modules": 174,
+          "maxRssKiB": 118496
         },
         {
-          "cpuMs": 289,
-          "modules": 177,
-          "maxRssKiB": 126160
+          "cpuMs": 334,
+          "modules": 174,
+          "maxRssKiB": 118688
+        }
+      ],
+      "calibration": [
+        {
+          "cpuMs": 79.493
+        },
+        {
+          "cpuMs": 73.413
+        },
+        {
+          "cpuMs": 72.589
+        },
+        {
+          "cpuMs": 72.789
+        },
+        {
+          "cpuMs": 102.387
+        },
+        {
+          "cpuMs": 83.208
+        },
+        {
+          "cpuMs": 80.971
         }
       ]
     },
     "moduleInventory": {
       "version": [
         "node_modules/@nanthai/forge/dist/cli-bundle-checkout-prep-observation-HASH.js",
-        "node_modules/@nanthai/forge/dist/cli-bundle-child-env-HASH.js",
         "node_modules/@nanthai/forge/dist/cli-bundle-cli-HASH.js",
         "node_modules/@nanthai/forge/dist/cli-bundle-cli-command-ready-HASH.js",
         "node_modules/@nanthai/forge/dist/cli-bundle-cli-installation-HASH.js",
@@ -1619,6 +1643,7 @@
         "node_modules/@nanthai/forge/dist/cli-bundle-errors-HASH.js",
         "node_modules/@nanthai/forge/dist/cli-bundle-exchange-observation-hooks-HASH.js",
         "node_modules/@nanthai/forge/dist/cli-bundle-file-mode-HASH.js",
+        "node_modules/@nanthai/forge/dist/cli-bundle-land-timing-HASH.js",
         "node_modules/@nanthai/forge/dist/cli-bundle-local-process-HASH.js",
         "node_modules/@nanthai/forge/dist/cli-bundle-receipt-slim-HASH.js",
         "node_modules/@nanthai/forge/dist/cli-bundle-root-paths-HASH.js",
@@ -1629,7 +1654,6 @@
       ],
       "help": [
         "node_modules/@nanthai/forge/dist/cli-bundle-checkout-prep-observation-HASH.js",
-        "node_modules/@nanthai/forge/dist/cli-bundle-child-env-HASH.js",
         "node_modules/@nanthai/forge/dist/cli-bundle-cli-HASH.js",
         "node_modules/@nanthai/forge/dist/cli-bundle-cli-command-ready-HASH.js",
         "node_modules/@nanthai/forge/dist/cli-bundle-cli-installation-HASH.js",
@@ -1639,6 +1663,7 @@
         "node_modules/@nanthai/forge/dist/cli-bundle-errors-HASH.js",
         "node_modules/@nanthai/forge/dist/cli-bundle-exchange-observation-hooks-HASH.js",
         "node_modules/@nanthai/forge/dist/cli-bundle-file-mode-HASH.js",
+        "node_modules/@nanthai/forge/dist/cli-bundle-land-timing-HASH.js",
         "node_modules/@nanthai/forge/dist/cli-bundle-local-process-HASH.js",
         "node_modules/@nanthai/forge/dist/cli-bundle-receipt-slim-HASH.js",
         "node_modules/@nanthai/forge/dist/cli-bundle-root-paths-HASH.js",
@@ -1876,6 +1901,7 @@
         "node_modules/@nanthai/forge/dist/hosted-finish-guard.js",
         "node_modules/@nanthai/forge/dist/hosted-finish.js",
         "node_modules/@nanthai/forge/dist/hosted-github-mirror-status.js",
+        "node_modules/@nanthai/forge/dist/hosted-history-schema.js",
         "node_modules/@nanthai/forge/dist/hosted-land-gate-client.js",
         "node_modules/@nanthai/forge/dist/hosted-land-gates.js",
         "node_modules/@nanthai/forge/dist/hosted-land-summary.js",
@@ -1891,6 +1917,7 @@
         "node_modules/@nanthai/forge/dist/hosted-lane-adopt.js",
         "node_modules/@nanthai/forge/dist/hosted-lane-checkout-marker.js",
         "node_modules/@nanthai/forge/dist/hosted-lane-checkout.js",
+        "node_modules/@nanthai/forge/dist/hosted-lane-directory.js",
         "node_modules/@nanthai/forge/dist/hosted-lane-dirty.js",
         "node_modules/@nanthai/forge/dist/hosted-lane-location.js",
         "node_modules/@nanthai/forge/dist/hosted-lane-snapshot-capture.js",
@@ -2075,8 +2102,6 @@
         "node_modules/@nanthai/forge/dist/receipt-slim.js",
         "node_modules/@nanthai/forge/dist/recovery-hosted-protocol.js",
         "node_modules/@nanthai/forge/dist/recovery-state.js",
-        "node_modules/@nanthai/forge/dist/review-hunks-core.js",
-        "node_modules/@nanthai/forge/dist/review-hunks.js",
         "node_modules/@nanthai/forge/dist/root-paths.js",
         "node_modules/@nanthai/forge/dist/runner-visibility.js",
         "node_modules/@nanthai/forge/dist/safe-relative.js",
@@ -2146,6 +2171,7 @@
         "node_modules/@nanthai/forge/dist/test-isolation.js",
         "node_modules/@nanthai/forge/dist/tested-docs.js",
         "node_modules/@nanthai/forge/dist/text-bytes.js",
+        "node_modules/@nanthai/forge/dist/text-line-edits.js",
         "node_modules/@nanthai/forge/dist/toml-lite.js",
         "node_modules/@nanthai/forge/dist/train-accounting.js",
         "node_modules/@nanthai/forge/dist/verified-blob.js",
@@ -2482,6 +2508,7 @@
         "dist/cli-bundle-agent-peers-cache-HASH.js",
         "dist/cli-bundle-agent-root-HASH.js",
         "dist/cli-bundle-agent-session-HASH.js",
+        "dist/cli-bundle-agent-slug-HASH.js",
         "dist/cli-bundle-agent-turn-work-HASH.js",
         "dist/cli-bundle-agent-verbs-HASH.js",
         "dist/cli-bundle-api-HASH.js",
@@ -2494,7 +2521,6 @@
         "dist/cli-bundle-checkout-io-HASH.js",
         "dist/cli-bundle-checkout-missing-HASH.js",
         "dist/cli-bundle-checkout-prep-observation-HASH.js",
-        "dist/cli-bundle-child-env-HASH.js",
         "dist/cli-bundle-clean-command-env-HASH.js",
         "dist/cli-bundle-clean-processes-HASH.js",
         "dist/cli-bundle-cli-HASH.js",
@@ -2504,6 +2530,7 @@
         "dist/cli-bundle-client-error-text-HASH.js",
         "dist/cli-bundle-client-settings-HASH.js",
         "dist/cli-bundle-client-settings-path-HASH.js",
+        "dist/cli-bundle-code-files-HASH.js",
         "dist/cli-bundle-contract-packages-HASH.js",
         "dist/cli-bundle-coordination-client-HASH.js",
         "dist/cli-bundle-coordination-types-HASH.js",
@@ -2517,6 +2544,7 @@
         "dist/cli-bundle-exchange-convex-fetch-HASH.js",
         "dist/cli-bundle-exchange-observation-hooks-HASH.js",
         "dist/cli-bundle-exchange-parallel-HASH.js",
+        "dist/cli-bundle-exchange-progress-HASH.js",
         "dist/cli-bundle-exchange-r2-read-HASH.js",
         "dist/cli-bundle-exchange-request-HASH.js",
         "dist/cli-bundle-exchange-retry-HASH.js",
@@ -2526,6 +2554,7 @@
         "dist/cli-bundle-gitlink-HASH.js",
         "dist/cli-bundle-gitlink-workspace-HASH.js",
         "dist/cli-bundle-hash-HASH.js",
+        "dist/cli-bundle-heavy-queue-HASH.js",
         "dist/cli-bundle-heavy-slots-HASH.js",
         "dist/cli-bundle-help-topics-HASH.js",
         "dist/cli-bundle-host-binding-HASH.js",
@@ -2536,13 +2565,13 @@
         "dist/cli-bundle-hosted-agent-cli-HASH.js",
         "dist/cli-bundle-hosted-agent-contract-HASH.js",
         "dist/cli-bundle-hosted-agent-finish-identity-HASH.js",
-        "dist/cli-bundle-hosted-agent-help-HASH.js",
         "dist/cli-bundle-hosted-agent-journal-HASH.js",
         "dist/cli-bundle-hosted-agent-submission-wait-HASH.js",
         "dist/cli-bundle-hosted-agent-transport-HASH.js",
         "dist/cli-bundle-hosted-agent-wait-local-HASH.js",
         "dist/cli-bundle-hosted-capabilities-carried-main-HASH.js",
         "dist/cli-bundle-hosted-capabilities-early-HASH.js",
+        "dist/cli-bundle-hosted-changed-paths-HASH.js",
         "dist/cli-bundle-hosted-check-HASH.js",
         "dist/cli-bundle-hosted-check-log-HASH.js",
         "dist/cli-bundle-hosted-check-output-HASH.js",
@@ -2553,12 +2582,9 @@
         "dist/cli-bundle-hosted-compose-HASH.js",
         "dist/cli-bundle-hosted-conflict-notice-HASH.js",
         "dist/cli-bundle-hosted-contract-features-HASH.js",
-        "dist/cli-bundle-hosted-github-git-HASH.js",
-        "dist/cli-bundle-hosted-history-cli-HASH.js",
         "dist/cli-bundle-hosted-land-child-env-HASH.js",
         "dist/cli-bundle-hosted-land-cli-HASH.js",
         "dist/cli-bundle-hosted-landing-HASH.js",
-        "dist/cli-bundle-hosted-landings-view-HASH.js",
         "dist/cli-bundle-hosted-lane-HASH.js",
         "dist/cli-bundle-hosted-lane-checkout-HASH.js",
         "dist/cli-bundle-hosted-lane-checkout-marker-HASH.js",
@@ -2580,9 +2606,9 @@
         "dist/cli-bundle-hosted-source-authority-HASH.js",
         "dist/cli-bundle-hosted-source-operation-HASH.js",
         "dist/cli-bundle-hosted-source-retry-HASH.js",
-        "dist/cli-bundle-hosted-wait-line-HASH.js",
         "dist/cli-bundle-hosted-work-client-HASH.js",
         "dist/cli-bundle-iso-HASH.js",
+        "dist/cli-bundle-land-timing-HASH.js",
         "dist/cli-bundle-landed-operations-HASH.js",
         "dist/cli-bundle-landing-capsule-client-HASH.js",
         "dist/cli-bundle-landing-stall-HASH.js",
@@ -2607,14 +2633,12 @@
         "dist/cli-bundle-package-graph-HASH.js",
         "dist/cli-bundle-package-manager-HASH.js",
         "dist/cli-bundle-physical-manifest-HASH.js",
-        "dist/cli-bundle-preflight-learned-HASH.js",
+        "dist/cli-bundle-planning-search-HASH.js",
         "dist/cli-bundle-presence-HASH.js",
         "dist/cli-bundle-public-governance-HASH.js",
         "dist/cli-bundle-receipt-slim-HASH.js",
         "dist/cli-bundle-recovery-state-HASH.js",
-        "dist/cli-bundle-review-hunks-HASH.js",
         "dist/cli-bundle-root-paths-HASH.js",
-        "dist/cli-bundle-safe-relative-HASH.js",
         "dist/cli-bundle-schemas-HASH.js",
         "dist/cli-bundle-scoped-recheck-policy-HASH.js",
         "dist/cli-bundle-secret-allow-HASH.js",
@@ -2633,8 +2657,10 @@
         "dist/cli-bundle-submodule-allowlist-HASH.js",
         "dist/cli-bundle-system-errors-HASH.js",
         "dist/cli-bundle-test-isolation-HASH.js",
+        "dist/cli-bundle-text-line-edits-HASH.js",
         "dist/cli-bundle-verified-blob-HASH.js",
         "dist/cli-bundle-work-actor-types-HASH.js",
+        "dist/cli-bundle-work-index-client-HASH.js",
         "dist/cli-bundle-work-lock-HASH.js",
         "dist/cli-bundle-work-records-HASH.js",
         "dist/cli-bundle-work-schedule-HASH.js",
@@ -2649,6 +2675,7 @@
         "dist/cli-bundle-agent-peers-cache-HASH.js",
         "dist/cli-bundle-agent-root-HASH.js",
         "dist/cli-bundle-agent-session-HASH.js",
+        "dist/cli-bundle-agent-slug-HASH.js",
         "dist/cli-bundle-agent-turn-work-HASH.js",
         "dist/cli-bundle-agent-verbs-HASH.js",
         "dist/cli-bundle-api-HASH.js",
@@ -2661,7 +2688,6 @@
         "dist/cli-bundle-checkout-io-HASH.js",
         "dist/cli-bundle-checkout-missing-HASH.js",
         "dist/cli-bundle-checkout-prep-observation-HASH.js",
-        "dist/cli-bundle-child-env-HASH.js",
         "dist/cli-bundle-clean-command-env-HASH.js",
         "dist/cli-bundle-clean-processes-HASH.js",
         "dist/cli-bundle-cli-HASH.js",
@@ -2671,6 +2697,7 @@
         "dist/cli-bundle-client-error-text-HASH.js",
         "dist/cli-bundle-client-settings-HASH.js",
         "dist/cli-bundle-client-settings-path-HASH.js",
+        "dist/cli-bundle-code-files-HASH.js",
         "dist/cli-bundle-contract-packages-HASH.js",
         "dist/cli-bundle-coordination-client-HASH.js",
         "dist/cli-bundle-coordination-types-HASH.js",
@@ -2684,6 +2711,7 @@
         "dist/cli-bundle-exchange-convex-fetch-HASH.js",
         "dist/cli-bundle-exchange-observation-hooks-HASH.js",
         "dist/cli-bundle-exchange-parallel-HASH.js",
+        "dist/cli-bundle-exchange-progress-HASH.js",
         "dist/cli-bundle-exchange-r2-read-HASH.js",
         "dist/cli-bundle-exchange-request-HASH.js",
         "dist/cli-bundle-exchange-retry-HASH.js",
@@ -2693,6 +2721,7 @@
         "dist/cli-bundle-gitlink-HASH.js",
         "dist/cli-bundle-gitlink-workspace-HASH.js",
         "dist/cli-bundle-hash-HASH.js",
+        "dist/cli-bundle-heavy-queue-HASH.js",
         "dist/cli-bundle-heavy-slots-HASH.js",
         "dist/cli-bundle-help-topics-HASH.js",
         "dist/cli-bundle-host-binding-HASH.js",
@@ -2703,13 +2732,13 @@
         "dist/cli-bundle-hosted-agent-cli-HASH.js",
         "dist/cli-bundle-hosted-agent-contract-HASH.js",
         "dist/cli-bundle-hosted-agent-finish-identity-HASH.js",
-        "dist/cli-bundle-hosted-agent-help-HASH.js",
         "dist/cli-bundle-hosted-agent-journal-HASH.js",
         "dist/cli-bundle-hosted-agent-submission-wait-HASH.js",
         "dist/cli-bundle-hosted-agent-transport-HASH.js",
         "dist/cli-bundle-hosted-agent-wait-local-HASH.js",
         "dist/cli-bundle-hosted-capabilities-carried-main-HASH.js",
         "dist/cli-bundle-hosted-capabilities-early-HASH.js",
+        "dist/cli-bundle-hosted-changed-paths-HASH.js",
         "dist/cli-bundle-hosted-check-HASH.js",
         "dist/cli-bundle-hosted-check-log-HASH.js",
         "dist/cli-bundle-hosted-check-output-HASH.js",
@@ -2720,12 +2749,9 @@
         "dist/cli-bundle-hosted-compose-HASH.js",
         "dist/cli-bundle-hosted-conflict-notice-HASH.js",
         "dist/cli-bundle-hosted-contract-features-HASH.js",
-        "dist/cli-bundle-hosted-github-git-HASH.js",
-        "dist/cli-bundle-hosted-history-cli-HASH.js",
         "dist/cli-bundle-hosted-land-child-env-HASH.js",
         "dist/cli-bundle-hosted-land-cli-HASH.js",
         "dist/cli-bundle-hosted-landing-HASH.js",
-        "dist/cli-bundle-hosted-landings-view-HASH.js",
         "dist/cli-bundle-hosted-lane-HASH.js",
         "dist/cli-bundle-hosted-lane-checkout-HASH.js",
         "dist/cli-bundle-hosted-lane-checkout-marker-HASH.js",
@@ -2747,9 +2773,9 @@
         "dist/cli-bundle-hosted-source-authority-HASH.js",
         "dist/cli-bundle-hosted-source-operation-HASH.js",
         "dist/cli-bundle-hosted-source-retry-HASH.js",
-        "dist/cli-bundle-hosted-wait-line-HASH.js",
         "dist/cli-bundle-hosted-work-client-HASH.js",
         "dist/cli-bundle-iso-HASH.js",
+        "dist/cli-bundle-land-timing-HASH.js",
         "dist/cli-bundle-landed-operations-HASH.js",
         "dist/cli-bundle-landing-capsule-client-HASH.js",
         "dist/cli-bundle-landing-stall-HASH.js",
@@ -2774,14 +2800,12 @@
         "dist/cli-bundle-package-graph-HASH.js",
         "dist/cli-bundle-package-manager-HASH.js",
         "dist/cli-bundle-physical-manifest-HASH.js",
-        "dist/cli-bundle-preflight-learned-HASH.js",
+        "dist/cli-bundle-planning-search-HASH.js",
         "dist/cli-bundle-presence-HASH.js",
         "dist/cli-bundle-public-governance-HASH.js",
         "dist/cli-bundle-receipt-slim-HASH.js",
         "dist/cli-bundle-recovery-state-HASH.js",
-        "dist/cli-bundle-review-hunks-HASH.js",
         "dist/cli-bundle-root-paths-HASH.js",
-        "dist/cli-bundle-safe-relative-HASH.js",
         "dist/cli-bundle-schemas-HASH.js",
         "dist/cli-bundle-scoped-recheck-policy-HASH.js",
         "dist/cli-bundle-secret-allow-HASH.js",
@@ -2800,8 +2824,10 @@
         "dist/cli-bundle-submodule-allowlist-HASH.js",
         "dist/cli-bundle-system-errors-HASH.js",
         "dist/cli-bundle-test-isolation-HASH.js",
+        "dist/cli-bundle-text-line-edits-HASH.js",
         "dist/cli-bundle-verified-blob-HASH.js",
         "dist/cli-bundle-work-actor-types-HASH.js",
+        "dist/cli-bundle-work-index-client-HASH.js",
         "dist/cli-bundle-work-lock-HASH.js",
         "dist/cli-bundle-work-records-HASH.js",
         "dist/cli-bundle-work-schedule-HASH.js",
@@ -2816,6 +2842,7 @@
         "dist/cli-bundle-agent-peers-cache-HASH.js",
         "dist/cli-bundle-agent-root-HASH.js",
         "dist/cli-bundle-agent-session-HASH.js",
+        "dist/cli-bundle-agent-slug-HASH.js",
         "dist/cli-bundle-agent-turn-work-HASH.js",
         "dist/cli-bundle-agent-verbs-HASH.js",
         "dist/cli-bundle-api-HASH.js",
@@ -2828,7 +2855,6 @@
         "dist/cli-bundle-checkout-io-HASH.js",
         "dist/cli-bundle-checkout-missing-HASH.js",
         "dist/cli-bundle-checkout-prep-observation-HASH.js",
-        "dist/cli-bundle-child-env-HASH.js",
         "dist/cli-bundle-clean-command-env-HASH.js",
         "dist/cli-bundle-clean-processes-HASH.js",
         "dist/cli-bundle-cli-HASH.js",
@@ -2838,6 +2864,7 @@
         "dist/cli-bundle-client-error-text-HASH.js",
         "dist/cli-bundle-client-settings-HASH.js",
         "dist/cli-bundle-client-settings-path-HASH.js",
+        "dist/cli-bundle-code-files-HASH.js",
         "dist/cli-bundle-contract-packages-HASH.js",
         "dist/cli-bundle-coordination-client-HASH.js",
         "dist/cli-bundle-coordination-types-HASH.js",
@@ -2851,6 +2878,7 @@
         "dist/cli-bundle-exchange-convex-fetch-HASH.js",
         "dist/cli-bundle-exchange-observation-hooks-HASH.js",
         "dist/cli-bundle-exchange-parallel-HASH.js",
+        "dist/cli-bundle-exchange-progress-HASH.js",
         "dist/cli-bundle-exchange-r2-read-HASH.js",
         "dist/cli-bundle-exchange-request-HASH.js",
         "dist/cli-bundle-exchange-retry-HASH.js",
@@ -2860,6 +2888,7 @@
         "dist/cli-bundle-gitlink-HASH.js",
         "dist/cli-bundle-gitlink-workspace-HASH.js",
         "dist/cli-bundle-hash-HASH.js",
+        "dist/cli-bundle-heavy-queue-HASH.js",
         "dist/cli-bundle-heavy-slots-HASH.js",
         "dist/cli-bundle-help-topics-HASH.js",
         "dist/cli-bundle-host-binding-HASH.js",
@@ -2870,13 +2899,13 @@
         "dist/cli-bundle-hosted-agent-cli-HASH.js",
         "dist/cli-bundle-hosted-agent-contract-HASH.js",
         "dist/cli-bundle-hosted-agent-finish-identity-HASH.js",
-        "dist/cli-bundle-hosted-agent-help-HASH.js",
         "dist/cli-bundle-hosted-agent-journal-HASH.js",
         "dist/cli-bundle-hosted-agent-submission-wait-HASH.js",
         "dist/cli-bundle-hosted-agent-transport-HASH.js",
         "dist/cli-bundle-hosted-agent-wait-local-HASH.js",
         "dist/cli-bundle-hosted-capabilities-carried-main-HASH.js",
         "dist/cli-bundle-hosted-capabilities-early-HASH.js",
+        "dist/cli-bundle-hosted-changed-paths-HASH.js",
         "dist/cli-bundle-hosted-check-HASH.js",
         "dist/cli-bundle-hosted-check-log-HASH.js",
         "dist/cli-bundle-hosted-check-output-HASH.js",
@@ -2887,12 +2916,9 @@
         "dist/cli-bundle-hosted-compose-HASH.js",
         "dist/cli-bundle-hosted-conflict-notice-HASH.js",
         "dist/cli-bundle-hosted-contract-features-HASH.js",
-        "dist/cli-bundle-hosted-github-git-HASH.js",
-        "dist/cli-bundle-hosted-history-cli-HASH.js",
         "dist/cli-bundle-hosted-land-child-env-HASH.js",
         "dist/cli-bundle-hosted-land-cli-HASH.js",
         "dist/cli-bundle-hosted-landing-HASH.js",
-        "dist/cli-bundle-hosted-landings-view-HASH.js",
         "dist/cli-bundle-hosted-lane-HASH.js",
         "dist/cli-bundle-hosted-lane-checkout-HASH.js",
         "dist/cli-bundle-hosted-lane-checkout-marker-HASH.js",
@@ -2914,9 +2940,9 @@
         "dist/cli-bundle-hosted-source-authority-HASH.js",
         "dist/cli-bundle-hosted-source-operation-HASH.js",
         "dist/cli-bundle-hosted-source-retry-HASH.js",
-        "dist/cli-bundle-hosted-wait-line-HASH.js",
         "dist/cli-bundle-hosted-work-client-HASH.js",
         "dist/cli-bundle-iso-HASH.js",
+        "dist/cli-bundle-land-timing-HASH.js",
         "dist/cli-bundle-landed-operations-HASH.js",
         "dist/cli-bundle-landing-capsule-client-HASH.js",
         "dist/cli-bundle-landing-stall-HASH.js",
@@ -2941,14 +2967,12 @@
         "dist/cli-bundle-package-graph-HASH.js",
         "dist/cli-bundle-package-manager-HASH.js",
         "dist/cli-bundle-physical-manifest-HASH.js",
-        "dist/cli-bundle-preflight-learned-HASH.js",
+        "dist/cli-bundle-planning-search-HASH.js",
         "dist/cli-bundle-presence-HASH.js",
         "dist/cli-bundle-public-governance-HASH.js",
         "dist/cli-bundle-receipt-slim-HASH.js",
         "dist/cli-bundle-recovery-state-HASH.js",
-        "dist/cli-bundle-review-hunks-HASH.js",
         "dist/cli-bundle-root-paths-HASH.js",
-        "dist/cli-bundle-safe-relative-HASH.js",
         "dist/cli-bundle-schemas-HASH.js",
         "dist/cli-bundle-scoped-recheck-policy-HASH.js",
         "dist/cli-bundle-secret-allow-HASH.js",
@@ -2967,8 +2991,10 @@
         "dist/cli-bundle-submodule-allowlist-HASH.js",
         "dist/cli-bundle-system-errors-HASH.js",
         "dist/cli-bundle-test-isolation-HASH.js",
+        "dist/cli-bundle-text-line-edits-HASH.js",
         "dist/cli-bundle-verified-blob-HASH.js",
         "dist/cli-bundle-work-actor-types-HASH.js",
+        "dist/cli-bundle-work-index-client-HASH.js",
         "dist/cli-bundle-work-lock-HASH.js",
         "dist/cli-bundle-work-records-HASH.js",
         "dist/cli-bundle-work-schedule-HASH.js",
@@ -2985,6 +3011,7 @@
         "dist/cli-bundle-agent-peers-cache-HASH.js",
         "dist/cli-bundle-agent-root-HASH.js",
         "dist/cli-bundle-agent-session-HASH.js",
+        "dist/cli-bundle-agent-slug-HASH.js",
         "dist/cli-bundle-agent-turn-work-HASH.js",
         "dist/cli-bundle-agent-verbs-HASH.js",
         "dist/cli-bundle-api-HASH.js",
@@ -2997,18 +3024,16 @@
         "dist/cli-bundle-checkout-io-HASH.js",
         "dist/cli-bundle-checkout-missing-HASH.js",
         "dist/cli-bundle-checkout-prep-observation-HASH.js",
-        "dist/cli-bundle-child-env-HASH.js",
         "dist/cli-bundle-clean-command-env-HASH.js",
         "dist/cli-bundle-clean-processes-HASH.js",
         "dist/cli-bundle-cli-HASH.js",
-        "dist/cli-bundle-cli-canary-HASH.js",
         "dist/cli-bundle-cli-command-ready-HASH.js",
         "dist/cli-bundle-cli-installation-HASH.js",
-        "dist/cli-bundle-cli-measurement-hold-HASH.js",
         "dist/cli-bundle-cli-version-HASH.js",
         "dist/cli-bundle-client-error-text-HASH.js",
         "dist/cli-bundle-client-settings-HASH.js",
         "dist/cli-bundle-client-settings-path-HASH.js",
+        "dist/cli-bundle-code-files-HASH.js",
         "dist/cli-bundle-contract-packages-HASH.js",
         "dist/cli-bundle-coordination-client-HASH.js",
         "dist/cli-bundle-coordination-types-HASH.js",
@@ -3022,6 +3047,7 @@
         "dist/cli-bundle-exchange-convex-fetch-HASH.js",
         "dist/cli-bundle-exchange-observation-hooks-HASH.js",
         "dist/cli-bundle-exchange-parallel-HASH.js",
+        "dist/cli-bundle-exchange-progress-HASH.js",
         "dist/cli-bundle-exchange-r2-read-HASH.js",
         "dist/cli-bundle-exchange-request-HASH.js",
         "dist/cli-bundle-exchange-retry-HASH.js",
@@ -3031,6 +3057,7 @@
         "dist/cli-bundle-gitlink-HASH.js",
         "dist/cli-bundle-gitlink-workspace-HASH.js",
         "dist/cli-bundle-hash-HASH.js",
+        "dist/cli-bundle-heavy-queue-HASH.js",
         "dist/cli-bundle-heavy-slots-HASH.js",
         "dist/cli-bundle-help-topics-HASH.js",
         "dist/cli-bundle-host-binding-HASH.js",
@@ -3041,13 +3068,13 @@
         "dist/cli-bundle-hosted-agent-cli-HASH.js",
         "dist/cli-bundle-hosted-agent-contract-HASH.js",
         "dist/cli-bundle-hosted-agent-finish-identity-HASH.js",
-        "dist/cli-bundle-hosted-agent-help-HASH.js",
         "dist/cli-bundle-hosted-agent-journal-HASH.js",
         "dist/cli-bundle-hosted-agent-submission-wait-HASH.js",
         "dist/cli-bundle-hosted-agent-transport-HASH.js",
         "dist/cli-bundle-hosted-agent-wait-local-HASH.js",
         "dist/cli-bundle-hosted-capabilities-carried-main-HASH.js",
         "dist/cli-bundle-hosted-capabilities-early-HASH.js",
+        "dist/cli-bundle-hosted-changed-paths-HASH.js",
         "dist/cli-bundle-hosted-check-HASH.js",
         "dist/cli-bundle-hosted-check-log-HASH.js",
         "dist/cli-bundle-hosted-check-output-HASH.js",
@@ -3058,12 +3085,9 @@
         "dist/cli-bundle-hosted-compose-HASH.js",
         "dist/cli-bundle-hosted-conflict-notice-HASH.js",
         "dist/cli-bundle-hosted-contract-features-HASH.js",
-        "dist/cli-bundle-hosted-github-git-HASH.js",
-        "dist/cli-bundle-hosted-history-cli-HASH.js",
         "dist/cli-bundle-hosted-land-child-env-HASH.js",
         "dist/cli-bundle-hosted-land-cli-HASH.js",
         "dist/cli-bundle-hosted-landing-HASH.js",
-        "dist/cli-bundle-hosted-landings-view-HASH.js",
         "dist/cli-bundle-hosted-lane-HASH.js",
         "dist/cli-bundle-hosted-lane-checkout-HASH.js",
         "dist/cli-bundle-hosted-lane-checkout-marker-HASH.js",
@@ -3085,9 +3109,9 @@
         "dist/cli-bundle-hosted-source-authority-HASH.js",
         "dist/cli-bundle-hosted-source-operation-HASH.js",
         "dist/cli-bundle-hosted-source-retry-HASH.js",
-        "dist/cli-bundle-hosted-wait-line-HASH.js",
         "dist/cli-bundle-hosted-work-client-HASH.js",
         "dist/cli-bundle-iso-HASH.js",
+        "dist/cli-bundle-land-timing-HASH.js",
         "dist/cli-bundle-landed-operations-HASH.js",
         "dist/cli-bundle-landing-capsule-client-HASH.js",
         "dist/cli-bundle-landing-stall-HASH.js",
@@ -3112,14 +3136,12 @@
         "dist/cli-bundle-package-graph-HASH.js",
         "dist/cli-bundle-package-manager-HASH.js",
         "dist/cli-bundle-physical-manifest-HASH.js",
-        "dist/cli-bundle-preflight-learned-HASH.js",
+        "dist/cli-bundle-planning-search-HASH.js",
         "dist/cli-bundle-presence-HASH.js",
         "dist/cli-bundle-public-governance-HASH.js",
         "dist/cli-bundle-receipt-slim-HASH.js",
         "dist/cli-bundle-recovery-state-HASH.js",
-        "dist/cli-bundle-review-hunks-HASH.js",
         "dist/cli-bundle-root-paths-HASH.js",
-        "dist/cli-bundle-safe-relative-HASH.js",
         "dist/cli-bundle-schemas-HASH.js",
         "dist/cli-bundle-scoped-recheck-policy-HASH.js",
         "dist/cli-bundle-secret-allow-HASH.js",
@@ -3138,8 +3160,10 @@
         "dist/cli-bundle-submodule-allowlist-HASH.js",
         "dist/cli-bundle-system-errors-HASH.js",
         "dist/cli-bundle-test-isolation-HASH.js",
+        "dist/cli-bundle-text-line-edits-HASH.js",
         "dist/cli-bundle-verified-blob-HASH.js",
         "dist/cli-bundle-work-actor-types-HASH.js",
+        "dist/cli-bundle-work-index-client-HASH.js",
         "dist/cli-bundle-work-lock-HASH.js",
         "dist/cli-bundle-work-records-HASH.js",
         "dist/cli-bundle-work-schedule-HASH.js",
@@ -3162,6 +3186,7 @@
       "convex",
       "convex-helpers",
       "ignore",
+      "smol-toml",
       "typescript",
       "undici",
       "zod"
@@ -3229,6 +3254,7 @@
       "status",
       "sync",
       "tests",
+      "undo",
       "uninstall-hooks",
       "wait",
       "whoami",
@@ -3335,6 +3361,7 @@
       "side-channel-map@1.0.1",
       "side-channel-weakmap@1.0.2",
       "side-channel@1.1.1",
+      "smol-toml@1.9.1",
       "statuses@2.0.2",
       "toidentifier@1.0.1",
       "type-is@2.1.0",
@@ -3351,8 +3378,8 @@
     "node": "v24.22.1",
     "platform": "darwin",
     "arch": "arm64",
-    "peakChildRssKiB": 152672,
-    "wallMs": 11221,
-    "maxRssKiB": 67088
+    "peakChildRssKiB": 148544,
+    "wallMs": 11526,
+    "maxRssKiB": 69808
   }
 }

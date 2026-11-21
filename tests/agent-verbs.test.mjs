@@ -55,6 +55,7 @@ const rows = [
   ['log', null],
   ['cancel', 'x cancel'],
   ['revert', 'x revert'],
+  ['undo', 'x undo'],
   ['undo-revert', 'retired'],
   ['abandon', 'x abandon'],
   ['reopen', 'start --reopen', 'reopen', 'reopen'],

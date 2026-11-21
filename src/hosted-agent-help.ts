@@ -100,10 +100,13 @@ export function hostedAgentHelp(action?: string) {
     'nforge agent ROOT ACTION [JSON | --command-file FILE]; actions listed as `x ACTION` run as nforge x ROOT ACTION [JSON | --command-file FILE].',
     'Hosted ROOT, retained address, or url + projectId. Guide: nforge docs agent.',
     'Parameters (? = optional, * = required for a new agent session unless FORGE_AGENT_MODEL supplies it):',
-    ...entries.map(
-      entry =>
-        `  ${entry.command}: ${entry.parameters.join(', ') || '{}'}${entry.action === 'history' ? ' — log, blame, show' : ''}`,
-    ),
+    ...entries.map(entry => {
+      // The overview explains operationId once. Action help and generated docs list every field.
+      const parameters = canonical
+        ? entry.parameters
+        : entry.parameters.filter(field => field !== 'operationId?');
+      return `  ${entry.command}: ${parameters.join(', ') || '{}'}${entry.action === 'history' ? ' — log, blame, show' : ''}`;
+    }),
     ...(canonical
       ? entries.flatMap(entry => [helpExample(entry), JSON.stringify(entry.schema, helpSchemaField, 2)])
       : []),

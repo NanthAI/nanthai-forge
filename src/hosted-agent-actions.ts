@@ -995,6 +995,7 @@ export async function executeHostedAgent(
     // A clash with main is a conflict to resolve against the saved head; the edits are in it.
     return { ...(guided as object), ...(savedFirst ? { saved: savedFirst } : {}), timing: timing.value() };
   }
+  if (action === 'undo') return (await import('./hosted-agent-undo.js')).executeHostedUndo(session, input);
   if (action === 'revert') {
     const command = hostedAgentCommandSchemas.revert.parse(input);
     return sendAuthorityPinned(

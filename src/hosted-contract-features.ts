@@ -18,6 +18,8 @@ export const sourceStateV2Feature = 'source-state-v2';
 export const feedCommitOrder = 'feed-commit-order';
 /** An Intent-id-only start asks for its title using the slot reserved for bare status. */
 export const startLaneTitle = 'start-lane-title';
+/** Undo asks for its mutation in the slot reserved for bare status. */
+export const laneUndo = 'lane-undo';
 export const hostedContractFeatures = [
   /** Reader expansion precedes this writer: start/save/land accept declared source authorship. */
   'source-authorship-v1',
@@ -237,6 +239,7 @@ export const MAX_CONTRACT_FEATURES = 64;
 export const advertisedFeatures = (asked: readonly string[]) => [
   ...(asked.includes(feedCommitOrder) ? [feedCommitOrder] : []),
   ...(asked.includes(startLaneTitle) ? [startLaneTitle] : []),
+  ...(asked.includes(laneUndo) ? [laneUndo] : []),
   ...hostedContractFeatures.filter(feature => asked.includes(feature)),
   ...(asked.includes('feed') ? ['feed'] : []),
 ];

@@ -36,6 +36,7 @@ export const boardModes: Readonly<Record<string, string>> = {
 export const operatorActions = [
   'cancel',
   'revert',
+  'undo',
   'abandon',
   'complete',
   'complete-merged',
@@ -108,7 +109,7 @@ export const retiredActions: Readonly<Record<string, string>> = {
   improve: 'friction-list groups recorded friction',
   integrate: 'preflight {laneId} and land --save --check-only check saved work without landing',
   'land-ready': 'land --save with the original request (or wait {operationIds}) resumes a landing',
-  'undo-sync': 'x revert {target} or a new save undoes work; Lane undo is planned (e7812d8f)',
+  'undo-sync': 'x undo restores a retained Lane save; x revert {target} compensates a landing',
   accept: 'land --save lands under project policy',
   'undo-revert': 'x revert {target} compensates a landing',
   clean: 'nforge prune removes local roots of landed or abandoned Lanes',

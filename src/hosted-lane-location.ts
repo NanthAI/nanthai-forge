@@ -63,6 +63,7 @@ const CHECKOUT_ACTIONS = new Set([
   'complete',
   'abandon',
   'withdraw',
+  'undo',
 ]);
 /** The folder a CLI command runs in when ROOT is not the named Lane's checkout (usually the project
  * folder, as the start receipt invites) but this machine has that Lane open: its own checkout, so the

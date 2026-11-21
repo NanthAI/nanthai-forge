@@ -22,6 +22,7 @@
 | `preflight` | `laneId?, run?, budgetSeconds?, trim?, retry?, message?, operationId?` |
 | `x source-pack` | `operationId?` |
 | `x snapshots` | `laneId?, undo?, redo?, restore?, paths?, purge?, operationId?` |
+| `x undo` | `laneId?, saveId?, version?, apply?, operationId?` |
 | `x cancel` | `submissionId, operationId?` |
 | `land --withdraw` | `laneId?, submissionId?, reason?, operationId?` |
 | `x revert` | `message?, target, operationId?` |

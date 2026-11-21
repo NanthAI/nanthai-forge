@@ -96,6 +96,7 @@ export const hostedAgentClientActions = [
   'recover-apply',
   'pull',
   'snapshots',
+  'undo',
 ] as const;
 export { hostedAgentAddressSchema, type HostedAgentAddress } from './hosted-address.js';
 export const hostedAgentCapabilitiesSchema = z
@@ -391,6 +392,20 @@ export const hostedAgentCommandSchemas = {
   'source-pack': z.object({}).strict(),
   /** Unsaved-work snapshots (7ac4e32f): the Lane's operation log, undo/redo/restore, owner purge. */
   snapshots: snapshotsCommandSchema,
+  undo: z
+    .object({
+      ...lane,
+      saveId: uuid.optional().describe('Restore the head of this Lane save (from records saves).'),
+      version: saveExpectedSchema.shape.version
+        .optional()
+        .describe('Restore an exact retained Lane version from a receipt.'),
+      apply: z.boolean().default(true).describe('Also restore the checkout here, if open.'),
+    })
+    .strict()
+    .refine(
+      command => command.saveId === undefined || command.version === undefined,
+      'Select saveId or version, or omit both to undo the last save.',
+    ),
   cancel: z.object({ submissionId: uuid }).strict(),
   /** land --withdraw: cancel this Lane's live landing; the Lane, saves and check evidence stay. */
   withdraw: z

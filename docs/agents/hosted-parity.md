@@ -50,7 +50,7 @@ hosted command that does its job (`retiredActions` in `src/agent-verbs.ts`).
 | `improve` | Group repeated workflow friction | FOLD | Bounded planning summaries with report IDs, costs and fixing Lanes | 88d3cfba; 0t |
 | `save --preview` (`integrate`) | Diagnose saved-Lane interactions | DROP | Remove standalone agent mode; retain preflight and composed check-only jobs | 657d63ee; 0t |
 | `land --resume-ready` (`land-ready`) | Continue dependency waits | FOLD | Original landing replay/wait command and server-driven dependency wake | 657d63ee; 0t |
-| `x undo-sync` | Restore pre-sync Lane work | FOLD | Lane undo restores the last or any earlier save; landed changes use checked revert | e7812d8f; 0t |
+| `x undo-sync` | Restore pre-sync Lane work | FOLD | `x undo` restores an earlier Lane State. Landed changes use checked revert. | e7812d8f; 0t |
 | `land` (saved heads) | Submit saved work without local edits | FOLD | Existing finish protocol with explicit saved inputs/pins, without capture | 657d63ee; df34d40f; 0t |
 | `x accept` | Submit an exact checked Candidate | FOLD | `land --save` with exact Candidate/run under existing policy | 657d63ee; df34d40f; 0t |
 | `x undo-revert` | Compensate native optimistic revert | DROP | Retire native-specific agent surface; retain explicit checked compensation | 657d63ee; 0t |

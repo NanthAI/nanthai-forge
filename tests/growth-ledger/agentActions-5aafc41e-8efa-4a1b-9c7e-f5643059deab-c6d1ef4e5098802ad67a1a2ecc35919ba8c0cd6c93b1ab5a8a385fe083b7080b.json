@@ -1,0 +1,6 @@
+{
+  "kind": "agentActions",
+  "delta": 1,
+  "reason": "Issue e7812d8f adds one Lane-scoped undo action. It replaces the retired native undo guidance and reuses hosted save history, operation receipts and guarded checkout apply. Checked revert still serves accepted history.",
+  "date": "2026-11-21"
+}

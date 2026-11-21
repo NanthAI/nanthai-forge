@@ -76,7 +76,8 @@ test('the hosted tool list stays inside its context budget', async t => {
   // 472 -> 463 (ad80e037): forge_check says 'read runs and logs' (help names retained logs), paying with the
   // shorter name for land's new `maxChecks:n` field (tools/list 5712 -> 5715, under its 5723 ceiling).
   // 463 -> 442: shorter forge_task description fits notVerified:a into the same tool list ceiling.
-  assert.equal(descriptionBytes, 442, 'cost fixes preserve the per-session MCP description bytes');
+  // 442 -> 423 (e7812d8f): forge_task drops the repeated wait hint to fit the undo action.
+  assert.equal(descriptionBytes, 423, 'the per-session MCP description bytes match the recorded budget');
   t.diagnostic(`tools/list ${chars} chars (~${Math.ceil(chars / 4)} tokens); descriptions ${descriptions}`);
   assert(chars <= LIST_CHARS, `tool list characters: ${chars}`);
   // Codex sends each tool as a function definition under a server-prefixed name: same budget.

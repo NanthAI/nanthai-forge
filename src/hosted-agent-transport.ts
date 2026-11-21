@@ -146,7 +146,7 @@ import {
   type SavedChangedPaths,
 } from './hosted-changed-paths.js';
 import { publishClientSourcePack } from './source-pack-client.js';
-import { missingRequiredFeatures } from './hosted-contract-features.js';
+import { laneUndo, missingRequiredFeatures } from './hosted-contract-features.js';
 import type { LandingHold } from './hosted-landing-hold.js';
 import {
   bareStatus,
@@ -203,7 +203,7 @@ const flag = (value: unknown) => (typeof value === 'boolean' ? value : undefined
 const guardAsking = new Set(['open', 'preflight', 'land']);
 /** Actions whose first main read follows capability discovery at once (capabilities-main). */
 const mainFirstActions = new Set(['start', 'sync', 'compose']);
-const snapshotSkips = new Set(['save', 'checkpoint', 'finish', 'compose', 'snapshots']);
+const snapshotSkips = new Set(['save', 'checkpoint', 'finish', 'compose', 'snapshots', 'undo']);
 /** Actions that may rewrite or remove working files: their snapshot is taken first, in this process,
  * whatever the timed interval says. Every other command hands a timed snapshot to a short-lived
  * detached process (at most one per interval per Lane) and never waits for it. */
@@ -989,6 +989,8 @@ export class HostedAgentTransport {
         // Finish uses the discovery slot reserved for main-today on bare status.
         if (action === 'finish')
           options = { ...options, features: [...(options.features as string[]), 'landing-client-hold'] };
+        if (action === 'undo')
+          options = { ...options, features: [...(options.features as string[]), laneUndo] };
         // The CLI may have started this exact read alongside its release check: take it once.
         let early = takeEarlyCapabilities(this.address, { clientVersion: CUTOVER_CLI_VERSION, ...options });
         for (;;) {
@@ -1298,6 +1300,14 @@ export class HostedAgentTransport {
         action === 'start' && !operationId
           ? await this.closedStart(root, capabilities.actor, command.data, startSession)
           : null;
+      const undoReplay =
+        action === 'undo' && !operationId && capabilities.features?.includes(laneUndo)
+          ? await (
+              await import('./hosted-agent-undo.js')
+            ).undoReplaySelection(root, this.address, capabilities.actor, command.data, laneId =>
+              this.query('projectHostedLanes:select', { laneId }),
+            )
+          : null;
       // An identical auto-addressed request replays only while the state its receipt reports still
       // holds (Issue ca49dc6c): a sync whose pins this checkout moved past, a withdraw whose landing
       // ended, a settled save whose Lane files changed since, an open whose folder is gone. Each
@@ -1337,7 +1347,7 @@ export class HostedAgentTransport {
               action,
               command.data,
               operationId as string | undefined,
-              previousStart !== null || supersededReplay,
+              previousStart !== null || supersededReplay || undoReplay?.fresh === true,
               startSession,
             );
       metricOperationId(journal.operationId);
@@ -1355,6 +1365,7 @@ export class HostedAgentTransport {
       let budgetExpiresAt = 0;
       let carriedMain = mainFirstActions.has(action) ? capabilities.main : undefined;
       const session: HostedAgentSession = {
+        ...(undoReplay?.selection ? { undoSelection: undoReplay.selection } : {}),
         ...(syncSaveInventory ? { syncSaveInventory } : {}),
         checkedCheckout: () => {
           const context = this.operationContext.getStore();
@@ -1614,8 +1625,12 @@ export class HostedAgentTransport {
       } else {
         if (action === 'finish') markLandStep('ready');
         result = await executeHostedAgent(session, action, command.data);
-        // A sync, resolution or revert rewrote files: follow a changed lockfile before the next build.
+        // A source operation rewrote files: follow a changed lockfile before the next build.
         if (['sync', 'resolve', 'revert', 'compose'].includes(action)) await this.refreshDependencies(root);
+        if (action === 'undo') {
+          const applied = (result as { applied?: { root: string } }).applied;
+          if (applied) await this.refreshDependencies(applied.root);
+        }
         const askedItemId =
           action === 'start' && (command.data as { planningItemId?: string }).planningItemId;
         // A short id was resolved by the start itself: the journal holds the Issue it started. (The
@@ -2617,6 +2632,7 @@ export class HostedAgentTransport {
   }
 }
 export type HostedAgentSession = {
+  undoSelection?: import('./hosted-lane.js').HostedLaneSelection;
   syncSaveInventory?: import('./hosted-save-capture.js').SaveInventory;
   checkedCheckout: () => void;
   authorship?: ReturnType<typeof agentAuthorship>;

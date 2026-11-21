@@ -159,6 +159,7 @@ export const replayBindings: Record<keyof typeof hostedAgentCommandSchemas, Bind
   snapshots: read,
   cancel: server,
   revert: server,
+  undo: { kind: 'transport' },
   abandon: { kind: 'checked', superseded: supersededLifecycle('abandon') },
   complete: { kind: 'checked', superseded: supersededLifecycle('complete') },
   pin: server,
