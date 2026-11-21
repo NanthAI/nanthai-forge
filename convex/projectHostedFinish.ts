@@ -11,7 +11,7 @@ import { finishPendingForReader } from '../src/hosted-finish';
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
-import { heldReview } from './projectHostedOwnerReview';
+import { heldPolicyNote, heldReview, loadHeldPolicy, noteHeldPolicy } from './projectHostedOwnerReview';
 import { activeProject, accessibleProject } from './projectAuthority';
 import { loadFinish } from './projectHostedFinishStore';
 import { acceptancePage, acceptancePlan } from './projectHostedAcceptanceStore';
@@ -68,16 +68,23 @@ export const status = query({
       const stallAlert = await latestStallAlert(ctx, input, queueAwareLandingState(state, queue));
       const orderWait = landingOrderWaitForReader(row, state);
       const reservation = landingReservationForReader(row);
-      const review = await heldReview(ctx, project, state);
+      const [policy, review] = await Promise.all([
+        loadHeldPolicy(ctx, project, state),
+        heldReview(ctx, project, state),
+      ]);
       return canonicalPayload({
         ...review,
+        ...(policy ? { policy, policyNote: heldPolicyNote(policy) } : {}),
         ...(reservation ? { reservation } : {}),
         ...(await readProviderDelay(ctx, row, state)),
         // The cause and next step the Failed check screen shows (b030c3c5); failure states only.
         ...(await failureCauseReply(ctx, input.projectId, row, state)),
         version: state.version,
         unchanged: state.phase !== 'queued' && input.version === state.version,
-        submission: landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
+        submission: noteHeldPolicy(
+          landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
+          policy,
+        ),
         queuePosition: queue?.position ?? null,
         queue: syncRequiredQueue(queue, wouldConflict),
         ...(orderWait ? { orderWait } : {}),

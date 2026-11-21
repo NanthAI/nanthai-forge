@@ -24,6 +24,7 @@ const { OwnerApproval } = await import(moduleUrl('../web/src/review/OwnerApprova
 const { LaneApproval } = await import(moduleUrl('../web/src/review/LaneApproval.tsx'));
 const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
+const finish = await import(moduleUrl('../convex/projectHostedFinish.ts'));
 const { set: setPolicy } = await import(moduleUrl('../convex/projectAutonomy.ts'));
 const { approvalDecisions } = await import(moduleUrl('../web/src/cockpit/attention.ts'));
 const needsMe = await import(moduleUrl('../convex/projectNeedsMe.ts'));
@@ -523,6 +524,10 @@ test('a held landing names the policy it is pinned to; a policy edit re-reads on
   const { f, state, select } = await heldLanding(t);
   f.insert('forgeAccounts', { owner: 'owner', handle: 'synthetic-owner' });
   f.patch('hostedProjects', f.projectId, { visibility: 'private' });
+  const input = { projectId: f.projectId, submissionId: state.id, priorityInfo: 1 };
+  const bySubmission = (actor = device) =>
+    f.tx('observeSubmission', finish.status, input, actor).then(JSON.parse);
+  await assert.rejects(bySubmission('other'), code('PROJECT_UNAVAILABLE'));
   for (const operationId of [state.operationId, randomUUID()])
     await assert.rejects(
       f.tx('privateHold', observe.page, { projectId: f.projectId, operationId, nextVersion: 0 }, 'other'),
@@ -555,6 +560,12 @@ test('a held landing names the policy it is pinned to; a policy edit re-reads on
   t.diagnostic(`held finish indexed reads: ${heldCost.ranges}`);
   assert.equal(unchanged.submission.error.message, current.request.error.message);
   assert.doesNotMatch(unchanged.submission.error.message, /policy changed since/);
+  const directPinned = await bySubmission();
+  const directPinnedCost = f.counts.at(-1);
+  t.diagnostic(`held submission observe indexed reads: ${directPinnedCost.ranges}`);
+  assert.deepEqual(directPinned.policy, pinned.policy);
+  assert.equal(directPinned.policyNote, pinned.policyNote);
+  assert.equal(directPinned.submission.error.message, unchanged.submission.error.message);
   const edit = fields =>
     f.tx('editHeldPolicy', setPolicy, {
       projectId: f.projectId,
@@ -579,6 +590,21 @@ test('a held landing names the policy it is pinned to; a policy edit re-reads on
     assert.equal(writes, 0);
   }
   assert.equal(page.submission.error.message, (await ordinaryStatus()).request.error.message);
+  const directChanged = await bySubmission();
+  const directChangedCost = f.counts.at(-1);
+  for (const { ranges, readRangesByTable, writes } of [directPinnedCost, directChangedCost]) {
+    assert(ranges <= 15, 'held submission observe stays within the held finish budget');
+    assert.equal(readRangesByTable.hostedProjects, 1, 'the authorized project row supplies the policy');
+    assert.equal(readRangesByTable.projectHostedLandingAttempts, 1, 'only the held attempt is read');
+    assert.equal(writes, 0);
+  }
+  assert.deepEqual(directChanged.policy, link.policy);
+  assert.equal(directChanged.policyNote, link.policyNote);
+  assert.equal(directChanged.submission.error.message, page.submission.error.message);
+  const directHold = hostedObservationContinuation('/tmp/root', directChanged).hold;
+  assert.equal(directHold.kind, 'review');
+  assert.equal(directHold.reason, page.submission.error.message);
+  assert.deepEqual(directHold.paths, ['selected.txt']);
   assert.equal(
     page.events.find(event => event.submission.version === page.submission.version)?.submission.error.message,
     page.submission.error.message,
@@ -602,6 +628,30 @@ test('a held landing names the policy it is pinned to; a policy edit re-reads on
   assert.doesNotMatch(fresh.submission.error.message, /changed since/);
   const landed = JSON.parse(await f.tx('approveFresh', acceptance.approve, await select()));
   assert.equal(landed.status, 'landed');
+});
+
+test('observing a submission outside owner review adds no policy lookup or idle work', async t => {
+  syntheticR2(t);
+  const f = await finishFixture(t);
+  const state = await f.enqueue(f.request());
+  const read = async (phase, baseline) => {
+    const reply = await f.current(state.id);
+    const { ranges, readRangesByTable, writes } = f.counts.at(-1);
+    t.diagnostic(`${phase} submission observe indexed reads: ${ranges}`);
+    assert(ranges <= baseline, `${phase} observe stays within its existing read budget`);
+    assert.equal(reply.submission.phase, phase);
+    assert.equal(reply.policy, undefined);
+    assert.equal(reply.policyNote, undefined);
+    assert.equal(readRangesByTable.projectHostedLandingAttempts, undefined);
+    assert.equal(writes, 0);
+  };
+  await read('queued', 8);
+  await f.drain();
+  await read('checking', 6);
+  await f.passChecks();
+  await f.drain();
+  await read('landed', 5);
+  assert.equal(f.pending().length, 0);
 });
 
 test('991a1a94 replay: path lifted while held, main moves, the owner approves: it lands without review in the submitter name', async t => {

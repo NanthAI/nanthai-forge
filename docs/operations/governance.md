@@ -135,12 +135,13 @@ did not. Otherwise it holds for review again. A busy queue does the same without
 recomposing: the landing takes its turn. Agents cannot create a grant.
 
 A held landing stays pinned to the policy its attempt was prepared under. A policy edit
-never re-checks it, and no sweep, alarm or recompose touches a held entry. approve-link
-returns `policy` (the attempt it is pinned to, when, whether the policy changed since) and
-`policyNote` (when it re-reads the policy); once the policy changed, every held reason
-(`wait`, `status`, the owner page) carries that note too. Only a fresh attempt re-reads it: the owner approves after main moved
-or after the policy changed (a full check on current main), or the builder withdraws and
-lands again. The approval carries to that fresh attempt only while the policy is unchanged.
+never re-checks it, and no sweep, alarm or recompose touches a held entry. Both `approve-link`
+and `observe {submissionId}` return `policy` (the pinned attempt, when it was pinned, and
+whether the policy changed) and `policyNote` (when it re-reads the policy). Once the policy
+changes, the held reason in `observe`, `wait`, `status`, and the owner page includes that note.
+Only a fresh attempt re-reads the policy. The owner can approve after main moves or the
+policy changes, which runs a full check on current main. The builder can also withdraw and
+land again. The approval carries to a fresh attempt only while the policy is unchanged.
 After a policy edit, the fresh attempt holds for the owner once more if the current policy
 still needs review. Otherwise it lands without review, and its receipt names the submitter
 (an agent), not the owner. That is how held submission 991a1a94 landed on 2026-11-09: the

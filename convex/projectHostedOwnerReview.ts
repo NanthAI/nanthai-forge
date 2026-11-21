@@ -170,7 +170,8 @@ export function noteHeldPolicy<T extends { error?: { code: string; message: stri
 ): T {
   if (!pin?.changed) return submission;
   const error = submission.error ?? { code: 'REVIEW_REQUIRED', message: 'Waiting for review by a person' };
-  return { ...submission, error: { ...error, message: `${error.message}. ${heldPolicyNote(pin)}` } };
+  // The CLI uses the semicolon to end the protected path list in the reason.
+  return { ...submission, error: { ...error, message: `${error.message}; ${heldPolicyNote(pin)}` } };
 }
 export function approvePath(projectId: string, submissionId: string) {
   return `/approve?${new URLSearchParams({ project: projectId, submission: submissionId })}`;
