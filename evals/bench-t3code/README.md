@@ -161,11 +161,12 @@ separate owner operations.
 
 ## What each harness file does
 
-The GitHub arm's shared read helper retries HTTP 5xx and transient network failures
-up to three attempts, with 250 ms then 500 ms backoffs. Healthy reads run once;
-4xx and other failures return immediately. Writes do not use this read retry;
-reset retains its separate fixed-target recovery. Settlement and CI evidence
-collection use the same helper.
+Settlement and CI evidence collection share a GitHub read helper. It retries
+HTTP 5xx, transient network failures and the GraphQL HTTP 401
+`Requires authentication` response observed during Phase 6 settlement. It makes
+up to three attempts, with 250 ms then 500 ms backoffs, and surfaces the final
+error if all attempts fail. Healthy reads and other 4xx responses return
+immediately. Reset writes retain their separate fixed-target recovery.
 
 Rework counts Git's line-shaped `CONFLICT (kind): detail` merge failures, Forge's
 structured conflict errors and real conflict markers. Advisory

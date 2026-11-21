@@ -42,9 +42,13 @@ export async function gh(args, { execute = run, pause = wait } = {}) {
       return (await execute('gh', args, { maxBuffer: 256 << 20 })).stdout;
     } catch (error) {
       const message = `${error.stderr ?? ''}\n${error.message ?? ''}`;
-      const status = /\bHTTP(?:\/\d(?:\.\d)?)?\s+(\d{3})\b/i.exec(message)?.[1];
+      const http = /\bHTTP(?:\/\d(?:\.\d)?)?\s+(\d{3})\b([^\r\n]*)/i.exec(message);
+      const status = http?.[1];
+      // The Phase 6 overlap PR lookup got this response even though later reads succeeded.
       const transient = status
-        ? /^5\d\d$/.test(status)
+        ? /^5\d\d$/.test(status) ||
+          (status === '401' &&
+            /^: Requires authentication \(https:\/\/api\.github\.com\/graphql\)\s*$/i.test(http[2]))
         : /\b(ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|EPIPE|ENOTFOUND)\b|\b(?:EOF|connection reset|connection refused|connection timed out|i\/o timeout|TLS handshake timeout|context deadline exceeded|Client\.Timeout exceeded|temporary failure in name resolution|no such host|network is unreachable|error connecting to api\.github\.com)\b/i.test(
             `${error.code ?? ''}\n${message}`,
           );

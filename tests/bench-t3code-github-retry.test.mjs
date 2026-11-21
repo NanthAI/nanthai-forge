@@ -3,6 +3,52 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as github from '../scripts/bench-t3code/github-arm.mjs';
 
+const graphqlAuthFailure = Object.assign(Error('gh failed'), {
+  stderr: 'HTTP 401: Requires authentication (https://api.github.com/graphql)',
+});
+const branchLookup = ['pr', 'list', '--state', 'all', '--head', 'agent/topic', '--json', 'number,mergedAt'];
+
+test('GitHub settlement can read a merged PR after an isolated GraphQL authentication response', async () => {
+  const merged = [{ number: 42, mergedAt: '2026-01-01T00:00:00Z' }];
+  const delays = [];
+  let attempts = 0;
+  const result = await github.gh(branchLookup, {
+    execute: async () => {
+      if (++attempts === 1) throw graphqlAuthFailure;
+      return { stdout: JSON.stringify(merged) };
+    },
+    pause: async ms => delays.push(ms),
+  });
+  assert.deepEqual(JSON.parse(result), merged);
+  assert.deepEqual(delays, [250]);
+});
+
+test('GitHub settlement still reports a persistent GraphQL authentication failure', async () => {
+  const delays = [];
+  await assert.rejects(
+    github.gh(branchLookup, {
+      execute: async () => {
+        throw graphqlAuthFailure;
+      },
+      pause: async ms => delays.push(ms),
+    }),
+    error => error === graphqlAuthFailure,
+  );
+  assert.deepEqual(delays, [250, 500]);
+});
+
+test('GitHub never retries a write after a GraphQL authentication response', async () => {
+  await assert.rejects(
+    github.gh(['pr', 'merge'], {
+      execute: async () => {
+        throw graphqlAuthFailure;
+      },
+      pause: () => assert.fail('must not replay a write'),
+    }),
+    error => error === graphqlAuthFailure,
+  );
+});
+
 test('GitHub settle and evidence reads survive a transient 502 without voiding the cell', async () => {
   for (const args of [
     ['pr', 'list', '--state', 'open', '--json', 'number,autoMergeRequest'],
