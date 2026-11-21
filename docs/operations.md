@@ -541,6 +541,11 @@ never the culprit; kept after main recovers), and `end`: `red` (with the live
 reason and failing files), `flaky`, `recovered` (by a `revert` or a `fix`, with its receipt)
 or `not-reported`. It reads only on request and writes nothing.
 
+When the runs reported different control builds, `controlBuildReason` names the harness
+change and `controlBuildChange` distinguishes `same-source` from `source-also-changed`.
+The reply retains the exact compared pass after recovery. With identical source, the
+listed receipts show what landed in that interval.
+
 `lane-history {laneId?}` is the matching per-Lane read: one query, six indexed reads
 (Lane head and record, its first version, the overlap row), a few hundred bytes, no
 writes. It gives `openedAt`, `startBase` and `lastSyncedBase` (main at start and main now),

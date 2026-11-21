@@ -23,6 +23,7 @@ export const prepare = internalMutation({
     ...sessionArgs,
     recipe: v.string(),
     lockfile: v.string(),
+    controlBuildKey: v.optional(v.string()),
     selectionStorage: v.optional(v.id('_storage')),
     selectionR2Key: v.optional(v.string()),
     recipeStorage: v.optional(v.id('_storage')),
@@ -158,9 +159,14 @@ export const prepare = internalMutation({
       'EVIDENCE_CHANGED',
       'Actions runtime differs.',
     );
-    if (run.plan)
+    if (run.plan) {
       invariant(run.planDigest === checkPin(plan), 'EVIDENCE_CHANGED', 'Original Actions plan is immutable.');
-    else {
+      invariant(
+        !run.controlBuildKey || !input.controlBuildKey || run.controlBuildKey === input.controlBuildKey,
+        'EVIDENCE_CHANGED',
+        'Original Actions control build is immutable.',
+      );
+    } else {
       invariant(
         !hostedCheckTerminal(run) && !run.cancelRequested,
         'WORK_STALE',
@@ -178,6 +184,7 @@ export const prepare = internalMutation({
       ]);
       run.plan = plan;
       run.planDigest = checkPin(plan);
+      if (input.controlBuildKey) run.controlBuildKey = input.controlBuildKey;
       // A runner's fallback code and its reason ride this plan write; unknown codes are dropped (7c2e69e1, 7cb61db1).
       Object.assign(run, runFallback(recipe.selection));
       // Recorded for the run's evidence; every pass reads the required jobs' conclusions.

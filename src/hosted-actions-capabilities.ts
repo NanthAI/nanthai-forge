@@ -26,6 +26,8 @@ export const actionsSubmoduleAccessCapability = 'checks.submoduleAccess';
 /** The plan call says it starts the optional source-pack job; a pass then reads the required
  * jobs' conclusions instead of waiting for the run's (friction 0064c3b2). */
 export const actionsPackVerdictCapability = 'checks.packVerdict';
+/** The trusted plan can report the pinned control build with its existing request. */
+const actionsControlBuildCapability = 'checks.controlBuildKey';
 /** Results say where the shard ran project code (`user` or `shared`); the run and receipt keep it. */
 export const actionsBatchCapability = 'results.batch';
 export const actionsIsolationCapability = 'results.isolation';
@@ -47,6 +49,7 @@ export const hostedActionsCapabilities = [
   actionsToolchainsCapability,
   actionsSubmoduleAccessCapability,
   actionsPackVerdictCapability,
+  actionsControlBuildCapability,
   actionsIsolationCapability,
   actionsBatchCapability,
   'results.packed',
@@ -83,6 +86,7 @@ export const actionsCapabilityFields: Readonly<Record<string, string>> = {
   'plan.resultsBatch': actionsBatchCapability,
   'plan.resultsPacked': 'results.packed',
   'plan.packRefresh': actionsPackVerdictCapability,
+  'plan.controlBuildKey': actionsControlBuildCapability,
   'result.result.isolation': actionsIsolationCapability,
 };
 /** Whole-command extensions gate every nested runner-sent field. */

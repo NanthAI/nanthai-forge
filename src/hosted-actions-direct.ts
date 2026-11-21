@@ -131,6 +131,7 @@ export const directCommandSchema = z.discriminatedUnion('kind', [
     .object({
       kind: z.literal('plan'),
       plan: directPlanSchema,
+      controlBuildKey: checkHash.optional(),
       /** The plan starts the optional source-pack job: settle a pass from the required jobs. */
       packRefresh: z.literal(true).optional(),
       resultsBatch: z.literal(true).optional(),

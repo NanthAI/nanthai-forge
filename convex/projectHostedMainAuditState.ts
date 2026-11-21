@@ -5,6 +5,8 @@ import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './server';
 import { closeMainRedHold, type HostedAcceptance } from '../src/hosted-acceptance';
 import { hostedCheckTerminal, hostedCheckRunSchema, type HostedCheckRun } from '../src/hosted-check';
+import { matchingCheckPins } from '../src/culprit-bisect';
+import { controlBuildReason } from './projectHostedMainAuditFields';
 import { mainGateSchema, type MainGate } from '../src/bet2-gate';
 import {
   auditDebt,
@@ -165,6 +167,7 @@ export async function auditEvent(
   sequence: number,
   drill?: DrillRecord,
   reverted?: boolean,
+  controlBuild?: ControlBuildEvidence,
 ) {
   await ctx.db.insert('projectHostedMainAuditEvents', {
     projectId: row.projectId,
@@ -175,6 +178,7 @@ export async function auditEvent(
     sequence,
     ...(drill ? { drill } : {}),
     ...(reverted !== undefined ? { reverted } : {}),
+    ...(controlBuild ? { controlBuild } : {}),
   });
   // `row` is the audit before this verdict: the first conclusive audit and later flips reach the line.
   if (kind === 'red' && !row.red) await lineMainState(ctx.db, row.projectId, { red: true, at });
@@ -185,6 +189,43 @@ export async function auditEvent(
       // The event's own `reverted`, as Needs me's Main broke row reads it (convex/projectMainRed.ts).
       ...(row.red ? { ended: reverted === true ? ('reverted' as const) : ('fixed-on-top' as const) } : {}),
     });
+}
+type ControlBuildEvidence = NonNullable<Doc<'projectHostedMainAuditEvents'>['controlBuild']>;
+/** The first failed, stamped audit checks one existing row. Preserve the comparison even if
+ * a green result settles before the scheduled culprit search starts. */
+async function compareControlBuild(
+  ctx: MutationCtx,
+  run: HostedCheckRun,
+  green: Doc<'projectHostedMainAudits'>['lastGreen'],
+): Promise<ControlBuildEvidence | undefined> {
+  if (!green || !run.controlBuildKey) return;
+  const saved = await ctx.db
+    .query('projectHostedCheckRuns')
+    .withIndex('by_project_and_run', q =>
+      q.eq('projectId', run.projectId as Id<'hostedProjects'>).eq('runId', green.runId),
+    )
+    .unique();
+  const parsed = saved ? hostedCheckRunSchema.safeParse(JSON.parse(saved.value)) : null;
+  const prior = parsed?.success ? parsed.data : null;
+  if (
+    prior?.status !== 'passed' ||
+    !prior.endedAt ||
+    prior.request.expectedHead !== green.head ||
+    !prior.controlBuildKey ||
+    prior.controlBuildKey === run.controlBuildKey ||
+    !matchingCheckPins(prior, run)
+  )
+    return;
+  return {
+    change: green.head === run.request.expectedHead ? 'same-source' : 'source-also-changed',
+    lastGreen: {
+      sequence: green.sequence,
+      head: green.head,
+      runId: green.runId,
+      at: prior.endedAt,
+      audited: prior.gate?.mode === 'audit',
+    },
+  };
 }
 type DrillRecord = NonNullable<Doc<'projectHostedMainAuditEvents'>['drill']>;
 /** The owner's drill that claimed the current red, as the counter rule takes it (fe7d67a8). A claim is
@@ -730,6 +771,8 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
     await forgetMainRedGuards(ctx, projectId, tests, firstAt);
     // An armed owner drill claims the first red in its window; a later red finds it expired (fe7d67a8).
     const claims = !row.red && drillClaims(row.drill, at);
+    const controlBuild =
+      !row.red && fullAudit ? await compareControlBuild(ctx, run, row.lastGreen) : undefined;
     await ctx.db.patch(row._id, {
       red: {
         // A later failed audit of the episode replaces the failing files; the cause stays.
@@ -737,6 +780,13 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
         since: row.red?.since ?? at,
         head: run.request.expectedHead,
         runId: run.id,
+        ...(controlBuild
+          ? {
+              controlBuildChange: controlBuild.change,
+              reason: controlBuildReason(controlBuild.change),
+              reasonRunId: run.id,
+            }
+          : {}),
         ...tests,
       },
       window: auditWindow(row.window, {
@@ -761,6 +811,8 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
         run.id,
         meta.sequence,
         claims ? { startedAt: row.drill!.startedAt, redAt: at } : undefined,
+        undefined,
+        controlBuild,
       );
     await ctx.scheduler.runAfter(
       0,

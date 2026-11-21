@@ -111,6 +111,7 @@ export async function prepareActionsJob(
   capacity?: { activeChecks: number; jobCap: number },
   /** The runner repository's installed forge-check.yml; undefined skips the step check. */
   workflow?: string,
+  controlBuildKey?: string,
 ) {
   console.log('Actions source: preparing pinned Candidate');
   // Fixed-cost phases of this step (Issue ca8a2ca4), printed once: durations only, no values.
@@ -303,6 +304,7 @@ export async function prepareActionsJob(
     );
   const planned = (await client.call({
     kind: 'plan',
+    ...(controlBuildKey ? { controlBuildKey } : {}),
     ...(client.capabilities.includes('results.batch') ? { resultsBatch: true as const } : {}),
     ...(client.capabilities.includes('results.packed') ? { resultsPacked: true as const } : {}),
     plan: { recipe, lockfile: lockfileDigest(state.files) },

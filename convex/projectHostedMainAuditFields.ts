@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineTable } from 'convex/server';
-import { v } from 'convex/values';
+import { v, type Infer } from 'convex/values';
+
+const controlBuildChange = v.union(v.literal('same-source'), v.literal('source-also-changed'));
+export type ControlBuildChange = Infer<typeof controlBuildChange>;
+export function controlBuildReason(change: ControlBuildChange) {
+  return change === 'same-source'
+    ? "Forge's check harness changed. The same source passed before the change."
+    : "Forge's check harness changed. The source also changed, leaving the cause unproven.";
+}
 
 export const checkGate = v.object({
   mode: v.union(
@@ -59,6 +67,7 @@ export const mainAuditFields = {
       head: v.string(),
       runId: v.string(),
       culprit: v.optional(v.string()),
+      controlBuildChange: v.optional(controlBuildChange),
       /** Item 687d1eda: the latest failed audit's failing files (at most 20) and how many more, the
        * recovery's reason and fix Intent, and the receipt that made newly covered tests run. */
       tests: v.optional(v.array(v.string())),
@@ -150,6 +159,20 @@ export const hostedMainAuditTables = {
     /** On a 'culprit'-kind event with no `culprit`: the receipt that made a newly covered red's tests
      * run (Item 687d1eda). Written once per episode, so the name survives recovery; never a culprit. */
     covered: v.optional(v.string()),
+    /** Comparison from the first failed audit. The passing run may have been a full landing
+     * that wrote no audit event, so keep its exact pin on the red. */
+    controlBuild: v.optional(
+      v.object({
+        change: controlBuildChange,
+        lastGreen: v.object({
+          sequence: v.number(),
+          head: v.string(),
+          runId: v.string(),
+          at: v.string(),
+          audited: v.boolean(),
+        }),
+      }),
+    ),
     /** Confirmed compensation on the green verdict; absent on legacy events. */
     reverted: v.optional(v.boolean()),
     /** On the red an owner's drill claimed, and on the verdict that ended it: its start, red,

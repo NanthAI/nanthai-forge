@@ -21,6 +21,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { landingMessageText } from './projectHostedLandingMessageBody';
+import { controlBuildReason } from './projectHostedMainAuditFields';
 
 export const MAIN_RED_EVENTS = 20;
 export const MAIN_RED_LANDINGS = 20;
@@ -233,11 +234,13 @@ export const read = query({
       const culprit = culpritOf(red, events) ?? live?.culprit ?? null;
       // While red, main's audit row names it; after recovery, the coverage event written once does.
       const covered = coveredOf(red, events) ?? live?.covered ?? null;
+      const controlBuild = red.controlBuild;
       const event = before.find(row => row.kind === 'green') ?? null;
       const kept =
         live && audit?.lastGreen && audit.lastGreen.sequence < red.sequence ? audit.lastGreen : null;
-      const lastGreen =
-        kept && kept.sequence >= (event?.sequence ?? -1)
+      const lastGreen = controlBuild
+        ? { ...controlBuild.lastGreen, at: Date.parse(controlBuild.lastGreen.at) }
+        : kept && kept.sequence >= (event?.sequence ?? -1)
           ? {
               sequence: kept.sequence,
               head: kept.coveredHead ?? kept.head,
@@ -323,6 +326,12 @@ export const read = query({
         /** The landing that made the failing tests run (they had no pass on the last green main): named, never
          * reverted, never the culprit (Item 687d1eda). */
         newlyCoveredBy: covered ? { receiptId: covered, landing: coveredLanding } : null,
+        ...(controlBuild
+          ? {
+              controlBuildChange: controlBuild.change,
+              controlBuildReason: controlBuildReason(controlBuild.change),
+            }
+          : {}),
         end,
       });
     } catch (error) {

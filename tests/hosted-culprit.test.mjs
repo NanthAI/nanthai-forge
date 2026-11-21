@@ -17,6 +17,7 @@ import {
   fixBrief,
 } from '../dist/culprit-bisect.js';
 import { effectivePolicy } from '../dist/autonomy-policy.js';
+import { auditReason } from '../dist/main-audit.js';
 const syntheticR2 = {
   R2_ACCOUNT_ID: 'synthetic',
   R2_BUCKET: 'synthetic',
@@ -35,6 +36,7 @@ const culprit = await import(moduleUrl('../convex/projectHostedCulprit.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const start = await import(moduleUrl('../convex/projectHostedStart.ts'));
 const agent = await import(moduleUrl('../convex/projectHostedAgent.ts'));
+const auditState = await import(moduleUrl('../convex/projectHostedMainAuditState.ts'));
 const at = '2026-10-29T00:00:00.000Z',
   hash = 'a'.repeat(64);
 function seedRecord(f, record) {
@@ -71,6 +73,8 @@ async function fixture(
     coverageAt = null,
     greenReports = null,
     auditReports = null,
+    sameTree = false,
+    controlBuildKeys = [],
   } = {},
 ) {
   const f = await checksFixture();
@@ -121,6 +125,7 @@ async function fixture(
       ).sha256,
   );
   if (noop) heads[1] = heads[0];
+  if (sameTree) heads[k] = heads[0];
   const intents = Array.from({ length: 600 }, () => ({
     kind: 'intent',
     id: randomUUID(),
@@ -221,6 +226,7 @@ async function fixture(
     },
     request: { ...original.request, expectedHead: heads[k], candidateId: f.receipts.at(-1).candidate.id },
     gate: { mode: 'audit' },
+    controlBuildKey: controlBuildKeys[1],
     status: 'failed',
     endedAt: at,
     terminalDigest: hash,
@@ -232,8 +238,14 @@ async function fixture(
     ...f.audit,
     id: randomUUID(),
     status: 'passed',
+    endedAt: '2026-10-28T23:59:00.000Z',
     gate: { mode: 'full', effective: 'full' },
-    request: { ...f.audit.request, expectedHead: heads[0] },
+    request: {
+      ...f.audit.request,
+      expectedHead: heads[0],
+      ...(sameTree ? { candidateId: f.receipts[574 - k].candidate.id } : {}),
+    },
+    controlBuildKey: controlBuildKeys[0],
     contractReports: greenReports ?? (addedAt === null ? { 'tests/red.test.mjs': { failed: false } } : {}),
   });
   f.insert('projectHostedCheckRuns', {
@@ -246,7 +258,7 @@ async function fixture(
   });
   f.auditRow = f.insert('projectHostedMainAudits', {
     projectId: f.projectId,
-    lastGreen: { sequence: 575 - k, head: heads[0], runId: green.id },
+    lastGreen: { sequence: 575 - k, head: green.request.expectedHead, runId: green.id },
     unaudited: { count: k, firstAt: at },
     audit: { runId: f.audit.id, head: heads[k], sequence: 575, status: 'failed' },
     red: { since: at, head: heads[k], runId: f.audit.id },
@@ -459,6 +471,93 @@ test('missing green reports without source absence never blame a landing', async
   assert.equal(JSON.parse(f.recovery().recovery).stage, 'done');
   assert.equal(f.probes().length, 0);
   assert.equal(f.tables.projectHostedSyncs.size, 0);
+});
+
+async function settleAudit(f, run, sequence) {
+  const { unaudited } = f.tables.projectHostedMainAudits.get(f.auditRow);
+  const terminal = {
+    ...run,
+    gate: {
+      mode: 'audit',
+      reason: auditReason({ sequence, count: unaudited.count, attempt: 0, key: 'test' }),
+    },
+  };
+  const check = [...f.tables.projectHostedCheckRuns.values()].find(row => row.runId === run.id);
+  if (check) f.patch('projectHostedCheckRuns', check._id, { value: JSON.stringify(terminal) });
+  f.patch('projectHostedMainAudits', f.auditRow, {
+    audit: { runId: run.id, sequence, head: run.request.expectedHead, status: 'running' },
+  });
+  await f.transaction('auditTerminal', { _handler: ctx => auditState.onGateRunTerminal(ctx, terminal) }, {});
+}
+
+test('incident 30b2efda: identical source turns red under a changed control build without blaming a landing', async () => {
+  const f = await fixture(1, { sameTree: true, controlBuildKeys: ['b'.repeat(64), 'c'.repeat(64)] });
+  const { lastGreen } = f.tables.projectHostedMainAudits.get(f.auditRow);
+  // The full landing had a passing run without an audit event. A later receipt accepted the same State.
+  f.patch('projectHostedMainAudits', f.auditRow, { red: undefined });
+  await settleAudit(f, f.audit, 575);
+  const mainRed = await import(moduleUrl('../convex/projectMainRed.ts'));
+  const { redSentence } = await import('../web/src/app/red/red-model.ts');
+  const read = async () =>
+    JSON.parse(await f.store.call('mainRedRead', mainRed.read, { projectId: f.projectId }, 'owner'));
+  const live = await read();
+  assert.equal(live.end.how, 'red');
+  assert.equal(live.controlBuildChange, 'same-source');
+  assert.match(live.controlBuildReason, /^Forge's check harness changed\. The same source passed/);
+  assert.equal(live.end.reason, live.controlBuildReason);
+  assert.equal(redSentence(live).rest, live.controlBuildReason);
+  assert.equal(live.lastGreen.runId, lastGreen.runId);
+  assert.equal(live.culprit, null);
+  assert.deepEqual(
+    live.landings.map(landing => landing.receiptId),
+    [f.receipts.at(-1).id],
+  );
+
+  await f.runCulprit();
+  await f.runCulprit(); // Same recovery receipt on callback retry.
+  const recovery = JSON.parse(f.recovery().value).terminal.outcome.result;
+  assert.equal(recovery.culprit, null);
+  assert.equal(recovery.proof.passed.head, recovery.proof.failed.head);
+  assert.deepEqual(
+    recovery.failed.map(failure => failure.file),
+    ['tests/red.test.mjs'],
+  );
+  assert.equal(f.probes().length, 0);
+  assert.equal(f.tables.projectHostedSyncs.size, 0);
+  assert.equal([...f.tables.projectHostedMainAuditEvents.values()].filter(row => row.controlBuild).length, 1);
+
+  await settleAudit(
+    f,
+    { ...f.audit, id: randomUUID(), status: 'passed', endedAt: '2026-10-29T00:02:00.000Z' },
+    576,
+  );
+  const historical = await read();
+  assert.equal(historical.end.how, 'recovered');
+  assert.equal(historical.controlBuildReason, live.controlBuildReason);
+  assert.equal(historical.lastGreen.runId, lastGreen.runId);
+});
+
+test('a changed control build and source are both candidates; a missing key keeps source bisection', async () => {
+  const changed = await fixture(2, {
+    controlBuildKeys: ['b'.repeat(64), 'c'.repeat(64)],
+    auditReports: {},
+  });
+  changed.patch('projectHostedMainAudits', changed.auditRow, { red: undefined });
+  await settleAudit(changed, changed.audit, 575);
+  await changed.runCulprit();
+  const current = changed.tables.projectHostedMainAudits.get(changed.auditRow).red;
+  assert.match(current.reason, /Forge's check harness changed\. The source also changed/);
+  assert.equal(current.culprit, undefined);
+  assert.equal(changed.probes().length, 0);
+  await changed.runCulprit();
+  assert.equal(changed.counts.at(-1).writes, 0, 'a duplicate callback does not write another decision');
+
+  const legacy = await fixture(2, { controlBuildKeys: [undefined, 'c'.repeat(64)] });
+  legacy.patch('projectHostedMainAudits', legacy.auditRow, { red: undefined });
+  await settleAudit(legacy, legacy.audit, 575);
+  await legacy.runCulprit();
+  assert.equal(legacy.probes().length, 1);
+  assert.equal(legacy.tables.projectHostedMainAudits.get(legacy.auditRow).red.reason, undefined);
 });
 
 test('incident 687d1eda: a newly covered failure names the coverage landing, reverts nothing and keeps main red', async t => {

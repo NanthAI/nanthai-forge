@@ -47,6 +47,7 @@ try {
       capacity,
       // This control checkout's workflow: a declared check needs its toolchain and cache steps.
       installedWorkflow(),
+      process.env.FORGE_CONTROL_BUILD_KEY,
     );
     writeFileSync(resolve(process.env.RUNNER_TEMP, 'forge-actions-state.json'), result.stateBytes);
     writeFileSync(resolve(process.env.RUNNER_TEMP, 'forge-actions-plan.json'), JSON.stringify(result.recipe));

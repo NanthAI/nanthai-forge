@@ -58,6 +58,7 @@ test('a main red says what failed, which landing broke it or which are candidate
       candidates: { ...base, run: { ...run, failed: [], files: { total: null, failed: null, flaky: null }, failureReason: 'The runner lost its connection.' }, runLink: null, landingsMore: true, culprit: null, end: { how: 'flaky', at: T + 12 * 60000, runId: 'run-p' } },
       red: { ...base, run: null, culprit: null, end: { how: 'red', reason: 'The newest audit failed on tests/parser-stream.test.mjs.', tests: ['tests/parser-stream.test.mjs'], moreTests: 3 } },
       covered: { ...base, culprit: null, newlyCoveredBy: { receiptId: culprit.receiptId, landing: culprit }, end: { how: 'recovered', at: T + 40 * 60000, runId: 'run-g3', head: 'c'.repeat(64), reverted: false, by: { kind: 'fix', landing: landing(11, 'Lane review: fit 390 px'), of: 1 } } },
+      harness: { ...base, landings: [landing(8, 'Accept the same State')], culprit: null, controlBuildChange: 'same-source', controlBuildReason: "Forge's check harness changed. The same source passed before the change.", end: { how: 'recovered', at: T + 40 * 60000, runId: 'run-g3', head: base.red.head, reverted: false, by: null } },
     };
     const read = reads[q.get('case') ?? 'culprit'];
     window.calls = [];
@@ -215,5 +216,12 @@ test('a main red says what failed, which landing broke it or which are candidate
     '/-/example/parser/code/r7-0000-4000-8000-000000000000',
   );
   await layouts('covered');
+
+  await page.goto('https://forge.test/fixture.html?case=harness');
+  await page.getByText("Forge's check harness changed. The same source passed before the change.").waitFor();
+  assert.equal(await page.getByRole('region', { name: 'Candidates' }).count(), 0);
+  const chronology = page.getByRole('region', { name: 'Since main last passed' });
+  assert.match(await chronology.textContent(), /Accept the same State/);
+  assert.doesNotMatch(await chronology.textContent(), /Candidate/);
   assert.deepEqual(errors, []);
 });

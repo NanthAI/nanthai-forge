@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedMainAuditFields.ts": "4c07ba20ec794277636fea3c5746dc204a44b094666d5a19f01553db8578e063",
+    "convex/projectHostedMainAuditState.ts": "3b0b25656fc6383b85a914c0ea268521a4df7bb24d8c674594dc2f6281824778",
+    "src/hosted-check.ts": "b565f958acaf8e23e103cf6824587fcf8390a00472f03f4592fc7e4ecc1a6bdf"
+  },
+  "replay": {
+    "incident": "30b2efda",
+    "test": "incident 30b2efda: identical source turns red under a changed control build without blaming a landing",
+    "receipt": "6323d96c-c032-4fe0-870d-e3b5385cebd2"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "01a1ff50-5d3a-7132-8e1e-f871b352959f",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "01a1ff5e-d1af-7472-b8a4-04e912e830cf",
+    "receipt": "6323d96c-c032-4fe0-870d-e3b5385cebd2"
+  }
+}

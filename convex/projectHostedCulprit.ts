@@ -24,6 +24,7 @@ import {
   noteRedCause,
 } from './projectHostedMainAuditState';
 import { recoveredRed } from './projectGuardMainRed';
+import { controlBuildReason, type ControlBuildChange } from './projectHostedMainAuditFields';
 import { auditMetadata, auditDebt, auditDue } from '../src/main-audit';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { autoRevertEnabled, autoRevertHold } from '../src/auto-revert-policy';
@@ -46,7 +47,14 @@ import {
   checkCause,
 } from '../src/hosted-check';
 import { canonicalPayload, hostedPayloadHash, hostedOperationSchema } from '../src/hosted-source-operation';
-import { culpritId, culpritFailures, probeVerdict, bisectStep, type NeedsFix } from '../src/culprit-bisect';
+import {
+  culpritId,
+  culpritFailures,
+  probeVerdict,
+  bisectStep,
+  matchingCheckPins,
+  type NeedsFix,
+} from '../src/culprit-bisect';
 import { buildComposePages, type composeLaneSchema } from '../src/hosted-compose';
 import type { z } from 'zod';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
@@ -312,9 +320,11 @@ async function fixForward(
   row: Doc<'projectHostedOperations'>,
   state: Recovery,
   reason: string,
-  covered?: string,
+  cause?: { covered: string } | { controlBuildChange: ControlBuildChange },
 ) {
   const intentId = culpritId({ fixMain: state.audit.id });
+  const covered = cause && 'covered' in cause ? cause.covered : undefined;
+  const controlBuildChange = cause && 'controlBuildChange' in cause ? cause.controlBuildChange : undefined;
   if (!reason.startsWith('Newly covered')) reason += uncoveredNote(state);
   state.reason = reason;
   state.intentId = intentId;
@@ -338,14 +348,19 @@ async function fixForward(
       sequence: coverage.sequence,
       covered: coverage.receipt.id,
     });
-  const target = state.target ?? state.range.at(-1)?.receipt;
+  const target = controlBuildChange ? undefined : (state.target ?? state.range.at(-1)?.receipt);
   const old = await readHostedRecord(ctx, {
     projectId: project._id,
     actor: project.owner,
     kind: 'intent',
     key: intentId,
   });
-  const constraints = `Full main audit ${state.audit.id} failed on ${state.audit.request.expectedHead}. ${reason} Inspect nforge agent ROOT log '{"operationId":"${state.audit.id}","stream":"stderr"}'. Preserve later accepted work. ${target ? `Candidate receipt ${target.id}.` : 'No complete accepted range retained.'}`;
+  const rangeNote = target
+    ? ` Candidate receipt ${target.id}.`
+    : controlBuildChange
+      ? ''
+      : ' No complete accepted range retained.';
+  const constraints = `Full main audit ${state.audit.id} failed on ${state.audit.request.expectedHead}. ${reason} Inspect nforge agent ROOT log '{"operationId":"${state.audit.id}","stream":"stderr"}'. Preserve later accepted work.${rangeNote}`;
   if (!old)
     await writeHostedRecord(ctx, {
       projectId: project._id,
@@ -393,6 +408,7 @@ async function fixForward(
     }
   }
   state.stage = 'done';
+  delete state.greenPending;
   await retain(ctx, row, state);
 }
 async function probe(
@@ -619,16 +635,19 @@ async function classify(
     if (audit.status !== 'failed' || audit.gate?.mode !== 'audit' || !audit.endedAt || !audit.terminalDigest)
       return;
     await hostedWriteProject(ctx, input.projectId, project.owner, audit.request.authorityEpoch);
-    const page = await ctx.db
-      .query('projectHostedAcceptances')
-      .withIndex('by_project_and_sequence', q =>
-        q
-          .eq('projectId', input.projectId)
-          .gt('sequence', auditRow.lastGreen?.sequence ?? 0)
-          .lte('sequence', auditRow.audit!.sequence),
-      )
-      .order('asc')
-      .paginate({ cursor: null, numItems: 100, maximumRowsRead: 100, maximumBytesRead: 512 * 1024 });
+    const controlBuildChange = auditRow.red.controlBuildChange;
+    const page = controlBuildChange
+      ? { page: [], isDone: true }
+      : await ctx.db
+          .query('projectHostedAcceptances')
+          .withIndex('by_project_and_sequence', q =>
+            q
+              .eq('projectId', input.projectId)
+              .gt('sequence', auditRow.lastGreen?.sequence ?? 0)
+              .lte('sequence', auditRow.audit!.sequence),
+          )
+          .order('asc')
+          .paginate({ cursor: null, numItems: 100, maximumRowsRead: 100, maximumBytesRead: 512 * 1024 });
     const range = page.page.map(r => ({
       sequence: r.sequence,
       receipt: hostedAcceptanceSchema.parse(JSON.parse(r.value)),
@@ -650,6 +669,10 @@ async function classify(
     await begin(ctx, project, recoveryOperation(input.runId), { kind: 'classify', runId: input.runId }, {});
     row = (await recoveryRow(ctx, input, project.owner))!;
     await retain(ctx, row, state);
+    if (controlBuildChange)
+      return fixForward(ctx, project, row, state, controlBuildReason(controlBuildChange), {
+        controlBuildChange,
+      });
     const continuous = range.every(
       (r, i) =>
         r.sequence === (auditRow.lastGreen?.sequence ?? 0) + i + 1 &&
@@ -850,9 +873,7 @@ async function classify(
     }
     if (
       own &&
-      own.check.definition === state.audit.check.definition &&
-      own.request.expectedConfiguration === state.audit.request.expectedConfiguration &&
-      own.request.expectedEnvironment === state.audit.request.expectedEnvironment &&
+      matchingCheckPins(own, state.audit) &&
       own.terminalDigest === state.target.check!.terminalDigest &&
       own.request.expectedHead ===
         (state.target.crossHeadProof?.checked.head ?? state.target.candidate.head) &&
@@ -1335,24 +1356,11 @@ async function beginGreenProbe(
     .withIndex('by_project_and_run', q => q.eq('projectId', input.projectId).eq('runId', state.pass!.runId))
     .unique();
   const green = greenRow ? hostedCheckRunSchema.parse(JSON.parse(greenRow.value)) : null;
-  if (green?.reportPointer && !attachNamedReports(green, named)) {
-    await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedCulpritSource:reports'), {
-      ...input,
-      namedRunId: green.id,
-    });
-    return;
-  }
-  if (green && greenRow?.reportParts !== undefined) {
-    detachCheckReports(green, greenRow.reportParts, greenRow.reportDigest ?? '');
-    await hydrateCheckReports(ctx, green);
-  }
   if (
     !green ||
     green.status !== 'passed' ||
     green.request.expectedHead !== state.pass!.head ||
-    green.check.definition !== state.audit.check.definition ||
-    green.request.expectedConfiguration !== state.audit.request.expectedConfiguration ||
-    green.request.expectedEnvironment !== state.audit.request.expectedEnvironment
+    !matchingCheckPins(green, state.audit)
   )
     return fixForward(
       ctx,
@@ -1369,6 +1377,17 @@ async function beginGreenProbe(
       state,
       'Automatic probes require the configured free Actions runner.',
     );
+  if (green.reportPointer && !attachNamedReports(green, named)) {
+    await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedCulpritSource:reports'), {
+      ...input,
+      namedRunId: green.id,
+    });
+    return;
+  }
+  if (greenRow?.reportParts !== undefined) {
+    detachCheckReports(green, greenRow.reportParts, greenRow.reportDigest ?? '');
+    await hydrateCheckReports(ctx, green);
+  }
   // Mixed red (687d1eda review): when some failing files really passed on the last green main and
   // the others only skipped or never ran there, bisect the passed ones; the rest are newly covered.
   const greenReports = green.contractReports ?? green.reportSummary?.semantic;
@@ -1564,7 +1583,7 @@ export const sourceEvidence = internalMutation({
                 ? `No landing in the red range changed which tests run; receipt ${state.target.id} is the only landing in it.`
                 : 'No landing in the red range changed which tests run.'
           } Main stays red until they pass; fix forward, nothing is reverted.`,
-          covered?.id,
+          covered ? { covered: covered.id } : undefined,
         );
         return null;
       }

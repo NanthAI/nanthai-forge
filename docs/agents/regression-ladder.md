@@ -103,6 +103,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 
 | `025470bf` | A moved-main cohort records its actual hold release. The selected request and receipt agree, and old releases with no stamp stay unavailable. |
 | `9829778c` | A stale conflict beside older board pages or a note already read in another Lane repeatedly interrupts a wait |
+| `30b2efda` | A check harness change can turn identical Candidate source red. Main broke retains the harness change without assigning a landing as culprit. |
 | `aad45785` | Overlapping full admissions spend checks before composing against an earlier pending predecessor; failed predecessors must preserve follower source |
 | `70a9bd2f` | Zoo timing: a build input and disjoint source arrived together; the admission pipeline must check a follower with its predecessor on the exact combined head and keep the 1.5x solo timing bar. The deleted O3 queue switch broke this replay (Item 026ce0cf) |
 | `2bf85ddf` | Core claim: the queue landed a parked Lane after its agent stopped and its Item heard nothing (2026-11-17); every landing now posts a system receipt comment to its Item |

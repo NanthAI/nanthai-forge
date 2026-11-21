@@ -29,6 +29,14 @@ export const needsFixSchema = z
   .strict();
 export type NeedsFix = z.infer<typeof needsFixSchema>;
 
+export function matchingCheckPins(first: HostedCheckRun, second: HostedCheckRun) {
+  return (
+    first.check.definition === second.check.definition &&
+    first.request.expectedConfiguration === second.request.expectedConfiguration &&
+    first.request.expectedEnvironment === second.request.expectedEnvironment
+  );
+}
+
 /** B2.4a's excerpt limits, also enforced here for legacy retained reports. */
 export function culpritFailures(run: HostedCheckRun): NeedsFix['failed'] {
   const reports =

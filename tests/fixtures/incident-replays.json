@@ -3805,6 +3805,28 @@
       "test": "incident replay 2bf85ddf: a parked Lane the queue lands after its agent stopped posts its receipt to its Item"
     },
     {
+      "incident": "30b2efda",
+      "what": "A pinned control checkout can turn an unchanged Candidate red independently of accepted source",
+      "file": "tests/hosted-culprit.test.mjs",
+      "paths": [
+        "convex/projectHostedActionsDirect.ts",
+        "convex/projectHostedCheckDefinitions.ts",
+        "convex/projectHostedCheckEntries.ts",
+        "convex/projectHostedCheckLease.ts",
+        "convex/projectHostedCheckStore.ts",
+        "convex/projectHostedCheckVerdictReuse.ts",
+        "convex/projectHostedChecks.ts",
+        "convex/projectHostedLandingMessageBody.ts",
+        "convex/projectHostedMainAuditFields.ts",
+        "convex/projectHostedMainAuditState.ts",
+        "src/first-check-risk.ts",
+        "src/hosted-check-evidence.ts",
+        "src/hosted-check.ts",
+        "src/landing-mode.ts"
+      ],
+      "test": "incident 30b2efda: identical source turns red under a changed control build without blaming a landing"
+    },
+    {
       "incident": "687d1eda",
       "what": "Main went red after a landing turned on browser tests its own check skipped (2026-11-19); a skip counted as a pass, two unrelated landings were blamed and reverted, and a docs-only audit cleared the red",
       "file": "tests/hosted-culprit.test.mjs",

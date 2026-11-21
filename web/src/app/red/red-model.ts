@@ -49,6 +49,8 @@ export type RedRead = {
   culprit?: { receiptId: string; landing: RedLanding | null } | null;
   /** The landing that made the failing tests run: they had no pass on the last green main (Item 687d1eda). */
   newlyCoveredBy?: { receiptId: string; landing: RedLanding | null } | null;
+  controlBuildChange?: 'same-source' | 'source-also-changed';
+  controlBuildReason?: string;
   end?: RedEnd;
 };
 
@@ -100,6 +102,7 @@ export function redSentence(read: RedRead): { lead: string; rest: string } {
       lead,
       rest: `${named(read.newlyCoveredBy)} made these tests run; they had no pass on the last green main.`,
     };
+  if (read.controlBuildReason) return { lead, rest: read.controlBuildReason };
   // Once a red ended only audit passes are on record: a landing a full check passed later can still be listed.
   const since = read.lastGreen?.audited ? 'the last audit pass' : 'main last passed';
   if (!landings.length) return { lead, rest: `No landing since ${since} is on record.` };
@@ -115,7 +118,11 @@ export function redSentence(read: RedRead): { lead: string; rest: string } {
 export function endLine(read: RedRead): string {
   const end = read.end ?? { how: 'not-reported' };
   if (end.how === 'red')
-    return end.reason ? `Still failing. ${end.reason}` : 'Still failing; recovery has not decided why yet.';
+    return end.reason
+      ? end.reason === read.controlBuildReason
+        ? 'Still failing.'
+        : `Still failing. ${end.reason}`
+      : 'Still failing; recovery has not decided why yet.';
   if (end.how === 'flaky')
     return `Counted as flaky at ${clock(end.at)}: the same source passed when checked again.`;
   if (end.how === 'not-reported') return 'How it ended is not reported.';

@@ -220,18 +220,21 @@ function Landings({ read, receipt }: { read: RedRead; receipt: (id: string) => s
   const culprit = read.culprit?.receiptId ?? null;
   const covered = read.newlyCoveredBy?.receiptId ?? null;
   const known = culprit ?? covered;
+  const candidates = !known && read.controlBuildChange !== 'same-source';
   return (
     <Region
-      title={known ? 'Since main last passed' : 'Candidates'}
+      title={candidates ? 'Candidates' : 'Since main last passed'}
       count={landings.length}
       hint={
         culprit
           ? 'the bisect proved which one'
           : covered
             ? 'one made the tests run'
-            : read.landingsMore
-              ? 'not proven; the newest'
-              : 'not proven'
+            : !candidates
+              ? undefined
+              : read.landingsMore
+                ? 'not proven; the newest'
+                : 'not proven'
       }
     >
       {landings.length ? (
@@ -252,7 +255,7 @@ function Landings({ read, receipt }: { read: RedRead; receipt: (id: string) => s
               ) : landing.receiptId === covered ? (
                 <span className="t2">Made tests run</span>
               ) : (
-                <span className="t2">{known ? '' : 'Candidate'}</span>
+                <span className="t2">{candidates ? 'Candidate' : ''}</span>
               )}
             </A>
           );

@@ -301,6 +301,8 @@ export const hostedCheckRunSchema = z
       .strict(),
     check: checkSchema.strict(),
     configuration: hostedCheckRunnerSchema,
+    /** Digest of the trusted control build reported by the runner at its first plan. */
+    controlBuildKey: checkHash.optional(),
     gate: checkGateSchema.optional(),
     proofOnLanding: z.literal(true).optional(),
     semanticPlan: semanticPlanSchema.optional(),

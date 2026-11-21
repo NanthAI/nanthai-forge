@@ -2088,7 +2088,8 @@ test('HTTP plan pairs use verified canonical R2 bytes and reuse both digests on 
       );
     },
   };
-  const send = () =>
+  const controlBuildKey = 'b'.repeat(64);
+  const send = (key = controlBuildKey) =>
     handle._handler(
       ctx,
       new Request(`${audience}/checks/actions`, {
@@ -2096,7 +2097,12 @@ test('HTTP plan pairs use verified canonical R2 bytes and reuse both digests on 
         headers: { authorization: `Bearer ${oidc()}` },
         body: JSON.stringify({
           ...s.id,
-          command: { kind: 'plan', plan: { recipe, lockfile: 'e'.repeat(64) }, packRefresh: true },
+          command: {
+            kind: 'plan',
+            plan: { recipe, lockfile: 'e'.repeat(64) },
+            packRefresh: true,
+            ...(key ? { controlBuildKey: key } : {}),
+          },
         }),
       }),
     );
@@ -2111,7 +2117,9 @@ test('HTTP plan pairs use verified canonical R2 bytes and reuse both digests on 
   assert.equal((await send()).status, 200);
   assert.deepEqual(mutations, ['projectHostedActionsSession', 'projectHostedActionsPlan']);
   // The plan's pack job rides the same plan write (friction 0064c3b2): no added call.
-  assert.equal((await s.status(s.run.id)).actions.packRefresh, true);
+  const retained = await s.status(s.run.id);
+  assert.equal(retained.actions.packRefresh, true);
+  assert.equal(retained.controlBuildKey, controlBuildKey);
   for (const value of [recipe.selection, recipe]) {
     const pin = savePin(value),
       key = `/synthetic/v1/p/${s.projectId}/o/${pin.sha256}`;
@@ -2127,6 +2135,9 @@ test('HTTP plan pairs use verified canonical R2 bytes and reuse both digests on 
   assert.deepEqual(mutations, ['projectHostedActionsSession', 'projectHostedActionsPlan']);
   assert.equal(r2.requests.filter(method => method === 'PUT').length, puts);
   assert.equal(r2.objects.size, 2);
+  assert.equal((await send(null)).status, 200, 'a legacy retry preserves the original stamp');
+  assert.equal((await send('a'.repeat(64))).status, 403, 'a replay cannot substitute the build');
+  assert.equal((await s.status(s.run.id)).controlBuildKey, controlBuildKey);
   t.diagnostic(
     JSON.stringify({
       tests: 3000,

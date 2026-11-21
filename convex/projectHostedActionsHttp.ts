@@ -207,6 +207,7 @@ export const handle = httpAction(async (ctx, request) => {
           ...input,
           recipe: canonicalPayload(plan.recipe),
           lockfile: plan.lockfile,
+          ...(command.controlBuildKey ? { controlBuildKey: command.controlBuildKey } : {}),
           ...(command.packRefresh ? { packRefresh: true } : {}),
           ...(command.resultsBatch ? { resultsBatch: true } : {}),
           ...(command.resultsPacked ? { resultsPacked: true } : {}),
