@@ -16,16 +16,17 @@ import {
   readBoardWokeAt,
 } from '../dist/hosted-board-wait.js';
 import { readBoardCursor, readBoardWaitCursor } from '../dist/board-local.js';
+import { canonicalPayload } from '../dist/hosted-source-operation.js';
 const conflicts = await import(moduleUrl('../convex/projectHostedConflicts.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 
-async function fixture(selectedLaneId) {
+async function fixture(selectedLaneId, [mineHead, peerHead] = ['mine', 'peer']) {
   const f = await landingFixture();
   const laneId = selectedLaneId ?? randomUUID(),
     peerId = randomUUID();
   for (const [id, head] of [
-    [laneId, 'mine'],
-    [peerId, 'peer'],
+    [laneId, mineHead],
+    [peerId, peerHead],
   ])
     f.insert('projectHostedOverlapLanes', {
       projectId: f.projectId,
@@ -51,13 +52,136 @@ async function fixture(selectedLaneId) {
     f.call('trialRecord', conflicts.record, {
       projectId: f.projectId,
       laneId,
-      head: 'mine',
-      peers: [{ laneId: peerId, head: 'peer' }],
+      head: mineHead,
+      peers: [{ laneId: peerId, head: peerHead }],
       conflicts: [{ peer: peerId, path: 'src/service.ts', mine: [[2, 2]], theirs: [[3, 3]], reason: 'text' }],
       ...overrides,
     });
   return { f, laneId, peerId, request, args, page, record };
 }
+
+test('d6bc421b: exact advice agrees across ordinary and finite reads through a policy update', async t => {
+  const heads = ['a'.repeat(64), 'b'.repeat(64)];
+  const { f, laneId, peerId, page, record } = await fixture(undefined, heads);
+  const { set } = await import(moduleUrl('../convex/projectAutonomy.ts'));
+  const board = await import(moduleUrl('../convex/projectBoard.ts'));
+  const overlap = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
+  const peerWait = await import(moduleUrl('../convex/projectBoardWait.ts'));
+  const { boardWake } = await import(moduleUrl('../convex/projectBoardDelivery.ts'));
+  const { writeHostedRecord } = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+  const { projectId } = f;
+  const input = { projectId, laneId };
+  for (const [i, id] of [laneId, peerId].entries())
+    await f.run('seedCanonicalLane', writeHostedRecord, {
+      ...f.auth,
+      expectedVersion: null,
+      record: {
+        kind: 'lane',
+        id,
+        intentId: randomUUID(),
+        actor: 'owner',
+        version: 0,
+        at: new Date(0).toISOString(),
+        base: { head: f.main.head, receiptId: f.main.receipt.id },
+        head: heads[i],
+        sourceVersion: 0,
+        lifecycleVersion: 0,
+        state: 'active',
+        authorityEpoch: 1,
+      },
+    });
+  const setPolicy = fields =>
+    f.call('editAdvicePolicy', set, {
+      projectId,
+      command: JSON.stringify({ action: 'set-policy', operationId: randomUUID(), ...fields }),
+    });
+  await setPolicy({ acceptance: { earlyResolve: 'off' } });
+  const projection = [...f.tables.projectFinishReadRows.values()].find(row => row.kind === 'hostedProjects');
+  const { owner, visibility, sourceAuthority, name, key } = JSON.parse(projection.value);
+  f.patch('projectFinishReadRows', projection._id, {
+    value: canonicalPayload({ owner, visibility, sourceAuthority, name, key }),
+  });
+  await record();
+  const row = [...f.tables.projectHostedConflictNotices.values()].find(row => row.laneId === laneId);
+  const advice = {
+    paths: ['src/service.ts'],
+    more: 0,
+    at: new Date(1).toISOString(),
+    next: 'Synthetic advice',
+    landedSubmissionId: 'synthetic',
+  };
+  f.patch('projectHostedConflictNotices', row._id, { earlyResolution: JSON.stringify(advice) });
+  const readWaits = async () => {
+    const reads = [];
+    for (const read of [
+      async () => JSON.parse(await page()).board,
+      async () =>
+        JSON.parse(await f.store.call('peerAdviceWait', peerWait.peer, { ...input, peer: peerId, after: 0 }))
+          .board,
+    ]) {
+      const delivery = await read();
+      reads.push({ conflicts: delivery.conflicts, current: f.readSet(), cost: f.counts.at(-1) });
+    }
+    return reads;
+  };
+  const assertParity = async (waits, expectedAdvice, historyReads = 0) => {
+    const ordinary = JSON.parse(await f.store.call('ordinaryOverlap', overlap.read, input)).conflicts;
+    assert.equal(ordinary.length, 1);
+    assert.deepEqual(ordinary[0].earlyResolution, expectedAdvice);
+    const boardDelivery = JSON.parse(await f.call('ordinaryBoard', board.read, input));
+    assert.deepEqual(boardDelivery.conflicts, ordinary);
+    const sourceDelivery = await f.run(
+      'sourceWait',
+      ctx => boardWake(ctx, { ...input, viewer: 'owner', after: 0 }),
+      {},
+    );
+    assert.deepEqual(
+      sourceDelivery.conflicts,
+      ordinary,
+      'source progress and check waits share raw board delivery',
+    );
+    for (const { conflicts, cost } of waits) {
+      assert.deepEqual(conflicts, ordinary);
+      assert.equal(cost.readRangesByTable.hostedProjects ?? 0, 0, 'no broad project dependency');
+      assert.equal(cost.readRangesByTable.projectPolicyChanges ?? 0, historyReads);
+      assert.equal(cost.writes, 0);
+    }
+  };
+  const legacy = await readWaits();
+  await assertParity(legacy, undefined, 1);
+  await f.run('workRevision', ctx => ctx.db.patch(projectId, { revision: 123 }), {});
+  assert(
+    legacy.every(wait => wait.current()),
+    'an ordinary project write keeps an older wait current',
+  );
+  await setPolicy({ acceptance: { earlyResolve: 'on' } });
+  assert(
+    legacy.every(wait => !wait.current()),
+    'the policy edit invalidates both older waits',
+  );
+  const on = await readWaits();
+  await assertParity(on, advice);
+  await setPolicy({ notify: { awaySummary: false } });
+  assert(
+    on.every(wait => wait.current()),
+    'an unrelated policy edit keeps the projected waits current',
+  );
+  await setPolicy({ acceptance: { earlyResolve: 'off' } });
+  assert(
+    on.every(wait => !wait.current()),
+    'the policy edit invalidates both projected waits',
+  );
+  const off = await readWaits();
+  await assertParity(off, undefined);
+  const ranges = waits => waits.map(wait => wait.cost.ranges);
+  assert.deepEqual(
+    ranges(off),
+    ranges(legacy).map(reads => reads - 1),
+  );
+  t.diagnostic(
+    `finish/peer index reads with advice suppressed: legacy ${ranges(legacy)}, projected ${ranges(off)}`,
+  );
+});
 
 for (const mode of ['off', 'on'])
   test(`11c07518 S2: clearing ${mode === 'off' ? 'hidden' : 'visible'} early advice ${mode === 'off' ? 'retains' : 'advances'} notice generation`, async t => {

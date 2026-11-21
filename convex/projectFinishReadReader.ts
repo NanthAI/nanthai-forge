@@ -2,9 +2,11 @@
 import { hydrateLandingRequest } from './projectLandingRequestBody';
 import type { QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
+import { effectivePolicy } from '../src/autonomy-policy';
 import { finishReadFields, type FinishReadKind } from './projectFinishReadProjection';
 const readers = new WeakSet<object>();
 const sourcePorts = new WeakMap<object, QueryCtx['db']>();
+const olderProjects = new WeakSet<object>();
 /** Decorate a read port without losing its source identity or applying projections twice. */
 export function mapFinishReadPort(db: QueryCtx['db'], map: (db: QueryCtx['db']) => QueryCtx['db']) {
   const mapped = map(db);
@@ -17,8 +19,26 @@ export const finishReadSourceDb = (ctx: QueryCtx) => sourcePorts.get(ctx.db) ?? 
 export const isFinishReadReader = (ctx: QueryCtx) => readers.has(ctx);
 const unpack = (db: QueryCtx['db'], row: Doc<'projectFinishReadRows'>) => {
   const value = { ...JSON.parse(row.value), _id: row.sourceId };
+  if (row.kind === 'hostedProjects' && value.earlyResolutionEnabled === undefined) olderProjects.add(value);
   return row.kind === 'projectHostedLandingRequests' ? hydrateLandingRequest(db, value) : value;
 };
+
+/** Reuse the authorized project read. Older projections can recover explicit "off" from
+ * the latest policy receipt, which is written atomically with every policy edit. */
+export async function earlyResolutionForProject(
+  ctx: QueryCtx,
+  project: Doc<'hostedProjects'> & { earlyResolutionEnabled?: boolean },
+) {
+  if (project.earlyResolutionEnabled !== undefined) return project.earlyResolutionEnabled;
+  if (!olderProjects.has(project)) return effectivePolicy(project).acceptance.earlyResolve !== 'off';
+  const latest = await ctx.db
+    .query('projectPolicyChanges')
+    .withIndex('by_project', q => q.eq('projectId', project._id))
+    .order('desc')
+    .first();
+  return latest?.policy.acceptance.earlyResolve !== 'off';
+}
+
 /** Selected exact read paths only. Old untouched rows remain readable, with an
  * explicit source-row dependency until their next ordinary write installs the
  * projection. No reader backfill, polling, source scan or extra RPC. */

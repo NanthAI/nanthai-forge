@@ -2201,6 +2201,9 @@ The observer reads one selected request, at most twenty retained versions and
 one queue page with eight ahead entries. Older rows use their exact source until
 an ordinary write installs the projection; reads never repair or scan history.
 Current access, authority, advice, progress and acceptance remain dependencies.
+Exact conflict advice uses the effective early-resolution decision from the
+existing project projection. When an older projection lacks the decision,
+delivery uses the latest policy receipt in place of rereading the project.
 Live board delivery reads only directed Lane notes; ordinary board reads retain Issue and project
 notes. Client waits remember content-derived conflict identities separately from message cursors,
 so a conflict beside an older two-note page is returned once across reconnects. The wait reply

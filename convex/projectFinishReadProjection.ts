@@ -68,6 +68,16 @@ export type FinishReadKind = keyof typeof finishReadFields;
 export function finishReadProjection(kind: FinishReadKind, row: Record<string, unknown>) {
   const result: Record<string, unknown> = {};
   for (const key of finishReadFields[kind]) if (row[key] !== undefined) result[key] = row[key];
+  if (kind === 'hostedProjects') {
+    // A policy patch supplies the canonical value. Other patches carry the previous decision
+    // forward, including its absence on a projection written before the decision was stored.
+    if ('autonomyPolicy' in row) {
+      const { autonomyPolicy } = row as Pick<Doc<'hostedProjects'>, 'autonomyPolicy'>;
+      result.earlyResolutionEnabled = autonomyPolicy?.acceptance.earlyResolve !== 'off';
+    } else if (typeof row.earlyResolutionEnabled === 'boolean') {
+      result.earlyResolutionEnabled = row.earlyResolutionEnabled;
+    }
+  }
   if (kind === 'projectWorkGenerations' && typeof result.metadata === 'string') {
     try {
       // This Plan-only header selects a schema, never the Work metadata body.

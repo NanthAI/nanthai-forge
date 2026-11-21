@@ -4,6 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internalMutation, internalQuery, type MutationCtx, type QueryCtx } from './server';
 import { effectivePolicy } from '../src/autonomy-policy';
+import { earlyResolutionForProject } from './projectFinishReadReader';
 import { conflictPredecessor } from './projectHostedConflictPredecessor';
 import { landingQueue } from './projectHostedLandingEvents';
 import { readHostedRecord } from './projectHostedRecords';
@@ -507,6 +508,7 @@ export async function laneConflicts(
   laneId: string,
   head?: string,
   after?: number,
+  authorizedProject?: Doc<'hostedProjects'>,
 ) {
   const rows = await ctx.db
     .query('projectHostedConflictNotices')
@@ -523,8 +525,10 @@ export async function laneConflicts(
       (currentHead === undefined || row.laneHead === currentHead) &&
       (after === undefined || row.updatedAt > after),
   );
-  const project = current.some(row => row.earlyResolution) ? await ctx.db.get(projectId) : null;
-  const enabled = project && effectivePolicy(project).acceptance.earlyResolve !== 'off';
+  const project = current.some(row => row.earlyResolution)
+    ? (authorizedProject ?? (await ctx.db.get(projectId)))
+    : null;
+  const enabled = project && (await earlyResolutionForProject(ctx, project));
   return Promise.all(
     current.map(async row => {
       const peer = enabled && row.earlyResolution ? await laneRow(ctx, projectId, row.peer) : null;

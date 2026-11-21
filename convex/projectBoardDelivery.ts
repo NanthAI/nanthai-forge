@@ -36,11 +36,7 @@ export function boardMessageView(row: Doc<'projectBoardMessages'>) {
 
 /** Board content is for members with write access only (owner and contributors). Hosted projects
  * have no path-scoped read grants: every such member reads all source, so paths need no masking. */
-export async function boardWriter(ctx: Ctx, projectId: Id<'hostedProjects'>, viewer: string) {
-  return (await boardWriterProject(ctx, projectId, viewer)) !== null;
-}
-/** The project row when `viewer` may use the board, else null. */
-export async function boardWriterProject(ctx: Ctx, projectId: Id<'hostedProjects'>, viewer: string) {
+async function boardWriterProject(ctx: Ctx, projectId: Id<'hostedProjects'>, viewer: string) {
   const project = await ctx.db.get(projectId);
   if (!project || project.removal) return null;
   return (await hasWriteRole(ctx, project, viewer)) ? project : null;
@@ -228,7 +224,8 @@ export async function boardWake(
     after: number;
   },
 ) {
-  if (!(await boardWriter(ctx, input.projectId, input.viewer))) return undefined;
+  const project = await boardWriterProject(ctx, input.projectId, input.viewer);
+  if (!project) return undefined;
   const inbox = await ctx.db
     .query('projectBoardInboxes')
     .withIndex('by_project_and_key', q =>
@@ -236,7 +233,7 @@ export async function boardWake(
     )
     .unique();
   if (!inbox || inbox.latestAt <= input.after) return undefined;
-  const conflicts = await laneConflicts(ctx, input.projectId, input.laneId, undefined, input.after);
+  const conflicts = await laneConflicts(ctx, input.projectId, input.laneId, undefined, input.after, project);
   // Exact source conflicts remain deliverable when member-written board notes are switched off.
   if (await boardStopped(ctx, input.projectId))
     return conflicts.length ? { messages: [], more: 0, cursor: inbox.latestAt, conflicts } : undefined;
