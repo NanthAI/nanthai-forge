@@ -1853,8 +1853,11 @@ owner, registration session, runner fingerprint (runtime plus environment), and
 key; it is not evidence reuse permission. Final acceptance copies this receipt.
 The runner installs the checkout in slices of about 25 ms of work between event-loop turns,
 so the 20 s lease heartbeat and the 60 s local deadline run during a 62k-file install, and a
-lost lease stops the install at its next file. The install skips the per-file fsync: the
-private root is removed after the run and rebuilt after any crash.
+lost lease stops scheduling new source files. On macOS the runner stages files directly
+from the existing same-volume machine object cache and verifies the independent copy of
+each blob before starting the check. Missing objects use the usual fetch, and a mismatched
+copy falls back to a full install from the private verified object store. The private root
+is removed after the run, so the install can skip per-file fsync.
 
 The single server-side sufficiency rule in `requireHostedCheckEvidence` allows Mac
 evidence for owner-controlled work under trusted/autonomous acceptance, including

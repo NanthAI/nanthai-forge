@@ -244,14 +244,23 @@ export async function stageHostedFiles(
   damaged?: NativeFile[],
   /** The target State's line-ending rules (`stateText`); files they convert get Git's working bytes. */
   text?: TextAttributes | null,
+  interrupt?: () => void,
 ) {
   await checkoutIo(async () => {
-    for (const directory of new Set(files.map(file => dirname(join(stage, file.path)))))
+    let sliceStart = Date.now();
+    for (const directory of new Set(files.map(file => dirname(join(stage, file.path))))) {
+      if (interrupt && Date.now() - sliceStart >= installSliceMs) {
+        await nextTurn();
+        sliceStart = Date.now();
+      }
+      interrupt?.();
       mkdirSync(directory, { recursive: true });
+    }
     mkdirSync(stage, { recursive: true });
     refuseFoldedCollisions(stage, files);
   });
   await mapExchange(files, 16, async file => {
+    interrupt?.();
     const target = join(stage, file.path),
       source = join(objects, file.blob);
     try {
@@ -261,8 +270,8 @@ export async function stageHostedFiles(
       // The shared machine cache can change between discovery and this clone.
       // Authenticate the independent installed inode before exposing it writable.
       invariant(
-        (await checkoutIo(() => fingerprintPrivateFile(target, 'INVALID_NATIVE_SOURCE'))).sha256 ===
-          file.blob,
+        (await checkoutIo(() => fingerprintPrivateFile(target, 'INVALID_NATIVE_SOURCE', interrupt)))
+          .sha256 === file.blob,
         'INVALID_NATIVE_SOURCE',
         'Cloned source differs from the selected content.',
       );

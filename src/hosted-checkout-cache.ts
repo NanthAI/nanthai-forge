@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fingerprintPrivateFile } from './files.js';
 import { invariant } from './errors.js';
 import { syncDirectory } from './state/durability.js';
-import { checkoutPathExists } from './hosted-checkout-files.js';
+import { checkoutPathExists, checkoutPathStat } from './hosted-checkout-files.js';
 import type { ContentPin } from './native-exchange.js';
 import type { SourcePackDownload } from './source-pack.js';
 import { downloadSourcePack, unpackSourcePackObjects } from './source-pack-archive.js';
@@ -160,8 +160,8 @@ export class HostedCheckoutCache {
   private async present(ids: string[], deferred: boolean) {
     const cached = await mapCheckoutIo(ids, async id => {
       const path = join(this.objects, id);
-      if (!checkoutPathExists(path)) return false;
-      const stat = lstatSync(path);
+      const stat = checkoutPathStat(path);
+      if (!stat) return false;
       // A machine entry is disposable, including one with unsafe permissions or
       // links. Refetch it instead of turning cache damage into a denied open.
       if (
@@ -256,8 +256,8 @@ export class HostedCheckoutCache {
       const found = await mapCheckoutIo(ids, async id => {
         const source = join(this.fallbackObjects!, id),
           path = join(temporary, id);
-        if (!checkoutPathExists(source)) return false;
-        const stat = lstatSync(source);
+        const stat = checkoutPathStat(source);
+        if (!stat) return false;
         if (this.fallbackObjects !== this.machine)
           invariant(
             stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1,
@@ -273,7 +273,9 @@ export class HostedCheckoutCache {
             'Machine object differs.',
           );
         } catch {
-          if (this.fallbackObjects === this.machine) await rm(source, { force: true });
+          // Repairing the shared store is best effort. A read-only or otherwise
+          // damaged entry must not prevent a verified private replacement.
+          if (this.fallbackObjects === this.machine) await rm(source, { force: true }).catch(() => undefined);
           return false;
         }
         await rename(path, join(this.objects, id));

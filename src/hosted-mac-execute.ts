@@ -31,7 +31,7 @@ import {
   type CheckoutObjectTransport,
 } from './hosted-checkout-cache.js';
 import { parseNativeState } from './state/format.js';
-import { installHostedCheckout } from './hosted-checkout-files.js';
+import { prepareMachineCheckout } from './hosted-mac-source.js';
 import { checkSubmodules, submoduleFailureCommand } from './submodule-materialize.js';
 import { checkEnvironment, checkProcessEnvironment, checkPassthrough } from './check-environment.js';
 import { checkPin, type HostedCheckRun } from './hosted-check.js';
@@ -238,14 +238,15 @@ export async function executeHostedMacCheck(
         ...(secretScan.allowChanges ? { secretAllow: secretScan.allowChanges } : {}),
       },
     });
-    await cache.ensure(state.files.map(file => file.blob));
-    signal.throwIfAborted();
     const checkout = join(root, 'source');
-    await mkdir(checkout, { mode: 0o700 });
-    // The root is private and removed after the run; a crash discards it, so no file needs an fsync.
-    await installHostedCheckout(checkout, cache.objects, state.files, {
-      interrupt: () => signal.throwIfAborted(),
-      durable: false,
+    const rawBlobs =
+      run.check.submodules !== false && state.files.some(file => file.mode === 'gitlink')
+        ? state.files
+            .filter(file => file.mode === 'gitlink' || file.path === '.gitmodules')
+            .map(file => file.blob)
+        : [];
+    await prepareMachineCheckout(checkout, cache, transport, state.files, signal, {
+      rawBlobs,
     });
     // Fetched once per run into this run's private root; removed with it. A refusal
     // fails the run through the ordinary result path, naming path, commit and URL.

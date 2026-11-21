@@ -112,6 +112,12 @@ landing queue's runner contract (`runner contract on …` in
 `tests/hosted-landing-prequeue.test.mjs`) passes on the GitHub Actions and the
 self-hosted adapter.
 
+On macOS, a runner with a same-volume machine object cache reuses its verified
+source objects. Each check still receives a fresh writable checkout. The runner
+copies and checks each file before use, falls back to a full private install if a
+copy fails verification, and keeps the existing private install when the machine
+cache is unavailable, read-only or on another volume.
+
 | Platform | Where it runs | Exact-source check | Runner contract |
 | --- | --- | --- | --- |
 | Linux x64 | GitHub-hosted `ubuntu-latest`, in every landing check | passes | passes |
