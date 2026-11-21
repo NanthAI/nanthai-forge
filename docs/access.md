@@ -176,6 +176,23 @@ after their first one ends; they return `BAD_ARGUMENT` with the next step to sen
 a new invitation in People using a new operation id. Explicit invitation and
 answer operation ids retain their original retry behavior.
 
+### Team invitations by address
+
+The team email invitation path is staged behind `FORGE_TEAM_EMAIL_INVITATIONS=1`.
+The switch is off by default. With it enabled, an owner invites an email
+address in **People and teams**. The owner can see and cancel the typed pending
+target regardless of whether an account uses that address. The invitation
+becomes team membership only after the person with the current verified
+address chooses **Accept** on Home. Declining leaves membership as it was.
+Blocking uses the same recipient-owned preference as project invitations.
+Removing a member ends earlier invitations to that account. A new invitation
+can be accepted after removal.
+
+The same inviter counters cover project and team invitations with the switch
+on (20 per UTC hour and 100 per UTC day for an inviter). The team path uses
+Home for delivery and is independent of the project invitation mail switch.
+Leave the team writer off until the owner approves applying the shared counters.
+
 ## Teams and organizations (proposed, `1e474c35`, `517523cf`)
 
 Teams exist today as owner-managed groups used for the landing-without-check choice and for read sharing of analysis imports. The proposal, GitHub's model:

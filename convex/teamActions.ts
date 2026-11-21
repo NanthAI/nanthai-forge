@@ -4,6 +4,9 @@ import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { action, accountAction } from './cliServer';
 import { emailRecipient } from './projectPeople';
+import { teamEmailInvitationsEnabled } from './projectInvitationPolicy';
+import { teamInvitationAnswerArgs } from './teamInvitationWrites';
+import { assertTeamEmailOperation } from './teamInvitationMembership';
 import { api, internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import { currentAccess } from './access';
@@ -20,7 +23,8 @@ export const addMember = accountAction('person')({
       invariant(user, 'GITHUB_UNAVAILABLE', 'Sign in to manage a team.');
       await ctx.runQuery(internal.teams.owned, { id, owner: user.subject });
       member = await checkForgeUser(member);
-      return await ctx.runMutation(internal.teams.add, { id, owner: user.subject, member });
+      await ctx.runMutation(internal.teams.add, { id, owner: user.subject, member });
+      return null;
     } catch (error) {
       return report(error);
     }
@@ -68,25 +72,72 @@ export const codescapes = action({
 });
 
 export const addByEmail = accountAction('person')({
-  args: { id: v.id('teams'), email: v.string() },
-  returns: v.null(),
-  handler: async (ctx, { id, email }): Promise<null> => {
+  args: {
+    id: v.id('teams'),
+    email: v.string(),
+    operationId: v.optional(v.string()),
+    pending: v.optional(v.literal(true)),
+  },
+  returns: v.union(v.null(), v.literal('pending')),
+  handler: async (ctx, { id, email, operationId, pending }): Promise<null | 'pending'> => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'GITHUB_UNAVAILABLE', 'Sign in to manage a team.');
-      const recipient = await ctx.runQuery(internal.teams.owned, { id, owner: user.subject, email });
-      const person = (await emailRecipient(email, recipient, true))!;
-      return await ctx.runMutation(internal.teams.add, {
+      assertTeamEmailOperation(operationId);
+      if (teamEmailInvitationsEnabled()) {
+        const result = await ctx.runMutation(internal.teamInvitationWrites.create, {
+          teamId: id,
+          target: email,
+          ...(operationId === undefined ? {} : { operationId }),
+        });
+        return operationId !== undefined && result === 'pending' ? 'pending' : null;
+      }
+      // A retry of a pending-mode request cannot switch to the direct grant path.
+      const lookup = await ctx.runQuery(internal.teams.owned, {
+        id,
+        owner: user.subject,
+        email,
+        ...(operationId === undefined ? {} : { operationId }),
+        ...(pending ? { pending } : {}),
+      });
+      if (lookup === 'pending') return operationId === undefined ? null : 'pending';
+      if (lookup === 'direct') return null;
+      invariant(lookup !== 'unavailable', 'BAD_ARGUMENT', 'Team email invitations are unavailable.');
+      const native = lookup?.recipient ?? null;
+      const person = (await emailRecipient(email, native, true))!;
+      const result = await ctx.runMutation(internal.teams.add, {
         id,
         owner: user.subject,
         member: person.id,
-        ...(recipient ? { email } : { legacyEmail: email }),
+        ...(native ? { email } : { legacyEmail: email }),
+        ...(operationId === undefined ? {} : { operationId }),
+      });
+      return operationId === undefined ? null : result;
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+export const answerInvitation = accountAction('person')({
+  args: teamInvitationAnswerArgs,
+  returns: v.null(),
+  handler: async (ctx, input): Promise<null> => {
+    try {
+      if (input.choice !== 'accept')
+        return await ctx.runMutation(internal.teamInvitationWrites.answer, input);
+      const proof = await ctx.runQuery(internal.teamInvitationWrites.prepareAccept, input);
+      if (!proof) return null;
+      const recipient = await emailRecipient(proof.email, proof.native, true);
+      return await ctx.runMutation(internal.teamInvitationWrites.answer, {
+        ...input,
+        providerSubject: recipient!.id,
       });
     } catch (error) {
       return report(error);
     }
   },
 });
+
 export const labels = action({
   args: { id: v.id('teams'), paginationOpts: paginationOptsValidator },
   returns: paginationResultValidator(v.object({ member: v.string(), label: v.string() })),

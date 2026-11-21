@@ -90,7 +90,13 @@ test('owner and recipient team invitation pages read bounded records at 400 and 
     const teamId = f.insert('teams', { name: 'Synthetic team', owner: 'owner', operationId: 'team' });
     f.insert('forgeAccounts', { owner: 'owner', handle: 'olive' });
     for (let i = 0; i < total; i++) {
-      f.insert('projectInvites', { teamId, email: address, inviter: 'owner', state: 'pending' });
+      f.insert('projectInvites', {
+        teamId,
+        email: address,
+        inviter: 'owner',
+        state: 'pending',
+        invitationEpoch: 0,
+      });
     }
     const owner = await f.call('Owner pending page', pending, { teamId });
     const ownerMeter = f.counts.at(-1);
@@ -110,7 +116,9 @@ test('owner and recipient team invitation pages read bounded records at 400 and 
       recipient,
     );
     assert.equal(new Set([...first.rows, ...next.rows].map(row => row.invitationId)).size, 50);
-    assert.equal(recipientMeter.readDocumentsByTable.projectInvites, 25);
+    assert.equal(first.rows.length, 25);
+    // 25 invitation rows plus one indexed revocation lookup per row.
+    assert.equal(recipientMeter.readDocumentsByTable.projectInvites, 50);
     assert.ok(recipientMeter.documents <= 102 && recipientMeter.readBytes < 32_000);
     assert.equal(recipientMeter.writes, 0);
     console.log(

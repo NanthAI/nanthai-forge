@@ -62,6 +62,7 @@ const people=${JSON.stringify(data)};
 let olderInvitation={id:'old-handle',email:'@older-person',state:'pending'};
 let rows=[{ invitationId:'recipient', projectName:'Compiler tools and documentation', inviterHandle:'olive', role:'read', state:'pending', expiresAt:Date.now()+5*86400000, href:'/-/olive/tools' },
 { invitationId:'old', projectName:'Old project', inviterHandle:'wren', role:'write', state:'expired', expiresAt:Date.now()-2*86400000, href:'/-/wren/old' }];
+let teamRows=[{ invitationId:'team-invite', teamName:'Documentation team', inviterHandle:'olive', state:'pending', href:'/-/account/people' }];
 export function useQuery(ref,args){useSyncExternalStore(fn=>{listeners.add(fn);return()=>listeners.delete(fn);},()=>version); const name=getFunctionName(ref);
 if(args==='skip')return undefined;
 if(name==='projectContributors:list')return [];
@@ -71,14 +72,20 @@ if(name==='projectAccess:people'&&args.limit===1){
   return {...people,invited:[people.invited[0]],invitationCursor:'ended'};
 }
 if(name==='projectAccess:people')return people;
-if(name==='projectInvitationInbox:inbox')return {rows:args.kind==='handle'?rows:[],cursor:null};
+if(name==='projectInvitationInbox:inbox'){
+  const team=location.pathname.endsWith('/team-recipient');
+  return {rows:team?(args.kind==='email'&&args.includeTeams?teamRows:[]):(args.kind==='handle'?rows:[]),cursor:null};
+}
 if(name==='projectInvitationInbox:blocked')return {rows:[],cursor:null};
 return undefined;}
 const mutation=async(ref,args)=>{
   const name=getFunctionName(ref);
   window.calls??=[];
   window.calls.push({name,args});
-  if(args.choice)rows=rows.filter(row=>row.invitationId!==args.invitationId);
+  if(args.choice){
+    rows=rows.filter(row=>row.invitationId!==args.invitationId);
+    teamRows=teamRows.filter(row=>row.invitationId!==args.invitationId);
+  }
   if(name==='projectContributors:cancelInvite'&&args.id===olderInvitation.id)
     olderInvitation={...olderInvitation,state:'cancelled'};
   emit();
@@ -138,7 +145,7 @@ if(legacy){
   t.after(() => browser.close());
   for (const width of [1440, 390])
     for (const theme of ['dark', 'light'])
-      for (const mode of ['owner', 'recipient', 'legacy']) {
+      for (const mode of ['owner', 'recipient', 'team-recipient', 'legacy']) {
         const context = await browser.newContext({
           viewport: { width, height: width === 390 ? 844 : 1000 },
           colorScheme: theme,
@@ -219,6 +226,19 @@ if(legacy){
             await page.getByRole('link', { name: 'Open the project', exact: true }).getAttribute('href'),
             '/-/olive/tools',
           );
+        }
+        if (mode === 'team-recipient') {
+          await page.getByText('Documentation team', { exact: true }).waitFor();
+          await page.getByText('join this team', { exact: false }).waitFor();
+          await page.getByRole('button', { name: 'Accept', exact: true }).click();
+          await page.getByRole('link', { name: 'Open People and teams', exact: true }).waitFor();
+          assert.deepEqual(
+            await page.evaluate(() =>
+              window.calls.map(({ name, args }) => [name, args.invitationId, args.choice]),
+            ),
+            [['teamActions:answerInvitation', 'team-invite', 'accept']],
+          );
+          assert.equal(await page.getByRole('button', { name: 'Accept', exact: true }).count(), 0);
         }
         if (mode === 'legacy') {
           const more = page.getByRole('button', { name: 'More invitations', exact: true });

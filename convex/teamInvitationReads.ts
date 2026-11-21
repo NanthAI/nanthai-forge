@@ -6,6 +6,7 @@ import { requireOwnerPerson } from './ownerPerson';
 import { invitationBlock } from './projectInvitationRecipient';
 import { teamOwner } from './teams';
 import { report } from './errors';
+import { teamInvitationWasRevoked } from './teamInvitationMembership';
 import { invitationPageCursor, invitationPageSize } from './projectInvitationPolicy';
 
 type TeamInvitation = Doc<'projectInvites'> & { teamId: Id<'teams'>; state: 'pending' };
@@ -17,6 +18,7 @@ export function pendingTeamInvitation(row: Doc<'projectInvites'>): row is TeamIn
 export async function teamInboxRow(ctx: QueryCtx, row: TeamInvitation, recipient: string) {
   const team = await ctx.db.get(row.teamId);
   if (!team || team.removal || team.owner !== row.inviter) return null;
+  if (await teamInvitationWasRevoked(ctx, row, recipient)) return null;
   if ((await invitationBlock(ctx, recipient, team.owner))?.blocked) return null;
   const account = await ctx.db
     .query('forgeAccounts')

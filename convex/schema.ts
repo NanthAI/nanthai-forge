@@ -821,7 +821,9 @@ export default defineSchema({
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_project_and_state_and_expiry', ['projectId', 'kind', 'state', 'expiresAt'])
     // index-order: caller: convex/teamInvitationReads.ts#pending; order: show the newest pending invitations first.
-    .index('by_teamId_and_state', ['teamId', 'state']),
+    .index('by_teamId_and_state', ['teamId', 'state'])
+    .index('by_teamId_and_operationId', ['teamId', 'operationId'])
+    .index('by_teamId_and_email_and_state', ['teamId', 'email', 'state']),
   projectContributors: defineTable(projectContributorFields)
     .index('by_project_and_contributor', ['projectId', 'contributor'])
     .index('by_contributor', ['contributor']),
@@ -958,6 +960,7 @@ export default defineSchema({
   teams: defineTable({
     owner: v.string(),
     name: v.string(),
+    invitationEpoch: v.optional(v.number()),
     operationId: v.string(),
     removal: v.optional(v.union(v.literal('deleting'), v.literal('deleted'))),
     removalOperation: v.optional(v.string()),

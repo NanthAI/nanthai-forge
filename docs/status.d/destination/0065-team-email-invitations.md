@@ -1,0 +1,1 @@
+Team invitations by email are staged behind a default-off setting. With it enabled, team owners see the typed address as pending and can cancel it. The person with the current verified address accepts or declines on Home. Team invitations use the shared inviter counter and the existing account block preference. See [team invitations](../../access.md#team-invitations-by-address).

@@ -61,17 +61,25 @@ export const purge = internalMutation({
   handler: async (ctx, { id }) => {
     const team = await ctx.db.get(id);
     if (team?.removal !== 'deleting') return null;
-    for (const kind of ['teamMembers', 'teamImports'] as const) {
-      const rows =
-        kind === 'teamMembers'
-          ? await ctx.db
-              .query(kind)
-              .withIndex('by_teamId_and_member', q => q.eq('teamId', id))
-              .take(50)
-          : await ctx.db
-              .query(kind)
-              .withIndex('by_teamId_and_importId', q => q.eq('teamId', id))
-              .take(50);
+    const pages = [
+      () =>
+        ctx.db
+          .query('teamMembers')
+          .withIndex('by_teamId_and_member', q => q.eq('teamId', id))
+          .take(50),
+      () =>
+        ctx.db
+          .query('teamImports')
+          .withIndex('by_teamId_and_importId', q => q.eq('teamId', id))
+          .take(50),
+      () =>
+        ctx.db
+          .query('projectInvites')
+          .withIndex('by_teamId_and_state', q => q.eq('teamId', id))
+          .take(50),
+    ];
+    for (const page of pages) {
+      const rows = await page();
       for (const row of rows) await ctx.db.delete(row._id);
       if (rows.length === 50) {
         await ctx.db.patch(id, { task: undefined });

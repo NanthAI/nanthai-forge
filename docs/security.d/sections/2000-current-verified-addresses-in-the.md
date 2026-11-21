@@ -20,12 +20,14 @@ checks the live session and a fresh account-bound passkey or GitHub proof before
 revoking other sessions; no session id supplied by a client selects another
 account's sessions.
 
-Team email additions retain the exact current verified native binding and the
-configured legacy provider comparison. Different account matches grant nothing;
-same-account matches proceed and the grant transaction rechecks the native
-binding. Project membership uses the pending invitation path instead: retained
-agent approvals and older project add APIs create invitations and the recipient
-accepts. A completed invitation retry performs no directory lookup, grants no
+Team email grants check the exact current verified native binding and the
+configured legacy provider comparison. The granting transaction rechecks the
+native binding. With the default-off team invitation switch enabled, this
+comparison happens only when the recipient accepts. Creation stores a pending
+address without looking up any recipient. The owner's pending list shows the
+typed target and state. Project membership also uses explicit acceptance:
+retained agent approvals and older project add APIs create invitations and
+the recipient accepts. A completed invitation retry performs no directory lookup, grants no
 membership and sends no second email. Legacy add APIs explain an ended invitation
 instead of silently succeeding. Pre-change invitation rows require the original
 operation's inviter to remain the project owner. Removing membership invalidates

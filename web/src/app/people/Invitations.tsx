@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useRef, useState } from 'react';
-import { useMutation, useQuery } from 'convex/react';
+import { useAction, useMutation, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
-import type { Id } from '../../../../convex/_generated/dataModel';
 import { Band, State } from '../../ds';
 import { A } from '../frames';
 
 type Inbox = NonNullable<ReturnType<typeof useQuery<typeof api.projectInvitationInbox.inbox>>>;
-type ProjectInvitation = Extract<Inbox['rows'][number], { projectName: string }>;
+type Invitation = Inbox['rows'][number];
+type Choice = 'accept' | 'decline' | 'block';
 function InvitationRows({
   rows,
   answer,
   busy,
 }: {
-  rows: ProjectInvitation[];
+  rows: Invitation[];
   busy: string;
-  answer: (id: Id<'projectInvites'>, choice: 'accept' | 'decline' | 'block', href: string) => void;
+  answer: (row: Invitation, choice: Choice) => void;
 }) {
   return (
     <>
@@ -26,20 +26,22 @@ function InvitationRows({
           data-weight={row.state === 'pending' ? 'act' : 'ref'}
         >
           <span className="nm">
-            <b>{row.projectName}</b>
+            <b>{'teamName' in row ? row.teamName : row.projectName}</b>
             <span className="sub">
               {row.inviterHandle ? `@${row.inviterHandle}` : 'A Forge person'} invited you to{' '}
-              {row.role === 'write' ? 'read and change' : 'read'} ·{' '}
+              {'teamName' in row ? 'join this team' : row.role === 'write' ? 'read and change' : 'read'} ·{' '}
               <State word={row.state === 'pending' ? 'Needs you' : 'Set aside'}>
                 {row.state === 'pending' ? 'Pending' : 'Expired'}
               </State>
             </span>
-            <span className="sub">
-              {row.state === 'pending' ? 'Expires' : 'Expired'}{' '}
-              <time dateTime={new Date(row.expiresAt).toISOString()}>
-                {new Date(row.expiresAt).toLocaleDateString()}
-              </time>
-            </span>
+            {'expiresAt' in row ? (
+              <span className="sub">
+                {row.state === 'pending' ? 'Expires' : 'Expired'}{' '}
+                <time dateTime={new Date(row.expiresAt).toISOString()}>
+                  {new Date(row.expiresAt).toLocaleDateString()}
+                </time>
+              </span>
+            ) : null}
           </span>
           {row.state === 'pending' ? (
             <span className="btns">
@@ -49,7 +51,7 @@ function InvitationRows({
                   key={choice}
                   className={`btn sm ${choice === 'accept' ? 'key' : 'ghost'}`}
                   disabled={busy === row.invitationId}
-                  onClick={() => answer(row.invitationId, choice, row.href)}
+                  onClick={() => answer(row, choice)}
                 >
                   {choice === 'accept'
                     ? 'Accept'
@@ -67,28 +69,38 @@ function InvitationRows({
     </>
   );
 }
-export default function Invitations() {
+export default function Invitations({ onJoinTeam }: { onJoinTeam?: () => void }) {
   const [handleCursor, setHandleCursor] = useState<string | null>(null),
     [emailCursor, setEmailCursor] = useState<string | null>(null);
   const handles = useQuery(api.projectInvitationInbox.inbox, { kind: 'handle', cursor: handleCursor });
-  const emails = useQuery(api.projectInvitationInbox.inbox, { kind: 'email', cursor: emailCursor });
+  const emails = useQuery(api.projectInvitationInbox.inbox, {
+    kind: 'email',
+    cursor: emailCursor,
+    includeTeams: true,
+  });
   const answer = useMutation(api.projectInvitationAnswers.answer);
+  const answerTeam = useAction(api.teamActions.answerInvitation);
   const attempts = useRef(new Map<string, string>());
   const [busy, setBusy] = useState(''),
     [problem, setProblem] = useState(''),
-    [joined, setJoined] = useState<string | null>(null);
+    [joined, setJoined] = useState<{ href: string; team: boolean } | null>(null);
   const [preferences, setPreferences] = useState(false);
-  const rows = [...(handles?.rows ?? []), ...(emails?.rows ?? [])]
-    .filter(row => 'projectName' in row)
-    .sort((a, b) => Number(a.state !== 'pending') - Number(b.state !== 'pending'));
-  const act = (invitationId: Id<'projectInvites'>, choice: 'accept' | 'decline' | 'block', href: string) => {
+  const rows = [...(handles?.rows ?? []), ...(emails?.rows ?? [])].sort(
+    (a, b) => Number(a.state !== 'pending') - Number(b.state !== 'pending'),
+  );
+  const act = (row: Invitation, choice: Choice) => {
+    const { invitationId, href } = row;
+    const team = 'teamName' in row;
     const key = `${invitationId}:${choice}`;
     if (!attempts.current.has(key)) attempts.current.set(key, crypto.randomUUID());
     setBusy(invitationId);
     setProblem('');
-    void answer({ invitationId, choice, operationId: attempts.current.get(key)! })
+    void (team ? answerTeam : answer)({ invitationId, choice, operationId: attempts.current.get(key)! })
       .then(() => {
-        if (choice === 'accept') setJoined(href);
+        if (choice === 'accept') {
+          setJoined({ href, team });
+          if (team) onJoinTeam?.();
+        }
       })
       .catch((error: { data?: { message?: string } }) =>
         setProblem(error.data?.message ?? 'Forge did not answer. Retry your answer.'),
@@ -106,7 +118,8 @@ export default function Invitations() {
         ) : null}
         {joined ? (
           <p className="quietline" role="status">
-            Invitation accepted. <A href={joined}>Open the project</A>
+            Invitation accepted.{' '}
+            <A href={joined.href}>{joined.team ? 'Open People and teams' : 'Open the project'}</A>
           </p>
         ) : null}
         {!handles || !emails ? (

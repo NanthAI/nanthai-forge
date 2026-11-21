@@ -9,6 +9,15 @@ import { isDeviceIdentity } from './cliServer';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { memberHandle } from './teamHandles';
+import {
+  addTeamMembership,
+  endTeamInvitations,
+  recordDirectTeamEmail,
+  teamEmailOperationKey,
+  teamEmailReplay,
+  teamInvitationOperation,
+} from './teamInvitationMembership';
+import { teamEmailInvitationsEnabled } from './projectInvitationPolicy';
 
 const item = v.object({ id: v.id('teams'), name: v.string(), owner: v.string() });
 export async function teamOwner(ctx: QueryCtx | MutationCtx, id: Id<'teams'>, owner: string | undefined) {
@@ -69,7 +78,13 @@ export const create = accountMutation('write')({
 });
 export const list = query({
   args: { paginationOpts: paginationOptsValidator },
-  returns: paginationResultValidator(item),
+  returns: paginationResultValidator(
+    v.object({
+      ...item.fields,
+      emailInvitations: v.optional(v.literal(true)),
+      canReadInvitations: v.optional(v.literal(true)),
+    }),
+  ),
   handler: async (ctx, { paginationOpts }) => {
     const user = await ctx.auth.getUserIdentity();
     if (!user) return { page: [], isDone: true, continueCursor: '' };
@@ -80,7 +95,18 @@ export const list = query({
     const page = [];
     for (const row of result.page) {
       const team = await ctx.db.get(row.teamId);
-      if (team && !team.removal) page.push({ id: team._id, name: team.name, owner: team.owner });
+      if (team && !team.removal)
+        page.push({
+          id: team._id,
+          name: team.name,
+          owner: team.owner,
+          ...(team.owner === user.subject && teamEmailInvitationsEnabled()
+            ? { emailInvitations: true as const }
+            : {}),
+          ...(team.owner === user.subject && team.invitationEpoch !== undefined
+            ? { canReadInvitations: true as const }
+            : {}),
+        });
     }
     return { ...result, page };
   },
@@ -102,11 +128,29 @@ export const members = query({
   },
 });
 export const owned = internalQuery({
-  args: { id: v.id('teams'), owner: v.string(), email: v.optional(v.string()) },
-  returns: v.union(v.string(), v.null()),
-  handler: async (ctx, { id, owner, email }) => {
-    await teamOwner(ctx, id, owner);
-    return email === undefined ? null : findVerifiedRecipient(ctx, email);
+  args: {
+    id: v.id('teams'),
+    owner: v.string(),
+    email: v.optional(v.string()),
+    operationId: v.optional(v.string()),
+    pending: v.optional(v.literal(true)),
+  },
+  returns: v.union(
+    v.null(),
+    v.object({ recipient: v.union(v.string(), v.null()) }),
+    v.literal('direct'),
+    v.literal('pending'),
+    v.literal('unavailable'),
+  ),
+  handler: async (ctx, { id, owner, email, operationId, pending }) => {
+    const team = await teamOwner(ctx, id, owner);
+    if (email === undefined) return null;
+    if (operationId !== undefined || team.invitationEpoch !== undefined) {
+      const replay = await teamInvitationOperation(ctx, id, teamEmailOperationKey(email, operationId));
+      if (replay) return teamEmailReplay(replay, email);
+    }
+    if (pending) return 'unavailable' as const;
+    return { recipient: await findVerifiedRecipient(ctx, email) };
   },
 });
 export const add = internalMutation({
@@ -116,27 +160,34 @@ export const add = internalMutation({
     member: v.string(),
     email: v.optional(v.string()),
     legacyEmail: v.optional(v.string()),
+    operationId: v.optional(v.string()),
   },
-  returns: v.null(),
-  handler: async (ctx, { id, owner, member, email, legacyEmail }) => {
+  returns: v.union(v.null(), v.literal('pending')),
+  handler: async (ctx, { id, owner, member, email, legacyEmail, operationId }) => {
     invariant(
       !isDeviceIdentity((await ctx.auth.getUserIdentity()) ?? {}),
       'AUTH_SCOPE_DENIED',
       'Add team members in your Forge browser.',
     );
-    await teamOwner(ctx, id, owner);
+    const team = await teamOwner(ctx, id, owner);
+    const address = email ?? legacyEmail;
+    if (address && (operationId !== undefined || team.invitationEpoch !== undefined)) {
+      const replay = await teamInvitationOperation(ctx, id, teamEmailOperationKey(address, operationId));
+      if (replay) return teamEmailReplay(replay, address) === 'pending' ? 'pending' : null;
+    }
+    invariant(
+      !address || !teamEmailInvitationsEnabled(),
+      'WORK_OPERATION_CHANGED',
+      'Team email invitations are now available. Retry your request.',
+    );
     invariant(
       !email || (await currentEmailRecipient(ctx, email, member, true)),
       'BAD_ARGUMENT',
       'No Forge account currently matches that verified address.',
     );
     if (legacyEmail) await currentEmailRecipient(ctx, legacyEmail, member, false);
-    const old = await ctx.db
-      .query('teamMembers')
-      .withIndex('by_teamId_and_member', q => q.eq('teamId', id).eq('member', member))
-      .unique();
-    if (!old)
-      await ctx.db.insert('teamMembers', { teamId: id, member, handle: await memberHandle(ctx, member) });
+    await addTeamMembership(ctx, id, member);
+    if (address && operationId !== undefined) await recordDirectTeamEmail(ctx, id, address, operationId);
     return null;
   },
 });
@@ -151,7 +202,10 @@ export const removeMember = accountMutation('write')({
         .query('teamMembers')
         .withIndex('by_teamId_and_member', q => q.eq('teamId', id).eq('member', member))
         .unique();
-      if (row) await ctx.db.delete(row._id);
+      if (row) {
+        await endTeamInvitations(ctx, team, member);
+        await ctx.db.delete(row._id);
+      }
       return null;
     } catch (error) {
       return report(error);

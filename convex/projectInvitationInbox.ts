@@ -46,6 +46,7 @@ export const inbox = query({
   handler: async (ctx, input) => {
     const user = await invitationPerson(ctx),
       email = input.kind === 'email' ? await recipientEmail(ctx, user) : null;
+    if (input.kind === 'email' && !email) return { rows: [], cursor: null };
     const selected =
       input.kind === 'email'
         ? ctx.db.query('projectInvites').withIndex('by_email', q => q.eq('email', email ?? ''))

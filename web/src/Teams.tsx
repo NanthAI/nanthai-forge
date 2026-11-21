@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useReadRetry } from './ui/read-retry';
 import { ErrorToast } from './ui/Toast';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useViewerHandle } from './shell/viewer';
 import { useConvex, usePaginatedQuery } from 'convex/react';
 import type { FunctionReturnType } from 'convex/server';
 import type { Id } from '../../convex/_generated/dataModel';
 import { api } from '../../convex/_generated/api';
 import { hostedError } from './snapshot';
+import TeamPendingInvitations from './app/people/TeamPendingInvitations';
 
-type Team = { id: Id<'teams'>; name: string; owner: string };
+type Team = FunctionReturnType<typeof api.teams.list>['page'][number];
 export default function Teams({ open }: { open: (id: Id<'imports'>) => void }) {
   const client = useConvex(),
     viewer = useViewerHandle();
@@ -99,6 +100,7 @@ function TeamDetail({
     [error, setError] = useState(''),
     [saved, setSaved] = useState('');
   const viewer = useViewerHandle();
+  const invitations = useRef(new Map<string, { operationId: string; pending?: true }>());
   const [labels, setLabels] = useState<Record<string, string>>({});
   const memberKey = results.map(row => row.member).join(',');
   useEffect(() => {
@@ -125,13 +127,13 @@ function TeamDetail({
     };
   }, [client, team.id, owner, memberKey, readAttempt]);
   const [imports, setImports] = useState<FunctionReturnType<typeof api.teamActions.codescapes> | null>(null);
-  async function act(run: () => Promise<unknown>, message: string) {
+  async function act(run: () => Promise<void | string>, message?: string) {
     setBusy(true);
     setError('');
     setSaved('');
     try {
-      await run();
-      setSaved(message);
+      const result = await run();
+      setSaved(result ?? message ?? '');
     } catch (e) {
       setError(hostedError(e));
     } finally {
@@ -162,13 +164,25 @@ function TeamDetail({
             onSubmit={e => {
               e.preventDefault();
               void act(async () => {
-                await client.action(api.teamActions.addByEmail, { id: team.id, email: member });
+                const email = member.trim();
+                const attempt = invitations.current.get(email) ?? {
+                  operationId: crypto.randomUUID(),
+                  ...(team.emailInvitations ? { pending: team.emailInvitations } : {}),
+                };
+                invitations.current.set(email, attempt);
+                const result = await client.action(api.teamActions.addByEmail, {
+                  id: team.id,
+                  email,
+                  ...attempt,
+                });
+                invitations.current.delete(email);
                 setMember('');
-              }, 'Team membership saved.');
+                return result === 'pending' ? 'Team invitation pending.' : 'Team membership saved.';
+              });
             }}
           >
             <label>
-              Team member email
+              {team.emailInvitations ? 'Invite by email' : 'Team member email'}
               <input
                 type="email"
                 required
@@ -177,8 +191,11 @@ function TeamDetail({
                 placeholder="name@example.com"
               />
             </label>
-            <button disabled={busy}>Add team member</button>
+            <button disabled={busy}>{team.emailInvitations ? 'Invite to team' : 'Add team member'}</button>
           </form>
+          {team.emailInvitations || team.canReadInvitations ? (
+            <TeamPendingInvitations teamId={team.id} />
+          ) : null}
           {status === 'LoadingFirstPage' ? (
             <p>Loading members…</p>
           ) : (
@@ -192,10 +209,9 @@ function TeamDetail({
                     <button
                       disabled={busy}
                       onClick={() =>
-                        void act(
-                          () => client.mutation(api.teams.removeMember, { id: team.id, member: row.member }),
-                          'Team membership removed.',
-                        )
+                        void act(async () => {
+                          await client.mutation(api.teams.removeMember, { id: team.id, member: row.member });
+                        }, 'Team membership removed.')
                       }
                     >
                       Remove team member

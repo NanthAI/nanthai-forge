@@ -24,6 +24,7 @@ import { isDeviceIdentity, query } from './cliServer';
 import type { QueryCtx } from './_generated/server';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { teamEmailInvitationsEnabled } from './projectInvitationPolicy';
 
 export const TEAMS_PAGE_MAX = 20;
 export const MEMBERS_SHOWN = 12;
@@ -40,6 +41,8 @@ const accountTeam = v.object({
   name: v.string(),
   role: v.union(v.literal('owner'), v.literal('member')),
   ownerHandle: v.union(v.string(), v.null()),
+  emailInvitations: v.optional(v.literal(true)),
+  canReadInvitations: v.optional(v.literal(true)),
   members: v.array(member),
   /** More members than shown. */
   more: v.boolean(),
@@ -94,6 +97,8 @@ async function teamRow(ctx: QueryCtx, team: Doc<'teams'>, mine: Doc<'teamMembers
     name: team.name,
     role: owns ? ('owner' as const) : ('member' as const),
     ownerHandle: ownerRow?.handle ?? null,
+    ...(owns && teamEmailInvitationsEnabled() ? { emailInvitations: true as const } : {}),
+    ...(owns && team.invitationEpoch !== undefined ? { canReadInvitations: true as const } : {}),
     members: rows.slice(0, MEMBERS_SHOWN).map(row => ({
       handle: row.handle ?? null,
       you: row.member === viewer,

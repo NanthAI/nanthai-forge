@@ -11,8 +11,9 @@ import {
   isInvitationRecipient,
   invitationBlock,
   recipientEmail,
+  setInvitationBlock,
 } from './projectInvitationRecipient';
-import { invitationStatus, invitationEmailHash } from './projectInvitationPolicy';
+import { invitationStatus } from './projectInvitationPolicy';
 import { syncPersonOrder } from './accountProjectOrder';
 import { invitationInviter, invitationWasRevoked } from './projectInvitationRevocation';
 
@@ -92,21 +93,7 @@ export const answer = accountMutation('person')({
         await grant(ctx, row.projectId, user.subject, row.role ?? 'write');
       if (input.choice === 'block') {
         const address = row.recipient ? await recipientEmail(ctx, user, { anyAge: true }) : row.email;
-        const emailHash = address ? invitationEmailHash(address) : blocked?.emailHash;
-        if (blocked)
-          await ctx.db.patch(blocked._id, {
-            blocked: true,
-            version: (blocked.version ?? 0) + 1,
-            ...(emailHash ? { emailHash } : {}),
-          });
-        else
-          await ctx.db.insert('invitationBlocks', {
-            recipient: user.subject,
-            inviter: project.owner,
-            blocked: true,
-            version: 1,
-            ...(emailHash ? { emailHash } : {}),
-          });
+        await setInvitationBlock(ctx, user.subject, project.owner, blocked, address);
       }
       await ctx.db.patch(row._id, {
         state: input.choice === 'accept' ? 'accepted' : 'declined',
