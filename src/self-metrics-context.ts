@@ -16,6 +16,7 @@ export type MetricContextLookup =
   | { kind: 'run'; id: string }
   | { kind: 'intent'; id: string }
   | { kind: 'lane'; id: string }
+  | { kind: 'root'; stream: 'attempts' | 'runs'; id: string }
   | { kind: 'failed-input'; intentId: string; head: string }
   | { kind: 'passed-key'; reuseKey: string };
 
@@ -28,11 +29,13 @@ export type MetricContextRow = {
 
 export const metricContextKey = (generation: string, key: string) =>
   'metric-context-v1:' + canonicalPayload(generation) + ':' + key;
+export const metricAliasGeneration = 'aliases-1';
 const key = (...parts: string[]) => canonicalPayload(parts);
-const rowKey = (kind: MetricContextStream) => key('row', kind);
+export const metricMemberKey = (kind: 'intent' | 'lane' | 'failed-input', ...identity: string[]) =>
+  metricContextKey(metricAliasGeneration, key('member', kind, ...identity));
 // Allow timestamp assignment just before or after the commit. Restored/imported
 // runs can have a larger offset and use the separate creation-bounded selection.
-const runStartSlopMs = 60_000;
+export const metricTimeSlopMs = 60_000;
 const dayMs = 86_400_000;
 const shiftedBillFamily = (day: number) => `bill-runs-shifted:${day}`;
 
@@ -74,14 +77,14 @@ export function metricContextRange(
   });
   switch (lookup.kind) {
     case 'created':
-      return exact(rowKey(lookup.stream), from, to, true);
+      return exact(key('row', lookup.stream), from, to, true);
     case 'activity':
       return time(lookup.stream + '-activity', from, to);
     case 'bill-runs':
       return time(
         'runs-started',
-        Math.max(lookup.from, context - runStartSlopMs),
-        Math.min(lookup.to, from + runStartSlopMs),
+        Math.max(lookup.from, context - metricTimeSlopMs),
+        Math.min(lookup.to, from + metricTimeSlopMs),
       );
     case 'bill-runs-shifted':
       return time(shiftedBillFamily(lookup.day), lookup.from, lookup.to);
@@ -91,9 +94,15 @@ export function metricContextRange(
     case 'entry':
       return exact(key('entry', lookup.id));
     case 'entry-retry':
-      return exact(key('entry-retry', lookup.id));
+      return exact(key('entry-retry', lookup.id), context - metricTimeSlopMs, to + metricTimeSlopMs);
+    case 'root':
+      return exact(
+        key('root', lookup.stream, lookup.id),
+        context - metricTimeSlopMs,
+        from + metricTimeSlopMs,
+      );
     case 'attempt-run':
-      return exact(key('attempt-run', lookup.id));
+      return exact(key('attempt-run', lookup.id), context - metricTimeSlopMs, to + metricTimeSlopMs);
     case 'run':
       return exact(key('run', lookup.id));
     case 'intent':
@@ -107,7 +116,7 @@ export function metricContextRange(
   }
 }
 
-type ProjectableMetricContextRow = Omit<MetricContextRow, 'row'> & {
+type ProjectableMetricContextRow = Pick<MetricContextRow, 'stream' | 'sourceCreatedAt'> & {
   row: {
     id: string;
     at: string;
@@ -122,32 +131,21 @@ type ProjectableMetricContextRow = Omit<MetricContextRow, 'row'> & {
     admissionRun?: { runId: string } | null;
     sharedBatch?: { runId: string } | null;
     retry?: { supersedes: string };
+    inputPin?: { sha256: string } | null;
   };
 };
 
-/** Associations store only the primary stream; creation time and original ID
- * address the primary row under the same index. Multiple inputs can name one key. */
-export function metricContextFacts(
-  generation: string,
-  { stream, sourceCreatedAt, sourceId, row }: ProjectableMetricContextRow,
-  inputs: readonly { laneId: string; intentId: string; head: string }[],
-) {
-  const primary = {
-    key: metricContextKey(generation, rowKey(stream)),
-    sourceCreatedAt,
-    sourceId,
-    value: canonicalPayload(row),
-  };
+/** The same key derivation selects new aliases and rechecks live hits. */
+export function metricContextKeys({ stream, sourceCreatedAt, row }: ProjectableMetricContextRow) {
   const lookups = new Set<string>();
   const at = Date.parse(row.at);
   const end = row.endedAt ? Date.parse(row.endedAt) : NaN;
   for (const time of [at, end]) if (time > sourceCreatedAt) lookups.add(timeKey(stream + '-activity', time));
   if (stream === 'runs') {
-    lookups.add(key('run', row.id));
     if (row.started)
       lookups.add(
         timeKey(
-          Math.abs(at - sourceCreatedAt) <= runStartSlopMs
+          Math.abs(at - sourceCreatedAt) <= metricTimeSlopMs
             ? 'runs-started'
             : shiftedBillFamily(Math.floor(sourceCreatedAt / dayMs)),
           at,
@@ -155,25 +153,13 @@ export function metricContextFacts(
       );
     if (row.fullSuite && row.endedAt) lookups.add(key('full'));
     if (row.endedAt && row.reuseKey && row.status === 'passed') lookups.add(key('passed-key', row.reuseKey));
-    if (row.endedAt && (row.status === 'failed' || row.status === 'interrupted'))
-      for (const input of inputs) lookups.add(key('failed-input', input.intentId, input.head));
+    if (row.inputPin && row.endedAt && (row.status === 'failed' || row.status === 'interrupted'))
+      lookups.add(key('root', stream, row.inputPin.sha256));
   } else {
-    lookups.add(key('entry', row.submissionId ?? row.id));
     if (row.retry) lookups.add(key('entry-retry', row.retry.supersedes));
     for (const id of [row.runId, row.admissionRun?.runId, row.sharedBatch?.runId, ...(row.runIds ?? [])])
       if (id) lookups.add(key('attempt-run', id));
-    for (const input of inputs) {
-      lookups.add(key('intent', input.intentId));
-      lookups.add(key('lane', input.laneId));
-    }
+    if (stream === 'attempts' && row.inputPin) lookups.add(key('root', stream, row.inputPin.sha256));
   }
-  return [
-    primary,
-    ...[...lookups].map(key => ({
-      key: metricContextKey(generation, key),
-      sourceCreatedAt,
-      sourceId,
-      value: stream,
-    })),
-  ];
+  return lookups;
 }

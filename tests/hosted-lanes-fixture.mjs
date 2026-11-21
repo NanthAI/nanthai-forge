@@ -94,6 +94,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         duplicateReadDocumentsByTable: {},
         duplicateReadBytesByTable: {},
         writes: 0,
+        writeRounds: 0,
         indexEntriesWritten: 0,
         indexEntriesRemoved: 0,
         writeBytes: 0,
@@ -113,6 +114,11 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
           markWrites: 0,
           markWriteBytes: 0,
         },
+      };
+      let inFlightWrites = 0;
+      const beginWrite = () => {
+        if (inFlightWrites++ === 0) meter.writeRounds++;
+        queueMicrotask(() => inFlightWrites--);
       };
       const lineKind = (table, row, hint) =>
         table === 'projectLiveLineLanes'
@@ -287,6 +293,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
             return read(table, rows => [rows.get(id) ?? null])[0];
           },
           delete: async id => {
+            beginWrite();
             const table = locate(id);
             if (!table) return;
             lineWrite(table, view(table).get(id));
@@ -298,6 +305,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
             meter.writes++;
           },
           insert: async (table, value) => {
+            beginWrite();
             assertWorkRecordDomain(table, value, legacyWorkRecords);
             const id = `${table}-${++serial}`;
             // Real creation times are wall-clock; retention checks (Issue b78ca196) compare them with Date.now().
@@ -312,11 +320,13 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
             return id;
           },
           replace: async (id, value) => {
+            beginWrite();
             const table = locate(id),
               old = view(table).get(id);
             put(table, id, updatedDocument(old, value, true));
           },
           patch: async (id, value) => {
+            beginWrite();
             const table = locate(id);
             put(table, id, updatedDocument(view(table).get(id), value));
           },

@@ -1,23 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { streamQuery } from 'convex-helpers/server/pagination';
 import type { QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
-import schema from './schema';
 import { invariant } from '../src/errors';
 import { digest } from '../src/state/hash';
 import {
-  metricContextRange,
   metricContextStreams,
-  metricContextKey,
   type MetricContextLookup,
   type MetricContextRow,
-  type MetricContextStream,
 } from '../src/self-metrics-context';
+import { metricContextCoverage } from './projectMetricContextCoverage';
+import { metricContextSources, metricRowBytes, type MetricLiveRow } from './projectMetricContextSources';
+import {
+  isRelatedMetricContext,
+  metricContextAliases,
+  validateMetricCursor,
+  type MetricIndexKey,
+  type MetricJoinCursor,
+} from './projectMetricContextAliases';
 
-const index = 'by_project_and_key_and_source_time_and_id';
 const stream = v.union(...metricContextStreams.map(name => v.literal(name)));
-
 export const metricContextLookupValidator = v.union(
   ...(['created', 'activity'] as const).map(kind => v.object({ kind: v.literal(kind), stream })),
   v.object({ kind: v.literal('bill-runs'), from: v.number(), to: v.number() }),
@@ -30,30 +32,13 @@ export const metricContextLookupValidator = v.union(
   v.object({ kind: v.literal('passed-key'), reuseKey: v.string() }),
 );
 
-export function metricContextCoverage(project: Doc<'hostedProjects'>, context: number, to: number) {
-  const { metricContextCoverage: coverage, sourceAuthority, sourceCutover } = project;
-  return sourceAuthority?.mode === 'server' &&
-    coverage &&
-    typeof coverage.generation === 'string' &&
-    coverage.generation.length > 0 &&
-    Number.isFinite(coverage.from) &&
-    Number.isFinite(coverage.to) &&
-    coverage.authorityEpoch === sourceAuthority.epoch &&
-    coverage.cutover === (sourceCutover?.at ?? null) &&
-    coverage.from <= context &&
-    coverage.to >= to
-    ? coverage.generation
-    : null;
-}
-
-type IndexKey = [string, string, number, string, number, string];
-function comparePrefix(key: IndexKey, bound: readonly (string | number)[]) {
-  for (const [index, right] of bound.entries()) {
-    const left = key[index]!;
-    if (left !== right) return left < right ? -1 : 1;
-  }
-  return 0;
-}
+type Position = {
+  binding: string;
+  lookup: number;
+  range: number;
+  key: MetricIndexKey | null;
+  join: MetricJoinCursor | null;
+};
 
 export async function metricContextPage(
   ctx: QueryCtx,
@@ -71,14 +56,14 @@ export async function metricContextPage(
   const { lookups, generation, context, from, to, cursor } = input;
   invariant(lookups.length <= 100, 'BAD_ARGUMENT', 'Read metric context in batches of 100 selections.');
   invariant(
-    generation === metricContextCoverage(project, context, to),
+    generation === (await metricContextCoverage(ctx, project, context, to)),
     'EVIDENCE_CHANGED',
     'Restart metrics with the current history coverage.',
   );
   const binding = digest(JSON.stringify([projectId, generation, context, from, to, lookups]));
-  let position: { binding: string; lookup: number; key: IndexKey | null };
+  let position: Position;
   try {
-    position = cursor ? JSON.parse(cursor) : { binding, lookup: 0, key: null };
+    position = cursor ? JSON.parse(cursor) : { binding, lookup: 0, range: 0, key: null, join: null };
   } catch {
     invariant(false, 'EVIDENCE_CHANGED', 'Continue the original metric context selection.');
   }
@@ -86,108 +71,70 @@ export async function metricContextPage(
     position?.binding === binding &&
       Number.isSafeInteger(position.lookup) &&
       position.lookup >= 0 &&
-      position.lookup <= lookups.length,
+      position.lookup <= lookups.length &&
+      Number.isSafeInteger(position.range) &&
+      position.range >= 0 &&
+      position.range <= 2,
     'EVIDENCE_CHANGED',
     'Continue the original metric context selection.',
   );
-  let { lookup, key } = position;
-  let scanned = 0,
-    readBytes = 0;
+  let scanned = 0;
+  let bytes = 0;
   const page: MetricContextRow[] = [];
   const seen = new Set<string>();
-  const bytes = (row: unknown) => new TextEncoder().encode(JSON.stringify(row)).length;
-  for (; lookup < lookups.length && scanned < 100 && readBytes < 512 * 1024; lookup++) {
-    const bounds = metricContextRange(lookups[lookup]!, context, from, to);
-    if (bounds.start[0] > bounds.end[0]) continue;
-    const [startKey, startTime] = bounds.start;
-    const [endKey, endTime] = bounds.end;
-    const start = [
-      projectId,
-      metricContextKey(generation, startKey),
-      ...(startTime === undefined ? [] : [startTime]),
-    ];
-    const end = [
-      projectId,
-      metricContextKey(generation, endKey),
-      ...(endTime === undefined ? [] : [endTime]),
-    ];
-    invariant(
-      key === null ||
-        (Array.isArray(key) &&
-          key.length === 6 &&
-          key[0] === projectId &&
-          typeof key[1] === 'string' &&
-          Number.isFinite(key[2]) &&
-          typeof key[3] === 'string' &&
-          Number.isFinite(key[4]) &&
-          typeof key[5] === 'string' &&
-          comparePrefix(key, start) >= 0 &&
-          comparePrefix(key, end) < 0),
-      'EVIDENCE_CHANGED',
-      'Continue the original metric context selection.',
-    );
-    const rows = streamQuery(ctx, {
-      schema,
-      table: 'projectMetricFacts',
-      index,
-      startIndexKey: key ?? start,
-      startInclusive: key === null,
-      endIndexKey: end,
-      endInclusive: false,
-      order: 'asc',
-    });
-    let complete = true;
-    for await (const [fact, indexKey] of rows) {
-      if (scanned >= 100 || readBytes >= 512 * 1024) {
-        complete = false;
-        break;
-      }
-      scanned++;
-      readBytes += bytes(fact);
-      key = indexKey as IndexKey;
-      if (fact.sourceCreatedAt < context || fact.sourceCreatedAt >= to || seen.has(fact.sourceId)) continue;
-      const kind = bounds.rows
-        ? (lookups[lookup] as Extract<MetricContextLookup, { kind: 'created' }>).stream
-        : fact.value;
+  const full = () => scanned >= 100 || bytes >= 512 * 1024;
+  const count = (row: unknown) => {
+    scanned++;
+    bytes += metricRowBytes(row);
+  };
+  const emit = (row: MetricLiveRow) => {
+    if (row.sourceCreatedAt < context || row.sourceCreatedAt >= to || seen.has(row.sourceId)) return;
+    seen.add(row.sourceId);
+    page.push(row);
+  };
+  const sources = metricContextSources(ctx, projectId);
+  const aliases = metricContextAliases(ctx, projectId, context, from, to, {
+    full,
+    count,
+    emit,
+    resolve: sources.resolve,
+  });
+  selections: for (; position.lookup < lookups.length && !full(); position.lookup++) {
+    const lookup = lookups[position.lookup]!;
+    if (lookup.kind === 'run') {
+      const row = await sources.resolve('runs', lookup.id, count);
+      if (row) emit(row);
+    } else if (lookup.kind === 'created' || lookup.kind === 'entry') {
+      const ranges = await sources.ranges(lookup, context, from, to, count);
       invariant(
-        metricContextStreams.some(stream => stream === kind),
+        position.range < ranges.length,
         'EVIDENCE_CHANGED',
-        'The metric context row kind changed.',
+        'Continue the original metric context selection.',
       );
-      const range = metricContextRange(
-        { kind: 'created', stream: kind as MetricContextStream },
-        context,
-        from,
-        to,
-      );
-      const source = bounds.rows
-        ? fact
-        : await ctx.db
-            .query('projectMetricFacts')
-            .withIndex(index, q =>
-              q
-                .eq('projectId', projectId)
-                .eq('key', metricContextKey(generation, range.start[0]))
-                .eq('sourceCreatedAt', fact.sourceCreatedAt)
-                .eq('sourceId', fact.sourceId),
-            )
-            .unique();
-      invariant(source, 'EVIDENCE_CHANGED', 'A covered metric context row is missing.');
-      if (!bounds.rows) readBytes += bytes(source);
-      seen.add(source.sourceId);
-      page.push({
-        stream: kind as MetricContextStream,
-        sourceCreatedAt: source.sourceCreatedAt,
-        sourceId: source.sourceId,
-        row: JSON.parse(source.value),
-      });
+      for (; position.range < ranges.length; position.range++) {
+        const range = ranges[position.range]!;
+        validateMetricCursor(position.key, range.start, range.end, range.inclusive);
+        for await (const [row, key] of range.rows(position.key)) {
+          if (lookup.kind !== 'created' || row.sourceCreatedAt >= from) emit(row);
+          if (full()) {
+            position.key = key;
+            break selections;
+          }
+        }
+        position.key = null;
+      }
+    } else if (isRelatedMetricContext(lookup)) {
+      position.join = await aliases.join(lookup, position.join);
+      if (position.join) break;
+    } else {
+      position.key = await aliases.select(lookup, position.key);
+      if (position.key) break;
     }
-    if (!complete) break;
-    key = null;
+    position.range = 0;
   }
   return {
     page,
-    isDone: lookup === lookups.length,
-    continueCursor: lookup === lookups.length ? '' : JSON.stringify({ binding, lookup, key }),
+    isDone: position.lookup === lookups.length,
+    continueCursor: position.lookup === lookups.length ? '' : JSON.stringify(position),
   };
 }
