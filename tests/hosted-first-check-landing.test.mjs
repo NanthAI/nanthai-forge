@@ -161,6 +161,12 @@ test('a change whose composition is clean and path-disjoint from what main gaine
   assert.deepEqual(second.crossHeadProof.candidatePaths, ['src/b.ts']);
   assert.deepEqual(second.crossHeadProof.mainPaths, ['src/a.ts']);
   assert.equal(second.check.runId, second.crossHeadProof.runId, 'the receipt names the admission run');
+  const accepted = [...f.tables.projectHostedAcceptances.values()].sort((a, b) => a.sequence - b.sequence);
+  assert.deepEqual(
+    accepted.map(row => row.checkReused),
+    [true, true],
+    'both held admission proofs carried',
+  );
   // Two admission runs and no second check (today: three runs, the recheck).
   assert.equal(runCount(f), 2);
   // The coalesced main audit for the first-check landing is armed now, not at the

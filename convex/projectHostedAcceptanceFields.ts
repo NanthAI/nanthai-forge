@@ -11,6 +11,9 @@ export const hostedAcceptanceTables = {
     attemptId: v.string(),
     sequence: v.number(),
     value: v.string(),
+    // Optional report facts outside the canonical receipt so installed readers keep its exact wire shape.
+    retryCount: v.optional(v.number()),
+    checkReused: v.optional(v.boolean()),
   })
     // index-order: caller: convex/projectHostedLandings.ts#read; order: landing history bounds _creationTime and paginates chronologically.
     .index('by_project', ['projectId'])

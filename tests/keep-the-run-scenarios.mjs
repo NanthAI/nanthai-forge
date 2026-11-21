@@ -116,10 +116,13 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // e3082c24: source timings on compose settlement move the exact byte deltas.
 // Candidate 7: dispatch attribution rides on the run and metrics rows and on
 // a deferred replacement's existing attempt. The number of calls is the same.
+// Item 2c420916: the health facts add 34 or 35 bytes per acceptance row. The carry
+// delta moves +135 read/-1 write bytes, scoped recheck +102 read, red -34 read.
+// The scenarios read different existing receipts. Call counts are unchanged.
 export const WIRED = {
-  carry: { calls: 7, readBytes: 404_443, writeBytes: 74_603 },
-  'scoped-recheck': { calls: 17, readBytes: 534_346, writeBytes: 143_217 },
-  red: { calls: -18, readBytes: -396_191, writeBytes: -144_510 },
+  carry: { calls: 7, readBytes: 404_578, writeBytes: 74_602 },
+  'scoped-recheck': { calls: 17, readBytes: 534_448, writeBytes: 143_217 },
+  red: { calls: -18, readBytes: -396_225, writeBytes: -144_510 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */

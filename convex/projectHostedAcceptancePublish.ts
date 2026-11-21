@@ -397,6 +397,8 @@ export async function publishAcceptance(
     attemptId: attempt.id,
     sequence: receipt.snapshot.revision,
     value,
+    retryCount: attempt.number,
+    ...(run ? { checkReused: Boolean(reuse || run.request.operationId !== attempt.operations.check) } : {}),
   });
   await ctx.db.insert('projectHostedAcceptanceEvents', {
     ...identity,

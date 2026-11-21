@@ -53,6 +53,11 @@ test('a failed landing writes one scrubbed failure row; the health report counts
   const record = JSON.parse(row.value);
   assert.equal(record.kind, 'landing');
   assert.equal(record.code, 'CHECK_FAILED');
+  const [landing] = f.tables.projectHostedLandingRequests.values();
+  const attempt = [...f.tables.projectHostedLandingAttempts.values()].find(
+    row => row.attemptId === landing.attemptId,
+  );
+  assert.equal(record.retryCount, attempt.number, 'the failure retains its final attempt ordinal');
   assert(record.message.length <= log.FAILURE_MESSAGE_MAX);
   assert(Number.isInteger(record.elapsedMs) && record.elapsedMs >= 0);
   assert(Buffer.byteLength(JSON.stringify(row)) < 600, 'a failure row stays small');
@@ -63,6 +68,7 @@ test('a failed landing writes one scrubbed failure row; the health report counts
   const report = JSON.parse(await f.tx('failureReport', health.report, { projectId: f.projectId, from, to }));
   assert.equal(report.failures, 1);
   assert.equal(report.complete, true);
+  assert.deepEqual(report.failedLandings, { count: 1, retryCountReported: 1, retries: attempt.number });
   assert.deepEqual(
     report.codes.map(({ code, kind, count }) => ({ code, kind, count })),
     [{ code: 'CHECK_FAILED', kind: 'landing', count: 1 }],
@@ -80,6 +86,110 @@ test('a landing that passes writes nothing to the failure log', async t => {
   await f.rawChecks.pass(active);
   await f.drain();
   assert.equal(rows(f).length, 0);
+  const [receipt] = f.tables.projectHostedAcceptances.values();
+  const attempt = [...f.tables.projectHostedLandingAttempts.values()].find(
+    row => row.attemptId === receipt.attemptId,
+  );
+  const { retryCount, checkReused } = receipt;
+  assert.equal(retryCount, attempt.number);
+  assert.equal(checkReused, false, 'a fresh check is recorded separately from missing evidence');
+  assert(Buffer.byteLength(JSON.stringify({ retryCount, checkReused })) <= 128);
+  const from = new Date(receipt._creationTime - 1).toISOString();
+  const to = new Date(receipt._creationTime + 60_000).toISOString();
+  const report = JSON.parse(await f.tx('failureReport', health.report, { projectId: f.projectId, from, to }));
+  assert.deepEqual(report.acceptedLandings, {
+    count: 1,
+    complete: true,
+    retryCountReported: 1,
+    retries: attempt.number,
+    checkReuseReported: 1,
+    checksReused: 0,
+  });
+});
+
+test('the health report keeps older accepted receipts and counts missing evidence separately', async t => {
+  const { f } = await checking(t);
+  const at = Date.parse('2026-11-21T00:00:00Z');
+  for (const [index, fields] of [{}, { retryCount: 0 }, { retryCount: 3, checkReused: true }].entries()) {
+    const id = `projectHostedAcceptances-${index}`;
+    f.tables.projectHostedAcceptances.set(id, {
+      _id: id,
+      _creationTime: at + index,
+      projectId: f.projectId,
+      receiptId: randomUUID(),
+      submissionId: randomUUID(),
+      attemptId: randomUUID(),
+      sequence: index,
+      value: '{}',
+      ...fields,
+    });
+  }
+  const from = new Date(at).toISOString(),
+    to = new Date(at + 3).toISOString();
+  const report = JSON.parse(await f.tx('failureReport', health.report, { projectId: f.projectId, from, to }));
+  assert.deepEqual(report.acceptedLandings, {
+    count: 3,
+    complete: true,
+    retryCountReported: 2,
+    retries: 3,
+    checkReuseReported: 1,
+    checksReused: 1,
+  });
+});
+
+test('the health report bounds accepted receipt reads by bytes and keeps the failed-check view failure-only', async t => {
+  const { f } = await checking(t);
+  const at = Date.parse('2026-11-21T00:00:00Z');
+  for (let i = 0; i < 600; i++) {
+    const id = `projectHostedAcceptances-${i}`;
+    f.tables.projectHostedAcceptances.set(id, {
+      _id: id,
+      _creationTime: at + i,
+      projectId: f.projectId,
+      receiptId: randomUUID(),
+      submissionId: randomUUID(),
+      attemptId: randomUUID(),
+      sequence: i,
+      value: JSON.stringify({ message: 'a'.repeat(1_500) }),
+      retryCount: 1,
+      checkReused: false,
+    });
+  }
+  const input = {
+    projectId: f.projectId,
+    from: new Date(at).toISOString(),
+    to: new Date(at + 600).toISOString(),
+  };
+  const out = JSON.parse(await f.tx('failureReport', health.report, input));
+  assert.equal(out.complete, true, 'the failure stream had nothing more');
+  assert.equal(out.acceptedLandings.complete, false, 'the acceptance stream reached its byte cap');
+  assert(out.acceptedLandings.count > 0 && out.acceptedLandings.count < 500);
+  const read = f.counts.at(-1);
+  assert.equal(read.readRangesByTable.projectHostedAcceptances, 1);
+  assert(read.readBytesByTable.projectHostedAcceptances <= 512 * 1024);
+  await f.tx('failedChecks', health.report, { ...input, checks: { limit: 20 } });
+  assert.equal(f.counts.at(-1).readRangesByTable.projectHostedAcceptances, undefined);
+
+  f.extendContext(ctx => {
+    const query = ctx.db.query.bind(ctx.db);
+    ctx.db.query = table => {
+      const result = query(table);
+      if (table !== 'projectHostedAcceptances') return result;
+      const paginate = result.paginate.bind(result);
+      result.paginate = async options => ({
+        ...(await paginate(options)),
+        isDone: true,
+        pageStatus: 'SplitRequired',
+      });
+      return result;
+    };
+  });
+  const split = JSON.parse(await f.tx('healthReportSplit', health.report, input));
+  assert.equal(
+    split.acceptedLandings.complete,
+    false,
+    'a provider-required split still leaves unread receipts',
+  );
 });
 
 test('failure messages keep no URL query, token or home folder name', () => {
@@ -332,7 +442,7 @@ test('failed checks page newest first with a cursor that loses and repeats nothi
     value: JSON.stringify({ schema: 1, kind, code, message: 'm', elapsedMs: 1000, ...value }),
   });
   const rows = [
-    row(9, 'CHECK_FAILED', { files: ['tests/a.test.mjs'], error: 'expected 1, got 2' }),
+    row(9, 'CHECK_FAILED', { files: ['tests/a.test.mjs'], error: 'expected 1, got 2', retryCount: 0 }),
     row(8, 'SOURCE_RETRY_EXHAUSTED', {}, 'operation'),
     row(7, 'CHECK_FAILED', { files: ['tests/a.test.mjs', 'tests/b.test.mjs'], more: 2, error: 'timed out' }),
     row(6, 'LANDING_BATCH_LEAKED', {}),
@@ -349,6 +459,8 @@ test('failed checks page newest first with a cursor that loses and repeats nothi
     'operations and other landing codes are not checks',
   );
   assert.equal(first.checks[1].more, 2);
+  assert.equal(first.checks[0].retryCount, 0);
+  assert.equal(first.checks[1].retryCount, undefined);
   assert.deepEqual(first.repeatedFiles, [{ file: 'tests/a.test.mjs', count: 2 }]);
   assert.deepEqual(first.noise, { runner: 0, budget: 0, flake: 1, real: 1, unknown: 0 });
   const rest = rows.filter(r => r._creationTime < Number(first.nextCursor));

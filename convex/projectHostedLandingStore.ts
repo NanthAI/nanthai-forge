@@ -530,6 +530,10 @@ export async function settleLandingOperation(ctx: MutationCtx, state: HostedLand
 /** One failure-log row for a landing that ended failed with an error (Item 2c420916). */
 export async function failedLanding(ctx: MutationCtx, state: HostedLandingState) {
   if (!state.error) return;
+  // writeLanding already loads these immutable pins. Desired failures before admission have only the first id.
+  const retryCount =
+    pinsFor(ctx).get(`${state.projectId}:${state.attemptId}`)?.number ??
+    (state.attemptId === state.firstAttemptId ? 0 : undefined);
   const recorded = await recordFailure(ctx, {
     projectId: state.projectId as Id<'hostedProjects'>,
     operationId: state.operationId,
@@ -537,6 +541,7 @@ export async function failedLanding(ctx: MutationCtx, state: HostedLandingState)
     error: state.error,
     startedAt: state.timing?.submittedAt ?? state.at,
     detail: failureDetail({ testFiles: state.testFiles, error: state.error }),
+    retryCount,
   });
   // Once per failed check (the failure row dedupes): it teaches the preflight guard set (13ea93bf).
   if (recorded && state.error.code === 'CHECK_FAILED') await recordGuardFailureOffMainRed(ctx, state);

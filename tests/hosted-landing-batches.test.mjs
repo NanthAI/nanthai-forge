@@ -39,7 +39,13 @@ test('incident replay: four finishes in one minute share one full check and one 
   await f.drain();
   assert(states(f).every(s => s.phase === 'landed'));
   assert.equal(f.tables.projectHostedAcceptances.size, 4);
-  const receipts = [...f.tables.projectHostedAcceptances.values()].map(r => JSON.parse(r.value));
+  const accepted = [...f.tables.projectHostedAcceptances.values()];
+  const receipts = accepted.map(r => JSON.parse(r.value));
+  assert.deepEqual(
+    accepted.map(r => r.checkReused),
+    [false, false, false, false],
+    'a fresh shared check is not reuse',
+  );
   assert(receipts.every(r => r.check.runId === run.id && r.candidate.head === run.request.expectedHead));
   assert(receipts.every(r => r.previous.head === oldMain.head));
   assert.deepEqual(

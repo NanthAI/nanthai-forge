@@ -27,6 +27,8 @@ export type FailureRecord = FailureDetail & {
   message: string;
   /** From the operation's first attempt (or the landing's submission) to the failure; null when unknown. */
   elapsedMs: number | null;
+  /** Ordinal of the final landing attempt within this submission. Absent if unavailable. */
+  retryCount?: number;
 };
 
 /** Endings someone chose (a cancel, an abandoned Lane, a superseded landing) are not failures: nothing is
@@ -95,6 +97,7 @@ export async function recordFailure(
     error: { code: string; message: string };
     startedAt?: string | undefined;
     detail?: FailureDetail | undefined;
+    retryCount?: number | undefined;
   },
 ) {
   if (chosenEndings.has(input.error.code)) return false;
@@ -113,6 +116,7 @@ export async function recordFailure(
     message: sanitizeFailureMessage(input.error.message),
     elapsedMs: Number.isFinite(started) ? Math.max(0, Date.now() - started) : null,
     ...input.detail,
+    ...(input.retryCount === undefined ? {} : { retryCount: input.retryCount }),
   };
   await ctx.db.insert('projectFailures', {
     projectId: input.projectId,

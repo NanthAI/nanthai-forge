@@ -1,0 +1,1 @@
+`nforge metrics ROOT --failures` counts later landing attempts and accepted checks that reused an existing run. It reports how many receipts supplied the evidence and whether each bounded sample covered the window. The facts ride on the existing acceptance and failure writes, with no extra reads during landing. See [the health report](../../operations.md#project-health-report).

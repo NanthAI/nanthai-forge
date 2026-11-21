@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// On-demand health report over the failure log (Item 2c420916): `nforge metrics ROOT --failures`. One bounded
-// indexed read per run, never a subscription or a timer; the lead check-in runs it (docs/agents/lead.md).
+// On-demand health report over the failure log and accepted receipts (Item 2c420916).
+// Bounded indexed reads only; the lead check-in runs it (docs/agents/lead.md).
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { metricsReader } from './projectSelfMetrics';
@@ -17,6 +17,7 @@ import {
 
 /** Most rows one report reads: about 300 bytes each (a failed check up to about 1 KB), so at most about 500 KB. */
 export const FAILURE_REPORT_ROWS = 500;
+const ACCEPTANCE_REPORT_BYTES = 512 * 1024;
 
 type Row = { _creationTime: number; operationId: string; value: string };
 const median = (values: number[]) => {
@@ -41,8 +42,16 @@ export function failureReport(rows: Row[], window: { from: string; to: string },
     }
   >();
   const days = new Map<string, number>();
+  const failedLandings = { count: 0, retryCountReported: 0, retries: 0 };
   for (const row of rows) {
     const record = JSON.parse(row.value) as FailureRecord;
+    if (record.kind === 'landing') {
+      failedLandings.count++;
+      if (record.retryCount !== undefined) {
+        failedLandings.retryCountReported++;
+        failedLandings.retries += record.retryCount;
+      }
+    }
     const at = new Date(row._creationTime).toISOString();
     const key = `${record.kind}:${record.code}`;
     const entry = codes.get(key) ?? {
@@ -69,11 +78,30 @@ export function failureReport(rows: Row[], window: { from: string; to: string },
     window,
     complete,
     failures: rows.length,
+    failedLandings,
     codes: [...codes.values()]
       .sort((a, b) => b.count - a.count || b.lastAt.localeCompare(a.lastAt))
       .map(({ elapsed, ...entry }) => ({ ...entry, medianElapsedMs: median(elapsed) })),
     days: [...days].sort(([a], [b]) => a.localeCompare(b)).map(([day, count]) => ({ day, count })),
   };
+}
+
+function acceptedLandings(rows: { retryCount?: number; checkReused?: boolean }[], complete: boolean) {
+  let retryCountReported = 0,
+    retries = 0,
+    checkReuseReported = 0,
+    checksReused = 0;
+  for (const row of rows) {
+    if (row.retryCount !== undefined) {
+      retryCountReported++;
+      retries += row.retryCount;
+    }
+    if (row.checkReused !== undefined) {
+      checkReuseReported++;
+      if (row.checkReused) checksReused++;
+    }
+  }
+  return { count: rows.length, complete, retryCountReported, retries, checkReuseReported, checksReused };
 }
 
 /** Most failed checks one read returns (about 500 bytes each). */
@@ -135,6 +163,7 @@ function checkRow(row: Row) {
     code: record.code,
     noise: failureNoise({ code: record.code, files, step, error }),
     elapsedMs: record.elapsedMs,
+    ...(record.retryCount === undefined ? {} : { retryCount: record.retryCount }),
     ...(files?.length ? { files } : {}),
     ...(more ? { more } : {}),
     ...(step ? { step } : {}),
@@ -143,8 +172,8 @@ function checkRow(row: Row) {
 }
 
 /**
- * The health report for [from, to): one bounded indexed read of at most FAILURE_REPORT_ROWS rows, newest
- * first. `complete` is false when the window held more; narrow the window then. Owner or maintainer only.
+ * The health report for [from, to), newest first. Each stream reports its own coverage.
+ * Owner or maintainer only.
  */
 export const report = query({
   args: {
@@ -200,13 +229,29 @@ export const report = query({
           }),
         });
       }
-      return JSON.stringify(
-        failureReport(
+      const accepted = await ctx.db
+        .query('projectHostedAcceptances')
+        .withIndex('by_project', q =>
+          q.eq('projectId', input.projectId).gte('_creationTime', from).lt('_creationTime', end),
+        )
+        .order('desc')
+        .paginate({
+          cursor: null,
+          numItems: FAILURE_REPORT_ROWS,
+          maximumRowsRead: FAILURE_REPORT_ROWS,
+          maximumBytesRead: ACCEPTANCE_REPORT_BYTES,
+        });
+      return JSON.stringify({
+        ...failureReport(
           rows.slice(0, FAILURE_REPORT_ROWS),
           { from: new Date(from).toISOString(), to: new Date(to).toISOString() },
           rows.length <= FAILURE_REPORT_ROWS,
         ),
-      );
+        acceptedLandings: acceptedLandings(
+          accepted.page,
+          accepted.isDone && accepted.pageStatus !== 'SplitRequired',
+        ),
+      });
     } catch (error) {
       return reportError(error);
     }

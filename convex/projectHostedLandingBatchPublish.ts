@@ -417,6 +417,8 @@ export async function publishLandingBatch(
       attemptId: member.attempt.id,
       sequence: receipt.snapshot.revision,
       value,
+      retryCount: member.attempt.number,
+      checkReused: run.request.operationId !== batch.checkOperationId,
     });
     await ctx.db.insert('projectHostedAcceptanceEvents', {
       ...identity,

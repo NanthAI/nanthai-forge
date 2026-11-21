@@ -12,7 +12,7 @@ export async function metricsCli(args: string[]) {
   if (args[0] === 'record-bill') return recordBillCli(args.slice(1));
   if (!args.length || args[0] === '--help') {
     process.stdout.write(
-      'nforge metrics ROOT [--from DATE] [--to DATE] [--json | --text] [--report FILE.md] [--compare FROM..TO] [--limit N] [--cursor C] [--context-days N] [--flake-issues]\nnforge metrics ROOT --failures [--from DATE] [--to DATE] [--text] [--checks [--limit N] [--cursor C] [--noise TAG]]\nnforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [...]\nUTC windows are [from,to). JSON is the default for agents/non-TTY output.\n--limit N pages the report row lists (N entries per list; follow page.nextCursor with --cursor C, same window); per-day rows are omitted when paging.\n--context-days N (0 to 30, default 2) sets the days of pre-window history read to classify landings; the window and this horizon bound the read.\n--flake-issues prints only the flaky-file list, each with its Issue.\n--failures prints the health report: failed operations and landings in the window counted by code, with first and last time, median time to fail and the latest message (one bounded read; default window the last 7 days).\n--failures --checks lists failed checks instead, newest first: operation id, code, failing test files or static step, first error and a noise tag (runner, budget, flake, real, unknown), N per page (default 20, up to 100; follow nextCursor with --cursor C), --noise TAG keeps one tag. One read of at most 500 rows.\n',
+      'nforge metrics ROOT [--from DATE] [--to DATE] [--json | --text] [--report FILE.md] [--compare FROM..TO] [--limit N] [--cursor C] [--context-days N] [--flake-issues]\nnforge metrics ROOT --failures [--from DATE] [--to DATE] [--text] [--checks [--limit N] [--cursor C] [--noise TAG]]\nnforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [...]\nUTC windows are [from,to). JSON is the default for agents/non-TTY output.\n--limit N pages the report row lists (N entries per list; follow page.nextCursor with --cursor C, same window); per-day rows are omitted when paging.\n--context-days N (0 to 30, default 2) sets the days of pre-window history read to classify landings; the window and this horizon bound the read.\n--flake-issues prints only the flaky-file list, each with its Issue.\n--failures prints the health report: failures by code with first and last time, median time to fail, latest message, and recorded landing retries and check reuse (default window the last 7 days).\n--failures --checks lists failed checks instead, newest first: operation id, code, failing test files or static step, first error and a noise tag (runner, budget, flake, real, unknown), N per page (default 20, up to 100; follow nextCursor with --cursor C), --noise TAG keeps one tag. One read of at most 500 rows.\n',
     );
     return;
   }
@@ -114,7 +114,7 @@ export async function metricsCli(args: string[]) {
       'BAD_ARGUMENT',
       'The failure report reads a hosted project; run it from a hosted checkout.',
     );
-    // One query: the bounded failure-log read (convex/projectFailureReport.ts).
+    // One query: the bounded project health report (convex/projectFailureReport.ts).
     const failures: unknown = JSON.parse(
       String(
         await metricQuery(address)('projectFailureReport:report', {

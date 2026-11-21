@@ -201,6 +201,8 @@ list, each file with its matching Issue, a look-alike to check before filing, or
 100 runs in the window, one day of context, no bills, placement or input hydration) instead
 of all eight metrics streams. It cannot combine with `--limit` or `--compare`.
 
+#### Project health report
+
 `nforge metrics ROOT --failures [--from DATE] [--to DATE]` prints the health report
 (Item 2c420916): every failed operation (save, compose, sync, check, cancel and the
 rest) and every failed landing in the window, counted by kind and code, with first
@@ -209,8 +211,15 @@ operation id. A cancel, an abandoned Lane or a superseded landing is a chosen en
 failure, and writes nothing. The default window is the last 7 days. Each failure wrote one row of
 about 300 bytes (`projectFailures`) in the mutation that settled it: one indexed read
 and one insert per failure, nothing on a healthy path and nothing while idle. The
-report is one query that reads at most 500 rows, newest first; `complete: false`
-means the window held more, so narrow it. Rows expire after 30 days with the
+report is one query with two bounded indexed reads. It reads at most 500 failure rows, newest
+first. `failedLandings` totals recorded retries. `acceptedLandings` also reports check reuse
+and coverage from up to 500 accepted receipts or 512 KiB, whichever is reached first.
+A retry here is a later recorded attempt in the same submission, including a new check binding.
+Check reuse counts an existing run carried into acceptance. A newly executed cohort check
+counts as fresh for each member. Older receipts and landings without check evidence can
+leave fields unreported. Each total includes its number of reporting receipts. A
+`complete: false` flag means the corresponding window may hold more, so narrow it.
+Failure rows expire after 30 days with the
 operational expiry pages. Owner or agent-guidance maintainer only. Messages keep no
 URL query string, token-shaped value or home folder name (the shared
 `src/client-error-text.ts` rules), at most 240 characters.
