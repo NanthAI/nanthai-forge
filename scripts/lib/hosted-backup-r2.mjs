@@ -99,7 +99,7 @@ export function r2Client(env = process.env, fetcher = networkFetch) {
         throw failure('BACKUP_R2_FAILED');
       }
     },
-    async create(key, sha256) {
+    async create(key, sha256, pin) {
       // The object key embeds the saved operation ID. Discover an initiation whose
       // response was lost before creating another multipart upload for that operation.
       let marker = {};
@@ -107,7 +107,11 @@ export function r2Client(env = process.env, fetcher = networkFetch) {
         const listing = await request('GET', '', { uploads: '', prefix: key, ...marker });
         const xml = await listing.text();
         for (const upload of tags(xml, 'Upload')) {
-          if (tag(upload, 'Key') === key && tag(upload, 'UploadId')) return tag(upload, 'UploadId');
+          const id = tag(upload, 'UploadId');
+          if (tag(upload, 'Key') === key && id) {
+            await pin?.();
+            return id;
+          }
         }
         if (tag(xml, 'IsTruncated') !== 'true') break;
         const nextKey = tag(xml, 'NextKeyMarker'),
@@ -116,6 +120,8 @@ export function r2Client(env = process.env, fetcher = networkFetch) {
           throw failure('BACKUP_R2_FAILED');
         marker = { 'key-marker': nextKey, ...(nextId ? { 'upload-id-marker': nextId } : {}) };
       }
+      // Discovery is read-only. Persist local retry state before the first possible write.
+      await pin?.();
       const response = await request('POST', key, { uploads: '' }, undefined, {
         'x-amz-meta-sha256': sha256,
       });

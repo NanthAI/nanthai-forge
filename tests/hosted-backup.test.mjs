@@ -7,10 +7,12 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { backup, readBackupStatus, pruneBackups } from '../scripts/lib/hosted-backup.mjs';
+import { r2Client } from '../scripts/lib/hosted-backup-r2.mjs';
 import { parseCommand } from '../scripts/hosted-durability.mjs';
 import { durabilityFixture } from './hosted-durability-fixture.mjs';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const id = '11111111-1111-4111-8111-111111111111';
+const nextId = '22222222-2222-4222-8222-222222222222';
 const now = new Date('2026-10-21T03:00:00.000Z');
 const prefix = 'hosted/synthetic/';
 function fakeClient() {
@@ -32,7 +34,8 @@ function fakeClient() {
       const bytes = objects.get(key);
       return { size: bytes.length, sha256: hash(bytes) };
     },
-    async create() {
+    async create(_key, _sha256, pin) {
+      await pin();
       const uploadId = String(++creates);
       uploads.set(uploadId, []);
       return uploadId;
@@ -103,20 +106,23 @@ function seed(client) {
   ])
     client.objects.set(key, Buffer.from('preserve'));
 }
+function zipExporter(rows) {
+  return async (_, path, { databaseOnly }) => {
+    const script =
+      "import sys,json,zipfile\nf=json.load(sys.stdin)\nwith zipfile.ZipFile(sys.argv[1],'w') as z:\n for table,rows in f.items():\n  z.writestr(table+'/documents.jsonl',''.join(json.dumps(r)+'\\n' for r in rows))\n if sys.argv[2]=='true': z.writestr('_storage/blob','payload')\n";
+    assert.equal(
+      spawnSync('python3', ['-c', script, path, String(!databaseOnly)], { input: JSON.stringify(rows) })
+        .status,
+      0,
+    );
+  };
+}
 
 test('backup exports, verifies a real fixture ZIP, uploads, verifies bytes and records identity', () =>
   setup(async x => {
     delete x.options.verifySnapshot;
     delete x.options.identity;
-    const exporter = async (_, path) => {
-      const script =
-        "import sys,json,zipfile\nf=json.load(sys.stdin)\nwith zipfile.ZipFile(sys.argv[1],'w') as z:\n for table,rows in f.items():\n  z.writestr(table+'/documents.jsonl',''.join(json.dumps(r)+'\\n' for r in rows))\n z.writestr('_storage/blob','payload')\n";
-      assert.equal(
-        spawnSync('python3', ['-c', script, path], { input: JSON.stringify(durabilityFixture()) }).status,
-        0,
-      );
-    };
-    const result = await backup(x.command, exporter, x.options);
+    const result = await backup(x.command, zipExporter(durabilityFixture()), x.options);
     assert.equal(result.complete, true);
     assert.equal(result.missedWeek, true);
     const manifest = JSON.parse([...x.client.objects].find(([key]) => key.endsWith('manifest.json'))[1]);
@@ -179,6 +185,9 @@ test('lost multipart completion response retries the original key without export
     };
     await assert.rejects(backup(x.command, x.exporter, x.options));
     assert.equal(x.client.objects.size, 1);
+    await assert.rejects(backup({ ...x.command, operationId: nextId }, x.exporter, x.options), {
+      code: 'BACKUP_PENDING',
+    });
     const result = await backup(x.command, x.exporter, x.options);
     assert.equal(result.complete, true);
     assert.equal(x.exports(), 1);
@@ -195,6 +204,9 @@ test('lost manifest response reconciles the existing manifest before pruning', (
       throw new Error('lost response');
     };
     await assert.rejects(backup(x.command, x.exporter, x.options));
+    await assert.rejects(backup({ ...x.command, operationId: nextId }, x.exporter, x.options), {
+      code: 'BACKUP_PENDING',
+    });
     x.client.put = () => assert.fail('manifest must not be duplicated');
     assert.equal((await backup(x.command, x.exporter, x.options)).complete, true);
     assert.equal(x.exports(), 1);
@@ -343,25 +355,99 @@ test('offline status CLI emits one line, uses exit 2 when overdue, and needs no 
     assert.equal(JSON.parse(result.stdout).lastAttempt.status, 'passed');
   }));
 
-test('a re-export after a failed export gets the fresh observation key and a pending operation keeps its id', () =>
+test('a refused database-only ZIP permits a new file-inclusive backup in the same state directory', () =>
   setup(async x => {
-    await assert.rejects(
-      backup(
-        x.command,
-        async () => {
-          throw new Error('failed export');
-        },
-        x.options,
-      ),
-    );
-    await assert.rejects(
-      backup({ ...x.command, operationId: '22222222-2222-4222-8222-222222222222' }, x.exporter, x.options),
-      { code: 'BACKUP_PENDING' },
-    );
+    delete x.options.verifySnapshot;
+    const rows = {
+      ...durabilityFixture(),
+      projectObjects: [{ _id: 'legacy-object', location: 'convex', storageId: 'blob' }],
+    };
+    const exporter = zipExporter(rows);
+    await assert.rejects(backup({ ...x.command, databaseOnly: true }, exporter, x.options), {
+      code: 'DATABASE_ONLY_STORAGE_REMAINS',
+      step: 'backup.validate',
+    });
+    assert.equal((await readBackupStatus(x.directory, now)).pending, false);
+    assert.equal(x.client.creates, 0);
+    assert.equal(x.client.objects.size, 0);
     const later = new Date('2026-10-28T03:00:00.000Z');
-    const result = await backup(x.command, x.exporter, { ...x.options, now: later });
+    const result = await backup({ ...x.command, operationId: nextId }, exporter, {
+      ...x.options,
+      now: later,
+    });
+    assert.equal(result.operationId, nextId);
+    assert.equal(result.includeFileStorage, true);
+    assert.equal(result.storedFiles, 1);
     assert.equal(result.time, later.toISOString());
-    assert.ok([...x.client.objects.keys()].every(key => key.includes('2026-10-28T03-00-00.000Z')));
+    assert.ok([...x.client.objects.keys()].every(key => key.includes(`2026-10-28T03-00-00.000Z-${nextId}`)));
+  }));
+
+test('a legacy manifest-less reservation allows a fresh operation and preserves a pre-existing export', () =>
+  setup(async x => {
+    const { deployment, bucket, prefix } = x.command;
+    await writeFile(
+      join(x.directory, 'last-run.json'),
+      JSON.stringify({
+        target: { deployment, bucket, prefix },
+        receipts: {},
+        pending: { id, databaseOnly: true, time: now.toISOString(), key: backupName(21) + 'snapshot.zip' },
+      }),
+    );
+    const snapshot = join(x.directory, id + '.zip');
+    await writeFile(snapshot, 'previous local export');
+    const result = await backup({ ...x.command, operationId: nextId }, x.exporter, x.options);
+    assert.equal(result.operationId, nextId);
+    await assert.rejects(backup(x.command, x.exporter, x.options), { code: 'BACKUP_STATE_INVALID' });
+    assert.equal(await readFile(snapshot, 'utf8'), 'previous local export');
+  }));
+
+test('a lost initiation response keeps the pinned key even before the upload ID is known', () =>
+  setup(async x => {
+    const create = x.client.create;
+    let initiated;
+    x.client.create = async (...args) => {
+      assert.equal(initiated, undefined);
+      initiated = { key: args[0], uploadId: await create(...args) };
+      throw new Error('lost response');
+    };
+    await assert.rejects(backup(x.command, x.exporter, x.options), /lost response/);
+    await assert.rejects(backup({ ...x.command, operationId: nextId }, x.exporter, x.options), {
+      code: 'BACKUP_PENDING',
+    });
+    await assert.rejects(backup({ ...x.command, databaseOnly: true }, x.exporter, x.options), {
+      code: 'BACKUP_TARGET_MISMATCH',
+    });
+    x.client.create = async key => {
+      assert.equal(key, initiated.key);
+      return initiated.uploadId;
+    };
+    assert.equal((await backup(x.command, x.exporter, x.options)).operationId, id);
+    assert.equal(x.exports(), 1);
+    assert.equal(x.client.creates, 1);
+  }));
+
+test('read-only R2 failures before multipart initiation allow a fresh operation', () =>
+  setup(async x => {
+    for (const method of ['HEAD', 'GET']) {
+      const client = r2Client(
+        {
+          R2_ACCOUNT_ID: 'synthetic',
+          R2_BUCKET: 'fake',
+          R2_ACCESS_KEY_ID: 'SYNTHETIC_ACCESS',
+          R2_SECRET_ACCESS_KEY: 'SYNTHETIC_SECRET',
+        },
+        async (_, request) => {
+          assert.ok(['HEAD', 'GET'].includes(request.method));
+          return new Response(null, { status: request.method === method ? 403 : 404 });
+        },
+      );
+      await assert.rejects(backup(x.command, x.exporter, { ...x.options, client }), {
+        code: 'BACKUP_R2_FAILED',
+      });
+      assert.equal((await readBackupStatus(x.directory, now)).pending, false);
+    }
+    const result = await backup({ ...x.command, operationId: nextId }, x.exporter, x.options);
+    assert.equal(result.operationId, nextId);
   }));
 
 test('database-only weekly backup excludes files and pins storage mode in its manifest and receipt', () =>
@@ -421,7 +507,7 @@ test('transient index retries retain the operation and publish only the verified
     assert.equal((await readBackupStatus(x.directory)).pending, false);
   }));
 
-test('exhausted index retries leave pending state intact without uploading or retaining', () =>
+test('exhausted index retries release the reservation without uploading or pruning', () =>
   setup(async x => {
     seed(x.client);
     const before = [...x.client.objects];
@@ -442,5 +528,5 @@ test('exhausted index retries leave pending state intact without uploading or re
     assert.equal(x.exports(), 3);
     assert.equal(x.client.creates, 0);
     assert.deepEqual([...x.client.objects], before);
-    assert.equal((await readBackupStatus(x.directory)).pending, true);
+    assert.equal((await readBackupStatus(x.directory)).pending, false);
   }));

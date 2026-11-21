@@ -378,7 +378,11 @@ directory between local retries. Actions runners are ephemeral: each run starts
 a new operation, and a rerun is a new backup, not a resumption of a lost runner's
 local pending state. Unfinished remote uploads remain untouched. No cache or
 artifact retains private retry state. A failed export/upload/checksum check never starts
-retention. An interrupted multipart upload resumes its same key/upload ID and
+retention. Export, validation and initial read-only R2 failures permit a fresh
+operation in the same state directory. An older journal entry with neither a manifest nor
+an upload ID is treated as a pre-upload reservation. Any existing local export
+is preserved, so use a fresh operation ID if the old ID already has a local ZIP.
+An interrupted multipart upload resumes its same key/upload ID and
 replaces parts deterministically; a lost completion or manifest response is
 reconciled by reading the existing bytes. Retry without a new operation id while
 pending; an explicit id must match the pending operation. Completed explicit ids
@@ -438,8 +442,10 @@ For the already approved weekly job, the lead may set
 `HOSTED_DURABILITY_DATABASE_ONLY=1` in the manual operator environment). The
 schedule and keep-four completed-backup retention do not change. No job is
 installed or enabled by this option. The default continues including Convex
-file storage. A backup's pending state, manifest and receipt pin its storage
-mode; retry the original operation with that same mode.
+file storage. If validation returns `DATABASE_ONLY_STORAGE_REMAINS`, start a fresh
+file-inclusive backup in the same state directory. The verified manifest is saved
+in pending state before the first R2 write. From that point, retry the original
+operation with its original storage mode. The completed receipt also pins that mode.
 
 Restore imports the original database ZIP into a fresh deployment using the
 fresh-target procedure above, then restores matching code, authentication,

@@ -10,6 +10,20 @@ import { parseArgs } from 'node:util';
 import { deploymentOptions } from './hosted-durability.mjs';
 import { failure } from './lib/hosted-durability-compare.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
+const maintenanceMessages = {
+  ARGUMENT_INVALID: 'Check the maintenance command and its arguments.',
+  DEPLOYMENT_CREDENTIAL_MISMATCH: 'Use a credential for the selected deployment.',
+  R2_VERIFIED_PASS_REQUIRED: 'Use a completed, zero-failure verification receipt for the selected project.',
+  R2_EARLY_VERIFICATION_REQUIRED: 'Use a full-digest verification receipt from within the last 24 hours.',
+  R2_BACKUP_REQUIRED:
+    'Check backup storage credentials and the completed file-inclusive backup receipt and manifest.',
+  R2_MAINTENANCE_FAILED: 'Storage maintenance failed; retry the original command.',
+};
+const argumentErrors = new Set([
+  'ERR_PARSE_ARGS_UNKNOWN_OPTION',
+  'ERR_PARSE_ARGS_INVALID_OPTION_VALUE',
+  'ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL',
+]);
 export function parseMaintenance(args) {
   const { values, positionals } = parseArgs({
     args,
@@ -123,12 +137,16 @@ async function journal(path, value) {
   }
   syncDirectory(dirname(resolve(path)));
 }
+async function readVerification(command) {
+  try {
+    return verificationReceipt(JSON.parse(await readFile(command.verification, 'utf8')), command);
+  } catch {
+    throw failure('R2_VERIFIED_PASS_REQUIRED');
+  }
+}
 /** Re-running starts stable project pages at null. Row markers/key rotation make unknown outcomes retry-safe. */
 export async function executeMaintenance(command, run = runInternal, options = {}) {
-  const pass =
-    command.operation === 'purge'
-      ? verificationReceipt(JSON.parse(await readFile(command.verification, 'utf8')), command)
-      : null;
+  const pass = command.operation === 'purge' ? await readVerification(command) : null;
   if (command.earlyOwnerApproved !== undefined) {
     const now = options.now ?? Date.now(),
       at = Date.parse(pass?.verifiedAt);
@@ -197,13 +215,17 @@ export async function executeMaintenance(command, run = runInternal, options = {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
     console.log(JSON.stringify(await executeMaintenance(parseMaintenance(process.argv.slice(2)))));
-  } catch {
+  } catch (error) {
+    const code = argumentErrors.has(error?.code)
+      ? 'ARGUMENT_INVALID'
+      : Object.hasOwn(maintenanceMessages, error?.code)
+        ? error.code
+        : 'R2_MAINTENANCE_FAILED';
     console.error(
       JSON.stringify({
         error: {
-          code: 'R2_MAINTENANCE_FAILED',
-          message:
-            'Storage maintenance failed; retry the original command. Provider output and credentials are withheld.',
+          code,
+          message: maintenanceMessages[code],
         },
       }),
     );

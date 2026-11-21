@@ -74,5 +74,62 @@ test('CLI failures redact secret-looking arguments and provider text', () => {
     { encoding: 'utf8' },
   );
   assert.equal(result.status, 1);
-  assert.ok(!result.stderr.includes('SYNTHETIC_PRIVATE_SENTINEL'));
+  assert.equal(result.stdout, '');
+  assert.deepEqual(JSON.parse(result.stderr), {
+    error: { code: 'ARGUMENT_INVALID', message: 'Check the maintenance command and its arguments.' },
+  });
+});
+test('early purge CLI distinguishes missing backup evidence from an invalid verification receipt', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'r2-maintenance-cli-'));
+  try {
+    const verification = join(directory, 'verify.json');
+    const now = Date.parse(receipt.verifiedAt) + 3_600_000;
+    const clock = 'data:text/javascript,' + encodeURIComponent(`Date.now = () => ${now};`);
+    const run = () =>
+      spawnSync(
+        process.execPath,
+        [
+          '--import',
+          clock,
+          'scripts/r2-maintenance.mjs',
+          'purge',
+          '--deployment',
+          command.deployment,
+          '--project',
+          command.projectId,
+          '--verification',
+          verification,
+          '--backup-state-dir',
+          directory,
+          '--early-owner-approved',
+          'SYNTHETIC_PRIVATE_SENTINEL',
+        ],
+        { encoding: 'utf8' },
+      );
+    await writeFile(verification, 'SYNTHETIC_PRIVATE_SENTINEL');
+    const invalid = run();
+    assert.equal(invalid.status, 1);
+    assert.deepEqual(JSON.parse(invalid.stderr), {
+      error: {
+        code: 'R2_VERIFIED_PASS_REQUIRED',
+        message: 'Use a completed, zero-failure verification receipt for the selected project.',
+      },
+    });
+    await writeFile(
+      verification,
+      JSON.stringify({ ...receipt, fullDigest: true, count: 1, digestChecks: 1 }),
+    );
+    const missing = run();
+    assert.equal(missing.status, 1);
+    assert.equal(missing.stdout, '');
+    assert.deepEqual(JSON.parse(missing.stderr), {
+      error: {
+        code: 'R2_BACKUP_REQUIRED',
+        message:
+          'Check backup storage credentials and the completed file-inclusive backup receipt and manifest.',
+      },
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

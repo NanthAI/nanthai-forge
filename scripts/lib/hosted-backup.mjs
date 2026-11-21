@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, open, readFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CheckQueue } from '../../dist/check-queue.js';
 import { failure, readSnapshot } from './hosted-durability-compare.mjs';
@@ -47,7 +47,7 @@ export function backupStatus(state, now = new Date()) {
     lastSuccess: last,
     lastAttempt: state.lastAttempt ?? null,
     missedWeek: !last || now.getTime() - Date.parse(last) > week,
-    pending: !!state.pending,
+    pending: !!(state.pending?.manifest || state.pending?.uploadId),
   };
 }
 export async function readBackupStatus(directory, now) {
@@ -65,10 +65,13 @@ async function confirm(client, key, expected) {
     throw failure('BACKUP_CHECKSUM_MISMATCH');
   return true;
 }
-async function upload(client, pending, path, persist) {
-  if (await confirm(client, pending.key, pending)) return;
+async function upload(client, pending, path, pin, persist) {
+  if (await confirm(client, pending.key, pending)) {
+    await pin();
+    return;
+  }
   if (!pending.uploadId) {
-    pending.uploadId = await client.create(pending.key, pending.sha256);
+    pending.uploadId = await client.create(pending.key, pending.sha256, pin);
     await persist();
   }
   const file = await open(path, 'r');
@@ -138,18 +141,15 @@ export async function backup(command, exportSnapshot, options = {}) {
         throw failure('BACKUP_TARGET_MISMATCH');
       return receipt;
     }
+    // Older versions reserved a journal entry before export. They always saved a
+    // manifest before contacting R2, so an empty reservation needs no reconciliation.
+    if (state.pending && !previous.pending) delete state.pending;
     if (state.pending && command.operationId && state.pending.id !== command.operationId)
       throw failure('BACKUP_PENDING');
+    if (state.pending && !state.pending.manifest) throw failure('BACKUP_STATE_INVALID');
     const client = options.client ?? r2Client();
-    if (!state.pending) {
-      const id = command.operationId ?? randomUUID();
-      if (!uuid(id)) throw failure('ARGUMENT_INVALID');
-      const time = now.toISOString();
-      const name = `${time.replaceAll(':', '-')}-${id}`;
-      state.pending = { id, time, key: command.prefix + name + '/snapshot.zip' };
-      await save(path, state);
-    }
-    const pending = state.pending;
+    const pending = state.pending ?? { id: command.operationId ?? randomUUID() };
+    if (!uuid(pending.id)) throw failure('ARGUMENT_INVALID');
     const databaseOnly = !!command.databaseOnly;
     if (pending.databaseOnly !== undefined && pending.databaseOnly !== databaseOnly)
       throw failure('BACKUP_TARGET_MISMATCH');
@@ -157,12 +157,12 @@ export async function backup(command, exportSnapshot, options = {}) {
       throw failure('BACKUP_TARGET_MISMATCH');
     pending.databaseOnly = databaseOnly;
     const snapshot = join(directory, pending.id + '.zip');
+    let staging;
     let step = 'backup.prepare';
     try {
       if (!pending.manifest) {
-        // Publish an export only after the exporter and ZIP/storage/Work verification succeed.
-        const temp = snapshot + '.partial.zip';
-        await rm(temp, { force: true });
+        staging = await mkdtemp(join(directory, 'export-'));
+        const temp = join(staging, 'snapshot.zip');
         const summary = await exportAndVerify(command.deployment, temp, exportSnapshot, {
           databaseOnly,
           read: options.verifySnapshot ?? readSnapshot,
@@ -171,13 +171,10 @@ export async function backup(command, exportSnapshot, options = {}) {
           now: options.now ? () => options.now : undefined,
         });
         const digest = await atStep('backup.hash', () => fileDigest(temp));
-        await rename(temp, snapshot);
+        const identity = options.identity ?? (await atStep('backup.identity', sourceIdentity));
         Object.assign(pending, digest);
-        // No remote write has happened yet. Name a re-export by its actual snapshot
-        // observation, so a retry after an export failure sorts by the new data.
         pending.time = summary.observedAt;
         pending.key = command.prefix + `${pending.time.replaceAll(':', '-')}-${pending.id}/snapshot.zip`;
-        const identity = options.identity ?? (await atStep('backup.identity', sourceIdentity));
         pending.manifest = {
           format: 1,
           operationId: pending.id,
@@ -192,16 +189,29 @@ export async function backup(command, exportSnapshot, options = {}) {
           includeFileStorage: !databaseOnly,
           identity,
         };
-        await save(path, state);
+      } else {
+        step = 'backup.hash';
+        const actual = await fileDigest(snapshot);
+        if (actual.size !== pending.size || actual.sha256 !== pending.sha256)
+          throw failure('BACKUP_CHECKSUM_MISMATCH');
       }
-      step = 'backup.hash';
-      if (
-        JSON.stringify(await fileDigest(snapshot)) !==
-        JSON.stringify({ size: pending.size, sha256: pending.sha256 })
-      )
-        throw failure('BACKUP_CHECKSUM_MISMATCH');
+      const pin = async () => {
+        if (state.pending) return;
+        // Preserve any snapshot already on disk, including one left by an interrupted export.
+        try {
+          await link(join(staging, 'snapshot.zip'), snapshot);
+        } catch (error) {
+          if (error.code === 'EEXIST') throw failure('BACKUP_STATE_INVALID');
+          throw error;
+        }
+        await rm(staging, { recursive: true, force: true });
+        staging = undefined;
+        // Persist the exact snapshot and key before any upload can have an unknown outcome.
+        await save(path, { ...state, pending });
+        state.pending = pending;
+      };
       await atStep('backup.upload-readback', () =>
-        upload(client, pending, snapshot, () => save(path, state)),
+        upload(client, pending, snapshot, pin, () => save(path, state)),
       );
       const manifest = Buffer.from(JSON.stringify(pending.manifest) + '\n');
       const manifestKey = pending.key.replace(/snapshot\.zip$/, 'manifest.json');
@@ -246,6 +256,8 @@ export async function backup(command, exportSnapshot, options = {}) {
       state.lastAttempt = { time: now.toISOString(), status: 'failed' };
       await save(path, state);
       throw error;
+    } finally {
+      if (staging) await rm(staging, { recursive: true, force: true }).catch(() => {});
     }
   } finally {
     queue.release();

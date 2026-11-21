@@ -71,10 +71,12 @@ test('S3 failures never return credentials, signed URLs or provider bodies', asy
 
 test('a lost initiation response discovers the original multipart upload before retrying', async () => {
   let uploadId,
-    creates = 0;
+    creates = 0,
+    pinned = false;
   const client = r2Client(fakeEnv, async (url, init) => {
     const u = new URL(url);
     if (init.method === 'GET') {
+      assert.equal(pinned, false, 'read-only discovery must precede the local pin');
       assert.equal(u.searchParams.get('prefix'), 'backup/exact/snapshot.zip');
       return new Response(
         '<ListMultipartUploadsResult><IsTruncated>false</IsTruncated>' +
@@ -84,14 +86,20 @@ test('a lost initiation response discovers the original multipart upload before 
           '</ListMultipartUploadsResult>',
       );
     }
+    assert.equal(pinned, true, 'the operation must be pinned before initiation');
     creates++;
     uploadId = 'original-id';
     throw new Error('response lost');
   });
-  await assert.rejects(client.create('backup/exact/snapshot.zip', hash('data')), {
+  const pin = async () => {
+    pinned = true;
+  };
+  await assert.rejects(client.create('backup/exact/snapshot.zip', hash('data'), pin), {
     code: 'BACKUP_R2_FAILED',
   });
-  assert.equal(await client.create('backup/exact/snapshot.zip', hash('data')), 'original-id');
+  pinned = false;
+  assert.equal(await client.create('backup/exact/snapshot.zip', hash('data'), pin), 'original-id');
+  assert.equal(pinned, true, 'a discovered multipart upload must be pinned before reuse');
   assert.equal(creates, 1);
 });
 

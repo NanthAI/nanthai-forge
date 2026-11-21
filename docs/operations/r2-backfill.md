@@ -155,7 +155,11 @@ private operator environment without printing them.
    retain its complete receipt: all four row kinds, no failures, current backfill
    revision, `digestChecks == count`, `verifiedAt` and `safeToPurgeAfter`. These
    commands perform live Convex metadata reads and R2 HEAD/GET operations.
-5. **LIVE, OWNER APPROVAL REQUIRED: R7 purge.** Preflight: present the owner with
+5. **LIVE, OWNER APPROVAL REQUIRED: R7 purge.** The maintenance CLI reports a
+   typed code for local verification and backup evidence failures, including
+   `R2_VERIFIED_PASS_REQUIRED` and `R2_BACKUP_REQUIRED`. Provider errors are
+   reported as `R2_MAINTENANCE_FAILED` with provider output withheld.
+   Preflight: present the owner with
    the exact deployment/projects, full verification receipts and eligible counts,
    the loss of the Convex fallback copies, and recovery through verified R2 plus
    the preserved file-inclusive backup. Obtain approval for that scope before
