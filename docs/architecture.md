@@ -249,10 +249,10 @@ and physical pin again after R2 reads without signing a second location. A chang
 pin or retryable manifest read failure obtains a complete, freshly authorized
 descriptor for the existing retry. Clone selectors keep their existing signing path.
 
-The default-off `FORGE_SOURCE_MERGE_ROOT_PREFETCH` switch lets the worker's first
-authorized transaction provide the two root descriptors for a single-page compose
-selection or the two tips for a plain sync. Workers still verify the exact
-plan and body pins. Larger inputs and absent bindings use the existing resolver.
+The worker's first authorized transaction prefetches the two root descriptors
+for a bounded single-page compose selection or the two tips for a bounded plain
+sync. Workers verify the exact plan and body pins. Larger inputs and absent
+bindings use the existing resolver.
 
 Output staging also counts nested recipe leaves and physical projections in its
 query allowance: at most 2,048 estimated lookups, with the rest reserved for

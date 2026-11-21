@@ -87,7 +87,7 @@ test('compose repairs an adopted Lane root without a usable main root', async t 
   const pin = physicalObjectRow(f.s, selected.sha256).statePhysical,
     root = await PhysicalManifestReader.open(selected.sha256, pin, f.read);
   assert.equal(selected.sha256, final.state.sha256);
-  assert.equal(f.requests.length - before, 3, 'compose keeps the existing descriptor call budget');
+  assert.equal(f.requests.length - before, 2, 'prefetch leaves two descriptor calls for this repair');
   assert.equal(
     root.root.chunks.some(chunk => chunk.pack?.digest === privatePack),
     false,

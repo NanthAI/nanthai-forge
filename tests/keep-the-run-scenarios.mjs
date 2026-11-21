@@ -119,10 +119,12 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // Item 2c420916: the health facts add 34 or 35 bytes per acceptance row. The carry
 // delta moves +135 read/-1 write bytes, scoped recheck +102 read, red -34 read.
 // The scenarios read different existing receipts. Call counts are unchanged.
+// Item 0930a720: prefetch saves a descriptor call and 11,410 read bytes on the
+// replacement compose in the red retire arm, narrowing the keep's savings.
 export const WIRED = {
   carry: { calls: 7, readBytes: 404_578, writeBytes: 74_602 },
   'scoped-recheck': { calls: 17, readBytes: 534_448, writeBytes: 143_217 },
-  red: { calls: -18, readBytes: -396_225, writeBytes: -144_510 },
+  red: { calls: -17, readBytes: -384_815, writeBytes: -144_510 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */

@@ -55,9 +55,10 @@ for (const history of [0, 1150])
     // Reads 3189 -> 3191, writes 1130 -> 1135 (Item 85f456c1, In-queue writer and batch truth gap): binding moves each trio Lane's mark to In queue (+1 write
     // per submitted Lane, owner-accepted: +3), and each of the two batch publishes reads and replaces the line summary
     // so main's snapshot moves (+2 reads, +2 writes, inside finishSettle); no call. Equal in both arms.
+    // Item 0930a720: compose root prefetch removes four descriptor calls and 44 document reads in each arm.
     assert.deepEqual(
       [after.calls, after.reads, after.writes, after.lateTaskMs, after.idle],
-      [165, 3191, 1135, 180000, 0],
+      [161, 3147, 1135, 180000, 0],
       '8c9b84fc: disjoint baseline must not grow',
     );
     t.diagnostic(JSON.stringify({ history, before, after }));

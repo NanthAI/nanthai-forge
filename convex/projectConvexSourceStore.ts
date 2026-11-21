@@ -324,12 +324,7 @@ export const begin = sourceMutation({
         for (const pin of await saveStepReads(ctx, args.projectId, args.jobId))
           locations.push(await sourceObjectLocation(ctx, args.projectId, pin));
       const source = active.source?.state;
-      if (
-        process.env.FORGE_SOURCE_MERGE_ROOT_PREFETCH === '1' &&
-        !active.row.batchId &&
-        source &&
-        ('inputs' in source || 'work' in source)
-      )
+      if (!active.row.batchId && source && ('inputs' in source || 'work' in source))
         locations.push(...(await mergeStepReads(ctx, args.projectId, source)));
     }
     return canonicalPayload({

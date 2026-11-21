@@ -345,10 +345,11 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // Reads 1,895,434 -> 1,896,106 B, writes 607,376 -> 608,297 B (Item 85f456c1, In-queue writer and batch truth gap): the In-queue binding write (+1 write
   // per submitted Lane, owner-accepted) and the batch publish's line-summary update; no call, about 0.8 KB per landing.
   // Item 2c420916: +69 read and +69 write bytes for the two existing acceptance rows' health facts.
+  // Item 0930a720: compose root prefetch removes two descriptor calls. The fixture reads 22,387 fewer bytes.
   const measured = withoutFlowReceiptBytes(pair);
   assert.deepEqual(
     measured,
-    { calls: 111, readBytes: 1_896_776, writeBytes: 608_921 },
+    { calls: 109, readBytes: 1_874_389, writeBytes: 608_919 },
     'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
@@ -392,10 +393,11 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // Reads 1,900,686 -> 1,901,360 B, writes 609,872 -> 610,798 B (Item 85f456c1, In-queue writer and batch truth gap): the In-queue binding write, as in the
   // small replay; no call.
   // Item 2c420916: +69 read and +69 write bytes, matching the small replay.
+  // Item 0930a720: compose root prefetch removes two descriptor calls. The fixture reads 22,433 fewer bytes.
   const measured = withoutFlowReceiptBytes(after);
   assert.deepEqual(
     measured,
-    { calls: 111, readBytes: 1_902_030, writeBytes: 611_422 },
+    { calls: 109, readBytes: 1_879_597, writeBytes: 611_420 },
     'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(after.idle, 0);

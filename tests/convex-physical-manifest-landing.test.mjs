@@ -14,6 +14,7 @@ import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 import { saveBytes } from '../dist/hosted-save.js';
 const sync = await import(moduleUrl('../convex/projectHostedSync.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+const jobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
 function moveMain(f, pin, receipt) {
   f.s.main.head = pin.sha256;
   f.s.main.receipt.id = receipt;
@@ -46,22 +47,11 @@ function dogfood(s, history) {
       removed: false,
     });
 }
-test('29k dogfood landing keeps save, real disjoint sync and compose descriptor calls at most five with no per-file writer scan', t =>
+test('29k dogfood landing prefetches merge descriptors and keeps save, disjoint sync and compose within five descriptor calls', t =>
   dogfoodLanding(t, 1));
 test('29k dogfood landing retains the descriptor budget at 10x history', t => dogfoodLanding(t, 10));
-test('29k landing resolves single-page compose roots and plain sync tips at begin', t =>
-  dogfoodLanding(t, 1, true));
 
-async function dogfoodLanding(t, history, prefetch = false) {
-  if (prefetch) {
-    const flag = 'FORGE_SOURCE_MERGE_ROOT_PREFETCH';
-    const old = process.env[flag];
-    process.env[flag] = '1';
-    t.after(() => {
-      if (old === undefined) delete process.env[flag];
-      else process.env[flag] = old;
-    });
-  }
+async function dogfoodLanding(t, history) {
   const f = await physicalProject(t, 29000);
   await f.queueSeed();
   await f.seed();
@@ -223,19 +213,17 @@ async function dogfoodLanding(t, history, prefetch = false) {
     'the normalized landing performs no catalog seed',
   );
   assert(measured.length <= 5, `${measured.length} descriptor calls across save/sync/compose`);
-  if (prefetch) {
-    const roots = [selection.request.inputs.root.sha256, selection.request.dependencies.root.sha256];
-    const tips = [progress.input.work.left.object.sha256, progress.input.work.right.object.sha256];
-    assert(
-      !f.requests.slice(saveEnd, syncEnd).some(request => request.digests.some(id => tips.includes(id))),
-      'exact sync tips are already available through begin',
-    );
-    assert(
-      !f.requests.slice(syncEnd, end).some(request => request.digests.some(id => roots.includes(id))),
-      'the exact compose roots are already available through begin',
-    );
-    assert(end - syncEnd <= 1, 'only the compose tips need another descriptor page');
-  }
+  const roots = [selection.request.inputs.root.sha256, selection.request.dependencies.root.sha256];
+  const tips = [progress.input.work.left.object.sha256, progress.input.work.right.object.sha256];
+  assert(
+    !f.requests.slice(saveEnd, syncEnd).some(request => request.digests.some(id => tips.includes(id))),
+    'exact sync tips are already available through begin',
+  );
+  assert(
+    !f.requests.slice(syncEnd, end).some(request => request.digests.some(id => roots.includes(id))),
+    'the exact compose roots are already available through begin',
+  );
+  assert(end - syncEnd <= 1, 'only the compose tips need another descriptor page');
   const fileIds = new Set([
     ...state.files.map(file => file.blob),
     ...readHostedLaneCheckout(root).state.files.map(file => file.blob),
@@ -267,4 +255,8 @@ async function dogfoodLanding(t, history, prefetch = false) {
       wallMs: Math.round(performance.now() - starts.at),
     }),
   );
+  const job = await f.s.run('S5 load published compose job', ctx =>
+    jobs.loadSourceJob(ctx, f.s.projectId, pending.jobId),
+  );
+  assert.equal(job.status, 'completed', 'compose publishes a result within the measured step');
 }
