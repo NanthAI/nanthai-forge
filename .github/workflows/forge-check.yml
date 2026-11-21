@@ -195,6 +195,7 @@ jobs:
           FORGE_PROJECT_ID: ${{ inputs.projectId }}
           FORGE_RUN_ID: ${{ inputs.runId }}
           FORGE_CANDIDATE: ${{ runner.temp }}/candidate
+          FORGE_CONTROL_BUILD_KEY: ${{ steps.keys.outputs.build }}
           FORGE_ACTIONS_JOB_CAP: '60'
       # Only distributed executions and the optional pack refresh need artifacts.
       - if: steps.plan.outputs.matrix != '[]' || steps.plan.outputs.pack_refresh == 'true'
