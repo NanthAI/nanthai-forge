@@ -254,6 +254,7 @@ The app scale is fixed in pixels. The public page and docs scale is fluid: docs 
 - **Window breakpoints:** at 1240 px the rail shows icons and keeps the link text available to assistive technology. At 860 px the page is one column, the rail becomes four bottom tabs and More, and the line moves to its own row under the top bar.
 - **Region breakpoints** (container queries, because regions can be moved): 900 px a yard stacks each label over its track; 700 px a Lane row stacks; 560 px a matrix stacks; 520 px the overlap ruler stacks; 420 px.
 - **Phone:** every control is at least 40 px tall; inputs are 16 px type; key caps are hidden and nothing depends on them; the tab bar pads for the safe area; the page never scrolls sideways (wide content scrolls inside its own region); what needs a person comes first.
+- **More:** the last phone tab opens the shared Menu above the bar. It lists the places outside the direct tabs and carries the current mark while one of those places is open.
 - **Public page:** full-width sections, content capped at 1280 px, gutters 16 to 48 px, one claim and one proof per section; checked at 1440, 1024, 768, 390 and 320 px.
 - Space is reserved for anything that loads late; nothing arriving pushes content down.
 

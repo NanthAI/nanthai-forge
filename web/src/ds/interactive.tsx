@@ -25,7 +25,7 @@ import type {
   SheetProps,
 } from './behaviour';
 import { loadLayer, useLayer } from './layer';
-import { DockMount, useDockRegions, useHeldGrip } from './dock-regions';
+import { DockMount, useDockRegions, useHeldPress } from './dock-regions';
 
 /** Same as the layer's default (behaviour/ReorderList.tsx), so the first-paint rows line up with the swapped ones. */
 const LIST_COLS = 'auto auto minmax(0, 1fr) auto';
@@ -102,26 +102,41 @@ function useSwapFocus(swapped: boolean) {
 /** A key that opens a menu of actions. */
 export function Menu(props: ActionMenuProps) {
   const layer = useLayer();
+  const { held, hold } = useHeldPress();
   const [pressed, setPressed] = useState(false);
+  const [focused, setFocused] = useState(false);
   const focusKey = props.focusKey ?? `menu-${props.label}`;
-  if (layer)
-    return <layer.ActionMenu {...props} focusKey={focusKey} defaultOpen={pressed} autoFocus={pressed} />;
+  if (layer && !held)
+    return <layer.ActionMenu {...props} focusKey={focusKey} replayPress={pressed} autoFocus={focused} />;
+  const press = (button: HTMLButtonElement) => {
+    // Kept here when this key outlives the swap; inside a list or a dock the wrapper carries it.
+    setPressed(true);
+    markPress(button, focusKey);
+    ask();
+  };
   return (
     <button
       type="button"
       className={props.className ?? 'btn'}
       aria-haspopup="menu"
       aria-expanded="false"
+      aria-current={props['aria-current']}
       aria-label={props.children ? props.label : undefined}
       data-focus-key={focusKey}
-      onFocus={ask}
-      onPointerEnter={ask}
-      onClick={event => {
-        // Kept here when this key outlives the swap; inside a list or a dock the wrapper carries it (markPress).
-        setPressed(true);
-        markPress(event.currentTarget, focusKey);
+      onFocus={() => {
+        setFocused(true);
         ask();
       }}
+      onBlur={() => setFocused(false)}
+      onPointerEnter={ask}
+      onPointerDown={hold}
+      onKeyDown={event => {
+        // Like the loaded menu, Space opens on keydown so attaching the layer cannot swallow its keyup click.
+        if (event.key !== ' ') return;
+        event.preventDefault();
+        if (!event.repeat) press(event.currentTarget);
+      }}
+      onClick={event => press(event.currentTarget)}
     >
       {props.children ?? <span>{props.label}</span>}
     </button>
@@ -223,7 +238,7 @@ export function ReorderList<T extends ReorderItem>(props: ReorderListProps<T>) {
 /** A screen's regions: a full-width row and two columns, each region moved by its handle. */
 export function Dock(props: DockProps) {
   const layer = useLayer();
-  const grip = useHeldGrip();
+  const grip = useHeldPress();
   const activeLayer = grip.held ? null : layer;
   const [initialMenu, setInitialMenu] = useState<string>();
   const { box, onFocus } = useSwapFocus(!!activeLayer);

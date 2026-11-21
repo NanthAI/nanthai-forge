@@ -62,8 +62,8 @@ export function useDockRegions(regions: readonly DockRegion[]) {
   return { hosts, content, onAttach };
 }
 
-/** An in-flight pointer press must finish on the first-paint grip, even if the layer arrives meanwhile. */
-export function useHeldGrip() {
+/** An in-flight pointer press must finish on the first-paint control, even if the layer arrives meanwhile. */
+export function useHeldPress() {
   const [pointer, setPointer] = useState<number>();
   useEffect(() => {
     if (pointer === undefined) return;

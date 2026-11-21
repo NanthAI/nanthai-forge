@@ -142,6 +142,39 @@ function placeHref(route: ProjectRoute, place: ProjectPlace) {
   return hrefFor({ ...route, place, section: '', rest: '' });
 }
 
+function PhoneMore<Place extends string>({
+  places,
+  tabs,
+  current,
+  labels,
+  href,
+}: {
+  places: readonly Place[];
+  tabs: readonly Place[];
+  current: Place;
+  labels: Record<Place, string>;
+  href: (place: Place) => string;
+}) {
+  const remaining = places.filter(place => !tabs.includes(place));
+  const items = remaining.map(place => ({
+    id: place,
+    label: labels[place],
+    onAction: () => navigate(href(place)),
+  }));
+  return (
+    <Menu
+      label="More"
+      items={items}
+      className="tabs-more"
+      placement="top end"
+      aria-current={remaining.includes(current) ? 'true' : undefined}
+    >
+      <PlaceIcon name="more" size={20} />
+      More
+    </Menu>
+  );
+}
+
 /** The section strip of a place with more than one section. */
 function Strip({ route }: { route: ProjectRoute }) {
   const sections = placeSections[route.place];
@@ -204,7 +237,6 @@ export function ProjectFrame({
     },
   ];
   const tabPlaces: readonly ProjectPlace[] = ['needs', 'lanes', 'plan', 'code'];
-  const more = route.place === 'stats' || route.place === 'settings';
   return (
     <div className="shell" data-frame="project">
       <Skip />
@@ -258,14 +290,13 @@ export function ProjectFrame({
             {place === 'needs' && held ? <Count n={held} hot /> : null}
           </A>
         ))}
-        <A
-          href={placeHref(route, more ? route.place : 'settings')}
-          aria-current={more ? 'page' : undefined}
-          data-more=""
-        >
-          <PlaceIcon name="more" size={20} />
-          More
-        </A>
+        <PhoneMore
+          places={projectPlaces}
+          tabs={tabPlaces}
+          current={route.place}
+          labels={projectPlaceLabels}
+          href={place => placeHref(route, place)}
+        />
       </nav>
     </div>
   );
@@ -284,7 +315,6 @@ export function AccountFrame({
   children: ReactNode;
 }) {
   const tabPlaces: readonly AccountPlace[] = ['projects', 'billing', 'people'];
-  const more = place === 'devices' || place === 'data';
   return (
     <div className="shell" data-frame="account">
       <Skip />
@@ -332,13 +362,13 @@ export function AccountFrame({
             {accountTabLabels[name] ?? accountPlaceLabels[name]}
           </A>
         ))}
-        <A
-          href={hrefFor({ frame: 'account', place: more ? place : 'devices' })}
-          aria-current={more ? 'page' : undefined}
-        >
-          <PlaceIcon name="more" size={20} />
-          More
-        </A>
+        <PhoneMore
+          places={accountPlaces}
+          tabs={tabPlaces}
+          current={place}
+          labels={accountPlaceLabels}
+          href={name => hrefFor({ frame: 'account', place: name })}
+        />
       </nav>
     </div>
   );

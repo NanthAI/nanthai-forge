@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The one menu: a key that opens a list of actions. Arrow keys move, Enter runs, Escape closes and focus returns to
 // the key. Loaded with the behaviour layer; screens use ds/menu.tsx, which draws the same key at first paint.
-import { useRef, useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type AriaAttributes, type ReactNode } from 'react';
 import { Button, Menu, MenuItem, MenuTrigger, Popover, Separator } from 'react-aria-components';
 import { EnglishOnly } from './shared';
 
@@ -15,10 +15,13 @@ export type ActionMenuProps = {
   items: readonly MenuAction[];
   children?: ReactNode;
   className?: string;
+  'aria-current'?: AriaAttributes['aria-current'];
   /** Opened by a press that arrived before the layer: open at once and keep focus on the key. */
   defaultOpen?: boolean;
   autoFocus?: boolean;
-  placement?: 'bottom start' | 'bottom end';
+  /** Replay a first-paint press after the real trigger mounts, so the menu can restore focus to it. */
+  replayPress?: boolean;
+  placement?: 'bottom start' | 'bottom end' | 'top end';
   /** Matches the first-paint control this key replaces (ds/interactive.tsx keeps focus and a pending press). */
   focusKey?: string;
   /** The Dock grip opens on click and lets the drag slot handle Enter. */
@@ -30,14 +33,20 @@ export function ActionMenu({
   items,
   children,
   className = 'btn',
+  'aria-current': current,
   defaultOpen,
   autoFocus,
+  replayPress,
   placement = 'bottom start',
   focusKey,
   dragHandle,
 }: ActionMenuProps) {
   const [open, setOpen] = useState(defaultOpen ?? false);
+  const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (replayPress) button.current?.click();
+  }, [replayPress]);
   const run = (key: React.Key) => {
     const item = items.find(entry => entry !== 'separator' && entry.id === key);
     if (item && item !== 'separator') item.onAction();
@@ -48,9 +57,11 @@ export function ActionMenu({
         {...(dragHandle ? { trigger: 'contextMenu', isOpen: open, onOpenChange: setOpen } : { defaultOpen })}
       >
         <Button
+          ref={button}
           className={className}
           data-focus-key={focusKey}
           aria-label={children ? label : undefined}
+          aria-current={current}
           autoFocus={autoFocus}
           slot={dragHandle ? 'drag' : undefined}
           style={dragHandle ? { pointerEvents: 'auto' } : undefined}
