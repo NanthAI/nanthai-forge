@@ -359,6 +359,7 @@ export class HostedAgentTransport {
     return this.serverFeatures;
   }
   private readonly operationContext = new AsyncLocalStorage<{
+    checkedCheckout?: true;
     id: string | null;
     sourceNotice?: ExactConflictNotice | undefined;
     protectedPathNotice?: ReturnType<typeof protectedPathNotice>;
@@ -1245,6 +1246,7 @@ export class HostedAgentTransport {
       // holds (Issue ca49dc6c): a sync whose pins this checkout moved past, a withdraw whose landing
       // ended, a settled save whose Lane files changed since, an open whose folder is gone. Each
       // is new work instead. Local reads only; every action declares its binding (replayBindings).
+      let syncSaveInventory: import('./hosted-save-capture.js').SaveInventory | undefined;
       const supersededReplay =
         !operationId &&
         autoReplaySuperseded(action, {
@@ -1252,6 +1254,9 @@ export class HostedAgentTransport {
           address: this.address,
           actor: capabilities.actor,
           command: command.data,
+          rememberSyncInventory: inventory => {
+            syncSaveInventory = inventory;
+          },
         });
       const journal =
         action === 'finish'
@@ -1294,6 +1299,11 @@ export class HostedAgentTransport {
       let budgetExpiresAt = 0;
       let carriedMain = mainFirstActions.has(action) ? capabilities.main : undefined;
       const session: HostedAgentSession = {
+        ...(syncSaveInventory ? { syncSaveInventory } : {}),
+        checkedCheckout: () => {
+          const context = this.operationContext.getStore();
+          if (context) context.checkedCheckout = true;
+        },
         root,
         address: this.address,
         exchange: this.exchange,
@@ -2072,6 +2082,7 @@ export class HostedAgentTransport {
         interruptedApply:
           'A local apply is running or was interrupted in this checkout. The next sync, save or preflight here finishes it first.',
       };
+    if (this.operationContext.getStore()?.checkedCheckout) return {};
     // A live landing froze this saved source: saving now would supersede it, so never advise it.
     const frozen = liveLanding(result) || ownsLiveLanding(root);
     return checkpointNudge(root, laneId, this.defaults, unsavedMinutes(root), frozen);
@@ -2486,6 +2497,8 @@ export class HostedAgentTransport {
   }
 }
 export type HostedAgentSession = {
+  syncSaveInventory?: import('./hosted-save-capture.js').SaveInventory;
+  checkedCheckout: () => void;
   authorship?: ReturnType<typeof agentAuthorship>;
   root: string;
   address: HostedAgentAddress;

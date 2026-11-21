@@ -28,7 +28,6 @@ import {
   settlePriorHostedSave,
 } from './hosted-save-client.js';
 import { capturedNotSaved } from './save-not-saved.js';
-import { hostedLaneDirty } from './hosted-lane-dirty.js';
 import {
   keptSaveTiming,
   nothingToSave,
@@ -953,7 +952,7 @@ export async function executeHostedAgent(
           },
           new ConvexLaneTransport(session.exchange),
           // The server just returned this Lane to this caller; its submit reply may carry the State delta.
-          { delta: (observed as { delta?: unknown } | undefined)?.delta },
+          { delta: (observed as { delta?: unknown } | undefined)?.delta, finalCheck: !command.cleanOnly },
         );
         clearSyncHandoff(session.root, operationId);
         timing.mark('apply');
@@ -971,12 +970,14 @@ export async function executeHostedAgent(
           path => !displacedBefore.has(path),
         );
         // An automatic restack runs right after a save that made this check; its own reply says nothing saved.
-        if (!command.cleanOnly)
+        if (!command.cleanOnly) {
           assertSavedCheckout(session.root, {
             what: `This sync completed (${source.status})`,
             completed: reply,
             kept: displaced.length ? { directories: displaced, count: 0, paths: [] } : null,
           });
+          session.checkedCheckout();
+        }
         return reply;
       }
     }
@@ -1265,7 +1266,7 @@ async function saveBeforeSync(
   session: HostedAgentSession,
   command: z.infer<(typeof hostedAgentCommandSchemas)['sync']>,
 ) {
-  if (!markerAt(session.root) || !hostedLaneDirty(session.root, { refresh: true })) return undefined;
+  if (!markerAt(session.root)) return undefined;
   const operationId = randomUUID();
   let saved: unknown;
   try {
@@ -1275,6 +1276,7 @@ async function saveBeforeSync(
       session.exchange,
       {
         ...saveContract(session.capabilities),
+        syncCapture: { inventory: session.syncSaveInventory },
         authorship: session.authorship,
         ...(session.holderSessionId
           ? {
@@ -1293,6 +1295,7 @@ async function saveBeforeSync(
     if (!(error instanceof ForgeError)) throw error;
     throw new ForgeError(error.code, `The sync did not run: ${error.message}`, error.retryAt, error.recovery);
   }
+  if ((saved as { status?: string } | null)?.status === 'nothing-to-save') return undefined;
   const settled = await awaitSaveOutcome(session, operationId, saved),
     outcome = agentSourceOutcome(settled);
   if (outcome?.status === 'completed')

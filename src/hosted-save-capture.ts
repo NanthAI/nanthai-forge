@@ -52,7 +52,12 @@ import { outputRoots, SymbolBudget } from './hosted-overlap-symbols.js';
 import { packageFactFile, packageSymbolLinks } from './hosted-overlap-packages.js';
 import { buildPackageGraph, type PackageGraph } from './package-graph.js';
 import { workLocked } from './work-lock.js';
-import { finishPendingCheckoutDelta, settlePendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
+import {
+  deltaApplyPending,
+  finishPendingCheckoutDelta,
+  settlePendingCheckoutDelta,
+} from './hosted-checkout-delta-pending.js';
+import { laneChanges } from './hosted-lane-dirty.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 import { neverIndex } from './forge-disk.js';
@@ -237,32 +242,64 @@ function laneFirstBaselines(root: string, cache: string, marker: HostedLaneCheck
   };
   return { bases, guess };
 }
+/** A source inventory belongs to one capture attempt. Files are read and checked again during
+ * capture, and the caller's final check catches later changes to the set of paths. */
+export function saveInventory(root: string, marker: HostedLaneCheckoutMarker) {
+  root = realpathSync(root);
+  const notSaved = notSavedCollector();
+  const tree = treeRecorder(root);
+  const paths = scanSourcePaths(root, {
+    retained: marker.state.files.map(file => file.path),
+    onExcluded: notSaved.onExcluded,
+    tree,
+  });
+  return { root, marker, paths, excluded: notSaved.value(), stillCurrent: tree.stillCurrent };
+}
+export type SaveInventory = ReturnType<typeof saveInventory>;
+
 export async function captureHostedSave(
   root: string,
   directory: string,
   preserveConflicts = false,
   continuation?: ConflictContinuation,
+  sync?: { inventory?: SaveInventory | undefined },
 ) {
   root = realpathSync(root);
   // An interrupted sync leaves a half-applied tree under the old marker; capture only a whole one.
+  const interrupted = sync && deltaApplyPending(root);
   finishPendingCheckoutDelta(root);
   const marker = readHostedLaneCheckout(root);
   invariant(marker, 'NOT_FOUND', 'Open a hosted Lane before preparing a save.');
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const since = Date.now(),
-    index = readCheckoutStatIndex(root),
+  const since = Date.now();
+  let checked: SaveInventory | undefined;
+  if (sync && !interrupted) {
+    const previous = sync.inventory;
+    if (
+      previous?.root === root &&
+      canonicalPayload(previous.marker) === canonicalPayload(marker) &&
+      previous.stillCurrent()
+    )
+      checked = previous;
+    else if (
+      !laneChanges(root, marker, {
+        refresh: true,
+        limit: 1,
+        // This is the capture attempt's own walk. A dirty checkout takes these paths straight
+        // into capture; a warm clean check can avoid enumerating them altogether.
+        scan: () => (checked = saveInventory(root, marker)).paths,
+      }).length
+    )
+      return { marker, changes: [], files: [] };
+  }
+  const index = readCheckoutStatIndex(root),
     text = worktreeText(root, marker.state.files),
     observedStats = new Map<string, ReturnType<typeof statEntry>>(),
     cache = clientCacheRoot(root),
     { bases, guess } = laneFirstBaselines(root, cache, marker);
-  const baseline = new Map(marker.state.files.map(file => [file.path, file])),
-    notSaved = notSavedCollector(),
-    // The walk is recorded so this save's final check need not repeat it (checkout-tree.json).
-    local = scanSourcePaths(root, {
-      retained: [...baseline.keys()],
-      onExcluded: notSaved.onExcluded,
-      tree: treeRecorder(root),
-    });
+  const baseline = new Map(marker.state.files.map(file => [file.path, file]));
+  checked ??= saveInventory(root, marker);
+  const local = checked.paths;
   const marked: string[] = [];
   const resolving = pendingConflictPaths(root, marker.selection.laneId).length > 0;
   const changes: SaveChange[] = [],
@@ -286,7 +323,7 @@ export async function captureHostedSave(
         }
       })),
   };
-  for (const path of local.sort()) {
+  for (const path of local) {
     const old = baseline.get(path),
       observed = captureFile(root, path, directory, old, index, text, cache);
     // A directory's stat does not move with its HEAD; submodules are never vouched for by it.
@@ -367,7 +404,7 @@ export async function captureHostedSave(
       });
     }
   // Capture is retry state, never a Work owner or a Lane publication.
-  const excluded = notSaved.value();
+  const excluded = checked.excluded;
   const result = { marker, changes, files, ...(excluded ? { notSaved: excluded } : {}) };
   mkdirSync(clientCacheRoot(root), { recursive: true, mode: 0o700 });
   neverIndex(clientCacheRoot(root));
@@ -381,6 +418,7 @@ export async function captureHostedSave(
       'WORK_STALE',
       'Checkout baseline changed during save preparation.',
     );
+    if (sync && !changes.length) return result;
     // Kept after the save settles (capture.json is dropped then), so a replayed receipt repeats it.
     if (excluded) durableReplace(join(directory, notSavedFile), JSON.stringify(excluded));
     durableReplace(path, JSON.stringify(result));

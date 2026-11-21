@@ -10,6 +10,7 @@ import { capturedTree, unsavedPaths } from './hosted-save-receipt-state.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { hostedRootLanePath } from './hosted-root-checkout.js';
 import { supersededSync } from './hosted-sync-retained.js';
+import type { SaveInventory } from './hosted-save-capture.js';
 import { withdrawDone } from './hosted-agent-withdraw.js';
 import type { HostedAgentAddress, hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 
@@ -26,7 +27,13 @@ import type { HostedAgentAddress, hostedAgentCommandSchemas } from './hosted-age
  * - `server`: the receipt is the server operation's own outcome, idempotent by id, and holds forever;
  * - `read`: no replay; every call reads current state.
  */
-type Context = { root: string; address: HostedAgentAddress; actor: string; command: unknown };
+type Context = {
+  root: string;
+  address: HostedAgentAddress;
+  actor: string;
+  command: unknown;
+  rememberSyncInventory?: (inventory: SaveInventory) => void;
+};
 type Binding =
   | { kind: 'checked'; superseded: (context: Context) => boolean }
   | { kind: 'transport' | 'server' | 'read' };
@@ -124,7 +131,8 @@ export const replayBindings: Record<keyof typeof hostedAgentCommandSchemas, Bind
   save: { kind: 'checked', superseded: supersededSave },
   sync: {
     kind: 'checked',
-    superseded: ({ root, address, actor, command }) => supersededSync(root, address, actor, command),
+    superseded: ({ root, address, actor, command, rememberSyncInventory }) =>
+      supersededSync(root, address, actor, command, rememberSyncInventory),
   },
   withdraw: {
     kind: 'checked',

@@ -5,7 +5,9 @@ import { clientCacheRoot } from './root-paths.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { HostedAgentJournal } from './hosted-agent-journal.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
-import { hostedLaneDirty } from './hosted-lane-dirty.js';
+import { laneChanges } from './hosted-lane-dirty.js';
+import { deltaApplyPending } from './hosted-checkout-delta-pending.js';
+import { saveInventory, type SaveInventory } from './hosted-save-capture.js';
 import { pendingConflictPaths } from './hosted-conflict-precheck.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
 
@@ -20,6 +22,7 @@ export function supersededSync(
   address: HostedAgentAddress,
   actor: string,
   command: unknown,
+  remember?: (inventory: SaveInventory) => void,
 ): boolean {
   try {
     const previous = HostedAgentJournal.previous(root, address, actor, 'sync', command);
@@ -33,18 +36,33 @@ export function supersededSync(
       JSON.parse(readFileSync(handoff, 'utf8')).operationId === previous.operationId
     )
       return false;
-    const selection = readHostedLaneCheckout(root)?.selection;
-    if (!selection || selection.laneId !== request.laneId) return false;
+    const marker = readHostedLaneCheckout(root);
+    if (!marker || marker.selection.laneId !== request.laneId) return false;
+    const { selection } = marker;
     if (selection.head !== request.expected.head || selection.version !== request.expected.version)
       return true;
     // Edits made since (an up-to-date sync moves neither pin): `save --sync` saves them first, so the
     // identical request is new work, never a replay that leaves them unsaved (48835eea).
     // A conflict this sync left to resolve keeps replaying its guidance: its files are the resolution.
-    return (
-      (command as { apply?: unknown } | null)?.apply !== false &&
-      !pendingConflictPaths(root, selection.laneId).length &&
-      hostedLaneDirty(root)
-    );
+    if (
+      (command as { apply?: unknown } | null)?.apply === false ||
+      pendingConflictPaths(root, selection.laneId).length
+    )
+      return false;
+    let inventory: SaveInventory | undefined;
+    try {
+      if (deltaApplyPending(root)) return true;
+      const dirty =
+        laneChanges(root, marker, {
+          limit: 1,
+          scan: () => (inventory = saveInventory(root, marker)).paths,
+        }).length > 0;
+      if (dirty && inventory) remember?.(inventory);
+      return dirty;
+    } catch {
+      // A fresh save reports the original capture error, as it does for any unreadable checkout.
+      return true;
+    }
   } catch {
     return false;
   }

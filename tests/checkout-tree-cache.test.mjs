@@ -109,6 +109,22 @@ test('48835eea degraded: a new folder of files is named, and a later file inside
   assert(found.listed.includes('src/deep'), `it walked: ${found.listed}`);
 });
 
+test('checkout inventory observes a change directly under a directory named __proto__', async t => {
+  const root = await recorded(t);
+  const directory = join(root, '__proto__');
+  mkdirSync(directory);
+  const tree = await recordLater(t, () => {
+    const tree = treeRecorder(root);
+    scanSourcePaths(root, { retained: tracked(root), tree });
+    return tree;
+  });
+  assert(tree.stillCurrent());
+  writeFileSync(join(directory, 'late.txt'), 'late source\n');
+  assert.equal(tree.stillCurrent(), false);
+  assert.equal(cachedSourcePaths(root, tracked(root)), undefined);
+  assert.deepEqual(unsavedPaths(root), ['__proto__/late.txt']);
+});
+
 test('48835eea cost: a save lists each checkout directory once, its final check reusing the capture walk', async t => {
   const s = await resolutionFixture(t, { overlap: false });
   await s.transport().dispatch('open', { laneId: s.f.lane.laneId });

@@ -75,6 +75,8 @@ export type CheckoutPrepared = {
   selection?: HostedLaneSelection;
   /** The selected State's exact bytes, rebuilt and digest-checked by the caller. */
   state?: { id: string; bytes: Uint8Array };
+  /** The sync wrapper checks the entire checkout after installation, including carried edits. */
+  finalCheck?: true;
 };
 /** Thin editing directory; no native Work owner, Channel writer or acceptance authority. */
 async function checkout(
@@ -477,12 +479,16 @@ async function checkout(
                     const inPlace =
                       Boolean(delta && request.previous) && current?.operationId !== request.operationId;
                     const changes: CheckoutChange[] = [];
+                    const scope =
+                      inPlace && prepared.finalCheck
+                        ? [...delta!.install, ...delta!.remove].map(file => file.path)
+                        : undefined;
                     const artifacts = cleanHostedCheckout(
                       root,
                       materializedFiles(current),
                       hostedLaneMarkerName,
                       Boolean(current),
-                      { target: files, index, ...(inPlace ? { collect: changes } : {}) },
+                      { target: files, index, scope, ...(inPlace ? { collect: changes } : {}) },
                     );
                     // In place, only paths the delta touches move; unsaved changes elsewhere stay
                     // exactly where they are under the new baseline. One that meets the delta (or

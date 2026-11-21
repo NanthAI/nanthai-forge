@@ -24,7 +24,7 @@ export async function applyHostedSync(
   /** Set only when this process just received `lane` from the server (a live sync result, not a
    * retained replay): `lane` then stands in for the opening access read, and the reply's `delta`
    * (src/hosted-sync-delta.ts) rebuilds the State from the checkout's own copy of `from`. */
-  live?: { delta?: unknown },
+  live?: { delta?: unknown; finalCheck?: boolean },
 ) {
   const request = applySchema.parse(input),
     { from, lane } = request;
@@ -54,6 +54,7 @@ export async function applyHostedSync(
   const prepared: CheckoutPrepared = {};
   if (live) {
     prepared.selection = lane;
+    if (live.finalCheck) prepared.finalCheck = true;
     const rebuilt =
       live.delta !== undefined &&
       marker?.selection.head === from.head &&

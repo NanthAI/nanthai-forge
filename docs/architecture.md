@@ -1729,6 +1729,11 @@ check therefore reuses its own capture walk (about 65 ms instead of 190 ms at 6,
 files). File events are never trusted for this: under load they arrive late with no
 error.
 
+An ordinary in-place `save --sync` shares its source inventory across replay
+detection and save capture. It checks only paths the incoming delta can affect
+and the Forge directory before publication, then checks the full checkout for
+late edits. The reply reuses that check for save advice.
+
 When the checkout already has a trusted installed marker, apply is in place and
 proportional to changed paths: only paths whose bytes or mode differ are fetched,
 verified, staged privately and flushed. A durable `delta-apply.json` journal names

@@ -25,6 +25,7 @@ import { indexedBlob, statIndexRefresh, type CheckoutStatIndex } from './checkou
 import { diskShapeMatches, diskMode } from './source-links.js';
 import { fold } from './hosted-checkout-delta.js';
 import { workingMatches, worktreeText } from './checkout-text.js';
+import { checkoutPathExists } from './hosted-checkout-files.js';
 
 export type CheckoutChange = { path: string; kind: 'edited' | 'extra' | 'deleted' };
 
@@ -45,6 +46,9 @@ export function cleanHostedCheckout(
     /** A clone refresh (Git parity): an untracked path that no saved or incoming path meets stays
      * where it is and is returned to carry across a directory swap, instead of refusing. */
     carryExtras?: boolean;
+    /** In-place sync only: validate the delta's paths and Forge metadata before publishing.
+     * The caller checks the complete installed tree after publication. */
+    scope?: readonly string[] | undefined;
   } = {},
 ): string[] {
   let rootStat;
@@ -60,11 +64,14 @@ export function cleanHostedCheckout(
     'Checkout directory must be real.',
   );
   // Started before the first lstat of saved files, so its `since` precedes every observation.
-  const refresh = options.index ? statIndexRefresh(root) : null;
+  const refresh = options.index && !options.scope ? statIndexRefresh(root) : null;
   const sourceRoot = realpathSync(root);
   // Files the checkout's `.gitattributes` convert hold their blob as CRLF (44ef42b9), not an edit.
   const text = worktreeText(root, files);
-  const allowed = new Map(files.map(file => [file.path, file]));
+  const scoped = options.scope && new Set(options.scope);
+  const allowed = new Map(
+    files.filter(file => !scoped || scoped.has(file.path)).map(file => [file.path, file]),
+  );
   const target = new Map(options.target?.map(file => [file.path, file]) ?? []);
   const directories = new Set<string>();
   for (const file of [...files, ...(options.target ?? [])])
@@ -89,10 +96,38 @@ export function cleanHostedCheckout(
       }
     });
   const preserved: string[] = [];
-  function visit(directory: string, layers: ReturnType<typeof ignoreLayer>, parentIgnored = false) {
-    const names = readdirSync(join(root, directory));
+  let exactMetadataName: boolean | undefined;
+  const children = new Map<string, Set<string>>();
+  for (const path of scoped ?? []) {
+    const parts = path.split('/');
+    for (let i = 0; i < parts.length; i++) {
+      const directory = parts.slice(0, i).join('/');
+      const names = children.get(directory) ?? new Set<string>();
+      names.add(parts[i]!);
+      children.set(directory, names);
+    }
+  }
+  const namesAt = (directory: string, complete: boolean) => {
+    const absolute = join(root, directory);
+    if (complete) return readdirSync(absolute);
+    const wanted = children.get(directory);
+    const names =
+      wanted && [...wanted].some(name => checkoutPathExists(join(absolute, name)))
+        ? // Exact spelling matters even where lookup accepts another spelling.
+          readdirSync(absolute).filter(name => wanted.has(name))
+        : [];
+    if (!directory && !names.includes('.forge')) names.push('.forge');
+    return names;
+  };
+  function visit(
+    directory: string,
+    layers: ReturnType<typeof ignoreLayer>,
+    parentIgnored = false,
+    complete = !scoped,
+  ) {
+    const names = namesAt(directory, complete);
     const local = ignoreLayer(directory, name =>
-      names.includes(name)
+      !complete || names.includes(name)
         ? readSource(sourceRoot, join(directory, name), Number.MAX_SAFE_INTEGER)?.toString('utf8')
         : undefined,
     );
@@ -133,6 +168,8 @@ export function cleanHostedCheckout(
               name.startsWith(EVENT_PROBE_PREFIX)
             )
           ) {
+            // An alias on a case-insensitive disk was an ignored entry in the full walk.
+            if (scoped && !(exactMetadataName ??= readdirSync(root).includes('.forge'))) break;
             if (options.collect) {
               options.collect.push({ path: `${path}/${name}`, kind: 'extra' });
               continue;
@@ -182,7 +219,7 @@ export function cleanHostedCheckout(
       }
       if (!saved && options.deferExtras && !directories.has(path)) continue;
       if (!saved && stat.isDirectory()) {
-        visit(path, next, ignored);
+        visit(path, next, ignored, complete || Boolean(scoped?.has(path)));
         continue;
       }
       if (!saved && options.deferExtras) continue;

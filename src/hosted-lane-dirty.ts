@@ -64,6 +64,7 @@ export function laneChanges(
     refresh?: boolean;
     record?: boolean;
     limit?: number;
+    scan?: () => string[];
     expected?: { files: readonly NativeFile[]; materialized: readonly string[] };
   } = {},
 ): string[] {
@@ -75,6 +76,7 @@ export function laneChanges(
   const retained = [...baseline.keys()];
   const local =
       cachedSourcePaths(root, retained) ??
+      options.scan?.() ??
       scanSourcePaths(root, {
         retained,
         tree: options.record || options.refresh ? treeRecorder(root) : undefined,

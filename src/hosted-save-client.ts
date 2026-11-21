@@ -20,7 +20,7 @@ import {
 import { join } from 'node:path';
 import { makeFunctionReference } from 'convex/server';
 import { hostedObjectWriter } from './hosted-object-store.js';
-import { captureHostedSave } from './hosted-save-capture.js';
+import { captureHostedSave, type SaveInventory } from './hosted-save-capture.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { durableReplace } from './state/durability.js';
 import { digest } from './hash.js';
@@ -85,6 +85,8 @@ export const overlapEvidenceLevel = (capabilities: {
 export type SaveContract = {
   authorship?: import('./hosted-agent-transport.js').HostedAgentSession['authorship'];
   onCapture?: ((capture: Awaited<ReturnType<typeof captureHostedSave>>) => void | Promise<void>) | undefined;
+  /** The sync's private save stops after local capture when the folder is clean. */
+  syncCapture?: { inventory?: SaveInventory | undefined };
   holderSessionId?: string;
   session?: import('zod').infer<typeof import('./hosted-lane.js').sessionClaimSchema>;
   overlapEvidence: OverlapEvidenceLevel;
@@ -277,9 +279,11 @@ async function saveOnce(
       'Save cache directory must be real.',
     );
   }
-  workLocked(join(clientCacheRoot(root), 'lock'), () =>
-    dropAcknowledgedSaves(clientCacheRoot(root), command.operationId),
-  );
+  const cleanStaging = () =>
+    workLocked(join(clientCacheRoot(root), 'lock'), () =>
+      dropAcknowledgedSaves(clientCacheRoot(root), command.operationId),
+    );
+  if (!contract.syncCapture) cleanStaging();
   const original = join(directory, 'command.json'),
     identity = { root, projectId: exchange.projectId, ...commandPin };
   workLocked(join(clientCacheRoot(root), 'lock'), () => {
@@ -309,7 +313,14 @@ async function saveOnce(
   timing?.mark('settle');
   const capture: Awaited<ReturnType<typeof captureHostedSave>> = checkoutPathExists(capturePath)
     ? JSON.parse(readFileSync(capturePath, 'utf8'))
-    : await captureHostedSave(root, directory, preserveConflicts, continuation);
+    : await captureHostedSave(root, directory, preserveConflicts, continuation, contract.syncCapture);
+  if (contract.syncCapture) {
+    if (!capture.changes.length) {
+      rmSync(directory, { recursive: true, force: true });
+      return { status: 'nothing-to-save' };
+    }
+    cleanStaging();
+  }
   await contract.onCapture?.(capture);
   markLandStep('captured');
   timing?.mark('capture');

@@ -152,9 +152,11 @@ export function indexInstalledFiles(stage: string, files: { path: string; blob: 
  * directory's stat when an entry is created (some FUSE and network mounts do not): the probe runs in
  * the client cache beside the checkout, on the same device, never inside the checkout. */
 export const checkoutTreeCacheName = 'checkout-tree.json';
+// Older records may omit directories named "__proto__". They are safe to rebuild on demand.
+const treeSchema = 2;
 type Seen = [mtimeMs: number, ctimeMs: number, ino: number, size: number];
 type Recorded = {
-  schema: 1;
+  schema: typeof treeSchema;
   since: number;
   /** The checkout's device: a record from another mount is never trusted. */
   dev: number;
@@ -197,11 +199,12 @@ function directoryStatsMove(root: string, dev: number) {
  * checkout, which the probe does not cover), leaves no record. */
 export function treeRecorder(checkout: string) {
   const since = Date.now(),
-    directories: Record<string, Seen> = {},
-    inputs: Record<string, Seen> = {};
+    directories: Record<string, Seen> = Object.create(null),
+    inputs: Record<string, Seen> = Object.create(null);
   let root = checkout,
     dev = -1,
-    trusted = true;
+    trusted = true,
+    written = 0;
   try {
     root = realpathSync(checkout);
     dev = lstatSync(root).dev;
@@ -229,13 +232,24 @@ export function treeRecorder(checkout: string) {
       const value = observe(path, stat);
       if (value) inputs[path] = value;
     },
+    /** Reuse across phases only when the observations pass the tree cache's filesystem and
+     * timestamp checks. A racy or changed tree needs a new capture inventory. */
+    stillCurrent() {
+      const bound = Math.min(since, written);
+      return (
+        written !== 0 &&
+        [directories, inputs].every(observations =>
+          Object.entries(observations).every(([path, before]) => unchanged(root, path, before, bound)),
+        )
+      );
+    },
     /** After a walk that returned `paths` for `retained`. Best effort: a failed write only means
      * the next check walks. */
     write(paths: readonly string[], retained: Iterable<string>) {
       const kept = new Set(retained),
         returned = new Set(paths);
       const value: Recorded = {
-        schema: 1,
+        schema: treeSchema,
         since,
         dev,
         paths: [...paths],
@@ -246,8 +260,10 @@ export function treeRecorder(checkout: string) {
       };
       try {
         // Nothing on this file system can vouch for a directory: no record, and none older kept.
-        if (trusted && directoryStatsMove(root, dev)) durableReplace(file(root), JSON.stringify(value));
-        else rmSync(file(root), { force: true });
+        if (trusted && directoryStatsMove(root, dev)) {
+          durableReplace(file(root), JSON.stringify(value));
+          written = lstatSync(file(root)).mtimeMs;
+        } else rmSync(file(root), { force: true });
       } catch {
         /* Speed only. */
       }
@@ -289,7 +305,7 @@ export function cachedSourcePaths(checkout: string, retained: Iterable<string>):
     const written = lstatSync(path).mtimeMs;
     const value = JSON.parse(readFileSync(path, 'utf8')) as Recorded;
     if (
-      value.schema !== 1 ||
+      value.schema !== treeSchema ||
       value.retained.length !== value.paths.length ||
       value.dev !== lstatSync(root).dev
     )
