@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// The line's slot in the top bar (Item 18af654d owns the marks, their motion and the feed). The frame draws the stops
-// and their counts from the feed's shared contract (convex/projectLiveLine.ts `liveLineResult`); until the feed
-// arrives it draws the stops with no counts, so nothing moves when it does. Each stop opens its station on Needs me.
+// The line draws the stops and marks from one feed. The first delivery settles in place. Each stop opens its
+// station on Needs me.
 // The stops are the Flow picture's (Item 85f456c1): Editing, Saved, In queue, Checking; a Lane whose check passed
 // ('ready') counts at Checking, so the line, the picture and Lanes count every stop alike (`lineStops`).
 import { hrefFor } from './paths';
 import { followLink } from './router';
 import { firstTryPercent, flowVerdict, mainToday, type FlowDayFeed } from '../../../src/flow-day';
+import { LineMarks } from './LineMarks';
 
 export type LineStage = 'editing' | 'saved' | 'queued' | 'checking' | 'ready';
 /** A stop on the line: the stages it counts. */
@@ -147,6 +147,7 @@ export function Line({
         );
       })}
       <MainStop feed={feed} phone={phone} href={`${flowHref}?open=main`} />
+      <LineMarks key={flowHref} feed={feed} stages={lineStops} />
     </nav>
   );
 }

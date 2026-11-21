@@ -23,7 +23,6 @@
   .line .stop .n, .line .tomain .main-number { color: var(--text); font: var(--w-strong) 13px/1 var(--font-mono); font-variant-numeric: tabular-nums; flex: none; }
   .line .stop[data-stop] { gap: var(--s-1); }
   .line .line-count { flex: none; color: var(--text-2); }
-  .line .stop .slot { flex: 1 1 0; min-width: 0; align-self: stretch; }
   .line .checking-split { flex-direction: column; flex-wrap: nowrap; justify-content: center; align-items: start; gap: 0; }
   .line .line-checking { display: flex; align-items: baseline; gap: var(--s-1); max-inline-size: 100%; }
   .line .line-passed { align-self: stretch; overflow: hidden; text-overflow: ellipsis; color: var(--waiting); font-size: var(--t-micro); }
@@ -34,27 +33,31 @@
   .line .tomain .compact-context { display: none; }
   .line .tomain .lbl { color: var(--text); }
   .line .tomain::before { background: var(--passed); width: 3px; height: 14px; transform-origin: 50% 100%; }
-  .line .tomain.ring::before { animation: ds-ring var(--d-ring) var(--ease-out); }
-  .line .marks { position: absolute; inset: 0; pointer-events: none; }
-  .m { position: absolute; left: 0; top: 0; width: var(--mark); height: var(--mark); transition: transform var(--d-travel) var(--ease-out), opacity var(--d-state) var(--ease-out); will-change: transform; }
-  .m i { display: block; width: 100%; height: 100%; border-radius: 50%; background: var(--st, var(--text-3)); border: 2px solid var(--st, var(--text-3)); transition: transform var(--d-pose) var(--ease-out), border-radius var(--d-pose) var(--ease-out), background-color var(--d-colour), border-color var(--d-colour); }
-  .m[data-hold="waiting"] i { background: transparent; }
-  .m[data-hold="conflict"] i { border-radius: 1px; transform: rotate(45deg); }
-  .m[data-hold="failed"] i { border-radius: 1px; }
-  .m::after { content: ""; position: absolute; left: -1px; right: -1px; bottom: -5px; border-bottom: 2px dotted var(--conflict); opacity: 0; transition: opacity var(--d-colour); }
-  .m[data-ov]::after { opacity: 1; }
-  .m.t { width: 3px; }
-  .m.t i { border-radius: 0; border-width: 0; }
-  .m.t[data-hold] { width: var(--mark); }
-  .m.new { opacity: 0; }
-  .m.new i { transform: scale(.6); }
-  .m.gone { opacity: 0; }
-  .m.aside i { transform: translateY(7px); }
-  .line.instant .m, .line.instant .m i { transition: none; }
+  .line .marks { position: absolute; inset: 0; overflow: clip; pointer-events: none; }
+  .line .m {
+    position: absolute; left: 0; bottom: 4px; width: var(--mark); height: var(--mark);
+    transform: translateX(var(--mark-x)); transition: transform var(--d-travel) var(--ease-out);
+    transition-delay: min(calc(var(--mark-order, 0) * var(--stagger)), var(--stagger-cap));
+  }
+  .line .m i { display: block; width: 100%; height: 100%; border-radius: 50%; background: var(--st); border: 2px solid var(--st); transition: transform var(--d-pose) var(--ease-out); }
+  .line .m[data-hold="waiting"] i { background: var(--surface); }
+  .line .m[data-hold="conflict"] i { border-radius: 1px; transform: rotate(45deg) scale(.8); }
+  .line .m::after { content: ""; position: absolute; inset: auto 0 -2px; border-bottom: 2px dotted var(--conflict); opacity: 0; transition: opacity var(--d-colour); }
+  .line .m[data-ov]::after { opacity: 1; }
+  .line .m.t { width: 3px; }
+  .line .m.t i { border-radius: 0; border-width: 0; }
+  .line .m[data-new] i { animation: line-appear var(--d-state) var(--ease-out); }
+  .line .m[data-exit="landed"] i { animation: line-fade 100ms var(--ease-out) calc(var(--d-travel) - 100ms) both; }
+  .line .m[data-exit="set-aside"] i { animation: line-aside var(--d-pose) var(--ease-out) both; }
+  .line .line-ring { position: absolute; left: var(--mark-x); bottom: 0; width: 3px; height: 14px; background: var(--passed); transform-origin: 50% 100%; animation: ds-ring var(--d-ring) var(--ease-out) calc(var(--d-travel) / 2) both; }
+  .line .m[data-instant], .line .m[data-instant] * { transition: none; animation: none; }
+  .line .m[data-instant][data-exit] { display: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .line :is([data-exit], .line-ring) { display: none; }
+  }
   /* Narrow: each count sits right after its own word ("Saved 16"), never at the cell's far edge beside the next one. */
   @container (max-width: 760px) {
     .line .stop { flex-wrap: wrap; align-items: baseline; align-content: flex-start; gap: 0 var(--s-1); padding: 6px 4px 9px 9px; font-size: var(--t-micro); }
-    .line .stop .slot { display: none; }
     .line .stop[data-stop] { gap: 0 var(--s-1); line-height: var(--lh-tight); }
     .line .stop[data-stop] .n { font-size: var(--t-micro); }
     .line .stop.checking-split { flex-wrap: nowrap; align-items: start; gap: 0; padding: 3px var(--s-1) 6px; line-height: var(--lh-disp); }
@@ -78,6 +81,7 @@
   .line.phone .stop[data-stop]:not(.checking-split) { flex-direction: column; align-items: flex-start; flex-wrap: nowrap; }
   /* Keep the split Checking labels and the main count whole in the phone row. */
   .line.phone { grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(max-content, 1.3fr) minmax(max-content, 1.1fr); height: var(--line-phone-h); border: 0; border-bottom: var(--rule) solid var(--line); background-color: var(--surface); background-size: 10px 4px; }
+  .line .stop[data-stop] { padding-bottom: calc(var(--mark) + 4px); }
   .rail { background: var(--surface); border-right: var(--rule) solid var(--line); display: flex; flex-direction: column; padding: var(--s-2) 0; min-height: 0; }
   .rail a { display: grid; grid-template-columns: 18px 1fr auto; gap: 10px; align-items: center; height: 36px; padding: 0 14px; color: var(--text-2); font-weight: var(--w-medium); }
   .rail a[aria-current] { color: var(--text); background: var(--surface-3); font-weight: var(--w-bold); box-shadow: inset 2px 0 0 var(--brand); }
@@ -406,7 +410,14 @@
   [data-weight="ref"] .nums span { color: var(--ref-ink-2); }
 }
 
-@keyframes ds-ring { 0% { transform: scale(1, 1); } 20% { transform: scale(1.7, 1.9); } 100% { transform: scale(1, 1); } }
+@keyframes line-appear { from { opacity: 0; scale: .6; } }
+@keyframes line-fade { to { opacity: 0; } }
+@keyframes line-aside { to { opacity: 0; transform: translateY(7px); } }
+@keyframes ds-ring {
+  0% { opacity: 0; transform: scale(1); }
+  20% { opacity: 1; transform: scale(1.7, 1.9); }
+  100% { opacity: 0; transform: scale(1); }
+}
 @keyframes ds-settle { from { background: var(--accent-bg); } }
 @keyframes ds-beat { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 

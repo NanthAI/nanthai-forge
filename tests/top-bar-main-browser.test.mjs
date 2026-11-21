@@ -92,7 +92,8 @@ async function chromeGeometry(page) {
       .filter(bar => bar.getClientRects().length)
       .map(bar => {
         const bounds = bar.getBoundingClientRect();
-        const children = [...bar.querySelectorAll(':not(.sr, .sr *)')]
+        // The rail paints separately when a resize changes its tally capacity. Its geometry is tested below.
+        const children = [...bar.querySelectorAll(':not(.sr, .sr *, .marks *)')]
           .map(child => ({ child, rect: child.getBoundingClientRect() }))
           .filter(({ rect }) => rect.width > 0 && rect.height > 0);
         const spilled = children.filter(
@@ -269,7 +270,10 @@ test('the top bar main segment and side rails stay accessible at responsive widt
             await page.evaluate(() => document.fonts.ready.then(() => null));
             for (const width of widths) {
               await page.setViewportSize({ width, height: 800 });
-              await page.evaluate(() => window.scrollTo(0, 0));
+              await page.evaluate(async () => {
+                window.scrollTo(0, 0);
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+              });
               const before = await chromeGeometry(page);
               const context = `${text} landings at ${width} px`;
               assert.deepEqual(
@@ -338,6 +342,209 @@ test('the top bar main segment and side rails stay accessible at responsive widt
         }
       });
     }
+    await t.test('50 Lanes keep held marks while crowded stops fold, at 390 and 1440 px', async t => {
+      for (const width of [390, 1440]) {
+        for (const theme of ['dark', 'light']) {
+          const page = await browser.newPage({ viewport: { width, height: 800 } });
+          await page.clock.setFixedTime(new Date('2026-11-10T12:00:00Z'));
+          try {
+            await routeFixture(page, out, html);
+            await page.goto(`https://forge.test/top.html?lanes=50&theme=${theme}`);
+            const line = page.locator('.line:visible');
+            await line.locator('.m[data-hold]').first().waitFor();
+            const marks = await line.evaluate(bar => {
+              const stops = [...bar.querySelectorAll('[data-stop]')];
+              const rects = [...bar.querySelectorAll('.m')].map(mark => {
+                const state = mark.dataset.stage;
+                const stop = stops.find(anchor => anchor.dataset.stop === state).getBoundingClientRect();
+                const rect = mark.getBoundingClientRect();
+                return {
+                  width: rect.width,
+                  held: mark.hasAttribute('data-hold'),
+                  withinStop:
+                    rect.left >= stop.left && rect.right <= stop.right && rect.bottom <= stop.bottom,
+                };
+              });
+              return {
+                whole: rects.filter(mark => mark.width === 8).length,
+                tally: rects.filter(mark => mark.width === 3).length,
+                held: rects.filter(mark => mark.held && mark.width === 8).length,
+                clipped: rects.filter(mark => !mark.withinStop).length,
+              };
+            });
+            t.diagnostic(JSON.stringify({ width, theme, ...marks }));
+            assert.equal(marks.held, 5);
+            assert.equal(marks.clipped, 0);
+            assert.deepEqual((await line.locator('.n').allTextContents()).map(Number), [13, 13, 12, 11]);
+            assert.match(await line.locator('[data-stop="checking"]').ariaSnapshot(), /11 Lanes, 1 held/);
+            if (width === 390) assert.ok(marks.tally > 0);
+            else assert.equal(marks.whole, 50);
+            assert.deepEqual(
+              (await chromeGeometry(page)).flatMap(bar => bar.spilled),
+              [],
+            );
+            if (shots)
+              await page.screenshot({
+                path: join(shots, `top-bar-50-lanes-${width}-${theme}.png`),
+                clip: { x: 0, y: 0, width, height: width === 390 ? 94 : 48 },
+              });
+          } finally {
+            await page.close();
+          }
+        }
+      }
+    });
+    await t.test(
+      '29 updates travel in one delivery, and reduced motion draws the same final stops instantly',
+      async t => {
+        for (const reducedMotion of ['no-preference', 'reduce']) {
+          const page = await browser.newPage({ viewport: { width: 1760, height: 800 }, reducedMotion });
+          try {
+            await page.clock.setFixedTime(new Date('2026-11-10T12:00:00Z'));
+            await routeFixture(page, out, html);
+            await page.goto('https://forge.test/top.html?lanes=50');
+            const line = page.locator('.line:visible');
+            await line.locator('.m').first().waitFor();
+            const result = await line.evaluate(async (bar, at) => {
+              await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+              const states = { editing: 'saved', saved: 'queued', queued: 'checking' };
+              const before = new Map([...bar.querySelectorAll('.m')].map(node => [node.dataset.lane, node]));
+              for (const mark of before.values()) mark.getBoundingClientRect();
+              const changed = new Set();
+              const longFrames = [];
+              const observer = PerformanceObserver.supportedEntryTypes.includes('long-animation-frame')
+                ? new PerformanceObserver(list =>
+                    longFrames.push(...list.getEntries().map(entry => entry.duration)),
+                  )
+                : null;
+              observer?.observe({ type: 'long-animation-frame' });
+              const started = performance.now();
+              const drawn = new Promise(resolve => {
+                const observer = new MutationObserver(() => {
+                  observer.disconnect();
+                  resolve(performance.now() - started);
+                });
+                observer.observe(bar.querySelector('.marks'), {
+                  subtree: true,
+                  attributeFilter: ['data-stage'],
+                });
+              });
+              window.dispatchEvent(
+                new CustomEvent('deliver-line', {
+                  detail: previous => ({
+                    ...previous,
+                    lanes: previous.lanes.map((lane, i) => {
+                      if ((i >= 10 && i < 13) || (i >= 22 && i < 26) || i >= 36) return lane;
+                      changed.add(lane.laneId);
+                      return { ...lane, stage: states[lane.stage], changedAt: at };
+                    }),
+                  }),
+                }),
+              );
+              const updateMs = await drawn;
+              const moved = [...bar.querySelectorAll('.m')].filter(mark => changed.has(mark.dataset.lane));
+              await new Promise(resolve => requestAnimationFrame(resolve));
+              const animations = moved.flatMap(mark => mark.getAnimations());
+              const timings = animations.map(animation => animation.effect.getTiming());
+              await Promise.all(animations.map(animation => animation.finished));
+              const elapsedMs = performance.now() - started;
+              if (observer) longFrames.push(...observer.takeRecords().map(entry => entry.duration));
+              observer?.disconnect();
+              return {
+                updateMs,
+                moved: moved.length,
+                retained: moved.filter(mark => before.get(mark.dataset.lane) === mark).length,
+                animations: animations.length,
+                delays: [...new Set(timings.map(timing => timing.delay))].sort((a, b) => a - b),
+                elapsedMs,
+                settleMs: Math.max(0, ...timings.map(timing => timing.delay + timing.duration)),
+                longFrames: observer ? longFrames : null,
+              };
+            }, Date.parse('2026-11-10T12:00:00Z'));
+            t.diagnostic(JSON.stringify({ reducedMotion, ...result }));
+            assert.equal(result.moved, 29);
+            assert.equal(result.retained, 29, 'the same marks travel between stops');
+            if (reducedMotion === 'reduce') assert.equal(result.animations, 0);
+            else {
+              assert.equal(result.animations, 29);
+              assert.deepEqual(result.delays, [0, 40, 80, 120, 160, 200, 240]);
+              assert.equal(result.settleMs, 840);
+            }
+          } finally {
+            await page.close();
+          }
+        }
+      },
+    );
+    await t.test(
+      'only an explicit landing rings main, and hidden updates return without replay',
+      async () => {
+        const page = await browser.newPage({ viewport: { width: 1440, height: 800 } });
+        try {
+          await page.clock.setFixedTime(new Date('2026-11-10T12:00:00Z'));
+          await routeFixture(page, out, html);
+          await page.goto('https://forge.test/top.html?lanes=50&exits');
+          const line = page.locator('.line:visible');
+          await line.locator('.m').first().waitFor();
+          const exits = async kind =>
+            page.evaluate(
+              ({ kind, at }) => {
+                window.dispatchEvent(
+                  new CustomEvent('deliver-line', {
+                    detail: previous => ({
+                      ...previous,
+                      lanes: previous.lanes.slice(1),
+                      exit: kind ? { kind, laneId: previous.lanes[0].laneId, at } : null,
+                    }),
+                  }),
+                );
+              },
+              { kind, at: Date.parse('2026-11-10T12:00:00Z') },
+            );
+          const visibility = async hidden =>
+            page.evaluate(hidden => {
+              Object.defineProperty(document, 'hidden', { configurable: true, value: hidden });
+              document.dispatchEvent(new Event('visibilitychange'));
+            }, hidden);
+
+          await exits(null);
+          await line.locator('.m[data-lane$="000000000000"]').waitFor({ state: 'detached' });
+          assert.equal(
+            await line.locator('[data-exit], .line-ring').count(),
+            0,
+            'a missing Lane has no guessed exit',
+          );
+          await exits('set-aside');
+          const aside = line.locator('[data-exit="set-aside"]');
+          await aside.waitFor({ state: 'attached' });
+          assert.equal(await aside.getAttribute('data-st'), 'stale', 'a ready Lane can be set aside');
+          assert.equal(await line.locator('.line-ring').count(), 0);
+          await exits('landed');
+          await line.locator('[data-exit="landed"]').waitFor({ state: 'attached' });
+          assert.equal(await line.locator('.line-ring').count(), 1);
+          await page.emulateMedia({ reducedMotion: 'reduce' });
+          await line.locator('.line-ring').waitFor({ state: 'detached' });
+          await page.emulateMedia({ reducedMotion: 'no-preference' });
+          assert.equal(
+            await line.locator('[data-exit], .line-ring').count(),
+            0,
+            'enabling motion never replays an exit',
+          );
+          await visibility(true);
+          await line.locator('.marks').waitFor({ state: 'hidden' });
+          await exits('landed');
+          await visibility(false);
+          await line.locator('.marks').waitFor();
+          assert.equal(
+            await line.locator('[data-exit], .line-ring').count(),
+            0,
+            'return draws the latest snapshot once',
+          );
+        } finally {
+          await page.close();
+        }
+      },
+    );
     for (const width of [861, 1000, 1239])
       await t.test(`rail links have accessible names at ${width} px`, async () => {
         const page = await browser.newPage({ viewport: { width, height: 800 } });

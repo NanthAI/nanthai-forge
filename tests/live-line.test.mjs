@@ -21,39 +21,77 @@ test.after(() => {
 const read = (f, actor = 'owner') => f.tx('observerBudgetPage', line.read, { projectId: f.projectId }, actor);
 const marks = f => [...f.tables.projectLiveLineLanes.values()];
 
+async function seedLineLanes(f, count, holdFirst = false) {
+  const seed = [...f.tables.projectHostedOverlapLanes.values()][0];
+  await f.tx(
+    'seedOpenLineLanes',
+    {
+      _handler: async ctx => {
+        for (let i = 1; i < count; i++) {
+          const row = Object.fromEntries(
+            Object.entries({ ...seed, laneId: randomUUID() }).filter(([k]) => !k.startsWith('_')),
+          );
+          const sourceId = await ctx.db.insert('projectHostedOverlapLanes', row);
+          await store.trackLineLane(ctx, sourceId, row, null, false);
+        }
+        if (!holdFirst) return;
+        const first = await ctx.db
+          .query('projectLiveLineLanes')
+          .withIndex('by_project_and_lane', q => q.eq('projectId', f.projectId).eq('laneId', seed.laneId))
+          .unique();
+        await store.changeLineMark(ctx.db, first, { held: true });
+      },
+    },
+    {},
+  );
+}
+
 test('live line follows a real landing atomically, deletes landed marks and retains exact main evidence', async t => {
   const f = await finishFixture(t);
   const state = await f.enqueue(f.request());
   assert.equal(marks(f).length, 1);
+  await seedLineLanes(f, 50);
+  assert.equal(marks(f).length, 50);
   let readSet;
   let latest;
+  let lastReply;
   const observations = [];
-  const refresh = async () => {
+  const refresh = async trigger => {
     if (readSet?.()) return;
+    const started = performance.now();
     latest = await read(f);
+    const queryMs = performance.now() - started;
     readSet = f.readSet();
+    const serialized = JSON.stringify(latest);
     observations.push({
+      trigger,
+      stage: latest.lanes.find(lane => lane.laneId === f.lane.laneId)?.stage ?? 'left',
+      changed: serialized !== lastReply,
+      queryMs,
       readBytes: f.counts.at(-1).readBytes,
-      replyBytes: Buffer.byteLength(JSON.stringify(latest)),
+      replyBytes: Buffer.byteLength(serialized),
     });
+    lastReply = serialized;
   };
-  await refresh();
-  assert.equal(latest.lanes[0].stage, 'queued', 'a submitted Lane waits In queue (Item 85f456c1)');
+  await refresh('initial read');
+  assert.equal(observations[0].stage, 'queued', 'a submitted Lane waits In queue (Item 85f456c1)');
   const phases = new Set();
   const drain = async () => {
     while (f.pending().length) {
-      await f.execute();
-      await refresh();
+      const task = f.pending()[0];
+      await f.execute(task);
+      await refresh(task.name);
       for (const mark of latest.lanes) phases.add(mark.stage);
     }
   };
   await drain();
   assert(phases.has('checking'));
   await f.passChecks();
-  await refresh();
+  await refresh('check passage');
   await drain();
   assert.equal((await f.current(state.id)).submission.phase, 'landed');
-  assert.deepEqual(latest.lanes, []);
+  assert.equal(latest.lanes.length, 49);
+  assert(!latest.lanes.some(lane => lane.laneId === f.lane.laneId));
   assert.equal(latest.more, 0);
   assert.equal(latest.exit.kind, 'landed');
   assert.equal(latest.exit.laneId, f.lane.laneId);
@@ -65,8 +103,12 @@ test('live line follows a real landing atomically, deletes landed marks and reta
   assert.equal(f.pending().length, 0, 'no line wake or idle server timer');
   const before = observations.length;
   f.advanceClock(30 * 60_000);
-  await refresh();
+  await refresh('idle');
   assert.equal(observations.length, before, 'thirty simulated idle minutes add no execution or DB I/O');
+  assert(
+    observations.every(sample => sample.readBytes < 27_000),
+    'the 50-Lane landing keeps each feed read bounded',
+  );
   t.diagnostic(JSON.stringify({ lineLanding: { reruns: observations.length - 1, observations } }));
 });
 
@@ -176,28 +218,7 @@ test('a newer save detaches an older submission and manual abandonment says set-
 for (const count of [50, 100, 150])
   test(`live line is bounded at ${count} open Lanes, prioritizes held marks and counts overflow`, async t => {
     const f = await finishFixture(t);
-    const seed = [...f.tables.projectHostedOverlapLanes.values()][0];
-    await f.tx(
-      'seedOpenLineLanes',
-      {
-        _handler: async ctx => {
-          for (let i = 1; i < count; i++) {
-            const row = Object.fromEntries(
-              Object.entries({ ...seed, laneId: randomUUID() }).filter(([k]) => !k.startsWith('_')),
-            );
-            const sourceId = await ctx.db.insert('projectHostedOverlapLanes', row);
-            await store.trackLineLane(ctx, sourceId, row, null, false);
-          }
-          // The existing mark is visible to this transaction through the DB, not the fixture's committed map.
-          const first = await ctx.db
-            .query('projectLiveLineLanes')
-            .withIndex('by_project_and_lane', q => q.eq('projectId', f.projectId).eq('laneId', seed.laneId))
-            .unique();
-          await store.changeLineMark(ctx.db, first, { held: true });
-        },
-      },
-      {},
-    );
+    await seedLineLanes(f, count, true);
     const started = performance.now();
     const result = await read(f);
     const queryWallMs = performance.now() - started;

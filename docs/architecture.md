@@ -2282,6 +2282,13 @@ return, including after idle sleep. HostedStrip replaces its Work-history hooks;
 Attention retains the shared reads, so no browser offset is credited. See the
 [cost model](operations/cost-to-serve.md#live-line-projection).
 
+The top bar lays the marks over its stop counts from that same reply. Within a
+stop, held marks come first and ordinary marks become tally ticks where the row
+is crowded. Above the feed cap, only the held marks in the reply are drawn.
+The browser glides marks on stage changes and shows the latest explicit exit
+once, with no data read or frame loop. Hidden tabs hide the overlay, visible
+dormant tabs leave it still, and reduced motion draws the current state at once.
+
 ### Composed Intent contracts
 
 Native landing prefix Views retain the declared contracts of their selected

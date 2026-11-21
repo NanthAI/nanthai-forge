@@ -262,27 +262,42 @@ test('return-after-idle: a visible return wakes the live line exactly once with 
   const window = new EventTarget();
   const page = Object.assign(new EventTarget(), { visibilityState: 'visible' });
   const stop = reads.watchActivity(window, page);
-  t.mock.timers.tick(IDLE_MS);
-  assert.equal(fake.count(), 0);
-  page.visibilityState = 'hidden';
-  page.dispatchEvent(new Event('visibilitychange'));
-  t.mock.timers.tick(HIDDEN_GRACE_MS);
-  latest = {
-    lanes: [{ laneId: 'current', stage: 'checking', held: false, overlap: false, changedAt: 1 }],
-    more: 0,
-    main: null,
-    exit: null,
-  };
-  fake.reset();
-  page.visibilityState = 'visible';
-  await React.act(async () => page.dispatchEvent(new Event('visibilitychange')));
-  await settle();
-  assert.equal(fake.count(), 1);
-  assert.equal(fake.stats.adds, 1, 'one catch-up after idle sleep and a hidden interval');
-  assert.equal(fake.stats.executions, 1);
-  assert.deepEqual(value, latest, 'one catch-up shows the current version, without replay');
-  window.dispatchEvent(new Event('focus'));
-  assert.equal(fake.stats.adds, 1, 'focus after visibility never duplicates the catch-up');
+  for (const alreadyIdle of [false, true]) {
+    if (alreadyIdle) {
+      t.mock.timers.tick(IDLE_MS);
+      assert.equal(fake.count(), 0);
+    }
+    page.visibilityState = 'hidden';
+    page.dispatchEvent(new Event('visibilitychange'));
+    t.mock.timers.tick(HIDDEN_GRACE_MS);
+    assert.equal(fake.count(), 0);
+    const old = value;
+    fake.reset();
+    latest = {
+      ...latest,
+      lanes: [
+        {
+          laneId: 'current',
+          stage: alreadyIdle ? 'ready' : 'checking',
+          held: false,
+          overlap: false,
+          changedAt: 1,
+        },
+      ],
+    };
+    fake.invalidate();
+    assert.equal(fake.stats.executions, 0, 'a stage change after hidden grace does no read');
+    assert.deepEqual(value, old);
+    page.visibilityState = 'visible';
+    await React.act(async () => page.dispatchEvent(new Event('visibilitychange')));
+    await settle();
+    assert.equal(fake.count(), 1);
+    assert.equal(fake.stats.adds, 1, 'one catch-up after a hidden interval, including an already idle tab');
+    assert.equal(fake.stats.executions, 1);
+    assert.deepEqual(value, latest, 'one catch-up shows the current version, without replay');
+    window.dispatchEvent(new Event('focus'));
+    assert.equal(fake.stats.adds, 1, 'focus after visibility never duplicates the catch-up');
+  }
   stop();
   await React.act(async () => root.unmount());
   assert.equal(fake.count(), 0);

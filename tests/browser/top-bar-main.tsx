@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The top bar on synthetic data through the real project frame. `?land=` sets today's landings on main,
 // and `?name=` can stress the space that the project picker leaves to the line.
+import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../../web/src/ds';
 import '../../web/src/app/app.css';
@@ -10,6 +11,7 @@ import type { LineFeed } from '../../web/src/app/Line';
 const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
 const landed = Number(params.get('land') ?? '0');
+const crowded = params.get('lanes') === '50';
 const hour = Math.floor(Date.now() / 3_600_000);
 const first = landed === 300 ? 261 : landed === 101 ? 28 : landed === 1284 ? 360 : landed;
 const uuid = (n: number) => `5d1c7a0e-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -42,6 +44,13 @@ const feed = {
       }
     : {}),
 } as LineFeed;
+const crowdedFeed: LineFeed = {
+  ...feed,
+  lanes: Array.from({ length: 50 }, (_, i) => {
+    const stage = i < 13 ? 'editing' : i < 26 ? 'saved' : i < 38 ? 'queued' : 'checking';
+    return lane(i, i === 1 && params.has('exits') ? 'ready' : stage, i % 10 === 0);
+  }),
+};
 const route = {
   frame: 'project' as const,
   handle: 'sample-one',
@@ -59,8 +68,14 @@ const content = (
     <div style={{ height: 2400 }} />
   </section>
 );
-createRoot(document.getElementById('root')!).render(
-  params.get('frame') === 'account' ? (
+function Fixture() {
+  const [current, setCurrent] = useState(crowded ? crowdedFeed : feed);
+  useEffect(() => {
+    const deliver = (event: Event) => setCurrent((event as CustomEvent<(prev: LineFeed) => LineFeed>).detail);
+    window.addEventListener('deliver-line', deliver);
+    return () => window.removeEventListener('deliver-line', deliver);
+  }, []);
+  return params.get('frame') === 'account' ? (
     <AccountFrame place="projects" back={{ href: projectHref, name: 'tidepool-ingest' }} controls={controls}>
       {content}
     </AccountFrame>
@@ -68,12 +83,13 @@ createRoot(document.getElementById('root')!).render(
     <ProjectFrame
       route={route}
       name={params.get('name') ?? 'tidepool-ingest'}
-      feed={params.has('unloaded') ? undefined : feed}
+      feed={params.has('unloaded') ? undefined : current}
       needs={{ n: landed === 1284 ? 1284 : 3, atLeast: false }}
       projects={null}
       controls={{ ...controls, onPicker: () => {} }}
     >
       {content}
     </ProjectFrame>
-  ),
-);
+  );
+}
+createRoot(document.getElementById('root')!).render(<Fixture />);
