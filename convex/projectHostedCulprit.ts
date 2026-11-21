@@ -352,6 +352,7 @@ async function fixForward(
       actor: project.owner,
       authorityEpoch: project.sourceAuthority!.epoch,
       expectedVersion: null,
+      planningItemId: null,
       record: {
         kind: 'intent',
         id: intentId,

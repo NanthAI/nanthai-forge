@@ -432,6 +432,7 @@ export async function appendWork(
                 ...(event.baseBackupId ? { baseBackupId: event.baseBackupId } : {}),
               }
             : undefined,
+          action === 'intent' ? input.operationId : undefined,
         );
       const metadata = JSON.parse(input.projection.metadata);
       if (parsed.success && (parsed.data.action === 'intent' || parsed.data.action === 'intent-status')) {

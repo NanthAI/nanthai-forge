@@ -309,8 +309,8 @@ credential is an agent run (its session slug, and the model its launcher declare
 and the model ("model not declared" when none). Readers and public viewers see no person: "a person", or the run
 name with its model.
 
-Landing receipts on Items (Issue 3a733ee8): every landing posts one system comment to the Item of each Intent it
-landed, whoever or whatever landed it: an agent's own accept, a person, or the queue after the agent stopped
+Landing receipts on Items (Issue 3a733ee8): each Intent started from an Item gets one system comment per
+landing, whether accepted by its agent, a person or the queue after the agent stopped
 (incident 2bf85ddf). An explicit accept of a cohort credits the caller on the claimed member and the queue on
 its peers. A resolution Lane also notes the origin's Item, including on `keepOpen` and `closes:false` landings.
 A revert posts a matching "Reverted" comment.
@@ -320,7 +320,9 @@ commit, main sequence, `landedBy` (`queue`, `agent` or `person`), `accepted` (`p
 submitter's handle where the viewer can see it. Person acceptance includes carried owner approval.
 System comments take no reply or reaction. Agents see the `systemComments` advisory beside them.
 
-Completion stores one small row per Intent and receipt. Later ticks and input pages add Lanes to that row
+Completion skips this comment for Intents created independently. Linking one to an Item later leaves the
+receipt available under Work. Older Intents without a recorded origin continue to produce notes.
+Later ticks and input pages add Lanes to the same note
 within the existing five-Lane display limit. The Item discussion shows up to 50 system notes per page from its
 own and linked Intent chains. The comment cursor continues large sets of links. A merged Item shows the
 duplicate's receipt-backed notes alongside copied member comments. Planning exports include these notes as

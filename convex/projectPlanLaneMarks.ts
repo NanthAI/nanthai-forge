@@ -94,6 +94,7 @@ export async function planLaneItem(
   project: Doc<'hostedProjects'>,
   itemId: string,
 ): Promise<Placement | null> {
+  if (!itemId) return null; // The Intent was explicitly created independently.
   const generation = await selectedGeneration(ctx, project);
   if (!generation) return null;
   const root = await workRecordLookup(ctx, recordPartition(generation), 'planningSearch', itemId);

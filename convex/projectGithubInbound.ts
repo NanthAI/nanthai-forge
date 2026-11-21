@@ -176,6 +176,7 @@ export const submit = internalMutation({
       actor,
       authorityEpoch: epoch,
       expectedVersion: null,
+      planningItemId: null,
       record: {
         kind: 'intent',
         id: ids.intent,

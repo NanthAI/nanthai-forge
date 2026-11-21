@@ -11,7 +11,12 @@ import {
   acceptancePage,
   type ReceiptIdentity,
 } from './projectHostedAcceptanceStore';
-import { readHostedRecord, recordHead, writeHostedRecord } from './projectHostedRecords';
+import {
+  independentIntentItem,
+  readHostedRecord,
+  recordHead,
+  writeHostedRecord,
+} from './projectHostedRecords';
 import { retireLandedOverlapLanes } from './projectHostedOverlapLanded';
 import { completeIntentWhenLanesDone } from './projectHostedIntentCompletion';
 import { completeResolutionOrigins, noteResolutionOrigins } from './projectHostedResolutionOrigin';
@@ -277,34 +282,43 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
     for (const entry of entries)
       if ('laneId' in entry && resolutionCandidates.has(entry.laneId))
         await noteResolutionOrigins(ctx, input.projectId, entry, note);
-  for (const [intentId, { laneIds, viaLaneId }] of noted)
-    await postIntentLandingNote(ctx, input.projectId, {
-      intentId,
-      receiptId: receipt.id,
-      kind: 'landed',
-      at: receipt.at,
-      laneIds,
-      commit: receipt.candidate.head,
-      sequence: receipt.snapshot.revision,
-      actor: receipt.actor.id,
-      agentRun: receipt.agentRun,
-      agentClient: receipt.agentClient,
-      landedBy: plan.landedBy,
-      viaLaneId,
-    });
-  // The Intent completes with its last Lane, so the planning read can close its Issue.
-  for (const intentId of declares ? finished : [])
-    await completeIntentWhenLanesDone(ctx, {
-      projectId: input.projectId,
-      actor: project.owner,
-      authorityEpoch: receipt.authorityEpoch,
-      intentId,
-      at: receipt.at,
-      ...(lanesDone ? {} : { landed: pageLanes }),
-      ...(supersededBy.has(intentId)
-        ? { supersededBy: { laneId: supersededBy.get(intentId)!, receiptId: input.receiptId } }
-        : {}),
-    });
+  for (const [intentId, { laneIds, viaLaneId }] of noted) {
+    const head = await recordHead(ctx, input.projectId, 'intent', intentId);
+    // Unmarked legacy Intents may belong to an Item. Remove their fallback once no
+    // open unmarked legacy Intents remain.
+    if (head?.planningItemId !== independentIntentItem)
+      await postIntentLandingNote(ctx, input.projectId, {
+        intentId,
+        receiptId: receipt.id,
+        kind: 'landed',
+        at: receipt.at,
+        laneIds,
+        commit: receipt.candidate.head,
+        sequence: receipt.snapshot.revision,
+        actor: receipt.actor.id,
+        agentRun: receipt.agentRun,
+        agentClient: receipt.agentClient,
+        landedBy: plan.landedBy,
+        viaLaneId,
+      });
+    // Reuse the Intent head when its last Lane lets the planning read close the Issue.
+    if (declares && finished.has(intentId))
+      await completeIntentWhenLanesDone(
+        ctx,
+        {
+          projectId: input.projectId,
+          actor: project.owner,
+          authorityEpoch: receipt.authorityEpoch,
+          intentId,
+          at: receipt.at,
+          ...(lanesDone ? {} : { landed: pageLanes }),
+          ...(supersededBy.has(intentId)
+            ? { supersededBy: { laneId: supersededBy.get(intentId)!, receiptId: input.receiptId } }
+            : {}),
+        },
+        head,
+      );
+  }
   const appliedPage = end === entries.length ? plan.appliedPage + 1 : plan.appliedPage;
   const position = { appliedPage, appliedEntry: end === entries.length ? 0 : end };
   if (appliedPage === plan.inputPages) return settleCompletion(ctx, plan, position);

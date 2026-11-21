@@ -49,6 +49,7 @@ export async function prepareHostedRevert(
     ...auth,
     authorityEpoch: request.authorityEpoch,
     expectedVersion: null,
+    planningItemId: null,
     record: {
       kind: 'intent',
       id: intentId,

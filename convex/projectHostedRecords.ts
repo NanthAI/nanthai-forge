@@ -56,6 +56,10 @@ export async function recordHead(
   journalDependency(ctx, `head:${kind}:${key}`, row ? [row.recordId, row.version, row.status] : null);
   return row;
 }
+
+// An empty string fits the existing optional string field. Missing is legacy and may
+// still be a planned Intent whose Item link predated the reverse pointer.
+export const independentIntentItem = '';
 export async function recordVersion(
   ctx: QueryCtx | MutationCtx,
   projectId: Id<'hostedProjects'>,
@@ -227,13 +231,14 @@ export async function writeHostedRecord(
     digest: ref.digest,
     bytes: ref.bytes,
   });
-  const itemId = input.planningItemId ?? head?.planningItemId;
+  const itemId =
+    input.planningItemId === null ? independentIntentItem : (input.planningItemId ?? head?.planningItemId);
   const pointer = {
     ...identity,
     ...indexed,
     ...(record.kind === 'save' ? { status: indexedSaveStatus } : {}),
     recordId: id,
-    ...(record.kind === 'intent' && itemId ? { planningItemId: itemId } : {}),
+    ...(record.kind === 'intent' && itemId !== undefined ? { planningItemId: itemId } : {}),
   };
   if (head) {
     await readyJournalRecord(ctx, input.projectId, head.recordId, head.kind);
@@ -294,7 +299,7 @@ export async function readHostedRecord(
   ]);
   return {
     ...row,
-    ...(head?.planningItemId ? { planningItemId: head.planningItemId } : {}),
+    ...(head?.planningItemId !== undefined ? { planningItemId: head.planningItemId } : {}),
     value: await hostedRecordBody(ctx, row),
   };
 }

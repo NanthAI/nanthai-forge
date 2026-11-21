@@ -30,7 +30,7 @@ import { report } from './errors';
 import { accessibleProject } from './projectAuthority';
 import { sourceAuthority } from '../src/hosted-source-authority';
 import { selectedGeneration, recordPartition, record as indexRecord } from './projectWorkIndexStore';
-import { recordHead, recordVersion, hostedRecordBody } from './projectHostedRecords';
+import { independentIntentItem, recordHead, recordVersion, hostedRecordBody } from './projectHostedRecords';
 import { hostedRecordIndex, hostedRecordValue } from '../src/hosted-records';
 import { assembleIndexValue } from '../src/work-index-value';
 import {
@@ -189,6 +189,7 @@ async function insertVersion(
   head: Awaited<ReturnType<typeof recordHead>>,
   provenance?: WorkProvenance,
   migrationDigests = true,
+  planningItemId = head?.planningItemId,
 ) {
   const { record, ref, value } = encoded;
   invariant(record.kind !== 'candidate', 'BAD_ARGUMENT', 'Work metadata copies cannot publish a Candidate.');
@@ -210,14 +211,17 @@ async function insertVersion(
       : { workReadDigest: workReadDigest(journalRow(record as unknown as { kind: string })) }),
   });
   const inline = inlineValue(encoded),
-    pointer = { ...identity, ...indexed, recordId, ...(inline === undefined ? {} : { value: inline }) };
+    pointer = {
+      ...identity,
+      ...indexed,
+      recordId,
+      ...(inline === undefined ? {} : { value: inline }),
+      ...(planningItemId === undefined ? {} : { planningItemId }),
+    };
   if (!head) await ctx.db.insert('projectHostedRecordHeads', pointer);
   else if (head.version < record.version) {
     await readyJournalRecord(ctx, projectId, head.recordId, head.kind);
-    await ctx.db.replace(head._id, {
-      ...pointer,
-      ...(head.planningItemId ? { planningItemId: head.planningItemId } : {}),
-    });
+    await ctx.db.replace(head._id, pointer);
   }
 }
 
@@ -231,7 +235,7 @@ export async function storeIntent(
   value: unknown,
   write: boolean,
   provenance?: WorkProvenance,
-  migrationDigests = true,
+  { migrationDigests = true, createdIndependently = false } = {},
 ): Promise<'copied' | 'same' | 'different' | 'hosted' | 'missing'> {
   const id = (value as { id: string }).id;
   const head = await recordHead(ctx, projectId, 'intent', id);
@@ -251,7 +255,15 @@ export async function storeIntent(
   const encoded = hostedRecordValue(
     workStoreRecord('intents', value, { owner, version: head ? head.version + 1 : 0 }),
   );
-  await insertVersion(ctx as MutationCtx, projectId, encoded, head, provenance, migrationDigests);
+  await insertVersion(
+    ctx as MutationCtx,
+    projectId,
+    encoded,
+    head,
+    provenance,
+    migrationDigests,
+    !head && createdIndependently ? independentIntentItem : undefined,
+  );
   return 'copied';
 }
 
@@ -265,6 +277,7 @@ export async function storeProjection(
   entries: { collection: string; key: string; parent: string; position: number; value: string }[],
   partition?: Id<'projectWorkGenerations'>,
   provenance?: WorkProvenance,
+  createdIntentId?: string,
 ): Promise<StoredWorkEvent | null> {
   const command = provenance ? JSON.parse(provenance.command) : null;
   const primary = !command
@@ -300,7 +313,10 @@ export async function storeProjection(
     const audit = collection === primary ? provenance : undefined;
     try {
       if (collection === 'intents')
-        await storeIntent(ctx, projectId, owner, value, true, audit, Boolean(partition));
+        await storeIntent(ctx, projectId, owner, value, true, audit, {
+          migrationDigests: Boolean(partition),
+          createdIndependently: entry.key === createdIntentId,
+        });
       else if (entry.collection !== 'planningItems')
         await storeVersion(
           ctx,

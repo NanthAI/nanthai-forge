@@ -8,7 +8,7 @@ import { mutation, receiptMutation, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
 import { beginHostedOperation, finishHostedOperation } from './projectHostedOperations';
-import { readHostedRecord, writeHostedRecord } from './projectHostedRecords';
+import { independentIntentItem, readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { hostedStartMain } from './projectHostedChannels';
 import {
   hostedStartSchema,
@@ -162,7 +162,12 @@ async function execute(
   // Intent finished (e4a71127). Absent for a new outcome.
   let targetIntentId = payload.intent.kind === 'new' ? undefined : payload.intent.intentId;
   let successor = false;
-  let planningItemId = payload.intent.kind === 'planned' ? payload.intent.intentId : undefined;
+  let planningItemId =
+    payload.intent.kind === 'planned'
+      ? payload.intent.intentId
+      : payload.intent.kind === 'new'
+        ? null
+        : undefined;
   // An Intent copied from the Work journal that no Lane has pinned yet (flip 5): this start pins it.
   let unpinned: ReturnType<typeof hostedIntentSchema.parse> | undefined;
   if (payload.intent.kind === 'existing' || payload.intent.kind === 'planned') {
@@ -173,7 +178,7 @@ async function execute(
       key: payload.intent.intentId,
     });
     plannedExists = Boolean(row);
-    planningItemId ??= row?.planningItemId;
+    planningItemId ??= row?.planningItemId === independentIntentItem ? null : row?.planningItemId;
     invariant(
       row || payload.intent.kind === 'planned',
       'NOT_FOUND',
@@ -384,7 +389,7 @@ async function execute(
       actor,
       authorityEpoch: expected.authorityEpoch,
       expectedVersion: null,
-      planningItemId: payload.intent.kind === 'new' ? null : planningItemId,
+      planningItemId,
       ownerOnly,
       overlap: {
         baseSequence: main.sourceRevision,

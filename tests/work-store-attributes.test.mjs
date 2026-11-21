@@ -10,7 +10,7 @@ import { setup } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
 const commands = await import(moduleUrl('../convex/projectWorkCommand.ts'));
-const { hostedRecordBody } = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+const { hostedRecordBody, recordHead } = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const intent = (id = randomUUID(), base = 'a'.repeat(64)) => ({
   id,
   base,
@@ -35,6 +35,19 @@ test('canonical Intent copy retains imported attributes whose names also occur i
   for (const key of ['payload', 'payloadKey', 'payloadParts', 'extension'])
     assert.deepEqual(canonical.journal[key], original[key], key);
   assert(!Object.hasOwn(canonical.journal, 'notes'), 'notes keep their separate retained records');
+});
+
+test('an Intent created in Work retains its independent origin when written to the hosted record store', async t => {
+  const s = await setup(t);
+  const base = (await s.read()).sourceHead;
+  s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
+  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'dual' });
+  const intentId = randomUUID();
+  await s.send({ action: 'intent', operationId: intentId, outcome: 'Independent Work Intent', base });
+  const origin = async () => (await recordHead(s.ctx, s.projectId, 'intent', intentId))?.planningItemId;
+  assert.equal(await origin(), '');
+  await s.send({ action: 'intent-status', intentId, status: 'ready' });
+  assert.equal(await origin(), '', 'a later update preserves the independent origin');
 });
 
 test('legacy copy and status mutations preserve imported attributes before data projections can retire', async t => {
@@ -66,6 +79,7 @@ test('legacy copy and status mutations preserve imported attributes before data 
     store.copy._handler(s.ctx, { projectId: s.projectId, collection: 'intents', cursor: null });
   const copied = JSON.parse(await copy());
   assert.equal(copied.copied, 2);
+  assert.equal((await recordHead(s.ctx, s.projectId, 'intent', id)).planningItemId, undefined);
   const body = async () => {
     const head = [...s.tables.projectHostedRecordHeads.values()].find(
       row => row.kind === 'intent' && row.key === id,

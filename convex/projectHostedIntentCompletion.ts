@@ -36,9 +36,11 @@ export async function completeIntentWhenLanesDone(
      * sibling page (friction b7f93deb). */
     supersededBy?: { laneId: string; receiptId: string };
   },
+  knownHead?: Awaited<ReturnType<typeof recordHead>>,
 ) {
   // Head rows carry the status, so a settled or missing Intent and any open sibling cost no record body read.
-  const head = await recordHead(ctx, input.projectId, 'intent', input.intentId);
+  const head =
+    knownHead === undefined ? await recordHead(ctx, input.projectId, 'intent', input.intentId) : knownHead;
   if (!head || head.status !== 'active') return false;
   const siblings = await ctx.db
     .query('projectHostedRecordHeads')

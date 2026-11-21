@@ -15,6 +15,7 @@ import { landingNoteId, landingNoteText } from '../dist/intent-landing-note.js';
 const notes = await import(moduleUrl('../convex/projectIntentLandingNotes.ts'));
 const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+const hostedStart = await import(moduleUrl('../convex/projectHostedStart.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -89,11 +90,12 @@ test('an explicit accept that publishes a cohort labels only the accepted member
   assert.equal(receipts.size, f.entries.length, 'one receipt per member');
 });
 
-const seedIntent = async f => {
+const seedIntent = async (f, linked = true) => {
   const intentId = randomUUID();
   await f.runAcceptance('acceptanceSeed', records.writeHostedRecord, {
     ...f.auth,
     expectedVersion: null,
+    ...(linked ? { planningItemId: intentId } : {}),
     record: {
       kind: 'intent',
       id: intentId,
@@ -109,6 +111,75 @@ const seedIntent = async f => {
   });
   return intentId;
 };
+
+test('an independent landing saves one write and legacy Intents retain their notes', async t => {
+  for (const [name, request] of [
+    ['completing', {}],
+    ['notes only', { closes: false }],
+  ]) {
+    const result = {};
+    for (const kind of ['planned', 'legacy', 'independent']) {
+      const f = await acceptanceFixture();
+      const policy = policyPreset('supervised');
+      f.patch('hostedProjects', f.projectId, {
+        autonomyPolicy: { ...policy, lifecycle: { ...policy.lifecycle, completeOnAccept: true } },
+      });
+      let intentId, lane;
+      if (kind === 'legacy') {
+        intentId = await seedIntent(f, false);
+        lane = await f.lane({ intentId });
+      } else {
+        const started = JSON.parse(
+          await f.transaction('acceptanceStart', hostedStart.start, {
+            projectId: f.projectId,
+            operationId: randomUUID(),
+            authorityEpoch: 1,
+            expectedMain: { head: f.main.head, receiptId: f.main.receipt.id },
+            initialHead: f.state.sha256,
+            intent:
+              kind === 'planned'
+                ? { kind: 'planned', intentId: randomUUID(), outcome: 'Planned Issue', constraints: '' }
+                : { kind: 'new', outcome: 'Independent Intent' },
+          }),
+        );
+        assert(started.lane, JSON.stringify(started));
+        intentId = started.intentId;
+        const { laneId, head, version, sourceVersion, lifecycleVersion } = started.lane;
+        lane = {
+          laneId,
+          head,
+          version,
+          sourceVersion,
+          lifecycleVersion,
+          state: { object: { sha256: head, size: f.state.size }, recipe: null },
+        };
+      }
+      const { state } = await f.ready(await f.makeCandidate([lane], [], { intentId }), request);
+      const { receipt } = await f.accept(state);
+      await f.materialize(receipt.id);
+      const meter = f.counts.at(-1);
+      const stored = notesOf(f, intentId);
+      assert.deepEqual(
+        stored.map(note => [note.receiptId, note.laneIds]),
+        kind === 'independent' ? [] : [[receipt.id, [lane.laneId]]],
+        `${name}: ${kind}`,
+      );
+      result[kind] = meter;
+    }
+    assert.equal(result.planned.writes, result.legacy.writes, name);
+    assert.equal(result.planned.writes - result.independent.writes, 1, name);
+    assert.deepEqual(
+      result.independent.written,
+      result.planned.written.filter(table => table !== 'projectIntentLandingNotes'),
+      name,
+    );
+    assert.equal(result.planned.ranges - result.independent.ranges, 1, name);
+    t.diagnostic(
+      `${name}: ${result.planned.writes} → ${result.independent.writes} writes, ` +
+        `${result.planned.writeBytesByTable.projectIntentLandingNotes} note bytes saved`,
+    );
+  }
+});
 
 /** Review 66f9ed38: a resolution Lane carries its conflicted original's work to main whether or not the
  * landing completes Lanes. The completing landing already noted the original's Item; keepOpen and

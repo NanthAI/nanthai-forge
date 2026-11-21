@@ -180,8 +180,12 @@ test('a revert posts a matching reverted note on the reverted Item, once', async
   let final = await f.settleRevert(state.id);
   for (let i = 0; final.phase !== 'landed' && i < 5; i++) final = await f.settleRevert(state.id);
   assert.equal(final.phase, 'landed');
-  // The original landing noted its Item; the revert's own landing noted its revert Intent.
+  // The original landing noted its Item. The independent compensation has no Item note.
   const landedNotes = [...f.tables.projectIntentLandingNotes.values()].filter(row => row.kind === 'landed');
+  assert.equal(
+    landedNotes.some(row => row.receiptId === final.acceptance.receiptId),
+    false,
+  );
   const originalNote = landedNotes.find(row => row.receiptId === receipt.id);
   assert(originalNote, 'the original landing noted its Item');
   // The compensating landing's scheduled notice (state.request.revertOf in production), run twice.

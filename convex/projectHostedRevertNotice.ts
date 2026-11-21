@@ -3,7 +3,7 @@ import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { acceptancePage, acceptanceRow } from './projectHostedAcceptanceStore';
-import { readHostedRecord, writeHostedRecord } from './projectHostedRecords';
+import { independentIntentItem, readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { postSystemLaneNote } from './projectBoardSystem';
 import { postIntentLandingNote } from './projectIntentLandingNotes';
 import { hostedAcceptanceSchema, type HostedAcceptance } from '../src/hosted-acceptance';
@@ -85,11 +85,11 @@ export async function noticeRevert(ctx: MutationCtx, input: Revert) {
     });
     if (posted === 'posted') notes++;
   }
-  const { needsFix, intentId } = await markIntent(ctx, project, original, revert, lanes[0]);
+  const { needsFix, itemNoteIntentId } = await markIntent(ctx, project, original, revert, lanes[0]);
   // Issue 3a733ee8: the reverted Intent's Item gets a system note matching its landing note.
-  if (intentId)
+  if (itemNoteIntentId)
     await postIntentLandingNote(ctx, input.projectId, {
-      intentId,
+      intentId: itemNoteIntentId,
       receiptId: revert.id,
       kind: 'reverted',
       at: revert.at,
@@ -120,14 +120,15 @@ async function markIntent(
 ) {
   const key = { projectId: project._id, actor: project.owner };
   const candidate = await readHostedRecord(ctx, { ...key, kind: 'candidate', key: original.candidate.id });
-  if (!candidate) return { needsFix: false, intentId: null };
+  if (!candidate) return { needsFix: false, itemNoteIntentId: null };
   const intentId = hostedRecordSchema.options[3].parse(JSON.parse(candidate.value)).intentId;
   const row = await readHostedRecord(ctx, { ...key, kind: 'intent', key: intentId });
-  if (!row) return { needsFix: false, intentId };
+  const itemNoteIntentId = row?.planningItemId === independentIntentItem ? null : intentId;
+  if (!row) return { needsFix: false, itemNoteIntentId };
   const intent = hostedRecordSchema.options[0].parse(JSON.parse(row.value));
   // Main-audit recovery already wrote its richer notice for this receipt; an abandoned Intent stays closed.
   if (intent.status === 'abandoned' || intent.needsFix?.receiptId === original.id)
-    return { needsFix: false, intentId };
+    return { needsFix: false, itemNoteIntentId };
   const notice = {
     state: 'reverted' as const,
     receiptId: original.id,
@@ -162,7 +163,7 @@ async function markIntent(
       }),
     },
   });
-  return { needsFix: true, intentId };
+  return { needsFix: true, itemNoteIntentId };
 }
 
 export const accepted = internalMutation({
