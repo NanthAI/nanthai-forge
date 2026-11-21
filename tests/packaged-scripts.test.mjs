@@ -40,8 +40,8 @@ function unbuiltEntries(entries) {
   return entries.filter(entry => !/[*?[{]/.test(entry) && !existsSync(entry) && !entry.includes('.'));
 }
 
-function missingImports(files, unbuilt = unbuiltEntries(manifest.files)) {
-  const missing = [];
+function readPackagedImports(files) {
+  const imports = new Map();
   for (const path of files) {
     if (
       !(
@@ -50,8 +50,9 @@ function missingImports(files, unbuilt = unbuiltEntries(manifest.files)) {
       )
     )
       continue;
-    const ast = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true);
+    const ast = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, false);
     assert.equal(ast.parseDiagnostics.length, 0, `Cannot parse ${path}`);
+    const specifiers = [];
     function visit(node) {
       const specifier =
         ts.isImportDeclaration(node) || ts.isExportDeclaration(node)
@@ -61,37 +62,43 @@ function missingImports(files, unbuilt = unbuiltEntries(manifest.files)) {
                 (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
             ? node.arguments[0]
             : undefined;
-      if (
-        specifier &&
-        ts.isStringLiteralLike(specifier) &&
-        !specifier.text.startsWith('.') &&
-        !isBuiltin(specifier.text)
-      ) {
-        const dependency = specifier.text
+      if (specifier && ts.isStringLiteralLike(specifier)) specifiers.push(specifier.text);
+      ts.forEachChild(node, visit);
+    }
+    visit(ast);
+    if (specifiers.length) imports.set(path, specifiers);
+  }
+  return imports;
+}
+
+function missingImports(imports, files, unbuilt = unbuiltEntries(manifest.files)) {
+  const missing = [];
+  for (const [path, specifiers] of imports) {
+    if (!files.has(path)) continue;
+    for (const specifier of specifiers) {
+      if (specifier.startsWith('.')) {
+        if (!path.startsWith('scripts/')) continue;
+        const target = posix.normalize(posix.join(posix.dirname(path), specifier));
+        if (!files.has(target) && !unbuilt.some(entry => target.startsWith(`${entry}/`)))
+          missing.push(`${path} imports unpackaged ${target}`);
+      } else if (!isBuiltin(specifier)) {
+        const dependency = specifier
           .split('/')
-          .slice(0, specifier.text.startsWith('@') ? 2 : 1)
+          .slice(0, specifier.startsWith('@') ? 2 : 1)
           .join('/');
         if (!Object.hasOwn(manifest.dependencies, dependency))
           missing.push(`${path} imports non-runtime dependency ${dependency}`);
       }
-      if (
-        path.startsWith('scripts/') &&
-        specifier &&
-        ts.isStringLiteralLike(specifier) &&
-        specifier.text.startsWith('.')
-      ) {
-        const target = posix.normalize(posix.join(posix.dirname(path), specifier.text));
-        if (!files.has(target) && !unbuilt.some(entry => target.startsWith(`${entry}/`)))
-          missing.push(`${path} imports unpackaged ${target}`);
-      }
-      ts.forEachChild(node, visit);
     }
-    visit(ast);
   }
   return missing;
 }
 
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+// The controls vary package membership, so all of them can use the same parsed source.
+const packaged = packagedFiles(manifest.files);
+const imports = readPackagedImports(packaged);
+
 test('packaged file enumeration excludes dangling, external and cyclic symlinks as npm does', () => {
   const root = mkdtempSync(join(tmpdir(), 'packaged-links-'));
   try {
@@ -115,35 +122,36 @@ test('packaged file enumeration excludes dangling, external and cyclic symlinks 
 });
 
 test('packaged scripts retain relative helpers and every emitted runtime import belongs to production dependencies', () => {
-  const files = packagedFiles(manifest.files);
-  assert.ok(files.has('scripts/script-impact.mjs'));
-  assert.deepEqual(missingImports(files), []);
+  assert.ok(packaged.has('scripts/script-impact.mjs'));
+  assert.deepEqual(missingImports(imports, packaged), []);
 });
 
 test('packaged import guard detects the missing transitive impact helper', () => {
-  const files = packagedFiles(manifest.files);
+  const files = new Set(packaged);
   files.delete('scripts/script-impact.mjs');
   assert.ok(
-    missingImports(files).includes('scripts/test-impact.mjs imports unpackaged scripts/script-impact.mjs'),
+    missingImports(imports, files).includes(
+      'scripts/test-impact.mjs imports unpackaged scripts/script-impact.mjs',
+    ),
   );
 });
 
 test('an unbuilt checkout (no dist/) packages dist imports by entry, a built one is still exact', () => {
-  const built = packagedFiles(manifest.files);
-  const unbuiltFiles = new Set([...built].filter(path => !path.startsWith('dist/')));
+  const unbuiltFiles = new Set([...packaged].filter(path => !path.startsWith('dist/')));
   assert.deepEqual(
     unbuiltEntries(['dist', 'docs', 'scripts/*.mjs', 'LICENSE.md']),
     existsSync('dist') ? [] : ['dist'],
   );
-  assert.deepEqual(missingImports(unbuiltFiles, ['dist']), []);
-  const importsDist = missingImports(unbuiltFiles, []);
+  assert.deepEqual(missingImports(imports, unbuiltFiles, ['dist']), []);
+  const importsDist = missingImports(imports, unbuiltFiles, []);
   assert.ok(
     importsDist.some(line => line.includes('imports unpackaged dist/')),
     'without the unbuilt exemption the same inputs fail on dist/*',
   );
   // An import outside every packaged entry still fails when dist is exempt.
   assert.ok(
-    missingImports(new Set([...unbuiltFiles].filter(path => path !== 'scripts/script-impact.mjs')), ['dist'])
-      .length > 0,
+    missingImports(imports, new Set([...unbuiltFiles].filter(path => path !== 'scripts/script-impact.mjs')), [
+      'dist',
+    ]).length > 0,
   );
 });
