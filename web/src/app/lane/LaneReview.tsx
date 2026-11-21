@@ -8,6 +8,7 @@ import { Component, useEffect, useMemo, useState, type CSSProperties, type React
 import { useConvex, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
+import { isPlanningUuid } from '../../../../src/planning-id';
 import { reviewGroupLabels, reviewGroups, type ReviewGroup } from '../../../../src/review-order';
 import { Avatar, Band, CodeBox, Key, State } from '../../ds';
 import { requestHighlight } from '../../highlight-client';
@@ -225,7 +226,10 @@ export function ReviewPage({
   const readCount = entries.filter(
     entry => ticks.state(entry.path, readMark(entry.file.after)) === 'read',
   ).length;
-  const goal = lane.goal ?? `Lane ${short(lane.laneId)}`;
+  const itemId = lane.itemId ?? lane.intentId;
+  // Older review replies can still contain the UUID stored in the overlap row.
+  const goal = lane.goal && (lane.itemId || !isPlanningUuid(lane.goal)) ? lane.goal : null;
+  const itemLabel = goal ? `${goal} · ${short(itemId)}` : `${short(itemId)} · title unavailable`;
   const nothing = !reply.files.total && lane.head === lane.base.head;
   const situation = lane.landed
     ? `On main since ${clock(lane.landed.at)}. ${plural(reply.files.total, 'file')} changed.`
@@ -247,7 +251,7 @@ export function ReviewPage({
         trail={trail}
         sentence={
           <>
-            <b>{goal}</b> {situation}
+            <b dir="auto">{itemLabel}</b> {situation}
           </>
         }
       >
@@ -275,7 +279,9 @@ export function ReviewPage({
           <Key
             keys="u"
             disabled={takeOut.busy || Boolean(takeOut.done)}
-            onClick={() => void takeOut.press(lane.landed!.receiptId, `Take “${goal}” out of main`)}
+            onClick={() =>
+              void takeOut.press(lane.landed!.receiptId, `Take “${goal ?? short(itemId)}” out of main`)
+            }
           >
             {takeOut.busy
               ? 'Taking it out of main…'
@@ -343,7 +349,7 @@ export function ReviewPage({
             </p>
           ) : null}
         </section>
-        <Side reply={reply} entries={entries} route={route} who={who} />
+        <Side reply={reply} entries={entries} route={route} who={who} itemId={itemId} itemLabel={itemLabel} />
       </div>
     </>
   );
@@ -870,11 +876,15 @@ function Side({
   entries,
   route,
   who,
+  itemId,
+  itemLabel,
 }: {
   reply: Reply;
   entries: Entry[];
   route: ProjectRoute;
   who: string;
+  itemId: string;
+  itemLabel: string;
 }) {
   const { lane } = reply;
   const guarded = entries.filter(entry => entry.file.protected).length;
@@ -915,8 +925,8 @@ function Side({
         </dd>
         <dt>For</dt>
         <dd>
-          <A className="lk" href={hrefFor({ ...route, place: 'plan', section: '', rest: lane.intentId })}>
-            Item: {lane.goal ?? short(lane.intentId)}
+          <A className="lk" href={hrefFor({ ...route, place: 'plan', section: '', rest: itemId })}>
+            Item: {itemLabel}
           </A>
         </dd>
         <dt>Pinned</dt>

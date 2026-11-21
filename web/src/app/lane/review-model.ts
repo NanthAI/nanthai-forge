@@ -47,6 +47,7 @@ export type Reply = {
   lane: {
     laneId: string;
     intentId: string;
+    itemId?: string;
     goal: string | null;
     actor: string | null;
     agent: string | null;

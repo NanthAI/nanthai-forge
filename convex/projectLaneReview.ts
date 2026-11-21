@@ -3,11 +3,12 @@
 // one bounded query, so the screen makes one round trip before its first diff instead of 13 serial calls. No State
 // object or file body is read here: the changed paths and their exact blob ids come from the Lane's overlap row, which
 // every save already writes, with each file's +/- counts when the saving CLI recorded them; file bodies are fetched by
-// the browser per opened file (describe, then R2).
+// the browser per opened file (describe, then R2). The first page includes the same indexed Intent title
+// lookup as Lanes, at a fixed cost per view. File continuations skip it.
 import { v } from 'convex/values';
 import { projectQuery as query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
-import { readHostedRecord } from './projectHostedRecords';
+import { readHostedIntentLabel, readHostedRecord } from './projectHostedRecords';
 import { laneConflicts } from './projectHostedConflicts';
 import { isAgentSlug } from '../src/agent-slug';
 import { hostedLaneSchema } from '../src/hosted-lane';
@@ -42,6 +43,10 @@ export const read = query({
       ]);
       invariant(record, 'NOT_FOUND', 'This Lane is not on this project.');
       const lane = hostedLaneSchema.parse(JSON.parse(record.value));
+      const intentRead =
+        offset === 0
+          ? readHostedIntentLabel(ctx, { projectId, actor: user.subject, intentId: lane.intentId })
+          : null;
       // The row describes this exact pinned pair only when it was written for the Lane's current head and base.
       const current = !!row && row.head === lane.head && row.baseHead === lane.base.head;
       const changes: OverlapChange[] = current ? JSON.parse(row.changes) : [];
@@ -100,6 +105,7 @@ export const read = query({
         }),
       );
       const timing = row?.landed ? await landedTiming(ctx, projectId, row.landed.receiptId) : null;
+      const intent = await intentRead;
       const run = isAgentSlug(lane.agentRun) ? lane.agentRun : null;
       const savedBy = current ? row.savedBy : undefined;
       // Before the save's author was projected, a holder change or a legacy owner override
@@ -116,7 +122,8 @@ export const read = query({
         lane: {
           laneId,
           intentId: lane.intentId,
-          goal: row?.intent ?? null,
+          goal: intent?.title ?? null,
+          itemId: intent?.itemId ?? row?.planningItemId ?? lane.intentId,
           actor: author,
           agent: lane.authorship ? (run ?? null) : (row?.agent ?? null),
           ...(lane.agentClient ? { agentClient: lane.agentClient } : {}),

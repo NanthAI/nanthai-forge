@@ -13,12 +13,15 @@ import { ConvexProvider, type ConvexReactClient } from 'convex/react';
 import { getFunctionName } from 'convex/server';
 import '../../web/src/ds';
 import '../../web/src/app/app.css';
+import { PlaceScreen } from '../../web/src/app/screens';
+import { useRoute } from '../../web/src/app/router';
 import { ReviewPage } from '../../web/src/app/lane/LaneReview';
 import type { Reply } from '../../web/src/app/lane/review-model';
 
 const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
 const scenario = params.get('s') ?? 'review';
+const routed = params.has('routes');
 
 const enc = new TextEncoder();
 const hex = async (bytes: Uint8Array) =>
@@ -68,14 +71,19 @@ const client = {
   // The owner's decision block subscribes to Needs me's read while the Lane is held; here it never answers, so the
   // block stays hidden and only its name is recorded (window.__watches).
   watchQuery: (ref: unknown) => {
+    const name = getFunctionName(ref as never);
     const watches = ((window as unknown as { __watches?: string[] }).__watches ??= []);
-    watches.push(getFunctionName(ref as never));
-    return { onUpdate: () => () => {}, localQueryResult: () => undefined, journal: () => undefined };
+    watches.push(name);
+    return { onUpdate: () => () => {}, localQueryResult: () => reads.get(name), journal: () => undefined };
   },
 } as unknown as ConvexReactClient;
 
 const PEER = '3c1f9a20-5b7e-4d2a-9c11-2f0e6b8a4d19';
 const LANE = '7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
+const ITEM = '9e8d7c6b-5a49-4382-9170-6f5e4d3c2b1a';
+const INTENT = '2a3f12de-8371-4310-a004-f9cae1ef291c';
+const TITLE = scenario === 'uuid-title' ? INTENT : 'Stream parser: handle split UTF-8';
+const reads = new Map<string, string>();
 const BASE = 'b'.repeat(64);
 const AHEAD_HEAD = 'a1'.repeat(32);
 const HEAD = 'c3'.repeat(32);
@@ -150,8 +158,9 @@ async function reply(): Promise<Reply> {
   return {
     lane: {
       laneId: LANE,
-      intentId: '9e8d7c6b-5a49-4382-9170-6f5e4d3c2b1a',
-      goal: 'Stream parser: handle split UTF-8',
+      intentId: scenario === 'legacy-id' ? ITEM : INTENT,
+      ...(scenario === 'legacy-id' ? {} : { itemId: ITEM }),
+      goal: scenario === 'unavailable' ? null : scenario === 'legacy-id' ? ITEM : TITLE,
       actor: 'sample-owner',
       agent: 'amber-fox',
       agentClient: 'codex:gpt-example',
@@ -249,11 +258,11 @@ const feed = {
   main: { head: BASE },
 };
 
-function Frame({ children }: { children: ReactNode }) {
-  if (!params.has('frame')) return <main id="main">{children}</main>;
+function Frame({ children, current = route }: { children: ReactNode; current?: typeof route }) {
+  if (!routed && !params.has('frame')) return <main id="main">{children}</main>;
   return (
     <ProjectFrame
-      route={route}
+      route={current}
       name="tide-pool"
       feed={feed}
       needs={{ n: 1, atLeast: false }}
@@ -265,27 +274,84 @@ function Frame({ children }: { children: ReactNode }) {
   );
 }
 
-void reply().then(data =>
+function Routed() {
+  const current = useRoute();
+  if (current.frame !== 'project' || current.place !== 'lanes') throw new Error('Expected a Lanes route');
+  return (
+    <Frame current={{ ...current, place: 'lanes' }}>
+      <PlaceScreen
+        route={current}
+        projectId={'p1' as never}
+        projectName="tide-pool"
+        feed={feed}
+        viewerHandle="sample-owner"
+      />
+    </Frame>
+  );
+}
+
+void reply().then(data => {
+  if (routed) {
+    reads.set('projectLaneReview:read', JSON.stringify(data));
+    reads.set(
+      'projectHostedLiveLanes:list',
+      JSON.stringify({
+        page: [
+          {
+            laneId: LANE,
+            intentId: INTENT,
+            intent: TITLE,
+            actor: 'sample-owner',
+            lastSaveAt: null,
+            landing: null,
+          },
+        ],
+        isDone: true,
+      }),
+    );
+    reads.set(
+      'projectHostedQueueView:read',
+      JSON.stringify({ total: 0, listed: 0, more: false, entries: [] }),
+    );
+    reads.set(
+      'projectNowOverlaps:now',
+      JSON.stringify({
+        signals: {
+          lanes: [{ laneId: LANE }, { laneId: PEER }],
+          paths: ['src/parser/stream-parser.ts'],
+          edits: [
+            { lane: 0, paths: [0] },
+            { lane: 1, paths: [0] },
+          ],
+          complete: true,
+        },
+      }),
+    );
+  }
   createRoot(document.getElementById('root')!).render(
     <ConvexProvider client={client}>
-      <Frame>
-        <ReviewPage
-          reply={data}
-          files={data.files.items}
-          feed={feed}
-          route={route}
-          projectId={'p1' as never}
-          trail={[
-            { label: 'tide-pool', href: '/-/sample-owner/tide-pool' },
-            { label: 'Lanes', href: '/-/sample-owner/tide-pool/lanes' },
-            { label: 'sample-owner/amber-fox' },
-          ]}
-          who="sample-owner/amber-fox"
-          nextOffset={null}
-          onMore={() => undefined}
-          loader={null}
-        />
-      </Frame>
+      {routed ? (
+        <Routed />
+      ) : (
+        <Frame>
+          <ReviewPage
+            reply={data}
+            files={data.files.items}
+            feed={feed}
+            route={route}
+            projectId={'p1' as never}
+            trail={[
+              { label: 'tide-pool', href: '/-/sample-owner/tide-pool' },
+              { label: 'Lanes', href: '/-/sample-owner/tide-pool/lanes' },
+              { label: 'sample-owner/amber-fox' },
+            ]}
+            who="sample-owner/amber-fox"
+            nextOffset={null}
+            onMore={() => undefined}
+            loader={null}
+          />
+        </Frame>
+      )}
     </ConvexProvider>,
-  ),
-);
+  );
+});

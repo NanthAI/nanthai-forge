@@ -173,7 +173,8 @@ lead owns billing reconciliation. Bytes were observed coming directly from R2.
 
 Item `4bc460aa`. The rebuilt Lane review screen (`web/src/app/lane/`) reads one
 bounded query, `projectLaneReview:read`, which names each changed path's exact
-before/after blobs from the Lane's overlap row. Opening a file makes one signed
+before/after blobs from the Lane's overlap row. Its first page also looks up the
+Intent title using the same indexed read as the Lanes list. Opening a file makes one signed
 `describe`, GETs its two blobs from R2 and re-checks access with a second
 `describe`. No State object is read. Folded files read nothing.
 
@@ -207,7 +208,8 @@ Calls and round trips met the target (13 calls before, now 3). Bytes are the
 opened file's two blobs, independent of repository size: the overlap row holds
 changed paths only, so a 3k-file and a 29k-file repository read the same bytes for
 the same file. Per-view database reads are bounded by `tests/lane-review-read.test.mjs`
-(7 documents, 2,566 bytes for the read). **Time does not meet the 1.0 s p95
+(7 documents, 2,566 bytes for the measured read, before the title lookup was included).
+**Time does not meet the 1.0 s p95
 target.** The interval for the open-connection p95 excludes 1,000 ms. The two
 `describe` mutations take about 60% of the time. Diff and highlighting are
 negligible.

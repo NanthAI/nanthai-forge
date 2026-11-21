@@ -131,6 +131,8 @@ and say that output appears when the check finishes. Available logs remain reada
 ## Detail navigation and actions
 
 Intent, Lane, Candidate, review and Lane source pages show linked Work breadcrumbs.
+The Lane page shows the same Item title as Lanes, alongside its short id, wherever
+you opened it. If the title cannot be read, the short id appears with “title unavailable.”
 Long titles truncate while retaining their full title on hover. Detail visits add
 browser history; in-page tabs, filters and Intent layouts replace the current
 entry so Back returns to the previous page. Lane **Browse source** opens Code at

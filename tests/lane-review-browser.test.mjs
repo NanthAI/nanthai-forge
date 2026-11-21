@@ -65,7 +65,7 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
   if (shots) mkdirSync(shots, { recursive: true });
   const html = await buildFixture(out);
   const browser = await chromium.launch(launchOptions);
-  async function open(t, viewport, query) {
+  async function open(t, viewport, query, path = '/lane-review.html') {
     const context = await browser.newContext({ viewport, locale: 'en-US' });
     const page = await context.newPage();
     const errors = [];
@@ -76,8 +76,7 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
       const url = new URL(route.request().url());
       if (url.protocol === 'data:') return route.continue();
       if (url.hostname !== 'forge.test') return route.abort();
-      if (url.pathname === '/lane-review.html')
-        return route.fulfill({ contentType: 'text/html', body: html });
+      if (url.pathname === path) return route.fulfill({ contentType: 'text/html', body: html });
       const file = join(out, url.pathname.slice(1));
       if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
       const contentType = file.endsWith('.js')
@@ -87,11 +86,12 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
           : 'text/html';
       return route.fulfill({ contentType, body: readFileSync(file) });
     });
-    await page.goto(`https://forge.test/lane-review.html?${query}`);
-    await page
-      .locator('section[aria-label="The change"]')
-      .waitFor({ timeout: 10_000 })
-      .catch(error => assert.fail(`${error.message}\n${errors.join('\n')}`));
+    await page.goto(`https://forge.test${path}?${query}`);
+    if (path === '/lane-review.html')
+      await page
+        .locator('section[aria-label="The change"]')
+        .waitFor({ timeout: 10_000 })
+        .catch(error => assert.fail(`${error.message}\n${errors.join('\n')}`));
     t.after(async () => {
       await context.close();
       assert.deepEqual(errors, [], 'no page errors');
@@ -113,6 +113,48 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
   };
 
   try {
+    await t.test('954afe8c: Lanes and Who is touching what open the same Item heading', async t => {
+      const lanes = '/-/sample-owner/tide-pool/lanes';
+      const title = 'Stream parser: handle split UTF-8';
+      const itemLabel = `${title} · 9e8d7c6b`;
+      const page = await open(t, DESK, 'routes', lanes);
+      const fromLanes = page.getByRole('link', { name: `${title}, Lane 7a2b4c6d`, exact: true });
+      const heading = page.locator('.head .sit');
+      await fromLanes.click();
+      await page.getByRole('link', { name: `Item: ${itemLabel}`, exact: true }).waitFor();
+      const openedFromLanes = await page.evaluate(() => location.pathname);
+      const headingFromLanes = await heading.textContent();
+      assert.match(headingFromLanes, new RegExp(itemLabel));
+
+      await page.goBack();
+      await fromLanes.waitFor();
+      await page.getByRole('link', { name: 'Who is touching what', exact: true }).click();
+      await page.locator('.lanes-files').getByRole('link', { name: title, exact: true }).click();
+      await page.getByRole('link', { name: `Item: ${itemLabel}`, exact: true }).waitFor();
+      assert.equal(await page.evaluate(() => location.pathname), openedFromLanes);
+      assert.equal(await heading.textContent(), headingFromLanes);
+    });
+
+    await t.test(
+      '954afe8c: unavailable titles use the short Item id, and recorded titles are retained',
+      async t => {
+        for (const [scenario, label] of [
+          ['unavailable', '9e8d7c6b · title unavailable'],
+          ['legacy-id', '9e8d7c6b · title unavailable'],
+          ['uuid-title', '2a3f12de-8371-4310-a004-f9cae1ef291c · 9e8d7c6b'],
+        ]) {
+          const path = '/-/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
+          const page = await open(t, DESK, `routes&s=${scenario}`, path);
+          const item = page.getByRole('link', { name: `Item: ${label}`, exact: true });
+          assert.equal(
+            await item.getAttribute('href'),
+            '/-/sample-owner/tide-pool/plan/9e8d7c6b-5a49-4382-9170-6f5e4d3c2b1a',
+          );
+          assert.equal(await page.locator('.head .sit b').textContent(), label);
+        }
+      },
+    );
+
     await t.test(
       'grouped by what needs eyes, with reasons; file order one press away; counts reconcile',
       async t => {

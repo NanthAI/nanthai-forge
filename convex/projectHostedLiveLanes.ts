@@ -2,7 +2,12 @@
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { recordCaller } from './projectHostedFrictionStore';
-import { readHostedRecord, hostedRecordBody, recordHead } from './projectHostedRecords';
+import {
+  readHostedIntentLabel,
+  readHostedRecord,
+  hostedRecordBody,
+  recordHead,
+} from './projectHostedRecords';
 import { isAgentSlug } from '../src/agent-slug';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -185,7 +190,7 @@ export const list = query({
                 : {}),
             }
           : {};
-        const intent = await readHostedRecord(ctx, { projectId, actor, kind: 'intent', key: lane.intentId });
+        const intent = await readHostedIntentLabel(ctx, { projectId, actor, intentId: lane.intentId });
         const [saved] = await ctx.db
           .query('projectHostedRecords')
           .withIndex('by_project_and_kind_and_parent', q =>
@@ -223,7 +228,7 @@ export const list = query({
         lanes.push({
           laneId: lane.id,
           intentId: lane.intentId,
-          intent: intent ? JSON.parse(intent.value).outcome : null,
+          intent: intent.title,
           // Keep the list contract for CLI callers. The Yard asks for the saver, and for
           // Mine it keeps the ownership comparison so the reply only names one account per Lane.
           actor: byline ? (save?.actor ?? lane.actor) : lane.actor,

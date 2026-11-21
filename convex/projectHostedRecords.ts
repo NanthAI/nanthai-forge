@@ -304,6 +304,28 @@ export async function readHostedRecord(
   };
 }
 
+/** The Lane list and detail use the same recorded Intent outcome for the title. */
+export async function readHostedIntentLabel(
+  ctx: QueryCtx,
+  { projectId, actor, intentId }: { projectId: Id<'hostedProjects'>; actor: string; intentId: string },
+) {
+  await accessibleProject(ctx, projectId, actor);
+  let itemId: string | null = null;
+  try {
+    const head = await recordHead(ctx, projectId, 'intent', intentId);
+    itemId = head?.planningItemId || null;
+    const record = head ? await ctx.db.get(head.recordId) : null;
+    const title =
+      record?.projectId === projectId && record.kind === 'intent' && record.key === intentId
+        ? JSON.parse(await hostedRecordBody(ctx, record))?.outcome
+        : null;
+    return { itemId, title: typeof title === 'string' && title.trim() ? title : null };
+  } catch {
+    // The head carries the Item's identity even when its title bytes are unavailable.
+    return { itemId, title: null };
+  }
+}
+
 /** Page sibling Lanes/saves/Candidates or pending jobs by the schema-owned index. */
 export async function hostedRecordPage(
   ctx: QueryCtx | MutationCtx,

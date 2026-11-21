@@ -17,7 +17,7 @@ async function lane(changes, extra = {}, savedBy) {
   const base = JSON.parse(
     [...s.tables.projectHostedRecordBodies.values()].find(row => JSON.parse(row.value).kind === 'lane').value,
   );
-  const write = (record, overlap, expectedVersion = null) =>
+  const write = (record, overlap, expectedVersion = null, planningItemId) =>
     s.transaction(
       'write',
       {
@@ -29,6 +29,7 @@ async function lane(changes, extra = {}, savedBy) {
             expectedVersion,
             record,
             overlap,
+            planningItemId,
           }),
       },
       {},
@@ -41,13 +42,13 @@ async function lane(changes, extra = {}, savedBy) {
     at: new Date().toISOString(),
     ...extra,
   };
-  await write(first, { baseSequence: 0, intent: 'Stream parser: handle split UTF-8' });
+  await write(first, { baseSequence: 0, intent: first.intentId });
   const saved = { ...first, head: digest(first.id), version: 1, sourceVersion: 1 };
   await write(
     saved,
     {
       baseSequence: 0,
-      intent: 'Stream parser: handle split UTF-8',
+      intent: first.intentId,
       changes,
       ...(savedBy ? { savedBy } : {}),
     },
@@ -62,7 +63,7 @@ async function lane(changes, extra = {}, savedBy) {
         'owner',
       )
       .then(JSON.parse);
-  return { s, saved, read };
+  return { s, saved, read, write };
 }
 
 const side = (seed, mode = 'file') => ({ blob: digest(seed), mode });
@@ -76,7 +77,7 @@ test('one read names the pinned head and every changed path with its exact blobs
   const { s, saved, read } = await lane(changes);
   const reply = await read();
   assert.equal(reply.lane.head, saved.head);
-  assert.equal(reply.lane.goal, 'Stream parser: handle split UTF-8');
+  assert.equal(reply.lane.goal, null, 'the saved overlap placeholder is not a title');
   assert.equal(reply.files.current, true);
   assert.equal(reply.files.total, 3);
   assert.deepEqual(
@@ -104,6 +105,48 @@ test('one read names the pinned head and every changed path with its exact blobs
   assert(meter.readBytes < 64 * 1024, `reads ${meter.readBytes} bytes`);
   for (const table of ['projectBackups', 'projectWorkRecords', 'projectWorkEvents', 'projectHostedSaveJobs'])
     assert(!meter.touched.includes(table), `does not read ${table}`);
+});
+
+test('the Lane title comes from its Intent even with UUID-only overlap metadata, and a failed read leaves the files', async t => {
+  const { s, saved, read, write } = await lane([
+    { path: 'src/parser.ts', before: side('p0'), after: side('p1') },
+  ]);
+  const itemId = randomUUID();
+  const title = 'Stream parser: handle split UTF-8';
+  await write(
+    {
+      kind: 'intent',
+      id: saved.intentId,
+      version: 0,
+      at: saved.at,
+      outcome: title,
+      constraints: '',
+      creatorAccountId: 'owner',
+      assigneeAccountIds: [],
+      base: saved.base,
+      status: 'active',
+    },
+    undefined,
+    null,
+    itemId,
+  );
+  const reply = await read();
+  assert.equal(reply.lane.goal, title);
+  assert.equal(reply.lane.itemId, itemId);
+  const meter = s.counts.at(-1);
+  t.diagnostic(
+    `view with a title: ${meter.documents} documents, ${meter.ranges} ranges, ${meter.readBytes} bytes`,
+  );
+  assert(meter.documents <= 12, `reads ${meter.documents} documents`);
+
+  const header = [...s.tables.projectHostedRecords.values()].find(
+    row => row.kind === 'intent' && row.key === saved.intentId,
+  );
+  header.digest = digest('unavailable record');
+  const unavailable = await read();
+  assert.equal(unavailable.lane.goal, null);
+  assert.equal(unavailable.lane.itemId, itemId, 'the Item id comes from the readable Intent header');
+  assert.deepEqual(unavailable.files, reply.files);
 });
 
 test('review attributes a takeover save to its recorded author and omits uncertain historical attribution', async t => {
