@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 import { chmod, lstat, mkdir, realpath } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { atomicPrivate, secretLocked } from '../../dist/sealed-local.js';
 import { ShotError } from './options.mjs';
 
@@ -14,11 +14,26 @@ async function statIfExists(path) {
   }
 }
 
-async function outsideRepositories(path) {
+async function hasForgeProjectMetadata(path) {
+  for (const name of ['hosted-lane.json', 'hosted-main.json', 'native.json', 'work']) {
+    if (await statIfExists(join(path, name))) return true;
+  }
+  return false;
+}
+
+async function outsideRepositories(path, home) {
   for (let current = path; ; current = dirname(current)) {
+    if (basename(current).endsWith('.forge-client'))
+      throw new ShotError('The bot credential directory must be outside repositories and Forge Lanes.');
     for (const marker of ['.git', '.forge', '.nforge', '.forge-client']) {
-      if (await statIfExists(join(current, marker)))
-        throw new ShotError('The bot credential directory must be outside repositories and Forge Lanes.');
+      const markerPath = join(current, marker);
+      const entry = await statIfExists(markerPath);
+      if (!entry) continue;
+      if (current === home && entry.isDirectory()) {
+        if (marker === '.nforge') continue;
+        if (marker === '.forge' && !(await hasForgeProjectMetadata(markerPath))) continue;
+      }
+      throw new ShotError('The bot credential directory must be outside repositories and Forge Lanes.');
     }
     if (current === dirname(current)) return;
   }
@@ -47,10 +62,10 @@ function privateBytes(path) {
 export async function openBotCredentialStore(home) {
   const realHome = await realpath(home);
   const config = join(realHome, '.config');
-  await outsideRepositories(realHome);
+  await outsideRepositories(realHome, realHome);
   if (!(await statIfExists(config))) await mkdir(config, { mode: 0o700 }).catch(existingDirectory);
   const parent = await realpath(config);
-  await outsideRepositories(parent);
+  await outsideRepositories(parent, realHome);
   const dir = join(parent, 'forge-ui-bot');
   await mkdir(dir, { mode: 0o700 }).catch(existingDirectory);
   const info = await lstat(dir);

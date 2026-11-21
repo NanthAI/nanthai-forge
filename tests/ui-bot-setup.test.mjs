@@ -5,9 +5,9 @@ import { execFile } from 'node:child_process';
 import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, stat, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { chromium } from 'playwright';
 import { openBotCredentialStore } from '../scripts/ui-shots/bot-credential-store.mjs';
@@ -41,6 +41,48 @@ test('the shared credential store keeps private modes and detects a changed file
   assert.equal((await stat(join(dir, 'credentials.json'))).mode & 0o777, 0o600);
 });
 
+test('per-user Forge state is allowed in the resolved home directory', async t => {
+  const root = await privateHome(t);
+  const home = join(root, 'home');
+  const linkedHome = join(root, 'linked-home');
+  await mkdir(join(home, '.forge', 'check-queue'), { recursive: true });
+  await mkdir(join(home, '.nforge'));
+  await symlink(home, linkedHome);
+
+  const store = await openBotCredentialStore(linkedHome);
+  store.data.projectId = 'synthetic-project';
+  await store.save();
+  assert.equal((await openBotCredentialStore(home)).data.projectId, 'synthetic-project');
+});
+
+for (const marker of [
+  '.git',
+  '.forge-client',
+  '.forge/hosted-lane.json',
+  '.forge/hosted-main.json',
+  '.forge/native.json',
+  '.forge/work',
+]) {
+  test(`a home that is a project checkout (${marker}) refuses to create a credential directory`, async t => {
+    const home = await privateHome(t);
+    const path = join(home, marker);
+    if (marker.endsWith('.json')) {
+      await mkdir(dirname(path));
+      await writeFile(path, '{}');
+    } else await mkdir(path, { recursive: true });
+    await assert.rejects(openBotCredentialStore(home), /outside repositories/);
+    assert.equal(existsSync(join(home, '.config')), false);
+  });
+}
+
+test('a home nested in a Forge client checkout cache cannot hold bot credentials', async t => {
+  const root = await privateHome(t);
+  const home = join(root, 'fixture.forge-client', 'lanes', 'home');
+  await mkdir(home, { recursive: true });
+  await assert.rejects(openBotCredentialStore(home), /outside repositories/);
+  assert.equal(existsSync(join(home, '.config')), false);
+});
+
 test('a config symlink into a repository is refused before creating the bot credential directory', async t => {
   const home = await privateHome(t);
   const repo = join(home, 'fixture-repo');
@@ -48,6 +90,17 @@ test('a config symlink into a repository is refused before creating the bot cred
   await symlink(repo, join(home, '.config'));
   await assert.rejects(openBotCredentialStore(home), /outside repositories/);
   assert.equal(existsSync(join(repo, 'forge-ui-bot')), false);
+});
+
+test('passkey setup with per-user Forge state reaches the first-run project check', async t => {
+  const home = await privateHome(t);
+  await mkdir(join(home, '.forge', 'check-queue'), { recursive: true });
+  await assert.rejects(
+    promisify(execFile)(process.execPath, ['scripts/ui-bot-setup.mjs', '--passkey'], {
+      env: { ...process.env, HOME: home },
+    }),
+    /Supply --project on the first run/,
+  );
 });
 
 test('setup rejects any site or deployment other than Forge dev before touching the private store', async t => {
