@@ -13,7 +13,7 @@ import {
   type ActionCtx,
 } from './cliServer';
 import { accessibleProject, activeOwnedProject } from './projectAuthority';
-import { autonomyPolicy } from './autonomyFields';
+import { autonomyPolicy, policyImpactFields } from './autonomyFields';
 import {
   effectivePolicy,
   policyWriteSchema,
@@ -26,6 +26,7 @@ import {
 import { invariant } from '../src/errors';
 import { acceptancePolicyDigest, ownerGated } from '../src/policy-digest';
 import { policyImpactReceipt } from './projectHostedLandingPolicyImpact';
+import { policyImpactMessage } from '../src/policy-impact-receipt';
 import { report } from './errors';
 import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
 import { callerActorKind } from './metricActorKind';
@@ -176,6 +177,7 @@ async function writePolicy(
     operationId: command.operationId,
     policy: receiptPolicy(policy),
     ...impact,
+    impactMessage: policyImpactMessage(impact),
     rule: input.rule,
   };
 }
@@ -240,10 +242,9 @@ export const set = mutation({
     operationId: v.string(),
     policy: autonomyPolicy,
     dryRun: v.optional(v.literal(true)),
-    /** Newly stale in-flight landings, or the predicted impact for a dry run. */
-    invalidatedLandings: v.optional(v.number()),
-    invalidatedSubmissionIds: v.optional(v.array(v.string())),
-    impactComplete: v.optional(v.literal(false)),
+    ...policyImpactFields,
+    impactAt: v.optional(v.string()),
+    impactMessage: v.optional(v.string()),
     /** Issue 470ef29b: who could write it (SettingRule); `held` means nothing changed yet. Absent on replays of edits from before it existed. */
     rule: v.optional(settingRuleValidator),
     /** A held edit: the owner's approval request, its link and how to wait for it. */
@@ -285,9 +286,7 @@ export const set = mutation({
           'WORK_OPERATION_CHANGED',
           'Retry policy with its original values.',
         );
-        return {
-          operationId: command.operationId,
-          policy: receiptPolicy(original.policy),
+        const impact = {
           ...(original.invalidatedLandings === undefined
             ? {}
             : { invalidatedLandings: original.invalidatedLandings }),
@@ -295,6 +294,19 @@ export const set = mutation({
             ? {}
             : { invalidatedSubmissionIds: original.invalidatedSubmissionIds }),
           ...(original.impactComplete === false ? { impactComplete: false as const } : {}),
+          ...(original.impactUnexamined === undefined ? {} : { impactUnexamined: original.impactUnexamined }),
+          ...(original.invalidatedByPhase === undefined
+            ? {}
+            : { invalidatedByPhase: original.invalidatedByPhase }),
+          ...(original.heldForReview === undefined ? {} : { heldForReview: original.heldForReview }),
+          ...(original.idsTruncated ? { idsTruncated: true as const } : {}),
+        };
+        const impactMessage = policyImpactMessage(impact);
+        return {
+          operationId: command.operationId,
+          policy: receiptPolicy(original.policy),
+          ...impact,
+          ...(impactMessage === undefined ? {} : { impactMessage }),
           ...(original.rule ? { rule: original.rule } : {}),
         };
       }
@@ -333,14 +345,19 @@ export const set = mutation({
         : ownerGated(previous, policy)
           ? await agentSettingRule(ctx, input.projectId, user)
           : 'no-gate-change';
-      if (command.dryRun)
+      if (command.dryRun) {
+        const impactAt = new Date().toISOString();
+        const impact = await policyImpactReceipt(ctx, project._id, previous, policy);
         return {
           operationId: command.operationId,
           dryRun: true as const,
           policy: receiptPolicy(policy),
-          ...(await policyImpactReceipt(ctx, project._id, previous, policy)),
+          ...impact,
+          impactAt,
+          impactMessage: policyImpactMessage(impact, impactAt),
           rule,
         };
+      }
       if (rule === 'held') {
         const row = await holdSetting(ctx, {
           projectId: input.projectId,

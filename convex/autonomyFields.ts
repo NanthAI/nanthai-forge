@@ -140,6 +140,15 @@ export const acceptanceEvidence = v.object({
   /** Actual source ancestry was checked in the action, not inferred from a graph. */
   containsPrevious: v.boolean(),
 });
+export const policyImpactFields = {
+  invalidatedLandings: v.optional(v.number()),
+  invalidatedSubmissionIds: v.optional(v.array(v.string())),
+  impactComplete: v.optional(v.literal(false)),
+  impactUnexamined: v.optional(v.number()),
+  invalidatedByPhase: v.optional(v.object({ ready: v.number(), checking: v.number(), queued: v.number() })),
+  heldForReview: v.optional(v.number()),
+  idsTruncated: v.optional(v.literal(true)),
+};
 export const autonomyTables = {
   projectPolicyChanges: defineTable({
     projectId: v.id('hostedProjects'),
@@ -150,9 +159,7 @@ export const autonomyTables = {
     previous: autonomyPolicy,
     policy: autonomyPolicy,
     /** Queued landings this edit invalidated, kept so a replay returns the same reply. */
-    invalidatedLandings: v.optional(v.number()),
-    invalidatedSubmissionIds: v.optional(v.array(v.string())),
-    impactComplete: v.optional(v.literal(false)),
+    ...policyImpactFields,
     /** Issue 470ef29b: who could write it (SettingRule in convex/projectSettingApprovals.ts). */
     rule: v.optional(
       v.union(

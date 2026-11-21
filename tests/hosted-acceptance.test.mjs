@@ -11,9 +11,11 @@ const policyPreset = name => ({ ...preset(name), agentDefaults: { preflight: 'ad
 import { acceptancePolicyDigest, landingPolicyCurrent, policyDigestCurrent } from '../dist/policy-digest.js';
 import { digest } from '../dist/state/hash.js';
 import { hostedAcceptanceSchema } from '../dist/hosted-acceptance.js';
+import { hostedRecordValue } from '../dist/hosted-records.js';
 import { moduleUrl } from './convex-module.mjs';
 const lanes = await import(moduleUrl('../convex/projectHostedLanes.ts'));
 const { set: setPolicy } = await import(moduleUrl('../convex/projectAutonomy.ts'));
+const { cancel } = await import(moduleUrl('../convex/projectHostedLanding.ts'));
 const keyId = process.env.FORGE_HOSTED_CHECK_KEY_ID;
 test.before(() => {
   process.env.FORGE_HOSTED_CHECK_KEY_ID = 'SYNTHETIC';
@@ -34,6 +36,12 @@ async function checked(f, item = null, policy = policyPreset('trusted'), request
   await f.rawChecks.pass(await f.rawChecks.activate(run.id));
   return f.ready(item, { agent: true, check: { kind: 'run', runId: run.id }, ...request });
 }
+
+const changePolicy = (f, fields) =>
+  f.transaction('setPolicyImpact', setPolicy, {
+    projectId: f.projectId,
+    command: JSON.stringify({ action: 'set-policy', operationId: randomUUID(), ...fields }),
+  });
 
 test('clean unchecked person acceptance publishes receipt, snapshot, event and original operation exactly once', async () => {
   const f = await acceptanceFixture();
@@ -228,6 +236,8 @@ test('830ccd4b and 81359837 replay: protected pattern edits retain unrelated che
     const global = await edit({ ...request, dryRun: true, acceptance: { gate: 'full' } });
     assert.equal(global.invalidatedLandings, 2);
     assert.deepEqual(global.invalidatedSubmissionIds, [unrelated.id, matching.id]);
+    for (const table of ['projectHostedRecordHeads', 'projectHostedRecords', 'projectHostedRecordBodies'])
+      assert.equal(f.counts.at(-1).readDocumentsByTable[table] ?? 0, 0, `gate edit: ${table}`);
     const preview = await edit({ ...request, dryRun: true });
     assert.equal(f.counts.at(-1).writes, 0);
     assert.equal(preview.dryRun, true);
@@ -270,13 +280,45 @@ test('830ccd4b and 81359837 replay: protected pattern edits retain unrelated che
   }
 });
 
-test('a sixty-submission policy preview scans only active pins and Candidate metadata', async t => {
+test('60 and 600 submissions fit in one policy preview with only active pins and exact Candidate metadata', async t => {
   const f = await acceptanceFixture();
-  const { state } = await checked(f);
+  // This policy-only scan has its own scale budget. The acceptance fixture's
+  // tighter per-controller budget still guards setup and publication.
+  const scan = fields => changePolicy(f.rawChecks, fields);
+  const { state, item } = await checked(f);
   const [attempt] = f.tables.projectHostedLandingAttempts.values();
   const [row] = f.tables.projectHostedLandingRequests.values();
+  const {
+    _id: _headId,
+    _creationTime: _headTime,
+    ...head
+  } = [...f.tables.projectHostedRecordHeads.values()].find(row => row.key === item.candidate.id);
+  const {
+    _id: _headerId,
+    _creationTime: _headerTime,
+    ...header
+  } = f.tables.projectHostedRecords.get(head.recordId);
   const ids = [state.id];
-  for (let index = 1; index < 60; index++) {
+  const numbers = [60, 600];
+  for (let index = 1; index <= numbers.at(-1); index++) {
+    if (numbers.includes(index)) {
+      const preview = await scan({ dryRun: true, acceptance: { protectedPaths: ['src/**'] } });
+      const { documents, ranges, readBytes, writes, readDocumentsByTable } = f.counts.at(-1);
+      assert.equal(preview.invalidatedLandings, index);
+      assert.deepEqual(preview.invalidatedSubmissionIds, ids);
+      assert.equal(preview.impactUnexamined, undefined);
+      assert.equal(writes, 0);
+      assert(readDocumentsByTable.projectHostedLandingRequests <= index + 3);
+      assert.equal(readDocumentsByTable.projectHostedLandingAttempts, index);
+      assert.equal(readDocumentsByTable.projectHostedRecordBodies, index);
+      assert(documents <= index * 5 + 6);
+      assert(ranges <= index * 4.2 + 10);
+      assert(readBytes < (index / 60) * 512 * 1024);
+      t.diagnostic(
+        `${index}: ${documents} documents, ${ranges} ranges, ${readBytes} bytes, ${writes} writes`,
+      );
+      if (index === numbers.at(-1)) break;
+    }
     const submissionId = randomUUID(),
       attemptId = randomUUID();
     const sequence = state.sequence + index;
@@ -291,7 +333,25 @@ test('a sixty-submission policy preview scans only active pins and Candidate met
       attemptId,
       firstAttemptId: attemptId,
     };
-    const pins = { ...JSON.parse(attempt.value), id: attemptId, submissionId, operationId };
+    const candidateId = randomUUID();
+    const { ref, value: candidateValue } = hostedRecordValue({ ...item.candidate, id: candidateId });
+    const bodyId = f.insert('projectHostedRecordBodies', { projectId: f.projectId, value: candidateValue });
+    const recordId = f.insert('projectHostedRecords', {
+      ...header,
+      key: candidateId,
+      bodyId,
+      digest: ref.digest,
+      bytes: ref.bytes,
+    });
+    f.insert('projectHostedRecordHeads', { ...head, key: candidateId, recordId });
+    const pinned = JSON.parse(attempt.value);
+    const pins = {
+      ...pinned,
+      id: attemptId,
+      submissionId,
+      operationId,
+      candidate: { ...pinned.candidate, id: candidateId, digest: ref.digest },
+    };
     f.insert('projectHostedLandingAttempts', {
       projectId: f.projectId,
       submissionId,
@@ -314,28 +374,68 @@ test('a sixty-submission policy preview scans only active pins and Candidate met
     });
     ids.push(submissionId);
   }
-  const preview = await f.transaction('setPolicyImpact', setPolicy, {
-    projectId: f.projectId,
-    command: JSON.stringify({
-      action: 'set-policy',
-      operationId: randomUUID(),
-      dryRun: true,
-      acceptance: { protectedPaths: ['src/**'] },
-    }),
-  });
-  const { documents, ranges, readBytes, writes, readDocumentsByTable } = f.counts.at(-1);
-  assert.equal(preview.invalidatedLandings, 60);
-  assert.deepEqual(preview.invalidatedSubmissionIds, ids);
-  assert.equal(writes, 0);
-  assert(readDocumentsByTable.projectHostedLandingRequests <= 60 + 3, 'one end-of-page read per phase');
-  assert.equal(readDocumentsByTable.projectHostedLandingAttempts, 60);
-  // Per submission: request, attempt, Candidate head, row, and optional body.
-  // Empty phase ranges and fixed authorization/receipt reads account for the rest.
-  assert(documents <= 60 * 5 + 6);
-  assert(readBytes < 512 * 1024);
-  t.diagnostic(
-    `policy preview: ${documents} documents, ${ranges} ranges, ${readBytes} bytes, ${writes} writes`,
+  const edit = { operationId: randomUUID(), acceptance: { protectedPaths: ['src/**'] } };
+  const applied = await scan(edit);
+  const stored = [...f.tables.projectPolicyChanges.values()].find(
+    row => row.operationId === edit.operationId,
   );
+  const { checking, queued, ready } = stored.invalidatedByPhase;
+  // Convex's value codec can read object keys in a different order than the write.
+  f.patch('projectPolicyChanges', stored._id, { invalidatedByPhase: { checking, queued, ready } });
+  assert.deepEqual(await scan(edit), applied);
+  assert.match(applied.impactMessage, /\(1 ready, 299 checking, 300 queued\)/);
+});
+
+test('missing and mismatched attempt rows leave only those submissions unexamined', async () => {
+  const f = await acceptanceFixture();
+  const { state: matching } = await checked(f);
+  const { state: missing } = await checked(f);
+  const { state: mismatched } = await checked(f);
+  for (const row of f.tables.projectHostedLandingAttempts.values()) {
+    if (row.attemptId === missing.attemptId) f.tables.projectHostedLandingAttempts.delete(row._id);
+    if (row.attemptId === mismatched.attemptId)
+      f.patch('projectHostedLandingAttempts', row._id, {
+        value: JSON.stringify({ ...JSON.parse(row.value), submissionId: randomUUID() }),
+      });
+  }
+  const result = await changePolicy(f, { dryRun: true, acceptance: { protectedPaths: ['src/**'] } });
+  assert.equal(result.impactComplete, false);
+  assert.equal(result.impactUnexamined, 2);
+  assert.equal(result.invalidatedLandings, 1);
+  assert.deepEqual(result.invalidatedSubmissionIds, [matching.id]);
+  assert.deepEqual(result.invalidatedByPhase, { ready: 1, checking: 0, queued: 0 });
+});
+
+test('two protected-path edits count a landing only on the edit that made its pin stale', async () => {
+  const f = await acceptanceFixture();
+  const policy = policyPreset('trusted');
+  policy.acceptance.protectedPaths = [];
+  const a = await f.makeCandidate([], [], { governance: { version: 1, paths: ['a'], ownerInputs: false } });
+  const b = await f.makeCandidate([], [], { governance: { version: 1, paths: ['b'], ownerInputs: false } });
+  const first = await checked(f, a, policy);
+  const second = await checked(f, b, policy);
+  const edit1 = await changePolicy(f, { acceptance: { protectedPaths: ['a'] } });
+  const edit2 = await changePolicy(f, { acceptance: { protectedPaths: ['a', 'b'] } });
+  assert.deepEqual(edit1.invalidatedSubmissionIds, [first.state.id]);
+  assert.deepEqual(edit2.invalidatedSubmissionIds, [second.state.id]);
+});
+
+test('an applied policy receipt survives withdrawal and a newly composed Candidate', async () => {
+  const f = await acceptanceFixture();
+  const { state } = await checked(f);
+  const edit = { operationId: randomUUID(), acceptance: { protectedPaths: ['src/**'] } };
+  const applied = await changePolicy(f, edit);
+  assert.deepEqual(applied.invalidatedSubmissionIds, [state.id]);
+  await f.transaction('landingCancel', cancel, {
+    projectId: f.projectId,
+    request: JSON.stringify({ operationId: randomUUID(), authorityEpoch: 1, submissionId: state.id }),
+  });
+  assert.equal((await f.status(state.id)).request.phase, 'terminal-failed');
+  const replacement = await f.makeCandidate([], [], {
+    governance: { version: 1, paths: ['src/leaf.ts'], ownerInputs: false },
+  });
+  await f.ready(replacement);
+  assert.deepEqual(await changePolicy(f, edit), applied);
 });
 
 test('an attempt pinned with the earlier digest stays valid until a gate field changes', () => {

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingPolicyImpact.ts": "a7f05ee794dbc0ad2cff4a6a62bd07b7f5b6842f1e68a66a9a5f83a18b20548a"
+  },
+  "replay": {
+    "incident": "830ccd4b",
+    "test": "830ccd4b and 81359837 replay: protected pattern edits retain unrelated checks and name invalidated submissions",
+    "receipt": "463044dc-4691-4a63-a87a-d00c96090de6"
+  },
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A200e839d-6e74-4d06-9fc6-45c363c12e67",
+  "authorModel": "gpt-6.2-sol",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:subagent:4256a1e6e11eeb31",
+    "receipt": "276bbfe8-a21a-41b9-8d63-ad8f754a014b"
+  }
+}

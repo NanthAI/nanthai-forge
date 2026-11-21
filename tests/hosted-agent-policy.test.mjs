@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getFunctionName } from 'convex/server';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
+import { acceptanceFixture } from './hosted-acceptance-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { policyPreset, policyReadView, samePolicy } from '../dist/autonomy-policy.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
@@ -16,20 +17,22 @@ const autonomy = await import(moduleUrl('../convex/projectAutonomy.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 
 /** The real CLI transport routed to the real Convex policy handlers on the fake store. */
-function cli(t) {
+function cli(t, fixture) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-hosted-policy-'));
   t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  const s = lanesFixture();
-  const projectId = s.insert('hostedProjects', {
-    key: 'synthetic',
-    name: 'Synthetic',
-    currentBackup: null,
-    revision: 0,
-    owner: 'owner',
-    visibility: 'private',
-    sourceAuthority: { mode: 'server', epoch: 1 },
-    autonomyPolicy: policyPreset('supervised'),
-  });
+  const s = fixture ?? lanesFixture();
+  const projectId =
+    fixture?.projectId ??
+    s.insert('hostedProjects', {
+      key: 'synthetic',
+      name: 'Synthetic',
+      currentBackup: null,
+      revision: 0,
+      owner: 'owner',
+      visibility: 'private',
+      sourceAuthority: { mode: 'server', epoch: 1 },
+      autonomyPolicy: policyPreset('supervised'),
+    });
   s.insert('projectContributors', { projectId, contributor: 'peer' });
   const handlers = { 'projectAutonomy:read': autonomy.read, 'projectAutonomy:set': autonomy.set };
   const state = { actor: 'owner', calls: [] };
@@ -179,29 +182,51 @@ test('set-policy previews an edit through the CLI without writing or reserving i
   assert.equal(preview.invalidatedLandings, 0);
   assert.deepEqual(preview.invalidatedSubmissionIds, []);
   assert.deepEqual((await run('policy')).result, before);
-  const { dryRun, ...predicted } = preview;
+  const { dryRun, impactAt, impactMessage, ...predicted } = preview;
+  assert.match(impactAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.match(impactMessage, /Would invalidate 0 in-flight landings as of this read/);
   const { result: applied } = await run('set-policy', { operationId: preview.operationId, ...fields });
-  assert.deepEqual(applied, predicted);
+  assert.match(applied.impactMessage, /Invalidated 0 in-flight landings at commit/);
+  assert.deepEqual({ ...applied, impactMessage: undefined }, { ...predicted, impactMessage: undefined });
   state.actor = 'peer';
   await assert.rejects(edit({ ...fields, dryRun: true }), code('PROJECT_UNAVAILABLE'));
 });
 
 test('set-policy can apply and replay an edit when transaction headroom cannot support an exact impact receipt', async t => {
-  const { s, run } = cli(t);
+  const f = await acceptanceFixture();
+  const { state: queued } = await f.ready();
+  const { state: ready } = await f.ready();
+  const row = [...f.tables.projectHostedLandingRequests.values()].find(r => r.submissionId === queued.id);
+  f.patch('projectHostedLandingRequests', row._id, {
+    phase: 'queued',
+    value: JSON.stringify({ ...queued, phase: 'queued' }),
+  });
+  const { s, run } = cli(t, f);
   s.extendContext(ctx => {
     const metrics = ctx.meta.getTransactionMetrics.bind(ctx.meta);
-    ctx.meta.getTransactionMetrics = async () => ({
-      ...(await metrics()),
-      bytesRead: { remaining: 7 * 1024 * 1024 },
-    });
+    ctx.meta.getTransactionMetrics = async () => {
+      const read = await metrics();
+      // Budget enough to classify the ready pin first and then fall back to the queue directory.
+      return {
+        ...read,
+        databaseQueries: { used: read.databaseQueries.used, remaining: 87 - read.databaseQueries.used },
+      };
+    };
   });
-  const edit = { operationId: randomUUID(), acceptance: { protectedPaths: ['docs/**'] } };
+  const gate = (await run('policy')).result.acceptance.gate === 'full' ? 'contract' : 'full';
+  const edit = { operationId: randomUUID(), acceptance: { gate } };
   const { result: preview } = await run('set-policy', { ...edit, dryRun: true });
   assert.equal(preview.impactComplete, false);
+  assert.equal(preview.invalidatedLandings + preview.impactUnexamined, 2);
+  assert.deepEqual(preview.invalidatedSubmissionIds, [ready.id]);
+  assert.deepEqual(preview.invalidatedByPhase, { ready: 1, checking: 0, queued: 0 });
+  assert.match(preview.impactMessage, /Would invalidate at least 1 .* between 1 and 2/);
   assert.equal(s.counts.at(-1).writes, 0);
   const { result: applied } = await run('set-policy', edit);
   assert.equal(applied.impactComplete, false);
-  assert.equal(applied.invalidatedLandings, undefined);
-  assert.deepEqual((await run('policy')).result.acceptance.protectedPaths, ['docs/**']);
+  assert.equal(applied.invalidatedLandings + applied.impactUnexamined, 2);
+  assert.deepEqual(applied.invalidatedSubmissionIds, [ready.id]);
+  assert.match(applied.impactMessage, /Invalidated at least 1 .* between 1 and 2/);
+  assert.equal((await run('policy')).result.acceptance.gate, gate);
   assert.deepEqual((await run('set-policy', edit)).result, applied);
 });

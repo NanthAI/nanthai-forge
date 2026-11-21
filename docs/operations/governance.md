@@ -207,13 +207,22 @@ including the owner's. Other projects retain their existing policy behavior.
 
 Generate a fresh operation UUID for a new edit; retries retain the original command.
 Use `expectedPolicy` for compare-and-swap edits. Send `dryRun: true` to preview the
-resulting policy, count and submission IDs (`invalidatedLandings` and
-`invalidatedSubmissionIds`) with no writes or approval request. The preview is
-current when it runs. Applying the edit returns the impact at commit time, and
-replaying that write returns the original receipt. When the transaction cannot
-verify the impact, the receipt says `impactComplete: false` and omits the count
-and IDs. An edit can still apply. The new fields are optional in stored
-policies and records. New runners send `governanceVersion:1` on landing/desired-finish
+resulting policy and receipt with no writes or approval request. CLI and MCP replies
+report `invalidatedLandings`, `invalidatedSubmissionIds` and `invalidatedByPhase`.
+The preview is current as of `impactAt`. The queue can change before you apply.
+The applied receipt records the selected attempts that became stale at commit.
+Replaying an edit returns its original receipt, even after those attempts are
+withdrawn or recomposed. `heldForReview` counts review holds excluded from the scan.
+
+The scan checks ready, checking and queued landings in that order. When it cannot
+verify every pin, `impactComplete: false` marks a bound. If 41 landings were verified
+as newly stale and `impactUnexamined` is 212, the edit invalidated at least 41
+landings and the total is between 41 and 253. A path edit can affect an unexamined
+landing if the changed patterns match its paths, its path coverage is unavailable,
+or its owner grant requires the exact policy. The first 1,000 verified
+IDs appear in submission order. `idsTruncated: true` marks a longer list and
+the count still covers every verified match. Older stored receipts keep their
+original impact coverage. New runners send `governanceVersion:1` on landing/desired-finish
 requests, including recovered pre-upgrade requests. Old strict servers reject that
 field rather than silently accepting without governance. List edits require the
 same version marker, so old strict policy servers also reject them. Old runners on

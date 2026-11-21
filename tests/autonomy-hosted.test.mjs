@@ -14,6 +14,13 @@ const work = await import(moduleUrl('../convex/projectWork.ts'));
 // Policy and Channel authority run on the hosted project row alone; no Work archive is needed.
 function hosted() {
   const s = state([]);
+  // These policy tests start with an empty landing queue and ample scan
+  // headroom. The acceptance fixture meters reads for populated queues.
+  s.ctx.meta.getTransactionMetrics = async () => ({
+    bytesRead: { used: 0, remaining: 16 * 1024 * 1024 },
+    documentsRead: { used: 0, remaining: 32_000 },
+    databaseQueries: { used: 0, remaining: 4_096 },
+  });
   s.tables.projectPolicyChanges = new Map();
   s.tables.projectSelfMetricReceipts = new Map();
   const projectId = 'project';
@@ -112,6 +119,7 @@ test('agentDefaults.stacking sets, reads back and clears through the real Convex
   // The fixture's patch enforces convex/schema.ts, so a validator without the field fails here.
   const auto = await set('auto');
   assert.equal(auto.reply.policy.agentDefaults.stacking, 'auto');
+  assert.equal(auto.reply.invalidatedLandings, 0);
   assert.equal(auto.read.agentDefaults.stacking, 'auto');
   assert.equal(s.tables.hostedProjects.get(s.projectId).autonomyPolicy.agentDefaults.stacking, 'auto');
   // Back to the documented default.

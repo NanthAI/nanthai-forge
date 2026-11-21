@@ -7,6 +7,7 @@ import { reviewPaths } from './native-source-review.js';
 import { workGit } from './work-git.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
+import { policyImpactMessage } from './policy-impact-receipt.js';
 import {
   effectivePolicy,
   editedPolicy,
@@ -25,6 +26,13 @@ type StoreAccess = Pick<
 export const localPerson = (): AcceptanceActor => ({ kind: 'person', id: userInfo().username });
 export const readPolicy = (store: StoreAccess) =>
   effectivePolicy(store.readRecords()?.data() ?? store.load());
+const localImpact = {
+  invalidatedLandings: 0,
+  invalidatedSubmissionIds: [],
+  invalidatedByPhase: { ready: 0, checking: 0, queued: 0 },
+  heldForReview: 0,
+};
+const appliedImpact = { ...localImpact, impactMessage: policyImpactMessage(localImpact) };
 export function setPolicy(store: StoreAccess, input: unknown, actor: AcceptanceActor, revision: number) {
   const parsed = policyWriteSchema.safeParse(input);
   invariant(
@@ -45,7 +53,7 @@ export function setPolicy(store: StoreAccess, input: unknown, actor: AcceptanceA
         'WORK_OPERATION_CHANGED',
         'Retry policy with its original values.',
       );
-      return { revision: data.revision, result: original };
+      return { revision: data.revision, result: { ...original, ...appliedImpact } };
     }
     invariant(data.revision === revision, 'WORK_STALE', 'Work changed. Refresh before editing policy.');
     const previous = effectivePolicy(data);
@@ -55,10 +63,17 @@ export function setPolicy(store: StoreAccess, input: unknown, actor: AcceptanceA
       'Project policy changed. Refresh it before editing.',
     );
     const policy = editedPolicy(previous, command);
+    const at = new Date().toISOString();
     if (command.dryRun)
       return {
         revision: data.revision,
-        result: { dryRun: true, policy, invalidatedLandings: 0, invalidatedSubmissionIds: [] },
+        result: {
+          dryRun: true,
+          policy,
+          ...localImpact,
+          impactAt: at,
+          impactMessage: policyImpactMessage(localImpact, at),
+        },
       };
     const change = {
       id: command.operationId,
@@ -66,14 +81,14 @@ export function setPolicy(store: StoreAccess, input: unknown, actor: AcceptanceA
       actor: actor.id,
       previous,
       policy,
-      at: new Date().toISOString(),
+      at,
     };
     data.autonomyPolicy = policy;
     (data.policyChanges ??= []).push(change);
 
     data.revision++;
     store.save(data);
-    return { revision: data.revision, result: change };
+    return { revision: data.revision, result: { ...change, ...appliedImpact } };
   });
 }
 export function acceptancePaths(store: StoreAccess, view: WorkView, previous: string | null): string[] {
