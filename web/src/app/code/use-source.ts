@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The folders and the file the reader has opened at one exact State. A deep link asks once for the path with its
 // folders; after that a click in a known folder asks only for that file's first page. Every folder read also lists its
-// subfolders (listing.ts), so a folder the reader can see opens with no read, and opening it fetches the level below in
-// the background. Nothing is read twice in a visit (code-data.ts keeps every answer) and the whole State never is.
+// subfolders (listing.ts), so a listed folder opens from the tab cache and fetches missing subfolder pages in
+// the background. The browser keeps source replies for the visit (code-data.ts).
 import { useEffect, useReducer, useRef, useState } from 'react';
 import {
   browse,

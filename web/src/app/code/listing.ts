@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The folders one tab has listed at one exact State (Item a3b55a6e). A folder read brings its subfolders' first pages
-// (src/code-tree.ts withChildren), so a folder the reader can see opens from here with no read; opening it asks once,
-// in the background, for the level below. States never change, so nothing here expires during the visit.
+// (src/code-tree.ts withChildren), so a listed folder opens from here. A background read looks one level ahead
+// when there are visible subfolders the tab has not listed yet. States never change during the visit.
 import type { CodeDir } from './code-data';
 
 export type Listing = { dirs: Map<string, CodeDir>; ahead: Set<string> };
@@ -24,5 +24,8 @@ export function keepListing(
 
 /** What opening `dir` needs: nothing, a background read of the level below, or a read before it can show. */
 export function listingNeed(listing: Listing, dir: string): 'none' | 'ahead' | 'read' {
-  return !listing.dirs.has(dir) ? 'read' : listing.ahead.has(dir) ? 'none' : 'ahead';
+  const page = listing.dirs.get(dir);
+  if (!page) return 'read';
+  if (listing.ahead.has(dir)) return 'none';
+  return page.entries.some(entry => entry.kind === 'dir' && !listing.dirs.has(entry.path)) ? 'ahead' : 'none';
 }

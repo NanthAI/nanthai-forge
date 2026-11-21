@@ -44,6 +44,8 @@ preview of its immediate subfolders. The tab keeps pages for the selected State.
 Opening a file reads its landing history from retained Candidate change lists.
 Earlier windows keep the same descending order, including when a window has no
 matches. Signed-in and public readers use the same receipt and Candidate lookup.
+A cached folder opens immediately and requests a background preview only when
+the tab is missing a visible subfolder's page.
 Signed-in browsing of a registered hosted State reads the State from current
 source storage. Older checkpoints and public visitor reads use their retained
 checkpoint.

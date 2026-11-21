@@ -116,6 +116,7 @@ test('a warm tab opens a folder it already listed without a read, and asks once 
   const files = state('src/a.ts', 'src/state/b.ts', 'src/state/deep/c.ts', 'tests/t.mjs');
   const cache = { dirs: new Map(), ahead: new Set() };
   keepListing(cache, { dirs: withChildren(files, folderPage(files, '')), ahead: '' });
+  assert.equal(listingNeed(cache, 'tests'), 'none', 'a cached leaf folder opens without a background read');
   assert.equal(
     listingNeed(cache, 'src'),
     'ahead',
@@ -126,6 +127,8 @@ test('a warm tab opens a folder it already listed without a read, and asks once 
   assert.equal(listingNeed(cache, 'src'), 'none', 'the same folder is never read twice in a tab');
   assert.equal(listingNeed(cache, 'src/state'), 'ahead');
   assert.equal(listingNeed(cache, 'src/state/deep'), 'read', 'an unlisted folder is exactly one read');
+  keepListing(cache, { dirs: [folderPage(files, 'src/state/deep')] });
+  assert.equal(listingNeed(cache, 'src/state'), 'none', 'all visible subfolders are already cached');
   // A later page of a folder appends to that folder only; an ahead listing never replaces a known folder.
   const before = cache.dirs.get('src').entries.length;
   keepListing(cache, { dirs: [{ ...folderPage(files, 'src'), entries: [] }, folderPage(files, 'tests')] });
