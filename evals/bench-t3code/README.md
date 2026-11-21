@@ -323,3 +323,53 @@ fields. An outer CLI wall interval is never relabelled as a server phase. The
 replay also retains every command and PR read with request/reply times. Missing
 server clocks remain missing; see the [N=10 diagnosis](../../docs/research/p6-n10-diagnosis.md#implementation-follow-up)
 for the product observability gap and the offline corrected rework table.
+
+## Sustained landing queue
+
+`scripts/bench-t3code/sustained-run.mjs` measures two Forge policies on the same
+synthetic arrival schedule. Each hour offers 40 submissions, including 10 solo
+reds. Six green submissions are paired on three shared paths with separable line
+edits. The fixed seed samples a joint red with 1% probability per pair. An arm
+may exercise no joint red. Observed overlap holds are reported separately from
+the planted paths. The ten-minute smoke uses the same two nine-minute test
+shards, with one expected red and six green submissions.
+
+Use one scratch config per arm after building the CLI modules (`npm run
+build:core`). The config supplies the dedicated bench deployment URL
+(`deployment`), its dedicated Forge launcher (`cli`), the full public Forge Git
+commit for the Actions control (`controlCommit`), a scratch repository
+(`repo`), a shared cleanup manifest (`manifest`), a private output folder
+(`scratch`), and the observed `dogfoodPolicy.acceptance`. Set `arm` to
+`dogfood` or `strict`, and `smoke: true` only for the smoke config. Set
+`priorMinutes` to the cumulative provider minutes already used by the run.
+
+```sh
+node scripts/bench-t3code/sustained-run.mjs setup CONFIG.json
+node scripts/bench-t3code/sustained-run.mjs run CONFIG.json
+node scripts/bench-t3code/sustained-run.mjs score CONFIG.json
+node scripts/bench-t3code/sustained-run.mjs cleanup CONFIG.json
+```
+
+Setup creates a synthetic Forge project and a public GitHub control repo with
+the pinned App/OIDC workflow. If the bench App uses selected repositories,
+the owner selects each scratch repo before runner configuration. Run the smoke
+first and require `qualified: true` before scoring. The two scored arms run
+one after the other. Each starts from green main and at 20 or fewer active org
+jobs. Scratch workflow groups cap concurrency at 16. The live monitor accounts
+for runner minutes across arms and stops dispatch before 4,000 minutes, or
+aborts if a dogfood check waits more than ten minutes. The workflow queues
+jobs within each group. Its queue wait is visible in the trace.
+
+Keep `trace.ndjson`, `observations.json`, `score.json` and `meter.json` in the
+private output folder before cleanup. The oracle reads each exact accepted State,
+checks fixture bytes and records red and lost contributions. A failed check
+counts as an expected red only when the intended synthetic failure appears
+in its retained log. Checks are counted once by run identity, audits appear
+separately, and discarded runner-minutes exclude planted solo failures. The
+score distinguishes releases and durable greens in the hour from drain results.
+It reports the cold-start ceiling imposed by the last arrivals needing nine
+minutes on a shard. It also reports a secondary rate over minutes 10–60. The
+strict arm's 28-per-hour target is inconclusive for this cold-start schedule.
+Missing evidence or an abort leaves the model comparison open.
+This instrument adds no product calls or idle work. Its observer reads the
+scratch projects only while they run and while evidence is being collected.
