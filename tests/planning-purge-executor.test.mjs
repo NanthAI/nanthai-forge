@@ -1060,12 +1060,146 @@ test('backfill indexes older scoped records without a retained header and can re
   await assert.rejects(step(), code('SOURCE_UNAVAILABLE'));
   assert.equal(project.planningArchiveIndexed, undefined);
   r2.objects.set(key, bytes);
+  assert.equal((await step()).done, false, 'archive reads finish before the independent inventory');
+  assert.equal(project.planningArchiveIndexed, undefined);
+  assert.equal((await step()).done, false);
   assert.equal((await step()).done, true);
   r2.requests.length = 0;
   const result = await worker.run(itemId, randomUUID());
   assert.equal(typeof result.purgedAt, 'number');
   assert.ok(r2.requests.some(row => row.key === key && row.method === 'DELETE'));
   assert.ok([...r2.objects.values()].every(body => !gunzipSync(body).includes(SECRET)));
+});
+
+test('the first archive page reads this project even when a preceding index range holds another project', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const own = await archiveOneNote(s, r2, itemId);
+  const other = { ...s, projectId: 'another-project' };
+  const [unrelated] = await putSegment(other, r2, 'events', 1, {
+    projectHostedRecordBodies: [
+      canonicalPayload({
+        _id: 'another-event',
+        projectId: other.projectId,
+        value: '',
+      }),
+    ],
+  });
+  const project = s.tables.hostedProjects.get(s.projectId);
+  project.journalRevision = 1;
+  const ctx = executor(s).ctx;
+  const first = await modules.projectPlanningArchiveBackfillRun.run._handler(ctx, { projectId: s.projectId });
+  assert.deepEqual([first.done, first.segments, first.gets], [false, 1, 1]);
+  assert.deepEqual(r2.requests, [{ key: own, method: 'GET' }]);
+  assert.equal(project.planningArchiveIndexed, undefined);
+  const remaining = await backfillArchive(s, ctx);
+  assert.ok(
+    remaining.every(page => page.gets === 0),
+    'the count pass uses index metadata',
+  );
+  assert.ok(!r2.requests.some(request => request.key === unrelated));
+  const purged = await executor(s).run(itemId, randomUUID());
+  assert.ok(purged.purgedAt);
+  assert.equal(r2.objects.has(own), false);
+});
+
+test('a native page split by the physical read budget resumes its remaining archive segments once', async t => {
+  const { s } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const keys = [];
+  for (let from = 1; from <= 9; from++)
+    keys.push(
+      ...(await putSegment(
+        s,
+        r2,
+        'events',
+        from,
+        {
+          projectHostedRecordBodies: [
+            canonicalPayload({
+              _id: `ordinary-event-${from}`,
+              projectId: s.projectId,
+              value: 'x'.repeat(230_000),
+            }),
+          ],
+        },
+        { fragmented: true },
+      )),
+    );
+  // A published root's physical fragments live outside the root scope.
+  for (const row of s.tables.projectJournalSegments.values())
+    if (row.category === 'fragment') await s.ctx.db.patch(row._id, { scope: 'fragment:fixture' });
+  const project = s.tables.hostedProjects.get(s.projectId);
+  const ctx = executor(s).ctx;
+  const first = await modules.projectPlanningArchiveBackfillRun.run._handler(ctx, { projectId: s.projectId });
+  assert.ok(keys.length > 16 && first.gets <= 16 && first.segments < 9);
+  assert.equal(project.planningArchiveIndexed, undefined);
+  const remaining = await backfillArchive(s, ctx);
+  assert.ok(remaining.every(page => page.gets <= 16));
+  assert.deepEqual(r2.requests.map(request => request.key).sort(), keys.sort());
+});
+
+test('a census mismatch keeps indexed purge disabled until a new pass verifies coverage', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const own = await archiveOneNote(s, r2, itemId);
+  const root = [...s.tables.projectJournalSegments.values()].find(row => row.key === own);
+  await s.ctx.db.patch(root._id, { category: 'fragment' });
+  const project = s.tables.hostedProjects.get(s.projectId);
+  project.journalRevision = 1;
+  const ctx = executor(s).ctx;
+  const step = () => modules.projectPlanningArchiveBackfillRun.run._handler(ctx, { projectId: s.projectId });
+  assert.equal((await step()).segments, 0);
+  assert.equal((await step()).segments, 0);
+  // A staged root becomes visible after the archive-reading pass.
+  await s.ctx.db.patch(root._id, { category: 'events' });
+  assert.equal((await step()).done, false);
+  const result = await step();
+  assert.deepEqual([result.done, result.advanced], [false, false]);
+  assert.equal(project.planningArchiveIndexed, undefined);
+  assert.ok(r2.objects.has(own), 'the incomplete migration has not removed any archive');
+  await backfillArchive(s, ctx);
+  assert.equal((await step()).done, true);
+  assert.ok((await executor(s).run(itemId, randomUUID())).purgedAt);
+  assert.equal(r2.objects.has(own), false);
+});
+
+test('an old unchecked readiness marker uses the full archive scan', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const own = await archiveOneNote(s, r2, itemId);
+  const project = s.tables.hostedProjects.get(s.projectId);
+  project.journalRevision = 1;
+  project.planningArchiveIndexed = true;
+  assert.ok((await executor(s).run(itemId, randomUUID())).purgedAt);
+  assert.equal(r2.objects.has(own), false);
+});
+
+test('an unchecked selection receipt is not reused after the verified index becomes ready', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const own = await archiveOneNote(s, r2, itemId);
+  s.tables.hostedProjects.get(s.projectId).journalRevision = 1;
+  const worker = executor(s);
+  await backfillArchive(s, worker.ctx);
+  const operationId = randomUUID();
+  const receipt = canonicalPayload({
+    request: digest(canonicalPayload([itemId, [itemId]])),
+    rewriteRevision: 0,
+    indexedRevision: 0,
+    indexedAfter: { target: 1, after: null },
+    frontier: null,
+    done: true,
+    selected: { rows: [], decisions: [], created: null, creates: false },
+  });
+  await s.ctx.db.insert('projectJournalReceipts', {
+    projectId: s.projectId,
+    operationId: `purge-selection:${operationId}`,
+    envelope: receipt,
+    hash: digest(receipt),
+  });
+  assert.ok((await worker.run(itemId, operationId)).purgedAt);
+  assert.equal(r2.objects.has(own), false);
 });
 
 async function retryArchiveRetirement(t, indexed) {
@@ -1615,15 +1749,15 @@ test('an interrupted archive selection resumes from its saved page and consumes 
 });
 
 test('each purge phase resumes from verified progress when the action slice ends', async t => {
+  let now = Date.UTC(2026, 10, 10, 12);
+  t.mock.method(Date, 'now', () => now);
   const { s, itemId, keep } = await deletedItem(t, { records: true, useAlias: false });
   const r2 = storage(t);
   const keys = await fillArchivePage(s, r2, keep, 17);
   const operationId = randomUUID();
-  let now = Date.now();
   const stop = () => {
     now += 180_000;
   };
-  t.mock.method(Date, 'now', () => now);
   const scheduled = () => s.scheduled.filter(row => getFunctionName(row.fn) === 'projectPlanningPurge:run');
   const runScheduled = (index, worker) =>
     modules.projectPlanningPurge.run._handler(worker.ctx, scheduled()[index].args);

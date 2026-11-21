@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { batchesFixture, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { finishFixture } from './hosted-finish-fixture.mjs';
@@ -98,7 +99,8 @@ test('a UTC-day rebuild replaces the live landing count once across tied receipt
   assert.deepEqual(result, { status: 'rebuilt', receipts: 300, landed: 300, partial: expectedPartial });
   const projection = await getFlow(f);
   const today = flowToday(projection, Date.now(), start);
-  assert.equal(today.byHour[0], Math.floor(now / HOUR_MS) === start / HOUR_MS ? 300 : 200);
+  assert.equal(today.byHour[0], 200);
+  assert.equal(today.byHour[12], 100);
   assert.deepEqual(
     [
       today.middle,
@@ -141,13 +143,12 @@ test('publication seeds a missing historical day from receipts, then live public
 
 for (const count of [299, 301]) {
   test(`a day with ${count} receipts reports landing coverage based on the real page boundary`, async t => {
-    const f = await finishFixture(t);
+    const f = await finishFixture(t, { startAt: Date.UTC(2026, 10, 10, 12, 30) });
     const now = Date.now();
     const start = utcDayStart(now);
     await publish(f, now, 310);
-    const older = Math.max(start, now - 0.1);
-    const newer = Math.max(start + 0.1, now);
-    for (let i = 0; i < count; i++) receipt(f, i, i < 200 ? older : newer);
+    // Two distinct receipt times in the same hour as the live count.
+    for (let i = 0; i < count; i++) receipt(f, i, i < 200 ? now - 1 : now);
     boundedProvider(f);
     channel(f, selection => ({ ...selection, sourceRevision: count - 1 }));
     const result = await rebuild(f, start);
@@ -175,6 +176,7 @@ test('a capped replay counts the new batch once even when the receipt page never
 });
 
 const savedEnvironment = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
+test.beforeEach(t => storageClock(t));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
   for (const [key, value] of Object.entries(savedEnvironment)) {

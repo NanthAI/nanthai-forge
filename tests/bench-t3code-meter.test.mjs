@@ -461,18 +461,21 @@ test('daily journal rejects a competing writer and releases its local lock', t =
   journalLock(dir)();
 });
 
+const spendNow = Date.UTC(2026, 10, 10, 12);
+const spendClock = 'data:text/javascript,' + encodeURIComponent(`Date.now = () => ${spendNow};`);
+const spendCli = args => ['--import', spendClock, 'scripts/convex-spend.mjs', ...args];
+
 test('CLI consumes stdin, reports seven days offline and deduplicates the same stream after restart', t => {
   const dir = dailyDirectory(t);
-  const event = dailyEvent({ timestamp: Date.now() / 1000 });
+  const event = dailyEvent({ timestamp: spendNow / 1000 - 1 });
   const input = JSON.stringify(event) + '\n';
   for (let i = 0; i < 2; i++)
-    execFileSync(
-      process.execPath,
-      ['scripts/convex-spend.mjs', '--state', dir, '--stdin', '--deployment', 'synthetic'],
-      { input, stdio: ['pipe', 'pipe', 'pipe'] },
-    );
+    execFileSync(process.execPath, spendCli(['--state', dir, '--stdin', '--deployment', 'synthetic']), {
+      input,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
   const report = JSON.parse(
-    execFileSync(process.execPath, ['scripts/convex-spend.mjs', '--state', dir, '--print'], {
+    execFileSync(process.execPath, spendCli(['--state', dir, '--print']), {
       encoding: 'utf8',
     }),
   );
@@ -758,7 +761,7 @@ test('private plan rejects misspelled or invalid allowances, while optional stor
 test('plan-aware stdin/print reports overage and list-rate columns without any provider command', t => {
   const dir = dailyDirectory(t),
     config = join(dir, 'plan.json');
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Date(spendNow).toISOString().slice(0, 10);
   writeFileSync(
     config,
     JSON.stringify({
@@ -767,13 +770,13 @@ test('plan-aware stdin/print reports overage and list-rate columns without any p
       plan: proConfig({ periodStart: today + 'T00:00:00Z' }),
     }),
   );
-  const output = execFileSync(process.execPath, ['scripts/convex-spend.mjs', '--config', config, '--stdin'], {
-    input: JSON.stringify(dailyEvent({ timestamp: Date.now() / 1000 })) + '\n',
+  const output = execFileSync(process.execPath, spendCli(['--config', config, '--stdin']), {
+    input: JSON.stringify(dailyEvent({ timestamp: spendNow / 1000 - 1 })) + '\n',
     encoding: 'utf8',
   });
   assert(!output.includes('"kind":"daily"'), 'plan mode replaces the old list-price daily alerts');
   const printed = JSON.parse(
-    execFileSync(process.execPath, ['scripts/convex-spend.mjs', '--config', config, '--print'], {
+    execFileSync(process.execPath, spendCli(['--config', config, '--print']), {
       encoding: 'utf8',
     }),
   );
@@ -881,13 +884,13 @@ test('stdin meter delivers one P0 upsert payload through the existing notifier a
     }),
   );
   const log = dailyEvent({
-    timestamp: Date.now() / 1000,
+    timestamp: spendNow / 1000 - 1,
     udfType: 'Mutation',
     logLines: ['FORGE_ACCEPTED_LANDINGS 20'],
     usageStats: { ...dailyEvent().usageStats, databaseIoReadBytes: 1e9 },
   });
   for (let i = 0; i < 2; i++)
-    execFileSync(process.execPath, ['scripts/convex-spend.mjs', '--stdin', '--config', config], {
+    execFileSync(process.execPath, spendCli(['--stdin', '--config', config]), {
       input: JSON.stringify(log) + '\n',
       stdio: ['pipe', 'pipe', 'pipe'],
     });

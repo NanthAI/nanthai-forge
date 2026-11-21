@@ -5,6 +5,7 @@
 // contract (convex/projectAccessContract.ts, readSource). A private project answers exactly like a missing one, and the
 // visitor route only reads: GET only, one budget write, no person, no Lane or Item id.
 import test from 'node:test';
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
 import { ConvexError } from 'convex/values';
@@ -254,6 +255,7 @@ test('the visitor route only reads: GET only, no person, no Lane or Item id, and
 });
 
 test('signed out, a failing read says what happened: over budget 429, no source yet 409, made private mid-read 404', async t => {
+  storageClock(t);
   const { ANONYMOUS_READ_BUDGET } = await import(moduleUrl('../convex/abuseLimits.ts'));
   const folder = s => `ada/atlas/${s.head}/open/-.json`;
   // Over the project's signed-out read budget: an uncached 429 any page may read.
@@ -381,23 +383,22 @@ test('one visitor cache miss: the calls, database bytes, reply bytes and object 
     Object.fromEntries([...new Set(names)].map(name => [name, names.filter(n => n === name).length]));
   // History: the HTTP action and one query (the public identity rule runs inside it).
   assert.deepEqual(tally(views.history.functions), { 'GET /public/v1/*': 1, 'publicCode:history': 1 });
-  // A folder or file: the project lookup, then the members' source read with no identity (its checkpoints and object
-  // lookups are the members' own). A file page is a listing and a page: two source reviews, so twice the work.
-  const source = (reviews, lookups) => ({
+  // A folder or deep-linked file shares one authorized checkpoint read. A file adds only its blob lookup.
+  const source = lookups => ({
     'GET /public/v1/*': 1,
     'publicCode:resolve': 1,
     'projectCodeBrowse:visitorRead': 1,
     'projectCode:checkpoint': 1,
-    'projectSourceReviewStore:checkpoint': 2 * reviews,
+    'projectSourceReviewStore:checkpoint': 2,
     'projectObjects:resolve': lookups,
   });
-  assert.deepEqual(tally(views.folder.functions), source(1, 6));
-  assert.deepEqual(tally(views.file.functions), source(2, 14));
+  assert.deepEqual(tally(views.folder.functions), source(6));
+  assert.deepEqual(tally(views.file.functions), source(8));
   for (const [name, view] of Object.entries(views)) {
     // Reads stay inside the history page's 256 KB and the source checkpoints' own rows; the only writes are the
     // anonymous read budget's (two checkpoint rows at most) and nothing at all for history.
     assert.ok(view.readBytes <= 256 * 1024, `${name} reads ${view.readBytes} B`);
-    assert.ok(view.writeDocuments <= (name === 'history' ? 0 : 2), `${name} writes ${view.writeDocuments}`);
+    assert.ok(view.writeDocuments <= (name === 'history' ? 0 : 1), `${name} writes ${view.writeDocuments}`);
     assert.ok(view.replyBytes <= 64 * 1024, `${name} replies ${view.replyBytes} B`);
   }
   assert.equal(views.history.objects, 0, 'history reads receipts only, no stored object');

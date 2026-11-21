@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
+import { storageClock } from '../storage-clock.mjs';
 import { batchesFixture, states } from '../hosted-landing-batches-fixture.mjs';
 
 export async function splitResultIncident(t) {
+  storageClock(t);
   const f = await batchesFixture(t, {
     memberPaths: ['src/one.ts', 'src/two.ts', 'src/three.ts', 'src/four.ts'],
     runner: {
@@ -15,7 +17,7 @@ export async function splitResultIncident(t) {
   while (!f.runs().length) await f.execute(f.pending()[0]);
   const [shared] = f.runs();
   await f.fail(shared.id, 'tests/unrelated.test.mjs');
-  const failedAt = Date.now();
+  const failedAt = Date.parse(f.runs().find(run => run.id === shared.id).endedAt);
   const children = () => f.runs().filter(run => run.id !== shared.id);
   for (let tick = 0; children().length < 2; tick++) {
     assert(tick < 100, 'a failed cohort dispatches its children');

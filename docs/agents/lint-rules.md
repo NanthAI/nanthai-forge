@@ -46,10 +46,9 @@ This page lists the guards and says where the next one goes.
 
 ## Test hygiene allowlist
 
-The four `forge/test-no-*` rules run over `tests/` (the only place `oxlint` reads tests; it adds about 1 s to a
-full local lint, and none to a preflight that changed no test). Each `tests/` file may keep the count it had when
+The `forge/test-no-*` rules run over `tests/` outside the raw fixture directory. Each test file may keep the count it had when
 the rules landed and no more, in [`tests/test-hygiene-allowlist.json`](../../tests/test-hygiene-allowlist.json) (one line per
-file, keys `sleep`, `retry`, `timeout`, `poll`). A new occurrence fails lint on the occurrence past the allowance. A file that
+file, keys `sleep`, `retry`, `timeout`, `poll`, `date`). A new occurrence fails lint on the occurrence past the allowance. A file that
 drops below its allowance fails lint too, so a deletion is recorded:
 
 - `node scripts/lint-test-hygiene.mjs --update` lowers every entry to the current count and drops deleted files. It never raises one
@@ -59,6 +58,7 @@ drops below its allowance fails lint too, so a deletion is recorded:
   `Atomics.wait`, a spawned `sleep`) is a `sleep`; the same in a loop, a `setInterval`, and `poll(() => ...)` / `eventually(() => ...)` are a `poll`;
   `retry`/`retries` in a test's options or `retryTimes` is a `retry`; a `timeout` option over 10 s (or not a plain number) on a test
   or hook, `jest.setTimeout`, `testTimeout` is a `timeout`. `setTimeout(resolve, 0)` is a yield, not a sleep.
+- `forge/test-no-implicit-date` counts `Date.now`, `Date(...)` and `new Date()` (incident 822fb3db). Pass a fixed instant to time-dependent helpers and freeze the clock where the code under test reads it internally. Use a monotonic clock to measure elapsed time. Existing explicit wall-clock checks, such as the storage exemption expiry guard, remain covered by their file's allowance.
 - It overlaps the older [Test signal](#test-signal) ratchet below on sleeps; that ratchet stays until this one has covered every sleep it counts.
 
 ## Test signal

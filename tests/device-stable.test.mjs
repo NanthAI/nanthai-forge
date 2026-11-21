@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, randomUUID, randomBytes, sign } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
@@ -458,6 +459,7 @@ test('the central device-end policy preserves older credential names on sign-out
 });
 
 test('SI-01: silent renewal ends 30 days after the last sign-in ended and at twelve months despite daily renewal', async t => {
+  storageClock(t);
   const f = fixture(t),
     device = key(),
     { flow } = await f.start(device);
@@ -470,8 +472,7 @@ test('SI-01: silent renewal ends 30 days after the last sign-in ended and at twe
   f.patch('cliCredentials', row._id, {
     expiresAt: Date.now() + day,
     deviceLastSeen: Date.now(),
-    deviceApprovedAt:
-      Date.UTC(new Date().getUTCFullYear() - 1, new Date().getUTCMonth(), new Date().getUTCDate()) - day,
+    deviceApprovedAt: Date.UTC(2025, 10, 9),
   });
   assert.equal((await f.renew(device)).status, 'approval-expired');
   const again = await f.start(device);

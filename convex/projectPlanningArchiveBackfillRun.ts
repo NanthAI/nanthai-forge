@@ -35,8 +35,9 @@ export const run = internalAction({
     { projectId },
   ): Promise<{ done: boolean; advanced: boolean; segments: number; gets: number; bytes: number }> => {
     const ref = internal.projectPlanningArchiveBackfill;
-    const { from, next, entries }: ArchiveBackfillPage = await ctx.runQuery(ref.page, { projectId });
-    if (!from) return { done: true, advanced: false, segments: 0, gets: 0, bytes: 0 };
+    const page: ArchiveBackfillPage = await ctx.runQuery(ref.page, { projectId });
+    if (!page) return { done: true, advanced: false, segments: 0, gets: 0, bytes: 0 };
+    const { from, next, entries, finish } = page;
     let gets = 0;
     let bytes = 0;
     const verified: { key: string; targets: ArchiveTarget[] }[] = [];
@@ -49,7 +50,7 @@ export const run = internalAction({
             gets++;
             bytes += pointer.size;
           }
-          const targets = from.legacyRecords
+          const targets = from?.legacyRecords
             ? (segment.tables.projectHostedRecords ?? []).flatMap(text => {
                 const target = archivedRecordTarget(JSON.parse(text));
                 return target ? [target] : [];
@@ -63,7 +64,7 @@ export const run = internalAction({
       );
       verified.push(...batch);
     }
-    const advanced = await ctx.runMutation(ref.commit, { projectId, from, next, entries: verified });
-    return { done: advanced && next === null, advanced, segments: entries.length, gets, bytes };
+    const result = await ctx.runMutation(ref.commit, { projectId, from, next, finish, entries: verified });
+    return { ...result, segments: entries.length, gets, bytes };
   },
 });

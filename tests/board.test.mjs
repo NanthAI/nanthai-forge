@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { boardFixture, delivery, limits } from './board-fixture.mjs';
@@ -128,7 +129,8 @@ test('secrets, emails and machine paths are refused before anything is written',
     assert.equal(f.tables[table].size, 0, table);
 });
 
-test('10 notes per 10 minutes per Lane and 300 a day per member per project', async () => {
+test('10 notes per 10 minutes per Lane and 300 a day per member per project', async t => {
+  storageClock(t);
   const f = boardFixture();
   for (let n = 0; n < 10; n++) await f.post({ to: 'project', text: `note ${n}`, laneId: f.lanes.B });
   await assert.rejects(
@@ -152,7 +154,8 @@ test('10 notes per 10 minutes per Lane and 300 a day per member per project', as
   );
 });
 
-test('Issue 93907d28: a post reply shows the remaining board budget only under 20%, from rows it already read', async () => {
+test('Issue 93907d28: a post reply shows the remaining board budget only under 20%, from rows it already read', async t => {
+  storageClock(t);
   const f = boardFixture();
   for (let n = 0; n < 8; n++) {
     const sent = await f.post({ to: 'project', text: `note ${n}`, laneId: f.lanes.B });
@@ -189,7 +192,8 @@ test('Issue 93907d28: a post reply shows the remaining board budget only under 2
   assert.equal(near.budget.left, 2);
 });
 
-test('account caps hold across projects; new accounts start low; alerts fire once and name the handle', async () => {
+test('account caps hold across projects; new accounts start low; alerts fire once and name the handle', async t => {
+  storageClock(t);
   const f = boardFixture();
   f.tables.forgeAccounts.get('acct-writer')._creationTime = Date.now() - day; // new account
   const caps = limits.BOARD_ACCOUNT_CAPS.new;

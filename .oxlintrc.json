@@ -101,7 +101,8 @@
         "forge/test-no-fixed-sleep": "error",
         "forge/test-no-retries": "error",
         "forge/test-no-raised-timeout": "error",
-        "forge/test-no-unsignaled-polling": "error"
+        "forge/test-no-unsignaled-polling": "error",
+        "forge/test-no-implicit-date": "error"
       }
     }
   ]

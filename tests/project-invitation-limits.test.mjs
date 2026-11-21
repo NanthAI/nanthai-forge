@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { invitationFixture, mail, policy, values, refusal } from './invitation-fixture.mjs';
@@ -27,6 +28,7 @@ for (const [name, key, count, period] of [
   ],
 ])
   test(`email budget ${name} refuses before any write or schedule`, async t => {
+    storageClock(t);
     const s = invitationFixture(t);
     seed(s, key, count, period);
     const before = snapshot(s),
@@ -35,7 +37,9 @@ for (const [name, key, count, period] of [
     assert.equal(snapshot(s), before);
     assert.equal(s.scheduled.length, tasks);
   });
+
 test('3 resends per invitation per UTC day refuses before writes; old resend retries never send again', async t => {
+  storageClock(t);
   const s = invitationFixture(t),
     row = await s.invite();
   seed(s, `invitation:resend-day:project:${row.operationId}`, 3);
@@ -101,6 +105,7 @@ test('50 open email invitations per project counts email only and excludes ended
   );
 });
 test('counter boundaries reset in place and exact invitation retries charge nothing', async t => {
+  storageClock(t);
   const s = invitationFixture(t);
   seed(s, 'invitation:inviter-hour:owner', 20, hour);
   s.tables.deviceAttempts.get('invitation:inviter-hour:owner').windowAt -= hour;

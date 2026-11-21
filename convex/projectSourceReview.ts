@@ -9,7 +9,7 @@ import { exchangeObjectReader } from './projectExchangeReader';
 import { exchangeRootSchema, isExchangeRoot, readByteTree } from '../src/native-exchange-tree';
 import { nativeManifestSchema } from '../src/work-archive-metadata';
 import { indexedReviewBytes, ReviewIndexUnavailable } from './projectSourceReviewIndex';
-import { readNativeSourceReview, readNativeSourceReviewBytes } from '../src/native-source-review';
+import { nativeReviewBytes, readNativeSourceReviewBytes } from '../src/native-source-review';
 import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
 import type { SourceAnchor } from '../src/work-intent-types';
@@ -58,13 +58,26 @@ type ReviewInput = {
   anchor?: SourceAnchor;
 };
 export async function readSourceReview(ctx: ActionCtx, input: ReviewInput, actor: string, viewOnly = false) {
+  return renderCheckpointSource(ctx, input, actor, viewOnly, bytes =>
+    readNativeSourceReviewBytes(input.base, input.head, bytes, input),
+  );
+}
+
+/** Render with the same retained membership, object integrity and final access checks as a review. */
+export async function renderCheckpointSource<T extends object>(
+  ctx: ActionCtx,
+  input: Pick<ReviewInput, 'projectId' | 'backupId' | 'base' | 'head' | 'anchor'>,
+  actor: string,
+  viewOnly: boolean,
+  render: (bytes: (ids: string[]) => Promise<Buffer[]>) => Promise<T>,
+) {
   const started = performance.now();
   const backup = await checkpoint(
     ctx,
     input.projectId,
     input.backupId,
     actor,
-    viewOnly ? { recheck: false, digests: [input.base, input.head] } : undefined,
+    viewOnly ? { recheck: false, digests: [...new Set([input.base, input.head])] } : undefined,
   );
   if (backup.transport !== 'objects' || backup.preview.format !== 'native') {
     invariant(
@@ -73,7 +86,7 @@ export async function readSourceReview(ctx: ActionCtx, input: ReviewInput, actor
       'Choose a retained native source View for this line comment.',
     );
     return {
-      available: false,
+      available: false as const,
       reason:
         'This checkpoint uses a source archive. Its existing download contains source and Work for local review.',
     };
@@ -81,15 +94,7 @@ export async function readSourceReview(ctx: ActionCtx, input: ReviewInput, actor
   const indexed = await indexedReviewBytes(ctx, backup, actor, backup.viewPins);
   if (indexed) {
     try {
-      const result = await readNativeSourceReviewBytes(input.base, input.head, indexed, {
-        file: input.file,
-        map: input.map,
-        submodules: input.submodules,
-        beforeOffset: input.beforeOffset,
-        afterOffset: input.afterOffset,
-        line: input.line,
-        anchor: input.anchor,
-      });
+      const result = await render(indexed);
       const final = await checkpoint(
         ctx,
         input.projectId,
@@ -103,7 +108,7 @@ export async function readSourceReview(ctx: ActionCtx, input: ReviewInput, actor
         'The selected checkpoint changed while reading.',
       );
       return {
-        available: true,
+        available: true as const,
         backupId: backup._id,
         backupDigest: backup.digest,
         ...result,
@@ -140,23 +145,7 @@ export async function readSourceReview(ctx: ActionCtx, input: ReviewInput, actor
     'Source checkpoint identity differs.',
   );
   const manifestMs = performance.now() - started;
-  const result = await readNativeSourceReview(
-    manifest,
-    input.base,
-    input.head,
-    read,
-    input.file === undefined && !input.map && !input.submodules
-      ? undefined
-      : {
-          ...(input.file === undefined ? {} : { file: input.file }),
-          ...(input.map ? { map: true } : {}),
-          ...(input.submodules ? { submodules: true } : {}),
-          beforeOffset: input.beforeOffset,
-          afterOffset: input.afterOffset,
-          line: input.line,
-          anchor: input.anchor,
-        },
-  );
+  const result = await render(nativeReviewBytes(manifest, read));
   const final = await checkpoint(
     ctx,
     input.projectId,
@@ -170,7 +159,7 @@ export async function readSourceReview(ctx: ActionCtx, input: ReviewInput, actor
     'The selected checkpoint changed while reading.',
   );
   return {
-    available: true,
+    available: true as const,
     backupId: backup._id,
     backupDigest: backup.digest,
     ...result,

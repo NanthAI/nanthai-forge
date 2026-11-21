@@ -53,6 +53,7 @@ test('Needs me: exact progress, N+ when capped, a withdrawn landing under FYI; a
   async function open(t, viewport, query = '') {
     const context = await browser.newContext({ viewport });
     const page = await context.newPage();
+    await page.clock.setFixedTime(new Date('2026-11-10T12:00:00Z'));
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => message.type() === 'error' && errors.push(message.text()));

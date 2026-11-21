@@ -3,7 +3,7 @@
 // .oxlintrc.json and `npm run lint` runs it with the built-in rules, so it costs no extra walk.
 // Each rule names the incident it guards; docs/agents/lint-rules.md says how to add the next one.
 //
-// The four test-hygiene rules at the end (guard 7, Item 611a1795) take the idea from the MIT-licensed
+// The test-hygiene rules at the end (guard 7, Item 611a1795) take the idea from the MIT-licensed
 // "landmines" testing rules: tests that wait on the clock, retry, raise a timeout or poll flake on a
 // loaded runner. The rules are written from scratch for this repository; no text or code is copied.
 
@@ -346,8 +346,8 @@ const renameOverDirectory = {
 };
 
 // ---- Test hygiene (guard 7, Item 611a1795) --------------------------------------------------------
-// Four rules run over tests/**: fixed sleeps used as waits, test retries, raised per-test timeouts and
-// unsignaled polling. Each file may keep the count it has today (tests/test-hygiene-allowlist.json) and no
+// These rules run over tests/**: fixed sleeps used as waits, test retries, raised per-test timeouts,
+// unsignaled polling and implicit reads of the wall clock. Each file may keep the count it has today (tests/test-hygiene-allowlist.json) and no
 // more: a new one fails lint, and a file that drops below its count fails too until
 // `node scripts/lint-test-hygiene.mjs --update` lowers the entry, so the list only shrinks.
 
@@ -594,6 +594,42 @@ const testNoRaisedTimeout = hygieneRule(
   }),
 );
 
+const globalDateObjects = new Set(['globalThis', 'global', 'window', 'self']);
+const memberName = member => (member.computed ? member.property.value : member.property.name);
+function globalIdentifier(context, node) {
+  return node?.type === 'Identifier' && !variableOf(context, node, node.name)?.defs.length;
+}
+function globalDate(context, node) {
+  if (node.type === 'Identifier') return node.name === 'Date' && globalIdentifier(context, node);
+  return (
+    node.type === 'MemberExpression' &&
+    memberName(node) === 'Date' &&
+    globalDateObjects.has(node.object.name) &&
+    globalIdentifier(context, node.object)
+  );
+}
+
+const testNoImplicitDate = hygieneRule(
+  'date',
+  'Tests: reading the wall clock lets a fixture cross a UTC hour or day during execution (incident 822fb3db). Fix the clock and pass the instant explicitly. A file keeps its existing reads and no more.',
+  'Use an explicit fixture instant. When the code under test reads the clock, fix that clock too.',
+  (context, hits) => ({
+    CallExpression(node) {
+      // Date(...) as a function reads the current time even with arguments.
+      if (globalDate(context, node.callee)) hits.push(node.callee);
+    },
+    NewExpression(node) {
+      if (node.arguments.length === 0 && globalDate(context, node.callee)) hits.push(node.callee);
+    },
+    MemberExpression(node) {
+      if (memberName(node) !== 'now' || !globalDate(context, node.object)) return;
+      const parent = node.parent;
+      if (parent?.type === 'AssignmentExpression' && parent.operator === '=' && parent.left === node) return; // Stubbing or restoring Date.now is a write.
+      hits.push(node.property);
+    },
+  }),
+);
+
 export default {
   meta: { name: 'forge' },
   rules: {
@@ -608,5 +644,6 @@ export default {
     'test-no-retries': testNoRetries,
     'test-no-raised-timeout': testNoRaisedTimeout,
     'test-no-unsignaled-polling': testNoUnsignaledPolling,
+    'test-no-implicit-date': testNoImplicitDate,
   },
 };

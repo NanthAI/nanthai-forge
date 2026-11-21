@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
@@ -69,6 +70,7 @@ test('People and recipient pages bound whole-document reads at 400 and 800 peopl
   }
 });
 test('concurrent emails cannot overspend the deployment allowance; refusal rolls back all invitation and counter writes', async t => {
+  storageClock(t);
   const old = process.env.FORGE_INVITATION_EMAIL;
   process.env.FORGE_INVITATION_EMAIL = '1';
   t.after(() =>

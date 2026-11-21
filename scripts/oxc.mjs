@@ -31,10 +31,10 @@ const EVERY_FILE =
 
 // The test-hygiene lint rules (scripts/lint/forge-plugin.mjs) run through the JS plugin, which costs far more
 // per file than the built-in rules. Only a test file that names something the rules look for can have a hit,
-// so the rest skip the plugin: about 320 of 1,470 files, a fraction of the lint time. The pattern is a superset
+// so the rest skip the plugin. The pattern is a superset
 // of what the rules match; tests/lint-rules.test.mjs checks every planted example against it.
 export const TEST_HYGIENE_CANDIDATE =
-  /setTimeout|setInterval|scheduler|Atomics|\bsleep\b|\b(?:sleepMs|delay|pause|nap|snooze|waitForTimeout|poll|pollUntil|eventually|retryTimes)\s*\(|\b(?:retry|retries|timeout)\b\s*[:,}]|testTimeout|hookTimeout|timers\/promises/;
+  /setTimeout|setInterval|scheduler|Atomics|\bsleep\b|\b(?:sleepMs|delay|pause|nap|snooze|waitForTimeout|poll|pollUntil|eventually|retryTimes)\s*\(|\b(?:retry|retries|timeout)\b\s*[:,}]|testTimeout|hookTimeout|timers\/promises|\bDate\b/;
 
 /** The lint files with the tests/ files that cannot trip a test-hygiene rule removed. A file with an entry in the
  * allowlist stays: it may have dropped below its allowance. */

@@ -4,6 +4,7 @@
 // patch that end already makes, the next submission's binding carries the mark, and its landing counts as not a
 // first try; the summary writes per landing stay what they were, and agents read the same figure with its words.
 import test from 'node:test';
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { synthetic } from './hosted-landing-batches-fixture.mjs';
@@ -16,6 +17,7 @@ const day = await import(moduleUrl('../src/flow-day.ts'));
 const main = await import(moduleUrl('../src/hosted-main.ts'));
 const cli = await import(moduleUrl('../src/hosted-pull.ts'));
 const previousEnvironment = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
+test.beforeEach(t => storageClock(t));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
   for (const [key, value] of Object.entries(previousEnvironment)) {

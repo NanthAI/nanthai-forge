@@ -306,3 +306,29 @@ test('the allowlist updater only lowers: it drops deleted and cleared files and 
   ]);
   assert.deepEqual(JSON.parse(serialize(files)), { version: 1, files });
 });
+
+test('forge/test-no-implicit-date rejects new ambient clock reads, including in an existing test file', t => {
+  const sources = {
+    'tests/calendar.test.mjs': [
+      'const previous = Date.now;',
+      'const timestamp = globalThis.Date["now"]();',
+      'const today = new window.Date();',
+      'const text = Date(0);',
+      'const noParens = new Date;',
+      'const fixed = new Date(Date.UTC(2026, 10, 10, 12));',
+      'Date.now = () => fixed.getTime();',
+      'function local(Date) { return new Date(); }',
+      '// Date.now() and new Date() in a comment are not clock reads.',
+    ].join('\n'),
+    'tests/new.test.mjs': 'const time = Date.now();',
+  };
+  const allowlist = serialize({ 'tests/calendar.test.mjs': { date: 1 } });
+  for (const source of Object.values(sources)) assert.match(source, TEST_HYGIENE_CANDIDATE);
+  assert.deepEqual(lint(t, sources, { 'tests/test-hygiene-allowlist.json': allowlist }), [
+    'tests/calendar.test.mjs:2:forge(test-no-implicit-date)',
+    'tests/calendar.test.mjs:3:forge(test-no-implicit-date)',
+    'tests/calendar.test.mjs:4:forge(test-no-implicit-date)',
+    'tests/calendar.test.mjs:5:forge(test-no-implicit-date)',
+    'tests/new.test.mjs:1:forge(test-no-implicit-date)',
+  ]);
+});

@@ -4,6 +4,7 @@
 // version and keeps the history. Each move is owner-only, applies once under replay and has an Undo. Version compare
 // marks the words that changed inside a rewritten line.
 import test from 'node:test';
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { setup } from './hosted-planning-fixture.mjs';
@@ -222,7 +223,8 @@ test('an archived or deleted Item opened by its link reads as its shelf with the
   assert.equal(shelvedRowOf(null, id), null);
 });
 
-test("bringing back a closed Item leaves today's closed count alone; closing one still counts", async () => {
+test("bringing back a closed Item leaves today's closed count alone; closing one still counts", async t => {
+  storageClock(t);
   // Review 9cc310fc finding 3: Restore of a deleted Item whose `was` is closed added 1 to closed today.
   const generationId = 'g1';
   const counts = { ...emptyPlanCounts(true), day: utcDay(Date.now()) };

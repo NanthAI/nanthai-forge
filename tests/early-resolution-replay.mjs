@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { batchesFixture, states } from './hosted-landing-batches-fixture.mjs';
 import { syncFixture } from './hosted-sync-fixture.mjs';
@@ -43,11 +44,10 @@ export async function conflictTrio(
     lateThird = false,
   } = {},
 ) {
+  // Daily rows add a call at midnight. Compared replays start at the same fixed noon.
+  storageClock(t);
   const f = await batchesFixture(t, {
-    // Every trio starts at noon UTC today. A replay's simulated minutes then never cross midnight,
-    // where daily rows add one call: compared replays (small vs large history, before vs after)
-    // differed by that call when a check started near 00:00 UTC.
-    startAt: new Date().setUTCHours(12, 0, 0, 0),
+    startAt: Date.UTC(2026, 10, 10, 12),
     count: 0,
     batchMaxSize: 1,
     fileCount: 2,
@@ -64,19 +64,6 @@ export async function conflictTrio(
       clean ? 'alpha\nlate middle\nomega\n' : 'alpha-c\nmiddle\nomega-c\n',
       lateThird ? 'alpha\nmiddle-d\nomega\n' : 'member 3',
     ],
-  });
-  const OriginalDate = Date,
-    clock = Date.now;
-  globalThis.Date = class extends OriginalDate {
-    constructor(...args) {
-      super(...(args.length ? args : [clock()]));
-    }
-    static now() {
-      return clock();
-    }
-  };
-  t.after(() => {
-    globalThis.Date = OriginalDate;
   });
   const project = f.tables.hostedProjects.get(f.projectId);
   if (earlyResolve)

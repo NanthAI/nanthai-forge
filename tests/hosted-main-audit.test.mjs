@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { checkCause } from '../dist/hosted-check.js';
 import test from 'node:test';
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { auditFixture, audit, state } from './hosted-main-audit-fixture.mjs';
@@ -998,7 +999,8 @@ test('687d1eda (analyst d975f2d7): the main-red reply says which branch runs, an
   }
 });
 
-test('85f456c1: a green audit after a culprit revert records reverted, not fixed on top, for the Flow day and Main broke', async () => {
+test('85f456c1: a green audit after a culprit revert records reverted, not fixed on top, for the Flow day and Main broke', async t => {
+  storageClock(t);
   const ended = async (culprit, after = {}) => {
     const f = await auditFixture();
     await f.land('full');

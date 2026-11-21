@@ -25,6 +25,20 @@ type Path = { path: string; mode: string };
 const kindOf = (mode: string): CodeEntry['kind'] =>
   mode === 'symlink' ? 'symlink' : mode === 'gitlink' ? 'submodule' : 'file';
 
+function lowerBound(paths: readonly Path[], path: string, start = 0, end = paths.length) {
+  while (start < end) {
+    const middle = start + Math.floor((end - start) / 2);
+    if (paths[middle]!.path < path) start = middle + 1;
+    else end = middle;
+  }
+  return start;
+}
+
+export function fileAt<T extends Path>(paths: readonly T[], path: string): T | undefined {
+  const entry = paths[lowerBound(paths, path)];
+  return entry?.path === path ? entry : undefined;
+}
+
 /** The folders on the way to `path`: '' first, then each parent; a folder path includes itself. */
 export function ancestors(path: string, isDir: boolean): string[] {
   const parts = path ? path.split('/') : [];
@@ -37,47 +51,55 @@ export function ancestors(path: string, isDir: boolean): string[] {
 /** One page of one folder: folders first, then files, each by name. `paths` is sorted (the State's own order). */
 export function folderPage(paths: readonly Path[], dir: string, cursor = 0, limit = CODE_DIR_PAGE): CodeDir {
   const prefix = dir ? `${dir}/` : '';
-  const folders = new Map<string, number>();
+  const folders: CodeEntry[] = [];
   const files: CodeEntry[] = [];
-  for (const { path, mode } of paths) {
-    if (!path.startsWith(prefix)) continue;
-    const rest = path.slice(prefix.length);
-    const cut = rest.indexOf('/');
-    if (cut === -1) files.push({ name: rest, path, kind: kindOf(mode) });
-    else folders.set(rest.slice(0, cut), (folders.get(rest.slice(0, cut)) ?? 0) + 1);
+  const startAt = dir ? lowerBound(paths, prefix) : 0;
+  // '0' immediately follows '/' in the State's path order, so this excludes lookalike names.
+  const endAt = dir ? lowerBound(paths, `${dir}0`, startAt) : paths.length;
+  for (let index = startAt; index < endAt;) {
+    const { path, mode } = paths[index]!;
+    const cut = path.indexOf('/', prefix.length);
+    if (cut === -1) {
+      files.push({ name: path.slice(prefix.length), path, kind: kindOf(mode) });
+      index++;
+    } else {
+      const child = path.slice(0, cut);
+      const end = lowerBound(paths, `${child}0`, index + 1, endAt);
+      folders.push({ name: child.slice(prefix.length), path: child, kind: 'dir', files: end - index });
+      index = end;
+    }
   }
-  const entries: CodeEntry[] = [
-    ...[...folders.keys()]
-      .sort()
-      .map(name => ({ name, path: prefix + name, kind: 'dir' as const, files: folders.get(name)! })),
-    ...files,
-  ];
-  const start = Math.max(0, Math.min(cursor, entries.length));
-  const end = Math.min(entries.length, start + limit);
+  // Prefix folders can be encountered in a different order than their bare names (a!/ then a/).
+  folders.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const total = folders.length + files.length;
+  const start = Math.max(0, Math.min(cursor, total));
+  const end = Math.min(total, start + limit);
   return {
     path: dir,
-    entries: entries.slice(start, end),
-    total: entries.length,
-    next: end < entries.length ? end : null,
+    entries: [
+      ...folders.slice(start, end),
+      ...files.slice(Math.max(0, start - folders.length), Math.max(0, end - folders.length)),
+    ],
+    total,
+    next: end < total ? end : null,
   };
 }
 
 /** Bytes of subfolder pages one folder read may add (Item a3b55a6e): the folders a reader can open next. */
 export const CODE_AHEAD_BYTES = 64 * 1024;
+const utf8 = new TextEncoder();
 
 /**
  * `page`, then the first page of each folder it lists, in order, while those pages fit `budget` bytes. A reader who
  * opens one of them needs no read; one level only, so the tree is still read one folder at a time, never whole.
  */
 export function withChildren(paths: readonly Path[], page: CodeDir, budget = CODE_AHEAD_BYTES): CodeDir[] {
-  const prefix = page.path ? `${page.path}/` : '';
-  const inside = prefix ? paths.filter(entry => entry.path.startsWith(prefix)) : paths;
   const out = [page];
   let used = 0;
   for (const entry of page.entries) {
     if (entry.kind !== 'dir') continue;
-    const child = folderPage(inside, entry.path);
-    used += JSON.stringify(child).length;
+    const child = folderPage(paths, entry.path);
+    used += utf8.encode(JSON.stringify(child)).length;
     if (used > budget) break;
     out.push(child);
   }
@@ -87,12 +109,9 @@ export function withChildren(paths: readonly Path[], page: CodeDir, budget = COD
 /** What a path names in this State: a file (with its mode), a folder, or nothing. */
 export function pathKind(paths: readonly Path[], path: string): 'dir' | 'file' | null {
   if (!path) return 'dir';
+  if (fileAt(paths, path)) return 'file';
   const prefix = `${path}/`;
-  for (const entry of paths) {
-    if (entry.path === path) return 'file';
-    if (entry.path.startsWith(prefix)) return 'dir';
-  }
-  return null;
+  return paths[lowerBound(paths, prefix)]?.path.startsWith(prefix) ? 'dir' : null;
 }
 
 /** The paths one landing changed, in path order, at most one page. */

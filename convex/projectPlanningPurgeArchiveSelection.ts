@@ -7,6 +7,7 @@ import type { JournalIndex } from '../src/journal-segment';
 import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import { internalQuery, internalMutation } from './server';
+import { planningArchiveIndexVersion } from './projectJournalFields';
 import { receiptRow } from './projectJournalMaintenance';
 import type { selectEventRows } from './projectPlanningPurgeSelect';
 import {
@@ -31,6 +32,7 @@ export const archivePin = v.object({
   frontier,
   rewriteRevision: v.number(),
   indexedRevision: v.optional(v.number()),
+  indexedVersion: v.optional(v.literal(planningArchiveIndexVersion)),
 });
 export type ArchivePin = typeof archivePin.type;
 export type SelectionProgress = ArchivePin & {
@@ -69,7 +71,8 @@ export async function archiveSelectionCurrent(
   );
   if (pin?.indexedRevision !== undefined)
     return (
-      project.planningArchiveIndexed === true &&
+      pin.indexedVersion === planningArchiveIndexVersion &&
+      project.planningArchiveIndexed === planningArchiveIndexVersion &&
       pin.indexedRevision === (project.planningArchiveEventRevision ?? 0)
     );
   const [last] = project.journalRevision ? await eventSegments(ctx, project._id).order('desc').take(1) : [];
@@ -94,15 +97,18 @@ async function selection(
   const row = await receiptRow(ctx, input.projectId, key(input.operationId));
   const request = digest(canonicalPayload([input.itemId, input.ids]));
   const rewriteRevision = project.journalEventRewriteRevision ?? 0;
-  const indexedRevision = project.planningArchiveIndexed
-    ? (project.planningArchiveEventRevision ?? 0)
-    : undefined;
+  const indexedRevision =
+    project.planningArchiveIndexed === planningArchiveIndexVersion
+      ? (project.planningArchiveEventRevision ?? 0)
+      : undefined;
+  const indexedVersion = indexedRevision === undefined ? undefined : planningArchiveIndexVersion;
   const prior = row && (JSON.parse(row.envelope) as SelectionProgress);
   // A legacy receipt never has this fence. Its cursor pinned the entire journal revision.
   const progress: SelectionProgress =
     prior?.request === request &&
     prior.rewriteRevision === rewriteRevision &&
-    prior.indexedRevision === indexedRevision
+    prior.indexedRevision === indexedRevision &&
+    prior.indexedVersion === indexedVersion
       ? prior
       : {
           request,
@@ -110,7 +116,7 @@ async function selection(
           frontier: null,
           ...(indexedRevision === undefined
             ? {}
-            : { indexedRevision, indexedAfter: { target: 0, after: null } }),
+            : { indexedRevision, indexedVersion, indexedAfter: { target: 0, after: null } }),
           done: false,
           selected: { rows: [], decisions: [], created: null, creates: false },
         };
@@ -183,6 +189,7 @@ export const checkpoint = internalMutation({
     invariant(progress.rewriteRevision === input.expected.rewriteRevision, 'WORK_STALE', archiveChanged);
     if (
       progress.indexedRevision !== input.expected.indexedRevision ||
+      progress.indexedVersion !== input.expected.indexedVersion ||
       canonicalPayload(progress.indexedAfter ?? null) !== canonicalPayload(input.indexed?.expected ?? null) ||
       canonicalPayload(progress.frontier) !== canonicalPayload(input.expected.frontier)
     )
@@ -194,7 +201,11 @@ export const checkpoint = internalMutation({
       rewriteRevision: progress.rewriteRevision,
       frontier: input.next,
       ...(input.indexed
-        ? { indexedRevision: progress.indexedRevision!, indexedAfter: input.indexed.next }
+        ? {
+            indexedRevision: progress.indexedRevision!,
+            indexedVersion: progress.indexedVersion!,
+            indexedAfter: input.indexed.next,
+          }
         : {}),
       done: input.done,
       selected: {

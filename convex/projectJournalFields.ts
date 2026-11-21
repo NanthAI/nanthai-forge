@@ -1,6 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
+export const planningArchiveIndexVersion = 2;
+export const planningArchiveBackfillProgress = v.object({
+  mode: v.union(v.literal('index'), v.literal('count')),
+  legacyRecords: v.boolean(),
+  cursor: v.union(v.string(), v.null()),
+  pending: v.array(v.string()),
+  rangeDone: v.boolean(),
+  indexed: v.number(),
+  expected: v.number(),
+});
+
 /** One compact index per immutable segment. Separate from hot finish projections so archive
  * range indexes never multiply the index footprint of every live landing row. */
 export const journalTables = {

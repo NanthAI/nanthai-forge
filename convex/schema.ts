@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invitationState, invitationMail, invitationTables } from './projectInvitationFields';
-import { journalTables, journalReceiptTables } from './projectJournalFields';
+import {
+  journalTables,
+  journalReceiptTables,
+  planningArchiveBackfillProgress,
+  planningArchiveIndexVersion,
+} from './projectJournalFields';
 import { liveLineTables } from './projectLiveLineFields';
 import { publicDiscoveryTables } from './publicDiscoveryFields';
 import { landingReadTables } from './projectLandingReadFields';
@@ -361,9 +366,12 @@ const projectFields = {
   /** Purge selection pins event bytes independently of append-only journal publication. */
   journalEventRewriteRevision: v.optional(v.number()),
   /** Indexed purge is safe once every legacy archive is covered. New word-bearing publications advance its fence. */
-  planningArchiveIndexed: v.optional(v.literal(true)),
+  planningArchiveIndexed: v.optional(v.union(v.literal(true), v.literal(planningArchiveIndexVersion))),
   planningArchiveBackfill: v.optional(
-    v.object({ legacyRecords: v.boolean(), cursor: v.union(v.string(), v.null()) }),
+    v.union(
+      v.object({ legacyRecords: v.boolean(), cursor: v.union(v.string(), v.null()) }),
+      planningArchiveBackfillProgress,
+    ),
   ),
   planningArchiveEventRevision: v.optional(v.number()),
   journalRecordReceipts: v.optional(v.literal(true)),

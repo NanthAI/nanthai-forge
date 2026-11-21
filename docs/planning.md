@@ -133,8 +133,9 @@ lifecycle events, and the store fingerprints.
 The purge uses the work store's retained record pointers and a sparse index of older archived Item
 commands and records. On a project whose archive has yet to be indexed, it uses a full archive scan.
 The operator can run `projectPlanningArchiveBackfillRun:run` with the project id, repeating until
-`done: true`. Each call resumes one bounded page of verified legacy archives. Modern record segments
-already have their pointers in Convex, so the backfill does not fetch them. There is no idle job.
+`done: true`. Each call resumes one bounded page. The backfill reads legacy archive bytes and compares
+the number of verified segments with a second pass over archive metadata. Modern record
+segments already have their pointers in Convex. There is no idle job.
 Current archive publication keeps the same writes for ordinary records and commands. If a captured legacy
 Item command is published, its index entry is written in the same transaction.
 The purge checkpoints selection and sweep pages. Before the tombstone, it accounts for newly

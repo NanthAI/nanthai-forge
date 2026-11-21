@@ -23,6 +23,7 @@ type ReviewSelection = {
 
 type Manifest = z.infer<typeof nativeManifestSchema>;
 type Pin = { sha256: string; size: number };
+type ReadBytes = (ids: string[]) => Promise<Buffer[]>;
 import { reviewPaths, reviewTextPage } from './source-review-format.js';
 export { reviewPaths, reviewTextPage, type ReviewPath } from './source-review-format.js';
 export async function readNativeSourceReview(
@@ -32,6 +33,11 @@ export async function readNativeSourceReview(
   read: (pins: Pin[]) => Promise<Buffer[]>,
   selection?: ReviewSelection,
 ) {
+  return readNativeSourceReviewBytes(base, head, nativeReviewBytes(manifest, read), selection);
+}
+
+/** Resolve exact object identities against the retained archive manifest. */
+export function nativeReviewBytes(manifest: Manifest, read: (pins: Pin[]) => Promise<Buffer[]>): ReadBytes {
   const objects = new Map(manifest.files.map(file => [file.path, file]));
   function pin(id: string) {
     invariant(/^[a-f0-9]{64}$/.test(id), 'BAD_ARGUMENT', 'Select an exact native source identity.');
@@ -43,7 +49,7 @@ export async function readNativeSourceReview(
     );
     return file;
   }
-  async function bytes(ids: string[]) {
+  return async ids => {
     const pins = ids.map(pin),
       values = await read(pins);
     invariant(
@@ -53,15 +59,14 @@ export async function readNativeSourceReview(
       'Stored source differs from its exact identity.',
     );
     return values;
-  }
-  return readNativeSourceReviewBytes(base, head, bytes, selection);
+  };
 }
 
 /** Same review semantics with exact-byte pins supplied by an authorized derived index. */
 export async function readNativeSourceReviewBytes(
   base: string,
   head: string,
-  bytes: (ids: string[]) => Promise<Buffer[]>,
+  bytes: ReadBytes,
   selection?: ReviewSelection,
 ) {
   const [original, selected] = await bytes([base, head]),

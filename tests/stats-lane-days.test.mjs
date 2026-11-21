@@ -4,6 +4,7 @@
 // (a project's day closes only when it had a landing). The close now counts every Lane since the previous closed day,
 // each under its own day; a one-time backfill files the same Lanes for days closed before the fix.
 import test from 'node:test';
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 
@@ -373,7 +374,8 @@ test('the backfill keeps the planning counts a close wrote on gap days, whenever
   );
 });
 
-test('past the change-row cap, everyone who can plan here is marked, even with no counted work (review 59bca412)', async () => {
+test('past the change-row cap, everyone who can plan here is marked, even with no counted work (review 59bca412)', async t => {
+  storageClock(t);
   const { PERSON_WORK_CHANGES } = await import(moduleUrl('../convex/personWork.ts'));
   const { profileRead } = await import(moduleUrl('../src/person-days.ts'));
   const iso = ms => new Date(ms).toISOString().slice(0, 10);

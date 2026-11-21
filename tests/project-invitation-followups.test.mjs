@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
@@ -24,6 +25,7 @@ const snapshot = s =>
   JSON.stringify(Object.fromEntries(Object.entries(s.tables).map(([k, v]) => [k, [...v]])));
 
 test('handle and email-off invitations across projects consume the same inviter allowance exactly once', async t => {
+  storageClock(t);
   const s = invitationFixture(t);
   delete process.env.FORGE_INVITATION_EMAIL;
   s.tables.hostedProjects.set('second', { ...s.tables.hostedProjects.get('project'), _id: 'second' });
@@ -54,6 +56,7 @@ test('handle and email-off invitations across projects consume the same inviter 
 });
 
 test('email-off resends share the inviter allowance without charging an email send or replay', async t => {
+  storageClock(t);
   const s = invitationFixture(t);
   delete process.env.FORGE_INVITATION_EMAIL;
   const row = await s.invite();
@@ -82,6 +85,7 @@ for (const kind of ['handle', 'email-off'])
     ['day', 100, day],
   ])
     test(`${kind} invitations enforce the shared inviter ${window} budget before writes`, async t => {
+      storageClock(t);
       const s = invitationFixture(t),
         owner = `invitation:inviter-${window}:owner`;
       if (kind === 'email-off') delete process.env.FORGE_INVITATION_EMAIL;

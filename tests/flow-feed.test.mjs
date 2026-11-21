@@ -2,6 +2,7 @@
 // The Flow view's feed fields (Item 85f456c1) ride writes the line feed already makes: a landing's step goes in
 // the summary write its exit already makes, a check key and a main-red hold ride the mark's stage/held patch.
 import test from 'node:test';
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { batchesFixture, synthetic } from './hosted-landing-batches-fixture.mjs';
@@ -14,6 +15,7 @@ const { policyPreset } = await import(moduleUrl('../src/autonomy-policy.ts'));
 const day = await import(moduleUrl('../src/flow-day.ts'));
 const sub = await import(moduleUrl('../convex/projectLiveLineSubmission.ts'));
 const previousEnvironment = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
+test.beforeEach(t => storageClock(t));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
   for (const [key, value] of Object.entries(previousEnvironment)) {

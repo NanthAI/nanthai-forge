@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { saveBytes } from '../dist/hosted-save.js';
@@ -86,7 +87,8 @@ const full = () => ({
   composes: MEMBER_WORK_BUDGET.composes,
   submissions: MEMBER_WORK_BUDGET.submissions,
 });
-test('fresh member checks consume a fixed counter once and full counters refuse before provider work', async () => {
+test('fresh member checks consume a fixed counter once and full counters refuse before provider work', async t => {
+  storageClock(t);
   const f = await checksFixture();
   const id = member(f),
     request = f.selection();
@@ -106,7 +108,8 @@ test('fresh member checks consume a fixed counter once and full counters refuse 
     'an original replay still reconciles at the cap',
   );
 });
-test('fresh member composes consume once, reject atomically at the cap and reset at a UTC day boundary', async () => {
+test('fresh member composes consume once, reject atomically at the cap and reset at a UTC day boundary', async t => {
+  storageClock(t);
   const f = await composeFixture();
   const id = member(f),
     selection = f.selection([await f.lane(f.baseline)]);
@@ -132,7 +135,8 @@ test('fresh member composes consume once, reject atomically at the cap and reset
   await prepare();
   assert.equal(f.tables.projectContributors.get(id).workBudget.composes, 1);
 });
-test('member submissions share one durable counter and reject before creating queue entries', async () => {
+test('member submissions share one durable counter and reject before creating queue entries', async t => {
+  storageClock(t);
   const f = await acceptanceFixture();
   const id = member(f);
   const item = await f.makeCandidate([], [], {}, 'member');
@@ -151,7 +155,8 @@ test('member submissions share one durable counter and reject before creating qu
   assert.equal(f.tables.projectHostedLandingRequests.size, count);
 });
 
-test('concurrent member requests share the last budget unit atomically', async () => {
+test('concurrent member requests share the last budget unit atomically', async t => {
+  storageClock(t);
   const f = await checksFixture(),
     id = member(f);
   f.patch('projectContributors', id, { workBudget: { ...full(), checks: MEMBER_WORK_BUDGET.checks - 1 } });
@@ -165,7 +170,8 @@ test('concurrent member requests share the last budget unit atomically', async (
   assert.equal(f.tables.projectHostedCheckRuns.size, 1);
 });
 
-test('a member at the submission cap cannot create a preparing goal or wake', async () => {
+test('a member at the submission cap cannot create a preparing goal or wake', async t => {
+  storageClock(t);
   const f = await acceptanceFixture(),
     id = member(f);
   f.patch('projectContributors', id, { workBudget: full() });

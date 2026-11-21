@@ -116,7 +116,9 @@ export const select = internalAction({
     const pin = (): ArchivePin => ({
       frontier: progress.frontier,
       rewriteRevision: progress.rewriteRevision,
-      ...(progress.indexedRevision === undefined ? {} : { indexedRevision: progress.indexedRevision }),
+      ...(progress.indexedRevision === undefined
+        ? {}
+        : { indexedRevision: progress.indexedRevision, indexedVersion: progress.indexedVersion }),
     });
     try {
       while (!progress.done && Date.now() < deadline) {

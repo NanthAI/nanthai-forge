@@ -152,6 +152,7 @@ test('the top bar main segment and side rails stay accessible at responsive widt
           };
         });
         const page = await context.newPage();
+        await page.clock.setFixedTime(new Date('2026-11-10T12:00:00Z'));
         const errors = [];
         const requests = [];
         page.on('pageerror', error => errors.push(error.message));
@@ -253,6 +254,7 @@ test('the top bar main segment and side rails stay accessible at responsive widt
       await t.test(`the bar contains landing stats and stays pinned in ${type.name()}`, async () => {
         const engine = type === chromium ? browser : await type.launch();
         const page = await engine.newPage({ viewport: { width: 1000, height: 800 } });
+        await page.clock.setFixedTime(new Date('2026-11-10T12:00:00Z'));
         try {
           await routeFixture(page, out, html);
           const widths = [320, 360, 768, 860, 861, 900, 1000, 1100, 1240, 1241, 1280, 1440, 1600];
@@ -337,6 +339,7 @@ test('the top bar main segment and side rails stay accessible at responsive widt
     for (const width of [861, 1000, 1239])
       await t.test(`rail links have accessible names at ${width} px`, async () => {
         const page = await browser.newPage({ viewport: { width, height: 800 } });
+        await page.clock.setFixedTime(new Date('2026-11-10T12:00:00Z'));
         try {
           await routeFixture(page, out, html);
           const unnamed = [];

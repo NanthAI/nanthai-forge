@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { batchesFixture, states } from './hosted-landing-batches-fixture.mjs';
 import { syncFixture } from './hosted-sync-fixture.mjs';
@@ -6,6 +7,7 @@ import { compose } from './hosted-finish-fixture.mjs';
 import { drainReady, retainLegacyCleanSync } from './early-resolution-replay.mjs';
 
 export async function internalConflict(t, beforeCompose) {
+  storageClock(t);
   const f = await batchesFixture(t, {
     count: 0,
     batchMaxSize: 3,
@@ -13,19 +15,6 @@ export async function internalConflict(t, beforeCompose) {
     baselineFiles: [['shared.txt', 'alpha\nmiddle\nomega\n']],
     memberPaths: ['root.txt', 'shared.txt', 'shared.txt'],
     memberContents: ['root', 'alpha-a\nmiddle\nomega\n', 'alpha-c\nmiddle\nomega-c\n'],
-  });
-  const OriginalDate = Date,
-    clock = Date.now;
-  globalThis.Date = class extends OriginalDate {
-    constructor(...args) {
-      super(...(args.length ? args : [clock()]));
-    }
-    static now() {
-      return clock();
-    }
-  };
-  t.after(() => {
-    globalThis.Date = OriginalDate;
   });
   await f.add(0);
   await drainReady(f);

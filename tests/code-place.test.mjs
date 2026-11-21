@@ -50,6 +50,30 @@ test('a large folder is one bounded page at a time and the cursor resumes exactl
   assert.equal(third.next, null);
 });
 
+test('listing a folder jumps past unrelated paths and descendants but counts them exactly', () => {
+  const files = state(
+    'src/a!/extra.ts',
+    'src/a/z.ts',
+    'src0/nearby.ts',
+    ...Array.from({ length: 29_000 }, (_, i) => `src/a/nested/item${i}.ts`),
+  );
+  let inspected = 0;
+  const paths = new Proxy(files, {
+    get(target, key) {
+      if (typeof key === 'string' && /^\d+$/.test(key)) inspected++;
+      return Reflect.get(target, key);
+    },
+  });
+  assert.deepEqual(
+    folderPage(paths, 'src').entries.map(entry => [entry.name, entry.files]),
+    [
+      ['a', 29_001],
+      ['a!', 1],
+    ],
+  );
+  assert.ok(inspected <= 100, `listing inspected ${inspected} paths`);
+});
+
 test('a folder read lists that folder and one level ahead, within a byte budget and never the whole tree', () => {
   const files = state(
     'README.md',
@@ -81,6 +105,11 @@ test('a folder read lists that folder and one level ahead, within a byte budget 
   const sent = bounded.slice(1).reduce((sum, dir) => sum + JSON.stringify(dir).length, 0);
   assert.ok(sent <= one * 3);
   assert.ok(JSON.stringify(withChildren(wide, folderPage(wide, ''))).length <= CODE_AHEAD_BYTES + 8_192);
+
+  const unicode = state('f00/é.ts');
+  const child = JSON.stringify(folderPage(unicode, 'f00'));
+  assert.equal(withChildren(unicode, folderPage(unicode, ''), child.length).length, 1);
+  assert.equal(withChildren(unicode, folderPage(unicode, ''), Buffer.byteLength(child)).length, 2);
 });
 
 test('a warm tab opens a folder it already listed without a read, and asks once for the next level', () => {

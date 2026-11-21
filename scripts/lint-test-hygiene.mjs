@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Frozen-count allowlist for the test-hygiene lint rules (guard 7, Item 611a1795). The rules in
 // scripts/lint/forge-plugin.mjs (test-no-fixed-sleep, test-no-retries, test-no-raised-timeout,
-// test-no-unsignaled-polling) let each tests/ file keep the count it has in
+// test-no-unsignaled-polling, test-no-implicit-date) let each tests/ file keep the count it has in
 // tests/test-hygiene-allowlist.json and no more. This script writes and lowers that file:
 //
 //   node scripts/lint-test-hygiene.mjs --init     write the first allowlist from today's counts; refuses to overwrite
@@ -23,6 +23,7 @@ const KEYS = {
   'test-no-retries': 'retry',
   'test-no-raised-timeout': 'timeout',
   'test-no-unsignaled-polling': 'poll',
+  'test-no-implicit-date': 'date',
 };
 const ORDER = Object.values(KEYS);
 

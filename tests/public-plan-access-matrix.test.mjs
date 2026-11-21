@@ -135,7 +135,7 @@ async function world(t, policy) {
         kind: 'intent',
         id: items[row].itemId,
         version: 0,
-        at: new Date().toISOString(),
+        at: new Date(NOW).toISOString(),
         outcome: items[row].title,
         constraints: items[row].body,
         creatorAccountId: 'owner',
@@ -154,7 +154,7 @@ async function world(t, policy) {
         kind: 'lane',
         id: randomUUID(),
         version: 0,
-        at: new Date().toISOString(),
+        at: new Date(NOW).toISOString(),
         intentId: items[row].itemId,
         actor: 'owner',
         base: { head: 'a'.repeat(64), receiptId: 'receipt' },
@@ -169,7 +169,7 @@ async function world(t, policy) {
       intentId: items[row].itemId,
       receiptId: randomUUID(),
       kind: 'landed',
-      at: new Date().toISOString(),
+      at: new Date(NOW).toISOString(),
       laneIds: [randomUUID()],
       commit: 'c'.repeat(64),
       sequence: 1,
@@ -190,14 +190,14 @@ async function world(t, policy) {
     s.tables.projectFinishReadRows?.set(`header-${row.kind}`, { _id: `header-${row.kind}`, ...row });
   // The owner's People day in this project: two Items closed and three planning comments.
   s.tables.personDays ??= new Map();
-  const day = new Date().toISOString().slice(0, 10);
+  const day = new Date(NOW).toISOString().slice(0, 10);
   s.tables.personDays.set('day', {
     _id: 'day',
     person: 'owner',
     day,
     value: JSON.stringify({
       p: {
-        [s.projectId]: { l: 1, la: 0, n: 0, na: 0, v: 0, t: [Date.now(), Date.now()], r: {}, c: 2, m: 3 },
+        [s.projectId]: { l: 1, la: 0, n: 0, na: 0, v: 0, t: [NOW, NOW], r: {}, c: 2, m: 3 },
       },
     }),
   });
@@ -363,10 +363,10 @@ for (const policy of POLICIES)
       }
       if (viewer === 'signed-out') {
         surfaces['public project page'] = await seen(() =>
-          publicRead.projectPage._handler(s.ctx, { handle: 'ada', slug: 'atlas', now: Date.now() }),
+          publicRead.projectPage._handler(s.ctx, { handle: 'ada', slug: 'atlas', now: NOW }),
         );
         surfaces['public profile page'] = await seen(() =>
-          publicRead.profilePage._handler(s.ctx, { handle: 'ada', now: Date.now() }),
+          publicRead.profilePage._handler(s.ctx, { handle: 'ada', now: NOW }),
         );
       }
       for (const [surface, reply] of Object.entries(surfaces))

@@ -3,6 +3,7 @@
 // day is recorded; the close reads each receipt and its landing row (own columns, no body pages) once and writes one row; the read
 // returns that day as measured figures only, with no clock argument.
 import test from 'node:test';
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { batchesFixture, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { fixtureLayers, readLimits } from './hosted-lanes-fixture.mjs';
@@ -13,6 +14,7 @@ const { landingRequestBodies } = await import(moduleUrl('../convex/projectLandin
 const { scheduleStatsClose, utcDay } = await import(moduleUrl('../convex/projectStatsClose.ts'));
 const { statsDay } = await import(moduleUrl('../src/stats-estimate.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
+test.beforeEach(t => storageClock(t));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
   for (const [k, v] of Object.entries(prior)) {

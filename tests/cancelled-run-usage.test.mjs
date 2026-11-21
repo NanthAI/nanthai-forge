@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -168,6 +169,7 @@ const finish = async f => {
 };
 
 test('cancelled usage stays pending until completion, is shared once, and corrects its closed landing day idempotently', async t => {
+  storageClock(t);
   const { f, row, runId, fence } = await cancelledFixture(t);
   for (const r of f.tables.projectHostedLandingRequests.values()) assert.equal(r.runnerAccounting.pending, 1);
   assert.equal(JSON.parse(row.value).cost.status, 'unknown');

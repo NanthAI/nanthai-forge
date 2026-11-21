@@ -4,6 +4,7 @@
 // already wrote. A break alerts once and opens one P0 Issue; a recovery closes the alert.
 // Replays the B1.5d n3-r3 a1 slowdown (4432 s against a ~1500 s norm).
 import test from 'node:test';
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -601,6 +602,7 @@ test('one weighted R2 break creates one stable P0, stays quiet and recovers with
 
 /** Seeds today's slow landings and the baseline relative to the landing's own clock. */
 async function seededLanding(t, stallAlerts) {
+  storageClock(t);
   const f = await finishFixture(t);
   const policy = [...f.tables.hostedProjects.values()].find(row => row._id === f.projectId).autonomyPolicy;
   f.patch('hostedProjects', f.projectId, {
@@ -609,17 +611,16 @@ async function seededLanding(t, stallAlerts) {
       agentDefaults: { stallAlerts, preflight: 'advise' },
     },
   });
-  // Committed stamps use the wall clock (new Date()), not the fixture's fake Date.now.
-  const wall = new Date().getTime();
+  const seededAt = Date.now();
   // Three slow landings just before this one: whatever it takes, the p90 of the last 20 is over 60 min.
   const seed = landings(null, normal(WINDOW - 4)).state;
-  seed.samples = seed.samples.map(([at, ...rest]) => [at - noon + wall - 3_600_000, ...rest]);
+  seed.samples = seed.samples.map(([at, ...rest]) => [at - noon + seededAt - 3_600_000, ...rest]);
   // The waste tripwire's open day was built at the replay's dates; the shifted seed has no day of its own.
   delete seed.waste;
   seed.samples.push(
-    [wall - 3, 120, 3, 'seed0001'],
-    [wall - 2, 120, 3, 'seed0002'],
-    [wall - 1, 120, 3, 'seed0003'],
+    [seededAt - 3, 120, 3, 'seed0001'],
+    [seededAt - 2, 120, 3, 'seed0002'],
+    [seededAt - 1, 120, 3, 'seed0003'],
   );
   await f.tx('seedLandingSpeed', {
     _handler: ctx =>
