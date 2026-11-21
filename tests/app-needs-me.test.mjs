@@ -359,3 +359,46 @@ test('a Lane held for a dependency names the Lane it lands after when the read n
     ],
   );
 });
+
+test('questions asked ahead are listed separately and a hand-back counts in both Needs you views', () => {
+  const base = {
+    id: 'open',
+    at: 3,
+    actor: 'sample-one',
+    agent: 'amber-fox',
+    text: 'Which endpoint?',
+    choices: ['A', 'B'],
+    laneId: 'lane',
+  };
+  const input = {
+    ...read([], []),
+    asks: [
+      base,
+      { ...base, id: 'ahead', ahead: true },
+      {
+        ...base,
+        id: 'hand-back',
+        choices: ['Decline'],
+        handBack: { head: 'save', left: 'Decide', to: 'owner' },
+      },
+    ],
+  };
+  const view = needsView(input);
+  assert.deepEqual(
+    view.asks.map(row => row.id),
+    ['open', 'hand-back'],
+  );
+  assert.deepEqual(
+    view.askedAhead.map(row => row.id),
+    ['ahead'],
+  );
+  assert.equal(view.count, needsCount(input).n);
+  assert.equal(view.count, 2);
+});
+
+test('a capped Needs you read with no visible asks reports incomplete coverage', () => {
+  const view = needsView({ ...read([], []), asksMore: true });
+  assert.equal(view.atLeast, true);
+  assert.equal(view.count, 0);
+  assert.equal(needsSentence(view).bold, 'Some requests could not be listed.');
+});

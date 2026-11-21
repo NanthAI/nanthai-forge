@@ -21,7 +21,7 @@ import { accessibleProject } from './projectAuthority';
 import { finishRow } from './projectHostedFinishWake';
 import { culpritOf } from './projectMainRed';
 import { landingRow } from './projectHostedLandingStore';
-import { session } from './coordinationWrite';
+import { openLaneForCoordination, receipt, session } from './coordinationWrite';
 import { storedLandingStateSchema } from '../src/hosted-landing';
 import { discardedRunnerSeconds } from '../src/cost-budgets';
 import { report } from './errors';
@@ -63,9 +63,7 @@ const oneLine = (text: unknown) =>
         .slice(0, TEXT) ?? null)
     : null;
 
-/** Messages addressed to this account that it has not acknowledged and whose Lane is still open, newest first.
- * `asks` picks the ones with choices (they wait on the reader) or the ones without (FYI). One index range of at most
- * FYI_MESSAGES rows, then one receipt, one presence and one session point read per row. */
+/** Account-scoped messages and hand-backs. Decisions share the existing Needs read and receipt authority. */
 export async function messagesTo(
   ctx: QueryCtx,
   project: Doc<'hostedProjects'>,
@@ -73,48 +71,50 @@ export async function messagesTo(
   asks: boolean,
 ) {
   const projectId = project._id;
-  const rows = await ctx.db
-    .query('projectCoordinationEvents')
-    .withIndex('by_project_and_kind_and_recipientActor', q =>
-      q.eq('projectId', projectId).eq('kind', 'message').eq('recipientActor', actor),
-    )
-    .order('desc')
-    .take(FYI_MESSAGES);
-  const out = [];
-  const readConversation = await canReadConversation(ctx, project, actor, rows);
-  for (const row of rows) {
-    if (row.conversation && !readConversation) continue;
-    if (row.command.kind !== 'message' || row.actor === actor) continue;
-    if ((Boolean(row.command.choices?.length) && row.command.question?.holdsWork !== false) !== asks)
-      continue;
-    const acked = await ctx.db
-      .query('projectCoordinationReceipts')
-      .withIndex('by_project_and_message_and_actor', q =>
-        q.eq('projectId', projectId).eq('messageId', row.operationId).eq('actor', actor),
+  const recent = (kind: 'message' | 'handoff') =>
+    ctx.db
+      .query('projectCoordinationEvents')
+      .withIndex('by_project_and_kind_and_recipientActor', q =>
+        q.eq('projectId', projectId).eq('kind', kind).eq('recipientActor', actor),
       )
-      .unique();
-    if (acked && (!row.command.question || !asks || acked.choice !== undefined)) continue;
-    const laneId = row.laneId ?? row.command.context.laneId;
-    // A Lane's presence row is deleted when it closes: the message ends with its Lane (landed or abandoned).
-    if (laneId) {
-      const open = await ctx.db
-        .query('projectHostedPresence')
-        .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
-        .unique();
-      if (!open) continue;
-    }
-    const sender = row.command.sessionId ? await session(ctx, projectId, row.command.sessionId) : null;
+      .order('desc')
+      .take(FYI_MESSAGES);
+  const [messages, handoffs] = await Promise.all([recent('message'), asks ? recent('handoff') : []]);
+  const rows = [...messages, ...handoffs];
+  const readConversation = await canReadConversation(ctx, project, actor, rows);
+  const out = [];
+  for (const row of rows) {
+    const command = row.command;
+    if (row.conversation && !readConversation) continue;
+    if (command.kind !== 'message' && command.kind !== 'handoff') continue;
+    const handBack = command.kind === 'handoff' ? command.handBack : undefined;
+    const question = command.kind === 'message' && !!command.choices?.length;
+    if ((!handBack && command.kind !== 'message') || Boolean(question || handBack) !== asks) continue;
+    if (row.actor === actor && !row.conversation) continue;
+    const acked = await receipt(ctx, projectId, row.operationId, actor);
+    if (acked && (!row.conversation || acked.choice !== undefined)) continue;
+    const laneId = row.laneId ?? (command.kind === 'message' ? command.context.laneId : command.laneId);
+    if (laneId && !(await openLaneForCoordination(ctx, projectId, laneId))) continue;
+    const sender = command.sessionId ? await session(ctx, projectId, command.sessionId) : null;
     out.push({
       id: row.operationId,
       at: row.at,
       actor: row.actor,
       agent: sender && sender.kind !== 'person' ? sender.name : null,
-      text: oneLine(row.command.text) ?? '',
-      choices: row.command.choices ?? [],
+      text:
+        command.kind === 'handoff' ? command.summary : asks ? command.text : (oneLine(command.text) ?? ''),
+      choices: command.kind === 'message' ? (command.choices ?? []) : ['Decline'],
       laneId: laneId ?? null,
+      ...(row.planningItemId ? { planningItemId: row.planningItemId } : {}),
+      ...(command.kind === 'message' && command.question?.holdsWork === false
+        ? { ahead: true as const }
+        : {}),
+      ...(command.kind === 'handoff' && handBack
+        ? { handBack: { head: command.head, left: handBack.left, to: actor } }
+        : {}),
     });
   }
-  return { rows: out, more: rows.length === FYI_MESSAGES };
+  return { rows: out, more: messages.length === FYI_MESSAGES || handoffs.length === FYI_MESSAGES };
 }
 
 /** The policy's top-level areas an edit changed, in the reader's words (the full before/after is in Settings). */

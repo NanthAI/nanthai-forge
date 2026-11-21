@@ -808,12 +808,20 @@ layer out of both first paints.
   frame already reads: no other read, one `visibilitychange` listener (`.mk-hidden`)
   and at most one timer, for the next hold end, calm (60 s) or still (5 min or
   live reads asleep). DESIGN.md "Brand mark states" has the rules.
+- The Lane's Thread and the Plan Item's discussion draw board notes and session
+  messages together. The scoped thread read takes one page of 20 entries;
+  earlier pages subscribe when requested. Questions that hold work are pinned among the
+  loaded entries. Answers use the same coordination acknowledgement from the
+  thread and Needs you. Asked-ahead questions appear separately from the count.
+  The thread reads delivery from recorded acknowledgements and offers the saved
+  resume prompt to copy while an answer is waiting. Opening Changes alone does
+  not subscribe to the thread.
 - Needs me (`web/src/app/needs/`) is the project front page, in three
   sections. Needs you reads `projectNeedsMe:read`: the live line's held marks
   (at most 30, the rest counted), each with its title, holder and recorded
   hold reason (the landing's recorded cause wins over an overlap mark), the
-  open approval requests (`openApprovalRequests`), questions with choices
-  addressed to the reader, and the Lanes parked for the reader (one index range
+  open approval requests (`openApprovalRequests`), questions with choices and
+  hand-backs addressed to the reader, and the Lanes parked for the reader (one index range
   on `projectHostedPresence.by_project_and_parked_for`, at most 30; a park is
   one optional field on the Lane record, mirrored onto its presence row). A
   Lane parked with no one named shows once its stored last-activity time is 4 h

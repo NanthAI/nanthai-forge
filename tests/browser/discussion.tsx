@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Plan Item page with its discussion (Item 9a3d6f5f) on synthetic data, through the real Plan screen, the lazy
-// ItemDiscussion chunk and its hosted hooks. The Convex client is a stand-in that answers the three reads the
-// discussion makes (the Work index workspace, the Item's comment page, the reaction counts) and records every write.
+// ItemDiscussion chunk and its hosted hooks. The Convex client is a stand-in that answers the reads the
+// discussion makes (the Work index workspace, comments, reactions and the scoped thread) and records every write.
 // `?viewer=reader` is a reader of a public project: no people, no composer, no reaction keys.
 import { createRoot } from 'react-dom/client';
 import { ConvexProvider, type ConvexReactClient } from 'convex/react';
@@ -14,6 +14,8 @@ import { review } from '../fixtures/review-findings.mjs';
 const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
 const reader = params.get('viewer') === 'reader';
+const withThread = params.has('thread');
+const withPages = params.has('pages');
 
 const uuid = (n: number) => `7be2c41a-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const ITEM = uuid(1),
@@ -101,8 +103,20 @@ const workspace = JSON.stringify({
 });
 const calls: string[] = [];
 const writes: unknown[] = [];
-Object.assign(window, { __calls: calls, __writes: writes });
-function answer(name: string) {
+const watches = new Set<() => void>();
+let newest = 3,
+  answered = false;
+Object.assign(window, {
+  __calls: calls,
+  __writes: writes,
+  changeThread: (change: 'append' | 'answer') => {
+    if (change === 'append') newest++;
+    else answered = true;
+    for (const notify of watches) notify();
+  },
+});
+type Before = { message?: [number, number, string] };
+function answer(name: string, before?: Before) {
   if (name === 'projectWorkIndex:workspace') return workspace;
   if (name === 'projectWorkIndex:records')
     return {
@@ -117,13 +131,76 @@ function answer(name: string) {
       revision: 1,
     };
   if (name === 'planningReactions:forItem') return { counts: reactions, complete: true };
+  if (name === 'projectDiscussionThread:read' && withPages) {
+    const end = before?.message?.[0] ?? newest + 1;
+    const numbers = [end - 1, end - 2].filter(n => n > 0);
+    return {
+      canRead: true,
+      before: numbers.at(-1)! > 1 ? { message: [numbers.at(-1), 0, 'cursor'] } : null,
+      entries: numbers.map(n => ({
+        id: uuid(30 + n),
+        at: Date.parse(minutes(n)),
+        actor: 'sample-two',
+        text: `Message ${n}`,
+        type: n === 1 ? 'question' : 'note',
+        ...(n === 1
+          ? {
+              choices: ['Pick A', 'Pick B'],
+              mayAnswer: !answered,
+              ...(answered ? { answer: { choice: 'Pick A', text: 'Chosen elsewhere' } } : {}),
+            }
+          : {}),
+      })),
+    };
+  }
+  if (name === 'projectDiscussionThread:read')
+    return {
+      canRead: !reader,
+      before: null,
+      entries:
+        withThread && !reader
+          ? [
+              {
+                id: uuid(17),
+                type: 'question',
+                actor: 'sample-two',
+                agent: 'keen-impala',
+                at: Date.parse(minutes(-4)),
+                text: 'Which endpoint should we use?',
+                choices: ['The old endpoint', 'The new endpoint', 'LongEndpoint'.repeat(10)],
+                mayAnswer: true,
+              },
+              {
+                id: uuid(18),
+                type: 'question',
+                actor: 'sample-two',
+                agent: 'keen-impala',
+                at: Date.parse(minutes(40)),
+                text: 'Which release can ship?',
+                answer: {
+                  actor: 'sample-one',
+                  choice: 'Release 3',
+                  text: 'QA is green.',
+                  resumePrompt: 'Resume the release after reading the recorded answer.',
+                },
+              },
+            ]
+          : [],
+    };
   throw new Error(`Unexpected read ${name}`);
 }
 const client = {
-  watchQuery: (fn: FunctionReference<'query'>) => {
+  watchQuery: (fn: FunctionReference<'query'>, args: { before?: Before }) => {
     const name = getFunctionName(fn);
     calls.push(name);
-    return { localQueryResult: () => answer(name), journal: () => undefined, onUpdate: () => () => {} };
+    return {
+      localQueryResult: () => answer(name, args.before),
+      journal: () => undefined,
+      onUpdate: (notify: () => void) => {
+        watches.add(notify);
+        return () => watches.delete(notify);
+      },
+    };
   },
   mutation: async (fn: FunctionReference<'mutation'>, args: unknown) => {
     writes.push([getFunctionName(fn), args]);

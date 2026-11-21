@@ -135,6 +135,44 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
       assert.equal(await heading.textContent(), headingFromLanes);
     });
 
+    await t.test('the Lane strip opens the merged Thread without reading it on Changes', async t => {
+      const lane = '/-/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
+      for (const viewport of [DESK, PHONE]) {
+        const page = await open(t, viewport, 'routes', lane);
+        const strip = page.getByRole('navigation', { name: 'Lane sections' });
+        await strip.getByRole('link', { name: 'Changes' }).waitFor();
+        assert.equal(
+          await page.evaluate(() => window.__watches.includes('projectDiscussionThread:read')),
+          false,
+        );
+        await strip.getByRole('link', { name: 'Thread' }).click();
+        const section = page.getByRole('region', { name: 'Thread', exact: true });
+        await section.getByRole('button', { name: 'Old client' }).waitFor();
+        assert.match(
+          await section.locator('article').first().textContent(),
+          /Which client should land first/,
+        );
+        assert.match(await section.locator('article').last().textContent(), /Legacy board note/);
+        assert.equal(await page.evaluate(() => location.pathname), lane + '/thread');
+        assert.equal(await page.getByRole('region', { name: 'The change' }).count(), 0);
+        await page.addScriptTag({ path: axePath });
+        for (const theme of ['dark', 'light']) {
+          await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
+          const [fits, violations] = await page.evaluate(async () => [
+            document.documentElement.scrollWidth <= innerWidth,
+            (
+              await window.axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] } })
+            ).violations.map(v => v.id),
+          ]);
+          assert.equal(fits, true);
+          assert.deepEqual(violations, []);
+          await shot(page, `lane-thread-${viewport.width}-${theme}`);
+        }
+        await strip.getByRole('link', { name: 'Changes' }).click();
+        await page.getByRole('region', { name: 'The change' }).waitFor();
+      }
+    });
+
     await t.test(
       '954afe8c: unavailable titles use the short Item id, and recorded titles are retained',
       async t => {

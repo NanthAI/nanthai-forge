@@ -5,9 +5,11 @@
 // reads and writes. Who wrote a comment is the server-recorded account by public identity only (Item 2fb69177): `@handle`
 // and "person", or `handle/run`, "agent" and the model its session declared; an older typed label is marked as not
 // verified. An agent's words sit behind a thin rule (DESIGN.md rule 33), so the two kinds read apart.
-import { useId, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Band, Key, Menu } from '../../ds';
 import { By } from './By';
+import { ConversationEntry } from './ConversationEntry';
+import type { Answer, ThreadEntry } from './conversation';
 import type { WhoProject } from '../who-links';
 import { SafeMarkdown } from '../../ds/markdown';
 import { readReview, ReviewFindings } from './ReviewFindings';
@@ -41,6 +43,16 @@ export type DiscussionProps = {
   pageSize?: number;
   now?: Date;
   project?: WhoProject | undefined;
+  title?: 'Comments' | 'Thread';
+  conversation?: {
+    entries: readonly ThreadEntry[];
+    loading: boolean;
+    loadingMore?: boolean;
+    readFailed?: boolean;
+    failed?: boolean;
+    loadEarlier?: (() => void) | undefined;
+    answer: Answer;
+  };
 };
 
 export function Discussion({
@@ -53,34 +65,109 @@ export function Discussion({
   pageSize = 20,
   now = new Date(),
   project,
+  title = 'Comments',
+  conversation,
 }: DiscussionProps) {
-  const all = threads(comments);
+  const all = threads([
+    ...comments,
+    ...(conversation?.entries.map((row): DiscussionComment => ({
+      id: row.id,
+      itemId: '',
+      text: row.text,
+      at: new Date(row.at).toISOString(),
+      ...(row.actor ? { author: row.actor } : {}),
+      ...(row.agent ? { agent: row.agent } : {}),
+      ...(row.replyTo ? { replyTo: row.replyTo } : {}),
+      conversation: row,
+    })) ?? []),
+  ]);
+  const pending = all.filter(({ root }) => {
+    const row = root.conversation;
+    return row?.type === 'question' && !row.answer && !row.ahead && !row.ended;
+  });
+  const recent = all.filter(thread => !pending.includes(thread));
+  const anchor = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (location.hash !== '#discussion') return;
+    anchor.current?.scrollIntoView();
+    anchor.current?.focus({ preventScroll: true });
+  }, []);
   const [shown, setShown] = useState(pageSize);
   const [replying, setReplying] = useState<string | null>(null);
-  const { visible, earlier } = latest(all, shown);
-  const total = comments.length;
+  const { visible, earlier } = latest(recent, shown);
+  const total = comments.length + (conversation?.entries.length ?? 0);
+  const reading = loading || conversation?.loading;
+  const more = conversation?.loadEarlier;
+  const conversationActions = conversation ? { answer: conversation.answer } : {};
   return (
-    <section className="sec discussion" aria-label="Comments">
+    <section className="sec discussion" id="discussion" aria-label={title} ref={anchor} tabIndex={-1}>
       <Band
-        title="Comments"
+        title={title}
         count={total}
         hint={
-          loading
-            ? 'reading the rest…'
+          reading || more
+            ? reading
+              ? 'reading the rest…'
+              : 'loaded so far'
             : all.length !== total
               ? `${all.length} ${all.length === 1 ? 'thread' : 'threads'}`
               : undefined
         }
       />
-      {earlier ? (
+      {pending.map(({ root, replies }) => (
+        <div key={root.id} className="thread-of" data-pinned="">
+          <Comment
+            comment={root}
+            reactions={[]}
+            canWrite={false}
+            now={now}
+            project={project}
+            {...conversationActions}
+          />
+          {replies.map(reply => (
+            <Comment
+              key={reply.id}
+              comment={reply}
+              reply
+              reactions={[]}
+              canWrite={false}
+              now={now}
+              project={project}
+              {...conversationActions}
+            />
+          ))}
+        </div>
+      ))}
+      {earlier || more ? (
         <div className="quietline">
-          Showing the latest {visible.length} of {all.length} threads.{' '}
-          <Key size="sm" onClick={() => setShown(value => value + pageSize)}>
-            Show {Math.min(pageSize, earlier)} earlier
+          {earlier ? (
+            <>
+              Showing the latest {visible.length} of {recent.length} threads.{' '}
+            </>
+          ) : null}
+          <Key
+            size="sm"
+            disabled={conversation?.loadingMore}
+            onClick={() => {
+              if (earlier < pageSize) more?.();
+              setShown(value => value + pageSize);
+            }}
+          >
+            {conversation?.loadingMore
+              ? 'Loading earlier…'
+              : `Show ${more ? pageSize : Math.min(pageSize, earlier)} earlier`}
           </Key>
+          {conversation?.failed ? <p role="alert">Could not read earlier messages. Try again.</p> : null}
         </div>
       ) : null}
-      {!total && !loading ? <p className="quietline">No comments yet.</p> : null}
+      {conversation?.readFailed ? (
+        <p className="quietline" role="alert">
+          Could not load the conversation.
+        </p>
+      ) : null}
+      {!total && !reading && !conversation?.readFailed ? (
+        <p className="quietline">{title === 'Thread' ? 'No messages yet.' : 'No comments yet.'}</p>
+      ) : null}
       {visible.map(thread => (
         <div key={thread.root.id} className="thread-of">
           <Comment
@@ -89,8 +176,9 @@ export function Discussion({
             canWrite={canWrite}
             now={now}
             project={project}
+            {...conversationActions}
             {...(onReact ? { onReact } : {})}
-            {...(canWrite && onPost && !thread.root.system
+            {...(canWrite && onPost && !thread.root.system && !thread.root.conversation
               ? { onReply: () => setReplying(thread.root.id) }
               : {})}
           />
@@ -103,6 +191,7 @@ export function Discussion({
               canWrite={canWrite}
               now={now}
               project={project}
+              {...conversationActions}
               {...(onReact ? { onReact } : {})}
             />
           ))}
@@ -129,6 +218,7 @@ function Comment({
   project,
   onReact,
   onReply,
+  answer,
 }: {
   comment: DiscussionComment;
   reply?: boolean;
@@ -138,13 +228,15 @@ function Comment({
   project?: WhoProject | undefined;
   onReact?: (commentId: string, kind: ReactionKind) => Promise<void>;
   onReply?: () => void;
+  answer?: Answer;
 }) {
   const by = writer(comment);
-  const review = readReview(comment.text);
-  const counts = reactionsFor(reactions, comment.id);
+  const row = comment.conversation;
+  const review = row ? null : readReview(comment.text);
+  const counts = row ? [] : reactionsFor(reactions, comment.id);
   // A system note (a landing receipt) takes no reaction or reply: nobody wrote it.
   const react =
-    canWrite && onReact && !comment.system
+    canWrite && onReact && !comment.system && !row
       ? (kind: ReactionKind) => void onReact(comment.id, kind)
       : undefined;
   return (
@@ -154,13 +246,24 @@ function Comment({
         <time dateTime={comment.at} title={comment.at}>
           {when(comment.at, now)}
         </time>
+        {row?.type === 'question' ? (
+          <span className="chip">
+            <span>{row.answer || row.ended ? 'Question' : row.ahead ? 'Asked ahead' : 'Open question'}</span>
+          </span>
+        ) : row?.type === 'hand-back' || row?.type === 'handoff' ? (
+          <span className="chip">
+            <span>{row.type === 'hand-back' ? 'Handed back' : 'Handoff'}</span>
+          </span>
+        ) : null}
         {comment.decision ? (
           <span className="chip" title="Kept in the Item body, with its date">
             <span>Decision</span>
           </span>
         ) : null}
       </div>
-      {comment.text.length > MAX_COMMENT_CHARACTERS ? (
+      {row && (row.type !== 'note' || row.withdrawnAt !== undefined) ? (
+        <ConversationEntry row={row} project={project} {...(answer ? { answer } : {})} />
+      ) : comment.text.length > MAX_COMMENT_CHARACTERS ? (
         <p className="quietline">
           This comment is longer than {MAX_COMMENT_CHARACTERS.toLocaleString('en-US')} characters and is not
           shown.

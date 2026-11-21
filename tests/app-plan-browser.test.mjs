@@ -98,6 +98,7 @@ const linkBackend = fakeConvex({
       return { id: row.id, row: row === linkedOpen ? null : JSON.stringify(row) };
     }
     if (name === 'projectPlanWorkers:read') return '{"lanes":[]}';
+    if (name === 'projectDiscussionThread:read') return { canRead: true, entries: [], before: null };
     if (name === 'projectItemWork:read') return window.readItemWork?.(args) ?? '{"role":false}';
     if (name === 'projectPlanSettled:page') return {
       page: settledRows.filter(row => row.status === args.status).map(row => JSON.stringify(row)),
@@ -971,7 +972,8 @@ test('plan views and bulk bar: real components keep the view in the address and 
           await page.getByRole('region', { name: 'Comments', exact: true }).waitFor();
           const shift = await page.evaluate(() => window.shifts.reduce((sum, value) => sum + value, 0));
           t.diagnostic(`Item load shift ${width} ${theme}: ${shift.toFixed(3)}`);
-          const lanes = work.locator('a[href*="/lanes/"]:not([href*="/sessions/"])');
+          const lanes = work.locator('a.ttl[href*="/lanes/"]');
+          const laneThreads = work.locator('a[href$="/thread"]');
           assert.equal(
             await work.getByRole('button', { name: 'Lanes', exact: true }).getAttribute('aria-expanded'),
             'true',
@@ -996,6 +998,11 @@ test('plan views and bulk bar: real components keep the view in the address and 
           assert.doesNotMatch(await page.locator('.head .crumb').textContent(), /00000000/);
           const landings = work.getByRole('link', { name: /^Landing / });
           assert.equal(await lanes.count(), 10);
+          assert.equal(await laneThreads.count(), 10);
+          assert.equal(
+            await laneThreads.first().getAttribute('href'),
+            `/-/example-builder/synthetic/lanes/${workFixture.open.id}/thread`,
+          );
           assert.equal(
             await lanes.first().getAttribute('href'),
             `/-/example-builder/synthetic/lanes/${workFixture.open.id}`,
@@ -1032,6 +1039,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
           }
           assert.deepEqual(await page.evaluate(() => window.planQueries), ['projectItemWork:read']);
           assert.deepEqual((await page.evaluate(() => window.planSubscriptions())).sort(), [
+            'projectDiscussionThread:read',
             'projectPlanCounts:read',
             'projectPlanView:read',
             'projectWorkIndex:workspace',
@@ -1040,6 +1048,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
           await lanes.filter({ hasText: 'Synthetic outcome' }).last().waitFor();
           await work.locator(`a[href$="/lanes/${workFixture.abandoned.id}"]`).waitFor();
           assert.equal(await lanes.count(), 12);
+          assert.equal(await laneThreads.count(), 12);
           assert.equal(await landings.count(), 2);
           assert.equal(await work.getByRole('link', { name: 'Define the wire format' }).count(), 1);
           assert.equal(await more.count(), 0);

@@ -6,7 +6,7 @@ export default [
   {
     place: 'lanes',
     section: '',
-    match: route => route.rest !== '' && !route.rest.includes('/'),
+    match: route => /^[^/]+(?:\/thread)?$/.test(route.rest),
     load: () => import('./LaneReview'),
   },
 ] satisfies ScreenRoutes;

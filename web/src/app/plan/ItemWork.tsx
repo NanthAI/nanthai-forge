@@ -252,6 +252,14 @@ export function ItemWork({
                     · Last save <WorkTime at={lane.lastSaveAt} />
                   </>
                 ) : null}
+                <A
+                  className="lk"
+                  style={{ textDecoration: 'underline' }}
+                  href={at({ place: 'lanes', rest: `${lane.laneId}/thread` })}
+                  aria-label={`Thread for ${lane.title ?? `Lane ${lane.laneId.slice(0, 8)}`}`}
+                >
+                  Thread
+                </A>
               </div>
             </Row>
           ))

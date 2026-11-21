@@ -83,7 +83,7 @@ const LANE = '7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
 const ITEM = '9e8d7c6b-5a49-4382-9170-6f5e4d3c2b1a';
 const INTENT = '2a3f12de-8371-4310-a004-f9cae1ef291c';
 const TITLE = scenario === 'uuid-title' ? INTENT : 'Stream parser: handle split UTF-8';
-const reads = new Map<string, string>();
+const reads = new Map<string, unknown>();
 const BASE = 'b'.repeat(64);
 const AHEAD_HEAD = 'a1'.repeat(32);
 const HEAD = 'c3'.repeat(32);
@@ -293,6 +293,23 @@ function Routed() {
 void reply().then(data => {
   if (routed) {
     reads.set('projectLaneReview:read', JSON.stringify(data));
+    reads.set('projectDiscussionThread:read', {
+      canRead: true,
+      before: null,
+      entries: [
+        { id: 'legacy-board', at: 2, type: 'note', actor: 'sample-owner', text: 'Legacy board note' },
+        {
+          id: 'new-question',
+          at: 1,
+          type: 'question',
+          actor: 'sample-two',
+          agent: 'salt-wren',
+          text: 'Which client should land first?',
+          choices: ['Old client', 'New client'],
+          mayAnswer: true,
+        },
+      ],
+    });
     reads.set(
       'projectHostedLiveLanes:list',
       JSON.stringify({

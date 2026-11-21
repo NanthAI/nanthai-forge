@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Plan Item page with its discussion in a real browser (Item 9a3d6f5f), on synthetic data through its real
-// components (tests/browser/discussion.tsx): the comments load on their own chunk with three reads and nothing on a
+// components (tests/browser/discussion.tsx): the comments load on their own chunk with four reads and nothing on a
 // clock, member HTML never runs, a reader of a public project sees no people and no composer, a typed label is marked
 // as not verified, a comment posts once with the server choosing its writer, and axe is clean with no sideways scroll
 // at desk and phone width in both themes. Set FORGE_DISCUSSION_SHOTS to a folder to also save the screenshots.
@@ -99,7 +99,7 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
 
   try {
     await t.test(
-      'a writer sees threads, decisions and reactions; the reads are three and none on a clock',
+      'a writer sees threads, decisions and reactions; the four scoped reads are on load',
       async t => {
         const page = await open(t, DESK);
         const section = page.locator('section[aria-label="Comments"]');
@@ -122,6 +122,7 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
         // Distinct subscriptions (a re-render re-attaches a watch to the same query; the client shares it).
         assert.deepEqual([...new Set(await page.evaluate(() => window.__calls))].sort(), [
           'planningReactions:forItem',
+          'projectDiscussionThread:read',
           'projectWorkIndex:records',
           'projectWorkIndex:workspace',
         ]);
@@ -162,9 +163,58 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
       );
     });
 
+    await t.test(
+      'an Item question answers in place and a stopped agent has a copyable resume prompt',
+      async t => {
+        const page = await open(t, DESK, 'thread=1#discussion');
+        const section = page.locator('section[aria-label="Comments"]');
+        await page.waitForFunction(() => document.activeElement?.id === 'discussion');
+        const pending = section.locator('[data-pinned]');
+        assert.match(await section.locator('article').first().textContent(), /Which endpoint should we use/);
+        await pending.getByRole('textbox', { name: 'Reason (optional)' }).fill('Both clients support it.');
+        await pending.getByRole('button', { name: 'The new endpoint' }).click();
+        await pending.getByRole('status').getByText('Answered “The new endpoint”.').waitFor();
+        const [[name, { operationId, command }]] = await page.evaluate(() => window.__writes);
+        assert.equal(name, 'projectCoordination:publish');
+        assert.match(operationId, /^[a-f0-9-]{36}$/);
+        assert.equal(command.kind, 'ack');
+        assert.equal(command.choice, 'The new endpoint');
+        assert.equal(command.text, 'Both clients support it.');
+        await section.getByText('Resume prompt', { exact: true }).click();
+        await section.getByText('Resume the release after reading the recorded answer.').waitFor();
+        await page
+          .context()
+          .grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'https://forge.test' });
+        await section.getByRole('button', { name: 'Give this to your agent' }).click();
+        await section.getByText('Resume prompt copied.').waitFor();
+        assert.equal(
+          await page.evaluate(() => navigator.clipboard.readText()),
+          'Resume the release after reading the recorded answer.',
+        );
+      },
+    );
+
+    await t.test(
+      'opened history follows answers and restarts at the current boundary after new messages',
+      async t => {
+        const page = await open(t, DESK, 'pages=1');
+        const section = page.locator('section[aria-label="Comments"]');
+        await section.getByRole('button', { name: 'Show 20 earlier' }).click();
+        await section.getByRole('button', { name: 'Pick A' }).waitFor();
+        await page.evaluate(() => window.changeThread('answer'));
+        await section.getByText('Chosen elsewhere').waitFor();
+        assert.equal(await section.getByRole('button', { name: 'Pick A' }).count(), 0);
+        await page.evaluate(() => window.changeThread('append'));
+        await section.getByText('Message 4', { exact: true }).waitFor();
+        await section.getByRole('button', { name: 'Show 20 earlier' }).click();
+        await section.getByText('Message 2', { exact: true }).waitFor();
+        assert.equal(await section.getByText('Chosen elsewhere').count(), 1);
+      },
+    );
+
     await t.test('axe and widths: both themes, desk and phone', async t => {
       for (const viewport of [DESK, PHONE])
-        for (const query of ['', 'viewer=reader', 'review=1']) {
+        for (const query of ['', 'viewer=reader', 'review=1', 'thread=1']) {
           const page = await open(t, viewport, query);
           await page.addScriptTag({ path: axePath });
           for (const theme of ['dark', 'light']) {
@@ -189,7 +239,8 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
               );
             });
             assert.deepEqual(violations, [], `axe at ${viewport.width} ${query} ${theme}`);
-            if (!query) await shot(page, `discussion-${viewport.width}-${theme}`);
+            if (!query || query === 'thread=1')
+              await shot(page, `discussion${query ? '-thread' : ''}-${viewport.width}-${theme}`);
             if (query === 'review=1') {
               const section = page.locator('section[aria-label="Comments"]');
               assert.equal(await section.locator('article').count(), 5);

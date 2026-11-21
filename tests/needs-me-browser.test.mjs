@@ -341,6 +341,25 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       assert.equal(await page.evaluate(() => window.intervals), 0, 'no repeating timer: idle costs nothing');
     });
 
+    await t.test('a hand-back and an asked-ahead question are actionable in Needs you', async t => {
+      const page = await open(t, PHONE, 'conversation');
+      const needs = region(page, 'Needs you');
+      const handBack = needs.locator('.dec', { hasText: 'Tried both clients' });
+      assert.match(await handBack.textContent(), /Decide which client ships/);
+      assert.equal(
+        await handBack.getByRole('link', { name: 'Open the thread' }).getAttribute('href'),
+        '/-/sample-one/tidepool/lanes/5d1c7a0e-0000-4000-8000-000000000004/thread',
+      );
+      const ahead = needs.locator('.grp', { has: page.getByText('Asked ahead', { exact: true }) });
+      assert.equal(await ahead.getByRole('button', { name: 'Use it', exact: true }).count(), 1);
+      assert.match(await needs.locator('.dec').first().textContent(), /Tried both clients/);
+      await handBack.getByRole('textbox', { name: 'Reason (optional)' }).fill('I can finish this.');
+      await handBack.getByRole('button', { name: 'Decline' }).click();
+      assert.deepEqual(await page.evaluate(() => window.writes), [
+        ['answer', '5d1c7a0e-0000-4000-8000-000000000071', 'Decline', 'I can finish this.'],
+      ]);
+    });
+
     await t.test(
       'filters, Dismiss and Clear all write once on the click; Loose ends is open by default',
       async t => {

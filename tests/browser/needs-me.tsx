@@ -340,43 +340,84 @@ const extraRead: NeedsRead = {
     complete: true,
   }),
 };
+const conversationRead: NeedsRead = {
+  held: [],
+  more: 0,
+  moreIsLowerBound: false,
+  approvals: JSON.stringify({ requests: [], complete: true }),
+  canDecide: true,
+  asks: [
+    {
+      id: uuid(70),
+      at: ago(8),
+      actor: 'sample-two',
+      agent: 'amber-fox',
+      text: 'Which endpoint?',
+      choices: ['Use v1', 'Use v2'],
+      laneId: uuid(3),
+    },
+    {
+      id: uuid(71),
+      at: ago(12),
+      actor: 'sample-two',
+      agent: 'amber-fox',
+      text: 'Tried both clients',
+      choices: ['Decline'],
+      laneId: uuid(4),
+      handBack: { head: 'b'.repeat(64), left: 'Decide which client ships', to: 'sample-one' },
+    },
+    {
+      id: uuid(72),
+      at: ago(10),
+      actor: 'sample-two',
+      agent: 'amber-fox',
+      text: 'Use the new client next time?',
+      choices: ['Use it', 'Keep the old one'],
+      laneId: null,
+      planningItemId: uuid(5),
+      ahead: true,
+    },
+  ],
+};
 const read: NeedsRead =
-  variant === 'held-more'
-    ? extraRead
-    : worst || variant === 'towers'
-      ? worstRead
-      : calm || quiet || unavailable
-        ? {
-            held: [],
-            more: 0,
-            moreIsLowerBound: false,
-            approvals: JSON.stringify({ requests: [], complete: true }),
-            canDecide: true,
-            asks: [],
-          }
-        : connect
+  variant === 'conversation'
+    ? conversationRead
+    : variant === 'held-more'
+      ? extraRead
+      : worst || variant === 'towers'
+        ? worstRead
+        : calm || quiet || unavailable
           ? {
               held: [],
               more: 0,
               moreIsLowerBound: false,
-              approvals: JSON.stringify({
-                requests: [
-                  {
-                    ...approval(
-                      'setting:github-connect',
-                      'Mirror main to synthetic/repo so reviewers on GitHub see each landing.',
-                      4,
-                    ),
-                    kind: 'setting',
-                    setting: { origin: 'github-connect' },
-                  },
-                ],
-                complete: true,
-              }),
+              approvals: JSON.stringify({ requests: [], complete: true }),
               canDecide: true,
               asks: [],
             }
-          : baseRead;
+          : connect
+            ? {
+                held: [],
+                more: 0,
+                moreIsLowerBound: false,
+                approvals: JSON.stringify({
+                  requests: [
+                    {
+                      ...approval(
+                        'setting:github-connect',
+                        'Mirror main to synthetic/repo so reviewers on GitHub see each landing.',
+                        4,
+                      ),
+                      kind: 'setting',
+                      setting: { origin: 'github-connect' },
+                    },
+                  ],
+                  complete: true,
+                }),
+                canDecide: true,
+                asks: [],
+              }
+            : baseRead;
 type Mark = LineFeed['lanes'][number];
 const moving = (n: number, stage: Mark['stage'], minutes: number, check?: string): Mark => ({
   laneId: uuid(400 + n),
@@ -603,7 +644,7 @@ function Fixture() {
           closedToday: null,
         }}
         decide={record('decide')}
-        answer={async (ask, choice) => void writes.push(['answer', ask.id, choice])}
+        answer={async (ask, choice, reason) => void writes.push(['answer', ask.id, choice, reason])}
         dismiss={record('dismiss')}
         loose={open =>
           open ? (

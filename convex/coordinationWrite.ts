@@ -51,6 +51,15 @@ export const receipt = (ctx: Ctx, projectId: Id<'hostedProjects'>, messageId: st
       q.eq('projectId', projectId).eq('messageId', messageId).eq('actor', actor),
     )
     .unique();
+/** A closed Lane has no presence row, so its requests are history. */
+export async function openLaneForCoordination(ctx: Ctx, projectId: Id<'hostedProjects'>, laneId: string) {
+  return (
+    (await ctx.db
+      .query('projectHostedPresence')
+      .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
+      .unique()) !== null
+  );
+}
 export const claimById = (ctx: Ctx, projectId: Id<'hostedProjects'>, claimId: string) =>
   ctx.db
     .query('projectCoordinationClaims')

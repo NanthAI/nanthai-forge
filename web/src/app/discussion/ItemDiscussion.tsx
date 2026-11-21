@@ -5,6 +5,7 @@ import type { Id } from '../../../../convex/_generated/dataModel';
 import type { WhoProject } from '../who-links';
 import { Discussion } from './Discussion';
 import { useDiscussion } from './useDiscussion';
+import { useAnswer, useConversation } from './useConversation';
 
 export default function ItemDiscussion({
   projectId,
@@ -16,9 +17,12 @@ export default function ItemDiscussion({
   project?: WhoProject | undefined;
 }) {
   const { comments, loading, reactions, canWrite, post, react } = useDiscussion(projectId, itemId);
+  const conversation = useConversation(projectId, 'item', itemId);
+  const answer = useAnswer(projectId);
   return (
     <Discussion
       comments={comments}
+      conversation={{ ...conversation, answer }}
       project={project}
       reactions={reactions}
       canWrite={canWrite}

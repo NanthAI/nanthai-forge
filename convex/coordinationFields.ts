@@ -190,7 +190,16 @@ export const coordinationTables = {
     .index('by_project_and_kind_and_recipientActor', ['projectId', 'kind', 'recipientActor'])
     .index('by_project_and_intentId', ['projectId', 'intentId'])
     .index('by_project_and_laneId', ['projectId', 'laneId'])
-    .index('by_project_and_planningItemId', ['projectId', 'planningItemId']),
+    .index('by_project_and_planningItemId', ['projectId', 'planningItemId'])
+    .index('by_project_and_kind_and_laneId_and_at', ['projectId', 'kind', 'laneId', 'at'])
+    .index('by_project_and_kind_and_planningItemId_and_at', ['projectId', 'kind', 'planningItemId', 'at'])
+    .index('by_project_and_kind_and_intentId_and_laneId_and_at', [
+      'projectId',
+      'kind',
+      'intentId',
+      'laneId',
+      'at',
+    ]),
   projectCoordinationReceipts: defineTable(receiptFields).index('by_project_and_message_and_actor', [
     'projectId',
     'messageId',

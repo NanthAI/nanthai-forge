@@ -107,6 +107,7 @@ export const needsMeResult = v.object({
   ),
   parkedMore: v.optional(v.boolean()),
   /** Questions with choices addressed to the viewer, unanswered, on an open Lane (Items 12fde646, 48049998). */
+  asksMore: v.optional(v.literal(true)),
   asks: v.optional(
     v.array(
       v.object({
@@ -117,6 +118,9 @@ export const needsMeResult = v.object({
         text: v.string(),
         choices: v.array(v.string()),
         laneId: v.union(v.string(), v.null()),
+        planningItemId: v.optional(v.string()),
+        ahead: v.optional(v.literal(true)),
+        handBack: v.optional(v.object({ head: v.string(), left: v.string(), to: v.string() })),
       }),
     ),
   ),
@@ -306,6 +310,7 @@ export const read = query({
         approvals,
         canDecide: project.owner === user.subject,
         asks: asks.rows,
+        ...(asks.more ? { asksMore: true as const } : {}),
       };
     } catch (error) {
       return report(error);

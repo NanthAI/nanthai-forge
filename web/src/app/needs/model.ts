@@ -69,6 +69,7 @@ export type NeedsView = {
   now: NowRow[];
   /** Questions with choices for the reader: they wait on the reader, so they are counted. */
   asks: AskRow[];
+  askedAhead?: AskRow[];
   /** Lanes parked for the reader that show now (count.ts `parkShown`): counted. */
   parked: ParkedRow[];
   /** Held, but nothing for a person to decide (count.ts `waitsOnPerson`): FYI rows, never counted. */
@@ -249,9 +250,11 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
     .sort((a, b) => a.since - b.since);
   const waiting = rows.filter(row => row.waits).map(({ waits: _waits, ...row }) => row);
   const fyi = rows.filter(row => !row.waits).map(({ waits: _waits, ...row }) => row);
-  const asks = (read.asks ?? [])
+  const messageRows = (read.asks ?? [])
     .map(ask => ({ ...ask, who: whoOf(ask.actor, ask.agent) }))
     .sort((a, b) => a.at - b.at);
+  const asks = messageRows.filter(row => !row.ahead);
+  const askedAhead = messageRows.filter(row => row.ahead);
   const parked = (read.parked ?? [])
     .filter(row => parkShown(row, now))
     .map(parkedRow)
@@ -277,11 +280,12 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
   return {
     now: waiting,
     asks,
+    ...(askedAhead.length ? { askedAhead } : {}),
     parked,
     fyi,
     ahead,
     count: waiting.length + asks.length + parked.length,
-    atLeast: read.more > 0 || read.parkedMore === true,
+    atLeast: read.more > 0 || read.parkedMore === true || read.asksMore === true,
     approvalsComplete: complete,
   };
 }
@@ -291,11 +295,13 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString
 /** The page sentence: the answer first, then at most one more clause (DESIGN.md rule 45). */
 export function needsSentence(view: NeedsView): { bold: string; rest: string } {
   const lanes = `${view.atLeast ? 'At least ' : ''}${plural(view.count, 'thing')}`;
-  const ahead = view.ahead.length
-    ? `${plural(view.ahead.length, 'request')} asked ahead ${view.ahead.length === 1 ? 'holds' : 'hold'} nothing yet.`
+  const aheadCount = view.ahead.length + (view.askedAhead?.length ?? 0);
+  const ahead = aheadCount
+    ? `${plural(aheadCount, 'request')} asked ahead ${aheadCount === 1 ? 'holds' : 'hold'} nothing yet.`
     : '';
   if (view.count)
     return { bold: `${lanes} ${view.count === 1 ? 'holds' : 'hold'} work until you decide.`, rest: ahead };
+  if (view.atLeast) return { bold: 'Some requests could not be listed.', rest: ahead };
   return {
     bold: 'Nothing needs you.',
     rest: ahead || 'Nothing is held and no agent is waiting for an answer.',

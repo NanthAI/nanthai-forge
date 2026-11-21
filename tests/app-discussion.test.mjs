@@ -189,3 +189,78 @@ test('decisions are marked, reactions show counts and the viewer’s own, reader
   assert.doesNotMatch(reader, />Reply</);
   assert.match(reader, /disabled=""/);
 });
+
+test('Lane and Item threads pin an open ask ahead of history and retain the answer and resume prompt', () => {
+  const ask = {
+    id: id(30),
+    at: Date.parse('2026-11-05'),
+    actor: 'sample-one',
+    agent: 'amber-fox',
+    type: 'question',
+    text: 'Which endpoint should the Lane use?',
+    choices: ['Use v1', 'Use v2'],
+    mayAnswer: true,
+  };
+  const note = {
+    id: id(31),
+    at: Date.parse('2026-11-12'),
+    actor: 'sample-one',
+    type: 'note',
+    text: 'Board note',
+  };
+  const answer = async () => {};
+  const open = render({
+    title: 'Thread',
+    comments: [],
+    conversation: { entries: [note, ask], loading: false, answer },
+  });
+  assert.match(open, /data-pinned/);
+  assert(open.indexOf(ask.text) < open.indexOf(note.text));
+  assert.match(open, /<button[^>]*><span dir="auto">Use v1<\/span><\/button>/);
+  assert.match(open, /<button[^>]*><span dir="auto">Use v2<\/span><\/button>/);
+  const recorded = render({
+    comments: [comment(4, { text: 'Item comment' })],
+    conversation: {
+      entries: [
+        note,
+        {
+          ...ask,
+          answer: { choice: 'Use v2', text: 'Both clients use it.', resumePrompt: 'Resume this Lane.' },
+        },
+      ],
+      loading: false,
+      answer,
+    },
+  });
+  assert.doesNotMatch(recorded, /data-pinned|<button[^>]*><span dir="auto">Use v1<\/span><\/button>/);
+  assert(recorded.indexOf(ask.text) < recorded.indexOf('Both clients use it.'));
+  assert(recorded.indexOf(note.text) < recorded.indexOf('Item comment'));
+  assert.match(recorded, /Give this to your agent/);
+  assert.match(recorded, /Resume this Lane\./);
+});
+
+test('a hand-back in the thread keeps the saved pin and explains who carries it', () => {
+  const html = render({
+    title: 'Thread',
+    comments: [],
+    conversation: {
+      entries: [
+        {
+          id: id(40),
+          at: Date.parse('2026-11-18'),
+          type: 'hand-back',
+          actor: 'sample-one',
+          text: 'Tried old client',
+          left: 'Check user decision',
+          head: 'b'.repeat(64),
+          to: 'sample-two',
+          mayAnswer: true,
+        },
+      ],
+      loading: false,
+      answer: async () => {},
+    },
+  });
+  for (const value of ['Tried old client', 'Check user decision', 'b'.repeat(64), 'sample-two', 'Decline'])
+    assert(html.includes(value));
+});

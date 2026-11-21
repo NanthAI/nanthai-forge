@@ -4,7 +4,16 @@
 // pinned saved head and every changed path with its exact blobs and the +/- counts its save recorded; a file's body is
 // read only when it is opened (one describe, then object storage), so a large change costs what the reader opens,
 // never the whole tree. Once the Lane has landed or is set aside, review is over: no read marks, files in path order.
-import { Component, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  Component,
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { useConvex, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
@@ -47,6 +56,7 @@ import './lane.css';
 
 type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
 type Props = PlaceProps;
+const LaneDiscussion = lazy(() => import('../discussion/LaneDiscussion'));
 
 /** Files drawn per band before "Show N more". */
 const LIMIT = 8;
@@ -113,7 +123,7 @@ class Boundary extends Component<
 }
 
 function Review({ route, projectId, projectName, feed }: Props) {
-  const laneId = route.rest;
+  const laneId = route.rest.split('/')[0]!;
   const text = useQuery(api.projectLaneReview.read, { projectId, laneId });
   const reply = useMemo(() => (text ? (JSON.parse(text) as Reply) : undefined), [text]);
   const [more, setMore] = useState<ReviewFile[]>([]);
@@ -207,6 +217,8 @@ export function ReviewPage({
   loader: ReactNode;
 }) {
   const { lane } = reply;
+  const thread = route.rest.endsWith('/thread');
+  const laneHref = hrefFor({ ...route, rest: lane.laneId });
   const entries = useMemo(() => entriesOf(reply, files), [reply, files]);
   const ticks = useReadTicks(lane.laneId);
   const [order, setOrder] = useState<'eyes' | 'path'>('eyes');
@@ -255,7 +267,7 @@ export function ReviewPage({
           </>
         }
       >
-        {nothing || !reply.files.current || closed ? null : (
+        {thread || nothing || !reply.files.current || closed ? null : (
           <div className="seg" role="group" aria-label="Order">
             <button type="button" aria-pressed={order === 'eyes'} onClick={() => setOrder('eyes')}>
               Needs eyes first
@@ -317,40 +329,73 @@ export function ReviewPage({
         </pre>
       ) : null}
       <Stops reply={reply} stop={stop} heldWhy={heldRow?.why ?? null} />
-      <div className="panes lane-p">
-        <section className="pane" aria-label="The change">
-          <div className="ph plain">
-            <h2>Changed files</h2>
-            <span className="cnt">{reply.files.total.toLocaleString()}</span>
-            {entries.length && !closed ? (
-              <span className="hint" style={{ marginLeft: 'auto' }}>
-                {readCount.toLocaleString()} of {plural(entries.length, 'file')} read
-              </span>
+      <nav className="strip" aria-label="Lane sections">
+        <A href={laneHref} aria-current={thread ? undefined : 'page'}>
+          Changes
+        </A>
+        <A href={laneHref + '/thread'} aria-current={thread ? 'page' : undefined}>
+          Thread
+        </A>
+      </nav>
+      {thread ? (
+        <Suspense
+          fallback={
+            <p className="quietline" aria-busy="true">
+              Loading the thread…
+            </p>
+          }
+        >
+          <LaneDiscussion
+            key={lane.laneId}
+            projectId={projectId}
+            laneId={lane.laneId}
+            intentId={itemId}
+            route={route}
+          />
+        </Suspense>
+      ) : (
+        <div className="panes lane-p">
+          <section className="pane" aria-label="The change">
+            <div className="ph plain">
+              <h2>Changed files</h2>
+              <span className="cnt">{reply.files.total.toLocaleString()}</span>
+              {entries.length && !closed ? (
+                <span className="hint" style={{ marginLeft: 'auto' }}>
+                  {readCount.toLocaleString()} of {plural(entries.length, 'file')} read
+                </span>
+              ) : null}
+            </div>
+            <Files
+              reply={reply}
+              entries={entries}
+              order={closed ? 'path' : order}
+              projectId={projectId}
+              route={route}
+              ticks={closed ? null : ticks}
+              nothing={nothing}
+            />
+            {loader ??
+              (nextOffset !== null ? (
+                <button type="button" className="quietline btn ghost lr-more" onClick={onMore}>
+                  Show the next {plural(Math.min(400, reply.files.total - nextOffset), 'file')}
+                </button>
+              ) : null)}
+            {reply.files.current && !reply.files.complete ? (
+              <p className="quietline">
+                More files changed than this save recorded. Read the whole change with <code>{command}</code>.
+              </p>
             ) : null}
-          </div>
-          <Files
+          </section>
+          <Side
             reply={reply}
             entries={entries}
-            order={closed ? 'path' : order}
-            projectId={projectId}
             route={route}
-            ticks={closed ? null : ticks}
-            nothing={nothing}
+            who={who}
+            itemId={itemId}
+            itemLabel={itemLabel}
           />
-          {loader ??
-            (nextOffset !== null ? (
-              <button type="button" className="quietline btn ghost lr-more" onClick={onMore}>
-                Show the next {plural(Math.min(400, reply.files.total - nextOffset), 'file')}
-              </button>
-            ) : null)}
-          {reply.files.current && !reply.files.complete ? (
-            <p className="quietline">
-              More files changed than this save recorded. Read the whole change with <code>{command}</code>.
-            </p>
-          ) : null}
-        </section>
-        <Side reply={reply} entries={entries} route={route} who={who} itemId={itemId} itemLabel={itemLabel} />
-      </div>
+        </div>
+      )}
     </>
   );
 }

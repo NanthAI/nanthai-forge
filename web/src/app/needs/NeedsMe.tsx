@@ -54,6 +54,9 @@ import { jumpToRow } from '../flow/labels';
 import { StationDrawer, type DrawerProps } from '../flow/Drawer';
 import { isDrawerStop, type DrawerStop } from '../flow/drawer-model';
 import { navigate, useSearch } from '../router';
+import { AnswerKeys, HandBackDetails } from '../discussion/ConversationEntry';
+import type { Answer } from '../discussion/conversation';
+import { useAnswer } from '../discussion/useConversation';
 import { needsRead } from './count';
 import {
   fyiSum,
@@ -140,16 +143,9 @@ function NeedsMeScreen({ route, projectId, projectName, feed, feedError, feedRea
     planCounts: counts !== undefined,
   });
   const decide = useProjectDecide(projectId);
-  const publish = useMutation(api.projectCoordination.publish);
+  const answer = useAnswer(projectId);
   const dismissMutation = useMutation(fyiDismiss);
   const abandon = useMutation(dormantAbandon);
-  const answer: Answer = async (ask, choice) => {
-    await publish({
-      projectId,
-      operationId: crypto.randomUUID(),
-      command: { kind: 'ack', messageId: ask.id, choice, text: choice },
-    });
-  };
   return (
     <NeedsMeView
       route={route}
@@ -187,8 +183,7 @@ function NeedsMeScreen({ route, projectId, projectName, feed, feedError, feedRea
 
 /** Approve or decline: a Lane's request, or a landing held for review on its exact attempt (decide.ts). */
 export type { Decide } from './decide';
-/** Answer a question with one of its choices (a coordination acknowledgement the asker reads). */
-export type Answer = (ask: AskRow, choice: string) => Promise<void>;
+export type { Answer } from '../discussion/conversation';
 /** Dismiss FYI rows, clear them all, or put an earlier state back (projectNeedsFyi:dismiss). */
 export type Dismiss = (input: { keys?: string[]; clearAll?: boolean; restore?: FyiState }) => Promise<string>;
 
@@ -268,8 +263,20 @@ export function NeedsMeView({
     const afterClose = requestAnimationFrame(() => jumpToRow(reveal.laneId));
     return () => cancelAnimationFrame(afterClose);
   }, [reveal]);
-  const heldRows = view ? [...view.now, ...view.asks, ...view.parked] : [];
-  const rowToReveal = view?.now.findIndex(row => row.laneId === reveal?.laneId) ?? -1;
+  const activityAt = (row: NowRow | AskRow | ParkedRow) => ('choices' in row ? row.at : row.since);
+  const heldRows = view
+    ? [...view.now, ...view.asks, ...view.parked].sort((a, b) => activityAt(a) - activityAt(b))
+    : [];
+  const asksAhead = view?.askedAhead ?? [];
+  const conversationHref = (row: AskRow) =>
+    row.laneId
+      ? at({ place: 'lanes', rest: `${row.laneId}/thread` })
+      : row.planningItemId
+        ? at({ place: 'plan', rest: row.planningItemId }) + '#discussion'
+        : undefined;
+  const rowToReveal = heldRows.findIndex(
+    row => !('choices' in row) && !('park' in row) && row.laneId === reveal?.laneId,
+  );
   const laneHref = (laneId: string) => at({ place: 'lanes', rest: laneId });
   const drawerContent =
     stop &&
@@ -379,6 +386,7 @@ export function NeedsMeView({
                               row={row}
                               drawnAt={drawnAt}
                               answer={answer}
+                              contextHref={conversationHref(row)}
                               announce={announce}
                             />
                           ) : (
@@ -423,11 +431,11 @@ export function NeedsMeView({
                     </Capped>
                   </div>
                 ) : null}
-                {view.ahead.length ? (
+                {view.ahead.length || asksAhead.length ? (
                   <div className="grp" data-weight="watch">
                     <Band
                       title="Asked ahead"
-                      count={view.ahead.length}
+                      count={view.ahead.length + asksAhead.length}
                       hint="not counted in Needs you until it holds work"
                     />
                     <Capped rows={view.ahead} more={0} atLeast={false}>
@@ -444,10 +452,28 @@ export function NeedsMeView({
                         />
                       )}
                     </Capped>
+                    <Capped rows={asksAhead} more={0} atLeast={false}>
+                      {row => (
+                        <Question
+                          project={route}
+                          key={row.id}
+                          row={row}
+                          drawnAt={drawnAt}
+                          answer={answer}
+                          contextHref={conversationHref(row)}
+                          announce={announce}
+                        />
+                      )}
+                    </Capped>
                   </div>
                 ) : null}
-                {!waiting && !view.ahead.length ? (
+                {!waiting && !view.ahead.length && !asksAhead.length && !view.atLeast ? (
                   <div className="quietline">Nothing waits on you. Agents go on without you.</div>
+                ) : null}
+                {read?.asksMore ? (
+                  <div className="pf">
+                    Some messages could not be listed here. Open a Lane or Item to see its thread.
+                  </div>
                 ) : null}
                 {view.approvalsComplete ? null : (
                   <div className="pf">Some requests could not be listed; the newest are shown.</div>
@@ -738,33 +764,25 @@ function Question({
   project,
   drawnAt,
   answer,
+  contextHref,
   announce,
 }: {
   row: AskRow;
   project: WhoProject;
   drawnAt: number;
   answer: Answer;
+  contextHref: string | undefined;
   announce: (text: string) => void;
 }) {
-  const [busy, setBusy] = useState(false);
   const [later, setLater] = useState(false);
   if (later) return <Later head={row.text} onShow={() => setLater(false)} />;
-  const pick = async (choice: string) => {
-    setBusy(true);
-    try {
-      await answer(row, choice);
-      announce(`Answered “${choice}”. ${row.who ?? 'The asker'} reads it on its next check.`);
-    } catch {
-      announce('Not answered: Forge could not be reached. Try again.');
-    } finally {
-      setBusy(false);
-    }
-  };
   return (
     <div className="dec">
       <div className="dtop">
-        <State word="Needs you">Question</State>
-        <span>waiting {waited(row.at, drawnAt)}</span>
+        <State word="Needs you">{row.handBack ? 'Handed back' : 'Question'}</State>
+        <span>
+          {row.ahead ? `asked ${waited(row.at, drawnAt)} ago` : `waiting ${waited(row.at, drawnAt)}`}
+        </span>
         {row.who ? (
           <RecordedWho
             handle={recordedIdentity(row.who)}
@@ -774,18 +792,22 @@ function Question({
           />
         ) : null}
       </div>
-      <h3 dir="auto">{row.text}</h3>
+      <h3 dir="auto" className="thread-choice">
+        {row.handBack ? `Hand-back for Lane ${row.laneId?.slice(0, 8) ?? ''}` : row.text}
+      </h3>
+      {row.handBack ? <HandBackDetails {...row.handBack} tried={row.text} /> : null}
+      <AnswerKeys
+        entry={row}
+        choices={row.choices}
+        answer={answer}
+        onAnswered={choice => announce(`Answered “${choice}”.`)}
+      />
       <div className="btns">
-        {row.choices.map((choice, index) => (
-          <Key
-            key={choice}
-            kind={index === 0 ? 'rec' : undefined}
-            disabled={busy}
-            onClick={() => void pick(choice)}
-          >
-            {choice}
-          </Key>
-        ))}
+        {contextHref ? (
+          <A className="btn ghost sm" href={contextHref}>
+            Open the thread
+          </A>
+        ) : null}
         <Key kind="ghost" size="sm" onClick={() => setLater(true)}>
           Later
         </Key>

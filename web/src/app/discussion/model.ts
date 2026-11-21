@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // An Item's discussion as the screen draws it (Item 9a3d6f5f): threads in the order they started, each reply under its
 // root, who wrote each comment by public identity only, and the reaction counts beside it.
+import type { ThreadEntry } from './conversation';
 import { declaredModel } from '../who-links';
 
 /** A planning comment row as public reads return it: `author` is already the writer's Forge handle (or gone for a
@@ -19,6 +20,7 @@ export type DiscussionComment = {
   decision?: true;
   /** Written by Forge from a landing receipt (Issue 3a733ee8), never by a member: no reply or reaction. */
   system?: true;
+  conversation?: ThreadEntry;
 };
 export type Thread = { root: DiscussionComment; replies: DiscussionComment[] };
 

@@ -79,6 +79,9 @@ export type Ask = {
   text: string;
   choices: string[];
   laneId: string | null;
+  planningItemId?: string;
+  ahead?: true;
+  handBack?: { head: string; left: string; to: string };
 };
 export type NeedsRead = {
   held: readonly HeldLane[];
@@ -87,6 +90,7 @@ export type NeedsRead = {
   approvals: string;
   canDecide: boolean;
   asks?: readonly Ask[];
+  asksMore?: true;
   parked?: readonly ParkedLane[];
   parkedMore?: boolean;
 };
@@ -126,5 +130,9 @@ export function needsCount(
     waitsOnPerson(lane, asked.has(lane.laneId ?? ''), read.canDecide),
   ).length;
   const parked = (read.parked ?? []).filter(row => parkShown(row, now)).length;
-  return { n: held + (read.asks?.length ?? 0) + parked, atLeast: read.more > 0 || read.parkedMore === true };
+  const asks = (read.asks ?? []).filter(row => !row.ahead).length;
+  return {
+    n: held + asks + parked,
+    atLeast: read.more > 0 || read.parkedMore === true || read.asksMore === true,
+  };
 }
