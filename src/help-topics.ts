@@ -229,7 +229,7 @@ Details: docs/data-placement.md.`,
   limits: {
     title: 'Limits and quotas',
     text: `A limit refusal names the limit and the value you sent.
-- RATE_LIMITED: nothing changed; run next after recovery.retryAt. A reply's budget shows what is left under 20%.
+- RATE_LIMITED: run next after recovery.retryAt. A reply's budget shows what is left under 20%.
 - QUOTA_EXCEEDED: over a storage quota, which has no time reset; retrying will not help.
 - *_LIMIT, *_TOO_LARGE, *_TOO_LONG, OUTPUT_LIMIT: shrink the input (fewer paths, a smaller page, shorter text) or follow the cursor the receipt gives.
 - LANDING_MESSAGE_TOO_LARGE: the landing message is the GitHub commit message, at most 1024 UTF-8 bytes; shorten it. land --save refuses it before it saves; preflight with the same --message-file (or "message") refuses it before any test runs.

@@ -419,11 +419,19 @@ try {
     }
   }
 } catch (error) {
+  // The detached land parent has the original invocation. Let it render the retry after the reset.
+  const forwardLimit =
+    process.env.FORGE_LAND_CHILD === '1' &&
+    error instanceof ForgeError &&
+    error.code === 'RATE_LIMITED' &&
+    typeof error.recovery?.retryAt === 'string';
+  const teaching = forwardLimit ? undefined : cliTeachContext(process.argv.slice(2));
   // Known errors stay terse; system and unexpected errors also log the stack and name the log.
-  const known = error instanceof ForgeError;
-  const teaching = cliTeachContext(process.argv.slice(2));
-  const failure = known ? describeFailure(error, teaching) : recordFailure(error, teaching);
-  if (process.argv[2] === 'github-sync') {
+  const failure =
+    error instanceof ForgeError ? describeFailure(error, teaching) : recordFailure(error, teaching);
+  if (forwardLimit) {
+    process.stdout.write(`${JSON.stringify({ error: failure })}\n`);
+  } else if (process.argv[2] === 'github-sync') {
     syncPending = false;
     process.stdout.write(`${JSON.stringify({ pushed: false, reason: failure.code, error: failure })}\n`);
   } else {

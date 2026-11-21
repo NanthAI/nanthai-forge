@@ -52,8 +52,9 @@ const progressLine = (event: unknown) => {
   const cursor = (event as { cursor?: unknown } | null)?.cursor;
   return { ...waitEventLine(event)?.line, ...(typeof cursor === 'string' ? { cursor } : {}) };
 };
+const toolCall = (name: string, input: unknown) => `${name} ${JSON.stringify(input)}`;
 const read = { readOnlyHint: true, idempotentHint: true, openWorldHint: true };
-async function result(action: () => Promise<unknown>, replyDetail = false) {
+async function result(action: () => Promise<unknown>, replyDetail = false, replay?: () => string) {
   try {
     const value = await action();
     return {
@@ -64,6 +65,8 @@ async function result(action: () => Promise<unknown>, replyDetail = false) {
       error instanceof z.ZodError
         ? new ForgeError('BAD_ARGUMENT', 'Invalid hosted MCP parameters.')
         : hostedActionError(error, 'agent request');
+    const next =
+      safe.code === 'RATE_LIMITED' && typeof safe.recovery?.retryAt === 'string' ? replay?.() : undefined;
     return {
       isError: true,
       content: [
@@ -75,6 +78,7 @@ async function result(action: () => Promise<unknown>, replyDetail = false) {
               message: safe.message,
               ...(safe.recovery ? { recovery: safe.recovery } : {}),
               ...teach(safe.code, { surface: 'mcp' }, safe.recovery),
+              ...(next ? { next } : {}),
             },
           }),
         },
@@ -222,6 +226,7 @@ export function registerHostedAgentWorkflow(
             ).then(refreshRules);
           },
           (command as { replyDetail?: boolean }).replyDetail,
+          () => toolCall(group.name, { command }),
         ),
     );
   }
@@ -255,7 +260,12 @@ export function registerHostedAgentWorkflow(
       inputSchema: hostedSourceSelectionSchema.shape,
       annotations: read,
     },
-    input => result(async () => ({ sourceContext: await selectExactHostedSource(transport, input) })),
+    input =>
+      result(
+        async () => ({ sourceContext: await selectExactHostedSource(transport, input) }),
+        false,
+        () => toolCall('forge_current', input),
+      ),
   );
   server.registerTool(
     'forge_source',
@@ -264,7 +274,12 @@ export function registerHostedAgentWorkflow(
       inputSchema: hostedSourceLinesSchema.shape,
       annotations: read,
     },
-    input => result(() => readHostedSourceLines(transport, input)),
+    input =>
+      result(
+        () => readHostedSourceLines(transport, input),
+        false,
+        () => toolCall('forge_source', input),
+      ),
   );
   server.registerTool(
     'forge_review',
@@ -286,22 +301,26 @@ export function registerHostedAgentWorkflow(
       annotations: read,
     },
     ({ command }) =>
-      result(() => {
-        if (command.action === 'history')
-          return import('./hosted-history-cli.js').then(m =>
-            m.hostedHistory(transport.address, command, transport),
-          );
-        if (command.action === 'provenance')
-          return import('./hosted-agent-provenance.js').then(m => {
-            const { action: _, ...input } = command;
-            void _;
-            return m.provenanceHostedSource(transport, input);
-          });
-        if (command.action === 'show') return showHostedSource(transport, command);
-        const { action, ...input } = command;
-        if (action === 'queue') return queueHostedSource(transport, input);
-        return action === 'diff' ? diffHostedSource(transport, input) : peersHostedSource(transport, input);
-      }),
+      result(
+        () => {
+          if (command.action === 'history')
+            return import('./hosted-history-cli.js').then(m =>
+              m.hostedHistory(transport.address, command, transport),
+            );
+          if (command.action === 'provenance')
+            return import('./hosted-agent-provenance.js').then(m => {
+              const { action: _, ...input } = command;
+              void _;
+              return m.provenanceHostedSource(transport, input);
+            });
+          if (command.action === 'show') return showHostedSource(transport, command);
+          const { action, ...input } = command;
+          if (action === 'queue') return queueHostedSource(transport, input);
+          return action === 'diff' ? diffHostedSource(transport, input) : peersHostedSource(transport, input);
+        },
+        false,
+        () => toolCall('forge_review', { command }),
+      ),
   );
   prose.forge_review =
     'history: op status/log/blame/show, commit?,path?,limit?,skip?,start?,end?; exact commit history, line authors and old file bytes. provenance: candidateId,file?,lines?,cursor?; one file/20 Lane versions, explicit partial coverage and pinned continuations; source and executor identities never guessed. show: exact Lane/main/state/candidateId file; force permits binary/large bytes. diff: pinned Lane base to saved head, paths/byteBudget/cursor; summary:true returns per path equal|absent|different against current main with no hunks. peers: laneId/path/detail saved overlap evidence; incomplete coverage never proves independence. queue: landing queue entries (Lane, Intent, phase, failing tests, recompose count). Unsaved bytes excluded.';

@@ -11,8 +11,10 @@ operation id. Storage quotas have no time-based reset. Live plan metadata is P8.
 Pace on the live limits, not on refusals. A board note reply carries
 `budget {limit,left,of,resetAt}` for the tightest board limit once under 20% of
 it is left; slow down or batch notes until `resetAt`. A `RATE_LIMITED` refusal
-changed nothing: its `recovery.retryAt` is the reset and the CLI `next` is the
-exact command to rerun then. Never loop on it before the reset.
+names when to try again in `recovery.retryAt`. After that time, use `next` to
+repeat the original agent CLI command or MCP tool call with the same operation
+id, if supplied. The CLI uses private copies of command or message inputs read
+from a file or stdin, so the retry uses the same bytes.
 
 Board note text accepts app route patterns such as `/-/{handle}/{project}/lanes`.
 Machine absolute, home, drive and file-URL paths are still refused; `paths` entries

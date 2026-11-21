@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { waitEventLine } from './hosted-wait-line.js';
+import { ForgeError } from './errors.js';
+import type { Failure } from './system-errors.js';
 import { suppliedLandingMessage } from './landing-message.js';
 import { clientCacheRoot } from './root-paths.js';
 import { isNetworkPending } from './network-continuation.js';
@@ -248,6 +250,11 @@ async function detachedSubmit(
   rmSync(`${base}.err`, { force: true });
   const line = stdout.trim().split('\n').at(-1);
   if ((code !== 0 && code !== 3) || !line) {
+    if (code === 1 && line?.startsWith('{"error":')) {
+      const { error } = JSON.parse(line) as { error?: Failure };
+      if (error?.code === 'RATE_LIMITED' && error.recovery?.retryAt)
+        throw new ForgeError(error.code, error.message, undefined, error.recovery);
+    }
     process.exitCode = code || 1;
     return null;
   }

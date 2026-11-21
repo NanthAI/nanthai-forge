@@ -9,7 +9,7 @@
 // Template tokens: <root> the caller's ROOT (or .), <command> the caller's own `nforge agent ROOT ACTION`
 // (or `nforge x ROOT ACTION`), <lane> a JSON object with
 // the caller's laneId ({} when unknown: actions select the Lane from the folder), <runId> the run id or
-// RUN_ID, <replay> the caller's own command line (only when short; otherwise no next).
+// RUN_ID, <replay> the caller's own command line (kept short except on timed agent limits).
 
 type Entry = { learn: string; next?: string };
 const land = `nforge agent <root> land --save '{"message":"MESSAGE"}'`;
@@ -143,7 +143,7 @@ export type TeachContext = {
 const REPLAY_MAX = 300;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const shell = (word: string) => (/^[\w./:@=+-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);
-const commandLine = (words: readonly string[]) => ['nforge', ...words].map(shell).join(' ');
+export const commandLine = (words: readonly string[]) => ['nforge', ...words].map(shell).join(' ');
 
 export function workIndexRecovery(url: string, projectId: string) {
   return { command: commandLine(['hosted-work', url, projectId, '{"action":"rebuild-index"}']) };
@@ -164,10 +164,10 @@ export function learnCommand(topic: string, context: TeachContext = {}) {
     : `nforge agent ${shell(context.root || '.')} help ${topic}`;
 }
 
-function fill(template: string, context: TeachContext): string | undefined {
+function fill(template: string, context: TeachContext, timedAgentLimit: boolean): string | undefined {
   if (template === '<replay>') {
     const replay = context.argv?.length ? commandLine(context.argv) : undefined;
-    return replay && replay.length <= REPLAY_MAX ? replay : undefined;
+    return replay && (timedAgentLimit || replay.length <= REPLAY_MAX) ? replay : undefined;
   }
   if (template.startsWith('<command>') && !context.command)
     return context.topLevel ? 'nforge --help' : `nforge agent ${shell(context.root || '.')} help`;
@@ -185,11 +185,16 @@ export function teach(code: string, context: TeachContext = {}, recovery?: unkno
     (message && teachingByMessage.find(([pattern]) => pattern.test(message))?.[1]) || teachingEntry(code);
   if (!entry) return {};
   let next = commandIn(recovery);
-  if (!next && context.surface !== 'mcp')
+  if (!next && context.surface !== 'mcp') {
+    const timedAgentLimit =
+      code === 'RATE_LIMITED' &&
+      Boolean(context.argv?.[0] === 'agent' || context.argv?.[0] === 'x') &&
+      typeof (recovery as { retryAt?: unknown } | undefined)?.retryAt === 'string';
     next =
       entry.learn === 'arguments' && context.corrected && context.corrected.length <= REPLAY_MAX
         ? context.corrected
-        : entry.next && fill(entry.next, context);
+        : entry.next && fill(entry.next, context, timedAgentLimit);
+  }
   return { ...(next ? { next } : {}), learn: learnCommand(entry.learn, context) };
 }
 

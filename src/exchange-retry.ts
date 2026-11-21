@@ -41,14 +41,14 @@ export function retryableExchangeError(error: ForgeError, operationId?: string |
     { ...error.recovery, retryable: true, ...(retryAt ? { retryAt: new Date(retryAt).toISOString() } : {}) },
   );
 }
-/** A service limit refusal that names its reset (RATE_LIMITED): nothing was changed, so the same
+/** A service limit refusal that names its reset (RATE_LIMITED): the limited request was refused, so the same
  * command and operation retry once it resets (Issue 93907d28). Returns null for any other error. */
 export function limitRefusal(error: ForgeError, operationId?: string | null) {
   if (error.code !== 'RATE_LIMITED' || !error.retryAt || error.recovery) return null;
   const retryAt = new Date(error.retryAt).toISOString();
   return new ForgeError(
     error.code,
-    `${error.message} Nothing was changed. Retry the same command after ${retryAt}${operationId ? ` (operation ${operationId})` : ''}.`,
+    `${error.message} Retry the same command after ${retryAt}${operationId ? ` (operation ${operationId})` : ''}.`,
     error.retryAt,
     { outcome: 'refused', retryable: true, retryAt },
   );

@@ -2,7 +2,7 @@
 import { hostedRootRequired } from './agent-root.js';
 import { validateHostedCliCommand } from './hosted-cli-validation.js';
 import { actionableNotFound, isShortLaneId, resolveShortLaneId } from './argument-errors.js';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { hostedAgentHelp, hostedHelpFor } from './hosted-agent-help.js';
 import { helpTopicIndex, helpTopicText, isHelpTopic } from './help-topics.js';
 import { addressOnlyRoot, hostedAgentAddress } from './hosted-agent-address.js';
@@ -27,8 +27,10 @@ import {
 } from './agent-verbs.js';
 import { parseWaitBudget } from './agent-operation-wait.js';
 import { recordTurnWait } from './agent-turn-work.js';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { ForgeError, invariant } from './errors.js';
+import { commandLine } from './error-teaching.js';
 import { housekeepingLines, type IdleLane, type OtherRunLane } from './lane-prune.js';
 
 /** process: invoked as the nforge process (land detaches its submission and waits by default). */
@@ -76,12 +78,44 @@ function readInput(path: string, name: string): string {
   }
 }
 
+type EffectiveCall = { root?: string; inputs?: { flag: string; value: string }[] };
+
+/** Preserve consumed or mutable inputs on a refused command, without printing their contents. */
+function fileRetry(error: unknown, inputs: EffectiveCall['inputs']): unknown {
+  if (
+    !inputs ||
+    !(error instanceof ForgeError) ||
+    error.code !== 'RATE_LIMITED' ||
+    typeof error.recovery?.retryAt !== 'string'
+  )
+    return error;
+  try {
+    // The normal Forge scratch sweep can run before a daily budget resets.
+    const directory = mkdtempSync(join(tmpdir(), 'forge-limit-retry-'));
+    const argv = process.argv.slice(2);
+    for (const { flag, value } of inputs) {
+      const path = join(directory, flag.slice(2));
+      writeFileSync(path, value, { mode: 0o600 });
+      argv[argv.indexOf(flag, 3) + 1] = path;
+    }
+    return new ForgeError(error.code, error.message, error.retryAt, {
+      ...error.recovery,
+      command: commandLine(argv),
+    });
+  } catch {
+    // Keep the reset and failure reason if local storage is unavailable.
+    return error;
+  }
+}
+
 /** Alias notices print only after the command succeeds, so error stderr stays one JSON object. */
 export async function agentCli(args: string[], options: AgentCliOptions = {}): Promise<unknown> {
   const notices: string[] = [];
   // An address-only call runs in Forge's own state folder (59f0e296); the turn hook reads it there.
-  const effective: { root?: string } = {};
-  const result = await runAgentCli(args, options, notices, effective);
+  const effective: EffectiveCall = {};
+  const result = await runAgentCli(args, options, notices, effective).catch(error => {
+    throw fileRetry(error, effective.inputs);
+  });
   for (const notice of notices) process.stderr.write(notice);
   const pending = (
     result as
@@ -128,12 +162,13 @@ async function runAgentCli(
   args: string[],
   options: AgentCliOptions,
   notices: string[],
-  effective: { root?: string },
+  effective: EffectiveCall,
 ): Promise<unknown> {
   let stdin: string | undefined;
-  const read = (path: string, name: string) => {
+  const read = (path: string, name: string, flag: string) => {
     const value = readInput(path, name);
     if (path === '-' && stdin === undefined) stdin = value;
+    if (options.process) (effective.inputs ??= []).push({ flag, value });
     return value;
   };
   if (!args.length || args[0] === '--help' || args[0] === 'help') {
@@ -188,7 +223,7 @@ async function runAgentCli(
   let text = option ?? '{}';
   if (option === '--command-file') {
     invariant(path, 'BAD_ARGUMENT', 'Choose a command JSON file, or - for stdin.');
-    text = read(path, 'Command file');
+    text = read(path, 'Command file', '--command-file');
   }
   let parameters: unknown;
   try {
@@ -221,7 +256,7 @@ async function runAgentCli(
   }
   // Any message text (apostrophes, newlines) arrives verbatim from a file or stdin, never through shell quoting.
   if (client.messageFile !== undefined) {
-    const message = read(client.messageFile, 'Message file').replace(/\r?\n$/, '');
+    const message = read(client.messageFile, 'Message file', '--message-file').replace(/\r?\n$/, '');
     // An empty file (a failed extraction script) never submits an empty commit message (friction 737e85cb).
     invariant(
       message.trim() !== '',
