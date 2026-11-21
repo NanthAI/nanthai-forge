@@ -24,5 +24,7 @@ restored State onto current main, merging concurrent work or reporting a
 conflict. To take a landed change out of main, use
 `nforge x ROOT revert '{"target":{"kind":"receipt","receiptId":"RECEIPT_ID"}}'`
 and land the resulting compensating Lane through the usual checks. The original
-landing and the new landing both remain in history. Undo selects a retained
-State and leaves sync behavior and local snapshot settings as they are.
+landing and the new landing both remain in history.
+
+After a sync, you can select a saved State from before it. The sync receipt
+stays in history. For unsaved edits, use the [snapshot workflow](0200-refresh-the-clone-root.md).
