@@ -123,9 +123,15 @@ write (save, sync, board, set-policy, planning, `pull` and the rest), runs on th
 build with one stderr line naming main and the held build. Only `nforge update` and
 `nforge cli rollback` refuse with `CLI_UPDATE_FROZEN`, naming the hold and recovery
 command; so does a write on an explicit historical rollback, which must restore main
-first. Landing commands also explain the wait and watch local hold removal before
-reading the released version, with no timers or server polling, so main stays fixed
-during a measurement. The updater never removes a measurement hold itself.
+first. Landing commands explain the wait and watch local hold removal before
+reading the released version. The measurement wait makes no server calls. The
+updater leaves the hold in place.
+
+`land --save --no-wait` records the request on this machine and returns a receipt
+with the hold, the operation ID and the `wait` command. Its detached submitter
+submits after release with that same operation ID. Replaying a pending request
+reuses it. A `wait` on the same machine observes the held request locally, then
+follows the hosted landing with the remaining wait budget.
 
 A hold can name the projects it measures, one `project PROJECT_ID` line each; other
 lines are free text for the holder. Landings for a named project (read from the

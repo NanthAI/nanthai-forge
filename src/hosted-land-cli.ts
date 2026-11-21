@@ -6,11 +6,9 @@ import { suppliedLandingMessage } from './landing-message.js';
 import { clientCacheRoot } from './root-paths.js';
 import { isNetworkPending } from './network-continuation.js';
 import { normalizeHostedFinishResult, retryableFinishSource } from './hosted-agent-finish-result.js';
-import { spawn } from 'node:child_process';
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
 import { hostedAgentRoot } from './hosted-agent-journal.js';
 import { HostedAgentTransport, type HostedAgentResponse } from './hosted-agent-transport.js';
@@ -47,16 +45,18 @@ import { withLandWaitMetrics } from './land-wait-metrics.js';
 import { backgroundWake, wakeContinuation } from './agent-wake.js';
 import { landEditedResolution } from './hosted-land-resolution.js';
 import { LAND_CHILD_ENV } from './hosted-land-child-env.js';
+import {
+  HELD_LAND_AUTO_ENV,
+  LAND_BUDGET_ENV,
+  LAND_WAKE_ENV,
+  spawnLandSubmitter,
+} from './hosted-land-submitter-process.js';
 import { syncOnceRelanded, syncOnceStopped, syncRequiredOnce } from './hosted-land-sync-once.js';
 
 export { landPhase, landSummary };
 
 /** Set in the detached submitter (LAND_CHILD_ENV): it submits and exits without waiting. */
 export { LAND_CHILD_ENV };
-/** Set in the detached submitter when its land returns at once with a background wake. */
-const LAND_WAKE_ENV = 'FORGE_LAND_WAKE';
-/** The land command's budget in seconds, passed to its detached submitter. */
-const LAND_BUDGET_ENV = 'FORGE_LAND_BUDGET_SECONDS';
 /** Default: the agent wait budget, so a foreground land returns IN_PROGRESS with its resume
  * command before a 600 s agent shell backgrounds or kills it. */
 function landBudgetSeconds() {
@@ -86,7 +86,7 @@ export async function submitHostedLand(
   /** The land returns at once with a background wake (the detached submitter reads it from env). */
   wake = process.env[LAND_WAKE_ENV] === '1',
 ) {
-  const invokedAt = Number(process.env[LAND_INVOKED_ENV]);
+  const invokedAt = Number(process.env[LAND_INVOKED_ENV] || undefined);
   startLandTiming(invokedAt);
   // The submitter shares the land command's budget, timed from when that command started.
   const deadline = (Number.isFinite(invokedAt) ? invokedAt : Date.now()) + landBudgetSeconds() * 1000;
@@ -106,6 +106,9 @@ export async function submitHostedLand(
       command,
       (action, body) => hostedAgentCli(root, action, body, address, transport),
       line => notes.push(line),
+      process.env[HELD_LAND_AUTO_ENV] === '1' && typeof command.operationId === 'string'
+        ? command.operationId
+        : undefined,
     );
   } finally {
     if (previous) transport.onOperation = previous;
@@ -201,33 +204,8 @@ async function detachedSubmit(
 ): Promise<HostedAgentResponse | null> {
   const directory = join(clientCacheRoot(hostedAgentRoot(root)), 'agent', 'land');
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const base = join(directory, randomUUID()),
-    out = openSync(`${base}.out`, 'w', 0o600),
-    err = openSync(`${base}.err`, 'w', 0o600);
-  const child = spawn(
-    process.execPath,
-    [
-      fileURLToPath(new URL('./cli-entry.js', import.meta.url)),
-      'agent',
-      root,
-      'finish',
-      JSON.stringify(command),
-    ],
-    {
-      detached: true,
-      stdio: ['ignore', out, err],
-      // The submitter times from when this command started, not from its own spawn.
-      env: {
-        ...process.env,
-        [LAND_CHILD_ENV]: '1',
-        [LAND_INVOKED_ENV]: String(performance.timeOrigin),
-        [LAND_BUDGET_ENV]: String(budgetSeconds),
-        [LAND_WAKE_ENV]: wake ? '1' : '0',
-      },
-    },
-  );
-  closeSync(out);
-  closeSync(err);
+  const base = join(directory, randomUUID());
+  const child = spawnLandSubmitter(root, command, base, budgetSeconds, wake);
   const leave = () => {
     process.stderr.write(
       `land: submission continues in the background (pid ${child.pid}); run the same command to resume.\n`,

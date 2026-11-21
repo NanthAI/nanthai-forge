@@ -7,4 +7,7 @@ by the owner or the automated `release-sign` GitHub job, and required: an unsign
 the current build until its signature appears. `nforge cli release-verify` re-checks stored
 signatures.
 See [CLI updates](../../operations/cli-update.md).
+
+Under a CLI measurement hold, `land --save --no-wait` returns a local receipt and
+wait command. Its detached submitter uses the recorded operation ID when released.
 Live release adoption and billed-usage qualification remain unverified.

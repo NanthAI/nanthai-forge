@@ -24,8 +24,9 @@ let marks: Map<LandStep, number> | null = null;
 
 /** Begin timing in the submitter; `invokedAt` is the epoch ms the user's command started. */
 export function startLandTiming(invokedAt?: number) {
-  marks = new Map([['invoked', Number.isFinite(invokedAt) ? invokedAt! : performance.timeOrigin]]);
-  markLandStep('started', performance.timeOrigin);
+  const invoked = Number.isFinite(invokedAt) ? invokedAt! : performance.timeOrigin;
+  marks = new Map([['invoked', invoked]]);
+  markLandStep('started', Math.max(performance.timeOrigin, invoked));
 }
 
 /** No-op unless a land submission is being timed in this process. */

@@ -45,6 +45,20 @@ const parametersOf = (next: Command) =>
 const carried = (command: Command) =>
   Object.fromEntries(CARRIED.filter(key => command[key] !== undefined).map(key => [key, command[key]]));
 
+function resolvedOrigin(root: string, named: string | undefined, current: string) {
+  return named && named !== current ? resolvedFinishContinuation(root, current) : undefined;
+}
+
+/** A held shorthand request for an origin already resolved here follows its retained finish. */
+export function resolvedOriginFinishId(root: string, command: Command) {
+  if (command.candidateId !== undefined || command.inputs !== undefined) return undefined;
+  const named = typeof command.laneId === 'string' ? command.laneId : undefined;
+  const here = resolutionHere(root, named);
+  const resolved = here && resolvedOrigin(root, named, here.laneId);
+  const id = z.uuid().safeParse(resolved && parametersOf(resolved.next).operationId);
+  return id.success ? id.data : undefined;
+}
+
 /** The finish to submit for this land, or undefined to submit the agent's command unchanged.
  * `note` receives one line saying what land did and how to undo it. */
 export async function landEditedResolution(
@@ -52,17 +66,31 @@ export async function landEditedResolution(
   command: Command,
   dispatch: Dispatch,
   note: (line: string) => void,
+  heldOperationId?: string,
 ): Promise<{ finish: Command } | { response: { result?: unknown } | undefined } | undefined> {
-  if (command.operationId !== undefined || command.candidateId !== undefined || command.inputs !== undefined)
+  if (
+    (command.operationId !== undefined && !heldOperationId) ||
+    command.candidateId !== undefined ||
+    command.inputs !== undefined
+  )
     return undefined;
   const named = typeof command.laneId === 'string' ? command.laneId : undefined;
   const here = resolutionHere(root, named);
   if (!here) return undefined;
   // Resolved already, and the land names the origin (which would land its old head): land the
   // resolution's retained finish instead. Naming the resolution Lane (or none) lands it as before.
-  const resolved = named && named !== here.laneId ? resolvedFinishContinuation(root, here.laneId) : undefined;
+  const resolved = resolvedOrigin(root, named, here.laneId);
   if (resolved) {
     const finish = parametersOf(resolved.next);
+    // A stopped submitter may have saved the resolution before it retained the held finish id.
+    if (
+      heldOperationId &&
+      finish.operationId !== heldOperationId &&
+      !retainedHostedOperation(root, String(finish.operationId))
+    ) {
+      finish.operationId = heldOperationId;
+      rememberResolutionFinish(root, here.laneId, finish);
+    }
     if (
       command.notVerified !== undefined &&
       JSON.stringify(command.notVerified) !== JSON.stringify(finish.notVerified)
@@ -86,7 +114,12 @@ export async function landEditedResolution(
   const next = (response?.result as { next?: Command } | undefined)?.next;
   if (next?.action !== 'finish' || !z.uuid().safeParse(next.operationId).success) return { response };
   const selection = parametersOf(next);
-  const finish = { ...selection, ...carried(command), laneId: selection.laneId ?? here.laneId };
+  const finish = {
+    ...selection,
+    ...carried(command),
+    laneId: selection.laneId ?? here.laneId,
+    ...(heldOperationId ? { operationId: heldOperationId } : {}),
+  };
   // Replays of this land reach the same finish operation with the same request.
   rememberResolutionFinish(root, here.laneId, finish);
   note(

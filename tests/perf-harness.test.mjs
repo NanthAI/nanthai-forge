@@ -85,6 +85,11 @@ test('381c62df: --version, --help and an idle turn-end hook stay on a minimal im
 
 test('package smoke ceilings and before-network import boundaries apply to the core build used by preflight', () => {
   const root = fileURLToPath(new URL('..', import.meta.url));
+  assert.match(
+    readFileSync(join(root, 'dist', 'cli-entry.js'), 'utf8'),
+    /^#![^\r\n]*\bnode\r?\n/,
+    'npm launches the bundled CLI directly and needs its Node interpreter line',
+  );
   const run = spawnSync(process.execPath, ['scripts/package-ceilings.mjs', '--runtime', '--inventory'], {
     cwd: root,
     encoding: 'utf8',

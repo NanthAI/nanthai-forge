@@ -243,6 +243,25 @@ export function unsavedFiles(root: string, laneId?: string) {
   };
 }
 
+/** Fields that select the source independently of the landing options. */
+export function finishSourceSelection(command: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(command).filter(
+      ([key]) =>
+        ![
+          'accept',
+          'message',
+          'retry',
+          'reason',
+          'priority',
+          'tokens',
+          'maxChecks',
+          'notVerified',
+          'operationId',
+        ].includes(key),
+    ),
+  );
+}
 /** One durable index per normalized finish selection, independent of history size.
  * Explicit operation replay never changes the latest shorthand selection. */
 export async function selectHostedFinish(
@@ -257,14 +276,7 @@ export async function selectHostedFinish(
   ) => Promise<{ status?: string; submission?: { observation?: { state: string } } }>,
 ) {
   const directory = hostedAgentDirectory(root);
-  const source = Object.fromEntries(
-    Object.entries(command).filter(
-      ([key]) =>
-        !['accept', 'message', 'retry', 'reason', 'priority', 'tokens', 'maxChecks', 'notVerified'].includes(
-          key,
-        ),
-    ),
-  );
+  const source = finishSourceSelection(command);
   const index = join(directory, `finish-${digest(canonicalPayload({ root, address, actor, source }))}.json`);
   const explicitReplay = operationId && checkoutPathExists(join(directory, `${operationId}.json`));
   if (explicitReplay) return new HostedAgentJournal(root, address, actor, 'finish', command, operationId);

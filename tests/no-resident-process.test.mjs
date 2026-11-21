@@ -16,7 +16,7 @@ const DETACHED_JOBS = {
   'cli-version.ts': 'one background CLI update to the released build',
   'github-auto-push.ts': 'owner-store: pushes accepted main to a connected GitHub mirror',
   'host-command.ts': 'finishes the history backfill of one `nforge host` run',
-  'hosted-land-cli.ts': 'submits one landing and relays its first lines',
+  'hosted-land-submitter-process.ts': 'submits one landing, waiting for any measurement hold first',
   'hosted-snapshot-worker.ts': 'takes one unsaved-work snapshot of a Lane checkout, then exits',
   'integration-preview-auto.ts': 'owner-store: one integration preview after a saved event',
   'local-watcher-client.ts': 'owner-store: shared file-watch helper',

@@ -47,6 +47,22 @@ if (process.argv[2] === 'wait') {
 let runCommand = false;
 try {
   invariant(supportedNode(), 'UNSUPPORTED_NODE', nodeRequirement);
+  if (process.env.FORGE_HELD_LAND_WORKER === '1') {
+    const { activateMeasurementSubmitter } = (await import(
+      /* @vite-ignore */ new URL('./hosted-land-measurement.js', import.meta.url).href
+    )) as typeof import('./hosted-land-measurement.js');
+    try {
+      if (!(await activateMeasurementSubmitter(process.argv[3]!, JSON.parse(process.argv[5]!))))
+        process.exit(1);
+    } catch (error) {
+      const { ForgeError: LocalForgeError } = (await import(
+        /* @vite-ignore */ new URL('./errors.js', import.meta.url).href
+      )) as typeof import('./errors.js');
+      if (error instanceof LocalForgeError)
+        throw new ForgeError(error.code, error.message, error.retryAt, error.recovery);
+      throw error;
+    }
+  }
   const { cliStartup } = await import('./cli-version.js');
   runCommand = await cliStartup();
 } catch (error) {

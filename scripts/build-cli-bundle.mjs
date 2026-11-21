@@ -34,15 +34,17 @@ const originalLocation = {
     if (!/import\.meta\.(?:url|dirname|filename)/.test(code)) return null;
     const rel = sibling(id);
     if (!rel) return null;
+    const hashbang = /^#![^\r\n]*\r?\n/.exec(code)?.[0] ?? '';
     const head =
       `import { fileURLToPath as __forgeToPath } from 'node:url';\nimport { dirname as __forgeDirname } from 'node:path';\n` +
       `const __forgeUrl = new URL(${JSON.stringify(rel)}, import.meta.url).href;\n` +
       `const __forgeFile = __forgeToPath(__forgeUrl);\nconst __forgeDir = __forgeDirname(__forgeFile);\n`;
     return {
       code:
+        hashbang +
         head +
         code
-          .replace(/^#!.*\n/, '\n')
+          .slice(hashbang.length)
           .replaceAll('import.meta.url', '__forgeUrl')
           .replaceAll('import.meta.dirname', '__forgeDir')
           .replaceAll('import.meta.filename', '__forgeFile'),

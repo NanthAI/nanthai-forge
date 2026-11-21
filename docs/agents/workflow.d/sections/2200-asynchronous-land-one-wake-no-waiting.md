@@ -30,3 +30,9 @@ the landing's whole life instead of a fresh subscribe and reread every 540 s; Co
 calls per landing do not rise, and nothing runs while idle. `--wait` keeps the
 foreground wait below; `FORGE_AGENT_WAKE=off` turns the asynchronous default off.
 Codex and other clients without background wakes keep the foreground wait.
+
+During a [measurement hold](../../../operations/cli-update.md), an explicit
+`land --save --no-wait` returns a local receipt with the hold and a `waitCommand`.
+The detached submitter uses the receipt's operation ID when the hold releases.
+Run `waitCommand` on the same machine to follow the request through submission
+and acceptance.

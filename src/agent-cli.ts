@@ -13,7 +13,7 @@ import {
   startEarlyCapabilities,
 } from './hosted-capabilities-early.js';
 import { hostedAgentRoot } from './hosted-agent-journal.js';
-import { LAND_CHILD_ENV } from './hosted-land-child-env.js';
+import { LAND_CHILD_ENV, MEASUREMENT_LAND_RECORD } from './hosted-land-child-env.js';
 import { canonicalOperationIds } from './operation-id-case.js';
 import {
   aliasNotice,
@@ -27,12 +27,14 @@ import {
 } from './agent-verbs.js';
 import { parseWaitBudget } from './agent-operation-wait.js';
 import { recordTurnWait } from './agent-turn-work.js';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { ForgeError, invariant } from './errors.js';
 import { commandLine } from './error-teaching.js';
 import { housekeepingLines, type IdleLane, type OtherRunLane } from './lane-prune.js';
 import type { HostedAgentAddress } from './hosted-address.js';
+import { cliInstallation } from './cli-installation.js';
+import { clientCacheRoot } from './root-paths.js';
 
 /** process: invoked as the nforge process (land detaches its submission and waits by default). */
 type AgentCliOptions = {
@@ -84,6 +86,32 @@ type EffectiveCall = {
   inputs?: { flag: string; value: string }[];
   analytics?: { address: HostedAgentAddress; command: string };
 };
+
+function measurementRecords(root: string) {
+  return existsSync(join(clientCacheRoot(hostedAgentRoot(root)), 'agent', MEASUREMENT_LAND_RECORD));
+}
+
+function newMeasurementHold() {
+  const installation = cliInstallation();
+  return installation !== null && existsSync(join(installation, '.freeze'));
+}
+
+/** Keep hold handling out of the ordinary bundled CLI graph. */
+async function measurementCall<T>(run: (module: typeof import('./hosted-land-measurement.js')) => T) {
+  const module = (await import(
+    /* @vite-ignore */ new URL('./hosted-land-measurement.js', import.meta.url).href
+  )) as typeof import('./hosted-land-measurement.js');
+  try {
+    return await run(module);
+  } catch (error) {
+    const { ForgeError: LocalForgeError } = (await import(
+      /* @vite-ignore */ new URL('./errors.js', import.meta.url).href
+    )) as typeof import('./errors.js');
+    if (error instanceof LocalForgeError)
+      throw new ForgeError(error.code, error.message, error.retryAt, error.recovery);
+    throw error;
+  }
+}
 
 /** Preserve consumed or mutable inputs on a refused command, without printing their contents. */
 function fileRetry(error: unknown, inputs: EffectiveCall['inputs']): unknown {
@@ -357,35 +385,72 @@ async function runAgentCli(
     if (short.resolved) {
       process.stderr.write(`laneId ${String(selected.laneId)} resolved to ${short.resolved}\n`);
       selected = short.selected;
-    } else if (isShortLaneId(selected.laneId)) {
-      // A Lane this machine never opened (a reviewer reading another builder's Lane): one indexed read,
-      // only on this miss, so every other command keeps its calls (ad80e037).
-      const { resolveHostedLaneId, HostedAgentTransport } = await import('./hosted-agent-transport.js');
-      const full = await resolveHostedLaneId(new HostedAgentTransport(root, hosted), selected.laneId);
-      if (full) {
-        process.stderr.write(`laneId ${selected.laneId} resolved to ${full}\n`);
-        selected = { ...selected, laneId: full };
-      }
     }
-    // An old Lane id whose folder became its resolution Lane after a sync conflict (9bc3775b): the
-    // folder's files are the resolution's now, so save and preflight run on it, and say so.
-    if (FOLDER_ACTIONS.has(action) && typeof selected.laneId === 'string') {
-      const moved = laneSuccessor({ root: hostedAgentRoot(root), address: hosted }, selected.laneId);
-      if (moved) {
-        process.stderr.write(
-          `Lane ${selected.laneId} continues as resolution Lane ${moved.laneId} in ${moved.root} after a sync conflict; ${action} runs on ${moved.laneId}. Use that id from now on.\n`,
-        );
-        selected = { ...selected, laneId: moved.laneId };
+    const folderAction = action;
+    const localRoot = () => {
+      // An old Lane id whose folder became its resolution Lane after a sync conflict (9bc3775b).
+      if (FOLDER_ACTIONS.has(folderAction) && typeof selected.laneId === 'string') {
+        const moved = laneSuccessor({ root: hostedAgentRoot(root), address: hosted }, selected.laneId);
+        if (moved) {
+          process.stderr.write(
+            `Lane ${selected.laneId} continues as resolution Lane ${moved.laneId} in ${moved.root} after a sync conflict; ${folderAction} runs on ${moved.laneId}. Use that id from now on.\n`,
+          );
+          selected = { ...selected, laneId: moved.laneId };
+        }
       }
-    }
-    // A laneId given from another folder runs in that Lane's checkout when this machine has it open
-    // (681ee3d4): the folder was the fix, so take it instead of refusing.
-    const laneRoot = laneCheckoutRoot(hostedAgentRoot(root), action, selected.laneId, hosted);
-    if (laneRoot)
-      process.stderr.write(`Running in the Lane folder of ${String(selected.laneId)}: ${laneRoot}\n`);
-    const here = laneRoot ?? root;
-    const command = canonicalOperationIds(here, landSaveCommand(form!, true, selected));
+      // A Lane given from another folder runs in its own local checkout (681ee3d4).
+      const laneRoot = laneCheckoutRoot(hostedAgentRoot(root), folderAction, selected.laneId, hosted);
+      if (laneRoot)
+        process.stderr.write(`Running in the Lane folder of ${String(selected.laneId)}: ${laneRoot}\n`);
+      return laneRoot ?? root;
+    };
+    let here = localRoot();
+    let command = canonicalOperationIds(here, landSaveCommand(form!, true, selected));
     try {
+      const shortId = isShortLaneId(selected.laneId) ? selected.laneId : undefined;
+      if (
+        options.beforeDispatch &&
+        action === 'finish' &&
+        form!.flags.includes('--save') &&
+        ((client.wait === false && newMeasurementHold()) || measurementRecords(here))
+      ) {
+        const held = await measurementCall(({ deferMeasurementLand }) =>
+          deferMeasurementLand(here, command, hosted, {
+            noWait: client.wait === false,
+            ...(client.budget === undefined ? {} : { budget: client.budget }),
+            // A held worker resolves this valid prefix after release, before finish's UUID validation.
+            validate: () =>
+              validateHostedCliCommand(
+                here,
+                'finish',
+                shortId ? { ...command, laneId: '00000000-0000-0000-0000-000000000000' } : command,
+              ),
+          }),
+        );
+        if (held) {
+          effective.root = here;
+          if (client.wait === false) {
+            delete effective.analytics;
+            return held;
+          }
+          action = 'wait';
+          command = {
+            ...held.result.next,
+            ...(client.budget === undefined ? {} : { timeoutSeconds: client.budget }),
+          };
+        }
+      }
+      if (action !== 'wait' && shortId) {
+        // A Lane this machine never opened: one indexed read on this miss (ad80e037).
+        const { resolveHostedLaneId, HostedAgentTransport } = await import('./hosted-agent-transport.js');
+        const full = await resolveHostedLaneId(new HostedAgentTransport(root, hosted), shortId);
+        if (full) {
+          process.stderr.write(`laneId ${shortId} resolved to ${full}\n`);
+          selected = { ...selected, laneId: full };
+          here = localRoot();
+          command = canonicalOperationIds(here, landSaveCommand(form!, true, selected));
+        }
+      }
       // The hosted command modules load while the release check (and, for commands that start with
       // it, capability discovery) is on the network, not before it (fea47345 round 3).
       const modules = Promise.all([
@@ -396,6 +461,21 @@ async function runAgentCli(
       modules.catch(() => undefined);
       if (options.beforeDispatch) {
         validateHostedCliCommand(here, action, command);
+        if (
+          action === 'wait' &&
+          Array.isArray(command.operationIds) &&
+          command.operationIds.length === 1 &&
+          measurementRecords(here)
+        ) {
+          const held = await measurementCall(({ observeMeasurementLand }) =>
+            observeMeasurementLand(here, command, hosted),
+          );
+          if (held?.reply) {
+            delete effective.analytics;
+            return held.reply;
+          }
+          if (held?.command) command = held.command;
+        }
         if (discoversCapabilitiesFirst(hostedAgentRoot(here), action, command))
           startEarlyCapabilities(hostedAgentRoot(here), hosted, bareStatus(action, command));
         if (!(await options.beforeDispatch(stdin === undefined ? undefined : { stdin }))) return;
