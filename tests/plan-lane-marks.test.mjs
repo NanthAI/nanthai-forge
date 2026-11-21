@@ -5,18 +5,44 @@ import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { acceptanceFixture } from './hosted-acceptance-fixture.mjs';
 import { nextItem } from '../dist/planning-model.js';
+import { batchUndo, mergeItems } from '../dist/planning-batch.js';
 import { successorIntentId } from '../dist/hosted-intent-chain.js';
+import { itemRows, purgeList } from './planning-purge-fixture.mjs';
 
 const start = await import(moduleUrl('../convex/projectHostedStart.ts'));
 const plan = await import(moduleUrl('../convex/projectPlanView.ts'));
 const itemWork = await import(moduleUrl('../convex/projectItemWork.ts'));
 const lifecycle = await import(moduleUrl('../convex/projectHostedLifecycle.ts'));
 const backfill = await import(moduleUrl('../convex/projectPlanLaneBackfill.ts'));
-const marks = await import(moduleUrl('../convex/projectPlanLaneMarks.ts'));
+const batch = await import(moduleUrl('../convex/projectPlanningBatch.ts'));
+const work = await import(moduleUrl('../convex/projectWorkCommand.ts'));
+const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const { readHostedRecord, writeHostedRecord } = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 
-function addPlan(f, ids) {
-  const backupId = 'synthetic-backup';
+function seedPlan(f) {
+  const backupId = f.insert('projectBackups', {
+    projectId: f.projectId,
+    operationId: randomUUID(),
+    request: 'b'.repeat(64),
+    nonce: randomUUID(),
+    previous: null,
+    status: 'stored',
+    digest: 'a'.repeat(64),
+    size: 0,
+    preview: {
+      manifestDigest: f.main.head,
+      head: f.main.head,
+      format: 'native',
+      revision: 0,
+      intents: 0,
+      lanes: 0,
+      views: 0,
+      runs: 0,
+      files: 0,
+      unavailable: 0,
+      channels: [],
+    },
+  });
   const generationId = f.insert('projectWorkGenerations', {
     projectId: f.projectId,
     backupId,
@@ -28,11 +54,17 @@ function addPlan(f, ids) {
     metadata: '{"schema":24}',
   });
   f.patch('hostedProjects', f.projectId, {
+    key: randomUUID(),
     work: { operationId: randomUUID(), initialRevision: 0, revision: 0, backupId, generationId },
   });
-  return ids.map((id, position) => {
+  return generationId;
+}
+
+function addPlan(f, ids) {
+  const generationId = seedPlan(f);
+  for (const [position, id] of ids.entries()) {
     const item = { id, title: `Item ${position}`, kind: 'issue', status: 'open' };
-    const rootId = f.insert('projectPlanningRecords', {
+    f.insert('projectPlanningRecords', {
       projectId: f.projectId,
       generationId,
       collection: 'planningSearch',
@@ -42,25 +74,29 @@ function addPlan(f, ids) {
       value: JSON.stringify(item),
       planning: { text: item.title, kind: item.kind, status: item.status, initiativeId: '', open: true },
     });
-    return { item, rootId };
-  });
+  }
 }
 
 const rows = async f =>
   JSON.parse((await f.store.transaction('markedPlan', plan.read, { projectId: f.projectId })).rows);
-const begin = async (f, intent, operationId = randomUUID()) =>
-  JSON.parse(
+const begin = async (f, intent, operationId = randomUUID()) => {
+  const main = f.currentMain();
+  return JSON.parse(
     await f.store.transaction('plannedStart', start.start, {
       projectId: f.projectId,
       operationId,
       authorityEpoch: 1,
-      expectedMain: { head: f.main.head, receiptId: f.main.receipt.id },
+      expectedMain: { head: main.head, receiptId: main.receipt.id },
       intent,
     }),
   );
+};
 const planned = id => ({ kind: 'planned', intentId: id, outcome: 'Planned test work' });
-const markRow = f =>
-  [...f.tables.projectFinishReadRows.values()].find(row => row.kind.startsWith('plan-item-lanes:'));
+const markRow = (f, itemId) =>
+  [...f.tables.projectFinishReadRows.values()].find(
+    row =>
+      row.kind.startsWith('plan-item-lanes:') && (!itemId || row.sourceId === `${f.projectId}:${itemId}`),
+  );
 const close = (f, id, state = 'abandoned') => f.changeLane(id, { state, lifecycleVersion: 1 });
 
 test('starting a planned Lane marks Plan and skips Next, and concurrent siblings keep the mark', async () => {
@@ -87,33 +123,196 @@ test('starting a planned Lane marks Plan and skips Next, and concurrent siblings
   assert.equal(nextItem(await rows(f)).next?.id, id);
 });
 
-test('an accepted head clears its Item mark even when the Lane stays active', async () => {
+for (const { label, keepOpen, sibling } of [
+  { label: 'when closing the Lane', keepOpen: false, sibling: false },
+  { label: 'when keeping the Lane open', keepOpen: true, sibling: false },
+  { label: 'with an open sibling on the same Item', keepOpen: false, sibling: true },
+])
+  test(`the first Lane completion tick retires the exact landed work ${label}`, async () => {
+    const f = await acceptanceFixture();
+    const [id, free] = [randomUUID(), randomUUID()];
+    addPlan(f, [id, free]);
+    const started = await begin(f, planned(id));
+    const lane = await f.changeLane(started.lane.laneId, { head: f.state.sha256, sourceVersion: 1 });
+    if (sibling) await begin(f, planned(id));
+    const originalMark = markRow(f, id);
+    assert.equal(JSON.parse(originalMark.value).open, sibling ? 2 : 1);
+    const item = await f.makeCandidate([
+      {
+        laneId: lane.id,
+        head: lane.head,
+        version: lane.version,
+        sourceVersion: lane.sourceVersion,
+        lifecycleVersion: lane.lifecycleVersion,
+        state: { object: { sha256: lane.head, size: f.state.size }, recipe: null },
+      },
+    ]);
+    const { state } = await f.ready(item, { keepOpen });
+    const accepted = await f.accept(state);
+    assert.equal(f.currentMain().receipt.id, accepted.receipt.id);
+    const beforeTick = await rows(f);
+    assert.equal(beforeTick[0].inLane, true);
+    assert.equal(nextItem(beforeTick).next?.id, free);
+    await f.materialize(accepted.receipt.id);
+    assert.equal((await f.readLane(lane.id)).state, keepOpen ? 'active' : 'completed');
+    const afterTick = await rows(f);
+    assert.equal(afterTick[0].inLane, sibling ? true : undefined);
+    assert.equal(nextItem(afterTick).next?.id, sibling ? free : id);
+    const afterTickMark = markRow(f, id);
+    if (sibling) {
+      assert.equal(afterTickMark._id, originalMark._id);
+      assert.equal(JSON.parse(afterTickMark.value).open, 1);
+    } else assert.equal(afterTickMark, undefined);
+
+    if (keepOpen) {
+      const next = f.put(
+        JSON.stringify({ ...JSON.parse(f.objectBytes.get(lane.head)), parents: [lane.head] }),
+      );
+      await f.store.transaction(
+        'saveAfterKeepOpen',
+        { _handler: writeHostedRecord },
+        {
+          ...f.auth,
+          expectedVersion: lane.version,
+          record: {
+            ...lane,
+            version: lane.version + 1,
+            head: next.sha256,
+            sourceVersion: lane.sourceVersion + 1,
+          },
+        },
+      );
+      assert.equal((await rows(f))[0].inLane, true, 'new work on the keep-open Lane marks the Item again');
+    }
+    const beforeReplay = markRow(f, id);
+    await f.materialize(accepted.receipt.id);
+    assert.deepEqual(markRow(f, id), beforeReplay, 'replay preserves sibling and later contributions');
+    const measured = f.counts.find(row => row.name === 'acceptanceComplete');
+    assert.equal(measured.readRangesByTable.projectWorkGenerations, undefined);
+    assert.equal(measured.readRangesByTable.projectPlanningRecords, undefined);
+  });
+
+const itemWrite = (f, command, endpoint = work.command) => {
+  const operationId = randomUUID();
+  return f.store.transaction('itemWrite', endpoint, {
+    projectId: f.projectId,
+    operationId,
+    command: JSON.stringify({ ...command, operationId }),
+    ...(endpoint === work.purgeFromServer ? { owner: 'owner' } : {}),
+  });
+};
+
+const put = (itemId, expectedVersion, fields) => ({
+  action: 'put-planning-item',
+  itemId,
+  expectedVersion,
+  ...fields,
+});
+
+test('hosted Merge and Undo retain the actual Item Work links and their Lane marks', async () => {
   const f = await acceptanceFixture();
+  const generationId = seedPlan(f);
+  const keep = { id: randomUUID(), version: 1, title: 'Keep' };
+  const duplicate = { id: randomUUID(), version: 1, title: 'Duplicate' };
+  for (const item of [keep, duplicate])
+    await itemWrite(f, put(item.id, 0, { kind: 'issue', title: item.title, status: 'open' }));
+  const readItem = async id =>
+    JSON.parse(
+      (
+        await f.store.transaction('mergedItemDetail', workIndex.detail, {
+          projectId: f.projectId,
+          generationId,
+          collection: 'planningItems',
+          id,
+        })
+      ).value,
+    );
+  const started = await begin(f, planned(duplicate.id));
+  const laneId = started.lane.laneId;
+  const laneWork = async id =>
+    JSON.parse(
+      await f.store.transaction('mergedItemWork', itemWork.read, { projectId: f.projectId, itemId: id }),
+    ).lanes.map(lane => lane.laneId);
+  const apply = async writes =>
+    JSON.parse(
+      await f.store.transaction('mergeOrUndo', batch.apply, {
+        projectId: f.projectId,
+        operationId: randomUUID(),
+        writes: JSON.stringify(writes),
+      }),
+    ).results;
+  const mark = markRow(f, duplicate.id)._id;
+  assert.equal((await rows(f)).find(row => row.id === duplicate.id).inLane, true);
+  const writes = mergeItems(await readItem(keep.id), [await readItem(duplicate.id)], []);
+  const results = await apply(writes);
+  assert.deepEqual(
+    results.map(result => result.outcome),
+    ['applied', 'applied'],
+  );
+  assert.deepEqual((await readItem(keep.id)).intentIds, [duplicate.id]);
+  assert.deepEqual(await laneWork(keep.id), []);
+  assert.deepEqual(await laneWork(duplicate.id), [laneId]);
+  assert.equal((await rows(f)).find(row => row.id === keep.id).inLane, undefined);
+  assert.equal(markRow(f, duplicate.id)._id, mark);
+  assert.equal(markRow(f, duplicate.id).kind, 'plan-item-lanes:abandoned');
+
+  const { undo } = batchUndo(writes, results);
+  assert.deepEqual(undo[0].intentIds, []);
+  assert.deepEqual(
+    (await apply(undo)).map(result => result.outcome),
+    ['applied', 'applied'],
+  );
+  assert.deepEqual((await readItem(keep.id)).intentIds, []);
+  assert.deepEqual(await laneWork(keep.id), []);
+  assert.deepEqual(await laneWork(duplicate.id), [laneId]);
+  assert.equal(markRow(f, duplicate.id)._id, mark);
+  assert.equal((await rows(f)).find(row => row.id === duplicate.id).inLane, true);
+
+  const { head, version, sourceVersion, lifecycleVersion } = await f.readLane(laneId);
+  const request = JSON.stringify({
+    operationId: randomUUID(),
+    authorityEpoch: 1,
+    action: 'abandon',
+    reason: 'Finished the fixture',
+    target: { kind: 'lane', laneId, expected: { head, version, sourceVersion, lifecycleVersion } },
+  });
+  const abandon = () =>
+    f.store.transaction('abandonMergedLane', lifecycle.transition, { projectId: f.projectId, request });
+  assert.equal(JSON.parse(await abandon()).status, 'applied');
+  assert.equal((await f.readLane(laneId)).state, 'abandoned');
+  assert.equal((await rows(f)).find(row => row.id === duplicate.id).inLane, undefined);
+  assert.equal(JSON.parse(await abandon()).status, 'applied');
+  assert.equal(markRow(f, duplicate.id), undefined);
+});
+
+test('purging an Item unlinks its Lane mark in the same transaction', async () => {
+  const f = await acceptanceFixture();
+  seedPlan(f);
   const id = randomUUID();
-  addPlan(f, [id]);
+  await itemWrite(f, put(id, 0, { kind: 'issue', title: 'Unlink this Item', status: 'open' }));
   const started = await begin(f, planned(id));
-  const lane = await f.changeLane(started.lane.laneId, { head: f.state.sha256, sourceVersion: 1 });
   assert.equal((await rows(f))[0].inLane, true);
-  const item = await f.makeCandidate([
+  await itemWrite(f, put(id, 1, { status: 'in-progress' }));
+  assert.equal((await rows(f))[0].inLane, true);
+  await itemWrite(f, put(id, 2, { status: 'deleted' }));
+  assert.equal(markRow(f, id).kind, 'plan-item-lanes:deleted');
+
+  await itemWrite(
+    f,
     {
-      laneId: lane.id,
-      head: lane.head,
-      version: lane.version,
-      sourceVersion: lane.sourceVersion,
-      lifecycleVersion: lane.lifecycleVersion,
-      state: { object: { sha256: lane.head, size: f.state.size }, recipe: null },
+      action: 'purge-planning-item',
+      itemId: id,
+      kind: 'issue',
+      expectedVersion: 3,
+      deletedAt: '2026-11-20T00:00:00.000Z',
+      rows: purgeList(itemRows(f.tables.projectWorkEvents.values(), [id])),
     },
-  ]);
-  const { state } = await f.ready(item, { keepOpen: true });
-  const accepted = await f.accept(state);
-  await f.materialize(accepted.receipt.id);
-  assert.equal((await f.readLane(lane.id)).state, 'active');
-  assert.equal((await rows(f))[0].inLane, undefined);
-  await f.materialize(accepted.receipt.id);
-  assert.equal(markRow(f), undefined);
-  const measured = f.counts.find(row => row.name === 'acceptanceComplete');
-  assert.equal(measured.readRangesByTable.projectWorkGenerations, undefined);
-  assert.equal(measured.readRangesByTable.projectPlanningRecords, undefined);
+    work.purgeFromServer,
+  );
+  assert.equal(markRow(f, id), undefined);
+  assert.equal((await f.readLane(started.lane.laneId)).state, 'active');
+  await close(f, started.lane.laneId);
+  assert.equal(markRow(f, id), undefined);
 });
 
 test('backfill restores an existing successor link, pages old work, and replays without recounting', async () => {
@@ -205,38 +404,4 @@ test('an Intent cascade removes its staged Lane marks when abandonment becomes v
   assert.equal((await rows(f))[0].inLane, undefined);
   assert.equal((await f.readLane(first.lane.laneId)).state, 'abandoned');
   assert.equal((await f.readLane(sibling.lane.laneId)).state, 'abandoned');
-});
-
-test('moving or purging an Item preserves or removes its live mark in the planning write', async () => {
-  const f = await acceptanceFixture();
-  const id = randomUUID();
-  const [{ item, rootId }] = addPlan(f, [id]);
-  const lane = await begin(f, planned(id));
-  const update = (before, after) =>
-    f.store.transaction(
-      'changeLinkedItem',
-      {
-        _handler: async ctx => {
-          await marks.movePlanLaneMark(ctx, f.projectId, before, after);
-          await ctx.db.patch(rootId, {
-            value: JSON.stringify(after),
-            planning: {
-              text: after.title,
-              kind: after.kind,
-              status: after.status,
-              initiativeId: '',
-              open: true,
-            },
-          });
-        },
-      },
-      {},
-    );
-  const moved = { ...item, status: 'in-progress' };
-  await update(item, moved);
-  assert.equal((await rows(f))[0].inLane, true);
-  await update(moved, { ...moved, status: 'deleted', purged: true });
-  assert.equal(markRow(f), undefined);
-  await close(f, lane.lane.laneId);
-  assert.equal(markRow(f), undefined);
 });
