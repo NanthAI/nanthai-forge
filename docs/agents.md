@@ -95,17 +95,24 @@ exact heads.
 
 Coordination tells agents and people who is working on what, what changed near their work, and who has been asked to do what. It is advisory only: nothing here locks a path, pauses an agent, grants access or accepts source.
 
-MCP tools (`nforge mcp-coordination URL PROJECT_ID`); each has a matching `nforge coordination URL PROJECT_ID JSON` action (`--help` lists them):
+Use the MCP tools below through `nforge mcp-coordination URL PROJECT_ID`.
+For CLI actions and their parameters, run `nforge coordination --help`.
 
 | Tool | Does |
 | --- | --- |
 | `forge_announce` | Status and summary, optional Intent, Lane, paths, `kind`, harness/version and parent session. Creates this process's session and touches its last-seen every 30 s until `completed`. |
 | `forge_claim` / `forge_release` | Advisory claim on paths with a TTL (default 60 min). A path covers that file or directory. The reply lists overlapping active claims by others. |
 | `forge_message` / `forge_handoff` | Message a session or participant (or broadcast); hand off the next step pinned to an exact head. |
-| `forge_inbox` / `forge_ack` | Your unacknowledged messages and handoffs (including broadcasts); `all:true` pages everything addressed to you. Ack by message id. |
+| `forge_inbox` / `forge_ack` | Your unacknowledged messages and handoffs, including broadcasts. Ack by message id. |
 | `forge_coordination_read` | `feed` (optionally one Intent or Lane), `sessions` (paged roots, immediate children or all flat sessions; `lastSeen`, `stale`), `counts`, `recent`, `related`, `claims`, `overlaps`. |
 | `forge_coordination_watch` | Waits up to 60 s for new events; `related:true` only returns events related to you. |
 | `forge_coordinate` | Low-level publish with explicit operation UUID and sequence. |
+
+From a hosted clone, use `nforge coordination . '{"action":"unacked"}'`
+for unacknowledged messages and handoffs. Use
+`nforge coordination . '{"action":"inbox","cursor":null}'` to read the first
+page of the full inbox, then pass the returned cursor for the next page.
+On MCP, `forge_inbox` with `all:true` pages all entries addressed to you.
 
 ### Session identity and counts
 

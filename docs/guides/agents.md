@@ -39,7 +39,7 @@ nforge mcp ROOT --agent
    nforge agent LANE_PATH diff '{}'
    ```
 
-   If save replies `settling`, follow its wait command or read the save outcome on your next command in the same checkout. Confirm that it settled before reporting the saved head. Adjust or omit the example `notVerified` list to describe your actual verification gaps. Use the same field on `land --save` when reporting gaps on that operation. In MCP, put it in the `forge_task.command` for `save` or `land` with mode `save`. See [run evidence](../run-evidence.md).
+   If save replies `settling`, follow its wait command or read the save outcome on your next command in the same checkout. Confirm that it settled before reporting the saved head. Adjust or omit the example `notVerified` list to describe your actual verification gaps. Use the same field on `land --save` when reporting gaps on that operation. In MCP, put it in the `forge_task.command` for `save` or `land` with mode `save`. To inspect the declaration after a compact wait reply, [replay the original save and operation ID with receipt detail](../run-evidence.md).
 
    Prove the changed behavior and failure paths, with UI/runtime evidence when relevant. Run affected checks, format, lint and types; the project runner owns the full check. Read the preflight's omissions and continuations. Review the saved diff, following every `nextCursor` for that pinned pair. Record [findings and outcomes](review.md#structured-review-findings) on the Item. Use an independent reviewer when the user or project requires one; this recipe adds no review gate. Later review rounds cover changed code and unresolved findings, keeping pre-existing issues distinct. Escalate unresolved judgment with the evidence rather than cycling indefinitely.
 

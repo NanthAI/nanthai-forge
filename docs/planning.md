@@ -192,9 +192,10 @@ shown (the web Plan's group headers and the Initiatives overview).
 
 ## Next
 
-"Next" is derived from state and never stored: the first Planned Item in plan order with no owner, no Lane and no
-open `depends-on` dependency (`nextItem`). The Items skipped on the way come back with their reason: owned, in a
-Lane, or blocked by a named Item.
+The web Plan derives "Next" from the current view. It selects the first Planned Item in plan order with no owner,
+no Lane and no open `depends-on` dependency.
+To choose the next Item with the CLI, [read the ordered active Plan](guides/plan.md#find-the-work) and
+check eligibility before starting.
 
 ## Fields
 
