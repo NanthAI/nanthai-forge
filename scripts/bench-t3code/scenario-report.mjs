@@ -113,6 +113,7 @@ export function summarizeCell(result, receipts, calls = [], contains = () => nul
   return {
     cellId: result.cellId,
     scenario: result.scenario?.name ?? 'smoke',
+    ...(result.switchArm ? { switchArm: result.switchArm } : {}),
     switches: result.switches?.start ?? null,
     landed: result.landed,
     receipts: own.length,

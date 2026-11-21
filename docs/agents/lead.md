@@ -263,6 +263,11 @@ harness and runtime pins before scored work. Dry findings become generic
 root-cause fixes for every project, never special cases for tasks or this repo.
 Re-pin and repeat dry qualification after a fix.
 
+Give each queue change its own temporary switch and a named A/B arm with only
+that switch changed from the baseline. Include a combined arm only when each
+switch also has an isolating arm. After the A/B decision, remove each switch
+and its unused code path. See the [bench operator's switch arm setup](../../evals/bench-t3code/README.md#named-queue-switch-arms).
+
 Compare only like with like: the same N, scenario set (name, version, tasks),
 base and seed. The queue A/B report refuses any other comparison and names the
 matching accepted cell. Run one cell per background command with the runner's

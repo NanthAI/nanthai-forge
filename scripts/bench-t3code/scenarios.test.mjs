@@ -12,7 +12,7 @@ import {
 } from './scenarios.mjs';
 import { driveForge } from './forge-protocol.mjs';
 import { summarizeCell, passToLand } from './scenario-report.mjs';
-import { switchProblems } from './switches.mjs';
+import { readSwitches, selectSwitchArm, switchArmProblems, switchProblems } from './switches.mjs';
 import { pathEvidence, cellLandings, permanentRules, DELETED_SWITCHES } from './path-evidence.mjs';
 import { scenarioEvidence as evidenceOf } from './scenario-evidence.mjs';
 import { SHARED_SOURCE, TEST_DIR, SOURCE_MARKER, failureReading } from './scenarios.mjs';
@@ -114,6 +114,7 @@ test('report joins only the cell receipts and reads pass-to-land from the first 
       cellId: 'c',
       landed: 2,
       scenario: { name: 'cohort-fail' },
+      switchArm: 'first-only',
       switches: { start: { X: true } },
       records: [{ laneId: 'a' }, { laneId: 'b' }],
       convex: { projectExecutions: 40, costUsd: 0.01 },
@@ -130,7 +131,55 @@ test('report joins only the cell receipts and reads pass-to-land from the first 
   assert.equal(row.recompositions, 2);
   assert.equal(row.wastePercent, (100 * 10) / 30);
   assert.equal(row.convexUsdPer1000, 5);
+  assert.equal(row.switchArm, 'first-only');
   assert.deepEqual(row.switches, { X: true });
+});
+
+test('a named arm matches its isolated or combined switch state before the cell runs', async () => {
+  const config = {
+    forge: {
+      deployment: 'fixture',
+      switches: ['FIRST', 'SECOND'],
+      switchArms: {
+        baseline: [],
+        'first-only': ['FIRST'],
+        'second-only': ['SECOND'],
+        combined: ['FIRST', 'SECOND'],
+      },
+    },
+  };
+  const cases = {
+    baseline: { FIRST: false, SECOND: false },
+    'first-only': { FIRST: true, SECOND: false },
+    'second-only': { FIRST: false, SECOND: true },
+    combined: { FIRST: true, SECOND: true },
+  };
+  for (const [name, states] of Object.entries(cases)) {
+    const observed = await readSwitches(config, {
+      exactPresence: true,
+      exec: async (_command, args) => ({ stdout: states[args.at(-1)] ? '\n' : '' }),
+    });
+    assert.deepEqual(observed, states);
+    assert.deepEqual(switchArmProblems(selectSwitchArm(config, name), observed), []);
+  }
+  assert.deepEqual(switchArmProblems(selectSwitchArm(config, 'first-only'), cases.combined), [
+    'switch arm first-only: expected SECOND unset',
+  ]);
+  assert.deepEqual(await readSwitches(config, { exec: async () => ({ stdout: '\n' }) }), cases.baseline);
+  const unreadable = await readSwitches(config, {
+    exec: async () => {
+      throw Error('fixture read failed');
+    },
+  });
+  assert.deepEqual(switchArmProblems(selectSwitchArm(config, 'baseline'), unreadable), [
+    'switch arm baseline: switch FIRST unreadable',
+    'switch arm baseline: switch SECOND unreadable',
+  ]);
+  assert.throws(() => selectSwitchArm(config, 'unknown'), /requires a name declared/);
+  assert.throws(
+    () => selectSwitchArm({ forge: { ...config.forge, switchArms: { typo: ['THIRD'] } } }, 'typo'),
+    /must list switches from config\.forge\.switches/,
+  );
 });
 
 test('a switch that is unreadable or changes during a cell voids it', () => {

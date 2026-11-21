@@ -198,6 +198,40 @@ transcripts. A changed identity adapter needs fresh harness qualification before
 - **Setup-only attempts**: a batch whose every cell crashed before any agent ran (`result.agentsStarted: false`) is marked `setupOnly` in `batch.json`, is disclosed in the driver log, and does not consume one of `DESIGN.maxAttempts`; at most `DESIGN.maxSetupRetries` such re-runs happen per batch.
 - **Separate bench deployment** (exit plan "Separate bench deployment and versions"): `config.forge.url` / `.deployment` select the bench deployment; `.deployWorkflow` is `convex-bench-deploy.yml`. The driver does not read or drain dev landings or deploys. Its `.freeze` belongs only to the bench CLI installation (`BENCH_ROOT/cli`), so builders keep landing. GitHub main moving is recorded (`versions.moved`); changes to the pinned bench deployment, CLI, harness, agent or check workflows still void a scored batch. `dogfood: { projectId, url? }` supplies only the mirror mapping from the CLI State to Git. The shared runner pool and local CPU samplers remain.
 
+## Named queue switch arms
+
+Declare the tracked switch names and the switches expected to be set in each arm
+in the private bench `config.json`. This example shows the `forge` fields to add
+alongside its existing deployment configuration.
+
+```json
+{
+  "switches": ["FORGE_EXAMPLE_FIRST", "FORGE_EXAMPLE_SECOND"],
+  "switchArms": {
+    "baseline": [],
+    "first-only": ["FORGE_EXAMPLE_FIRST"],
+    "second-only": ["FORGE_EXAMPLE_SECOND"],
+    "combined": ["FORGE_EXAMPLE_FIRST", "FORGE_EXAMPLE_SECOND"]
+  }
+}
+```
+
+Use lowercase letters, digits and hyphens in arm names. Every tracked switch
+omitted from an arm's list is expected to be unset. With the bench deployment
+already in the selected arm's state, run through the usual one-cell entry point.
+Keep N, scenario version, tasks, base and seed fixed across arms.
+
+```sh
+node scripts/bench-t3code/cell.mjs forge 10 1 --dry --scenario withdraw-join --switch-arm first-only
+```
+
+The runner records the arm name and switch presence at the start and end. A
+starting mismatch or unreadable switch refuses a named arm before setup.
+An unreadable or changed end snapshot voids the cell. The runner leaves
+deployment switches as configured and records no switch values. The report
+includes the arm name. Without `--switch-arm`, cells keep the historical
+convention of treating blank values as unset.
+
 ## Fixed N=10 protocol diagnostics
 
 The separate `replay-cells.mjs` registration runs synthetic contributions through

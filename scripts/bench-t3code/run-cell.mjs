@@ -3,7 +3,7 @@
 // B1.5d cell: N concurrent agents land the 10 frozen tasks on one arm in the PLAN.md order,
 // then the oracle grades the exact final main. Usage:
 //   node scripts/bench-t3code/run-cell.mjs ARM N REP [--dry | --model-check] [--attempt K] [--pin FILE] [--batch DIR] [--unpinned] [--tasks K]
-//                                          [--cell convoy|overlap [--stack offer|auto]]
+//                                          [--cell convoy|overlap [--stack offer|auto]] [--switch-arm NAME]
 // --cell runs a coordination cell (cells.mjs): N generated tasks, one per agent, dispatched
 // together after every workspace is ready (start signal); graded by scope, not hidden tests.
 // --stack (Forge overlap cells) applies the stacking setting named in config.forge.stacking.
@@ -55,7 +55,7 @@ import { SCENARIOS, scenarioRole, scenarioTestPath } from './scenarios.mjs';
 import { cellLandings } from './path-evidence.mjs';
 import { cellChecks } from './cell-checks.mjs';
 import { scenarioEvents, scenarioEvidence } from './scenario-evidence.mjs';
-import { readSwitches, switchProblems } from './switches.mjs';
+import { readSwitches, selectSwitchArm, switchArmProblems, switchProblems } from './switches.mjs';
 import { removeWorkspace } from './evidence.mjs';
 import { gates as cellGates, diskFreeGb } from './gates.mjs';
 import { writeCellResult } from './result.mjs';
@@ -72,6 +72,8 @@ const B = benchRootOrExit();
 const config = JSON.parse(readFileSync(join(B, 'config.json'), 'utf8'));
 const [arm, nText, repText, ...flags] = process.argv.slice(2);
 const flag = name => (flags.includes(name) ? flags[flags.indexOf(name) + 1] : null);
+const switchArm = flags.includes('--switch-arm') ? selectSwitchArm(config, flag('--switch-arm')) : null;
+const switchReadOptions = { exactPresence: switchArm !== null };
 const N = Number(nText),
   rep = Number(repText),
   dry = flags.includes('--dry'),
@@ -95,7 +97,7 @@ const replay = replayKind
 if (replayKind) replayBatch(cellKind, rep, replay.release);
 if (!['github', 'forge'].includes(arm) || !(N >= 1) || !(rep >= 1))
   throw Error(
-    'usage: run-cell.mjs github|forge N REP [--dry] [--extra] [--cell convoy|overlap [--stack offer|auto]]',
+    'usage: run-cell.mjs github|forge N REP [--dry] [--extra] [--cell convoy|overlap [--stack offer|auto]] [--switch-arm NAME]',
   );
 if (cellKind && !(replayKind ? N === 10 : COORDINATION[cellKind]?.ns.includes(N)))
   throw Error(`coordination cell ${cellKind} at N = ${N} is not in PLAN.md`);
@@ -142,7 +144,7 @@ const claudeToken =
     : null;
 const batchDir = flag('--batch');
 const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
-const cellId = `${planned.key}${scenario === 'smoke' ? '' : `-${scenario}`}${dry ? '-dry' : modelCheck ? '-modelcheck' : ''}-a${attempt}-${stamp}`;
+const cellId = `${planned.key}${scenario === 'smoke' ? '' : `-${scenario}`}${switchArm ? `-arm-${switchArm.name}` : ''}${dry ? '-dry' : modelCheck ? '-modelcheck' : ''}-a${attempt}-${stamp}`;
 const dir = join(B, 'runs', cellId),
   ws = join(B, 'ws', cellId);
 mkdirSync(join(B, 'runs'), { recursive: true });
@@ -184,6 +186,7 @@ const result = {
   modelCheck,
   extra,
   scenario: { name: scenario, paths: SCENARIOS[scenario].paths, about: SCENARIOS[scenario].about },
+  ...(switchArm ? { switchArm: switchArm.name } : {}),
   seed: planned.seed,
   // The base tree both arms start from; the compare guard (scenario-report.mjs) keys on it.
   base: config.github.mainBase,
@@ -252,7 +255,7 @@ process.on('exit', () => {
 
 // ---- Gates (nothing has run yet; a refusal leaves no trace beyond result.json).
 const start = await snapshot(config);
-result.switches = { start: await readSwitches(config) };
+result.switches = { start: await readSwitches(config, switchReadOptions) };
 const gates = await cellGates({
   arm,
   N,
@@ -266,6 +269,7 @@ const gates = await cellGates({
   differences,
   pinFile: flag('--pin'),
 });
+if (switchArm) gates.refusals.push(...switchArmProblems(switchArm, result.switches.start));
 result.gates = gates;
 if (gates.refusals.length) {
   writeResult({ refused: gates.refusals.join('; ') });
@@ -814,7 +818,7 @@ if (oracleReport.branch) oracle.branchCleanup = oracleReport.branch;
 
 // ---- Versions at the end, voids, result.
 const end = await snapshot(config);
-result.switches.end = await readSwitches(config);
+result.switches.end = await readSwitches(config, switchReadOptions);
 sampler.stop();
 result.load.after = {
   rateLimit: await rateLimit(),
