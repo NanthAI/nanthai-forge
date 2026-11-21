@@ -1773,12 +1773,17 @@ claimed. The lead owns deployment, the dev pass and billed-usage qualification.
 
 ### Local Lane dependency installs
 
-The shared installed-tree cache uses a 4 GiB soft budget. Override it with a
+The shared dependency cache uses a 4 GiB soft budget. Override it with a
 positive `FORGE_DEPS_CACHE_MAX_GB` value (GiB). `nforge prune` previews the local
-LRU eviction. `nforge prune --apply` removes unused read-only installs. Existing
-checkout references and running install/link locks are kept even above budget.
+LRU eviction. `nforge prune --apply` removes unused read-only installs and eligible
+package-manager download stores. Main, selected CLI builds, recently used or pinned
+Lanes and running work can keep the cache above budget. Dormant Lane links and unused
+download stores use the existing `clientCacheMaxAgeHours` setting.
 The `dependencies.bytes` figure measures current allocated disk space across
 the cache, including `dependencies.downloadBytes` for package-manager downloads.
 A busy sweep reports `dependencies.status: "busy"` with no numeric total.
+Explicit prune can also reclaim clean, idle copies in the Lane checkout cache when
+the server confirms permanent project deletion to its owner. Access failures and
+projects in the restore window keep their local copies.
 See [dependency sharing](parallel-work-defaults.md#sharedependencies) for scope,
 size accounting, automatic eviction and changed-lockfile relinking.

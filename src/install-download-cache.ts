@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { lstatSync, mkdirSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkCacheScope } from './check-ecosystem-env.js';
 import type { PackageManager } from './package-manager.js';
@@ -19,7 +19,33 @@ import type { PackageManager } from './package-manager.js';
  * and per manager, private to the user (mode 0700, never a link), and holds downloads only: the
  * installed `node_modules` stays sealed in its own entry.
  */
-export const sharesDownloads = (pm: PackageManager) => pm.name === 'pnpm' || (pm.name === 'yarn' && pm.berry);
+export const sharesDownloads = (pm: PackageManager): pm is PackageManager & { name: 'pnpm' | 'yarn' } =>
+  pm.name === 'pnpm' || (pm.name === 'yarn' && pm.berry);
+
+/** Bind shared installs and downloads to a hosted Lane's deployment and project. */
+export function dependencyProject(root: string): string | null {
+  try {
+    const marker = JSON.parse(readFileSync(join(root, '.forge', 'hosted-lane.json'), 'utf8')) as {
+      url?: unknown;
+      selection?: { projectId?: unknown };
+    };
+    const project = marker.selection?.projectId;
+    return typeof project === 'string' && project && typeof marker.url === 'string'
+      ? `${marker.url}/${project}`
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export const downloadCachePath = (cache: string, manager: 'pnpm' | 'yarn', project: string | null) =>
+  join(cache, 'downloads', manager, checkCacheScope(project ?? 'local'));
+
+export function privateDownloadDirectory(path: string) {
+  const stat = lstatSync(path, { throwIfNoEntry: false }),
+    owner = process.getuid?.();
+  return stat?.isDirectory() && (owner === undefined || stat.uid === owner);
+}
 
 /** The shared download directory for this manager and project, created if needed; null when it
  * cannot be used safely (not a plain directory owned by this user), so the install stays private. */
@@ -30,14 +56,11 @@ export function sharedDownloadCache(
 ): string | null {
   if (!sharesDownloads(pm)) return null;
   const parent = join(cache, 'downloads', pm.name),
-    directory = join(parent, checkCacheScope(project ?? 'local'));
+    directory = downloadCachePath(cache, pm.name, project);
   try {
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
-    const owner = process.getuid?.();
-    // Every level is a plain directory of this user: a link planted anywhere in the path is refused.
-    for (const level of [join(cache, 'downloads'), parent, directory]) {
-      const stat = lstatSync(level);
-      if (!stat.isDirectory() || (owner !== undefined && stat.uid !== owner)) return null;
+    for (const level of [cache, join(cache, 'downloads'), parent, directory]) {
+      if (!lstatSync(level, { throwIfNoEntry: false })) mkdirSync(level, { recursive: true, mode: 0o700 });
+      if (!privateDownloadDirectory(level)) return null;
     }
     return directory;
   } catch {

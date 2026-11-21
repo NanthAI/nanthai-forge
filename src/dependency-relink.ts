@@ -1,5 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import { lstatSync, readFileSync, readdirSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { linkInstall } from './dependency-link.js';
 import { linkDirectory } from './source-links.js';
@@ -7,7 +15,7 @@ import { linkDirectory } from './source-links.js';
 /** A Lane's `node_modules` that Forge linked, and the key of the install it points at.
  * Cheap to read: one lstat, plus one readlink or one small marker file. */
 export type ForgeLink = { fingerprint: string; entry: string; folders: string[] };
-export type Relinked = { from: string };
+export type Relinked = { from: string; restored?: true };
 
 const ENTRY_NAME = /^(npm|pnpm|yarn|bun)(?:-scripts|-rebuild|-skipped)?-([0-9a-f]{24})$/;
 /** Written inside a Lane-owned (real directory) `node_modules` so a later sync knows Forge built it. */
@@ -50,7 +58,9 @@ export function readLink(root: string): ForgeLink | null {
         match = ENTRY_NAME.exec(basename(entry));
       if (!isAbsolute(target) || basename(target) !== 'node_modules' || !match) return null;
       const fingerprint =
-        match[1] === 'npm' ? match[2]! : readFileSync(join(entry, ENTRY_FINGERPRINT), 'utf8').trim();
+        match[1] === 'npm' || !stat(entry)
+          ? match[2]!
+          : readFileSync(join(entry, ENTRY_FINGERPRINT), 'utf8').trim();
       return /^[0-9a-f]{24}$/.test(fingerprint) ? { fingerprint, entry, folders: [] } : null;
     } catch {
       return null;
@@ -64,6 +74,7 @@ export function readLink(root: string): ForgeLink | null {
       /^[0-9a-f]{24}$/.test(marker.fingerprint) &&
       typeof marker.entry === 'string' &&
       isAbsolute(marker.entry) &&
+      ENTRY_NAME.test(basename(marker.entry)) &&
       Array.isArray(marker.folders) &&
       marker.folders.every(
         folder => typeof folder === 'string' && !isAbsolute(folder) && !folder.split('/').includes('..'),
@@ -107,7 +118,11 @@ function retire(root: string, link: ForgeLink): (() => void) | string {
   for (const path of present) rmSync(path, { recursive: true, force: true });
   return () => {
     try {
-      if (!stat(join(root, 'node_modules'))) linkInstall(link.entry, root, link.folders);
+      if (!stat(join(root, 'node_modules'))) {
+        linkInstall(link.entry, root, link.folders);
+        if (!stat(join(root, 'node_modules'))) mkdirSync(join(root, 'node_modules'));
+        recordLink(root, link);
+      }
     } catch {
       /* Best effort: the failure is already reported by the caller. */
     }
@@ -118,13 +133,12 @@ function retire(root: string, link: ForgeLink): (() => void) | string {
  * is a Forge link to an install of an older lockfile, relink it through `relink` (which installs once
  * into the shared cache if the new key is not there yet). Returns null when there is nothing to do.
  * A failed relink puts the previous link back, so a Lane never ends with less than it had. */
-export async function relinkIfStale<T extends { status: string }>(
+export async function relinkDependencyEntry<T extends { status: string }>(
   root: string,
-  currentKey: string,
+  link: ForgeLink,
+  missing: boolean,
   relink: () => Promise<T>,
-): Promise<{ status: 'stale'; reason: string } | (T & { relinked?: Relinked }) | null> {
-  const link = readLink(root);
-  if (!link || link.fingerprint === currentKey) return null;
+): Promise<{ status: 'stale'; reason: string } | (T & { relinked?: Relinked })> {
   const undo = retire(root, link);
   if (typeof undo === 'string') return { status: 'stale', reason: undo };
   let result: T;
@@ -135,7 +149,7 @@ export async function relinkIfStale<T extends { status: string }>(
     throw error;
   }
   if (result.status === 'linked' || result.status === 'installed')
-    return { ...result, relinked: { from: link.fingerprint } };
+    return { ...result, relinked: { from: link.fingerprint, ...(missing ? { restored: true } : {}) } };
   undo();
   return result;
 }

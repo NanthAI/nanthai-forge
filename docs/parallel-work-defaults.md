@@ -270,23 +270,26 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   or the manager version or install settings changed) it relinks to the install for the new key, installing
   it once into the shared cache if no Lane has yet, and prints one line on stderr (`start`/`open` also report
   `dependencies.relinked.from`). Lanes linked by older builds follow the same rule. If the new install
-  fails the previous link is put back. If the directory holds packages Forge did not link, it is kept
+  fails the previous link is put back. These commands also restore a Forge link when its shared
+  install was pruned. If the directory holds packages Forge did not link, it is kept
   and reported (`dependencies.status` `stale`, or a stderr line); delete it to relink. A Lane with no
   `node_modules` is not given one by these commands.
-- The cache is `$XDG_CACHE_HOME/forge/deps` (default `~/.cache/forge/deps`). Its installed trees
-  have a **4 GiB** soft budget. Set `FORGE_DEPS_CACHE_MAX_GB` to a positive number of GiB to override it.
+- The cache is `$XDG_CACHE_HOME/forge/deps` (default `~/.cache/forge/deps`). It has a
+  **4 GiB** soft budget. Set `FORGE_DEPS_CACHE_MAX_GB` to a positive number of GiB to override it.
   Existing start/open/install/refresh work sweeps unused entries least-recently-used first; no daemon,
-  polling, network or idle work is added. `nforge prune` previews the same eviction and
-  `nforge prune --apply` applies it after ordinary Lane-root cleanup.
-- Existing checkout links (including main, workspace overlays and retained CLI runtimes) and running
-  install/link locks always win over the budget. If they alone need more than the budget, the cache
-  stays larger until those references disappear. Cache aliases are compared by their canonical
+  polling, network or idle work is added. `nforge prune` previews eviction against the whole cache's
+  disk footprint and `nforge prune --apply` applies it after Lane-root cleanup.
+- Main checkout links, recent Lane links, pinned Lanes, running Lane commands and live install/link
+  locks retain their entries even above budget. Lane links use the existing `clientCacheMaxAgeHours`
+  setting (24 hours by default, 0 disables age expiry). Workspace overlays follow the same rule.
+  CLI builds keep their installs while selected by `current`, `previous` or `manager`. Runtime leases,
+  the CLI's retirement grace and the update lock protect live CLI work. Cache aliases are compared by their canonical
   filesystem paths, so a link through a different symlink spelling stays protected. An installer and eviction hold the same per-entry
   lock through link publication or removal; a failed relink keeps its old entry available through a process-identity rollback lease.
   Relinks never hold two exclusive install locks, so two Lanes can swap hashes without deadlocking.
-  Abandoned partial installs can be reclaimed once their installer is gone. Unrecognised cache folders,
-  including the separate manager download caches, are left alone.
-- The eviction budget uses apparent installed-tree bytes. Completed sealed-package sizes are memoised
+  Abandoned partial installs can be reclaimed once their installer is gone. Unrecognised cache folders
+  are left alone.
+- Automatic eviction uses apparent installed-tree bytes. Completed sealed-package sizes are memoised
   locally and writable tool output is counted on every sweep. Automatic runs read entry metadata and
   registered/root references, measuring new or legacy sealed installs once. They remove read-only
   trees by restoring directory permissions without following symlinks.
@@ -295,8 +298,10 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   inode once per filesystem, like `du -sk` on a quiet cache. `downloadBytes` is included in that
   total and gets credit for links shared between downloads and installs. These are filesystem
   allocations, with no attempt to identify shared copy-on-write extents. `installedBytes` is the
-  estimated installed-tree budget usage after the previewed or applied eviction. Per-entry eviction
-  estimates use the same apparent-byte method as that budget. Download stores stay outside eviction.
+  estimated installed-tree size after the previewed or applied eviction. Explicit prune can evict
+  a pnpm or Yarn Berry download store if it is over budget, older than `clientCacheMaxAgeHours`, and
+  has neither a live installer lease nor a retained install link. Dry run reports the currently
+  allocated bytes and lists candidates separately.
   If another sweep holds the lock, prune reports `status: "busy"` and null sizes. An absent cache
   reports `status: "measured"` and zero bytes. If a directory moves during inspection or the
   disk walk fails, prune reports `status: "unavailable"` with null disk totals and retains its

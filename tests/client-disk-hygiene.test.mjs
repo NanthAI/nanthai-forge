@@ -419,6 +419,53 @@ test('finished Lane prune ignores snapshot maintenance without losing dirty or h
   assert.equal(logged.find(row => row.laneId === done.laneId).bytes, expectedBytes);
 });
 
+test('explicit prune reclaims clean deleted-project copies and retains unsaved, pinned and held copies', async t => {
+  const directory = realpathSync(isolated(t));
+  const now = Date.parse('2026-01-02T00:00:00Z'),
+    states = new Map();
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const prepare = async (name, state = 'project-deleted', flags = {}) => {
+    const laneId = randomUUID(),
+      root = join(directory, `${name}.forge-client`, 'lanes', laneId);
+    await realCheckout(root, laneId);
+    ageTree(root, 10);
+    ageTree(`${root}.forge-client`, 10);
+    age(`${root}.forge-metrics.jsonl`, 10);
+    recordLane({ laneId, root, ...address, lastActionAt: now - 10 * hour, ...flags });
+    states.set(laneId, state);
+    return { root, laneId };
+  };
+  const deleted = await prepare('deleted'),
+    dirty = await prepare('dirty'),
+    withheld = await prepare('withheld', 'unknown'),
+    pinned = await prepare('pinned', 'project-deleted', { pinned: true }),
+    held = await prepare('held', 'project-deleted', {
+      landing: { operationId: randomUUID(), at: now - 10 * hour },
+    }),
+    inUse = await prepare('in-use');
+  const edited = join(dirty.root, 'src', 'a.txt');
+  writeFileSync(edited, 'unsaved\n');
+  age(edited, 10);
+  const input = {
+    readStates: async () => states,
+    now,
+    settings: { autoPruneHours: 3, idleLaneHours: 1 },
+    processes: () => ({ paths: [inUse.root], unknown: false }),
+  };
+  assert.deepEqual((await laneHousekeeping({ ...input, apply: true })).pruned, []);
+  const dry = await laneHousekeeping({ ...input, apply: false, deletedProjects: true });
+  assert.deepEqual(
+    dry.wouldPrune.map(row => row.laneId),
+    [deleted.laneId],
+  );
+  assert(existsSync(deleted.root));
+  const applied = await laneHousekeeping({ ...input, apply: true, deletedProjects: true });
+  assert.deepEqual(applied.pruned, dry.wouldPrune);
+  assert(!existsSync(deleted.root));
+  assert.equal(readFileSync(edited, 'utf8'), 'unsaved\n');
+  assert([withheld, pinned, held, inUse].every(lane => existsSync(lane.root)));
+});
+
 test('an idle active Lane root survives housekeeping by default and a removal is logged', async t => {
   const directory = isolated(t);
   const now = Date.now();

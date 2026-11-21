@@ -5,33 +5,34 @@ import { randomUUID } from 'node:crypto';
 import { processAlive } from './local-process.js';
 import { startIdentity } from './heavy-queue.js';
 import { fileURLToPath } from 'node:url';
-import {
-  lstatSync,
-  readFileSync,
-  readdirSync,
-  readlinkSync,
-  rmSync,
-  renameSync,
-  writeFileSync,
-} from 'node:fs';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { lstatSync, readFileSync, readdirSync, rmSync, renameSync, utimesSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { tryHeavySlot } from './heavy-slots.js';
-import { listLanes } from './lane-registry.js';
-import { readLink } from './dependency-relink.js';
 import { removeInstall } from './dependency-seal.js';
 import { dependencyCacheDiskUsage } from './dependency-cache-disk.js';
+import { dependencyRootExists, dependencyRoots } from './dependency-cache-roots.js';
+import {
+  dependencyProject,
+  downloadCachePath,
+  privateDownloadDirectory,
+  sharedDownloadCache,
+} from './install-download-cache.js';
+import type { PackageManager } from './package-manager.js';
+import { readClientSettings } from './client-settings.js';
 
 const ENTRY = /^((?:npm|pnpm|yarn|bun)(?:-scripts|-rebuild|-skipped)?-[0-9a-f]{24})(?:\.tmp-[a-zA-Z0-9]+)?$/;
 const lockDirectory = (entry: string) => join(dirname(entry), `${ENTRY.exec(basename(entry))![1]}.lock`);
 /** Made while holding the entry lock, then held without that exclusive lock during a relink.
  * A shared rollback lease avoids an A→B / B→A install-lock cycle across two Lanes. */
 export function retainDependencyEntry(entry: string): () => void {
-  const path = join(lockDirectory(entry), `keep-${process.pid}-${randomUUID()}`);
+  return retain(lockDirectory(entry));
+}
+function retain(directory: string): () => void {
+  const path = join(directory, `keep-${process.pid}-${randomUUID()}`);
   writeFileSync(path, JSON.stringify({ pid: process.pid, startTime: startIdentity(process.pid) }));
   return () => rmSync(path, { force: true });
 }
-function retained(entry: string): boolean {
-  const directory = lockDirectory(entry);
+function retained(directory: string, apply: boolean): boolean {
   let live = false;
   for (const name of readdirSync(directory).filter(name => name.startsWith('keep-'))) {
     const path = join(directory, name);
@@ -42,24 +43,47 @@ function retained(entry: string): boolean {
       /* The filename still identifies a partial writer. */
     }
     if (processAlive(identity)) live = true;
-    else rmSync(path, { force: true });
+    else if (apply) rmSync(path, { force: true });
   }
   return live;
 }
+
+/** Fence a store against eviction while the package manager uses it. Concurrent
+ * installers share the store and hold their own leases through the install. */
+export function retainDownloadCache(cache: string, manager: PackageManager, project: string | null) {
+  const spelling = cache;
+  cache = canonicalRoot(cache);
+  const directory = sharedDownloadCache(cache, manager, project);
+  if (!directory) return null;
+  const lockDirectory = `${directory}.lock`;
+  if (stat(lockDirectory) && !privateDownloadDirectory(lockDirectory)) return null;
+  const lock = tryHeavySlot(lockDirectory, 1);
+  if (!lock) return null;
+  try {
+    if (!sharedDownloadCache(cache, manager, project)) return null;
+    const now = new Date();
+    utimesSync(directory, now, now);
+    return { directory: join(spelling, relative(cache, directory)), release: retain(lockDirectory) };
+  } finally {
+    rmSync(lock, { recursive: true, force: true });
+  }
+}
+
 const USAGE = '.forge-usage.json';
 const DEFAULT_BYTES = 4 * 1024 ** 3;
-type Usage = { bytes?: number; tools?: number; folders?: string[]; used: number; roots: string[] };
+type Usage = {
+  bytes?: number;
+  tools?: number;
+  folders?: string[];
+  used: number;
+  roots: string[];
+  download?: string;
+};
 const stat = (path: string) => lstatSync(path, { throwIfNoEntry: false });
 const writeUsage = (entry: string, value: Usage) => {
   const next = join(entry, '.forge-usage.next');
   writeFileSync(next, JSON.stringify(value));
   renameSync(next, join(entry, USAGE));
-};
-const runtimeRoots = (root: string) => {
-  const parent = dirname(root);
-  return basename(parent) === 'builds' && stat(parent)?.isDirectory()
-    ? readdirSync(parent).map(name => join(parent, name))
-    : [];
 };
 const usage = (entry: string): Usage => {
   try {
@@ -96,64 +120,16 @@ function toolBytes(entry: string, folders: string[] = []): number {
   return total;
 }
 /** Called under the entry lock, after publishing the Lane links. Main and custom roots are recorded too. */
-export function touchDependencyEntry(entry: string, root: string, folders?: string[]) {
+export function touchDependencyEntry(entry: string, root: string, folders?: string[], download?: string) {
   const previous = usage(entry);
-  const roots = previous.roots.filter(path => stat(path) || runtimeRoots(path).length);
+  const roots = previous.roots.filter(dependencyRootExists);
   writeUsage(entry, {
     ...previous,
     ...(folders ? { folders } : {}),
+    ...(download ? { download: canonicalRoot(download) } : {}),
     used: Date.now(),
     roots: [...new Set([...roots, canonicalRoot(root)])],
   });
-}
-/** Registered roots cover pre-upgrade installs; enclosing project roots cover main's old links. */
-function knownRoots(extra: string[]): string[] {
-  const roots = new Set(extra.map(root => resolve(root)));
-  for (const lane of listLanes()) {
-    roots.add(lane.root);
-    for (let parent = dirname(lane.root); parent !== dirname(parent); parent = dirname(parent))
-      if (basename(parent).endsWith('.forge-client')) roots.add(parent.slice(0, -'.forge-client'.length));
-  }
-  const runtime = dirname(dirname(fileURLToPath(import.meta.url)));
-  roots.add(runtime);
-  for (const root of runtimeRoots(runtime)) roots.add(root);
-  return [...roots];
-}
-function referenced(entry: string, roots: string[]): boolean {
-  return roots
-    .flatMap(root => [root, ...runtimeRoots(root)])
-    .some(root => {
-      try {
-        const modules = join(root, 'node_modules'),
-          found = stat(modules);
-        if (!found) return false;
-        const link = readLink(root);
-        if (link) return canonicalRoot(link.entry) === entry;
-        // Legacy/custom symlinks need no marker. An unreadable marker or directory keeps its bytes.
-        const pointsInto = (path: string) => {
-          const target = canonicalRoot(resolve(dirname(path), readlinkSync(path)));
-          return target === entry || target.startsWith(entry + sep);
-        };
-        if (found.isSymbolicLink()) return pointsInto(modules);
-        if (found.isDirectory()) {
-          for (const name of readdirSync(modules)) {
-            const path = join(modules, name),
-              child = stat(path);
-            if (child?.isSymbolicLink() && pointsInto(path)) return true;
-            if (child?.isDirectory() && (name.startsWith('@') || name === '.bin'))
-              for (const name of readdirSync(path)) {
-                const nested = join(path, name);
-                if (stat(nested)?.isSymbolicLink() && pointsInto(nested)) return true;
-              }
-          }
-        }
-        return false;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
-        // Unknown filesystem coverage cannot authorize eviction.
-        return true;
-      }
-    });
 }
 type DependencyCachePrune = {
   budgetBytes: number;
@@ -198,7 +174,15 @@ export function pruneDependencyCache(
   };
   if (!stat(cache)) return result;
   cache = canonicalRoot(cache);
-  const sweep = tryHeavySlot(join(cache, '.gc.lock'), 1);
+  const sweepDirectory = join(cache, '.gc.lock');
+  if (stat(sweepDirectory) && !privateDownloadDirectory(sweepDirectory))
+    return {
+      ...result,
+      status: 'unavailable',
+      bytes: null,
+      ...(options.remeasure ? { downloadBytes: null, installedBytes: null } : {}),
+    };
+  const sweep = tryHeavySlot(sweepDirectory, 1);
   if (!sweep)
     return {
       ...result,
@@ -207,12 +191,12 @@ export function pruneDependencyCache(
       ...(options.remeasure ? { downloadBytes: null, installedBytes: null } : {}),
     };
   let installedBytes = 0;
+  let disk: ReturnType<typeof dependencyCacheDiskUsage> | undefined;
   try {
-    const roots = knownRoots(options.roots ?? []);
+    const referenced = dependencyRoots(options.roots ?? [], dirname(dirname(fileURLToPath(import.meta.url))));
     const entries = readdirSync(cache)
       .filter(name => ENTRY.test(name) && stat(join(cache, name))?.isDirectory())
-      .map(name => ({ entry: join(cache, name), ...usage(join(cache, name)) }))
-      .sort((a, b) => a.used - b.used || a.entry.localeCompare(b.entry));
+      .map(name => ({ entry: join(cache, name), ...usage(join(cache, name)) }));
     // Running installers own the base lock, including temporary stages; abandoned stages can go.
     for (const item of entries) {
       if (
@@ -225,7 +209,9 @@ export function pruneDependencyCache(
         installedBytes += item.bytes;
         continue;
       }
-      const lock = tryHeavySlot(lockDirectory(item.entry), 1);
+      const directory = lockDirectory(item.entry);
+      const lock =
+        !stat(directory) || privateDownloadDirectory(directory) ? tryHeavySlot(directory, 1) : null;
       if (!lock) {
         installedBytes += item.bytes ?? 0;
         result.kept.push({ entry: item.entry, reason: 'Install or link is running.' });
@@ -246,38 +232,103 @@ export function pruneDependencyCache(
             folders: item.folders ?? [],
             used: item.used,
             roots: item.roots,
+            ...(item.download ? { download: item.download } : {}),
           });
       } finally {
         rmSync(lock, { recursive: true, force: true });
       }
     }
-    for (const item of entries) {
-      if (installedBytes <= budgetBytes) break;
+    if (options.remeasure) {
+      try {
+        disk = dependencyCacheDiskUsage(cache, sweep);
+      } catch {
+        // Keep the existing installed-tree sweep available if disk accounting fails.
+      }
+    }
+    const stores = [...(disk?.entries ?? [])]
+      .filter(([path]) => {
+        const parent = dirname(path);
+        return (
+          /^[0-9a-f]{16}$/.test(basename(path)) &&
+          ['pnpm', 'yarn'].includes(basename(parent)) &&
+          dirname(parent) === join(cache, 'downloads')
+        );
+      })
+      .map(([entry, measurement]) => ({ entry, used: measurement.newest, bytes: measurement.bytes }));
+    const storePaths = new Set(stores.map(store => store.entry));
+    const maxAge = stores.length ? readClientSettings().clientCacheMaxAgeHours * 3_600_000 : 0;
+    const now = Date.now();
+    const installRunning = Boolean(result.kept.length);
+    let budgetUse = disk?.bytes ?? installedBytes;
+    for (const item of [...entries, ...stores].sort(
+      (a, b) => a.used - b.used || a.entry.localeCompare(b.entry),
+    )) {
+      if (budgetUse <= budgetBytes) break;
+      const store = storePaths.has(item.entry);
       if (item.bytes === undefined || result.kept.some(kept => kept.entry === item.entry)) continue;
-      const lock = tryHeavySlot(lockDirectory(item.entry), 1);
+      const directory = store ? `${item.entry}.lock` : lockDirectory(item.entry);
+      if (stat(directory) && !privateDownloadDirectory(directory)) continue;
+      if (
+        store &&
+        ![join(cache, 'downloads'), dirname(item.entry), item.entry].every(privateDownloadDirectory)
+      )
+        continue;
+      const lock = tryHeavySlot(directory, 1);
       if (!lock) {
         result.kept.push({ entry: item.entry, reason: 'Install or link is running.' });
         continue;
       }
       try {
-        if (!stat(item.entry)) continue;
-        // Re-read under the lock: a concurrent cache hit may have added a new root or refreshed LRU.
-        const current = usage(item.entry);
-        if (
-          current.used !== item.used ||
-          retained(item.entry) ||
-          referenced(item.entry, [...roots, ...current.roots])
-        ) {
-          result.kept.push({
-            entry: item.entry,
-            reason:
-              'Linked from an existing checkout, retained for a running relink, or used during this sweep.',
-          });
-          continue;
+        const found = stat(item.entry);
+        if (!found?.isDirectory()) continue;
+        if (store) {
+          const linked = () =>
+            entries.some(entry => {
+              const current = usage(entry.entry);
+              if (current.download)
+                return current.download === item.entry && referenced(entry.entry, current.roots);
+              // Older installs recorded checkout links without recording their download scope.
+              const manager = /^(pnpm|yarn)(?:-skipped)?-[0-9a-f]{24}$/.exec(basename(entry.entry))?.[1];
+              return (
+                (manager === 'pnpm' || manager === 'yarn') &&
+                referenced(
+                  entry.entry,
+                  current.roots,
+                  root => downloadCachePath(cache, manager, dependencyProject(root)) === item.entry,
+                )
+              );
+            });
+          if (
+            !maxAge ||
+            installRunning ||
+            now - Math.max(found.mtimeMs, item.used) <= maxAge ||
+            retained(directory, result.apply) ||
+            linked()
+          ) {
+            result.kept.push({ entry: item.entry, reason: 'Recent, linked or in-use package downloads.' });
+            continue;
+          }
+        } else {
+          // Re-read under the lock: a concurrent cache hit may have added a new root or refreshed LRU.
+          const current = usage(item.entry);
+          if (
+            current.used !== item.used ||
+            retained(directory, result.apply) ||
+            referenced(item.entry, current.roots)
+          ) {
+            result.kept.push({
+              entry: item.entry,
+              reason:
+                'Linked from an existing checkout, retained for a running relink, or used during this sweep.',
+            });
+            continue;
+          }
+          installedBytes -= item.bytes;
         }
         if (result.apply) removeInstall(item.entry);
-        (result.apply ? result.removed : result.wouldRemove).push({ entry: item.entry, bytes: item.bytes });
-        installedBytes -= item.bytes;
+        const size = disk?.reclaim(item.entry) ?? item.bytes;
+        (result.apply ? result.removed : result.wouldRemove).push({ entry: item.entry, bytes: size });
+        budgetUse -= size;
       } finally {
         rmSync(lock, { recursive: true, force: true });
         // The lock directory persists: removing it could race a new slot claim.
@@ -287,10 +338,12 @@ export function pruneDependencyCache(
     rmSync(sweep, { recursive: true, force: true });
   }
   if (!options.remeasure) return { ...result, bytes: installedBytes };
+  if (!disk) return { ...result, installedBytes, status: 'unavailable', bytes: null, downloadBytes: null };
   // The separate disk report is observational. A slow or unreadable cache must not
   // hold the sweep lock or hide the removal receipt for changes already applied.
   try {
-    return { ...result, installedBytes, ...dependencyCacheDiskUsage(cache, sweep) };
+    const { bytes, downloadBytes } = !result.removed.length ? disk : dependencyCacheDiskUsage(cache, sweep);
+    return { ...result, installedBytes, bytes, downloadBytes };
   } catch {
     return { ...result, installedBytes, status: 'unavailable', bytes: null, downloadBytes: null };
   }

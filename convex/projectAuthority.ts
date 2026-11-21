@@ -118,11 +118,32 @@ export async function accessibleProject(
   ctx: QueryCtx | MutationCtx,
   projectId: Id<'hostedProjects'>,
   actor: string,
+): Promise<Doc<'hostedProjects'>>;
+export async function accessibleProject(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  actor: string,
+  forPrune: boolean,
+): Promise<Doc<'hostedProjects'> | null>;
+export async function accessibleProject(
+  ctx: QueryCtx | MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  actor: string,
+  forPrune = false,
 ) {
   await deviceProject(ctx, projectId);
   const project = await ctx.db.get(projectId);
   let authorized = false;
   try {
+    // Only the owner can distinguish permanent deletion from missing access, and
+    // this tombstone path never authorizes a read of project or Work data.
+    if (
+      forPrune &&
+      project?.owner === actor &&
+      project.removal === 'deleted' &&
+      project.purge?.completedAt !== undefined
+    )
+      return null;
     invariant(
       project && !project.removal,
       'PROJECT_UNAVAILABLE',

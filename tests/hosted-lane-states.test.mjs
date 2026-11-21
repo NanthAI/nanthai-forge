@@ -157,3 +157,61 @@ test('92f4bf04: empty project selections cannot bypass the bounded prune read pa
   );
   assert.equal(s.counts.at(-1).documents, 0, 'reject before any DB access');
 });
+
+test('prune only proves permanent deletion to the project owner and reads no Lane records', async () => {
+  const s = lanesFixture();
+  const project = (owner, removal, completed = false) =>
+    s.insert('hostedProjects', {
+      owner,
+      removal,
+      key: randomUUID(),
+      name: 'Synthetic',
+      currentBackup: null,
+      revision: 0,
+      visibility: 'private',
+      ...(completed
+        ? {
+            purge: {
+              operationId: randomUUID(),
+              reason: 'owner',
+              startedAt: 1,
+              rows: 0,
+              bytes: 0,
+              pages: 0,
+              completedAt: 2,
+            },
+          }
+        : {}),
+    });
+  const projectId = project('owner', 'deleted', true),
+    laneId = randomUUID(),
+    trashed = randomUUID(),
+    inProgress = randomUUID(),
+    hidden = randomUUID(),
+    legacy = randomUUID(),
+    missing = randomUUID();
+  const result = await s.call('deleted', reads.states, {
+    projectId,
+    laneIds: [laneId],
+    additionalProjects: [
+      { projectId: project('owner', 'trash'), laneIds: [trashed] },
+      { projectId: project('owner', 'deleting'), laneIds: [inProgress] },
+      { projectId: project('someone else', 'deleted', true), laneIds: [hidden] },
+      { projectId: project('owner', 'deleted'), laneIds: [legacy] },
+      { projectId: 'missing', laneIds: [missing] },
+    ],
+  });
+  assert.deepEqual(
+    result.map(row => row.state),
+    ['project-deleted', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown'],
+  );
+  assert.deepEqual(result[0], { laneId, state: 'project-deleted', version: 0 });
+  const count = s.counts.at(-1);
+  assert.equal(count.readDocumentsByTable.projectHostedRecords ?? 0, 0);
+  assert.equal(count.readDocumentsByTable.hostedProjects, 5);
+  assert.equal(count.writes, 0);
+  await assert.rejects(
+    s.call('regularRead', reads.states, { projectId, laneIds: [laneId] }),
+    error => (error.data?.code ?? error.code) === 'PROJECT_UNAVAILABLE',
+  );
+});

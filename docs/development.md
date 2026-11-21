@@ -72,12 +72,13 @@ Lane start/open and dependency refresh reuse sealed installs under
 4 GiB soft budget, overridden by a positive `FORGE_DEPS_CACHE_MAX_GB` value in GiB.
 Unused installs are evicted by last use during existing dependency work;
 `nforge prune` previews eviction and `nforge prune --apply` removes eligible entries.
-Live checkout links and running install/link locks are always retained, even above
-the budget. Explicit prune reports allocated space for the whole cache, including
-manager downloads. Ordinary sweeps reuse sealed-package size metadata and count
-writable tool output.
+Active checkout links and running install/link locks are retained even above the
+budget. Explicit prune measures the entire cache on disk and includes stale,
+unused manager download stores in eviction. Ordinary sweeps reuse sealed-package
+size metadata and count writable tool output.
 There are no new calls, DB I/O, background workers or idle timers. Changed lockfiles
-relink at preflight/open automatically. A clone root with its own `node_modules`
+relink at preflight/open automatically, as do Forge links whose installs were pruned.
+A clone root with its own `node_modules`
 keeps that install on pull; run `npm ci --ignore-scripts` there after the lockfile
 changes, including before `npm run build:web`. Lane installs include the web
 development dependencies; a production-only CLI install does not. See [dependency sharing](parallel-work-defaults.md#sharedependencies)

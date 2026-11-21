@@ -196,7 +196,17 @@ export const states = query({
       const result = [];
       for (const group of groups) {
         try {
-          await accessibleProject(ctx, group.projectId, user.subject);
+          const project = await accessibleProject(
+            ctx,
+            group.projectId,
+            user.subject,
+            Boolean(input.additionalProjects) && !input.sourcePins,
+          );
+          if (!project) {
+            for (const laneId of new Set(group.laneIds))
+              result.push({ laneId, state: 'project-deleted', version: 0 });
+            continue;
+          }
         } catch (error) {
           // No record or lifecycle data is read for an unavailable project. A batched prune
           // can still classify the other projects; a legacy caller keeps its typed failure.

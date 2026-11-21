@@ -85,6 +85,11 @@ export function permitCliRetirement(installation: string) {
  * machine setting: at most the builds of the last few minutes of updates stay on disk. */
 export const CLI_RETIRE_GRACE_MS = 10 * 60_000;
 const RETIRED = '.retired';
+/** Read a runtime user's lease without mutating it. An unreadable lease leaves liveness unknown. */
+export function liveCliBuildUser(file: string) {
+  const identity = JSON.parse(readFileSync(file, 'utf8')) as { pid: number; startTime?: string };
+  return processAlive(identity) ? identity : null;
+}
 /** Selecting a build (again) clears its retirement mark. */
 export function unretireCliBuild(build: string) {
   rmSync(join(build, RETIRED), { force: true });
@@ -118,8 +123,8 @@ export function pruneCliBuilds(
     for (const user of existsSync(users) ? readdirSync(users) : []) {
       const file = join(users, user);
       try {
-        const identity = JSON.parse(readFileSync(file, 'utf8'));
-        if (processAlive(identity)) {
+        const identity = liveCliBuildUser(file);
+        if (identity) {
           build.live = true;
           // Only an exact kernel identity can explain a stable-path invocation.
           if (identity.startTime && processStartTime(identity.pid) === identity.startTime)

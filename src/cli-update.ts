@@ -477,7 +477,22 @@ async function updateCliLocked(
         }
       return value;
     };
-    if (retainedBuild) return await published(publish());
+    const install = (directory: string) =>
+      dependencies.run(
+        directory,
+        ['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'],
+        undefined,
+        buildLease?.command(),
+      );
+    if (retainedBuild) {
+      const deps = await shareDependencies(build, { enabled: true, refresh: true, install });
+      invariant(
+        deps.status !== 'failed' && deps.status !== 'stale',
+        'CLI_UPDATE_DEPENDENCIES_FAILED',
+        'Could not restore locked CLI dependencies for this build.',
+      );
+      return await published(publish());
+    }
     stage = mkdtempSync(join(installation, 'builds', '.install-'));
     const transferCache = clientCacheRoot(stage);
     try {
@@ -491,13 +506,6 @@ async function updateCliLocked(
       'CLI_UPDATE_SOURCE_INVALID',
       'CLI releases must come from the Forge source project.',
     );
-    const install = (directory: string) =>
-      dependencies.run(
-        directory,
-        ['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'],
-        undefined,
-        buildLease?.command(),
-      );
     const deps = await shareDependencies(stage, {
       enabled: true,
       install,

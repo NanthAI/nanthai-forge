@@ -16,7 +16,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { readInstallScriptAllowlist, type InstallScriptAllowlist } from './install-script-allowlist.js';
 import { linkInstall } from './dependency-link.js';
 import { removeInstall, sealInstall } from './dependency-seal.js';
-import { readLink, recordLink, relinkIfStale, type Relinked } from './dependency-relink.js';
+import { readLink, recordLink, relinkDependencyEntry, type Relinked } from './dependency-relink.js';
 import { allowedRebuilds, npmInstaller, scriptedPackages } from './npm-install.js';
 import {
   detectPackageManager,
@@ -36,8 +36,9 @@ import {
 import { acquireHeavySlot, heavySlotDirectory, tryHeavySlot } from './heavy-slots.js';
 import { heavySlots, readClientSettings } from './client-settings.js';
 import { installRegistryHosts, type RegistryHosts } from './install-registry-hosts.js';
-import { sharedDownloadCache } from './install-download-cache.js';
+import { dependencyProject, sharesDownloads } from './install-download-cache.js';
 import { linkDirectory } from './source-links.js';
+import { canonicalRoot } from './root-paths.js';
 
 // Keep cold cache maintenance out of the CLI bundle's startup chunks. The emitted sibling
 // is packaged with core; import.meta keeps its original dist location in the CLI bundle.
@@ -123,21 +124,6 @@ export function workspaceDirectories(lock: Buffer): string[] | null {
     ? folders.sort()
     : null;
 }
-/** The hosted project a Lane checkout belongs to (deployment and project id), or null for any other folder. */
-function hostedProject(root: string): string | null {
-  try {
-    const marker = JSON.parse(readFileSync(join(root, '.forge', 'hosted-lane.json'), 'utf8')) as {
-      url?: unknown;
-      selection?: { projectId?: unknown };
-    };
-    const project = marker.selection?.projectId;
-    return typeof project === 'string' && project && typeof marker.url === 'string'
-      ? `${marker.url}/${project}`
-      : null;
-  } catch {
-    return null;
-  }
-}
 /** npm installs are keyed by the exact lockfile, package.json (and every workspace package.json),
  * platform and Node major version, so a Lane with a different lockfile never shares another Lane's install. */
 export function dependencyKey(root: string, managerVersion?: string): string | null {
@@ -175,7 +161,7 @@ export function dependencyKey(root: string, managerVersion?: string): string | n
   const allow = readInstallScriptAllowlist(root);
   if (allow) hash.update(`\0allow:${JSON.stringify(allow)}`);
   // A hosted Lane's install is its project's own: a fork with identical manifests never shares it.
-  const project = hostedProject(root);
+  const project = dependencyProject(root);
   if (project) hash.update(`\0project:${project}`);
   return hash
     .update(`\0${process.platform}-${process.arch}-node${process.versions.node.split('.')[0]}`)
@@ -307,36 +293,37 @@ export async function shareDependencies(
   if (!detected) return { status: 'none' };
   if ('reason' in detected) return { status: 'none', reason: detected.reason };
   const pm = detected.manager,
-    other = pm.name !== 'npm';
+    other = pm.name !== 'npm',
+    cache = options.cache ?? dependencyCacheDirectory();
   if (exists(join(root, 'node_modules'))) {
     const current = dependencyKey(root);
     if (!current) return { status: 'none' };
     const link = readLink(root);
-    if (!link) return { status: 'present' };
+    if (!link || canonicalRoot(dirname(link.entry)) !== canonicalRoot(cache)) return { status: 'present' };
+    if (lstatSync(link.entry, { throwIfNoEntry: false })?.isSymbolicLink()) return { status: 'present' };
     const maintenance = await cacheMaintenance();
     const lock = await acquireHeavySlot(`${link.entry}.lock`, 1);
-    if (link.fingerprint !== current) {
+    const missing = !exists(join(link.entry, 'node_modules'));
+    if (missing || link.fingerprint !== current) {
       // Retain rollback bytes without holding one exclusive install lock while acquiring another.
       let release: () => void;
       try {
-        release = maintenance.retainDependencyEntry(link.entry);
+        release = missing ? () => {} : maintenance.retainDependencyEntry(link.entry);
       } finally {
         rmSync(lock, { recursive: true, force: true });
       }
       try {
-        return (
-          (await relinkIfStale(root, current, () =>
-            shareDependencies(root, { ...options, refresh: false }),
-          )) ?? { status: 'present' }
+        return await relinkDependencyEntry(root, link, missing, () =>
+          shareDependencies(root, { ...options, refresh: false }),
         );
       } finally {
         release();
-        maintenance.sweepDependencyCache(options.cache ?? dependencyCacheDirectory(), root);
+        maintenance.sweepDependencyCache(cache, root);
       }
     }
     try {
       maintenance.touchDependencyEntry(link.entry, root, link.folders);
-      maintenance.sweepDependencyCache(options.cache ?? dependencyCacheDirectory(), root);
+      maintenance.sweepDependencyCache(cache, root);
       return { status: 'present' };
     } finally {
       rmSync(lock, { recursive: true, force: true });
@@ -364,13 +351,13 @@ export async function shareDependencies(
   // Each script mode has its own entry: a Lane that did not accept scripts never links one that ran
   // them. `-skipped` holds a requesting repository's script-less install: its plain entry from before
   // requests needed acceptance may have run the allowlisted scripts, so it is never linked again.
-  const cache = options.cache ?? dependencyCacheDirectory(),
-    mode = runScripts ? '-scripts' : rebuild.length ? '-rebuild' : policy.requested ? '-skipped' : '',
+  const mode = runScripts ? '-scripts' : rebuild.length ? '-rebuild' : policy.requested ? '-skipped' : '',
     prefix = `${pm.name}${mode}`,
     entry = join(cache, `${prefix}-${key}`);
   const registryHosts = installRegistryHosts(root, pm),
     hosts = registryHosts ? { registryHosts } : {};
-  let installed = false;
+  let installed = false,
+    downloadDirectory: string | undefined;
   mkdirSync(cache, { recursive: true });
   const { installIfCacheBusy } = options;
   const lock = installIfCacheBusy
@@ -400,18 +387,28 @@ export async function shareDependencies(
       }
       // Script-less installs of one project share a content-addressed download cache; an install
       // that runs package scripts keeps a private one (code that could write the shared directory).
-      const downloads =
-        other && !runScripts && !rebuild.length ? sharedDownloadCache(cache, pm, hostedProject(root)) : null;
       const settings = readClientSettings(),
         slots = options.heavy === false ? 0 : heavySlots(settings.localHeavySlots);
       const slot = slots ? await acquireHeavySlot(heavySlotDirectory(), slots) : null;
+      let downloads: ReturnType<typeof import('./dependency-cache.js').retainDownloadCache> = null;
       try {
+        if (!runScripts && !rebuild.length && sharesDownloads(pm)) {
+          const { retainDownloadCache } = await cacheMaintenance();
+          downloads = retainDownloadCache(cache, pm, dependencyProject(root));
+          downloadDirectory = downloads?.directory;
+        }
         await (
           options.install ??
           (other
             ? (directory, installOptions) => managerInstall(directory, pm, runner!, installOptions)
             : npmInstaller)
-        )(stage, { runScripts, rebuild, manager: pm, runner, ...(downloads ? { downloads } : {}) });
+        )(stage, {
+          runScripts,
+          rebuild,
+          manager: pm,
+          runner,
+          ...(downloadDirectory ? { downloads: downloadDirectory } : {}),
+        });
       } catch (error) {
         rmSync(stage, { recursive: true, force: true });
         return {
@@ -421,6 +418,7 @@ export async function shareDependencies(
           ...hosts,
         };
       } finally {
+        downloads?.release();
         if (slot) rmSync(slot, { recursive: true, force: true });
       }
       // Read-only before the marker: an entry that carries the marker is always sealed.
@@ -444,7 +442,7 @@ export async function shareDependencies(
     const fingerprint = dependencyKey(root);
     if (fingerprint) recordLink(root, { fingerprint, entry, folders: other ? folders : npmFolders });
     const { touchDependencyEntry } = await cacheMaintenance();
-    touchDependencyEntry(entry, root, other ? folders : npmFolders);
+    touchDependencyEntry(entry, root, other ? folders : npmFolders, downloadDirectory);
     const skippedScripts = runScripts ? undefined : skippedInstallScripts(root, rebuild);
     const ran: RanScripts | undefined =
       policy.because && (runScripts || rebuild.length)

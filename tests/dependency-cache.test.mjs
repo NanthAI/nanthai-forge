@@ -5,6 +5,7 @@ import fs, {
   existsSync,
   linkSync,
   lstatSync,
+  lutimesSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -13,12 +14,13 @@ import fs, {
   realpathSync,
   rmSync,
   truncateSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { join, dirname, basename } from 'node:path';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
-import { pruneDependencyCache, touchDependencyEntry } from '../dist/dependency-cache.js';
+import { pruneDependencyCache, retainDownloadCache, touchDependencyEntry } from '../dist/dependency-cache.js';
 import { removeInstall, sealInstall } from '../dist/dependency-seal.js';
 import { dependencyKey, shareDependencies } from '../dist/shared-dependencies.js';
 import { tryHeavySlot } from '../dist/heavy-slots.js';
@@ -400,17 +402,189 @@ test('workspace overlay references retain their install even when the budget is 
   assert.equal(readFileSync(join(root, 'node_modules', 'dep', 'index.js'), 'utf8'), 'workspace dep');
 });
 
-test('a CLI install stage renamed into a retained runtime keeps its dependency tree', t => {
+test('only selected CLI builds and a live updater retain runtime dependency trees', t => {
   const f = fixture(t),
-    entry = f.entry(1),
-    stage = join(f.directory, 'cli', 'builds', '.install-stage');
-  mkdirSync(stage, { recursive: true });
-  linkDirectory(join(entry, 'node_modules'), join(stage, 'node_modules'));
-  touchDependencyEntry(entry, stage);
-  const runtime = join(dirname(stage), 'abc123');
-  renameSync(stage, runtime);
+    installation = join(f.directory, 'cli'),
+    builds = join(installation, 'builds'),
+    update = tryHeavySlot(join(installation, 'update-lock'), 1);
+  const pointers = ['current', 'previous', 'manager'];
+  for (const [index, pointer] of pointers.entries()) {
+    const entry = f.entry(index + 1),
+      stage = join(builds, '.install-stage'),
+      runtime = join(builds, (index + 1).toString().repeat(12));
+    mkdirSync(stage, { recursive: true });
+    linkDirectory(join(entry, 'node_modules'), join(stage, 'node_modules'));
+    touchDependencyEntry(entry, stage);
+    renameSync(stage, runtime);
+    linkDirectory(runtime, join(installation, pointer));
+  }
+  const obsolete = f.entry(4),
+    obsoleteBuild = join(builds, '4'.repeat(12));
+  mkdirSync(obsoleteBuild);
+  linkDirectory(join(obsolete, 'node_modules'), join(obsoleteBuild, 'node_modules'));
+  touchDependencyEntry(obsolete, obsoleteBuild);
   assert.deepEqual(f.sweep().removed, []);
-  assert.equal(readFileSync(join(runtime, 'node_modules', 'dep', 'index.js'), 'utf8').length, 1000);
+  rmSync(update, { recursive: true });
+  const users = join(obsoleteBuild, '.users');
+  mkdirSync(users);
+  writeFileSync(join(users, String(process.pid)), JSON.stringify({ pid: process.pid }));
+  assert.deepEqual(f.sweep().removed, [], 'a retired CLI can still lazy-load its dependencies');
+  rmSync(users, { recursive: true });
+  const otherBuilds = join(f.directory, 'project', 'builds', 'lane');
+  const laneInstall = f.entry(5);
+  mkdirSync(otherBuilds, { recursive: true });
+  linkDirectory(join(laneInstall, 'node_modules'), join(otherBuilds, 'node_modules'));
+  recordLane({ laneId: '00000000-0000-4000-8000-000000000005', root: otherBuilds });
+  assert.deepEqual(
+    f.sweep().removed.map(row => row.entry),
+    [obsolete],
+  );
+  for (const pointer of pointers)
+    assert.equal(
+      readFileSync(join(installation, pointer, 'node_modules', 'dep', 'index.js'), 'utf8').length,
+      1000,
+    );
+});
+
+test('a dormant Lane loses only its install and recovers on refresh; pinned and running Lanes keep theirs', async t => {
+  const f = fixture(t);
+  const now = Date.parse('2026-01-02T00:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const before = now - 25 * 3_600_000;
+  const options = {
+    cache: f.cache,
+    enabled: true,
+    heavy: false,
+    install: async stage => {
+      mkdirSync(join(stage, 'node_modules'));
+      writeFileSync(join(stage, 'node_modules', 'payload'), 'shared');
+    },
+  };
+  const roots = [];
+  for (const [index, kind] of ['dormant', 'recent', 'pinned', 'running'].entries()) {
+    const root = join(f.directory, kind);
+    mkdirSync(root);
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: kind }));
+    writeFileSync(join(root, 'package-lock.json'), '{"lockfileVersion":3,"packages":{"":{}}}');
+    assert.equal((await shareDependencies(root, options)).status, 'installed');
+    const laneId = `00000000-0000-4000-8000-00000000000${index}`;
+    recordLane({
+      laneId,
+      root,
+      lastActionAt: kind === 'recent' ? now : before,
+      ...(kind === 'pinned' ? { pinned: true } : {}),
+      ...(kind === 'running' ? { running: { action: 'sync', pid: process.pid, since: before } } : {}),
+    });
+    roots.push({ root, laneId });
+  }
+  const { root, laneId } = roots[0];
+  const dormant = dirname(readlinkSync(join(root, 'node_modules')));
+  assert.deepEqual(
+    f.sweep({ apply: false }).wouldRemove.map(row => row.entry),
+    [dormant],
+  );
+  assert(existsSync(dormant));
+  assert.deepEqual(
+    f.sweep().removed.map(row => row.entry),
+    [dormant],
+  );
+  assert(existsSync(join(root, 'package.json')));
+  recordLane({ laneId });
+  const restored = await shareDependencies(root, { ...options, refresh: true });
+  assert.equal(restored.status, 'installed');
+  assert.equal(restored.relinked.restored, true);
+  assert.equal(readFileSync(join(root, 'node_modules', 'payload'), 'utf8'), 'shared');
+});
+
+test('explicit prune counts downloads and keeps a recent, linked or leased store while reclaiming an old one', t => {
+  const f = fixture(t);
+  const now = new Date('2026-01-02T00:00:00Z'),
+    old = new Date(now.getTime() - 25 * 3_600_000);
+  t.mock.timers.enable({ apis: ['Date'], now: now.getTime() });
+  const store = scope => {
+    const hold = retainDownloadCache(f.cache, { name: 'pnpm' }, scope);
+    const path = hold.directory,
+      payload = join(path, 'payload');
+    writeFileSync(payload, Buffer.alloc(64 * 1024, 1));
+    utimesSync(payload, old, old);
+    utimesSync(path, old, old);
+    return hold;
+  };
+  const unused = store('unused'),
+    linked = store('linked'),
+    recent = store('recent'),
+    legacy = store(null),
+    busy = store('busy');
+  for (const item of [unused, linked, recent, legacy]) item.release();
+  t.after(busy.release);
+  utimesSync(recent.directory, now, now);
+  const entry = f.entry(1);
+  const root = join(f.directory, 'live');
+  mkdirSync(root);
+  linkDirectory(join(entry, 'node_modules'), join(root, 'node_modules'));
+  touchDependencyEntry(entry, root, [], linked.directory);
+  const legacyEntry = join(f.cache, `pnpm-${'2'.repeat(24)}`);
+  renameSync(f.entry(2), legacyEntry);
+  const legacyRoot = join(f.directory, 'legacy');
+  mkdirSync(legacyRoot);
+  linkDirectory(join(legacyEntry, 'node_modules'), join(legacyRoot, 'node_modules'));
+  touchDependencyEntry(legacyEntry, legacyRoot);
+  const outside = join(f.directory, 'outside');
+  mkdirSync(outside);
+  writeFileSync(join(outside, 'keep'), 'outside');
+  linkDirectory(outside, join(unused.directory, 'outside'));
+  lutimesSync(join(unused.directory, 'outside'), old, old);
+  utimesSync(unused.directory, old, old);
+  const automatic = f.sweep();
+  assert.deepEqual(automatic.removed, []);
+  const preview = f.sweep({ remeasure: true, apply: false });
+  assert(preview.bytes >= preview.downloadBytes && preview.downloadBytes >= 256 * 1024);
+  assert.deepEqual(
+    preview.wouldRemove.map(row => row.entry),
+    [unused.directory],
+  );
+  assert(existsSync(unused.directory));
+  const applied = f.sweep({ remeasure: true });
+  assert.deepEqual(applied.removed, preview.wouldRemove);
+  assert(applied.downloadBytes < preview.downloadBytes);
+  assert(!existsSync(unused.directory));
+  assert.equal(readFileSync(join(outside, 'keep'), 'utf8'), 'outside');
+  for (const item of [linked, recent, legacy, busy]) assert(existsSync(join(item.directory, 'payload')));
+});
+
+test('prune does not count shared blocks as reclaimed while a retained install still links them', t => {
+  const f = fixture(t);
+  const now = Date.parse('2026-01-02T00:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const store = (scope, hours) => {
+    const hold = retainDownloadCache(f.cache, { name: 'pnpm' }, scope);
+    const path = join(hold.directory, 'archive');
+    writeFileSync(path, Buffer.alloc(128 * 1024, 1));
+    const old = new Date(now - hours * 3_600_000);
+    utimesSync(path, old, old);
+    utimesSync(hold.directory, old, old);
+    hold.release();
+    return { dir: hold.directory, path };
+  };
+  const first = store('oldest', 48),
+    second = store('next', 47);
+  const entry = f.entry(1);
+  const surviving = join(entry, 'node_modules', 'shared');
+  linkSync(first.path, surviving);
+  const root = join(f.directory, 'keep');
+  mkdirSync(root);
+  linkDirectory(join(entry, 'node_modules'), join(root, 'node_modules'));
+  touchDependencyEntry(entry, root);
+  const initial = f.sweep({ budgetBytes: 1024 ** 3, apply: false, remeasure: true });
+  const budgetBytes = initial.bytes - 64 * 1024;
+  const dry = f.sweep({ budgetBytes, apply: false, remeasure: true });
+  assert.deepEqual(
+    dry.wouldRemove.map(row => row.entry),
+    [first.dir, second.dir],
+  );
+  const applied = f.sweep({ budgetBytes, remeasure: true });
+  assert(applied.bytes <= budgetBytes);
+  assert.equal(readFileSync(surviving).length, 128 * 1024);
 });
 
 test('writable tool-cache growth is counted without rewalking sealed packages or an explicit prune', t => {

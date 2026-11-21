@@ -2,12 +2,13 @@
 import { removeCachePreservingKept, sweepKeptApplyCache } from './hosted-apply-kept.js';
 import { canonicalRoot, clientCacheRoot, rootSibling } from './root-paths.js';
 import { lstatSync, readFileSync, readdirSync, readlinkSync, rmSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { makeFunctionReference } from 'convex/server';
 import {
   forgetLane,
   laneCommandRunning,
   listLanes,
+  readLaneEntry,
   recordLane,
   type LaneRegistryEntry,
 } from './lane-registry.js';
@@ -169,6 +170,8 @@ export async function laneHousekeeping(input: {
   /** Never removed: the caller's own root and Lane. */
   exclude?: { roots?: string[]; laneIds?: string[] };
   scan?: string;
+  /** Permanently deleted projects are eligible only in the explicit prune command. */
+  deletedProjects?: boolean;
   now?: number;
   /** Replaceable in tests. True when the root has edits that are not saved. */
   isDirty?: (root: string) => boolean;
@@ -317,29 +320,43 @@ export async function laneHousekeeping(input: {
           });
     // An active Lane idle past the active prune age loses its root only when nothing in it is unsaved
     // and no command runs in it; `open` restores it from the saved head.
+    const deleted = input.deletedProjects === true && state === 'project-deleted';
     const activeIdle = state === 'active' && activeLimit > 0 && idleFor >= activeLimit;
     const limit = activeIdle ? activeLimit : pruneMs;
     if (state === 'active' && !activeIdle) {
       if (idleMs > 0 && idleFor >= idleMs) listIdle();
       continue;
     }
-    if (!state || (!activeIdle && !terminal.has(state)) || limit === 0 || idleFor < limit) {
+    if (!state || (!activeIdle && !deleted && !terminal.has(state)) || limit === 0 || idleFor < limit) {
       if (!state || (!terminal.has(state) && state !== 'active'))
         result.kept.push({ laneId: entry.laneId, reason: reasons.get(entry.laneId)! });
       continue;
     }
     const root = canonicalRoot(entry.root);
+    const identity = markerIdentity(root);
+    if (
+      deleted &&
+      (root !== resolve(entry.root) ||
+        !uuid.test(basename(root)) ||
+        basename(dirname(root)) !== 'lanes' ||
+        !basename(dirname(dirname(root))).endsWith('.forge-client') ||
+        exists(clientCacheRoot(root))?.isSymbolicLink())
+    ) {
+      result.kept.push({ laneId: entry.laneId, reason: 'outside the Lane checkout cache' });
+      continue;
+    }
     let reason =
       excludedRoots.some(path => inside(path, root) || inside(root, path)) || inside(workingRoot, root)
         ? 'in use by this command'
-        : markerIdentity(root)?.laneId !== entry.laneId
+        : identity?.laneId !== entry.laneId ||
+            (deleted && (identity.projectId !== entry.projectId || identity.url !== entry.url))
           ? 'not this Lane checkout'
-          : laneCommandRunning(entry)
+          : laneCommandRunning(entry) || (deleted && (entry.landing || entry.hold))
             ? 'command running'
             : nestedLanes(root)
               ? 'contains other Lane roots'
               : (processBlocker(root, (processes ??= (input.processes ?? workingProcesses)())) ?? null);
-    if (!reason && activeIdle) reason = checkUnsaved(root);
+    if (!reason && (activeIdle || deleted)) reason = checkUnsaved(root);
     if (reason) {
       if (activeIdle && idleMs > 0 && idleFor >= idleMs) listIdle();
       result.kept.push({ laneId: entry.laneId, reason });
@@ -363,7 +380,7 @@ export async function laneHousekeeping(input: {
         const worker = exists(join(snapshots, 'worker'));
         return (worker !== null && time - worker.mtimeMs < SNAPSHOT_LAUNCH_MS) || snapshotLockHeld(root);
       };
-      reason = busy(now) ? 'snapshot running' : checkUnsaved(root);
+      reason = busy(now) ? 'snapshot running' : deleted ? null : checkUnsaved(root);
       // A worker may start while the synchronous dirty scan reads the checkout.
       if (!reason && input.apply && busy(input.now ?? Date.now())) reason = 'snapshot running';
       if (reason) {
@@ -372,6 +389,19 @@ export async function laneHousekeeping(input: {
       }
     }
     if (input.apply) {
+      const latest = deleted ? readLaneEntry(entry.laneId) : null;
+      if (
+        latest &&
+        (latest.pinned ||
+          latest.landing ||
+          latest.hold ||
+          laneCommandRunning(latest) ||
+          latest.lastActionAt !== entry.lastActionAt ||
+          latest.root !== entry.root)
+      ) {
+        result.kept.push({ laneId: entry.laneId, reason: 'Lane use changed during prune' });
+        continue;
+      }
       logLanePrune(
         {
           laneId: entry.laneId,
@@ -386,7 +416,7 @@ export async function laneHousekeeping(input: {
       for (const path of siblings(root))
         if (path === clientCacheRoot(root)) removeCachePreservingKept(path);
         else rmSync(path, { recursive: true, force: true });
-      for (const link of links.get(root) ?? []) rmSync(link, { force: true });
+      if (!deleted) for (const link of links.get(root) ?? []) rmSync(link, { force: true });
       forgetLane(entry.laneId);
     }
     (input.apply ? result.pruned : result.wouldPrune).push({ laneId: entry.laneId, root, bytes: tree.bytes });
@@ -497,6 +527,7 @@ export async function pruneCli(args: string[], readStates: LaneStateReader) {
   const result = await laneHousekeeping({
     readStates,
     apply,
+    deletedProjects: true,
     settings: {
       autoPruneHours: hours,
       idleLaneHours: settings.idleLaneHours,

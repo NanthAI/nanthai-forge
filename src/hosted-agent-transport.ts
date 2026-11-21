@@ -1896,11 +1896,13 @@ export class HostedAgentTransport {
       });
       if ('relinked' in shared && shared.relinked)
         process.stderr.write(
-          `The lockfile changed: node_modules now links the install for the current one (was ${shared.relinked.from}).\n`,
+          shared.relinked.restored
+            ? 'Restored node_modules after its shared install was pruned.\n'
+            : `The lockfile changed: node_modules now links the install for the current one (was ${shared.relinked.from}).\n`,
         );
       else if (shared.status === 'stale' || shared.status === 'failed')
         process.stderr.write(
-          `The lockfile changed but node_modules was not relinked: ${'reason' in shared ? shared.reason : shared.message}\n`,
+          `Forge could not relink node_modules: ${'reason' in shared ? shared.reason : shared.message}\n`,
         );
       const notice = installScriptsNotice(shared);
       if (notice && 'relinked' in shared) process.stderr.write(`${notice}\n`);
