@@ -190,7 +190,7 @@ export const projectPage = internalQuery({
     if (!found) return null;
     const { project } = found;
     const row = await publicRow(ctx, project._id);
-    const upstream = row?.upstream ? await upstreamOf(ctx, row.upstream.projectId) : null;
+    const upstream = row?.upstream ? await upstreamOf(ctx, row.upstream.projectId) : undefined;
     const roots = new Map<string, PublicPlanRoot>();
     const plan = await planOf(ctx, project, roots);
     return {
@@ -203,7 +203,7 @@ export const projectPage = internalQuery({
         slug: project.slug,
         name: project.name,
         since: project._creationTime,
-        ...(upstream ? { upstream } : {}),
+        ...(upstream === undefined ? {} : { upstream }),
       },
       stars: row?.stars ?? 0,
       activity: await weekOf(ctx, project, now),

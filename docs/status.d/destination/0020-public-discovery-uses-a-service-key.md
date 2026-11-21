@@ -10,3 +10,7 @@ seconds without stale serving. Role-less signed-in readers follow the public pla
 registration, including an Item's work list; the members-only plan is an owner-only server setting with no web control yet. Public weekly counts read seven compact day totals instead of full landing receipts; initial
 coverage is labelled “recorded this week”. See [security](../../security.md) and
 [development configuration](../../development.md#public-discovery-configuration).
+
+A public project with a stored fork pointer links to its upstream while the upstream is public. If the upstream
+is private, removed or missing, the page reports it as unavailable without naming it. The link follows the
+same 30-second cache period as the rest of the page.

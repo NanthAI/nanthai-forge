@@ -546,6 +546,8 @@ function Project({ handle, slug }: { handle: string; slug: string }) {
                   {project.upstream.handle}/{project.upstream.slug}
                 </a>
               </span>
+            ) : project.upstream === null ? (
+              <span>Forked from a project that is no longer available</span>
             ) : null}
           </div>
         </div>

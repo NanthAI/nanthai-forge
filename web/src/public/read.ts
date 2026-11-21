@@ -50,7 +50,8 @@ export type ProjectPage = {
     slug: string;
     name: string;
     since: number;
-    upstream?: { handle: string; slug: string };
+    /** Missing for ordinary projects. Null means the fork's upstream is no longer publicly available. */
+    upstream?: { handle: string; slug: string } | null;
   };
   stars: number;
   activity: { landings: number; days: number[]; main: MainCheck; lastAt?: number; recordedSince?: number };

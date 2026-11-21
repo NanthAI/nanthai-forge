@@ -30,6 +30,41 @@ const everyPublicRead = async s => [
   JSON.stringify(await read.sitemapRows._handler(s.ctx, {})),
 ];
 
+test('public forks link to the upstream only while its project is public and available', async () => {
+  const s = fixture();
+  assert.equal(Object.hasOwn((await page(s)).project, 'upstream'), false);
+  const fork = s.tables.projectPublic.get('public');
+  const head = 'a'.repeat(64);
+  fork.upstream = { projectId: 'upstream', head };
+  const source = projectRow({
+    _id: 'upstream',
+    owner: 'source-owner',
+    name: 'Original Atlas',
+    slug: 'original-atlas',
+    visibility: 'public',
+  });
+  s.tables.hostedProjects.set('upstream', source);
+  s.tables.forgeAccounts.set('source-account', {
+    _id: 'source-account',
+    owner: 'source-owner',
+    handle: 'wren',
+  });
+  assert.deepEqual((await page(s)).project.upstream, { handle: 'wren', slug: 'original-atlas' });
+  const unavailable = async () => {
+    const body = await page(s);
+    assert.equal(body.project.upstream, null);
+    assert.doesNotMatch(JSON.stringify(body), /wren|original-atlas|Original Atlas|source-owner/);
+    assert.equal(JSON.stringify(body).includes(head), false);
+  };
+  source.visibility = 'private';
+  await unavailable();
+  source.visibility = 'public';
+  source.removal = 'trash';
+  await unavailable();
+  s.tables.hostedProjects.delete('upstream');
+  await unavailable();
+});
+
 test('the plan is public by default on a public project and the next Item is the first Planned one', async () => {
   const body = await page(fixture());
   assert.equal(body.plan.shown, true);

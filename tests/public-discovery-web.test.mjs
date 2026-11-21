@@ -53,10 +53,10 @@ const explore = order => ({
   more: false,
   projects: order === 'stars' ? [...projects].sort((a, b) => b.stars - a.stars) : projects,
 });
-const project = ({ plan = 'public', titles = false } = {}) => ({
+const project = ({ plan = 'public', titles = false, upstream } = {}) => ({
   v: 1,
   asOf: NOW,
-  project: { id: 'p1', handle: 'ada', slug: 'atlas', name: 'atlas', since: NOW - 60 * DAY },
+  project: { id: 'p1', handle: 'ada', slug: 'atlas', name: 'atlas', since: NOW - 60 * DAY, upstream },
   stars: 310,
   activity: { landings: 42, days: [3, 6, 4, 8, 7, 9, 5], main: 'passing', lastAt: NOW - 3_600_000 },
   lanes: {
@@ -309,6 +309,8 @@ const reads = {
     contributions,
   },
   '/-/public/v1/project/ada/atlas.json': project(),
+  '/-/public/v1/project/ada/fork.json': project({ upstream: { handle: 'wren', slug: 'original-atlas' } }),
+  '/-/public/v1/project/ada/fork-unavailable.json': project({ upstream: null }),
   '/-/public/v1/project/ada/members.json': project({ plan: 'members' }),
   '/-/public/v1/project/ada/titled.json': project({ titles: true }),
   '/-/public/v1/project/ada/partial.json': {
@@ -472,6 +474,19 @@ test('public discovery screens: explore, a profile signed out and as its person,
   );
   await pp.getByRole('button', { name: 'Clone' }).click();
   await pp.getByRole('dialog', { name: 'Sign in to clone atlas' }).waitFor();
+
+  const fork = await open('/-/ada/fork');
+  assert.match(await fork.locator('.phead .fl').textContent(), /Forked from wren\/original-atlas/);
+  assert.equal(
+    await fork.getByRole('link', { name: 'wren/original-atlas' }).getAttribute('href'),
+    '/-/wren/original-atlas',
+  );
+  const forkUnavailable = await open('/-/ada/fork-unavailable');
+  assert.match(
+    await forkUnavailable.locator('.phead .fl').textContent(),
+    /Forked from a project that is no longer available/,
+  );
+  assert.equal(await forkUnavailable.locator('.phead .fl a').count(), 0);
 
   // Lane titles only with the opt-in; a members-only plan shows no plan, no Left and no Items.
   const titled = await open('/-/ada/titled');
