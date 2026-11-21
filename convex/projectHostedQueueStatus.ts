@@ -5,7 +5,7 @@ import { hostedLandingStall, retainedStallOwner } from '../src/hosted-landing-st
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { HostedLandingState } from '../src/hosted-landing';
-import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { storedLandingStateSchema } from '../src/hosted-landing';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { latestLandingProgress, LANDING_STALL_MS } from '../src/landing-stall';
 import { queueStatusPage, type QueueStatusKey, type HostedQueueStatus } from '../src/hosted-queue-status';
@@ -68,7 +68,7 @@ export async function readQueueStatus(
   const ahead = key.predecessor ? await landingRow(ctx, { projectId, submissionId: key.predecessor }) : null;
   const predecessor =
     ahead && !['landed', 'terminal-failed'].includes(ahead.phase)
-      ? hostedLandingStateSchema.parse(JSON.parse(ahead.value))
+      ? storedLandingStateSchema.parse(JSON.parse(ahead.value))
       : null;
   const pending = predecessor ? await finishRow(ctx, { projectId, submissionId: predecessor.id }) : null;
   const liveRun =

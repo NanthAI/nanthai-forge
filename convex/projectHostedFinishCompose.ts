@@ -32,7 +32,7 @@ import {
 } from '../src/hosted-finish';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
-import { hostedLandingStateSchema, landingObservation } from '../src/hosted-landing';
+import { storedLandingStateSchema, landingObservation } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
 import { validCrossHeadProof, type CrossHeadProof } from '../src/hosted-cross-head-proof';
 import { carriedCostCounts } from '../src/landing-speed-alerts';
@@ -173,7 +173,7 @@ async function mainMoveReason(
     .order('desc')
     .take(8);
   const movers = landed
-    .map(row => hostedLandingStateSchema.parse(JSON.parse(row.value)))
+    .map(row => storedLandingStateSchema.parse(JSON.parse(row.value)))
     .filter(s => Date.parse(s.timing?.committedAt ?? '') > Date.parse(previous.at))
     .sort((a, b) => a.sequence - b.sequence);
   const moved = `Main moved from ${previous.main.head.slice(0, 8)} to ${head.slice(0, 8)}`;

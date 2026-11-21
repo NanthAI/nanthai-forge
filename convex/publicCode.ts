@@ -19,16 +19,10 @@ import { v } from 'convex/values';
 import { internalQuery } from './server';
 import { publicProject } from './publicRead';
 import { lineSummary } from './projectLiveLineStore';
-import type { HostedAcceptance } from '../src/hosted-acceptance';
-import {
-  codeHistoryRow,
-  CODE_HISTORY_PAGE,
-  CODE_HISTORY_READ_BYTES,
-  CODE_RECEIPT_ID,
-} from '../src/code-history';
+import { CODE_HISTORY_PAGE, CODE_HISTORY_READ_BYTES, CODE_RECEIPT_ID } from '../src/code-history';
 import { CODE_DIR_DEPTH, CODE_TOUCHED_PAIRS } from '../src/code-tree';
 import { safeRelative } from '../src/safe-relative';
-import { codeFileHistory, codeHistoryReceipt } from './projectCodeFileHistory';
+import { codeFileHistory, codeHistoryReceipt, readCodeHistoryRow } from './projectCodeFileHistory';
 import type { Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 
@@ -138,7 +132,8 @@ export const resolve = internalQuery({
   handler: async (ctx, { handle, slug }) => (await publicProject(ctx, handle, slug))?.project._id ?? null,
 });
 
-/** One page of landings on main, newest first, by main's own sequence: at most 25 receipts and 256 KB read. The first
+/** One page of landings on main, newest first, by main's own sequence: at most 25 receipts and 256 KB of receipt reads,
+ * plus at most 25 one-KiB referenced messages. The first
  * page also names the project and main's head, so a visitor's Code page needs this one read to start. */
 export const history = internalQuery({
   args: {
@@ -171,9 +166,7 @@ export const history = internalQuery({
         maximumBytesRead: CODE_HISTORY_READ_BYTES,
       });
     // Signed out, nobody may see a person: the actor is left out of every row (no lookup needed).
-    const landings = page.page.map(row =>
-      codeHistoryRow(JSON.parse(row.value) as HostedAcceptance, row.sequence, true),
-    );
+    const landings = await Promise.all(page.page.map(row => readCodeHistoryRow(ctx, row, true)));
     const main = before === null ? await mainHead(ctx, project._id) : undefined;
     const body = {
       v: 1,

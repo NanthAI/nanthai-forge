@@ -9,7 +9,7 @@ import { cancelHostedLanding } from './projectHostedLandingCancel';
 import { hostedWriteProject } from './projectHostedRecords';
 import { digest } from '../src/state/hash';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { storedLandingStateSchema } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
 
 type Plan = Doc<'projectHostedLifecyclePlans'>;
@@ -68,7 +68,7 @@ async function cancelLanePage(
           }),
         );
         const operationId = `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
-        const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+        const state = storedLandingStateSchema.parse(JSON.parse(row.value));
         await cancelHostedLanding(ctx, {
           projectId: plan.projectId,
           actor: plan.actor,

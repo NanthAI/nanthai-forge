@@ -17,7 +17,7 @@ import {
   fullGate,
   mainAuditSettingsSchema,
 } from '../src/main-audit';
-import { hostedLandingStateSchema, landingObservation } from '../src/hosted-landing';
+import { storedLandingStateSchema, landingObservation } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { firstCheckProof } from '../src/hosted-cross-head-proof';
 import { recordLandingObservation, wakeLandingQueue } from './projectHostedLandingEvents';
@@ -295,7 +295,7 @@ export async function releaseHeldPage(
       continue;
     }
     released = true;
-    const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+    const state = storedLandingStateSchema.parse(JSON.parse(row.value));
     state.version++;
     state.error = null;
     state.observation = landingObservation('queued');

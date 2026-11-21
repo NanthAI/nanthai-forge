@@ -65,7 +65,7 @@ import { pinLandingAttempt } from './projectHostedLandingPins';
 import {
   hostedLandingRequestSchema,
   hostedLandingCancelSchema,
-  hostedLandingStateSchema,
+  storedLandingStateSchema,
   landingObservation,
   landingTokensColumn,
 } from '../src/hosted-landing';
@@ -75,6 +75,8 @@ import { report } from './errors';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
+import { receiptMessageForReader } from './projectHostedAcceptanceMessage';
+import { landingMessageForReader } from './projectHostedLandingMessageBody';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
 import { enforceLandGates } from './projectHostedLandGates';
 import { requireQueueRoom } from './projectHostedQueueRoom';
@@ -86,13 +88,12 @@ export const cancel = mutation({
   handler: async (ctx, input) => {
     try {
       const actor = await acceptanceActor(ctx, true);
-      return canonicalPayload(
-        await cancelHostedLanding(ctx, {
-          projectId: input.projectId,
-          actor: actor.id,
-          request: hostedLandingCancelSchema.parse(JSON.parse(input.request)),
-        }),
-      );
+      const result = await cancelHostedLanding(ctx, {
+        projectId: input.projectId,
+        actor: actor.id,
+        request: hostedLandingCancelSchema.parse(JSON.parse(input.request)),
+      });
+      return canonicalPayload(await landingMessageForReader(ctx, input.projectId, result));
     } catch (error) {
       return report(error);
     }
@@ -143,7 +144,8 @@ export const enqueue = receiptMutation({
         actor,
       );
       const review = await heldReview(ctx, authorizedReadProject(ctx, input.projectId), state);
-      return reply(canonicalPayload(review ? { ...state, ...review } : state));
+      const selected = await landingMessageForReader(ctx, input.projectId, state);
+      return reply(canonicalPayload(review ? { ...selected, ...review } : selected));
     } catch (error) {
       return report(error);
     }
@@ -251,8 +253,14 @@ export const list = query({
       });
       return canonicalPayload({
         ...page,
-        page: page.page.map(row =>
-          landingPriorityState(row, hostedLandingStateSchema.parse(JSON.parse(row.value))),
+        page: await Promise.all(
+          page.page.map(row =>
+            landingMessageForReader(
+              ctx,
+              input.projectId,
+              landingPriorityState(row, storedLandingStateSchema.parse(JSON.parse(row.value))),
+            ),
+          ),
         ),
       });
     } catch (error) {
@@ -473,7 +481,7 @@ export async function enqueueHostedLanding(
     inherited.supersededCheck,
     attempt.check?.runId ?? admission,
   );
-  const state = hostedLandingStateSchema.parse({
+  const state = storedLandingStateSchema.parse({
     schema: 1,
     projectId: input.projectId,
     id: submissionId,
@@ -661,17 +669,20 @@ export const candidate = query({
             .order('desc')
             .take(1)
         : [];
+      const readable = await landingMessageForReader(ctx, input.projectId, state);
       const payload = {
         request:
           state.observation.state === 'pending' && run?.status === 'unknown'
-            ? { ...state, observation: { ...state.observation, pendingReason: 'pending-infra' } }
-            : state,
+            ? { ...readable, observation: { ...readable.observation, pendingReason: 'pending-infra' } }
+            : readable,
         attempt,
         run,
         reverseCandidateId: reverse?.candidateId ?? null,
         message: finish ? JSON.parse(finish.value).source.message : null,
         pendingAttempt: finish ? finishPendingForReader(JSON.parse(finish.value).pending) : null,
-        receipt: receipt ? JSON.parse(receipt.value) : null,
+        receipt: receipt
+          ? await receiptMessageForReader(ctx, input.projectId, JSON.parse(receipt.value), receipt.sequence)
+          : null,
         ahead:
           ahead && !['landed', 'terminal-failed'].includes(ahead.phase)
             ? JSON.parse(ahead.value).request.candidateId

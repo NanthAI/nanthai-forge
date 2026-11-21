@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { hostedLandingStateSchema, type HostedLandingState } from '../src/hosted-landing';
+import { storedLandingStateSchema, type HostedLandingState } from '../src/hosted-landing';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { latestLandingProgress } from '../src/landing-stall';
 import {
@@ -170,7 +170,7 @@ async function updateQueueStatus(ctx: MutationCtx, states: HostedLandingState[],
           .order('asc')
           .take(50);
         for (const row of window) {
-          const parsed = hostedLandingStateSchema.parse(JSON.parse(row.value));
+          const parsed = storedLandingStateSchema.parse(JSON.parse(row.value));
           const key = queueStatusKey({ ...parsed, priority: row.priority ?? parsed.priority });
           if (key && !all.some(other => other.id === key.id)) all.push(key);
         }

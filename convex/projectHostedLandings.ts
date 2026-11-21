@@ -14,6 +14,7 @@ import { invariant } from '../src/errors';
 import { nextCreationCursor, readCreationCursor } from './creationTimeCursor';
 import { landingAcceptedBySchema, receiptAcceptedBy } from '../src/landing-accepted-by';
 import { authorshipLabel } from './projectAuthorshipLabel';
+import { landingMessageText } from './projectHostedLandingMessageBody';
 import {
   LANDINGS_ATTEMPTS,
   LANDINGS_DEFAULT_LIMIT,
@@ -169,10 +170,12 @@ async function evidence(
   const landedBase = receipt.previous;
   // Before builder stamps, the attempt named the submitter while the receipt named the approver.
   const builder = attempts[0]?.actor ?? receipt.actor;
+  const message = await landingMessageText(ctx, projectId, receipt);
+  if (receipt.messageRef) bytes += new TextEncoder().encode(message).length;
   return {
     bytes,
     row: {
-      title: (receipt.message ?? state?.message ?? state?.request?.message)?.split(/\r?\n/, 1)[0] ?? null,
+      title: (message ?? state?.message ?? state?.request?.message)?.split(/\r?\n/, 1)[0] ?? null,
       receiptId: receipt.id,
       submissionId: receipt.submissionId,
       laneId: lanes[0]?.key ?? null,

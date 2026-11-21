@@ -15,7 +15,7 @@ import { prepareObjectTargets } from './projectObjects';
 import { completeObjects, recipePin, storedDigests } from './projectGithubImportBatch';
 import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
 import { githubSyncCommitSchema } from '../src/github-sync-types';
-import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { storedLandingStateSchema } from '../src/hosted-landing';
 import { hostedLandingDesiredSchema } from '../src/hosted-landing-desired';
 import { buildComposePages } from '../src/hosted-compose';
 import { savePin } from '../src/hosted-save';
@@ -342,7 +342,7 @@ export const land = internalMutation({
       { projectId: project._id, actor, operationId: inbound.composeOperationId! },
       false,
     );
-    const state = hostedLandingStateSchema.parse(
+    const state = storedLandingStateSchema.parse(
       JSON.parse(
         await submitDesiredLanding(
           ctx,

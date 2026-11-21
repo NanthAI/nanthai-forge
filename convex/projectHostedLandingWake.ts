@@ -20,7 +20,7 @@ import { loadHostedCheck } from './projectHostedCheckStore';
 import { hostedCheckTerminal } from '../src/hosted-check';
 import { settleLandingAdmission } from './projectHostedLandingAdmission';
 import { rememberGuardCheck } from './projectGuardMainRed';
-import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { storedLandingStateSchema } from '../src/hosted-landing';
 import { nextLandingRow, nextReadyLandingRow, orderHostedLandingRows } from './projectHostedLandingOrder';
 import { loadBatch } from './projectHostedLandingBatchState';
 import { pipelinePredecessor, invalidatePipeline } from './projectHostedLandingPipeline';
@@ -49,7 +49,7 @@ export async function nextTrainLandingRow(
     // batch-check transition. Retire its descendants on the same queue event.
     const values = rows
       .filter(row => row !== null)
-      .map(row => hostedLandingStateSchema.parse(JSON.parse(row.value)));
+      .map(row => storedLandingStateSchema.parse(JSON.parse(row.value)));
     // Event repair for a train retained before owner holds released their stack.
     // Uses the rows already read, with no sweep, idle timer or no-hold I/O.
     const reviews = values.filter(state => state.observation.pendingReason === 'waiting-for-review');
@@ -89,14 +89,14 @@ export async function nextTrainLandingRow(
     }
     const pending = rows.filter(row => {
       if (!row || row.phase === 'landed' || row.phase === 'terminal-failed' || row.hold) return false;
-      const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+      const state = storedLandingStateSchema.parse(JSON.parse(row.value));
       return (
         state.observation.pendingReason !== 'waiting-for-review' &&
         state.observation.pendingReason !== 'waiting-for-dependency'
       );
     });
     if (pending.length) {
-      const states = pending.map(row => hostedLandingStateSchema.parse(JSON.parse(row!.value)));
+      const states = pending.map(row => storedLandingStateSchema.parse(JSON.parse(row!.value)));
       const first = states[0]!;
       if (!pending.some(row => row!.priority === 'urgent')) {
         const batch = first.batchId
@@ -294,9 +294,9 @@ async function wakeLandingCheckPage(
         if (await settleLandingAdmission(ctx, row, run)) woken = true;
       } else if (
         run.failureReason?.startsWith('provider-delayed:') ||
-        hostedLandingStateSchema.parse(JSON.parse(row.value)).observation.pendingReason === 'pending-infra'
+        storedLandingStateSchema.parse(JSON.parse(row.value)).observation.pendingReason === 'pending-infra'
       ) {
-        const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+        const state = storedLandingStateSchema.parse(JSON.parse(row.value));
         retainCheckProgress(state, run, Date.now());
         await writeLanding(
           ctx,
@@ -318,13 +318,13 @@ async function wakeLandingCheckPage(
     // when progress reached the queue within the window.
     if (
       row.phase === 'checking' &&
-      !progressWakeDue(hostedLandingStateSchema.parse(JSON.parse(row.value)).timing?.ciProgressAt, Date.now())
+      !progressWakeDue(storedLandingStateSchema.parse(JSON.parse(row.value)).timing?.ciProgressAt, Date.now())
     ) {
       run ??= (await loadHostedCheck(ctx, input)).run;
       if (
         !hostedCheckTerminal(run) &&
         !run.failureReason?.startsWith('provider-delayed:') &&
-        hostedLandingStateSchema.parse(JSON.parse(row.value)).observation.pendingReason !== 'pending-infra'
+        storedLandingStateSchema.parse(JSON.parse(row.value)).observation.pendingReason !== 'pending-infra'
       )
         continue;
     }

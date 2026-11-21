@@ -2579,13 +2579,17 @@ subscriptions, writes or idle work.
 Acceptance freezes supplied subject, body and trailers by value. Messages are
 limited to 1 KiB UTF-8; controls are stripped, CRLF normalized, and reserved
 Forge-State/Acceptance/View lines escaped with `> `. Other trailers retain their
-order; authoritative Forge trailers follow. A cohort's first receipt carries
+order; authoritative Forge trailers follow. A cohort's final receipt carries
 all supplied messages in member order for its shared commit. Native batches do
 the same. Raw State exports keep State messages; published history is unchanged.
 Legacy CLI `Agent change` defaults mean omission; negotiated requests distinguish
 an explicit identical subject. Pre-upgrade pending finishes recover their saved
 message at acceptance. Released status/wait projections omit this internal
 provenance so strict older clients keep working; canonical records retain it.
+Readers also understand project-owned message bodies and a final-cohort receipt
+that identifies the preceding members by sequence. They expand those records
+at message-reading boundaries and retain the original receipt text, order and
+trailers. Landing writers still emit inline messages.
 
 Metadata uses existing calls and records, with zero idle calls. Each message adds
 at most 2,061 JSON bytes; the first cohort receipt adds at most 16,427 more for

@@ -3,7 +3,7 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { LandingChannel, LandingRow } from './projectHostedLandingStore';
 import type { HostedLandingState } from '../src/hosted-landing';
 import { orderLandingEntries } from '../src/landing-batch-order';
-import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { storedLandingStateSchema } from '../src/hosted-landing';
 import type { Doc } from './_generated/dataModel';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { hostedLandingProgressAt, retainedStallOwner } from '../src/hosted-landing-stall';
@@ -166,7 +166,7 @@ export async function olderLandingAhead(
     if (
       ahead?.admitting &&
       ahead.admission?.full &&
-      holdsLandingOrder(ahead, hostedLandingStateSchema.parse(JSON.parse(ahead.value)), now)
+      holdsLandingOrder(ahead, storedLandingStateSchema.parse(JSON.parse(ahead.value)), now)
     )
       return { row: ahead, until: null, held: 'combined' as const, footprints: 'unknown' as const };
   }
@@ -194,7 +194,7 @@ export async function olderLandingAhead(
     .take(16);
   for (const other of older) {
     if (row.priority === 'urgent' && other.priority !== 'urgent') continue;
-    const value = hostedLandingStateSchema.parse(JSON.parse(other.value));
+    const value = storedLandingStateSchema.parse(JSON.parse(other.value));
     if (state.batchId && value.batchId === state.batchId) continue;
     if (!holdsLandingOrder(other, value, now)) continue;
     // A live reservation holder goes ahead of an older entry it holds back (10d253c6).
@@ -398,7 +398,7 @@ export async function nextReadyLandingRow(ctx: QueryCtx | MutationCtx, input: La
     .take(8);
   const ready = rows.filter(row => {
     if (!row.runnable || row.hold) return false;
-    const { pendingReason } = hostedLandingStateSchema.parse(JSON.parse(row.value)).observation;
+    const { pendingReason } = storedLandingStateSchema.parse(JSON.parse(row.value)).observation;
     return pendingReason !== 'waiting-for-review' && pendingReason !== 'waiting-for-dependency';
   });
   return orderHostedLandingRows(ready)[0] ?? null;
@@ -482,13 +482,20 @@ export type LandingOrder = Awaited<ReturnType<typeof activeLandingOrder>>;
 export function landingStateForReader(state: HostedLandingState, priorityInfo?: 1): HostedLandingState {
   // Retry links remain in canonical records and admission receipts. Selected
   // read DTOs keep the released strict shape, including priority-aware readers.
-  const { supersedes: _supersedes, retryReason: _retryReason, message: _message, ...publicState } = state;
+  const {
+    supersedes: _supersedes,
+    retryReason: _retryReason,
+    message: _message,
+    messageRef: _messageRef,
+    ...publicState
+  } = state;
   const { retryReason: _requestedRetry, message: _requestedMessage, ...publicRequest } = state.request;
   void _supersedes;
   void _retryReason;
   void _requestedRetry;
   // Message provenance stays in canonical records, not released strict wait DTOs.
   void _message;
+  void _messageRef;
   void _requestedMessage;
   const { ms: _ms, ...timing } = state.timing ?? { submittedAt: state.at };
   void _ms;

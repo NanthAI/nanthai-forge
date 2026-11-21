@@ -5,7 +5,7 @@ import { supersededOutcome } from '../src/landing-state';
 import type { LandingCapsule } from '../src/landing-capsule';
 import {
   readLandingTransition,
-  hostedLandingStateSchema,
+  storedLandingStateSchema,
   hostedLandingAttemptSchema,
   type HostedLandingState,
 } from '../src/hosted-landing';
@@ -58,7 +58,7 @@ export function capsuleObserveReply(capsule: LandingCapsule, context: Context, c
         ...event,
         pendingAttempt: finishPendingForReader(event.pendingAttempt),
         submission: landingStateForReader(
-          hostedLandingStateSchema.parse(event.submission),
+          storedLandingStateSchema.parse(event.submission),
           command.priorityInfo as 1 | undefined,
         ),
       });

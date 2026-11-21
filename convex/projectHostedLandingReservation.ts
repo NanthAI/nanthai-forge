@@ -2,7 +2,7 @@
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { LandingRow } from './projectHostedLandingStore';
-import { hostedLandingStateSchema, type HostedLandingState } from '../src/hosted-landing';
+import { storedLandingStateSchema, type HostedLandingState } from '../src/hosted-landing';
 import { landingChangedPaths } from './projectHostedLandingOvertake';
 import { batchRow, batchSchema } from './projectHostedLandingBatchState';
 import { landingReservation, reservationHolds } from '../src/landing-reservation';
@@ -22,7 +22,7 @@ export async function priorLandingForReservation(
     .order('desc')
     .take(1);
   if (!prior) return null;
-  const value = hostedLandingStateSchema.parse(JSON.parse(prior.value));
+  const value = storedLandingStateSchema.parse(JSON.parse(prior.value));
   return {
     phase: prior.phase,
     errorCode: value.error?.code ?? null,
@@ -99,7 +99,7 @@ export async function reservationAhead(
   if (!holders.length) return null;
   let mine: string[] | null | undefined;
   for (const holder of holders) {
-    const value = hostedLandingStateSchema.parse(JSON.parse(holder.value));
+    const value = storedLandingStateSchema.parse(JSON.parse(holder.value));
     if (
       // A landing held for red main owns no alarm or wake, so it holds nothing (review e7137e30 4b).
       holder.hold ||

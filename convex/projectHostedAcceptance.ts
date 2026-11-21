@@ -26,6 +26,7 @@ import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { report } from './errors';
 import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
 import { settleAttemptApprovals } from './projectHostedApprovalStore';
+import { receiptMessageForReader } from './projectHostedAcceptanceMessage';
 async function publishSelected(
   ctx: MutationCtx,
   claim: import('./projectHostedLandingControl').LandingClaim,
@@ -35,9 +36,20 @@ async function publishSelected(
   by: 'queue' | 'agent' | 'person' = ownerApproval ? 'person' : 'queue',
 ) {
   const state = selectedState ?? (await acceptanceSelection(ctx, claim)).state;
-  return state.batchId && !state.batchSolo
-    ? publishLandingBatch(ctx, claim, now, by)
-    : publishAcceptance(ctx, claim, now, ownerApproval, by);
+  const result =
+    state.batchId && !state.batchSolo
+      ? await publishLandingBatch(ctx, claim, now, by)
+      : await publishAcceptance(ctx, claim, now, ownerApproval, by);
+  if (by === 'queue' || result.status !== 'landed') return result;
+  return {
+    ...result,
+    receipt: await receiptMessageForReader(
+      ctx,
+      claim.projectId,
+      result.receipt,
+      result.receipt.snapshot.revision,
+    ),
+  };
 }
 const selection = { projectId: v.id('hostedProjects'), submissionId: v.string(), attemptId: v.string() };
 async function caller(ctx: MutationCtx, input: AcceptanceIdentity) {
@@ -254,7 +266,7 @@ export const receipt = query({
       invariant(row, 'NOT_FOUND', 'Accepted receipt not found.');
       const plan = await acceptancePlan(ctx, input);
       return canonicalPayload({
-        receipt: JSON.parse(row.value),
+        receipt: await receiptMessageForReader(ctx, input.projectId, JSON.parse(row.value), row.sequence),
         completion: plan && {
           appliedPage: plan.appliedPage,
           appliedEntry: plan.appliedEntry,

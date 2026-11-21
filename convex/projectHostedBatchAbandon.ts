@@ -5,7 +5,7 @@ import { internalMutation, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { readHostedRecord } from './projectHostedRecords';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
-import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { storedLandingStateSchema } from '../src/hosted-landing';
 
 const fields = {
   projectId: v.id('hostedProjects'),
@@ -65,7 +65,7 @@ async function cancelCandidateMembers(
     )
     .paginate({ cursor, numItems: 10, maximumRowsRead: 10, maximumBytesRead: 128 * 1024 });
   for (const row of page.page) {
-    const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+    const state = storedLandingStateSchema.parse(JSON.parse(row.value));
     if (['landed', 'terminal-failed'].includes(state.phase) || !(state.batchId ?? state.batchOriginId))
       continue;
     await cancelHostedLanding(ctx, {

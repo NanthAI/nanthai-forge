@@ -2287,63 +2287,77 @@ test('an unmirrored project serves its landings as Git commits on the imported h
   );
   await client(['fsck', '--full', '--strict'], three);
 });
-// Item 3968a655: a build page never ends inside a batch, so the batch's last receipt (every
-// member's message) is the one commit; the next page starts at the batch and credits each member.
-test('a Forge-built main page that would end inside a batch stops before it; the next page commits it once', async t => {
-  const source = sourceRepository(t),
-    f = fixture(t, source),
-    { s } = f;
-  for (const table of ['projectHostedChannels', 'projectHostedAcceptances']) s.tables[table] ??= new Map();
-  const projectId = await importedProject(f, source.head);
-  publish(s, projectId);
-  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
-  const imported = storeState(s, projectId, source.repo, source.head);
-  historyRow(s, projectId).importState = imported;
-  const { mainBatch } = modules.gitServeMainStore;
-  const fake = i => createHash('sha256').update(`state ${i}`).digest('hex');
-  let previous = imported;
-  for (let i = 0; i < mainBatch - 2; i++) land(s, projectId, previous, (previous = fake(i)), `Step ${i}`);
-  const batchId = crypto.randomUUID(),
-    batched = fake('batch'),
-    clients = ['claude-code:claude-opus-5-5', 'codex:gpt-6.1-sol', 'pi'];
-  for (const [i, agentClient] of clients.entries())
-    land(s, projectId, previous, batched, `Member ${i}`, {
-      batchId,
-      agentClient,
-      ...(i === 2 ? { cohortMessages: ['Member 0', 'Member 1', 'Member 2'] } : {}),
-    });
-  const plan = () => modules.gitServeMainStore.plan._handler(s.ctx, { projectId });
-  const first = await plan();
-  assert.equal(first.landings.length, mainBatch - 2, 'the page stops before the batch that crosses its end');
-  assert.equal(first.landings.at(-1).message, `Step ${mainBatch - 3}`);
-  const rows = [...s.tables.projectHostedAcceptances.values()].filter(row => row.projectId === projectId);
-  await s.ctx.db.insert('projectHistoryPacks', {
-    projectId,
-    tip: 'b'.repeat(40),
-    haves: [],
-    chunks: [],
-    bytes: 0,
-    objects: 0,
-    packSha1: 'c'.repeat(40),
-    source: 'forge',
-    main: {
-      state: previous,
-      tree: 'd'.repeat(40),
-      sequence: rows[mainBatch - 3].sequence,
-      listing: { sha256: 'e'.repeat(64), size: 1 },
+// A build page never ends inside a batch. The next page makes one commit and credits all members.
+for (const referenced of [false, true])
+  test(
+    referenced
+      ? 'a Forge-built main page preserves one commit for a cohort whose last receipt selects the message rows'
+      : 'a Forge-built main page that would end inside a batch stops before it; the next page commits it once',
+    async t => {
+      const source = sourceRepository(t),
+        f = fixture(t, source),
+        { s } = f;
+      for (const table of ['projectHostedChannels', 'projectHostedAcceptances'])
+        s.tables[table] ??= new Map();
+      const projectId = await importedProject(f, source.head);
+      publish(s, projectId);
+      await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+      const imported = storeState(s, projectId, source.repo, source.head);
+      historyRow(s, projectId).importState = imported;
+      const { mainBatch } = modules.gitServeMainStore;
+      const fake = i => createHash('sha256').update(`state ${i}`).digest('hex');
+      let previous = imported;
+      for (let i = 0; i < mainBatch - 2; i++) land(s, projectId, previous, (previous = fake(i)), `Step ${i}`);
+      const batchId = crypto.randomUUID(),
+        batched = fake('batch'),
+        clients = ['claude-code:claude-opus-5-5', 'codex:gpt-6.1-sol', 'pi'];
+      for (const [i, agentClient] of clients.entries())
+        land(s, projectId, previous, batched, `Member ${i}`, {
+          batchId,
+          agentClient,
+          ...(i === 2
+            ? referenced
+              ? { cohortSize: clients.length }
+              : { cohortMessages: ['Member 0', 'Member 1', 'Member 2'] }
+            : {}),
+        });
+      const plan = () => modules.gitServeMainStore.plan._handler(s.ctx, { projectId });
+      const first = await plan();
+      assert.equal(
+        first.landings.length,
+        mainBatch - 2,
+        'the page stops before the batch that crosses its end',
+      );
+      assert.equal(first.landings.at(-1).message, `Step ${mainBatch - 3}`);
+      const rows = [...s.tables.projectHostedAcceptances.values()].filter(row => row.projectId === projectId);
+      await s.ctx.db.insert('projectHistoryPacks', {
+        projectId,
+        tip: 'b'.repeat(40),
+        haves: [],
+        chunks: [],
+        bytes: 0,
+        objects: 0,
+        packSha1: 'c'.repeat(40),
+        source: 'forge',
+        main: {
+          state: previous,
+          tree: 'd'.repeat(40),
+          sequence: rows[mainBatch - 3].sequence,
+          listing: { sha256: 'e'.repeat(64), size: 1 },
+        },
+        at: 0,
+      });
+      const next = await plan();
+      assert.equal(next.landings.length, 1, 'the batch is one commit');
+      const [landing] = next.landings;
+      assert.deepEqual(landing.cohortMessages, ['Member 0', 'Member 1', 'Member 2']);
+      assert.deepEqual(
+        landing.members.map(member => member.agentClient),
+        clients,
+        'every member is credited, read past the page start',
+      );
     },
-    at: 0,
-  });
-  const next = await plan();
-  assert.equal(next.landings.length, 1, 'the batch is one commit');
-  const [landing] = next.landings;
-  assert.deepEqual(landing.cohortMessages, ['Member 0', 'Member 1', 'Member 2']);
-  assert.deepEqual(
-    landing.members.map(member => member.agentClient),
-    clients,
-    'every member is credited, read past the page start',
   );
-});
 // Incident (Issue 3bd4a8e9, 2026-11-09): on an imported project with no mirror, a member's Lane
 // fetch answered GIT_HISTORY_PREPARING forever, because Lane refs waited for a mirror commit.
 test('an unmirrored project lists and serves Lane refs on the imported and Forge-built main commits', async t => {

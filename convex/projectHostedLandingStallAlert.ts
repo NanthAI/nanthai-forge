@@ -6,7 +6,7 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { landingRow } from './projectHostedLandingStore';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
-import { hostedLandingStateSchema, type HostedLandingState } from '../src/hosted-landing';
+import { storedLandingStateSchema, type HostedLandingState } from '../src/hosted-landing';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { effectivePolicy } from '../src/autonomy-policy';
@@ -71,7 +71,7 @@ export async function raiseStallAlert(
   const canonical = await landingRow(ctx, input);
   const row = canonical ?? (await desiredLanding(ctx, input));
   if (!row) return null;
-  const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+  const state = storedLandingStateSchema.parse(JSON.parse(row.value));
   // Progress, settlement or review since the deadline was set: nothing is stuck any more.
   if (
     state.observation.state !== 'pending' ||

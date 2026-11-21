@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Code place's history (Items 90e5bc9c, 3968a655): what landed on main, newest first, one receipt per row.
-// Metadata only, from the receipts already stored at acceptance: no source bytes, no per-row reads beyond the page.
+// Metadata only. Referenced messages use one bounded body read per returned receipt, with no source reads.
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { internalQuery } from './server';
@@ -10,11 +10,11 @@ import { report } from './errors';
 import { invariant } from '../src/errors';
 import { findStoredObject, isRegisteredState } from './projectObjectFind';
 import { isStored, objectDocument } from './projectObjectFields';
-import type { HostedAcceptance } from '../src/hosted-acceptance';
-import { codeHistoryRow, CODE_HISTORY_PAGE, CODE_HISTORY_READ_BYTES } from '../src/code-history';
-import { codeFileHistory, codeHistoryReceipt } from './projectCodeFileHistory';
+import { CODE_HISTORY_PAGE, CODE_HISTORY_READ_BYTES } from '../src/code-history';
+import { codeFileHistory, codeHistoryReceipt, readCodeHistoryRow } from './projectCodeFileHistory';
 
-/** One page of landings on main by main's own sequence, newest first. At most 25 receipts and 256 KB read per page;
+/** One page of landings on main by main's own sequence, newest first. At most 25 receipts and 256 KB of receipt reads
+ * per page, plus at most 25 one-KiB referenced messages.
  * the cursor resumes exactly. Re-runs only when a landing is accepted (a new receipt row); idle costs nothing. */
 export const history = query({
   args: {
@@ -47,9 +47,7 @@ export const history = query({
         });
       return JSON.stringify({
         schema: 1,
-        landings: page.page.map(row =>
-          codeHistoryRow(JSON.parse(row.value) as HostedAcceptance, row.sequence),
-        ),
+        landings: await Promise.all(page.page.map(row => readCodeHistoryRow(ctx, row))),
         nextCursor: page.isDone ? null : page.continueCursor,
       });
     } catch (error) {

@@ -20,6 +20,7 @@ import { summarizeCheckRun } from '../src/hosted-check-summary';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { landingMessageText } from './projectHostedLandingMessageBody';
 
 export const MAIN_RED_EVENTS = 20;
 export const MAIN_RED_LANDINGS = 20;
@@ -28,7 +29,13 @@ const MAIN_RED_RECOVERY = 10;
 const MAIN_RED_AT = 8;
 
 type Event = Doc<'projectHostedMainAuditEvents'>;
-type Receipt = { id: string; at: string; message?: string; actor?: { id: string; kind: string } };
+type Receipt = {
+  id: string;
+  at: string;
+  message?: string;
+  messageRef?: string;
+  actor?: { id: string; kind: string };
+};
 type MainRedLanding = {
   receiptId: string;
   sequence: number;
@@ -59,13 +66,13 @@ const title = (text: unknown) =>
         ?.trim()
         .slice(0, 280) ?? null)
     : null;
-function landingOf(row: Doc<'projectHostedAcceptances'>): MainRedLanding {
+async function landingOf(ctx: QueryCtx, row: Doc<'projectHostedAcceptances'>): Promise<MainRedLanding> {
   const receipt = JSON.parse(row.value) as Receipt;
   return {
     receiptId: receipt.id,
     sequence: row.sequence,
     at: Date.parse(receipt.at),
-    title: title(receipt.message),
+    title: title(await landingMessageText(ctx, row.projectId, receipt)),
     actor: receipt.actor?.id ?? null,
     agent: receipt.actor?.kind === 'agent',
   };
@@ -172,8 +179,8 @@ async function recovery(
   }
   const revert = reverts.find(item => item.revertOf === culprit) ?? reverts[0];
   return revert
-    ? { kind: 'revert' as const, landing: landingOf(revert.row), of: rows.length, more }
-    : { kind: 'fix' as const, landing: landingOf(rows[0]!), of: rows.length, more };
+    ? { kind: 'revert' as const, landing: await landingOf(ctx, revert.row), of: rows.length, more }
+    : { kind: 'fix' as const, landing: await landingOf(ctx, rows[0]!), of: rows.length, more };
 }
 
 export const read = query({
@@ -258,7 +265,9 @@ export const read = query({
         )
         .order('desc')
         .take(MAIN_RED_LANDINGS + 1);
-      const landings = landingRows.slice(0, MAIN_RED_LANDINGS).map(landingOf);
+      const landings = await Promise.all(
+        landingRows.slice(0, MAIN_RED_LANDINGS).map(row => landingOf(ctx, row)),
+      );
       // A named landing outside the page costs one indexed read.
       const named = async (receiptId: string | null) => {
         if (!receiptId) return null;
@@ -268,7 +277,7 @@ export const read = query({
           .query('projectHostedAcceptances')
           .withIndex('by_project_and_receipt', q => q.eq('projectId', projectId).eq('receiptId', receiptId))
           .unique();
-        return row ? landingOf(row) : null;
+        return row ? landingOf(ctx, row) : null;
       };
       const [culpritLanding, coveredLanding] = await Promise.all([named(culprit), named(covered)]);
       // A run row that no longer parses (retired fields) leaves the rest of the answer: "not reported", not an error.

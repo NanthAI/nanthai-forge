@@ -14,6 +14,7 @@ import { digest } from './state/hash.js';
 import { crossHeadProofSchema } from './hosted-cross-head-proof.js';
 import { secretAllowMarkSchema } from './secret-allow.js';
 import { docsResolutionSchema } from './docs-resolution.js';
+import { HOSTED_BATCH_MEMBERS } from './hosted-landing-batch.js';
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 /** At most this many main-red holds kept per landing (the newest). */
@@ -44,7 +45,9 @@ export const hostedAcceptanceSchema = z
     previous: hostedLandingAttemptSchema.shape.main,
     candidate: hostedLandingAttemptSchema.shape.candidate.extend({ head: hash }),
     message: landingMessageSchema.optional(),
+    messageRef: z.string().min(1).optional(),
     cohortMessages: cohortMessagesSchema.optional(),
+    cohortSize: z.number().int().min(1).max(HOSTED_BATCH_MEMBERS).optional(),
     memberCandidate: hostedLandingAttemptSchema.shape.candidate.optional(),
     batchId: z.uuid().optional(),
     crossHeadProof: crossHeadProofSchema.optional(),

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { storedLandingStateSchema } from '../src/hosted-landing';
 import { report } from './errors';
 import { v } from 'convex/values';
 import { internalMutation, internalQuery, type QueryCtx, type MutationCtx } from './server';
@@ -150,7 +150,7 @@ export const review = query({
             .take(1)
         : [];
       const conflicts = landing[0]
-        ? (hostedLandingStateSchema.parse(JSON.parse(landing[0].value)).semanticConflicts ?? [])
+        ? (storedLandingStateSchema.parse(JSON.parse(landing[0].value)).semanticConflicts ?? [])
         : [];
       return canonicalPayload({ contract, semanticConflicts: conflicts });
     } catch (error) {

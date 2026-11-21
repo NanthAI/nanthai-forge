@@ -18,7 +18,7 @@ import { beginCheckOperation, checkCaller, checkSetting, loadHostedCheck } from 
 import { heldSettingReply, saveCheckSetting } from './projectHostedCheckDefinitions';
 import { settingKey } from './projectSettingApprovals';
 import { earnMainAudit, isEarnRequest } from './projectHostedMainAuditEarn';
-import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { storedLandingStateSchema } from '../src/hosted-landing';
 import { recordLandingObservation } from './projectHostedLandingStore';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 import { hostedOperationRow } from './projectHostedOperations';
@@ -194,7 +194,7 @@ export const stallHeld = internalMutation({
         await ctx.db.patch(held._id, { hold: undefined });
         continue;
       }
-      const state = hostedLandingStateSchema.parse(JSON.parse(held.value));
+      const state = storedLandingStateSchema.parse(JSON.parse(held.value));
       state.version++;
       state.error = {
         code: 'MAIN_AUDIT_STALLED',

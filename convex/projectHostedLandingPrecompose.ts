@@ -8,7 +8,7 @@ import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { composeRow } from './projectHostedComposeStore';
 import { acceptancePlan, acceptancePage } from './projectHostedAcceptanceStore';
 import { landingQueue } from './projectHostedLandingStore';
-import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { storedLandingStateSchema } from '../src/hosted-landing';
 import { hostedStartMain } from './projectHostedChannels';
 import { readHostedRecord } from './projectHostedRecords';
 import { ForgeError } from '../src/errors';
@@ -141,7 +141,7 @@ export async function precomposeWaiting(
   let started = 0;
   let hasCleanCandidate = input.hasCleanCandidate ?? false;
   for (const row of rows) {
-    const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+    const state = storedLandingStateSchema.parse(JSON.parse(row.value));
     if (
       !state.request.finish ||
       (state.batchId && row.runId) ||

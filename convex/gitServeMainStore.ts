@@ -8,7 +8,8 @@ import { hostedStartMain } from './projectHostedChannels';
 import { historyChunk } from './projectHistoryFields';
 import { historyLimit, historyPackPage } from './projectHistoryStore';
 import { hostedAcceptanceSchema, type HostedAcceptance } from '../src/hosted-acceptance';
-import { batchMembers } from './projectGithubMirrorMessage';
+import { cohortMessageFields, cohortReceipt, readCohortReceipts } from './projectHostedAcceptanceMessage';
+import { landingMessageText } from './projectHostedLandingMessageBody';
 import { laneAuthor } from '../src/git-serve-lane-refs';
 import { invariant } from '../src/errors';
 
@@ -57,27 +58,39 @@ export const plan = internalQuery({
       .take(mainBatch);
     const authors = new Map<string, string | null>();
     const landings = [];
-    const receipts = rows.map(row => hostedAcceptanceSchema.parse(JSON.parse(row.value)));
-    // A batch's members share one State and its last receipt carries every member's message, so
+    const entries = rows.map(row => ({
+      sequence: row.sequence,
+      receipt: hostedAcceptanceSchema.parse(JSON.parse(row.value)),
+    }));
+    const receipts = entries.map(entry => entry.receipt);
+    // A batch's members share one State and its last receipt selects every member's message, so
     // the batch is one commit from that receipt. A full page that ends inside a batch stops before
     // it; the next build starts there.
     const sameBatch = (a?: HostedAcceptance, b?: HostedAcceptance) =>
       !!a?.batchId && a.batchId === b?.batchId && a.candidate.head === b.candidate.head;
     let end = rows.length;
-    if (rows.length === mainBatch && receipts[end - 1]!.batchId && !receipts[end - 1]!.cohortMessages)
+    if (rows.length === mainBatch && receipts[end - 1]!.batchId && !cohortReceipt(receipts[end - 1]!))
       while (end > 1 && receipts[end - 1]!.batchId === receipts[rows.length - 1]!.batchId) end--;
     for (const [index, row] of rows.slice(0, end).entries()) {
       const receipt = receipts[index]!;
       if (sameBatch(receipt, receipts[index + 1])) continue;
       // A batch's members precede its last receipt; read them only when the page may have cut them.
-      const members =
-        receipt.batchId && receipt.cohortMessages
-          ? last && receipts[0]!.batchId === receipt.batchId
-            ? await batchMembers(ctx, projectId, receipt, row.sequence)
-            : receipts
-                .filter(member => member.batchId === receipt.batchId)
-                .map(member => ({ message: member.message, agentClient: member.agentClient }))
-          : undefined;
+      const fields = cohortReceipt(receipt)
+        ? await cohortMessageFields(
+            ctx,
+            projectId,
+            receipt,
+            row.sequence,
+            (
+              receipt.cohortSize !== undefined
+                ? row.sequence - receipt.cohortSize < rows[0]!.sequence
+                : last && receipts[0]!.batchId === receipt.batchId
+            )
+              ? await readCohortReceipts(ctx, projectId, receipt, row.sequence)
+              : entries,
+          )
+        : undefined;
+      const message = fields?.members.at(-1)?.message ?? (await landingMessageText(ctx, projectId, receipt));
       if (!authors.has(receipt.actor.id))
         authors.set(receipt.actor.id, (await accountFor(ctx, receipt.actor.id))?.handle ?? null);
       landings.push({
@@ -86,10 +99,9 @@ export const plan = internalQuery({
         state: receipt.candidate.head,
         viewId: receipt.candidate.id,
         at: receipt.at,
-        ...(receipt.message !== undefined ? { message: receipt.message } : {}),
-        ...(receipt.cohortMessages ? { cohortMessages: receipt.cohortMessages } : {}),
+        ...(message !== undefined ? { message } : {}),
         ...(receipt.agentClient ? { agentClient: receipt.agentClient } : {}),
-        ...(members ? { members } : {}),
+        ...fields,
         author: laneAuthor(authors.get(receipt.actor.id) ?? null, receipt.agentRun),
       });
     }

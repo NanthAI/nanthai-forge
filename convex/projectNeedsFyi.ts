@@ -22,10 +22,11 @@ import { finishRow } from './projectHostedFinishWake';
 import { culpritOf } from './projectMainRed';
 import { landingRow } from './projectHostedLandingStore';
 import { session } from './coordinationWrite';
-import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { storedLandingStateSchema } from '../src/hosted-landing';
 import { discardedRunnerSeconds } from '../src/cost-budgets';
 import { report } from './errors';
 import { invariant } from '../src/errors';
+import { landingMessageText } from './projectHostedLandingMessageBody';
 
 export const FYI_LANDINGS = 12;
 export const FYI_EVENTS = 6;
@@ -150,6 +151,7 @@ export const read = query({
           id: string;
           at: string;
           message?: string;
+          messageRef?: string;
           actor?: { id: string; kind: string };
           automatic?: boolean;
           check?: unknown;
@@ -172,14 +174,14 @@ export const read = query({
         let thrown: number | null = 0;
         if (redone) {
           const landing = await landingRow(ctx, { projectId, submissionId: row.submissionId });
-          const parsed = landing ? hostedLandingStateSchema.safeParse(JSON.parse(landing.value)) : null;
+          const parsed = landing ? storedLandingStateSchema.safeParse(JSON.parse(landing.value)) : null;
           thrown = parsed?.success ? discardedRunnerSeconds(parsed.data) : null;
         }
         landings.push({
           receiptId: receipt.id,
           sequence: row.sequence,
           at: Date.parse(receipt.at),
-          title: oneLine(receipt.message),
+          title: oneLine(await landingMessageText(ctx, projectId, receipt)),
           actor: receipt.actor?.id ?? null,
           agent: receipt.actor?.kind === 'agent',
           checked: receipt.check !== null && receipt.check !== undefined,

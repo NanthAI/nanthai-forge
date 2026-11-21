@@ -18,6 +18,11 @@ import { hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
 import { hostedLandingStateSchema, hostedLandingRequestSchema } from '../dist/hosted-landing.js';
 const store = await import(moduleUrl('../convex/projectGithubMirrorStore.ts'));
 const landingApi = await import(moduleUrl('../convex/projectHostedLanding.ts'));
+const landingPriority = await import(moduleUrl('../convex/projectHostedLandingPriority.ts'));
+const acceptanceApi = await import(moduleUrl('../convex/projectHostedAcceptance.ts'));
+const code = await import(moduleUrl('../convex/projectCode.ts'));
+const history = await import(moduleUrl('../convex/projectLandingReads.ts'));
+const needsFyi = await import(moduleUrl('../convex/projectNeedsFyi.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 const configuration = {
   ...synthetic,
@@ -82,6 +87,118 @@ test('released strict wait and stack readers keep working while canonical messag
   assert.equal(canonical.message, supplied(0));
   assert.equal(canonical.request.message, supplied(0));
   assert.equal((await f.accept(state)).receipt.message, supplied(0));
+});
+
+test('inline and referenced cohort messages give identical receipt, history, Needs me and mirror replies', async t => {
+  const f = await batchesFixture(t, { count: 0 });
+  const messages = [supplied(0), '', null, supplied(3)];
+  for (const [index, message] of messages.entries()) await f.add(index, { request: { message } });
+  const { projectId } = f;
+  const run = (fn, args) => f.transaction('readLandingMessage', fn, { projectId, ...args });
+  const priorityRequest = {
+    submissionId: f.entries.at(-1).state.id,
+    operationId: randomUUID(),
+    priority: 'normal',
+    expectedVersion: 0,
+    authorityEpoch: 1,
+  };
+  await run(landingPriority.prioritize, priorityRequest);
+  const project = f.tables.hostedProjects.get(f.projectId);
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: {
+      ...project.autonomyPolicy,
+      githubMirror: { repo: 'synthetic/mirror', autoPush: true, laneRefs: false },
+    },
+  });
+  const tickets = () =>
+    [...f.tables.projectHostedLandingRequests.values()].sort((a, b) => a.sequence - b.sequence);
+  for (let tick = 0; tickets().some(row => row.phase !== 'landed'); tick++) {
+    assert(tick < 300, 'the cohort reaches acceptance');
+    if (f.runs().some(run => run.status === 'queued')) await f.passChecks();
+    await f.execute(f.pending()[0]);
+  }
+  const rows = [...f.tables.projectHostedAcceptances.values()].sort((a, b) => a.sequence - b.sequence);
+  const last = rows.at(-1);
+  const receipt = JSON.parse(last.value);
+  assert.deepEqual(
+    receipt.cohortMessages,
+    messages.filter(message => message !== null),
+  );
+  const job = [...f.tables.projectGithubMirrorJobs.values()][0];
+  const mapping = [...f.tables.projectGithubMirrors.values()][0];
+  const binding = mirrorFixture({ before: {}, after: {} }).root;
+  const mirrors = async (state = receipt.previous.head) => {
+    f.patch('projectGithubMirrors', mapping._id, { mapping: JSON.stringify({ ...binding, state }) });
+    f.patch('projectGithubMirrorJobs', job._id, { seed: undefined });
+    return JSON.parse(await f.transaction('mirrorMessage', store.begin, { jobId: job._id, step: job.step }))
+      .seed.message;
+  };
+  const views = async () => ({
+    receipt: await run(acceptanceApi.receipt, { receiptId: receipt.id }),
+    acceptReplay: await run(acceptanceApi.accept, {
+      submissionId: receipt.submissionId,
+      attemptId: receipt.attemptId,
+    }),
+    landingReplay: await run(landingApi.enqueue, { request: JSON.stringify(f.entries.at(-1).request) }),
+    priorityReplay: await run(landingPriority.prioritize, priorityRequest),
+    landings: JSON.parse(await run(landingApi.list, { channel: 'main', cursor: null })).page,
+    landing: await run(landingApi.candidate, { candidateId: tickets().at(-1).candidateId }),
+    code: await run(code.history, { cursor: null }),
+    history: await run(history.list, { view: 'recent' }),
+    fyi: await run(needsFyi.read, {}),
+    mirror: await mirrors(),
+    catchUp: await mirrors('9'.repeat(64)),
+  });
+  const inline = await views();
+  assert.equal(JSON.parse(inline.receipt).receipt.message, messages.at(-1));
+  assert.equal(JSON.parse(inline.acceptReplay).receipt.message, messages.at(-1));
+  assert(JSON.parse(inline.landing).receipt.cohortMessages.length > 1);
+  for (const value of [inline.code, inline.history, inline.fyi, inline.mirror])
+    assert.match(value, /Supplied subject 0/);
+  assert.deepEqual(lostTrailers(messages.at(-1), inline.mirror), []);
+
+  // The reader-first release leaves the writer inline. Exercise the proposed storage shape with
+  // the exact same accepted identities and a mixed cohort (inline, reference, omitted and empty).
+  let lastRef;
+  for (const [index, row] of rows.entries()) {
+    const value = JSON.parse(row.value);
+    if (index !== 0 && value.message !== undefined) {
+      lastRef = f.insert('projectHostedLandingBodies', { messageProjectId: projectId, value: value.message });
+      const ticket = tickets().find(ticket => ticket.submissionId === row.submissionId);
+      const state = ticketState(f, ticket);
+      assert.equal(state.request.message, value.message);
+      delete state.request.message;
+      state.messageRef = { id: lastRef, source: 'request' };
+      patchTicketState(f, ticket, state);
+      delete value.message;
+      value.messageRef = lastRef;
+    }
+    if (index === rows.length - 1) {
+      delete value.cohortMessages;
+      value.cohortSize = rows.length;
+    }
+    f.patch('projectHostedAcceptances', row._id, { value: JSON.stringify(value) });
+  }
+  assert.deepEqual(await views(), inline);
+  assert.match(inline.catchUp, /^Catch up 4 Forge landings/);
+  const referenced = JSON.parse(f.tables.projectHostedAcceptances.get(last._id).value);
+  f.patch('projectHostedAcceptances', last._id, {
+    value: JSON.stringify({ ...referenced, cohortSize: rows.length - 1 }),
+  });
+  await assert.rejects(run(acceptanceApi.receipt, { receiptId: receipt.id }), {
+    data: { code: 'EVIDENCE_CHANGED', message: 'The ordered landing cohort is incomplete.' },
+  });
+  f.patch('projectHostedAcceptances', last._id, { value: JSON.stringify(referenced) });
+  f.patch('projectHostedLandingBodies', lastRef, { value: 'Forge-State: synthetic spoof' });
+  await assert.rejects(run(acceptanceApi.receipt, { receiptId: receipt.id }), {
+    data: { code: 'EVIDENCE_CHANGED', message: 'The stored landing message is not canonical.' },
+  });
+  f.patch('projectHostedLandingBodies', lastRef, { messageProjectId: 'hostedProjects-999' });
+  await assert.rejects(run(acceptanceApi.receipt, { receiptId: receipt.id }), error => {
+    assert.equal(error.data?.code, 'EVIDENCE_CHANGED');
+    assert(!error.message.includes(messages.at(-1)));
+    return true;
+  });
 });
 
 // Issue b30284de / class guard 8b7b97ce / eacfdb6e: run real finish, acceptance,

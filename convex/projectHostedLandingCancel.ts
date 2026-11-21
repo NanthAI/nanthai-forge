@@ -23,7 +23,7 @@ import { finishRow } from './projectHostedFinishWake';
 import { releaseLandingQueue } from './projectHostedLandingWake';
 import {
   hostedLandingCancelSchema,
-  hostedLandingStateSchema,
+  storedLandingStateSchema,
   landingObservation,
 } from '../src/hosted-landing';
 import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
@@ -100,20 +100,20 @@ export async function cancelHostedLanding(
       'SOURCE_UNAVAILABLE',
       'Cancellation receipt is unavailable.',
     );
-    return hostedLandingStateSchema.parse(operation.terminal.outcome.result);
+    return storedLandingStateSchema.parse(operation.terminal.outcome.result);
   }
   const identity = { projectId, submissionId: request.submissionId };
   const canonical = await landingRow(ctx, identity);
   if (!canonical) {
     const desired = await desiredLanding(ctx, identity);
     invariant(desired, 'NOT_FOUND', 'Hosted landing request not found.');
-    const previous = hostedLandingStateSchema.parse(JSON.parse(desired.value));
+    const previous = storedLandingStateSchema.parse(JSON.parse(desired.value));
     if (!input.drop && !input.abandonOperationId && !input.supersede)
       await requireMemberAuthorityById(ctx, projectId, previous.actor, actor, 'landing');
     const state =
       previous.phase === 'terminal-failed'
         ? previous
-        : hostedLandingStateSchema.parse({
+        : storedLandingStateSchema.parse({
             ...previous,
             version: previous.version + 1,
             phase: 'terminal-failed',

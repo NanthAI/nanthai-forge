@@ -48,8 +48,7 @@ async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJob
       binding = value.commits[value.pushed - 1] ?? null;
     }
   }
-  let fallback = '';
-  if (receipt.message === undefined && !receipt.cohortMessages?.length) {
+  const fallback = async () => {
     const candidate = await readHostedRecord(ctx, {
       projectId: job.projectId,
       actor: project.owner,
@@ -70,8 +69,8 @@ async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJob
       'SOURCE_UNAVAILABLE',
       'The accepted Intent is unavailable for the mirror commit message.',
     );
-    fallback = JSON.parse(intent.value).outcome;
-  }
+    return JSON.parse(intent.value).outcome;
+  };
   const name = process.env.FORGE_GITHUB_SYNC_NAME?.trim() || binding?.committer.name;
   const email = process.env.FORGE_GITHUB_SYNC_EMAIL?.trim() || binding?.committer.email;
   invariant(

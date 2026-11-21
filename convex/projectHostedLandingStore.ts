@@ -25,7 +25,7 @@ import {
 } from '../src/hosted-source-operation';
 import {
   hostedLandingAttemptSchema,
-  hostedLandingStateSchema,
+  storedLandingStateSchema,
   hostedLandingProgressSchema,
   landingObservation,
   type HostedLandingState,
@@ -69,7 +69,7 @@ export async function loadLanding(ctx: QueryCtx | MutationCtx, input: LandingIde
   return { row, state: landingStateFromRow(row) };
 }
 export function landingStateFromRow(row: LandingRow) {
-  const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+  const state = storedLandingStateSchema.parse(JSON.parse(row.value));
   invariant(
     state.id === row.submissionId &&
       state.projectId === row.projectId &&
@@ -161,8 +161,8 @@ export async function writeLanding(
     'WORK_OPERATION_CHANGED',
     'Composition goals publish through desired-state admission.',
   );
-  const state = landingPriorityState(row, hostedLandingStateSchema.parse(input)),
-    previous = hostedLandingStateSchema.parse(JSON.parse(row.value));
+  const state = landingPriorityState(row, storedLandingStateSchema.parse(input)),
+    previous = storedLandingStateSchema.parse(JSON.parse(row.value));
   // A new attempt starts with empty check progress: counts and the progress
   // digest belong to the attempt that observed them (9f94c28a). Fresh values
   // written with this transition differ from the previous attempt's and stay.

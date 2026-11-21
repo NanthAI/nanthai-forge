@@ -11,7 +11,7 @@ import type { Id } from './_generated/dataModel';
 import type { LandingIdentity, LandingRow } from './projectHostedLandingStore';
 import { landingRow, loadLanding, writeLanding } from './projectHostedLandingStore';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
-import { hostedLandingStateSchema, type HostedLandingState } from '../src/hosted-landing';
+import { storedLandingStateSchema, type HostedLandingState } from '../src/hosted-landing';
 import { hostedLandingProgressAt, hostedLandingStall } from '../src/hosted-landing-stall';
 import { LANDING_DROP_MS, LANDING_STALL_MS } from '../src/landing-stall';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -97,7 +97,7 @@ export async function raiseLandingAlarm(ctx: MutationCtx, input: Stalled, now = 
   const desired = canonical ? null : await desiredLanding(ctx, input);
   const row = canonical ?? desired;
   if (!row || row.alarm?.lastProgressAt !== input.lastProgressAt) return null;
-  const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+  const state = storedLandingStateSchema.parse(JSON.parse(row.value));
   const queue = canonical && state.phase === 'queued' ? await readQueueStatus(ctx, state, now) : null;
   if (
     canonical &&
@@ -231,7 +231,7 @@ async function soloFinishOwner(ctx: MutationCtx, input: LandingIdentity, state: 
 }
 async function aheadHoldsOrder(ctx: MutationCtx, row: LandingRow) {
   const ahead = await landingRow(ctx, { projectId: row.projectId, submissionId: row.orderWait! });
-  return Boolean(ahead && holdsLandingOrder(ahead, hostedLandingStateSchema.parse(JSON.parse(ahead.value))));
+  return Boolean(ahead && holdsLandingOrder(ahead, storedLandingStateSchema.parse(JSON.parse(ahead.value))));
 }
 
 /** One supervisor action. `alarm`/`resolve` replay every lost driver (queue wake,
@@ -248,7 +248,7 @@ export async function repairStalledLanding(
     if (input.mode === 'alarm') await redriveLanding(ctx, input);
     return null;
   }
-  const state = hostedLandingStateSchema.parse(JSON.parse(canonical.value));
+  const state = storedLandingStateSchema.parse(JSON.parse(canonical.value));
   if (
     !supervised(canonical.phase) ||
     state.observation.state !== 'pending' ||
@@ -301,7 +301,7 @@ export async function repairStalledLanding(
 export async function resolveStalledLanding(ctx: MutationCtx, input: Round, now = Date.now()) {
   const row = await landingRow(ctx, input);
   if (!row) return null;
-  const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+  const state = storedLandingStateSchema.parse(JSON.parse(row.value));
   if (!stalledSince(state, input.lastProgressAt) || !(await supervises(ctx, row))) return null;
   // Parked behind an older entry that still holds its place: that one owns
   // progress, and its exit re-arms this entry's alarm (c329d191).
@@ -563,7 +563,7 @@ export async function liveOwner(
   if (row.hold === 'ci-down') return 'the CI-down hold';
   if (row.orderWait) {
     const ahead = await landingRow(ctx, { ...input, submissionId: row.orderWait });
-    if (ahead && holdsLandingOrder(ahead, hostedLandingStateSchema.parse(JSON.parse(ahead.value))))
+    if (ahead && holdsLandingOrder(ahead, storedLandingStateSchema.parse(JSON.parse(ahead.value))))
       return 'its live predecessor';
   }
   const finish = await finishRow(ctx, input);
@@ -586,7 +586,7 @@ export async function liveOwner(
     const other = await landingRow(ctx, peer);
     if (!other || other.phase === 'landed' || other.phase === 'terminal-failed') continue;
     if (other.phase === 'checking' || other.phase === 'ready' || other.runnable) return 'a batch peer';
-    const value = hostedLandingStateSchema.parse(JSON.parse(other.value));
+    const value = storedLandingStateSchema.parse(JSON.parse(other.value));
     if (value.batchSolo && !value.batchNeedsSoloCompose) return 'a batch peer';
     if ((await finishRow(ctx, peer))?.composeOperationId) return 'a batch peer';
   }

@@ -11,7 +11,7 @@ import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { preparingSourceStep } from './projectHostedPreparingSource';
 import { sourceStepFailureField } from '../src/hosted-source-retry';
-import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { storedLandingStateSchema } from '../src/hosted-landing';
 import { withLandingCapsule } from './projectLandingCapsuleStore';
 import { capsuleHistoryContext } from './projectLandingCapsuleContext';
 import { readLandingTransition } from '../src/hosted-landing';
@@ -131,7 +131,7 @@ async function observePage(
             .unique();
     if (!rows.length && desired) {
       stage = 'desired';
-      const state = hostedLandingStateSchema.parse(JSON.parse(desired.value));
+      const state = storedLandingStateSchema.parse(JSON.parse(desired.value));
       // A stalled preparation names its failed or fenced source step and cause (incident e62d834b).
       // Read only once stalled, so a healthy wait's subscription never follows the step row. The
       // compose id comes from the parsed request: the projected desired row carries no compose column.
@@ -203,7 +203,7 @@ async function observePage(
         break;
       }
       const event = readLandingTransition(row.value, state);
-      const submission = hostedLandingStateSchema.parse(event.submission);
+      const submission = storedLandingStateSchema.parse(event.submission);
       if (submission.version === state.version) {
         if (state.counts) submission.counts = state.counts;
         else delete submission.counts;

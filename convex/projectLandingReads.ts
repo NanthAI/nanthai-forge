@@ -21,6 +21,7 @@ import { maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
 import { readAuthorship } from '../src/work-actor-types';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
+import { landingMessageText } from './projectHostedLandingMessageBody';
 
 export const HISTORY_PAGE = 30;
 /** Receipts one filtered page looks through at most (a receipt is about 2 to 6 KB); `next` resumes below them. */
@@ -39,6 +40,7 @@ type Receipt = {
   id: string;
   at: string;
   message?: string;
+  messageRef?: string;
   actor?: { id: string; kind: 'agent' | 'person' };
   automatic?: boolean;
   agentRun?: string;
@@ -173,7 +175,7 @@ export const list = query({
               )
               .first()
           : null;
-        const message = (receipt.message ?? '').trim();
+        const message = ((await landingMessageText(ctx, projectId, receipt)) ?? '').trim();
         const item = await itemOf(ctx, projectId, intentId);
         rows.push({
           sequence: row.sequence,

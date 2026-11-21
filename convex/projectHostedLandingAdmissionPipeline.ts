@@ -2,7 +2,7 @@
 import type { MutationCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import {
-  hostedLandingStateSchema,
+  storedLandingStateSchema,
   type HostedLandingAttempt,
   type HostedLandingRequest,
 } from '../src/hosted-landing';
@@ -102,7 +102,7 @@ export async function pipelineAdmission(
     },
   );
   if (!predecessor || !selected.row || !selected.attempt) return null;
-  const prior = { row: selected.row, state: hostedLandingStateSchema.parse(JSON.parse(selected.row.value)) };
+  const prior = { row: selected.row, state: storedLandingStateSchema.parse(JSON.parse(selected.row.value)) };
   const pins = selected.attempt;
   if (
     prior.state.priority !== (request.priority ?? 'normal') ||

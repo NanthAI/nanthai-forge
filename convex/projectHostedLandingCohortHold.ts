@@ -5,7 +5,7 @@ import { internalMutation } from './server';
 import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { HostedLandingAttempt, HostedLandingState } from '../src/hosted-landing';
-import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { storedLandingStateSchema } from '../src/hosted-landing';
 import { HOSTED_BATCH_MEMBERS, HOSTED_TRAIN_HOLD_MS, hostedBatching } from '../src/hosted-landing-batch';
 import { preQueueCheck } from '../src/hosted-landing-admission';
 import { holdsLandingOrder } from './projectHostedLandingOrder';
@@ -100,7 +100,7 @@ export async function holdForPeers(
   return true;
 }
 async function release(ctx: MutationCtx, row: Row) {
-  const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+  const state = storedLandingStateSchema.parse(JSON.parse(row.value));
   await ctx.db.patch(row._id, {
     runnable: true,
     orderLive: holdsLandingOrder(row, state) ? true : undefined,
@@ -149,7 +149,7 @@ export const end = internalMutation({
       )
       .unique();
     if (!row?.admission?.hold || row.phase !== 'queued') return null;
-    const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+    const state = storedLandingStateSchema.parse(JSON.parse(row.value));
     if (state.batchId) return null;
     if (!row.admission.hold.done && !row.runnable) await release(ctx, row);
     else if (!row.runnable) return null;

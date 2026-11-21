@@ -4,7 +4,7 @@ import { landingQueue, landingRow, loadLandingAttempt, type LandingRow } from '.
 import { holdsLandingOrder } from './projectHostedLandingOrder';
 import { hostedStartMain } from './projectHostedChannels';
 import {
-  hostedLandingStateSchema,
+  storedLandingStateSchema,
   type HostedLandingAttempt,
   type HostedLandingState,
 } from '../src/hosted-landing';
@@ -112,7 +112,7 @@ export async function refuseStaleLaneProofNow(
   if (older.length === EARLY_REFUSAL_WINDOW) return null;
   let ahead = 0;
   for (const other of older) {
-    const value = hostedLandingStateSchema.parse(JSON.parse(other.value));
+    const value = storedLandingStateSchema.parse(JSON.parse(other.value));
     if (!holdsLandingOrder(other, value)) continue;
     if (!refusablePeer(other) || value.batchId || value.batchSolo) return null;
     if (other.phase === 'ready') {

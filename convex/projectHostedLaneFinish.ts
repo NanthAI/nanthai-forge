@@ -9,7 +9,7 @@ import type { LandingRow } from './projectHostedLandingStore';
 import { landingRow } from './projectHostedLandingStore';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
 import { loadLandingAttempt } from './projectHostedLandingAttemptRead';
-import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { storedLandingStateSchema } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
 import { syncRequiredAdvice } from '../src/hosted-would-conflict';
 
@@ -44,7 +44,7 @@ export async function laneFinishes(
   let live: {
     submissionId: string;
     phase: string;
-    state: ReturnType<typeof hostedLandingStateSchema.parse>;
+    state: ReturnType<typeof storedLandingStateSchema.parse>;
   } | null = null;
   const syncRequired: string[] = [];
   const selections = await ctx.db
@@ -103,7 +103,7 @@ export async function laneFinishes(
       ...preparing,
     ];
     for (const value of rows) {
-      const state = hostedLandingStateSchema.parse(JSON.parse(value));
+      const state = storedLandingStateSchema.parse(JSON.parse(value));
       const composedAt = state.timing?.composeStartedAt ?? state.at;
       if (LIVE.has(state.phase) && composedAt >= input.headWrittenAt) {
         live ??= { submissionId: state.id, phase: state.phase, state };
@@ -166,7 +166,7 @@ export async function supersedeLaneFinishes(
     const row = await landingRow(ctx, key);
     if (!row && input.scope === 'live') {
       const desired = await desiredLanding(ctx, key);
-      const state = desired && hostedLandingStateSchema.parse(JSON.parse(desired.value));
+      const state = desired && storedLandingStateSchema.parse(JSON.parse(desired.value));
       if (state && LIVE.has(state.phase)) {
         await cancelHostedLanding(ctx, {
           projectId: input.projectId,
@@ -189,7 +189,7 @@ export async function supersedeLaneFinishes(
       (row.phase !== 'queued' || !row.wouldConflict || !syncRequiredAdvice(JSON.parse(row.wouldConflict)))
     )
       continue;
-    const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+    const state = storedLandingStateSchema.parse(JSON.parse(row.value));
     // Read-only precondition: an entry whose attempt is unreadable keeps today's path (it ends
     // LANDING_SUPERSEDED at acceptance), so this can never fail the save that moved the head.
     const attempt = await loadLandingAttempt(ctx, {
@@ -216,7 +216,7 @@ export async function supersedeLaneFinishes(
 /** A new request may join only work that still has an owner. Read-only lost-driver probing
  * preserves an in-flight IO fence; ordinary lost queue steps are replayed when an owner remains. */
 export async function replaceOwnerlessLanding(ctx: MutationCtx, row: LandingRow) {
-  const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+  const state = storedLandingStateSchema.parse(JSON.parse(row.value));
   if (!LIVE.has(state.phase)) return false;
   const input = { projectId: row.projectId, submissionId: row.submissionId };
   const lost = await redriveLanding(ctx, input, { row, probe: true });

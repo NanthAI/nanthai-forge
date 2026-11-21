@@ -17,6 +17,7 @@ import type { Contribution, LatestAction } from '../src/person-days';
 import { PERSON_LATEST } from '../src/person-days';
 import { isAgentSlug } from '../src/agent-slug';
 import { DAY_MS, isAccount } from './statsLanes';
+import { landingMessageText } from './projectHostedLandingMessageBody';
 
 export { isAccount };
 
@@ -284,6 +285,7 @@ export async function latestActions(
         at: string;
         actor?: { id?: string };
         message?: string;
+        messageRef?: string;
         agentRun?: string;
         agentClient?: string;
       };
@@ -291,7 +293,7 @@ export async function latestActions(
       out.push({
         kind: 'landed',
         at: Date.parse(receipt.at),
-        title: firstLine(receipt.message, 'A landing'),
+        title: firstLine(await landingMessageText(ctx, project.id, receipt), 'A landing'),
         run: receipt.agentRun ?? null,
         model: receipt.agentRun ? (receipt.agentClient?.split(':')[1] ?? '') : null,
         project: where,

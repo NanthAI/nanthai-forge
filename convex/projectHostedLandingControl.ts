@@ -38,7 +38,7 @@ import { hostedCheckTerminal } from '../src/hosted-check';
 import { rememberGuardCheck } from './projectGuardMainRed';
 import {
   HOSTED_LANDING_LEASE_MS,
-  hostedLandingStateSchema,
+  storedLandingStateSchema,
   landingObservation,
   type HostedLandingState,
 } from '../src/hosted-landing';
@@ -94,7 +94,7 @@ export async function claimLandingQueue(
   // a reason after a few re-claims whose advance never committed.
   // The lease records the row version its claim wrote; a row still at that
   // version means no advance committed since (no extra write to settle it).
-  const current = row ? hostedLandingStateSchema.parse(JSON.parse(row.value)) : null;
+  const current = row ? storedLandingStateSchema.parse(JSON.parse(row.value)) : null;
   // A stall diagnosis changes the row version without advancing the controller.
   // Keep its existing retry count until actual progress clears that current stall.
   const diagnosedWithoutProgress =
@@ -106,7 +106,7 @@ export async function claimLandingQueue(
       ? (queue.lease!.retries ?? 0) + 1
       : 0;
   if (row && retries > LANDING_LEASE_RETRIES) {
-    const stuck = hostedLandingStateSchema.parse(JSON.parse(row.value));
+    const stuck = storedLandingStateSchema.parse(JSON.parse(row.value));
     const reason = exhaustedReason(
       `The landing controller step failed ${retries - 1} times in a row on this entry without recording a result.`,
     );

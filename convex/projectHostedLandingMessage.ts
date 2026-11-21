@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import { hostedLandingStateSchema, type HostedLandingState } from '../src/hosted-landing';
+import { storedLandingStateSchema, type HostedLandingState } from '../src/hosted-landing';
 import { hostedOperationRow } from './projectHostedOperations';
 import { hostedOperationSchema } from '../src/hosted-source-operation';
 import { landingAttemptRow, landingRow, landingStateFromRow } from './projectHostedLandingStore';
@@ -11,17 +11,20 @@ import { hostedFinishSchema } from '../src/hosted-finish';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { finishRow } from './projectHostedFinishWake';
 import { readHostedRecord } from './projectHostedRecords';
+import { landingMessageText } from './projectHostedLandingMessageBody';
 
 /** Only pre-upgrade pending requests need this indexed read. New requests carry
  * the value (or explicit omission) in their existing landing record. */
 export async function acceptedLandingMessage(ctx: MutationCtx, state: HostedLandingState) {
+  const projectId = state.projectId as Id<'hostedProjects'>;
+  if (state.messageRef) return landingMessageText(ctx, projectId, { messageRef: state.messageRef.id });
   if (typeof state.request.message === 'string') return state.request.message;
   // A frozen value: the legacy subject, or the message a resolution inherits.
   if (state.message !== undefined) return state.message ?? undefined;
   if (state.request.message === null) return undefined;
   if (!state.request.finish || state.request.finish.reviewedSource) return undefined;
   const row = await finishRow(ctx, {
-    projectId: state.projectId as Id<'hostedProjects'>,
+    projectId,
     submissionId: state.id,
   });
   if (!row) return undefined;
@@ -99,6 +102,8 @@ export async function resolutionMessage(
     const origin = await landingRow(ctx, { projectId: input.projectId, submissionId });
     return origin ? acceptedLandingMessage(ctx, landingStateFromRow(origin)) : undefined;
   }
-  const origin = hostedLandingStateSchema.parse(JSON.parse(conflicted.value));
+  const origin = storedLandingStateSchema.parse(JSON.parse(conflicted.value));
+  if (origin.messageRef)
+    return landingMessageText(ctx, input.projectId, { messageRef: origin.messageRef.id });
   return (typeof origin.request.message === 'string' ? origin.request.message : origin.message) ?? undefined;
 }

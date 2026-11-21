@@ -6,7 +6,7 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import {
   hostedLandingAttemptSchema,
-  hostedLandingStateSchema,
+  storedLandingStateSchema,
   type HostedLandingState,
 } from '../src/hosted-landing';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
@@ -283,7 +283,7 @@ export async function driveParkedWaiter(ctx: MutationCtx, waiter: Doc<'projectHo
     : await armLandingAlarm(
         ctx,
         waiter,
-        hostedLandingProgressAt(hostedLandingStateSchema.parse(JSON.parse(waiter.value))),
+        hostedLandingProgressAt(storedLandingStateSchema.parse(JSON.parse(waiter.value))),
       );
   await ctx.db.patch(waiter._id, {
     orderWait: undefined,
@@ -355,7 +355,7 @@ export async function wakeLandingOrderWaiters(
         waiter.phase === 'queued' &&
         waiter.batchSelection &&
         hostedLandingAttemptSchema.parse(JSON.parse(waiter.batchSelection)).earlyResolutions?.length &&
-        !hostedLandingStateSchema.parse(JSON.parse(waiter.value)).batchId,
+        !storedLandingStateSchema.parse(JSON.parse(waiter.value)).batchId,
       );
       if (
         speculativeOnly &&
@@ -386,7 +386,7 @@ export async function wakeLandingOrderWaiters(
           ? await armLandingAlarm(
               ctx,
               waiter,
-              hostedLandingProgressAt(hostedLandingStateSchema.parse(JSON.parse(waiter.value))),
+              hostedLandingProgressAt(storedLandingStateSchema.parse(JSON.parse(waiter.value))),
             )
           : undefined;
       await ctx.db.patch(waiter._id, {

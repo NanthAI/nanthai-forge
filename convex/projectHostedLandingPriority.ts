@@ -14,6 +14,7 @@ import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
 import { callerActorKind } from './metricActorKind';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { effectiveAgentDefaults, urgentAllowed, urgentRefusal } from '../src/agent-parallel-defaults';
+import { landingMessageForReader } from './projectHostedLandingMessageBody';
 
 /** One submission patch, no wake/poller or progress fan-out. The retained CAS
  * prevents an old retry from undoing a later owner's priority change. */
@@ -57,7 +58,9 @@ export const prioritize = mutation({
           'WORK_OPERATION_CHANGED',
           'Replay the original priority change.',
         );
-        return canonicalPayload(landingPriorityState(row, state));
+        return canonicalPayload(
+          await landingMessageForReader(ctx, input.projectId, landingPriorityState(row, state)),
+        );
       }
       invariant(
         Number.isSafeInteger(input.expectedVersion) &&
@@ -87,7 +90,13 @@ export const prioritize = mutation({
         action: 'prioritize',
         actorKind: await callerActorKind(ctx, actor.id),
       });
-      return canonicalPayload(landingPriorityState({ ...row, ...patch }, state));
+      return canonicalPayload(
+        await landingMessageForReader(
+          ctx,
+          input.projectId,
+          landingPriorityState({ ...row, ...patch }, state),
+        ),
+      );
     } catch (error) {
       return report(error);
     }

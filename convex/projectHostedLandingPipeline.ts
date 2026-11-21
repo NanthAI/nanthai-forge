@@ -12,7 +12,7 @@ import {
   writeLanding,
 } from './projectHostedLandingStore';
 import { loadBatch, type BatchIdentity, type LandingBatch } from './projectHostedLandingBatchState';
-import { hostedLandingStateSchema, type HostedLandingAttempt } from '../src/hosted-landing';
+import { storedLandingStateSchema, type HostedLandingAttempt } from '../src/hosted-landing';
 import { hostedBatching, hostedPipelineWidth } from '../src/hosted-landing-batch';
 import { landingSuspect } from '../src/hosted-landing-suspect';
 import { invalidatePipeline as retirePipeline } from './projectHostedLandingPipelineInvalidation';
@@ -58,7 +58,7 @@ export async function pipelinePredecessor(
     if (tail) options.onBlocked?.(tail);
     return undefined;
   };
-  const states = live.map(row => hostedLandingStateSchema.parse(JSON.parse(row.value)));
+  const states = live.map(row => storedLandingStateSchema.parse(JSON.parse(row.value)));
   // A suspect (51bbbd00) still checks, but nothing stacks on its unproven head.
   // Its descendants retired when it became suspect, so the rest of the train
   // never contains its changes. It still occupies an execution slot below.
@@ -97,7 +97,7 @@ export async function pipelinePredecessor(
     head: attempt.candidate.head,
     receiptId: attempt.operations.accept,
   };
-  let state = hostedLandingStateSchema.parse(JSON.parse(tail.value));
+  let state = storedLandingStateSchema.parse(JSON.parse(tail.value));
   for (let depth = 0; pending.size && depth <= live.length; depth++) {
     const required = pending.get(current.submissionId);
     if (required?.head === current.head && required.receiptId === current.receiptId)

@@ -10,7 +10,7 @@ import { readWouldConflict } from './projectHostedLandingWouldConflict';
 import { syncRequiredAdvice, syncRequiredNext } from '../src/hosted-would-conflict';
 import { loadLandingAttempt } from './projectHostedLandingAttemptRead';
 import { finishRow } from './projectHostedFinishWake';
-import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { storedLandingStateSchema } from '../src/hosted-landing';
 import { hostedFinishSchema } from '../src/hosted-finish';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { landingSuspect } from '../src/hosted-landing-suspect';
@@ -54,7 +54,7 @@ export const read = query({
       for (const key of keys.slice(0, take)) {
         const row = await landingRow(ctx, { projectId, submissionId: key.id });
         if (!row) continue;
-        const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+        const state = storedLandingStateSchema.parse(JSON.parse(row.value));
         const attempt = await loadLandingAttempt(ctx, { projectId, attemptId: state.attemptId });
         const finish = await finishRow(ctx, { projectId, submissionId: state.id });
         const intentId = finish ? hostedFinishSchema.parse(JSON.parse(finish.value)).source.intentId : null;
@@ -146,7 +146,7 @@ export const read = query({
         .take(take + 1);
       const preparationEntries = [];
       for (const row of preparing.slice(0, Math.max(0, take - entries.length))) {
-        const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+        const state = storedLandingStateSchema.parse(JSON.parse(row.value));
         const inputs = await ctx.db
           .query('projectHostedComposeSelections')
           .withIndex('by_project_and_actor_and_operation_and_kind_and_key', q =>

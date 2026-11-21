@@ -17,7 +17,7 @@ import { openApprovalRequests } from './projectHostedApprovals';
 import { messagesTo } from './projectNeedsFyi';
 import { openLandingReviews, reviewSubmitter } from './projectHostedReviewInbox';
 import { approvePath, approveUrl } from './projectHostedOwnerReview';
-import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { storedLandingStateSchema } from '../src/hosted-landing';
 import { report } from './errors';
 import { invariant } from '../src/errors';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
@@ -137,7 +137,7 @@ async function reason(
   const submissionId = owner?.projectId === projectId ? owner.submissionId : undefined;
   if (submissionId && reviewIds.has(submissionId)) return null;
   const row = submissionId ? await landingRow(ctx, { projectId, submissionId }) : null;
-  const parsed = row ? hostedLandingStateSchema.safeParse(JSON.parse(row.value)) : null;
+  const parsed = row ? storedLandingStateSchema.safeParse(JSON.parse(row.value)) : null;
   const state = parsed?.success ? parsed.data : null;
   const observed = state?.observation;
   // A recorded landing hold or failure wins over an incidental overlap mark.
@@ -175,7 +175,7 @@ async function reason(
 async function dependencyLane(ctx: QueryCtx, projectId: Id<'hostedProjects'>, submissionId: string) {
   const parentId = (await finishRow(ctx, { projectId, submissionId }))?.parentSubmissionId;
   const row = parentId ? await landingRow(ctx, { projectId, submissionId: parentId }) : null;
-  const parsed = row ? hostedLandingStateSchema.safeParse(JSON.parse(row.value)) : null;
+  const parsed = row ? storedLandingStateSchema.safeParse(JSON.parse(row.value)) : null;
   const parent = parsed?.success ? parsed.data : null;
   const operationId = parent?.request.finish?.composeOperationId;
   if (!parent || !operationId) return null;

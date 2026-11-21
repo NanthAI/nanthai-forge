@@ -259,6 +259,13 @@ export const hostedLandingStateSchema = z
       .nullable(),
   })
   .strict();
+/** Internal tickets can carry a message reference. Released replies keep the inline schema above. */
+export const storedLandingStateSchema = hostedLandingStateSchema.extend({
+  messageRef: z
+    .object({ id: z.string().min(1), source: z.enum(['request', 'inherited']) })
+    .strict()
+    .optional(),
+});
 export const hostedLandingProgressSchema = hostedLandingStateSchema
   .pick({
     semanticConflicts: true,
@@ -276,7 +283,7 @@ export const hostedLandingProgressSchema = hostedLandingStateSchema
   .strict();
 export type HostedLandingRequest = z.infer<typeof hostedLandingRequestSchema>;
 export type HostedLandingAttempt = z.infer<typeof hostedLandingAttemptSchema>;
-export type HostedLandingState = z.infer<typeof hostedLandingStateSchema>;
+export type HostedLandingState = z.infer<typeof storedLandingStateSchema>;
 type Counts = NonNullable<HostedLandingState['counts']>;
 const unreportedCheck = 'superseded-check-execution-unreported';
 const compactCountsSchema = z.tuple([

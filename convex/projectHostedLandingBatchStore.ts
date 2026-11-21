@@ -14,7 +14,7 @@ import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import {
   hostedLandingAttemptSchema,
-  hostedLandingStateSchema,
+  storedLandingStateSchema,
   landingObservation,
 } from '../src/hosted-landing';
 import { hostedBatching } from '../src/hosted-landing-batch';
@@ -183,7 +183,7 @@ export async function formLandingBatch(
   const ordered = orderHostedLandingRows([...new Map(windows.map(row => [row.submissionId, row])).values()]);
   const members = ordered
     .flatMap(row => {
-      const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+      const state = storedLandingStateSchema.parse(JSON.parse(row.value));
       if (!row.batchSelection || state.batchId || state.batchSolo || state.request.finish?.after) return [];
       const attempt = hostedLandingAttemptSchema.parse(JSON.parse(row.batchSelection));
       return attempt.id === row.attemptId &&
@@ -288,7 +288,7 @@ export async function installBatchAttempt(
   const { original } = input;
   const row = await landingRow(ctx, { projectId: input.projectId, submissionId: original.submissionId });
   invariant(row, 'SOURCE_UNAVAILABLE', 'The batch member is unavailable.');
-  const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+  const state = storedLandingStateSchema.parse(JSON.parse(row.value));
   const parent = await loadLandingAttempt(ctx, { projectId: input.projectId, attemptId: state.attemptId });
   // A retry or cohort pin is a new attempt: it never inherits the original's race reasons (7c2e69e1).
   const {

@@ -17,7 +17,7 @@ import { loadBatch } from './projectHostedLandingBatchState';
 import { redriveCohortHold } from './projectHostedLandingCohortHold';
 import { auditRow } from './projectHostedMainAuditState';
 import { redriveCiDown } from './projectHostedLandingCiDown';
-import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { storedLandingStateSchema } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { report } from './errors';
 
@@ -62,7 +62,7 @@ export async function redriveLanding(
   const row = options.row ?? (await landingRow(ctx, input));
   if (!row) {
     const desired = await desiredLanding(ctx, input);
-    if (!desired || hostedLandingStateSchema.parse(JSON.parse(desired.value)).observation.state !== 'pending')
+    if (!desired || storedLandingStateSchema.parse(JSON.parse(desired.value)).observation.state !== 'pending')
       return done;
     if (desired.wake && (await lost(ctx, desired.wake.taskId))) {
       if (act) await scheduleDesired(ctx, desired, 0);
@@ -172,7 +172,7 @@ async function idleReady(
   finish: Doc<'projectHostedFinishes'>,
 ) {
   if (row.orderWait || finish.waiting) return false;
-  const reason = hostedLandingStateSchema.parse(JSON.parse(row.value)).observation.pendingReason;
+  const reason = storedLandingStateSchema.parse(JSON.parse(row.value)).observation.pendingReason;
   if (reason === 'waiting-for-review' || reason === 'waiting-for-dependency') return false;
   const task = finish.wake ? await ctx.db.system.get(finish.wake.taskId) : null;
   return task?.state.kind !== 'pending' && task?.state.kind !== 'inProgress';
@@ -185,7 +185,7 @@ async function idleCohortLeader(
   finish: Doc<'projectHostedFinishes'>,
 ) {
   if (row.orderWait || finish.waiting) return false;
-  const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+  const state = storedLandingStateSchema.parse(JSON.parse(row.value));
   if (!state.batchId) return false;
   const { batch } = await loadBatch(ctx, { projectId: row.projectId, batchId: state.batchId });
   if (batch.phase !== 'composing' || (batch.leaderId ?? batch.id) !== row.submissionId) return false;

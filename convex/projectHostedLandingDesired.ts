@@ -28,7 +28,7 @@ import { enforceLandGates } from './projectHostedLandGates';
 import { requireQueueRoom } from './projectHostedQueueRoom';
 import { hostedLandingDesiredSchema } from '../src/hosted-landing-desired';
 import { validateNotVerified } from '../src/agent-handoff-types';
-import { hostedLandingStateSchema, landingObservation, landingTokensColumn } from '../src/hosted-landing';
+import { storedLandingStateSchema, landingObservation, landingTokensColumn } from '../src/hosted-landing';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { sanitizeOutside, declarationIdentity } from '../src/run-evidence';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -36,6 +36,7 @@ import { digest } from '../src/state/hash';
 import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
 import { heldReview } from './projectHostedOwnerReview';
+import { landingMessageForReader } from './projectHostedLandingMessageBody';
 
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() };
 /** Register the goal while the first source job runs. The selected source pages
@@ -118,11 +119,12 @@ export async function submitDesiredLanding(
   const project = await activeProject(ctx, input.projectId, actor.id);
   // Only reused canonical states can be held. Project the current approval on the public reply,
   // leaving the stored state bytes intact and every fresh submission on its existing path.
-  const reply = async (row: LandingRow) => {
-    if (!includeReview || row.phase !== 'ready') return row.value;
-    const state = JSON.parse(row.value) as z.infer<typeof hostedLandingStateSchema>;
-    const review = await heldReview(ctx, project, state);
-    return review ? canonicalPayload({ ...state, ...review }) : row.value;
+  const reply = async (row: Pick<LandingRow, 'value'> & { phase?: LandingRow['phase'] }) => {
+    const state = JSON.parse(row.value) as z.infer<typeof storedLandingStateSchema>;
+    const review = includeReview && row.phase === 'ready' ? await heldReview(ctx, project, state) : null;
+    if (!review && !state.messageRef) return row.value;
+    const selected = await landingMessageForReader(ctx, projectId, state);
+    return canonicalPayload(review ? { ...selected, ...review } : selected);
   };
   const request = canonicalPayload(withoutAuthorship(command));
   const old = await ctx.db
@@ -138,7 +140,7 @@ export async function submitDesiredLanding(
       const task = await ctx.db.system.get(old.wake.taskId);
       if (!task || task.state.kind === 'failed') await schedule(ctx, old, 0);
     }
-    return canonical ? reply(canonical) : old.value;
+    return reply(canonical ?? old);
   }
   const alias = await landingAlias(ctx, {
     projectId: input.projectId,
@@ -154,7 +156,7 @@ export async function submitDesiredLanding(
     const canonical = await landingRow(ctx, alias);
     const desired = canonical ? null : await desiredLanding(ctx, alias);
     invariant(canonical || desired, 'SOURCE_UNAVAILABLE', 'Original desired landing is unavailable.');
-    return canonical ? reply(canonical) : desired!.value;
+    return reply(canonical ?? desired!);
   }
   requireWriteEpoch(project, command.authorityEpoch);
   // Fresh goals and fresh aliases charge once; canonical admission retains this reservation.
@@ -194,10 +196,10 @@ export async function submitDesiredLanding(
     )
     .order('desc')
     .take(1);
-  let queuedState = queued && hostedLandingStateSchema.parse(JSON.parse(queued.value));
+  let queuedState = queued && storedLandingStateSchema.parse(JSON.parse(queued.value));
   const replaced = queued && (await replaceOwnerlessLanding(ctx, queued));
   if (replaced)
-    queuedState = hostedLandingStateSchema.parse(JSON.parse((await landingRow(ctx, queued))!.value));
+    queuedState = storedLandingStateSchema.parse(JSON.parse((await landingRow(ctx, queued))!.value));
   if (queued && queuedState?.phase !== 'terminal-failed') {
     await ctx.db.insert('projectHostedLandingAliases', {
       projectId: input.projectId,
@@ -217,7 +219,7 @@ export async function submitDesiredLanding(
     .take(1);
   const existingCanonical = existing && (await landingRow(ctx, existing));
   const existingState =
-    existing && hostedLandingStateSchema.parse(JSON.parse(existingCanonical?.value ?? existing.value));
+    existing && storedLandingStateSchema.parse(JSON.parse(existingCanonical?.value ?? existing.value));
   if (
     existing &&
     existingState?.phase !== 'terminal-failed' &&
@@ -230,7 +232,7 @@ export async function submitDesiredLanding(
       requestHash: digest(request),
       submissionId: existing.submissionId,
     });
-    return existingCanonical ? reply(existingCanonical) : existing.value;
+    return reply(existingCanonical ?? existing);
   }
   // A new desired landing only: replays and joins of a live landing above return unjudged.
   await requireQueueRoom(ctx, input.projectId, maxChecks);
@@ -264,7 +266,7 @@ export async function submitDesiredLanding(
   const id = crypto.randomUUID(),
     attemptId = crypto.randomUUID(),
     at = new Date().toISOString();
-  const state = hostedLandingStateSchema.parse({
+  const state = storedLandingStateSchema.parse({
     schema: 1,
     projectId: input.projectId,
     id,
@@ -347,7 +349,7 @@ export const claim = internalMutation({
   handler: async (ctx, input) => {
     const row = await desiredLanding(ctx, input);
     if (row?.wake?.id !== input.wakeId) return null;
-    const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+    const state = storedLandingStateSchema.parse(JSON.parse(row.value));
     if (state.observation.state !== 'pending') {
       // This is the wake currently running; Convex refuses self/ancestor cancellation.
       await ctx.db.patch(row._id, { wake: null });
@@ -363,7 +365,7 @@ export const advance = internalMutation({
   handler: async (ctx, input) => {
     const row = await desiredLanding(ctx, input);
     if (row?.wake?.id !== input.wakeId) return null;
-    const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+    const state = storedLandingStateSchema.parse(JSON.parse(row.value));
     try {
       await activeProject(ctx, row.projectId, row.actor);
       const source = await loadCompose(ctx, {
@@ -432,7 +434,7 @@ export const fail = internalMutation({
   handler: async (ctx, input) => {
     const row = await desiredLanding(ctx, input);
     if (row?.wake?.id !== input.wakeId) return null;
-    const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+    const state = storedLandingStateSchema.parse(JSON.parse(row.value));
     const failed = {
       ...state,
       version: state.version + 1,
@@ -474,7 +476,7 @@ export const drive = internalAction({
     } catch (error) {
       const detail =
         error && typeof error === 'object' && 'data' in error
-          ? hostedLandingStateSchema.shape.error.safeParse(error.data)
+          ? storedLandingStateSchema.shape.error.safeParse(error.data)
           : null;
       if (!detail?.success || !detail.data || detail.data.code === 'HOSTED_REQUEST_FAILED') throw error;
       return ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedLandingDesired:fail'), {

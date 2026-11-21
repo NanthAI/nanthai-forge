@@ -13,6 +13,7 @@ import {
 import { CODE_DIR_DEPTH } from '../src/code-tree';
 import { invariant } from '../src/errors';
 import { safeRelative } from '../src/safe-relative';
+import { landingMessageText } from './projectHostedLandingMessageBody';
 
 const MATCHES_PER_PAGE = 8;
 const SCAN_ROWS = 96;
@@ -23,6 +24,16 @@ const encoder = new TextEncoder();
 const documentBytes = (row: object) => encoder.encode(JSON.stringify(row)).length;
 type Candidate = Extract<HostedRecord, { kind: 'candidate' }>;
 type Match = boolean | null;
+
+export async function readCodeHistoryRow(
+  ctx: QueryCtx,
+  row: Doc<'projectHostedAcceptances'>,
+  visitor = false,
+  receipt = JSON.parse(row.value) as HostedAcceptance,
+) {
+  const message = await landingMessageText(ctx, row.projectId, receipt);
+  return codeHistoryRow({ ...receipt, message }, row.sequence, visitor);
+}
 
 /** An older match from a file page links straight to its receipt. */
 export async function codeHistoryReceipt(
@@ -36,7 +47,7 @@ export async function codeHistoryReceipt(
     .query('projectHostedAcceptances')
     .withIndex('by_project_and_receipt', q => q.eq('projectId', projectId).eq('receiptId', receiptId))
     .unique();
-  return row ? [codeHistoryRow(JSON.parse(row.value) as HostedAcceptance, row.sequence, visitor)] : [];
+  return row ? [await readCodeHistoryRow(ctx, row, visitor)] : [];
 }
 
 /** Find a page of matches within a bounded window of receipts. A Candidate's governance paths are the exact net change
@@ -151,7 +162,7 @@ export async function codeFileHistory(
       }
       scanned += 1;
       if (touched === null) missing += 1;
-      if (touched) landings.push(codeHistoryRow(receipt, row.sequence, visitor));
+      if (touched) landings.push(await readCodeHistoryRow(ctx, row, visitor, receipt));
       if (landings.length === MATCHES_PER_PAGE) break;
     }
     if (end < batch.length) break;
