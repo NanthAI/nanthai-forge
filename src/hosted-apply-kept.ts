@@ -277,19 +277,29 @@ export type KeptApplySummary = {
   note: string;
 };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const pendingHeldCheckoutName = (id: string) => `awaiting-previous-${id}`;
 function names(cache: string) {
   try {
-    return readdirSync(cache).filter(name => uuid.test(name));
+    if (!real(cache)) return [];
+    const entries = new Set(readdirSync(cache));
+    return [...entries].filter(
+      name =>
+        uuid.test(name) &&
+        (!entries.has(pendingHeldCheckoutName(name)) ||
+          checkoutPathExists(join(cache, name, 'prior-checkout'))),
+    );
   } catch {
     return [];
   }
 }
-function summarize(cache: string, id: string, hideEmpty = false): KeptApplySummary | null {
-  const directory = join(cache, id);
+function summarize(cache: string, name: string, hideEmpty = false): KeptApplySummary | null {
+  const directory = join(cache, name);
   let receipt;
   try {
     if (!real(directory)) return null;
     receipt = receiptShape.parse(JSON.parse(readFileSync(join(directory, 'receipt.json'), 'utf8')));
+    // Disposal writes its intent before moving the directory (or symlink) into position.
+    if (receipt.held && !checkoutPathExists(join(directory, 'prior-checkout'))) return null;
   } catch {
     return null;
   }
@@ -303,9 +313,9 @@ function summarize(cache: string, id: string, hideEmpty = false): KeptApplySumma
   // Held checkout remainders can contain bytes outside the indexed path rounds.
   if (hideEmpty && !receipt.held && !counts.edited && !counts.extra && !counts.deleted) return null;
   return {
-    id,
+    id: name,
     directory,
-    ...(receipt.confirmedAt
+    ...(!receipt.held && receipt.confirmedAt
       ? { confirmedAt: receipt.confirmedAt, expiresAt: receipt.confirmedAt + KEPT_APPLY_TTL_MS }
       : {}),
     ...counts,
@@ -384,11 +394,7 @@ export function listKeptApply(root: string) {
 /** Sweep one client cache directory by path (used when its project root is gone). */
 export function sweepKeptApplyCache(cache: string, now = Date.now()) {
   const directory = join(cache, 'kept-apply');
-  for (const id of names(directory)) {
-    const summary = summarize(directory, id);
-    if (summary?.expiresAt && summary.expiresAt <= now)
-      rmSync(summary.directory, { recursive: true, force: true });
-  }
+  sweep(directory, now);
   try {
     rmdirSync(directory);
   } catch {
@@ -411,8 +417,11 @@ export function removeCachePreservingKept(cache: string) {
 
 /** Remove entries whose confirmed apply is older than the TTL. Never touches an unconfirmed entry. */
 export function sweepKeptApply(root: string, now = Date.now()): string[] {
-  const cache = keptApplyRoot(root),
-    removed: string[] = [];
+  return sweep(keptApplyRoot(root), now);
+}
+
+function sweep(cache: string, now: number) {
+  const removed: string[] = [];
   for (const id of names(cache)) {
     const summary = summarize(cache, id);
     if (summary?.expiresAt && summary.expiresAt <= now) {

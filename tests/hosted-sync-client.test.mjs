@@ -26,6 +26,7 @@ import { digest } from '../dist/hash.js';
 import { ForgeError } from '../dist/errors.js';
 import { fixture } from './hosted-sync-client-fixture.mjs';
 import { syncStateDelta, applySyncStateDelta, syncStateDeltaBytes } from '../dist/hosted-sync-delta.js';
+import { keptApplyRoot } from '../dist/hosted-apply-kept.js';
 test('explicit sync apply fetches only affected materialized objects and preserves sparse scope', async t => {
   const s = await fixture(t, ['a']),
     command = s.command();
@@ -463,6 +464,28 @@ test('an in-place sync apply walks the checkout tree once (2ccb2322 F6)', async 
   assert.equal(applied.head, s.selection().head);
   assert.equal(readFileSync(join(s.root, 'a'), 'utf8'), 'after\n');
   assert.equal(roots.length, 1, 'one walk of the checkout root');
+});
+test('F7: in-place sync apply reads no kept receipts', async t => {
+  const s = await fixture(t);
+  const directory = join(keptApplyRoot(s.root), randomUUID()),
+    receipt = join(directory, 'receipt.json');
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(receipt, JSON.stringify({ confirmedAt: 1 }));
+  const read = fs.readFileSync;
+  let reads = 0;
+  t.mock.method(fs, 'readFileSync', (path, ...args) => {
+    if (path === receipt) reads++;
+    return read(path, ...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    const request = s.command();
+    assert.equal((await applyHostedSync(s.root, request, s.transport)).head, request.lane.head);
+    assert.equal(reads, 0);
+  } finally {
+    fs.readFileSync.mock.restore();
+    syncBuiltinESMExports();
+  }
 });
 test('one-trip sync: a live result with its State delta applies with no access read and no State download', async t => {
   const s = await fixture(t);

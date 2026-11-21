@@ -12,17 +12,19 @@ import {
   unlinkSync,
   type Stats,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { EVENT_PROBE_PREFIX } from './forge-cache-paths.js';
 import { ForgeError } from './errors.js';
+import { digest } from './hash.js';
 import type { NativeFile } from './state/format.js';
 import { durableReplace, syncDirectory } from './state/durability.js';
 import { indexedBlob, type CheckoutStatIndex } from './checkout-stat-index.js';
 import { workingMatches, worktreeText } from './checkout-text.js';
-import { keptApplyRoot, type KeptEntry } from './hosted-apply-kept.js';
+import { pendingHeldCheckoutName, keptApplyRoot, type KeptEntry } from './hosted-apply-kept.js';
 import { retainedDeltaBackups } from './hosted-checkout-delta-settle.js';
 import { diskShapeMatches, writeSourceLink } from './source-links.js';
+import { checkoutPathStat } from './hosted-checkout-files.js';
 
 /** Forge-owned names inside `.forge`; anything else there is kept like any other local file. */
 const metadata = (markerName: string) => new Set([markerName, 'cache-use.json']);
@@ -31,14 +33,15 @@ const shaped = (stat: Stats, file: NativeFile) => diskShapeMatches(stat, file.mo
 /** Retire the prior checkout directory after a whole-checkout publication.
  *
  * The cleanliness check before the rename owns nothing: until the rename lands, an editor can
- * recreate paths in the old root (even a layout that mimics a cache). So this never removes the
- * tree wholesale. It walks it once, as `rm -r` would. Each baseline path is first moved into a
+ * recreate paths in the old root (even a layout that mimics a cache). Move the prior entry by
+ * name into its private held folder before inspecting it, so a link swapped in at `previous`
+ * can never redirect the walk. Walk it once, as `rm -r` would. Each baseline path is first moved into a
  * private folder inside the old root and only then compared (an exact stat-index match counts,
  * like save), so a write through the old path after that lands in a new file that stays; exact
  * baseline bytes are unlinked, anything else goes back to its path. Forge's own metadata is
  * removed; the marker goes last, so an interrupted disposal can be finished from it. Anything else
- * stays, and the remainder moves whole into a held kept-apply folder in the outermost client
- * cache: listed by status, reported on every checkout result, never swept by expiry. A walk that
+ * stays in the held kept-apply folder in the outermost client cache: listed by status, reported
+ * on every checkout result, never swept by expiry. A walk that
  * stops on a filesystem error (a read-only folder, say) holds the remainder the same way, so the
  * publication finishes and later checkouts are not refused.
  *
@@ -47,16 +50,96 @@ export function disposePriorCheckout(input: {
   root: string;
   cacheRoot: string;
   previous: string;
-  files: readonly NativeFile[];
+  operationId: string;
+  replay?: boolean;
+  files: (prior: string) => readonly NativeFile[];
   markerName: string;
   index?: CheckoutStatIndex;
 }): string | null {
-  const { root, cacheRoot, previous, markerName, index } = input;
-  const baseline = new Map(input.files.map(file => [file.path, file]));
-  // Files its `.gitattributes` convert hold their blob as CRLF (44ef42b9), not an edit.
-  const text = worktreeText(previous, input.files);
-  const owned = metadata(markerName);
+  const { root, cacheRoot, markerName, index } = input,
+    original = input.previous;
+  const unclaimed = checkoutPathStat(original);
+  if (!unclaimed && !input.replay) return null;
+  const hex = digest(`${cacheRoot}\0${input.operationId}`).slice(0, 32),
+    id = hex.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, '$1-$2-$3-$4-$5'),
+    cache = keptApplyRoot(root),
+    directory = join(cache, id),
+    previous = join(directory, 'prior-checkout'),
+    receipt = join(directory, 'receipt.json'),
+    awaiting = join(cache, pendingHeldCheckoutName(id));
   const kept: KeptEntry[] = [];
+  const writeReceipt = (complete: boolean, stopped?: string) =>
+    durableReplace(
+      receipt,
+      JSON.stringify({
+        held: true,
+        preservedAt: previous,
+        rounds: { 'prior-checkout': kept },
+        complete,
+        ...(stopped ? { stopped } : {}),
+      }),
+    );
+  const holder = checkoutPathStat(cache)?.isDirectory() ? checkoutPathStat(directory) : null;
+  let prior = holder?.isDirectory() ? checkoutPathStat(previous) : null;
+  if (!prior) {
+    if (!unclaimed) return null;
+    let reserved = false;
+    try {
+      mkdirSync(cache, { recursive: true, mode: 0o700 });
+      if (!lstatSync(cache).isDirectory() || checkoutPathStat(directory)?.isDirectory() === false)
+        throw Object.assign(new Error('The kept checkout directory must be real.'), { code: 'ENOTDIR' });
+      durableReplace(awaiting, '');
+      reserved = true;
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+      writeReceipt(false);
+      syncDirectory(cache);
+      syncDirectory(dirname(cache));
+      // Readers ignore destinations that have not moved yet. Journal both references first
+      // so a crash after the rename still reports the held path on replay.
+      retainedDeltaBackups(cacheRoot, previous);
+      renameSync(original, previous);
+    } catch (error) {
+      const moved = reserved && checkoutPathStat(previous);
+      if (reserved && !moved)
+        try {
+          rmSync(directory, { recursive: true, force: true });
+          rmSync(awaiting, { force: true });
+        } catch {
+          // Status ignores an unfinished receipt, and the same operation reuses its slot.
+        }
+      const code = (error as NodeJS.ErrnoException)?.code ?? 'unknown';
+      const preservedAt = moved ? previous : original;
+      throw new ForgeError(
+        'WORK_CONFLICT',
+        `The new checkout is published, but its previous copy could not be kept aside (${code}). It is still at ${preservedAt}. Fix the permission or space problem and rerun the same command, or move that folder out yourself and continue.`,
+        undefined,
+        {
+          phase: 'dispose-previous',
+          obstruction: { kind: 'prior-checkout', code, path: preservedAt },
+          preservedAt,
+          next: { action: 'retry' },
+          alternatives: [{ action: 'keep-backup', path: preservedAt }],
+        },
+      );
+    }
+    syncDirectory(directory);
+    syncDirectory(cacheRoot);
+    prior = lstatSync(previous);
+  } else {
+    try {
+      const stat = checkoutPathStat(receipt);
+      if (!stat?.isFile() || stat.nlink !== 1) return previous;
+      if (JSON.parse(readFileSync(receipt, 'utf8')).complete) return previous;
+    } catch {
+      return previous; // Unreadable metadata cannot authorize removing anything.
+    }
+  }
+  // A replacement link or file is itself local content. Hold that entry without opening it.
+  const files = prior.isDirectory() ? input.files(previous) : [];
+  const baseline = new Map(files.map(file => [file.path, file]));
+  // Files its `.gitattributes` convert hold their blob as CRLF (44ef42b9), not an edit.
+  const text = prior.isDirectory() ? worktreeText(previous, files) : null;
+  const owned = metadata(markerName);
   const asideName = `.forge-disposal-${randomUUID()}`,
     aside = join(previous, asideName);
   let asideMade = false,
@@ -146,7 +229,7 @@ export function disposePriorCheckout(input: {
   };
   let stopped: NodeJS.ErrnoException | null = null;
   try {
-    let empty = visit('');
+    let empty = prior.isDirectory() && visit('');
     if (asideMade)
       try {
         rmdirSync(aside);
@@ -167,7 +250,10 @@ export function disposePriorCheckout(input: {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
       rmdirSync(previous);
-      syncDirectory(cacheRoot);
+      unlinkSync(receipt);
+      rmdirSync(directory);
+      rmSync(awaiting, { force: true });
+      syncDirectory(cache);
       return null;
     }
   } catch (error) {
@@ -175,41 +261,10 @@ export function disposePriorCheckout(input: {
       throw error;
     stopped = error as NodeJS.ErrnoException;
   }
-  // Something other than baseline bytes is here, or the walk could not finish. Hold it whole,
-  // outside every disposable cache: a rename reads nothing inside it.
-  const directory = join(keptApplyRoot(root), randomUUID()),
-    destination = join(directory, 'prior-checkout');
-  try {
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
-    durableReplace(
-      join(directory, 'receipt.json'),
-      JSON.stringify({
-        held: true,
-        preservedAt: destination,
-        rounds: { 'prior-checkout': kept },
-        ...(stopped ? { stopped: stopped.code, complete: false } : {}),
-      }),
-    );
-    renameSync(previous, destination);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException)?.code ?? 'unknown';
-    const next = { action: 'retry' };
-    // Typed, so a sync turns it into recover-apply, which replays this disposal.
-    throw new ForgeError(
-      'WORK_CONFLICT',
-      `The new checkout is published, but its previous copy could not be removed or kept aside (${stopped?.code ?? code}, then ${code}). Nothing else was deleted: it is still at ${previous}. Fix the permission or space problem and rerun the same command, or move that folder out yourself and continue.`,
-      undefined,
-      {
-        phase: 'dispose-previous',
-        obstruction: { kind: 'prior-checkout', code, path: previous },
-        preservedAt: previous,
-        next,
-        alternatives: [{ action: 'keep-backup', path: previous }],
-      },
-    );
-  }
-  syncDirectory(directory);
-  syncDirectory(cacheRoot);
-  retainedDeltaBackups(cacheRoot, destination);
-  return destination;
+  // A provisional receipt already points at these bytes if the final summary cannot be written.
+  if (!checkoutPathStat(previous)) return null;
+  writeReceipt(true, stopped?.code);
+  rmSync(awaiting, { force: true });
+  syncDirectory(cache);
+  return previous;
 }

@@ -2485,7 +2485,7 @@ again after it was kept starts another round instead of being overwritten, and a
 read-cache folder holding local files is kept the same way. Status lists kept entries
 (`keptApply`, paths and counts only, at most 20) with their expiry. The retention clock starts when
 the pinned apply is confirmed and lasts seven days; an unconfirmed entry never expires.
-Expired entries are swept by later recoveries, applies and Lane housekeeping scans, and
+Expired entries are swept by later recoveries and Lane housekeeping scans, and
 Lane pruning keeps the folder until then. Restoration requires the exact journaled marker and clean materialized baseline;
 a recreated or re-edited checkout is preserved in another durable round. Recovery uses one
 serialized private baseline stage of the restored files only, cleans it on exit, and never
@@ -2498,25 +2498,31 @@ or removed path (or a parent or child of one), or any Forge metadata change, ref
 anything is installed, and the refusal removes its pending receipt so a retry re-checks its
 pins. The judgement reuses the publication's one stat-indexed clean pass. A whole-checkout
 publication never removes the prior root wholesale: an editor can recreate paths in it until
-the rename lands, so `hosted-checkout-dispose.ts` walks it once (the walk `rm -r` did). Each
+the rename lands. Disposal moves the prior entry to its private holding path and walks it
+once (the walk `rm -r` did). Each
 baseline path is first renamed into a private folder inside the old root and only then
 compared, so a write through the old path after that lands in a new file that stays; exact
 baseline bytes are unlinked, others go back to their path without replacing anything. Forge
 metadata is removed and anything else moves whole into a held kept-apply folder that never
 expires; results report it in `displacedRecovery`. A walk that stops on a filesystem error (a
 read-only folder) holds the remainder the same way, so the publication finishes and later
-checkouts are not refused; if even that rename fails, a typed `WORK_CONFLICT` names the
-folder and the retry. Hosted main
+checkouts are not refused. The held receipt is shown once the move has happened. A replacement
+link is kept as a link without walking its target. If the rename fails, a typed `WORK_CONFLICT`
+names the folder and the retry. Hosted main
 pulls do the same. Recovery wrappers keep typed recovery for filesystem errors
-(`local-filesystem`), an unreadable quarantined cache (left quarantined), a lost marker (a
-private baseline copy taken with the handoff), and a checkout root replaced by a link (a
+(`local-filesystem`), an unreadable quarantined cache (left quarantined), a lost marker (the
+handoff keeps its State pin, checkout metadata and sparse path bitmap), and a checkout root replaced by a link (a
 `root-link` blocker; nothing is written through the link). When the Lane moved before the
 first apply receipt, `recover-apply` returns `status:"superseded"` with both pin sets and
 `next: open` before moving anything; it never switches pins silently. A checkout that already
 holds the apply's target pins or a newer version of its Lane (an `open` while the sync waited)
-is reported as `alreadyApplied` and left untouched; the handoff's baseline copy stands in only
-for a marker that is missing or unreadable, never for a newer one. Recovery removes its exact journaled baseline
-stage even after an interrupted earlier run.
+is reported as `alreadyApplied` and left untouched. Recovery rebuilds a missing or unreadable marker
+from the exact pinned State, using the object cache or fetching that State with current authority.
+When both States are missing locally, recovery fetches the baseline and target in one page and
+reports the fetched baseline in its reply.
+Once the apply finishes or is superseded, its baseline files and blocked record are removed.
+Completed recovery keeps its request and handoff for replay and removes its exact journaled
+baseline stage even after an interrupted earlier run.
 
 `HostedAgentTransport` is the shared hosted CLI/agent boundary. `agent-cli` selects
 an explicit deployment/project, a verified Lane marker or a retained client

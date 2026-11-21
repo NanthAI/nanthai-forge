@@ -16,6 +16,8 @@ import { parseNativeState, parseNativeStateValue } from './state/format.js';
 import { hostedMainSchema, type HostedMain, type MainExpectation } from './hosted-main.js';
 import { durableReplace, syncDirectory } from './state/durability.js';
 import {
+  checkoutPathExists,
+  checkoutPathStat,
   cleanHostedCheckout,
   installHostedFiles,
   stageHostedFiles,
@@ -110,22 +112,25 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
   // private stage, rolls back, or refuses, exactly as in a Lane checkout.
   const recover = () => {
     recoverMainPublication(root, cache);
-    if (existsSync(previous) && !existsSync(root)) renameSync(previous, root);
+    if (!checkoutPathExists(root) && checkoutPathStat(previous)?.isDirectory()) renameSync(previous, root);
     const settled = settleCheckoutDelta(root, cache);
     if (settled?.conflict) throw settled.conflict;
   };
   /** Retire the old clone once publication is durable: only exact baseline bytes are removed, and
    * anything recreated in the old root before the rename landed is held and reported. */
-  const disposePrevious = (previousMarker: string | null, index?: CheckoutStatIndex) => {
-    if (!existsSync(previous)) return;
-    const bytes = readSource(previous, '.forge/hosted-main.json', Number.MAX_SAFE_INTEGER);
-    const old =
-      bytes && digest(bytes) === previousMarker ? markerSchema.parse(JSON.parse(bytes.toString())) : null;
+  const disposePrevious = (previousMarker: string | null, index?: CheckoutStatIndex, replay = false) => {
     disposePriorCheckout({
       root,
       cacheRoot: cache,
       previous,
-      files: old ? parseNativeStateValue(old.state).files : [],
+      operationId: request.operationId,
+      replay,
+      files: prior => {
+        const bytes = readSource(prior, '.forge/hosted-main.json', Number.MAX_SAFE_INTEGER);
+        const old =
+          bytes && digest(bytes) === previousMarker ? markerSchema.parse(JSON.parse(bytes.toString())) : null;
+        return old ? parseNativeStateValue(old.state).files : [];
+      },
       markerName: 'hosted-main.json',
       index: index ?? readCheckoutStatIndex(root),
     });
@@ -152,7 +157,7 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
         'Retry the original client checkout request.',
       );
       // A crash after the completion receipt can leave the old clone behind.
-      if (original.complete) disposePrevious(original.previousMarker);
+      if (original.complete) disposePrevious(original.previousMarker, undefined, true);
       // A completed checkout replays only while this folder still holds it (Issue ca49dc6c).
       if (original.complete && readHostedMainSelection(root)?.projectId !== request.projectId)
         throw checkoutMissing(root);
@@ -190,7 +195,7 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
       selection: observed,
       complete: Boolean(
         request.refresh &&
-        !existsSync(previous) &&
+        !checkoutPathExists(previous) &&
         marker?.selection.head === observed.head &&
         marker?.selection.receipt.id === observed.receipt.id,
       ),
@@ -369,7 +374,7 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
         }
         if (settled?.conflict) throw settled.conflict;
       } else if (!installed) {
-        invariant(!existsSync(previous), 'WORK_CONFLICT', 'An earlier checkout backup is preserved.');
+        invariant(!checkoutPathExists(previous), 'WORK_CONFLICT', 'An earlier checkout backup is preserved.');
         planCheckoutPreservation(preservationPath, artifacts);
         if (existsSync(root)) renameSync(root, previous);
         renameSync(stage, root);

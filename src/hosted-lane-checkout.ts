@@ -29,7 +29,6 @@ import {
 } from './hosted-checkout-delta.js';
 import { retainedDeltaBackups, settleCheckoutDelta } from './hosted-checkout-delta-settle.js';
 import { sweepCheckoutStages } from './hosted-checkout-delta-pending.js';
-import { sweepKeptApply } from './hosted-apply-kept.js';
 import { disposePriorCheckout } from './hosted-checkout-dispose.js';
 import { refuseDeltaConflict } from './hosted-checkout-carry.js';
 import { withCheckoutOpenMetrics, type CheckoutOpenMetrics } from './checkout-open-metrics.js';
@@ -40,6 +39,7 @@ import { HostedCheckoutCache, type CheckoutObjectTransport } from './hosted-chec
 import { machineObjectsDirectory } from './machine-object-store.js';
 import {
   checkoutPathExists,
+  checkoutPathStat,
   cleanHostedCheckout,
   stageHostedFiles,
   flushHostedFiles,
@@ -133,7 +133,7 @@ async function checkout(
     return bytes ? digest(bytes) : null;
   };
   const recover = () => {
-    if (checkoutPathExists(previous) && !checkoutPathExists(root)) renameSync(previous, root);
+    if (!checkoutPathExists(root) && checkoutPathStat(previous)?.isDirectory()) renameSync(previous, root);
     // An interrupted in-place install finishes from its durable private stage, or rolls back.
     const settled = settleCheckoutDelta(root, cache.root);
     if (settled?.conflict) throw settled.conflict;
@@ -164,16 +164,23 @@ async function checkout(
     });
   /** Retire the old checkout once publication is durable. Only exact baseline bytes are removed;
    * anything recreated in the old root before the rename lands is held and reported (B1). */
-  const disposePrevious = (previousMarker: string | null, index = readCheckoutStatIndex(root)) => {
-    if (!checkoutPathExists(previous)) return;
-    const bytes = readSource(previous, `.forge/${hostedLaneMarkerName}`, Number.MAX_SAFE_INTEGER);
-    // A prior marker that is not the one this operation observed vouches for nothing.
-    const old = bytes && digest(bytes) === previousMarker ? readHostedLaneCheckout(previous) : null;
+  const disposePrevious = (
+    previousMarker: string | null,
+    index = readCheckoutStatIndex(root),
+    replay = false,
+  ) => {
     disposePriorCheckout({
       root,
       cacheRoot: cache.root,
       previous,
-      files: materializedFiles(old),
+      operationId: request.operationId,
+      replay,
+      files: prior => {
+        const bytes = readSource(prior, `.forge/${hostedLaneMarkerName}`, Number.MAX_SAFE_INTEGER);
+        // A prior marker that is not the one this operation observed vouches for nothing.
+        const old = bytes && digest(bytes) === previousMarker ? readHostedLaneCheckout(prior) : null;
+        return materializedFiles(old);
+      },
       markerName: hostedLaneMarkerName,
       index,
     });
@@ -222,7 +229,7 @@ async function checkout(
                 'Retry the original Lane checkout request.',
               );
               // A crash after the completion receipt can leave the old checkout behind.
-              if (original.complete) disposePrevious(original.previousMarker);
+              if (original.complete) disposePrevious(original.previousMarker, undefined, true);
               // A completed checkout replays only while this folder still holds the Lane (Issue
               // ca49dc6c). Its pins may be older than the Lane's saves, so it is never reinstalled.
               if (original.complete && !baseline()) throw checkoutMissing(root, request.laneId);
@@ -509,11 +516,6 @@ async function checkout(
                       // Ignored artifacts stay where they are; only changed paths move.
                       const pin = ({ path, blob, mode }: NativeFile) => ({ path, blob, mode });
                       sweepCheckoutStages(cache.root);
-                      try {
-                        sweepKeptApply(root);
-                      } catch {
-                        /* Expiry bookkeeping never fails an apply. */
-                      }
                       journalCheckoutDelta(cache.root, {
                         operationId: request.operationId,
                         stage: basename(stage),

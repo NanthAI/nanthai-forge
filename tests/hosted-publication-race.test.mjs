@@ -19,7 +19,7 @@ function beforeRename(t, from, during) {
   const rename = fs.renameSync;
   let fired = false;
   t.mock.method(fs, 'renameSync', (source, destination) => {
-    if (!fired && source === from && String(destination).endsWith('/previous')) {
+    if (!fired && source === from && String(destination) === join(clientCacheRoot(from), 'previous')) {
       fired = true;
       during();
     }
@@ -106,6 +106,34 @@ test('B1: a clean whole-checkout publication keeps nothing and leaves no prior c
   assert.equal(applied.displacedRecovery, undefined);
   assert(!fs.existsSync(join(clientCacheRoot(s.root), 'previous')));
   assert.deepEqual(listKeptApply(s.root).entries, []);
+});
+
+test('F9: whole-checkout replacement on Windows checks executable bytes and keeps a late edit', async t => {
+  const s = await fixture(t, undefined, [
+    { path: 'script-clean', content: 'clean baseline', mode: 'executable' },
+    { path: 'script-edited', content: 'edited baseline', mode: 'executable' },
+  ]);
+  for (const path of ['script-clean', 'script-edited']) fs.chmodSync(join(s.root, path), 0o644);
+  s.setFiles([
+    ...s.files.filter(file => file.path !== 'unaffected'),
+    { path: 'unaffected/inner', blob: s.put('nested\n'), mode: 'file' },
+  ]);
+  const platform = t.mock.property(process, 'platform', 'win32');
+  const hook = beforeRename(t, s.root, () => {
+    fs.writeFileSync(join(s.root, 'script-edited'), 'changed after the walk');
+  });
+  let applied;
+  try {
+    applied = await applyHostedSync(s.root, s.command(), s.transport);
+  } finally {
+    hook.restore();
+    platform.mock.restore();
+  }
+  assert(hook.fired());
+  assert.equal(fs.readFileSync(join(s.root, 'script-edited'), 'utf8'), 'edited baseline');
+  const [held] = applied.displacedRecovery;
+  assert.equal(fs.readFileSync(join(held, 'script-edited'), 'utf8'), 'changed after the walk');
+  assert(!fs.existsSync(join(held, 'script-clean')), 'the matching executable needs no kept copy');
 });
 
 test('B1: an edit landing in a baseline file after the clean check is held, not deleted', async t => {

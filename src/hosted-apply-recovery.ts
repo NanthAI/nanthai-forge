@@ -36,6 +36,7 @@ import {
   clearKept,
   installBaseline,
   keptApplyEntry,
+  keptApplyRoot,
   liveState,
   misplacedCacheContent,
   preserveChanges,
@@ -45,9 +46,13 @@ import {
 import {
   receiptSchema,
   validBaseline,
+  restoreBaselinePin,
   recoveryDirectory,
   pathFor,
   blockedName,
+  completedApplyName,
+  completedApplyPath,
+  completeLocalApply,
   read,
   savedSchema,
   markerAt,
@@ -87,8 +92,9 @@ async function incomingDelta(
   marker: HostedLaneCheckoutMarker,
   files: readonly NativeFile[],
   head: string,
+  ensured: boolean,
 ): Promise<CheckoutDelta | null> {
-  await cache.ensure([head]);
+  if (!ensured) await cache.ensure([head]);
   const bytes = readFileSync(join(cache.objects, head));
   invariant(digest(bytes) === head, 'INVALID_NATIVE_SOURCE', 'Selected State bytes changed.');
   const retained = new Set(marker.materialized),
@@ -124,19 +130,26 @@ export async function recoverLocalApply(root: string, id: string, transport: Lan
 }
 async function recoverApply(root: string, id: string, transport: LaneTransport) {
   const lexical = unfollowedRoot(root),
-    retained = join(unfollowedClientCacheRoot(root), blockedName(id));
+    lexicalCache = unfollowedClientCacheRoot(root);
   root = canonicalRoot(root);
   // The journal is found where the apply was retained. A root recreated as a link afterwards is
   // never followed: recovery refuses with the same executable action instead of writing elsewhere.
-  if (root !== lexical && !checkoutPathExists(pathFor(root, id)) && checkoutPathExists(retained))
-    throw rootLinkBlocked(lexical, root, savedSchema.parse(read(retained)));
+  if (root !== lexical)
+    for (const name of [completedApplyName(id), blockedName(id)]) {
+      const retained = join(lexicalCache, name);
+      if (checkoutPathExists(retained))
+        throw rootLinkBlocked(lexical, root, savedSchema.parse(read(retained)));
+    }
+  const completed = completedApplyPath(root, id),
+    settled = checkoutPathExists(completed),
+    savedPath = settled ? completed : pathFor(root, id);
   invariant(
-    checkoutPathExists(pathFor(root, id)),
+    checkoutPathExists(savedPath),
     'NOT_FOUND',
     'No retained local apply with this applyOperationId exists for this checkout.',
   );
   const cacheRoot = clientCacheRoot(root),
-    saved = savedSchema.parse(read(pathFor(root, id)));
+    saved = savedSchema.parse(read(savedPath));
   const request = applySchema.parse(saved.request);
   invariant(request.operationId === id, 'WORK_OPERATION_CHANGED', 'Recover the retained apply.');
   const observed = await transport.select(request.lane.laneId); // fresh authority before local writes
@@ -168,10 +181,13 @@ async function recoverApply(root: string, id: string, transport: LaneTransport) 
     const moved =
       !checkoutPathExists(checkoutReceipt) &&
       JSON.stringify(pins(observed)) !== JSON.stringify(pins(request.lane));
-    const skip = untouched && (checkoutAhead(root, request) !== null || moved);
-    if (!skip) mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const skip = settled || (untouched && (checkoutAhead(root, request) !== null || moved));
+    const pinned =
+      !skip && !checkoutPathExists(receiptPath) && !saved.baseline && !markerAt(root)
+        ? await restoreBaselinePin(root, request, transport)
+        : undefined;
     if (!skip)
-      for (const path of [cacheRoot, directory])
+      for (const path of [cacheRoot, keptApplyRoot(root), directory].filter(checkoutPathExists))
         invariant(
           lstatSync(path).isDirectory() && !lstatSync(path).isSymbolicLink(),
           'UNSAFE_PATH',
@@ -185,7 +201,7 @@ async function recoverApply(root: string, id: string, transport: LaneTransport) 
       : workLocked(join(cacheRoot, 'lock'), () => {
           if (checkoutPathExists(receiptPath)) return receiptSchema.parse(read(receiptPath));
           const observedMarker = markerAt(root),
-            marker = saved.baseline ?? observedMarker;
+            marker = saved.baseline ?? observedMarker ?? pinned?.marker;
           invariant(
             marker && validBaseline(marker, request),
             'WORK_STALE',
@@ -198,6 +214,7 @@ async function recoverApply(root: string, id: string, transport: LaneTransport) 
             baselineStage: join(directory, `baseline-${randomUUID()}`),
             undo: `Only your unsaved changes that clash with the incoming change are kept at ${backup}, with the same relative paths; other edits and new files stay in place. Files that were deleted are listed in the receipt next to it. Copy what you need back after the apply. Further rounds stay in the same folder. It is removed seven days after the apply is confirmed.`,
           };
+          mkdirSync(directory, { recursive: true, mode: 0o700 });
           durableReplace(receiptPath, JSON.stringify(value));
           return receiptSchema.parse(value);
         });
@@ -221,13 +238,19 @@ async function recoverApply(root: string, id: string, transport: LaneTransport) 
       const state = parseNativeStateValue(receipt.marker.state);
       const files = state.files.filter(file => paths.has(file.path));
       const byPath = new Map(files.map(file => [file.path, file]));
-      const cache = new HostedCheckoutCache(cacheRoot, transport);
+      const cache = pinned?.cache ?? new HostedCheckoutCache(cacheRoot, transport);
       const lock = join(cacheRoot, 'lock');
       // A baseline this apply installed itself is finished by a strict replay, not in place.
       const incoming =
         receipt.marker.operationId === request.operationId
           ? null
-          : await incomingDelta(cache, receipt.marker, files, request.lane.head);
+          : await incomingDelta(
+              cache,
+              receipt.marker,
+              files,
+              request.lane.head,
+              !!pinned && pinned.marker.operationId !== id,
+            );
       // The baseline is back once no remaining local change clashes with the incoming change.
       const publishedBaseline = (marker: unknown) => {
         if (JSON.stringify(markerAt(root)) !== JSON.stringify(marker)) return false;
@@ -434,6 +457,7 @@ async function recoverApply(root: string, id: string, transport: LaneTransport) 
           /* No retained handoff for this apply. */
         }
       });
+      completeLocalApply(root, id);
       const next = { action: 'open', laneId: request.lane.laneId };
       const { action, ...command } = next;
       return {
@@ -486,6 +510,12 @@ async function recoverApply(root: string, id: string, transport: LaneTransport) 
         ? {
             priorPreservedAt: join(directory, 'prior-checkout'),
             priorUndo: `Earlier installer backup preserved at ${join(directory, 'prior-checkout')}. Copy needed files back after apply.`,
+          }
+        : {}),
+      ...(pinned?.fetched
+        ? {
+            fetchedBaselineState: pinned.fetched,
+            baselineNote: 'Fetched the pinned baseline State to rebuild the missing checkout marker.',
           }
         : {}),
       next,

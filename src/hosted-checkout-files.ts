@@ -27,16 +27,16 @@ import { writeSourceLink } from './source-links.js';
 import type { TextAttributes } from './git-attributes.js';
 import { stateText, workingMatches } from './checkout-text.js';
 
-/** Unlike existsSync, a dangling symlink still occupies a checkout path. */
-export function checkoutPathExists(path: string) {
+/** Inspect the entry itself, including dangling symlinks. */
+export function checkoutPathStat(path: string) {
   try {
-    lstatSync(path);
-    return true;
+    return lstatSync(path);
   } catch (error) {
-    if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return false;
+    if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return null;
     throw error;
   }
 }
+export const checkoutPathExists = (path: string) => checkoutPathStat(path) !== null;
 export { cleanHostedCheckout } from './hosted-checkout-clean.js';
 /** Whether `.gitattributes` may give this installed file other working bytes than its blob. */
 const converts = (text: TextAttributes | null | undefined, file: NativeFile) =>

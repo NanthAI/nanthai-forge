@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { closeSync, fsyncSync, mkdirSync, openSync, renameSync, rmdirSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  renameSync,
+  rmdirSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { open } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -57,12 +66,21 @@ export function durableReplace(path: string, bytes: Buffer | string, mode = 0o60
   const temporary = `${path}.${randomUUID()}.tmp`;
   const fd = openSync(temporary, 'wx', mode);
   try {
-    writeFileSync(fd, bytes);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
+    try {
+      writeFileSync(fd, bytes);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(temporary, path);
+  } catch (error) {
+    try {
+      unlinkSync(temporary);
+    } catch {
+      // Keep the original write error if the temporary name is unavailable.
+    }
+    throw error;
   }
-  renameSync(temporary, path);
   syncDirectory(dirname(path));
 }
 /** Move a finished directory to a new name without replacing anything already there. POSIX

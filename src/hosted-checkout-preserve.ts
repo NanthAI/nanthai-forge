@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { ForgeError } from './errors.js';
 import { laneScratchPath } from './forge-cache-paths.js';
 import { durableReplace, publishDirectory, syncDirectory } from './state/durability.js';
+import { checkoutPathStat } from './hosted-checkout-files.js';
 
 // Artifacts are native filesystem names, not portable source paths. Preserve
 // names containing newlines or POSIX backslashes without allowing traversal.
@@ -77,7 +78,7 @@ export function preserveCheckoutArtifacts(
   plan: string,
   legacyPlan: () => string[],
 ) {
-  if (!exists(previous)) return;
+  if (!checkoutPathStat(previous)?.isDirectory()) return;
   // Older interrupted installs have no artifact journal. Validate their saved
   // checkout before deriving it; an absent journal never means disposable bytes.
   if (!exists(plan)) planCheckoutPreservation(plan, legacyPlan());

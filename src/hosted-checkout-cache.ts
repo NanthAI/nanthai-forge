@@ -107,6 +107,7 @@ export class HostedCheckoutCache {
     if (missing.length >= checkoutPackMinimum && this.transport.sourcePack && this.sourcePack === null)
       missing = await this.fromPack(missing);
     await this.fetchMissing(missing);
+    return missing;
   }
   /** Describe pages of `missing` and download them in windows. */
   private async fetchMissing(missing: string[]) {

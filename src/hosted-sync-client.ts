@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { checkoutAhead, localApplyBlocked, markerAt } from './hosted-apply-recovery-records.js';
+import {
+  checkoutAhead,
+  completeLocalApply,
+  localApplyBlocked,
+  markerAt,
+} from './hosted-apply-recovery-records.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { canonicalRoot, clientCacheRoot } from './root-paths.js';
 import { deltaJournalName } from './hosted-checkout-delta.js';
@@ -34,6 +39,10 @@ export async function applyHostedSync(
   // interrupted install (its delta journal or prior copy) that the checkout settles first.
   const marker = markerAt(root),
     cache = clientCacheRoot(canonicalRoot(root));
+  const already = (ahead: 'target' | 'newer') => {
+    completeLocalApply(root, request.operationId);
+    return alreadyApplied(root, request, ahead);
+  };
   if (
     marker &&
     !checkoutPathExists(join(cache, deltaJournalName)) &&
@@ -41,7 +50,7 @@ export async function applyHostedSync(
     checkoutAhead(root, request) === 'target' &&
     canonicalPayload(marker.selection) === canonicalPayload(lane)
   )
-    return alreadyApplied(root, request, 'target');
+    return already('target');
   const prepared: CheckoutPrepared = {};
   if (live) {
     prepared.selection = lane;
@@ -53,8 +62,9 @@ export async function applyHostedSync(
         : null;
     if (rebuilt?.id === lane.head) prepared.state = { id: rebuilt.id, bytes: rebuilt.bytes };
   }
+  let applied;
   try {
-    return await checkoutHostedLane(
+    applied = await checkoutHostedLane(
       root,
       {
         operationId: request.operationId,
@@ -80,7 +90,7 @@ export async function applyHostedSync(
       (kind?.kind === 'baseline-mismatch' || kind?.kind === 'superseded')
     ) {
       const ahead = checkoutAhead(root, request);
-      if (ahead) return alreadyApplied(root, request, ahead);
+      if (ahead) return already(ahead);
     }
     if (
       error instanceof ForgeError &&
@@ -103,6 +113,8 @@ export async function applyHostedSync(
       );
     throw error;
   }
+  completeLocalApply(root, request.operationId);
+  return applied;
 }
 function alreadyApplied(root: string, request: { lane: { laneId: string } }, ahead: 'target' | 'newer') {
   return {

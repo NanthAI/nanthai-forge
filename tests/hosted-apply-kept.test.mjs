@@ -21,6 +21,8 @@ import { fixture } from './hosted-sync-client-fixture.mjs';
 import { applyHostedSync } from '../dist/hosted-sync-client.js';
 import { recoverLocalApply } from '../dist/hosted-apply-recovery.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
+import { retainApplyBaseline } from '../dist/hosted-apply-recovery-records.js';
+import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 import {
   KEPT_APPLY_TTL_MS,
   keptApplyEnvelope,
@@ -154,6 +156,96 @@ test('a replay of a finished recovery keeps the same entry and adds no copies', 
   assert.equal(again.preservedAt, first.preservedAt);
   assert.deepEqual(filesUnder(dirname(first.preservedAt)), before);
   assert.equal(listKeptApply(s.root).entries.length, 1);
+});
+
+for (const persisted of ['compact warm', 'compact cold', 'legacy'])
+  test(`F8: a missing sparse marker recovers from its ${persisted} baseline and clears finished journals`, async t => {
+    const previousCache = process.env.FORGE_OBJECT_CACHE;
+    process.env.FORGE_OBJECT_CACHE = 'off';
+    t.after(() => {
+      if (previousCache === undefined) delete process.env.FORGE_OBJECT_CACHE;
+      else process.env.FORGE_OBJECT_CACHE = previousCache;
+    });
+    const s = await fixture(t, ['a', 'src/dir1'], extra);
+    const request = s.command(),
+      cache = clientCacheRoot(s.root),
+      pin = join(cache, `apply-pin-${request.operationId}.json`),
+      legacy = join(cache, `apply-baseline-${request.operationId}.json`),
+      blocked = join(cache, `apply-blocked-${request.operationId}.json`),
+      marker = join(s.root, '.forge', 'hosted-lane.json');
+    const before = readHostedLaneCheckout(s.root);
+    if (persisted === 'legacy') copyFileSync(marker, legacy);
+    else {
+      retainApplyBaseline(s.root, request.operationId);
+      assert(lstatSync(pin).size < 1024, 'the handoff writes pins and a bitmap, not the manifest');
+      assert(!existsSync(legacy));
+    }
+    rmSync(marker);
+    writeFileSync(join(s.root, 'a'), 'draft while sync waited');
+    await assert.rejects(applyHostedSync(s.root, request, s.transport), { code: 'WORK_STALE' });
+    assert(existsSync(blocked));
+    const cold = persisted === 'compact cold';
+    if (cold) rmSync(join(cache, 'objects', before.selection.head));
+    const pages = [],
+      objects = s.transport.objects;
+    s.transport.objects = async ids => {
+      pages.push(ids);
+      return objects(ids);
+    };
+    const recovered = await recoverLocalApply(s.root, request.operationId, s.transport);
+    assert.equal(recovered.status, 'applied');
+    assert.deepEqual(readHostedLaneCheckout(s.root).materialized, before.materialized);
+    assert.equal(readFileSync(join(recovered.preservedAt, 'a'), 'utf8'), 'draft while sync waited');
+    assert.deepEqual(
+      pages.filter(ids => ids.includes(request.lane.head) || ids.includes(before.selection.head)),
+      [cold ? [before.selection.head, request.lane.head] : [request.lane.head]],
+      'a cold baseline shares the target page, and a warm baseline makes no extra object read',
+    );
+    assert.equal(recovered.fetchedBaselineState, cold ? before.selection.head : undefined);
+    for (const path of [blocked, pin, legacy]) assert(!existsSync(path), path);
+    const replay = await recoverLocalApply(s.root, request.operationId, s.transport);
+    assert.equal(replay.preservedAt, recovered.preservedAt);
+    assert.equal(replay.applied.head, request.lane.head);
+  });
+
+test('F8: an interruption cleaning a completed baseline can be replayed without a new recovery round', async t => {
+  const s = await fixture(t),
+    request = s.command();
+  retainApplyBaseline(s.root, request.operationId);
+  writeFileSync(join(s.root, 'a'), 'only draft');
+  await assert.rejects(applyHostedSync(s.root, request, s.transport), { code: 'WORK_CONFLICT' });
+  const cache = clientCacheRoot(s.root),
+    pin = join(cache, `apply-pin-${request.operationId}.json`),
+    blocked = join(cache, `apply-blocked-${request.operationId}.json`);
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const rm = fs.rmSync;
+  t.mock.method(fs, 'rmSync', (path, ...args) => {
+    if (path === pin) throw Object.assign(new Error('synthetic interrupted cleanup'), { code: 'EIO' });
+    return rm(path, ...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(recoverLocalApply(s.root, request.operationId, s.transport), {
+      code: 'LOCAL_APPLY_INTERRUPTED',
+    });
+    assert(existsSync(blocked), 'the original blocked record still triggers its cleanup');
+  } finally {
+    fs.rmSync.mock.restore();
+    syncBuiltinESMExports();
+  }
+  const replay = await recoverLocalApply(s.root, request.operationId, s.transport);
+  assert.equal(readFileSync(join(replay.preservedAt, 'a'), 'utf8'), 'only draft');
+  assert.equal(replay.additionalPreservedAt, undefined);
+  for (const path of [blocked, pin]) assert(!existsSync(path), path);
+  const movedRoot = join(s.root, '..', 'moved');
+  fs.renameSync(s.root, movedRoot);
+  symlinkSync(movedRoot, s.root, process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(recoverLocalApply(s.root, request.operationId, s.transport), error => {
+    assert.equal(error.recovery?.blockers?.[0]?.kind, 'root-link');
+    assert.equal(readFileSync(join(movedRoot, 'a'), 'utf8'), 'after\n');
+    return true;
+  });
 });
 
 test('a directory standing where a saved file belongs is kept file by file and the baseline returns', async t => {

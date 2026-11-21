@@ -1,21 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 import { canonicalRoot, clientCacheRoot } from './root-paths.js';
 import { keptApplyRoot, keptEntrySchema } from './hosted-apply-kept.js';
-import { constants, copyFileSync, lstatSync, readFileSync, rmSync } from 'node:fs';
+import { lstatSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ForgeError, invariant } from './errors.js';
-import { durableReplace } from './state/durability.js';
+import { durableReplace, syncDirectory } from './state/durability.js';
 import { workLocked } from './work-lock.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
-import {
-  readHostedLaneCheckout,
-  hostedLaneCheckoutMarkerSchema,
-  hostedLaneMarkerName,
-} from './hosted-lane-checkout-marker.js';
+import { readHostedLaneCheckout, hostedLaneCheckoutMarkerSchema } from './hosted-lane-checkout-marker.js';
 import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
 import { applySchema } from './hosted-sync-contract.js';
+import { digest } from './hash.js';
+import { parseNativeState } from './state/format.js';
+import { HostedCheckoutCache, type CheckoutObjectTransport } from './hosted-checkout-cache.js';
 const handoffSchema = z
   .object({
     operationId: z.uuid(),
@@ -42,7 +41,7 @@ export const receiptSchema = z
   })
   .strict();
 export function validBaseline(
-  marker: z.infer<typeof hostedLaneCheckoutMarkerSchema>,
+  marker: Pick<z.infer<typeof hostedLaneCheckoutMarkerSchema>, 'operationId' | 'selection' | 'url'>,
   request: z.infer<typeof applySchema>,
 ) {
   const pins = marker.operationId === request.operationId ? request.lane : request.from;
@@ -61,7 +60,10 @@ export function recoveryDirectory(root: string, id: string) {
   return join(keptApplyRoot(root), z.uuid().parse(id));
 }
 export const blockedName = (id: string) => `apply-blocked-${z.uuid().parse(id)}.json`;
+export const completedApplyName = (id: string) => `apply-completed-${z.uuid().parse(id)}.json`;
 export const pathFor = (root: string, id: string) => join(clientCacheRoot(root), blockedName(id));
+export const completedApplyPath = (root: string, id: string) =>
+  join(clientCacheRoot(root), completedApplyName(id));
 export const read = (path: string): unknown => {
   const stat = lstatSync(path);
   invariant(stat.isFile() && stat.nlink === 1, 'UNSAFE_PATH', 'Recovery receipt must be a private file.');
@@ -78,22 +80,93 @@ export const savedSchema = z
  * If the live marker is lost before the local apply, recovery still has its exact baseline. */
 const baselinePathFor = (root: string, id: string) =>
   join(clientCacheRoot(root), `apply-baseline-${z.uuid().parse(id)}.json`);
-/** Under the caller's work lock. A clone where the filesystem has one (APFS, Btrfs), else one
- * copy of the marker the apply rewrites anyway. Replays keep the first copy. */
+// The immutable State already lives in source storage. Scope roots are explicit inputs needed
+// for later opens; a sparse checkout needs only one bit per State path to restore its selection.
+const pinSchema = hostedLaneCheckoutMarkerSchema.omit({ state: true, materialized: true }).extend({
+  present: z.string().nullable(),
+});
+const applyPinPath = (root: string, id: string) =>
+  join(clientCacheRoot(root), `apply-pin-${z.uuid().parse(id)}.json`);
+/** Under the caller's work lock. Keep the first baseline, including older full-copy journals. */
 export function retainApplyBaseline(root: string, id: string) {
-  const path = baselinePathFor(root, id),
-    marker = join(canonicalRoot(root), '.forge', hostedLaneMarkerName);
-  if (checkoutPathExists(path) || !checkoutPathExists(marker) || !markerAt(root)) return;
-  copyFileSync(marker, path, constants.COPYFILE_FICLONE);
+  const path = applyPinPath(root, id);
+  if (checkoutPathExists(baselinePathFor(root, id)) || checkoutPathExists(path)) return;
+  const marker = markerAt(root);
+  if (!marker) return;
+  const { state, materialized, ...metadata } = marker;
+  let present: string | null = null;
+  if (materialized.length < state.files.length) {
+    const selected = new Set(materialized);
+    const bits = Buffer.alloc(Math.ceil(state.files.length / 8));
+    state.files.forEach((file, index) => {
+      if (selected.has(file.path)) {
+        const byte = index >> 3;
+        bits.writeUInt8(bits.readUInt8(byte) | (1 << (index & 7)), byte);
+      }
+    });
+    present = bits.toString('base64');
+  }
+  durableReplace(path, JSON.stringify({ ...metadata, present }));
+}
+/** Used only after current Lane authority has been checked and the live baseline is missing. */
+export async function restoreBaselinePin(
+  root: string,
+  request: z.infer<typeof applySchema>,
+  transport: CheckoutObjectTransport,
+) {
+  const path = applyPinPath(root, request.operationId);
+  if (!checkoutPathExists(path)) return undefined;
+  const { present, ...metadata } = pinSchema.parse(read(path));
+  if (!validBaseline(metadata, request)) return undefined;
+  const head = metadata.selection.head;
+  const cache = new HostedCheckoutCache(clientCacheRoot(root), transport);
+  const fetched = await cache.ensure(
+    metadata.operationId === request.operationId ? [head] : [head, request.lane.head],
+  );
+  const bytes = readFileSync(join(cache.objects, head));
+  invariant(digest(bytes) === head, 'INVALID_NATIVE_SOURCE', 'Recovery State bytes changed.');
+  const state = parseNativeState(bytes);
+  const bits = present === null ? null : Buffer.from(present, 'base64');
+  invariant(
+    !bits || bits.length === Math.ceil(state.files.length / 8),
+    'INVALID_NATIVE_SOURCE',
+    'Recovery State paths differ from the retained checkout.',
+  );
+  const materialized = state.files
+    .filter((_, index) => !bits || (bits.readUInt8(index >> 3) & (1 << (index & 7))) !== 0)
+    .map(file => file.path);
+  return {
+    marker: hostedLaneCheckoutMarkerSchema.parse({ ...metadata, state, materialized }),
+    cache,
+    fetched: fetched.includes(head) ? head : undefined,
+  };
 }
 export function clearApplyBaseline(root: string, id: string) {
   rmSync(baselinePathFor(root, id), { force: true });
+  rmSync(applyPinPath(root, id), { force: true });
+}
+/** Keep the original replay identity and handoff, without the now-unused State and paths. */
+export function completeLocalApply(root: string, id: string) {
+  const path = pathFor(root, id);
+  if (!checkoutPathExists(path)) return;
+  const cache = clientCacheRoot(root);
+  workLocked(join(cache, 'lock'), () => {
+    if (!checkoutPathExists(path)) return;
+    const completed = completedApplyPath(root, id);
+    if (!checkoutPathExists(completed)) {
+      const { request, handoff } = savedSchema.parse(read(path));
+      durableReplace(completed, JSON.stringify({ request, handoff }));
+    }
+    // The blocked record is the cleanup trigger, including after power loss.
+    clearApplyBaseline(root, id);
+    syncDirectory(cache);
+    rmSync(path, { force: true });
+    syncDirectory(cache);
+  });
 }
 function retainedApplyBaseline(root: string, request: z.infer<typeof applySchema>) {
   try {
-    const marker = hostedLaneCheckoutMarkerSchema.parse(
-      JSON.parse(readFileSync(baselinePathFor(root, request.operationId), 'utf8')),
-    );
+    const marker = hostedLaneCheckoutMarkerSchema.parse(read(baselinePathFor(root, request.operationId)));
     return validBaseline(marker, request) ? marker : undefined;
   } catch {
     return undefined;
@@ -172,6 +245,7 @@ export function localApplyBlocked(root: string, input: unknown, error: ForgeErro
     command: hostedRecoveryCommand(root, next.action, { applyOperationId: request.operationId }),
   };
   workLocked(join(cache, 'lock'), () => {
+    if (checkoutPathExists(completedApplyPath(root, request.operationId))) return;
     // The copy taken at handoff stands in only for a marker that is gone or unreadable. A live
     // marker that is newer (an `open` while the sync waited) is never rolled back to it.
     const marker = markerAt(root),
