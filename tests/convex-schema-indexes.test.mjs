@@ -102,6 +102,19 @@ test('unresolved dynamic query expressions fail instead of claiming an index is 
   );
   assert.match(indexIssues(i).join('\n'), /input.index/);
 });
+test('bounded pagination counts the indexes used by the Convex getPage helper', t => {
+  const inventory = sourceFixture(
+    t,
+    `const tables = { one: defineTable({a: v.string(), b: v.string()})
+      .index('by_a', ['a']).index('by_b', ['b']) };`,
+    `import { getPage as readPage } from 'convex-helpers/server/pagination';
+      const indexes = { a: 'by_a', b: 'by_b' } as const;
+      function feed(ctx, scope: keyof typeof indexes) {
+        return readPage(ctx, { table: 'one', index: indexes[scope] });
+      }`,
+  );
+  assert.deepEqual(indexIssues(inventory), []);
+});
 test('same-table prefixes require a definition-local reason even when both have callers', t => {
   const schema = reason => `const tables = { one: defineTable({a: v.string(), b: v.string()})
     ${reason ? '// index-order: caller: convex/queries.ts#list; order: list exposes creation-time pagination cursors.' : ''}

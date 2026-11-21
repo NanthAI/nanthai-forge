@@ -123,44 +123,27 @@ test('board (server): two agent sessions of one account read as different handle
   assert(f.invoke.reads <= postReads + 1, `post reads ${f.invoke.reads} vs ${postReads}`);
 });
 
-test('board post (CLI): the slug goes only to a server that takes it; a rolled-back server gets one plain retry', async t => {
+test('resolving a retained board note attributes the current agent only on servers that accept it', async t => {
   const { boardHostedSource } = await import('../dist/hosted-board.js');
   const root = join(mkdtempSync(join(tmpdir(), 'forge-slug-board-')), 'client');
   t.after(() => rmSync(dirname(root), { recursive: true, force: true }));
   const calls = [];
-  let reject = false;
-  const transport = features => ({
+  const transport = {
     root,
-    address: { url: 'https://fixture.invalid', projectId: 'project' },
-    advertisedFeatures: features,
+    advertisedFeatures: ['agent-board', 'board-resolve'],
     agentSlug: () => 'quiet-otter',
-    query: async () => ({}),
     mutation: async (name, args) => {
-      calls.push(args);
-      if (reject && 'agent' in args)
-        throw new Error(
-          'ArgumentValidationError: Object contains extra field `agent` that is not in the validator.',
-        );
-      return { status: 'posted' };
+      calls.push({ name, ...args });
+      return { status: 'resolved' };
     },
-  });
-  await boardHostedSource(transport(['agent-board']), 'board-post', { to: 'project', text: 'a' });
-  await boardHostedSource(transport(['agent-board', 'agent-slug']), 'board-post', {
-    to: 'project',
-    text: 'b',
-  });
-  reject = true;
-  await boardHostedSource(transport(['agent-slug']), 'board-post', { to: 'project', text: 'c' });
-  assert.deepEqual(
-    calls.map(args => [args.text, args.agent]),
-    [
-      ['a', undefined],
-      ['b', 'quiet-otter'],
-      ['c', 'quiet-otter'],
-      ['c', undefined],
-    ],
-  );
-  assert.equal(calls[2].operationId, calls[3].operationId, 'the retry is the same note');
+  };
+  await boardHostedSource(transport, 'board-resolve', { id: 'abcdef12' });
+  transport.advertisedFeatures.push('agent-slug');
+  await boardHostedSource(transport, 'board-resolve', { id: 'abcdef12' });
+  assert.deepEqual(calls, [
+    { name: 'projectBoard:resolve', id: 'abcdef12' },
+    { name: 'projectBoard:resolve', id: 'abcdef12', agent: 'quiet-otter' },
+  ]);
 });
 
 test('public identity (actions): ACCOUNT/slug maps to handle/slug through the one batched lookup', async () => {
@@ -445,7 +428,7 @@ test('CLI start: sends the session slug only to a server that takes it; the rece
   );
 });
 
-test('end to end: two agent sessions on one root post to each other through the CLI and see different slugs', async t => {
+test('the hosted board CLI shows distinct slugs on historical notes from two sessions', async t => {
   const f = boardFixture();
   f.lanes.D = randomUUID();
   f.lane('D', 'owner', true);
@@ -511,10 +494,22 @@ test('end to end: two agent sessions on one root post to each other through the 
     two = '0b7d2a51-0000-4000-8000-00000000000b';
   assert.notEqual(agentSlug(one), agentSlug(two));
   const post = (session, from, to, text) =>
-    as(session, ['board-post', JSON.stringify({ ...address, to: `lane:${to}`, laneId: from, text })]);
-  assert.equal((await post(one, f.lanes.B, f.lanes.D, 'From session one')).result.status, 'posted');
-  assert.equal((await post(two, f.lanes.D, f.lanes.B, 'From session two')).result.status, 'posted');
-  assert.equal((await post(undefined, f.lanes.D, f.lanes.B, 'From the owner')).result.status, 'posted');
+    f.invoke(
+      board.post,
+      'projectBoard:post',
+      {
+        projectId: 'project',
+        operationId: randomUUID(),
+        to: `lane:${to}`,
+        laneId: from,
+        text,
+        ...(session ? { agent: agentSlug(session) } : {}),
+      },
+      'owner',
+    );
+  assert.equal((await post(one, f.lanes.B, f.lanes.D, 'From session one')).status, 'posted');
+  assert.equal((await post(two, f.lanes.D, f.lanes.B, 'From session two')).status, 'posted');
+  assert.equal((await post(undefined, f.lanes.D, f.lanes.B, 'From the owner')).status, 'posted');
   const readAs = (session, laneId) =>
     as(session, ['board', JSON.stringify({ ...address, laneId, all: true })]);
   const seenByTwo = (await readAs(two, f.lanes.D)).result.notices;
@@ -533,11 +528,5 @@ test('end to end: two agent sessions on one root post to each other through the 
     'a person reads as plain @handle',
   );
   // Budget: one call per board command, no capability read added.
-  assert.deepEqual(traffic, [
-    'projectBoard:post',
-    'projectBoard:post',
-    'projectBoard:post',
-    'projectBoard:read',
-    'projectBoard:read',
-  ]);
+  assert.deepEqual(traffic, ['projectBoard:read', 'projectBoard:read']);
 });

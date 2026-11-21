@@ -11,7 +11,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { invariant } from '../src/errors';
 import { storageWritesAvailable } from './legacyStoragePause';
-import { legacyBlob, legacyMetadata, nativeLegacyUrl } from './legacyStorageRead';
+import { legacyBlob, legacyMetadata, legacyUrl } from './legacyStorageRead';
 
 /** Opaque legacy storage ID or r2blob:<artifactBlobs ID>. Owning callers always
  * authorize before resolving a reference; storage metadata never grants access. */
@@ -104,8 +104,7 @@ export function blobStore(ctx: Context): BlobStore {
       }
     },
     getUrl: async id => {
-      // Legacy URL fall-through awaits placement review (Issue 779d17be).
-      if (!artifactBlobId(id)) return nativeLegacyUrl(ctx, id);
+      if (!artifactBlobId(id)) return legacyUrl(ctx, id);
       const value = await row(id);
       return value ? presignGet(r2Config(), value.r2Key) : null;
     },

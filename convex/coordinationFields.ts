@@ -50,6 +50,9 @@ export const command = v.union(
     recipient: v.optional(v.string()),
     text: v.string(),
     choices: v.optional(v.array(v.string())),
+    question: v.optional(
+      v.object({ planningItemId: v.optional(v.string()), holdsWork: v.optional(v.boolean()) }),
+    ),
     context,
   }),
   v.object({
@@ -82,6 +85,7 @@ export const command = v.union(
     head: v.string(),
     intentId: v.optional(v.string()),
     laneId: v.optional(v.string()),
+    handBack: v.optional(v.object({ left: v.string() })),
   }),
 );
 /** Server-emitted related-change observation; never accepted from clients. */
@@ -128,6 +132,9 @@ export const eventFields = {
   recipientSession: v.optional(v.string()),
   intentId: v.optional(v.string()),
   laneId: v.optional(v.string()),
+  planningItemId: v.optional(v.string()),
+  resumePrompt: v.optional(v.string()),
+  conversation: v.optional(v.literal(true)),
 };
 /** First acknowledgement of a message or handoff by one participant. */
 export const receiptFields = {
@@ -182,7 +189,8 @@ export const coordinationTables = {
     .index('by_project_and_recipientActor', ['projectId', 'recipientActor'])
     .index('by_project_and_kind_and_recipientActor', ['projectId', 'kind', 'recipientActor'])
     .index('by_project_and_intentId', ['projectId', 'intentId'])
-    .index('by_project_and_laneId', ['projectId', 'laneId']),
+    .index('by_project_and_laneId', ['projectId', 'laneId'])
+    .index('by_project_and_planningItemId', ['projectId', 'planningItemId']),
   projectCoordinationReceipts: defineTable(receiptFields).index('by_project_and_message_and_actor', [
     'projectId',
     'messageId',

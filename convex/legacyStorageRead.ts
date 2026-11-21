@@ -120,6 +120,17 @@ export async function legacyBlob(
   return copy ? copyBlob(storageId, copy, clock) : null;
 }
 
+/** Callers authorize the legacy id and receivers verify bytes against their pin. */
+export async function legacyUrl(ctx: Reader & TombstoneReader, storageId: string) {
+  const url = await nativeLegacyUrl(ctx, storageId);
+  if (url !== null) return url;
+  const copy = await findCopy(ctx, storageId);
+  if (!copy) return null;
+  const signed = await presignGet(r2Config(), copy.copyKey);
+  observed(storageId, copy);
+  return signed;
+}
+
 /** Transactional callers can use the immutable pin; byte reads verify the copy again. */
 export async function legacyMetadata(ctx: Reader & TombstoneReader, storageId: string) {
   const file = await nativeLegacyMetadata(ctx, storageId);

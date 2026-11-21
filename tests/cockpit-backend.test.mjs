@@ -221,7 +221,11 @@ test('choice answers imply ack, reconcile retries, enforce recipient and reach s
   );
   const send = input => dispatchCoordination(transport, 'project', input);
   const choices = ['Yes, rename it', 'Keep lastSeen'];
-  const message = await send({ action: 'message', to: 'recipient', text: 'Rename?', choices });
+  const message = await coordination.publish._handler(s.ctx, {
+    projectId: 'project',
+    operationId: randomUUID(),
+    command: { kind: 'message', recipient: 'recipient', text: 'Rename?', choices, context: {} },
+  });
   s.caller('recipient');
   const inbox = await send({ action: 'inbox' });
   assert.deepEqual(inbox.items[0].choices, choices);

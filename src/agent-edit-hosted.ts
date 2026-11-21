@@ -101,7 +101,7 @@ const isTouching = (value: unknown): value is { author?: string; fromLaneId: str
 export const touchingLine = (path: string, row: { author?: string; fromLaneId: string; at: number }) => {
   const lane = row.fromLaneId.slice(0, 8);
   const minutes = Math.max(0, Math.round((Date.now() - row.at) / 60_000));
-  return `Claim on ${path.slice(0, 80)}: ${actorLabel(row.author)} (Lane ${lane}) is editing it, unsaved, first write ${minutes}m ago. Coordinate: board --post {"to":"lane:${lane}","text":"…"}`.slice(
+  return `Claim on ${path.slice(0, 80)}: ${actorLabel(row.author)} (Lane ${lane}) is editing it, unsaved, first write ${minutes}m ago.`.slice(
     0,
     240,
   );

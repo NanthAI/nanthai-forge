@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { randomUUID } from 'node:crypto';
 import { ConvexError } from 'convex/values';
 import { z } from 'zod';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
-import { assertBoardPaths, assertBoardText } from './board-text.js';
+import { assertBoardText } from './board-text.js';
 import { memberDataNotice } from './member-data-notice.js';
 import {
   boardNoticeLine,
@@ -52,25 +51,10 @@ export const hostedBoardReadSchema = z
     all: z.boolean().optional(),
   })
   .strict();
-const writeFields = {
-  text: z.string().min(1),
-  laneId: z.uuid().optional(),
-  operationId: z.uuid().optional(),
-};
-export const hostedBoardPostSchema = z
-  .object({
-    ...writeFields,
-    to: z.string().min(1),
-    paths: z.array(z.string()).max(10).optional(),
-  })
-  .strict();
-export const hostedBoardReplySchema = z.object({ ...writeFields, id: ref }).strict();
 /** Withdraw a note that no longer applies; the reason is one short line (same 240-character rule). */
 export const hostedBoardResolveSchema = z.object({ id: ref, text: z.string().min(1).optional() }).strict();
 export const hostedBoardSchemas = {
   board: hostedBoardReadSchema,
-  'board-post': hostedBoardPostSchema,
-  'board-reply': hostedBoardReplySchema,
   'board-resolve': hostedBoardResolveSchema,
 } as const;
 
@@ -93,9 +77,7 @@ function unsupported(error: unknown, resolving = false): never {
   throw error;
 }
 
-/** board, board --post, board --reply, board --resolve. One Convex call each; no capability probe (the server
- * authorizes every call). Posts without an operationId get a new one; a retried identical note
- * to the same target within 24 h returns the original id (server dedupe). */
+/** Read or resolve retained board notes. One authorized Convex call each. */
 export async function boardHostedSource(
   transport: Pick<HostedAgentTransport, 'root' | 'query' | 'mutation'> &
     Partial<Pick<HostedAgentTransport, 'address' | 'advertisedFeatures' | 'agentSlug'>>,
@@ -151,37 +133,14 @@ export async function boardHostedSource(
       ...(notices.length || conflictNotice ? { notice: memberDataNotice } : {}),
     };
   }
-  // The note names this agent session (c29d0780) once the server takes it.
   const agent = features.includes('agent-slug') ? transport.agentSlug?.() : undefined;
-  if (action === 'board-resolve') {
-    const reason = command.text as string | undefined;
-    if (reason !== undefined) assertBoardText(reason);
-    return transport
-      .mutation('projectBoard:resolve', {
-        id: (command.id as string).toLowerCase(),
-        ...(reason ? { text: reason } : {}),
-        ...(agent ? { agent } : {}),
-      })
-      .catch((error: unknown) => unsupported(error, true));
-  }
-  const text = command.text as string;
-  // Same checks as the server, so a refusal costs no call; the server re-checks every post.
-  assertBoardText(text);
-  assertBoardPaths(command.paths as string[] | undefined);
-  const post = {
-    operationId: (command.operationId as string | undefined) ?? randomUUID(),
-    text,
-    ...(action === 'board-reply' ? { replyTo: (command.id as string).toLowerCase() } : { to: command.to }),
-    ...(command.paths ? { paths: command.paths } : {}),
-    ...(laneId ? { laneId } : {}),
-  };
+  const reason = command.text as string | undefined;
+  if (reason !== undefined) assertBoardText(reason);
   return transport
-    .mutation('projectBoard:post', agent ? { ...post, agent } : post)
-    .catch((error: unknown) => {
-      // A server rolled back past agent-slug: post once more without the slug (people see @handle).
-      if (agent && error instanceof Error && /extra field\s+[`'"]?agent\b/i.test(error.message))
-        return transport.mutation('projectBoard:post', post);
-      throw error;
+    .mutation('projectBoard:resolve', {
+      id: (command.id as string).toLowerCase(),
+      ...(reason ? { text: reason } : {}),
+      ...(agent ? { agent } : {}),
     })
-    .catch(unsupported);
+    .catch((error: unknown) => unsupported(error, true));
 }

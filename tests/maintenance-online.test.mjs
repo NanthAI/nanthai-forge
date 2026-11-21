@@ -8,6 +8,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
 import { fakeSourceR2 } from './convex-source-r2-fixture.mjs';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
+import { replayUrlSwitch } from './maintenance-online-url.mjs';
 
 const { legacyBlob, legacyMetadata, tombstone } = await import(moduleUrl('../convex/legacyStorageRead.ts'));
 const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
@@ -193,6 +194,49 @@ test('a missing or changed retained copy never yields bytes, and a healthy nativ
   }
 });
 
+test('legacy URL reads use the native hit or resolve one exact tombstone in queries, mutations and actions', async t => {
+  const { requests } = fakeSourceR2(t);
+  const logs = t.mock.method(console, 'info', () => {});
+  const { f, file, ctx } = await fileFixture();
+  const reads = t.mock.method(f.ctx.db, 'query');
+  const calls = t.mock.method(ctx, 'runQuery');
+  const transactionCtx = { db: f.ctx.db, storage: f.ctx.storage };
+  const readers = [
+    id => blobStore(transactionCtx).getUrl(id),
+    id => f.transaction(() => blobStore(transactionCtx).getUrl(id)),
+    id => blobStore(ctx).getUrl(id),
+  ];
+  const native = await f.ctx.storage.getUrl(file.storageId);
+  for (const read of readers) assert.equal(await read(file.storageId), native);
+  assert.equal(reads.mock.callCount(), 0);
+  assert.equal(calls.mock.callCount(), 0);
+  for (const read of readers) assert.equal(await read('unknown-file'), null);
+  assert.equal(reads.mock.callCount(), 3);
+  assert.equal(calls.mock.callCount(), 1);
+  assert.equal(logs.mock.callCount(), 0);
+
+  await f.transaction(() => switchFile(f.ctx, file, payload));
+  reads.mock.resetCalls();
+  calls.mock.resetCalls();
+  for (const read of readers) {
+    const url = new URL(await read(file.storageId));
+    assert.equal(url.origin, 'https://synthetic.r2.cloudflarestorage.com');
+    assert.equal(url.pathname, '/synthetic/' + file.copyKey);
+    assert.equal(url.searchParams.get('X-Amz-Expires'), '300');
+    assert.match(url.searchParams.get('X-Amz-Signature'), /^[a-f0-9]{64}$/);
+  }
+  assert.equal(reads.mock.callCount(), 3);
+  assert.equal(calls.mock.callCount(), 1);
+  assert.deepEqual(requests, [], 'issuing a URL never fetches bytes');
+  assert.deepEqual(
+    logs.mock.calls.map(call => call.arguments),
+    Array(3).fill([
+      'legacy_storage_read_through',
+      { storageId: file.storageId, operationId: file.operationId },
+    ]),
+  );
+});
+
 test('incident 779d17be: the 22-minute maintenance replay preserves every landing and its order', async t => {
   const before = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
   Object.assign(process.env, synthetic);
@@ -314,4 +358,7 @@ test('incident 779d17be: the 22-minute maintenance replay preserves every landin
     });
   assert.deepEqual(outcomes[0]?.landed, [1, 2, 3]);
   assert.deepEqual(outcomes[1], outcomes[0]);
+  await t.test('an Actions URL reader reissues its grant after retirement and verifies the copy', t =>
+    replayUrlSwitch(t, { payload, pin, switchFile }),
+  );
 });

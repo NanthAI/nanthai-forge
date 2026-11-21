@@ -8870,7 +8870,7 @@
     },
     {
       "incident": "779d17be",
-      "what": "The November 5 legacy maintenance required a 22-minute write outage. An online copy-and-switch fixture keeps ordinary landings moving in their original order.",
+      "what": "The November 5 legacy maintenance required a 22-minute write outage. An online copy-and-switch fixture keeps ordinary landings in order and lets a URL reader reissue its grant and verify the retired copy.",
       "file": "tests/maintenance-online.test.mjs",
       "test": "incident 779d17be: the 22-minute maintenance replay preserves every landing and its order"
     },

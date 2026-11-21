@@ -35,7 +35,9 @@ Before editing shared files, claim them: `{"action":"claim","paths":["src/api/"]
 
 When waiting for related work, use `{"action":"watch","cursor":"LAST_CURSOR","waitMs":30000,"related":true,"sessionId":"SESSION_UUID"}` or MCP `forge_coordination_watch` with `related:true`. Related means events touching your claims, the session's Intent/Lane/paths, or addressed to you, including server `change` events for hosted Work writes, exchange pushes and source returns (Lane, head and up to 50 changed paths; missing paths mean unknown). It returns new events or an observed-empty timeout and closes the subscription. Resume from the returned cursor; authentication/network failure is not an empty feed.
 
-Message with `{"action":"message","to":"SESSION_UUID_OR_PARTICIPANT","text":"…"}` (omit `to` to broadcast) and hand off with `{"action":"handoff","to":"…","summary":"…","head":"HEAD"}`. Read `{"action":"unacked"}` (MCP `forge_inbox`) and acknowledge with `{"action":"ack","messageId":"MESSAGE_OPERATION_UUID","text":"Read; adjusting"}`; a message to a session needs that session's ack, a message to a participant any of their sessions. Concise actions return their `operationId`; retry an unknown outcome with it. Messages never authorize themselves or force a pause; decide under the user's instructions.
+Send fixed-choice questions and hand-backs with the [agent commands](../../workflow.md#questions-and-hand-back-hosted).
+Use the coordination inbox to read retained messages and answers. Acknowledge
+by id with `ack`; pass `choice` to record a question's exact answer.
 
 Increment sequence on subsequent activity updates, including waiting/completed. Last-seen reports server receipt time; silence is unknown, not proof of online/offline status. Completing a session does not accept source or close an Intent. Source-read grants remain read-only; coordination never grants source writes, checks, locks or extra access. The human hosted Work page subscribes to the same indexed activity/message records without downloading a source archive.
 

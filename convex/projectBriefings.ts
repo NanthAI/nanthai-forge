@@ -23,14 +23,16 @@ export const brief = query({
       const project = await accessibleProject(ctx, input.projectId, user.subject);
       // A briefing is member context: it renders Lane names, its Intent's Item, and the project's recent messages and
       // handoffs. A viewer without a role reads the public Plan and Lanes views instead (Item 76be0714).
-      invariant(
-        await readProjectRole(ctx, project, user.subject),
-        'PROJECT_UNAVAILABLE',
-        'Agent briefings are for project members.',
-      );
+      const role = await readProjectRole(ctx, project, user.subject);
+      invariant(role, 'PROJECT_UNAVAILABLE', 'Agent briefings are for project members.');
       const parsed = briefInputSchema.safeParse(input);
       invariant(parsed.success, 'BAD_ARGUMENT', 'Choose a briefing situation, records and agent variant.');
-      const { records, generation, coverage } = await hostedBriefRecords(ctx, project, parsed.data);
+      const { records, generation, coverage } = await hostedBriefRecords(
+        ctx,
+        project,
+        parsed.data,
+        role !== 'read',
+      );
       const selected = selectBrief(parsed.data, records);
       const states = new Map<string, BriefState>(),
         missing = new Set<string>();

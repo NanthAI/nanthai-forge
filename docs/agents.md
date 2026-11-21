@@ -102,9 +102,8 @@ For CLI actions and their parameters, run `nforge coordination --help`.
 | --- | --- |
 | `forge_announce` | Status and summary, optional Intent, Lane, paths, `kind`, harness/version and parent session. Creates this process's session and touches its last-seen every 30 s until `completed`. |
 | `forge_claim` / `forge_release` | Advisory claim on paths with a TTL (default 60 min). A path covers that file or directory. The reply lists overlapping active claims by others. |
-| `forge_message` / `forge_handoff` | Message a session or participant (or broadcast); hand off the next step pinned to an exact head. |
-| `forge_inbox` / `forge_ack` | Your unacknowledged messages and handoffs, including broadcasts. Ack by message id. |
-| `forge_coordination_read` | `feed` (optionally one Intent or Lane), `sessions` (paged roots, immediate children or all flat sessions; `lastSeen`, `stale`), `counts`, `recent`, `related`, `claims`, `overlaps`. |
+| `forge_inbox` / `forge_ack` | Read your messages and hand-backs. Acknowledge by id or answer with an exact choice. |
+| `forge_coordination_read` | `feed` (optionally one Intent, Lane or Item), `sessions` (paged roots, immediate children or all flat sessions), `counts`, `recent`, `related`, `claims`, `overlaps`. |
 | `forge_coordination_watch` | Waits up to 60 s for new events; `related:true` only returns events related to you. |
 | `forge_coordinate` | Low-level publish with explicit operation UUID and sequence. |
 
@@ -113,6 +112,8 @@ for unacknowledged messages and handoffs. Use
 `nforge coordination . '{"action":"inbox","cursor":null}'` to read the first
 page of the full inbox, then pass the returned cursor for the next page.
 On MCP, `forge_inbox` with `all:true` pages all entries addressed to you.
+Send questions and hand-backs from the agent CLI or `forge_task`.
+[Questions and hand-back](agents/workflow.md#questions-and-hand-back-hosted)
 
 ### Session identity and counts
 

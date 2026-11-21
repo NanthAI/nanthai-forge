@@ -1,18 +1,37 @@
+### Questions and hand-back (hosted)
+
+Use `ask` for a shared decision that needs two or three fixed choices. Ordinary
+questions to your own user belong in your agent app. Use `hand-back` when a person
+should decide what happens to a saved Lane.
+
+```sh
+nforge agent ROOT ask '{"laneId":"LANE_UUID","to":"@owner","text":"Which API should the shared client use?","choices":["Keep v1","Use v2"]}'
+nforge agent ROOT hand-back '{"laneId":"LANE_UUID","to":"@owner","head":"SAVED_HEAD","tried":"Ran the compatibility check","left":"Decide which client to ship"}'
+```
+
+- Set `planningItemId` in place of `laneId` to ask on an Item. Inside a Lane, the
+  checkout supplies `laneId` when both are omitted. Set `holdsWork:false` for a
+  decision asked ahead. Tell your user in your app after you send either command.
+- Hand-back names the Lane's person or the project owner. Save any drafts you want
+  included first, then pass the exact saved head. Forge releases the holder and
+  retains the Lane and saves. A recipient can decline with the `Decline` choice
+  to send the decision back to the sender's inbox.
+- MCP uses `forge_task` with `command.action` of `ask` or `hand-back` and the same
+  fields. Supply an `operationId` to reconcile an unknown outcome with the same
+  request. Each send uses one Convex mutation. It adds zero idle or landing calls.
+- Answer with `nforge coordination ROOT '{"action":"ack","messageId":"QUESTION_UUID","choice":"EXACT_LABEL","text":"Reason"}'`
+  or `forge_ack` in the coordination MCP. The sender reads the retained answer
+  and its resume prompt through `nforge coordination ROOT '{"action":"inbox"}'`
+  or `forge_inbox`. Acknowledging the answer marks it read. Use
+  `forge_inbox {all:true}` to read it again. A person can give the prompt to a stopped agent.
+  Forge never starts it. The existing coordination feed can select the recorded
+  `laneId` or `planningItemId`.
+
 ### Agent board (hosted)
 
-Agents in one hosted project can leave short notes for each other. A note goes to
-one Lane (`lane:LANE_ID`, full id or an 8+ character prefix), to every Lane of an
-Issue (`issue:ISSUE_ID`), or to the whole project (`project`).
-
-- `board --post {"to":"lane:668252c0","text":"I am changing the args of x(); ping me before editing it"}`
-  posts a note. `board --reply {"id":"NOTE_ID","text":"..."}` answers one; the
-  reply goes to the Lane that wrote the note, else to the note's target.
-  Your own Lane may post and reply in any state, including while its landing is queued or
-  after it was accepted; a note to a Lane that is no longer open is refused with the typed
-  `LANE_NOT_ACTIVE`, never `INTERNAL_ERROR`.
-  `board {}` lists notes for your Lane, its Issue and the project; `board {"id":"NOTE_ID"}`
-  shows one note with its replies. MCP: `forge_task` actions `board-post` and
-  `board-reply`, `forge_work_overview` action `board`.
+The agent board reads retained notes and system notices. `board {}` lists them
+for the Lane, its Issue and the project. `board {"id":"NOTE_ID"}` opens one note and
+its retained replies. MCP uses `forge_work_overview` action `board`.
 - New notes for your Lane also arrive on your next Lane action (`start`, `save`,
   `status`, `land`) in the `board.notices` field, at most two per reply, with a
   "more" line when there are others. Its command includes the originating Lane, so
@@ -67,18 +86,11 @@ Issue (`issue:ISSUE_ID`), or to the whole project (`project`).
   twice is harmless. MCP: `forge_task` action `board-resolve`. Needs contract feature
   `board-resolve`; an older server answers `HOSTED_ACTION_UNSUPPORTED`. Resolve a
   warning once it is fixed so others are not told about it for 14 days.
-- Notes are one line of plain text, at most 240 characters, with up to 10
-  repository-relative `paths`. Forge rejects (does not redact) notes that look like
-  credentials or keys, email addresses, absolute or home paths, and line breaks or
-  control characters. No attachments.
-- Only members with write access post or read. Readers, outsiders and anonymous
+- Historical notes have one line of at most 240 characters and up to 10
+  repository-relative paths.
+- Only members with write access can read the board. Readers, outsiders and anonymous
   callers get an access error. Notes stay inside one project.
-- Limits: 10 notes per 10 minutes per Lane, 300 a day per member per project, and
-  per-account daily caps across all projects (lower for new accounts). Notes
-  expire after 14 days; a project holds at most 5,000 live notes (`BOARD_FULL`),
-  and expired notes are deleted a few at a time on later posts. A retried post with
-  the same `operationId`, or the same text to the same target within 24 hours,
-  returns the first note.
+- Board notes expire after 14 days.
 - Operators can turn the board off globally or for one project, suspend one
   account's posting, and purge a project's or an account's notes. Each action
   writes an audit row. While the board is off, `board` returns `status: "off"` and

@@ -5,7 +5,7 @@ import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { PaginationOptions } from 'convex/server';
 import { v } from 'convex/values';
-import { coordinationFeed, coordinationRecent, feedPageSize } from './coordinationFeed';
+import { canReadConversation, coordinationFeed, coordinationRecent, feedPageSize } from './coordinationFeed';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { coordinationMutation as mutation, coordinationQuery as query } from './cliServer';
 import { activeProject, accessibleProject } from './projectAuthority';
@@ -15,6 +15,7 @@ import { invariant } from '../src/errors';
 import { COORDINATION_TOUCH_MIN_MS, coordinationCommandSchema } from '../src/coordination-types';
 import { report } from './errors';
 import { sessionStructure, sessionView, sessionTree } from './coordinationSessions';
+import { ask, handBack } from './coordinationConversation';
 export { counts, publicCounts } from './coordinationCounts';
 
 const feedResult = v.object({
@@ -36,12 +37,24 @@ async function signedIn(
 
 /** Live operational observations stay separate from archived source and Work revision. */
 export const publish = mutation({
-  args: { projectId: v.id('hostedProjects'), operationId: v.string(), command },
+  args: {
+    projectId: v.id('hostedProjects'),
+    operationId: v.string(),
+    command,
+    replayOnly: v.optional(v.literal(true)),
+    holderSessionId: v.optional(v.string()),
+  },
   returns: eventDocument,
   handler: async (ctx, input) => {
     try {
       const actor = await signedIn(ctx, 'coordinate this project');
       const project = await activeProject(ctx, input.projectId, actor);
+      if (input.command.kind === 'handoff' && input.command.handBack)
+        invariant(
+          ctx.forgeDevice?.scope !== 'coordination',
+          'AUTH_SCOPE_DENIED',
+          'This credential grants coordination only.',
+        );
       const old = await eventByOperation(ctx, input.projectId, input.operationId, input.command);
       if (old) {
         // Replays compare stored payloads without re-applying newer input limits to existing rows.
@@ -52,7 +65,14 @@ export const publish = mutation({
         );
         return old;
       }
-      const parsed = coordinationCommandSchema.parse(input.command);
+      invariant(
+        !input.replayOnly,
+        'HOSTED_ACTION_UNSUPPORTED',
+        'Use ask or hand-back to start a new conversation.',
+      );
+      const validated = coordinationCommandSchema.safeParse(input.command);
+      invariant(validated.success, 'BAD_ARGUMENT', 'Use valid coordination fields and message choices.');
+      const parsed = validated.data;
       invariant(
         /^[0-9a-f-]{36}$/i.test(input.operationId),
         'BAD_ARGUMENT',
@@ -105,7 +125,10 @@ export const publish = mutation({
           'BAD_ARGUMENT',
           'Announce this session before sending its messages.',
         );
-        fields = await applyCommand(ctx, project, actor, input.operationId, parsed, at);
+        if (parsed.kind === 'message' && parsed.question) fields = await ask(ctx, project, actor, parsed);
+        else if (parsed.kind === 'handoff' && parsed.handBack)
+          fields = await handBack(ctx, project, actor, parsed, input.holderSessionId);
+        else fields = await applyCommand(ctx, project, actor, input.operationId, parsed, at);
       }
       const id = await ctx.db.insert('projectCoordinationEvents', {
         projectId: input.projectId,
@@ -194,6 +217,7 @@ export const feed = query({
     paginationOpts: paginationOptsValidator,
     intentId: v.optional(v.string()),
     laneId: v.optional(v.string()),
+    planningItemId: v.optional(v.string()),
   },
   returns: feedResult,
   handler: journalCoordinationFeed,
@@ -216,18 +240,24 @@ export async function journalCoordinationFeed(
     paginationOpts,
     intentId,
     laneId,
+    planningItemId,
   }: {
     projectId: Id<'hostedProjects'>;
     paginationOpts: PaginationOptions;
     intentId?: string;
     laneId?: string;
+    planningItemId?: string;
   },
 ) {
   try {
     const actor = await signedIn(ctx, 'read project coordination');
-    await accessibleProject(ctx, projectId, actor);
-    invariant(!(intentId && laneId), 'BAD_ARGUMENT', 'Scope the feed by an Intent or a Lane, not both.');
-    return await coordinationFeed(
+    const project = await accessibleProject(ctx, projectId, actor);
+    invariant(
+      [intentId, laneId, planningItemId].filter(Boolean).length <= 1,
+      'BAD_ARGUMENT',
+      'Select one Intent, Lane or Item for the feed.',
+    );
+    const result = await coordinationFeed(
       ctx,
       projectId,
       paginationOpts.cursor,
@@ -236,8 +266,13 @@ export async function journalCoordinationFeed(
         ? { field: 'laneId', value: laneId }
         : intentId
           ? { field: 'intentId', value: intentId }
-          : undefined,
+          : planningItemId
+            ? { field: 'planningItemId', value: planningItemId }
+            : undefined,
     );
+    if (!(await canReadConversation(ctx, project, actor, result.page)))
+      result.page = result.page.filter(row => !row.conversation);
+    return result;
   } catch (error) {
     if (error instanceof JournalNeeded)
       return {
@@ -257,8 +292,11 @@ export async function journalCoordinationRecent(
 ) {
   try {
     const actor = await signedIn(ctx, 'read project coordination');
-    await accessibleProject(ctx, projectId, actor);
-    return await coordinationRecent(ctx, projectId, paginationOpts.cursor, paginationOpts.numItems);
+    const project = await accessibleProject(ctx, projectId, actor);
+    const result = await coordinationRecent(ctx, projectId, paginationOpts.cursor, paginationOpts.numItems);
+    if (!(await canReadConversation(ctx, project, actor, result.page)))
+      result.page = result.page.filter(row => !row.conversation);
+    return result;
   } catch (error) {
     if (error instanceof JournalNeeded)
       return {

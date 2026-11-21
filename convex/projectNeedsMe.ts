@@ -206,7 +206,7 @@ export const read = query({
           .withIndex('by_project_and_held', q => q.eq('projectId', projectId).eq('held', true))
           .take(NEEDS_ME_HELD_LIMIT + 1),
         openApprovalRequests(ctx, projectId),
-        messagesTo(ctx, projectId, user.subject, true),
+        messagesTo(ctx, project, user.subject, true),
         ctx.db
           .query('projectHostedParks')
           .withIndex('by_project_and_parked_for', q =>

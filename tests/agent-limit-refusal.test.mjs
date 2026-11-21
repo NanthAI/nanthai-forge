@@ -28,30 +28,38 @@ test('a RATE_LIMITED refusal reaches the agent with its reset time and the exact
   const retryAt = Date.now() + 90_000;
   const inner = s.exchange.client.mutation;
   s.exchange.client.mutation = (ref, args) =>
-    getFunctionName(ref) === 'projectBoard:post'
+    getFunctionName(ref) === 'projectCoordination:publish'
       ? Promise.reject(
           new ConvexError({
             code: 'RATE_LIMITED',
-            message: '10 notes per 10 minutes per Lane. Retry after 90 s.',
+            message: 'Retry after 90 s.',
             retryAt,
           }),
         )
       : inner(ref, args);
-  const command = { to: 'project', text: 'Heads up', laneId: s.lane.laneId };
+  const command = {
+    to: '@owner',
+    text: 'Which name?',
+    choices: ['A', 'B'],
+    laneId: s.lane.laneId,
+    operationId: randomUUID(),
+  };
   const error = await s
     .transport()
-    .dispatch('board-post', command)
+    .dispatch('ask', command)
     .then(
       () => assert.fail('the post is refused'),
       error => error,
     );
-  const argv = ['agent', s.root, 'board-post', JSON.stringify(command)];
+  const argv = ['agent', s.root, 'ask', JSON.stringify(command)];
   const failure = describeFailure(error, cliTeachContext(argv));
   const iso = new Date(retryAt).toISOString();
   assert.equal(failure.code, 'RATE_LIMITED');
-  assert.deepEqual(failure.recovery, { outcome: 'refused', retryable: true, retryAt: iso });
+  assert.equal(failure.recovery.outcome, 'refused');
+  assert.equal(failure.recovery.retryable, true);
+  assert.equal(failure.recovery.retryAt, iso);
   assert.match(failure.message, new RegExp(`Retry the same command after ${iso}`));
-  assert.equal(failure.next, `nforge agent ${s.root} board-post '${JSON.stringify(command)}'`);
+  assert.equal(failure.next, `nforge agent ${s.root} ask '${JSON.stringify(command)}'`);
   assert.equal(failure.learn, `nforge agent ${s.root} help limits`);
 });
 
@@ -63,7 +71,7 @@ test('only a limit with a reset gets retry wording; a storage quota has no time-
   assert.equal(limitRefusal(new ForgeError('WORK_BUSY', 'busy', Date.now() + 1)), null);
 });
 
-test('MCP board replies preserve a low budget and give an exact tool call on a timed refusal', async t => {
+test('MCP ask reports the exact tool call on a timed refusal', async t => {
   const s = agentFixture(t);
   const transport = s.transport();
   const server = new McpServer({ name: 'forge-test', version: '1.0.0' });
@@ -78,35 +86,36 @@ test('MCP board replies preserve a low budget and give an exact tool call on a t
     await server.close();
   });
   const resetAt = '2026-12-01T00:00:00.000Z';
-  const budget = { limit: 'board-lane-notes', left: 1, of: 10, resetAt };
   const request = {
     name: 'forge_task',
     arguments: {
-      command: { action: 'board-post', to: 'project', text: 'One note', operationId: randomUUID() },
+      command: {
+        action: 'ask',
+        to: '@owner',
+        text: 'Which name?',
+        choices: ['A', 'B'],
+        laneId: s.lane.laneId,
+        operationId: randomUUID(),
+      },
     },
   };
   const posts = [];
   t.mock.method(s.exchange.client, 'mutation', async (ref, input) => {
-    assert.equal(getFunctionName(ref), 'projectBoard:post');
+    assert.equal(getFunctionName(ref), 'projectCoordination:publish');
     posts.push(input);
-    if (posts.length === 1) return { id: randomUUID(), budget };
     if (posts.length === 2)
-      throw new ConvexError({ code: 'RATE_LIMITED', message: 'Board limit.', retryAt: Date.parse(resetAt) });
-    return { id: randomUUID() };
+      throw new ConvexError({
+        code: 'RATE_LIMITED',
+        message: 'Request limit.',
+        retryAt: Date.parse(resetAt),
+      });
+    return { operationId: input.operationId, actor: 'owner', at: 1, command: input.command };
   });
   const success = await client.callTool({
     ...request,
     arguments: { command: { ...request.arguments.command, operationId: randomUUID() } },
   });
-  const receipt = JSON.parse(success.content[0].text);
-  const { budget: shown, ...rest } = receipt.result;
   assert.equal(success.isError, undefined);
-  assert.deepEqual(shown, budget);
-  const budgetBytes =
-    Buffer.byteLength(success.content[0].text) -
-    Buffer.byteLength(JSON.stringify({ ...receipt, result: rest }));
-  t.diagnostic(`Board budget delta: ${budgetBytes} bytes`);
-  assert(budgetBytes <= 100);
 
   const refusal = await client.callTool(request);
   assert.equal(refusal.isError, true);

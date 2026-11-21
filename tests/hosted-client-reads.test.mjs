@@ -26,8 +26,8 @@ const minimal = {
   wait: { runId: randomUUID() },
   show: { path: 'a.ts' },
   board: {},
-  'board-post': { to: 'project', text: 'Synthetic note' },
-  'board-reply': { id: 'abcdef12', text: 'Synthetic reply' },
+  ask: { to: '@owner', text: 'Which name?', choices: ['A', 'B'], laneId: randomUUID() },
+  'hand-back': { to: '@owner', head: 'a'.repeat(64), tried: 'Tests', left: 'Review', laneId: randomUUID() },
   'board-resolve': { id: 'abcdef12' },
 };
 

@@ -8,14 +8,26 @@ import type { Doc, Id } from './_generated/dataModel';
 import schema from './schema';
 import { invariant } from '../src/errors';
 import { COORDINATION_LIMITS } from '../src/coordination-types';
+import { hasWriteRole } from './projectRole';
 
 const prefix = 'forge-coordination-v1:';
-export type FeedScope = { field: 'intentId' | 'laneId' | 'recipientActor'; value: string };
+export type FeedScope = { field: 'intentId' | 'laneId' | 'planningItemId' | 'recipientActor'; value: string };
 const indexes = {
   intentId: 'by_project_and_intentId',
   laneId: 'by_project_and_laneId',
+  planningItemId: 'by_project_and_planningItemId',
   recipientActor: 'by_project_and_recipientActor',
 } as const;
+
+/** Conversation replaces the write-member board. Keep general Activity readable under its existing policy. */
+export function canReadConversation(
+  ctx: QueryCtx,
+  project: Doc<'hostedProjects'>,
+  actor: string,
+  rows: readonly Pick<Doc<'projectCoordinationEvents'>, 'conversation'>[],
+) {
+  return !rows.some(row => row.conversation) || hasWriteRole(ctx, project, actor);
+}
 
 export function feedPageSize(numItems: number) {
   invariant(
@@ -77,7 +89,8 @@ export async function feedRows(
     absoluteMaxRows: maxRows,
   });
   const enabled = projectJournalHint(ctx, projectId);
-  if (enabled ?? !!(await ctx.db.get(projectId))?.journalRevision) {
+  // Only messages and their replies have an Item scope. Those records are kept in the live table.
+  if (scope?.field !== 'planningItemId' && (enabled ?? !!(await ctx.db.get(projectId))?.journalRevision)) {
     const archived = await journalCoordinationRows(
       ctx,
       projectId,

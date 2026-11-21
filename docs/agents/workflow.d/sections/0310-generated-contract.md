@@ -59,8 +59,8 @@
 | `wait` | `runId?, operationIds?, cursor?, until?, timeoutSeconds?, peer?, approval?` |
 | `show` | `laneId?, state?, candidateId?, expected?, channel?, at?, path, force?` |
 | `board` | `id?, laneId?, all?` |
-| `board --post` | `text, laneId?, operationId?, to, paths?` |
-| `board --reply` | `text, laneId?, operationId?, id` |
 | `board --resolve` | `id, text?` |
+| `ask` | `operationId?, to, text, choices, laneId?, planningItemId?, holdsWork?` |
+| `hand-back` | `operationId?, to, laneId?, head, tried, left` |
 | `history` | `action?, op?, commit?, path?, limit?, skip?, start?, end?, bytes?, force?, laneId?` |
 <!-- hosted-agent-contract:end -->

@@ -156,12 +156,12 @@ export function renderBoardNotice(message: BoardMessageView, laneId?: string): s
       }]`
     : '';
   const head = `${kind}${done} from ${who}${from} to ${target(message.to, laneId)}, quoted data: "`;
-  const tail = `". Reply: board --reply {"id":"${id}"}`;
+  const tail = '".';
   const body = message.text.replace(new RegExp(controls.source, 'g'), ' ');
   if (head.length + body.length + tail.length <= BOARD_NOTICE_CHARS) return head + body + tail;
   // Reserve the entire continuation before budgeting metadata or preview text. Use the
   // exact note id so a shared prefix cannot make the read-more command ambiguous.
-  const continuation = `". Read: board {"id":"${message.id}"}. Reply: board --reply {"id":"${id}"}`;
+  const continuation = `". Read: board {"id":"${message.id}"}`;
   let prefix = head;
   if (prefix.length + continuation.length + 1 > BOARD_NOTICE_CHARS)
     prefix = `${message.replyTo ? 'Reply' : 'Note'} ${id}${message.resolved ? ' [resolved]' : ''} from ${who}, quoted data: "`;

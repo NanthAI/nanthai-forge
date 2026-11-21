@@ -73,7 +73,7 @@ export async function startCoordinationMcp(deployment: string, projectId: string
     'forge_coordinate',
     {
       description:
-        'Low-level publish of any coordination command (activity, message, ack, claim, release, handoff) with an explicit operation UUID. Prefer the short forge_* tools. Stable UUID retries deduplicate; increasing session sequences prevent delayed observations replacing newer ones.',
+        'Publish activity, ack, claim or release with an explicit operation UUID. Message and handoff are retained-operation replay only. Use forge_task ask or hand-back to send. Stable UUIDs deduplicate retries.',
       inputSchema: { operationId: z.string().uuid(), command: coordinationCommandSchema },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
@@ -83,7 +83,7 @@ export async function startCoordinationMcp(deployment: string, projectId: string
     'forge_coordination_read',
     {
       description:
-        'Read pages: feed (optionally one intentId or laneId), sessions (paged roots by default, immediate children with parentSessionId, or flat pages with all=true; lastSeen and stale), counts (agents, subagents, people, active Lanes and unannounced Lanes), recent, related (events touching your claims/session scope or the given paths), claims (active), overlaps (active claims by others overlapping paths). Keep the returned cursor for reconnects.',
+        'Read pages: feed (optionally one intentId, laneId or planningItemId), sessions, counts, recent, related, claims or overlaps. Keep the returned cursor for reconnects.',
       inputSchema: {
         action: z.enum(['feed', 'sessions', 'recent', 'related', 'claims', 'overlaps', 'counts']),
         parentSessionId: z.string().optional(),
@@ -92,11 +92,12 @@ export async function startCoordinationMcp(deployment: string, projectId: string
         pageSize: z.number().int().positive().max(100).default(50),
         intentId: z.string().max(200).optional(),
         laneId: z.string().max(200).optional(),
+        planningItemId: z.uuid().optional(),
         paths: z.array(z.string().max(500)).max(100).optional(),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    ({ action, cursor, pageSize, intentId, laneId, paths, parentSessionId, all }) =>
+    ({ action, cursor, pageSize, intentId, laneId, planningItemId, paths, parentSessionId, all }) =>
       result(
         action === 'claims' || action === 'counts'
           ? { action }
@@ -113,7 +114,7 @@ export async function startCoordinationMcp(deployment: string, projectId: string
                   ...(paths ? { paths } : {}),
                 }
               : action === 'feed'
-                ? { action, cursor, pageSize, intentId, laneId }
+                ? { action, cursor, pageSize, intentId, laneId, planningItemId }
                 : action === 'sessions'
                   ? { action, cursor, pageSize, parentSessionId, all }
                   : { action, cursor, pageSize },

@@ -51,7 +51,9 @@ function fixture() {
     dispatchCoordination(transport, 'project', { action: 'publish', operationId, command });
   const read = (action, cursor = null, pageSize = 50) =>
     dispatchCoordination(transport, 'project', { action, cursor, pageSize });
-  return { ...f, publish, read };
+  const browser = (command, operationId = randomUUID()) =>
+    coordination.publish._handler(f.ctx, { projectId: 'project', command, operationId });
+  return { ...f, publish, browser, read };
 }
 test('two environments announce, message, acknowledge and reconnect without source archive or Work revision mutation', async () => {
   const f = fixture();
@@ -59,7 +61,7 @@ test('two environments announce, message, acknowledge and reconnect without sour
   await f.publish(activity(sessionB));
   const first = await f.read('feed', null, 2);
   assert.equal(first.page.length, 2);
-  const message = await f.publish({
+  const message = await f.browser({
     kind: 'message',
     sessionId: sessionA,
     recipient: sessionB,
@@ -116,7 +118,7 @@ test('current owner/contributor authority applies on every call, session ownersh
   f.caller('other');
   await f.publish(activity(sessionB));
   await assert.rejects(f.publish(activity(sessionA, 2)), /another principal/);
-  const message = await f.publish({
+  const message = await f.browser({
     kind: 'message',
     sessionId: sessionB,
     recipient: sessionA,
@@ -139,12 +141,12 @@ test('messages remain contextual claims; cross-project recipient and acknowledge
   const f = fixture();
   await f.publish(activity(sessionA));
   await assert.rejects(
-    f.publish({ kind: 'message', recipient: sessionB, text: 'Missing', context: {} }),
+    f.browser({ kind: 'message', recipient: sessionB, text: 'Missing', context: {} }),
     /Select a session/,
   );
   await assert.rejects(
     f.publish({ kind: 'ack', messageId: randomUUID(), text: 'Missing' }),
-    /message or handoff operation/,
+    /in this project/,
   );
   await assert.rejects(f.publish({ ...activity(sessionB), sequence: 0 }), /Use publish/);
 });
@@ -244,10 +246,8 @@ test('real CLI and MCP processes coordinate separate sessions over authenticated
     'forge_coordinate',
     'forge_coordination_read',
     'forge_coordination_watch',
-    'forge_handoff',
     'forge_hosted_work',
     'forge_inbox',
-    'forge_message',
     'forge_release',
   ]);
   const call = async (name, args) => {
@@ -265,8 +265,10 @@ test('real CLI and MCP processes coordinate separate sessions over authenticated
       text: 'Coordinate shared path',
       context: { paths: ['src/shared.ts'] },
     };
-  await cli({ action: 'publish', operationId, command });
-  await cli({ action: 'publish', operationId, command });
+  await assert.rejects(cli({ action: 'publish', operationId, command }), /Use ask or hand-back/);
+  await f.browser(command, operationId);
+  const replayed = await cli({ action: 'publish', operationId, command });
+  assert.equal(replayed.operationId, operationId);
   const resumed = await call('forge_coordination_read', {
     action: 'feed',
     cursor: page.body.continueCursor,
@@ -319,7 +321,7 @@ test('real CLI and MCP processes coordinate separate sessions over authenticated
   await child.close();
   const claim = await call('forge_claim', { paths: ['src/shared.ts'] });
   assert.equal(claim.body.overlaps.length, 0);
-  const sent = await cli({ action: 'message', to: 'owner', text: 'Please review' });
+  const sent = await f.browser({ kind: 'message', recipient: 'owner', text: 'Please review', context: {} });
   const inbox = await call('forge_inbox', {});
   assert.deepEqual(
     inbox.body.items.map(item => item.id),
@@ -344,13 +346,13 @@ test('durable feed cursor retains EOF and equal-time ID boundaries, replays opaq
   const f = fixture(),
     empty = await f.read('feed');
   assert.equal(empty.page.length, 0);
-  const first = await f.publish({ kind: 'message', text: 'After empty EOF', context: {} });
+  const first = await f.browser({ kind: 'message', text: 'After empty EOF', context: {} });
   const after = await f.read('feed', empty.continueCursor);
   assert.deepEqual(
     after.page.map(x => x.operationId),
     [first.operationId],
   );
-  for (let i = 0; i < 5; i++) await f.publish({ kind: 'message', text: `Tie ${i}`, context: {} });
+  for (let i = 0; i < 5; i++) await f.browser({ kind: 'message', text: `Tie ${i}`, context: {} });
   for (const row of f.tables.projectCoordinationEvents.values()) row._creationTime = 100;
   let cursor = null,
     all = [];
@@ -365,7 +367,7 @@ test('durable feed cursor retains EOF and equal-time ID boundaries, replays opaq
   assert.deepEqual(all, [...all].sort());
   const resumed = await f.read('feed', cursor);
   assert.equal(resumed.page.length, 0);
-  await f.publish({ kind: 'message', text: 'After populated EOF', context: {} });
+  await f.browser({ kind: 'message', text: 'After populated EOF', context: {} });
   assert.equal((await f.read('feed', resumed.continueCursor)).page.length, 1);
   const legacy = await f.read('feed', 'old-opaque-exhausted-cursor', 2);
   assert.equal(legacy.cursorReset, true);

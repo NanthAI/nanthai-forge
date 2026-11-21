@@ -25,37 +25,18 @@ function fake(t, reply) {
   return { root, calls, query: call('query'), mutation: call('mutation') };
 }
 
-test('board --post and --reply lower to one mutation each; refused text costs no call', async t => {
-  for (const [flag, wire] of [
-    ['--post', 'board-post'],
-    ['--reply', 'board-reply'],
-  ]) {
-    const [form, rest] = parseVerbForm('board', [flag, '{}']);
-    assert.deepEqual(rest, ['{}']);
-    assert.equal(lowerVerb(form, true), wire);
-  }
+test('board reads remain available and retired send forms point to ask and hand-back', () => {
   assert.equal(lowerVerb(parseVerbForm('board', ['{}'])[0], true), 'board');
-  const laneId = randomUUID();
-  const f = fake(t, () => ({ status: 'posted', id: 'x', target: 'project', at: 1 }));
-  await boardHostedSource(f, 'board-post', { to: 'project', text: 'Heads up', laneId });
-  await boardHostedSource(f, 'board-reply', { id: 'ABCDEF12', text: 'OK', laneId });
-  assert.deepEqual(
-    f.calls.map(c => [c.kind, c.name, c.args.to ?? c.args.replyTo, c.args.laneId]),
-    [
-      ['mutation', 'projectBoard:post', 'project', laneId],
-      ['mutation', 'projectBoard:post', 'abcdef12', laneId],
-    ],
-  );
-  assert.match(f.calls[0].args.operationId, /^[0-9a-f-]{36}$/);
-  await assert.rejects(
-    boardHostedSource(f, 'board-post', { to: 'project', text: 'key ghp_abcdefghijklmnopqrstuvwxyz' }),
-    e => e.code === 'BOARD_TEXT_SECRET',
-  );
-  await assert.rejects(
-    boardHostedSource(f, 'board-post', { to: 'project', text: 'x', extra: 1 }),
-    e => e.code === 'BAD_ARGUMENT',
-  );
-  assert.equal(f.calls.length, 2);
+  for (const [verb, args] of [
+    ['board', ['--post', '{}']],
+    ['board', ['--reply', '{}']],
+    ['board-post', ['{}']],
+    ['board-reply', ['{}']],
+  ])
+    assert.throws(
+      () => parseVerbForm(verb, args),
+      e => e.code === 'HOSTED_ACTION_UNSUPPORTED' && /ask or hand-back/.test(e.message),
+    );
 });
 
 test('board reads advance the local cursor; delivery renders lines; an older server says it has no board', async t => {
@@ -129,36 +110,21 @@ test("historical project notes do not repeat across this actor's Lanes; Lane and
   assert.equal(readBoardProjectCursor(f.root), 60, 'switching back retains the actor cursor');
 });
 
-test('typed server refusals reach the agent with their code, never as INTERNAL_ERROR (fd8dc28e, ce974f90)', async t => {
-  const laneId = randomUUID();
-  for (const [data, to] of [
-    [{ code: 'LANE_NOT_ACTIVE', message: 'Lane 3c861b3c is no longer open.' }, `lane:${randomUUID()}`],
-    [{ code: 'BAD_ARGUMENT', message: 'laneId must be your own Lane in this project.' }, 'project'],
-  ]) {
-    const f = fake(t, () => {
-      throw new ConvexError(data);
-    });
+test('typed server refusals reach historical board reads and resolutions', async t => {
+  const data = { code: 'NOT_FOUND', message: 'The selected note was not found.' };
+  const f = fake(t, () => {
+    throw new ConvexError(data);
+  });
+  for (const action of ['board', 'board-resolve']) {
     await assert.rejects(
-      boardHostedSource(f, 'board-post', { to, text: 'Hello', laneId }),
+      boardHostedSource(f, action, { id: 'abcdef12' }),
       error => error instanceof ForgeError && error.code === data.code && error.message === data.message,
     );
-    await assert.rejects(
-      boardHostedSource(f, 'board-reply', { id: 'abcdef12', text: 'Hello', laneId }),
-      error => error instanceof ForgeError && error.code === data.code,
-    );
-    await assert.rejects(
-      boardHostedSource(f, 'board', { laneId }),
-      error => error instanceof ForgeError && error.code === data.code,
-    );
   }
-  // An untyped failure is still surfaced as it was.
-  const f = fake(t, () => {
+  const network = fake(t, () => {
     throw new Error('socket hang up');
   });
-  await assert.rejects(
-    boardHostedSource(f, 'board-post', { to: 'project', text: 'Hello' }),
-    /socket hang up/,
-  );
+  await assert.rejects(boardHostedSource(network, 'board', {}), /socket hang up/);
 });
 
 test('board --resolve lowers to one mutation, names the session, checks the reason first and gates `all` on the feature', async t => {

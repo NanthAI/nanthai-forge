@@ -9,7 +9,8 @@ Use `nforge agent ROOT ACTION --help` for CLI parameters and `forge_work_overvie
 | Job | CLI | MCP |
 | --- | --- | --- |
 | Start, save or land a Lane | Mode flags such as `start --open`, `save --sync`, `land --save`, and `land --save --check-only` | `forge_task` with `action` and `mode`, such as `{"action":"land","mode":"save","checkOnly":true}`. `forge_check` handles save modes `check` and `contract`. |
-| Board writes | `board --post`, `board --reply`, `board --resolve` | `forge_task` actions `board-post`, `board-reply`, `board-resolve`. |
+| Shared decisions and hand-back | `ask`, `hand-back` | `forge_task` actions `ask`, `hand-back`. |
+| Resolve a retained board note | `board --resolve` | `forge_task` action `board-resolve`. |
 | Observe a landing or identify yourself | `observe`, `status {"whoami":true}` | `forge_check` action `observe` and `forge_work_overview` action `status` with `whoami:true`. |
 | Wait | `wait` with `--budget` or `timeoutSeconds` in seconds | `forge_wait` also accepts `maxWaitMs` in milliseconds and can stream progress. |
 | List Lanes | `lanes` accepts `planningItemId` (aliases `id` and `itemId`) and `state` | `forge_work_overview` action `lanes` accepts `id`, `intentId`, `cursor`, `limit`, and `view`. |

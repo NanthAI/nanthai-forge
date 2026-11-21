@@ -11,8 +11,8 @@ Walked: the Needs you, answers, reply box, overlaps, conversation and message co
 | # | Need | Route | What comes back |
 | --- | --- | --- | --- |
 | 1 | A go before landing | `request-approval '{"laneId":"…","reason":"…"}'` "records one request on a saved Lane and posts one project board note; the reply carries the owner's link". `wait '{"approval":"LANE_ID"}'` blocks until the decision. | Granted, or `REVIEW_DECLINED` with the reason. (docs; [journey 7](07-people-access.md)) |
-| 2 | An answer to a question | No agent action asks a person a question. The board takes a note of at most 240 characters to a Lane, an Item or the project. A second channel, `nforge coordination DEPLOYMENT PROJECT_ID JSON` (or the `mcp-coordination` server), has `message` with two or three choices ("answers must match a label and cannot be replaced, while free text remains available"), `unacked` and `ack`. | A note that "ends wait early (reason message, exit 3)". (ran: help, docs) |
-| 3 | Hand the work back | `handoff` → `HOSTED_ACTION_UNSUPPORTED`: "handoff was removed with native mode. Use board --post {to,text} leaves a note for the next agent." The coordination channel still has `{"action":"handoff","to":"…","summary":"…","head":"HEAD"}`. `x abandon` with a reason closes the Lane and keeps everything. | (ran, docs) |
+| 2 | An answer to a question | `ask` records two or three choices on a Lane or Item. The recipient chooses an exact label with coordination `ack`. | The sender’s retained inbox carries the answer and resume prompt. (CLI and backend fixture) |
+| 3 | Hand the work back | `hand-back` records what was tried, what is left and the exact saved Lane head, and releases the holder. The recipient can decline. | The Lane and its saves remain. (MCP and backend fixture) |
 | 4 | Two agents on the same file | "A real conflict shows as conflictNotice on save, status and land, on both Lanes: file, lines and the other Lane's goal. Nothing needs an answer: sync or coordinate, save again". `peers` lists who saved the same files. `wait '{"peer":"LANE_ID"}'` waits for the other Lane to land. | (ran: help) |
 | 5 | Stuck with no route | It tells its person in its own chat. Forge records nothing. | |
 
@@ -31,10 +31,10 @@ Walked: the Needs you, answers, reply box, overlaps, conversation and message co
 
 | Id | Severity | Finding | Evidence |
 | --- | --- | --- | --- |
-| J26-1 | S1 | **An agent cannot ask its person a question through the commands it is taught.** The three verbs and the reads have no "ask". The choices-and-answers channel exists behind a different command (`nforge coordination` with a deployment address and project id) and a different MCP server, which the skill and the help do not teach. In practice a stuck agent stops and writes in its own chat, where Forge and the rest of the team see nothing. | ran, docs |
-| J26-2 | S1 | **"Hand back" was removed and its replacement is a 240-character note.** The refusal for `handoff` says to post a board note. A handoff needs what was tried, what is left and where the work is; the Needs you kind "Handoff to you" still exists on the web, fed by the other channel. The scorecard journey "hands back to a person when stuck" has no agent command. | ran, source |
-| J26-3 | S2 | **Two message systems that do not meet.** The board (agent actions, 240 characters, notes to a Lane, an Item or the project) and coordination messages (sessions, choices, acknowledgements, handoffs, claims). The web shows the second in Needs you and conversations; agents are taught the first. A person's answer and an agent's question can sit in different places. | ran, docs, source |
-| J26-4 | S2 | **The answer reaches the agent only at its next command** (journey 17, J17-6). A person answers in Needs you and sees nothing change; the agent may have ended its turn. Nothing tells the person "delivered" or "the agent is no longer running; start it again with this prompt". | docs |
+| J26-1 | S1 | `ask` now records a shared fixed-choice question on a Lane or Item. Ordinary questions to the agent’s own user stay in its app. | CLI fixture |
+| J26-2 | S1 | `hand-back` records the work and releases the holder. | MCP fixture |
+| J26-3 | S2 | CLI and MCP sends share the existing coordination event store. The board reads retained notes and system notices. The signed-in Lane and Item thread views remain open. | source, fixtures |
+| J26-4 | S2 | The retained answer includes a ready resume prompt in the coordination inbox. Delivery and copy controls in the signed-in thread remain open. | fixture |
 | J26-5 | S2 | **A person cannot decide an overlap; they can only watch it.** Overlap answers were removed on purpose (notices were noisy). What is left for a person is "Usually fine." and "Ask NAME to wait", which sends a message with no effect on the queue. When two agents really collide, the decision "this one first" has no control; queue priority exists as an operator action (`x prioritize`). | source, ran |
 | J26-6 | S2 | **The agent's request names a Lane by eight hex characters.** "Approval for Lane 1a2b3c4d waits for you". The person needs the Item title and the agent's reason first. | source |
 | J26-7 | S2 | **A person is told nothing outside the app** (journey 17, J17-1). The agent holds an approval link and must pass it on by other means. | docs |
@@ -43,9 +43,8 @@ Walked: the Needs you, answers, reply box, overlaps, conversation and message co
 
 ## Dead ends
 
-- An agent asking "A or B?" with only the taught commands.
 - A person choosing which of two overlapping Lanes lands first.
-- A person answering an agent that has stopped.
+- The signed-in thread still needs to expose the retained answer and resume prompt.
 
 ## Naming and tone
 

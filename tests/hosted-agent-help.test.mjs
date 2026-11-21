@@ -57,9 +57,9 @@ test('hosted help and packaged docs are generated from every enforced schema', a
       'wait',
       'show',
       'board',
-      'board-post',
-      'board-reply',
       'board-resolve',
+      'ask',
+      'hand-back',
       'history',
     ],
   );
@@ -300,8 +300,7 @@ test('every generated hosted action reaches dispatch validation instead of an un
   for (const { action } of hostedAgentHelpEntries) {
     // CLI-owned adapters (source/board/wait) are tested at their entry points; transport
     // actions must recognise their names before rejecting this deliberately invalid body.
-    if (['show', 'history', 'wait', 'board', 'board-post', 'board-reply', 'board-resolve'].includes(action))
-      continue;
+    if (['show', 'history', 'wait', 'board', 'ask', 'hand-back', 'board-resolve'].includes(action)) continue;
     await assert.rejects(
       transport.dispatch(action, { unsupportedGuard: true }),
       error => {

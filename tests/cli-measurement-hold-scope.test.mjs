@@ -160,7 +160,7 @@ test('under any hold with main moved, every write runs on the held build; only u
     writeFileSync(f.hold, hold);
     const run = (...args) => cliStartup(args, f.old, cliVersionCheck(), { validated: true });
     const body = JSON.stringify({ url: source.url, projectId: DOGFOOD });
-    for (const action of ['save', 'sync', 'start', 'complete', 'board-post', 'set-policy', 'friction'])
+    for (const action of ['save', 'sync', 'start', 'complete', 'ask', 'hand-back', 'set-policy', 'friction'])
       assert.equal(await settled(run('agent', f.root, action, body)), true, `${action} under ${hold}`);
     assert.equal(await settled(run('agent', f.root, 'save', '--friction', body)), true, 'save --friction');
     assert.equal(await settled(run('x', f.root, 'put-planning-item', body)), true, 'planning write');

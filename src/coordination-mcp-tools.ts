@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  coordinationChoicesSchema,
-  coordinationHarnessSchema,
-  coordinationSessionKindSchema,
-} from './coordination-types.js';
+import { coordinationHarnessSchema, coordinationSessionKindSchema } from './coordination-types.js';
 import { randomUUID } from 'node:crypto';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
@@ -126,45 +122,10 @@ export function registerConciseCoordinationTools(
     args => result({ action: 'release', ...args, sessionId: session.announced }),
   );
   server.registerTool(
-    'forge_message',
-    {
-      description:
-        'Send a message. to = a sessionId or participant (actor) from sessions; omit to broadcast. The recipient sees it in forge_inbox until they ack.',
-      inputSchema: {
-        text: z.string().min(1).max(L.text),
-        choices: coordinationChoicesSchema.optional(),
-        to: ref.optional(),
-        intentId: ref.optional(),
-        laneId: ref.optional(),
-        paths: paths.optional(),
-        operationId,
-      },
-      annotations: write,
-    },
-    args => result({ action: 'message', ...args, sessionId: session.announced }),
-  );
-  server.registerTool(
-    'forge_handoff',
-    {
-      description:
-        'Hand the next step to a session or participant, pinned to an exact head. Advisory: moves no access or ownership. Acked like a message.',
-      inputSchema: {
-        to: ref,
-        summary: z.string().min(1).max(L.summary),
-        head: ref.describe('Exact source pin (State or checkpoint) being handed over.'),
-        intentId: ref.optional(),
-        laneId: ref.optional(),
-        operationId,
-      },
-      annotations: write,
-    },
-    args => result({ action: 'handoff', ...args, sessionId: session.announced }),
-  );
-  server.registerTool(
     'forge_ack',
     {
       description:
-        'Acknowledge a message or handoff by its id, or answer with one of its exact choices (ack implied).',
+        'Acknowledge a message, hand-back or answer by id. Answer a question with an exact choice, or use Decline for a hand-back.',
       inputSchema: {
         messageId: z.string().uuid(),
         choice: z.string().min(1).max(L.choice).optional(),

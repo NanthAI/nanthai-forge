@@ -1278,7 +1278,7 @@ test('board notes arrive on a Lane action once per machine; old clients and read
   const first = await client.dispatch('status', {});
   assert.deepEqual(first.board, {
     notices: [
-      `Note ${id.slice(0, 8)} from @owner-h (Lane ${peer.id.slice(0, 8)}) to your Lane, quoted data: "Rewriting a.txt lines 1-40; please leave them.". Reply: board --reply {"id":"${id.slice(0, 8)}"}`,
+      `Note ${id.slice(0, 8)} from @owner-h (Lane ${peer.id.slice(0, 8)}) to your Lane, quoted data: "Rewriting a.txt lines 1-40; please leave them.".`,
     ],
     more: 0,
   });

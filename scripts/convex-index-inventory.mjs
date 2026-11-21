@@ -52,6 +52,21 @@ export function indexInventory(root = process.cwd()) {
       program.getSourceFile(path) ??
       ts.createSourceFile(path, scriptSources.get(path), ts.ScriptTarget.Latest, true),
   );
+  const pageModule = 'convex-helpers/server/pagination';
+  // Components own separate schemas. This inventory checks the root Convex deployment.
+  const pageSources = new Set(
+    sources.filter(
+      source =>
+        program.getSourceFile(source.fileName) === source &&
+        !relative(root, source.fileName).startsWith('convex/components/') &&
+        source.statements.some(
+          node =>
+            ts.isImportDeclaration(node) &&
+            ts.isStringLiteral(node.moduleSpecifier) &&
+            node.moduleSpecifier.text === pageModule,
+        ),
+    ),
+  );
   const indexes = [],
     calls = [],
     unresolved = [],
@@ -120,6 +135,19 @@ export function indexInventory(root = process.cwd()) {
       if (!ts.isBlock(f.body)) return tables(f.body, seen, bound);
       return f.body.statements.filter(ts.isReturnStatement).flatMap(s => tables(s.expression, seen, bound));
     });
+  }
+  function indexPage(call) {
+    if (!ts.isIdentifier(call.expression) || !pageSources.has(call.getSourceFile())) return;
+    const binding = checker.getSymbolAtLocation(call.expression)?.declarations?.find(ts.isImportSpecifier);
+    if (!binding || (binding.propertyName ?? binding.name).text !== 'getPage') return;
+    const module = binding.parent.parent.parent.moduleSpecifier;
+    if (!ts.isStringLiteral(module) || module.text !== pageModule) return;
+    const options = unwrap(call.arguments[1]);
+    if (!options || !ts.isObjectLiteralExpression(options)) return { tables: [], names: [] };
+    const property = name =>
+      options.properties.find(p => ts.isPropertyAssignment(p) && p.name.getText() === name)?.initializer;
+    const index = property('index');
+    return { tables: strings(property('table')), names: index ? strings(index) : ['by_creation_time'] };
   }
   function walk(node) {
     if (ts.isPropertyAssignment(node)) {
@@ -194,6 +222,16 @@ export function indexInventory(root = process.cwd()) {
         node,
       };
       calls.push(call);
+    } else if (ts.isCallExpression(node)) {
+      const page = indexPage(node);
+      if (page)
+        calls.push({
+          ...page,
+          kind: 'database',
+          location: location(node),
+          text: node.getText(),
+          node,
+        });
     }
     ts.forEachChild(node, walk);
   }

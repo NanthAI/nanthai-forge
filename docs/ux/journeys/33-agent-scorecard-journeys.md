@@ -43,7 +43,7 @@ Detail: [journey 8](08-planning.md).
 | Step | Observed in the mapping pass | Evidence |
 | --- | --- | --- |
 | Progress while working | `save '{"message":"…"}'`. Reply: `status:"settling"` and "Saved: the server is finishing this save now. Your next command here reports its outcome, including any failure." | ran |
-| Tell peers | `board --post '{"to":"lane:ID","text":"…"}'` (240 characters) → `status:"posted"`, `recipients:1`. | ran |
+| Ask for a shared decision | `ask` records two or three choices and a recipient on a Lane or Item. | CLI fixture |
 | Record evidence on the Item | `comment-planning-item '{"planningItemId":"…","text":"…"}'`. "An Issue closes when its Intent completes and every Done-when line has evidence; a held one names the open lines." A closing comment on another Item read: "Intent completed; 1 Done-when line(s) still open, so this Issue stays open … Comment the evidence for each line, then close with: nforge agent . put-planning-item …". | ran: help, ran |
 | Evidence of the change | The landing receipt: check run ids, heads, costs. Optional proof that changed tests fail on the base and pass on the head (`proofOnLanding`, off by default). | docs |
 | Report to the person | Nothing structured. AGENTS.md asks for a handoff in prose: "what changed, why, what you ran (with results), what you did not verify, and the next step". | docs |
@@ -70,7 +70,7 @@ Detail: [journey 26](26-answering-an-agent.md).
 | --- | --- | --- |
 | Ask for a go | `request-approval`, then `wait '{"approval":"LANE_ID"}'`. | docs |
 | Ask a question | No action among those the help lists. | ran |
-| Hand the work back | `handoff` → `HOSTED_ACTION_UNSUPPORTED: handoff was removed with native mode. Use board --post {to,text} leaves a note for the next agent.` | ran |
+| Hand the work back | `hand-back` releases the holder and records what was tried, what is left and the exact saved head. | MCP fixture |
 | Stop cleanly | `x abandon '{"laneId":"…","reason":"…"}'` keeps everything; or leave the Lane saved and report in the agent's own chat. | ran: help |
 
 ## 6. Coordinate across repositories

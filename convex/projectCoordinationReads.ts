@@ -8,7 +8,7 @@ import { coordinationQuery as query, type QueryCtx } from './cliServer';
 import type { Doc, Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
 import { claimDocument, eventDocument } from './coordinationFields';
-import { feedCursor, feedPageSize, feedPosition, feedRows } from './coordinationFeed';
+import { canReadConversation, feedCursor, feedPageSize, feedPosition, feedRows } from './coordinationFeed';
 import { canAcknowledge, receipt, session } from './coordinationWrite';
 import { invariant } from '../src/errors';
 import { COORDINATION_LIMITS } from '../src/coordination-types';
@@ -23,14 +23,14 @@ const RELATED_SCAN = 200,
 async function reader(ctx: QueryCtx, projectId: Id<'hostedProjects'>, sessionId?: string) {
   const user = await ctx.auth.getUserIdentity();
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read project coordination.');
-  await accessibleProject(ctx, projectId, user.subject);
+  const project = await accessibleProject(ctx, projectId, user.subject);
   const own = sessionId ? await session(ctx, projectId, sessionId) : null;
   invariant(
     !sessionId || own?.actor === user.subject,
     'PROJECT_UNAVAILABLE',
     'Select one of your own sessions in this project.',
   );
-  return { actor: user.subject, own };
+  return { actor: user.subject, own, project };
 }
 /** Session-directed rows for another of your sessions are left out when a session is selected. */
 const forSession = (row: Doc<'projectCoordinationEvents'>, sessionId?: string) =>
@@ -80,7 +80,7 @@ export async function journalCoordinationInbox(
 ) {
   const { projectId, paginationOpts, sessionId } = input;
   try {
-    const { actor } = await reader(ctx, projectId, sessionId);
+    const { actor, project } = await reader(ctx, projectId, sessionId);
     const size = feedPageSize(paginationOpts.numItems);
     const { position, cursorReset } = feedPosition(ctx, projectId, paginationOpts.cursor);
     const result = await feedRows(ctx, projectId, position, size, {
@@ -88,8 +88,9 @@ export async function journalCoordinationInbox(
       value: actor,
     });
     const page = [];
+    const readConversation = await canReadConversation(ctx, project, actor, result.rows);
     for (const row of result.rows)
-      if (forSession(row, sessionId))
+      if ((!row.conversation || readConversation) && forSession(row, sessionId))
         page.push({ ...row, acked: !!(await receipt(ctx, projectId, row.operationId, actor)) });
     return {
       page,
@@ -112,13 +113,13 @@ export async function journalCoordinationInbox(
   }
 }
 
-/** Recent directed messages/handoffs and broadcasts by others that the caller has not acknowledged. */
+/** Recent messages, replies and broadcasts that the caller has yet to acknowledge or answer. */
 export const unacked = query({
   args: { projectId: v.id('hostedProjects'), sessionId: v.optional(v.string()), limit: v.number() },
   returns: v.object({ items: v.array(ackedEvent), complete: v.boolean() }),
   handler: async (ctx, { projectId, sessionId, limit }) => {
     try {
-      const { actor } = await reader(ctx, projectId, sessionId);
+      const { actor, project } = await reader(ctx, projectId, sessionId);
       feedPageSize(limit);
       const directed = await ctx.db
         .query('projectCoordinationEvents')
@@ -135,15 +136,21 @@ export const unacked = query({
         .order('desc')
         .take(UNACKED_SCAN);
       const items = [];
+      const readConversation = await canReadConversation(ctx, project, actor, directed);
       for (const row of [...directed, ...broadcast].sort(
         (a, b) => a.at - b.at || a._creationTime - b._creationTime,
-      ))
+      )) {
+        if (row.conversation && !readConversation) continue;
         if (
-          (row.recipientActor || row.actor !== actor) &&
-          (await canAcknowledge(ctx, row, actor, sessionId)) &&
-          !(await receipt(ctx, projectId, row.operationId, actor))
+          (!row.recipientActor && row.actor === actor) ||
+          !(await canAcknowledge(ctx, row, actor, sessionId))
         )
-          items.push({ ...(await withActorName(ctx, projectId, row)), acked: false });
+          continue;
+        const acknowledgement = await receipt(ctx, projectId, row.operationId, actor);
+        const unanswered = row.command.kind === 'message' && row.command.question && !acknowledgement?.choice;
+        if (!acknowledgement || unanswered)
+          items.push({ ...(await withActorName(ctx, projectId, row)), acked: !!acknowledgement });
+      }
       return {
         items: items.slice(-limit),
         complete: directed.length < UNACKED_SCAN && broadcast.length < UNACKED_SCAN && items.length <= limit,
@@ -245,7 +252,7 @@ export async function journalCoordinationRelated(
   },
 ) {
   try {
-    const { actor, own } = await reader(ctx, input.projectId, input.sessionId);
+    const { actor, own, project } = await reader(ctx, input.projectId, input.sessionId);
     const size = feedPageSize(input.paginationOpts.numItems);
     invariant(
       (input.intentIds?.length ?? 0) <= 20 &&
@@ -267,6 +274,7 @@ export async function journalCoordinationRelated(
     };
     const { position, cursorReset } = feedPosition(ctx, input.projectId, input.paginationOpts.cursor);
     const scanned = await feedRows(ctx, input.projectId, position, RELATED_SCAN);
+    const readConversation = await canReadConversation(ctx, project, actor, scanned.rows);
     const page: Doc<'projectCoordinationEvents'>[] = [];
     let last = position,
       stoppedEarly = false;
@@ -274,6 +282,7 @@ export async function journalCoordinationRelated(
       const row = scanned.rows[i]!;
       last = scanned.positions[i]!;
       if (
+        (!row.conversation || readConversation) &&
         (input.includeMine || row.actor !== actor) &&
         (row.recipientActor === actor || inCoordinationScope(row.command, scope))
       )

@@ -1,0 +1,4 @@
+{
+  "issue": "b54a14c0",
+  "reason": "Replace two board send actions with ask and hand-back, and remove two separate coordination MCP send tools. Both replacements use one coordination mutation per send or replay. The Item fixture compares indexed cost at 400 and 800 events. Shorten the check summary to fit the conversation fields. The adapter loads only on its own commands. Keep the existing package, startup and listing ceilings."
+}

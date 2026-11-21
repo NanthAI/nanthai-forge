@@ -65,7 +65,11 @@ nforge mcp ROOT --agent
 
 ## When you need someone else
 
-Save and confirm the save outcome. Tell the person in your coding app what you tried, what remains, and the Lane and saved head to resume from. Use [`request-approval`](../agents/workflow.md#agent-board-hosted) for a project owner's go on a Lane. The coordination server can send a [message or advisory handoff](../agents.md#coordination). Those records leave Lane ownership and landing policy in place.
+Ask ordinary questions in your coding app. Use [`ask`](../agents/workflow.md#questions-and-hand-back-hosted)
+for a shared Lane or Item decision with fixed choices. To hand a Lane back, confirm
+the save and run `hand-back` with what you tried, what remains and the saved head.
+Tell your user in your coding app. Use [`request-approval`](../agents/workflow.md#agent-board-hosted)
+for a project owner's go on a Lane.
 
 ## Work across two repositories
 

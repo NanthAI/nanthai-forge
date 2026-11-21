@@ -36,30 +36,11 @@ async function call<T>(work: () => Promise<unknown>): Promise<T> {
     );
   }
 }
-type Write = Extract<CoordinationRequest, { action: 'message' | 'handoff' | 'ack' | 'claim' | 'release' }>;
+type Write = Extract<CoordinationRequest, { action: 'ack' | 'claim' | 'release' }>;
 /** Concise write actions become ordinary publish commands; a generated operation UUID is returned for retries. */
 export function conciseCommand(request: Write): CoordinationCommand {
   const sessionId = request.sessionId;
   switch (request.action) {
-    case 'message':
-      return defined({
-        kind: 'message',
-        sessionId,
-        recipient: request.to,
-        text: request.text,
-        choices: request.choices,
-        context: defined({ intentId: request.intentId, laneId: request.laneId, paths: request.paths }),
-      });
-    case 'handoff':
-      return defined({
-        kind: 'handoff',
-        sessionId,
-        to: request.to,
-        summary: request.summary,
-        head: request.head,
-        intentId: request.intentId,
-        laneId: request.laneId,
-      });
     case 'ack':
       return defined({
         kind: 'ack',
@@ -94,7 +75,7 @@ export async function dispatchCoordination(
   invariant(
     parsed.success,
     'BAD_ARGUMENT',
-    'Use publish with operationId/command, feed/sessions/recent/inbox/related with cursor and pageSize, watch with cursor, pageSize and waitMs, or a concise action (touch, message, handoff, ack, claim, release, unacked, claims, overlaps, counts). Text and path lists have size limits.',
+    'Use publish, feed, sessions, recent, inbox, related, watch, touch, ack, claim, release, unacked, claims, overlaps or counts. For a new question or hand-back, use nforge agent ROOT ask or hand-back.',
   );
   const request = parsed.data;
   const query = async (name: string, args: Record<string, unknown>) => {
@@ -117,9 +98,14 @@ export async function dispatchCoordination(
     });
     return (typeof result === 'string' ? JSON.parse(result) : result) as Record<string, unknown>;
   };
-  const publish = (operationId: string, command: CoordinationCommand) =>
+  const publish = (operationId: string, command: CoordinationCommand, replayOnly = false) =>
     call<StoredEvent>(() =>
-      client.mutation(ref.mutation('projectCoordination:publish'), { projectId, operationId, command }),
+      client.mutation(ref.mutation('projectCoordination:publish'), {
+        projectId,
+        operationId,
+        command,
+        ...(replayOnly ? { replayOnly: true } : {}),
+      }),
     );
   switch (request.action) {
     case 'counts':
@@ -131,13 +117,19 @@ export async function dispatchCoordination(
       return watch(rest);
     }
     case 'publish':
-      return publish(request.operationId, request.command);
+      return publish(
+        request.operationId,
+        request.command,
+        ['message', 'handoff'].includes(request.command.kind),
+      );
     case 'feed':
     case 'sessions':
     case 'recent':
       return query(`projectCoordination:${request.action}`, {
         paginationOpts: { cursor: request.cursor, numItems: request.pageSize },
-        ...(request.action === 'feed' ? { intentId: request.intentId, laneId: request.laneId } : {}),
+        ...(request.action === 'feed'
+          ? { intentId: request.intentId, laneId: request.laneId, planningItemId: request.planningItemId }
+          : {}),
         ...(request.action === 'sessions'
           ? defined({ parentSessionId: request.parentSessionId, all: request.all })
           : {}),

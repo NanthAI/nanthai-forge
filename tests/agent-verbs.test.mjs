@@ -68,8 +68,6 @@ const rows = [
   ['link', 'retired'],
   ['status', null],
   ['whoami', 'status', 'status', 'status'],
-  ['board-post', 'board --post', 'board-post', 'board-post'],
-  ['board-reply', 'board --reply', 'board-reply', 'board-reply'],
   ['board-resolve', 'board --resolve', 'board-resolve', 'board-resolve'],
   ['pending-status', 'retired'],
   ['records', null],
@@ -323,8 +321,6 @@ test('old and new spellings send the same hosted request; only the old one print
     ['snapshots', ['x', 'snapshots'], {}],
     ['landing', ['observe'], { operationId }],
     ['whoami', ['status'], {}, { whoami: true }],
-    ['board-post', ['board', '--post'], { to: 'project', text: 'Ready', operationId }],
-    ['board-reply', ['board', '--reply'], { id: operationId, text: 'Thanks', operationId }],
     ['board-resolve', ['board', '--resolve'], { id: operationId, operationId }],
   ];
   for (const [old, current, oldInput, newInput = oldInput] of pairs) {

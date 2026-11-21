@@ -796,6 +796,15 @@ The client keeps only the URL path (no origin, credentials, query or fragment), 
 
 ## Hosted coordination paging
 
+The agent CLI and MCP publish fixed-choice questions and hand-backs through
+the coordination mutation. Questions select exactly one Lane or Item, and
+answers keep its scope and a resume prompt in the recipient inbox. Hand-back
+uses the existing holder authority and writes an unheld Lane version at the
+same saved head in the event transaction. Send and replay each use one call.
+Message and answer rows stay in Convex, as before. The project owner and
+contributors can read the conversation, matching the agent board's access.
+The change adds an Item index and zero idle or landing-path calls.
+
 `projectCoordination.sessions({projectId, paginationOpts, parentSessionId?, all?})`
 returns Convex `{page, continueCursor, isDone}` pages. The default selects roots;
 `parentSessionId` selects immediate children of that session; `all: true` selects

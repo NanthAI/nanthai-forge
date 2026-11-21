@@ -27,6 +27,7 @@ import { discardedRunnerSeconds } from '../src/cost-budgets';
 import { report } from './errors';
 import { invariant } from '../src/errors';
 import { landingMessageText } from './projectHostedLandingMessageBody';
+import { canReadConversation } from './coordinationFeed';
 
 export const FYI_LANDINGS = 12;
 export const FYI_EVENTS = 6;
@@ -67,10 +68,11 @@ const oneLine = (text: unknown) =>
  * FYI_MESSAGES rows, then one receipt, one presence and one session point read per row. */
 export async function messagesTo(
   ctx: QueryCtx,
-  projectId: Id<'hostedProjects'>,
+  project: Doc<'hostedProjects'>,
   actor: string,
   asks: boolean,
 ) {
+  const projectId = project._id;
   const rows = await ctx.db
     .query('projectCoordinationEvents')
     .withIndex('by_project_and_kind_and_recipientActor', q =>
@@ -79,16 +81,19 @@ export async function messagesTo(
     .order('desc')
     .take(FYI_MESSAGES);
   const out = [];
+  const readConversation = await canReadConversation(ctx, project, actor, rows);
   for (const row of rows) {
+    if (row.conversation && !readConversation) continue;
     if (row.command.kind !== 'message' || row.actor === actor) continue;
-    if (Boolean(row.command.choices?.length) !== asks) continue;
+    if ((Boolean(row.command.choices?.length) && row.command.question?.holdsWork !== false) !== asks)
+      continue;
     const acked = await ctx.db
       .query('projectCoordinationReceipts')
       .withIndex('by_project_and_message_and_actor', q =>
         q.eq('projectId', projectId).eq('messageId', row.operationId).eq('actor', actor),
       )
       .unique();
-    if (acked) continue;
+    if (acked && (!row.command.question || !asks || acked.choice !== undefined)) continue;
     const laneId = row.laneId ?? row.command.context.laneId;
     // A Lane's presence row is deleted when it closes: the message ends with its Lane (landed or abandoned).
     if (laneId) {
@@ -143,7 +148,7 @@ export const read = query({
           .withIndex('by_project_and_sequence', q => q.eq('projectId', projectId))
           .order('desc')
           .take(FYI_EVENTS),
-        messagesTo(ctx, projectId, user.subject, false),
+        messagesTo(ctx, project, user.subject, false),
       ]);
       const landings = [];
       for (const row of accepted.slice(0, FYI_LANDINGS)) {

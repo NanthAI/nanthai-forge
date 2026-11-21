@@ -45,7 +45,14 @@ function fixture() {
     f.caller(caller);
     return dispatchCoordination({ query: run, mutation: run }, 'project', input);
   };
-  return { ...f, as };
+  // Seed through the retained browser write path to exercise existing message compatibility.
+  const browser = (caller, command, operationId = randomUUID()) => {
+    f.caller(caller);
+    return coordination.publish._handler(f.ctx, { projectId: 'project', operationId, command });
+  };
+  const note = (caller, { to, ...body }) =>
+    browser(caller, { kind: 'message', context: {}, ...body, ...(to ? { recipient: to } : {}) });
+  return { ...f, as, browser, note };
 }
 const announce = async (f, caller, sessionId, extra) =>
   f.as(caller, { action: 'publish', operationId: randomUUID(), command: activity(sessionId, extra) });
@@ -53,13 +60,13 @@ const announce = async (f, caller, sessionId, extra) =>
 test('input limits refuse oversized new writes and page sizes but stored rows still replay', async () => {
   const f = fixture(),
     a = randomUUID();
-  await assert.rejects(announce(f, 'owner', a, { name: 'x'.repeat(121) }), /size limits/);
-  await assert.rejects(f.as('owner', { action: 'message', text: 'x'.repeat(4001) }), /size limits/);
+  await assert.rejects(announce(f, 'owner', a, { name: 'x'.repeat(121) }), /Use publish/);
+  await assert.rejects(f.note('owner', { text: 'x'.repeat(4001) }), /valid coordination fields/);
   await assert.rejects(
     f.as('owner', { action: 'claim', paths: Array.from({ length: 101 }, (_, i) => `p${i}`) }),
-    /size limits/,
+    /Use publish/,
   );
-  await assert.rejects(f.as('owner', { action: 'feed', pageSize: 101 }), /size limits/);
+  await assert.rejects(f.as('owner', { action: 'feed', pageSize: 101 }), /Use publish/);
   f.caller('owner');
   await assert.rejects(
     coordination.feed._handler(f.ctx, {
@@ -120,15 +127,14 @@ test('inbox addresses participants and sessions; acks are per recipient and cann
     theirs = randomUUID();
   await announce(f, 'owner', mine);
   await announce(f, 'other', theirs);
-  const direct = await f.as('other', {
-    action: 'message',
+  const direct = await f.note('other', {
     to: 'owner',
     text: 'API changes',
     sessionId: theirs,
   });
-  const toSession = await f.as('other', { action: 'message', to: mine, text: 'For your session' });
-  const broadcast = await f.as('owner', { action: 'message', text: 'Everyone: freeze docs/' });
-  await assert.rejects(f.as('owner', { action: 'message', to: 'stranger', text: 'x' }), /Select a session/);
+  const toSession = await f.note('other', { to: mine, text: 'For your session' });
+  const broadcast = await f.note('owner', { text: 'Everyone: freeze docs/' });
+  await assert.rejects(f.note('owner', { to: 'stranger', text: 'x' }), /Select a session/);
 
   let inbox = await f.as('owner', { action: 'inbox' });
   assert.deepEqual(
@@ -167,8 +173,8 @@ test('inbox addresses participants and sessions; acks are per recipient and cann
   assert.equal((await f.as('other', { action: 'unacked' })).items.length, 0);
   assert.equal(f.tables.projectCoordinationReceipts.size, 3);
   // Resuming from the inbox cursor returns only newer rows.
-  const later = await f.as('other', {
-    action: 'handoff',
+  const later = await f.browser('other', {
+    kind: 'handoff',
     to: 'owner',
     summary: 'Finish tests',
     head: 'a'.repeat(64),
@@ -248,17 +254,12 @@ test('Now Reply reaches the original agent session inbox through CLI/MCP dispatc
   const f = fixture(),
     agent = randomUUID();
   await announce(f, 'other', agent);
-  const question = await f.as('other', {
-    action: 'message',
+  const question = await f.note('other', {
     sessionId: agent,
     to: 'owner',
     text: 'Which file?',
   });
-  await f.as('owner', {
-    action: 'publish',
-    operationId: randomUUID(),
-    command: { kind: 'message', recipient: agent, text: 'Use src/index.ts', context: {} },
-  });
+  await f.browser('owner', { kind: 'message', recipient: agent, text: 'Use src/index.ts', context: {} });
   await f.as('owner', {
     action: 'publish',
     operationId: randomUUID(),
@@ -279,7 +280,7 @@ test('people can acknowledge their old sessions, other accounts cannot, and repl
     browserSession = randomUUID();
   await announce(f, 'owner', oldSession);
   await announce(f, 'owner', browserSession);
-  const message = await f.as('other', { action: 'message', to: oldSession, text: 'Please review' });
+  const message = await f.note('other', { to: oldSession, text: 'Please review' });
   assert.ok(
     (await f.as('owner', { action: 'unacked', sessionId: browserSession })).items.some(
       item => item.id === message.operationId,
@@ -317,7 +318,7 @@ test('device agents keep exact-session acknowledgement and Needs-you visibility'
   await announce(f, 'owner', oldSession);
   await announce(f, 'owner', actingSession);
   subject = 'other';
-  const message = await f.as('other', { action: 'message', to: oldSession, text: 'For old session' });
+  const message = await f.note('other', { to: oldSession, text: 'For old session' });
   subject = 'owner';
   device = true;
   await assert.rejects(
@@ -335,7 +336,7 @@ test('legacy recipients resolve session ownership for people, never foreign sess
   const f = fixture(),
     oldSession = randomUUID();
   await announce(f, 'owner', oldSession);
-  const message = await f.as('other', { action: 'message', to: oldSession, text: 'Legacy question' });
+  const message = await f.note('other', { to: oldSession, text: 'Legacy question' });
   const stored = [...f.tables.projectCoordinationEvents.values()].find(
     row => row.operationId === message.operationId,
   );
@@ -351,7 +352,7 @@ test('Needs you excludes a directed session the account cannot acknowledge', asy
   const f = fixture(),
     foreignSession = randomUUID();
   await announce(f, 'other', foreignSession);
-  const message = await f.as('other', { action: 'message', to: 'owner', text: 'Directed question' });
+  const message = await f.note('other', { to: 'owner', text: 'Directed question' });
   const row = [...f.tables.projectCoordinationEvents.values()].find(
     row => row.operationId === message.operationId,
   );

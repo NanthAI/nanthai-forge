@@ -25,6 +25,7 @@ import { hostedLaneHistorySchema } from './hosted-agent-lane-history.js';
 import { hostedAgentRoot } from './hosted-agent-journal.js';
 import { liveLanesInput } from './hosted-live-lanes.js';
 import { hostedBoardSchemas } from './hosted-board.js';
+import { hostedConversationSchemas } from './coordination-types.js';
 import { SELECT_LANE } from './hosted-lane-location.js';
 import { shellQuote } from './shell-quote.js';
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
@@ -179,8 +180,9 @@ export const hostedClientReadSchemas = {
   flow: hostedFlowSchema,
   wait: hostedWaitSchema,
   show: hostedSourceShowSchema.omit({ action: true }),
-  /** The board verbs are client actions too: `board --post`/`--reply` write one note each, `--resolve` withdraws one. */
+  /** Conversation writes and historical board reads use the checkout address directly. */
   ...hostedBoardSchemas,
+  ...hostedConversationSchemas,
 } as const;
 /** A diff page that is not the last says so and gives the next-page command (ad80e037): agents
  * read `more`, not only `nextCursor`. Formatting only. */

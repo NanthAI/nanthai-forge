@@ -48,6 +48,31 @@ export const coordinationChoicesSchema = z
   .max(L.choices)
   .refine(values => new Set(values).size === values.length, 'Use distinct answer choices.');
 const choice = z.string().min(1).max(L.choice).optional();
+const person = z.string().min(1).max(L.id);
+const workText = z.string().trim().min(1).max(L.summary);
+export const hostedConversationSchemas = {
+  ask: z
+    .object({
+      operationId: z.uuid().optional(),
+      to: person,
+      text: z.string().trim().min(1).max(L.text),
+      choices: coordinationChoicesSchema,
+      laneId: z.uuid().optional(),
+      planningItemId: z.uuid().optional(),
+      holdsWork: z.boolean().optional(),
+    })
+    .strict(),
+  'hand-back': z
+    .object({
+      operationId: z.uuid().optional(),
+      to: person,
+      laneId: z.uuid().optional(),
+      head: z.string().regex(/^[0-9a-f]{64}$/),
+      tried: workText,
+      left: workText,
+    })
+    .strict(),
+};
 export const coordinationContextSchema = z
   .object({
     intentId: ref.optional(),
@@ -84,6 +109,10 @@ export const coordinationCommandSchema = z.discriminatedUnion('kind', [
       recipient: ref.optional(),
       text: z.string().min(1).max(L.text),
       choices: coordinationChoicesSchema.optional(),
+      question: z
+        .object({ planningItemId: z.uuid().optional(), holdsWork: z.boolean().optional() })
+        .strict()
+        .optional(),
       context: coordinationContextSchema.default({}),
     })
     .strict(),
@@ -127,6 +156,7 @@ export const coordinationCommandSchema = z.discriminatedUnion('kind', [
       head: ref,
       intentId: ref.optional(),
       laneId: ref.optional(),
+      handBack: z.object({ left: workText }).strict().optional(),
     })
     .strict(),
 ]);
@@ -174,7 +204,15 @@ export const coordinationRequestSchema = z.discriminatedUnion('action', [
       command: coordinationCommandSchema,
     })
     .strict(),
-  z.object({ action: z.literal('feed'), ...page, intentId: ref.optional(), laneId: ref.optional() }).strict(),
+  z
+    .object({
+      action: z.literal('feed'),
+      ...page,
+      intentId: ref.optional(),
+      laneId: ref.optional(),
+      planningItemId: z.uuid().optional(),
+    })
+    .strict(),
   z
     .object({
       action: z.literal('sessions'),
@@ -203,29 +241,6 @@ export const coordinationRequestSchema = z.discriminatedUnion('action', [
       action: z.literal('overlaps'),
       paths: coordinationPathsSchema.min(1),
       includeMine: z.boolean().optional(),
-    })
-    .strict(),
-  z
-    .object({
-      action: z.literal('message'),
-      ...write,
-      to: ref.optional(),
-      text: z.string().min(1).max(L.text),
-      choices: coordinationChoicesSchema.optional(),
-      intentId: ref.optional(),
-      laneId: ref.optional(),
-      paths: coordinationPathsSchema.optional(),
-    })
-    .strict(),
-  z
-    .object({
-      action: z.literal('handoff'),
-      ...write,
-      to: ref,
-      summary: z.string().min(1).max(L.summary),
-      head: ref,
-      intentId: ref.optional(),
-      laneId: ref.optional(),
     })
     .strict(),
   z

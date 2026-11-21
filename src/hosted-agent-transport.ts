@@ -302,8 +302,8 @@ export type HostedAgentResponse = {
     | 'lane-history'
     | 'flow'
     | 'board'
-    | 'board-post'
-    | 'board-reply'
+    | 'ask'
+    | 'hand-back'
     | 'board-resolve';
   sourceContext?: unknown;
   operationId: string | null;
@@ -557,6 +557,20 @@ export class HostedAgentTransport {
         resolved: null,
         result: await queueHostedSource(this, input),
       };
+    if (requestedAction === 'ask' || requestedAction === 'hand-back') {
+      // Keep the conversation adapter out of the source-work startup graph.
+      const { hostedConversation } = (await import(
+        /* @vite-ignore */ new URL('./hosted-conversation.js', import.meta.url).href
+      )) as typeof import('./hosted-conversation.js');
+      return {
+        schema: 1,
+        transport: 'hosted',
+        action: requestedAction,
+        resolved: null,
+        ...(await hostedConversation(this, requestedAction, input)),
+        notice: memberDataNotice,
+      };
+    }
     if (Object.hasOwn(hostedBoardSchemas, requestedAction)) {
       const result = await boardHostedSource(this, requestedAction as keyof typeof hostedBoardSchemas, input);
       const { conflictNotice, notice } = result as { conflictNotice?: ExactConflictNotice; notice?: string };

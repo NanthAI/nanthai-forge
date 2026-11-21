@@ -19,6 +19,7 @@ const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
 //   read   storage.get / getUrl / getMetadata (Convex file-storage reads)
 //   handle a ctx.storage handle passed on, which could write or read elsewhere
 //   field  v.id('_storage') (a record that names a Convex file)
+//   native-url a nativeLegacyUrl reference outside the shared read seam
 const legacy =
   'Convex file storage cleanup (Issue 40dad5e0): legacy Convex copies stay readable until moved and deleted.';
 const storageAllowlist = {
@@ -39,6 +40,8 @@ const storageAllowlist = {
   ],
   'blobStore.ts handle': [1, 'Deletes existing legacy copies; every upload goes to R2.', '2027-01-31'],
   'legacyStorageRead.ts read': [3, 'The sole native read seam, with verified R2 fall-through.', '2027-01-31'],
+  'projectR2Backfill.ts native-url': [2, 'Backfill must read the native copy source.', '2027-01-31'],
+  'projectWorkIndexRetry.ts native-url': [2, 'Preserves the native Work index copy source.', '2027-01-31'],
   'projectWorkIndexRetry.ts handle': [
     1,
     'Wraps the storage reader with retry for legacy Work index reads.',
@@ -88,6 +91,12 @@ const isStorage = node =>
 function storageUses(name, source) {
   const uses = [];
   const visit = (node, parent) => {
+    if (
+      name !== 'legacyStorageRead.ts' &&
+      ((ts.isIdentifier(node) && node.text === 'nativeLegacyUrl') ||
+        (ts.isElementAccessExpression(node) && member(node) === 'nativeLegacyUrl'))
+    )
+      uses.push('native-url');
     if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
       const method = member(node);
       if (method === 'generateUploadUrl' || (isStorage(node.expression) && storageCalls.has(method)))
@@ -187,6 +196,13 @@ test('the storage guard fails on a new write, read, handle or field and on expir
   ]);
   // A Lane-local durable seam named something else is not Convex storage.
   assert.deepEqual(storageFindings([['ok.ts', 'durable.store(bytes); r2.get(key)']], {}), []);
+});
+
+test('a new reader cannot bypass legacy URL read-through by importing the native primitive', () => {
+  const source = "import { nativeLegacyUrl as readUrl } from './legacyStorageRead'; readUrl(ctx, id);";
+  assert.deepEqual(storageFindings([['newReader.ts', source]], {}), [
+    'newReader.ts native-url: 1 unlisted; bytes go to R2 (docs/data-placement.md)',
+  ]);
 });
 
 test('docs/data-placement.md lists every allowlisted file and every Convex table', () => {

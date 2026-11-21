@@ -11,6 +11,10 @@ export type StoredEvent = {
   recipientActor?: string;
   recipientSession?: string;
   acked?: boolean;
+  intentId?: string;
+  laneId?: string;
+  planningItemId?: string;
+  resumePrompt?: string;
 };
 type StoredClaim = {
   claimId: string;
@@ -31,7 +35,14 @@ export function compactEvent(event: StoredEvent) {
     scope = commandScope(command);
   return defined({
     id: event.operationId,
-    kind: command.kind,
+    kind:
+      command.kind === 'message' && command.question
+        ? 'question'
+        : command.kind === 'handoff' && command.handBack
+          ? 'hand-back'
+          : command.kind === 'ack' && event.resumePrompt
+            ? 'answer'
+            : command.kind,
     from: event.actor,
     fromDisplayName: event.actorDisplayName,
     session: 'sessionId' in command ? command.sessionId : undefined,
@@ -55,13 +66,18 @@ export function compactEvent(event: StoredEvent) {
         : command.kind === 'claim'
           ? (command.claimId ?? event.operationId)
           : undefined,
-    intentId: scope.intentId,
-    laneId: scope.laneId,
+    intentId: event.intentId ?? scope.intentId,
+    laneId: event.laneId ?? scope.laneId,
+    planningItemId: event.planningItemId,
     head: scope.head,
     paths: scope.paths?.length ? scope.paths : undefined,
     pathCount: command.kind === 'change' ? command.pathCount : undefined,
     choices: command.kind === 'message' ? command.choices : undefined,
     choice: command.kind === 'ack' ? command.choice : undefined,
+    holdsWork: command.kind === 'message' ? command.question?.holdsWork : undefined,
+    tried: command.kind === 'handoff' && command.handBack ? command.summary : undefined,
+    left: command.kind === 'handoff' ? command.handBack?.left : undefined,
+    resumePrompt: event.resumePrompt,
     acked: event.acked,
   });
 }

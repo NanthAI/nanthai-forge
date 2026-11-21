@@ -11,7 +11,12 @@ import { invariant } from '../src/errors';
 import type { BriefInput, BriefRecords, BriefEvent, BriefState } from '../src/agent-brief-types';
 import type { Lane, WorkData, WorkView, CheckRun } from '../src/work-types';
 
-export async function hostedBriefRecords(ctx: QueryCtx, project: Doc<'hostedProjects'>, input: BriefInput) {
+export async function hostedBriefRecords(
+  ctx: QueryCtx,
+  project: Doc<'hostedProjects'>,
+  input: BriefInput,
+  readConversation: boolean,
+) {
   const generation = await selectedGeneration(ctx, project);
   invariant(
     generation,
@@ -69,7 +74,11 @@ export async function hostedBriefRecords(ctx: QueryCtx, project: Doc<'hostedProj
         )
         .unique()
     : null;
-  invariant(!input.messageId || eventRow, 'NOT_FOUND', 'Message or handoff not found in this project.');
+  invariant(
+    !input.messageId || (eventRow && (!eventRow.conversation || readConversation)),
+    'NOT_FOUND',
+    'Message or handoff not found in this project.',
+  );
   const selectedEvent = eventRow ? briefEvent(eventRow) : undefined;
   const run = await get<CheckRun>('runs', input.runId);
   const view = await get<WorkView>('views', input.viewId ?? run?.viewId);
@@ -113,6 +122,7 @@ export async function hostedBriefRecords(ctx: QueryCtx, project: Doc<'hostedProj
     .order('desc')
     .take(100);
   for (const row of [...scopes, ...laneEvents, ...recentEvents]) {
+    if (row.conversation && !readConversation) continue;
     const item = briefEvent(row);
     if (item && !events.some(e => e.id === item.id)) events.push(item);
   }

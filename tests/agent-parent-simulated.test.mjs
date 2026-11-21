@@ -29,6 +29,7 @@ const FAMILY = [
   'tests/agent-session-process.test.mjs',
   'tests/agent-session.test.mjs',
   'tests/agent-slug.test.mjs',
+  'tests/hosted-conversation.test.mjs',
   'tests/hosted-land-acceptance-wait.test.mjs',
   'tests/hosted-wait-papercuts.test.mjs',
   'tests/lane-holder.test.mjs',

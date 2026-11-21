@@ -476,7 +476,6 @@ test('70b38346: default lists and first-write claims keep a working exact-note c
   );
   const context = hostedEditContext(hook);
   assert(context.includes(`Read: board {"id":"${row.id}"}`), context);
-  assert(context.includes(`Reply: board --reply {"id":"${row.id.slice(0, 8)}"}`), context);
   assert(context.isWellFormed());
   assert.equal(calls, 3, 'the hook reuses its single existing query');
   t.diagnostic(

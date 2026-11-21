@@ -25,10 +25,8 @@ export const verbModes: Readonly<Record<Verb, Readonly<Record<string, string>>>>
   land: { '--save': 'finish', '--withdraw': 'withdraw' },
 };
 
-/** Hosted board (Issue 9c8490a4): `board` reads, `board --post`/`--reply` write. Client actions. */
+/** The historical board still reads and resolves retained notes. */
 export const boardModes: Readonly<Record<string, string>> = {
-  '--post': 'board-post',
-  '--reply': 'board-reply',
   '--resolve': 'board-resolve',
 };
 
@@ -76,6 +74,8 @@ export const namedReads = [
   'lane-history',
   'flow',
   'board',
+  'ask',
+  'hand-back',
   'metrics',
   'decisions',
   'friction-list',
@@ -102,7 +102,7 @@ export const retiredActions: Readonly<Record<string, string>> = {
   review: 'diff {laneId} and show {laneId,path} read saved changes',
   link: 'status, landings and board receipts carry their links',
   brief: 'planning {id} and status {laneId} recover the task and next step',
-  handoff: 'board --post {to,text} leaves a note for the next agent',
+  handoff: 'hand-back {laneId,to,head,tried,left} hands the saved Lane back',
   'handoff-read': 'board {laneId} reads notes left on a Lane',
   report: 'metrics reads session totals',
   'making-of': 'lane-history {laneId} and landings trace an Intent to main',
@@ -143,6 +143,13 @@ export type VerbForm = { verb: string; flags: string[]; operator: boolean };
 
 /** Split `VERB [--mode…] [JSON | --command-file FILE | --help]` into its form and the remainder. */
 export function parseVerbForm(verb: string, rest: string[], operator = false): [VerbForm, string[]] {
+  invariant(
+    verb !== 'board-post' &&
+      verb !== 'board-reply' &&
+      (verb !== 'board' || !['--post', '--reply'].includes(rest[0] ?? '')),
+    'HOSTED_ACTION_UNSUPPORTED',
+    'Use ask or hand-back for shared work. Use board {id} to read retained notes.',
+  );
   const retired = Object.hasOwn(retiredActions, verb)
     ? verb
     : rest[0] !== undefined
