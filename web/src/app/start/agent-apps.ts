@@ -6,15 +6,22 @@
 // and the bare `nforge login` are Phase 8 and do not appear.
 import { hrefFor } from '../paths';
 
-export const agentApps = ['claude-code', 'codex', 'cursor', 'other'] as const;
+export const agentApps = ['claude-code', 'codex', 'cursor', 'opencode', 'pi', 'other'] as const;
 export type AgentApp = (typeof agentApps)[number];
 
 export const agentAppLabels: Record<AgentApp, string> = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
   cursor: 'Cursor',
+  opencode: 'OpenCode',
+  pi: 'Pi',
   other: 'Another app',
 };
+
+export const agentAppsSummary = `${agentApps
+  .slice(0, -1)
+  .map(app => agentAppLabels[app])
+  .join(', ')}, or another app`;
 
 /** A page of the docs that explains a step, so the step itself stays short (DESIGN.md rule 29). */
 export type DocsLink = { label: string; href: string };
@@ -99,36 +106,25 @@ export const appStepTitle = 'Tools for your agent app';
 /** The last step before an app is picked: the choice itself, and the docs for every app. */
 export const appStepDocs: readonly DocsLink[] = [HOOKS, MCP];
 
-/** The one step that differs by app, and the only optional one: tools (MCP, or the Codex plugin) on top of the
- * commands. Forge writes no client configuration; each line says where the entry goes and how to undo it. */
+const manualSetup: Record<AgentApp, string> = {
+  'claude-code': 'Add the forge entry to mcpServers in .mcp.json in the project folder.',
+  codex: 'Put the printed command and args in [mcp_servers.forge] in .codex/config.toml.',
+  cursor: 'Add the forge entry to mcpServers in .cursor/mcp.json.',
+  opencode:
+    'In opencode.json or opencode.jsonc, add forge under mcp.servers. Set type to local and command to an array with the executable followed by its arguments.',
+  pi: 'Add the forge entry to mcpServers in .pi/mcp.json. Pi reads project settings after it trusts the project.',
+  other:
+    'Add the printed forge entry to the app’s MCP settings. Remove that entry to undo. Any app with a terminal can run nforge agent . directly.',
+};
+
+/** MCP tools are optional. The shared CLI works from the terminal of any app. */
 export function appStep(app: AgentApp): SetupStep {
-  const step = { title: appStepTitle, optional: true, docs: appStepDocs };
-  if (app === 'claude-code')
-    return {
-      ...step,
-      detail:
-        'The first nforge run adds advisory hooks to Claude Code and prints the undo. For tools, add the printed forge entry to .mcp.json in the project folder; remove that entry to undo.',
-      commands: ['nforge mcp-config . --agent'],
-    };
-  if (app === 'codex')
-    return {
-      ...step,
-      detail:
-        'The first nforge run adds advisory hooks to Codex and prints the undo. For tools, this writes a plugin folder; its README says how to add it to Codex and how to remove it.',
-      commands: ['nforge plugin-config . NEW_DIRECTORY'],
-    };
-  if (app === 'cursor')
-    return {
-      ...step,
-      detail:
-        'Add the printed forge entry to .cursor/mcp.json in the project folder; remove that entry to undo. Forge adds no hooks to Cursor.',
-      commands: ['nforge mcp-config . --agent'],
-    };
   return {
-    ...step,
-    detail:
-      'Add the printed forge entry to the app’s MCP settings; remove that entry to undo. Hooks cover Claude Code and Codex only.',
-    commands: ['nforge mcp-config . --agent'],
+    title: appStepTitle,
+    optional: true,
+    docs: appStepDocs,
+    detail: manualSetup[app],
+    commands: [app === 'other' ? 'nforge mcp-config . --agent' : `nforge connect ${app}`],
   };
 }
 

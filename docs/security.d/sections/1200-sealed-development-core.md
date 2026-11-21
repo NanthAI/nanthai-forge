@@ -18,6 +18,11 @@ Forge IDs, with separate purpose labels; a server-supplied protocol ID is never
 accepted as the requested project's identity. Known-answer fixtures cover these
 layouts independently of the signing implementation.
 
+Dropping a tombstone can raise the set's version floor while existing live names
+keep their versions. A new change starts one above the higher of the name's
+current version and the floor of the verified head used for the write, including
+any compaction in that write.
+
 Device secret keys are kept in a private file readable by your user account:
 0600, in a 0700 configuration folder, outside projects and Lanes. The OS keychain
 is planned before Gate B (Issue `a9f9b608`). Re-login retains these keys. This does

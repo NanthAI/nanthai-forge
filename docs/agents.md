@@ -12,21 +12,41 @@ For work on Forge itself, read [AGENTS.md](../AGENTS.md), the [lead playbook](ag
 
 ## Connect over MCP
 
-Build or install Forge, then print a ready-made client entry:
+After [installing Forge](quickstart.md#install-the-development-cli) and signing the
+machine in, run one command from the hosted project checkout. The entry points
+to that local checkout and CLI installation.
+
+| App | Command | Project config |
+| --- | --- | --- |
+| Claude Code | `nforge connect claude-code` | `.mcp.json` |
+| Codex | `nforge connect codex` | `.codex/config.toml` |
+| Cursor | `nforge connect cursor` | `.cursor/mcp.json` |
+| OpenCode | `nforge connect opencode` | `opencode.json` or the existing `opencode.json(c)` |
+| Pi | `nforge connect pi` | `.pi/mcp.json` |
+
+Forge previews its entry before writing and prints the private backup path and
+undo command. It also previews the first-run Claude Code and Codex hooks, backs
+up any hook file it changes, and prints the command to remove Forge hooks from
+both apps. Open a new agent
+session so the app loads its project configuration. Refresh **Connect your agent
+app yourself** to see **Connected** after the app's first authenticated contact
+with Forge on this account. The page reads once per load.
+
+For manual setup or another app, print the entry:
 
 ```sh
 nforge mcp-config /absolute/path/to/project --agent
 ```
 
-Merge the printed `mcpServers.forge` entry into your client's configuration (Claude Code: `.mcp.json` in the project folder; Cursor: `.cursor/mcp.json`). Forge adds advisory hooks to Claude Code and Codex only; in Cursor, agents run the same `nforge agent` commands in its terminal. It uses the absolute Node and CLI paths. Run the server directly with Node because npm's output corrupts the stdio stream. Remove the entry to disconnect.
-
-For the Codex CLI, use the absolute Node and CLI paths from the printed JSON:
-
-```sh
-codex mcp add forge -- /absolute/path/to/node /absolute/path/to/cli-entry.js mcp /absolute/path/to/project --agent
-```
-
-Start a new session to load the server. Use `codex mcp remove forge` to disconnect. `nforge plugin-config ROOT NEW_DIRECTORY` also generates a local plugin with the skill and the MCP server for clients that load local plugins.
+Claude Code, Cursor and Pi use the printed `mcpServers.forge` entry. Codex
+uses `command` and `args` under `[mcp_servers.forge]`. OpenCode V2 uses a
+`local` entry under `mcp.servers` with the executable and arguments in one
+`command` array. App-level project trust applies. Remove the entry to undo.
+For a supported app, append `--client APP` to the print command to include
+connection confirmation.
+Any app with a terminal can also run `nforge agent ROOT` directly.
+`nforge plugin-config ROOT NEW_DIRECTORY` generates a local Codex plugin with
+the skill and MCP server.
 
 | Process | Tools | Authority |
 | --- | --- | --- |

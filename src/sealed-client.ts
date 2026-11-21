@@ -175,7 +175,7 @@ export class SealedClient {
             'Changing an existing secret needs a person until proposals are available.',
           );
           if (value === null && (!old || old.kind === 3)) return { operationId, name, removed: false };
-          // Make room before assigning a new name's version, so it starts above the resulting floor.
+          // Make room before choosing a version, since compaction can raise the floor.
           if (!old && reply.head.names.length >= 400) {
             const tombstone = reply.head.names
               .filter(n => n.kind === 3)
@@ -192,7 +192,7 @@ export class SealedClient {
           const record: NameRecord = {
             name,
             kind: value === null ? 3 : options.file ? 2 : 1,
-            valueVersion: old ? old.valueVersion + 1 : reply.head.versionFloor + 1,
+            valueVersion: Math.max(old?.valueVersion ?? 0, reply.head.versionFloor) + 1,
             valueEpoch: reply.roster.epoch,
             sealEpoch: reply.roster.epoch,
             ctHash: Buffer.alloc(0),

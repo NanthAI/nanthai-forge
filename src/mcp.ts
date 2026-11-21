@@ -17,6 +17,7 @@ export async function startMcp(
   workEnabled = false,
   agentMode = false,
   addressing: Record<string, unknown> = {},
+  setupClient?: string,
 ): Promise<McpServer> {
   const address = agentMode ? hostedAgentAddress(root, addressing) : null;
   if (address) root = addressOnlyRoot(root, address);
@@ -144,6 +145,19 @@ export async function startMcp(
     );
   }
   const stopOverlap = hosted ? registerAgentWorkflow(server, root, hosted) : undefined;
+  if (address && setupClient)
+    server.server.oninitialized = () => {
+      delete server.server.oninitialized;
+      void (
+        import(/* @vite-ignore */ new URL('./agent-connect-receipt.js', import.meta.url).href) as Promise<
+          typeof import('./agent-connect-receipt.js')
+        >
+      )
+        .then(({ recordAgentConnection }) => recordAgentConnection(address, setupClient))
+        .catch(() => {
+          // A missing login or an older backend leaves the connection unconfirmed. Tools still work.
+        });
+    };
   const originalClose = server.close.bind(server);
   let closing: Promise<void> | undefined;
   const cleanup = async () => {

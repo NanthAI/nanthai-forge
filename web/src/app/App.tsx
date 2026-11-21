@@ -141,6 +141,17 @@ function Pages() {
   useEffect(() => {
     if (needsSignIn) navigate(signInHref(location.pathname + location.search), { replace: true });
   }, [needsSignIn]);
+  useEffect(() => {
+    if (
+      import.meta.env.VITE_FORGE_POSTHOG_PROJECT_TOKEN &&
+      !isLoading &&
+      !needsSignIn &&
+      (route.frame !== 'project' || discovering)
+    )
+      void import('../product-analytics')
+        .then(({ captureBrowserAnalytics }) => captureBrowserAnalytics('screen_opened', route))
+        .catch(() => undefined);
+  }, [isLoading, needsSignIn, route, discovering]);
   if (isLoading || needsSignIn) return null;
   if (discovering)
     return (
@@ -207,6 +218,7 @@ function SignedIn({
   viewerHandle: string | undefined;
 }) {
   const { signOut } = useAuthActions();
+  const client = useConvex();
   const [palette, setPalette] = useState(false);
   const [keys, setKeys] = useState(false);
   const leave = () =>
@@ -240,7 +252,9 @@ function SignedIn({
   if (route.frame === 'bare')
     return (
       <BareFrame controls={controls}>
-        <Suspense fallback={null}>{route.page === 'import' ? <ImportRepository /> : <Start />}</Suspense>
+        <Suspense fallback={null}>
+          {route.page === 'import' ? <ImportRepository /> : <Start connectionClient={client} />}
+        </Suspense>
         {overlays()}
       </BareFrame>
     );
@@ -275,6 +289,12 @@ function ProjectView({
   const client = useConvex();
   const project = useQuery(api.urlProjects.resolve, { handle: route.handle, slug: route.project });
   const projectId = (project?.id ?? null) as Id<'hostedProjects'> | null;
+  useEffect(() => {
+    if (import.meta.env.VITE_FORGE_POSTHOG_PROJECT_TOKEN && projectId)
+      void import('../product-analytics')
+        .then(({ captureBrowserAnalytics }) => captureBrowserAnalytics('screen_opened', route, projectId))
+        .catch(() => undefined);
+  }, [route, projectId]);
   const { value: line, error: lineError } = useLiveLine(projectId);
   const connection = useConvexConnectionState();
   const feedError = !!lineError || (connection.hasEverConnected && !connection.isWebSocketConnected);

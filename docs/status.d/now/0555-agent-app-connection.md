@@ -1,0 +1,1 @@
+- **Connect an agent app.** `nforge connect APP` adds the hosted MCP server for Claude Code, Codex, Cursor, OpenCode or Pi with a preview, a backup and undo. The setup page reads the first authenticated connection for the selected app once per load.

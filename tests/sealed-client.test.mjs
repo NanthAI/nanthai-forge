@@ -199,6 +199,42 @@ test('owner genesis set/list/change/remove and cache reads use the real bounded 
   assert(await pins.load(project, 1));
   assert.equal(calls.filter(c => c.action === 'write').length, 3);
 });
+test('a direct write advances a retained live version past the compacted floor', async t => {
+  const { client, f, pins, project, transport } = setup(t);
+  const publishFixture = async previous => {
+    f.wrap();
+    await transport.write({ ...sealedWrite(f.reply, randomUUID(), previous), kind: 1 });
+    return framedHash(headBytes(f.reply.head));
+  };
+  f.name('API_TOKEN');
+  const initial = await publishFixture(null);
+  f.bump();
+  f.name('OLDEST_TOKEN', Buffer.alloc(0), { kind: 3, valueVersion: 7 });
+  const withOldest = await publishFixture(initial);
+  f.bump();
+  for (let index = 0; index < 398; index++) {
+    f.name(`REMOVED_TOKEN_${index}`, Buffer.alloc(0), { kind: 3 });
+  }
+  await publishFixture(withOldest);
+  clear(await client.read());
+
+  await client.write('NEW_TOKEN', Buffer.from('synthetic-value-for-new-name'));
+  const compacted = await pins.load(project, 1);
+  assert.equal(compacted.pin.head.versionFloor, 7);
+  assert.equal(compacted.pin.head.names.find(entry => entry.name === 'API_TOKEN').valueVersion, 1);
+  assert.equal(
+    compacted.pin.head.names.some(entry => entry.name === 'OLDEST_TOKEN'),
+    false,
+  );
+
+  await client.write('API_TOKEN', Buffer.from('synthetic-value-for-retained-name'));
+  const accepted = await client.read();
+  try {
+    assert.equal(accepted.pin.head.names.find(entry => entry.name === 'API_TOKEN').valueVersion, 8);
+  } finally {
+    clear(accepted);
+  }
+});
 test('a crash after accepted receipt compaction but before first pin publication recovers through the local creator proof', async t => {
   const { client, pins, project, calls, directory } = setup(t),
     operationId = randomUUID(),

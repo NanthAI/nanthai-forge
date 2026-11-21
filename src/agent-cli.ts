@@ -32,6 +32,7 @@ import { tmpdir } from 'node:os';
 import { ForgeError, invariant } from './errors.js';
 import { commandLine } from './error-teaching.js';
 import { housekeepingLines, type IdleLane, type OtherRunLane } from './lane-prune.js';
+import type { HostedAgentAddress } from './hosted-address.js';
 
 /** process: invoked as the nforge process (land detaches its submission and waits by default). */
 type AgentCliOptions = {
@@ -78,7 +79,11 @@ function readInput(path: string, name: string): string {
   }
 }
 
-type EffectiveCall = { root?: string; inputs?: { flag: string; value: string }[] };
+type EffectiveCall = {
+  root?: string;
+  inputs?: { flag: string; value: string }[];
+  analytics?: { address: HostedAgentAddress; command: string };
+};
 
 /** Preserve consumed or mutable inputs on a refused command, without printing their contents. */
 function fileRetry(error: unknown, inputs: EffectiveCall['inputs']): unknown {
@@ -113,9 +118,23 @@ export async function agentCli(args: string[], options: AgentCliOptions = {}): P
   const notices: string[] = [];
   // An address-only call runs in Forge's own state folder (59f0e296); the turn hook reads it there.
   const effective: EffectiveCall = {};
-  const result = await runAgentCli(args, options, notices, effective).catch(error => {
-    throw fileRetry(error, effective.inputs);
+  const capture = async (outcome: { reply: unknown } | { error: unknown }) => {
+    if (!effective.analytics) return;
+    const { address, command } = effective.analytics;
+    // A separate dist entry keeps the optional collector out of the shared CLI chunk graph.
+    const optional = import(
+      /* @vite-ignore */ new URL('./cli-product-analytics.js', import.meta.url).href
+    ) as Promise<typeof import('./cli-product-analytics.js')>;
+    await optional
+      .then(module => module.captureCliAnalytics(address, command, outcome))
+      .catch(() => undefined);
+  };
+  const result = await runAgentCli(args, options, notices, effective).catch(async caught => {
+    const error = fileRetry(caught, effective.inputs);
+    if (effective.analytics) await capture({ error });
+    throw error;
   });
+  if (effective.analytics) await capture({ reply: result });
   for (const notice of notices) process.stderr.write(notice);
   const pending = (
     result as
@@ -277,6 +296,22 @@ async function runAgentCli(
   const hosted = hostedAgentAddress(root, selected);
   if (hosted) effective.root = root = addressOnlyRoot(root, hosted);
   action = canonical(lowerVerb(form!, Boolean(hosted)));
+  if (
+    hosted &&
+    options.process &&
+    process.env.FORGE_POSTHOG_PROJECT_TOKEN &&
+    process.env.FORGE_POSTHOG_DEV_DEPLOYMENT &&
+    process.env.DO_NOT_TRACK !== '1' &&
+    process.env[LAND_CHILD_ENV] !== '1'
+  ) {
+    const known = [...lifecycleVerbs, ...namedReads, ...operatorActions].find(
+      verb => verb === requestedAction,
+    );
+    effective.analytics = {
+      address: hosted,
+      command: action === 'finish' ? 'land' : action === 'checkpoint' ? 'save' : (known ?? 'agent'),
+    };
+  }
   if (action === 'history') {
     invariant(
       hosted,

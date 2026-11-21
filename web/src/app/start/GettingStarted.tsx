@@ -12,7 +12,7 @@ import type { AutonomyPolicy } from '../../../../src/autonomy-policy';
 import { Key, Region, Row, State, Who } from '../../ds';
 import { A } from '../frames';
 import { hrefFor, type AppRoute } from '../paths';
-import { deploymentUrl, joinPrompt } from './agent-apps';
+import { agentAppsSummary, deploymentUrl, joinPrompt } from './agent-apps';
 import { approvalWords, useApprovalWrite, type ApprovalMode } from './approvals';
 import { ConnectSteps, CopyKey } from './parts';
 import {
@@ -247,9 +247,9 @@ export default function GettingStarted({
           title="Connect your agent app yourself"
           fold="start.connect"
           foldedByDefault
-          sum="Claude Code, Codex, Cursor, or any app with a terminal"
+          sum={agentAppsSummary}
         >
-          <ConnectSteps deployment={deploymentUrl()} project={projectUrl} />
+          <ConnectSteps deployment={deploymentUrl()} project={projectUrl} connectionClient={client} />
         </Region>
       ) : null}
     </>

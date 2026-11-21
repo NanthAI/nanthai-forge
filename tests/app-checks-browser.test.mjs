@@ -69,6 +69,7 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
         const name = getFunctionName(ref);
         window.calls.push({ name });
         if (name === 'projectSetup:read') return setup;
+        if (name === 'agentConnections:read') return q.has('connected') ? ['pi'] : [];
         if (name === 'projectAutonomy:read') return policy;
         if (name === 'projectHostedMainAudit:status') return JSON.stringify({ landing: null });
         if (name === 'projectHostedChannels:current') return JSON.stringify(main);
@@ -92,7 +93,7 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
     };
     const route = { frame: 'project', handle: 'example', project: 'parser', place: 'settings', section: 'checks', rest: '' };
     const feed = { main: { head: HEAD }, lanes: [], more: 0, moreIsLowerBound: false };
-    createRoot(document.getElementById('root')).render(q.has('start') ? <Start /> : <LandingChecks route={route} projectId="synthetic" projectName="Parser" feed={feed} viewerHandle="ada" />);
+    createRoot(document.getElementById('root')).render(q.has('start') ? <Start connectionClient={window.client} /> : <LandingChecks route={route} projectId="synthetic" projectName="Parser" feed={feed} viewerHandle="ada" />);
   `,
   );
   const { build } = await import('vite');
@@ -330,12 +331,34 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
   // Before a pick no app is pressed and the steps every app shares are already there.
   await page.getByRole('list', { name: 'Steps for any agent app' }).waitFor();
   assert.equal(await page.locator('[aria-label="Your agent app"] [aria-pressed="true"]').count(), 0);
+  const appOptions = page.getByRole('group', { name: 'Your agent app' }).getByRole('button');
+  assert.deepEqual(await appOptions.allTextContents(), [
+    'Claude Code',
+    'Codex',
+    'Cursor',
+    'OpenCode',
+    'Pi',
+    'Another app',
+  ]);
   await layouts('start-any');
   await page.getByRole('button', { name: 'Cursor', exact: true }).click();
   assert.match(
     await page.getByRole('list', { name: 'Steps for Cursor' }).textContent(),
-    /\.cursor\/mcp\.json/,
+    /nforge connect cursor/,
   );
+  assert.equal(await page.getByText(/\.cursor\/mcp\.json/).isVisible(), false);
+  await page.getByText('Manual setup').click();
+  await page.getByText(/\.cursor\/mcp\.json/).waitFor();
   await layouts('start-cursor');
+  await page.getByRole('button', { name: 'Pi', exact: true }).click();
+  assert.equal(await page.getByText('Connected', { exact: true }).count(), 0);
+  const connectionReads = () =>
+    page.evaluate(() => window.calls.filter(call => call.name === 'agentConnections:read').length);
+  assert.equal(await connectionReads(), 1, 'app choices and layout changes make no connection reads');
+
+  await page.goto('https://forge.test/-/new?start=1&connected=1');
+  await page.getByText('Connected', { exact: true }).waitFor();
+  assert.equal(await connectionReads(), 1);
+  await layouts('start-pi-connected');
   assert.deepEqual(errors, []);
 });

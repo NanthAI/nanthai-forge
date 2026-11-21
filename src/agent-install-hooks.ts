@@ -29,7 +29,10 @@ export function installEditHooks(
   home = homedir(),
   automatic = false,
   /** `runner` is for tests: it stands in for the installed CLI's runner. */
-  options: { runner?: string } = {},
+  options: {
+    runner?: string;
+    beforeWrite?: (files: readonly { path: string; before: string | null }[]) => void;
+  } = {},
 ) {
   for (const name of ['.claude', '.codex']) refuseRealUserState(join(home, name), 'agent hook config');
   if (automatic && !uninstall && !editHooksEnabled(undefined, home))
@@ -56,7 +59,8 @@ export function installEditHooks(
   const files = [join(home, '.claude', 'settings.json'), join(home, '.codex', 'hooks.json')];
   // Validate both client files before changing either one.
   const updates = files.map(path => {
-    const config: Config = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
+    const before = existsSync(path) ? readFileSync(path, 'utf8') : null;
+    const config: Config = before === null ? {} : JSON.parse(before);
     invariant(
       config && typeof config === 'object' && !Array.isArray(config),
       'BAD_ARGUMENT',
@@ -70,7 +74,7 @@ export function installEditHooks(
     );
     // An automatic run leaves hooks that point at another valid install alone; only an
     // explicit install-hooks takes them over. Missing or broken targets are still repaired.
-    if (automatic && !uninstall && pointsAtOtherInstall(config, runner!)) return { path, config };
+    if (automatic && !uninstall && pointsAtOtherInstall(config, runner!)) return { path, before, config };
     config.hooks ??= {};
     for (const event of ['PreToolUse', 'UserPromptSubmit', 'Stop']) {
       invariant(
@@ -84,14 +88,12 @@ export function installEditHooks(
           'BAD_ARGUMENT',
           'Client hook group must contain hooks.',
         );
-      const groups = (config.hooks[event] ?? [])
-        .map(group => ({
-          ...group,
-          hooks: group.hooks.filter(
-            hook => !isForgeHook(hook.command, runner ?? own) && !isTurnEndHook(hook.command),
-          ),
-        }))
-        .filter(group => group.hooks.length);
+      const groups = (config.hooks[event] ?? []).flatMap(group => {
+        const hooks = group.hooks.filter(
+          hook => !isForgeHook(hook.command, runner ?? own) && !isTurnEndHook(hook.command),
+        );
+        return hooks.length === group.hooks.length ? [group] : hooks.length ? [{ ...group, hooks }] : [];
+      });
       // UserPromptSubmit only fed the retired native turn store: installs now remove it.
       if (!uninstall && event !== 'UserPromptSubmit')
         groups.push(
@@ -108,15 +110,22 @@ export function installEditHooks(
       if (groups.length) config.hooks[event] = groups;
       else delete config.hooks[event];
     }
-    return { path, config };
+    return { path, before, config };
   });
+  const changes = updates.filter(({ before, config }) =>
+    before === null ? !uninstall : JSON.stringify(JSON.parse(before)) !== JSON.stringify(config),
+  );
+  options.beforeWrite?.(changes);
   if (!automatic) setEditHooksEnabled(!uninstall, undefined, home);
   const changed: string[] = [];
-  for (const { path, config } of updates) {
-    if (!existsSync(path) && uninstall) continue;
-    const bytes = JSON.stringify(config);
-    if (existsSync(path) && JSON.stringify(JSON.parse(readFileSync(path, 'utf8'))) === bytes) continue;
-    mkdirBelow(home, join(home, path.includes('.claude') ? '.claude' : '.codex'));
+  for (const { path, before, config } of changes) {
+    mkdirBelow(home, dirname(path));
+    if (options.beforeWrite)
+      invariant(
+        (existsSync(path) ? readFileSync(path, 'utf8') : null) === before,
+        'BAD_ARGUMENT',
+        'A hook config changed during setup. Retry to preview the current settings.',
+      );
     writeRecoveryState(path, config);
     changed.push(path);
   }

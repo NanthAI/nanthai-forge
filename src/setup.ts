@@ -10,21 +10,20 @@ import { hookHealth } from './agent-hook-health.js';
 import { hostedDoctor } from './hosted-doctor.js';
 
 export const diagnosticRuntime = { filesystemEventHealth };
+export function mcpServerConfig(root: string, agent?: boolean) {
+  return {
+    command: process.execPath,
+    args: [
+      fileURLToPath(new URL('./cli-entry.js', import.meta.url)),
+      'mcp',
+      root,
+      ...(agent ? ['--agent'] : []),
+    ],
+  };
+}
 export function mcpConfig(root: string, options: { agent?: boolean } = {}) {
   const workspace = new Workspace(root);
-  return {
-    mcpServers: {
-      forge: {
-        command: process.execPath,
-        args: [
-          fileURLToPath(new URL('./cli-entry.js', import.meta.url)),
-          'mcp',
-          workspace.root,
-          ...(options.agent ? ['--agent'] : []),
-        ],
-      },
-    },
-  };
+  return { mcpServers: { forge: mcpServerConfig(workspace.root, options.agent) } };
 }
 export async function doctor(root: string): Promise<object> {
   const hosted = hostedDoctor(root);

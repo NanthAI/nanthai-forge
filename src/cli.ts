@@ -5,7 +5,7 @@ import type { ExactConflictNotice } from './hosted-conflict-notice.js';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { ForgeError, invariant } from './errors.js';
 import { describeFailure, recordFailure } from './system-errors.js';
-import { cliTeachContext, teachReceipt } from './error-teaching.js';
+import { agentDeadEnd, cliTeachContext, teachReceipt } from './error-teaching.js';
 import { readFileSync } from 'node:fs';
 
 const HELP = `Forge is a source host and workspace for humans and AI agents working on the same code.
@@ -59,7 +59,8 @@ Usage:
   nforge mcp --public [SITE_URL]   # find public projects without a checkout
   nforge mcp <root> [--agent]   # source tools; --agent: a hosted checkout's agent tools
   nforge mcp-agent <forge-convex-deployment-url>
-  nforge mcp-config <root> [--agent]
+  nforge mcp-config <root> [--agent [--client APP]]
+  nforge connect <claude-code|codex|cursor|opencode|pi> [--undo BACKUP_ID]
   nforge plugin-config <root> <new-directory>
   nforge doctor <git-worktree-root | forge-clone-or-lane-root>
   nforge index <git-worktree-root>
@@ -205,6 +206,23 @@ async function main(args: string[]): Promise<unknown> {
       }),
     );
   }
+  if (args[0] === 'connect') {
+    // The emitted sibling keeps the config parsers and their dependency graph out of the CLI bundle.
+    const { agentConnect } = (await import(
+      /* @vite-ignore */ new URL('./agent-connect-cli.js', import.meta.url).href
+    )) as typeof import('./agent-connect-cli.js');
+    try {
+      return agentConnect(args.slice(1));
+    } catch (error) {
+      // The compiled sibling and the bundle have separate copies of ForgeError.
+      const { ForgeError: LocalForgeError } = (await import(
+        /* @vite-ignore */ new URL('./errors.js', import.meta.url).href
+      )) as typeof import('./errors.js');
+      if (error instanceof LocalForgeError)
+        throw new ForgeError(error.code, error.message, error.retryAt, error.recovery);
+      throw error;
+    }
+  }
   if (args[0] === 'plugin-config') {
     invariant(
       args.length === 3 && args[1] && args[2],
@@ -214,8 +232,15 @@ async function main(args: string[]): Promise<unknown> {
     return (await import('./plugin-config.js')).pluginConfig(args[1], args[2]);
   }
   if (args[0] === 'mcp-config' && args[2] === '--agent') {
-    invariant(args.length === 3 && args[1], 'BAD_ARGUMENT', 'Use mcp-config <root> --agent.');
-    return (await import('./setup.js')).mcpConfig(args[1], { agent: true });
+    const setupClient = args.length === 5 && args[3] === '--client' ? args[4] : undefined;
+    invariant(
+      args[1] && (args.length === 3 || setupClient),
+      'BAD_ARGUMENT',
+      'Use mcp-config <root> --agent [--client APP].',
+    );
+    const config = (await import('./setup.js')).mcpConfig(args[1], { agent: true });
+    if (setupClient) config.mcpServers.forge.args.push('--client', setupClient);
+    return config;
   }
   if (args[0] === 'mcp-agent') {
     invariant(args.length === 2 && args[1], 'BAD_ARGUMENT', 'Use mcp-agent <forge-convex-deployment-url>.');
@@ -230,12 +255,15 @@ async function main(args: string[]): Promise<unknown> {
     }
     const explicitHosted =
       args.length === 7 && args[2] === '--agent' && args[3] === '--url' && args[5] === '--project-id';
+    const setupClient =
+      args.length === 5 && args[2] === '--agent' && args[3] === '--client' ? args[4] : undefined;
     invariant(
       args[1] &&
         !args[1].startsWith('--') &&
         (args.length === 2 ||
           (args.length === 3 && ['--work', '--agent'].includes(args[2]!)) ||
-          explicitHosted),
+          explicitHosted ||
+          setupClient),
       'BAD_ARGUMENT',
       'Use mcp <root> [--work | --agent [--url URL --project-id ID]].',
     );
@@ -246,6 +274,7 @@ async function main(args: string[]): Promise<unknown> {
       args[2] === '--work' || args[2] === '--agent',
       args[2] === '--agent',
       explicitHosted ? { url: args[4], projectId: args[6] } : {},
+      setupClient,
     );
     return undefined;
   }
@@ -397,12 +426,12 @@ try {
       landChild: process.env.FORGE_LAND_CHILD === '1',
     });
     // A terminal error inside an agent receipt (a conflict, a failed check) names its help topic.
-    const printed =
-      (process.argv[2] === 'agent' || process.argv[2] === 'x') && process.env.FORGE_LAND_CHILD !== '1'
-        ? teachReceipt(receipt, cliTeachContext(process.argv.slice(2)))
-        : receipt;
+    const agentReply =
+      (process.argv[2] === 'agent' || process.argv[2] === 'x') && process.env.FORGE_LAND_CHILD !== '1';
+    const printed = agentReply ? teachReceipt(receipt, cliTeachContext(process.argv.slice(2))) : receipt;
+    const deadEnd = agentReply ? agentDeadEnd(printed) : undefined;
     process.stdout.write(
-      `${JSON.stringify(printed, null, process.argv[2] === 'agent' || process.argv[2] === 'x' || (process.argv[2] === 'host' && process.argv.includes('--json')) ? undefined : 2)}\n`,
+      `${JSON.stringify(deadEnd ? { ...(printed as object), deadEnd } : printed, null, process.argv[2] === 'agent' || process.argv[2] === 'x' || (process.argv[2] === 'host' && process.argv.includes('--json')) ? undefined : 2)}\n`,
     );
     // The JSON receipt on stdout carries stackOffer too; the line keeps it from being missed in a log.
     const offer = (output as { stackOffer?: { mode: string; text: string; command: string } } | null)
@@ -436,13 +465,19 @@ try {
   // Known errors stay terse; system and unexpected errors also log the stack and name the log.
   const failure =
     error instanceof ForgeError ? describeFailure(error, teaching) : recordFailure(error, teaching);
+  const deadEnd =
+    !forwardLimit &&
+    ['agent', 'x', 'wait'].includes(process.argv[2] ?? '') &&
+    process.env.FORGE_LAND_CHILD !== '1'
+      ? agentDeadEnd({ error: failure })
+      : undefined;
   if (forwardLimit) {
     process.stdout.write(`${JSON.stringify({ error: failure })}\n`);
   } else if (process.argv[2] === 'github-sync') {
     syncPending = false;
     process.stdout.write(`${JSON.stringify({ pushed: false, reason: failure.code, error: failure })}\n`);
   } else {
-    process.stderr.write(`${JSON.stringify({ error: failure })}\n`);
+    process.stderr.write(`${JSON.stringify({ error: failure, ...(deadEnd ? { deadEnd } : {}) })}\n`);
   }
   process.exitCode = 1;
 }

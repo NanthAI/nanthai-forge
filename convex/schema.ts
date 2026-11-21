@@ -16,6 +16,7 @@ import { hostedOverlapTables } from './projectHostedOverlapFields';
 import { boardTables } from './projectBoardFields';
 import { laneSnapshotTables } from './projectLaneSnapshotFields';
 import { abuseLimitTables } from './abuseLimitFields';
+import { connectedApps } from './agentConnectionFields';
 import { hostedFrictionTables } from './projectHostedFrictionFields';
 import { selfMetricBillTables } from './projectSelfMetricBillFields';
 import { selfMetricReceiptTables } from './projectSelfMetricReceiptFields';
@@ -673,6 +674,7 @@ export default defineSchema({
   forgeAccounts: defineTable({
     owner: v.string(),
     handle: v.string(),
+    connectedApps: v.optional(connectedApps),
     /** True until the person picks or keeps a handle once; unset until first checked. */
     handlePrompt: v.optional(v.boolean()),
     /** Set when a Your data cleanup leaves the secret grants shared with the person: every grant to them given at or

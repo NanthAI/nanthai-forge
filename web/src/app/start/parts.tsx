@@ -3,7 +3,9 @@
 // rule 22), a command block a person copies, the one-line first-run help that goes away once read (rule 29: no standing
 // explainers), and the connection steps with the app choice in their last step.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Key, Row, useFold } from '../../ds';
+import type { ConvexReactClient } from 'convex/react';
+import { api } from '../../../../convex/_generated/api';
+import { Key, Row, State, useFold } from '../../ds';
 import { A } from '../frames';
 import {
   agentAppLabels,
@@ -96,8 +98,28 @@ function DocsLinks({ docs }: { docs?: readonly DocsLink[] }) {
 
 /** One connection flow for every agent app: the steps all apps share, then the one optional step that differs, where
  * the app is chosen. No app is pressed until this browser picks one; picking changes only that step. */
-export function ConnectSteps({ deployment, project }: { deployment: string; project?: string }) {
+export function ConnectSteps({
+  deployment,
+  project,
+  connectionClient,
+}: {
+  deployment: string;
+  project?: string;
+  connectionClient?: Pick<ConvexReactClient, 'query'> | undefined;
+}) {
   const [app, setApp] = useState<AgentApp | null>(rememberedApp);
+  const [connected, setConnected] = useState<readonly AgentApp[]>();
+  useEffect(() => {
+    if (!connectionClient) return;
+    let open = true;
+    void connectionClient
+      .query(api.agentConnections.read, {})
+      .then(apps => open && setConnected(apps))
+      .catch(() => {});
+    return () => {
+      open = false;
+    };
+  }, [connectionClient]);
   const pick = (next: AgentApp) => {
     setApp(next);
     rememberApp(next);
@@ -158,8 +180,28 @@ export function ConnectSteps({ deployment, project }: { deployment: string; proj
               </div>
               {last ? (
                 <>
-                  <div className="meta">{last.detail}</div>
                   <CommandBlock label={last.title} text={last.commands.join('\n')} />
+                  {app === 'other' ? (
+                    <div className="meta">{last.detail}</div>
+                  ) : (
+                    <>
+                      <div className="meta">
+                        {app && connected?.includes(app) ? (
+                          <State word="Done">Connected</State>
+                        ) : (
+                          'Run from the project folder. Open a new agent session, then refresh this page.'
+                        )}
+                      </div>
+                      <details>
+                        <summary className="meta">Manual setup</summary>
+                        <p className="meta">{last.detail} Remove the entry to undo.</p>
+                        <CommandBlock
+                          label="Print the Forge MCP entry"
+                          text={`nforge mcp-config . --agent --client ${app}`}
+                        />
+                      </details>
+                    </>
+                  )}
                 </>
               ) : null}
               <DocsLinks docs={appStepDocs} />

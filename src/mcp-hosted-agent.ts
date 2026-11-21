@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { hostedHistorySchema } from './hosted-history-schema.js';
 import { hostedProvenanceSchema } from './hosted-provenance-schema.js';
-import { teach } from './error-teaching.js';
+import { agentDeadEnd, teach } from './error-teaching.js';
 import {
   hostedClientReadSchemas,
   hostedDiffSchema,
@@ -55,10 +55,16 @@ const progressLine = (event: unknown) => {
 const toolCall = (name: string, input: unknown) => `${name} ${JSON.stringify(input)}`;
 const read = { readOnlyHint: true, idempotentHint: true, openWorldHint: true };
 async function result(action: () => Promise<unknown>, replyDetail = false, replay?: () => string) {
+  const content = (value: unknown) => {
+    const deadEnd = agentDeadEnd(value);
+    return [
+      { type: 'text' as const, text: JSON.stringify(deadEnd ? { ...(value as object), deadEnd } : value) },
+    ];
+  };
   try {
     const value = await action();
     return {
-      content: [{ type: 'text' as const, text: JSON.stringify(replyDetail ? value : slimReceipt(value)) }],
+      content: content(replyDetail ? value : slimReceipt(value)),
     };
   } catch (error) {
     const safe =
@@ -69,20 +75,15 @@ async function result(action: () => Promise<unknown>, replyDetail = false, repla
       safe.code === 'RATE_LIMITED' && typeof safe.recovery?.retryAt === 'string' ? replay?.() : undefined;
     return {
       isError: true,
-      content: [
-        {
-          type: 'text' as const,
-          text: JSON.stringify({
-            error: {
-              code: safe.code,
-              message: safe.message,
-              ...(safe.recovery ? { recovery: safe.recovery } : {}),
-              ...teach(safe.code, { surface: 'mcp' }, safe.recovery),
-              ...(next ? { next } : {}),
-            },
-          }),
+      content: content({
+        error: {
+          code: safe.code,
+          message: safe.message,
+          ...(safe.recovery ? { recovery: safe.recovery } : {}),
+          ...teach(safe.code, { surface: 'mcp' }, safe.recovery),
+          ...(next ? { next } : {}),
         },
-      ],
+      }),
     };
   }
 }

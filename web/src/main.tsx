@@ -21,6 +21,10 @@ class AppBoundary extends Component<{ children: ReactNode }, { failed: boolean }
     return { failed: true };
   }
   componentDidCatch(error: unknown, info: ErrorInfo) {
+    if (import.meta.env.VITE_FORGE_POSTHOG_PROJECT_TOKEN)
+      void import('./product-analytics')
+        .then(({ captureBrowserAnalytics }) => captureBrowserAnalytics('screen_error'))
+        .catch(() => undefined);
     const stack = error instanceof Error ? error.stack : undefined;
     errorReporter.capture('render', error, {
       ...(stack || info.componentStack
@@ -76,7 +80,13 @@ function startOldApp() {
   );
   root.render(frame(<AppLoader />));
   void import('./Hosted')
-    .then(({ default: Hosted }) => root.render(frame(<Hosted />)))
+    .then(({ default: Hosted }) => {
+      root.render(frame(<Hosted />));
+      if (import.meta.env.VITE_FORGE_POSTHOG_PROJECT_TOKEN)
+        void import('./product-analytics')
+          .then(({ captureBrowserAnalytics }) => captureBrowserAnalytics('screen_opened'))
+          .catch(() => undefined);
+    })
     .catch(() =>
       root.render(frame(<ErrorToast error="Could not load Forge." retry={() => location.reload()} />)),
     );

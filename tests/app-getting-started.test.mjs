@@ -47,7 +47,7 @@ test('every step for every agent app runs a command the CLI ships, and nothing f
       assert.ok(steps.some(step => step.commands.includes(`nforge login ${DEPLOYMENT}`)));
     }
   assert.ok(verbs.includes("'check-settings'"), 'the checks page names a verb agents have');
-  assert.match(apps.setupSteps('other', DEPLOYMENT).at(-1).detail, /Hooks cover Claude Code and Codex only/);
+  assert.match(apps.setupSteps('other', DEPLOYMENT).at(-1).detail, /Any app with a terminal/);
 });
 
 test('no agent app is preselected: the shared steps show at once and the app is chosen in the last, optional step', () => {
@@ -55,7 +55,7 @@ test('no agent app is preselected: the shared steps show at once and the app is 
   assert.equal([...html.matchAll(/aria-pressed="false"/g)].length, apps.agentApps.length);
   assert.doesNotMatch(html, /aria-pressed="true"/, 'every app is offered the same way');
   assert.ok(html.includes(`nforge login ${DEPLOYMENT}`), 'the steps every app shares need no choice');
-  assert.doesNotMatch(html, /mcp-config|plugin-config/, 'no app’s tools step before the person picks');
+  assert.doesNotMatch(html, /mcp-config|nforge connect/, 'no app’s tools step before the person picks');
   for (const app of apps.agentApps) {
     assert.deepEqual(
       apps.setupSteps(app, DEPLOYMENT).slice(0, -1),
@@ -64,11 +64,9 @@ test('no agent app is preselected: the shared steps show at once and the app is 
     );
     const last = apps.appStep(app);
     assert.equal(last.optional, true, 'commands alone need nothing more than the shared steps');
-    assert.match(
-      last.detail,
-      /undo|remove/,
-      'Forge writes no client configuration; the step says how to undo',
-    );
+    assert.deepEqual(last.commands, [
+      app === 'other' ? 'nforge mcp-config . --agent' : `nforge connect ${app}`,
+    ]);
   }
   assert.doesNotMatch(
     JSON.stringify(apps.sharedSteps(DEPLOYMENT).filter(step => !step.needsPerson)),
@@ -105,16 +103,10 @@ test('the steps link the install guide, hooks, MCP and guidance, each to a docs 
   }
 });
 
-test('Cursor gets the steps that work today: its terminal and the MCP entry, with no hooks promised', () => {
+test('Cursor gets the one-step command and its project file for manual setup', () => {
   const last = apps.setupSteps('cursor', DEPLOYMENT).at(-1);
-  assert.deepEqual(last.commands, ['nforge mcp-config . --agent']);
+  assert.deepEqual(last.commands, ['nforge connect cursor']);
   assert.match(last.detail, /\.cursor\/mcp\.json/);
-  assert.match(last.detail, /no hooks to Cursor/);
-  assert.match(
-    last.detail,
-    /remove that entry to undo/,
-    'Forge writes no Cursor configuration; the person can undo',
-  );
 });
 
 test('the sign-in step sends the person to the devices page where the same code and name show', () => {
@@ -137,7 +129,7 @@ test('the copied prompt makes the agent explain first, and is the landing page�
   );
 });
 
-test('the start page offers both doors without a Convex call or a claim that an agent started', () => {
+test('the start page offers both doors without claiming that an agent started', () => {
   const html = renderToStaticMarkup(h(Start));
   assert.match(html, /Give this to your agent/);
   assert.match(html, /Import from GitHub/);

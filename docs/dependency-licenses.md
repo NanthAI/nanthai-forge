@@ -1199,7 +1199,7 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/signal-exit | 4.1.0 | ISC | development |
 | node_modules/slashes | 3.0.12 | ISC | development |
 | node_modules/slice-ansi | 9.0.1 | MIT | development |
-| node_modules/smol-toml | 1.9.1 | BSD-3-Clause | development |
+| node_modules/smol-toml | 1.9.1 | BSD-3-Clause | runtime |
 | node_modules/sonic-boom | 4.2.1 | MIT | development |
 | node_modules/source-map | 0.6.1 | BSD-3-Clause | development |
 | node_modules/source-map-js | 1.2.2 | BSD-3-Clause | development |

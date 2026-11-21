@@ -277,3 +277,76 @@ export function teachReceipt<T>(value: T, context: TeachContext, depth = 0): T {
   }
   return (out ?? value) as T;
 }
+
+type Reply = Record<string, unknown>;
+const record = (value: unknown): Reply => (value && typeof value === 'object' ? (value as Reply) : {});
+const text = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
+
+function hasContinuation(value: Reply) {
+  const { next, recovery, conflict, continuation, wake, failureCause } = value;
+  return (
+    (value.status === 'settling' && text(value.note)) ||
+    (value.phase === 'save' &&
+      typeof value.reason === 'string' &&
+      value.reason.includes('Replay the original save with this operationId.')) ||
+    [value.command, value.nextCommand, value.waitCommand, value.retryCommand, value.instruction].some(text) ||
+    (text(next) && next !== 'retry') ||
+    text(record(next).action) ||
+    text(record(failureCause).next) ||
+    text(record(wake).command) ||
+    [recovery, conflict, continuation].some(advice => {
+      const nested = record(advice);
+      return (
+        [nested.command, nested.nextCommand, nested.waitCommand, nested.instruction, nested.next].some(
+          text,
+        ) ||
+        text(record(nested.next).action) ||
+        text(record(nested.conflict).command)
+      );
+    })
+  );
+}
+
+function failureWithoutContinuation(value: Reply) {
+  const error = record(value.error);
+  const submission = record(value.submission);
+  const submissionError = record(submission.error);
+  const status = typeof value.status === 'string' ? value.status.toLowerCase() : '';
+  const phase = record(submission.observation).state ?? submission.phase ?? value.phase;
+  const code = error.code ?? submissionError.code ?? value.code;
+  // A requested cancel successfully stops the submission. Its retained error describes that submission.
+  if (
+    ['landed', 'accepted', 'passed', 'superseded'].includes(status) ||
+    phase === 'landed' ||
+    code === 'LANDING_CANCELLED'
+  )
+    return undefined;
+  if (
+    !text(code) &&
+    value.inProgress !== true &&
+    value.successful !== false &&
+    phase !== 'terminal-failed' &&
+    !['failed', 'in_progress', 'in-progress', 'submitted', 'settling', 'retryable', 'sync_required'].includes(
+      status,
+    )
+  )
+    return undefined;
+  if (hasContinuation(value) || hasContinuation(error) || hasContinuation(submissionError)) return undefined;
+  return typeof code === 'string' ? code : null;
+}
+
+/** Diagnose a non-success reply that leaves the caller without a way forward. Ordinary reads need no next step. */
+export function agentDeadEnd(reply: unknown) {
+  const envelope = record(reply);
+  if (hasContinuation(envelope)) return undefined;
+  const result = record(envelope.result);
+  const outer = failureWithoutContinuation(envelope);
+  const direct = outer === undefined ? failureWithoutContinuation(result) : outer;
+  if (direct !== undefined) return { code: direct };
+  if (Array.isArray(result.submissions) && !hasContinuation(result))
+    for (const entry of result.submissions) {
+      const code = failureWithoutContinuation(record(entry));
+      if (code !== undefined) return { code };
+    }
+  return undefined;
+}

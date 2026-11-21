@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // Before a first project (`/-/new`, the bare frame): give a prompt to the agent app the person already uses, or import
 // a repository yourself (Items 6beca32b, c3e4a838). The agent explains first and installs nothing until its person says
-// so; Forge never starts an agent. The page makes no Convex call: everything on it is words and commands. The import
+// so; Forge never starts an agent. The connection step reads this account’s confirmation once. The import
 // door opens the import page (`/-/new/import`).
+import type { ConvexReactClient } from 'convex/react';
 import { Region } from '../../ds';
 import { A } from '../frames';
 import { Head } from '../Place';
 import { hrefFor } from '../paths';
-import { deploymentUrl, explainFirstPrompt } from './agent-apps';
+import { agentAppsSummary, deploymentUrl, explainFirstPrompt } from './agent-apps';
 import { CommandBlock, ConnectSteps, CopyKey, FirstRunLine } from './parts';
 import './start.css';
 
-export default function Start() {
+export default function Start({ connectionClient }: { connectionClient?: Pick<ConvexReactClient, 'query'> }) {
   const prompt = explainFirstPrompt(location.origin);
   return (
     <div className="gs">
@@ -62,9 +63,9 @@ export default function Start() {
         title="Connect your agent app yourself"
         fold="start.connect"
         foldedByDefault
-        sum="Claude Code, Codex, Cursor, or any app with a terminal"
+        sum={agentAppsSummary}
       >
-        <ConnectSteps deployment={deploymentUrl()} />
+        <ConnectSteps deployment={deploymentUrl()} connectionClient={connectionClient} />
       </Region>
     </div>
   );

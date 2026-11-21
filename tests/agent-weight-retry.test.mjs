@@ -13,6 +13,9 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const baseline = readWeightBaseline(root);
 const clean = () => ({
   ...structuredClone(baseline.report),
+  // CPU calibration fixtures vary the measurements. The separate surface tests vary these lists.
+  boundary: [...baseline.boundary],
+  agentActions: [...baseline.agentActions],
   actual: { ...baseline.ceilings },
   samples: Object.fromEntries(Object.keys(baseline.report.samples).map(name => [name, [{ cpuMs: 0 }]])),
 });

@@ -1,0 +1,4 @@
+{
+  "issue": "7b74e67b",
+  "reason": "Codex project setup uses the already locked smol-toml parser to preserve neighboring settings and validate its exact TOML before writing and undoing. Only the connect command loads it. Local package smoke measured 138354218 installed bytes under the 151289995-byte ceiling, and the existing agent module, CPU, and tool-list ceilings are retained."
+}

@@ -13,6 +13,7 @@
   .gs-peek > summary { padding: var(--s-2) var(--gut); color: var(--text-2); font-size: var(--t-meta); }
   .gs-peek > .gs-cmd { margin: 0 var(--gut) var(--s-3); }
   .gs-apps { max-width: 100%; overflow-x: auto; }
+  .gs-apps .seg { flex-wrap: wrap; }
   .gs-docs { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-3); }
   /* A link inside a sentence is told apart by its rule, not by colour alone. */
   .gs-steps a.lk, .gs-steps + .pf a.lk { text-decoration: underline; }

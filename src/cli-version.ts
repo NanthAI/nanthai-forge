@@ -22,7 +22,7 @@ export function cliVersionCheck() {
 export const checkCliVersion = cliVersionCheck();
 export function cliDeferredCommand(args: string[]) {
   return (
-    ['agent', 'x', 'heavy', 'pull', 'clone'].includes(args[0]!) ||
+    ['agent', 'x', 'heavy', 'pull', 'clone', 'connect'].includes(args[0]!) ||
     // Public lookup works before login, including with an installed runtime.
     (args[0] === 'mcp' && args[1] === '--public')
   );
@@ -132,7 +132,13 @@ async function redispatch(
     const child = spawn(process.execPath, [entry, ...args], {
       stdio: stdin === undefined ? 'inherit' : ['pipe', 'inherit', 'inherit'],
       env: childEnv({
-        allow: RUNTIME_ENV,
+        allow: [
+          ...RUNTIME_ENV,
+          'DO_NOT_TRACK',
+          'FORGE_POSTHOG_PROJECT_TOKEN',
+          'FORGE_POSTHOG_DEV_DEPLOYMENT',
+          'FORGE_POSTHOG_REGION',
+        ],
         ...(verified ? { extra: { [VERIFIED]: `${verified}:${process.pid}` } } : {}),
       }),
     });
