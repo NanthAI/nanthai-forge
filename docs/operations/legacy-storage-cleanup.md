@@ -2,11 +2,12 @@
 
 This is a disposition and precondition guide, not permission to delete. New bytes already go to R2. P1 and B1.9 have separate approved scopes and evidence. Current scope lives on 13402039 (backup), 40dad5e0 (storage), 8678148e (R2 evidence), e542a26e (narrower follow-up) and 64d7192b (B1.9). See the [R2 backfill runbook](r2-backfill.md) for the existing evidence contract.
 
-## Current dev disposition
+## Dev inventory for online retirement
 
-Dev retains **16 files / 1,352,278 bytes**. The approved deleted bench
-project's 155,012 rows are removed, all 58 per-table after counts are zero, and
-six cursor references are migrated to R2 and verified. Three dev pause windows
+The online retirement inventory is **16 files / 1,352,278 bytes**. See Issue
+779d17be for live retirement and post-run inventory evidence. The approved
+deleted bench project's 155,012 rows are removed, all 58 per-table after counts
+are zero, and six cursor references are migrated to R2 and verified. Three dev pause windows
 removed 92,650 Convex files / 2,685,123,068 bytes in committed cleanup pages:
 43,400 files in the first, 46,996 in the first remaining-only run and 2,254 in
 the second, including class 4 files from owner-approved manifests. R2 objects
@@ -18,8 +19,8 @@ the cursors of eight source steps whose jobs stopped at the cutover. The
 those cursors. Use [online retirement](#online-retirement) for these files.
 The CLI no longer has a Convex upload path (`uploadUrl` /
 `putConvexUpload`): every upload is a presigned R2 PUT. The guard's legacy
-read and record-field allowlist entries remain while those files and the legacy
-`storageId` columns exist.
+read and record-field allowlist entries remain for the legacy `storageId`
+columns.
 
 The expand reader checks one indexed tombstone on a legacy file miss. A recorded
 copy is fetched from R2 and verified against its pinned size and SHA-256 before
@@ -45,11 +46,25 @@ operation and a new lead go.
 ## Online retirement
 
 Issue 779d17be authorizes the dev retirement of the last 16 native files while
-landings run. Keep the exact private inventory, verified R2 keys and original
-request. Use the deployed `projectLegacyStorageRetirement:run` action with
-`apply: false` first. It checks the native file and current indexed owners and
-streams each existing same-project copy through SHA-256. It returns a count and
-changes no records. Stop if any native or R2 pin differs, a copy is missing,
+landings run. Keep the exact private inventory, R2 keys and original request.
+Start with the deployed `projectLegacyStorageRetirement:run` action and
+`apply: false`. It checks the native files and current indexed owners and
+streams each same-project copy through SHA-256 without changing records.
+
+When a copy is missing, invoke `projectLegacyStorageRetirement:copyMissing`
+with the same page and no `apply` field. It rechecks the page, checks which
+keys are absent, and uploads only those copies. Each upload checks the native
+bytes against the pinned size and SHA-256 and uses a create-only PUT. An
+existing object is left intact, including on retry. This step writes no
+tombstones, native files or retirement receipts. Both the copy and read-only
+checks use `v1/p/<project>/o/<sha256>`.
+
+The approved dev run keeps both maintenance switches off and runs alongside
+ordinary landings. Confirm any earlier R2 sweep has settled before recreating
+a canonical key. An already-claimed sweep can still deliver its delete.
+
+Repeat `run` with `apply: false` after preparing copies. Require a full pass
+before applying. Stop if a native or R2 pin differs, a copy remains missing,
 or the registered incident replay fails. Run the existing read-only preflight
 for the named stale source jobs before settling them.
 

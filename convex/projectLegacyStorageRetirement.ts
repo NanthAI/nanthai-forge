@@ -6,12 +6,13 @@ import { internalAction, internalMutation, internalQuery, type QueryCtx } from '
 import { retirementPin } from './legacyStorageCleanupFields';
 import { checkLegacyFile } from './legacyStoragePinGuard';
 import { cleanupReceipt, recordCleanup } from './legacyStorageReceipts';
-import { lookupLegacyCopy, verifyLegacyCopy } from './legacyStorageRead';
+import { lookupLegacyCopy, nativeLegacyBlob, verifyLegacyCopy } from './legacyStorageRead';
 import { findObjects } from './projectObjectFind';
-import { r2Config, r2Key } from './r2';
+import { storeSourceBytes } from './projectSourceBytes';
+import { headObject, r2Config, r2Key } from './r2';
 import { digest } from '../src/state/hash';
 import { mapExchange } from '../src/exchange-parallel';
-import { invariant } from '../src/errors';
+import { ForgeError, invariant } from '../src/errors';
 
 const scope = v.object({
   projectId: v.id('hostedProjects'),
@@ -200,17 +201,54 @@ export const commit = internalMutation({
   },
 });
 
-/** Rehearse without writes, or verify and retire an exact page. Uses only
- * existing R2 copies. A replay returns the original receipt before any GET. */
+const prepareRetirement = makeFunctionReference<'query', Scope, Infer<typeof prepared>>(
+  'projectLegacyStorageRetirement:prepare',
+);
+
+/** Prepare missing copies from pinned native bytes. Retirement verifies the
+ * complete R2 bodies separately before it can commit a switch. */
+export const copyMissing = internalAction({
+  args: scope.fields,
+  returns: v.object({ preparedCopies: v.number() }),
+  handler: async (ctx, input) => {
+    requireApprovedDev();
+    const prior = await ctx.runQuery(prepareRetirement, input);
+    if ('receipt' in prior) return { preparedCopies: 0 };
+
+    const config = r2Config();
+    const copies = uniqueCopies(input.pins);
+    const heads = await mapExchange(copies, 4, async copy => {
+      const head = await headObject(config, copy.copyKey);
+      if (head.status === 'error')
+        throw new ForgeError('R2_OBJECT_UNAVAILABLE', `Retained copy HEAD failed: ${head.detail}.`);
+      return head.status;
+    });
+    let preparedCopies = 0;
+    for (const [index, copy] of copies.entries()) {
+      if (heads[index] !== 'missing') continue;
+      const file = await nativeLegacyBlob(ctx, copy.storageId);
+      invariant(file && file.size === copy.size, 'EVIDENCE_CHANGED', 'The native copy source changed.');
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      invariant(
+        digest(bytes) === copy.digest,
+        'BLOB_DIGEST_MISMATCH',
+        'The native copy source differs from its pin.',
+      );
+      await storeSourceBytes(ctx, input.projectId, bytes, { sha256: copy.digest, size: copy.size });
+      preparedCopies++;
+    }
+    return { preparedCopies };
+  },
+});
+
+/** Rehearse without writes, or verify and retire an exact page. A replay
+ * returns the original receipt before any GET. */
 export const run = internalAction({
   args: { ...scope.fields, apply: v.boolean() },
   returns: v.object({ verifiedCopies: v.number(), receipt: v.union(result, v.null()) }),
   handler: async (ctx, { apply, ...input }) => {
     requireApprovedDev();
-    const prior: Infer<typeof prepared> = await ctx.runQuery(
-      makeFunctionReference<'query'>('projectLegacyStorageRetirement:prepare'),
-      input,
-    );
+    const prior = await ctx.runQuery(prepareRetirement, input);
     if ('receipt' in prior) return { verifiedCopies: 0, receipt: prior.receipt };
     const copies = uniqueCopies(input.pins),
       verifiedAt = Date.now();

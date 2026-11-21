@@ -173,7 +173,11 @@ test('retirement checks every full copy first and leaves native files intact on 
   );
   assert.equal(requests.length, 0);
   objects.set('/synthetic/' + file.copyKey, payload);
-  await assert.rejects(retire(false), { code: 'R2_OBJECT_UNAVAILABLE' });
+  await assert.rejects(retire(false), { code: 'R2_OBJECT_UNAVAILABLE', message: /R2 HTTP 404/ });
+  await assert.rejects(retire(true), { code: 'R2_OBJECT_UNAVAILABLE', message: /R2 HTTP 404/ });
+  assert.equal(f.tables.legacyStorageTombstones.size, 0);
+  assert.equal(f.tables.legacyStorageCleanupPages.size, 0);
+  assert(f.files.has(file.storageId) && f.files.has(second.storageId));
   objects.set('/synthetic/' + second.copyKey, Buffer.alloc(second.size, 1));
   await assert.rejects(retire(true), { code: 'BLOB_DIGEST_MISMATCH' });
   assert.equal(f.tables.legacyStorageTombstones.size, 0);
@@ -233,6 +237,77 @@ test('retirement checks every full copy first and leaves native files intact on 
   await assert.rejects(executeRetirement(transaction, { ...page, pins: [page.pins[0]] }), {
     code: 'OPERATION_REUSED',
   });
+});
+
+test('copy preparation restores an absent R2 object from exact native bytes and never switches the page', async t => {
+  const { objects, hooks, requests } = fakeSourceR2(t);
+  hooks.echo = true;
+  process.env.CONVEX_CLOUD_URL = devDeployment;
+  const { f, file } = await fileFixture();
+  const bytes = Buffer.from('another retained file');
+  const existing = pin(await f.ctx.storage.store(new Blob([bytes])), 'project', bytes);
+  const existingKey = '/synthetic/' + existing.copyKey;
+  const copyKey = '/synthetic/' + file.copyKey;
+  const page = retirementPage([file, existing]);
+  const transaction = (_, fn, args) => f.transaction(() => fn._handler(f.ctx, args));
+  const copy = (storage = f.ctx.storage) =>
+    retirement.copyMissing._handler(
+      {
+        storage,
+        runQuery: (_, args) => transaction('prepare', retirement.prepare, args),
+      },
+      page,
+    );
+  objects.set(existingKey, bytes);
+
+  const fetch = globalThis.fetch;
+  let unavailable = true;
+  t.mock.method(globalThis, 'fetch', (url, init) => {
+    if (init?.method === 'PUT') assert.equal(new Headers(init.headers).get('if-none-match'), '*');
+    return unavailable && new URL(url).pathname === existingKey
+      ? Promise.resolve(new Response(null, { status: 403 }))
+      : fetch(url, init);
+  });
+  await assert.rejects(copy(), { code: 'R2_OBJECT_UNAVAILABLE', message: /HTTP 403/ });
+  assert.equal(objects.has(copyKey), false);
+
+  unavailable = false;
+  await assert.rejects(copy({ ...f.ctx.storage, get: async () => new Blob([Buffer.alloc(file.size)]) }), {
+    code: 'BLOB_DIGEST_MISMATCH',
+  });
+  assert.equal(objects.has(copyKey), false);
+
+  assert.deepEqual(await copy(), { preparedCopies: 1 });
+  assert.deepEqual(objects.get(copyKey), payload);
+  assert.deepEqual(objects.get(existingKey), bytes);
+  assert.deepEqual(await copy(), { preparedCopies: 0 });
+  assert.equal(requests.filter(method => method === 'PUT').length, 1);
+  assert.deepEqual(await executeRetirement(transaction, page, false), { verifiedCopies: 2, receipt: null });
+  assert.equal(f.tables.legacyStorageTombstones.size, 0);
+  assert.equal(f.tables.legacyStorageCleanupPages.size, 0);
+  assert(f.files.has(file.storageId) && f.files.has(existing.storageId));
+});
+
+test('a lost legacy copy upload reply reconciles without overwriting or switching the native file', async t => {
+  const { objects, hooks, requests } = fakeSourceR2(t);
+  process.env.CONVEX_CLOUD_URL = devDeployment;
+  const { f, file } = await fileFixture();
+  const page = retirementPage([file]);
+  const copy = () =>
+    retirement.copyMissing._handler(
+      {
+        storage: f.ctx.storage,
+        runQuery: (_, args) => f.transaction(() => retirement.prepare._handler(f.ctx, args)),
+      },
+      page,
+    );
+  hooks.lostPut = true;
+  await assert.rejects(copy(), { name: 'SourceIoError' });
+  assert.deepEqual(objects.get('/synthetic/' + file.copyKey), payload);
+  assert.deepEqual(await copy(), { preparedCopies: 0 });
+  assert.equal(requests.filter(method => method === 'PUT').length, 1);
+  assert(f.files.has(file.storageId));
+  assert.equal(f.tables.legacyStorageTombstones.size, 0);
 });
 
 function* orders(steps) {

@@ -78,7 +78,11 @@ export async function verifyLegacyCopy(
     await presignGet(r2Config(), copy.copyKey),
     { headers: { 'accept-encoding': 'identity' }, redirect: 'error' },
     async (response, progressed) => {
-      invariant(response.ok, 'R2_OBJECT_UNAVAILABLE', 'Retired file copy is unavailable.');
+      invariant(
+        response.ok,
+        'R2_OBJECT_UNAVAILABLE',
+        `Retired file copy is unavailable (R2 HTTP ${response.status}).`,
+      );
       const hash = sha256.create();
       let size = 0;
       if (response.body) {
