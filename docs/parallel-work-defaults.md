@@ -268,10 +268,21 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   Relinks never hold two exclusive install locks, so two Lanes can swap hashes without deadlocking.
   Abandoned partial installs can be reclaimed once their installer is gone. Unrecognised cache folders,
   including the separate manager download caches, are left alone.
-- Completed sealed-package sizes are memoised locally; writable tool output is counted on every sweep.
-  Explicit prune remeasures the whole install.
-  Automatic runs read entry metadata and registered/root references, measuring new or legacy sealed installs
-  once. They remove read-only trees by restoring directory permissions without following symlinks.
+- The eviction budget uses apparent installed-tree bytes. Completed sealed-package sizes are memoised
+  locally and writable tool output is counted on every sweep. Automatic runs read entry metadata and
+  registered/root references, measuring new or legacy sealed installs once. They remove read-only
+  trees by restoring directory permissions without following symlinks.
+- Explicit prune reports the current cache footprint in `dependencies.bytes` (after removal with
+  `--apply`). It sums allocated 512-byte blocks, skips symlink targets and counts each hard-linked
+  inode once per filesystem, like `du -sk` on a quiet cache. `downloadBytes` is included in that
+  total and gets credit for links shared between downloads and installs. These are filesystem
+  allocations, with no attempt to identify shared copy-on-write extents. `installedBytes` is the
+  estimated installed-tree budget usage after the previewed or applied eviction. Per-entry eviction
+  estimates use the same apparent-byte method as that budget. Download stores stay outside eviction.
+  If another sweep holds the lock, prune reports `status: "busy"` and null sizes. An absent cache
+  reports `status: "measured"` and zero bytes. If a directory moves during inspection or the
+  disk walk fails, prune reports `status: "unavailable"` with null disk totals and retains its
+  eviction receipt.
   The receipt lists removed or retained entries; automatic removals print the reclaimed size. Opening
   a Lane again reinstalls an evicted dependency tree when needed.
 - A finished install's packages are read-only; its root, each `node_modules` root and tool-cache folders

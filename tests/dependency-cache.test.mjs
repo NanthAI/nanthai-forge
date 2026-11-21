@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
+import fs, {
   existsSync,
+  linkSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   readlinkSync,
   renameSync,
   realpathSync,
   rmSync,
+  truncateSync,
   writeFileSync,
 } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { join, dirname, basename } from 'node:path';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import { pruneDependencyCache, touchDependencyEntry } from '../dist/dependency-cache.js';
@@ -188,6 +193,145 @@ test('nforge prune previews dependency eviction and --apply removes the same unu
     [entry],
   );
   assert.equal(existsSync(entry), false);
+});
+
+test('prune distinguishes a busy dependency sweep from an empty cache', async t => {
+  const f = fixture(t);
+  const readStates = async () => new Map();
+  const empty = (await pruneCli([], readStates)).dependencies;
+  assert.equal(empty.status, 'measured');
+  assert.equal(empty.bytes, 0);
+
+  const entry = f.entry(1);
+  const sweep = tryHeavySlot(join(f.cache, '.gc.lock'), 1);
+  assert.ok(sweep);
+  try {
+    const busy = (await pruneCli([], readStates)).dependencies;
+    assert.equal(busy.status, 'busy');
+    assert.equal(busy.bytes, null);
+    assert.equal(busy.downloadBytes, null);
+    assert.equal(busy.installedBytes, null);
+    assert.deepEqual(busy.wouldRemove, []);
+    assert.equal(existsSync(entry), true);
+  } finally {
+    rmSync(sweep, { recursive: true });
+  }
+  assert.equal((await pruneCli([], readStates)).dependencies.bytes > 0, true);
+});
+
+test('prune measures allocated cache bytes once per hard-linked inode, including downloads', async t => {
+  const f = fixture(t);
+  const first = f.entry(1),
+    second = f.entry(2),
+    downloads = join(f.cache, 'downloads'),
+    store = join(downloads, 'pnpm'),
+    outside = join(f.directory, 'outside');
+  mkdirSync(store, { recursive: true });
+  mkdirSync(outside);
+  writeFileSync(join(outside, 'private'), Buffer.alloc(256 * 1024));
+  linkDirectory(outside, join(store, 'outside'));
+  const payload = join(store, 'shared'),
+    sparse = join(store, 'sparse');
+  writeFileSync(payload, Buffer.alloc(64 * 1024, 1));
+  writeFileSync(sparse, '');
+  truncateSync(sparse, 4 * 1024 * 1024);
+  for (const entry of [first, second]) {
+    const installed = join(entry, 'node_modules', 'dep', 'index.js');
+    rmSync(installed);
+    linkSync(payload, installed);
+  }
+  linkSync(payload, join(store, 'shared-again'));
+  process.env.FORGE_DEPS_CACHE_MAX_GB = '0.000000001';
+  const readStates = async () => new Map();
+  const preview = (await pruneCli([], readStates)).dependencies;
+  const allocated = (...paths) => paths.reduce((sum, path) => sum + lstatSync(path).blocks * 512, 0);
+  const downloadBytes = allocated(downloads, store, payload, sparse, join(store, 'outside'));
+  assert.equal(preview.downloadBytes, downloadBytes);
+  assert.equal(
+    preview.bytes,
+    downloadBytes +
+      allocated(f.cache, join(f.cache, '.gc.lock'), `${first}.lock`, `${second}.lock`) +
+      [first, second].reduce(
+        (sum, entry) =>
+          sum +
+          allocated(
+            entry,
+            join(entry, 'node_modules'),
+            join(entry, 'node_modules', 'dep'),
+            join(entry, '.forge-complete'),
+            join(entry, '.forge-usage.json'),
+          ),
+        0,
+      ),
+  );
+  assert.deepEqual(
+    preview.wouldRemove.map(item => item.entry),
+    [first, second],
+  );
+  assert.equal(existsSync(first) && existsSync(second), true);
+  const applied = (await pruneCli(['--apply'], readStates)).dependencies;
+  assert.equal(applied.downloadBytes, downloadBytes);
+  assert.equal(
+    applied.bytes,
+    downloadBytes + allocated(f.cache, join(f.cache, '.gc.lock'), `${first}.lock`, `${second}.lock`),
+  );
+  assert.equal(readFileSync(payload).length, 64 * 1024);
+});
+
+test('prune retains completed removals when a download directory cannot be measured', async t => {
+  const f = fixture(t),
+    entry = f.entry(1),
+    downloads = join(f.cache, 'downloads');
+  mkdirSync(downloads);
+  process.env.FORGE_DEPS_CACHE_MAX_GB = '0.000000001';
+  const readDirectory = readdirSync;
+  const mock = t.mock.method(fs, 'readdirSync', (path, ...args) => {
+    if (path === downloads)
+      throw Object.assign(new Error('fixture denied directory read'), { code: 'EACCES' });
+    return readDirectory(path, ...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = (await pruneCli(['--apply'], async () => new Map())).dependencies;
+    assert.equal(result.status, 'unavailable');
+    assert.equal(result.bytes, null);
+    assert.equal(result.downloadBytes, null);
+    assert.deepEqual(
+      result.removed.map(item => item.entry),
+      [entry],
+    );
+    assert.equal(existsSync(entry), false);
+  } finally {
+    mock.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
+test('prune discards the disk total when a download directory is replaced during measurement', async t => {
+  const f = fixture(t),
+    downloads = join(f.cache, 'downloads'),
+    outside = join(f.directory, 'outside');
+  mkdirSync(downloads, { recursive: true });
+  mkdirSync(outside);
+  writeFileSync(join(outside, 'outside-file'), 'outside');
+  const readDirectory = readdirSync;
+  const mock = t.mock.method(fs, 'readdirSync', (path, ...args) => {
+    if (path === downloads) {
+      renameSync(downloads, join(f.directory, 'moved'));
+      linkDirectory(outside, downloads);
+    }
+    return readDirectory(path, ...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = (await pruneCli([], async () => new Map())).dependencies;
+    assert.equal(result.status, 'unavailable');
+    assert.equal(result.bytes, null);
+    assert.equal(result.downloadBytes, null);
+  } finally {
+    mock.mock.restore();
+    syncBuiltinESMExports();
+  }
 });
 
 test('the default budget is 4 GiB and a positive GiB override changes it', t => {

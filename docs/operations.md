@@ -1767,7 +1767,10 @@ claimed. The lead owns deployment, the dev pass and billed-usage qualification.
 
 The shared installed-tree cache uses a 4 GiB soft budget. Override it with a
 positive `FORGE_DEPS_CACHE_MAX_GB` value (GiB). `nforge prune` previews the local
-LRU eviction; `nforge prune --apply` removes unused read-only installs. Existing
+LRU eviction. `nforge prune --apply` removes unused read-only installs. Existing
 checkout references and running install/link locks are kept even above budget.
+The `dependencies.bytes` figure measures current allocated disk space across
+the cache, including `dependencies.downloadBytes` for package-manager downloads.
+A busy sweep reports `dependencies.status: "busy"` with no numeric total.
 See [dependency sharing](parallel-work-defaults.md#sharedependencies) for scope,
 size accounting, automatic eviction and changed-lockfile relinking.

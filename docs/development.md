@@ -73,7 +73,8 @@ Lane start/open and dependency refresh reuse sealed installs under
 Unused installs are evicted by last use during existing dependency work;
 `nforge prune` previews eviction and `nforge prune --apply` removes eligible entries.
 Live checkout links and running install/link locks are always retained, even above
-the budget. Prune remeasures sizes; ordinary sweeps reuse sealed-package size metadata and count
+the budget. Explicit prune reports allocated space for the whole cache, including
+manager downloads. Ordinary sweeps reuse sealed-package size metadata and count
 writable tool output.
 There are no new calls, DB I/O, background workers or idle timers. Changed lockfiles
 relink at preflight/open automatically. A clone root with its own `node_modules`

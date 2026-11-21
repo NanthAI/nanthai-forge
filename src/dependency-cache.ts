@@ -19,6 +19,7 @@ import { tryHeavySlot } from './heavy-slots.js';
 import { listLanes } from './lane-registry.js';
 import { readLink } from './dependency-relink.js';
 import { removeInstall } from './dependency-seal.js';
+import { dependencyCacheDiskUsage } from './dependency-cache-disk.js';
 
 const ENTRY = /^((?:npm|pnpm|yarn|bun)(?:-scripts|-rebuild|-skipped)?-[0-9a-f]{24})(?:\.tmp-[a-zA-Z0-9]+)?$/;
 const lockDirectory = (entry: string) => join(dirname(entry), `${ENTRY.exec(basename(entry))![1]}.lock`);
@@ -154,9 +155,12 @@ function referenced(entry: string, roots: string[]): boolean {
       }
     });
 }
-export type DependencyCachePrune = {
+type DependencyCachePrune = {
   budgetBytes: number;
-  bytes: number;
+  status: 'measured' | 'busy' | 'unavailable';
+  bytes: number | null;
+  downloadBytes?: number | null;
+  installedBytes?: number | null;
   removed: { entry: string; bytes: number }[];
   wouldRemove: { entry: string; bytes: number }[];
   kept: { entry: string; reason: string }[];
@@ -184,7 +188,9 @@ export function pruneDependencyCache(
     (Number.isFinite(configured) && configured > 0 ? configured * 1024 ** 3 : DEFAULT_BYTES);
   const result: DependencyCachePrune = {
     budgetBytes,
+    status: 'measured',
     bytes: 0,
+    ...(options.remeasure ? { downloadBytes: 0, installedBytes: 0 } : {}),
     removed: [],
     wouldRemove: [],
     kept: [],
@@ -193,7 +199,14 @@ export function pruneDependencyCache(
   if (!stat(cache)) return result;
   cache = canonicalRoot(cache);
   const sweep = tryHeavySlot(join(cache, '.gc.lock'), 1);
-  if (!sweep) return result;
+  if (!sweep)
+    return {
+      ...result,
+      status: 'busy',
+      bytes: null,
+      ...(options.remeasure ? { downloadBytes: null, installedBytes: null } : {}),
+    };
+  let installedBytes = 0;
   try {
     const roots = knownRoots(options.roots ?? []);
     const entries = readdirSync(cache)
@@ -209,12 +222,12 @@ export function pruneDependencyCache(
         Number.isFinite(item.tools)
       ) {
         item.bytes = item.bytes! - (item.tools ?? 0) + toolBytes(item.entry, item.folders);
-        result.bytes += item.bytes;
+        installedBytes += item.bytes;
         continue;
       }
       const lock = tryHeavySlot(lockDirectory(item.entry), 1);
       if (!lock) {
-        result.bytes += item.bytes ?? 0;
+        installedBytes += item.bytes ?? 0;
         result.kept.push({ entry: item.entry, reason: 'Install or link is running.' });
         continue;
       }
@@ -225,7 +238,7 @@ export function pruneDependencyCache(
             ? bytes(item.entry)
             : item.bytes!;
         item.tools = toolBytes(item.entry, item.folders);
-        result.bytes += item.bytes!;
+        installedBytes += item.bytes!;
         if (result.apply)
           writeUsage(item.entry, {
             bytes: item.bytes!,
@@ -239,7 +252,7 @@ export function pruneDependencyCache(
       }
     }
     for (const item of entries) {
-      if (result.bytes <= budgetBytes) break;
+      if (installedBytes <= budgetBytes) break;
       if (item.bytes === undefined || result.kept.some(kept => kept.entry === item.entry)) continue;
       const lock = tryHeavySlot(lockDirectory(item.entry), 1);
       if (!lock) {
@@ -264,7 +277,7 @@ export function pruneDependencyCache(
         }
         if (result.apply) removeInstall(item.entry);
         (result.apply ? result.removed : result.wouldRemove).push({ entry: item.entry, bytes: item.bytes });
-        result.bytes -= item.bytes;
+        installedBytes -= item.bytes;
       } finally {
         rmSync(lock, { recursive: true, force: true });
         // The lock directory persists: removing it could race a new slot claim.
@@ -273,7 +286,14 @@ export function pruneDependencyCache(
   } finally {
     rmSync(sweep, { recursive: true, force: true });
   }
-  return result;
+  if (!options.remeasure) return { ...result, bytes: installedBytes };
+  // The separate disk report is observational. A slow or unreadable cache must not
+  // hold the sweep lock or hide the removal receipt for changes already applied.
+  try {
+    return { ...result, installedBytes, ...dependencyCacheDiskUsage(cache, sweep) };
+  } catch {
+    return { ...result, installedBytes, status: 'unavailable', bytes: null, downloadBytes: null };
+  }
 }
 /** Automatic sweeps are advisory; an unavailable cache never prevents a Lane from opening. */
 export function sweepDependencyCache(cache: string, root: string) {
