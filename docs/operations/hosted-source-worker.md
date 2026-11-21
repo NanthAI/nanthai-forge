@@ -4,6 +4,12 @@ The source worker is fixed Forge code. It treats repository content as bytes and
 never checks it out, imports it, installs its packages, runs Git, follows source
 symlinks or executes repository commands. Check execution is separate from this source service.
 
+The alternate whole worker uses verified State parent links to advance the
+shallowest unresolved frontier of each selected merge pair. A singleton cut
+ends the ancestry search. The worker still verifies and reads the exact State
+trees needed by the merge, including recursive bases. Restore and stacked
+merges use their pinned base directly.
+
 Pending or retryable source work retains its original operation and execution;
 follow the advertised continuation to reconcile an unknown outcome. A truly
 terminal source receipt remains immutable on replay. A failed finish advertises

@@ -1,8 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { NativeAncestry } from './native-ancestry.js';
 import { NativeSource } from './native-source.js';
 import type { SourceWorkerReader } from './hosted-source-worker-reader.js';
+
+type MergeRoots = [left: string, right: string];
+type AncestryScope = {
+  roots: MergeRoots;
+  boundary?: string | null;
+  tips?: Map<string, ReturnType<NativeSource['state']>>;
+};
+
 export class NeededObject extends Error {
   state = false;
   constructor(
@@ -18,11 +27,42 @@ export class NeededObject extends Error {
 export class LazyMergeSource extends NativeSource {
   readonly generated = new Set<string>();
   readonly states = new Set<string>();
-  private readonly expanded = new Set<string>();
+  private readonly verifiedParents: Record<string, string[]> = {};
+  private ancestryScope: AncestryScope | undefined;
+  private writtenState: { id: string; state: ReturnType<NativeSource['state']> } | undefined;
+
+  withAncestry<T>(scope: AncestryScope, action: () => T): T {
+    const previous = this.ancestryScope;
+    this.ancestryScope = scope;
+    try {
+      return action();
+    } finally {
+      // Keep at most the two tip trees, and release them before any async hydration.
+      delete scope.tips;
+      this.ancestryScope = previous;
+    }
+  }
+
+  override ancestry() {
+    const scope = this.ancestryScope;
+    if (!scope) return super.ancestry();
+    return new NativeAncestry(id =>
+      id === scope.boundary ? [] : (this.verifiedParents[id] ?? this.state(id).parents),
+    );
+  }
+
   override state(id: string) {
+    const scope = this.ancestryScope,
+      cached = id === this.writtenState?.id ? this.writtenState.state : scope?.tips?.get(id);
+    if (cached) return cached;
     try {
       const state = super.state(id);
       this.states.add(id);
+      this.verifiedParents[id] = state.parents;
+      // Reuse the disk-verified State read back by writeState, for the next
+      // merge or the final file listing. Retain at most one generated tree.
+      if (this.generated.has(id)) this.writtenState = { id, state };
+      if (scope?.roots.includes(id)) (scope.tips ??= new Map()).set(id, state);
       return state;
     } catch (error) {
       if (error instanceof NeededObject) error.state = true;
@@ -47,18 +87,12 @@ export class LazyMergeSource extends NativeSource {
   mergeBases(_left: string, _right: string): string[] {
     return [];
   }
-  async fetchMissing(reader: SourceWorkerReader, error: NeededObject) {
+  async fetchMissing(reader: SourceWorkerReader, error: NeededObject, scope?: AncestryScope) {
     if (error.state) {
-      let frontier = [...this.states, error.id].filter(id => !this.expanded.has(id));
-      while (frontier.length) {
-        await reader.resolveMany(frontier.filter(id => !existsSync(join(this.directory, id))));
-        const next = new Set<string>();
-        for (const id of frontier) {
-          this.expanded.add(id);
-          for (const parent of this.state(id).parents) if (!this.expanded.has(parent)) next.add(parent);
-        }
-        frontier = [...next];
-      }
+      if (scope && scope.boundary === undefined) await this.prepareAncestry(reader, scope);
+      // A cut settles ancestry alone. A base tree requested by the merge
+      // still needs its original, verified manifest.
+      else await reader.resolveMany(error.ids);
       return;
     }
     // An unchanged file has one blob across these exact States and needs no IO.
@@ -77,6 +111,45 @@ export class LazyMergeSource extends NativeSource {
         if (different.has(file.path) && !existsSync(join(this.directory, file.blob))) needed.add(file.blob);
     await reader.resolveMany([...needed]);
   }
+
+  private async prepareAncestry(reader: SourceWorkerReader, scope: AncestryScope) {
+    // Load the proof only when the whole worker actually prepares a merge.
+    const { sourceAncestryCut } = await import('./hosted-source-ancestry-cut.js');
+    const parents: Record<string, string[]> = {};
+    let frontier = [...new Set(scope.roots)],
+      expanded = 0,
+      nextProof = 0,
+      closed = false;
+    let checkedSingleton = false;
+    while (frontier.length) {
+      // A single open leaf can close the graph immediately. For deep plural
+      // frontiers, double the verified prefix between full proof scans so a
+      // late (or absent) convergence does not make the walk quadratic.
+      const singleton = !closed && frontier.length === 1 && !checkedSingleton;
+      if (expanded <= 100 || expanded >= nextProof || singleton) {
+        const boundary = sourceAncestryCut(parents, frontier, scope.roots);
+        if (boundary) {
+          scope.boundary = boundary;
+          return;
+        }
+        if (expanded && singleton) checkedSingleton = true;
+        nextProof = 2 * expanded;
+      }
+      // Advance one shallowest depth, using cached verified edges at that depth.
+      await reader.resolveMany(
+        frontier.filter(id => !this.verifiedParents[id] && !existsSync(join(this.directory, id))),
+      );
+      expanded += frontier.length;
+      const next = new Set<string>();
+      for (const id of frontier) {
+        const edges = (parents[id] = this.verifiedParents[id] ?? this.state(id).parents);
+        closed ||= !edges.length;
+        for (const parent of edges) next.add(parent);
+      }
+      frontier = [...next].filter(id => !parents[id]);
+    }
+    scope.boundary = sourceAncestryCut(parents, [], scope.roots);
+  }
 }
 
 export async function lazyMerge<T>(
@@ -84,13 +157,15 @@ export async function lazyMerge<T>(
   progress: () => Promise<void>,
   action: () => T,
   source?: LazyMergeSource,
+  roots?: MergeRoots,
 ): Promise<T> {
+  const scope = roots ? { roots } : undefined;
   for (;;) {
     try {
-      return action();
+      return source && scope ? source.withAncestry(scope, action) : action();
     } catch (error) {
       if (!(error instanceof NeededObject)) throw error;
-      if (source) await source.fetchMissing(reader, error);
+      if (source) await source.fetchMissing(reader, error, scope);
       else await reader.resolve(error.id);
       await progress();
     }

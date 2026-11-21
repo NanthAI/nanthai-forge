@@ -55,9 +55,9 @@ export async function buildHostedComposeState(
   reader.expectStates([plan.main.object.sha256]);
   await reader.file(plan.main);
   invariant(plan.main.object.sha256 === plan.base.head, 'SOURCE_JOB_INVALID', 'Compose main pins differ.');
-  const calculate = <T>(action: () => T) => lazyMerge(reader, progress, action, source);
   // Compose parses text-merged JS/TS before accepting it; see hosted-compose-syntax.
-  const gated = <T>(action: () => T) => syntaxGatedMerge(source, calculate, action);
+  const gated = <T>(action: () => T, roots?: [string, string]) =>
+    syntaxGatedMerge(source, calculate => lazyMerge(reader, progress, calculate, source, roots), action);
   let head = plan.base.head,
     pageCount = 0,
     selected = 0;
@@ -119,18 +119,22 @@ export async function buildHostedComposeState(
         if (result) continue;
         let left = head;
         const right = entry.head;
-        let merged = await gated(() => {
-          source.state(left);
-          source.state(right);
-          return restoreBase
-            ? composeStack(source, right, left, restoreBase.object.sha256, plan.message, plan.at)
-            : source.compose(left, right, plan.message, plan.at);
-        });
+        let merged = await gated(
+          () => {
+            source.state(left);
+            source.state(right);
+            return restoreBase
+              ? composeStack(source, right, left, restoreBase.object.sha256, plan.message, plan.at)
+              : source.compose(left, right, plan.message, plan.at);
+          },
+          restoreBase ? undefined : [left, right],
+        );
         // Only Markdown docs conflict: native finish's deterministic rule, main oriented as compose
         // is. Code, mixed, binary or ambiguous conflicts keep the conflict below. Stacks keep theirs.
         if (!merged.head && !restoreBase) {
-          const docs = await gated(() =>
-            resolveDocsComposition(source, right, left, plan.message, plan.at, { mainFirst: true }),
+          const docs = await gated(
+            () => resolveDocsComposition(source, right, left, plan.message, plan.at, { mainFirst: true }),
+            [left, right],
           );
           if (docs) {
             merged = { head: docs.head, conflicts: [] };
@@ -146,32 +150,36 @@ export async function buildHostedComposeState(
           // base in the same worker; retain prompt main conflicts with their
           // actual base root, and mark prefix-only conflicts as advisory.
           if (plan.batch && left !== plan.base.head) {
-            const onMain = await gated(() =>
-              restoreBase
-                ? composeStack(
-                    source,
-                    right,
-                    plan.base.head,
-                    restoreBase.object.sha256,
-                    plan.message,
-                    plan.at,
-                  )
-                : source.compose(plan.base.head, right, plan.message, plan.at),
+            const onMain = await gated(
+              () =>
+                restoreBase
+                  ? composeStack(
+                      source,
+                      right,
+                      plan.base.head,
+                      restoreBase.object.sha256,
+                      plan.message,
+                      plan.at,
+                    )
+                  : source.compose(plan.base.head, right, plan.message, plan.at),
+              restoreBase ? undefined : [plan.base.head, right],
             );
             if (!onMain.head) {
               left = plan.base.head;
               merged = onMain;
             }
           }
-          const details = await gated(() =>
-            restoreBase
-              ? source.mergeFiles(
-                  left,
-                  right,
-                  new Set([restoreBase.object.sha256]),
-                  new Set([restoreBase.object.sha256]),
-                )
-              : source.mergeFiles(left, right),
+          const details = await gated(
+            () =>
+              restoreBase
+                ? source.mergeFiles(
+                    left,
+                    right,
+                    new Set([restoreBase.object.sha256]),
+                    new Set([restoreBase.object.sha256]),
+                  )
+                : source.mergeFiles(left, right),
+            restoreBase ? undefined : [left, right],
           );
           const leftFiles = new Map(source.state(left).files.map(file => [file.path, file])),
             rightFiles = new Map(source.state(right).files.map(file => [file.path, file]));
@@ -245,16 +253,17 @@ export async function buildHostedComposeState(
   if (!result) {
     // These exact State manifests are already resident for composition. No blob reads,
     // source scans, graph queries or provider calls are needed for changed paths.
-    const paths = bases && changedPaths(bases, source.state(plan.base.head).files, source.state(head).files);
+    const files = bases && source.state(head).files;
+    const paths = bases && files && changedPaths(bases, source.state(plan.base.head).files, files);
     const docs = docsMerge(docsPaths);
-    if (fileListContext !== null && bases)
+    if (fileListContext !== null && bases && files)
       listing = Buffer.from(
         saveBytes(
           candidateFileList(
             fileListContext?.base ?? plan.base.head,
             head,
             bases,
-            source.state(head).files,
+            files,
             fileListContext?.selections ?? selections,
           ),
         ),

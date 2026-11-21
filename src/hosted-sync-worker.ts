@@ -26,7 +26,8 @@ export async function buildHostedSyncState(
   const plan = syncInputSchema.parse(value),
     work = plan.work,
     source = original instanceof LazyMergeSource ? original : new LazyMergeSource(original.owner),
-    calculate = <T>(action: () => T) => lazyMerge(reader, progress, action, source);
+    calculate = <T>(action: () => T, roots?: [string, string]) =>
+      lazyMerge(reader, progress, action, source, roots);
   const publishGenerated = async () => {
     await reader.publishGenerated(source, source.generated);
     source.generated.clear();
@@ -157,19 +158,22 @@ export async function buildHostedSyncState(
         work.stackBase ? [] : source.mergeBases(left, right),
       );
     }
+    const roots: [string, string] | undefined =
+      work.mode === 'sync' && work.stackBase ? undefined : [left, right];
     let merged: { head?: string; conflicts: string[] } = await calculate(() => {
       source.state(left);
       source.state(right);
       return work.mode === 'sync' && work.stackBase
         ? composeStack(source, left, right, work.stackBase.object.sha256, plan.message, plan.at)
         : source.compose(left, right, plan.message, plan.at, { insertionOrder: 'right-first' });
-    });
+    }, roots);
     // A Lane sync whose only conflicts are Markdown docs takes native finish's rule (Lane left,
     // main right, as this sync merges). Explicit resolutions and stacked syncs keep their conflicts.
     let docs: ReturnType<typeof docsMerge>;
     if (!merged.head && work.mode === 'sync' && !work.stackBase) {
-      const resolved = await calculate(() =>
-        resolveDocsComposition(source, left, right, plan.message, plan.at),
+      const resolved = await calculate(
+        () => resolveDocsComposition(source, left, right, plan.message, plan.at),
+        roots,
       );
       if (resolved) {
         merged = { head: resolved.head, conflicts: [] };
@@ -184,15 +188,17 @@ export async function buildHostedSyncState(
         ...(docs ? { docs } : {}),
       };
     } else {
-      const pending = await calculate(() =>
-        conflictPlan(
-          source,
-          left,
-          right,
-          // A landing resolution merges the Lane (right) into main (left); a sync the reverse.
-          work.mode === 'resolution' ? ['main', 'lane'] : ['lane', 'target'],
-          work.mode === 'sync' ? work.stackBase?.object.sha256 : undefined,
-        ),
+      const pending = await calculate(
+        () =>
+          conflictPlan(
+            source,
+            left,
+            right,
+            // A landing resolution merges the Lane (right) into main (left); a sync the reverse.
+            work.mode === 'resolution' ? ['main', 'lane'] : ['lane', 'target'],
+            work.mode === 'sync' ? work.stackBase?.object.sha256 : undefined,
+          ),
+        roots,
       );
       const files: NativeFile[] = pending.files.map(file => ({
         path: file.path,
@@ -202,15 +208,17 @@ export async function buildHostedSyncState(
       // Draft has only its left parent. Right becomes an ancestor on explicit resolved completion.
       const head = source.writeState(files, [left], plan.message, plan.at);
       if (!conflicts) {
-        const details = await calculate(() =>
-          source.mergeFiles(
-            left,
-            right,
-            work.mode === 'sync' && work.stackBase ? new Set([work.stackBase.object.sha256]) : undefined,
-            work.mode === 'sync' && work.stackBase ? new Set([work.stackBase.object.sha256]) : undefined,
-            undefined,
-            { insertionOrder: 'right-first' },
-          ),
+        const details = await calculate(
+          () =>
+            source.mergeFiles(
+              left,
+              right,
+              work.mode === 'sync' && work.stackBase ? new Set([work.stackBase.object.sha256]) : undefined,
+              work.mode === 'sync' && work.stackBase ? new Set([work.stackBase.object.sha256]) : undefined,
+              undefined,
+              { insertionOrder: 'right-first' },
+            ),
+          roots,
         );
         const byPath = new Map(details.conflicts.map(item => [item.path, item]));
         const l = new Map(source.state(left).files.map(file => [file.path, file])),

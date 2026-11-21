@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { digest } from '../dist/hash.js';
 import { saveBytes } from '../dist/hosted-save.js';
 import { parseNativeState } from '../dist/state/format.js';
+import { buildHostedSourceState } from '../dist/hosted-source-worker.js';
 import { buildComposePages } from '../dist/hosted-compose.js';
 import { initialSourceStep } from '../dist/hosted-source-step.js';
 import { prepareMergeStep, computeMergeStep } from '../dist/hosted-source-step-merge.js';
@@ -156,6 +157,14 @@ export function ancestryFixture({ generationMetadata = false } = {}) {
       headBytes: cursor.head ? objects.get(cursor.head) : null,
     };
   }
+  async function whole(initial) {
+    const result = await buildHostedSourceState(initial.input, io);
+    return {
+      ...result,
+      output: objects.get(result.output.sha256),
+      headBytes: result.head ? objects.get(result.head) : null,
+    };
+  }
   return {
     objects,
     parents,
@@ -170,6 +179,7 @@ export function ancestryFixture({ generationMetadata = false } = {}) {
     ref,
     plan,
     compose,
+    whole,
     verifiedParents,
   };
 }
