@@ -2,7 +2,12 @@
 import { existsSync, lstatSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cliRuntimePaths, type CliRuntimeUser } from './cli-runtime-processes.js';
+import {
+  cliRuntimePaths,
+  retiredOwnerServices,
+  stopRetiredOwnerServices,
+  type CliRuntimeUser,
+} from './cli-runtime-processes.js';
 import { randomUUID } from 'node:crypto';
 import { durableReplace, syncDirectory } from './state/durability.js';
 import { processAlive, processStartTime } from './local-process.js';
@@ -159,6 +164,43 @@ export function selectCliBuild(installation: string, build: string, pointer = 'c
 /** Publish only after all existing hook settings have migrated successfully. */
 export function permitCliRetirement(installation: string) {
   durableReplace(join(installation, 'hooks-ready'), cliBuildCommit(join(installation, 'current')));
+}
+
+/** An older updater cannot retire these services itself. The new build also
+ * reconciles once on first use, after the old updater's hook migration. */
+export function reconcileRetiredOwnerServices(
+  installation = cliInstallation(),
+  build = cliPackageRoot(),
+  users?: CliRuntimeUser[],
+) {
+  if (!installation || !['darwin', 'linux'].includes(process.platform)) return 0;
+  const marker = join(build, '.owner-services-inspected');
+  if (existsSync(marker) || !existsSync(join(installation, 'previous'))) return 0;
+  try {
+    const selected = canonicalRoot(build);
+    const ready = join(installation, 'hooks-ready');
+    if (
+      existsSync(join(installation, 'rollback.json')) ||
+      cliSelectedBuild(installation) !== selected ||
+      !existsSync(ready) ||
+      readFileSync(ready, 'utf8') !== cliBuildCommit(selected)
+    )
+      return 0;
+    const candidates = retiredOwnerServices(installation, selected, users ?? cliRuntimePaths());
+    return withCliLock(
+      installation,
+      () => {
+        if (existsSync(marker) || cliSelectedBuild(installation) !== selected) return 0;
+        const count = stopRetiredOwnerServices(candidates);
+        durableReplace(marker, '1');
+        return count;
+      },
+      0,
+    );
+  } catch {
+    // Advisory and retried on a later command if observation or publication failed.
+    return 0;
+  }
 }
 /** A replaced build stays on disk this long after it stops being selected. Leases protect processes
  * that claimed it; the grace also covers a process that resolved the old path just before the

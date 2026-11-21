@@ -8,6 +8,7 @@ import {
   cliSelectedBuild,
   permitCliRetirement,
   pruneCliBuilds,
+  reconcileRetiredOwnerServices,
   selectCliBuild,
   stageStableSelection,
   unretireCliBuild,
@@ -18,6 +19,7 @@ import {
 import { invariant } from './errors.js';
 import { canonicalRoot } from './root-paths.js';
 import { shellQuote } from './shell-quote.js';
+import { cliRuntimePaths } from './cli-runtime-processes.js';
 import type { CliSource } from './cli-update-source.js';
 
 export const cliCurrentCommit = (installation: string) => {
@@ -116,14 +118,25 @@ export function activateCliBuild(input: PublishInput) {
     return previous;
   });
   let removed: string[] = [];
+  let stoppedRetiredWorkers = 0;
   try {
-    removed = pruneCliBuilds(installation, undefined, input.retireGraceMs ?? CLI_RETIRE_GRACE_MS);
+    removed = pruneCliBuilds(
+      installation,
+      () => {
+        const users = cliRuntimePaths();
+        if (!input.rollback && published)
+          stoppedRetiredWorkers = reconcileRetiredOwnerServices(installation, build, users);
+        return users;
+      },
+      input.retireGraceMs ?? CLI_RETIRE_GRACE_MS,
+    );
   } catch {
     /* Selection already succeeded; unremoved builds are retried by the next update. */
   }
   return {
     status: 'updated',
     cliCommit: head,
+    ...(stoppedRetiredWorkers ? { stoppedRetiredWorkers } : {}),
     installation,
     removed,
     ...(published && /^[a-f0-9]{64}$/.test(published)

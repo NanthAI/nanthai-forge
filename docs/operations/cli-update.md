@@ -153,6 +153,13 @@ The owner does not need to reinstall hooks after updates.
 The stable bootstrap and managed CLI/hook processes record local runtime leases,
 including kernel process identity. Replaced builds remain while their processes may lazy-load
 modules. Retirement checks detached-worker and legacy process script paths privately.
+After a successful release swap, the updater sends SIGTERM to orphaned native
+auto-exchange and sync-agent workers pinned to an old managed build of that
+installation. The update result reports the number signalled as
+`stoppedRetiredWorkers`. Active commands and detached check and landing
+workers keep their pinned runtime until they finish.
+When an older updater made the swap, the selected CLI performs this check on
+its first command after hook migration.
 If inspection is unavailable, it preserves uncertain runtimes. A replaced build is marked
 `.retired` and stays for 10 minutes (product retention, `CLI_RETIRE_GRACE_MS`). This covers
 a process that resolved the old path just before the switch and has not claimed a lease yet.

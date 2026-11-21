@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { hostname } from 'node:os';
 import { childEnv } from '../scripts/child-env.mjs';
 import { Worker } from 'node:worker_threads';
+import { once } from 'node:events';
 import assert from 'node:assert/strict';
 import {
   mkdtempSync,
@@ -41,6 +42,7 @@ import {
   cliBuildCommit,
   pruneCliBuilds,
   permitCliRetirement,
+  reconcileRetiredOwnerServices,
   selectCliBuild,
   stableSelection,
   stageStableSelection,
@@ -49,6 +51,8 @@ import {
 } from '../dist/cli-installation.js';
 import { cliLandingCommand, waitForCliMeasurement } from '../dist/cli-measurement-hold.js';
 import { migrateEditHookRunner } from '../dist/agent-install-hooks.js';
+import { processAlive, processIdentity } from '../dist/local-process.js';
+import { eventually } from './mcp-lifecycle-fixture.mjs';
 
 const a = 'a'.repeat(64),
   b = 'b'.repeat(64);
@@ -1094,6 +1098,93 @@ test('detached workers protect managed runtime bytes even without a CLI lease', 
     [a],
   );
 });
+
+for (const legacyUpdater of [false, true])
+  test(
+    legacyUpdater
+      ? 'the newly selected runtime reconciles orphaned services after a swap performed by an old updater'
+      : 'release swap stops orphaned owner services from its old build while preserving other detached work',
+    { skip: !['darwin', 'linux'].includes(process.platform), timeout: 10000 },
+    async t => {
+      const f = fixture(t),
+        other = join(f.directory, 'other-installation', 'builds', a),
+        next = f.build(b);
+      mkdirSync(join(other, 'dist'), { recursive: true });
+      writeFileSync(join(other, '.managed-cli'), '1');
+      const worker = `
+      import { writeFileSync } from 'node:fs';
+      process.on('SIGTERM', () => {
+        writeFileSync(import.meta.filename + '.stopped', '');
+        process.exit(0);
+      });
+      writeFileSync(import.meta.filename + '.ready', '');
+      setInterval(() => {}, 60000);
+    `;
+      const workers = [
+        { path: join(f.old, 'dist', 'auto-exchange.js'), args: [] },
+        { path: join(f.old, 'dist', 'cli.js'), args: ['host', f.directory, '--sync-agent'] },
+        { path: join(f.old, 'dist', 'check-controller-worker.js'), args: [] },
+        { path: join(other, 'dist', 'auto-exchange.js'), args: [] },
+        { path: join(next, 'dist', 'auto-exchange.js'), args: [] },
+      ];
+      for (const { path } of workers) writeFileSync(path, worker);
+      const parent = spawn(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          `import { spawn } from 'node:child_process';
+         const pids = ${JSON.stringify(workers)}.map(({ path, args }) => {
+           const child = spawn(process.execPath, [path, ...args], { detached: true, stdio: 'ignore' });
+           child.unref();
+           return child.pid;
+         });
+         process.send(pids, () => process.disconnect());`,
+        ],
+        { env: childEnv(), stdio: ['ignore', 'ignore', 'ignore', 'ipc'] },
+      );
+      const exited = once(parent, 'exit');
+      const pids = (await once(parent, 'message'))[0];
+      const identities = pids.map(pid => processIdentity(pid));
+      t.after(() => {
+        for (const identity of identities) if (processAlive(identity)) process.kill(identity.pid, 'SIGKILL');
+      });
+      assert.deepEqual(await exited, [0, null]);
+      await eventually(
+        'all fixture workers installed their signal handler',
+        () => workers.every(({ path }) => existsSync(path + '.ready')),
+        Boolean,
+      );
+      if (legacyUpdater) {
+        // The old updater publishes these pins but cannot execute a new runtime's cleanup.
+        selectCliBuild(f.installation, f.old, 'previous');
+        selectCliBuild(f.installation, next);
+        permitCliRetirement(f.installation);
+        assert.equal(reconcileRetiredOwnerServices(f.installation, next), 2);
+        assert.equal(reconcileRetiredOwnerServices(f.installation, next), 0);
+      } else {
+        const result = publishCliBuild({
+          installation: f.installation,
+          build: next,
+          head: b,
+          expectedCurrent: a,
+          address,
+          migrate: () => {},
+        });
+        assert.equal(result.stoppedRetiredWorkers, 2);
+      }
+      await eventually(
+        'both old owner services exited',
+        () => identities.slice(0, 2).every(identity => !processAlive(identity)),
+        Boolean,
+      );
+      assert.deepEqual(
+        workers.map(({ path }) => existsSync(path + '.stopped')),
+        [true, true, false, false, false],
+      );
+      assert.deepEqual(identities.slice(2).map(processAlive), [true, true, true]);
+    },
+  );
 
 test('runtime lock publishes complete owner metadata and recovers only a dead holder', t => {
   const f = fixture(t),

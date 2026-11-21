@@ -2605,10 +2605,12 @@ return saved Lane/State/blob pins and recheck current authorization before retur
 bytes, without Work/history hydration or substitution of local drafts. Only an
 explicit live run or submission wait creates subscriptions; every exit and server
 disconnect closes them. Finite status/observe installs no observer. All stdio MCP
-entry points close on stdin end/close or a broken output pipe, and after two
-hours without a request (`FORGE_MCP_IDLE_MS` overrides the deadline). One
-unreferenced timeout sleeps while idle; it is removed while any request is in
-flight and rearmed after the last response. Closing releases graph workers,
+entry points close on stdin end/close, a closed or broken output pipe, or
+client process exit. A local, unreferenced parent check catches a dead client
+when a wrapper still holds the pipes open. An unreferenced timeout closes
+connections after two hours without a request (`FORGE_MCP_IDLE_MS` overrides
+the deadline). It is removed while any request is in flight and rearmed after
+the last response. Closing releases graph workers,
 watcher attachments and live waits without taking over background owner work.
 Account authentication never selects person acceptance in these tools. Live
 provisioning and provider qualification remain separate.

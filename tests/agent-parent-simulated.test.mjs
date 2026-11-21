@@ -32,6 +32,7 @@ const FAMILY = [
   'tests/hosted-land-acceptance-wait.test.mjs',
   'tests/hosted-wait-papercuts.test.mjs',
   'tests/lane-holder.test.mjs',
+  'tests/mcp-client-lifecycle.test.mjs',
   'tests/secret-run-names.test.mjs',
   'tests/secret-run.test.mjs',
 ];

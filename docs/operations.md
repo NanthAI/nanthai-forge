@@ -685,6 +685,10 @@ timed in the report:
    IDs and creation times included. Differences name the table and row, never
    contents. Nothing runs in between: there are no crons, and an import brings no
    scheduled jobs.
+   A snapshot taken during landing completion carries the Lane records, the
+   accepted snapshot delta and the retained completion plan and pages, including
+   the unapplied part. The row comparison checks those records independently of
+   the visible Lane status. Resuming a scheduled job is a separate recovery step.
 6. Meanwhile check the project's R2 prefix in place: every key a backup row names
    must exist, and every `o/<sha256>` object is streamed and must hash to its name
    and have the size its row records. A source pack is a cache that rotates as main

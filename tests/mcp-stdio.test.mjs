@@ -36,6 +36,14 @@ test('EPIPE closes the transport and rejects the write without an uncaught strea
   assert.equal(m.closed(), 1);
 });
 
+test('closing stdout disconnects even while stdin is open', async t => {
+  const m = await transport(t);
+  m.output.emit('close');
+  await m.stdio.close();
+  assert.equal(m.closed(), 1);
+  assert.equal(m.input.listenerCount('data'), 0);
+});
+
 test('one idle deadline defaults to fifteen minutes and stays stopped until every response finishes', async t => {
   assert.equal(MCP_IDLE_MS, 7_200_000);
   t.mock.timers.enable({ apis: ['setTimeout'] });
