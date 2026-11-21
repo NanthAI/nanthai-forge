@@ -232,6 +232,175 @@ async function visitor(s, path, method = 'GET') {
   return { status: response.status, body: await response.text(), headers: response.headers };
 }
 
+// Model one Worker with an edge cache per location and a private R2 binding shared across locations.
+// The backend is the real public Code handler. No Worker, network listener or bucket is provisioned.
+function publicR2Fixture(readOrigin, now) {
+  const replica = new Map();
+  const calls = { edgeHits: 0, r2Gets: 0, r2Puts: 0, r2BytesRead: 0, r2BytesWritten: 0, origin: 0 };
+  const fresh = entry => entry && entry.expiresAt > now();
+  const cacheable = reply =>
+    reply.status === 200 &&
+    reply.headers.get('content-type') === 'application/json; charset=utf-8' &&
+    reply.headers.get('netlify-cdn-cache-control') === route.PUBLIC_CACHE.shared &&
+    !reply.headers.has('set-cookie');
+
+  function edge() {
+    const cache = new Map();
+    return async path => {
+      const cached = cache.get(path);
+      if (fresh(cached)) {
+        calls.edgeHits++;
+        return { status: 200, body: cached.body };
+      }
+
+      calls.r2Gets++;
+      const stored = replica.get(path);
+      if (fresh(stored)) {
+        calls.r2BytesRead += Buffer.byteLength(stored.body);
+        cache.set(path, stored);
+        return { status: 200, body: stored.body };
+      }
+
+      // Use the authorization start, so a late fill can never extend disclosure.
+      const expiresAt = now() + 30_000;
+      calls.origin++;
+      const reply = await readOrigin(path);
+      const entry = { body: reply.body, expiresAt };
+      if (cacheable(reply) && fresh(entry)) {
+        replica.set(path, entry);
+        cache.set(path, entry);
+        calls.r2Puts++;
+        calls.r2BytesWritten += Buffer.byteLength(entry.body);
+      }
+      return { status: reply.status, body: reply.body };
+    };
+  }
+  return { calls, edge };
+}
+
+test('1,000 public Code file views: edge and fresh R2 hits serve exact bytes without Convex', async t => {
+  const s = await setup(t, 'public');
+  const path = `ada/atlas/${s.head}/page/${hex('a.ts')}/0.json`;
+  const delivery = publicR2Fixture(
+    path => visitor(s, path),
+    () => 0,
+  );
+  const read = delivery.edge();
+  const beforeFill = s.ran.length;
+  const { meterWorkIO } = await import('./hosted-read-set.mjs');
+  const meter = meterWorkIO(s.ctx, s.tables);
+  t.after(() => meter.restore());
+  let first;
+  const start = performance.now();
+  const coldDb = await meter.cost(async () => {
+    first = await read(path);
+  });
+  assert.equal(first.status, 200);
+  assert.equal(JSON.parse(first.body).file.page.text, 'export const a = 1;\n');
+  const coldCalls = s.ran.slice(beforeFill);
+  const beforeHits = s.ran.length;
+  const edgeDb = await meter.cost(async () => {
+    for (let view = 1; view < 1_000; view++) assert.deepEqual(await read(path), first);
+  });
+  const wallMs = performance.now() - start;
+  const bodyBytes = Buffer.byteLength(first.body);
+  assert.equal(s.ran.length, beforeHits);
+  assert.deepEqual(delivery.calls, {
+    edgeHits: 999,
+    r2Gets: 1,
+    r2Puts: 1,
+    r2BytesRead: 0,
+    r2BytesWritten: bodyBytes,
+    origin: 1,
+  });
+  assert.deepEqual(edgeDb, {
+    readDocuments: 0,
+    readBytes: 0,
+    writeDocuments: 0,
+    writeBytes: 0,
+    migrationWrites: 0,
+  });
+
+  const replicaDb = await meter.cost(async () => {
+    assert.deepEqual(await delivery.edge()(path), first, 'edge in a new location reads the shared replica');
+  });
+  assert.deepEqual(replicaDb, edgeDb);
+  assert.equal(delivery.calls.r2Gets, 2);
+  assert.equal(delivery.calls.r2BytesRead, bodyBytes);
+  assert.equal(delivery.calls.origin, 1);
+  assert.equal(s.ran.length, beforeHits);
+
+  t.diagnostic(
+    JSON.stringify({
+      views: 1_000,
+      bodyBytes,
+      visitorBodyBytes: 1_000 * bodyBytes,
+      coldConvexFunctions: ['publicHttp:serve', ...coldCalls],
+      coldDb,
+      maxRssKiB: process.resourceUsage().maxRSS,
+      wallMs: Math.round(wallMs * 100) / 100,
+    }),
+  );
+});
+
+test('the replica never extends public file visibility and private member Code still reads the bytes', async t => {
+  const s = await setup(t, 'public');
+  const path = `ada/atlas/${s.head}/page/${hex('a.ts')}/0.json`;
+  let clock = 0;
+  const delivery = publicR2Fixture(
+    path => visitor(s, path),
+    () => clock,
+  );
+  const first = await delivery.edge()(path);
+  assert.equal(first.status, 200);
+  assert.equal(JSON.parse(first.body).file.page.text, 'export const a = 1;\n');
+  s.tables.hostedProjects.get('project').visibility = 'private';
+
+  clock = 29_999;
+  const second = delivery.edge();
+  assert.deepEqual(await second(path), first, 'fresh replica can only use the original window');
+  clock = 30_000;
+  for (const denied of [await second(path), await delivery.edge()(path)]) {
+    assert.equal(denied.status, 404, 'neither cache extends visibility');
+    assert.deepEqual(JSON.parse(denied.body), { found: false });
+  }
+  assert.equal(delivery.calls.r2Puts, 1, 'the origin denial creates no replica');
+
+  s.caller('reader');
+  const member = JSON.parse(
+    await projectCodeBrowse.read._handler(s.ctx, {
+      projectId: 'project',
+      state: s.head,
+      want: 'page',
+      path: 'a.ts',
+      offset: 0,
+    }),
+  );
+  assert.equal(member.file.page.text, 'export const a = 1;\n');
+});
+
+test('a public reply arriving after its original deadline cannot fill the edge or replica', async t => {
+  const s = await setup(t, 'public');
+  const path = `ada/atlas/${s.head}/page/${hex('a.ts')}/0.json`;
+  let clock = 0;
+  const delivery = publicR2Fixture(
+    async path => {
+      const reply = await visitor(s, path);
+      clock = 30_000;
+      s.tables.hostedProjects.get('project').visibility = 'private';
+      return reply;
+    },
+    () => clock,
+  );
+  const read = delivery.edge();
+
+  assert.equal((await read(path)).status, 200, 'the first reply was already authorized');
+  assert.equal((await read(path)).status, 404);
+  assert.equal((await delivery.edge()(path)).status, 404);
+  assert.equal(delivery.calls.edgeHits, 0);
+  assert.equal(delivery.calls.r2Puts, 0);
+});
+
 for (const visibility of ['public', 'private'])
   test(`access matrix on a ${visibility} project: every signed-in standing gets the contract's answer`, async t => {
     for (const [who, standing] of Object.entries(standings))

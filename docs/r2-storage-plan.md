@@ -34,7 +34,7 @@ Principle: R2 holds every blob. No database function receives or returns file by
 | R5 | Imports, zones, agents and proposals build artifacts into R2 | Done; server/runner artifacts and browser logical-object uploads write to R2 |
 | R6 | Backfill: export, upload each file after checking its digest, flip rows in pages; keep old storage 14 days as fallback | Landed; lead-run command implemented, deployment qualification and actual run remain |
 | R7 | Prefix purge, abandoned-upload sweep, scheduled database-only export, optional bucket lock | Landed |
-| R8 | Optional public Worker with edge cache on a custom subdomain | Later |
+| R8 | Optional Worker and R2 replica for rendered public Code | Fixture only; dev and production activation require an owner decision |
 
 Order: R0, R1, R2, then R3a and R4 in parallel, R3b, R6, R5, R7. R0 to R2 alone remove egress for pulls and new pushes. During dual read every reader dispatches on the row's location, so old and new paths coexist. There is no rollback to Convex writes: R2 is the only write path (see [data placement](data-placement.md)); rows already in Convex storage stay readable; old storage stays for 14 days after verification unless the owner explicitly approves the guarded early-purge procedure below.
 
@@ -399,3 +399,97 @@ expiry is introduced.
 
 The weekly backup supports database-only snapshots after deployment-wide source
 bytes are in R2; see [database-only backup and restore](operations/hosted-durability.md#database-only-backup-and-restore).
+
+
+## R8 public Code delivery
+
+Forge's signed-out Code route serves rendered source pages through the existing
+site CDN. R8's fixture models an alternate backing cache. It uses the existing
+Code handler as the origin and measures one public project's rendered file page.
+Signed-in Code continues to use the authenticated reader. The proposed replica
+stores the same JSON the visitor receives, with no raw objects, archive plans or
+signed storage URLs.
+
+### Proposed request path
+
+Keep the site's canonical address, signed-out routing and abuse rules at ingress.
+On a site cache miss for a rendered file page, the site can call a Worker at a
+fixed, configured origin using a server credential. Before any cache lookup,
+the Worker authenticates the site and checks the canonical Code page address.
+It then uses its edge cache and a dedicated private R2 bucket. Isolate the
+bucket and Worker credentials from source and Work storage. The cache key
+includes the canonical project address, exact State,
+file path and page offset. Code history, file trees, changes and signed-in
+routes keep their existing readers. A replica miss calls the existing public
+Code authority directly, with no browser headers and without reusing an older
+site CDN response. The Worker stores only successful cacheable rendered
+file responses. It handles a replica read failure as a miss and returns the
+origin response even if an optional cache write fails. The site
+may fall back to the existing public reader only when it knows the Worker
+skipped the origin. An ambiguous Worker failure uses the existing public-read
+error response, keeping the budget to one origin attempt. The request path
+adds no job, timer, Convex record or landing hook.
+
+A replica carries one absolute expiry, at most 30 seconds after its origin
+authorization starts. Both cache layers use the remaining lifetime, including
+the site's CDN if it caches the Worker response. They never start a new freshness
+window for an R2 hit or serve expired content on error. After a change to
+visibility or project removal, subsequent authorization checks reject the
+read. An already-authorized read may complete against its original deadline.
+If it completes at or after that deadline, neither cache can store it. Restrict
+the bucket to the Worker and expire physically retained replicas under the
+owner-approved lifecycle. A JSON body and its absolute expiry are the only
+replica data needed.
+Preserve the origin's safe response type, no-sniff and browser revalidation
+policy; a replica carries no caller headers. Errors and origin refusals cannot
+populate the replica.
+
+A bare `r2.dev` endpoint cannot enforce this expiry or provide Cloudflare edge
+caching, and public access would expose objects directly. Use a private binding
+for dev and keep the application-facing contract stable when choosing the
+production hostname. See [public buckets](https://developers.cloudflare.com/r2/buckets/public-buckets/)
+and the [Workers Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/).
+
+### Cost per 1,000 views
+
+These are models for requests reaching the Worker, with an initially empty
+replica unless specified. A site CDN hit before the Worker incurs none of the
+operations below. Edge hit rate depends on address reuse, location and elapsed
+time. Cloudflare's Worker Cache API is local to a data center.
+
+| Access pattern | Cloudflare edge hit rate | R2 GET | R2 PUT | Existing origin fills | R2 operations at marginal rate |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| One completed cold fill then 999 warm views of one URL in one location | 99.9% | 1 | 1 | 1 | $0.00000486 |
+| Every edge read cold, fresh replicas | 0% | 1,000 | 0 | 0 | $0.00036 |
+| Distinct URLs cold in both layers, all cacheable | 0% | 1,000 | 1,000 | 1,000 | $0.00486 |
+
+Every valid edge or replica hit adds zero Convex calls and zero DB I/O. The
+cold path retains the current source handler's calls and reads. The table's
+operation costs cover the replica only; existing origin costs are separate.
+Worker requests add $0.00030 per 1,000 at the marginal paid rate, plus $0.00002
+per 1,000 CPU milliseconds. Included usage, billable-unit rounding and the
+paid plan's $5 monthly minimum apply separately. One cold fill followed by
+999 edge hits costs $0.00030486 across Worker requests and replica operations,
+plus CPU, retained bytes and the existing origin costs. Standard R2 storage costs
+$0.015 per GB-month at marginal rate, and Internet egress is free. Doubling
+traffic across the same warm URL doubles delivery bytes and Worker requests
+with no new origin reads within that window. Doubling the number of distinct
+cold URLs doubles the corresponding request and origin costs. Idle operations
+and landing cost are zero. See [R2 pricing](https://developers.cloudflare.com/r2/pricing/)
+and [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/).
+
+Run the fixture with `nforge heavy npm run build:core`, then
+`nforge heavy --no-build node --import ./tests/check-runtime.mjs --test tests/public-code-access.test.mjs`.
+It reports body bytes, cold Convex calls and local process memory and wall time.
+Counts are fixture observations; billed usage, edge latency, request
+coalescing across concurrent cold arrivals and actual multi-location cache
+hits need deployment measurements.
+
+The remaining owner decision is whether to authorize a dev Worker and
+dedicated private R2 bucket for one synthetic public project, including
+routing, rate-rule parity, lifecycle and spend. Keeping the existing site CDN
+alone avoids the added Worker and replica cost. If approved, verify the
+current ingress rules, capture response bytes and hit/miss counts on one dev
+project, reconcile Cloudflare and Convex usage, and exercise the signed-in
+private file read and public-to-private cache expiry. Production domain and
+cost approval follow the P8 production move.
