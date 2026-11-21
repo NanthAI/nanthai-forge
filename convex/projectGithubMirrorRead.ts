@@ -7,7 +7,7 @@ import { v } from 'convex/values';
 import { query, isDeviceIdentity } from './cliServer';
 import { accessibleProject } from './projectAuthority';
 import { effectivePolicy } from '../src/autonomy-policy';
-import { githubMirrorStatus } from './projectGithubMirrorStatus';
+import { githubMirrorStatus } from './projectGithubMirrorStatus.idle';
 import { mirrorSummary } from '../src/github-mirror-sentence';
 import { invariant } from '../src/errors';
 import { report } from './errors';

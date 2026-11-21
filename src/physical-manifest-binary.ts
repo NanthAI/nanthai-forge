@@ -31,6 +31,7 @@ export class PhysicalWriter {
   }
   integer(value: number) {
     valid(Number.isSafeInteger(value) && value >= 0);
+    // hot-loop: encode up to eight bytes per integer across manifest entries.
     do {
       const next = value % 128;
       value = Math.floor(value / 128);
@@ -39,6 +40,7 @@ export class PhysicalWriter {
   }
   private hex(value: string) {
     this.reserve(value.length / 2);
+    // hot-loop: write each digest or nonce from character pairs into reserved storage.
     for (let at = 0; at < value.length; at += 2) {
       const high = value.charCodeAt(at),
         low = value.charCodeAt(at + 1);
@@ -72,6 +74,7 @@ export class PhysicalReader {
     let value = 0,
       multiplier = 1,
       byte: number;
+    // hot-loop: decode up to eight bytes per integer across manifest entries.
     do {
       valid(multiplier <= 2 ** 49);
       byte = this.byte();
@@ -85,6 +88,7 @@ export class PhysicalReader {
     valid(this.remaining >= size);
     let id = '';
     const end = this.at + size;
+    // hot-loop: decode up to 32 bytes per digest or nonce using the shared hex table.
     while (this.at < end) id += hexBytes[this.bytes[this.at++]!]!;
     return id;
   }

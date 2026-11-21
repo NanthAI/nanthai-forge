@@ -2,7 +2,7 @@
 import { requireSourceProtocol } from './projectSourceProtocol';
 import { maySeeDeviceName } from './accessPolicy';
 import { needsFix } from '../src/culprit-bisect';
-import { githubMirrorStatus } from './projectGithubMirrorStatus';
+import { githubMirrorStatus } from './projectGithubMirrorStatus.idle';
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { accessibleProject } from './projectAuthority';

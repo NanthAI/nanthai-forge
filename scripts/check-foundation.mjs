@@ -10,6 +10,7 @@ import { renderDependencyLicenses } from './render-dependency-licenses.mjs';
 import { localPathFindings } from './check-local-paths.mjs';
 import { landingModelFindings } from './check-landing-model.mjs';
 import { idleQueryFindings } from './check-idle-queries.mjs';
+import { pathConventionFindings } from './check-path-conventions.mjs';
 import { recoveryAdviceFindings } from './check-recovery-advice.mjs';
 import { actionPinFindings, isWorkflowPath } from './check-action-pins.mjs';
 import { candidateStepFindings } from './check-candidate-steps.mjs';
@@ -79,7 +80,10 @@ for (const file of files) {
     errors.push(...landingAttemptForkFindings(path.split(sep).join('/'), source));
     errors.push(...networkBoundaryFindings(path, source));
     errors.push(...workStoreAccessFindings(path.split(sep).join('/'), source));
-    if (['.ts', '.tsx'].includes(extname(file))) errors.push(...idleQueryFindings(path, source));
+    if (['.ts', '.tsx'].includes(extname(file))) {
+      errors.push(...idleQueryFindings(path, source));
+      errors.push(...pathConventionFindings(path, source));
+    }
     errors.push(...recoveryAdviceFindings(path, source));
     errors.push(...spdxFindings(path.split(sep).join('/'), source));
     errors.push(...statusListFindings(path.split(sep).join('/'), source));

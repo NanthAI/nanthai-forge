@@ -8,7 +8,7 @@ import { workRecordTable } from './projectWorkRecordTables';
 import { findWorkEvent } from './projectWorkEventStore';
 import { likelyPlanningDuplicates } from './projectHostedPlanningSearch';
 import { needsFix } from '../src/culprit-bisect';
-import { githubMirrorStatus } from './projectGithubMirrorStatus';
+import { githubMirrorStatus } from './projectGithubMirrorStatus.idle';
 import { hostedRecordValue } from './hostedRecordValue';
 import { hostedPaths } from '../src/hosted-paths';
 import { generationHead } from './projectWorkHead';

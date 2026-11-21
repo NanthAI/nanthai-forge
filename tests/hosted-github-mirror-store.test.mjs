@@ -16,7 +16,7 @@ const retarget = await import(moduleUrl('../convex/projectGithubMirrorRetarget.t
 const owner = await import(moduleUrl('../convex/projectGithubMirrorResume.ts'));
 const verifyStore = await import(moduleUrl('../convex/projectGithubPullStatusStore.ts'));
 const verifyPost = await import(moduleUrl('../convex/projectGithubPullStatus.ts'));
-const { githubMirrorStatus } = await import(moduleUrl('../convex/projectGithubMirrorStatus.ts'));
+const { githubMirrorStatus } = await import(moduleUrl('../convex/projectGithubMirrorStatus.idle.ts'));
 
 /** Owner-proven repository bindings are a deployment setting; tests bind their own synthetic project. */
 const bindRepository = (t, projectId, repo) => {

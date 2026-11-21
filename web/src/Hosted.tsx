@@ -16,7 +16,7 @@ import { useConvexTokenAuth } from './clerk-convex-auth';
 import { api as functions } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { SourceRequest, Route } from './api';
-import { watchImport } from './import-watch';
+import { watchImport } from './import-watch.idle';
 import { PointField } from './PointField';
 import { ActionPanel, Icon, PageTabs, LazyPage, useDestination, useSection } from './WorkspaceUI';
 import { hostedError as message, hostedFailure, snapshotDownload } from './snapshot';

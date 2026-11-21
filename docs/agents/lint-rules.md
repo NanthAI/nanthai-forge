@@ -161,7 +161,7 @@ The idle and hot-path guard, including source moves and fixtures, belongs to Iss
 | Hosted agent client | [CLI](../../src/hosted-agent-cli.ts) and [MCP](../../src/mcp-hosted-agent.ts) share the hosted command surface. [Transport](../../src/hosted-agent-transport.ts) also coordinates local materialization and retry state. | Keep protocol validation and dispatch shared across the CLI and MCP. Use `hosted-<area>-client.ts` for remote calls and `local-<area>.ts` for machine-only state or I/O. Put orchestration at the entry point that owns the operation. |
 | Native source and shared contracts | [Native source](../../src/native-source.ts) reads and materializes filesystem States. [State format](../../src/state/format.ts) and [physical manifest codec](../../src/physical-manifest-codec.ts) have runtime-neutral consumers. [Work schemas](../../src/work-types.ts) are used by Node, Convex and the browser. | Keep filesystem and process I/O in the local adapter. Keep portable codecs, validators and rules in shared modules with type-only imports where possible. Prefer a role such as `-schema`, `-codec`, `-selection` or `-runner` when it identifies a specific responsibility. |
 | Hosted authority and storage | [Landing](../../convex/projectHostedLanding.ts) implements server-side authority. [Source storage](../../convex/projectConvexSourceStorage.ts) connects records to R2 data. [Browser](../../web/src/Hosted.tsx) and CLI are clients of that authority. | Keep access checks, current pins, operation replay and durable writes at the hosted boundary. Name adapters by what they select, store or execute. Use `native-` for Forge's native source representation or its existing implementation, and `local-` for the location of execution. An offline Lane remains a checkout of the hosted project. |
-| Convex API and server internals | [Mirror read](../../convex/projectGithubMirrorRead.ts) registers a client-facing query with validators and an access check. [Mirror store](../../convex/projectGithubMirrorStore.ts) registers server-only mutations. [Mirror status](../../convex/projectGithubMirrorStatus.ts) exports a plain helper. | Keep new client-facing endpoints in clearly named feature entry modules. Give server-only registrations an `Internal` or narrow worker-role name, and data helpers names such as `Rows`, `Store` or `Status` according to their actual role. Visibility comes from the Convex registration builder. Preserve existing function addresses, scheduled references, authority checks and the [mutation wrappers](../../convex/server.ts) when moving helpers. |
+| Convex API and server internals | [Mirror read](../../convex/projectGithubMirrorRead.ts) registers a client-facing query with validators and an access check. [Mirror store](../../convex/projectGithubMirrorStore.ts) registers server-only mutations. [Mirror status](../../convex/projectGithubMirrorStatus.idle.ts) exports a plain helper. | Keep new client-facing endpoints in clearly named feature entry modules. Give server-only registrations an `Internal` or narrow worker-role name, and data helpers names such as `Rows`, `Store` or `Status` according to their actual role. Visibility comes from the Convex registration builder. Preserve existing function addresses, scheduled references, authority checks and the [mutation wrappers](../../convex/server.ts) when moving helpers. |
 
 A caller looking for a schema currently has to distinguish the shared [Work record schema](../../src/work-types.ts),
 the deployed [Convex schema](../../convex/schema.ts), and the [hosted agent contract](../../src/hosted-agent-contract.ts).
@@ -173,17 +173,19 @@ responsibility boundary.
 ### Path conventions for review
 
 **Idle paths.** Use `*.idle.ts` or `*.idle.tsx` for modules on event-driven observation paths
-that initiate zero Convex calls once quiescent. [Mirror status](../../convex/projectGithubMirrorStatus.ts)
-is a candidate leaf. Its callers use the existing [authorized query](../../convex/projectGithubMirrorRead.ts),
-which responds to server writes. [Import watch](../../web/src/import-watch.ts) is a browser candidate.
+that initiate zero Convex calls once quiescent. [Mirror status](../../convex/projectGithubMirrorStatus.idle.ts)
+is a tagged helper. Its callers use the existing [authorized query](../../convex/projectGithubMirrorRead.ts),
+which responds to server writes. [Import watch](../../web/src/import-watch.idle.ts) is a tagged browser module.
 It attaches a stable invalidation subscription, refreshes on a changed result, focus or reconnection,
 and removes its subscription and listeners on cleanup. Keep generated API paths stable by tagging or
 moving eligible helpers, with registered handlers retaining their paths.
 
-Start with direct timer and scheduler calls in tagged files. The guard fixture should fail on a
-refresh timer and a scheduled poll and pass for event registration and cleanup. Keep the current
-[idle query argument guard](../../scripts/check-idle-queries.mjs) for browser clock-driven resubscription
-across the whole tree. [Live reads](../../web/src/live-reads.ts) uses a one-shot timeout to *detach*
+The [path convention guard](../../scripts/check-path-conventions.mjs) rejects direct `setTimeout`,
+`setInterval`, `scheduler.runAfter` and `scheduler.runAt` calls in tagged files. Its
+[fixtures](../../tests/path-conventions.test.mjs) cover refresh timers, scheduled polls and event
+registration and cleanup. The foundation check runs it in every standard landing verification.
+The [idle query argument guard](../../scripts/check-idle-queries.mjs) still checks for browser
+clock-driven resubscription across the whole tree. [Live reads](../../web/src/live-reads.ts) uses a one-shot timeout to *detach*
 subscriptions. [Mac worker](../../src/hosted-mac-worker.ts) starts deadline and lease timers for a
 claimed run. Keep those mixed lifecycle modules outside the idle suffix as written. Measure opaque
 helper calls through the existing call-budget evidence.
@@ -195,9 +197,10 @@ module, start with a `// hot-loop: <reason>` tag immediately above the specific 
 `PhysicalReader.integer` touches each byte of a variable-length field with scalar state and no
 per-byte object. `PhysicalWriter.hex` reserves capacity before walking character pairs. At manifest
 scale those paths repeat across encoded entries. The codec allocates returned entries and
-the writer grows its buffer on demand. Keep the initial check scoped to extra scratch objects,
-arrays or copies in the flagged bodies. The guard fixture should fail on a per-iteration scratch
-object and pass for scalar updates and a buffer reserved before the loop. Use
+the writer grows its buffer on demand. The guard checks loop bodies for visible scratch
+allocations such as object and array literals, rest destructuring, constructors and copy calls like
+`slice` and `Array.from`. Its fixtures cover per-iteration allocation, scalar updates and a buffer reserved
+before the loop. Use
 [physical manifest tests](../../tests/physical-manifest-v2.test.mjs) for exact bytes and malformed input,
 and [manifest lookup budgets](../../tests/source-manifest-lookup-speed.test.mjs) for storage-call evidence.
 Syntax checks cover visible operations. A measured budget can detect overhead hidden behind calls.

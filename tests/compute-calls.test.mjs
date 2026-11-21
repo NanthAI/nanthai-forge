@@ -6,7 +6,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { state, job } from './hosted-fixture.mjs';
 import { tokenKeys } from '../dist/device-token.js';
-const { watchImport } = await import(moduleUrl('../web/src/import-watch.ts'));
+const { watchImport } = await import(moduleUrl('../web/src/import-watch.idle.ts'));
 const status = await import(moduleUrl('../convex/importStatus.ts'));
 const sync = await import(moduleUrl('../convex/sync.ts'));
 
