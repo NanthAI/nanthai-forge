@@ -260,8 +260,11 @@ test('preparing member goals charge once per operation while aliases share the s
         expectedEnvironment: 'c'.repeat(64),
       },
     };
-    const submit = request =>
-      call('desiredSubmit', desired.submit, { request: JSON.stringify(request) }).then(JSON.parse);
+    const submit = (request, memberBudget) =>
+      call('desiredSubmit', desired.submit, {
+        request: JSON.stringify(request),
+        ...(memberBudget ? { memberBudget } : {}),
+      }).then(JSON.parse);
     const goal = await submit(command);
     assert.equal(goal.phase, 'composing');
     assert.equal(f.tables.projectContributors.get(id).workBudget.submissions, 1);
@@ -273,6 +276,18 @@ test('preparing member goals charge once per operation while aliases share the s
     await submit(alias);
     assert.equal(f.tables.projectContributors.get(id).workBudget.submissions, 2);
     assert.equal(f.tables.projectHostedLandingDesired.size, 1);
+    const current = {
+      ...full(),
+      checks: MEMBER_WORK_BUDGET.checks - 2,
+      submissions: MEMBER_WORK_BUDGET.submissions - 10,
+    };
+    const resetAt = new Date(current.day + MEMBER_WORK_BUDGET.windowMs).toISOString();
+    f.patch('projectContributors', id, { workBudget: current });
+    const { budget, ...storedGoal } = await submit({ ...command, operationId: randomUUID() }, true);
+    assert.equal(storedGoal.id, goal.id);
+    assert.deepEqual(budget, { limit: 'member-composes', left: 0, of: MEMBER_WORK_BUDGET.composes, resetAt });
+    assert.equal(f.tables.projectContributors.get(id).workBudget.submissions, current.submissions + 1);
+    assert.equal((await submit(command)).budget, undefined);
   } finally {
     for (const [key, value] of Object.entries(prior)) {
       if (value === undefined) delete process.env[key];

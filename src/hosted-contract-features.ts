@@ -36,6 +36,8 @@ export const hostedContractFeatures = [
   /** Board notes: the overlap read takes `board`, and projectBoard:read/post exist (was
    * boardVersion:1). Without it the CLI sends no board argument. */
   'agent-board',
+  /** Check enqueue, compose prepare and landing submissions can project the caller's live work budget. */
+  'member-work-budget',
   /** Ordinary board/overlap pages accept a separate delivered-directed-note watermark. */
   'board-lane-after',
   /** Ordinary board/overlap pages accept a separate read-project-note watermark. */

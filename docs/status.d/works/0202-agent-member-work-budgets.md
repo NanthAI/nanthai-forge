@@ -1,0 +1,1 @@
+Agent CLI and MCP receipts show the remaining member check, compose or landing submission budget and its UTC reset time when fewer than 20% of the existing units remain. They use the counter already read for the operation. See [agent pacing](../../agents/workflow.md#billing-pools-and-run-allowances).

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { memberWorkBudgetReply } from './abuseLimits';
 import { capsuleReceiptDigest } from './projectLandingCapsuleLedger';
 import { sourceProgress } from './projectSourceProgress';
 import { boardWake } from './projectBoardDelivery';
@@ -51,12 +52,18 @@ async function caller(
   return { projectId: input.projectId, operationId: input.operationId, actor: user.subject };
 }
 export const prepare = mutation({
-  args: { projectId: v.id('hostedProjects'), request: v.string() },
+  args: { projectId: v.id('hostedProjects'), request: v.string(), memberBudget: v.optional(v.boolean()) },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
       const request = composeRequestSchema.parse(JSON.parse(input.request)),
         auth = await caller(ctx, { projectId: input.projectId, operationId: request.operationId });
+      const reply = memberWorkBudgetReply(
+        ctx,
+        { projectId: auth.projectId, actor: auth.actor },
+        'composes',
+        input.memberBudget,
+      );
       const expected = {
         authorityEpoch: request.authorityEpoch,
         head: request.expectedMain.head,
@@ -84,10 +91,12 @@ export const prepare = mutation({
       if (prepared.replayed) {
         const old = await composeRow(ctx, auth);
         invariant(old, 'SOURCE_UNAVAILABLE', 'The original composition is unavailable.');
-        return canonicalPayload({
-          state: composeStateSchema.parse(JSON.parse(old.value)),
-          terminal: prepared.operation.terminal,
-        });
+        return reply(
+          canonicalPayload({
+            state: composeStateSchema.parse(JSON.parse(old.value)),
+            terminal: prepared.operation.terminal,
+          }),
+        );
       }
       const main = await hostedStartMain(ctx, input.projectId);
       invariant(
@@ -126,7 +135,7 @@ export const prepare = mutation({
         candidateId: state.candidateId,
         value: semanticPayload(state),
       });
-      return canonicalPayload({ state, terminal: null });
+      return reply(canonicalPayload({ state, terminal: null }));
     } catch (error) {
       return report(error);
     }

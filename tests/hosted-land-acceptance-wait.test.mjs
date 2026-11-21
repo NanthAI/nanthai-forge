@@ -10,7 +10,7 @@ import { landTerminal, landSummary } from '../dist/hosted-land-summary.js';
 import { landWaitCommand } from '../dist/hosted-land-wait.js';
 
 const turn = () => new Promise(resolve => setImmediate(resolve));
-async function fixture(t, checkOnly = false) {
+async function fixture(t, checkOnly = false, memberBudget) {
   const calls = [],
     events = [],
     err = [],
@@ -35,6 +35,7 @@ async function fixture(t, checkOnly = false) {
     transport: 'hosted',
     action: 'finish',
     operationId,
+    ...(memberBudget ? { budget: memberBudget } : {}),
     result: sourcePending
       ? { phase: 'sync', progress: { status: 'submitted' }, command: 'exact source continuation' }
       : checkOnly
@@ -251,6 +252,22 @@ test('check-only still waits only for its run and returns CHECK PASSED without a
   assert.equal(result.result.run.status, 'passed');
   assert.equal(landTerminal(result), true);
   assert.deepEqual(landSummary(result), ['CHECK PASSED (check only; this command does not land)']);
+  assert.equal(s.calls.length, 1);
+});
+
+test('a foreground land drops an expired member budget from its acceptance receipt', async t => {
+  const resetAt = '2026-12-01T00:00:00.000Z';
+  const s = await fixture(t, false, { limit: 'member-submissions', left: 2, of: 300, resetAt });
+  let now = Date.parse(resetAt) - 30_000;
+  t.mock.method(Date, 'now', () => now);
+  const pending = s.run();
+  await turn();
+  assert.deepEqual(s.events, ['subscription']);
+  now = Date.parse(resetAt);
+  s.release();
+  const result = await pending;
+  assert.equal(result.result.submission.acceptance.receiptId, 'accepted');
+  assert.equal(result.budget, undefined);
   assert.equal(s.calls.length, 1);
 });
 

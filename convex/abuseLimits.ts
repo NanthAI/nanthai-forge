@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Doc, Id } from './_generated/dataModel';
-import type { MutationCtx } from './_generated/server';
+import type { MutationCtx, QueryCtx } from './_generated/server';
 import { ForgeError } from '../src/errors';
+import { canonicalPayload } from '../src/hosted-source-operation';
 
 const minute = 60_000,
   MiB = 1024 ** 2,
@@ -152,10 +153,56 @@ export const MEMBER_WORK_BUDGET = {
   submissions: 300,
 } as const;
 type MemberWork = NonNullable<Doc<'projectContributors'>['workBudget']>;
+type MemberWorkKind = 'checks' | 'composes' | 'submissions';
+type MemberBudgetCapture = {
+  projectId: Id<'hostedProjects'>;
+  actor: string;
+  current: MemberWork | undefined;
+};
+const memberBudgetCaptures = new WeakMap<QueryCtx | MutationCtx, MemberBudgetCapture>();
+const unchangedReply = (reply: string) => reply;
+
+/** The existing write-authority lookup also supplies the counter on replays, which skip charging. */
+export function rememberMemberWorkBudget(
+  ctx: QueryCtx | MutationCtx,
+  member: Doc<'projectContributors'>,
+  current = member.workBudget,
+) {
+  const capture = memberBudgetCaptures.get(ctx);
+  if (capture?.projectId === member.projectId && capture.actor === member.contributor)
+    capture.current = current;
+}
+
+/** Opt-in on a public mutation only. The warning travels beside the legacy reply and never enters
+ * stored Work. A landing can spend any of its three existing counters as it runs. */
+export function memberWorkBudgetReply(
+  ctx: MutationCtx,
+  identity: Omit<MemberBudgetCapture, 'current'>,
+  kind: MemberWorkKind | 'landing',
+  enabled = false,
+) {
+  if (!enabled) return unchangedReply;
+  const capture: MemberBudgetCapture = { ...identity, current: undefined };
+  memberBudgetCaptures.set(ctx, capture);
+  return (reply: string) => {
+    memberBudgetCaptures.delete(ctx);
+    const current = capture.current;
+    const window = MEMBER_WORK_BUDGET.windowMs;
+    const now = Date.now();
+    if (!current || current.day !== now - (now % window)) return reply;
+    const remaining = (work: MemberWorkKind) =>
+      budgetLeft(`member-${work}`, current[work], MEMBER_WORK_BUDGET[work], current.day + window);
+    const budget =
+      kind === 'landing'
+        ? tightestBudget(remaining('checks'), remaining('composes'), remaining('submissions'))
+        : remaining(kind);
+    return budget ? canonicalPayload({ ...JSON.parse(reply), budget }) : reply;
+  };
+}
 /** Read old (absent) and current counters. Replays never call this allocator. */
 export function nextMemberWorkBudget(
   current: MemberWork | undefined,
-  kind: 'checks' | 'composes' | 'submissions',
+  kind: MemberWorkKind,
   now = Date.now(),
 ): MemberWork {
   const day = now - (now % MEMBER_WORK_BUDGET.windowMs);
@@ -176,7 +223,7 @@ export async function chargeMemberWork(
   ctx: MutationCtx,
   project: Pick<Doc<'hostedProjects'>, '_id' | 'owner'>,
   actor: string,
-  kind: 'checks' | 'composes' | 'submissions',
+  kind: MemberWorkKind,
 ) {
   if (actor === project.owner) return;
   // The grant row itself carries the budget, so this reads it directly (same read as projectRole's write check).
@@ -185,5 +232,7 @@ export async function chargeMemberWork(
     .withIndex('by_project_and_contributor', q => q.eq('projectId', project._id).eq('contributor', actor))
     .unique();
   if (!member) throw new ForgeError('PROJECT_UNAVAILABLE', 'Current contributor membership is required.');
-  await ctx.db.patch(member._id, { workBudget: nextMemberWorkBudget(member.workBudget, kind) });
+  const workBudget = nextMemberWorkBudget(member.workBudget, kind);
+  await ctx.db.patch(member._id, { workBudget });
+  rememberMemberWorkBudget(ctx, member, workBudget);
 }

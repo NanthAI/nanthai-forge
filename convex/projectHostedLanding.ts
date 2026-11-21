@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { memberWorkBudgetReply } from './abuseLimits';
 import { checkCause, submittedCheckCause } from '../src/hosted-check';
 import { withoutAuthorship, personStampValid } from '../src/work-actor-types';
 import { sanitizeOutside } from '../src/run-evidence';
@@ -100,6 +101,7 @@ export const cancel = mutation({
 
 export const enqueue = receiptMutation({
   args: {
+    memberBudget: v.optional(v.boolean()),
     projectId: v.id('hostedProjects'),
     request: v.string(),
     /** The calling agent run's slug (feature landing-agent-run, d730121f); not part of the request. */
@@ -121,6 +123,12 @@ export const enqueue = receiptMutation({
       const request = hostedLandingRequestSchema.parse(JSON.parse(input.request));
       validateNotVerified(request.notVerified);
       const actor = await acceptanceActor(ctx, request.agent);
+      const reply = memberWorkBudgetReply(
+        ctx,
+        { projectId: input.projectId, actor: actor.id },
+        'landing',
+        input.memberBudget,
+      );
       const state = await enqueueHostedLanding(
         ctx,
         {
@@ -135,7 +143,7 @@ export const enqueue = receiptMutation({
         actor,
       );
       const review = await heldReview(ctx, authorizedReadProject(ctx, input.projectId), state);
-      return canonicalPayload(review ? { ...state, ...review } : state);
+      return reply(canonicalPayload(review ? { ...state, ...review } : state));
     } catch (error) {
       return report(error);
     }

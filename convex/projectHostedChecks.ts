@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { memberWorkBudgetReply } from './abuseLimits';
 import { useObjectReports } from './projectHostedCheckReports';
 import { reusedHostedVerdict } from './projectHostedCheckVerdictReuse';
 import { scheduleCiStatus } from './projectCiStatus';
@@ -49,19 +50,19 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 
 export const enqueue = mutation({
-  args: { projectId: v.id('hostedProjects'), request: v.string() },
+  args: { projectId: v.id('hostedProjects'), request: v.string(), memberBudget: v.optional(v.boolean()) },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
       const { actor } = await checkCaller(ctx, input.projectId);
-      return canonicalPayload(
-        await enqueueHostedCheck(ctx, {
-          projectId: input.projectId,
-          actor,
-          cause: checkCause.manual,
-          request: JSON.parse(input.request),
-        }),
-      );
+      const identity = { projectId: input.projectId, actor };
+      const reply = memberWorkBudgetReply(ctx, identity, 'checks', input.memberBudget);
+      const run = await enqueueHostedCheck(ctx, {
+        ...identity,
+        cause: checkCause.manual,
+        request: JSON.parse(input.request),
+      });
+      return reply(canonicalPayload(run));
     } catch (error) {
       return report(error);
     }

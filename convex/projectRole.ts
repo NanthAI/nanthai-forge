@@ -5,6 +5,7 @@
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { ProjectRole } from './projectAccessContract';
+import { rememberMemberWorkBudget } from './abuseLimits';
 
 type Project = Pick<Doc<'hostedProjects'>, '_id' | 'owner'>;
 // Roles a transaction checked. Authorization reads current membership; one query reuses its own check (one snapshot).
@@ -36,9 +37,11 @@ export async function hasWriteRole(ctx: QueryCtx | MutationCtx, project: Project
   if (project.owner === actor) return true;
   const known = checkedInQuery(ctx, project, actor);
   if (known !== undefined) return known === 'write';
-  const granted = !!(await contributorRow(ctx, project._id, actor));
-  if (granted) checked(ctx, project, actor, 'write');
-  return granted;
+  const member = await contributorRow(ctx, project._id, actor);
+  if (!member) return false;
+  rememberMemberWorkBudget(ctx, member);
+  checked(ctx, project, actor, 'write');
+  return true;
 }
 
 /** The actor's current role on the project, or null for no grant (public visibility is not a role). */

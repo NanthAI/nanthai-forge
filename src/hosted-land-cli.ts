@@ -453,6 +453,7 @@ export async function hostedLandCli(
       },
     ),
   };
+  if (final.budget && Date.parse(final.budget.resetAt) <= Date.now()) delete final.budget;
   const lines = landSummary(final);
   for (const line of lines) process.stderr.write(`${line}\n`);
   if (typeof submitted.operationId === 'string')

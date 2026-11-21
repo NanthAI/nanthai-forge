@@ -2,7 +2,7 @@
 import { latestCancelledRun, supersededCheckCosts } from './projectHostedLandingRunnerCosts';
 import { withoutAuthorship, personStampValid } from '../src/work-actor-types';
 import { cancelPendingTask } from './schedulerCancel';
-import { chargeMemberWork } from './abuseLimits';
+import { chargeMemberWork, memberWorkBudgetReply } from './abuseLimits';
 import { landingPriority } from './projectHostedLandingOrder';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
 import { desiredWatchdogMs } from '../src/hosted-landing-stall';
@@ -42,6 +42,7 @@ const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() }
  * are already staged; no Mac, client journal or further client mutation is needed. */
 export const submit = receiptMutation({
   args: {
+    memberBudget: v.optional(v.boolean()),
     projectId: v.id('hostedProjects'),
     request: v.string(),
     /** The calling agent run's slug (feature landing-agent-run, d730121f); not part of the request. */
@@ -63,7 +64,13 @@ export const submit = receiptMutation({
       const command = hostedLandingDesiredSchema.parse(JSON.parse(input.request));
       validateNotVerified(command.notVerified);
       const actor = await acceptanceActor(ctx, true);
-      return await submitDesiredLanding(
+      const reply = memberWorkBudgetReply(
+        ctx,
+        { projectId: input.projectId, actor: actor.id },
+        'landing',
+        input.memberBudget,
+      );
+      const state = await submitDesiredLanding(
         ctx,
         input.projectId,
         command,
@@ -75,6 +82,7 @@ export const submit = receiptMutation({
         input.maxChecks,
         true,
       );
+      return reply(state);
     } catch (error) {
       return report(error);
     }

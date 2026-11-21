@@ -1288,6 +1288,7 @@ export class HostedAgentTransport {
       // The finish gate's judgement of the checkout's saved head, sent again with the landing.
       let gatedLane: LandGateEntry | undefined;
       let budget: MemberBudget | undefined;
+      let budgetExpiresAt = 0;
       let carriedMain = mainFirstActions.has(action) ? capabilities.main : undefined;
       const session: HostedAgentSession = {
         root,
@@ -1331,13 +1332,25 @@ export class HostedAgentTransport {
         ...(this.serverFeatures?.includes('landing-tokens') ? { landingTokens: true as const } : {}),
         query: this.query.bind(this),
         mutation: async <T>(name: string, args: Record<string, unknown>) => {
-          const reply = await this.mutation<T>(name, args);
-          if (!memberBudgetMutations.has(name) || !reply || typeof reply !== 'object' || !('budget' in reply))
-            return reply;
+          const memberWork = memberBudgetMutations.has(name);
+          const includeBudget = memberWork && capabilities.features?.includes('member-work-budget');
+          const reply = await this.mutation<T>(name, includeBudget ? { ...args, memberBudget: true } : args);
+          if (!memberWork || !reply || typeof reply !== 'object' || !('budget' in reply)) return reply;
           const { budget: reported, ...payload } = reply as T & { budget: unknown };
           const parsed = memberBudgetSchema.safeParse(reported);
-          if (parsed.success && (!budget || parsed.data.left / parsed.data.of <= budget.left / budget.of))
-            budget = parsed.data;
+          if (parsed.success) {
+            const now = Date.now();
+            const expiresAt = Date.parse(parsed.data.resetAt);
+            if (
+              expiresAt > now &&
+              (!budget ||
+                budgetExpiresAt <= now ||
+                parsed.data.left / parsed.data.of <= budget.left / budget.of)
+            ) {
+              budget = parsed.data;
+              budgetExpiresAt = expiresAt;
+            }
+          }
           // The legacy payload still goes through its original strict parser or journal.
           return payload as T;
         },
@@ -1696,7 +1709,7 @@ export class HostedAgentTransport {
         if (done.status === 'done' && done.value) response.localLanes = done.value;
         else if (done.status === 'timeout') this.abandonedStart = true;
       }
-      if (budget) response.budget = budget;
+      if (budget && budgetExpiresAt > Date.now()) response.budget = budget;
       return response;
     } catch (error) {
       const owner = nativeOwner(existsSync(this.root) ? realpathSync(this.root) : this.root);

@@ -16,6 +16,13 @@ repeat the original agent CLI command or MCP tool call with the same operation
 id, if supplied. The CLI uses private copies of command or message inputs read
 from a file or stdin, so the retry uses the same bytes.
 
+Check, compose and landing replies for project members can also carry a top-level
+`budget` below 20% of the relevant daily work allowance. It gives the remaining
+count and the next midnight UTC. A landing shows the tightest of the existing
+check, compose and submission budgets at submission or replay. These counters
+apply to non-owner members. The CLI and MCP request the field on the existing
+mutations when the server advertises support.
+
 Board note text accepts app route patterns such as `/-/{handle}/{project}/lanes`.
 Machine absolute, home, drive and file-URL paths are still refused; `paths` entries
 remain repository-relative source paths.

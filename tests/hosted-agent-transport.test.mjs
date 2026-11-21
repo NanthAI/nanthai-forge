@@ -30,15 +30,22 @@ const errorCode = expected => error => error.code === expected;
 test('the compact finish reply carries the tightest member budget without changing landing pins', async t => {
   const s = agentFixture(t);
   const resetAt = '2026-12-01T00:00:00.000Z';
+  let now = Date.parse(resetAt) - 30_000;
+  t.mock.method(Date, 'now', () => now);
   const composes = { limit: 'member-composes', left: 59, of: 300, resetAt };
   const submissions = { limit: 'member-submissions', left: 3, of: 300, resetAt };
   let reportBudget = true;
   let malformed = false;
+  let rollover = false;
   const reported = [];
   const mutation = s.exchange.client.mutation;
   t.mock.method(s.exchange.client, 'mutation', async (ref, args) => {
     const reply = await mutation(ref, args);
     const name = getFunctionName(ref);
+    if (rollover && name === 'projectHostedLanding:enqueue') {
+      now = Date.parse(resetAt);
+      return reply;
+    }
     const budget =
       name === 'projectHostedCompose:prepare'
         ? composes
@@ -61,6 +68,10 @@ test('the compact finish reply carries the tightest member budget without changi
   const partial = await transport.dispatch('finish', { ...command, operationId: randomUUID() });
   assert.equal(partial.result.phase, 'finish');
   assert.deepEqual(partial.budget, composes);
+  rollover = true;
+  const expired = await transport.dispatch('finish', { ...command, operationId: randomUUID() });
+  assert.equal(expired.result.phase, 'finish');
+  assert.equal(expired.budget, undefined);
   reportBudget = false;
   const calls = s.calls.length;
   const baseline = await transport.dispatch('finish', command);
