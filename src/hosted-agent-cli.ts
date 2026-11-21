@@ -15,7 +15,7 @@ import { markerIdentity } from './lane-prune.js';
 import { landExitsFailed, landingStallReport, landSummary, selfReviewLine } from './hosted-land-summary.js';
 import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
 import { holdLines, landingHold } from './hosted-landing-hold.js';
-import { landingStateField } from './landing-state.js';
+import { landingStateField, type LandingRecord } from './landing-state.js';
 import { orderWaitOf } from './hosted-wait-line.js';
 import { learnFromLanding } from './preflight-learned.js';
 import { operationLine } from './hosted-land-wait.js';
@@ -320,9 +320,11 @@ async function dispatchHostedAgentCli(
       ).catch(error => {
         throw waitFailure(error, continuation);
       });
-      const { submissions, status, run } = response.result as {
+      const { submissions, status, run, pendingProgress } = response.result as {
         submissions?: {
-          submission: { phase?: string } & Parameters<typeof landingHold>[0];
+          submission: { id: string; operationId: string; phase?: string } & NonNullable<
+            Parameters<typeof landingHold>[0]
+          >;
           recovery?: unknown;
           conflict?: unknown;
           orderWait?: unknown;
@@ -330,32 +332,42 @@ async function dispatchHostedAgentCli(
           providerDelay?: string;
         }[];
         status: string;
+        pendingProgress?: LandingRecord;
         run?: { status?: string } | null;
       };
+      const selected = submissions?.length === 1 ? submissions[0] : undefined;
+      const recorded = selected && {
+        ...selected.submission,
+        orderWait: orderWaitOf(selected.orderWait),
+        providerDelay: selected.providerDelay,
+      };
+      const recordedCode = recorded?.error?.code;
+      const recordedHoldCode =
+        recordedCode === 'MAIN_RED' || recordedCode === 'CI_DOWN' ? recordedCode : undefined;
+      // A metadata-only update can leave a recorded hold or stall in effect.
+      const changed =
+        pendingProgress &&
+        recorded &&
+        (pendingProgress.phase !== recorded.phase ||
+          pendingProgress.observation?.pendingReason !== recorded.observation?.pendingReason ||
+          pendingProgress.error?.code !== recordedHoldCode ||
+          pendingProgress.orderWait?.submissionId !== recorded.orderWait?.submissionId);
+      const presentation = changed
+        ? { id: recorded.id, operationId: recorded.operationId, ...pendingProgress }
+        : recorded;
+      const phase = selected ? (presentation?.phase ?? 'unknown') : 'pending';
       // A landing held for a person or a dependency says so on every unfinished return (5c59940b).
-      const hold = submissions?.length === 1 ? landingHold(submissions[0]!.submission, laneId) : null;
+      const hold = landingHold(presentation, laneId);
       // The same state word and next step people see (src/landing-state.ts); additive.
-      const landing =
-        submissions?.length === 1
-          ? {
-              landingState: landingStateField(
-                {
-                  ...submissions[0]!.submission,
-                  orderWait: orderWaitOf(submissions[0]!.orderWait),
-                  providerDelay: submissions[0]!.providerDelay,
-                },
-                laneId,
-              ),
-            }
-          : {};
+      const landing = presentation ? { landingState: landingStateField(presentation, laneId) } : {};
       // A stalled landing says so, with its source failure and replay, on every unfinished return
       // (friction c7f3afac: a wait stayed silent for 2 h on a failed compose step).
       const waitedOn = selectedWait.operationIds?.length === 1 ? selectedWait.operationIds[0]! : undefined;
       const retained = waitedOn ? retainedHostedOperation(root, waitedOn) : null;
       const stalled =
-        submissions?.length === 1 && status !== 'terminal'
+        selected && !changed && status !== 'terminal'
           ? landingStallReport(
-              submissions[0]!,
+              selected,
               retained && waitedOn ? { root, ...retained, operationId: waitedOn } : undefined,
             )
           : undefined;
@@ -384,7 +396,7 @@ async function dispatchHostedAgentCli(
             ...(selectedWait.runId
               ? { runId: selectedWait.runId }
               : { operationIds: selectedWait.operationIds }),
-            phase: submissions?.length === 1 ? (submissions[0]!.submission.phase ?? 'unknown') : 'pending',
+            phase,
             ...held,
             board: { ...envelope, ...(!conflictNotice && notice ? { notice } : {}) },
             ...resume,
@@ -438,8 +450,7 @@ async function dispatchHostedAgentCli(
               ? { runId: selectedWait.runId, phase: run?.status ?? 'unknown' }
               : {
                   operationIds: selectedWait.operationIds,
-                  phase:
-                    submissions?.length === 1 ? (submissions[0]!.submission.phase ?? 'unknown') : 'pending',
+                  phase,
                   ...held,
                 }),
             ...resume,
@@ -451,7 +462,6 @@ async function dispatchHostedAgentCli(
       // A single-target wait exposes the same observed outcome as finish, while
       // retaining the complete selection below. Continuation consumers can follow
       // finish -> wait -> outcome without another read or a finish replay.
-      const selected = submissions?.length === 1 ? submissions[0] : undefined;
       if (!selectedWait.runId && status === 'terminal')
         for (const entry of submissions ?? []) {
           // A failed landing exits 2, the same as `land` (SM-C M7); landed and superseded stay 0.

@@ -16,6 +16,9 @@ or `maxWaitMs` (MCP `forge_wait`) sets another. Unfinished work returns
 `IN_PROGRESS` (exit 3) with the same resume command: run it again in the
 foreground. Never resubmit, sleep between checks or end the turn on a background
 wait. MCP sends progress notifications while it waits.
+For a single landing, the CLI budget reply uses the latest pending phase delivered
+for the observed attempt by its existing subscription. The continuation still selects
+the original operation, and settlement still comes from its canonical landing record.
 `land --save` uses the same 540 s budget for its whole run (submission and wait,
 `--budget` sets another) and ends `IN_PROGRESS` (exit 3) with its exact resume command.
 If a hosted `save` replies `settling`, follow its wait command or check its outcome

@@ -80,6 +80,18 @@ const pageSchema = eventSchema.extend({
   conflict: z.unknown().optional(),
 });
 const decode = (value: unknown) => (typeof value === 'string' ? JSON.parse(value) : value);
+type PendingProgress = {
+  attemptId: string;
+  version: number;
+  phase: z.infer<typeof hostedLandingStateSchema.shape.phase>;
+  observation: {
+    state: 'pending';
+    pendingReason: z.infer<typeof hostedLandingStateSchema.shape.observation.shape.pendingReason>;
+  };
+  error?: { code: 'MAIN_RED' | 'CI_DOWN' };
+  orderWait?: { submissionId: string };
+};
+type WaitNotes = { board?: unknown; progress: Map<string, PendingProgress> };
 /** Durable submission versions plus S05 selection-scoped deduplication. Live
  * queries are hints: register then reread to close the initial lost-wake window. */
 export async function observeHostedSubmissions(
@@ -100,7 +112,7 @@ export async function observeHostedSubmissions(
     active = true;
   // The latest board value any attempt saw: a budget or cancel stop still carries its conflict
   // note (a peer flag an acceptance wait did not wake for, ad80e037).
-  const noted: { board?: unknown } = {};
+  const noted: WaitNotes = { progress: new Map() };
   const pending = (status: 'timeout' | 'cancelled') => ({
     ...boardConflictEnvelope(board?.laneId, noted.board),
     schema: 1 as const,
@@ -180,6 +192,8 @@ export async function observeHostedSubmissions(
         ),
     });
     const entry = response.result.submissions.length === 1 ? response.result.submissions[0] : undefined;
+    const progress =
+      entry?.submission.observation.state === 'pending' ? noted.progress.get(entry.submission.id) : undefined;
     // A sync-required stop names the one recovery (the same Lane's land --save), not another wait.
     const sync =
       response.result.status === 'sync-required'
@@ -191,6 +205,12 @@ export async function observeHostedSubmissions(
       ...response,
       result: {
         ...response.result,
+        ...(entry &&
+        progress &&
+        progress.attemptId === entry.submission.attemptId &&
+        progress.version > entry.submission.version
+          ? { pendingProgress: progress }
+          : {}),
         ...(sync ? syncRequiredContinuation(transport.root, sync.advice!) : {}),
         ...(entry?.recovery ? { recovery: entry.recovery } : {}),
         ...(entry?.conflict ? { conflict: entry.conflict } : {}),
@@ -208,8 +228,8 @@ async function observeHostedSubmissionsOnce(
   emit: (value: unknown) => void,
   subscribe: () => HostedRunSubscription,
   previous: ReadonlyMap<string, z.infer<typeof eventSchema>>,
-  board?: BoardWaitOption,
-  noted: { board?: unknown } = {},
+  board: BoardWaitOption | undefined,
+  noted: WaitNotes,
   feedLanes?: string[],
 ) {
   const command = hostedSubmissionWaitSchema.parse(input);
@@ -644,6 +664,18 @@ async function observeHostedSubmissionsOnce(
                   phase: observed.phase,
                   observation: { state: 'pending' },
                 });
+                // The feed already carries the current pending phase. Keep it separate from the
+                // drained submission: it has no Candidate, advice, terminal receipt or replay cursor.
+                const { pending, phase, version, submissionId } = observed;
+                if (pending && version > (noted.progress.get(submissionId)?.version ?? -1))
+                  noted.progress.set(submissionId, {
+                    attemptId: pending.attemptId,
+                    version,
+                    phase,
+                    observation: { state: 'pending', pendingReason: pending.reason },
+                    ...(pending.holdCode ? { error: { code: pending.holdCode } } : {}),
+                    ...(pending.orderWait ? { orderWait: { submissionId: pending.orderWait } } : {}),
+                  });
                 if (!observed.needsSync && !['landed', 'terminal-failed'].includes(observed.phase)) continue;
                 const key = `${observed.phase}:${observed.version}:${observed.needsSync}`;
                 for (const operation of selected) {

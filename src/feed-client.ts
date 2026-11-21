@@ -7,7 +7,7 @@ import type { HostedRunSubscription } from './hosted-agent-observe.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { withExchangeProgress } from './exchange-progress.js';
 import { decodeFeedPosition, laterFeedPosition } from './feed-position.js';
-import { hostedLandingStateSchema } from './hosted-landing.js';
+import { hostedLandingStateSchema, landingObservationSchema } from './hosted-landing.js';
 
 export const FEED_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 export const FEED_OVERLAP_MS = 30_000;
@@ -53,6 +53,14 @@ const feedPageSchema = z.object({
         phase: hostedLandingStateSchema.shape.phase,
         version: timestamp,
         needsSync: z.boolean(),
+        pending: z
+          .object({
+            attemptId: z.uuid(),
+            reason: landingObservationSchema.shape.pendingReason,
+            holdCode: z.enum(['MAIN_RED', 'CI_DOWN']).optional(),
+            orderWait: z.uuid().optional(),
+          })
+          .optional(),
       }),
     )
     .max(32)

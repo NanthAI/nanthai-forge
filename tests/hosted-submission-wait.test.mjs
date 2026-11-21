@@ -4,7 +4,13 @@ import { landingBodyCounts } from './observer-projection-budget.mjs';
 import { logicalTicket, ticketState, patchTicketState } from './landing-ticket-fixture.mjs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { landWaitCommand } from '../dist/hosted-land-wait.js';
+import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
+import { HostedAgentJournal } from '../dist/hosted-agent-journal.js';
+import { observationWaitHooks } from '../dist/hosted-agent-observe.js';
 import { assertAgentResponseShape } from './agent-response-shape.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -161,6 +167,7 @@ async function fixture(onFeed = false, { rider = onFeed, reactive = false } = {}
         }),
       );
       live.forEach((s, index) => s.next(values[index]));
+      return values;
     },
     fail: error => {
       for (const s of subscriptions) s.fail(error);
@@ -1162,6 +1169,147 @@ test(
     assert.deepEqual(await again, resumed, 'reattachment retains the same terminal receipt');
   },
 );
+
+function feedBackedCliWait(t, s, operationId) {
+  const root = mkdtempSync(join(tmpdir(), 'forge-wait-progress-'));
+  const { address } = s.transport;
+  const oldExit = process.exitCode;
+  t.after(() => {
+    delete observationWaitHooks.subscribe;
+    process.exitCode = oldExit;
+    rmSync(root, { recursive: true, force: true });
+    rmSync(`${root}.forge-client`, { recursive: true, force: true });
+  });
+  new HostedAgentJournal(root, address, 'owner', 'finish', { laneId: s.feedLane }, operationId);
+  observationWaitHooks.subscribe = s.subscribe;
+  let now = 0;
+  t.mock.method(performance, 'now', () => now);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const input = { operationIds: [operationId], until: 'acceptance', timeoutSeconds: 1 };
+  const wait = command => hostedAgentCli(root, 'wait', command, address, s.transport);
+  const expireBudget = () => {
+    now += 1000;
+    t.mock.timers.tick(1000);
+  };
+  return { input, wait, address, expireBudget };
+}
+
+test('a bounded acceptance wait reports the observed check and resumes the original landing', async t => {
+  const s = await fixture(true);
+  const { request, state } = await s.start();
+  const operationId = request.operationId;
+  const { input, wait, address, expireBudget } = feedBackedCliWait(t, s, operationId);
+  const pending = wait(input);
+  await turn();
+  await s.deliver();
+  assert.equal(s.counts().reads, 1);
+
+  await s.update(state.id, 'checking');
+  const [feedPage] = await s.deliver();
+  await turn();
+  const { submission, ...page } = await s.transport.query('projectHostedFinishObserve:page', {
+    operationId,
+    nextVersion: 0,
+  });
+  assert.equal(page.operationId, operationId);
+  assert.equal(submission.id, state.id);
+  assert.equal(submission.attemptId, state.attemptId);
+  assert.equal(submission.phase, 'checking');
+  const [projected] = feedPage.waiting;
+  assert.equal(projected.pending.attemptId, submission.attemptId);
+  assert.equal(projected.phase, submission.phase);
+  assert.equal(projected.version, submission.version);
+  const beforeBudget = s.f.metrics.calls;
+  expireBudget();
+  const bounded = (await pending).result;
+  assert.equal(process.exitCode, 3);
+  assert.equal(bounded.status, 'IN_PROGRESS');
+  assert.equal(bounded.reason, 'budget');
+  assert.equal(bounded.phase, submission.phase);
+  assert.equal(bounded.landingState.state, 'checking');
+  assert.deepEqual(bounded.next.operationIds, [operationId]);
+  assert.equal(s.f.metrics.calls, beforeBudget, 'the budget reply makes no extra Convex call');
+  assert.equal(s.counts().reads, 2, 'only the baseline and the explicit comparison read');
+  const { readBytes, writeBytes } = s.f.counts.findLast(count => count.name === 'landingWaitLive');
+  assert.equal(writeBytes, 0);
+  t.diagnostic(
+    `Existing feed evaluation: ${readBytes} DB bytes, ${Buffer.byteLength(JSON.stringify(feedPage))} reply bytes. CLI budget reply: ${Buffer.byteLength(JSON.stringify(bounded))} result bytes.`,
+  );
+
+  const resumedInput = JSON.parse(bounded.waitCommand.split(" wait '")[1].slice(0, -1));
+  assert.deepEqual(resumedInput, { ...input, ...address });
+  const resumed = wait(resumedInput);
+  await turn();
+  const acceptance = { receiptId: randomUUID(), head: 'a'.repeat(64) };
+  await s.update(state.id, 'landed', { acceptance });
+  await s.record(state, 'landing.landed');
+  await s.deliver();
+  const settled = (await resumed).result;
+  assert.equal(process.exitCode, 0);
+  assert.equal(settled.status, 'terminal');
+  assert.equal(settled.submission.operationId, operationId);
+  assert.equal(settled.submission.attemptId, state.attemptId);
+  assert.deepEqual(settled.submission.acceptance, acceptance);
+  assert.equal(settled.waitCommand, undefined);
+  assert.equal(s.counts().reads, 4, 'the resumed wait reads its own baseline and terminal receipt');
+  assert.equal(s.counts().opens, s.counts().closes);
+});
+
+test('a pending metadata update keeps the recorded hold reason on the bounded reply', async t => {
+  const s = await fixture(true);
+  const { request, state } = await s.start();
+  const reason = 'Waiting for pinned parent Candidate';
+  const held = {
+    observation: { state: 'pending', pendingReason: 'waiting-for-dependency', cause: null },
+    error: { code: 'DEPENDENCY_NOT_ACCEPTED', message: reason },
+  };
+  await s.update(state.id, 'ready', held);
+  const { input, wait, expireBudget } = feedBackedCliWait(t, s, request.operationId);
+  const pending = wait(input);
+  await turn();
+  await s.deliver();
+
+  await s.update(state.id, 'ready', held);
+  const [feedPage] = await s.deliver();
+  assert.equal(feedPage.waiting[0].version, state.version + 2);
+  expireBudget();
+  const { result } = await pending;
+  assert.equal(result.reason, 'budget');
+  assert.equal(result.landingState.state, 'held-dependency');
+  assert.equal(result.hold.reason, reason);
+  assert.equal(s.counts().reads, 1);
+});
+
+test('a feed update for a replacement attempt does not relabel the pinned observation', async t => {
+  const s = await fixture(true);
+  const { request, state } = await s.start();
+  let now = 0;
+  t.mock.method(performance, 'now', () => now);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pending = s.wait({ operationIds: [request.operationId], until: 'acceptance', timeoutSeconds: 1 });
+  await turn();
+  await s.deliver();
+
+  const original = (await s.f.status(state.id)).attempt;
+  const replacement = {
+    ...original,
+    id: randomUUID(),
+    parentAttemptId: original.id,
+    number: original.number + 1,
+    operations: { check: randomUUID(), accept: randomUUID() },
+  };
+  await s.f.run('landingWaitInsertReplacement', store.insertLandingAttempt, replacement);
+  await s.update(state.id, 'checking', { attemptId: replacement.id });
+  const [feedPage] = await s.deliver();
+  assert.equal(feedPage.waiting[0].pending.attemptId, replacement.id);
+  now = 1000;
+  t.mock.timers.tick(1000);
+  const { result } = await pending;
+  assert.equal(result.status, 'timeout');
+  assert.equal(result.submissions[0].submission.attemptId, state.attemptId);
+  assert.equal(result.pendingProgress, undefined);
+  assert.equal(s.counts().reads, 1);
+});
 
 test('six matched landing waits preserve outcomes and measure the live read cost with and without the feed rider', async t => {
   const measures = [];
