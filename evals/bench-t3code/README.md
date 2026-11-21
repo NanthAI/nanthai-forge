@@ -46,6 +46,24 @@ That command selects the restored inputs for every harness script in this shell.
 4. Reconstruct upstream C (`52f4ec6f`) plus the six preview prerequisites (#21745, #22739, #25436, #22062, #25028, #24244). Replace upstream workflows with the exact recovered bench CI scaffolding as described in the registered plan; retain the oracle separately from agent workspaces. Compare file modes, paths, the tree id and the commit id with fa3b7349 (above): equal ids prove every path, mode and byte. Check every reference port's pre-image blob ids against that tree and its files against the task's `oracle.referenceFiles`. Record every patch/reference port and its provenance.
 5. Re-run the qualification matrix in a separately authorized environment: same base tree and check in both arms; base green three times; each task with hidden tests red in its owned scope and with its reference green. Verify that no solution or hidden test appears in the agent base. Restore the exact toolchain/lockfiles and runner scope from the plan, then record harness, source, CLI, runner and backend pins.
 
+### Recover a separately pinned amendment
+
+For a run with an approved amendment, restore the exact bytes as
+`BENCH_ROOT/PLAN-AMENDMENTS.md` and the expected digest as the top-level
+`planAmendmentsSha256` field in `BENCH_ROOT/config.json`. When registering an amendment,
+record the SHA-256 from `shasum -a 256 "$BENCH_ROOT/PLAN-AMENDMENTS.md"` with the approved
+record before using it. During recovery, use that recorded lowercase digest rather than
+deriving a new expected digest from the recovered file. Keep both pins alongside the
+exact harness revision and retain a separate recovery directory for the original run.
+
+`plan.mjs check` verifies the amendment file and digest as a pair, including when one
+is missing. `plan.mjs json` includes `planAmendmentsSha256` for an amended input set.
+Keep the original `PLAN.md` and its `planSha256` for both input sets. For a
+pre-amendment run, restore its original plan and harness revision and leave both the
+amendment file and digest absent. The amendment record documents the decision.
+Scoring, contamination detection and prior results still come from the pinned
+harness and retained evidence.
+
 ## Rebuild the environment with one script
 
 `scripts/bench-t3code/setup` builds everything a bench needs outside the harness code; `scripts/bench-t3code/teardown` removes it. Both need an explicit `--dry` (reads only) or `--live`.

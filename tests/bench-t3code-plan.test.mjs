@@ -18,6 +18,7 @@ import {
   outlierDecision,
   checkPlan,
   planPath,
+  planSha,
 } from '../scripts/bench-t3code/plan.mjs';
 import { batchGuard, staleBenchFreeze } from '../scripts/bench-t3code/drive.mjs';
 import { realConflicts, mergeConflicts } from '../scripts/bench-t3code/hunks.mjs';
@@ -1646,4 +1647,58 @@ test('plan check: the committed exit plan, the B1.5d plan frozen as run, and the
   } finally {
     rmSync(B, { recursive: true, force: true });
   }
+});
+
+test('plan check keeps the pre-amendment plan pin and requires the exact separately pinned amendment bytes', t => {
+  const root = mkdtempSync(join(tmpdir(), 'bench-plan-amendments-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const legacy = join(root, 'legacy');
+  const amended = join(root, 'amended');
+  const base = readFileSync(planPath());
+  const config = { agent: DESIGN.agent };
+  const amendment = '# Synthetic amendment\nRetained with the recovery record.\n';
+  const amendmentFile = join(amended, 'PLAN-AMENDMENTS.md');
+  const amendConfig = pin =>
+    writeFileSync(join(amended, 'config.json'), JSON.stringify({ ...config, planAmendmentsSha256: pin }));
+  for (const dir of [legacy, amended]) {
+    mkdirSync(dir);
+    writeFileSync(join(dir, 'PLAN.md'), base);
+    writeFileSync(join(dir, 'config.json'), JSON.stringify(config));
+    writeFileSync(join(dir, 'tasks.json'), '{"tasks":[]}');
+  }
+  // The registered tasks are private. Both roots must still reject the synthetic task array.
+  const taskProblem = `BENCH_TASKS_CHANGED ${planSha('[]')}`;
+  assert.deepEqual(checkPlan(legacy), [taskProblem]);
+
+  writeFileSync(amendmentFile, amendment);
+  assert.deepEqual(checkPlan(amended), [
+    'BENCH_ROOT/PLAN-AMENDMENTS.md requires config.planAmendmentsSha256',
+    taskProblem,
+  ]);
+  amendConfig(null);
+  assert.deepEqual(checkPlan(amended), [
+    'config.planAmendmentsSha256 must be a lowercase SHA-256 digest',
+    taskProblem,
+  ]);
+  amendConfig(planSha(amendment));
+  assert.deepEqual(checkPlan(amended), [taskProblem]);
+  assert.deepEqual(checkPlan(legacy), [taskProblem]);
+  assert.deepEqual(readFileSync(join(amended, 'PLAN.md')), base);
+
+  writeFileSync(amendmentFile, amendment.trimEnd());
+  assert.deepEqual(checkPlan(amended), [
+    'BENCH_ROOT/PLAN-AMENDMENTS.md differs from config.planAmendmentsSha256',
+    taskProblem,
+  ]);
+  rmSync(amendmentFile);
+  assert.deepEqual(checkPlan(amended), [
+    'BENCH_ROOT/PLAN-AMENDMENTS.md is missing for config.planAmendmentsSha256',
+    taskProblem,
+  ]);
+  writeFileSync(amendmentFile, amendment);
+  writeFileSync(join(amended, 'PLAN.md'), Buffer.concat([base, Buffer.from('\n')]));
+  assert.deepEqual(checkPlan(amended), [
+    'BENCH_ROOT/PLAN.md differs from the committed PLAN.md',
+    taskProblem,
+  ]);
 });

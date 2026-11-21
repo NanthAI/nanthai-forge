@@ -5,7 +5,7 @@
 // here from fixed inputs, so the schedule is known before the first cell runs:
 //   node scripts/bench-t3code/plan.mjs json   -> the machine-readable plan (batches; rep-3 candidates)
 //   node scripts/bench-t3code/plan.mjs check  -> exits 1 unless BENCH_ROOT/PLAN.md and
-//                                               tasks.json match this plan
+//                                               tasks.json match, and any amendments are pinned
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -281,13 +281,42 @@ export const planPath = () =>
   join(dirname(fileURLToPath(import.meta.url)), '../../docs/research/p6-exit-bench-plan.md');
 export const planSha = text => createHash('sha256').update(text).digest('hex');
 
-/** The plan the driver follows: design, schedule and the PLAN.md text hash. */
+function readPlanConfig(benchRoot) {
+  try {
+    return JSON.parse(readFileSync(join(benchRoot, 'config.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/** An amendments record has its own pin; the base plan hash still identifies PLAN.md. */
+function checkAmendments(benchRoot, config) {
+  const pin = config?.planAmendmentsSha256;
+  if (pin !== undefined && (typeof pin !== 'string' || !/^[a-f0-9]{64}$/.test(pin)))
+    throw Error('config.planAmendmentsSha256 must be a lowercase SHA-256 digest');
+  let bytes;
+  try {
+    bytes = readFileSync(join(benchRoot, 'PLAN-AMENDMENTS.md'));
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    if (pin === undefined) return undefined;
+    throw Error('BENCH_ROOT/PLAN-AMENDMENTS.md is missing for config.planAmendmentsSha256');
+  }
+  if (pin === undefined) throw Error('BENCH_ROOT/PLAN-AMENDMENTS.md requires config.planAmendmentsSha256');
+  if (planSha(bytes) !== pin)
+    throw Error('BENCH_ROOT/PLAN-AMENDMENTS.md differs from config.planAmendmentsSha256');
+  return pin;
+}
+
+/** The plan the driver follows: design, schedule and the two independent plan pins. */
 export function plan(benchRoot) {
+  const planAmendmentsSha256 = checkAmendments(benchRoot, readPlanConfig(benchRoot));
   const tasks = loadTasks(benchRoot);
   const text = readFileSync(planPath(), 'utf8');
   return {
     design: DESIGN,
     planSha256: planSha(text),
+    ...(planAmendmentsSha256 && { planAmendmentsSha256 }),
     tasks: tasks.map(t => ({ id: t.id, pr: t.pr, overlap: t.overlap })),
     batches: batches(tasks.map(t => t.id)),
     extraCandidates: 'any (N, rep) the outlier rule selects: extraBatch(N, rep), same order as the batch',
@@ -301,7 +330,7 @@ export function plan(benchRoot) {
   };
 }
 
-/** BENCH_ROOT/PLAN.md must be the committed PLAN.md, byte for byte. */
+/** Check the committed base plan, optional pinned amendments, agent and task digest. */
 export function checkPlan(benchRoot) {
   const committed = readFileSync(planPath(), 'utf8');
   let copy = null;
@@ -310,10 +339,12 @@ export function checkPlan(benchRoot) {
   } catch {}
   const problems = [];
   if (copy !== committed) problems.push('BENCH_ROOT/PLAN.md differs from the committed PLAN.md');
-  let config = null;
+  const config = readPlanConfig(benchRoot);
   try {
-    config = JSON.parse(readFileSync(join(benchRoot, 'config.json'), 'utf8'));
-  } catch {}
+    checkAmendments(benchRoot, config);
+  } catch (error) {
+    problems.push(error.message);
+  }
   if (config) {
     const a = config.agent ?? {};
     const want = DESIGN.agent;
