@@ -43,7 +43,6 @@ export function physicalSourceBinding(
  * Compose only schedules seeds; ordinary writes always need a verified parent. */
 export function sourcePhysicalManifests(options: {
   enabled: boolean;
-  composeLineage?: boolean;
   sourceKind?: string | undefined;
   projectId: Id<'hostedProjects'>;
   locations: Map<string, ObjectLocation>;
@@ -56,7 +55,7 @@ export function sourcePhysicalManifests(options: {
   log: (message: string) => void;
   seed?: (pin: WorkerPin, files: readonly NativeFile[]) => Promise<void>;
 }) {
-  const enforceLineage = options.enabled && options.composeLineage && options.sourceKind === 'compose';
+  const composeEnabled = options.enabled && options.sourceKind === 'compose';
   let composeMain: string | undefined;
   const pending = new Map<string, Promise<{ statePhysical: WorkerPin; physical: PhysicalOutput[] } | null>>();
   const entry = (row: ObjectLocation) =>
@@ -184,7 +183,7 @@ export function sourcePhysicalManifests(options: {
         const output = options.outputs.at(-1);
         if (output?.sha256 === pin.sha256 && output.statePhysical) {
           output.statePhysicalRebind = true;
-          if (enforceLineage) output.statePhysicalPrevious = original ?? null;
+          output.statePhysicalPrevious = original ?? null;
         } else
           throw new ForgeError(
             'SOURCE_HASH_MISMATCH',
@@ -196,7 +195,6 @@ export function sourcePhysicalManifests(options: {
       }
       return;
     }
-    if (!main && !enforceLineage) return;
     const physical: PhysicalOutput[] = [];
     const result = await repairPhysicalRoot({
       state: pin.sha256,
@@ -219,7 +217,7 @@ export function sourcePhysicalManifests(options: {
       ...pin,
       statePhysical: result.pin,
       statePhysicalRebind: true,
-      ...(enforceLineage ? { statePhysicalPrevious: row.statePhysical ?? null } : {}),
+      statePhysicalPrevious: row.statePhysical ?? null,
       physical,
       ...(binding.recipe
         ? { recipe: binding.recipe }
@@ -249,7 +247,7 @@ export function sourcePhysicalManifests(options: {
     SourceOutput,
     'statePhysical' | 'statePhysicalRebind' | 'statePhysicalPrevious' | 'physical'
   > | null> => {
-    if (!enforceLineage) return create(pin, files, bases);
+    if (!composeEnabled) return create(pin, files, bases);
     if (!generated || !composeMain || pin.sha256 === composeMain) return null;
     // A generated State can have a Lane or an intermediate Candidate as a
     // logical parent. Its physical metadata must extend only the selected main.
@@ -261,14 +259,14 @@ export function sourcePhysicalManifests(options: {
   };
   return {
     output,
-    ...(enforceLineage
+    ...(composeEnabled
       ? {
           selectPhysicalComposeMain: (state: string) => {
             composeMain = state;
           },
         }
       : {}),
-    ...(options.enabled && options.sourceKind === 'compose' ? { composePhysicalState: compose } : {}),
+    ...(composeEnabled ? { composePhysicalState: compose } : {}),
     ...(options.enabled
       ? {
           writePhysicalState: (pin: WorkerPin, files: readonly NativeFile[], bases: readonly string[]) =>

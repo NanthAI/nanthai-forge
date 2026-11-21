@@ -70,6 +70,7 @@ export const sourceStepTables = {
     generation: v.optional(v.number()),
     /** Captured once at dispatch, so retries never follow a later setting change. */
     physicalManifests: v.optional(v.literal(true)),
+    /** Legacy dispatch stamp retained for source steps written before lineage became unconditional. */
     physicalComposeLineage: v.optional(v.literal(true)),
     projectId: v.id('hostedProjects'),
     jobId: v.string(),

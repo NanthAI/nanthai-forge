@@ -9,7 +9,7 @@ import { physicalBucket } from '../dist/physical-manifest-codec.js';
 import { physicalKey } from '../dist/physical-manifest-binary.js';
 import { stateSchema } from '../dist/state/format.js';
 const jobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
-async function compose(f, state, main, lineage = false, prepareOutput) {
+async function compose(f, state, main, prepareOutput) {
   const entry = await f.s.lane(state, { base: { head: main.sha256, receiptId: 'main-1' } }),
     selection = f.s.selection([entry]);
   await f.s.prepare(selection);
@@ -20,18 +20,13 @@ async function compose(f, state, main, lineage = false, prepareOutput) {
     const job = await f.s.run('compose job', ctx => jobs.loadSourceJob(ctx, f.s.projectId, pending.jobId));
     await prepareOutput(JSON.parse(f.s.objects.get(job.input.sha256)));
   }
-  const old = process.env.FORGE_PHYSICAL_MANIFESTS,
-    oldLineage = process.env.FORGE_PHYSICAL_COMPOSE_LINEAGE;
+  const old = process.env.FORGE_PHYSICAL_MANIFESTS;
   try {
     process.env.FORGE_PHYSICAL_MANIFESTS = '1';
-    if (lineage) process.env.FORGE_PHYSICAL_COMPOSE_LINEAGE = '1';
-    else delete process.env.FORGE_PHYSICAL_COMPOSE_LINEAGE;
     await f.c.call('projectConvexSource:dispatch', identity);
   } finally {
     if (old === undefined) delete process.env.FORGE_PHYSICAL_MANIFESTS;
     else process.env.FORGE_PHYSICAL_MANIFESTS = old;
-    if (oldLineage === undefined) delete process.env.FORGE_PHYSICAL_COMPOSE_LINEAGE;
-    else process.env.FORGE_PHYSICAL_COMPOSE_LINEAGE = oldLineage;
   }
   await f.c.call('projectConvexSource:step', { ...identity, step: 0 });
   let job = await f.s.run('compose job', ctx => jobs.loadSourceJob(ctx, f.s.projectId, pending.jobId));
@@ -73,60 +68,58 @@ async function setup(t) {
   return { ...f, main: seeded.head, save };
 }
 
-for (const lineage of [false, true]) {
-  test(`rootless main and an adopted Lane tip: compose lineage switch ${lineage ? 'on' : 'off'}`, async t => {
-    const f = await setup(t);
-    const extras = Array.from({ length: 8 }, (_, i) =>
-      f.s.file(`rootless-${i}.txt`, `working file ${i}`),
-    ).sort((a, b) => physicalBucket(a.blob) - physicalBucket(b.blob));
-    const removed = extras[3],
-      withExtra = [...f.files, ...extras],
-      files = withExtra.filter(file => file !== removed),
-      intermediate = await f.save(withExtra, f.main, f.files),
-      final = await f.save(files, intermediate.state, withExtra),
-      privatePack = intermediate.root.root.chunks.find(chunk => chunk.bucket === physicalBucket(removed.blob))
-        .pack.digest;
-    for (const main of [f.base, f.main])
-      f.s.patch('projectObjects', physicalObjectRow(f.s, main.sha256)._id, { statePhysical: undefined });
-    const before = f.requests.length;
-    const selected = await compose(f, final.state, f.main, lineage);
-    const pin = physicalObjectRow(f.s, selected.sha256).statePhysical,
-      root = await PhysicalManifestReader.open(selected.sha256, pin, f.read);
-    assert.equal(selected.sha256, final.state.sha256);
-    assert.equal(f.requests.length - before, 3, 'compose keeps the existing descriptor call budget');
-    assert.equal(
-      root.root.chunks.some(chunk => chunk.pack?.digest === privatePack),
-      !lineage,
-    );
-    assert.deepEqual(await root.lookup([removed.blob, extras[2].blob]), [
-      null,
-      { sha256: extras[2].blob, size: f.s.objects.get(extras[2].blob).length },
-    ]);
-  });
+test('compose repairs an adopted Lane root without a usable main root', async t => {
+  const f = await setup(t);
+  const extras = Array.from({ length: 8 }, (_, i) => f.s.file(`rootless-${i}.txt`, `working file ${i}`)).sort(
+    (a, b) => physicalBucket(a.blob) - physicalBucket(b.blob),
+  );
+  const removed = extras[3],
+    withExtra = [...f.files, ...extras],
+    files = withExtra.filter(file => file !== removed),
+    intermediate = await f.save(withExtra, f.main, f.files),
+    final = await f.save(files, intermediate.state, withExtra),
+    privatePack = intermediate.root.root.chunks.find(chunk => chunk.bucket === physicalBucket(removed.blob))
+      .pack.digest;
+  for (const main of [f.base, f.main])
+    f.s.patch('projectObjects', physicalObjectRow(f.s, main.sha256)._id, { statePhysical: undefined });
+  const before = f.requests.length;
+  const selected = await compose(f, final.state, f.main);
+  const pin = physicalObjectRow(f.s, selected.sha256).statePhysical,
+    root = await PhysicalManifestReader.open(selected.sha256, pin, f.read);
+  assert.equal(selected.sha256, final.state.sha256);
+  assert.equal(f.requests.length - before, 3, 'compose keeps the existing descriptor call budget');
+  assert.equal(
+    root.root.chunks.some(chunk => chunk.pack?.digest === privatePack),
+    false,
+  );
+  assert.deepEqual(await root.lookup([removed.blob, extras[2].blob]), [
+    null,
+    { sha256: extras[2].blob, size: f.s.objects.get(extras[2].blob).length },
+  ]);
+});
 
-  test(`rootless main and a generated merge: compose lineage switch ${lineage ? 'on' : 'off'}`, async t => {
-    const f = await setup(t);
-    const mainFile = f.s.file('rootless-main.txt', 'accepted main file'),
-      laneFile = f.s.file('rooted-lane.txt', 'working file'),
-      lane = await f.save([...f.files, laneFile], f.main, f.files),
-      main = f.s.state([...f.files, mainFile], [f.main.sha256]);
-    f.s.patch('projectObjects', physicalObjectRow(f.s, main.sha256)._id, {
-      stateParents: [f.main.sha256],
-      stateGeneration: 3,
-    });
-    f.s.patch('projectObjects', physicalObjectRow(f.s, f.base.sha256)._id, { statePhysical: undefined });
-    f.s.main.head = main.sha256;
-    f.s.moveMain(main.sha256, 'main-1');
-    const selected = await compose(f, lane.state, main, lineage);
-    const state = JSON.parse(f.s.objects.get(selected.sha256)),
-      row = physicalObjectRow(f.s, selected.sha256);
-    assert.notEqual(selected.sha256, lane.state.sha256);
-    assert.deepEqual(state.parents, [main.sha256, lane.state.sha256]);
-    assert(state.files.some(file => file.blob === mainFile.blob));
-    assert(state.files.some(file => file.blob === laneFile.blob));
-    assert.equal(!!row.statePhysical, !lineage);
+test('compose uses the selected State catalog for a generated merge without a usable main root', async t => {
+  const f = await setup(t);
+  const mainFile = f.s.file('rootless-main.txt', 'accepted main file'),
+    laneFile = f.s.file('rooted-lane.txt', 'working file'),
+    lane = await f.save([...f.files, laneFile], f.main, f.files),
+    main = f.s.state([...f.files, mainFile], [f.main.sha256]);
+  f.s.patch('projectObjects', physicalObjectRow(f.s, main.sha256)._id, {
+    stateParents: [f.main.sha256],
+    stateGeneration: 3,
   });
-}
+  f.s.patch('projectObjects', physicalObjectRow(f.s, f.base.sha256)._id, { statePhysical: undefined });
+  f.s.main.head = main.sha256;
+  f.s.moveMain(main.sha256, 'main-1');
+  const selected = await compose(f, lane.state, main);
+  const state = JSON.parse(f.s.objects.get(selected.sha256)),
+    row = physicalObjectRow(f.s, selected.sha256);
+  assert.notEqual(selected.sha256, lane.state.sha256);
+  assert.deepEqual(state.parents, [main.sha256, lane.state.sha256]);
+  assert(state.files.some(file => file.blob === mainFile.blob));
+  assert(state.files.some(file => file.blob === laneFile.blob));
+  assert.equal(row.statePhysical, undefined);
+});
 
 test('generated compose clears a pre-existing working root outside its descriptor window', async t => {
   const f = await setup(t),
@@ -139,7 +132,7 @@ test('generated compose clears a pre-existing working root outside its descripto
   f.s.moveMain(main.sha256, 'main-1');
   let existing;
   const before = f.requests.length;
-  const selected = await compose(f, lane.state, main, true, async plan => {
+  const selected = await compose(f, lane.state, main, async plan => {
     const files = [laneFile, mainFile, ...f.files].sort((a, b) => a.path.localeCompare(b.path));
     existing = f.s.put(
       JSON.stringify(

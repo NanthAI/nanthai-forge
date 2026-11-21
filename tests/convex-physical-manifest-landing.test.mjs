@@ -47,14 +47,10 @@ function dogfood(s, history) {
     });
 }
 test('29k dogfood landing keeps save, real disjoint sync and compose descriptor calls at most five with no per-file writer scan', t =>
-  dogfoodLanding(t, 1, false));
-test('29k dogfood landing retains the descriptor budget with lineage enforcement', t =>
-  dogfoodLanding(t, 1, true));
-for (const lineage of [false, true])
-  test(`29k dogfood landing retains the descriptor budget at 10x history (lineage ${lineage ? 'on' : 'off'})`, t =>
-    dogfoodLanding(t, 10, lineage));
+  dogfoodLanding(t, 1));
+test('29k dogfood landing retains the descriptor budget at 10x history', t => dogfoodLanding(t, 10));
 
-async function dogfoodLanding(t, history, lineage) {
+async function dogfoodLanding(t, history) {
   const f = await physicalProject(t, 29000);
   await f.queueSeed();
   await f.seed();
@@ -116,14 +112,9 @@ async function dogfoodLanding(t, history, lineage) {
   exchange.client = f.c.client;
   const old = process.env.FORGE_PHYSICAL_MANIFESTS;
   process.env.FORGE_PHYSICAL_MANIFESTS = '1';
-  const oldLineage = process.env.FORGE_PHYSICAL_COMPOSE_LINEAGE;
-  if (lineage) process.env.FORGE_PHYSICAL_COMPOSE_LINEAGE = '1';
-  else delete process.env.FORGE_PHYSICAL_COMPOSE_LINEAGE;
   t.after(() => {
     if (old === undefined) delete process.env.FORGE_PHYSICAL_MANIFESTS;
     else process.env.FORGE_PHYSICAL_MANIFESTS = old;
-    if (oldLineage === undefined) delete process.env.FORGE_PHYSICAL_COMPOSE_LINEAGE;
-    else process.env.FORGE_PHYSICAL_COMPOSE_LINEAGE = oldLineage;
   });
   const starts = {
     requests: f.requests.length,
@@ -238,7 +229,6 @@ async function dogfoodLanding(t, history, lineage) {
       files: 29000,
       changedPaths: 8,
       history,
-      lineage,
       descriptorCalls: {
         save: saveEnd - starts.requests,
         sync: syncEnd - saveEnd,

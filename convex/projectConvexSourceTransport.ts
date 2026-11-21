@@ -59,7 +59,6 @@ export function convexSourceTransport(
     observed = [],
     putMetrics = sourcePutMetrics(),
     physicalManifests = false,
-    physicalComposeLineage = false,
     sourceKind,
     bindings = [],
     clock = sourceStepClock(delegatedAt),
@@ -73,7 +72,6 @@ export function convexSourceTransport(
      * sent). A matching read is served from memory; a text that fails its pin is ignored. */
     preloaded?: readonly { sha256: string; size: number; text: string }[] | undefined;
     physicalManifests?: boolean;
-    physicalComposeLineage?: boolean;
     sourceKind?: string;
     bindings?: readonly { sha256: string; size: number; r2Key: string; pack?: ObjectPack }[] | undefined;
     observed?: ({ sha256: string; size: number } & StateSize)[] | undefined;
@@ -283,7 +281,6 @@ export function convexSourceTransport(
   };
   const physical = sourcePhysicalManifests({
     enabled: physicalManifests,
-    composeLineage: physicalComposeLineage,
     sourceKind,
     projectId,
     locations,

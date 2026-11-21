@@ -230,13 +230,12 @@ can extend the seed State after verifying its exact membership; more than 100
 new bindings or a chunked parent routes catch-up to background pages, preserving
 catalog publication and the normal request budget. Background catch-up reuses
 verified parent bindings and resolves only missing ones, then emits fully live
-packs. With `FORGE_PHYSICAL_COMPOSE_LINEAGE=1`, generated Candidate States extend
-only the verified main root selected by the compose plan. They use the same-State
+packs. With the physical manifest writer enabled, generated Candidate States
+extend only the verified main root selected by the compose plan. They use the same-State
 catalog while main has no usable root. An adopted Candidate repairs metadata packs
 with superseded buckets, treating every pack as outside main's lineage when main
 has no usable root. Competing root replacements fall back to the exact State
-catalog when the observed root changed before commit. The lineage switch defaults
-off and is captured at compose dispatch alongside the writer setting.
+catalog when the observed root changed before commit.
 Ordinary incremental State writes share unchanged manifest buckets. The ordinary
 100-object windows and their call counts stay unchanged. Ancestry
 prefetch bounds attempted lookups, including absent hints, rather than only
