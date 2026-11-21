@@ -454,6 +454,7 @@ export async function computeMergeStep(
     return;
   }
   const plan = sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan));
+  io.selectPhysicalComposeMain?.(plan.main.object.sha256);
   if (io.seedPhysicalState && !io.hasPhysicalState?.(plan.main.object.sha256)) {
     const reader = new MemorySourceReader(source, io);
     await reader.bytes(plan.main);

@@ -871,6 +871,11 @@ Convex calls, rows and DB reads added on the healthy landing path: zero. Idle: z
 
 A pack is fully live when its live buckets fill it exactly. The repair reads the State's root and main's root, copies the live buckets of each failing pack into one new pack in bucket order, and writes a new root for the same State. It needs no file list, descriptor or binding, so nonce bindings and recipes pass through as stored bytes. The result depends only on the two roots: a retry or a racing compose writes identical bytes.
 
+With the default-off `FORGE_PHYSICAL_COMPOSE_LINEAGE` switch enabled, a compose
+with no usable main root treats its accepted pack set as empty when repairing
+an adopted State. A generated State extends only the compose plan's selected
+main root, using the same-State catalog while that root is unavailable.
+
 **What this guarantees.** Start from a seed, where every pack is fully live. Each later main State passed the check when it was composed, so each of its packs was either already in main's lineage or fully live for that State. Holes appear later only where a newer accepted State replaced a bucket. So every byte a metadata grant on a Candidate or an accepted State can cover is a bucket of the seed, of an accepted State or of that State itself. Runners can select only such States (the run's Candidate, its base, the recheck pairs and the source pack State).
 
 **What it does not change.** A Lane's saved States stay registered States and ancestors of the accepted State. A client with project access can read them and their working roots, as before. Rule 3 is about what a grant on a Candidate or an accepted State covers.

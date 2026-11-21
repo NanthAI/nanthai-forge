@@ -102,6 +102,7 @@ export async function runConvexSourceStep(
           preloaded: options.preloaded,
           bindings: options.bindings,
           physicalManifests: state.physicalManifests === true,
+          physicalComposeLineage: state.physicalComposeLineage === true,
           sourceKind: state.jobKind,
         });
         let output: Awaited<ReturnType<typeof runSmallSourceSave>> = null;

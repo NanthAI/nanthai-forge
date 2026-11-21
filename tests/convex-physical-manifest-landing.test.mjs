@@ -19,7 +19,7 @@ function moveMain(f, pin, receipt) {
   f.s.main.receipt.id = receipt;
   f.s.moveMain(pin.sha256, receipt);
 }
-function dogfood(s) {
+function dogfood(s, history) {
   for (const [kind, count] of [
     ['intent', 600],
     ['lane', 560],
@@ -27,7 +27,7 @@ function dogfood(s) {
     ['candidate', 2200],
     ['job', 1500],
   ])
-    for (let index = 0; index < count; index++)
+    for (let index = 0; index < count * history; index++)
       s.insert('projectHostedRecordHeads', {
         projectId: s.projectId,
         kind,
@@ -46,7 +46,15 @@ function dogfood(s) {
       removed: false,
     });
 }
-test('29k dogfood landing keeps save, real disjoint sync and compose descriptor calls at most five with no per-file writer scan', async t => {
+test('29k dogfood landing keeps save, real disjoint sync and compose descriptor calls at most five with no per-file writer scan', t =>
+  dogfoodLanding(t, 1, false));
+test('29k dogfood landing retains the descriptor budget with lineage enforcement', t =>
+  dogfoodLanding(t, 1, true));
+for (const lineage of [false, true])
+  test(`29k dogfood landing retains the descriptor budget at 10x history (lineage ${lineage ? 'on' : 'off'})`, t =>
+    dogfoodLanding(t, 10, lineage));
+
+async function dogfoodLanding(t, history, lineage) {
   const f = await physicalProject(t, 29000);
   await f.queueSeed();
   await f.seed();
@@ -97,7 +105,7 @@ test('29k dogfood landing keeps save, real disjoint sync and compose descriptor 
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `first\nlanding-${file.path}\nlast\n`);
   }
-  dogfood(f.s);
+  dogfood(f.s, history);
   const exchange = new ConvexExchange(
     testDeploymentOrigin('https://fixture.invalid'),
     'synthetic',
@@ -108,11 +116,23 @@ test('29k dogfood landing keeps save, real disjoint sync and compose descriptor 
   exchange.client = f.c.client;
   const old = process.env.FORGE_PHYSICAL_MANIFESTS;
   process.env.FORGE_PHYSICAL_MANIFESTS = '1';
+  const oldLineage = process.env.FORGE_PHYSICAL_COMPOSE_LINEAGE;
+  if (lineage) process.env.FORGE_PHYSICAL_COMPOSE_LINEAGE = '1';
+  else delete process.env.FORGE_PHYSICAL_COMPOSE_LINEAGE;
   t.after(() => {
     if (old === undefined) delete process.env.FORGE_PHYSICAL_MANIFESTS;
     else process.env.FORGE_PHYSICAL_MANIFESTS = old;
+    if (oldLineage === undefined) delete process.env.FORGE_PHYSICAL_COMPOSE_LINEAGE;
+    else process.env.FORGE_PHYSICAL_COMPOSE_LINEAGE = oldLineage;
   });
-  const starts = { requests: f.requests.length, calls: f.c.calls.length, db: f.s.counts.length };
+  const starts = {
+    requests: f.requests.length,
+    calls: f.c.calls.length,
+    db: f.s.counts.length,
+    r2Read: f.c.r2ReadBytes(),
+    r2Write: f.c.r2PutBytes(),
+    at: performance.now(),
+  };
   const save = await saveHostedLane(
     root,
     { operationId: randomUUID(), message: 'eight-file landing' },
@@ -217,6 +237,8 @@ test('29k dogfood landing keeps save, real disjoint sync and compose descriptor 
     JSON.stringify({
       files: 29000,
       changedPaths: 8,
+      history,
+      lineage,
       descriptorCalls: {
         save: saveEnd - starts.requests,
         sync: syncEnd - saveEnd,
@@ -225,6 +247,10 @@ test('29k dogfood landing keeps save, real disjoint sync and compose descriptor 
       },
       functionCalls: f.c.calls.length - starts.calls,
       dbReadBytes: f.s.counts.slice(starts.db).reduce((sum, row) => sum + row.readBytes, 0),
+      dbWriteBytes: f.s.counts.slice(starts.db).reduce((sum, row) => sum + row.writeBytes, 0),
+      r2ReadBytes: f.c.r2ReadBytes() - starts.r2Read,
+      r2WriteBytes: f.c.r2PutBytes() - starts.r2Write,
+      wallMs: Math.round(performance.now() - starts.at),
     }),
   );
-});
+}

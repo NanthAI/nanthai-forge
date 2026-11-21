@@ -138,6 +138,7 @@ async function runNodeSourceStep(
               hash: nativeDigest,
               preloaded: options.preloaded ?? (supplied ? state.preloaded : undefined),
               physicalManifests: state.physicalManifests === true,
+              physicalComposeLineage: state.physicalComposeLineage === true,
               sourceKind: state.jobKind,
               bindings: supplied ? state.bindings : undefined,
               observed: supplied ? state.observedStates : undefined,

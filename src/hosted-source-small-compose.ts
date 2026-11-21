@@ -182,6 +182,7 @@ export async function runSmallSourceCompose(
         })(),
       );
     // No output before eligibility is proven, so fallback reuses the same input and descriptors.
+    io.selectPhysicalComposeMain?.(plan.main.object.sha256);
     await io.seedPhysicalState?.(plan.main.object, left.files);
     if (generated) io.rememberOutputState?.(state, [plan.base.head, entry.head], files);
     else if (io.composePhysicalState) await io.composePhysicalState(state, files, plan.base.head);

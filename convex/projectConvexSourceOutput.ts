@@ -25,6 +25,7 @@ export type SourceOutput = {
   stateParents?: string[];
   statePhysical?: { sha256: string; size: number };
   statePhysicalRebind?: boolean;
+  statePhysicalPrevious?: { sha256: string; size: number } | null;
   storageId?: Id<'_storage'>;
   r2Key?: string;
   recipe?: { sha256: string; size: number };
@@ -32,6 +33,8 @@ export type SourceOutput = {
   pack?: ObjectPack;
   physical?: { sha256: string; size: number; r2Key: string; pack?: ObjectPack }[];
 };
+const samePhysical = (a?: SourceOutput['statePhysical'] | null, b?: SourceOutput['statePhysical'] | null) =>
+  a?.sha256 === b?.sha256 && a?.size === b?.size;
 export async function storeSourceOutputs(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
@@ -201,15 +204,29 @@ export async function storeSourceOutputs(
         'Immutable State physical manifest changed.',
       );
     }
-    // Source metadata stays immutable; only the trusted compose flag may replace
-    // the derived physical root with equivalent live buckets.
+    // A concurrent rebind can prove a different lineage for the same State.
+    // Fall back to its exact catalog instead of restoring a superseded proof.
+    const statePhysical =
+      pin.statePhysicalRebind &&
+      pin.statePhysicalPrevious !== undefined &&
+      !samePhysical(old?.statePhysical, pin.statePhysicalPrevious) &&
+      !samePhysical(old?.statePhysical, pin.statePhysical)
+        ? undefined
+        : pin.statePhysical;
     const graph = {
       ...(closure === undefined ? {} : { recipeClosure: closure }),
       ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
       ...(pin.stateParents === undefined ? {} : { stateParents: pin.stateParents }),
-      ...(pin.statePhysical === undefined ? {} : { statePhysical: pin.statePhysical }),
+      ...(statePhysical === undefined ? {} : { statePhysical }),
       ...(pin.stateSize === undefined ? {} : { stateSize: pin.stateSize }),
     };
+    const patchGraph =
+      pin.statePhysicalRebind &&
+      pin.statePhysicalPrevious !== undefined &&
+      !statePhysical &&
+      old?.statePhysical
+        ? { ...graph, statePhysical: undefined }
+        : graph;
     if (old?._id !== undefined && old.packMembers && !old.r2Committed) {
       const retained = (await findSourceObjects(ctx, projectId, [pin.sha256])).get(pin.sha256);
       if (retained && retained.size === pin.size) {
@@ -223,7 +240,7 @@ export async function storeSourceOutputs(
             r2Key: pin.r2Key,
             ...(pin.pack ? { pack: pin.pack } : {}),
           });
-        if (Object.keys(graph).length) await ctx.db.patch(old._id, graph);
+        if (Object.keys(patchGraph).length) await ctx.db.patch(old._id, patchGraph);
         fence = pin.sha256;
         continue;
       }
@@ -246,7 +263,7 @@ export async function storeSourceOutputs(
     )
       await ctx.db.patch((await objectRow(ctx, old))._id, {
         ...encoding,
-        ...graph,
+        ...patchGraph,
         ...(!pin.r2Key ? { location: undefined, r2Key: undefined, r2Committed: undefined } : {}),
         removed: false,
         sourceReferenced: true,
@@ -255,14 +272,12 @@ export async function storeSourceOutputs(
       !old.sourceReferenced ||
       (old.stateGeneration === undefined && pin.stateGeneration !== undefined) ||
       (old.stateParents === undefined && pin.stateParents !== undefined) ||
-      (old.statePhysical === undefined && pin.statePhysical !== undefined) ||
-      (pin.statePhysicalRebind &&
-        (old.statePhysical?.sha256 !== pin.statePhysical?.sha256 ||
-          old.statePhysical?.size !== pin.statePhysical?.size)) ||
+      (old.statePhysical === undefined && statePhysical !== undefined) ||
+      (pin.statePhysicalRebind && !samePhysical(old.statePhysical, statePhysical)) ||
       (old.stateSize === undefined && pin.stateSize !== undefined) ||
       (old.recipeClosure === undefined && pin.recipeClosure !== undefined)
     )
-      await ctx.db.patch((await objectRow(ctx, old))._id, { sourceReferenced: true, ...graph });
+      await ctx.db.patch((await objectRow(ctx, old))._id, { sourceReferenced: true, ...patchGraph });
     if (!old?.sourceReferenced) fence = pin.sha256;
   }
   if (fence) await ctx.db.insert('projectCheckLogSourcePins', { projectId, digest: fence });

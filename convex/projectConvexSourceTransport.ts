@@ -59,6 +59,7 @@ export function convexSourceTransport(
     observed = [],
     putMetrics = sourcePutMetrics(),
     physicalManifests = false,
+    physicalComposeLineage = false,
     sourceKind,
     bindings = [],
     clock = sourceStepClock(delegatedAt),
@@ -72,6 +73,7 @@ export function convexSourceTransport(
      * sent). A matching read is served from memory; a text that fails its pin is ignored. */
     preloaded?: readonly { sha256: string; size: number; text: string }[] | undefined;
     physicalManifests?: boolean;
+    physicalComposeLineage?: boolean;
     sourceKind?: string;
     bindings?: readonly { sha256: string; size: number; r2Key: string; pack?: ObjectPack }[] | undefined;
     observed?: ({ sha256: string; size: number } & StateSize)[] | undefined;
@@ -281,6 +283,7 @@ export function convexSourceTransport(
   };
   const physical = sourcePhysicalManifests({
     enabled: physicalManifests,
+    composeLineage: physicalComposeLineage,
     sourceKind,
     projectId,
     locations,
@@ -342,6 +345,9 @@ export function convexSourceTransport(
     },
   });
   const io: StepTransport = {
+    ...(physical.selectPhysicalComposeMain
+      ? { selectPhysicalComposeMain: physical.selectPhysicalComposeMain }
+      : {}),
     ...(physical.composePhysicalState ? { composePhysicalState: physical.composePhysicalState } : {}),
     hasPhysicalState: id => !!locations.get(id)?.statePhysical,
     ...(physical.seedPhysicalState ? { seedPhysicalState: physical.seedPhysicalState } : {}),
@@ -663,7 +669,7 @@ export function convexSourceTransport(
         // independent immutable destinations. Settle both before publishing either binding,
         // including failures; serializing these R2 rounds adds no correctness evidence.
         const [manifestResult, contentResult] = await Promise.allSettled([
-          stateParents && stateFiles ? physical.output(pin, stateFiles, stateParents) : null,
+          stateParents && stateFiles ? physical.output(pin, stateFiles, stateParents, !!ownParents) : null,
           (async () => {
             const projected = stateParents ? await chunks.output(pin, bytes) : null;
             return projected
@@ -707,7 +713,7 @@ export function convexSourceTransport(
               closure: projected.recipeClosure!.map(leaf => byDigest.get(leaf.sha256)!),
               ...(stateGeneration === undefined ? {} : { stateGeneration }),
               stateParents,
-              ...(manifest ? { statePhysical: manifest.statePhysical } : {}),
+              ...(manifest?.statePhysical ? { statePhysical: manifest.statePhysical } : {}),
               ...dimensions,
             },
           ]);
@@ -717,8 +723,8 @@ export function convexSourceTransport(
             stateParents,
             ...(manifest
               ? {
-                  statePhysical: manifest.statePhysical,
-                  physical: [...(projected.physical ?? []), ...manifest.physical],
+                  ...manifest,
+                  physical: [...(projected.physical ?? []), ...(manifest.physical ?? [])],
                 }
               : {}),
             ...dimensions,
@@ -735,7 +741,7 @@ export function convexSourceTransport(
             descriptor: { object: pin, recipe: null },
             ...(stateGeneration === undefined ? {} : { stateGeneration }),
             ...(stateParents === undefined ? {} : { stateParents }),
-            ...(manifest ? { statePhysical: manifest.statePhysical } : {}),
+            ...(manifest?.statePhysical ? { statePhysical: manifest.statePhysical } : {}),
             ...dimensions,
             storageId: r2 ? null : (ref as Id<'_storage'>),
             url: null,

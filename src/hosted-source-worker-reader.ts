@@ -28,6 +28,8 @@ export interface SourceWorkerTransport {
   rememberOutputState?(pin: WorkerPin, parents: readonly string[], files?: readonly NativeFile[]): void;
   /** Trusted compose-only one-time seed, never called by an ordinary State write. */
   seedPhysicalState?(pin: WorkerPin, files: readonly NativeFile[]): Promise<void>;
+  /** The verified compose input selects the accepted base for every quantum. */
+  selectPhysicalComposeMain?(state: string): void;
   /** Fast-forwards can select an existing State without uploading its bytes again. */
   writePhysicalState?(pin: WorkerPin, files: readonly NativeFile[], bases: readonly string[]): Promise<void>;
   hasPhysicalState?(id: string): boolean;

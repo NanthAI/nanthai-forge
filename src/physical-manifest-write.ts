@@ -171,13 +171,13 @@ export async function repairPhysicalRoot({
 }: {
   state: string;
   head: PhysicalManifestReader;
-  main: PhysicalManifest;
+  main: PhysicalManifest | null;
   put: (bytes: Uint8Array) => Promise<PhysicalPin>;
 }) {
   invariant(state === head.root.state, 'SOURCE_HASH_MISMATCH', 'Repair selects another State.');
   const key = (pin: PhysicalManifest['chunks'][number]) =>
     physicalKey(pin.pack?.digest ?? pin.sha256, pin.pack?.nonce);
-  const accepted = new Set(main.chunks.map(key)),
+  const accepted = new Set(main?.chunks.map(key)),
     groups = new Map<string, PhysicalManifest['chunks']>();
   for (const chunk of head.root.chunks) groups.set(key(chunk), [...(groups.get(key(chunk)) ?? []), chunk]);
   const failing = [...groups].filter(

@@ -43,6 +43,7 @@ export function physicalSourceBinding(
  * Compose only schedules seeds; ordinary writes always need a verified parent. */
 export function sourcePhysicalManifests(options: {
   enabled: boolean;
+  composeLineage?: boolean;
   sourceKind?: string | undefined;
   projectId: Id<'hostedProjects'>;
   locations: Map<string, ObjectLocation>;
@@ -55,13 +56,20 @@ export function sourcePhysicalManifests(options: {
   log: (message: string) => void;
   seed?: (pin: WorkerPin, files: readonly NativeFile[]) => Promise<void>;
 }) {
+  const enforceLineage = options.enabled && options.composeLineage && options.sourceKind === 'compose';
+  let composeMain: string | undefined;
   const pending = new Map<string, Promise<{ statePhysical: WorkerPin; physical: PhysicalOutput[] } | null>>();
   const entry = (row: ObjectLocation) =>
     physicalSourceBinding(options.projectId, row, options.key(row.descriptor.object.sha256));
-  const create = async (pin: WorkerPin, files: readonly NativeFile[], bases: readonly string[]) => {
+  const create = async (
+    pin: WorkerPin,
+    files: readonly NativeFile[],
+    bases: readonly string[],
+    replace = false,
+  ) => {
     if (!options.enabled) return null;
     const old = options.locations.get(pin.sha256)?.statePhysical;
-    if (old) return { statePhysical: old, physical: [] };
+    if (old && !replace) return { statePhysical: old, physical: [] };
     let running = pending.get(pin.sha256);
     if (running) return running;
     running = (async () => {
@@ -174,8 +182,10 @@ export function sourcePhysicalManifests(options: {
       try {
         await existing(pin, files, [mainId]);
         const output = options.outputs.at(-1);
-        if (output?.sha256 === pin.sha256 && output.statePhysical) output.statePhysicalRebind = true;
-        else
+        if (output?.sha256 === pin.sha256 && output.statePhysical) {
+          output.statePhysicalRebind = true;
+          if (enforceLineage) output.statePhysicalPrevious = original ?? null;
+        } else
           throw new ForgeError(
             'SOURCE_HASH_MISMATCH',
             'Compose could not replace its invalid physical root.',
@@ -186,12 +196,12 @@ export function sourcePhysicalManifests(options: {
       }
       return;
     }
-    if (!main) return;
+    if (!main && !enforceLineage) return;
     const physical: PhysicalOutput[] = [];
     const result = await repairPhysicalRoot({
       state: pin.sha256,
       head,
-      main: main.root,
+      main: main?.root ?? null,
       put: async bytes => {
         const stored = await options.put(bytes);
         physical.push(stored);
@@ -209,6 +219,7 @@ export function sourcePhysicalManifests(options: {
       ...pin,
       statePhysical: result.pin,
       statePhysicalRebind: true,
+      ...(enforceLineage ? { statePhysicalPrevious: row.statePhysical ?? null } : {}),
       physical,
       ...(binding.recipe
         ? { recipe: binding.recipe }
@@ -229,9 +240,34 @@ export function sourcePhysicalManifests(options: {
       `source bindings: compose repaired physical manifest (${physical.reduce((sum, pin) => sum + pin.size, 0)} planned metadata bytes)`,
     );
   };
+  const output = async (
+    pin: WorkerPin,
+    files: readonly NativeFile[],
+    bases: readonly string[],
+    generated: boolean,
+  ): Promise<Pick<
+    SourceOutput,
+    'statePhysical' | 'statePhysicalRebind' | 'statePhysicalPrevious' | 'physical'
+  > | null> => {
+    if (!enforceLineage) return create(pin, files, bases);
+    if (!generated || !composeMain || pin.sha256 === composeMain) return null;
+    // A generated State can have a Lane or an intermediate Candidate as a
+    // logical parent. Its physical metadata must extend only the selected main.
+    const previous = options.locations.get(pin.sha256)?.statePhysical ?? null;
+    const manifest = await create(pin, files, [composeMain], true);
+    // The commit also sees existing States outside this action's descriptor
+    // window. Replace any old working binding even when we publish rootless.
+    return { ...manifest, statePhysicalRebind: true, statePhysicalPrevious: previous };
+  };
   return {
-    output: (pin: WorkerPin, files: readonly NativeFile[], bases: readonly string[]) =>
-      create(pin, files, bases),
+    output,
+    ...(enforceLineage
+      ? {
+          selectPhysicalComposeMain: (state: string) => {
+            composeMain = state;
+          },
+        }
+      : {}),
     ...(options.enabled && options.sourceKind === 'compose' ? { composePhysicalState: compose } : {}),
     ...(options.enabled
       ? {

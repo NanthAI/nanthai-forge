@@ -16,6 +16,7 @@ export const sourceOutput = v.object({
   stateParents: v.optional(v.array(v.string())),
   statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
   statePhysicalRebind: v.optional(v.boolean()),
+  statePhysicalPrevious: v.optional(v.union(v.object({ sha256: v.string(), size: v.number() }), v.null())),
   sha256: v.string(),
   size: v.number(),
   storageId: v.optional(v.id('_storage')),
@@ -69,6 +70,7 @@ export const sourceStepTables = {
     generation: v.optional(v.number()),
     /** Captured once at dispatch, so retries never follow a later setting change. */
     physicalManifests: v.optional(v.literal(true)),
+    physicalComposeLineage: v.optional(v.literal(true)),
     projectId: v.id('hostedProjects'),
     jobId: v.string(),
     dispatch: v.string(),
