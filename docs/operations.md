@@ -934,6 +934,18 @@ clears that pending resume state under the binding lock and retains its original
 pins and deletion-operation receipt. A pending operation for another project or
 deployment remains intact.
 
+### Backfill existing Plan Lane marks
+
+After deploying the Lane mark writer, run this once per existing project using
+the operator's configured deployment. Start with the `items` phase and a null
+cursor. Pass the returned `next.phase` and `next.cursor` to the next call until
+`next` is null. Each call reads at most 20 Items or overlap rows at its cursor.
+The count uses the current Lane state, and replaying a page adds no duplicate marks.
+
+```sh
+npx convex run projectPlanLaneBackfill:run '{"projectId":"PROJECT_ID","phase":"items","cursor":null}'
+```
+
 ### Project retention and restore
 
 Deleting a project from Settings (or `projectLifecycle:trash`) tombstones it at

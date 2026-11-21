@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
+import type { MutationCtx } from './_generated/server';
 import { acceptancePage, type ReceiptIdentity } from './projectHostedAcceptanceStore';
 import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
 import { overlapLandingLabel, recordOverlapLanding } from '../src/hosted-overlap';
 import { labelOverlapMainLog } from './projectHostedOverlapMainLog';
 import { publicActorLabel } from './publicPeople';
 import { closeConflictNotices } from './projectHostedConflicts';
+import { removePlanLanes } from './projectPlanLaneMarks';
 import { readHostedRecord } from './projectHostedRecords';
 import type { MainRedHold } from '../src/hosted-acceptance';
 
@@ -19,13 +20,15 @@ const RETIRE_LIMIT = 100;
 export async function retireLandedOverlapLanes(
   ctx: MutationCtx,
   identity: ReceiptIdentity,
-  landed?: { commit: string; at: string; sequence?: number; mainRedHolds?: MainRedHold[] },
+  landed: { commit: string; at: string; sequence?: number; mainRedHolds?: MainRedHold[] },
+  index = 0,
 ) {
-  await stampLegacyOverlapActivity(ctx, identity.projectId);
-  const page = await acceptancePage(ctx, { ...identity, kind: 'inputs', index: 0 });
+  if (index === 0) await stampLegacyOverlapActivity(ctx, identity.projectId);
+  const page = await acceptancePage(ctx, { ...identity, kind: 'inputs', index });
   if (!page) return 0;
   let retired = 0,
-    logged = false;
+    logged = index !== 0;
+  const planLanes = new Map<Id<'projectFinishReadRows'>, (Id<'projectHostedLifecyclePlans'> | undefined)[]>();
   const entries = validateComposePage(JSON.parse(page.value)).entries;
   for (const value of entries) {
     if (retired >= RETIRE_LIMIT) break;
@@ -80,9 +83,24 @@ export async function retireLandedOverlapLanes(
     const stamped = !stamp || row.landed?.receiptId === stamp.receiptId;
     if (row.conflicted) await closeConflictNotices(ctx, identity.projectId, row.laneId, 'landed');
     if (!row.open && stamped) continue;
-    await ctx.db.patch(row._id, { open: false, ...(stamped ? {} : { landed: stamp }) });
+    const closesMark =
+      row.planLaneMark &&
+      (!row.planLanePin ||
+        (row.planLanePin.sourceVersion === lane.data.sourceVersion &&
+          row.planLanePin.lifecycleVersion === lane.data.lifecycleVersion));
+    if (closesMark && row.planLaneMark) {
+      const planIds = planLanes.get(row.planLaneMark) ?? [];
+      planIds.push(row.lifecyclePlanId);
+      planLanes.set(row.planLaneMark, planIds);
+    }
+    await ctx.db.patch(row._id, {
+      open: false,
+      ...(closesMark ? { planLaneMark: undefined, planLanePin: undefined } : {}),
+      ...(stamped ? {} : { landed: stamp }),
+    });
     retired++;
   }
+  for (const [id, planIds] of planLanes) await removePlanLanes(ctx, id, planIds);
   return retired;
 }
 

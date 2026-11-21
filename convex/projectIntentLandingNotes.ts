@@ -68,13 +68,19 @@ export async function itemIntentChain(ctx: QueryCtx, projectId: Id<'hostedProjec
   let current = itemId;
   let head = await recordHead(ctx, projectId, 'intent', current);
   let state: string | null = null;
+  let selectingStatus = true;
   for (let hop = 0; head && hop <= maxIntentChain; hop++) {
     intents.push(current);
-    state = head.status.startsWith('journal:') ? null : head.status;
-    if (!intentFinished(head.status.replace(/^journal:/, ''))) break;
+    if (selectingStatus) {
+      state = head.status.startsWith('journal:') ? null : head.status;
+      selectingStatus = intentFinished(head.status.replace(/^journal:/, ''));
+    }
+    if (hop === maxIntentChain) break;
     const next = successorIntentId(current);
     const following = await recordHead(ctx, projectId, 'intent', next);
-    if (!following) break;
+    // A reopened earlier Intent becomes the active one again. A verified successor still
+    // serves the same Item and remains part of its Work history.
+    if (!following || (following.planningItemId ?? (selectingStatus ? itemId : null)) !== itemId) break;
     current = next;
     head = following;
   }

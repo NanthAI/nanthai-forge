@@ -99,6 +99,8 @@ export const hostedRecordTables = {
     ...identity,
     ...indexed,
     recordId: v.id('projectHostedRecords'),
+    /** The Item at the root of this hosted follow-up Intent's chain. */
+    planningItemId: v.optional(v.string()),
     /** Work store kinds (issue, comment, lifecycle): the current version as its journal row read, so a
      * planning page reads one document per row. Absent on other kinds; a replace without it drops it. */
     value: v.optional(v.string()),

@@ -49,6 +49,10 @@ export const hostedOverlapTables = {
     lifecyclePlanId: v.optional(v.id('projectHostedLifecyclePlans')),
     recordVersion: v.number(),
     open: v.boolean(),
+    /** The hosted Item link, and the count row this Lane contributes to while its work is open. */
+    planningItemId: v.optional(v.string()),
+    planLaneMark: v.optional(v.id('projectFinishReadRows')),
+    planLanePin: v.optional(v.object({ sourceVersion: v.number(), lifecycleVersion: v.number() })),
     /** Set when an accepted receipt landed this exact saved head: Lane status reads it (no extra call).
      * `revertedBy` names the accepted compensating landing that took it off main (Issue 8dbccdfb). */
     landed: v.optional(

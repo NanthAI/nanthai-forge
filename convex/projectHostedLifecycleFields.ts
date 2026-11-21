@@ -15,6 +15,8 @@ export const hostedLifecycleTables = {
     status: v.union(v.literal('pending'), v.literal('applied'), v.literal('stale'), v.literal('failed')),
     cursor: v.union(v.string(), v.null()),
     staged: v.number(),
+    /** Each staged child has the same Intent and contributes to the same Item. */
+    planLaneMark: v.optional(v.id('projectFinishReadRows')),
     ready: v.boolean(),
     saveOperationId: v.union(v.string(), v.null()),
     savedExpected: v.union(v.string(), v.null()),

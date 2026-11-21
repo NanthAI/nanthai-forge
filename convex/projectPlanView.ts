@@ -16,6 +16,7 @@ import { report } from './errors';
 import { invariant } from '../src/errors';
 import type { PlanRow } from '../src/planning-model';
 export { planViewRow } from './projectPlanRows';
+import { markPlanPage } from './projectPlanLaneMarks';
 import { decodePlanPage, PLAN_ROWS, planParent, planViewRow } from './projectPlanRows';
 
 /** Live Items read per status, Initiatives read, and settled Items counted per live Initiative; beyond these the
@@ -122,13 +123,18 @@ export async function planView(ctx: QueryCtx, projectId: Id<'hostedProjects'>): 
   for (const root of initiatives.slice(0, PLAN_INITIATIVE_LIMIT)) {
     out.push(root);
   }
-  for (const pageRows of await Promise.all(
-    liveStatuses.map(status => readRows('issue', status, PLAN_LIVE_LIMIT)),
-  )) {
-    if (pageRows.length > PLAN_LIVE_LIMIT) more = true;
-    for (const root of pageRows.slice(0, PLAN_LIVE_LIMIT)) {
-      out.push(root);
-    }
+  const livePages = await Promise.all(
+    liveStatuses.map(async status => {
+      const page = await readRows('issue', status, PLAN_LIVE_LIMIT);
+      return {
+        more: page.length > PLAN_LIVE_LIMIT,
+        rows: await markPlanPage(ctx, projectId, status, page.slice(0, PLAN_LIVE_LIMIT)),
+      };
+    }),
+  );
+  for (const page of livePages) {
+    more ||= page.more;
+    out.push(...page.rows);
   }
   const live = out.filter(
     row => row.kind === 'initiative' && (liveStatuses as readonly string[]).includes(row.status),

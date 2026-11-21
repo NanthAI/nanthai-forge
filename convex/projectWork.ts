@@ -35,6 +35,7 @@ import { record, recordPartition, selectedGeneration } from './projectWorkIndexS
 import { internal } from './_generated/api';
 import { report } from './errors';
 import { emitChange, workChange } from './coordinationWrite';
+import { movePlanLaneMark } from './projectPlanLaneMarks';
 import { storeProjection } from './projectWorkStore';
 import { workStoreMigrationActive } from './projectWorkStoreFingerprintWrites';
 
@@ -362,14 +363,12 @@ export async function appendWork(
           (action === 'put-planning-item' ||
             action === 'comment-planning-item' ||
             action === 'purge-planning-item')
-        )
-          await changeItemRetention(
-            ctx,
-            project._id,
-            old ? JSON.parse(old.value) : null,
-            JSON.parse(entry.value),
-            entry.position,
-          );
+        ) {
+          const previous = old ? JSON.parse(old.value) : null;
+          const next = JSON.parse(entry.value);
+          await changeItemRetention(ctx, project._id, previous, next, entry.position);
+          await movePlanLaneMark(ctx, project._id, previous, next);
+        }
         if (old) {
           if (!entry.collection.endsWith(':payload')) {
             const payloadKey = JSON.parse(old.value).payloadKey;

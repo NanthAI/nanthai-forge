@@ -160,7 +160,6 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
     sequence: row.sequence,
     ...(receipt.mainRedHolds ? { mainRedHolds: receipt.mainRedHolds } : {}),
   };
-  if (!receipt.completion.enabled && plan.inputPages) await retireLandedOverlapLanes(ctx, input, landed);
   // Landing declares the Intents of its Lanes even when the Lanes themselves stay open (completeOnAccept off or
   // keepOpen): `closeIntents` completes them in this same tick, and the planning read closes the Issue if its
   // Done-when lines are ticked. Refs-only landings and closeOnLand off leave the Intent alone.
@@ -170,8 +169,7 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
   // A landing that neither completes Lanes nor declares Intents (closes:false) still tells its Items
   // (Issue 3a733ee8): the same head-only walk as keepOpen, notes only, no record writes.
   const notesOnly = !lanesDone && !declares;
-  if (lanesDone && plan.appliedPage === 0 && plan.appliedEntry === 0)
-    await retireLandedOverlapLanes(ctx, input, landed);
+  if (plan.appliedEntry === 0) await retireLandedOverlapLanes(ctx, input, landed, plan.appliedPage);
   const project = await ctx.db.get(input.projectId);
   if (notesOnly && !project) return settleCompletion(ctx, plan);
   invariant(

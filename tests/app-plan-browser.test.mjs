@@ -44,7 +44,7 @@ const docs = { id: uuid(2), kind: 'initiative', title: 'Documentation and recove
 const big = { id: uuid(3), kind: 'initiative', title: 'A long running release with a name that will not fit on a phone line', status: 'open', position: 2, version: 1 };
 const item = (n, fields) => ({ id: uuid(n), kind: 'issue', status: 'open', position: n, version: 2, doneWhen: [1, 3], ...fields });
 const rows = [launch, docs, big,
-  item(17, { title: 'Last open step of the long release', initiativeId: big.id, status: 'in-progress', order: 'a' }),
+  item(17, { title: 'Last open step of the long release', initiativeId: big.id, status: 'in-progress', inLane: true, order: 'a' }),
   item(10, { title: 'Stream parser: preserve split bytes across reads', initiativeId: launch.id, owner: '@example-builder', type: 'bug', order: 'a' }),
   item(11, { title: 'Recover from a truncated frame without losing the next one', initiativeId: launch.id, status: 'in-progress', owner: '@example-builder/amber-fox', order: 'b' }),
   item(12, { title: 'Bench the parser against the old reader', initiativeId: launch.id, parentId: uuid(10), order: 'c', doneWhen: null }),
@@ -241,6 +241,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
     const { page, errors, context } = await open(1440, 'dark');
     const main = page.locator('main');
     assert.match(await main.textContent(), /Stream parser/);
+    assert.equal(await main.getByText('in Lane', { exact: true }).count(), 1);
     await page.getByRole('link', { name: /^No owner/ }).click();
     assert.match(page.url(), /owner=none/);
     assert.doesNotMatch(await main.textContent(), /Write the recovery guide/);

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { cancelAbandonedLanesLandings } from './projectHostedLifecycleCancel';
+import { changePlanLaneCascade } from './projectPlanLaneMarks';
 import { markHostedOverlapLifecycle } from './projectHostedOverlapStore';
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
@@ -35,6 +36,7 @@ export async function advanceLifecycle(ctx: MutationCtx, plan: LifecyclePlan) {
   if (!valid) return settleLifecycle(ctx, plan, 'stale');
   if (plan.ready) {
     await applyLifecycleRecord(ctx, plan, current.record);
+    if (plan.planLaneMark) await changePlanLaneCascade(ctx, plan.planLaneMark, plan._id, 'apply');
     await ctx.db.patch(guard!._id, { revision: guard!.revision + 1 });
     const result = await settleLifecycle(ctx, plan, 'applied');
     if (plan.staged) await scheduleLifecycle(ctx, plan._id);
@@ -48,6 +50,8 @@ export async function advanceLifecycle(ctx: MutationCtx, plan: LifecyclePlan) {
     )
     .paginate({ cursor: plan.cursor, numItems: 20, maximumRowsRead: 20, maximumBytesRead: 128 * 1024 });
   let staged = plan.staged;
+  let planLaneMark = plan.planLaneMark,
+    marked = 0;
   for (const head of page.page) {
     await materializeLifecycleLane(ctx, plan.projectId, head.key);
     const row = await readHostedRecord(ctx, {
@@ -94,10 +98,15 @@ export async function advanceLifecycle(ctx: MutationCtx, plan: LifecyclePlan) {
     };
     if (pointer) await ctx.db.replace(pointer._id, next);
     else await ctx.db.insert('projectHostedLifecyclePointers', next);
-    await markHostedOverlapLifecycle(ctx, plan.projectId, lane.id, plan._id);
+    const mark = await markHostedOverlapLifecycle(ctx, plan.projectId, lane.id, plan._id);
+    if (mark) {
+      planLaneMark = mark;
+      marked++;
+    }
     await writeLifecycleEvent(ctx, plan, lane, staged++);
   }
-  await ctx.db.patch(plan._id, { staged, cursor: page.continueCursor, ready: page.isDone });
+  if (planLaneMark && marked) await changePlanLaneCascade(ctx, planLaneMark, plan._id, marked);
+  await ctx.db.patch(plan._id, { staged, planLaneMark, cursor: page.continueCursor, ready: page.isDone });
   await scheduleLifecycle(ctx, plan._id);
   return lifecycleResult({ ...plan, staged, cursor: page.continueCursor, ready: page.isDone });
 }
@@ -124,6 +133,8 @@ export async function materializeLifecycle(ctx: MutationCtx, plan: LifecyclePlan
     plan,
     page.page.filter(event => event.kind === 'lane').map(event => ({ laneId: event.key, cursor: null })),
   );
+  if (page.isDone && plan.planLaneMark)
+    await changePlanLaneCascade(ctx, plan.planLaneMark, plan._id, 'clear');
   // Keep the provider cursor opaque; appliedThrough is an event count only.
   await ctx.db.patch(plan._id, {
     materialized: page.isDone,

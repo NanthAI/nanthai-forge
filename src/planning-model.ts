@@ -139,7 +139,7 @@ export type PlanRow = {
   hidden?: boolean;
   /** [ticked, total] Done-when lines; null when the body has none, undefined when not known. */
   doneWhen?: readonly [number, number] | null;
-  /** A Lane serves this Item (a started Intent that has not finished). */
+  /** At least one linked Lane is still open for work. */
   inLane?: boolean;
   /** Archived and Deleted rows only (Item 4c9e961e): the status it left, and when this version was written. */
   was?: StoredStatus;

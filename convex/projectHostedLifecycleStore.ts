@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { scheduleAbandonedBatchReselection } from './projectHostedBatchAbandon';
 import { completeIntentWhenLanesDone } from './projectHostedIntentCompletion';
+import { changePlanLaneCascade } from './projectPlanLaneMarks';
 import { cancelAbandonedLaneLandings } from './projectHostedLifecycleCancel';
 import { landingQueue } from './projectHostedLandingEvents';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -112,6 +113,8 @@ export async function settleLifecycle(
   const row = await hostedOperationRow(ctx, plan.projectId, plan.actor, plan.operationId);
   invariant(row, 'SOURCE_UNAVAILABLE', 'The original lifecycle operation is unavailable.');
   const op = hostedOperationSchema.parse(JSON.parse(row.value));
+  if (status !== 'applied' && plan.planLaneMark)
+    await changePlanLaneCascade(ctx, plan.planLaneMark, plan._id, 'clear');
   await ctx.db.patch(plan._id, { status });
   await finishHostedOperation(ctx, {
     projectId: plan.projectId,
@@ -178,6 +181,7 @@ export async function applyLifecycleRecord(
     actor: plan.actor,
     authorityEpoch: plan.authorityEpoch,
     expectedVersion: before.version,
+    ...(before.kind === 'lane' && request.action === 'reopen' ? { reopened: true } : {}),
     record: {
       ...before,
       version: before.version + 1,

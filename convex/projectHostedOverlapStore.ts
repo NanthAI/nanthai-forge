@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import type { z } from 'zod';
 import type { hostedLaneSchema } from '../src/hosted-lane';
 import { mergeOverlapChanges, advanceOverlapMain, type OverlapChange } from '../src/hosted-overlap';
@@ -10,6 +10,8 @@ import { parkedFor } from '../src/hosted-records';
 import { notifyStackDependents, trackStackDependent } from './projectHostedStackNotice';
 import { closeConflictNotices, planTrialMerge } from './projectHostedConflicts';
 import { appendOverlapMainLog } from './projectHostedOverlapMainLog';
+import { addPlanLane, planLaneItem, removePlanLanes } from './projectPlanLaneMarks';
+import { recordHead } from './projectHostedRecords';
 
 export async function trackHostedOverlapLane(
   ctx: MutationCtx,
@@ -31,6 +33,12 @@ export async function trackHostedOverlapLane(
     /** A save submitted to settle in the background (fea47345 C): its paths count before its head
      * is published, so a first save from the base still records them. */
     pending?: boolean;
+  },
+  planning?: {
+    project: Doc<'hostedProjects'>;
+    itemId: string | null | undefined;
+    newLane: boolean;
+    reopened: boolean;
   },
 ) {
   const old = await ctx.db
@@ -90,6 +98,30 @@ export async function trackHostedOverlapLane(
   const open = ['active', 'paused', 'ready'].includes(lane.state);
   // Superseded lasts while the Lane stays open at the head it was set on; a save or reopen ends it.
   const superseded = old?.open && open && old.superseded?.laneHead === lane.head ? old.superseded : undefined;
+  const itemId =
+    old?.planningItemId ??
+    planning?.itemId ??
+    (origin?.intentId === lane.intentId ? origin.planningItemId : undefined);
+  let planningItemId = itemId ?? undefined;
+  let planLaneMark = old?.planLaneMark;
+  if (!open && planLaneMark) {
+    await removePlanLanes(ctx, planLaneMark, [old?.lifecyclePlanId]);
+    planLaneMark = undefined;
+  } else if (
+    !planLaneMark &&
+    open &&
+    planning?.project.work?.generationId &&
+    itemId !== null &&
+    (planning.newLane || planning.reopened || (planningItemId && !sameHead))
+  ) {
+    if (!planningItemId) {
+      const intent = await recordHead(ctx, projectId, 'intent', lane.intentId);
+      planningItemId = intent?.planningItemId ?? lane.intentId;
+    }
+    const item = await planLaneItem(ctx, planning.project, planningItemId);
+    if (item) planLaneMark = await addPlanLane(ctx, projectId, item);
+    else planningItemId = undefined;
+  }
   const value = {
     projectId,
     laneId: lane.id,
@@ -116,6 +148,15 @@ export async function trackHostedOverlapLane(
     baseSequence: metadata?.baseSequence ?? (sameBase ? (old?.baseSequence ?? null) : null),
     recordVersion: lane.version,
     open,
+    ...(planningItemId ? { planningItemId } : {}),
+    ...(planLaneMark
+      ? {
+          planLaneMark,
+          planLanePin: { sourceVersion: lane.sourceVersion, lifecycleVersion: lane.lifecycleVersion },
+        }
+      : {}),
+    // An unchanged pending save must not erase a staged lifecycle association.
+    ...(old?.lifecyclePlanId && !planning ? { lifecyclePlanId: old.lifecyclePlanId } : {}),
     ...(superseded ? { superseded } : {}),
     lastActivityAt: Number.isFinite(Date.parse(lane.at)) ? Date.parse(lane.at) : Date.now(),
     // Landing evidence belongs to the head that landed and survives later records of the Lane.
@@ -235,6 +276,7 @@ export async function markHostedOverlapLifecycle(
       { projectId, laneId, actor: row.actor, ...(row.agent ? { agent: row.agent } : {}) },
       { kind: 'abandoned', key: String(lifecyclePlanId) },
     );
+  return row?.planLaneMark;
 }
 
 /** Retire the advisory open entry when its existing lifecycle overlay is promoted. */
@@ -255,6 +297,8 @@ export async function materializeHostedOverlapLifecycle(
       open: false,
       recordVersion,
       lifecyclePlanId: undefined,
+      planLaneMark: undefined,
+      planLanePin: undefined,
       presenceRow: undefined,
     });
 }

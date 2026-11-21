@@ -214,7 +214,10 @@ async function insertVersion(
   if (!head) await ctx.db.insert('projectHostedRecordHeads', pointer);
   else if (head.version < record.version) {
     await readyJournalRecord(ctx, projectId, head.recordId, head.kind);
-    await ctx.db.replace(head._id, pointer);
+    await ctx.db.replace(head._id, {
+      ...pointer,
+      ...(head.planningItemId ? { planningItemId: head.planningItemId } : {}),
+    });
   }
 }
 

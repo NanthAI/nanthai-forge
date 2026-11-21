@@ -108,6 +108,7 @@ export function Line({
             next
           </span>
         ) : null}
+        {row.inLane ? <span className="flag">in Lane</span> : null}
         {line.blockedBy ? (
           <span className="flag" title={`Cannot start until ${line.blockedBy.title} is done`}>
             blocked by {line.blockedBy.id.slice(0, 4)}

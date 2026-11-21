@@ -59,6 +59,7 @@ export function Board({
                   {row.title}
                 </A>
                 <span className="t3 cut">
+                  {row.inLane ? 'in Lane · ' : ''}
                   {row.initiativeId ? (byId.get(row.initiativeId)?.title ?? 'Initiative') : 'No Initiative'}
                   {row.type ? `, ${row.type}` : ''}
                 </span>

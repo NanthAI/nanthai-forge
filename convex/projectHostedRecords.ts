@@ -130,6 +130,9 @@ export async function writeHostedRecord(
     authorityEpoch: number;
     record: unknown;
     expectedVersion: number | null;
+    /** The Item selected by a planned start, or null for a new independent Intent. */
+    planningItemId?: string | null | undefined;
+    reopened?: true;
     /** Trusted compose metadata, outside the client-visible immutable record body. */
     restoreBases?: string;
     candidateFiles?: { sha256: string; size: number };
@@ -223,7 +226,13 @@ export async function writeHostedRecord(
     digest: ref.digest,
     bytes: ref.bytes,
   });
-  const pointer = { ...identity, ...indexed, recordId: id };
+  const itemId = input.planningItemId ?? head?.planningItemId;
+  const pointer = {
+    ...identity,
+    ...indexed,
+    recordId: id,
+    ...(record.kind === 'intent' && itemId ? { planningItemId: itemId } : {}),
+  };
   if (head) {
     await readyJournalRecord(ctx, input.projectId, head.recordId, head.kind);
     await ctx.db.replace(head._id, pointer);
@@ -238,7 +247,13 @@ export async function writeHostedRecord(
         Date.now() + journalGraceMs,
       );
     await touchLifecycleIntent(ctx, input.projectId, record.intentId);
-    await trackHostedOverlapLane(ctx, input.projectId, record, input.overlap);
+    await trackHostedOverlapLane(ctx, input.projectId, record, input.overlap, {
+      project,
+      itemId: input.planningItemId,
+      newLane: !head,
+      reopened:
+        input.reopened === true || Boolean(head && head.status !== 'active' && record.state === 'active'),
+    });
   }
   return { ...(await ctx.db.get(id))!, value };
 }
@@ -270,7 +285,11 @@ export async function readHostedRecord(
     row.digest,
     row.status,
   ]);
-  return { ...row, value: await hostedRecordBody(ctx, row) };
+  return {
+    ...row,
+    ...(head?.planningItemId ? { planningItemId: head.planningItemId } : {}),
+    value: await hostedRecordBody(ctx, row),
+  };
 }
 
 /** Page sibling Lanes/saves/Candidates or pending jobs by the schema-owned index. */
