@@ -17,6 +17,7 @@ Get a change from an idea to main, with people and agents working together.
 | Read a change, record findings or map pull-request habits | [Review and land](guides/review.md) |
 | Connect a terminal or understand who holds a Lane | [Devices, sign-ins and holders](guides/access.md) |
 | Keep several Lanes moving | [Oversee the work](guides/oversight.md) |
+| Send Forge events to a host or a local command | [Connect a host to Forge events](guides/event-feed.md) |
 | Fix a failed check | [When a check fails](guides/review.md#when-a-check-fails) |
 | Understand account billing | [Account billing](guides/billing.md) |
 | Keep a copy or leave with your work | [Export and mirrors](guides/export.md) |

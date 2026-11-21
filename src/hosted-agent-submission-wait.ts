@@ -32,6 +32,7 @@ import { stableSubmissionPageSchema } from './hosted-landing-stable.js';
 import { contractSkew, replySkewError, replySkewSide } from './hosted-reply-skew.js';
 import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
 import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
+import { feedCommitOrder } from './hosted-contract-features.js';
 
 export const hostedSubmissionWaitSchema = z
   .object({
@@ -89,6 +90,8 @@ export async function observeHostedSubmissions(
   subscribe: () => HostedRunSubscription = () => hostedRunSubscription(transport.address),
   /** Wait delivery: the caller's own Lane. A note to it ends the wait early (status "message"). */
   board?: BoardWaitOption,
+  /** Exact input Lanes from the caller's submitted or retained selection. */
+  feedLanes?: string[],
 ) {
   const command = hostedSubmissionWaitSchema.parse(input);
   const current = new Map<string, z.infer<typeof eventSchema>>();
@@ -173,6 +176,7 @@ export async function observeHostedSubmissions(
           current,
           board,
           noted,
+          feedLanes,
         ),
     });
     const entry = response.result.submissions.length === 1 ? response.result.submissions[0] : undefined;
@@ -206,6 +210,7 @@ async function observeHostedSubmissionsOnce(
   previous: ReadonlyMap<string, z.infer<typeof eventSchema>>,
   board?: BoardWaitOption,
   noted: { board?: unknown } = {},
+  feedLanes?: string[],
 ) {
   const command = hostedSubmissionWaitSchema.parse(input);
   const operations = [...new Set(command.operationIds)];
@@ -218,6 +223,16 @@ async function observeHostedSubmissionsOnce(
   // The board rides on the first operation's existing subscription, only on servers that say so.
   const features = (discovery.result as { features?: unknown }).features;
   const boardWait = board && Array.isArray(features) && features.includes('board-wait') ? board : undefined;
+  const lanes = feedLanes && [...new Set([...feedLanes, ...(boardWait ? [boardWait.laneId] : [])])];
+  const useFeed =
+    command.until === 'acceptance' &&
+    command.timeoutSeconds > 0 &&
+    lanes &&
+    lanes.length > 0 &&
+    lanes.length <= 32 &&
+    operations.length <= 32 &&
+    Array.isArray(features) &&
+    features.includes(feedCommitOrder);
   const capsuleArgs =
     Array.isArray(features) && features.includes('landing-capsules-v1') ? { capsuleProtocol: 1 } : {};
   const actor = z.object({ actor: z.string() }).parse(discovery.result).actor;
@@ -228,6 +243,7 @@ async function observeHostedSubmissionsOnce(
   const cursor = new HostedSubmissionWaitCursor(transport.address, actor, operations, command.cursor);
   const canonicalOperations = new Map<string, string>();
   const current = new Map<string, z.infer<typeof eventSchema>>();
+  let feedAfter: string | undefined;
   // Input pages describe an attempt's Lane-relative outcome. They may settle
   // after that attempt was replaced, or before the canonical receipt is visible.
   // Only the current submission can end the wait; its existing subscription and
@@ -393,12 +409,34 @@ async function observeHostedSubmissionsOnce(
     for (;;) {
       if (stopped || signal.aborted) return;
       const nextVersion = cursor.versions.get(operationId) ?? 0;
-      const read = parseHostedOutcome(
-        pageSchema,
-        stableSubmissionPageSchema,
-        livePage(operationId, nextVersion) ??
-          decode(await transport.query('projectHostedFinishObserve:page', { operationId, nextVersion })),
-      );
+      const liveValue = useFeed ? undefined : livePage(operationId, nextVersion);
+      const value =
+        liveValue ??
+        decode(
+          await transport.query('projectHostedFinishObserve:page', {
+            operationId,
+            nextVersion,
+            ...(useFeed && feedAfter === undefined ? { arrivalFence: 1 } : {}),
+            ...(useFeed && boardWait && operationId === operations[0]
+              ? { board: { laneId: boardWait.laneId, after: boardWait.after } }
+              : {}),
+          }),
+        );
+      if (useFeed && feedAfter === undefined) {
+        const { decodeFeedPosition } = await import('./feed-position.js');
+        const fence = (value as { feedAfter?: unknown } | null)?.feedAfter;
+        invariant(
+          typeof fence === 'string' && decodeFeedPosition(fence)?.id === null,
+          'HOSTED_PROTOCOL_INVALID',
+          'The landing baseline omitted its feed position.',
+        );
+        feedAfter = fence;
+      }
+      if (useFeed && boardWait && operationId === operations[0] && !stopped && !signal.aborted) {
+        latestBoard = noted.board = { board: (value as { board?: unknown } | null)?.board };
+        waker?.offer(latestBoard);
+      }
+      const read = parseHostedOutcome(pageSchema, stableSubmissionPageSchema, value);
       if (read.skew) skew = read.skew;
       // The stable read carries every other field as sent; authority keeps its normal form so a
       // skewed page never looks like an authority change (which would cost a resnapshot read).
@@ -529,6 +567,102 @@ async function observeHostedSubmissionsOnce(
   let latestBoard: unknown;
   let stop: (() => void) | undefined;
   try {
+    if (useFeed) {
+      // The finite baseline comes with its own snapshot fence. A commit between
+      // the read and registration still lies ahead of that fence.
+      for (const operation of operations) await drain(operation);
+      if (terminal()) return result('terminal');
+      if (syncRequired()) return result('sync-required');
+      if (signal.aborted) return result('cancelled');
+      // MCP loads this observer at startup. Only an explicit feed-backed CLI wait needs the client.
+      const { consumeProjectFeed, FEED_OVERLAP_MS } = await import('./feed-client.js');
+      const controller = new AbortController();
+      const feedSignal = AbortSignal.any([controller.signal, signal]);
+      let feed: Promise<void> | undefined;
+      try {
+        return await new Promise<ReturnType<typeof result>>((resolve, reject) => {
+          stop = () => resolve(result('cancelled'));
+          signal.addEventListener('abort', stop, { once: true });
+          if (signal.aborted) return stop();
+          if (boardWait) {
+            waker = boardWaker(boardWait, delivery => resolve(result('message', delivery)), false);
+            waker.offer(latestBoard);
+          }
+          const finish = () => {
+            if (terminal()) resolve(result('terminal'));
+            else if (syncRequired()) resolve(result('sync-required'));
+          };
+          const bySubmission = new Map<string, string[]>();
+          for (const operation of operations) {
+            const id = current.get(operation)!.submission.id;
+            const aliases = bySubmission.get(id);
+            if (aliases) aliases.push(operation);
+            else bySubmission.set(id, [operation]);
+          }
+          const actionable = new Map<string, string>();
+          feed = consumeProjectFeed({
+            selection: {
+              projectId: transport.address.projectId,
+              lanes,
+              waitFor: operations.map(operation => canonicalOperations.get(operation) ?? operation),
+              kinds: [
+                'landing.landed',
+                'landing.failed',
+                'landing.cancelled',
+                ...(boardWait ? (['lane.attention'] as const) : []),
+              ],
+            },
+            cursor: { since: Math.max(0, waitStarted - FEED_OVERLAP_MS), seen: [], after: feedAfter! },
+            subscribe,
+            read: args => transport.query('projectFeed:page', args),
+            signal: feedSignal,
+            event: async event => {
+              if (feedSignal.aborted) return;
+              if (event.kind === 'lane.attention') {
+                if (event.laneId === boardWait?.laneId) await drain(operations[0]!);
+              } else {
+                for (const operation of operations) {
+                  if (
+                    current.get(operation)?.submission.observation.state === 'pending' &&
+                    event.operationId === (canonicalOperations.get(operation) ?? operation)
+                  )
+                    await drain(operation);
+                }
+              }
+              if (!feedSignal.aborted) finish();
+            },
+            waiting: async observations => {
+              for (const observed of observations) {
+                if (feedSignal.aborted || terminal()) return;
+                const selected = bySubmission
+                  .get(observed.submissionId)
+                  ?.filter(operation => current.get(operation)?.submission.observation.state === 'pending');
+                if (!selected?.length) continue;
+                redrive({
+                  id: observed.submissionId,
+                  version: observed.version,
+                  phase: observed.phase,
+                  observation: { state: 'pending' },
+                });
+                if (!observed.needsSync && !['landed', 'terminal-failed'].includes(observed.phase)) continue;
+                const key = `${observed.phase}:${observed.version}:${observed.needsSync}`;
+                for (const operation of selected) {
+                  if (actionable.get(operation) === key) continue;
+                  actionable.set(operation, key);
+                  await drain(operation);
+                }
+              }
+              if (!feedSignal.aborted) finish();
+            },
+          });
+          feed.catch(reject);
+        });
+      } finally {
+        stopped = true;
+        controller.abort();
+        await feed?.catch(() => {});
+      }
+    }
     for (const operation of operations) await drain(operation);
     if (terminal()) return result('terminal');
     if (syncRequired()) return result('sync-required');

@@ -69,11 +69,11 @@
       },
       "immediate": {
         "entries": 416,
-        "keyBytes": 31502
+        "keyBytes": 31859
       },
       "retained": {
         "entries": 421,
-        "keyBytes": 31803
+        "keyBytes": 32160
       },
       "written": 1611
     }
@@ -148,11 +148,11 @@
       },
       "immediate": {
         "entries": 25173,
-        "keyBytes": 1711234
+        "keyBytes": 1711591
       },
       "retained": {
         "entries": 25206,
-        "keyBytes": 1713981
+        "keyBytes": 1714338
       },
       "written": 3028
     }
@@ -177,23 +177,23 @@
   },
   "tenLandingIndexes": {
     "landings": 10,
-    "written": 13832,
+    "written": 13852,
     "stored": [
       {
-        "entries": 866,
-        "keyBytes": 52472
+        "entries": 868,
+        "keyBytes": 52829
       },
       {
-        "entries": 1060,
-        "keyBytes": 67440
+        "entries": 1062,
+        "keyBytes": 67797
       },
       {
-        "entries": 2161,
-        "keyBytes": 153054
+        "entries": 2169,
+        "keyBytes": 154482
       },
       {
-        "entries": 2161,
-        "keyBytes": 153054
+        "entries": 2169,
+        "keyBytes": 154482
       }
     ]
   }

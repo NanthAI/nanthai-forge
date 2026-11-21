@@ -18,15 +18,11 @@ test.after(() => {
   }
 });
 const known = JSON.parse(readFileSync(new URL('./known-violations.json', import.meta.url))).violations;
-const snapshot = f =>
-  JSON.stringify(
-    Object.fromEntries(Object.entries(f.tables).map(([name, rows]) => [name, [...rows.values()]])),
-  );
 test('pre-N1 parked incident: the detector exposes the stale chain', async t => {
   const { f, followers } = await parkedIncident(t);
-  const before = snapshot(f);
+  const before = structuredClone(f.tables);
   const issues = await inspectQueue(f);
-  assert.equal(snapshot(f), before, 'the detector cannot repair its counterexample');
+  assert.deepEqual(f.tables, before, 'the detector cannot repair its counterexample');
   for (const id of ['L1', 'L2']) {
     if (known[id])
       assert(

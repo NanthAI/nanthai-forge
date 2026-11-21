@@ -112,6 +112,7 @@ function compile(spec) {
     null: value => value === null,
     bytes: value => value instanceof ArrayBuffer,
     bigint: value => typeof value === 'bigint' && value >= -(2n ** 63n) && value < 2n ** 63n,
+    commitTs: value => typeof value === 'bigint' && value >= -(2n ** 63n) && value < 2n ** 63n,
     literal: value => Object.is(value, literal),
   };
   const predicate = predicates[type];

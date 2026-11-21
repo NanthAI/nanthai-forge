@@ -10,6 +10,9 @@ import { invariant } from '../src/errors';
 import { feedEventViewValidator, feedKind } from './projectFeedFields';
 import { feedQueueEvent } from './projectFeedQueue';
 import { report } from './errors';
+import { feedArrivalAnchor, readFeedArrivals } from './projectFeedArrival';
+import { decodeFeedPosition } from '../src/feed-position';
+import { feedWaitObservations, feedWaitingValidator } from './projectFeedWait';
 
 const pageSize = 33;
 const laneScopeMax = 32;
@@ -102,11 +105,17 @@ export const page = query({
     kinds: v.optional(v.array(feedKind)),
     queue: v.optional(v.object({ laneId: v.string() })),
     cursor: v.optional(v.string()),
+    arrival: v.optional(
+      v.object({ after: v.union(v.string(), v.null()), replay: v.optional(v.literal(true)) }),
+    ),
+    waitFor: v.optional(v.array(v.string())),
   },
   returns: v.object({
     events: v.array(feedEventViewValidator),
     more: v.boolean(),
     cursor: v.union(v.string(), v.null()),
+    arrival: v.optional(v.object({ after: v.string(), scanned: v.number() })),
+    waiting: v.optional(feedWaitingValidator),
   }),
   handler: async (ctx, input) => {
     try {
@@ -133,21 +142,73 @@ export const page = query({
         'BAD_ARGUMENT',
         'The queue Lane must be in the feed scope.',
       );
+      const bootstrap = input.arrival?.after === null;
+      const history = input.arrival?.replay && !bootstrap;
+      invariant(
+        !input.arrival ||
+          (history
+            ? Boolean(input.arrival.after)
+            : input.cursor === undefined && (bootstrap || Boolean(input.arrival.after))),
+        'BAD_ARGUMENT',
+        'Choose an arrival cursor or an event-time continuation.',
+      );
+      const fence = history ? decodeFeedPosition(input.arrival!.after!) : undefined;
+      invariant(!history || (fence && fence.id === null), 'BAD_ARGUMENT', 'Invalid feed history fence.');
+      invariant(
+        !input.waitFor ||
+          (lanes &&
+            input.arrival?.after &&
+            !history &&
+            input.waitFor.length > 0 &&
+            input.waitFor.length <= laneScopeMax &&
+            input.waitFor.every(id => laneId.safeParse(id).success)),
+        'BAD_ARGUMENT',
+        'Choose 1 to 32 landing operations on a Lane-scoped arrival feed.',
+      );
       const after = input.cursor === undefined ? undefined : decodeCursor(input.cursor, input.since);
       const kinds = input.kinds && new Set(input.kinds);
+      const view = (rows: EventRow[]) =>
+        rows
+          .filter(
+            row =>
+              (!input.mine || row.actor === actor) &&
+              (!kinds || kinds.has(row.kind)) &&
+              (!fence || row.commitTs === undefined || (row.commitTs as bigint) <= fence.commit),
+          )
+          .map(row => feedEventView(row as EventRow & StoredFeedEvent));
       const queue =
         input.queue && !after && (!kinds || kinds.has('queue.moved'))
           ? await feedQueueEvent(ctx, input.projectId, input.queue.laneId, input.mine ? actor : undefined)
           : null;
+      const capacity = pageSize - (queue ? 1 : 0);
+      if (input.arrival?.after && !history) {
+        const [page, waiting] = await Promise.all([
+          readFeedArrivals(ctx, input.projectId, lanes, input.arrival.after, capacity),
+          input.waitFor ? feedWaitObservations(ctx, input.projectId, [...new Set(input.waitFor)]) : undefined,
+        ]);
+        const events = view(page.scanned);
+        if (queue) events.push(queue);
+        return {
+          events,
+          more: page.more,
+          cursor: page.more ? page.after : null,
+          arrival: { after: page.after, scanned: page.scanned.length },
+          ...(waiting ? { waiting } : {}),
+        };
+      }
+      const arrival = bootstrap
+        ? { after: feedArrivalAnchor(ctx), scanned: 0 }
+        : history
+          ? { after: input.arrival!.after!, scanned: 0 }
+          : undefined;
+      if (arrival && !input.arrival?.replay)
+        return { events: queue ? [queue] : [], more: false, cursor: null, arrival };
       const ranges = await Promise.all(
         (lanes ?? [undefined]).map(lane => readRange(ctx, input.projectId, lane, input.since, after)),
       );
       const rows = ranges.flat().sort(order);
-      const capacity = pageSize - (queue ? 1 : 0);
       const scan = rows.slice(0, capacity);
-      const events = scan
-        .filter(row => (!input.mine || row.actor === actor) && (!kinds || kinds.has(row.kind)))
-        .map(row => feedEventView(row as EventRow & StoredFeedEvent));
+      const events = view(scan);
       if (queue) events.push(queue);
       const more = rows.length > capacity;
       const last = scan.at(-1);
@@ -155,6 +216,7 @@ export const page = query({
         events: events.sort(order),
         more,
         cursor: more && last ? btoa(JSON.stringify([last.at, last.id])) : null,
+        ...(arrival ? { arrival } : {}),
       };
     } catch (error) {
       return report(error);

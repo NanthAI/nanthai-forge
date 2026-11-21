@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { checkArgs, checkDocument, insertedDocument, updatedDocument } from './convex-args.mjs';
-import { validateContext } from './convex-context.mjs';
+import { fixtureCommitStart, validateContext } from './convex-context.mjs';
+import { convexToJson } from 'convex/values';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 /** Index fields may name a nested path such as `metricMutation.action`. */
 const at = (row, key) => key.split('.').reduce((value, part) => value?.[part], row);
-const size = value => (value === null ? 0 : Buffer.byteLength(JSON.stringify(value)));
+const indexKey = values =>
+  JSON.stringify(values, (_, value) => (typeof value === 'bigint' ? convexToJson(value) : value));
+const size = value => (value === null ? 0 : Buffer.byteLength(JSON.stringify(convexToJson(value))));
 
 /** Indexed metadata fake. Counts the matched provider range, not a JS table scan.
  * Index names and equality order are checked against the actual Convex schema.
@@ -20,6 +23,7 @@ export function recordsFixture() {
     counts = [];
   let serial = 0,
     creationClock = 0,
+    commitClock = fixtureCommitStart,
     meter = null,
     undo = null;
   const invalidate = table => {
@@ -29,14 +33,14 @@ export function recordsFixture() {
     for (const [cacheKey, cache] of indexes) {
       if (!cacheKey.startsWith(`${table}:`)) continue;
       if (old) {
-        const key = JSON.stringify(cache.fields.map(k => at(old, k)));
+        const key = indexKey(cache.fields.map(k => at(old, k)));
         const group = cache.groups.get(key);
         if (group) {
           const i = group.findIndex(r => r._id === old._id);
           if (i >= 0) group.splice(i, 1);
         }
       }
-      const key = JSON.stringify(cache.fields.map(k => at(row, k)));
+      const key = indexKey(cache.fields.map(k => at(row, k)));
       if (!cache.groups.has(key)) cache.groups.set(key, []);
       const group = cache.groups.get(key);
       group.push(row);
@@ -93,6 +97,11 @@ export function recordsFixture() {
       },
     },
     db: {
+      vars: {
+        get commitTs() {
+          return commitClock;
+        },
+      },
       normalizeId: (table, id) => (locations.get(id) === table ? id : null),
       get: async id => {
         range();
@@ -186,9 +195,7 @@ export function recordsFixture() {
             if (!indexes.has(cacheKey)) {
               const groups = new Map();
               for (const row of tables[table].values()) {
-                const key = JSON.stringify(
-                  definition.fields.slice(0, equalities.length).map(k => at(row, k)),
-                );
+                const key = indexKey(definition.fields.slice(0, equalities.length).map(k => at(row, k)));
                 if (!groups.has(key)) groups.set(key, []);
                 groups.get(key).push(row);
               }
@@ -205,7 +212,7 @@ export function recordsFixture() {
                 compare,
               });
             }
-            selected = indexes.get(cacheKey).groups.get(JSON.stringify(equalities)) ?? [];
+            selected = indexes.get(cacheKey).groups.get(indexKey(equalities)) ?? [];
             if (lower)
               selected = selected.filter(row =>
                 lower.inclusive ? at(row, lower.field) >= lower.value : at(row, lower.field) > lower.value,
@@ -257,6 +264,7 @@ export function recordsFixture() {
   });
   const run = async (name, action) => {
     assert.equal(meter, null);
+    commitClock++;
     meter = { name, ranges: 0, documents: 0, readBytes: 0, writes: 0, writeBytes: 0 };
     undo = [];
     try {

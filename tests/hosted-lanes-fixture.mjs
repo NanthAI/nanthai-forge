@@ -5,7 +5,12 @@ import { indexEntriesPerWrite } from './convex-index-cost.mjs';
 import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { checkArgs, checkDocument, checkReturn, insertedDocument, updatedDocument } from './convex-args.mjs';
-import { validateContext } from './convex-context.mjs';
+import {
+  fixtureCommitStart,
+  fixturePendingCommit,
+  resolveFixtureCommit,
+  validateContext,
+} from './convex-context.mjs';
 const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
 const { landingRequestBodies } = await import(moduleUrl('../convex/projectLandingRequestBody.ts'));
 const {
@@ -17,8 +22,13 @@ const {
 } = await import(moduleUrl('../convex/projectFinishReadProjection.ts'));
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const githubBindings = await import(moduleUrl('../convex/githubBindingStore.ts'));
-const bytes = value => Buffer.byteLength(JSON.stringify(value));
-const encoded = rows => JSON.stringify(rows);
+const encoded = value =>
+  JSON.stringify(value, (key, item) =>
+    typeof item === 'bigint'
+      ? String(key === 'commitTs' && item === fixturePendingCommit ? fixtureCommitStart : item)
+      : item,
+  );
+const bytes = value => Buffer.byteLength(encoded(value));
 const fieldValue = (row, path) =>
   path.includes('.') ? path.split('.').reduce((value, part) => value?.[part], row) : row[path];
 
@@ -39,6 +49,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
   const counts = [];
   const scheduled = [];
   let serial = 0,
+    commitClock = fixtureCommitStart,
     decorate,
     lastReadSet;
   const insert = (table, value) => {
@@ -67,6 +78,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         observedRows = new WeakSet();
       // A Convex query function may run one paginate(); a second fails in production only (mutations are exempt).
       let paginations = 0;
+      const snapshotTs = commitClock;
       const meter = {
         name,
         // Query or mutation, for per-kind call counts (the landing cost guard).
@@ -232,6 +244,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
       const locate = id => Object.keys(baseline).find(table => view(table).has(id));
       const ctx = validateContext({
         meta: {
+          getSnapshotTs: () => snapshotTs,
           getRequestMetadata: async () => ({ scheduledFunctionId: null }),
           getTransactionMetrics: async () => ({
             databaseQueries: { used: meter.ranges, remaining: 4096 - meter.ranges },
@@ -469,6 +482,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
       // System task reads use the same metered transaction snapshot as ordinary rows.
       // Scheduler decorators with a separate task store override this alongside scheduling.
       ctx.db.system = { get: ctx.db.get };
+      ctx.db.vars = { commitTs: fixturePendingCommit };
       const unchanged = () => {
         // A retained read set can be checked again after later transactions.
         // Rebuild each live-table equality index once for this validation.
@@ -484,9 +498,10 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         // Convex rejects an oversized return value, which rolls the mutation back.
         if (fn.exportArgs) checkReturn(result, name);
         if (unchanged()) {
+          if (writes.length) commitClock++;
           for (const [table, id, row] of writes) {
             if (row === null) tables[table].delete(id);
-            else tables[table].set(id, row);
+            else tables[table].set(id, resolveFixtureCommit(row, commitClock));
           }
           if (name === 'observerBudgetPage') lastReadSet = unchanged;
           counts.push(meter);

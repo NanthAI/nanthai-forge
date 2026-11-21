@@ -147,7 +147,12 @@ import {
 import { publishClientSourcePack } from './source-pack-client.js';
 import { missingRequiredFeatures } from './hosted-contract-features.js';
 import type { LandingHold } from './hosted-landing-hold.js';
-import { bareStatus, capabilityOptions, takeEarlyCapabilities } from './hosted-capabilities-early.js';
+import {
+  bareStatus,
+  capabilityOptions,
+  requestFeedCapability,
+  takeEarlyCapabilities,
+} from './hosted-capabilities-early.js';
 import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
 import { selectHostedFinish, unsavedFiles } from './hosted-agent-finish-identity.js';
 import {
@@ -935,6 +940,7 @@ export class HostedAgentTransport {
           ? (await import('./preflight-guard-cache.js')).guardRevisionToAsk(this.root, this.address.projectId)
           : undefined;
         if (guardRevision !== undefined) options = { ...options, guardRevision };
+        if (action === 'capabilities') options = requestFeedCapability(options);
         // Finish uses the discovery slot reserved for main-today on bare status.
         if (action === 'finish')
           options = { ...options, features: [...(options.features as string[]), 'landing-client-hold'] };

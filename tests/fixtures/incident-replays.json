@@ -180,7 +180,9 @@
       "incident": "5e3c3a3c",
       "what": "Core claim: passed landings waited 60-100 min behind a holder that started a new check (2026-11-17); the queue simulation gates followers' pass-to-land and fails on the pre-N1 code",
       "file": "tests/hosted-landing-queue-sim.test.mjs",
-      "paths": ["convex/projectHostedFinishWake.ts"],
+      "paths": [
+        "convex/projectHostedFinishWake.ts"
+      ],
       "test": "incident 5e3c3a3c: passed followers land within the pass-to-land ceiling while the holder re-checks"
     },
     {
@@ -613,6 +615,24 @@
       "what": "A CI-down probe whose check ended on another infrastructure cause (interrupted after runner-unavailable) restarted the streak, so a later pass released nothing and the other held entries were stranded (review 2bf14e44 B1)",
       "file": "tests/hosted-landing-ci-down.test.mjs",
       "test": "incident replay e62d834b line 5 (review 2bf14e44 B1): a probe that ends on another infrastructure cause keeps the hold, so a later verdict releases every held entry"
+    },
+    {
+      "incident": "f65d8024",
+      "what": "A feed-backed wait can miss the Ready transition and never re-drive stalled settlement (f65d8024 saved-Lane review)",
+      "file": "tests/hosted-submission-wait.test.mjs",
+      "test": "a feed wait that starts checking still re-drives a stalled Ready settlement",
+      "paths": [
+        "convex/projectHostedFinishObserve.ts"
+      ]
+    },
+    {
+      "incident": "f65d8024",
+      "what": "A selected landing can newly require sync without emitting a terminal event (f65d8024 saved-Lane review)",
+      "file": "tests/hosted-submission-wait.test.mjs",
+      "test": "a feed wait ignores unrelated landing rows and still reports newly marked sync advice",
+      "paths": [
+        "convex/projectHostedFinishObserve.ts"
+      ]
     },
     {
       "incident": "39a68046",

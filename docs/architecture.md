@@ -2262,6 +2262,16 @@ returned opaque `cursor` alongside the same selection for a finite continuation.
 can be empty when the indexed window contains only filtered events. Live subscriptions
 start with `since` and no cursor. The server checks current access on each run and reads
 indexed event ranges. It has no heartbeat or scheduled expiry.
+The `feed-commit-order` feature adds an optional `arrival` mode on the same
+query. The first read captures a database snapshot fence and can replay older
+event-time history. Live readers move through raw commit positions even when
+no rows match the filters, then keep one subscription open at the new position.
+The two scope indexes use the optional commit timestamp stamped by the inserting
+transaction. Older rows still use the event-time pages.
+A scoped landing wait takes its starting fence with the canonical observation
+and includes the pinned operations in its feed query. Existing landing rows
+provide the phase, version and sync-required flag so the waiter can still
+trigger Ready settlement recovery and read the current sync guidance.
 
 Single-page acceptance, terminal landing failures, check outcomes, saved-head changes,
 direct Lane closures and directed attention emit with their source transition.

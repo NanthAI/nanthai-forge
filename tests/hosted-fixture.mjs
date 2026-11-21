@@ -26,7 +26,12 @@ import {
   insertedDocument,
   updatedDocument,
 } from './convex-args.mjs';
-import { validateContext } from './convex-context.mjs';
+import {
+  fixtureCommitStart,
+  fixturePendingCommit,
+  resolveFixtureCommit,
+  validateContext,
+} from './convex-context.mjs';
 import { backupFields, backupPreview, proposalFields } from './project-backup-fixture.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const artifactStorage = await import(moduleUrl('../convex/artifactStorage.ts'));
@@ -208,7 +213,8 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
   let caller = 'owner',
     reads = 0,
     count = 0,
-    creationClock = Date.now();
+    creationClock = Date.now(),
+    commitClock = fixtureCommitStart;
   // Lookups run on every call; scan the tables without allocating a per-call array.
   const tableNameOf = id => {
     for (const name in tables) if (tables[name].has(id)) return name;
@@ -224,7 +230,7 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
   // A mutation's writes and scheduled work are undone when it throws, like a provider
   // transaction. Interleaved async mutations are not isolated from each other (no OCC).
   const transactions = new AsyncLocalStorage();
-  const remember = undo => transactions.getStore()?.push(undo);
+  const remember = undo => transactions.getStore()?.undo.push(undo);
   const restorable = id => {
     for (const table of Object.values(tables))
       if (table.has(id)) {
@@ -234,14 +240,23 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
       }
   };
   const transaction = async run => {
-    const undo = [],
-      parent = transactions.getStore();
+    const parent = transactions.getStore();
+    const current = { undo: [], commits: [], snapshotAt: parent?.snapshotAt ?? commitClock };
     try {
-      const result = await transactions.run(undo, run);
-      parent?.push(...undo);
+      const result = await transactions.run(current, run);
+      if (parent) {
+        parent.undo.push(...current.undo);
+        parent.commits.push(...current.commits);
+      } else if (current.undo.length) {
+        commitClock++;
+        for (const [table, id] of current.commits) {
+          const document = tables[table].get(id);
+          if (document) tables[table].set(id, resolveFixtureCommit(document, commitClock));
+        }
+      }
       return result;
     } catch (error) {
-      for (const step of undo.reverse()) step();
+      for (const step of current.undo.reverse()) step();
       throw error;
     }
   };
@@ -257,9 +272,13 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
   };
   for (const table of Object.keys(schema.tables)) tables[table] ??= new Map();
   const ctx = validateContext({
-    meta: { getRequestMetadata: async () => ({ scheduledFunctionId: null }) },
+    meta: {
+      getRequestMetadata: async () => ({ scheduledFunctionId: null }),
+      getSnapshotTs: () => transactions.getStore()?.snapshotAt ?? commitClock,
+    },
     auth: { getUserIdentity: async () => (caller ? { subject: caller } : null) },
     db: {
+      vars: { commitTs: fixturePendingCommit },
       normalizeId: (table, id) => (find(id) && !tables[table]?.has(id) ? null : id),
       get: async id => structuredClone(find(id)),
       system: {
@@ -295,6 +314,11 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
           ),
         );
         remember(() => tables[table].delete(id));
+        if (row.commitTs === fixturePendingCommit) {
+          const current = transactions.getStore();
+          if (current) current.commits.push([table, id]);
+          else tables[table].set(id, resolveFixtureCommit(tables[table].get(id), ++commitClock));
+        }
         return id;
       },
       replace: async (id, values) => {

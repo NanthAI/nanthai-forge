@@ -15,6 +15,7 @@
 export const sourceStateFeature = 'source-state';
 /** Source/bootstrap version 2 and one descriptor refresh after a root replacement. */
 export const sourceStateV2Feature = 'source-state-v2';
+export const feedCommitOrder = 'feed-commit-order';
 export const hostedContractFeatures = [
   /** Reader expansion precedes this writer: start/save/land accept declared source authorship. */
   'source-authorship-v1',
@@ -232,6 +233,7 @@ export const MAX_CONTRACT_FEATURES = 64;
 /** The subset of the asked names this server implements (server side). Feed consumers
  * ask explicitly; the installed CLI's general discovery already uses its full feature budget. */
 export const advertisedFeatures = (asked: readonly string[]) => [
+  ...(asked.includes(feedCommitOrder) ? [feedCommitOrder] : []),
   ...hostedContractFeatures.filter(feature => asked.includes(feature)),
   ...(asked.includes('feed') ? ['feed'] : []),
 ];

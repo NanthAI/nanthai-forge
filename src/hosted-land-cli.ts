@@ -14,7 +14,7 @@ import { hostedAgentRoot } from './hosted-agent-journal.js';
 import { HostedAgentTransport, type HostedAgentResponse } from './hosted-agent-transport.js';
 import { hostedAgentCli } from './hosted-agent-cli.js';
 import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
-import { followLocalOperation } from './hosted-agent-wait-local.js';
+import { followLocalOperation, landingFeedLanes } from './hosted-agent-wait-local.js';
 import { observeHostedRun } from './hosted-agent-observe.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { readClientSettings } from './client-settings.js';
@@ -283,7 +283,16 @@ async function waitLanding(
           root,
           { operationId: response.operationId, waitingFor: 'acceptance', budgetSeconds: timeoutSeconds },
           emit,
-          observed => observeHostedSubmissions(transport, selection, controller.signal, observed),
+          observed =>
+            observeHostedSubmissions(
+              transport,
+              selection,
+              controller.signal,
+              observed,
+              undefined,
+              undefined,
+              landingFeedLanes(root, selection.operationIds),
+            ),
         );
       } catch (error) {
         // A check-only or save operation id is not a landing: follow what this client recorded for it.

@@ -151,11 +151,11 @@ for (const boundary of ['checking', 'accepting']) {
     // and already-retained server scheduler run after this boundary.
     if (boundary === 'checking') await f.passChecks();
     await f.drain();
-    const before = JSON.stringify(Object.entries(f.tables).map(([name, table]) => [name, [...table]]));
+    const before = structuredClone(f.tables);
     const reconnected = (await read(f, alias.operationId)).submission;
     assert.equal(reconnected.id, state.id);
     assert.equal(reconnected.phase, 'landed');
-    assert.equal(JSON.stringify(Object.entries(f.tables).map(([name, table]) => [name, [...table]])), before);
+    assert.deepEqual(f.tables, before);
     assert.equal(f.tables.projectHostedCheckRuns.size, 1);
     assert.equal(f.tables.projectHostedAcceptances.size, 1);
     assert.equal(f.pending().length, 0);

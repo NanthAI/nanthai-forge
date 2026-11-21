@@ -136,8 +136,8 @@ latency and thirty-minute idle I/O remain unverified.
 
 ### Hosted project feed
 
-The six-landing fixture records six feed events and 2,940 document-write bytes, or
-490 bytes per landing. Its existing mutations publish the events, with 275 total
+The six-landing fixture records six feed events and 3,138 document-write bytes, or
+523 bytes per landing. Its existing mutations publish the events, with 275 total
 fixture calls and zero additional scheduled work. The fresh history incurs six
 empty expiry probes. Reusing the loaded acceptance plan reduced publication's
 feed-related acceptance input page reads from 4,410 bytes to zero. A one-Lane
@@ -145,13 +145,27 @@ plan stages 64 extra bytes. Publication drops them from its plan, while a
 superseded plan retains them until capsule cleanup.
 The six-landing fixture took 1.58 s with 517,280 KiB peak RSS for the Node test
 process, including its database fake and source fixtures.
-The ten-landing fixture stores 20 additional custom index entries.
-
-With the indexed-patch fit below, 490 document bytes plus 181 bytes of row overhead
-and two 128-byte custom entries model 927 write bytes per fixture landing, or about
-$0.00019 per 1,000 at Professional I/O rates. This fixture measures one
-terminal event per Lane. Saves, check-only runs, attention notes, expiry deletes
+Commit ordering adds 33 document bytes and two custom keys totaling 357 modeled
+key bytes per event, or 198 document bytes and 2,142 modeled key bytes across
+six landings. The ten-landing fixture adds 20 commit-order index entries.
+The JSON key model measures values and identifiers. The indexed-patch fit below
+uses billed per-index overhead from a separate measurement and estimates
+523 + 181 + 4 × 128 = 1,216 write bytes per fixture landing, up from 927.
+At Professional I/O rates the modeled difference is about $0.00006 per
+1,000 fixture landings. Saves, check-only runs, attention notes, expiry deletes
 and active subscribers contribute their own I/O in projects that use them.
+
+The matched six-landing acceptance-wait fixture advances each submission through
+Queued, Checking, Ready and a terminal outcome. Its database fake tracks live query
+dependencies. Each mode includes one capability lookup per wait. A selected
+operation's narrow projection preserves sync guidance and Ready settlement recovery.
+A second Lane changing its own landing row does not invalidate the waiter.
+
+| Observer | Calls per wait | Live evaluations per wait, including the initial run | Read bytes across six waits |
+| --- | ---: | ---: | ---: |
+| Live receipt observer | 8 | 5 | 203,395 |
+| Feed without the operation projection | 5 | 2 | 66,496 |
+| Feed with the operation projection | 8 | 5 | 127,032 |
 
 Idle has zero calls. A live page reads a bounded window of at most 34 records per
 selected Lane or project range, plus the existing access check. An optional queue

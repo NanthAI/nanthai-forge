@@ -5,14 +5,25 @@ import { randomUUID } from 'node:crypto';
 import { landingFixture } from './hosted-landing-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { feedEventId, feedEventView, feedKinds } from '../dist/feed-event.js';
+import { capabilityOptions, requestFeedCapability } from '../dist/hosted-capabilities-early.js';
 
 const { page } = await import(moduleUrl('../convex/projectFeed.ts'));
 const { recordFeedEvent } = await import(moduleUrl('../convex/projectFeedStore.ts'));
 const { trackHostedOverlapLane } = await import(moduleUrl('../convex/projectHostedOverlapStore.ts'));
 const { postSystemLaneNote } = await import(moduleUrl('../convex/projectBoardSystem.ts'));
 const board = await import(moduleUrl('../convex/projectBoard.ts'));
+const hostedAgent = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 const code = expected => error => error.data?.code === expected;
 const since = 1;
+
+test('a watcher negotiates commit order within the existing capability request budget', async () => {
+  const f = await landingFixture();
+  const args = { projectId: f.projectId, ...requestFeedCapability(capabilityOptions('/synthetic')) };
+  const reply = JSON.parse(await f.call('feedCapabilities', hostedAgent.capabilities, args));
+  assert(reply.features.includes('feed-commit-order'));
+  assert(reply.features.includes('board-wait'));
+  assert(!args.features.includes('main-today'));
+});
 
 test('feed access tracks current project membership, including revocation during a subscription', async () => {
   const f = await landingFixture();
@@ -24,11 +35,18 @@ test('feed access tracks current project membership, including revocation during
   await assert.rejects(read('outsider'), code('PROJECT_UNAVAILABLE'));
   await assert.rejects(read('reader'), code('PROJECT_UNAVAILABLE'));
   assert.deepEqual(await read('writer'), { events: [], more: false, cursor: null });
+  const anchor = await read('writer', { ...input, arrival: { after: null } });
+  assert.deepEqual(anchor.events, []);
+  assert.deepEqual((await read('writer', { ...input, arrival: { after: anchor.arrival.after } })).events, []);
   const unchanged = f.readSet();
   assert(unchanged(), 'a quiet subscription has no changed dependency');
   f.tables.projectContributors.delete(membership);
   assert(!unchanged(), 'membership removal invalidates the live query');
   await assert.rejects(read('writer'), code('PROJECT_UNAVAILABLE'));
+  await assert.rejects(
+    read('writer', { ...input, arrival: { after: anchor.arrival.after } }),
+    code('PROJECT_UNAVAILABLE'),
+  );
   await assert.rejects(read('owner', { ...input, lanes: [randomUUID()] }), code('BAD_ARGUMENT'));
   await assert.rejects(
     read('owner', { ...input, project: undefined, lanes: Array.from({ length: 33 }, randomUUID) }),
@@ -109,6 +127,82 @@ test('feed pagination crosses unmatched rows at a shared instant and keeps Lane 
       fixtureMs: performance.now() - started,
     }),
   );
+});
+
+test('commit cursors cross a dense filtered prefix, keep tied rows and wake on a late commit', async () => {
+  const f = await landingFixture();
+  const laneId = randomUUID();
+  const base = { projectId: f.projectId, since, project: true, mine: true };
+  const read = input => f.call('observerBudgetPage', page, input);
+  const newRows = (target, actor, versions, at) =>
+    f.run(
+      'commitFeed',
+      async ctx => {
+        for (const sourceVersion of versions) {
+          const event = { projectId: f.projectId, laneId: target, actor, kind: 'lane.saved', sourceVersion };
+          await ctx.db.insert('projectFeedEvents', {
+            ...event,
+            id: feedEventId(event),
+            at,
+            commitTs: ctx.db.vars.commitTs,
+          });
+        }
+      },
+      {},
+    );
+  f.insert('projectFeedEvents', {
+    projectId: f.projectId,
+    laneId,
+    actor: 'owner',
+    at: 2,
+    id: `lane.closed:${laneId}`,
+    kind: 'lane.closed',
+  });
+  const boot = await read({ ...base, arrival: { after: null, replay: true } });
+  assert.deepEqual(
+    boot.events.map(event => event.kind),
+    ['lane.closed'],
+  );
+  await newRows(
+    laneId,
+    'peer',
+    Array.from({ length: 40 }, (_, i) => i + 1),
+    500_000,
+  );
+  const empty = await read({ ...base, arrival: { after: boot.arrival.after } });
+  assert.deepEqual(empty.events, []);
+  assert.equal(empty.more, true);
+  assert.equal(empty.arrival.scanned, 33);
+  assert.equal(empty.cursor, empty.arrival.after);
+  assert(f.counts.at(-1).readDocumentsByTable.projectFeedEvents <= 34);
+  const tail = await read({ ...base, arrival: { after: empty.cursor } });
+  assert.deepEqual(tail.events, []);
+  assert.equal(tail.arrival.scanned, 7, 'all tied rows after the boundary remain readable');
+  const last = { ...base, arrival: { after: tail.arrival.after } };
+  assert.deepEqual((await read(last)).events, []);
+  const idle = f.readSet();
+  assert(idle());
+  await newRows(laneId, 'owner', [41], 3);
+  assert(!idle(), 'a late commit invalidates an otherwise idle range after the dense prefix');
+  const delivered = await read(last);
+  assert.deepEqual(
+    delivered.events.map(event => [event.sourceVersion, event.at]),
+    [[41, 3]],
+  );
+
+  const scoped = {
+    projectId: f.projectId,
+    since,
+    lanes: [laneId],
+    arrival: { after: delivered.arrival.after },
+  };
+  assert.deepEqual((await read(scoped)).events, []);
+  const scopedRead = f.readSet();
+  await newRows(randomUUID(), 'owner', [1], 4);
+  assert(scopedRead(), 'an unrelated Lane leaves the scoped live range idle');
+  await newRows(laneId, 'owner', [42], 4);
+  assert(!scopedRead());
+  await assert.rejects(read({ ...base, arrival: { after: 'malformed' } }), code('BAD_ARGUMENT'));
 });
 
 test('feed writes prune at most two expired rows in their project without scheduling upkeep', async t => {

@@ -17,6 +17,7 @@ import { settleTurnWork } from './agent-turn-work.js';
 import { finishRefusedKey } from './hosted-agent-finish-identity.js';
 import { preparingFinishSource } from './hosted-agent-finish-result.js';
 import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
+import { markerIdentity } from './lane-prune.js';
 import {
   observeHostedRun,
   hostedRunSubscription,
@@ -211,6 +212,7 @@ async function continueFinish(
       emit,
       subscribe,
       board,
+      landingFeedLanes(transport.root, [operationId]),
     );
   // A check-only finish that reserved its run: wait on that run, as land does.
   const run = result.run as { id?: unknown } | undefined;
@@ -285,6 +287,28 @@ export async function followLocalOperation(
 }
 
 /** Wait on operation ids: a hosted landing as before, else the local operation it names. */
+export function landingFeedLanes(root: string, operationIds: string[]) {
+  const lanes = new Set<string>();
+  const agent = join(clientCacheRoot(hostedAgentRoot(root)), 'agent');
+  for (const operationId of operationIds) {
+    if (!z.uuid().safeParse(operationId).success || !checkoutPathExists(join(agent, `${operationId}.json`)))
+      return undefined;
+    const retained = retainedHostedOperation(root, operationId);
+    if (retained?.action !== 'finish') return undefined;
+    const { command } = retained;
+    const inputs = command.inputs as { laneId?: unknown }[] | undefined;
+    // Candidate/compose replays without retained inputs may select a different Lane than ROOT.
+    const laneId =
+      inputs?.[0]?.laneId ??
+      command.laneId ??
+      (command.composeOperationId || command.candidateId ? undefined : markerIdentity(root)?.laneId);
+    const lane = z.uuid().safeParse(laneId);
+    if (!lane.success) return undefined;
+    lanes.add(lane.data);
+  }
+  return [...lanes];
+}
+
 export async function observeOperations(
   transport: HostedAgentTransport,
   root: string,
@@ -299,7 +323,15 @@ export async function observeOperations(
   board?: BoardWaitOption,
 ) {
   try {
-    return await observeHostedSubmissions(transport, input, signal, emit, subscribe, board);
+    return await observeHostedSubmissions(
+      transport,
+      input,
+      signal,
+      emit,
+      subscribe,
+      board,
+      input.until === 'acceptance' ? landingFeedLanes(root, input.operationIds) : undefined,
+    );
   } catch (error) {
     const followed = await followLocalOperation(
       transport,

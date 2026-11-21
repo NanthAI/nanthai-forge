@@ -16,6 +16,8 @@ import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
 import { landingFixture, store, api, code } from './hosted-landing-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
+const feed = await import(moduleUrl('../convex/projectFeed.ts'));
+const { recordFeedEvent } = await import(moduleUrl('../convex/projectFeedStore.ts'));
 const turn = () => new Promise(resolve => setImmediate(resolve));
 const pendingWaits = new Map();
 test.afterEach(async () => {
@@ -23,10 +25,11 @@ test.afterEach(async () => {
   for (const [controller] of waits) controller.abort();
   await Promise.allSettled(waits.map(([, pending]) => pending));
 });
-async function fixture() {
+async function fixture(onFeed = false, { rider = onFeed, reactive = false } = {}) {
   const f = await landingFixture(),
     subscriptions = new Set(),
-    events = [];
+    events = [],
+    feedLane = randomUUID();
   let opens = 0,
     closes = 0,
     unsubscribes = 0,
@@ -47,11 +50,13 @@ async function fixture() {
         transport: 'hosted',
         action: 'capabilities',
         operationId: null,
-        result: { actor: 'owner' },
+        result: { actor: 'owner', ...(onFeed ? { features: ['feed', 'feed-commit-order'] } : {}) },
       };
     },
     async query(name, args) {
       if (name === 'projectHostedLanding:status') return sStatus(args.submissionId);
+      if (name === 'projectFeed:page')
+        return f.call('landingWaitFeedContinuation', feed.page, { ...args, projectId: f.projectId }, actor);
       assert.equal(name, 'projectHostedFinishObserve:page');
       reads++;
       return JSON.parse(
@@ -63,8 +68,10 @@ async function fixture() {
     opens++;
     return {
       onUpdate(ref, args, next, fail) {
-        assert.equal(getFunctionName(ref), 'projectHostedFinishObserve:page');
-        const s = { args, next, fail };
+        assert.equal(getFunctionName(ref), onFeed ? 'projectFeed:page' : 'projectHostedFinishObserve:page');
+        const query = { ...args };
+        if (!rider) delete query.waitFor;
+        const s = { args: query, next, fail };
         subscriptions.add(s);
         duringSubscribe?.();
         duringSubscribe = null;
@@ -115,6 +122,7 @@ async function fixture() {
     transport,
     conflictReads: () => conflictReads,
     subscribe,
+    feedLane,
     events,
     start,
     update,
@@ -126,6 +134,8 @@ async function fixture() {
         signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
         e => events.push(e),
         subscribe,
+        undefined,
+        onFeed ? [feedLane] : undefined,
       );
       pendingWaits.set(controller, pending);
       // A failed assertion can leave its waiter unawaited; teardown still closes it.
@@ -137,9 +147,18 @@ async function fixture() {
     },
     /** A live delivery as Convex sends one transition: every subscribed page's current value, together. */
     deliver: async () => {
-      const live = [...subscriptions];
+      const live = [...subscriptions].filter(s => !reactive || !s.unchanged?.());
       const values = await Promise.all(
-        live.map(s => f.call('landingWaitLive', observe.page, { ...s.args, projectId: f.projectId }, actor)),
+        live.map(async s => {
+          const value = await f.call(
+            reactive ? 'observerBudgetPage' : 'landingWaitLive',
+            onFeed ? feed.page : observe.page,
+            { ...s.args, projectId: f.projectId },
+            actor,
+          );
+          if (reactive) s.unchanged = f.readSet();
+          return value;
+        }),
       );
       live.forEach((s, index) => s.next(values[index]));
     },
@@ -153,6 +172,21 @@ async function fixture() {
       duringSubscribe = fn;
     },
     counts: () => ({ opens, closes, unsubscribes, reads }),
+    async record(state, kind) {
+      await f.run(
+        'landingWaitTerminalEvent',
+        ctx =>
+          recordFeedEvent(ctx, {
+            projectId: f.projectId,
+            actor,
+            laneId: feedLane,
+            kind,
+            operationId: state.operationId,
+            submissionId: state.id,
+          }),
+        {},
+      );
+    },
   };
 }
 
@@ -1000,10 +1034,10 @@ test('wait preserves embedded recovery from its observation with zero conflict r
 });
 
 test(
-  'a SIGKILLed hosted wait reattaches with its printed command to the same landed receipt',
+  'a SIGKILLed feed-backed wait reattaches with its printed command to the same landed receipt',
   { timeout: 30000 },
   async t => {
-    const s = await fixture(),
+    const s = await fixture(true),
       a = await s.start(),
       operationId = a.request.operationId;
     const command = landWaitCommand('/synthetic', {
@@ -1021,26 +1055,39 @@ test(
     process.on('disconnect', () => process.exit());
     let sequence = 0;
     const pending = new Map();
-    process.on('message', ({ id, value }) => {
+    let update;
+    process.on('message', ({ id, value, live }) => {
+      if (live) {
+        update(value);
+        return;
+      }
       pending.get(id)(value);
       pending.delete(id);
     });
     const transport = {
       root: '/synthetic', address: JSON.parse(process.argv[1]),
-      dispatch: async () => ({ schema: 1, transport: 'hosted', action: 'capabilities', operationId: null, result: { actor: 'owner' } }),
+    dispatch: async () => ({ schema: 1, transport: 'hosted', action: 'capabilities', operationId: null, result: { actor: 'owner', features: ['feed', 'feed-commit-order'] } }),
       query: (name, args) => new Promise(resolve => {
         const id = ++sequence;
         pending.set(id, resolve);
         process.send({ id, name, args });
       }),
     };
-    await observeHostedSubmissions(transport, JSON.parse(process.argv[2]), undefined, () => {}, () => ({
-      onUpdate() { process.send({ subscribed: true }); return () => {}; },
+    await observeHostedSubmissions(transport, JSON.parse(process.argv[2]), undefined, event => {
+      if (event.type === 'submission' && event.submission.observation.state === 'pending')
+        process.send({ observedPending: true });
+    }, () => ({
+      onUpdate(_ref, args, notify) {
+        update = notify;
+        process.send({ subscribed: true, args });
+        return () => {};
+      },
       async close() {},
-    }));
+    }), undefined, [process.argv[3]]);
   `,
         JSON.stringify(s.transport.address),
         JSON.stringify(input),
+        s.feedLane,
       ],
       {
         stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
@@ -1061,15 +1108,23 @@ test(
       }
     });
     const subscribed = new Promise((resolve, reject) => {
+      let observedPending = false;
       child.on('message', async message => {
-        if (message.subscribed) return resolve();
+        if (message.observedPending) {
+          observedPending = true;
+          return;
+        }
         try {
-          const value = await s.transport.query(message.name, message.args);
+          const value = await s.transport.query(
+            message.subscribed ? 'projectFeed:page' : message.name,
+            message.args,
+          );
           // A reply still in flight when the test SIGKILLs the wait fails with EPIPE: only that
           // deliberate kill excuses a send error.
           if (child.connected)
-            child.send({ id: message.id, value }, error => {
+            child.send({ id: message.id, live: message.subscribed, value }, error => {
               if (error && !killed) reject((sendError = error));
+              if (!error && message.subscribed && observedPending) resolve();
             });
         } catch (error) {
           reject(error);
@@ -1085,7 +1140,15 @@ test(
     assert.equal(sendError, undefined, 'every reply before the kill reached the wait');
     const acceptance = { receiptId: randomUUID(), head: 'a'.repeat(64) };
     await s.update(a.state.id, 'landed', { acceptance });
-    const resumed = await s.wait(input);
+    await s.record(a.state, 'landing.landed');
+    const sameOperation = await s.f.enqueue(a.request);
+    assert.equal(sameOperation.id, a.state.id);
+    assert.equal(sameOperation.operationId, operationId);
+    assert.deepEqual(sameOperation.acceptance, acceptance);
+    const replay = s.wait(input);
+    await turn();
+    await s.deliver();
+    const resumed = await replay;
     const canonical = (await s.f.status(a.state.id)).request;
     assert.equal(resumed.result.status, 'terminal');
     assert.equal(resumed.result.submissions[0].submission.id, a.state.id);
@@ -1093,9 +1156,156 @@ test(
     assert.deepEqual(resumed.result.submissions[0].submission.acceptance, acceptance);
     assert.deepEqual(resumed.result.submissions[0].submission.acceptance, canonical.acceptance);
     assert.equal(s.f.tables.projectHostedLandingRequests.size, 1);
-    assert.deepEqual(await s.wait(input), resumed, 'reattachment retains the same terminal receipt');
+    const again = s.wait(input);
+    await turn();
+    await s.deliver();
+    assert.deepEqual(await again, resumed, 'reattachment retains the same terminal receipt');
   },
 );
+
+test('six matched landing waits preserve outcomes and measure the live read cost with and without the feed rider', async t => {
+  const measures = [];
+  const outcomes = ['landed', 'failed', 'cancelled', 'landed', 'failed', 'cancelled'];
+  for (const mode of ['legacy', 'feed without rider', 'feed with rider']) {
+    const s = await fixture(mode !== 'legacy', { rider: mode === 'feed with rider', reactive: true });
+    const calls = [];
+    const evaluations = [];
+    let observerReadBytes = 0;
+    for (const outcome of outcomes) {
+      const a = await s.start();
+      const before = s.f.metrics.calls;
+      const cursor = s.f.counts.length;
+      const pending = s.wait({ operationIds: [a.request.operationId], until: 'acceptance' });
+      await turn();
+      await s.deliver(); // Initial subscription evaluation.
+      const idle = s.f.metrics.calls;
+      await s.deliver(); // No changed query dependency.
+      await turn();
+      assert.equal(s.f.metrics.calls, idle);
+      for (const stage of ['queued', 'checking', 'ready']) {
+        await s.update(
+          a.state.id,
+          stage,
+          stage === 'ready'
+            ? {
+                observation: { state: 'pending', pendingReason: 'waiting-for-review', cause: null },
+              }
+            : {},
+        );
+        await s.deliver();
+        await turn();
+      }
+      const phase = outcome === 'landed' ? 'landed' : 'terminal-failed';
+      const acceptance = { receiptId: randomUUID(), head: 'a'.repeat(64) };
+      const error =
+        outcome === 'cancelled' ? { code: 'LANDING_CANCELLED', message: 'Withdrawn.' } : undefined;
+      await s.update(a.state.id, phase, {
+        ...(outcome === 'landed' ? { acceptance } : {}),
+        ...(error ? { error } : {}),
+      });
+      // Every mode observes the same terminal transition and explicit input Lane.
+      await s.record(a.state, `landing.${outcome}`);
+      await s.deliver();
+      const observed = await pending;
+      assert.equal(observed.result.status, 'terminal');
+      assert.equal(observed.result.successful, outcome === 'landed');
+      const { submission } = observed.result.submissions[0];
+      assert.equal(submission.id, a.state.id);
+      assert.equal(submission.operationId, a.request.operationId);
+      assert.equal(submission.observation.state, phase);
+      if (outcome === 'landed') assert.deepEqual(submission.acceptance, acceptance);
+      if (error) assert.deepEqual(submission.error, error);
+      const counts = s.f.counts
+        .slice(cursor)
+        .filter(
+          count =>
+            count.query && (count.name.startsWith('landingWait') || count.name === 'observerBudgetPage'),
+        );
+      observerReadBytes += counts.reduce((sum, count) => sum + count.readBytes, 0);
+      // Test transport stubs the same single capabilities call in each mode.
+      calls.push(counts.length + 1);
+      evaluations.push(counts.filter(count => count.name === 'observerBudgetPage').length);
+      assert(s.f.metrics.calls > before);
+    }
+    measures.push({ mode, calls, evaluations, observerReadBytes });
+    assert.deepEqual(s.counts().opens, s.counts().closes);
+  }
+  t.diagnostic(JSON.stringify(measures));
+  const [legacy, bare, rider] = measures;
+  assert(legacy.calls.every((calls, index) => calls >= rider.calls[index]));
+  assert(legacy.observerReadBytes > rider.observerReadBytes);
+  assert(rider.evaluations.every((calls, index) => calls >= bare.evaluations[index]));
+});
+
+test('a feed wait ignores unrelated landing rows and still reports newly marked sync advice', async () => {
+  const s = await fixture(true, { reactive: true });
+  const selected = await s.start();
+  const other = await s.start();
+  const pending = s.wait({ operationIds: [selected.request.operationId], until: 'acceptance' });
+  await turn();
+  await s.deliver();
+  await s.update(other.state.id, 'checking');
+  const before = s.f.metrics.calls;
+  await s.deliver();
+  assert.equal(s.f.metrics.calls, before, 'an unrelated landing row does not invalidate the scoped wait');
+  await s.f.run(
+    'markSelectedLanding',
+    async ctx => {
+      const row = await ctx.db
+        .query('projectHostedLandingRequests')
+        .withIndex('by_project_and_submission', q =>
+          q.eq('projectId', s.f.projectId).eq('submissionId', selected.state.id),
+        )
+        .unique();
+      await ctx.db.patch(row._id, {
+        wouldConflict: JSON.stringify({
+          paths: ['shared.ts'],
+          more: 0,
+          at: new Date(s.f.now()).toISOString(),
+          landedSubmissionId: other.state.id,
+          laneId: s.feedLane,
+          next: 'Sync with accepted main.',
+        }),
+      });
+    },
+    {},
+  );
+  await s.deliver();
+  const result = await pending;
+  assert.equal(result.result.status, 'sync-required');
+  assert.equal(result.result.code, 'SYNC_REQUIRED');
+  assert.deepEqual(result.result.next, { action: 'land', save: true, laneId: s.feedLane });
+});
+
+test('a feed wait that starts checking still re-drives a stalled Ready settlement', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const s = await fixture(true, { reactive: true });
+  const selected = await s.start();
+  await s.update(selected.state.id, 'checking');
+  const redrives = [];
+  s.transport.mutation = async (action, args) => {
+    redrives.push([action, args]);
+  };
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  const pending = s.wait(
+    { operationIds: [selected.request.operationId], until: 'acceptance' },
+    controller.signal,
+  );
+  await turn();
+  await s.deliver();
+  await s.update(selected.state.id, 'ready', {
+    observation: { state: 'pending', pendingReason: 'queued', cause: null },
+  });
+  await s.deliver();
+  await turn();
+  assert.deepEqual(redrives, []);
+  t.mock.timers.tick(120_000);
+  await turn();
+  assert.deepEqual(redrives, [['projectHostedLandingRedrive:redrive', { submissionId: selected.state.id }]]);
+  controller.abort();
+  await pending;
+});
 
 test('wake wait: one settle wait through queued, checking and ready wakes once per outcome with the receipt', async t => {
   const { wakeContinuation, WAKE_BUDGET_SECONDS } = await import('../dist/agent-wake.js');

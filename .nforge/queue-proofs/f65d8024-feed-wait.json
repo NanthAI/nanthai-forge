@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedFinishObserve.ts": "828aba7cc97166eb55f908ca51e7d04d48da0e4fd59ed99c72bf6d794f2a6d72"
+  },
+  "replay": {
+    "incident": "f65d8024",
+    "test": "a feed wait that starts checking still re-drives a stalled Ready settlement",
+    "receipt": "dc95d343-9c24-45e5-94cc-ca919eb991e9"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "receipt": "343416b9-7fda-4887-adbd-51207eaf57e7",
+    "session": "01a1fe95-f503-7352-96cd-84bb5d8529ad"
+  },
+  "authorSession": "01a1fe74-64d8-7ec3-9d70-a0907e51e4a9"
+}

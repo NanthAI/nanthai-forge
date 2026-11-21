@@ -27,6 +27,7 @@ Usage:
   nforge metrics ROOT [--from DATE] [--to DATE] [--json] [--report FILE.md] [--compare FROM..TO]
   nforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [--list-usd N] [--usage unit=qty,...] [--rate unit=usd,...] [--basis TEXT]
   nforge wait ID [--budget SECONDS]   # resume this agent session's own unfinished landing or run
+  nforge watch ROOT [--mine | --lanes ID,…] [--json] [--on-landing CMD]
   nforge docs [name]
   nforge run [--root ROOT] [--set development|checks] [--only A,B] [--show] -- COMMAND [ARGS...]
   nforge secret set|list|rm|repin|resolve [options]
@@ -111,6 +112,7 @@ async function main(args: string[]): Promise<unknown> {
     throw new ForgeError('BAD_ARGUMENT', REMOVED[args[0]!]!);
   if (args[0] === 'worker') return (await import('./worker-cli.js')).workerCli(args.slice(1));
   if (args[0] === 'metrics') return (await import('./metrics-cli.js')).metricsCli(args.slice(1));
+  if (args[0] === 'watch') return (await import('./watch-cli.js')).watchCli(args.slice(1));
   if (args[0] === 'docs') return (await import('./docs-cli.js')).docsCli(args.slice(1));
   if (args[0] === 'run') return (await import('./secret-run-cli.js')).secretRunCli(args.slice(1));
   if (args[0] === 'secret') return (await import('./sealed-cli.js')).sealedCli(args.slice(1));

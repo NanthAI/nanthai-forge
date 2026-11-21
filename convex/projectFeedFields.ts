@@ -46,7 +46,10 @@ export const feedTables = {
     // Internal subject of the recipient Lane's holder when the event happened.
     actor: v.string(),
     recordVersion: v.optional(v.number()),
+    commitTs: v.optional(v.commitTs()),
   })
     .index('by_project_and_at_and_id', ['projectId', 'at', 'id'])
-    .index('by_project_and_lane_and_at_and_id', ['projectId', 'laneId', 'at', 'id']),
+    .index('by_project_and_lane_and_at_and_id', ['projectId', 'laneId', 'at', 'id'])
+    .index('by_project_and_commit_ts_and_id', ['projectId', 'commitTs', 'id'])
+    .index('by_project_and_lane_and_commit_ts_and_id', ['projectId', 'laneId', 'commitTs', 'id']),
 };

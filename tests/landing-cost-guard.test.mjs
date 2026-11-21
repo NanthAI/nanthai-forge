@@ -334,6 +334,15 @@ function meter(
         writeBytes: sum('writeBytes'),
         feed: {
           events: f.tables.projectFeedEvents.size,
+          arrivalIndexes: indexStorage(
+            indexSchema,
+            { projectFeedEvents: f.tables.projectFeedEvents },
+            index => index.indexDescriptor.endsWith('_commit_ts_and_id'),
+          ),
+          commitFieldBytes: [...f.tables.projectFeedEvents.values()].reduce(
+            (bytes, row) => bytes + Buffer.byteLength(JSON.stringify({ commitTs: String(row.commitTs) })) - 1,
+            0,
+          ),
           readBytes: counts.reduce((n, c) => n + (c.readBytesByTable.projectFeedEvents ?? 0), 0),
           writeBytes: counts.reduce((n, c) => n + (c.writeBytesByTable.projectFeedEvents ?? 0), 0),
           expiryProbes: counts.reduce((n, c) => n + (c.readRangesByTable.projectFeedEvents ?? 0), 0),
@@ -790,6 +799,20 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   const feedEvents = mixed.reduce((n, s) => n + s.feed.events, 0);
   assert.equal(calls, 275, 'feed writes introduce no Convex call in the current six-landing mix');
   assert.equal(feedEvents, 6, 'one terminal feed row per accepted Lane on the fixture mix');
+  // f65d8024: the approved commit cursor adds 33 document bytes and two scoped
+  // keys totaling 357 modeled key bytes per event and per fixture landing.
+  assert.equal(
+    mixed.reduce((n, s) => n + s.feed.commitFieldBytes, 0),
+    198,
+  );
+  assert.equal(
+    mixed.reduce((n, s) => n + s.feed.arrivalIndexes.entries, 0),
+    12,
+  );
+  assert.equal(
+    mixed.reduce((n, s) => n + s.feed.arrivalIndexes.keyBytes, 0),
+    2142,
+  );
   assert.equal(
     mixed.reduce((n, s) => n + s.feed.expiryProbes, 0),
     6,
@@ -809,6 +832,9 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
       calls,
       events: feedEvents,
       documentBytes: mixed.reduce((n, s) => n + s.feed.writeBytes, 0),
+      commitFieldBytes: mixed.reduce((n, s) => n + s.feed.commitFieldBytes, 0),
+      arrivalIndexEntries: mixed.reduce((n, s) => n + s.feed.arrivalIndexes.entries, 0),
+      arrivalIndexKeyBytes: mixed.reduce((n, s) => n + s.feed.arrivalIndexes.keyBytes, 0),
       acceptanceReadBytes: mixed.reduce((n, s) => n + s.feed.acceptanceReadBytes, 0),
       wallMs: performance.now() - started,
       peakRssKiB: process.resourceUsage().maxRSS,
@@ -850,6 +876,7 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
       exportWritten: ten.reduce((n, s) => n + s.exportIndexEntriesWritten, 0),
       removed: ten.reduce((n, s) => n + s.indexEntriesRemoved, 0),
       stored: ten.map(s => s.storedIndexes),
+      arrivals: ten.map(s => s.feed.arrivalIndexes),
     })}`,
   );
   // Ten-landing index writes 11,736 -> 12,864 (Item 9a04d916, compose settle; owner-approved +$0.02/1k): the scheduler rows of the settle and
@@ -860,7 +887,8 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   // in the mutations ledger below and docs/data-placement.md). The In-queue binding write adds a few entries.
   // Stored keys in the two batch scenarios 150,180 -> 151,690 B: the touch stamps each of the 151 person rows with
   // this hour (about 10 B of key each). Fixed per person and overwritten each hour, so it does not grow with history.
-  // f65d8024: two custom entries per terminal event, ten events. Feed bytes expire on new writes.
+  // f65d8024: commit ordering adds 20 custom index writes across ten events.
+  // Each adds 357 modeled key bytes to the existing per-project and per-Lane event-time keys.
   const indexBudget = storageBudgets.tenLandingIndexes;
   assert.equal(
     ten.reduce((n, s) => n + s.landings, 0),
@@ -1463,6 +1491,8 @@ test('storage per landing ratchets every table on fresh and dogfood-shaped check
   // Index entries written 1,539 -> 1,611 fresh and 2,884 -> 3,028 dogfood (Item 9a04d916, compose
   // settle; owner-approved +$0.02/1,000): the scheduler rows of the settle and retry mutations.
   // Stored entries do not grow: a completed task row is not retained.
+  // f65d8024: each accepted event adds 33 retained document bytes and 357 modeled
+  // index key bytes to the immediate and retained budgets in both scenarios.
   for (const [name, scenario] of Object.entries(scenarios)) {
     const indexBudget = storageBudgets[name].indexes;
     assert(scenario.indexes.written <= indexBudget.written, `${name}: custom index write budget`);

@@ -3,7 +3,6 @@ import { hostedRootRequired } from './agent-root.js';
 import { validateHostedCliCommand } from './hosted-cli-validation.js';
 import { actionableNotFound, isShortLaneId, resolveShortLaneId } from './argument-errors.js';
 import { join, resolve } from 'node:path';
-import { hostedAgentHelp, hostedHelpFor } from './hosted-agent-help.js';
 import { helpTopicIndex, helpTopicText, isHelpTopic } from './help-topics.js';
 import { addressOnlyRoot, hostedAgentAddress } from './hosted-agent-address.js';
 import { FOLDER_ACTIONS, laneCheckoutRoot, laneSuccessor } from './hosted-lane-location.js';
@@ -194,7 +193,8 @@ export async function agentCli(args: string[], options: AgentCliOptions = {}): P
 
 /** `help` with no topic prints the command overview; `help TOPIC` prints one topic or one hosted action's
  * help (Issue 0a7d6f56). Local only: no network, no Convex call. */
-function helpText(topic: string | undefined) {
+async function helpText(topic: string | undefined) {
+  const { hostedAgentHelp, hostedHelpFor } = await import('./hosted-agent-help.js');
   if (!topic) return hostedAgentHelp();
   const text = isHelpTopic(topic) ? helpTopicText(topic) : hostedHelpFor(topic);
   invariant(
@@ -220,7 +220,7 @@ async function runAgentCli(
   };
   if (!args.length || args[0] === '--help' || args[0] === 'help') {
     await options.beforeLocal?.();
-    process.stdout.write(helpText(args[1]));
+    process.stdout.write(await helpText(args[1]));
     return undefined;
   }
   const textMode = args[1] === 'wait' && args.includes('--text');
@@ -231,7 +231,7 @@ async function runAgentCli(
     tail = client.rest;
   if (requestedAction === 'help' || requestedAction === '--help') {
     await options.beforeLocal?.();
-    process.stdout.write(helpText(rawTail[0]));
+    process.stdout.write(await helpText(rawTail[0]));
     return undefined;
   }
   const [form, rest] = requestedAction
@@ -264,6 +264,7 @@ async function runAgentCli(
       );
       return undefined;
     }
+    const { hostedAgentHelp } = await import('./hosted-agent-help.js');
     process.stdout.write(hostedAgentHelp(lowerVerb(form!, true)));
     return undefined;
   }

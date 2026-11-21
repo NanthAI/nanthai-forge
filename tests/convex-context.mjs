@@ -5,6 +5,11 @@ import { moduleUrl } from './convex-module.mjs';
 
 const targets = new Map();
 const modules = new Map();
+export const fixtureCommitStart = 1_800_000_000_000_000_000n;
+export const fixturePendingCommit = -1n;
+export const resolveFixtureCommit = (row, commitTs) =>
+  row.commitTs === fixturePendingCommit ? { ...row, commitTs } : row;
+
 async function checkReference(ref, args) {
   const name = getFunctionName(ref);
   if (!targets.has(name)) {

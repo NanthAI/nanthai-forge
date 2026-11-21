@@ -40,5 +40,10 @@ export async function recordFeedEvent(ctx: MutationCtx, ...events: FeedWrite[]) 
     .take(2 * events.length);
   for (const row of expired) await ctx.db.delete(row._id);
   for (const event of events)
-    await ctx.db.insert('projectFeedEvents', { ...event, id: feedEventId(event), at });
+    await ctx.db.insert('projectFeedEvents', {
+      ...event,
+      id: feedEventId(event),
+      at,
+      commitTs: ctx.db.vars.commitTs,
+    });
 }

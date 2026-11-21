@@ -1,0 +1,6 @@
+{
+  "kind": "cliCommands",
+  "delta": 1,
+  "reason": "nforge watch adds the explicit host stream and merges its subscription and replay logic with CLI acceptance waits. Keep the older observer for deploy compatibility and waits without retained Lane selections.",
+  "date": "2026-11-21"
+}

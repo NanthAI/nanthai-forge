@@ -46,7 +46,11 @@ function storedBytes(f) {
               )) ||
             (name === 'projectJournalReceipts' && fixedJournalControl(row))
               ? 0
-              : Buffer.byteLength(JSON.stringify({ ...row, _creationTime: 0 }))),
+              : Buffer.byteLength(
+                  JSON.stringify({ ...row, _creationTime: 0 }, (_, value) =>
+                    typeof value === 'bigint' ? String(value) : value,
+                  ),
+                )),
           0,
         ),
       ]),

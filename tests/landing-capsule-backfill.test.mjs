@@ -34,10 +34,7 @@ async function legacy(t) {
   const tasks = name => [...h.f.tables._scheduled_functions.values()].filter(row => row.name === name);
   const packs = () => tasks(packName).filter(row => row.state.kind === 'pending');
   const chains = () => tasks(runName).filter(row => row.state.kind === 'pending');
-  const snapshot = () =>
-    canonicalPayload(
-      Object.fromEntries(Object.entries(h.f.tables).map(([table, rows]) => [table, [...rows]])),
-    );
+  const snapshot = () => structuredClone(h.f.tables);
   const meters = name => h.f.counts.filter(count => count.name === name);
   /** No scan or dry run reads a cold request body: every row here (and every `addOld` copy, which
    * shares the original's body and would fail its ownership check if hydrated) has one. */
@@ -74,7 +71,7 @@ test('b149b16b backfill dry run counts the unpacked landing, its rows and calls,
   const b = await legacy(t);
   const before = b.snapshot();
   const dry = await b.dryRun({});
-  assert.equal(b.snapshot(), before, 'dry run wrote or scheduled nothing');
+  assert.deepEqual(b.snapshot(), before, 'dry run wrote or scheduled nothing');
   assert.equal(dry.done, true);
   assert.equal(dry.cursor, null);
   assert.equal(dry.landings, 1);
@@ -155,7 +152,7 @@ test('b149b16b backfill packs a legacy landing through the verified packer; read
   h.f.advanceClock(60_000);
   const settled = b.snapshot();
   assert.equal((await b.runPage({})).unchanged, true);
-  assert.equal(b.snapshot(), settled, 're-run of a finished backfill writes nothing');
+  assert.deepEqual(b.snapshot(), settled, 're-run of a finished backfill writes nothing');
   const again = await b.runPage({ restart: true });
   assert.equal(again.totals.packed, 1);
   assert.equal(b.packs().length, 0, 'a packed landing is never scheduled again');
@@ -258,7 +255,7 @@ test('b149b16b backfill pages are bounded and resume from the stored cursor; one
   const busy = await b.runPage({ limit: 1 });
   assert.equal(busy.busy, true);
   assert(busy.retryAfterMs > 0);
-  assert.equal(b.snapshot(), overlap);
+  assert.deepEqual(b.snapshot(), overlap);
   // Crash, then a fresh operator call after the window: it resumes after the committed page.
   b.h.f.advanceClock(busy.retryAfterMs);
   const page2 = await b.runPage({ limit: 1, pages: 3 });
@@ -281,7 +278,7 @@ test('b149b16b backfill pages are bounded and resume from the stored cursor; one
   assert.equal(b.h.f.tables._scheduled_functions.get(pendingChain._id).state.kind, 'canceled');
   const stale = b.snapshot();
   assert.equal((await b.runPage(pendingChain.args[0])).stale, true, 'the old chain stops at its first page');
-  assert.equal(b.snapshot(), stale);
+  assert.deepEqual(b.snapshot(), stale);
   assert.equal(b.chains().length, 1);
   // The surviving chain finishes the pass; it schedules only the landings the old pass had not reached.
   for (let guard = 0; b.chains().length && guard < 10; guard++) {

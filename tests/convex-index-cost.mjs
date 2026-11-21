@@ -2,18 +2,20 @@
 // Custom database indexes only; system/search indexes are unchanged. Key bytes
 // are a reproducible JSON payload model, not provider storage/B-tree overhead.
 export const indexEntriesPerWrite = (schema, table) => schema.tables[table]?.export().indexes.length ?? 0;
-export function indexStorage(schema, tables) {
+export function indexStorage(schema, tables, includeIndex = () => true) {
   let entries = 0,
     keyBytes = 0;
   for (const [table, rows] of Object.entries(tables)) {
-    const indexes = schema.tables[table]?.export().indexes ?? [];
+    const indexes = schema.tables[table]?.export().indexes.filter(includeIndex) ?? [];
     for (const row of rows.values())
       for (const index of indexes) {
         const values = index.fields.map(field => field.split('.').reduce((v, key) => v?.[key], row));
         // Normalize the synthetic creation clock, as the document-storage fixture does.
         const key = [...values, 0, row._id];
         entries++;
-        keyBytes += Buffer.byteLength(JSON.stringify(key));
+        keyBytes += Buffer.byteLength(
+          JSON.stringify(key, (_, value) => (typeof value === 'bigint' ? String(value) : value)),
+        );
       }
   }
   return { entries, keyBytes };

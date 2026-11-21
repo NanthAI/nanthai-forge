@@ -29,6 +29,7 @@ import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
 import { boardWake } from './projectBoardDelivery';
 import { held, heldReview, loadHeldPolicy, noteHeldPolicy } from './projectHostedOwnerReview';
+import { feedArrivalAnchor } from './projectFeedArrival';
 
 /** Finite selected-request pages. Every page/subscription rechecks current access;
  * neither reading nor reconnecting wakes a controller. Versions are durable offsets,
@@ -40,6 +41,7 @@ export const page = query({
     nextVersion: v.number(),
     priorityInfo: v.optional(v.literal(1)),
     capsuleProtocol: v.optional(v.literal(1)),
+    arrivalFence: v.optional(v.literal(1)),
     /** Wait delivery (feature board-wait): the live wait subscription only, never a page drain.
      * Adds `board` when a note reached this Lane's own inbox after the client's cursor. */
     board: v.optional(v.object({ laneId: v.string(), after: v.number() })),
@@ -47,19 +49,26 @@ export const page = query({
   returns: v.string(),
   handler: async (rawCtx, input) => {
     const payload = await observePage(rawCtx, input);
-    if (!input.board) return payload;
+    if (!input.board && !input.arrivalFence) return payload;
     // Board delivery is advisory: it can never fail or change the landing observation.
     const reader = finishReadReader(rawCtx);
-    const user = await reader.auth.getUserIdentity();
-    const board = user
-      ? await boardWake(reader, {
-          projectId: input.projectId,
-          viewer: user.subject,
-          laneId: input.board.laneId,
-          after: input.board.after,
-        }).catch(() => undefined)
-      : undefined;
-    return board ? canonicalPayload({ ...JSON.parse(payload), board }) : payload;
+    const user = input.board ? await reader.auth.getUserIdentity() : null;
+    const board =
+      user && input.board
+        ? await boardWake(reader, {
+            projectId: input.projectId,
+            viewer: user.subject,
+            laneId: input.board.laneId,
+            after: input.board.after,
+          }).catch(() => undefined)
+        : undefined;
+    return board || input.arrivalFence
+      ? canonicalPayload({
+          ...JSON.parse(payload),
+          ...(board ? { board } : {}),
+          ...(input.arrivalFence ? { feedAfter: feedArrivalAnchor(rawCtx) } : {}),
+        })
+      : payload;
   },
 });
 

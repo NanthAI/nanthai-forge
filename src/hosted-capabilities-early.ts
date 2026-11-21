@@ -2,7 +2,7 @@
 import { makeFunctionReference } from 'convex/server';
 import { ConvexExchange } from './exchange-client.js';
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
-import { hostedContractFeatures } from './hosted-contract-features.js';
+import { feedCommitOrder, hostedContractFeatures } from './hosted-contract-features.js';
 import { hostedAgentPlanningActions, type HostedAgentAddress } from './hosted-agent-contract.js';
 import { backgroundSaveOperation } from './hosted-save-pending.js';
 import { readHostedMainSelection } from './hosted-main-marker.js';
@@ -32,6 +32,11 @@ export function capabilityOptions(root: string, status = false): Record<string, 
     openLanesVersion: 1,
     ...(settling ? { settling } : {}),
   };
+}
+
+/** Explicit discovery for observers can use the main-today slot reserved for bare status. */
+export function requestFeedCapability(options: Record<string, unknown>) {
+  return { ...options, features: [...(options.features as string[]), feedCommitOrder] };
 }
 
 /** Actions whose first server call is capability discovery. Others (lists, board, policy, a clone's
