@@ -15,7 +15,7 @@ import { Blocks, CubeFaces, CubeFocus, motionStyle } from './blocks';
 import { BackLabel, StationLabel, Tag } from './labels';
 import type { DrawerStop } from './drawer-model';
 import { cubeArt, config, layout, placeBlocks, platform, strata, ISO } from './geometry';
-import { shortWho, type Block, type Station } from './model';
+import { shortWho, type Block, type mainHealth, type Station } from './model';
 
 export type PictureFacts = {
   /** Landed today, landings per hour today (oldest first), and main's verdict. */
@@ -25,7 +25,7 @@ export type PictureFacts = {
   red: boolean;
   /** The figures each label and rail says. */
   stationFacts: readonly (string | null)[];
-  mainFact: { word: 'Passing' | 'Failing'; since: string | null } | null;
+  mainFact: ReturnType<typeof mainHealth>;
   fix: { n: number; waiting: number };
   failed: { n: number; reverted: number; fixedOnTop: number };
 };
@@ -125,14 +125,12 @@ export function Picture({
   const mainUnit = {
     n: facts.today,
     word: 'today',
+    title: facts.mainFact?.title,
     fact: facts.mainFact ? (
-      <>
-        <span className="st" data-st={facts.mainFact.word === 'Failing' ? 'failed' : 'passed'}>
-          <Glyph of={facts.mainFact.word === 'Failing' ? 'failed' : 'passed'} />
-          {facts.mainFact.word}
-        </span>
-        {facts.mainFact.since ? <span>since {facts.mainFact.since}</span> : null}
-      </>
+      <span className="st" data-st={facts.mainFact.state} title={facts.mainFact.title}>
+        <Glyph of={facts.mainFact.state} />
+        {facts.mainFact.word}
+      </span>
     ) : null,
   };
   return (
@@ -192,6 +190,7 @@ export function Picture({
               onClick={followLink}
               aria-label="main, open drawer"
             >
+              {facts.mainFact ? <title>{facts.mainFact.title}</title> : null}
               <path className="l" d={art.l} />
               <path className="r" d={art.r} />
               {art.seams.map((seam, i) => (

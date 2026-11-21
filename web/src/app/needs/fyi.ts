@@ -29,6 +29,7 @@ export type FyiRead = {
   }[];
   landingsMore: boolean;
   broke: { sequence: number; at: number; head: string; culprit: string | null; drill: boolean }[];
+  mainCheckedAt?: number;
   settings: { id: string; at: number; actor: string; areas: string[]; rule: string | null }[];
   access: {
     id: string;

@@ -6,7 +6,7 @@
 // time the page was drawn. Pure.
 import { flowToday, flowVerdict, utcDayStart } from '../../../../src/flow-day';
 import { lineStopCounts, lineStops, type LineFeed, type LineStop } from '../Line';
-import { laneState, unheldConflict } from '../lane-state';
+import { unheldConflict } from '../lane-state';
 import type { StateWord } from '../../ds';
 
 /** A block's colour (the state tokens) and the glyph cut into its top. */
@@ -90,7 +90,7 @@ export function flowStations(feed: LineFeed | undefined, rows: readonly HeldRow[
                 ? 'Conflict'
                 : 'Held'
               : lane.stage === 'ready'
-                ? laneState(lane).glyph
+                ? 'Passed, waiting to land'
                 : stop.label,
         head: row?.head ?? null,
         who: row?.who ?? null,
@@ -124,6 +124,28 @@ export function flowFigures(feed: LineFeed | undefined, drawnAt: number) {
   return { ...today, red: verdict?.red === true, verdict };
 }
 
+export function mainHealth(
+  verdict: ReturnType<typeof flowVerdict>,
+  checkedAt: number | undefined,
+  drawnAt: number,
+) {
+  if (!verdict) return null;
+  if (verdict.red)
+    return {
+      word: 'main red',
+      state: 'failed' as const,
+      title:
+        verdict.since === null ? 'A check of main failed' : `main red since ${clock(verdict.since, drawnAt)}`,
+    };
+  // FYI and the line arrive independently. A pass from an earlier green streak
+  // cannot date the check that ended a more recent red.
+  const time =
+    checkedAt !== undefined && checkedAt >= (verdict.since ?? -Infinity)
+      ? ` at ${clock(checkedAt, drawnAt)}`
+      : '';
+  return { word: 'main green', state: 'passed' as const, title: `Latest full check of main passed${time}` };
+}
+
 export function duration(seconds: number) {
   const s = Math.max(0, Math.round(seconds));
   if (s < 60) return `${s} s`;
@@ -143,5 +165,5 @@ export function clock(at: number, drawnAt: number) {
     : `${new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} ${time}`;
 }
 
-/** The last part of a handle, for a tag: "salt-wren" from "mara/salt-wren". */
+/** The last part of a handle for a tag, such as the agent name in "mara/salt-wren". */
 export const shortWho = (who: string | null) => (who ? (who.split('/').pop() ?? who) : null);

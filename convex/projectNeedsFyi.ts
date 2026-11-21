@@ -150,6 +150,9 @@ export const read = query({
           .take(FYI_EVENTS),
         messagesTo(ctx, project, user.subject, false),
       ]);
+      const verdict = audits.find(row => row.kind === 'green' || row.kind === 'red');
+      let mainCheckedAt =
+        verdict?.kind === 'green' && verdict.reverted === undefined ? Date.parse(verdict.at) : NaN;
       const landings = [];
       for (const row of accepted.slice(0, FYI_LANDINGS)) {
         const receipt = JSON.parse(row.value) as {
@@ -162,6 +165,10 @@ export const read = query({
           check?: unknown;
           firstCheck?: { landedOn: string; reason?: string };
         };
+        // A full-gated landing that turns main green stamps the event with its
+        // acceptance time. A different time proves this recovery came from an audit.
+        if (verdict?.kind === 'green' && verdict.sequence === row.sequence && verdict.at !== receipt.at)
+          mainCheckedAt = Date.parse(verdict.at);
         const finish = await finishRow(ctx, { projectId, submissionId: row.submissionId });
         const intentId = finish
           ? ((JSON.parse(finish.value) as { source?: { intentId?: string } }).source?.intentId ?? null)
@@ -244,6 +251,7 @@ export const read = query({
         landings,
         landingsMore: accepted.length > FYI_LANDINGS,
         broke,
+        ...(Number.isFinite(mainCheckedAt) ? { mainCheckedAt } : {}),
         settings,
         access,
         messages: messages.rows,

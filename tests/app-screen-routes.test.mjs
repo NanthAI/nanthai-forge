@@ -21,7 +21,28 @@ const routeFiles = readdirSync(app, { withFileTypes: true })
 // compile every screen they lazily name.
 const { projectScreenFor, accountScreenFor } = await import(pathToFileURL(join(app, 'screen-route.ts')).href);
 const { projectPlaces, accountPlaces } = await import(pathToFileURL(join(app, 'paths.ts')).href);
-const { Line } = await import(moduleUrl('../web/src/app/Line.tsx'));
+const { Line, passedWaiting } = await import(moduleUrl('../web/src/app/Line.tsx'));
+const { mainHealth } = await import(moduleUrl('../web/src/app/flow/model.ts'));
+
+test('Flow names the destination for passed Lanes and dates main green from fresh audit evidence', () => {
+  const at = new Date(2026, 10, 21, 16, 45).getTime();
+  const yesterday = new Date(2026, 10, 20, 20, 50).getTime();
+  const green = { red: false, since: yesterday, checkedAt: yesterday };
+  assert.equal(passedWaiting(1_234), '1,234 passed, waiting to land');
+  assert.deepEqual(mainHealth(green, at, at), {
+    word: 'main green',
+    state: 'passed',
+    title: 'Latest full check of main passed at 16:45',
+  });
+  assert.equal(mainHealth(green, undefined, at).title, 'Latest full check of main passed');
+  assert.equal(mainHealth({ ...green, since: at }, yesterday, at).title, 'Latest full check of main passed');
+  assert.deepEqual(mainHealth({ red: true, since: at, checkedAt: null }, yesterday, at), {
+    word: 'main red',
+    state: 'failed',
+    title: 'main red since 16:45',
+  });
+  assert.equal(mainHealth(null, at, at), null);
+});
 
 const resolveTs = (from, spec) => {
   const base = resolve(dirname(from), spec);
@@ -156,7 +177,7 @@ test('the Lane stops, desktop and phone, are named starting with the words they 
       'Editing 1 Lane in this project',
       'Saved 0 Lanes in this project',
       'In queue 0 Lanes in this project',
-      'Checking 0 Lanes, 2 Lanes passed, waiting, 1 held in this project',
+      'Checking 0 Lanes, 2 Lanes passed, waiting to land, 1 held in this project',
     ],
   );
   const phone = names(

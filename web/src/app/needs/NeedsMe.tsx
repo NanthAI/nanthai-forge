@@ -308,6 +308,7 @@ export function NeedsMeView({
           feed={feed}
           error={feedError}
           readAt={feedReadAt}
+          mainCheckedAt={fyi?.mainCheckedAt}
           stop={stop}
           onOpen={showStation}
           laneHref={laneHref}

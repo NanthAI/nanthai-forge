@@ -114,6 +114,37 @@ test('FYI lists landings newest first and messages that ask nothing; a question 
   );
 });
 
+test('Flow receives the latest full pass time from the existing FYI audit page', async () => {
+  const f = fixture();
+  const audit = (sequence, kind, extra = {}) =>
+    f.s.insert('projectHostedMainAuditEvents', {
+      projectId: f.projectId,
+      sequence,
+      kind,
+      at: new Date(DAY + sequence * 60_000).toISOString(),
+      head: 'a'.repeat(64),
+      runId: randomUUID(),
+      ...extra,
+    });
+  assert.equal((await f.read()).mainCheckedAt, undefined);
+  audit(1, 'green');
+  audit(2, 'green');
+  audit(3, 'stalled');
+  await f.dismiss({ clearAll: true });
+  assert.equal((await f.read()).mainCheckedAt, DAY + 2 * 60_000, 'the newer pass survives Clear all');
+  audit(4, 'red');
+  assert.equal((await f.read()).mainCheckedAt, undefined, 'a previous green must not date a red main');
+  f.accept(5, 'Full-gated recovery');
+  audit(5, 'green', { reverted: false });
+  assert.equal((await f.read()).mainCheckedAt, undefined, 'a recovery may record landing time');
+  audit(6, 'red');
+  f.accept(7, 'Source for a later audit');
+  audit(7, 'green', { reverted: true, at: new Date(DAY + 8 * 60_000).toISOString() });
+  assert.equal((await f.read()).mainCheckedAt, DAY + 8 * 60_000, 'an audit can turn main green again');
+  audit(9, 'green');
+  assert.equal((await f.read()).mainCheckedAt, DAY + 9 * 60_000);
+});
+
 test('a message clears when it is acknowledged, or when its Lane lands or is abandoned', async () => {
   const f = fixture();
   const presence = f.lane('lane-a');

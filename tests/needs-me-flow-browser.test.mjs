@@ -145,11 +145,13 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
           await figures.getByRole('link', { name: /Land to main/ }).textContent(),
           measured ? /partial sample/ : /No timing samples/,
         );
-        assert.match(await figures.getByRole('link', { name: /main Passing/ }).textContent(), /Checked/);
+        const main = figures.getByRole('link', { name: 'main green' });
+        assert.equal(await main.textContent(), 'main green');
+        assert.equal(await main.getAttribute('title'), 'Latest full check of main passed at 14:48');
         assert.equal(await page.locator('header.top .line .tomain').getAttribute('title'), 'Main passing');
       }
       const phone = await open(t, 390, 'partial-empty');
-      assert.match(await phone.locator('.flow-rows > li').last().textContent(), /Passing/);
+      assert.match(await phone.locator('.flow-rows > li').last().textContent(), /main green/);
     });
 
     await t.test('the Flow state legend and recorded checks render at reference weight', async t => {
@@ -298,20 +300,21 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
             );
             const line = strip.locator('[data-stop="checking"]');
             assert.equal(await line.locator('.n').textContent(), '4');
+            assert.equal(await line.locator('.line-passed').innerText(), '6 Lanes passed');
             assert.equal(
-              await line.locator('.line-passed').innerText(),
-              width === 390 ? '6 Lanes passed' : '6 Lanes passed, waiting',
+              await line.locator('.line-passed').getAttribute('title'),
+              '6 Lanes passed, waiting to land',
             );
             assert.match(
               await line.getAttribute('aria-label'),
-              /Check(?:ing)? 4 Lanes, 6 Lanes passed, waiting in this project/,
+              /Check(?:ing)? 4 Lanes, 6 Lanes passed, waiting to land in this project/,
             );
             const station =
               width === 390
                 ? page.locator('.flow-rows .flow-row').nth(3)
                 : page.locator('.fv-pic .fv-stn[data-stop="checking"]');
             assert.equal(await station.locator('.c').textContent(), '4');
-            assert.equal(await station.locator('.flow-passed').textContent(), '6 passed, waiting');
+            assert.equal(await station.locator('.flow-passed').textContent(), '6 passed, waiting to land');
             const button = station.getByRole('button', { name: 'Checking 4' });
             assert.equal(await button.count(), 1);
             assert.equal(
@@ -323,6 +326,12 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
                 ? station.locator('.flow-marks [data-st="waiting"]')
                 : page.locator('.fv-pic g[data-stop="checking"] .fv-cube[data-st="waiting"]');
             assert.equal(await waiting.count(), 6);
+            const hovers =
+              width === 390
+                ? await waiting.evaluateAll(marks => marks.map(mark => mark.title))
+                : await waiting.locator('title').allTextContents();
+            assert.equal(hovers.length, 6);
+            assert.ok(hovers.every(title => title.endsWith('Passed, waiting to land')));
             const loose = region(page, 'Loose ends');
             assert.match(
               await loose.textContent(),
@@ -333,7 +342,7 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
             await line.click();
             const drawer = page.getByRole(width === 390 ? 'dialog' : 'region', { name: 'Checking' });
             await drawer.waitFor();
-            assert.equal(await drawer.getByText('Waiting its turn', { exact: true }).count(), 6);
+            assert.equal(await drawer.getByText('Passed, waiting to land', { exact: true }).count(), 6);
           }
         }
       },

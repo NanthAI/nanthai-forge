@@ -63,7 +63,6 @@
     .line .stop.checking-split { flex-wrap: nowrap; align-items: start; gap: 0; padding: 3px var(--s-1) 6px; line-height: var(--lh-disp); }
     .line .checking-split .line-checking { flex-wrap: wrap; gap: 0 var(--s-1); }
     .line .checking-split .lbl { flex: none; max-inline-size: 100%; }
-    .line .line-passed-detail { display: none; }
     .line .tomain { padding-right: 0; padding-left: 6px; } .line .tomain .main-number { font-size: var(--t-micro); }
   }
   /* The line compacts against the space the project name and the controls actually leave it. */

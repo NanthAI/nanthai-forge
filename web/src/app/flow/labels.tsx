@@ -83,7 +83,7 @@ export function StationLabel({
   bare: boolean;
   cls: string;
   style: CSSProperties;
-  unit?: { n: number; word: string; fact: React.ReactNode };
+  unit?: { n: number; word: string; fact: React.ReactNode; title?: string | undefined };
   loading: boolean;
   /** Opens this stop's drawer. */
   open: { stop: DrawerStop; shown: boolean; go: (stop: DrawerStop) => void };
@@ -106,6 +106,7 @@ export function StationLabel({
         className="flow-stop"
         aria-expanded={open.shown}
         aria-describedby={showPassed ? passedId : undefined}
+        title={unit?.title}
         onClick={() => open.go(open.stop)}
       >
         <span className="n">{station.name}</span>{' '}

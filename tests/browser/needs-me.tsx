@@ -215,6 +215,7 @@ const fyi: FyiRead = first
       ],
       landingsMore: false,
       broke: [],
+      mainCheckedAt: ago(12),
       settings: [
         { id: uuid(61), at: ago(108), actor: 'sample-one', areas: ['checks'], rule: 'owner-approved' },
       ],

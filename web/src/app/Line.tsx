@@ -69,7 +69,8 @@ export function lineStopCounts(feed: LineFeed | undefined, stop: (typeof lineSto
   return { total, held, passed, count };
 }
 
-export const passedWaiting = (count: number) => `${count.toLocaleString('en')} passed, waiting`;
+const waitingToLand = 'waiting to land';
+export const passedWaiting = (count: number) => `${count.toLocaleString('en')} passed, ${waitingToLand}`;
 
 export function Line({
   feed,
@@ -98,9 +99,9 @@ export function Line({
         // The name starts with what the stop shows ("Editing 1"), so speech and voice control match the screen.
         const amount = `${count}${plus} ${units(count)}`;
         const fullStop = shown !== stop.label ? `, ${stop.label.toLowerCase()}` : '';
-        const waiting = `${passed}${plus} ${units(passed)} passed`;
+        const waiting = `${passed}${plus} ${units(passed)} passed, ${waitingToLand}`;
         const words = feed
-          ? `${shown} ${amount}${passed ? `, ${waiting}, waiting` : ''}${held ? `, ${held}${plus} held` : ''}${scope}${fullStop}`
+          ? `${shown} ${amount}${passed ? `, ${waiting}` : ''}${held ? `, ${held}${plus} held` : ''}${scope}${fullStop}`
           : `${shown}, not loaded yet`;
         const label = (
           <span className="lbl" aria-hidden="true">
@@ -130,11 +131,10 @@ export function Line({
                 <span className="line-checking">
                   {label} {number}
                 </span>{' '}
-                <span className="line-passed" aria-hidden="true" title={`${waiting}, waiting`}>
+                <span className="line-passed" aria-hidden="true" title={waiting}>
                   {passed}
                   {plus}
                   <span className="line-unit"> {units(passed)}</span> passed
-                  <span className="line-passed-detail">, waiting</span>
                 </span>
               </>
             ) : (

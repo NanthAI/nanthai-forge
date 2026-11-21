@@ -12,7 +12,7 @@ import { passedWaiting, type LineFeed } from '../Line';
 import { SizedPicture, type PictureFacts } from './Picture';
 import { Tag } from './labels';
 import { FlowChecks, FlowLegend } from './Checks';
-import { clock, duration, flowFigures, flowStations, type HeldRow, type Station } from './model';
+import { clock, duration, flowFigures, flowStations, mainHealth, type HeldRow, type Station } from './model';
 import './flow.css';
 
 type FlowHrefs = { stats: string; lanes: string; code: string };
@@ -30,6 +30,7 @@ export function FlowRegion({
   feed,
   error,
   readAt,
+  mainCheckedAt,
   stop,
   onOpen,
   laneHref,
@@ -44,6 +45,7 @@ export function FlowRegion({
   feed: LineFeed | undefined;
   error?: boolean;
   readAt?: number;
+  mainCheckedAt?: number | undefined;
   stop: DrawerStop | null;
   onOpen: (stop: DrawerStop) => void;
   laneHref: (id: string) => string;
@@ -64,8 +66,7 @@ export function FlowRegion({
   const open = feed ? feed.lanes.length + feed.more : undefined;
   const checking = stations.find(station => station.stop === 'checking')!;
   const waiting = stations.flatMap(s => s.held).filter(block => block.colour === 'failed').length;
-  const since = day.verdict?.since == null ? null : clock(day.verdict.since, drawnAt);
-  const checked = day.verdict?.checkedAt == null ? null : clock(day.verdict.checkedAt, drawnAt);
+  const mainFact = mainHealth(day.verdict, mainCheckedAt, drawnAt);
   const partial = new Set(day.partial);
   const facts: PictureFacts = {
     today: day.landed,
@@ -73,7 +74,7 @@ export function FlowRegion({
     hours: day.byHour,
     red: day.red,
     stationFacts: stations.map(stationFact),
-    mainFact: day.verdict ? { word: day.red ? 'Failing' : 'Passing', since } : null,
+    mainFact,
     fix: { n: day.fix, waiting },
     failed: { n: day.reverted + day.fixedOnTop, reverted: day.reverted, fixedOnTop: day.fixedOnTop },
   };
@@ -134,6 +135,7 @@ export function FlowRegion({
                         key={block.laneId}
                         className={block.running ? 'run' : undefined}
                         data-st={block.colour}
+                        title={block.passed ? block.word : undefined}
                       >
                         <Glyph of={block.colour} size={10} />
                       </span>
@@ -154,6 +156,7 @@ export function FlowRegion({
               type="button"
               className="flow-stop"
               aria-expanded={stop === 'main'}
+              title={mainFact?.title}
               onClick={() => onOpen('main')}
             >
               <span className="n">main</span>
@@ -163,10 +166,10 @@ export function FlowRegion({
               </span>
             </button>
             <span className="w">
-              {day.verdict ? (
-                <span className="st" data-st={day.red ? 'failed' : 'passed'}>
-                  <Glyph of={day.red ? 'failed' : 'passed'} />
-                  {day.red ? 'Failing' : 'Passing'}
+              {mainFact ? (
+                <span className="st" data-st={mainFact.state} title={mainFact.title}>
+                  <Glyph of={mainFact.state} />
+                  {mainFact.word}
                 </span>
               ) : null}
             </span>
@@ -243,27 +246,20 @@ export function FlowRegion({
                 <b>{day.fixedOnTop.toLocaleString('en')}</b> fixed on top
               </span>
             </A>
-            <A href={hrefs.code}>
-              <span className="k">main</span>
-              <b>
-                {day.verdict ? (
-                  <span className="st" data-st={day.red ? 'failed' : 'passed'}>
-                    <Glyph of={day.red ? 'failed' : 'passed'} />
-                    {day.red ? 'Failing' : 'Passing'}
+            <A href={hrefs.code} title={mainFact?.title}>
+              {mainFact ? null : <span className="k">main</span>}
+              {mainFact ? (
+                <b>
+                  <span className="st" data-st={mainFact.state}>
+                    <Glyph of={mainFact.state} />
+                    {mainFact.word}
                   </span>
-                ) : (
+                </b>
+              ) : (
+                <b>
                   <span className="nr">not reported</span>
-                )}
-              </b>
-              <span className="s">
-                {since ? (
-                  <>since {<b>{since}</b>}</>
-                ) : checked ? (
-                  <>Checked {<b>{checked}</b>}</>
-                ) : day.verdict ? null : (
-                  'Waiting for a conclusive main check'
-                )}
-              </span>
+                </b>
+              )}
             </A>
           </nav>
           <FlowChecks
