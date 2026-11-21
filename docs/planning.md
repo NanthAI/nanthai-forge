@@ -17,6 +17,20 @@ The stored kind of an Item is `issue`, so every older operation replays exactly.
 Each Item has one type label. The defaults are Idea, Task and Bug; a project may use its own labels of up to 32
 characters.
 
+## Item Work
+
+Open an Item from the Plan, including its Done and Dropped lists. Work lists open Lanes
+first with their Intent titles and recorded saves. A landing links to Code at the
+accepted State, with its recorded check and changed-file count when available. Related
+links use the current titles of Initiatives, dependencies and split Items. The Item
+discussion and Lane rows use the same identity mark as the rest of Forge.
+
+Work opens with one call to the same bounded reader as the agent CLI. Each request for
+more work reads one cursor page. The web details are optional and Work makes no idle
+calls. Reverse dependency links use the relations already available in the Work reply
+and open Plan. The Landings fold marks partial coverage when an Intent has more
+notes than its recent-history window.
+
 ## Status
 
 Stored status words never change. Screens and agent replies show the visible word:

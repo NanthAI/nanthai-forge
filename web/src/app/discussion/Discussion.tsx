@@ -8,6 +8,7 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { Band, Key, Menu } from '../../ds';
 import { By } from './By';
+import type { WhoProject } from '../who-links';
 import { SafeMarkdown } from '../../ds/markdown';
 import { readReview, ReviewFindings } from './ReviewFindings';
 import {
@@ -39,6 +40,7 @@ export type DiscussionProps = {
   /** Threads shown before "Show earlier" (the latest ones). */
   pageSize?: number;
   now?: Date;
+  project?: WhoProject | undefined;
 };
 
 export function Discussion({
@@ -50,6 +52,7 @@ export function Discussion({
   onReact,
   pageSize = 20,
   now = new Date(),
+  project,
 }: DiscussionProps) {
   const all = threads(comments);
   const [shown, setShown] = useState(pageSize);
@@ -85,6 +88,7 @@ export function Discussion({
             reactions={reactions}
             canWrite={canWrite}
             now={now}
+            project={project}
             {...(onReact ? { onReact } : {})}
             {...(canWrite && onPost && !thread.root.system
               ? { onReply: () => setReplying(thread.root.id) }
@@ -98,6 +102,7 @@ export function Discussion({
               reactions={reactions}
               canWrite={canWrite}
               now={now}
+              project={project}
               {...(onReact ? { onReact } : {})}
             />
           ))}
@@ -121,6 +126,7 @@ function Comment({
   reactions,
   canWrite,
   now,
+  project,
   onReact,
   onReply,
 }: {
@@ -129,6 +135,7 @@ function Comment({
   reactions: readonly ReactionCount[];
   canWrite: boolean;
   now: Date;
+  project?: WhoProject | undefined;
   onReact?: (commentId: string, kind: ReactionKind) => Promise<void>;
   onReply?: () => void;
 }) {
@@ -143,7 +150,7 @@ function Comment({
   return (
     <article className={`cmt${reply ? ' re' : ''}`} id={`comment-${comment.id}`} data-kind={by.kind}>
       <div className="by">
-        <By by={by} />
+        <By by={by} project={project} />
         <time dateTime={comment.at} title={comment.at}>
           {when(comment.at, now)}
         </time>

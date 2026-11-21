@@ -99,7 +99,7 @@ test('a forged label never becomes the writer: an outside reader of a public pro
   const html = renderToStaticMarkup(h(Discussion, { comments: outside, canWrite: false }));
   assert.doesNotMatch(html, /mara/, 'the forged handle shows nowhere');
   assert.doesNotMatch(html, /A member/);
-  assert.match(html, /a person<\/span><span class="kind">person/);
+  assert.equal((html.match(/>a person<\/span>/g) ?? []).length, 2, 'both comments show an anonymous person');
   as({ subject: 'owner' });
   const body = (await s.read()).data.planningItems.filter(item => item.id === issue.itemId).at(-1).body;
   assert.match(

@@ -17,6 +17,7 @@ import { ProjectFrame } from '../../web/src/app/frames';
 import type { LineFeed } from '../../web/src/app/Line';
 import { needsCount, type NeedsRead } from '../../web/src/app/needs/count';
 import type { FyiRead } from '../../web/src/app/needs/fyi';
+import { stressText } from '../../web/src/ds/reference/stress-text';
 import type { LooseEndsRead } from '../../web/src/app/needs/loose-ends';
 
 const params = new URLSearchParams(location.search);
@@ -25,7 +26,8 @@ const first = params.get('data') === 'first';
 const connect = params.get('data') === 'connect';
 const calm = params.get('data') === 'calm';
 const variant = params.get('data');
-const worst = variant === 'worst' || variant === 'over';
+const stress = variant === 'stress';
+const worst = stress || variant === 'worst' || variant === 'over';
 const quiet = variant === 'quiet' || variant === 'empty';
 const unavailable = variant === 'loading' || variant === 'error';
 const writes: unknown[] = [];
@@ -258,6 +260,12 @@ const worstRead: NeedsRead = {
       title: 'Streaming adapters: retry with backoff, jitter and a per-host budget for every transport',
       agent: LONG.split('/')[1],
     }),
+    ...(stress
+      ? [
+          lane(4, 'conflict', 10, { title: stressText.email, actor: 'j' }),
+          lane(5, 'conflict', 7, { title: stressText.identifier, actor: '👩🏽‍💻' }),
+        ]
+      : []),
     lane(3, 'conflict', 6, {
       title: 'Docs: الأسئلة الشائعة about queue limits and fairness',
       agent: 'still-heron',
@@ -442,6 +450,7 @@ const fixtureFeed: LineFeed = {
         },
 };
 
+const projectName = stress ? stressText.identifier : 'tidepool';
 const route = {
   frame: 'project' as const,
   handle: 'sample-one',
@@ -508,7 +517,7 @@ function Fixture() {
   return (
     <ProjectFrame
       route={route}
-      name="tidepool"
+      name={projectName}
       feed={feed}
       needs={needsCount(read, NOW)}
       projects={null}
@@ -516,7 +525,7 @@ function Fixture() {
     >
       <NeedsMeView
         route={route}
-        projectName="tidepool"
+        projectName={projectName}
         feed={feed}
         feedError={variant === 'error'}
         feedReadAt={ago(2)}
@@ -535,7 +544,9 @@ function Fixture() {
           exact: true,
           issue: first
             ? { proposed: 0, open: 0, inProgress: 1, closed: 1, abandoned: 0 }
-            : { proposed: 2, open: 7, inProgress: 5, closed: 46, abandoned: 1 },
+            : stress
+              ? { proposed: 1234, open: 12345, inProgress: 5, closed: 123456, abandoned: 1 }
+              : { proposed: 2, open: 7, inProgress: 5, closed: 46, abandoned: 1 },
           closedToday: null,
         }}
         decide={record('decide')}

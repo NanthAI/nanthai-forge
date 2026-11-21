@@ -8,6 +8,7 @@
   .top .brand { width: var(--rail-w); flex: none; display: flex; align-items: center; gap: 9px; padding: 0 14px; font: var(--w-bold) 16px/1 var(--font-sans); letter-spacing: var(--head-track); }
   .top .brand svg { width: 20px; height: 20px; }
   .top .proj { display: flex; align-items: center; gap: 6px; padding: 0 14px; border: 0; border-left: var(--rule) solid var(--line); background: transparent; font-weight: var(--w-strong); white-space: nowrap; min-width: 0; }
+  .top .proj > svg { flex: none; }
   .top .end { display: flex; align-items: center; gap: var(--s-1); padding: 0 10px; flex: none; }
   .top .needs { display: inline-flex; align-items: center; gap: 7px; height: var(--ctl-h); padding: 0 10px; font-weight: var(--w-strong); white-space: nowrap; }
   .mk-f .stem { fill: currentColor; }
@@ -96,7 +97,7 @@
   .region.moved { animation: ds-settle var(--d-travel) var(--ease-out); }
   .ph { display: flex; align-items: center; gap: 9px; min-height: var(--ph-h); padding: 0 var(--gut) 0 6px; border-bottom: var(--rule) solid var(--line); background: inherit; }
   .ph.plain { padding-left: var(--gut); }
-  .ph h2, .ph h3, .ph h4 { font-size: var(--t-title); font-weight: var(--w-bold); white-space: nowrap; }
+  .ph h2, .ph h3, .ph h4 { font-size: var(--t-title); font-weight: var(--w-bold); min-width: 0; overflow-wrap: anywhere; }
   .ph .hint { color: var(--text-3); font-size: var(--t-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .grip { display: grid; place-items: center; width: 22px; height: 28px; flex: none; border: 0; border-radius: var(--r); background: transparent; color: var(--text-3); cursor: grab; touch-action: none; }
   .pf { padding: 9px var(--gut); border-top: var(--rule) solid var(--line); color: var(--text-2); font-size: var(--t-meta); }
@@ -160,7 +161,7 @@
   .ck { width: 16px; height: 16px; border-radius: var(--r); border: 1.5px solid var(--text-3); display: inline-grid; place-items: center; flex: none; color: var(--surface); }
   .ck.on { background: var(--passed); border-color: var(--passed); }
   .ck svg { width: 11px; height: 11px; }
-  .menu { min-width: 232px; background: var(--surface-2); border: var(--rule) solid var(--line-strong); box-shadow: var(--shadow); padding: var(--s-1) 0; }
+  .menu { max-width: calc(100vw - 2 * var(--gut)); min-width: min(232px, calc(100vw - 2 * var(--gut))); background: var(--surface-2); border: var(--rule) solid var(--line-strong); box-shadow: var(--shadow); padding: var(--s-1) 0; }
   .menu button { display: flex; width: 100%; align-items: center; gap: var(--s-3); justify-content: space-between; border: 0; background: transparent; height: 32px; padding: 0 var(--s-3); text-align: left; font-size: var(--t-small); }
   .menu button[disabled] { color: var(--text-3); cursor: default; }
   .menu hr { border: 0; border-top: var(--rule) solid var(--line); margin: var(--s-1) 0; }
@@ -235,6 +236,11 @@
   .strip a { display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-4); color: var(--text-2); font-size: var(--t-small); font-weight: var(--w-medium); white-space: nowrap; }
   .strip a[aria-current] { color: var(--text); font-weight: var(--w-bold); box-shadow: inset 0 -2px 0 var(--brand); }
   .strip .gap { flex: 1 1 auto; min-width: var(--s-4); }
+  @media (max-width: 420px) {
+    .strip { height: auto; flex-wrap: wrap; }
+    .strip a { min-height: var(--ph-h); padding-inline: var(--s-2); }
+    .strip .gap { display: none; }
+  }
   .pnav a { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s-2); align-items: center; min-height: 32px; padding: var(--s-1) var(--gut); color: var(--text-2); font-size: var(--t-small); }
   .pnav a.on { background: var(--surface-3); color: var(--text); font-weight: var(--w-strong); box-shadow: inset 2px 0 0 var(--brand); }
   .pnav a.drop { box-shadow: inset 0 0 0 2px var(--brand); color: var(--text); }
@@ -253,6 +259,7 @@
   .chip button { border: 0; background: transparent; padding: 0; color: var(--text-3); display: inline-grid; }
   .bulk { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-3); align-items: center; min-height: var(--ph-h); padding: var(--s-1) var(--gut); background: var(--accent-bg); border-bottom: var(--rule) solid var(--line); position: sticky; top: var(--stick-top, 0px); z-index: 4; }
   .bulk b { white-space: nowrap; }
+  @media (max-height: 360px) { .bulk { position: static; } }
   .pager { display: flex; gap: var(--s-2) var(--s-3); align-items: center; flex-wrap: wrap; padding: var(--s-2) var(--gut); border-top: var(--rule) solid var(--line); color: var(--text-2); font-size: var(--t-meta); }
   .pager .n { font-variant-numeric: tabular-nums; margin-right: auto; }
   .ckb { appearance: none; width: 16px; height: 16px; margin: 0; border: 1.5px solid var(--text-3); border-radius: var(--r); background: transparent; display: inline-grid; place-items: center; flex: none; cursor: pointer; }
@@ -297,7 +304,7 @@
   .nextmark { display: inline-flex; align-items: center; height: 18px; padding: 0 5px; border: var(--rule) solid var(--text); border-radius: var(--r); color: var(--text); font: var(--w-bold) var(--t-micro)/1 var(--font-sans); white-space: nowrap; flex: none; }
   .row.isnext { box-shadow: inset 2px 0 0 var(--text); }
   .dropline { height: 0; border-top: 2px solid var(--brand); margin: -1px 0; position: relative; z-index: 2; }
-  .dropline span { position: absolute; right: var(--gut); top: -11px; background: var(--surface); padding: 0 6px; font-size: var(--t-micro); color: var(--accent); font-weight: var(--w-strong); }
+  .dropline span { max-width: calc(100% - 2 * var(--gut)); overflow-wrap: anywhere; position: absolute; right: var(--gut); top: -11px; background: var(--surface); padding: 0 6px; font-size: var(--t-micro); color: var(--accent); font-weight: var(--w-strong); }
   .diff2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); border-block: var(--rule) solid var(--line); }
   .diff2 > div { background: var(--surface); padding: var(--s-3) var(--gut-head); min-width: 0; overflow-wrap: anywhere; }
   .diff2 ins { background: var(--add-bg); text-decoration: none; }
@@ -374,7 +381,7 @@
   .pstate .ps { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; color: var(--text-2); font-size: var(--t-small); white-space: nowrap; }
   .pstate .ps .st { align-self: center; }
   .pstate .ps b { color: var(--text); font: var(--w-bold) var(--t-body)/1 var(--font-mono); font-variant-numeric: tabular-nums; }
-  .pstate .ps .more { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .pstate .ps .more { overflow-wrap: anywhere; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   @media (hover: hover) and (pointer: fine) { .pstate a.ps:hover { color: var(--text); } .pstate a.ps:hover .more { color: var(--text-2); } }
   @media (max-width: 860px) { .pstate { padding-inline: var(--gut); gap: var(--s-1) var(--s-4); } .pstate > .roll { flex-basis: 100%; } .pstate .ps { flex: 1 1 100%; white-space: normal; flex-wrap: wrap; } .pstate a.ps { min-block-size: 24px; align-items: center; } }
   [data-weight="ref"] .nums b { font-size: var(--t-body); line-height: var(--lh-body); letter-spacing: 0; }
@@ -385,3 +392,17 @@
 @keyframes ds-ring { 0% { transform: scale(1, 1); } 20% { transform: scale(1.7, 1.9); } 100% { transform: scale(1, 1); } }
 @keyframes ds-settle { from { background: var(--accent-bg); } }
 @keyframes ds-beat { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+
+/* Keep Tab and scrollIntoView targets clear of the frame's fixed chrome. */
+[data-ds]:has(.shell) { scroll-padding-block-start: calc(var(--top-h) + var(--s-1)); }
+@media (max-width: 860px) {
+  [data-ds]:has(.shell) {
+    scroll-padding-block-start: calc(var(--top-h) + var(--s-1) + env(safe-area-inset-top, 0px));
+  }
+  [data-ds]:has(.shell[data-frame="project"]) {
+    scroll-padding-block-start: calc(var(--top-h) + var(--line-phone-h) + var(--s-1) + env(safe-area-inset-top, 0px));
+  }
+  [data-ds]:has(.shell > .tabs) {
+    scroll-padding-block-end: calc(var(--tabs-h) + var(--s-1) + env(safe-area-inset-bottom, 0px));
+  }
+}

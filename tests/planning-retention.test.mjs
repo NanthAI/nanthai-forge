@@ -209,7 +209,14 @@ test('an Archived or Deleted Item opens from a unique short id and preserves the
   await s.send(s.item({ itemId: other }));
   assert.equal(await lookup(itemId.slice(0, 8)), null);
   assert.ok((await lookup(itemId)).row, 'the complete shelved id still opens');
-  assert.deepEqual(await lookup(other), { id: other, row: null });
+  const live = JSON.parse((await lookup(other)).row);
+  assert.equal(live.id, other);
+  assert.equal(
+    live.status,
+    'open',
+    'exact links still resolve the live Item when it is outside the loaded plan',
+  );
+  assert.equal(live.was, undefined);
 });
 
 test('refusals yield the next sweep to fresh Items and back off without dropping a transient failure', async t => {

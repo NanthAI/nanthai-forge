@@ -3,7 +3,7 @@
 // in the project's place, no line, the account's places), bare (no rail, no line; before a first project) and the
 // public bar and column. Every control at first paint is a plain link or button; menus and sheets attach with the
 // behaviour layer (decisions.md, shared-base rule 3). Each frame has a skip link, one main landmark and the phone tabs.
-import type { ReactNode } from 'react';
+import type { FocusEvent, ReactNode } from 'react';
 import { Avatar, Count, DockPerson, Menu, State, initials, type MenuAction } from '../ds';
 import { ForgeMark } from '../shell/brand';
 import { Line, type LineFeed } from './Line';
@@ -47,6 +47,33 @@ function Skip() {
       Skip to the page
     </a>
   );
+}
+
+/** The browser's focus scroll can leave an already onscreen control behind the sticky bars. */
+function showPageFocus(event: FocusEvent<HTMLElement>) {
+  const { target, currentTarget } = event;
+  if (
+    !(target instanceof HTMLElement) ||
+    !currentTarget.contains(target) ||
+    !target.matches(':focus-visible')
+  )
+    return;
+  // Run after the browser and any composite widget have scrolled the newly focused control.
+  requestAnimationFrame(() => {
+    if (document.activeElement !== target) return;
+    const { scrollPaddingBlockStart, scrollPaddingBlockEnd } = getComputedStyle(document.documentElement);
+    let start = parseFloat(scrollPaddingBlockStart) || 0;
+    const bulk = currentTarget.querySelector('.bulk');
+    if (bulk && !bulk.contains(target) && getComputedStyle(bulk).position === 'sticky') {
+      const bar = bulk.getBoundingClientRect();
+      if (bar.top <= start && bar.bottom > start) start = bar.bottom;
+    }
+    const end = innerHeight - (parseFloat(scrollPaddingBlockEnd) || 0);
+    const { top, bottom, height } = target.getBoundingClientRect();
+    if (height > end - start && top < end && bottom > start) return;
+    const shift = top < start ? top - start : Math.max(0, bottom - end);
+    if (shift) window.scrollBy({ top: shift, behavior: 'instant' });
+  });
 }
 
 /** The F follows the project (mark.ts). Its word takes the name's place while the state needs one, and is announced. */
@@ -215,7 +242,7 @@ export function ProjectFrame({
           </A>
         ))}
       </nav>
-      <main id="main" tabIndex={-1}>
+      <main id="main" tabIndex={-1} onFocus={showPageFocus}>
         <Strip route={route} />
         <DockPerson value={controls.viewerHandle ?? null}>{children}</DockPerson>
       </main>
@@ -291,7 +318,7 @@ export function AccountFrame({
           </A>
         ) : null}
       </nav>
-      <main id="main" tabIndex={-1}>
+      <main id="main" tabIndex={-1} onFocus={showPageFocus}>
         <DockPerson value={controls.viewerHandle ?? null}>{children}</DockPerson>
       </main>
       <nav className="tabs" aria-label="Account" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
@@ -327,7 +354,7 @@ export function BareFrame({ controls, children }: { controls: FrameControls; chi
         <div className="fill" />
         <End handle={controls.viewerHandle} onPalette={controls.onPalette} onKeys={controls.onKeys} />
       </header>
-      <main id="main" tabIndex={-1}>
+      <main id="main" tabIndex={-1} onFocus={showPageFocus}>
         {children}
       </main>
     </div>

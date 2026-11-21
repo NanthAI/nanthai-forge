@@ -17,6 +17,7 @@ import {
 } from '../interactive';
 import { Segment } from '../Segment';
 import { Figures } from './Figures';
+import { stressText } from './stress-text';
 import { DocsFrame } from '../DocsFrame';
 import '../docs.css';
 import { Discussion } from '../../app/discussion/Discussion';
@@ -85,7 +86,17 @@ const LAYOUT: DockLayout = { top: ['needs'], a: ['plan', 'lanes'], b: ['checks',
 export function Reference() {
   const [source, setSource] = useState('write');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [plan, setPlan] = useState(PLAN);
+  const worst = new URLSearchParams(location.search).get('data') === 'worst';
+  const [plan, setPlan] = useState(() =>
+    worst
+      ? stressText.titles.map((label, index): Planned => ({
+          id: `worst-${index}`,
+          label,
+          state: 'planned',
+          by: stressText.handles[index]!,
+        }))
+      : PLAN,
+  );
   const [sheet, setSheet] = useState(false);
   const [palette, setPalette] = useState(false);
   const [filters, setFilters] = useState(['Mine', 'Needs you']);
@@ -125,15 +136,17 @@ export function Reference() {
           title="Needs you"
           weight="act"
           waiting="c2"
-          count={2}
+          count={worst ? 123456 : 2}
           handle={handle}
           hint="held until a person decides"
         >
           <Band title="Decisions" count={1} needs />
           <Row weight="act">
             <State word="Conflict" />
-            <span className="ttl cut">Two Lanes change the same lines in the upload step</span>
-            <Who handle="@sample-two/builder" app="an agent app" />
+            <span className="ttl cut">
+              {worst ? stressText.name : 'Two Lanes change the same lines in the upload step'}
+            </span>
+            <Who handle={worst ? stressText.handles[0]! : '@sample-two/builder'} app="an agent app" />
             <Key kind="primary" size="sm" keys="a" onClick={() => setSheet(true)}>
               Choose
             </Key>
@@ -213,7 +226,9 @@ export function Reference() {
           <Table
             caption="Checks on the current Lane"
             rowKey={row => row.id}
-            rows={CHECKS}
+            rows={
+              worst ? CHECKS.map((row, index) => ({ ...row, name: stressText.titles[index + 1]! })) : CHECKS
+            }
             columns={[
               { key: 'name', title: 'Check', cell: row => row.name },
               {
@@ -293,9 +308,9 @@ export function Reference() {
       </header>
       <Standing
         of="app"
-        done={{ n: 5, more: '14 landed today' }}
-        inProgress={{ n: 5, more: '5 Lanes open, 2 need you' }}
-        left={{ n: 7, more: `next: ${plan[0]?.label ?? 'none'}` }}
+        done={{ n: worst ? 123456 : 5, more: '14 landed today' }}
+        inProgress={{ n: worst ? 12345 : 5, more: '5 Lanes open, 2 need you' }}
+        left={{ n: worst ? 1234 : 7, more: `next: ${plan[0]?.label ?? 'none'}` }}
       />
       <div className="tbar">
         {filters.map(filter => (
@@ -358,7 +373,7 @@ export function Reference() {
       <Sheet
         open={sheet}
         onOpenChange={setSheet}
-        title="Which side lands first?"
+        title={worst ? stressText.name : 'Which side lands first?'}
         footer={
           <>
             <Key onClick={() => setSheet(false)}>Later</Key>

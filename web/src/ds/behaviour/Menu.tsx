@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The one menu: a key that opens a list of actions. Arrow keys move, Enter runs, Escape closes and focus returns to
 // the key. Loaded with the behaviour layer; screens use ds/menu.tsx, which draws the same key at first paint.
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { Button, Menu, MenuItem, MenuTrigger, Popover, Separator } from 'react-aria-components';
 import { EnglishOnly } from './shared';
 
@@ -37,6 +37,7 @@ export function ActionMenu({
   dragHandle,
 }: ActionMenuProps) {
   const [open, setOpen] = useState(defaultOpen ?? false);
+  const menu = useRef<HTMLDivElement>(null);
   const run = (key: React.Key) => {
     const item = items.find(entry => entry !== 'separator' && entry.id === key);
     if (item && item !== 'separator') item.onAction();
@@ -75,8 +76,8 @@ export function ActionMenu({
         >
           {children ?? <span>{label}</span>}
         </Button>
-        <Popover className="ds-pop" placement={placement} offset={4}>
-          <Menu className="menu" onAction={run} aria-label={label}>
+        <Popover className="ds-pop" placement={placement} offset={4} scrollRef={menu}>
+          <Menu ref={menu} className="menu" onAction={run} aria-label={label}>
             {items.map((item, index) =>
               item === 'separator' ? (
                 <Separator key={`separator-${index}`} className="sep" />

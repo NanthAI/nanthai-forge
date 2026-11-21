@@ -74,6 +74,91 @@ test('an Item read lists its Lanes in every state, landed ones with receipt, com
   assert(count.readBytes < 12 * 1024, JSON.stringify(count));
 });
 
+test('Item-page details link recorded saves, acceptance evidence and settled relation titles without writes', async () => {
+  const s = await fixture({ details: true });
+  const compact = await s.read();
+  assert.equal(compact.lanes[0].saveCount, undefined);
+  assert.equal(compact.related, undefined);
+  const work = await s.read({ details: true });
+  const [lane] = work.lanes;
+  assert.deepEqual(
+    [lane.title, lane.actor, lane.model],
+    ['Synthetic outcome', 'synthetic-owner/cobalt-fox', 'gpt-6.2-sol'],
+  );
+  assert.deepEqual([lane.saveCount, lane.lastSaveAt], [1, at]);
+  const noted = work.landings.find(landing => landing.receiptId === s.noteReceipt);
+  assert.deepEqual([noted.check, noted.files], ['passed', 2]);
+  const stamped = work.landings.find(landing => landing.receiptId === s.stampReceipt);
+  assert.deepEqual([stamped.check, stamped.files], [null, null]);
+  assert.deepEqual(
+    work.related.map(({ kind, title }) => [kind, title]),
+    [
+      ['Initiative', 'Parser release'],
+      ['Depends on', 'Define the wire format'],
+      ['Split into', 'Cover retry cases'],
+      ['Blocks', 'Cover retry cases'],
+    ],
+  );
+  const followUp = await s.read({ details: true, itemId: s.followUpId });
+  assert.deepEqual(
+    followUp.related.map(({ kind, title }) => [kind, title]),
+    [
+      ['Split from', 'Synthetic outcome'],
+      ['Depends on', 'Synthetic outcome'],
+    ],
+  );
+  assert.equal(s.counts.at(-1).writes, 0);
+  await s.ctx.db.patch(s.auth.projectId, { visibility: 'public' });
+  s.as('visitor');
+  const visitor = await s.read({ details: true });
+  assert.equal(visitor.related, undefined, 'visitor never receives member-only related titles');
+});
+
+test('Item Work preserves earlier landings of a Lane that was kept open and pages their receipts', async () => {
+  const s = await fixture({ details: true });
+  const receipts = Array.from({ length: 12 }, () => randomUUID());
+  for (const [index, receiptId] of receipts.entries()) {
+    await s.ctx.db.insert('projectIntentLandingNotes', {
+      projectId: s.auth.projectId,
+      intentId: s.itemId,
+      receiptId,
+      kind: 'landed',
+      at,
+      laneIds: [s.open.id],
+      commit: other,
+      sequence: 43 + index,
+      actor: 'owner',
+    });
+  }
+  const first = await s.read({ details: true });
+  assert.deepEqual(
+    first.landings.map(landing => landing.receiptId).slice(0, 10),
+    receipts.slice(2).reverse(),
+  );
+  assert.equal(first.lanes[0].receipt.receiptId, receipts.at(-1));
+  const next = await s.read({ details: true, cursor: first.nextCursor });
+  assert.deepEqual(next.lanes, []);
+  assert.deepEqual(
+    next.landings.map(landing => landing.receiptId),
+    [receipts[1], receipts[0], s.noteReceipt],
+  );
+  assert.equal(next.nextCursor, null);
+  assert.equal(first.landingsPartial, false);
+  for (let sequence = 60; sequence < 110; sequence++)
+    await s.ctx.db.insert('projectIntentLandingNotes', {
+      projectId: s.auth.projectId,
+      intentId: s.itemId,
+      receiptId: randomUUID(),
+      kind: 'landed',
+      at,
+      laneIds: [s.open.id],
+      commit: other,
+      sequence,
+      actor: 'owner',
+    });
+  assert.equal((await s.read({ details: true })).landingsPartial, true);
+});
+
 test('an open Lane reads queued while its Intent has a live submission, parked while it waits', async () => {
   const s = await fixture();
   await submit(s);

@@ -38,8 +38,6 @@ import { ProjectFrame } from ${JSON.stringify(join(root, 'web/src/app/frames.tsx
 import { navigate, useSearch } from ${JSON.stringify(join(root, 'web/src/app/router.ts'))};
 import { batchUndo } from ${JSON.stringify(join(root, 'src/planning-batch.ts'))};
 import ${JSON.stringify(join(root, 'web/src/app/app.css'))};
-const rest = decodeURIComponent(location.pathname.split('/plan/')[1] ?? '');
-const route = { frame: 'project', handle: 'example-builder', project: 'synthetic', place: 'plan', section: '', rest };
 const uuid = n => '00000000-0000-4000-8000-' + String(n).padStart(12, '0');
 const launch = { id: uuid(1), kind: 'initiative', title: 'Launch the parser', status: 'open', position: 0, version: 3 };
 const docs = { id: uuid(2), kind: 'initiative', title: 'Documentation and recovery paths', status: 'open', position: 1, version: 1 };
@@ -69,13 +67,17 @@ const linkBackend = fakeConvex({
   resolve(name, args) {
     if (name === 'projectPlanView:read') return { ...read, rows: JSON.stringify([linkedOpen]) };
     if (name === 'projectPlanSettled:item') {
-      const candidates = [linkedOpen, linkedDeleted].filter(row => row.id.startsWith(args.id));
+      const candidates = [linkedOpen, linkedDeleted, ...settledRows].filter(row => row.id.startsWith(args.id));
       if (candidates.length !== 1) return null;
       const row = candidates[0];
-      return { id: row.id, row: row.status === 'deleted' ? JSON.stringify(row) : null };
+      return { id: row.id, row: row === linkedOpen ? null : JSON.stringify(row) };
     }
     if (name === 'projectPlanWorkers:read') return '{"lanes":[]}';
     if (name === 'projectItemWork:read') return window.readItemWork?.(args) ?? '{"role":false}';
+    if (name === 'projectPlanSettled:page') return {
+      page: settledRows.filter(row => row.status === args.status).map(row => JSON.stringify(row)),
+      isDone: true, continueCursor: '',
+    };
     if (args.paginationOpts) return { page: [], isDone: true, continueCursor: '' };
     return null;
   },
@@ -116,6 +118,8 @@ const reads = {
 };
 function Fixture() {
   const search = useSearch();
+  const rest = decodeURIComponent(location.pathname.split('/plan/')[1] ?? '');
+  const route = { frame: 'project', handle: 'example-builder', project: 'synthetic', place: 'plan', section: '', rest };
   const query = readQuery(search);
   const go = patch => navigate(location.pathname + writeQuery({ ...query, ...patch }), { replace: true });
   // The shell receives the same Needs you count as the page read (window.heldFeed, set before load).
@@ -771,9 +775,27 @@ test('plan views and bulk bar: real components keep the view in the address and 
     assert.deepEqual(errors, []);
     await context.close();
   }
+  await t.test('Done and Dropped links open their Item pages and Work from the settled list', async () => {
+    const { page, context, errors } = await open(1440, 'light', '?scope=closed', false, true);
+    try {
+      for (const title of ['Old reader removed', 'Ship a second parser']) {
+        await page.getByRole('link', { name: title }).click();
+        await page.locator('main .head .sit').filter({ hasText: title }).waitFor();
+        await page.getByRole('region', { name: 'Work', exact: true }).waitFor();
+        await page.goBack();
+      }
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
+  });
   // The browser dispatches the production query to the real handler through the indexed records fixture.
   // The same Item has 12 Lanes in both cases, so unrelated project history cannot change either page's cost.
-  const workFixture = await itemWorkFixture({ itemId: '00000000-0000-4000-8000-000000000010', extra: 8 });
+  const workFixture = await itemWorkFixture({
+    itemId: '00000000-0000-4000-8000-000000000010',
+    extra: 8,
+    details: true,
+  });
   const { itemId } = workFixture;
   let workCosts;
   for (const unrelated of [0, 10_000]) {
@@ -793,7 +815,11 @@ test('plan views and bulk bar: real components keep the view in the address and 
         const { page, context, errors } = await open(width, theme, `/${itemId}`, false, true, async args => {
           calls.push(args);
           const start = performance.now();
-          const reply = await workFixture.readRaw({ cursor: args.cursor, limit: args.limit });
+          const reply = await workFixture.readRaw({
+            cursor: args.cursor,
+            limit: args.limit,
+            details: args.details,
+          });
           const { name, ...cost } = workFixture.counts.at(-1);
           costs.push({ ...cost, responseBytes: Buffer.byteLength(reply) });
           t.diagnostic(
@@ -803,9 +829,30 @@ test('plan views and bulk bar: real components keep the view in the address and 
         });
         try {
           const work = page.getByRole('region', { name: 'Work', exact: true });
-          const more = work.getByRole('button', { name: 'Show more Lanes' });
+          const more = work.getByRole('button', { name: 'Show more work' });
           await more.waitFor();
-          const lanes = work.getByRole('link', { name: /^Lane / });
+          await page.getByRole('region', { name: 'Comments', exact: true }).waitFor();
+          const shift = await page.evaluate(() => window.shifts.reduce((sum, value) => sum + value, 0));
+          t.diagnostic(`Item load shift ${width} ${theme}: ${shift.toFixed(3)}`);
+          const lanes = work.locator('a[href*="/lanes/"]:not([href*="/sessions/"])');
+          assert.equal(
+            await work.getByRole('button', { name: 'Lanes', exact: true }).getAttribute('aria-expanded'),
+            'true',
+          );
+          await work.getByRole('button', { name: 'Landings', exact: true }).click();
+          await work.getByRole('button', { name: 'Related', exact: true }).click();
+          assert.equal(await lanes.first().textContent(), 'Synthetic outcome');
+          assert.match(await lanes.first().locator('..').textContent(), /cobalt-fox.*1 save.*Last save/);
+          assert.equal(await work.getByText('2 files changed', { exact: true }).count(), 1);
+          assert.equal(await work.getByText('Passed', { exact: true }).count(), 1);
+          assert.equal(
+            await work.getByRole('link', { name: 'Define the wire format' }).getAttribute('href'),
+            `/-/example-builder/synthetic/plan/${workFixture.dependencyId}`,
+          );
+          assert.equal(await work.getByRole('link', { name: 'Parser release' }).count(), 1);
+          assert.equal(await work.getByText('Split into', { exact: true }).count(), 1);
+          assert.equal(await work.getByText('Blocks', { exact: true }).count(), 1);
+          assert.doesNotMatch(await page.locator('.head .crumb').textContent(), /00000000/);
           const landings = work.getByRole('link', { name: /^Landing / });
           assert.equal(await lanes.count(), 10);
           assert.equal(
@@ -817,10 +864,31 @@ test('plan views and bulk bar: real components keep the view in the address and 
             await landings.first().getAttribute('href'),
             `/-/example-builder/synthetic/code/files?at=${'c'.repeat(64)}`,
           );
-          assert.deepEqual(calls.slice(-1), [{ itemId, projectId: 'synthetic', limit: 10, cursor: null }]);
+          assert.deepEqual(calls.slice(-1), [
+            { itemId, projectId: 'synthetic', limit: 10, cursor: null, details: true },
+          ]);
           await check(page, `Item Work ${width} ${theme}`);
-          if (shots)
+          assert.equal(
+            await lanes.evaluateAll(links =>
+              links.some(link => {
+                const row = link.closest('.row');
+                const facts = row.querySelector('.r').getBoundingClientRect();
+                const title = link.getBoundingClientRect();
+                const identity = row.querySelector('.who').getBoundingClientRect();
+                const titleOverlaps =
+                  title.right > facts.left + 1 &&
+                  title.bottom > facts.top + 1 &&
+                  title.top + 1 < facts.bottom;
+                return titleOverlaps || identity.top + 1 < facts.bottom;
+              }),
+            ),
+            false,
+            'Lane title, status and identity never overlap',
+          );
+          if (shots) {
+            await page.evaluate(() => window.scrollTo(0, 0));
             await page.screenshot({ path: join(shots, `item-work-${width}-${theme}.png`), fullPage: true });
+          }
           assert.deepEqual(await page.evaluate(() => window.planQueries), ['projectItemWork:read']);
           assert.deepEqual((await page.evaluate(() => window.planSubscriptions())).sort(), [
             'projectPlanCounts:read',
@@ -828,16 +896,18 @@ test('plan views and bulk bar: real components keep the view in the address and 
             'projectWorkIndex:workspace',
           ]);
           await more.click();
-          await work.getByRole('link', { name: `Lane ${workFixture.abandoned.id.slice(0, 8)}` }).waitFor();
+          await lanes.filter({ hasText: 'Synthetic outcome' }).last().waitFor();
+          await work.locator(`a[href$="/lanes/${workFixture.abandoned.id}"]`).waitFor();
           assert.equal(await lanes.count(), 12);
           assert.equal(await landings.count(), 2);
+          assert.equal(await work.getByRole('link', { name: 'Define the wire format' }).count(), 1);
           assert.equal(await more.count(), 0);
           assert.deepEqual(await page.evaluate(() => window.planQueries), [
             'projectItemWork:read',
             'projectItemWork:read',
           ]);
           assert.deepEqual(calls.slice(-1), [
-            { itemId, projectId: 'synthetic', limit: 10, cursor: 'forge-item-work-v1:10' },
+            { itemId, projectId: 'synthetic', limit: 10, cursor: 'forge-item-work-v1:10', details: true },
           ]);
           assert.deepEqual(errors, []);
         } finally {
@@ -847,9 +917,9 @@ test('plan views and bulk bar: real components keep the view in the address and 
       assert.equal(calls.length, 4);
       for (const cost of costs) {
         assert.equal(cost.writes, 0);
-        assert(cost.ranges <= 64, JSON.stringify(cost));
-        assert(cost.documents <= 80, JSON.stringify(cost));
-        assert(cost.readBytes < 24 * 1024, JSON.stringify(cost));
+        assert(cost.ranges <= 85, JSON.stringify(cost));
+        assert(cost.documents <= 95, JSON.stringify(cost));
+        assert(cost.readBytes < 28 * 1024, JSON.stringify(cost));
       }
       if (unrelated)
         assert.deepEqual(costs, workCosts, 'unrelated Lane heads add no database I/O or response bytes');

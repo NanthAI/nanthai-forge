@@ -9,7 +9,7 @@ import { paginationOptsValidator, type PaginationOptions } from 'convex/server';
 import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { query } from './cliServer';
-import { accessibleProject, ownedProject } from './projectAuthority';
+import { accessibleProject, readProjectRole } from './projectAuthority';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { planningRecordTable } from './projectWorkRecordTables';
 import { planViewRow } from './projectPlanView';
@@ -113,7 +113,7 @@ export const page = query({
   },
 });
 
-/** A linked shelf Item, only for the owner. Resolve a prefix in the same read, and leave ambiguous prefixes alone. */
+/** A linked Item outside the open plan. Shelves stay owner-only; ambiguous prefixes resolve to nothing. */
 export const item = query({
   args: { projectId: v.id('hostedProjects'), id: v.string() },
   returns: v.union(v.object({ id: v.string(), row: v.union(v.string(), v.null()) }), v.null()),
@@ -121,7 +121,10 @@ export const item = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read your Forge project.');
-      const project = await ownedProject(ctx, projectId, user.subject);
+      const project = await accessibleProject(ctx, projectId, user.subject);
+      const owner = project.owner === user.subject;
+      if (!owner && (!isPlanningUuid(id) || !(await readProjectRole(ctx, project, user.subject))))
+        return null;
       const generation = await selectedGeneration(ctx, project);
       if (!generation) return null;
       const partition = recordPartition(generation);
@@ -133,8 +136,13 @@ export const item = query({
       const root = roots.length === 1 ? roots[0] : null;
       if (!root) return null;
       const header = JSON.parse(root.value);
-      if (header.purged || (header.status !== 'archived' && header.status !== 'deleted'))
-        return { id: root.key, row: null };
+      if (header.purged) return owner ? { id: root.key, row: null } : null;
+      if (header.status !== 'archived' && header.status !== 'deleted') {
+        const search = await record(ctx, partition, 'planningSearch', root.key);
+        const row = search && planViewRow(JSON.parse(search.value), search.position);
+        return { id: root.key, row: row ? JSON.stringify(row) : null };
+      }
+      if (!owner) return null;
       const rows = [root];
       await commandPayloadRows(rows, keys =>
         Promise.all(keys.map(({ collection, key }) => record(ctx, partition, collection, key))),

@@ -107,11 +107,11 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
         assert.equal(await section.locator('article.re').count(), 1, 'the reply sits under its root');
         assert.match(
           await section.locator('article').nth(2).locator('.by').textContent(),
-          /sample-one\/keen-impala·?agent·?model not declared/,
+          /keen-impala.*model not declared.*@sample-one/,
         );
         assert.match(
           await section.locator('article').nth(3).locator('.by').textContent(),
-          /sample-threepersonnot verified/,
+          /sample-threenot verified/,
         );
         assert.equal(await section.locator('img, script').count(), 0, 'member HTML never becomes elements');
         assert.equal(
@@ -154,7 +154,11 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
       assert.equal(await section.getByText(/sample-(one|two)/).count(), 0, 'no person is named');
       assert.equal(await section.locator('textarea').count(), 0);
       assert.equal(await section.getByRole('button', { name: /React|Reply/ }).count(), 0);
-      assert.equal(await section.locator('.who').count(), 0, 'no handle is drawn as a checked writer');
+      assert.equal(
+        await section.locator('.who a').count(),
+        0,
+        'no hidden person or run gets an identity link',
+      );
     });
 
     await t.test('axe and widths: both themes, desk and phone', async t => {

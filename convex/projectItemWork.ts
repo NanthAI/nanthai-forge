@@ -20,6 +20,8 @@ import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { query } from './cliServer';
 import { recordCaller } from './projectHostedFrictionStore';
+import { readProjectRole } from './projectAuthority';
+import { itemWorkLaneDetails, itemWorkLandingDetails, itemWorkRelated } from './projectItemWorkDetails';
 import { readHostedRecord, recordHead } from './projectHostedRecords';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
@@ -102,19 +104,23 @@ export const read = query({
   args: {
     projectId: v.id('hostedProjects'),
     itemId: v.string(),
-    /** Lanes per page, open first then newest: 20 by default, at most 50. */
+    /** Lanes per page, open first then newest. Web details use pages of up to 10, CLI up to 50. */
     limit: v.optional(v.number()),
     cursor: v.optional(v.union(v.string(), v.null())),
+    details: v.optional(v.boolean()),
   },
   returns: v.string(),
-  handler: async (ctx, { projectId, itemId, limit, cursor }) => {
+  handler: async (ctx, { projectId, itemId, limit, cursor, details }) => {
     try {
       invariant(isPlanningUuid(itemId), 'BAD_ARGUMENT', 'itemId: expected the full Item UUID.');
-      const shown = Math.min(Math.max(Math.trunc(limit ?? WORK_PAGE), 1), WORK_PAGE_MAX);
       const offset = decodeOffset(cursor ?? null);
       // Signed out: nothing to read (the page says to sign in). Signed in: the Lanes list's own access rule.
       if (!(await ctx.auth.getUserIdentity())) return canonicalPayload({ role: false });
-      const { actor } = await recordCaller(ctx, projectId);
+      const { actor, project } = await recordCaller(ctx, projectId);
+      const detailed = details && Boolean(await readProjectRole(ctx, project, actor));
+      const shown = detailed
+        ? Math.min(Math.max(Math.trunc(limit ?? 10), 1), 10)
+        : Math.min(Math.max(Math.trunc(limit ?? WORK_PAGE), 1), WORK_PAGE_MAX);
       const { intents, state } = await itemIntentChain(ctx, projectId, itemId);
 
       // Every Lane of the chain, any state: small head rows only, bounded per Intent.
@@ -146,30 +152,39 @@ export const read = query({
 
       // Landing receipts: the Intent's landing notes first (every landing since 3a733ee8), then the overlap stamp.
       const landed = new Map<string, Landed>();
-      // Every shown Lane's Intent, abandoned-only ones aside: a keepOpen landing leaves its Lane open.
-      for (const intentId of new Set(lanes.filter(lane => lane.state !== 'abandoned').map(l => l.intentId))) {
+      const recentLandings = new Map<string, Landed>();
+      let landingsPartial = false;
+      // The web's Landings fold pages the notes independently of the Lanes fold. The compact
+      // CLI only needs the latest receipt for each shown Lane, including Lanes left open after landing.
+      const landingIntents = detailed
+        ? intents
+        : new Set(lanes.filter(lane => lane.state !== 'abandoned').map(lane => lane.intentId));
+      for (const intentId of landingIntents) {
         const notes = await ctx.db
           .query('projectIntentLandingNotes')
           .withIndex('by_project_and_intent', q => q.eq('projectId', projectId).eq('intentId', intentId))
           .order('desc')
-          .take(LANDING_NOTES_PER_ITEM);
+          .take(LANDING_NOTES_PER_ITEM + (detailed ? 1 : 0));
+        if (notes.length > LANDING_NOTES_PER_ITEM) {
+          landingsPartial = true;
+          notes.pop();
+        }
         const reverted = new Map(
           notes.filter(note => note.kind === 'reverted' && note.revertOf).map(note => [note.revertOf!, note]),
         );
         for (const note of notes) {
           if (note.kind !== 'landed') continue;
+          const receipt = {
+            receiptId: note.receiptId,
+            commit: note.commit,
+            at: note.at,
+            sequence: note.sequence,
+            ...(note.landedBy ? { landedBy: note.landedBy.by } : {}),
+            ...(reverted.has(note.receiptId) ? { revertedBy: reverted.get(note.receiptId)!.receiptId } : {}),
+          };
+          if (detailed) recentLandings.set(receipt.receiptId, receipt);
           for (const laneId of [...note.laneIds, ...(note.viaLaneId ? [note.viaLaneId] : [])])
-            if (!landed.has(laneId))
-              landed.set(laneId, {
-                receiptId: note.receiptId,
-                commit: note.commit,
-                at: note.at,
-                sequence: note.sequence,
-                ...(note.landedBy ? { landedBy: note.landedBy.by } : {}),
-                ...(reverted.has(note.receiptId)
-                  ? { revertedBy: reverted.get(note.receiptId)!.receiptId }
-                  : {}),
-              });
+            if (!landed.has(laneId)) landed.set(laneId, receipt);
         }
       }
       for (const lane of lanes) {
@@ -219,6 +234,25 @@ export const read = query({
           });
       }
 
+      const pageReceipts = new Map(
+        [...recentLandings.values()]
+          .sort((a, b) => (b.sequence ?? 0) - (a.sequence ?? 0))
+          .slice(offset, offset + shown)
+          .map(receipt => [receipt.receiptId, receipt]),
+      );
+      if (detailed)
+        for (const lane of lanes) {
+          const receipt = landed.get(lane.id);
+          if (receipt && !recentLandings.has(receipt.receiptId)) pageReceipts.set(receipt.receiptId, receipt);
+        }
+      const identity = { projectId, actor };
+      const [laneDetails, landings, related] = detailed
+        ? await Promise.all([
+            itemWorkLaneDetails(ctx, identity, lanes),
+            itemWorkLandingDetails(ctx, projectId, [...pageReceipts.values()]),
+            offset === 0 ? itemWorkRelated(ctx, project, itemId, actor === project.owner) : undefined,
+          ])
+        : [];
       const rows = lanes.map(lane => {
         const run = [lane.agentRun, lane.holder?.agent].find(isAgentSlug);
         const agent = Boolean(run) || lane.authorship?.kind === 'agent';
@@ -236,6 +270,7 @@ export const read = query({
           state: laneState,
           head: lane.head,
           lastActivityAt: lane.at,
+          ...laneDetails?.get(lane.id),
           actor: agentActor(lane.actor, run),
           kind: agent ? ('agent' as const) : ('person' as const),
           ...(run ? { run } : {}),
@@ -253,9 +288,11 @@ export const read = query({
         intent: state,
         intents: intents.length,
         lanes: rows,
+        ...(landings ? { landings, landingsPartial } : {}),
+        ...(related ? { related } : {}),
         total,
         atLeast,
-        nextCursor: next < heads.length ? `${CURSOR}${next}` : null,
+        nextCursor: next < Math.max(heads.length, recentLandings.size) ? `${CURSOR}${next}` : null,
       });
     } catch (error) {
       return report(error);

@@ -130,7 +130,7 @@ test('done and dropped Items come one bounded page at a time from root rows', as
     return value;
   };
   for (let i = 0; i < 70; i++) await add({});
-  await add({ status: 'abandoned' });
+  const abandonedItem = await add({ status: 'abandoned' });
   await add({ status: 'open' });
 
   const meter = meterReads(s.ctx);
@@ -175,6 +175,23 @@ test('done and dropped Items come one bounded page at a time from root rows', as
     settled.settledPage(s.ctx, s.projectId, 'closed', { cursor: null, numItems: 50 }, 'x'.repeat(65)),
     /BAD_ARGUMENT|at most 64/,
   );
+
+  const direct = id => settled.item._handler(s.ctx, { projectId: s.projectId, id });
+  for (const item of [...own, abandonedItem]) {
+    assert.deepEqual(await direct(item.id), await direct(item.id.slice(0, 8)));
+    const linked = JSON.parse((await direct(item.id)).row);
+    assert.deepEqual([linked.title, linked.status, linked.doneWhen], [item.title, item.status, [1, 1]]);
+  }
+  const archived = await add({ status: 'archived' });
+  await s.ctx.db.insert('projectReaders', { projectId: s.projectId, reader: 'reader' });
+  s.caller('reader');
+  assert.equal(JSON.parse((await direct(own[0].id)).row).status, 'closed');
+  assert.equal(await direct(archived.id), null);
+  assert.equal(await direct(archived.id.slice(0, 8)), null);
+  await s.ctx.db.patch(s.projectId, { visibility: 'public' });
+  s.caller('visitor');
+  assert.equal(await direct(own[0].id), null);
+  await s.ctx.db.patch(s.projectId, { visibility: 'private' });
 
   s.caller('stranger');
   await assert.rejects(settled.settledPage(s.ctx, s.projectId, 'closed', { cursor: null, numItems: 50 }));

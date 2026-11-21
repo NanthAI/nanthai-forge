@@ -7,7 +7,7 @@
 // Everything scopes add one bounded page each of done and dropped Items, and the Archive and Deleted views one page of
 // theirs (projectPlanSettled:page); who works on an unowned Item is one bounded one-shot read by Intent
 // (projectPlanWorkers:read, workers.ts), again only when the in-progress Items change or a hidden tab is shown again.
-// An owner on the page of an Item the plan rows leave out reads that Item's root (projectPlanSettled:item, indexed read) to show an Archived or Deleted Item with Unarchive or Restore.
+// Item links outside the open plan use an exact lookup (projectPlanSettled:item). Owners can also open shelved Items.
 // Writes:
 // projectWorkCommand:command for one row, projectPlanningBatch:apply for a selection, each retry-safe by its
 // operation id.
@@ -16,9 +16,9 @@ import { useAction, useConvex, useMutation } from 'convex/react';
 import { makeFunctionReference, type PaginationResult } from 'convex/server';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
-import { Band, Key, Menu, Region, Row, Standing } from '../../ds';
+import { Band, Key, Menu, Region, Standing } from '../../ds';
 import { Announcer, useAnnounce } from '../../ds/behaviour/announce';
-import { inverseRelationLabel, isLive, itemStatus, itemStatusLabel } from '../../../../src/planning-model';
+import { isLive, itemStatus, itemStatusLabel } from '../../../../src/planning-model';
 import type { PlanRow } from '../../../../src/planning-model';
 import { planningBatchLimit } from '../../../../src/planning-batch';
 import { useSafePaginatedQuery, useSafeQuery } from '../../safe-query';
@@ -38,7 +38,7 @@ import { COLS, DoneWhen, Line, Owner, Status } from './rows';
 import { useWorkers, type ActiveLane, type Workers } from './workers';
 import { Tick, type Ticker } from './Tick';
 import { Versions } from './Versions';
-import { isShelf, shelfWords, shelve, shelvedRowOf, ShelfList, unshelve, type Shelf } from './Shelf';
+import { isShelf, shelfWords, shelve, ShelfList, unshelve, type Shelf } from './Shelf';
 import { isPlanningPrefix, isPlanningUuid } from '../../../../src/planning-id';
 import { DeleteForever, type PurgeItem } from './DeleteForever';
 import type { BatchPut } from '../../../../src/planning-batch';
@@ -146,17 +146,16 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
   const shortLink = Boolean(read?.canEdit && isPlanningPrefix(lookupId));
   const lookup = useMemo(
     () =>
-      shortLink ||
-      (read?.canEdit && isPlanningUuid(lookupId) && !parseRows(read).some(row => row.id === lookupId)),
+      shortLink || (read && isPlanningUuid(lookupId) && !parseRows(read).some(row => row.id === lookupId)),
     [shortLink, read, lookupId],
   );
   const linked = useSafeQuery(api.projectPlanSettled.item, lookup ? { projectId, id: lookupId } : 'skip');
-  const shelvedItem = useMemo(
+  const linkedItem = useMemo(
     () =>
       lookup && !linked.error && linked.value === undefined
         ? ('loading' as const)
         : linked.value?.row
-          ? shelvedRowOf(linked.value.row, linked.value.id)
+          ? (JSON.parse(linked.value.row) as PlanRow)
           : null,
     [lookup, linked.error, linked.value],
   );
@@ -165,7 +164,8 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
   const apply = useMutation(batchApply);
   const client = useConvex();
   const readItemWork = useCallback<ReadItemWork>(
-    (itemId, cursor) => client.query(api.projectItemWork.read, { projectId, itemId, limit: 10, cursor }),
+    (itemId, cursor) =>
+      client.query(api.projectItemWork.read, { projectId, itemId, limit: 10, cursor, details: true }),
     [client, projectId],
   );
   const put: Put = command => {
@@ -213,7 +213,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
       closed={closed}
       dropped={dropped}
       shelved={shelved}
-      shelvedItem={shelvedItem}
+      linkedItem={linkedItem}
       resolvedShortId={shortLink ? (linked.value?.id ?? null) : undefined}
       showDone={showDone}
       progress={counts.value}
@@ -256,6 +256,7 @@ export function PlanScreenView({
   closed = noSettled,
   dropped = noSettled,
   shelved = noSettled,
+  linkedItem = null,
   shelvedItem = null,
   resolvedShortId,
   showDone = () => undefined,
@@ -263,7 +264,8 @@ export function PlanScreenView({
 }: Pick<PlaceProps, 'route' | 'projectName' | 'feed'> & {
   /** The project's progress counts (convex/projectPlanCounts.ts), the same read Needs me shows. */
   progress?: PlanCountsRead | undefined;
-  /** The Item page's Item when the plan rows leave it out because it is Archived or Deleted (owner only). */
+  /** The Item resolved by a direct link outside the open Plan. */
+  linkedItem?: PlanRow | null | 'loading';
   shelvedItem?: PlanRow | null | 'loading';
   resolvedShortId?: string | null | undefined;
   /** Hosted reads for the Item page's comments and versions; without it the page draws neither. */
@@ -359,13 +361,25 @@ export function PlanScreenView({
       setError(`Forge could not change ${row.title}; nothing changed.`);
     }
   };
+  const lookedUpShelf =
+    linkedItem && linkedItem !== 'loading' && isShelf(linkedItem.status) ? linkedItem : null;
+  const shelfRow = lookedUpShelf ?? shelvedItem;
+  const itemRow = itemKey
+    ? (whole?.byId.get(itemKey) ??
+      (isPlanningPrefix(itemKey)
+        ? [...(whole?.byId.values() ?? [])].find(entry => entry.id.startsWith(itemKey))
+        : undefined) ??
+      (linkedItem && linkedItem !== 'loading' && linkedItem.id === itemKey && !isShelf(linkedItem.status)
+        ? linkedItem
+        : null))
+    : null;
   const here =
     itemKey &&
-    shelvedItem &&
-    shelvedItem !== 'loading' &&
-    shelvedItem.id.startsWith(itemKey) &&
-    isShelf(shelvedItem.status)
-      ? { row: shelvedItem, shelf: shelvedItem.status, back: unshelve(shelvedItem) }
+    shelfRow &&
+    shelfRow !== 'loading' &&
+    shelfRow.id.startsWith(itemKey) &&
+    isShelf(shelfRow.status)
+      ? { row: shelfRow, shelf: shelfRow.status, back: unshelve(shelfRow) }
       : itemKey && sent && sent.row.id.startsWith(itemKey)
         ? {
             row: sent.row,
@@ -395,7 +409,7 @@ export function PlanScreenView({
     return (
       <ItemPage
         route={route}
-        itemKey={itemKey}
+        row={whole && (linkedItem !== 'loading' || here) ? itemRow : undefined}
         projectName={projectName}
         view={whole}
         workers={workers}
@@ -406,7 +420,6 @@ export function PlanScreenView({
         onVersions={projectId ? () => setVersions(true) : undefined}
         onShelve={whole?.canEdit && run ? (row, to) => void shelfMove(shelve([row], to), row, to) : undefined}
         shelved={here}
-        looking={shelvedItem === 'loading' && !here}
         onBack={here && run ? () => void shelfMove([here.back], here.row, null) : undefined}
         onPurge={
           whole?.canEdit && here?.shelf === 'deleted' && purge
@@ -420,12 +433,7 @@ export function PlanScreenView({
           versions && projectId ? (
             <Versions
               projectId={projectId}
-              itemId={
-                here?.row.id ??
-                [...(whole?.byId.values() ?? [])].find(entry => itemKey && entry.id.startsWith(itemKey))
-                  ?.id ??
-                route.rest
-              }
+              itemId={here?.row.id ?? itemRow?.id ?? route.rest}
               restore={
                 whole?.canEdit && run
                   ? async (writes, words) => {
@@ -448,7 +456,7 @@ export function PlanScreenView({
             <SplitSheet
               onOpenChange={setSplit}
               row={
-                [...(whole?.byId.values() ?? [])].find(entry => itemKey && entry.id.startsWith(itemKey)) ?? {
+                itemRow ?? {
                   id: route.rest,
                   title: route.rest.slice(0, 8),
                 }
@@ -906,7 +914,7 @@ function SettledPager({
  * until the Item page is rebuilt. */
 function ItemPage({
   route,
-  itemKey,
+  row,
   projectName,
   view,
   workers,
@@ -925,10 +933,9 @@ function ItemPage({
   split,
   versions,
   toast,
-  looking = false,
 }: {
   route: PlaceProps['route'];
-  itemKey: string | null;
+  row: PlanRow | null | undefined;
   projectName: string;
   view: PlanView | null;
   workers: Workers;
@@ -941,8 +948,6 @@ function ItemPage({
   onShelve?: ((row: PlanRow, to: Shelf) => void) | undefined;
   /** This page's Item when it is Archived or Deleted (just sent, or opened by its link); onBack brings it back. */
   shelved?: { row: PlanRow; shelf: Shelf } | null;
-  /** Its root is still being read: the page says it is loading, not that the Item is missing. */
-  looking?: boolean;
   onBack?: (() => void) | undefined;
   onPurge?: (() => void) | undefined;
   purgeDialog?: ReactNode;
@@ -952,10 +957,6 @@ function ItemPage({
   split?: ReactNode;
   toast?: ReactNode;
 }) {
-  const row = view
-    ? ((itemKey ? [...view.byId.values()].find(entry => entry.id.startsWith(itemKey)) : undefined) ??
-      (looking ? undefined : null))
-    : undefined;
   const legacy = currentScreenHref(route);
   const workItem = row?.id ?? (row === null ? shelved?.row.id : undefined);
   const full = legacy && row ? `${legacy}?planningItem=${encodeURIComponent(row.id)}` : legacy;
@@ -963,18 +964,21 @@ function ItemPage({
     ? view?.groups.find(entry => entry.lines.some(line => line.row.id === row.id))
     : undefined;
   const line = group?.lines.find(entry => entry.row.id === row?.id);
+  const initiative = row?.initiativeId ? view?.byId.get(row.initiativeId) : undefined;
   const blocks = row
-    ? [...view!.byId.values()].filter(other =>
-        other.relations?.some(relation => relation.kind === 'depends-on' && relation.id === row.id),
-      )
+    ? [...(view?.byId.values() ?? [])]
+        .filter(other =>
+          other.relations?.some(relation => relation.kind === 'depends-on' && relation.id === row.id),
+        )
+        .map(other => ({ kind: 'Blocks', id: other.id, title: other.title }))
     : [];
   const facts: [string, ReactNode][] = row
     ? [
         ['Status', <Status key="s" row={row} />],
         [
           'In',
-          group?.initiative
-            ? `${group.initiative.title}${line && !line.depth ? `, ${line.rank} of ${group.lines.filter(entry => !entry.depth).length} in order` : ''}`
+          initiative
+            ? `${initiative.title}${line && !line.depth && group ? `, ${line.rank} of ${group.lines.filter(entry => !entry.depth).length} in order` : ''}`
             : 'No Initiative',
         ],
         ['Owner', <Owner key="o" owner={row.owner} workers={workers.get(row.id)} />],
@@ -986,7 +990,12 @@ function ItemPage({
   return (
     <div className="plan">
       <Head
-        trail={crumbsFor(route, projectName)}
+        trail={[
+          ...crumbsFor({ ...route, rest: '' }, projectName).map(crumb =>
+            initiative && !crumb.href ? { ...crumb, href: at({}) } : crumb,
+          ),
+          ...(initiative ? [{ label: initiative.title, href: at({ rest: initiative.id }) }] : []),
+        ]}
         sentence={
           row === undefined ? (
             'Loading the Item…'
@@ -1063,31 +1072,9 @@ function ItemPage({
               </FactRow>
             ))}
           </dl>
-          {row.relations?.length || blocks.length ? (
-            <>
-              <Band title="Relations" count={(row.relations?.length ?? 0) + blocks.length} />
-              {row.relations?.map(relation => (
-                <Relation
-                  key={`${relation.kind}:${relation.id}`}
-                  kind={relation.kind}
-                  id={relation.id}
-                  view={view!}
-                  at={at}
-                />
-              ))}
-              {blocks.map(other => (
-                <Row key={`blocks:${other.id}`} cols="8em minmax(0, 1fr)">
-                  <span className="t2">{inverseRelationLabel['depends-on']}</span>
-                  <A className="lk" href={at({ rest: other.id })} dir="auto">
-                    {other.title}
-                  </A>
-                </Row>
-              ))}
-            </>
-          ) : null}
           {projectId ? (
             <Suspense fallback={<div className="quietline">Loading the comments…</div>}>
-              <ItemDiscussion projectId={projectId} itemId={row.id} />
+              <ItemDiscussion key={row.id} projectId={projectId} itemId={row.id} project={route} />
             </Suspense>
           ) : null}
         </Region>
@@ -1114,7 +1101,14 @@ function ItemPage({
         </Region>
       ) : null}
       {workItem && readItemWork ? (
-        <ItemWork key={`${projectId}:${workItem}`} itemId={workItem} read={readItemWork} at={at} />
+        <ItemWork
+          key={`${projectId}:${workItem}`}
+          itemId={workItem}
+          read={readItemWork}
+          at={at}
+          project={route}
+          blocks={blocks}
+        />
       ) : null}
     </div>
   );
@@ -1126,36 +1120,5 @@ function FactRow({ label, children }: { label: string; children: ReactNode }) {
       <dt>{label}</dt>
       <dd>{children}</dd>
     </>
-  );
-}
-
-const relationWords = {
-  'depends-on': 'Depends on',
-  'duplicate-of': 'Duplicate of',
-  related: 'Related',
-} as const;
-function Relation({
-  kind,
-  id,
-  view,
-  at,
-}: {
-  kind: keyof typeof relationWords;
-  id: string;
-  view: PlanView;
-  at: (patch: Partial<PlaceProps['route']>) => string;
-}) {
-  const other = view.byId.get(id);
-  return (
-    <Row cols="8em minmax(0, 1fr)">
-      <span className="t2">{relationWords[kind]}</span>
-      {other ? (
-        <A className="lk" href={at({ rest: id })} dir="auto">
-          {other.title}
-        </A>
-      ) : (
-        <span className="mono t2">{id.slice(0, 8)}, not in open work</span>
-      )}
-    </Row>
   );
 }

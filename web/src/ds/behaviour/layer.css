@@ -4,14 +4,16 @@
 
 [data-ds] {
   .ds-pop { outline: 0; }
+  .ds-pop > .menu { max-height: inherit; overflow-y: auto; overscroll-behavior: contain; }
   .ds-pop[data-entering] { animation: ds-pop-in var(--d-state) var(--ease-out); }
   .menu { outline: 0; }
-  .menu [role="menuitem"] { display: flex; width: 100%; align-items: center; gap: var(--s-3); justify-content: space-between; height: 32px; padding: 0 var(--s-3); font-size: var(--t-small); color: var(--text); cursor: default; outline: 0; }
+  .menu [role="menuitem"] { display: flex; width: 100%; align-items: center; gap: var(--s-3); justify-content: space-between; min-height: 32px; padding: var(--s-1) var(--s-3); font-size: var(--t-small); color: var(--text); cursor: default; outline: 0; }
+  .menu [role="menuitem"] > span { min-width: 0; overflow-wrap: anywhere; }
   .menu [role="menuitem"][data-focused] { background: var(--accent-bg); }
   .menu [role="menuitem"][data-disabled] { color: var(--text-3); }
   .menu [role="menuitem"].danger { color: var(--failed); }
   .menu [role="separator"] { border-top: var(--rule) solid var(--line); margin: var(--s-1) 0; }
-  @media (max-width: 860px) { .menu [role="menuitem"] { height: 42px; } }
+  @media (max-width: 860px) { .menu [role="menuitem"] { min-height: 42px; } }
 
   .ds-dialog { outline: 0; }
   .ds-dialog > .ph h2 { margin: 0; }
@@ -38,6 +40,25 @@
   .zone[data-drop-target] { box-shadow: inset 0 0 0 2px var(--brand); }
   .zone-empty { padding: var(--s-4) var(--gut); color: var(--text-3); font-size: var(--t-small); border-bottom: var(--rule) dashed var(--line-strong); }
   .grip[data-pressed] { cursor: grabbing; }
+  /* Native pickup keeps the occupied zones in their resting grid. Empty targets overlay its edges. */
+  .dock[data-native-drag] { position: relative; }
+  .dock[data-native-drag] > .zone[data-empty] {
+    display: flex;
+    position: absolute;
+    grid-area: top;
+    inset-block-end: 100%;
+    z-index: 3;
+    background: var(--surface-2);
+    border: var(--rule) dashed var(--line-strong);
+  }
+  .dock[data-native-drag] > .zone[data-zone="top"][data-empty] { inset-inline: 25%; }
+  .dock[data-native-drag] > .zone[data-zone="a"][data-empty] { inset-inline: 0 76%; }
+  .dock[data-native-drag] > .zone[data-zone="b"][data-empty] { inset-inline: 76% 0; }
+  .dock[data-native-drag] > .zone[data-empty] .zone-empty { border-bottom: 0; }
+  @media (max-width: 860px) {
+    .dock[data-native-drag] > .zone[data-zone="a"][data-empty] { inset: 100% 52% auto 0; }
+    .dock[data-native-drag] > .zone[data-zone="b"][data-empty] { inset: 100% 0 auto 52%; }
+  }
   .dock .grip { user-select: none; }
   .dock .grip > svg { pointer-events: none; }
   .dock-toast { flex-wrap: wrap; }

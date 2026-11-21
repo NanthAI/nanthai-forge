@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { useEffect, useState } from 'react';
-import { Band, Key, Region, Row, State, Who, type StateWord } from '../../ds';
+import { useEffect, useId, useState, type ReactNode } from 'react';
+import { Avatar, Count, Glyph, Key, Region, Row, State, Who, useFold, type StateWord } from '../../ds';
+import { age } from '../../ui/status';
 import { A } from '../frames';
 import type { ProjectRoute } from '../screen-route';
+import { whoLinks, type WhoProject } from '../who-links';
 
 export type ReadItemWork = (itemId: string, cursor: string | null) => Promise<string>;
 
@@ -13,42 +15,130 @@ const stateWords = {
   landed: 'Landed',
   abandoned: 'Abandoned',
 } as const satisfies Record<string, StateWord>;
-
-type Receipt = { receiptId: string; commit: string; at: string };
+type Landing = {
+  receiptId: string;
+  commit: string;
+  at: string;
+  check: 'passed' | 'not-checked' | null;
+  files: number | null;
+  sequence?: number;
+};
 type Lane = {
   laneId: string;
+  title: string | null;
   state: keyof typeof stateWords;
-  lastActivityAt: string;
+  receipt?: { receiptId: string } | null;
   actor?: string | null;
   kind: 'agent' | 'person';
+  run?: string;
   model: string | null;
-  receipt?: Receipt | null;
+  saveCount?: number;
+  moreSaves: boolean;
+  lastSaveAt: string | null;
 };
+type Related = { kind: string; id: string; title: string };
 type Work =
   | { role: false }
-  | { role: true; lanes: Lane[]; total: number; atLeast: boolean; nextCursor: string | null };
+  | {
+      role: true;
+      lanes: Lane[];
+      landings?: Landing[];
+      landingsPartial?: boolean | undefined;
+      related?: Related[];
+      total: number;
+      atLeast: boolean;
+      nextCursor: string | null;
+    };
 
 function WorkTime({ at }: { at: string }) {
   return (
-    <time className="t2" dateTime={at}>
-      {new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+    <time className="t2" dateTime={at} title={new Date(at).toLocaleString()}>
+      {age(at, Date.now())}
     </time>
   );
 }
 
-/** One page on open. Further pages use only the same reader's cursor and an explicit request. */
+function Part({
+  name,
+  fold,
+  count,
+  atLeast,
+  children,
+}: {
+  name: string;
+  fold: string;
+  count?: number;
+  atLeast?: boolean;
+  children: ReactNode;
+}) {
+  const [open, toggle] = useFold(fold, name === 'Lanes');
+  const id = useId();
+  return (
+    <div className={`grp plan-grp${open ? '' : ' shut'}`} data-fold="">
+      <div className="band plan-gh">
+        <span className="plan-gn">{name}</span>
+        {count === undefined ? null : atLeast ? (
+          <span className="t2">At least {count.toLocaleString()}</span>
+        ) : (
+          <Count n={count} />
+        )}
+        <button
+          type="button"
+          className="tw"
+          aria-expanded={open}
+          aria-controls={id}
+          aria-label={name}
+          onClick={toggle}
+        />
+      </div>
+      <div id={id} hidden={!open}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function WhoWorked({ lane, project }: { lane: Lane; project: WhoProject }) {
+  const actor = lane.actor ?? '';
+  if (lane.kind === 'agent') {
+    const handle = actor.includes('/') ? actor : `${actor}/${lane.run ?? 'Agent'}`;
+    return (
+      <Who
+        handle={handle}
+        model={lane.model}
+        layout="line"
+        nofor={!actor}
+        {...(actor ? whoLinks(lane.run ? handle : actor, project) : {})}
+      />
+    );
+  }
+  return actor ? (
+    <Who handle={actor} layout="line" {...whoLinks(actor, project)} />
+  ) : (
+    <span className="who" data-kind="person">
+      <Avatar handle="?" /> Person
+    </span>
+  );
+}
+
+/** One page on open. Further pages use the same reader's cursor and an explicit request. */
 export function ItemWork({
   itemId,
   read,
   at,
+  project,
+  blocks,
 }: {
   itemId: string;
   read: ReadItemWork;
   at: (patch: Partial<ProjectRoute>) => string;
+  project: WhoProject;
+  blocks: readonly Related[];
 }) {
   const [work, setWork] = useState<Work | 'failed' | null>(null);
   const [paging, setPaging] = useState(false);
   const [pageFailed, setPageFailed] = useState(false);
+  const [attempt, retry] = useState(0);
   useEffect(() => {
     let current = true;
     read(itemId, null)
@@ -61,7 +151,7 @@ export function ItemWork({
     return () => {
       current = false;
     };
-  }, [itemId, read]);
+  }, [itemId, read, attempt]);
 
   if (work === null || work === 'failed' || !work.role)
     return (
@@ -72,6 +162,17 @@ export function ItemWork({
             : work === 'failed'
               ? 'Work could not be loaded.'
               : 'Sign in to see work.'}
+          {work === 'failed' ? (
+            <Key
+              size="sm"
+              onClick={() => {
+                setWork(null);
+                retry(value => value + 1);
+              }}
+            >
+              Retry
+            </Key>
+          ) : null}
         </div>
       </Region>
     );
@@ -86,78 +187,129 @@ export function ItemWork({
         setWork(next);
         return;
       }
-      const shown = new Set(work.lanes.map(lane => lane.laneId));
-      setWork({ ...next, lanes: [...work.lanes, ...next.lanes.filter(lane => !shown.has(lane.laneId))] });
+      const lanes = new Map([...work.lanes, ...next.lanes].map(lane => [lane.laneId, lane]));
+      const landings = new Map(
+        [...(work.landings ?? []), ...(next.landings ?? [])].map(landing => [landing.receiptId, landing]),
+      );
+      setWork({
+        ...next,
+        lanes: [...lanes.values()],
+        landings: [...landings.values()],
+        landingsPartial: work.landingsPartial || next.landingsPartial,
+        related: work.related ?? [],
+      });
     } catch {
       setPageFailed(true);
     } finally {
       setPaging(false);
     }
   };
-  const receipts = new Map<string, Receipt>();
-  for (const lane of work.lanes) {
-    if (lane.receipt) receipts.set(lane.receipt.receiptId, lane.receipt);
-  }
-  const landings = [...receipts.values()].sort((a, b) => b.at.localeCompare(a.at));
+  const landings = [...(work.landings ?? [])].sort(
+    (a, b) => b.at.localeCompare(a.at) || (b.sequence ?? 0) - (a.sequence ?? 0),
+  );
+  const related = new Map(
+    [...(work.related ?? []), ...blocks].map(link => [`${link.kind}:${link.id}`, link]),
+  );
+  const fold = `item-work:${project.handle}/${project.project}:${itemId}`;
+  const more = work.nextCursor ? (
+    <div className="pad">
+      <Key size="sm" onClick={() => void showMore()} disabled={paging}>
+        {paging ? 'Loading more work…' : 'Show more work'}
+      </Key>
+      {pageFailed ? <p role="status">More work could not be loaded.</p> : null}
+    </div>
+  ) : null;
   return (
     <Region title="Work">
-      <Band
-        title="Lanes"
-        count={work.atLeast ? undefined : work.total}
-        hint={work.atLeast ? `At least ${work.total.toLocaleString()}` : undefined}
-      />
-      {work.lanes.length ? (
-        work.lanes.map(lane => (
-          <Row key={lane.laneId} cols="minmax(0, 1fr) auto">
-            <div>
-              <A className="lk" href={at({ place: 'lanes', rest: lane.laneId })}>
-                Lane {lane.laneId.slice(0, 8)}
+      <Part name="Lanes" fold={`${fold}:lanes`} count={work.total} atLeast={work.atLeast}>
+        {work.lanes.length ? (
+          work.lanes.map(lane => (
+            <Row key={lane.laneId} cols="minmax(0, 1fr) auto" style={{ rowGap: 0 }}>
+              <A className="lk ttl" href={at({ place: 'lanes', rest: lane.laneId })} dir="auto">
+                {lane.title ?? `Lane ${lane.laneId.slice(0, 8)}`}
               </A>
-              <div className="meta">
-                {lane.actor ? (
-                  <Who handle={lane.actor} model={lane.model} />
-                ) : lane.kind === 'agent' ? (
-                  'Agent'
+              <div className="r">
+                {lane.state === 'landed' && !lane.receipt ? (
+                  <span className="st" data-st="stale">
+                    <Glyph of="stale" /> Closed without landing
+                  </span>
                 ) : (
-                  'Person'
+                  <State word={stateWords[lane.state]} />
                 )}
               </div>
-            </div>
-            <div>
-              <State word={stateWords[lane.state]} />
-              <div className="meta">
-                <WorkTime at={lane.lastActivityAt} />
+              <div className="meta" style={{ gridColumn: '1 / -1', flexBasis: '100%' }}>
+                <WhoWorked lane={lane} project={project} />
               </div>
-            </div>
-          </Row>
-        ))
-      ) : (
-        <div className="quietline">No Lanes yet.</div>
-      )}
-      <Band title="Landings" />
-      {landings.length ? (
-        landings.map(landing => (
-          <Row key={landing.receiptId} cols="minmax(0, 1fr) auto">
-            <A
-              className="lk"
-              href={`${at({ place: 'code', section: 'files' })}?at=${encodeURIComponent(landing.commit)}`}
-            >
-              Landing {landing.receiptId.slice(0, 8)}
-            </A>
-            <WorkTime at={landing.at} />
-          </Row>
-        ))
-      ) : (
-        <div className="quietline">No landings on these Lanes.</div>
-      )}
-      {work.nextCursor ? (
-        <div className="pad">
-          <Key size="sm" onClick={() => void showMore()} disabled={paging}>
-            {paging ? 'Loading more Lanes…' : 'Show more Lanes'}
-          </Key>
-          {pageFailed ? <p role="status">More work could not be loaded.</p> : null}
-        </div>
-      ) : null}
+              <div className="meta" style={{ gridColumn: '1 / -1', flexBasis: '100%' }}>
+                {lane.saveCount === undefined
+                  ? 'Saves not reported'
+                  : `${lane.moreSaves ? 'At least ' : ''}${lane.saveCount.toLocaleString()} ${lane.saveCount === 1 ? 'save' : 'saves'}`}
+                {lane.lastSaveAt ? (
+                  <>
+                    {' '}
+                    · Last save <WorkTime at={lane.lastSaveAt} />
+                  </>
+                ) : null}
+              </div>
+            </Row>
+          ))
+        ) : (
+          <div className="quietline">No Lanes yet.</div>
+        )}
+      </Part>
+      <Part name="Landings" fold={`${fold}:landings`}>
+        {landings.length ? (
+          landings.map(landing => (
+            <Row key={landing.receiptId} cols="minmax(0, 1fr) auto">
+              <div>
+                <A
+                  className="lk"
+                  href={`${at({ place: 'code', section: 'files' })}?at=${encodeURIComponent(landing.commit)}`}
+                >
+                  Landing {landing.receiptId.slice(0, 8)}
+                </A>
+                <div className="meta">
+                  {landing.files === null
+                    ? 'File count unavailable'
+                    : `${landing.files.toLocaleString()} ${landing.files === 1 ? 'file' : 'files'} changed`}
+                </div>
+              </div>
+              <div>
+                {landing.check === 'passed' ? (
+                  <span className="st" data-st="passed">
+                    <Glyph of="passed" /> Passed
+                  </span>
+                ) : (
+                  <span className="t2">
+                    {landing.check === 'not-checked' ? 'Not checked' : 'Check not reported'}
+                  </span>
+                )}
+                <div className="meta">
+                  <WorkTime at={landing.at} />
+                </div>
+              </div>
+            </Row>
+          ))
+        ) : (
+          <div className="quietline">No landings shown.</div>
+        )}
+        {work.landingsPartial ? <div className="quietline">Showing recent landings.</div> : null}
+      </Part>
+      <Part name="Related" fold={`${fold}:related`} count={related.size}>
+        {related.size ? (
+          [...related.values()].map(link => (
+            <Row key={`${link.kind}:${link.id}`} cols="8em minmax(0, 1fr)">
+              <span className="t2">{link.kind}</span>
+              <A className="lk ttl" href={at({ rest: link.id })} dir="auto">
+                {link.title}
+              </A>
+            </Row>
+          ))
+        ) : (
+          <div className="quietline">No related Items.</div>
+        )}
+      </Part>
+      {more}
     </Region>
   );
 }

@@ -26,9 +26,8 @@
   .trk .rl { position: absolute; left: 0; right: 34px; top: 50%; height: 0; container-type: inline-size; }
   .trk .rl::before { content: ""; position: absolute; left: 0; right: -16px; top: -1px; border-top: 2px dotted var(--rail-off); }
   .trk .fl { position: absolute; left: 0; right: 0; top: -1px; height: 2px; background: var(--st); transform-origin: 0 50%; transform: scaleX(calc(var(--p) / 4)); transition: transform var(--d-travel) var(--ease-out); }
-  /* the mark travels a quarter of its rail per stop; a zero-width box moved by the rail's own width (cqw) adds no
-     sideways overflow, which a full-width box moved by a percentage of itself did */
-  .trk .nw { position: absolute; left: 0; width: 0; top: 0; height: 0; transform: translateX(calc(var(--p) * 25cqw)); transition: transform var(--d-travel) var(--ease-out); }
+  /* Animate the stop number. Zoom can resize the rail without interpolating from an old pixel position. */
+  .trk .nw { position: absolute; left: 0; width: 0; top: 0; height: 0; --track-stop: var(--p); transform: translateX(calc(var(--track-stop) * 25cqw)); transition: --track-stop var(--d-travel) var(--ease-out); }
   .trk .nd { position: absolute; left: -8px; top: -8px; width: var(--mark-lg); height: var(--mark-lg); border-radius: 50%; background: var(--st); border: 3px solid var(--surface); box-shadow: 0 0 0 1.5px var(--st); }
   [data-st="conflict"] > .trk .nd { border-radius: 2px; transform: rotate(45deg); }
   [data-st="failed"] > .trk .nd { border-radius: 2px; }
@@ -308,20 +307,19 @@
   }
 
   /* the yard: every open Lane on the four stops and main, the crossing, and the overlap view's own lines */
-  .yard { --lab: 300px; --actw: 330px; }
-  .ln { display: grid; grid-template-columns: var(--lab) minmax(0, 1fr) var(--actw); }
+  .ln { display: grid; grid-template-columns: minmax(0, 1fr); }
   .ln { position: relative; align-items: center; min-height: var(--row-h-lane); border-bottom: var(--rule) solid var(--line); color: inherit; }
-  .ln .lab { padding: var(--s-2) var(--s-3) var(--s-2) var(--gut); min-width: 0; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 1px 10px; align-items: start; }
+  .ln .lab { padding: 10px var(--gut) 2px; min-width: 0; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 1px 10px; align-items: start; }
   .ln .lab .av { grid-row: span 2; margin-top: 2px; }
   .ln .lab .ttl { font-weight: var(--w-strong); line-height: var(--lh-head); min-width: 0; }
   .ln .lab .meta { color: var(--text-2); font-size: var(--t-meta); min-width: 0; }
-  .ln .actn { padding: 6px var(--gut) 6px 14px; display: flex; align-items: center; gap: 6px 10px; min-width: 0; flex-wrap: wrap; }
+  .ln .actn { padding: var(--s-1) var(--gut) var(--s-2) 54px; display: flex; align-items: center; gap: 6px 10px; min-width: 0; flex-wrap: wrap; }
   .ln .actn .why { color: var(--text-2); font-size: var(--t-meta); line-height: var(--lh-head); min-width: 0; flex: 1 1 96px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   .ln .actn .btn { flex: 0 1 auto; max-width: 100%; }
   .ln .actn .st { flex: none; }
   .ln .actn .why b { display: block; color: var(--text); font-weight: var(--w-medium); }
-  .ln .xnote { display: none; }
-  .ln > .trk { align-self: stretch; height: auto; min-height: 26px; }
+  .ln .xnote { display: block; flex-basis: 100%; color: var(--conflict); font-size: var(--t-meta); overflow-wrap: anywhere; }
+  .ln > .trk { align-self: stretch; height: 26px; min-height: 26px; margin-left: var(--gut); }
   .ln > .trk::after { top: -1px; }
   .ln > .trk .nw { z-index: 2; }
   .ln[data-st="conflict"] .nd:not(.num) { border-radius: 2px; transform: rotate(45deg); }
@@ -329,7 +327,7 @@
   .trk .nd.num { display: grid; place-items: center; left: -10px; top: -10px; min-width: 20px; width: auto; padding: 0 5px; border-radius: 10px; height: 20px; border: 0; box-shadow: none; color: var(--surface); font: var(--w-bold) var(--t-micro)/1 var(--font-mono); }
   .ln.sel { background: var(--accent-bg); }
   .ln.sel .trk .nd { border-color: var(--accent-bg); }
-  .xl { position: absolute; top: 0; left: calc(var(--x) * 25%); width: 0; border-left: 2px dotted var(--conflict); z-index: 1; }
+  .xl { display: none; position: absolute; top: 0; left: calc(var(--x) * 25%); width: 0; border-left: 2px dotted var(--conflict); z-index: 1; }
   .xl.dn { top: 50%; height: calc(50% + 1px); }
   .xl.up { height: 50%; }
   .xl.up::after { content: ""; position: absolute; left: -6px; bottom: -5px; width: 10px; height: 10px; background: var(--surface); border: 2px solid var(--conflict); transform: rotate(45deg); }
@@ -343,19 +341,27 @@
   .yard.dense .ln .actn .why { -webkit-line-clamp: 1; }
   .yard.dense .ln .actn .why b { display: inline; }
   .yard.dense .trk .nd:not(.num) { left: -6px; top: -6px; width: 12px; height: 12px; border-width: 2px; }
-  @container (max-width: 1100px) {
-    .yard { --lab: 250px; --actw: 240px; }
+  @media (max-width: 420px) {
+    .yard .ln .lab .meta { white-space: normal; overflow-wrap: anywhere; }
   }
-  @container (max-width: 900px) {
-    .yard { --lab: 0px; --actw: 0px; }
-    .yard .ln { grid-template-columns: minmax(0, 1fr); }
-    .yard .ln .lab { padding: 10px var(--gut) 2px; }
-    .yard .ln .actn { padding: var(--s-1) var(--gut) var(--s-2) 54px; }
-    .yard .ln > .trk { height: 26px; margin-left: var(--gut); }
-    .yard.dense .ln .actn { padding-left: 48px; }
-    .yard.dense .ln > .trk { height: 18px; min-height: 18px; }
-    .yard .xl { display: none; }
-    .yard .ln .xnote { display: block; flex-basis: 100%; color: var(--conflict); font-size: var(--t-meta); overflow-wrap: anywhere; }
+  .yard.dense .ln .actn { padding-left: 48px; }
+  .yard.dense .ln > .trk { height: 18px; min-height: 18px; }
+  /* A narrow viewport still needs the compact arrangement if the engine's container query uses the unzoomed width. */
+  @media (width > 900px) {
+    @container (width > 900px) {
+      .yard { --lab: 250px; --actw: 240px; }
+      .yard .ln { grid-template-columns: var(--lab) minmax(0, 1fr) var(--actw); }
+      .yard .ln .lab { padding: var(--s-2) var(--s-3) var(--s-2) var(--gut); }
+      .yard .ln .actn { padding: 6px var(--gut) 6px 14px; }
+      .yard.dense .ln .actn { padding-left: 14px; }
+      .yard .ln > .trk { height: auto; min-height: 26px; margin-left: 0; }
+      .yard.dense .ln > .trk { height: auto; min-height: 26px; }
+      .yard .xl { display: block; }
+      .yard .ln .xnote { display: none; }
+    }
+    @container (width > 1100px) {
+      .yard { --lab: 300px; --actw: 330px; }
+    }
   }
   .ovl { border-bottom: var(--rule) solid var(--line); }
   .ovl:last-child { border-bottom: 0; }
@@ -369,4 +375,10 @@
   @container (max-width: 520px) {
     .ovl .what { grid-template-columns: minmax(0, 1fr); }
   }
+}
+
+@property --track-stop {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
 }

@@ -45,7 +45,7 @@ async function dragBefore(page, title, anchor, zone, position) {
   await page.mouse.down();
   try {
     await page.mouse.move(x + 16, y, { steps: 5 });
-    // The empty full-width row appears on pickup, moving the columns. Read the current destination.
+    // The empty full-width target appears on pickup. Hit the destination in its resting column.
     await page.getByText('Drop a region here', { exact: true }).waitFor({ timeout: 4000 });
     const to = await region(page, anchor).boundingBox();
     assert.ok(to, `${anchor} is a visible destination`);

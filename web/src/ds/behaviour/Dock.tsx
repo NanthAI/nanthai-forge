@@ -80,7 +80,10 @@ export function Dock({
   const [message, announce] = useAnnounce();
   const root = useRef<HTMLDivElement>(null);
   const returnFocus = useDockGripFocus(root);
-  const [moving, setMoving] = useState<string | null>(null);
+  const nativeDrag = useRef(false);
+  const [carry, setCarry] = useState<{ id: string; native: boolean } | null>(null);
+  const moving = carry?.id ?? null;
+  const setMoving = (id: string | null) => setCarry(id === null ? null : { id, native: nativeDrag.current });
   const [openingMenu, setOpeningMenu] = useState(initialMenu);
   const [lastMove, setLastMove] = useState<DockMove | null>(null);
   const expire = useCallback(() => setLastMove(null), []);
@@ -154,8 +157,19 @@ export function Dock({
         role="group"
         aria-label={label}
         data-dock=""
-        data-carrying={moving === null ? undefined : ''}
-        data-shut={shutZones(layout, moving !== null && !singleColumn)}
+        data-carrying={carry ? '' : undefined}
+        data-native-drag={carry?.native && !singleColumn ? '' : undefined}
+        data-shut={shutZones(layout, !!carry && !carry.native && !singleColumn)}
+        onDragStartCapture={event => {
+          const target = event.target;
+          nativeDrag.current =
+            target instanceof HTMLElement &&
+            target.matches('.ds-drag') &&
+            target.closest('.ds-region')?.parentElement?.parentElement === root.current;
+        }}
+        onDragEndCapture={() => {
+          nativeDrag.current = false;
+        }}
       >
         {ZONES.map(zone => (
           <Zone

@@ -164,26 +164,17 @@ test('writers show who wrote it: person or agent run with its declared model, ne
   });
   assert.doesNotMatch(html, /Ada/);
   assert.doesNotMatch(html, /A member/);
+  assert.match(html, /class="who" data-kind="agent" title="mara\/keen-impala · claude-opus-5-5"/);
+  assert.match(html, /class="who" data-kind="agent" title="jun\/copper-moth · model not declared"/);
+  assert.match(html, /class="who" data-kind="person" title="@orla"/);
+  assert.match(html, /data-kind="agent"[^>]*>[\s\S]*?class="av ag"/, 'an agent run gets the outlined mark');
   assert.match(
     html,
-    /mara\/keen-impala<\/span><span class="kind">agent<\/span><span class="mono model"[^>]*>claude-opus-5-5/,
-  );
-  assert.match(
-    html,
-    /jun\/copper-moth<\/span><span class="kind">agent<\/span><span class="model nd">model not declared/,
-  );
-  assert.match(html, /@orla<\/span><span class="kind">person</);
-  assert.match(
-    html,
-    /amber-fox<\/span><span class="kind">agent/,
+    /class="a-run mono"[^>]*>amber-fox<\/span>/,
     'a hidden person still shows the agent run',
   );
-  assert.match(html, /data-kind="agent"[^>]*>[\s\S]*?class="av ag"/, 'an agent run gets the outlined mark');
   assert.doesNotMatch(html, /@sample-forged/, 'a typed label never gets the handle mark');
-  assert.match(
-    html,
-    /sample-forged<\/span><span class="kind">person<\/span><span class="t3"[^>]*>not verified/,
-  );
+  assert.match(html, /sample-forged<\/span><span class="t3"[^>]*>not verified/);
 });
 
 test('decisions are marked, reactions show counts and the viewer’s own, readers get no composer', () => {
