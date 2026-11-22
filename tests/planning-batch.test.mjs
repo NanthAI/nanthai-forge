@@ -16,12 +16,245 @@ import {
   splitItem,
 } from '../dist/planning-batch.js';
 import { planFilterMatch } from '../dist/planning-filter.js';
+import { planningSearchEntry } from '../dist/planning-search.js';
 import { setup } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { meterReads } from './hosted-read-set.mjs';
 
 const batch = await import(moduleUrl('../convex/projectPlanningBatch.ts'));
+const { planView, PLAN_LIVE_LIMIT } = await import(moduleUrl('../convex/projectPlanView.ts'));
+const { recordPartition } = await import(moduleUrl('../convex/projectWorkIndexStore.ts'));
+const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
+const { runBatch } = await import(moduleUrl('../web/src/app/plan/batch.ts'));
 const id = () => randomUUID();
+
+async function useSearchRoots(s, coverage) {
+  const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
+  const partition = recordPartition(s.tables.projectWorkGenerations.get(generationId));
+  const { db } = finishReadWriter(s.ctx);
+  for (const id of new Set([generationId, partition]))
+    await db.patch(id, { planRowsVersion: undefined, planningSearchVersion: coverage });
+  return partition;
+}
+
+const planBatch = (s, writes, options, operationId = id()) =>
+  s
+    .transaction(() =>
+      batch.apply._handler(s.ctx, {
+        projectId: s.projectId,
+        operationId,
+        writes: JSON.stringify(writes),
+        ...options,
+      }),
+    )
+    .then(JSON.parse);
+
+test('explicit close preserves live direct children in their stored Initiatives and one replayable Undo restores their links', async t => {
+  const s = await setup(t);
+  const add = async fields => {
+    const item = s.item(fields);
+    await s.send(item);
+    return item.itemId;
+  };
+  const first = await add({ kind: 'initiative' });
+  const second = await add({ kind: 'initiative' });
+  const parent = await add({ initiativeId: first });
+  const otherParent = await add({});
+  const proposed = await add({ parentId: parent, initiativeId: second, status: 'proposed' });
+  const active = await add({ parentId: otherParent, status: 'in-progress', body: 'Keep this history.' });
+  const planned = await add({ parentId: parent, initiativeId: first });
+  const selectedChild = await add({ parentId: otherParent, initiativeId: second });
+  const done = await add({ parentId: parent, status: 'closed' });
+  const dropped = await add({ parentId: parent, status: 'abandoned' });
+  const grandchild = await add({ parentId: planned });
+  const writes = closeMany(
+    [parent, otherParent, selectedChild].map(id => ({ id, version: 1 })),
+    'Shipped',
+  ).writes;
+  const operationId = id();
+  const receipt = await planBatch(s, writes, { close: true }, operationId);
+  assert.equal(receipt.detached, 3);
+  assert.deepEqual(
+    receipt.results.map(row => row.outcome),
+    ['applied', 'applied', 'applied'],
+  );
+  const addedLater = await add({ parentId: parent });
+  s.caller('foreign');
+  await assert.rejects(
+    planBatch(s, writes, { close: true }, operationId),
+    error => error.data.code === 'PROJECT_UNAVAILABLE',
+  );
+  s.caller('owner');
+  assert.deepEqual(await planBatch(s, writes, { close: true }, operationId), receipt);
+  await assert.rejects(
+    planBatch(s, writes.slice(0, 1), { close: true }, operationId),
+    error => error.data.code === 'WORK_OPERATION_CHANGED',
+  );
+
+  const closed = (await s.read()).data.planningItems;
+  const latest = itemId => closed.filter(item => item.id === itemId).at(-1);
+  assert.deepEqual(
+    [parent, otherParent, selectedChild].map(key => latest(key).status),
+    ['closed', 'closed', 'closed'],
+  );
+  assert.deepEqual(
+    [proposed, active, planned].map(key => {
+      const { parentId, initiativeId, status, version } = latest(key);
+      return [parentId, initiativeId, status, version];
+    }),
+    [
+      [undefined, second, 'proposed', 2],
+      [undefined, undefined, 'in-progress', 2],
+      [undefined, first, 'open', 2],
+    ],
+  );
+  assert.deepEqual(
+    [selectedChild, done, dropped, grandchild, addedLater].map(key => latest(key).parentId),
+    [otherParent, parent, parent, planned, parent],
+  );
+  assert.equal(latest(parent).reason, 'Shipped');
+  assert.equal(latest(active).body, 'Keep this history.');
+  assert.equal(closed.find(item => item.id === proposed && item.version === 1).parentId, parent);
+
+  const call = args => s.transaction(() => batch.apply._handler(s.ctx, args));
+  const replay = await runBatch(call, s.projectId, writes, { close: true, operationId });
+  assert.equal(replay.undoClose, operationId);
+  assert.equal(replay.detached, 3);
+  const undoId = id();
+  const undone = await runBatch(call, s.projectId, [], { undoClose: replay.undoClose, operationId: undoId });
+  assert.equal(undone.results.length, 6);
+  assert.deepEqual(
+    await runBatch(call, s.projectId, [], { undoClose: replay.undoClose, operationId: undoId }),
+    undone,
+  );
+  const history = (await s.read()).data.planningItems;
+  const restored = itemId => history.filter(item => item.id === itemId).at(-1);
+  assert.deepEqual(
+    [parent, otherParent, selectedChild].map(key => restored(key).status),
+    ['open', 'open', 'open'],
+  );
+  assert.deepEqual(
+    [proposed, active, planned].map(key => restored(key).parentId),
+    [parent, otherParent, parent],
+  );
+  assert.deepEqual(
+    [proposed, active, planned].map(key => restored(key).initiativeId),
+    [second, undefined, first],
+  );
+  assert.deepEqual(
+    history.filter(item => item.id === proposed).map(item => item.parentId),
+    [parent, undefined, parent],
+  );
+});
+
+test('a parent missed by a stale close keeps its children, and stale Undo cannot reopen other Items or reattach children partially', async t => {
+  const s = await setup(t);
+  const stale = s.item({ title: 'Edited parent' });
+  const parent = s.item({ title: 'Other parent' });
+  const staleChild = s.item({ parentId: stale.itemId });
+  const child = s.item({ parentId: parent.itemId });
+  for (const item of [stale, parent, staleChild, child]) await s.send(item);
+  await s.send(s.item({ itemId: stale.itemId, expectedVersion: 1, title: 'Edited meanwhile' }));
+  await s.send(s.item({ itemId: child.itemId, expectedVersion: 1, title: 'Edited before close' }));
+  const operationId = id();
+  const writes = closeMany(
+    [stale, parent, child].map(item => ({ id: item.itemId, version: 1 })),
+    '',
+  ).writes;
+  const receipt = await planBatch(s, writes, { close: true }, operationId);
+  assert.equal(receipt.detached, 1);
+  assert.deepEqual(
+    receipt.results.map(row => [row.outcome, row.code]),
+    [
+      ['refused', 'ITEM_CHANGED'],
+      ['applied', undefined],
+      ['refused', 'ITEM_CHANGED'],
+    ],
+  );
+  await s.send(s.item({ itemId: child.itemId, expectedVersion: 3, title: 'Edited after detaching' }));
+
+  await assert.rejects(
+    planBatch(s, [], { undoClose: operationId }),
+    error => error.data.code === 'ITEM_CHANGED',
+  );
+  const history = (await s.read()).data.planningItems;
+  const latest = itemId => history.filter(item => item.id === itemId).at(-1);
+  assert.equal(latest(parent.itemId).status, 'closed');
+  assert.equal(latest(staleChild.itemId).parentId, stale.itemId);
+  assert.equal(latest(child.itemId).parentId, undefined);
+  assert.equal(latest(child.itemId).title, 'Edited after detaching');
+});
+
+test('close reads canonical hierarchy when a legacy live child has no search root', async t => {
+  const s = await setup(t);
+  const parent = s.item({});
+  const child = s.item({ parentId: parent.itemId, body: 'A large retained body. '.repeat(1800) });
+  await s.send(parent);
+  await s.send(child);
+  const generationId = await useSearchRoots(s, 1);
+  for (const [key, row] of s.tables.projectPlanningRecords) {
+    if (row.generationId === generationId && row.collection === 'planningSearch' && row.key === child.itemId)
+      await s.ctx.db.delete(key);
+  }
+  const screen = await planView(s.ctx, s.projectId);
+  assert.ok(!JSON.parse(screen.rows).some(row => row.id === child.itemId));
+  const result = await planBatch(s, closeMany([{ id: parent.itemId, version: 1 }], '').writes, {
+    close: true,
+  });
+  assert.equal(result.detached, 1);
+  const history = (await s.read()).data.planningItems;
+  const versions = history.filter(item => item.id === child.itemId);
+  assert.deepEqual(
+    versions.map(item => item.parentId),
+    [parent.itemId, undefined],
+  );
+  assert.deepEqual(
+    versions.map(item => item.body),
+    [child.body, child.body],
+  );
+});
+
+test('close finds a stored sub-item beyond the live Plan window through bounded search pages', async t => {
+  const s = await setup(t);
+  const parent = s.item({});
+  await s.send(parent);
+  const child = s.item({ parentId: parent.itemId, title: 'Outside the Plan window' });
+  await s.send(child);
+  const generationId = await useSearchRoots(s, 2);
+  for (const [key, row] of s.tables.projectPlanningRecords) {
+    if (row.generationId === generationId && row.collection === 'planningSearch' && row.key === child.itemId)
+      await s.ctx.db.patch(key, { position: PLAN_LIVE_LIMIT + 10 });
+  }
+  for (let position = 2; position <= PLAN_LIVE_LIMIT + 1; position++) {
+    const entry = planningSearchEntry(
+      {
+        id: id(),
+        kind: 'issue',
+        title: 'Another live Item',
+        body: '',
+        version: 1,
+        status: 'open',
+        intentIds: [],
+      },
+      position,
+    );
+    await s.ctx.db.insert('projectPlanningRecords', { ...entry, projectId: s.projectId, generationId });
+  }
+  const screen = await planView(s.ctx, s.projectId);
+  assert.equal(screen.more, true);
+  assert.ok(!JSON.parse(screen.rows).some(row => row.id === child.itemId));
+  const meter = meterReads(s.ctx);
+  const cost = await meter.cost(async () => {
+    const result = await planBatch(s, closeMany([{ id: parent.itemId, version: 1 }], '').writes, {
+      close: true,
+    });
+    assert.equal(result.detached, 1);
+  });
+  meter.restore();
+  t.diagnostic(JSON.stringify({ partialPlanClose: cost }));
+  const history = (await s.read()).data.planningItems;
+  assert.equal(history.filter(item => item.id === child.itemId).at(-1).parentId, undefined);
+});
 
 test('batch Undo writes back exactly the fields the batch named, abandons creations and keeps comments', () => {
   const writes = [

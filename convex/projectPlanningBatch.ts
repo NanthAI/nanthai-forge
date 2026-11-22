@@ -11,15 +11,22 @@ import { mutation, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { report } from './errors';
 import { executeCommand } from './projectWorkCommand';
-import { activeProject } from './projectAuthority';
+import { activeProject, activeOwnedProject } from './projectAuthority';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { commandPayloadRows, commandValues } from './projectWorkCommandRows';
+import { liveCloseChildren } from './projectPlanningCloseRows';
+import { beginHostedOperation, finishHostedOperation, hostedOperationRow } from './projectHostedOperations';
 import { ForgeError, invariant } from '../src/errors';
 import { digest } from '../src/state/hash';
+import { sourceAuthority } from '../src/hosted-source-authority';
+import { hostedOperationSchema, hostedPayloadHash } from '../src/hosted-source-operation';
 import {
+  batchUndo,
+  detachAfterClose,
   planningBatchLimit,
   undoableFields,
   type BatchBefore,
+  type BatchPut,
   type BatchResult,
   type BatchWrite,
 } from '../src/planning-batch';
@@ -61,26 +68,24 @@ async function storedItem(ctx: MutationCtx, projectId: Id<'hostedProjects'>, use
   return (commandValues(rows, 'planningItems')[0] as Record<string, unknown> | undefined) ?? null;
 }
 
-export async function applyBatch(
+type BatchInput = {
+  projectId: Id<'hostedProjects'>;
+  operationId: string;
+  writes: string;
+  close?: true;
+  undoClose?: string;
+};
+
+async function applyWrites(
   ctx: MutationCtx,
-  input: { projectId: Id<'hostedProjects'>; operationId: string; writes: string },
+  input: BatchInput,
+  actor: string,
+  writes: readonly BatchWrite[],
+  offset = 0,
+  atomic = false,
 ) {
-  const user = await ctx.auth.getUserIdentity();
-  invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to use your Forge project.');
-  invariant(uuid.test(input.operationId), 'BAD_ARGUMENT', 'Use an original batch operation UUID.');
-  let writes: BatchWrite[];
-  try {
-    writes = JSON.parse(input.writes);
-  } catch {
-    invariant(false, 'BAD_ARGUMENT', 'Send the batch as a JSON list of planning writes.');
-  }
-  invariant(
-    Array.isArray(writes) && writes.length >= 1 && writes.length <= planningBatchLimit,
-    'BAD_ARGUMENT',
-    `A batch holds 1 to ${planningBatchLimit} planning writes.`,
-  );
   const results: BatchResult[] = [];
-  for (const [index, write] of writes.entries()) {
+  for (const [position, write] of writes.entries()) {
     invariant(
       write &&
         typeof write === 'object' &&
@@ -89,12 +94,13 @@ export async function applyBatch(
       'BAD_ARGUMENT',
       'Each batch write is a put-planning-item or comment-planning-item with an itemId.',
     );
+    const index = offset + position;
     const operationId = batchWriteOperationId(input.operationId, index);
     const base = { index, itemId: write.itemId, action: write.action } as const;
     const replayed = await written(ctx, input.projectId, operationId);
     const before =
       !replayed && write.action === 'put-planning-item' && write.expectedVersion > 0
-        ? await storedItem(ctx, input.projectId, user.subject, write.itemId)
+        ? await storedItem(ctx, input.projectId, actor, write.itemId)
         : null;
     try {
       await executeCommand(ctx, {
@@ -103,7 +109,7 @@ export async function applyBatch(
         command: JSON.stringify({ ...write, operationId }),
       });
     } catch (error) {
-      if (!(error instanceof ForgeError) || !ownRefusals.has(error.code)) throw error;
+      if (atomic || !(error instanceof ForgeError) || !ownRefusals.has(error.code)) throw error;
       results.push({
         ...base,
         outcome: 'refused',
@@ -131,13 +137,168 @@ export async function applyBatch(
           (kept as Record<string, unknown>)[field] = before[field] ?? null;
     results.push({ ...base, outcome: 'applied', version, before: kept });
   }
+  return results;
+}
+
+type CloseReceipt = {
+  kind: 'planning-close' | 'planning-undo-close';
+  operationId: string;
+  results: BatchResult[];
+  detached: number;
+  undo: BatchPut[];
+};
+
+async function closeBatch(ctx: MutationCtx, input: BatchInput, actor: string, writes: BatchWrite[]) {
+  const { projectId, operationId, undoClose } = input;
+  const project = await activeOwnedProject(ctx, projectId, actor);
+  const old = await hostedOperationRow(ctx, projectId, actor, operationId);
+  const authority = sourceAuthority(project);
+  const expected = old
+    ? hostedOperationSchema.parse(JSON.parse(old.value)).expected
+    : { authorityEpoch: authority.epoch };
+  const at = new Date().toISOString();
+  const kind = undoClose ? 'planning-undo-close' : 'planning-close';
+  const payload = undoClose ? { kind, undoClose } : { kind, writes };
+  const { operation } = await beginHostedOperation(ctx, {
+    projectId,
+    actor,
+    expectedAuthority: authority,
+    request: {
+      schema: 1,
+      projectId,
+      operationId,
+      actor,
+      expected,
+      payloadHash: hostedPayloadHash(payload, expected),
+    },
+    payload,
+    firstAttempt: { projectId, operationId, id: operationId, parentAttemptId: null, at, expected, ids: {} },
+  });
+  if (operation.terminal) {
+    invariant(
+      operation.terminal.outcome.status === 'completed',
+      'WORK_OPERATION_CHANGED',
+      'Reconcile the original close operation.',
+    );
+    return JSON.stringify(operation.terminal.outcome.result);
+  }
+
+  const result: CloseReceipt = { kind, operationId, results: [], detached: 0, undo: [] };
+  const requireFresh = (results: readonly BatchResult[]) => {
+    invariant(
+      results.every(row => row.outcome !== 'replayed'),
+      'WORK_OPERATION_CHANGED',
+      'The original close or Undo receipt is unavailable; no new changes were made.',
+    );
+  };
+  const applyPages = async (entries: BatchPut[], offset: number) => {
+    const results: BatchResult[] = [];
+    for (let start = 0; start < entries.length; start += planningBatchLimit)
+      results.push(
+        ...(await applyWrites(
+          ctx,
+          input,
+          actor,
+          entries.slice(start, start + planningBatchLimit),
+          offset + start,
+          true,
+        )),
+      );
+    requireFresh(results);
+    return results;
+  };
+  if (undoClose) {
+    const saved = await hostedOperationRow(ctx, projectId, actor, undoClose);
+    invariant(saved, 'NOT_FOUND', 'The original close receipt is unavailable.');
+    const terminal = hostedOperationSchema.parse(JSON.parse(saved.value)).terminal?.outcome;
+    const close = terminal?.status === 'completed' ? (terminal.result as CloseReceipt) : null;
+    invariant(
+      close?.kind === 'planning-close' && close.undo.length,
+      'BAD_ARGUMENT',
+      'Select a close that has changes to undo.',
+    );
+    result.results = await applyPages(close.undo, 0);
+  } else {
+    const selected = new Set(writes.map(write => write?.itemId));
+    invariant(
+      selected.size === writes.length &&
+        writes.every(
+          write =>
+            write?.action === 'put-planning-item' &&
+            typeof write.itemId === 'string' &&
+            Number.isSafeInteger(write.expectedVersion) &&
+            write.expectedVersion > 0 &&
+            write.status === 'closed' &&
+            Object.keys(write).every(key =>
+              ['action', 'itemId', 'expectedVersion', 'status', 'reason'].includes(key),
+            ),
+        ),
+      'BAD_ARGUMENT',
+      'Select individual Items and their versions to close.',
+    );
+    const generation = await selectedGeneration(ctx, project);
+    invariant(
+      generation,
+      'PROJECT_WORK_INDEX_MISSING',
+      'Prepare the hosted Work index before closing Items.',
+    );
+    const children = await liveCloseChildren(ctx, generation, selected);
+    result.results = await applyWrites(ctx, input, actor, writes);
+    requireFresh(result.results);
+    const closed = new Set(result.results.filter(row => row.outcome !== 'refused').map(row => row.itemId));
+    const detach = detachAfterClose(closed, children);
+    const detached = await applyPages(detach, writes.length);
+    result.detached = detached.length;
+    result.undo = batchUndo([...writes, ...detach], [...result.results, ...detached]).undo;
+  }
+  // One retained receipt keeps the exact Undo available after a lost reply. It holds only
+  // IDs, versions, outcomes, status and parent changes, without Item bodies or notes.
+  await finishHostedOperation(ctx, {
+    projectId,
+    actor,
+    operationId,
+    receipt: {
+      attemptId: operation.firstAttempt.id,
+      at,
+      outcome: { status: 'completed', result: JSON.parse(JSON.stringify(result)) },
+    },
+  });
+  return JSON.stringify(result);
+}
+
+export async function applyBatch(ctx: MutationCtx, input: BatchInput) {
+  const user = await ctx.auth.getUserIdentity();
+  invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to use your Forge project.');
+  invariant(uuid.test(input.operationId), 'BAD_ARGUMENT', 'Use an original batch operation UUID.');
+  let writes: BatchWrite[];
+  try {
+    writes = JSON.parse(input.writes);
+  } catch {
+    invariant(false, 'BAD_ARGUMENT', 'Send the batch as a JSON list of planning writes.');
+  }
+  invariant(
+    Array.isArray(writes) &&
+      (input.undoClose
+        ? !input.close && uuid.test(input.undoClose) && writes.length === 0
+        : writes.length >= 1 && writes.length <= planningBatchLimit),
+    'BAD_ARGUMENT',
+    `A batch holds 1 to ${planningBatchLimit} planning writes. A close Undo names its original operation.`,
+  );
+  if (input.close || input.undoClose) return closeBatch(ctx, input, user.subject, writes);
+  const results = await applyWrites(ctx, input, user.subject, writes);
   return JSON.stringify({ operationId: input.operationId, results });
 }
 
 /** One batch of planning writes (at most 100), retry-safe by its operation id. Returns JSON
  * `{operationId, results: BatchResult[]}` (src/planning-batch.ts); batchUndo turns it into the one Undo. */
 export const apply = mutation({
-  args: { projectId: v.id('hostedProjects'), operationId: v.string(), writes: v.string() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    operationId: v.string(),
+    writes: v.string(),
+    close: v.optional(v.literal(true)),
+    undoClose: v.optional(v.string()),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {

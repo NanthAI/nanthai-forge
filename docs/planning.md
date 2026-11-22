@@ -252,13 +252,18 @@ that changed after it was read is refused with its current version and is never 
   abandoned with the reason "Undone"; copied comments stay, since comments are never deleted.
 - Close many sets each Item to Done with one note as its reason. An Item with open Done-when lines closes with that
   note, or with the one-press close-anyway reason; the reply names those Items so a follow-up can be offered.
+- When you confirm a close in Plan, direct sub-items that are still Proposed, Planned or In progress become
+  top-level Items in their own stored Initiatives. A sub-item you close in the same selection stays under its
+  parent, as do settled sub-items. Closing and detaching shares one transaction and reads past the visible Plan
+  window. One Undo restores the prior statuses and links if those versions are still current. If any changed
+  meanwhile, Undo leaves the whole change in place and reports the conflict. Every edit adds a retained version.
 - Split gives each Done-when line to one part. The Item keeps its prose and the lines it keeps; each new part is a
   Planned Item in the same Initiative and parent, related both ways to the Item.
 - Merge carries each duplicate's Lane links (its planned Intent and linked Intents) and a copy of each comment to the
   surviving Item, and abandons the duplicate as a duplicate with a `duplicate-of` link. Items have no watchers yet,
   so there are none to carry.
 
-Agents send the same batch as `put-planning-item {"batch":[…]}` ([workflow](agents/workflow.md)).
+Agents send ordinary batches as `put-planning-item {"batch":[…]}` ([workflow](agents/workflow.md)).
 
 ## Filters
 

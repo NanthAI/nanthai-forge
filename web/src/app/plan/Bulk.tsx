@@ -2,7 +2,7 @@
 // The bulk bar (Item 65b0e706, DESIGN.md rules 6, 7 and 18): only the ticked rows change, each action is one batch
 // call with per-Item results, and the reply's one Undo waits in a toast for 10 seconds. A row someone else changed
 // meanwhile is refused by its version and named; their change stays.
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Key, Menu, Sheet } from '../../ds';
 import {
   batchSentence,
@@ -17,7 +17,8 @@ import {
   type BatchWrite,
 } from '../../../../src/planning-batch';
 import { defaultItemTypes, type PlanRow } from '../../../../src/planning-model';
-import type { BatchOutcome, FullItem, InitiativeDetails, ItemComment, RunBatch } from './batch';
+import { hostedError, hostedErrorCode } from '../../snapshot';
+import type { BatchOptions, BatchOutcome, FullItem, InitiativeDetails, ItemComment, RunBatch } from './batch';
 import type { ReadWorkers } from './workers';
 
 export type Reads = {
@@ -46,6 +47,9 @@ export function outcomeWords(outcome: BatchOutcome, byId: ReadonlyMap<string, Pl
     .map(result => byId.get(result.itemId) ?? { title: short(result.itemId) });
   return [
     batchSentence(outcome.results),
+    outcome.detached
+      ? `Kept ${outcome.detached.toLocaleString()} live ${outcome.detached === 1 ? 'sub-item' : 'sub-items'} as Items.`
+      : '',
     moved.length ? `Changed meanwhile: ${names(moved)}.` : '',
     refused.length - moved.length
       ? `Refused: ${refused
@@ -91,18 +95,16 @@ export function BulkBar({
   const [sheet, setSheet] = useState<'close' | 'merge' | 'split' | null>(null);
   const [error, setError] = useState('');
   const reason = why.trim() ? { reason: why.trim().slice(0, 500) } : {};
-  const go = async (writes: BatchWrite[], words?: string) => {
+  const go: Go = async (writes, words, options) => {
     setBusy(true);
     setError('');
     try {
-      const outcome = await run(writes);
+      const outcome = await run(writes, options);
       onDone(outcome, words ?? '');
       setWhy('');
       return outcome;
     } catch (failure) {
-      setError(
-        failure instanceof Error ? failure.message : 'Forge could not change these Items; nothing changed.',
-      );
+      setError((failure instanceof Error && hostedError(failure)) || 'Forge could not confirm the change.');
       return null;
     } finally {
       setBusy(false);
@@ -252,6 +254,8 @@ export function BulkBar({
         onOpenChange={open => setSheet(open ? 'close' : null)}
         rows={rows}
         go={go}
+        busy={busy}
+        error={sheet === 'close' ? error : ''}
       />
       {sheet === 'merge' ? (
         <MergeSheet
@@ -273,7 +277,7 @@ export function BulkBar({
   );
 }
 
-type Go = (writes: BatchWrite[], words?: string) => Promise<BatchOutcome | null>;
+type Go = (writes: BatchWrite[], words?: string, options?: BatchOptions) => Promise<BatchOutcome | null>;
 
 /** Close many with one note: names what had Done-when lines open, closes anyway in one press with the standard
  * reason, and offers (never forces) one follow-up Item for what stayed open. */
@@ -282,20 +286,29 @@ function CloseSheet({
   onOpenChange,
   rows,
   go,
+  busy,
+  error,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   rows: readonly PlanRow[];
   go: Go;
+  busy: boolean;
+  error: string;
 }) {
   const [note, setNote] = useState('');
   const [left, setLeft] = useState<PlanRow[] | null>(null);
+  const attempt = useRef<{ payload: string; operationId: string } | null>(null);
   const { writes, openLines } = useMemo(() => closeMany(rows, note), [rows, note]);
   const withOpen = rows.filter(row => openLines.some(entry => entry.id === row.id));
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const outcome = await go(writes);
+    if (busy) return;
+    const payload = JSON.stringify(writes);
+    if (attempt.current?.payload !== payload) attempt.current = { payload, operationId: crypto.randomUUID() };
+    const outcome = await go(writes, undefined, { close: true, operationId: attempt.current.operationId });
     if (!outcome) return;
+    attempt.current = null;
     const closed = new Set(outcome.results.filter(r => r.outcome !== 'refused').map(r => r.itemId));
     const stayed = withOpen.filter(row => closed.has(row.id));
     setNote('');
@@ -347,7 +360,7 @@ function CloseSheet({
         ) : (
           <>
             <Key onClick={() => onOpenChange(false)}>Cancel</Key>
-            <Key kind="primary" type="submit" form="plan-close-many">
+            <Key kind="primary" type="submit" form="plan-close-many" disabled={busy}>
               {withOpen.length && !note.trim() ? 'Close anyway' : 'Close'}
             </Key>
           </>
@@ -361,6 +374,7 @@ function CloseSheet({
         </p>
       ) : (
         <form id="plan-close-many" className="plan-capture" onSubmit={event => void submit(event)}>
+          {error ? <p role="alert">{error}</p> : null}
           <label>
             <span>One note for all of them (optional)</span>
             <textarea
@@ -608,29 +622,47 @@ export function UndoToast({
   byId: ReadonlyMap<string, PlanRow>;
 }) {
   const [busy, setBusy] = useState(false);
+  const [retryUndo, setRetryUndo] = useState(false);
+  const undoOperationId = useRef<string | undefined>(undefined);
   useEffect(() => {
     // A timer only while a toast is showing after an action; an idle screen has none.
+    if (busy && outcome.undoClose) return;
     const timer = setTimeout(() => onGone(), 10_000);
     return () => clearTimeout(timer);
-  }, [outcome]);
+  }, [busy, outcome]);
   const undo = async () => {
     setBusy(true);
     try {
-      const back = await run(outcome.undo);
+      if (outcome.undoClose) undoOperationId.current ??= crypto.randomUUID();
+      const back = await run(
+        outcome.undo,
+        outcome.undoClose
+          ? { undoClose: outcome.undoClose, operationId: undoOperationId.current! }
+          : undefined,
+      );
       onGone(
         `Undone. ${outcomeWords(back, byId)}${outcome.kept ? ` ${outcome.kept.toLocaleString()} copied comments stay.` : ''}`,
       );
-    } catch {
-      onGone('Forge could not undo; the changes stay.');
+    } catch (error) {
+      const code = hostedErrorCode(error);
+      if (
+        outcome.undoClose &&
+        (!code || ['HOSTED_ACTION_FAILED', 'HOSTED_CONFLICT', 'HOSTED_REQUEST_FAILED'].includes(code))
+      ) {
+        setRetryUndo(true);
+        setBusy(false);
+        return;
+      }
+      onGone(outcome.undoClose ? hostedError(error) : 'Forge could not undo; the changes stay.');
     }
   };
   return (
     <div className="toasts" role="status">
       <div className="toast">
-        <span>{words}</span>
-        {outcome.undo.length ? (
+        <span>{retryUndo ? 'Forge could not confirm Undo. Retry to check what happened.' : words}</span>
+        {outcome.undo.length || outcome.undoClose ? (
           <button type="button" onClick={() => void undo()} disabled={busy}>
-            Undo
+            {retryUndo ? 'Retry Undo' : 'Undo'}
           </button>
         ) : null}
       </div>

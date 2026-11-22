@@ -120,7 +120,17 @@ if (window.readItemWork) {
   window.planSubscriptions = () => [...linkBackend.live.values()].map(entry => entry.name);
 }
 window.calls = [];
-const run = async writes => {
+window.closeUndos = [];
+const run = async (writes, options) => {
+  if (options?.close) return {
+    results: writes.map((write, index) => ({ itemId: write.itemId, index, action: write.action, outcome: 'applied' })),
+    detached: 1, undo: [], undoClose: options.operationId, kept: 0,
+  };
+  if (options?.undoClose) {
+    window.closeUndos.push(options);
+    if (window.closeUndos.length === 1) throw new Error('Reply lost');
+    return { results: [], undo: [], kept: 0 };
+  }
   window.calls.push(writes);
   const results = writes.map((write, index) => index === 1 && writes.length > 1 && window.calls.length === 1
     ? { index, itemId: write.itemId, action: write.action, outcome: 'refused', code: 'ITEM_CHANGED', currentVersion: 3 }
@@ -352,6 +362,23 @@ test('plan views and bulk bar: real components keep the view in the address and 
         window.calls.at(-1).map(write => [write.itemId.slice(-2), write.parentId.slice(-2)]),
       ),
       [['13', '10']],
+    );
+    await page
+      .getByRole('checkbox', { name: 'Select Stream parser: preserve split bytes across reads' })
+      .check();
+    await bar.getByRole('button', { name: 'Close with one note' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Close anyway' }).click();
+    await toast.getByText('Kept 1 live sub-item as Items.', { exact: false }).waitFor();
+    await toast.getByRole('button', { name: 'Undo', exact: true }).click();
+    await toast.getByRole('button', { name: 'Retry Undo', exact: true }).click();
+    await toast.waitFor({ state: 'hidden' });
+    const undoAttempts = await page.evaluate(() => window.closeUndos);
+    assert.equal(undoAttempts.length, 2);
+    assert.ok(undoAttempts[0].operationId);
+    assert.deepEqual(
+      undoAttempts[1],
+      undoAttempts[0],
+      'Undo reconciles the original operation after a lost reply',
     );
     await page.getByRole('button', { name: 'Board', exact: true }).click();
     assert.match(page.url(), /view=board/);

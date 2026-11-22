@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { isLive, type PlanRow } from './planning-model.js';
 import type { PlanningItem } from './work-planning-types.js';
-// Pure: also runs in the Convex non-Node runtime and in the web app. No I/O, no imports.
+// Pure: also runs in the Convex non-Node runtime and in the web app. No I/O.
 //
 // Backlog batches (Item 65b0e706, docs/planning.md "Batches"): one person or agent action that changes many Items
 // at once (move, re-parent, assign, change status or type, close many, split, merge) is one list of planning writes
@@ -168,6 +169,21 @@ export function closeMany(
     .map(row => ({ id: row.id, open: row.doneWhen ? row.doneWhen[1] - row.doneWhen[0] : 0 }))
     .filter(entry => entry.open > 0);
   return { writes, openLines };
+}
+
+/** Use stored direct links. Clearing only parentId leaves the child's stored Initiative intact. */
+export function detachAfterClose(closedIds: ReadonlySet<string>, liveRows: readonly PlanRow[]): BatchPut[] {
+  return changeEach(
+    liveRows.filter(
+      row =>
+        row.kind === 'issue' &&
+        isLive(row) &&
+        row.parentId &&
+        closedIds.has(row.parentId) &&
+        !closedIds.has(row.id),
+    ),
+    { parentId: null },
+  );
 }
 
 // ---- Split -------------------------------------------------------------------------------------------------------

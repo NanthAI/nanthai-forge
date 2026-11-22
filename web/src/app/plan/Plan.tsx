@@ -195,7 +195,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
       command: JSON.stringify({ action: 'put-planning-item', operationId, ...command }),
     });
   };
-  const run: RunBatch = writes => runBatch(apply, projectId, writes);
+  const run: RunBatch = (writes, options) => runBatch(apply, projectId, writes, options);
   const reads: Reads = {
     items: ids => readItems(client, projectId, ids),
     initiative: id => readInitiative(client, projectId, id),
@@ -527,6 +527,7 @@ export function PlanScreenView({
         toast={
           toast && run ? (
             <UndoToast
+              key={toast.outcome.undoClose}
               {...toast}
               run={run}
               byId={byId}
@@ -871,6 +872,7 @@ export function PlanScreenView({
       {purgeDialog}
       {toast && run ? (
         <UndoToast
+          key={toast.outcome.undoClose}
           {...toast}
           run={run}
           byId={byId}

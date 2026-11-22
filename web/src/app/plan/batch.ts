@@ -15,14 +15,17 @@ import {
 
 export const batchApply = makeFunctionReference<
   'mutation',
-  { projectId: Id<'hostedProjects'>; operationId: string; writes: string },
+  { projectId: Id<'hostedProjects'>; operationId: string; writes: string; close?: true; undoClose?: string },
   string
 >('projectPlanningBatch:apply');
 
-export type RunBatch = (writes: readonly BatchWrite[]) => Promise<BatchOutcome>;
+export type BatchOptions = { operationId?: string; close?: true; undoClose?: string };
+export type RunBatch = (writes: readonly BatchWrite[], options?: BatchOptions) => Promise<BatchOutcome>;
 export type BatchOutcome = {
   results: BatchResult[];
   undo: BatchPut[];
+  undoClose?: string;
+  detached?: number;
   /** Comments copied by the batch stay when it is undone (a comment is never deleted). */
   kept: number;
 };
@@ -30,13 +33,28 @@ export type BatchOutcome = {
 /** One call; the reply's per-Item results and the Undo that puts back what it changed. A retry of the same call
  * (the client resends on a dropped connection) is the same operation id, so nothing applies twice. */
 export async function runBatch(
-  apply: (args: { projectId: Id<'hostedProjects'>; operationId: string; writes: string }) => Promise<string>,
+  apply: (args: {
+    projectId: Id<'hostedProjects'>;
+    operationId: string;
+    writes: string;
+    close?: true;
+    undoClose?: string;
+  }) => Promise<string>,
   projectId: Id<'hostedProjects'>,
   writes: readonly BatchWrite[],
+  { operationId = crypto.randomUUID(), ...options }: BatchOptions = {},
 ): Promise<BatchOutcome> {
   const reply = JSON.parse(
-    await apply({ projectId, operationId: crypto.randomUUID(), writes: JSON.stringify(writes) }),
-  ) as { results: BatchResult[] };
+    await apply({ projectId, operationId, writes: JSON.stringify(writes), ...options }),
+  ) as { results: BatchResult[]; undo?: BatchPut[]; detached?: number };
+  if (options.close || options.undoClose)
+    return {
+      results: reply.results,
+      undo: [],
+      kept: 0,
+      ...(reply.undo?.length ? { undoClose: operationId } : {}),
+      ...(reply.detached ? { detached: reply.detached } : {}),
+    };
   const { undo, kept } = batchUndo(writes, reply.results);
   return { results: reply.results, undo, kept };
 }
