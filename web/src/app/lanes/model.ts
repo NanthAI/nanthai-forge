@@ -5,6 +5,7 @@
 // says when the rows are not all of them.
 import { lineStopCounts, lineStops, type LineFeed, type LineStage } from '../Line';
 import type { StateKind, StateWord } from '../../ds';
+import type { SaveFailure } from '../SaveFailureNotice';
 import { QUIET_MS } from '../../../../src/lane-quiet';
 import { currentEntries, landingOf, laneState, notLandedWhy, stopWords, waitLine } from '../lane-state';
 import { parkWords, type Park } from '../needs/count';
@@ -20,6 +21,7 @@ export type LaneMeta = {
   agentRun?: string;
   agentClient?: string;
   lastSaveAt: string | null;
+  saveFailure?: SaveFailure;
   landing: { submissionId: string; state: string } | null;
   dormant?: boolean;
   lastActivityAt?: string;

@@ -10,6 +10,7 @@ import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { navigate, useSearch } from '../router';
 import { Head, crumbsFor } from '../Place';
+import { SaveFailureNotice } from '../SaveFailureNotice';
 import {
   atStop,
   buildYard,
@@ -193,6 +194,19 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
           </div>
         ) : null}
       </Head>
+      {lanes?.map(({ laneId, intent, saveFailure }) => {
+        if (!saveFailure) return null;
+        const short = laneId.slice(0, 8);
+        return (
+          <SaveFailureNotice
+            key={`${laneId}:${saveFailure.operationId}:${saveFailure.attemptId}`}
+            projectId={projectId}
+            laneId={laneId}
+            failure={saveFailure}
+            lane={{ href: laneHref(laneId), label: intent ? `${intent} · ${short}` : `Lane ${short}` }}
+          />
+        );
+      })}
       <FirstRun />
       <Dock
         label="Lanes regions"

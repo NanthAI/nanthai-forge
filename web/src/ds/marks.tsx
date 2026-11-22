@@ -38,6 +38,7 @@ export const stateWords = {
   'Needs you': 'waiting',
   Handoff: 'waiting',
   Conflict: 'conflict',
+  'Save failed': 'failed',
   'Check failed': 'failed',
   Landed: 'passed',
   'Set aside': 'stale',

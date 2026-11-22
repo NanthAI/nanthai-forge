@@ -17,6 +17,7 @@ import { lineCounts, type OverlapChange } from '../src/hosted-overlap';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { landedTiming } from './projectLaneTiming';
+import { saveFailureSummary } from './projectHostedSaveStore';
 
 /** Changed paths per reply page. A 128 KB overlap row holds at most about 800, so one page is the usual case. */
 export const REVIEW_PAGE = 400;
@@ -35,7 +36,13 @@ export const read = query({
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read this Lane.');
       const project = await accessibleProject(ctx, projectId, user.subject);
       const [record, row] = await Promise.all([
-        readHostedRecord(ctx, { projectId, actor: user.subject, kind: 'lane', key: laneId }),
+        readHostedRecord(ctx, {
+          projectId,
+          actor: user.subject,
+          kind: 'lane',
+          key: laneId,
+          withSaveFailure: offset === 0,
+        }),
         ctx.db
           .query('projectHostedOverlapLanes')
           .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
@@ -132,6 +139,7 @@ export const read = query({
           head: lane.head,
           base: lane.base,
           landed: row?.landed ? { ...row.landed, timing } : null,
+          ...(record.saveFailure ? { saveFailure: saveFailureSummary(record.saveFailure.value) } : {}),
           // Parked (Item e1633718): who it waits on and why, from the record already read.
           ...(lane.state === 'active' && lane.park
             ? { park: { ...lane.park, named: Boolean(lane.park.to) } }

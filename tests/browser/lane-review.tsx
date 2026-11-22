@@ -22,6 +22,16 @@ const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
 const scenario = params.get('s') ?? 'review';
 const routed = params.has('routes');
+const unattended = scenario.startsWith('save-');
+const saveFailure =
+  unattended && scenario !== 'save-healthy'
+    ? {
+        operationId: '7c6b5a49-3827-4160-9e8d-1a2b3c4d5e6f',
+        attemptId: '5a78d310-8a93-4e4b-a236-f6b76aea2057',
+        code: 'WORK_STALE',
+        at: 1_790_000_000_000,
+      }
+    : undefined;
 
 const enc = new TextEncoder();
 const hex = async (bytes: Uint8Array) =>
@@ -54,11 +64,24 @@ const parserMine = parserMain
   .replace('  emit(text);', '  if (text) emit(text);\n  carry.reset();');
 
 const calls: string[] = [];
+const listeners = new Map<string, Set<() => void>>();
 const client = {
   mutation: async (ref: unknown, args: { digests: string[] }) => {
     const name = getFunctionName(ref as never);
     calls.push(name);
     (window as unknown as { __calls: string[] }).__calls = calls;
+    if (name === 'projectHostedSaves:dismissFailure') {
+      (window as unknown as { __dismissArgs: unknown }).__dismissArgs = args;
+      if (scenario === 'save-denied') return false;
+      for (const query of ['projectLaneReview:read', 'projectHostedLiveLanes:list']) {
+        const value = JSON.parse(reads.get(query) as string);
+        const lane = value.lane ?? value.page[0];
+        delete lane.saveFailure;
+        reads.set(query, JSON.stringify(value));
+        for (const update of listeners.get(query) ?? []) update();
+      }
+      return true;
+    }
     const url = (id: string) =>
       `data:application/octet-stream;base64,${btoa(String.fromCharCode(...(bodies.get(id) ?? new Uint8Array())))}`;
     return args.digests.map(digest => ({
@@ -70,11 +93,26 @@ const client = {
   },
   // The owner's decision block subscribes to Needs me's read while the Lane is held; here it never answers, so the
   // block stays hidden and only its name is recorded (window.__watches).
-  watchQuery: (ref: unknown) => {
+  watchQuery: (ref: unknown, args: unknown) => {
     const name = getFunctionName(ref as never);
     const watches = ((window as unknown as { __watches?: string[] }).__watches ??= []);
     watches.push(name);
-    return { onUpdate: () => () => {}, localQueryResult: () => reads.get(name), journal: () => undefined };
+    return {
+      onUpdate: (update: () => void) => {
+        const subscriptions = ((
+          window as unknown as {
+            __subscriptions?: { name: string; args: unknown }[];
+          }
+        ).__subscriptions ??= []);
+        subscriptions.push({ name, args });
+        const callbacks = listeners.get(name) ?? new Set();
+        callbacks.add(update);
+        listeners.set(name, callbacks);
+        return () => callbacks.delete(update);
+      },
+      localQueryResult: () => reads.get(name),
+      journal: () => undefined,
+    };
   },
 } as unknown as ConvexReactClient;
 
@@ -167,6 +205,7 @@ async function reply(): Promise<Reply> {
       state: scenario === 'abandoned' ? 'abandoned' : scenario === 'landed' ? 'completed' : 'active',
       head: HEAD,
       base: { head: BASE },
+      ...(saveFailure ? { saveFailure } : {}),
       // A landed Lane carries its own time to main and stops (Item a61d3c91).
       landed:
         scenario === 'landed'
@@ -252,7 +291,15 @@ const feed = {
   lanes:
     scenario === 'abandoned'
       ? []
-      : [{ laneId: LANE, stage: 'checking' as const, held: true, overlap: true, changedAt: Date.now() }],
+      : [
+          {
+            laneId: LANE,
+            stage: unattended ? ('editing' as const) : ('checking' as const),
+            held: !unattended,
+            overlap: !unattended,
+            changedAt: Date.now(),
+          },
+        ],
   more: 0,
   moreIsLowerBound: false,
   main: { head: BASE },
@@ -265,7 +312,7 @@ function Frame({ children, current = route }: { children: ReactNode; current?: t
       route={current}
       name="tide-pool"
       feed={feed}
-      needs={{ n: 1, atLeast: false }}
+      needs={{ n: unattended ? 0 : 1, atLeast: false }}
       projects={null}
       controls={{ viewerHandle: 'sample-owner', onPicker() {}, onPalette() {}, onKeys() {} }}
     >
@@ -321,6 +368,7 @@ void reply().then(data => {
             actor: 'sample-owner',
             lastSaveAt: null,
             landing: null,
+            ...(saveFailure ? { saveFailure } : {}),
           },
         ],
         isDone: true,

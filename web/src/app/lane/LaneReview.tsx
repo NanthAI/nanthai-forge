@@ -28,6 +28,7 @@ import { declaredModel, recordedIdentity } from '../who-links';
 import type { LineFeed } from '../Line';
 import { hrefFor, type AppRoute } from '../paths';
 import { crumbsFor, Head } from '../Place';
+import { SaveFailureNotice } from '../SaveFailureNotice';
 import type { PlaceProps } from '../screens';
 import { readExact, readFileBody, type FileBody, type Hunk } from './file-diff';
 import { lineOrigin, type LineOrigin, type Origin } from './line-origin';
@@ -303,6 +304,14 @@ export function ReviewPage({
           </Key>
         ) : null}
       </Head>
+      {lane.saveFailure ? (
+        <SaveFailureNotice
+          key={`${lane.laneId}:${lane.saveFailure.operationId}:${lane.saveFailure.attemptId}`}
+          projectId={projectId}
+          laneId={lane.laneId}
+          failure={lane.saveFailure}
+        />
+      ) : null}
       {takeOut.done || takeOut.error ? (
         <div className="notice" data-st={takeOut.error ? 'failed' : 'passed'} role="status">
           <p>

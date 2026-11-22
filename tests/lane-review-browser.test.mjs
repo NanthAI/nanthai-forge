@@ -113,6 +113,86 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
   };
 
   try {
+    await t.test(
+      'an unattended save failure appears and dismisses through the existing live Lane and board reads',
+      async t => {
+        const board = '/-/sample-owner/tide-pool/lanes';
+        const laneId = '7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
+        for (const [path, loaded, names] of [
+          [
+            board,
+            'On the way to main',
+            ['projectHostedLiveLanes:list', 'projectHostedQueueView:read', 'projectNowOverlaps:now'],
+          ],
+          [`${board}/${laneId}`, 'Changed files', ['projectLaneReview:read']],
+        ]) {
+          const subscriptions = page =>
+            page.evaluate(() => [...window.__subscriptions].sort((a, b) => a.name.localeCompare(b.name)));
+          const healthy = await open(t, PHONE, 'routes&s=save-healthy', path);
+          await healthy.getByRole('heading', { name: loaded }).waitFor();
+          assert.equal(await healthy.getByText('Save failed', { exact: true }).count(), 0);
+          assert.equal(await healthy.getByRole('button', { name: /^Dismiss save failure/ }).count(), 0);
+          const healthyReads = await subscriptions(healthy);
+          assert.deepEqual(
+            healthyReads.map(read => read.name),
+            names,
+          );
+          assert.equal(await calls(healthy), 0);
+
+          const failed = await open(t, PHONE, 'routes&s=save-failed', path);
+          await failed.getByRole('heading', { name: loaded }).waitFor();
+          const notice = failed.getByRole('status').filter({ hasText: 'Save failed' });
+          const dismiss = failed.getByRole('button', { name: /^Dismiss save failure/ });
+          await notice.waitFor();
+          assert.match(await notice.textContent(), /WORK_STALE/);
+          assert.deepEqual(await subscriptions(failed), healthyReads);
+          assert.equal(await calls(failed), 0);
+          if (path === board) {
+            const link = notice.getByRole('link', { name: 'Stream parser: handle split UTF-8 · 7a2b4c6d' });
+            assert.equal(await link.getAttribute('href'), `${board}/${laneId}`);
+            await link.focus();
+            await failed.keyboard.press('Tab');
+            assert.equal(await dismiss.evaluate(button => document.activeElement === button), true);
+          } else {
+            await dismiss.focus();
+          }
+          const fits = await dismiss.evaluate(button => {
+            const rect = button.getBoundingClientRect();
+            return (
+              rect.left >= 0 && rect.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth
+            );
+          });
+          assert.equal(fits, true, 'the notice and its control fit at phone width');
+          await failed.keyboard.press('Enter');
+          await notice.waitFor({ state: 'detached' });
+          assert.equal(await dismiss.count(), 0);
+          assert.equal(await failed.evaluate(() => document.activeElement.id), 'main');
+          assert.deepEqual(await failed.evaluate(() => [window.__calls, window.__dismissArgs]), [
+            ['projectHostedSaves:dismissFailure'],
+            {
+              projectId: 'p1',
+              laneId,
+              operationId: '7c6b5a49-3827-4160-9e8d-1a2b3c4d5e6f',
+              attemptId: '5a78d310-8a93-4e4b-a236-f6b76aea2057',
+            },
+          ]);
+          assert.deepEqual(await subscriptions(failed), healthyReads);
+        }
+      },
+    );
+
+    await t.test('a refused dismissal keeps the save failure and keyboard focus', async t => {
+      const path = '/-/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
+      const page = await open(t, PHONE, 'routes&s=save-denied', path);
+      const dismiss = page.getByRole('button', { name: 'Dismiss save failure' });
+      await dismiss.focus();
+      await page.keyboard.press('Enter');
+      await page.getByRole('alert').filter({ hasText: 'Could not dismiss this save failure.' }).waitFor();
+      assert.equal(await page.getByText('Save failed', { exact: true }).isVisible(), true);
+      assert.equal(await dismiss.evaluate(button => document.activeElement === button), true);
+      assert.equal(await calls(page), 1);
+    });
+
     await t.test('954afe8c: Lanes and Who is touching what open the same Item heading', async t => {
       const lanes = '/-/sample-owner/tide-pool/lanes';
       const title = 'Stream parser: handle split UTF-8';

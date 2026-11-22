@@ -6,6 +6,7 @@ import { documentationPath } from '../../../../src/prose-paths';
 import { reviewEntry, type ReviewEntry, type ReviewFacts } from '../../../../src/review-order';
 import type { LineFeed, LineStage } from '../Line';
 import type { Park } from '../needs/count';
+import type { SaveFailure } from '../SaveFailureNotice';
 import { uniqueBy } from '../../ui/unique';
 
 export type Side = { blob: string; mode: string } | null;
@@ -56,6 +57,7 @@ export type Reply = {
     state: 'active' | 'completed' | 'abandoned';
     head: string;
     base: { head: string };
+    saveFailure?: SaveFailure;
     landed: {
       receiptId: string;
       commit: string;

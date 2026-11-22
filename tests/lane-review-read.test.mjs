@@ -78,6 +78,7 @@ test('one read names the pinned head and every changed path with its exact blobs
   const reply = await read();
   assert.equal(reply.lane.head, saved.head);
   assert.equal(reply.lane.goal, null, 'the saved overlap placeholder is not a title');
+  assert.equal(reply.lane.saveFailure, undefined);
   assert.equal(reply.files.current, true);
   assert.equal(reply.files.total, 3);
   assert.deepEqual(
@@ -105,6 +106,29 @@ test('one read names the pinned head and every changed path with its exact blobs
   assert(meter.readBytes < 64 * 1024, `reads ${meter.readBytes} bytes`);
   for (const table of ['projectBackups', 'projectWorkRecords', 'projectWorkEvents', 'projectHostedSaveJobs'])
     assert(!meter.touched.includes(table), `does not read ${table}`);
+});
+
+test('Lane review forwards the public save failure from its existing head read', async () => {
+  const { s, saved, read } = await lane([]);
+  await read();
+  const healthy = s.counts.at(-1);
+  const head = [...s.tables.projectHostedRecordHeads.values()].find(row => row.key === saved.id);
+  const saveFailure = {
+    operationId: randomUUID(),
+    attemptId: randomUUID(),
+    code: 'WORK_STALE',
+    at: 1_790_000_000_000,
+  };
+  s.patch('projectHostedRecordHeads', head._id, {
+    saveFailure: { ...saveFailure, actor: 'owner', boardRowId: 'synthetic-board-row' },
+  });
+  assert.deepEqual((await read()).lane.saveFailure, saveFailure);
+  const failed = s.counts.at(-1);
+  assert.equal(failed.documents, healthy.documents);
+  assert.equal(failed.ranges, healthy.ranges);
+  assert.equal((await read({ offset: 400 })).lane.saveFailure, undefined);
+  s.patch('projectHostedRecordHeads', head._id, { saveFailure: undefined });
+  assert.equal((await read()).lane.saveFailure, undefined);
 });
 
 test('the Lane title comes from its Intent even with UUID-only overlap metadata, and a failed read leaves the files', async t => {
