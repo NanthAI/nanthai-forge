@@ -10,7 +10,9 @@ import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const { landingHold, holdLines } = await import(moduleUrl('../src/hosted-landing-hold.ts'));
-const { environmentEnd, checkCommandKey } = await import(moduleUrl('../src/check-environment-failure.ts'));
+const { environmentEnd, checkCommandKey, normalizeFailureLine } = await import(
+  moduleUrl('../src/check-environment-failure.ts')
+);
 const { ENVIRONMENT_STREAK } = await import(moduleUrl('../convex/projectHostedLandingCiDown.ts'));
 const { heldCommand } = await import(moduleUrl('../convex/projectHostedLandingEnvironmentHold.ts'));
 const SWITCH = 'FORGE_QUEUE_HOLD_ON_CI_DOWN';
@@ -25,12 +27,20 @@ test.after(() => {
   }
 });
 
+/** mkdtemp appends six random [A-Za-z0-9] characters: about 35% of real folders hold no digit (the review
+ * of 0d14c456 found a digit-free name kept its own identity, so the hold missed a third of real failures,
+ * and random test names made this file fail now and then). Fixed seeds, digit-free names first. */
+const folders = ['xQzTbR', 'abcdef', 'k9Lm2p', 'WWWWWW', '123456', 'a1B2c3'];
+let folderTurn = 0;
+const nextFolder = () => folders[folderTurn++ % folders.length];
+
 /** What the bf111983 job printed: bash's own 126 line, then the sandbox's access note. The temp folder
  * name differs per run (mkdtemp), so identity must not depend on it. */
 const denied = folder =>
   `forge packages: js: npm run test --workspace=packages/a\nbash: line 1: $RUNNER_TEMP/forge-packages-${folder}/run: Permission denied\nForge: $RUNNER_TEMP/forge-packages-${folder} is a check input Forge wrote for the Candidate user forge-check to read and run, not change; if it could not be read or run, that is a Forge fault, not the project's.`;
 
 async function fixture(t, options) {
+  folderTurn = 0;
   const f = await batchesFixture(t, { batching: false, ...options });
   f.rows = () => [...f.tables.projectHostedLandingRequests.values()].filter(r => r.projectId === f.projectId);
   f.queue = () => [...f.tables.projectHostedLandingQueues.values()].find(q => q.projectId === f.projectId);
@@ -72,7 +82,7 @@ async function fixture(t, options) {
   f.brokenEnvironment = async () => {
     for (let round = 0; round < 20 && f.queued().length; round++) {
       const [run] = f.queued();
-      await f.failJob(run, denied(randomUUID().slice(0, 6)));
+      await f.failJob(run, denied(nextFolder()));
       await f.settle();
     }
   };
@@ -298,6 +308,44 @@ test("Item 0d14c456 (review): a Lane's own script that exits 126 is the change's
   assert(
     states(f).every(s => s.error?.code === 'CHECK_FAILED'),
     phases(f),
+  );
+});
+
+test('Item 0d14c456 (review): the identity ignores every mkdtemp suffix, including names with no digit', () => {
+  const pins = {
+    checkId: randomUUID(),
+    expectedDefinition: 'a'.repeat(64),
+    expectedConfiguration: 'b'.repeat(64),
+    expectedEnvironment: 'c'.repeat(64),
+  };
+  const run = { status: 'failed', cancelRequested: false, request: pins };
+  // mkdtemp suffixes are six [A-Za-z0-9] characters (digit-free in about 35% of cases); the rule that
+  // strips ids by "has a letter and a digit" kept the digit-free ones as their own identity.
+  const suffixes = ['xQzTbR', 'abcdef', 'WWWWWW', 'k9Lm2p', '123456', 'a1B2c3', 'ZZZZZ0'];
+  const signatures = new Set(suffixes.map(suffix => environmentEnd(run, [denied(suffix)]).signature));
+  assert.equal(signatures.size, 1, 'one identity for every folder name');
+  // The same shape for every Forge-made temp folder name, whatever the prefix.
+  for (const prefix of ['forge-packages-', 'forge-candidate-', 'forge-test-modules-'])
+    assert.equal(
+      normalizeFailureLine(`Forge: $RUNNER_TEMP/${prefix}xQzTbR/run is a check input`),
+      normalizeFailureLine(`Forge: $RUNNER_TEMP/${prefix}k9Lm2p/run is a check input`),
+      prefix,
+    );
+  // A hold stored before this rule (mixed suffix, generic rule only) keeps matching after an upgrade.
+  const legacy = text =>
+    text
+      .replace(/\s+/g, ' ')
+      .replace(/\b(?=[\w-]*\d)(?=[\w-]*[A-Za-z])[\w-]{6,}\b/g, '#')
+      .replace(/\d+/g, '0')
+      .trim();
+  for (const suffix of ['Ab12Cd', 'k9Lm2p', '123456']) {
+    const line = denied(suffix).split('\n')[2];
+    assert.equal(normalizeFailureLine(line), legacy(line), `stored form kept for ${suffix}`);
+  }
+  // Words around it stay: a different line is still a different identity.
+  assert.notEqual(
+    normalizeFailureLine('Forge: $RUNNER_TEMP/forge-packages-xQzTbR/run is a check input'),
+    normalizeFailureLine('Forge: $RUNNER_TEMP/forge-other/run is a check input'),
   );
 });
 

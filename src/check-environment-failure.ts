@@ -26,10 +26,16 @@ export const checkCommandKey = (pins: CheckPins) =>
 const ENVIRONMENT_LINE =
   /^Forge: .* is a check input Forge wrote for the Candidate user\b|^CANDIDATE_ISOLATION_UNAVAILABLE: /;
 
-/** Run-specific noise out of a failing line: temp-folder names, ids, digests, counts and times. */
+/** Run-specific noise out of a failing line: temp-folder names, ids, digests, counts and times.
+ * First the shape every Forge-made mkdtemp folder has, `forge-<what>-` plus six random [A-Za-z0-9]
+ * characters (about 35% of them hold no digit, which the generic id rule below cannot tell from a
+ * word: the hold missed a third of real identical failures, Item 0d14c456). Then the generic rule. */
 export const normalizeFailureLine = (text: string) =>
   text
     .replace(/\s+/g, ' ')
+    // The whole name becomes `#`, as the generic rule already made it for a mixed suffix, so a hold
+    // stored before this rule existed keeps matching (review of the fix).
+    .replace(/\bforge-[a-z]+(?:-[a-z]+)*-[A-Za-z0-9]{6}(?![\w-])/g, '#')
     .replace(/\b(?=[\w-]*\d)(?=[\w-]*[A-Za-z])[\w-]{6,}\b/g, '#')
     .replace(/\d+/g, '0')
     .trim();
