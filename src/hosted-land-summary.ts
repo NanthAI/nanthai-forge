@@ -73,8 +73,15 @@ type Result = {
   checkLogs?: string;
   /** A stalled preparation's failed or fenced source step (wait observation). */
   sourceFailure?: unknown;
+  /** The GitHub mirror is stopped, so this landing does not reach GitHub yet (friction 28e84c06). */
+  mirrorStopped?: { repository?: string; error?: string; receiptId?: string | null };
 };
 export const resultOf = (response: HostedAgentResponse) => (response.result ?? {}) as Result;
+/** Landed on Forge main, not on GitHub: name the stop and where its cause is, never poll GitHub. */
+export function mirrorStoppedLine(stop: NonNullable<Result['mirrorStopped']>) {
+  const receipt = stop.receiptId ? ` at receipt ${stop.receiptId.slice(0, 8)}` : '';
+  return `GitHub mirror${stop.repository ? ` to ${stop.repository}` : ''} is stopped (${stop.error ?? 'GITHUB_SYNC_FAILED'}${receipt}): this landing is on Forge main but does not reach GitHub until the project owner resumes the mirror. nforge github status . names the cause.`;
+}
 export function landPhase(response: HostedAgentResponse): string | undefined {
   const result = resultOf(response);
   return result.submission?.phase ?? result.phase;
@@ -128,6 +135,7 @@ function classifyLand(
       ...(submission?.acceptance?.proof ? [proofLine(submission.acceptance.proof)] : []),
       ...(submission?.acceptance?.acceptedBy ? [acceptedByLine(submission.acceptance.acceptedBy)] : []),
       ...(submission?.acceptance?.checkTime ? [checkTimeLine(submission.acceptance.checkTime)] : []),
+      ...(result.mirrorStopped ? [mirrorStoppedLine(result.mirrorStopped)] : []),
     ]);
   if (submission?.observation?.state === 'superseded' || phase === 'superseded')
     return out('superseded', [

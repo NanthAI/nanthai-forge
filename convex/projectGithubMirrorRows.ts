@@ -11,6 +11,53 @@ export const mirrorRow = (ctx: MutationCtx | QueryCtx, projectId: Id<'hostedProj
     .query('projectGithubMirrors')
     .withIndex('by_project', q => q.eq('projectId', projectId))
     .unique();
+const stopRow = (ctx: MutationCtx | QueryCtx, projectId: Id<'hostedProjects'>) =>
+  ctx.db
+    .query('projectGithubMirrorStops')
+    .withIndex('by_project', q => q.eq('projectId', projectId))
+    .unique();
+/** A terminal failure now holds the mirror: record which job (failure path only). */
+export async function markMirrorStop(
+  ctx: MutationCtx,
+  job: Pick<Doc<'projectGithubMirrorJobs'>, '_id' | 'projectId'>,
+) {
+  const old = await stopRow(ctx, job.projectId);
+  if (old) await ctx.db.patch(old._id, { jobId: job._id });
+  else await ctx.db.insert('projectGithubMirrorStops', { projectId: job.projectId, jobId: job._id });
+}
+/** A resume, retarget or bring-in moves the mirror past its stop; one indexed read, called only
+ * on those rare transitions. */
+export async function clearMirrorStop(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
+  const stop = await stopRow(ctx, projectId);
+  if (stop) await ctx.db.delete(stop._id);
+}
+/** Friction 28e84c06: a landed reply names a stopped mirror, so an agent never polls GitHub for a
+ * commit that will not arrive. One indexed read while healthy; the job and project are read only
+ * when a stop is recorded. A paused, disconnected or re-pointed mirror, a mirror whose active job
+ * moved on, and a project Forge does not hold authority for are not reported. */
+export async function stoppedMirror(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
+  const stop = await stopRow(ctx, projectId);
+  if (!stop) return null;
+  const [job, project, queue] = await Promise.all([
+    ctx.db.get(stop.jobId),
+    ctx.db.get(projectId),
+    mirrorRow(ctx, projectId),
+  ]);
+  const mirror = project?.sourceAuthority?.mode === 'server' ? effectivePolicy(project).githubMirror : null;
+  if (
+    job?.status !== 'failed' ||
+    queue?.activeId !== job._id ||
+    !mirror?.autoPush ||
+    job.repository.toLowerCase() !== mirror.repo.toLowerCase()
+  )
+    return null;
+  return {
+    repository: job.repository,
+    error: job.error ?? 'GITHUB_SYNC_FAILED',
+    state: job.state,
+    receiptId: job.inbound ? null : job.receiptId,
+  };
+}
 /** The queue row both webhooks and publishes need; absent until a project connects two-way sync or
  * lands. Idempotent: one indexed read, one insert only when missing (friction 77518c88). */
 export async function ensureMirrorRow(ctx: MutationCtx, projectId: Id<'hostedProjects'>, repo: string) {
@@ -84,6 +131,8 @@ export async function resumeMirrorJob(
   if (!replaceTask && live && job.status !== 'failed' && task.scheduledTime + 11 * 60_000 > Date.now())
     return { status: 'already-running' as const, step: job.step };
   if (live) await cancelPendingTask(ctx, task._id, task);
+  // Only a stopped job has a stop row; a healthy resume reads nothing more.
+  if (job.status === 'failed') await clearMirrorStop(ctx, job.projectId);
   const step = job.step + 1;
   await ctx.db.patch(job._id, {
     status: 'running',

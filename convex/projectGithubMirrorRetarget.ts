@@ -4,7 +4,7 @@
 // became a failed job that never became active and no surface showed it.
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { mirrorRow } from './projectGithubMirrorRows';
+import { clearMirrorStop, mirrorRow } from './projectGithubMirrorRows';
 import { queuedJobs } from './projectGithubInboundQueue';
 
 /** Failed publish jobs that are not the queue's active job: a retarget's binding failures. Pull
@@ -43,6 +43,8 @@ export async function retargetGithubMirror(ctx: MutationCtx, projectId: Id<'host
   open.push(...(await strandedMirrorJobs(ctx, projectId, null)));
   for (const job of open)
     await ctx.db.patch(job._id, { status: 'done', step: job.step + 1, detail: superseded(repo) });
+  // The new repository starts unstopped; an old stop must not name it (friction 28e84c06).
+  await clearMirrorStop(ctx, projectId);
   await ctx.db.patch(queue._id, {
     repository: repo,
     repositoryKey: repo.toLowerCase(),

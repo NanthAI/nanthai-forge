@@ -858,6 +858,8 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   // 1122c9c9: lead approved solo 492 -> 494 reads; measured +908 B/landing = +$0.0001816/1,000 for pending-only scheduler safety.
   // 9a04d916: compose settle, solo 647 -> 685 reads (owner-approved +$0.02/1,000; ledger reason recorded).
   // f65d8024: 685 -> 686, one empty expiry probe. The loaded acceptance plan holds the exact Lane pins.
+  // 67771ca6 (friction 28e84c06): 686 -> 687, the landed reply's one empty stop-row probe, so a
+  // stopped GitHub mirror is named; the row changes only on a terminal stop or resume.
   assertCommandWeight('landServerSolo', landServer);
   t.diagnostic(JSON.stringify({ landServerSolo: landServer }));
   const verdicts = judgeCosts(costs, costGuard, 'landing-fixture', baseline.measured);

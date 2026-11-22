@@ -872,3 +872,33 @@ test('compact landings keep weakened-test flags, pending (preflight on) and land
   assert.deepEqual(landed.defaults.weakenedTests, weakenedTests);
   assert.equal(landed.defaults.preflight, undefined, 'a landed brief still drops the preflight record');
 });
+
+test('friction 28e84c06: brief land and observe replies keep a stopped GitHub mirror', () => {
+  const mirrorStopped = {
+    repository: 'synthetic/mirror',
+    error: 'GITHUB_SYNC_HASH',
+    state: 'a'.repeat(64),
+    receiptId: '893d4653-e7a5-4d1b-8639-8f9ec839a8ee',
+  };
+  // The request is dropped by the brief reply, so its absence proves slimming ran.
+  const submission = { phase: 'landed', acceptance: { receiptId: 'r1', head: 'h' }, request: { big: 'x' } };
+  const hosted = receipt => slimReceipt({ transport: 'hosted', operationId: 'op1', ...receipt });
+  const land = hosted({ action: 'land', result: { submission, mirrorStopped } });
+  assert.equal(land.result.submission.request, undefined, 'the brief land reply ran');
+  assert.deepEqual(land.result.mirrorStopped, mirrorStopped);
+  const wait = hosted({ action: 'wait', result: { submission, mirrorStopped } });
+  assert.deepEqual(wait.result.mirrorStopped, mirrorStopped);
+  const observe = hosted({
+    action: 'observe',
+    result: {
+      status: 'terminal',
+      successful: true,
+      submissions: [{ operationId: 'op1', submission, mirrorStopped }],
+    },
+  });
+  assert.equal(observe.result.submissions[0].submission.request, undefined, 'the brief observe reply ran');
+  assert.deepEqual(observe.result.submissions[0].mirrorStopped, mirrorStopped);
+  const healthy = hosted({ action: 'land', result: { submission } });
+  assert.equal(healthy.result.submission.request, undefined);
+  assert.equal('mirrorStopped' in healthy.result, false);
+});

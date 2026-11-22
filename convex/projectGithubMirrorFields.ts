@@ -39,6 +39,13 @@ export const githubMirrorTables = {
   })
     .index('by_project', ['projectId'])
     .index('by_repository_key', ['repositoryKey']),
+  /** One row while a terminally failed publish holds the mirror (Item 67771ca6, friction 28e84c06).
+   * Written only when a job stops and deleted on resume, so a landed reply that asks reads one
+   * index range that no healthy mirror write ever changes. */
+  projectGithubMirrorStops: defineTable({
+    projectId: v.id('hostedProjects'),
+    jobId: v.id('projectGithubMirrorJobs'),
+  }).index('by_project', ['projectId']),
   projectGithubMirrorJobs: defineTable({
     projectId: v.id('hostedProjects'),
     receiptId: v.string(),

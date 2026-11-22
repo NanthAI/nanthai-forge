@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "projectGithubMirrorStops (Item 67771ca6, friction 28e84c06): landed replies must name a stopped GitHub mirror. A field on projectGithubMirrors would re-run every landing wait subscription on each mirror publish; a separate at-most-one-row-per-project table changes only on a terminal stop or resume, so the healthy wait stays quiet.",
+  "date": "2026-11-22"
+}

@@ -2,7 +2,13 @@
 import { wakeCiMirrorWaiters } from './projectCiStatusMirror';
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
-import { mirrorJob, mirrorRow, scheduleMirror, resumeMirrorJob } from './projectGithubMirrorRows';
+import {
+  markMirrorStop,
+  mirrorJob,
+  mirrorRow,
+  scheduleMirror,
+  resumeMirrorJob,
+} from './projectGithubMirrorRows';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
 import { readHostedRecord } from './projectHostedRecords';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
@@ -377,7 +383,11 @@ export const failed = internalMutation({
       nextAttemptAt: delay === null ? undefined : Date.now() + delay,
     });
     if (delay !== null) await scheduleMirror(ctx, { _id: job._id, step }, delay);
-    else if (job.ciWaiters) await wakeCiMirrorWaiters(ctx, job._id);
+    else {
+      // The job now holds the queue: landed replies name the stop (friction 28e84c06).
+      await markMirrorStop(ctx, job);
+      if (job.ciWaiters) await wakeCiMirrorWaiters(ctx, job._id);
+    }
     return null;
   },
 });

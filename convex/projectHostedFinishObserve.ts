@@ -2,7 +2,7 @@
 import { pendingRunnerState } from './cancelledRunUsage';
 import { readProviderDelay } from './projectHostedLandingCheckProgress';
 import { failureCauseReply } from './projectFailureCauseRead';
-import { finishReadReader, selectExactFinishProject } from './projectFinishReadReader';
+import { finishReadReader, finishReadSourceDb, selectExactFinishProject } from './projectFinishReadReader';
 import { readWouldConflict, syncRequiredQueue } from './projectHostedLandingWouldConflict';
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
 import { landingOrderWaitForReader, landingStateForReader } from './projectHostedLandingOrder';
@@ -30,6 +30,7 @@ import { report } from './errors';
 import { boardWake } from './projectBoardDelivery';
 import { held, heldReview, loadHeldPolicy, noteHeldPolicy, reviewState } from './projectHostedOwnerReview';
 import { feedArrivalAnchor } from './projectFeedArrival';
+import { stoppedMirror } from './projectGithubMirrorRows';
 
 /** Finite selected-request pages. Every page/subscription rechecks current access;
  * neither reading nor reconnecting wakes a controller. Versions are durable offsets,
@@ -243,14 +244,22 @@ async function observePage(
     const delay = await readProviderDelay(ctx, selectedRow, state);
     // The cause and next step the Failed check screen shows (b030c3c5); failure states only, 0 reads otherwise.
     const cause = await failureCauseReply(ctx, input.projectId, selectedRow, state);
+    // A landing that will not reach GitHub says so (friction 28e84c06); landed replies only. The
+    // policy is not in the finish projection, so the stop check reads the source port.
+    const stopped =
+      state.phase === 'landed'
+        ? await stoppedMirror({ ...rawCtx, db: finishReadSourceDb(rawCtx) }, input.projectId)
+        : null;
+    const mirror = stopped ? { mirrorStopped: stopped } : {};
     for (const event of events)
-      if (event.submission.version === state.version) Object.assign(event, delay, cause);
+      if (event.submission.version === state.version) Object.assign(event, delay, cause, mirror);
     const decision = selectedRow.reviewState ?? reviewState(selectedRow, state);
     const payload = {
       ...review,
       ...(decision ? { reviewState: decision } : {}),
       ...delay,
       ...cause,
+      ...mirror,
       projectId: input.projectId,
       operationId: input.operationId,
       canonicalOperationId: state.operationId,

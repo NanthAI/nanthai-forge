@@ -128,6 +128,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `65e2d743` | The passed landing waited behind an older submission. Individual and batch receipts record the elapsed order wait, and `landings` includes waits shorter than one minute. |
 | `78a97771` | Withdrawal by Lane keeps the builder's saves and ends the pending check. An old withdrawal reader can still read a reply after a newer CLI stamps the submit. |
 | `9cd6c0ec` | A green check refused acceptance: composition onto a moved main changed covered shared-file bytes after the proof. A stale proof now refuses at preflight or in the hosted planner before any test job, naming the offline refresh; a proof whose replay scope main left intact holds. |
+| `28e84c06` | Friction (Item 67771ca6): while the GitHub mirror was stopped, a builder polled GitHub for 25 minutes for a landing that could not arrive. A landed reply now names the stopped mirror, its code and receipt; pending, paused and healthy replies add nothing. |
 
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.

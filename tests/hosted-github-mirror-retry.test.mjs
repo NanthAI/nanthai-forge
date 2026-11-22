@@ -23,6 +23,9 @@ const store = await import(moduleUrl('../convex/projectGithubMirrorStore.ts'));
 const action = await import(moduleUrl('../convex/projectGithubMirror.ts'));
 const ownership = await import(moduleUrl('../convex/projectConvexSourceOwnership.ts'));
 const { githubMirrorStatus } = await import(moduleUrl('../convex/projectGithubMirrorStatus.idle.ts'));
+const { stoppedMirror, mirrorRow } = await import(moduleUrl('../convex/projectGithubMirrorRows.ts'));
+const { retargetGithubMirror } = await import(moduleUrl('../convex/projectGithubMirrorRetarget.ts'));
+const { yieldToInbound } = await import(moduleUrl('../convex/projectGithubInboundQueue.ts'));
 const agent = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 const { HostedMirrorStatus } = await import(moduleUrl('../web/src/cockpit/HostedMirrorStatus.tsx'));
 const { createElement } = await import('react');
@@ -802,3 +805,91 @@ for (const [name, source, workflows] of [
     ]);
     assert.equal(f.github.commits.size, 2);
   });
+
+test('friction 28e84c06: a terminal stop records one stop row; a pause hides it and resume clears it', async t => {
+  const f = await fixture(
+    t,
+    () => false,
+    undefined,
+    url =>
+      url.endsWith('/git/trees')
+        ? Response.json({ message: 'GitRPC::BadObjectState' }, { status: 422 })
+        : undefined,
+  );
+  const stops = () => [...(f.tables.projectGithubMirrorStops?.values() ?? [])];
+  const stopped = () => f.run({ _handler: ctx => stoppedMirror(ctx, f.projectId) });
+  assert.equal(await stopped(), null, 'a healthy mirror has no stop row');
+  await f.step();
+  assert.equal(f.job().status, 'failed');
+  assert.deepEqual(
+    stops().map(row => row.jobId),
+    [f.input.jobId],
+  );
+  assert.deepEqual(await stopped(), {
+    repository: 'synthetic/mirror',
+    error: f.job().error,
+    state: f.job().state,
+    receiptId: f.job().receiptId,
+  });
+  // A paused mirror says paused elsewhere; a landing does not claim it is stopped.
+  const project = f.tables.hostedProjects.get(f.projectId);
+  const policy = project.autonomyPolicy;
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: { ...policy, githubMirror: { ...policy.githubMirror, autoPush: false } },
+  });
+  assert.equal(await stopped(), null);
+  f.patch('hostedProjects', f.projectId, { autonomyPolicy: policy });
+  assert.equal((await f.run(store.resume, { jobId: f.input.jobId })).status, 'scheduled');
+  assert.deepEqual(stops(), [], 'resume deletes the stop row');
+  assert.equal(await stopped(), null);
+});
+
+test('friction 28e84c06: a retarget, a bring-in, a moved active job or client authority never report an old stop', async t => {
+  const failing = async () => {
+    const f = await fixture(
+      t,
+      () => false,
+      undefined,
+      url =>
+        url.endsWith('/git/trees')
+          ? Response.json({ message: 'GitRPC::BadObjectState' }, { status: 422 })
+          : undefined,
+    );
+    await f.step();
+    assert.equal(f.job().status, 'failed');
+    return f;
+  };
+  const stops = f => [...(f.tables.projectGithubMirrorStops?.values() ?? [])];
+  const stopped = f => f.run({ _handler: ctx => stoppedMirror(ctx, f.projectId) });
+  const f = await failing();
+  assert.notEqual(await stopped(f), null);
+  // A native-owner project is not mirrored from Forge.
+  const project = f.tables.hostedProjects.get(f.projectId);
+  f.patch('hostedProjects', f.projectId, {
+    sourceAuthority: { ...project.sourceAuthority, mode: 'native-owner' },
+  });
+  assert.equal(await stopped(f), null, 'native-owner authority');
+  f.patch('hostedProjects', f.projectId, { sourceAuthority: project.sourceAuthority });
+  // The queue moved past the stopped job without clearing the row: still not reported.
+  const row = [...f.tables.projectGithubMirrors.values()].find(r => r.projectId === f.projectId);
+  f.patch('projectGithubMirrors', row._id, { activeId: null });
+  assert.equal(await stopped(f), null, 'a moved active job');
+  f.patch('projectGithubMirrors', row._id, { activeId: row.activeId });
+  assert.notEqual(await stopped(f), null);
+  await f.run({ _handler: ctx => retargetGithubMirror(ctx, f.projectId, 'synthetic/other') });
+  assert.deepEqual(stops(f), [], 'a retarget clears the stop');
+  // Bringing GitHub in requeues the failed publish and clears its stop.
+  const g = await failing();
+  assert.equal(stops(g).length, 1);
+  await g.run({
+    _handler: async ctx =>
+      yieldToInbound(
+        ctx,
+        await ctx.db.get(g.projectId),
+        await mirrorRow(ctx, g.projectId),
+        await ctx.db.get(g.input.jobId),
+      ),
+  });
+  assert.equal(g.job().status, 'queued');
+  assert.deepEqual(stops(g), [], 'a bring-in clears the stop');
+});

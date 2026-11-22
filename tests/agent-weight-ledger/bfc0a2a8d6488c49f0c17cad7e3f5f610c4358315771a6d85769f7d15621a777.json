@@ -1,0 +1,4 @@
+{
+  "issue": "67771ca6",
+  "reason": "Stopped GitHub mirror named on landing (Item 67771ca6, friction 28e84c06): a landed observe reply probes the per-project projectGithubMirrorStops row by index, so land/wait say when a landing will not reach GitHub. Solo fixture: +1 document read (the empty probe), +0 calls; the job and project are read only when a stop is recorded. The stop row is written only on a terminal mirror failure and removed on resume, so a healthy wait subscription never re-runs for it. No new writes on the healthy path; idle cost unchanged."
+}

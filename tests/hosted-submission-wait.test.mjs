@@ -281,9 +281,10 @@ test('a cursor from a mid-page progress event resumes every disconnected version
   assert.equal(s.counts().opens, 0);
   assert.equal(new Set(s.events.map(e => `${e.id}:${e.version}`)).size, s.events.length);
   for (const c of s.f.counts.filter(c => c.name === 'landingWaitPage')) {
-    // 24 page ranges plus one account read naming the caller by handle.
+    // 24 page ranges, one account read naming the caller by handle and one empty stop-row probe
+    // on the landed reply (friction 28e84c06: a stopped GitHub mirror is named).
     assert(
-      c.documents - landingBodyCounts(c).reads <= 25 && c.ranges - landingBodyCounts(c).ranges <= 25,
+      c.documents - landingBodyCounts(c).reads <= 26 && c.ranges - landingBodyCounts(c).ranges <= 26,
       JSON.stringify(c),
     );
   }

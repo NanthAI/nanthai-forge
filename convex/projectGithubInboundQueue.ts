@@ -6,7 +6,7 @@ import { v } from 'convex/values';
 import { z } from 'zod';
 import { internalMutation, type MutationCtx, type QueryCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
-import { mirrorRow, scheduleMirror } from './projectGithubMirrorRows';
+import { clearMirrorStop, mirrorRow, scheduleMirror } from './projectGithubMirrorRows';
 import { startMirrorPublish, suspendHeldMirror } from './projectGithubMirrorCadence';
 import { effectivePolicy } from '../src/autonomy-policy';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
@@ -268,6 +268,8 @@ export async function yieldToInbound(
   job: Doc<'projectGithubMirrorJobs'>,
   requested = false,
 ) {
+  // Bringing GitHub in after a stop requeues the failed publish; its stop row goes with it.
+  if (job.status === 'failed') await clearMirrorStop(ctx, job.projectId);
   await ctx.db.patch(job._id, {
     status: 'queued',
     step: job.step + 1,

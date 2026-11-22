@@ -53,6 +53,8 @@ const eventSchema = z.object({
   failureCause: z.unknown().optional(),
   /** A stalled preparation's failed or fenced source step and its cause (incident e62d834b). */
   sourceFailure: z.unknown().optional(),
+  /** A landed reply while the GitHub mirror is stopped (friction 28e84c06). */
+  mirrorStopped: z.unknown().optional(),
   pendingAttempt: hostedFinishSchema.shape.pending,
   queue: z.unknown().optional(),
   queueAheadSelection: z.unknown().optional(),
@@ -166,6 +168,7 @@ export async function observeHostedSubmissions(
                 reviewState,
                 failureCause,
                 sourceFailure,
+                mirrorStopped,
                 pendingAttempt,
                 queue,
                 wouldConflict,
@@ -181,6 +184,7 @@ export async function observeHostedSubmissions(
                 ...(reviewState ? { reviewState } : {}),
                 ...(failureCause ? { failureCause } : {}),
                 ...(sourceFailure ? { sourceFailure } : {}),
+                ...(mirrorStopped ? { mirrorStopped } : {}),
                 pendingAttempt,
                 ...(recovery ? { recovery } : {}),
                 ...(conflict ? { conflict } : {}),
@@ -563,6 +567,7 @@ async function observeHostedSubmissionsOnce(
               ...(page.reviewState ? { reviewState: page.reviewState } : {}),
               ...(page.failureCause ? { failureCause: page.failureCause } : {}),
               ...(page.sourceFailure ? { sourceFailure: page.sourceFailure } : {}),
+              ...(page.mirrorStopped ? { mirrorStopped: page.mirrorStopped } : {}),
               ...((page.recovery ?? suppliedAdvice?.recovery)
                 ? { recovery: page.recovery ?? suppliedAdvice?.recovery }
                 : {}),
