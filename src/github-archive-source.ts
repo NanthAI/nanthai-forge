@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { logImportMetric } from './github-import-metric.js';
 import { networkFetch, networkTimeout } from './network-fetch.js';
 import { createHash } from 'node:crypto';
 import { assertGithubRateLimit, type GithubFetch } from './github.js';
@@ -77,18 +78,13 @@ export async function listGithubTree(
     }
   } catch (error) {
     if (!(error instanceof TreeSplitUnavailable)) throw error;
-    console.log(
-      `FORGE_IMPORT_METRIC ${JSON.stringify({ phase: 'listing-split-unavailable', reason: error.reason, requests: stats.requests })}`,
-    );
+    logImportMetric({ phase: 'listing-split-unavailable', reason: error.reason, requests: stats.requests });
     return null;
   }
   if (lossyCount) refuseLossyGitPaths(lossy, 'This GitHub repository', lossyCount, 100);
   invariant(!unordered, 'GITHUB_RESPONSE', 'GitHub returned invalid or duplicate tree paths.');
   invariant(Number.isSafeInteger(totalBytes), 'GITHUB_RESPONSE', 'Repository size is invalid.');
-  if (stats.splits)
-    console.log(
-      `FORGE_IMPORT_METRIC ${JSON.stringify({ phase: 'listing-split', ...stats, entries, rssBytes: process.memoryUsage().rss })}`,
-    );
+  if (stats.splits) logImportMetric({ phase: 'listing-split', ...stats, entries });
   return { files, totalBytes, submodules };
 }
 /** The commit's tarball as one gzip stream. GitHub redirects to codeload with a

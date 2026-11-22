@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { logImportMetric } from '../src/github-import-metric';
 import { randomBytes, randomFillSync } from 'node:crypto';
-import { open, unlink } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import type { ActionCtx } from './_generated/server';
@@ -22,6 +20,12 @@ import { listGithubTree } from '../src/github-archive-source';
 import type { GithubFetch } from '../src/github';
 import type { ImportRequestMeter } from '../src/github-import-meter';
 import { importPageBytes } from '../src/github-import-pages';
+import {
+  openImportScratch,
+  readImportBody,
+  readImportRange,
+  writeImportRange,
+} from './projectGithubImportScratch';
 
 type Pin = { sha256: string; size: number };
 const listingHeader = Buffer.from('{"schema":3,');
@@ -85,7 +89,7 @@ async function storeScratch(
 }
 /** Fetch and verify each page once. A private action-local copy serves repeated
  * scans and out-of-order tar members without making another R2 request. */
-async function readListing(
+export async function readListing(
   projectId: Id<'hostedProjects'>,
   pin: Pin,
   tree: string,
@@ -95,21 +99,7 @@ async function readListing(
   const index = bytes && decodeListingIndex(bytes, tree);
   if (!index) return null;
   const buffer = Buffer.allocUnsafe(index.pages.reduce((max, page) => Math.max(max, page.size), 0));
-  const path = join(tmpdir(), `forge-github-listing-${randomBytes(16).toString('hex')}`);
-  const file = await open(path, 'wx+', 0o600);
-  // Lambda can interrupt an action without unwinding it. On POSIX the open
-  // descriptor keeps the bytes available after unlink and owns their lifetime.
-  const linked = await unlink(path).then(
-    () => false,
-    () => true,
-  );
-  const close = async () => {
-    try {
-      await file.close();
-    } finally {
-      if (linked) await unlink(path);
-    }
-  };
+  const { file, close } = await openImportScratch();
   const offsets = new Map<string, number>();
   let offset = 0;
   let keep = false;
@@ -127,11 +117,7 @@ async function readListing(
         }
         const start = offsets.get(page.sha256)! + (span?.offset ?? 0);
         const raw = buffer.subarray(0, span?.size ?? page.size);
-        for (let at = 0; at < raw.length;) {
-          const { bytesRead } = await file.read(raw, at, raw.length - at, start + at);
-          if (bytesRead === 0) return null;
-          at += bytesRead;
-        }
+        if (!(await readImportRange(file, raw, start))) return null;
         return digest(raw) === (span?.sha256 ?? page.sha256) ? raw : null;
       },
       indexTarMembers,
@@ -155,11 +141,38 @@ export async function readPins(
   return bytes && ImportedPins.decode(bytes, tree, listing.sha256, rows);
 }
 
+export async function openPinCheckpoint(projectId: Id<'hostedProjects'>, pin: Pin) {
+  const scratch = await openImportScratch();
+  const verified = await readScratchParts(projectId, pin, 'pins', (bytes, offset) =>
+    writeImportRange(scratch.file, bytes, offset),
+  );
+  if (verified) return scratch;
+  await scratch.close();
+  return null;
+}
+
 async function readScratch(
   projectId: Id<'hostedProjects'>,
   pin: Pin,
   kind: 'listing' | 'pins',
   { header, buffer }: { header?: Buffer; buffer?: Buffer } = {},
+) {
+  let bytes: Buffer | undefined;
+  const verified = await readScratchParts(projectId, pin, kind, (chunk, offset) => {
+    if (header && offset < header.length)
+      for (let i = 0; i < Math.min(chunk.length, header.length - offset); i++)
+        if (header[offset + i] !== chunk[i]) return false;
+    bytes ??= buffer?.subarray(0, pin.size) ?? Buffer.allocUnsafe(pin.size);
+    bytes.set(chunk, offset);
+  });
+  return verified && bytes ? bytes : null;
+}
+
+async function readScratchParts(
+  projectId: Id<'hostedProjects'>,
+  pin: Pin,
+  kind: 'listing' | 'pins',
+  consume: Parameters<typeof readImportBody>[3],
 ) {
   try {
     const url = await presignGet(r2Config(), r2ImportListingKey(projectId, pin.sha256));
@@ -167,35 +180,10 @@ async function readScratch(
       `R2 import ${kind} read`,
       url,
       { headers: { 'accept-encoding': 'identity' } },
-      async (response, progressed) => {
-        if (!response.ok || !response.body) return null;
-        const length = response.headers.get('content-length');
-        if (length !== null && Number(length) !== pin.size) return null;
-        let bytes: Buffer | undefined;
-        let offset = 0;
-        const reader = response.body.getReader();
-        try {
-          for (;;) {
-            const chunk = await reader.read();
-            if (chunk.done) break;
-            if (chunk.value.byteLength > pin.size - offset) return null;
-            if (header && offset < header.length)
-              for (let i = 0; i < Math.min(chunk.value.length, header.length - offset); i++)
-                if (header[offset + i] !== chunk.value[i]) return null;
-            bytes ??= buffer?.subarray(0, pin.size) ?? Buffer.allocUnsafe(pin.size);
-            bytes.set(chunk.value, offset);
-            offset += chunk.value.byteLength;
-            progressed();
-          }
-        } finally {
-          void reader.cancel().catch(() => {});
-          reader.releaseLock();
-        }
-        return bytes && offset === pin.size && digest(bytes) === pin.sha256 ? bytes : null;
-      },
+      (response, progressed) => readImportBody(response, pin, progressed, consume),
     );
   } catch {
-    return null;
+    return false;
   }
 }
 /** A listing-only step writes the pages and advances the job. The next action
@@ -213,9 +201,13 @@ export async function jobListing(
   const started = Date.now();
   const stored = job.listing && (await readListing(job.projectId, job.listing, tree, indexTarMembers));
   if (stored) {
-    console.log(
-      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'listing-stored', at: Date.now(), elapsedMillis: Date.now() - started, files: stored.listing.length })}`,
-    );
+    logImportMetric({
+      projectId: job.projectId,
+      phase: 'listing-stored',
+      at: Date.now(),
+      elapsedMillis: Date.now() - started,
+      files: stored.listing.length,
+    });
     return Object.assign(stored, { pin: job.listing! });
   }
   const writer = new ListingPageWriter((page, nonce) =>
@@ -253,9 +245,15 @@ export async function jobListing(
     submodules: totals.submodules,
     githubRequests: meter.counts,
   });
-  console.log(
-    `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'listing-written', at: Date.now(), elapsedMillis: Date.now() - started, files: totals.files, sourceBytes: totals.totalBytes, pages: index.pages.length, rssBytes: process.memoryUsage().rss, peakRssBytes: process.resourceUsage().maxRSS * 1024 })}`,
-  );
+  logImportMetric({
+    projectId: job.projectId,
+    phase: 'listing-written',
+    at: Date.now(),
+    elapsedMillis: Date.now() - started,
+    files: totals.files,
+    sourceBytes: totals.totalBytes,
+    pages: index.pages.length,
+  });
   return null;
 }
 
@@ -276,7 +274,7 @@ export async function dropListing(projectId: Id<'hostedProjects'>) {
           await remove().catch(remove);
         } catch {
           // A persistent failure for one key does not strand the other pages.
-          console.log(`FORGE_IMPORT_METRIC ${JSON.stringify({ projectId, phase: 'scratch-delete-failed' })}`);
+          logImportMetric({ projectId, phase: 'scratch-delete-failed' });
         }
       }
       if (page.isDone || !page.keys.length) return;

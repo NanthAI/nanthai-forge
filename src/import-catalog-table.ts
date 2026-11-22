@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { invariant } from './errors.js';
 import type { StateSize } from './state/size.js';
 import type { ObjectPack } from './object-pack-range.js';
 
@@ -28,6 +29,7 @@ export class CatalogTable {
   private packIndex = new Map<string, number>();
   private extra = new Map<number, Pick<CatalogEntry, 'recipe' | 'stateGeneration' | 'stateSize'>>();
   private probe = Buffer.alloc(32);
+  private importSources = new Uint8Array(0);
 
   has(digest: string) {
     return this.find(digest) >= 0;
@@ -35,6 +37,9 @@ export class CatalogTable {
   get(digest: string): CatalogEntry | undefined {
     const row = this.find(digest);
     return row < 0 ? undefined : this.entry(row, digest);
+  }
+  sizeOf(digest: string) {
+    return this.sizes[this.find(digest)];
   }
   /** Map semantics: a digest stored again replaces its row. */
   set(digest: string, entry: CatalogEntry) {
@@ -70,15 +75,56 @@ export class CatalogTable {
   *values(): Generator<CatalogEntry> {
     for (let row = 0; row < this.size; row++) yield this.entry(row);
   }
+  /** Verify the file pin and remember only membership, even when many paths share it. */
+  markImportSource(digest: string, size: number) {
+    const row = this.find(digest);
+    invariant(
+      row >= 0 && this.sizes[row] === size,
+      'IMPORT_INCOMPLETE',
+      'A source blob is missing from the stored catalog.',
+    );
+    this.importSources[row] = 1;
+  }
+  /** Share the source sort with final catalog publication. The manifest adds
+   * only its own metadata objects, which merge into the existing order. */
+  importOrder() {
+    const addedAt = this.size;
+    const order = this.order(0);
+    return {
+      sources: () => this.orderedSources(order),
+      entries: () => this.mergeNewEntries(order, addedAt),
+    };
+  }
+  private *orderedSources(order: Uint32Array) {
+    for (const row of order)
+      if (this.importSources[row]) yield { sha256: this.digestAt(row), size: this.sizes[row]! };
+  }
+  private *mergeNewEntries(order: Uint32Array, addedAt: number) {
+    const added = this.order(addedAt);
+    let next = 0;
+    for (const row of order) {
+      while (next < added.length && this.compare(added[next]!, row) < 0) yield this.entry(added[next++]!);
+      yield this.entry(row);
+    }
+    while (next < added.length) yield this.entry(added[next++]!);
+  }
   /** Every entry in ascending digest order (the catalog's row order). */
   *sorted(): Generator<CatalogEntry> {
-    const digests = this.digests;
-    const order = new Uint32Array(this.size);
-    for (let row = 0; row < this.size; row++) order[row] = row;
-    order.sort((a, b) => digests.compare(digests, b * 32, b * 32 + 32, a * 32, a * 32 + 32));
-    for (const row of order) yield this.entry(row);
+    for (const row of this.order(0)) yield this.entry(row);
   }
-  private entry(row: number, digest = this.digests.toString('hex', row * 32, row * 32 + 32)) {
+  private order(start: number) {
+    const rows = new Uint32Array(this.size - start);
+    for (let row = 0; row < rows.length; row++) rows[row] = start + row;
+    return rows.sort((a, b) => this.compare(a, b));
+  }
+  private compare(a: number, b: number) {
+    const digests = this.digests;
+    return digests.compare(digests, b * 32, b * 32 + 32, a * 32, a * 32 + 32);
+  }
+  private digestAt(row: number) {
+    return this.digests.toString('hex', row * 32, row * 32 + 32);
+  }
+  private entry(row: number, digest = this.digestAt(row)) {
     const pack = this.packs[row]!,
       extra = this.extra.get(row);
     const entry: CatalogEntry = { digest, size: this.sizes[row]! };
@@ -121,5 +167,8 @@ export class CatalogTable {
     const packs = new Int32Array(capacity);
     packs.set(this.packs);
     this.packs = packs;
+    const sources = new Uint8Array(capacity);
+    sources.set(this.importSources);
+    this.importSources = sources;
   }
 }

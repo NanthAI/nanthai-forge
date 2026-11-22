@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { logImportMetric } from '../src/github-import-metric';
 import type { ActionCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
@@ -16,16 +17,15 @@ import { networkFetch } from '../src/network-fetch';
 import { ImportRequestMeter } from '../src/github-import-meter';
 import { ForgeError, invariant } from '../src/errors';
 import { importPageFiles } from '../src/github-import-pages';
+import { importStatePrefix, importStateSuffix } from '../src/import-state-scan';
 
 const stagedPageBytes = 2 * 1024 * 1024;
 /** ~35 KB rows: the web's 100-row record window stays a few MB at the archive limit. */
 const treePathsPerRow = 500;
-/** Row values (JSON) in key order. Re-iterable, so an archive import produces them lazily
- * instead of holding every JSON string; the keys only order the paged inventory. */
-export type ImportRows = {
-  imported: Iterable<string> | AsyncIterable<Iterable<string>>;
-  blobs: Iterable<string>;
-};
+type ImportFile = Pick<GithubHostedFile, 'path' | 'blob' | 'size'> & { mode: string };
+/** Repeatable scans in State order. Archive imports carry verified file pins
+ * directly; only the legacy inventory needs to decode stored JSON rows. */
+export type ImportRows = AsyncIterable<Iterable<ImportFile>>;
 /** Publication sorts the catalog it stored in place, without copying it. */
 type PublishCatalog = ImportCatalog & { stored: CatalogTable };
 /** Metadata is traversed in bounded ordered pages. No whole repository array,
@@ -64,25 +64,18 @@ async function publishRows(
 ) {
   const started = Date.now();
   const metric = (phase: string) =>
-    console.log(
-      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase, step: job.step, at: Date.now(), elapsedMillis: Date.now() - started, putAttempts: upload.putAttempts, putBytes: upload.putBytes, uploadMillis: upload.uploadMillis, rssBytes: process.memoryUsage().rss, peakRssBytes: process.resourceUsage().maxRSS * 1024 })}`,
-    );
+    logImportMetric({
+      projectId: job.projectId,
+      phase,
+      step: job.step,
+      at: Date.now(),
+      elapsedMillis: Date.now() - started,
+      putAttempts: upload.putAttempts,
+      putBytes: upload.putBytes,
+      uploadMillis: upload.uploadMillis,
+    });
   const identity = { id: job._id, actor: job.owner };
-  async function* pages(part: string) {
-    if (memory) {
-      let page: string[] = [];
-      const rows = memory[part as keyof ImportRows];
-      const ranges = Symbol.asyncIterator in rows ? rows : [rows];
-      for await (const range of ranges)
-        for (const row of range) {
-          page.push(row);
-          if (page.length < importPageFiles) continue;
-          yield page;
-          page = [];
-        }
-      if (page.length) yield page;
-      return;
-    }
+  async function* inventoryPages(part: 'imported' | 'blobs') {
     let after = '';
     while (true) {
       const rows = await ctx.runQuery(internal.projectGithubImportInventory.scan, {
@@ -95,26 +88,45 @@ async function publishRows(
       yield rows.map(row => row.value);
     }
   }
+  async function* filePages() {
+    if (!memory) {
+      for await (const rows of inventoryPages('imported'))
+        yield rows.map(row => JSON.parse(row) as ImportFile);
+      return;
+    }
+    let page: ImportFile[] = [];
+    for await (const range of memory)
+      for (const row of range) {
+        page.push(row);
+        if (page.length < importPageFiles) continue;
+        yield page;
+        page = [];
+      }
+    if (page.length) yield page;
+  }
   const upload = new ImportUpload(ctx, job.projectId, job.owner, 8, catalog);
   let fileCount = 0;
   async function* stateBytes() {
-    yield Buffer.from('{"schema":1,"kind":"forge-source-state","parents":[],"files":[');
+    yield importStatePrefix;
     let first = true;
-    for await (const rows of pages('imported')) {
+    for await (const rows of filePages()) {
       fileCount += rows.length;
-      const values = rows.map(row => {
-        const { path, blob, mode }: GithubHostedFile = JSON.parse(row);
+      const values = rows.map(({ path, blob, size, mode }) => {
+        if (memory) catalog!.stored.markImportSource(blob, size);
         return JSON.stringify({ path, blob, mode });
       });
       yield Buffer.from((first ? '' : ',') + values.join(','));
       first = false;
     }
-    yield Buffer.from(
-      `],"message":${JSON.stringify(`Imported GitHub commit ${job.commit}`)},"at":${JSON.stringify(job.at)}}`,
-    );
+    yield importStateSuffix(job.commit, job.at);
   }
-  const state = await upload.stream(stateBytes(), 1, true, () => fileCount),
+  const state = await upload.stream(stateBytes(), 1, !job.stateObject, () => fileCount),
     head = state.sha256;
+  invariant(
+    !memory || !job.stateObject || (head === job.stateObject.sha256 && state.size === job.stateObject.size),
+    'INVALID_WORK_BACKUP',
+    'Publication retry differs from the pinned State.',
+  );
   const data = githubImportedWork(job.operationId, job.at, head);
   const workText = JSON.stringify(data, null, 2),
     work = { sha256: digest(workText), size: Buffer.byteLength(workText) };
@@ -134,27 +146,39 @@ async function publishRows(
     unavailable: [],
     coverage: `Complete committed GitHub tree at ${job.commit}; original file bytes, executable bits and symlink targets. ${lfsCoverage(job)} Git history and analysis are separate.`,
   });
+  const catalogOrder = memory ? catalog!.stored.importOrder() : undefined;
   let blobs = 0;
   async function* manifestBytes() {
     const prefix = JSON.stringify(minimal),
       split = prefix.indexOf('],"unavailable"');
     yield Buffer.from(prefix.slice(0, split));
-    for await (const rows of pages('blobs')) {
-      blobs += rows.length;
-      yield Buffer.from(
-        rows
-          .map(row => {
-            const pin = JSON.parse(row);
-            invariant(
-              !catalog || catalog.stored.get(pin.sha256)?.size === pin.size,
-              'IMPORT_INCOMPLETE',
-              'A source blob is missing from the stored catalog.',
-            );
-            return ',' + JSON.stringify({ path: `objects/${pin.sha256}`, ...pin });
-          })
-          .join(''),
-      );
-    }
+    if (catalogOrder) {
+      let batch = [];
+      for (const pin of catalogOrder.sources()) {
+        blobs++;
+        batch.push(manifestEntry(pin));
+        if (batch.length < importPageFiles) continue;
+        yield Buffer.from(batch.join(''));
+        batch = [];
+      }
+      if (batch.length) yield Buffer.from(batch.join(''));
+    } else
+      for await (const rows of inventoryPages('blobs')) {
+        blobs += rows.length;
+        yield Buffer.from(
+          rows
+            .map(row => {
+              const pin = JSON.parse(row);
+              invariant(
+                !catalog || catalog.stored.get(pin.sha256)?.size === pin.size,
+                'IMPORT_INCOMPLETE',
+                'A source blob is missing from the stored catalog.',
+              );
+              return manifestEntry(pin);
+            })
+            .join(''),
+        );
+      }
     yield Buffer.from(prefix.slice(split));
   }
   const root = await upload.stream(manifestBytes());
@@ -172,7 +196,7 @@ async function publishRows(
     // existing payload budget even when every entry belongs to a pack.
     const pagesPerBatch = job.pagedCatalog ? 16 : 32;
     let pages = [];
-    for (const page of sortedCatalogPages(catalog.stored.sorted())) {
+    for (const page of sortedCatalogPages(catalogOrder?.entries() ?? catalog.stored.sorted())) {
       pages.push(page);
       if (pages.length < pagesPerBatch) continue;
       await ctx.runMutation(internal.projectGithubImportCatalog.publish, {
@@ -241,12 +265,8 @@ async function publishRows(
   };
   await stage(projection.entries);
   let position = 0;
-  for await (const rows of pages('imported')) {
-    const paths = sourceTreeEntries(
-      head,
-      rows.map(row => JSON.parse(row)),
-      treePathsPerRow,
-    );
+  for await (const rows of filePages()) {
+    const paths = sourceTreeEntries(head, rows, treePathsPerRow);
     await stage(
       paths
         .filter(row => row.collection !== 'sourceTrees')
@@ -261,7 +281,7 @@ async function publishRows(
   // Catalog-backed generations resolve sourceBlobs from the object catalog.
   position = 1;
   if (!catalog)
-    for await (const rows of pages('blobs')) {
+    for await (const rows of inventoryPages('blobs')) {
       await stage(
         rows.map(value => ({
           collection: 'sourceBlobs',
@@ -288,6 +308,10 @@ async function publishRows(
   });
   metric('ready');
 }
+function manifestEntry({ sha256, size }: { sha256: string; size: number }) {
+  return ',' + JSON.stringify({ path: `objects/${sha256}`, sha256, size });
+}
+
 /** Archive and paged imports bind Git LFS paths to their objects unless the
  * importer chose pointers (limit 0). */
 export function lfsCoverage(job: Pick<Doc<'projectGithubImports'>, 'protocol' | 'cursor'>) {

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from './errors.js';
 
-const prefix = Buffer.from('{"schema":1,"kind":"forge-source-state","parents":[],"files":[');
+export const importStatePrefix = Buffer.from(
+  '{"schema":1,"kind":"forge-source-state","parents":[],"files":[',
+);
 const pathKey = Buffer.from('{"path":'),
   blobKey = Buffer.from(',"blob":"'),
   modeKey = Buffer.from('","mode":"');
@@ -11,7 +13,16 @@ const hex = /^[0-9a-f]{64}$/;
 /** The files of a root import State, in order, read from its exact bytes one entry at a time.
  * Publication writes these bytes (JSON.stringify of each file); a retry rereads them without
  * parsing the whole State into one object per file. Anything else is not this State. */
-export function* importStateFiles(bytes: Buffer): Generator<{ path: string; blob: string; mode: string }> {
+export function importStateSuffix(commit: string, at: string) {
+  return Buffer.from(
+    `],"message":${JSON.stringify(`Imported GitHub commit ${commit}`)},"at":${JSON.stringify(at)}}`,
+  );
+}
+
+export function* importStateFiles(
+  bytes: Buffer,
+  framed = true,
+): Generator<{ path: string; blob: string; mode: string }> {
   const fail = () =>
     invariant(false, 'INVALID_WORK_BACKUP', 'The stored State is not an import State.') as never;
   const expect = (at: number, token: Buffer) => {
@@ -19,8 +30,9 @@ export function* importStateFiles(bytes: Buffer): Generator<{ path: string; blob
       fail();
     return at + token.length;
   };
-  let at = expect(0, prefix);
-  if (bytes[at] === 0x5d) return;
+  let at = framed ? expect(0, importStatePrefix) : 0;
+  const done = () => (framed ? bytes[at] === 0x5d : at === bytes.length);
+  if (done()) return;
   for (;;) {
     const start = expect(at, pathKey);
     // A JSON string: the first unescaped quote ends it.
@@ -37,7 +49,7 @@ export function* importStateFiles(bytes: Buffer): Generator<{ path: string; blob
     if (typeof path !== 'string' || !hex.test(blob) || !mode || bytes[close + 1] !== 0x7d) fail();
     yield { path: path as string, blob, mode: mode! };
     at = close + 2;
-    if (bytes[at] === 0x5d) return;
+    if (done()) return;
     if (bytes[at++] !== 0x2c) fail();
   }
 }

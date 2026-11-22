@@ -131,6 +131,12 @@ const metricNumbers = [
   'uploadMillis',
   'peakBufferedBytes',
   'rssBytes',
+  'peakRssBytes',
+  'heapUsed',
+  'external',
+  'arrayBuffers',
+  'heapLimitBytes',
+  'memoryLimitBytes',
 ];
 
 let logs,
@@ -196,10 +202,15 @@ function onLogLine(line) {
       if (
         data.projectId !== guard.monitor.target.projectId ||
         ![
+          'start',
+          'archive-start',
           'upload',
+          'listing-written',
           'listing-stored',
           'listing',
+          'publication-handoff',
           'resume',
+          'resume-fallback',
           'archive-open',
           'archive-complete',
           'metadata',
@@ -210,6 +221,8 @@ function onLogLine(line) {
       )
         continue;
       const metric = { phase: data.phase, executionId: event.executionId };
+      if (data.memoryLimitSource === 'process' || data.memoryLimitSource === 'os')
+        metric.memoryLimitSource = data.memoryLimitSource;
       for (const key of metricNumbers) if (Number.isFinite(data[key])) metric[key] = data[key];
       if (!metrics.some(prior => JSON.stringify(prior) === JSON.stringify(metric))) {
         metrics.push(metric);

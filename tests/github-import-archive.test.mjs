@@ -166,11 +166,6 @@ function splitTreeReply(repo, sha, recursive, truncatedChild) {
 }
 /** Synthetic GitHub plus a strict fake R2 bucket (create-only, checksummed PUTs). */
 async function serve(t, repo, counts, hooks = {}) {
-  const memoryUsage = process.memoryUsage;
-  t.mock.method(process, 'memoryUsage', () => {
-    const actual = memoryUsage();
-    return { ...actual, rss: hooks.rss ? hooks.rss(actual.rss) : Math.min(actual.rss, 379_999_999) };
-  });
   const saved = Object.fromEntries(Object.keys(r2Env).map(name => [name, process.env[name]]));
   Object.assign(process.env, r2Env);
   const native = globalThis.fetch,
@@ -826,12 +821,6 @@ test('class guard: publication-path mutations never page a repository-sized coll
   }
 });
 
-test('Issue c6426ee9: an archive import hands publication lazily produced rows; a 100,000-file run held 190 MB of JSON rows and ran out of its 512 MB action', () => {
-  const source = readFileSync(new URL('../convex/projectGithubImportArchive.ts', import.meta.url), 'utf8');
-  assert.ok(!/rows\.(?:imported|blobs)\.push/.test(source), 'build rows while publication pages them');
-  assert.match(source, /\*\[Symbol\.iterator\]/);
-});
-
 /** Archive steps stop at a wall-clock budget; this moves the importer's clock instead of waiting.
  * Presigned URLs carry the real issue time, so the fake bucket's clock follows the same jump. */
 function skewClock(t) {
@@ -1314,11 +1303,11 @@ test('Issue e165787c: many names for one subtree take linear listing work', asyn
   assert.ok(probes <= 8 * siblings, `${probes} directory probes for ${siblings} siblings`);
 });
 
-test('Issue e165787c: a complete high-memory step hands off fresh publication once', async t => {
+test('Issue e165787c: a complete large acquisition hands off publication once', async t => {
   const s = pagedFixture(),
     counts = {};
-  const repo = repository({ files: 12, directories: 2 });
-  const bucket = await serve(t, repo, counts, { rss: () => 400_000_000 });
+  const repo = repository({ files: 65_536, directories: 2_000, submodules: 0 });
+  const bucket = await serve(t, repo, counts);
   const id = await startAcquisition(s);
   await s.worker(id);
   const acquired = s.tables.projectGithubImports.get(id);
@@ -1332,7 +1321,7 @@ test('Issue e165787c: a complete high-memory step hands off fresh publication on
   await s.worker(id);
   const job = s.tables.projectGithubImports.get(id);
   assert.equal(job.phase, 'ready', JSON.stringify(job.error));
-  assert.equal(job.step, 2, 'publication does not hand off again at the same RSS');
+  assert.equal(job.step, 2, 'publication does not hand off again at the same file count');
   assert.deepEqual(counts, before, 'publication downloads no GitHub trees, archives or blobs');
   assert.deepEqual(listingKeys(bucket), []);
   assert.equal((await mainFiles(s, bucket, job.projectId)).files.size, repo.files);

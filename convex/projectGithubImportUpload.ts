@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { logImportMetric } from '../src/github-import-metric';
 import { createHash } from 'node:crypto';
 import type { StateSize } from '../src/state/size';
 import type { ActionCtx } from './_generated/server';
@@ -239,9 +240,16 @@ export class ImportUpload {
       }
     });
     this.uploadMillis += Date.now() - started;
-    console.log(
-      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: this.projectId, phase: 'upload', at: Date.now(), objects: pending.length, putAttempts: this.putAttempts, putBytes: this.putBytes, uploadMillis: this.uploadMillis, peakBufferedBytes: this.peakBufferedBytes })}`,
-    );
+    logImportMetric({
+      projectId: this.projectId,
+      phase: 'upload',
+      at: Date.now(),
+      objects: pending.length,
+      putAttempts: this.putAttempts,
+      putBytes: this.putBytes,
+      uploadMillis: this.uploadMillis,
+      peakBufferedBytes: this.peakBufferedBytes,
+    });
   }
   async commit(state?: { sha256: string; size: number }) {
     if (this.catalog) {

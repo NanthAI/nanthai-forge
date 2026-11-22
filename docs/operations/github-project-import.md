@@ -165,7 +165,7 @@ writes create-only, checksummed R2 pages of up to 65,536 files or 8 MiB. Each
 page stores UTF-8 paths, binary Git IDs, sizes and modes. A small index names
 the exact tree, totals and ordered page digests. The listing step pins the index
 and schedules acquisition. Every archive step verifies and loads the pages
-individually into its preallocated file table. A missing, altered or legacy listing
+individually into its private action-local file. A missing, altered or legacy listing
 triggers a fresh listing. Publication and a switch to protocol 2 clean the scratch
 prefix, including pages whose index was never pinned. The listing adds no per-file
 Convex rows. Project purge removes scratch left by persistent storage failures.
@@ -208,16 +208,20 @@ or damaged checkpoint sends the affected reads back to Git without reopening the
 tarball. A catchable failure retains verified progress for retry.
 
 Each successful advance retires the previous pin snapshot. A complete acquisition
-with RSS above 380 MB checkpoints its pins and schedules publication in a fresh
-action. The fresh action publishes from verified pins and the stored-object catalog
-without requesting GitHub blobs or opening the tarball. A complete acquisition
-below the threshold publishes in the same action. Main is published only after all
+of at least 65,536 files checkpoints its pins and schedules publication in a
+separate action. It publishes from verified pins and the stored-object catalog
+without requesting GitHub blobs or opening the tarball. A smaller complete
+acquisition publishes in the same action. Main is published only after all
 files are verified and stored. A continuation that verifies no new files reports a
 structured failure.
 
 Convex documents a 512 MiB RAM allocation for Node actions by default. Its
-compute usage field reports billed memory. The `rssBytes` and `peakRssBytes` fields
-in `FORGE_IMPORT_METRIC` report current and lifetime Node process RSS. A hosted
+compute usage field reports billed memory. Each `FORGE_IMPORT_METRIC` reports
+the runtime limit in `memoryLimitBytes` using Node's process constraint, with
+system RAM as a fallback identified by `memoryLimitSource`. It reports
+`heapLimitBytes` for V8, `heapUsed`, `external`, and `arrayBuffers` in bytes.
+Array buffers are included in external memory. `rssBytes` and `peakRssBytes`
+report current and lifetime Node process RSS. A hosted
 Firefox-shaped Dev import published 487,756 files and 3.67 GB of source in 26m11s.
 The publication action reported a 756 MB process RSS high-water mark and 512 MiB
 of billed memory. Convex's dynamic executor can allocate more RAM than it bills.
@@ -233,11 +237,15 @@ global row numbers for pins, State publication and the source path index.
 Repeated scans use the same local copy, so the index and each page need one
 R2 read per action. The file is discarded when the action ends.
 
-Verified pins and the stored-object catalog still grow with the file and
-object counts. The catalog uses binary digests, sizes and pack offsets in an
-open-addressing index, about 70 bytes per object. Publication sorts that
-catalog in place and writes it 32 pages at a time. A publication retry with a
-pinned State scans file entries from the stored State bytes.
+Acquisition retains verified pins by listing row. Publication reads a complete
+checkpoint by range from a private action-local file. The stored-object catalog
+uses binary digests, sizes and pack offsets in an open-addressing index, about
+70 bytes per object. It marks the logical source blobs in the State and uses
+one digest ordering for the manifest and final catalog. State and path-index
+writers consume structured file rows. A retry uses the verified listing and
+pin checkpoint when available. Otherwise it verifies the pinned State into
+action-local scratch and scans it in bounded ranges. Repeated scans avoid
+additional R2 reads.
 
 State, manifest and Work metadata use the same R2-backed object path. Catalog
 publication and source-index materialization use bounded pages. The ready
@@ -342,6 +350,11 @@ report); events already counted are dropped, so totals stay exact.
 Record the installed CLI `.commit`, repository commit, project ID and timestamps
 for every run. Numeric `FORGE_IMPORT_METRIC` records distinguish archive/listing,
 upload waits and attempts, metadata, catalog, projection and ready publication.
+The separate-process publication fixture in `tests/github-publication-memory.test.mjs`
+checks exact State identity and retained-memory growth at 487,756 and 1,000,000
+files. On a machine with Docker, set `FORGE_GITHUB_PUBLICATION_CGROUP=1` to
+exercise publication and both retries under a 435 MiB Linux cgroup with swap
+disabled. The measured worker uses Node's default heap sizing in that run.
 The fixture guard in `tests/github-import-archive.test.mjs` bounds PUT count on a
 28.9k-file import and fixes its GitHub REST total at 8 requests (start: repository,
 commit, tree; run: repository, tarball, two fallback blobs; publication:

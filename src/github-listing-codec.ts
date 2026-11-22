@@ -291,7 +291,7 @@ export class ListingPages {
     return row < 0 ? undefined : page.entry(row);
   }
 }
-const pinsHeaderBytes = 92;
+export const pinsHeaderBytes = 92;
 const pinRowBytes = 41;
 /** Verified pins of a table's rows, by row: the SHA-256 blob and its size (an LFS path binds
  * its object's size). About 41 bytes a file, where a path Map of objects held about 185. */
@@ -349,15 +349,7 @@ export class ImportedPins {
     return bytes;
   }
   static decode(bytes: Buffer, tree: string, listing: string, length: number): ImportedPins | null {
-    if (
-      bytes.length !== pinsHeaderBytes + length * pinRowBytes ||
-      bytes.toString('ascii', 0, 4) !== 'NFP1' ||
-      bytes.readUInt32LE(4) !== length ||
-      bytes[8] !== tree.length ||
-      bytes.toString('hex', 12, 12 + tree.length / 2) !== tree ||
-      bytes.toString('hex', 44, 76) !== listing
-    )
-      return null;
+    if (!matchesPinCheckpoint(bytes, bytes.length, tree, listing, length)) return null;
     const pins = new ImportedPins(length, bytes);
     for (let index = 0; index < length; index++) {
       const status = pins.done[index]!;
@@ -368,20 +360,23 @@ export class ImportedPins {
     }
     return pins;
   }
-  /** Distinct blobs in ascending digest order, each with its size. */
-  *distinct(): Generator<{ sha256: string; size: number }> {
-    const blobs = this.blobs;
-    const order = new Uint32Array(this.length);
-    let n = 0;
-    for (let i = 0; i < this.length; i++) if (this.done[i]) order[n++] = i;
-    const sorted = order
-      .subarray(0, n)
-      .sort((a, b) => blobs.compare(blobs, b * 32, b * 32 + 32, a * 32, a * 32 + 32));
-    for (let k = 0; k < n; k++) {
-      const i = sorted[k]!;
-      if (k && blobs.compare(blobs, sorted[k - 1]! * 32, sorted[k - 1]! * 32 + 32, i * 32, i * 32 + 32) === 0)
-        continue;
-      yield { sha256: this.blob(i), size: this.size(i) };
-    }
-  }
+}
+
+/** The same identity check applies to a complete checkpoint opened by range. */
+export function matchesPinCheckpoint(
+  header: Buffer,
+  size: number,
+  tree: string,
+  listing: string,
+  length: number,
+) {
+  return (
+    header.length >= pinsHeaderBytes &&
+    size === pinsHeaderBytes + length * pinRowBytes &&
+    header.toString('ascii', 0, 4) === 'NFP1' &&
+    header.readUInt32LE(4) === length &&
+    header[8] === tree.length &&
+    header.toString('hex', 12, 12 + tree.length / 2) === tree &&
+    header.toString('hex', 44, 76) === listing
+  );
 }

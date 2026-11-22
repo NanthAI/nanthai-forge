@@ -11,6 +11,7 @@ import { lfsImportMaxBytes } from '../src/github-import-pages';
 import { importReadToken } from './githubAppToken';
 import { convexFetch } from './networkFetch';
 import { networkFetch } from '../src/network-fetch';
+import { logImportMetric } from '../src/github-import-metric';
 import { ImportRequestMeter } from '../src/github-import-meter';
 import { authorizeImportGithub } from './githubImportAccess';
 import { invariant } from '../src/errors';
@@ -32,6 +33,7 @@ export const start = accountAction('write')({
   },
   returns: v.id('projectGithubImports'),
   handler: async (ctx, input): Promise<Id<'projectGithubImports'>> => {
+    const started = Date.now();
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'AUTH_REQUIRED', 'Sign in to import a project.');
@@ -69,6 +71,12 @@ export const start = accountAction('write')({
           id: existing._id,
           actor: user.subject,
           ...(input.atReset ? { atReset: true } : {}),
+        });
+        logImportMetric({
+          projectId: existing.projectId,
+          phase: 'start',
+          at: started,
+          elapsedMillis: Date.now() - started,
         });
         return existing._id;
       }
@@ -114,6 +122,12 @@ export const start = accountAction('write')({
         visibility: input.visibility ?? (access.repository.private ? 'private' : 'public'),
         githubRequests: meter.counts,
         ...(migration ? { migration } : {}),
+      });
+      logImportMetric({
+        phase: 'start',
+        projectId: begun.projectId,
+        at: started,
+        elapsedMillis: Date.now() - started,
       });
       return begun.id;
     } catch (error) {

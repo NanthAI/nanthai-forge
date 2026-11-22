@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { logImportMetric } from '../src/github-import-metric';
 import { createHash, randomBytes } from 'node:crypto';
 import type { ActionCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -9,10 +10,10 @@ import { importReadToken } from './githubAppToken';
 import { convexFetch } from './networkFetch';
 import { networkFetch } from '../src/network-fetch';
 import type { ImportRequestMeter } from '../src/github-import-meter';
-import { githubSourceMode, type GithubSourceEntry } from '../src/github-project-source';
+import { type GithubSourceEntry } from '../src/github-project-source';
 import { openGithubArchive, githubArchiveFiles, gitBlobId } from '../src/github-archive-source';
 import { archiveCursorSchema, importPageFiles, lfsImportDefaultBytes } from '../src/github-import-pages';
-import { ImportedPins, type ListedGithubEntry, type ListingPages } from '../src/github-listing-codec';
+import { ImportedPins, type ListedGithubEntry } from '../src/github-listing-codec';
 import { ObjectRecipeBuilder, objectChunkBytes } from '../src/object-chunks';
 import { githubBlobPack } from '../src/github-blob-pack';
 import { streamGithubBlobPack } from '../src/github-blob-pack-stream';
@@ -28,14 +29,16 @@ import {
   readPins,
   storePins,
 } from './projectGithubImportListing';
-import { publishImport, type ImportRows } from './projectGithubImportPublish';
+import { publishImport } from './projectGithubImportPublish';
+import { archiveRows } from './projectGithubImportRows';
 import { stageFallbackBlobs } from './projectGithubImportFallback';
 
 /** A run stops streaming here and continues in a fresh action; the platform
  * action limit is 10 minutes and publication needs headroom. */
 export const archiveRunMillis = 6 * 60_000;
 const packTimeoutMillis = 2 * 60_000;
-const archivePublicationRss = 380_000_000;
+// Large imports publish in a separate action without acquisition buffers or LFS rules.
+const archivePublicationFiles = 65_536;
 /** Pack and empty-object PUTs may proceed independently within the bounded
  * source window and pack-copy memory. */
 export const archiveUploadConcurrency = 32;
@@ -51,13 +54,11 @@ export async function runArchiveImport(
   input: Identity,
   meter: ImportRequestMeter,
 ) {
-  // Every file is stored and the State is pinned: a publication retry never streams again.
+  // A complete checkpoint needs no GitHub acquisition credentials or source request.
   if (await resumePublication(ctx, job, input, meter)) return;
   const started = Date.now(),
     cursor = archiveCursorSchema.parse(JSON.parse(job.cursor));
-  console.log(
-    `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'archive-start', step: job.step, at: started, rssBytes: process.memoryUsage().rss })}`,
-  );
+  logImportMetric({ projectId: job.projectId, phase: 'archive-start', step: job.step, at: started });
   const github = meter.wrap(networkFetch);
   const access = await authorizeImportGithub(job.repository, job.owner, github, ctx);
   invariant(
@@ -108,9 +109,14 @@ async function runListedArchiveImport(
   },
 ) {
   const { listing, pin: listingPin } = ready;
-  console.log(
-    `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'listing', at: Date.now(), elapsedMillis: Date.now() - started, files: listing.length, sourceBytes: listing.totalBytes, rssBytes: process.memoryUsage().rss })}`,
-  );
+  logImportMetric({
+    projectId: job.projectId,
+    phase: 'listing',
+    at: Date.now(),
+    elapsedMillis: Date.now() - started,
+    files: listing.length,
+    sourceBytes: listing.totalBytes,
+  });
   // Progress is the stored objects themselves: one receipt per earlier window.
   const stored = await storedObjects(ctx, input);
   const saveWindow = async (objects: CatalogEntry[], state?: { sha256: string; size: number }) => {
@@ -137,7 +143,7 @@ async function runListedArchiveImport(
         index => {
           const blob = imported.blob(index),
             size = imported.size(index);
-          if (!stored.has(blob)) return false;
+          if (stored.sizeOf(blob) !== size) return false;
           if (page.mode(index - page.start) !== '160000') bytes += size;
           if (imported.isLfs(index) && !lfsOids.has(blob)) {
             lfsOids.add(blob);
@@ -161,7 +167,7 @@ async function runListedArchiveImport(
     await publishImport(
       ctx,
       { ...job, ...counters(), totalKnown: true },
-      archiveRows(listing, imported),
+      archiveRows(listing, () => imported),
       catalog,
       meter,
     );
@@ -170,9 +176,13 @@ async function runListedArchiveImport(
   // A complete checkpoint hands off directly to publication. If any pin was
   // lost, continue the ordinary acquisition path and verify those rows again.
   if (cursor.pins && initialCount === listing.length) {
-    console.log(
-      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'publication-handoff', step: job.step, at: Date.now(), files: initialCount, rssBytes: process.memoryUsage().rss })}`,
-    );
+    logImportMetric({
+      projectId: job.projectId,
+      phase: 'publication-handoff',
+      step: job.step,
+      at: Date.now(),
+      files: initialCount,
+    });
     await publish();
     return;
   }
@@ -325,9 +335,12 @@ async function runListedArchiveImport(
       await stageMissing(importPageFiles);
     } else {
       const archive = await openGithubArchive(job.repository, job.commit, token, github);
-      console.log(
-        `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'archive-open', at: Date.now(), elapsedMillis: Date.now() - started })}`,
-      );
+      logImportMetric({
+        projectId: job.projectId,
+        phase: 'archive-open',
+        at: Date.now(),
+        elapsedMillis: Date.now() - started,
+      });
       let seen = 0,
         complete = true;
       for await (const file of githubArchiveFiles(archive, listing, objectChunkBytes)) {
@@ -371,10 +384,21 @@ async function runListedArchiveImport(
       });
     await upload.drain(true);
     await flush();
-    const rssBytes = process.memoryUsage().rss;
-    console.log(
-      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'archive-complete', step: job.step, at: Date.now(), elapsedMillis: Date.now() - started, files: imported.count, lfsObjects: lfs.objects, lfsBytes: lfs.objectBytes, lfsFetched: lfs.fetched, putAttempts: upload.putAttempts, putBytes: upload.putBytes, uploadMillis: upload.uploadMillis, peakBufferedBytes: upload.peakBufferedBytes, rssBytes, peakRssBytes: process.resourceUsage().maxRSS * 1024 })}`,
-    );
+    logImportMetric({
+      projectId: job.projectId,
+      phase: 'archive-complete',
+      step: job.step,
+      at: Date.now(),
+      elapsedMillis: Date.now() - started,
+      files: imported.count,
+      lfsObjects: lfs.objects,
+      lfsBytes: lfs.objectBytes,
+      lfsFetched: lfs.fetched,
+      putAttempts: upload.putAttempts,
+      putBytes: upload.putBytes,
+      uploadMillis: upload.uploadMillis,
+      peakBufferedBytes: upload.peakBufferedBytes,
+    });
     if (imported.count < listing.length) {
       invariant(
         !cursor.pins || imported.count > initialCount,
@@ -384,7 +408,7 @@ async function runListedArchiveImport(
       await checkpoint(true);
       return;
     }
-    if (rssBytes > archivePublicationRss && imported.count > 0) {
+    if (imported.count >= archivePublicationFiles) {
       await checkpoint(true);
       return;
     }
@@ -399,38 +423,12 @@ async function runListedArchiveImport(
         imported.retain(index => stored.has(imported.blob(index)));
         await checkpoint(false);
       } catch (checkpointError) {
-        console.log(
-          `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'checkpoint-failed', reason: checkpointError instanceof Error ? checkpointError.name : 'UNKNOWN' })}`,
-        );
+        logImportMetric({
+          projectId: job.projectId,
+          phase: 'checkpoint-failed',
+          reason: checkpointError instanceof Error ? checkpointError.name : 'UNKNOWN',
+        });
       }
     throw error;
   }
-}
-
-function archiveRows(listing: ListingPages, imported: ImportedPins): ImportRows {
-  // Rows are produced page by page while publication reads them: 100,000 files
-  // as materialized JSON rows held about 190 MB of a 512 MB action.
-  return {
-    imported: {
-      async *[Symbol.asyncIterator]() {
-        for await (const page of listing.pages())
-          yield (function* () {
-            for (let row = 0; row < page.length; row++) {
-              const index = page.start + row;
-              yield JSON.stringify({
-                path: page.path(row),
-                blob: imported.blob(index),
-                size: imported.size(index),
-                mode: githubSourceMode(page.mode(row)),
-              });
-            }
-          })();
-      },
-    },
-    blobs: {
-      *[Symbol.iterator]() {
-        for (const pin of imported.distinct()) yield JSON.stringify(pin);
-      },
-    },
-  };
 }
