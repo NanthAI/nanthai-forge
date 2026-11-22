@@ -121,13 +121,17 @@ function finishPasskeyStep(next: string) {
   forget();
   navigate(next, { replace: true });
 }
-const signInHref = (next: string) =>
-  `${hrefFor({ frame: 'public', page: 'signin' })}?next=${encodeURIComponent(next)}`;
+const signInHref = (next?: string) =>
+  hrefFor({ frame: 'public', page: 'signin' }) + (next ? `?next=${encodeURIComponent(next)}` : '');
+
+let lastProject: { href: string; name: string } | null = null;
 
 function Pages() {
   const route = useRoute();
   const search = useSearch();
   const { isLoading, isAuthenticated } = useConvexAuth();
+  const { signOut } = useAuthActions();
+  const signingOutTo = useRef<{ href: string } | null>(null);
   const viewer = useQuery(api.urlAccounts.current, isAuthenticated ? {} : 'skip');
   // Anyone can browse signed out: explore, profiles, a project's front page (owner decision 2026-11-16) and its code
   // and history, read only (Item 4c164732). A private or missing project answers "No public project" alike.
@@ -138,9 +142,18 @@ function Pages() {
     !isAuthenticated &&
     !discovering &&
     !(route.frame === 'public' && ['signin', 'terms', 'privacy'].includes(route.page));
+  // The auth state owns the redirect. A late sign-out response cannot interrupt the next sign-in.
   useEffect(() => {
-    if (needsSignIn) navigate(signInHref(location.pathname + location.search), { replace: true });
-  }, [needsSignIn]);
+    if (isLoading || isAuthenticated) return;
+    const destination = signingOutTo.current;
+    if (destination) {
+      signingOutTo.current = null;
+      lastProject = null;
+      navigate(destination.href, { replace: true });
+    } else if (needsSignIn) {
+      navigate(signInHref(location.pathname + location.search), { replace: true });
+    }
+  }, [isLoading, isAuthenticated, needsSignIn]);
   useEffect(() => {
     if (
       import.meta.env.VITE_FORGE_POSTHOG_PROJECT_TOKEN &&
@@ -171,7 +184,17 @@ function Pages() {
     if (route.page === 'passkey') return <FirstPasskey onDone={finishPasskeyStep} />;
     return <Device viewerHandle={viewer?.handle} />;
   }
-  return <SignedIn route={route} viewerHandle={viewer?.handle} />;
+  const leave = (next?: string) => {
+    if (signingOutTo.current) return;
+    const destination = { href: signInHref(next) };
+    signingOutTo.current = destination;
+    forget();
+    void signOut().catch(error => {
+      if (signingOutTo.current === destination) signingOutTo.current = null;
+      throw error;
+    });
+  };
+  return <SignedIn route={route} viewerHandle={viewer?.handle} leave={leave} />;
 }
 
 /** Signed in on the sign-in page: name the account once, then go on (or offer a first passkey after GitHub). */
@@ -208,26 +231,23 @@ function AfterSignIn() {
   );
 }
 
-let lastProject: { href: string; name: string } | null = null;
-
 function SignedIn({
   route,
   viewerHandle,
+  leave,
 }: {
   route: Exclude<AppRoute, { frame: 'public' }>;
   viewerHandle: string | undefined;
+  leave: (next?: string) => void;
 }) {
-  const { signOut } = useAuthActions();
   const client = useConvex();
   const [palette, setPalette] = useState(false);
   const [keys, setKeys] = useState(false);
-  const leave = () =>
-    void signOut().then(() => navigate(hrefFor({ frame: 'public', page: 'signin' }), { replace: true }));
   const go: Go = {
     route,
     openPalette: () => setPalette(true),
     openKeys: () => setKeys(true),
-    signOut: leave,
+    signOut: () => leave(),
   };
   useFrameKeys(go);
   const controls: FrameControls = { onPalette: go.openPalette, onKeys: go.openKeys, viewerHandle };
@@ -245,7 +265,11 @@ function SignedIn({
   if (route.frame === 'account')
     return (
       <AccountFrame place={route.place} back={lastProject} controls={controls}>
-        <AccountScreen place={route.place} handle={viewerHandle} leave={leave} />
+        <AccountScreen
+          place={route.place}
+          handle={viewerHandle}
+          leave={() => leave(route.place === 'people' ? hrefFor(route) : undefined)}
+        />
         {overlays()}
       </AccountFrame>
     );

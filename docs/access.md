@@ -102,9 +102,9 @@ invitation never lowers existing write access. Accepting write replaces read.
 Recipients see **Accept**, **Decline**, and **Decline and block inviter** on Home
 (`/-/account`) and the invitation page (`/-/account/people`). A link opens that
 page and carries no credential, email or private project identifier. Signing in
-preserves the destination; the wrong account can return after signing out and
-using the invited account. A forwarded link grants nothing and reveals no other
-account's invitations. Blocks belong to the recipient, apply across projects,
+preserves the destination. Choose **Use another account** on the invitation page
+to sign in with the invited account and open its inbox. A forwarded link grants
+nothing and reveals no other account's invitations. Blocks belong to the recipient, apply across projects,
 suppress later invitation mail, and can be undone in **Blocked inviters**. They
 are never exposed to the inviter.
 

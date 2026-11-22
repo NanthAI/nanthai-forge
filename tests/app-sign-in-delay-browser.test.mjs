@@ -30,17 +30,22 @@ test('a reload with sign-in still loading renders nothing and reads nothing; the
     export * from ${JSON.stringify(join(root, 'node_modules/convex/dist/esm/react/index.js'))};
     const listeners = new Set<() => void>();
     const w = window as any;
-    w.auth = { isLoading: true, isAuthenticated: false };
+    const returningFromGithub = sessionStorage.getItem('fixture.githubReturn') === '1';
+    sessionStorage.removeItem('fixture.githubReturn');
+    w.auth = returningFromGithub
+      ? { isLoading: false, isAuthenticated: true, handle: 'invited' }
+      : { isLoading: true, isAuthenticated: false };
     w.authReads = 0;
     w.reads = [];
     // The test resolves sign-in by hand, as a slow token check would.
-    w.resolveAuth = (isAuthenticated: boolean) => {
-      w.auth = { isLoading: false, isAuthenticated };
+    w.resolveAuth = (isAuthenticated: boolean, handle?: string) => {
+      w.auth = { isLoading: false, isAuthenticated, handle };
       listeners.forEach(listener => listener());
     };
     const subscribe = (listener: () => void) => (listeners.add(listener), () => listeners.delete(listener));
     const client = {
-      query: async () => null,
+      query: async (query: any) =>
+        getFunctionName(query) === 'accountTeams:list' ? { page: [], isDone: true } : null,
       mutation: async () => null,
       action: async () => null,
       setAuth() {},
@@ -51,8 +56,26 @@ test('a reload with sign-in still loading renders nothing and reads nothing; the
     export class ConvexReactClient { constructor() { return client as any; } }
     export const useConvex = () => client;
     export const useConvexAuth = () => (w.authReads++, useSyncExternalStore(subscribe, () => w.auth));
-    export const useQuery = (reference: any, args: unknown) => {
-      if (args !== 'skip') w.reads.push(getFunctionName(reference));
+    export const useQuery = (reference: any, args: any) => {
+      if (args === 'skip') return;
+      const name = getFunctionName(reference);
+      w.reads.push(name);
+      if (!w.auth.handle) return;
+      if (name === 'urlAccounts:current') return { handle: w.auth.handle };
+      if (name === 'urlProjects:resolve' && w.auth.handle === 'wrong-account')
+        return { id: 'old-project', handle: 'owner', slug: 'other-project', name: 'Previous private project' };
+      if (name === 'auth:listPasskeys') return { passkeys: [] };
+      if (name === 'projectInvitationInbox:inbox') {
+        const invited = w.auth.handle === 'invited';
+        const kind = invited ? 'email' : 'handle';
+        return { rows: args.kind === kind ? [{
+          invitationId: kind,
+          projectName: invited ? 'Invited project' : 'Other project',
+          href: invited ? '/-/owner/invited-project' : '/-/owner/other-project',
+          role: 'read',
+          state: 'pending',
+        }] : [] };
+      }
       return undefined;
     };
     export const usePaginatedQuery = (reference: any, args: unknown) => {
@@ -71,17 +94,34 @@ test('a reload with sign-in still loading renders nothing and reads nothing; the
     authShim,
     `import { createElement, Fragment } from 'react';
     export const ConvexAuthProvider = ({ children }: any) => createElement(Fragment, null, children);
-    export const useAuthActions = () => ({ signIn: async () => ({ signingIn: false }), signOut: async () => {} });`,
+    export const useAuthActions = () => ({
+      signIn: async () => ({ signingIn: false }),
+      signOut: async () => {
+        (window as any).resolveAuth(false);
+        await new Promise<void>(resolve => ((window as any).completeSignOut = resolve));
+      },
+    });`,
   );
-  // The sign-in page's own hooks come from the auth library and need its provider; the test gives them inert ones.
+  // These hooks resolve synthetic accounts in the fixture. GitHub simulates a full redirect back to the app.
   const methodsShim = join(temp, 'convex-auth-methods.ts');
   writeFileSync(
     methodsShim,
     `export const useOauth = () => ({ flowError: null });
-    export const useSignInWithGithub = () => ({ signIn: async () => ({ signingIn: false }) });
+    export const useSignInWithGithub = () => ({
+      signIn: async ({ redirectTo }: { redirectTo: string }) => {
+        sessionStorage.setItem('fixture.githubReturn', '1');
+        location.assign(redirectTo);
+      },
+    });
     export const useAddPasskey = () => ({ pending: false, add: async () => ({}) });
     export const useRemovePasskey = () => ({ pending: false, remove: async () => ({}) });
-    export const useSignInWithUsernamePasskey = () => ({ pending: false, signIn: async () => ({ signingIn: false }) });`,
+    export const useSignInWithUsernamePasskey = () => ({
+      pending: false,
+      signIn: async ({ username }: { username: string }) => {
+        (window as any).resolveAuth(true, username);
+        return { status: 'success' };
+      },
+    });`,
   );
   writeFileSync(
     html,
@@ -214,5 +254,76 @@ test('a reload with sign-in still loading renders nothing and reads nothing; the
     );
     assert.deepEqual(errors, []);
     await page.close();
+  }
+
+  for (const method of ['passkey', 'GitHub']) {
+    await t.test(`the invitation page survives switching accounts with ${method}`, async () => {
+      const inboxPath = '/-/account/people';
+      const signInPath = `/-/signin?next=${encodeURIComponent(inboxPath)}`;
+      const { page, errors } = await open(inboxPath);
+      const passkey = async handle => {
+        await page.getByLabel('Your handle').fill(handle);
+        await page.getByRole('button', { name: 'Continue', exact: true }).click();
+      };
+      const inbox = page.getByRole('region', { name: 'Your invitations' });
+      await page.evaluate(() => window.resolveAuth(false));
+      await page.waitForURL(`https://forge.test${signInPath}`);
+      await passkey('wrong-account');
+      await inbox.getByText('Other project').waitFor();
+      assert.equal(await inbox.getByText('Invited project').count(), 0);
+      assert.equal(new URL(page.url()).pathname, inboxPath);
+
+      await page.evaluate(() => {
+        history.pushState(null, '', '/-/owner/other-project');
+        dispatchEvent(new PopStateEvent('popstate'));
+      });
+      await page.getByText('Previous private project', { exact: true }).first().waitFor();
+      await page.goBack();
+      const previousProject = page.getByRole('link', { name: 'Previous private project' });
+      await previousProject.waitFor();
+
+      // Only the canonical path should survive a switch, even if someone appended details to the link.
+      await page.evaluate(() => history.replaceState(null, '', '?extra=sample-private-project#sample'));
+      await page.getByRole('button', { name: 'Use another account' }).click();
+      await page.waitForURL(`https://forge.test${signInPath}`);
+      if (method === 'GitHub') {
+        await page.evaluate(() => window.completeSignOut());
+        await page.getByRole('button', { name: 'Continue with GitHub' }).click();
+        await page.getByRole('heading', { name: 'Add a passkey' }).waitFor();
+        await page.getByRole('button', { name: 'Not now' }).click();
+      } else {
+        await passkey('invited');
+      }
+      await inbox.getByText('Invited project').waitFor();
+      if (method === 'passkey') {
+        const redirects = await page.evaluate(async () => {
+          const paths = [];
+          const replace = history.replaceState;
+          history.replaceState = (...args) => {
+            paths.push(args[2]);
+            replace.apply(history, args);
+          };
+          window.completeSignOut();
+          await new Promise(resolve => requestAnimationFrame(resolve));
+          history.replaceState = replace;
+          return paths;
+        });
+        assert.deepEqual(redirects, [], 'the earlier sign-out cannot navigate after the next sign-in');
+      }
+      assert.equal(page.url(), `https://forge.test${inboxPath}`);
+      assert.equal(await previousProject.count(), 0);
+      assert.equal(await inbox.getByText('Other project').count(), 0);
+      assert.equal(await inbox.getByRole('button', { name: 'Accept', exact: true }).count(), 1);
+      assert.equal(await inbox.getByRole('link', { name: 'Open the project' }).count(), 0);
+
+      await page.keyboard.press('Control+k');
+      await page.getByPlaceholder('Go to a place or run…').fill('Sign out');
+      await page.getByRole('menuitem', { name: 'Sign out' }).click();
+      await page.waitForURL('https://forge.test/-/signin');
+      await page.evaluate(() => window.completeSignOut());
+      assert.equal(page.url(), 'https://forge.test/-/signin');
+      assert.deepEqual(errors, []);
+      await page.close();
+    });
   }
 });

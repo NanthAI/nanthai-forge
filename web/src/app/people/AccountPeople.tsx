@@ -61,7 +61,7 @@ function useAccountTeams() {
   return { read, retry: first, showMore: () => void (cursor.current && page(cursor.current)) };
 }
 
-export default function AccountPeople(_props: AccountProps) {
+export default function AccountPeople({ leave }: AccountProps) {
   const client = useConvex();
   const { read, retry, showMore } = useAccountTeams();
   const invitations = useRef(new Map<string, { operationId: string; pending?: true }>());
@@ -102,6 +102,7 @@ export default function AccountPeople(_props: AccountProps) {
       showMore={showMore}
       actions={actions}
       invitations={<Invitations onJoinTeam={retry} />}
+      switchAccount={leave}
     />
   );
 }
@@ -117,12 +118,14 @@ export function PeopleView({
   showMore,
   actions,
   invitations,
+  switchAccount,
 }: {
   read: Read;
   retry: () => void;
   showMore?: () => void;
   actions: TeamActions;
   invitations?: ReactNode;
+  switchAccount?: () => void;
 }) {
   const data = read.state === 'ok' ? read.data : read.state === 'failed' ? read.last : undefined;
   const sentence = data
@@ -132,7 +135,13 @@ export function PeopleView({
       : 'Loading…';
   return (
     <div className="account-people">
-      <Head trail={trail} sentence={sentence} />
+      <Head trail={trail} sentence={sentence}>
+        {switchAccount ? (
+          <button type="button" className="btn ghost" onClick={switchAccount}>
+            Use another account
+          </button>
+        ) : null}
+      </Head>
       {invitations}
       {read.state === 'failed' ? (
         <div className="notice" role="status">

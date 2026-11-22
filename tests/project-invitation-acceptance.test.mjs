@@ -15,6 +15,7 @@ import {
 import { moduleUrl } from './convex-module.mjs';
 const accounts = await import(moduleUrl('../convex/urlAccounts.ts'));
 const { guard } = await import(moduleUrl('../convex/cliServer.ts'));
+const { accessibleProject } = await import(moduleUrl('../convex/projectAuthority.ts'));
 
 test('handle and email invitations grant nothing until their recipient accepts; acceptance replays without restoring a removed grant', async t => {
   for (const person of ['@wren', 'guest@example.test']) {
@@ -38,6 +39,29 @@ test('handle and email invitations grant nothing until their recipient accepts; 
     await assert.rejects(s.answer(row, 'decline', operationId), refusal('WORK_OPERATION_CHANGED'));
   }
 });
+test('switching accounts opens only the current recipient’s pending invitations and grants no project access', async t => {
+  const s = invitationFixture(t);
+  const invited = await s.invite();
+  const other = await s.invite('@rook');
+  const pending = async kind =>
+    (await inbox.inbox._handler(s.ctx, { kind })).rows.map(row => row.invitationId);
+
+  s.caller('other', 'other@example.test');
+  await accounts.ensure._handler(s.ctx, {});
+  assert.deepEqual(await pending('handle'), [other._id]);
+  assert.deepEqual(await pending('email'), []);
+  await assert.rejects(accessibleProject(s.ctx, 'project', 'other'), refusal('PROJECT_UNAVAILABLE'));
+
+  s.caller();
+  await accounts.ensure._handler(s.ctx, {});
+  assert.deepEqual(await pending('handle'), []);
+  assert.deepEqual(await pending('email'), [invited._id]);
+  await assert.rejects(accessibleProject(s.ctx, 'project', 'guest'), refusal('PROJECT_UNAVAILABLE'));
+  await s.answer(invited);
+  assert.equal((await accessibleProject(s.ctx, 'project', 'guest'))._id, 'project');
+  assert.deepEqual(await pending('email'), []);
+});
+
 test('acceptance preserves existing write access and can lift read to write', async t => {
   const s = invitationFixture(t);
   let row = await s.invite('@wren');
