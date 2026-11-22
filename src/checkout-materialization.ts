@@ -70,7 +70,8 @@ export async function withCheckoutMaterialization<T>(
   const capacity = checkoutVolumeCapacity(),
     localCapacity = Math.min(capacity, checkoutIoCapacity()),
     pending: Job[] = [],
-    workers = new Set<Promise<void>>();
+    workers = new Set<Promise<void>>(),
+    available = { copy: 0, durability: 0, shared: 0 };
   options.budget?.({ volumeWorkers: capacity, localWorkers: localCapacity });
   setMaxListeners(localCapacity + 1, stop.signal);
   let active = 0,
@@ -96,19 +97,22 @@ export async function withCheckoutMaterialization<T>(
     });
   function pump() {
     if (stop.signal.aborted || !pending.length || workers.size >= localCapacity) return;
-    // Always give this open one waiting worker. Extra workers consume only spare
-    // permits; ten opens do not each manufacture four waiting tickets.
-    if (workers.size) {
-      if (performance.now() < spareUntil) return;
-      if (directories.some(directory => queueEntries(directory).length >= capacity)) {
-        spareUntil = performance.now() + 1000;
-        return;
-      }
-    }
     const phase = pending[0]!.phase;
+    // Acquiring and between-job workers already cover the FIFO prefix of
+    // their phase. Only an uncovered job warrants another ticket.
+    for (let i = 1; i <= available[phase]; i++) if (pending[i]?.phase !== phase) return;
     const queues: CheckQueue[] = [];
-    // Publish choosing/tickets synchronously before another local producer pumps.
     try {
+      // Always give this open one waiting worker. Extra workers consume only spare
+      // permits; ten opens do not each manufacture four waiting tickets.
+      if (workers.size) {
+        if (performance.now() < spareUntil) return;
+        if (directories.some(directory => queueEntries(directory).length >= capacity)) {
+          spareUntil = performance.now() + 1000;
+          return;
+        }
+      }
+      // Publish choosing/tickets synchronously before another local producer pumps.
       queues.push(
         new CheckQueue(directories[0]!, { limit: capacity, serializeAdmission: false, identity: { phase } }),
       );
@@ -118,6 +122,7 @@ export async function withCheckoutMaterialization<T>(
       mark();
       return;
     }
+    available[phase]++;
     const worker = (async () => {
       try {
         for (let i = 0; i < directories.length; i++) {
@@ -141,14 +146,18 @@ export async function withCheckoutMaterialization<T>(
             until = performance.now() + 1000;
           }
           const job = pending.shift()!;
+          available[phase]--;
           active++;
-          mark();
           try {
+            mark();
+            // Taking the last job in a phase can uncover a different phase.
+            if (pending[0] && pending[0].phase !== phase) pump();
             job.resolve(await job.run());
           } catch (error) {
             job.reject(error);
           } finally {
             active--;
+            available[phase]++;
             mark();
           }
           // Await continuations before retiring an idle worker; a copy's next
@@ -159,6 +168,7 @@ export async function withCheckoutMaterialization<T>(
         while (pending.length) pending.shift()!.reject(error);
         mark();
       } finally {
+        available[phase]--;
         for (const queue of queues.reverse()) queue.release();
       }
     })();

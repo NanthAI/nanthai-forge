@@ -277,6 +277,42 @@ test('CPU and network waits consume no volume permit and completion retires spar
   }
 });
 
+test('an acquiring worker covers the first phase without reserving a second ticket for the next phase', async t => {
+  const root = fixture(t),
+    directory = join(root, 'queue');
+  await withCheckoutMaterialization(
+    root,
+    async () => {
+      const copy = checkoutIo(async () => 'copy');
+      const durable = checkoutIo(async () => 'durability', 'durability');
+      const phases = queueEntries(directory).map(entry => entry.ticket?.phase);
+      assert.deepEqual(await Promise.all([copy, durable]), ['copy', 'durability']);
+      assert.deepEqual(phases, ['copy']);
+    },
+    { directory },
+  );
+  assert.deepEqual(queueEntries(directory), []);
+});
+
+test('a worker between jobs keeps its ticket for the next job in the same phase', async t => {
+  const root = fixture(t),
+    directory = join(root, 'queue');
+  const tickets = () => queueEntries(directory).map(entry => entry.path);
+  await withCheckoutMaterialization(
+    root,
+    async () => {
+      const first = await checkoutIo(async () => tickets());
+      const next = checkoutIo(async () => tickets());
+      const whilePending = tickets();
+      assert.equal(first.length, 1);
+      assert.deepEqual(await next, first);
+      assert.deepEqual(whilePending, first);
+    },
+    { directory },
+  );
+  assert.deepEqual(tickets(), []);
+});
+
 test('ten processes serialize editing write passes while every request completes', async t => {
   const root = fixture(t);
   const results = await Promise.all(Array.from({ length: 10 }, () => worker(t, ['writes', root]).done));
