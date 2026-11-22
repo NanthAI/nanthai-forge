@@ -27,6 +27,8 @@ import { runInbound } from './projectGithubInboundRun';
 import { unexpectedMirrorFailure } from '../src/hosted-github-retry';
 import { networkFailure } from '../src/network-fetch';
 import { writeMirrorVerification } from './projectGithubMirrorVerifyStatus';
+const publicNow = (ctx: ActionCtx, projectId: Id<'hostedProjects'>) =>
+  ctx.runQuery(makeFunctionReference<'query'>('projectGithubPullStatusStore:publicNow'), { projectId });
 const mutation = (name: string) => makeFunctionReference<'mutation'>(name);
 /** Same recipe-aware verified reader as the fixed source worker, with one
  * logical-file cache. Descriptors and storage grants are per 100-object window. */
@@ -170,13 +172,17 @@ export const step = internalAction({
       let verifyRetry = false;
       if (plan.entry && verification) {
         try {
+          // The link was read when the step loaded; the step may have run for minutes. A public link is re-checked
+          // just before the write (one read, only when a link exists), inside this retry boundary.
+          const link =
+            verification.link && (await publicNow(ctx, loaded.projectId)) ? verification.link : null;
           verifyError = statusGrant
             ? await writeMirrorVerification(
                 api,
                 loaded.repository,
                 plan.entry.commit,
                 verification.state,
-                verification.link,
+                link,
                 started.phase === 'done' || !!plan.refAlreadyPublished,
               )
             : 'GITHUB_APP_PERMISSIONS';

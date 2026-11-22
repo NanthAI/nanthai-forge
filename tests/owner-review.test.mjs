@@ -1097,6 +1097,7 @@ test('a fork PR head asks the owner once; only the owner person grants, which st
         state: 'pending',
         description: forkStatus.pending,
         link: url,
+        checked: true,
       },
     ],
     'one pending status with the approve link',

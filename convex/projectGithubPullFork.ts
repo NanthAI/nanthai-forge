@@ -8,29 +8,22 @@ import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './server';
 import type { Doc } from './_generated/dataModel';
 import { saveLane } from './projectHostedSaveStore';
-import {
-  approvalRow,
-  fitNote,
-  laneApproveUrl,
-  opaqueApproveUrl,
-  writeApproval,
-} from './projectHostedApprovalStore';
+import { approvalRow, fitNote, laneApproveUrl, writeApproval } from './projectHostedApprovalStore';
 import { postSystemLaneNote } from './projectBoardSystem';
 import { parseInbound } from './projectGithubInboundQueue';
-import { endForkApproval, projectLink } from './projectGithubPullQueue';
+import { endForkApproval, queuedStatus } from './projectGithubPullQueue';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { forkApprovalReason, forkApprovalTtlMs, forkStatus, pullOperationId } from '../src/github-pull-check';
 import type { InboundJob } from '../src/github-inbound-job';
 
 type Job = Doc<'projectGithubMirrorJobs'>;
-const pending = (ctx: MutationCtx, job: Job, sha: string, description: string, link: string | null) =>
+const pending = (ctx: MutationCtx, job: Job, sha: string, forms: Awaited<ReturnType<typeof queuedStatus>>) =>
   ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectGithubPullStatus:post'), {
     projectId: job.projectId,
     repository: job.repository,
     sha,
     state: 'pending',
-    description,
-    link,
+    ...forms,
   });
 
 /** Whether this fork head's check-only run may start now. The first time: open the approval
@@ -51,7 +44,7 @@ export async function forkGate(ctx: MutationCtx, job: Job, project: Doc<'hostedP
       row.decision?.head === row.head;
     if (!granted) return false;
     await endForkApproval(ctx, project._id, laneId, pull.approval);
-    await pending(ctx, job, pull.head, forkStatus.started, await projectLink(ctx, project, laneId));
+    await pending(ctx, job, pull.head, await queuedStatus(ctx, project, laneId, forkStatus.started));
     return true;
   }
   const lane = await saveLane(ctx, { projectId: project._id, actor: project.owner, laneId });
@@ -80,12 +73,12 @@ export async function forkGate(ctx: MutationCtx, job: Job, project: Doc<'hostedP
   });
   const url = await laneApproveUrl(ctx, project, laneId);
   // GitHub readers see the status link before Forge checks access: a private project's stays opaque (Item 0a99ab23).
+  // The public form keeps the app-root approve link the board note carries.
   await pending(
     ctx,
     job,
     pull.head,
-    forkStatus.pending,
-    project.visibility === 'public' ? url : opaqueApproveUrl(project._id, laneId),
+    await queuedStatus(ctx, project, laneId, forkStatus.pending, undefined, url),
   );
   await postSystemLaneNote(ctx, {
     projectId: project._id,

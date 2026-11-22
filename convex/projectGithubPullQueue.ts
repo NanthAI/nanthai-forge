@@ -17,7 +17,15 @@ import { opaqueApproveUrl } from './projectHostedApprovalStore';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { hostedProjectRoot } from '../src/project-routes';
-import { checkRunStatus, forkStatus, isPullOperation, type PullJob } from '../src/github-pull-check';
+import {
+  checkRunStatus,
+  forkStatus,
+  isPullOperation,
+  openLane,
+  pullOutcomeDescriptions as descriptions,
+  type PullJob,
+} from '../src/github-pull-check';
+export { openLane };
 import type { InboundJob } from '../src/github-inbound-job';
 
 type Job = Doc<'projectGithubMirrorJobs'>;
@@ -50,14 +58,34 @@ export async function projectLink(
   url.hash = '';
   return url.href;
 }
-/** The one sentence a non-public project's failure status carries instead of worker or error detail. */
-export const openLane = 'Open the Lane in Forge for details.';
-const descriptions: Record<Outcome, string> = {
-  success: 'Forge check passed.',
-  failure: 'Forge check failed.',
-  error: 'Forge could not check this head.',
-  superseded: 'Superseded by a newer push to this pull request.',
-};
+/** What a status post carries (Item 966cb821). A public project's status is queued with its readable form
+ * plus the private form beside it; the post action asks the project's visibility once, just before it
+ * writes, and sends the private form when the project turned private in between. A project already
+ * non-public queues only the private form, so its post needs no read. */
+export async function queuedStatus(
+  ctx: QueryCtx | MutationCtx,
+  project: Doc<'hostedProjects'>,
+  laneId: string | undefined,
+  description: string,
+  privateDescription: string = description,
+  publicLink?: string | null,
+) {
+  if (project.visibility !== 'public')
+    return {
+      description: privateDescription,
+      link: laneId ? opaqueApproveUrl(project._id, laneId) : null,
+      checked: true as const,
+    };
+  const link = publicLink !== undefined ? publicLink : await projectLink(ctx, project, laneId);
+  return {
+    description,
+    link,
+    privateForm: {
+      description: privateDescription,
+      link: laneId ? opaqueApproveUrl(project._id, laneId) : null,
+    },
+  };
+}
 /** Record the final outcome once and schedule its one forge/verify write, plus the Lane's
  * retirement. Later events for this head change nothing. `privateDescription` replaces
  * `description` for a non-public project: a description built from worker or error detail can
@@ -86,10 +114,13 @@ export async function settlePull(
     repository: job.repository,
     sha: pull.head,
     state: result === 'superseded' ? 'error' : result,
-    description:
-      (project.visibility !== 'public' ? (privateDescription ?? description) : description) ??
-      descriptions[result],
-    link: await projectLink(ctx, project, inbound.laneId),
+    ...(await queuedStatus(
+      ctx,
+      project,
+      inbound.laneId,
+      description ?? descriptions[result],
+      privateDescription ?? description ?? descriptions[result],
+    )),
     jobId: job._id,
   });
   // Separate transaction: a Lane or run that cannot be retired never loses the status.

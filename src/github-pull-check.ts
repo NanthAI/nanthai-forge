@@ -96,6 +96,26 @@ export const forkStatus = {
   withdrawn: 'Fork PR: the approval request was withdrawn. Push again to ask again.',
   expired: 'Fork PR: no owner approved this run within 30 days. Push again to ask again.',
 } as const;
+/** The fixed forge/verify sentence per outcome (and the pending one): what a non-public project posts when
+ * no coded private form applies. */
+export const pullOutcomeDescriptions = {
+  pending: 'Forge check pending.',
+  success: 'Forge check passed.',
+  failure: 'Forge check failed.',
+  error: 'Forge could not check this head.',
+  superseded: 'Superseded by a newer push to this pull request.',
+} as const;
+/** The one sentence a non-public project's failure status carries instead of worker or error detail. */
+export const openLane = 'Open the Lane in Forge for details.';
+const codedPrivate = new RegExp(
+  `^(?:[A-Z][A-Z0-9_]{2,60}: |Forge could not start the check \\([A-Za-z0-9_ ]{3,60}\\)\\. |Does not apply to Forge main \\([A-Z][A-Z0-9_]{2,60}\\)\\. )${openLane.replace('.', '\\.')}$`,
+);
+/** Whether a description is already free of project, path and worker detail: a fixed sentence, or a code
+ * plus the Lane pointer, matched in full. Anything else may carry detail and is not safe for a private project. */
+export const isPrivateSafeDescription = (description: string) =>
+  (Object.values(pullOutcomeDescriptions) as string[]).includes(description) ||
+  (Object.values(forkStatus) as string[]).includes(description) ||
+  codedPrivate.test(description);
 /** The approval request the owner reads on the approve page and the board. */
 export const forkApprovalReason = (number: number, head: string) =>
   `GitHub PR #${number} from a fork (head ${head.slice(0, 12)}) asks to run the Forge check on this project's runner. Review its changes first; the run gets no private submodules.`;

@@ -3,11 +3,17 @@
 // runtime: the status write needs only fetch and the App token module.
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { internalAction } from './_generated/server';
+import { internalAction, type ActionCtx } from './_generated/server';
+import type { Id } from './_generated/dataModel';
 import { convexFetch } from './networkFetch';
 import { installationTokenMinter, pullStatusPermissions } from './githubAppToken';
 import { githubRequest, type GithubRequest } from '../src/hosted-github-api';
-import { pullStatus, pullStatusContext, type PullStatus } from '../src/github-pull-check';
+import {
+  pullOutcomeDescriptions,
+  pullStatus,
+  pullStatusContext,
+  type PullStatus,
+} from '../src/github-pull-check';
 
 /** One status write. GitHub keeps every status; the newest per context decides the merge. */
 export async function postPullStatus(
@@ -26,6 +32,30 @@ export async function postPullStatus(
     ...(link?.startsWith('https://') ? { target_url: link } : {}),
   });
 }
+/** The form this post sends, read just before the write (Item 966cb821). A status queued while its project
+ * was public carries a `privateForm`; one read of the project's visibility picks it when the project has since
+ * gone private, been trashed or gone. A status queued private is marked `checked` and reads nothing. A payload
+ * with neither mark was queued before this check existed: it is read too, and a non-public project then gets
+ * no link and the fixed sentence for the state. */
+export async function statusToPost(
+  ctx: Pick<ActionCtx, 'runQuery'>,
+  input: {
+    projectId: Id<'hostedProjects'>;
+    state: PullStatus['state'];
+    description: string;
+    link: string | null;
+    privateForm?: StatusForm;
+    checked?: boolean;
+  },
+): Promise<StatusForm> {
+  if (input.checked) return { description: input.description, link: input.link };
+  const open = await ctx.runQuery(makeFunctionReference<'query'>('projectGithubPullStatusStore:publicNow'), {
+    projectId: input.projectId,
+  });
+  if (open) return { description: input.description, link: input.link };
+  return input.privateForm ?? { description: pullOutcomeDescriptions[input.state], link: null };
+}
+type StatusForm = { description: string; link: string | null };
 /** Status writes retried after a transient GitHub or network failure. When every attempt fails the
  * failure is recorded on the job (projectGithubPullStatusStore:statusFailed) and shown in the mirror
  * status with its next step; GitHub keeps the last accepted status, so merging stays blocked,
@@ -45,6 +75,10 @@ export const post = internalAction({
     state: v.union(v.literal('pending'), v.literal('success'), v.literal('failure'), v.literal('error')),
     description: v.string(),
     link: v.union(v.string(), v.null()),
+    /** What to send instead when the project is no longer public at post time (statusToPost). */
+    privateForm: v.optional(v.object({ description: v.string(), link: v.union(v.string(), v.null()) })),
+    /** Set when the form was chosen for a project that was already non-public: nothing to re-check. */
+    checked: v.optional(v.boolean()),
     attempt: v.optional(v.number()),
     /** The PR job this status settles; the failure after the last attempt is recorded on it. */
     jobId: v.optional(v.id('projectGithubMirrorJobs')),
@@ -53,10 +87,17 @@ export const post = internalAction({
   },
   returns: v.null(),
   handler: async (ctx, input) => {
+    // Safe until the visibility read succeeds: a recorded failure never keeps the public detail.
+    let form: StatusForm =
+      input.privateForm ??
+      (input.checked ? input : { description: pullOutcomeDescriptions[input.state], link: null });
     try {
       const mint = await installationTokenMinter(ctx, input.projectId, input.repository);
-      const api = githubRequest(await mint(pullStatusPermissions), convexFetch);
-      await postPullStatus(api, input.repository, input.sha, input.state, input.description, input.link);
+      const token = await mint(pullStatusPermissions);
+      // Each attempt re-checks, after the slow minting and just before the write.
+      form = await statusToPost(ctx, input);
+      const api = githubRequest(token, convexFetch);
+      await postPullStatus(api, input.repository, input.sha, input.state, form.description, form.link);
     } catch (error) {
       const attempt = (input.attempt ?? 1) + 1;
       if (attempt > attempts) {
@@ -66,7 +107,7 @@ export const post = internalAction({
           {
             jobId: input.jobId,
             state: input.state,
-            description: input.description,
+            description: form.description,
             error: postFailureCode(error),
           },
         );

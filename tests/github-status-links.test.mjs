@@ -198,3 +198,101 @@ for (const visibility of ['private', 'public']) {
     }
   });
 }
+
+// Receipt 0334007f review: a status queued while the project was public is re-checked when it posts. The post path
+// asks the project's current visibility once and sends the private form (opaque link or none, code plus fixed
+// sentence) when the project turned private in between.
+const check = await import(moduleUrl('../src/github-pull-check.ts'));
+const poster = await import(moduleUrl('../convex/projectGithubPullStatus.ts'));
+const statusStore = await import(moduleUrl('../convex/projectGithubPullStatusStore.ts'));
+const asPoster = f => ({ runQuery: (_ref, args) => f.tx('visibility', statusStore.publicNow, args) });
+for (const turn of ['stays public', 'turns private', 'is removed']) {
+  test(`d357d772: queued while public, the project ${turn} before the post`, async t => {
+    const f = await fixture(t, 'public');
+    const settling = job(f, {});
+    await run(f, 'settle', async ctx =>
+      queue.settlePull(
+        ctx,
+        await ctx.db.get(settling),
+        'failure',
+        secretDetail,
+        `GITHUB_SYNC_REJECTED: ${check.openLane}`,
+      ),
+    );
+    const queued = posted(f);
+    assert.equal(queued.link, readable(f));
+    assert.equal(queued.description, secretDetail);
+    if (turn === 'turns private') f.patch('hostedProjects', f.projectId, { visibility: 'private' });
+    if (turn === 'is removed') f.patch('hostedProjects', f.projectId, { removal: 'trash' });
+    const sent = await poster.statusToPost(asPoster(f), queued);
+    if (turn === 'stays public') {
+      assert.equal(sent.link, readable(f));
+      assert.equal(sent.description, secretDetail);
+    } else {
+      assert.equal(sent.link, opaque(f));
+      assert.equal(sent.description, `GITHUB_SYNC_REJECTED: ${check.openLane}`);
+      assert.doesNotMatch(JSON.stringify(sent), /secret|ada|tide/);
+    }
+  });
+}
+
+test('d357d772: a recorded public-form failure is reposted as the fixed sentence once the project is private', async t => {
+  const f = await fixture(t, 'private');
+  const failed = job(f, { statusPost: { state: 'failure', description: secretDetail, error: 'HTTP 500' } });
+  f.insert('projectGithubMirrors', {
+    projectId: f.projectId,
+    repository: 'synthetic/mirror',
+    activeId: null,
+    mapping: null,
+    verifyFailedId: failed,
+  });
+  assert.equal(await run(f, 'repost', ctx => repostPullStatus(ctx, f.projectId)), true);
+  assert.equal(posted(f).description, 'Forge check failed.');
+  assert.equal(posted(f).link, opaque(f));
+});
+
+// Review round (receipt 0334007f follow-up): payloads queued before the check carry no mark; a private queue is marked
+// and reads nothing; a recorded description is kept for a private project only when it is already the private form.
+test('d357d772: a payload queued before the post-time check is read, and a private one is redacted', async t => {
+  const f = await fixture(t, 'private');
+  const legacy = { projectId: f.projectId, state: 'failure', description: secretDetail, link: readable(f) };
+  assert.deepEqual(await poster.statusToPost(asPoster(f), legacy), {
+    description: 'Forge check failed.',
+    link: null,
+  });
+  const pub = await fixture(t, 'public');
+  const same = { projectId: pub.projectId, state: 'failure', description: secretDetail, link: readable(pub) };
+  assert.deepEqual(await poster.statusToPost(asPoster(pub), same), {
+    description: secretDetail,
+    link: readable(pub),
+  });
+});
+
+test('d357d772: a status queued private is marked and its post reads nothing', async t => {
+  const f = await fixture(t, 'private');
+  const failing = job(f, {});
+  await run(f, 'settle', async ctx =>
+    queue.settlePull(ctx, await ctx.db.get(failing), 'failure', secretDetail),
+  );
+  const queued = posted(f);
+  assert.equal(queued.checked, true);
+  assert.equal(queued.privateForm, undefined);
+  const noRead = { runQuery: () => assert.fail('a private queue must not read the project') };
+  assert.equal((await poster.statusToPost(noRead, queued)).link, opaque(f));
+});
+
+test('d357d772: only the private form is safe to repost for a private project', () => {
+  const safe = [
+    'Forge check failed.',
+    'GITHUB_SYNC_REJECTED: Open the Lane in Forge for details.',
+    'Forge could not start the check (CHECK_UNAVAILABLE). Open the Lane in Forge for details.',
+    'Does not apply to Forge main (STATE_CONFLICT). Open the Lane in Forge for details.',
+  ];
+  for (const text of safe) assert.equal(check.isPrivateSafeDescription(text), true, text);
+  const unsafe = [
+    secretDetail,
+    'GITHUB_SYNC_FAILED: Worker failed in synthetic/private. Open the Lane in Forge for details.',
+    'Forge could not start the check (see ada/tide-pool). Open the Lane in Forge for details.',
+  ];
+  for (const text of unsafe) assert.equal(check.isPrivateSafeDescription(text), false, text);
+});

@@ -4,10 +4,11 @@
 // a posted one while GitHub still shows the last accepted status.
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { internalMutation, type MutationCtx } from './server';
+import { internalMutation, internalQuery, type MutationCtx } from './server';
 import type { Doc } from './_generated/dataModel';
 import { parseInbound } from './projectGithubInboundQueue';
-import { projectLink } from './projectGithubPullQueue';
+import { queuedStatus } from './projectGithubPullQueue';
+import { isPrivateSafeDescription, pullOutcomeDescriptions } from '../src/github-pull-check';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import type { InboundJob } from '../src/github-inbound-job';
 import { mirrorRow } from './projectGithubMirrorRows';
@@ -21,6 +22,16 @@ const withStatusPost = (job: Job, statusPost: StatusPost | undefined) => {
   else delete pull.statusPost;
   return canonicalPayload({ ...inbound, pull } satisfies InboundJob);
 };
+/** Whether the project is public and live right now: the one read a queued public status makes just
+ * before it posts (Item 966cb821). Gone or removed counts as not public, so the private form is sent. */
+export const publicNow = internalQuery({
+  args: { projectId: v.id('hostedProjects') },
+  returns: v.boolean(),
+  handler: async (ctx, { projectId }) => {
+    const project = await ctx.db.get(projectId);
+    return !!project && !project.removal && project.visibility === 'public';
+  },
+});
 /** The last attempt failed: name the head on the job and point the queue row at it (one pointer, so
  * the status read needs one `get` only while this exists). */
 export const statusFailed = internalMutation({
@@ -61,6 +72,10 @@ export const statusPosted = internalMutation({
     return null;
   },
 });
+/** A recorded description is reposted for a project that is no longer public only when it already is the
+ * private form (isPrivateSafeDescription, matched in full); anything else gets the fixed sentence for the state. */
+const safeDescription = (description: string, state: StatusPost['state']) =>
+  isPrivateSafeDescription(description) ? description : pullOutcomeDescriptions[state];
 /** Owner re-post of the recorded failed status (nforge github resume): the same state and text,
  * one scheduled post whose success clears the record. False when nothing is recorded. */
 export async function repostPullStatus(ctx: MutationCtx, projectId: Job['projectId']) {
@@ -79,8 +94,13 @@ export async function repostPullStatus(ctx: MutationCtx, projectId: Job['project
     repository: job.repository,
     sha: inbound.pull!.head,
     state: statusPost.state,
-    description: statusPost.description,
-    link: await projectLink(ctx, project, inbound.laneId),
+    ...(await queuedStatus(
+      ctx,
+      project,
+      inbound.laneId,
+      statusPost.description,
+      safeDescription(statusPost.description, statusPost.state),
+    )),
     jobId: job._id,
     clear: true,
   });

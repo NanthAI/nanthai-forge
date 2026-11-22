@@ -1275,6 +1275,8 @@ test('two-way PR: the check run settles forge/verify once; a newer head supersed
     state: 'error',
     description: 'Superseded by a newer push to this pull request.',
     link: null,
+    // A project that is not public queues only its private form; the post re-reads nothing.
+    checked: true,
     // SM-E: the post names its job so a failed post can be recorded on it.
     jobId: old._id,
   });

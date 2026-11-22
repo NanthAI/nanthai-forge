@@ -116,8 +116,17 @@ export async function runInbound(
   if (pull) {
     commit = pull.head;
     // A fork head's one pending status comes with its approve link, once its Lane exists.
-    if (!pull.fork)
-      await postPullStatus(api, loaded.repository, commit, 'pending', 'Forge check started.', loaded.link);
+    if (!pull.fork) {
+      // The link was read when the step loaded; re-check once the token is minted, just before the write.
+      const link =
+        loaded.link &&
+        (await ctx.runQuery(makeFunctionReference<'query'>('projectGithubPullStatusStore:publicNow'), {
+          projectId: loaded.projectId,
+        }))
+          ? loaded.link
+          : null;
+      await postPullStatus(api, loaded.repository, commit, 'pending', 'Forge check started.', link);
+    }
   } else {
     const ref = await api<{ object: { sha: string } }>(`${prefix}/ref/heads/main`);
     commit = ref.object.sha;

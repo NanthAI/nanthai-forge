@@ -255,8 +255,21 @@ export const post = internalAction({
       if (!mint.canWriteStatuses) error = 'GITHUB_APP_PERMISSIONS';
       else {
         const api = githubRequest(await mint(pullStatusPermissions));
+        // The links were read before the slow minting: re-check once (only when a link exists), then write.
+        const open =
+          jobs.some(job => job.link) &&
+          (await ctx.runQuery(makeFunctionReference<'query'>('projectGithubPullStatusStore:publicNow'), {
+            projectId,
+          }));
         for (const { jobId, sha, state, link } of jobs) {
-          const refused = await writeMirrorVerification(api, repository, sha, state, link, input.attempt > 0);
+          const refused = await writeMirrorVerification(
+            api,
+            repository,
+            sha,
+            state,
+            open ? link : null,
+            input.attempt > 0,
+          );
           if (refused === 'GITHUB_APP_PERMISSIONS') {
             error = refused;
             break;
