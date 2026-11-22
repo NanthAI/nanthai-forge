@@ -7,6 +7,7 @@ import { scrubText } from './client-error-text.js';
 import { shellQuote } from './shell-quote.js';
 import { failedErrorChars, failedErrors } from './check-file-summary.js';
 import { retryableFinishSource } from './hosted-agent-finish-result.js';
+import type { LandingRecord } from './landing-state.js';
 import { holdLines, landingHold } from './hosted-landing-hold.js';
 import { syncRequiredSummary } from './hosted-would-conflict.js';
 import { acceptedByLine } from './landing-accepted-by.js';
@@ -81,9 +82,9 @@ export function landPhase(response: HostedAgentResponse): string | undefined {
 
 /** One line per outcome; failures list each failing file with its first error. A runner whose
  * owner accepted public logs adds that notice as the last line. */
-export function landSummary(response: HostedAgentResponse): string[] {
+export function landSummary(response: HostedAgentResponse, presentation?: LandingRecord): string[] {
   const checkLogs = resultOf(response).checkLogs;
-  const { lines } = classifyLand(response);
+  const { lines } = classifyLand(response, presentation);
   return typeof checkLogs === 'string' && lines.length ? [...lines, checkLogs] : lines;
 }
 /** What `land` and `wait` decide from (SM-C M7, the smallest typed outcome their exit codes need):
@@ -108,7 +109,10 @@ export const landNeedsAction = (kind: LandOutcomeKind) => kind === 'failed' || k
 /** True when `land` and `wait` exit 2 for this reply: a failed landing, or one that needs a sync. */
 export const landExitsFailed = (response: HostedAgentResponse) =>
   landPhase(response) === 'terminal-failed' || landNeedsAction(landOutcomeKind(response));
-function classifyLand(response: HostedAgentResponse): { kind: LandOutcomeKind; lines: string[] } {
+function classifyLand(
+  response: HostedAgentResponse,
+  presentation?: LandingRecord,
+): { kind: LandOutcomeKind; lines: string[] } {
   const out = (kind: LandOutcomeKind, lines: string[]) => ({ kind, lines });
   const result = resultOf(response),
     submission = result.submission;
@@ -138,19 +142,23 @@ function classifyLand(response: HostedAgentResponse): { kind: LandOutcomeKind; l
     ]);
   // A held landing is neither queued nor stranded (5c59940b): name the hold and who releases it.
   const replay = (result as { replayParameters?: { laneId?: unknown } }).replayParameters;
-  const hold = landingHold(submission, typeof replay?.laneId === 'string' ? replay.laneId : undefined);
+  const hold = landingHold(
+    presentation ?? submission,
+    typeof replay?.laneId === 'string' ? replay.laneId : undefined,
+  );
   if (hold) return out('held', holdLines(hold));
   // A passed check is not a landing, and a queued landing is not a failure: say which.
-  if (phase === 'ready' && submission?.observation?.state !== 'terminal-failed')
-    return out('ready', [
-      result.orderWait?.submissionId
-        ? result.orderWait.reason === 'reservation'
-          ? `CHECK PASSED; not landed yet: submission ${result.orderWait.submissionId} reserved files this change touches; it lands first or its reservation ends`
-          : `CHECK PASSED; not landed yet: waiting for older submission ${result.orderWait.submissionId} to take main first`
-        : result.reservation?.live
-          ? `CHECK PASSED; queued to land first on its reserved files (reserved until ${result.reservation.until})`
-          : 'CHECK PASSED; queued to land, not landed yet (waiting for acceptance)',
-    ]);
+  if ((presentation?.phase ?? phase) === 'ready' && submission?.observation?.state !== 'terminal-failed') {
+    const blocker = presentation?.orderWait?.submissionId;
+    if (blocker && blocker !== result.orderWait?.submissionId)
+      return out('ready', [`CHECK PASSED; not landed yet: waiting for submission ${blocker}`]);
+    const orderWait =
+      !presentation || blocker === result.orderWait?.submissionId ? result.orderWait : undefined;
+    const reservation = phase === 'ready' ? result.reservation : undefined;
+    return out('ready', readyLines(orderWait, reservation));
+  }
+  if (presentation)
+    return out('pending', [`${pendingLabel(presentation.observation?.pendingReason)}; not landed yet`]);
   if (result.phase === 'check' && result.run?.status === 'passed')
     return out('check-passed', ['CHECK PASSED (check only; this command does not land)']);
   // The conflict's resolution Lane already completed: its landing carried this work.
@@ -235,6 +243,18 @@ const pendingLabels: Record<string, string> = {
   'pending-infra': 'WAITING FOR CHECK INFRASTRUCTURE',
 };
 const pendingLabel = (reason: string | null | undefined) => pendingLabels[reason ?? ''] ?? 'IN PROGRESS';
+
+function readyLines(orderWait: Result['orderWait'], reservation: Result['reservation']) {
+  return [
+    orderWait?.submissionId
+      ? orderWait.reason === 'reservation'
+        ? `CHECK PASSED; not landed yet: submission ${orderWait.submissionId} reserved files this change touches; it lands first or its reservation ends`
+        : `CHECK PASSED; not landed yet: waiting for older submission ${orderWait.submissionId} to take main first`
+      : reservation?.live
+        ? `CHECK PASSED; queued to land first on its reserved files (reserved until ${reservation.until})`
+        : 'CHECK PASSED; queued to land, not landed yet (waiting for acceptance)',
+  ];
+}
 
 /** Requested landings settle on canonical acceptance/failure, never check readiness. */
 export function landTerminal(response: HostedAgentResponse) {

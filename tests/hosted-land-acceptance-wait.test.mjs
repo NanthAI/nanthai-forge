@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { landTerminal, landSummary } from '../dist/hosted-land-summary.js';
 import { landWaitCommand } from '../dist/hosted-land-wait.js';
+import { pendingLandingPresentation } from '../dist/hosted-agent-finish-result.js';
 import { printedReceipt } from '../dist/receipt-slim.js';
 
 const turn = () => new Promise(resolve => setImmediate(resolve));
@@ -349,6 +350,28 @@ test('land observation deadline returns IN PROGRESS with the exact wait command 
   // so a foreground land returns before a 600 s agent shell backgrounds it.
   assert.equal(s.budgets.length, 1);
   assert(s.budgets[0] > 530 && s.budgets[0] <= 540, `budget ${s.budgets[0]}`);
+});
+
+test('a feed-only blocker on a ready landing names the submission without guessing order or reservation', () => {
+  const id = randomUUID(),
+    operationId = randomUUID(),
+    original = randomUUID(),
+    current = randomUUID();
+  const observation = { state: 'pending', pendingReason: 'queued' };
+  const submission = { id, operationId, phase: 'ready', observation };
+  const orderWait = { submissionId: original, reason: 'reservation' };
+  const pending = pendingLandingPresentation(
+    { ...submission, orderWait },
+    { phase: 'ready', observation, orderWait: { submissionId: current } },
+  );
+  const response = { operationId, result: { phase: 'finish', submission, orderWait } };
+  assert.equal(pending.landingState.label, 'Waiting for another landing');
+  assert.match(pending.landingState.nextStep, new RegExp(current));
+  assert.doesNotMatch(pending.landingState.nextStep, /older|reservation/);
+  assert.deepEqual(landSummary(response, pending.submission), [
+    `CHECK PASSED; not landed yet: waiting for submission ${current}`,
+  ]);
+  assert.match(landSummary(response)[0], new RegExp(`submission ${original} reserved files`));
 });
 
 // Issue 4f60d57a replay: three land --save clients waited 16-21 min at 0% CPU on one socket after their

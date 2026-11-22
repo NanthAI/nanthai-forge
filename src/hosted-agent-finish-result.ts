@@ -9,6 +9,37 @@ import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-con
 
 type Reply = Record<string, unknown>;
 
+/** Present newer progress for the selected attempt without changing the drained landing record. */
+export function pendingLandingPresentation(
+  recorded: (LandingRecord & { id: string; operationId: string }) | undefined,
+  progress: LandingRecord | undefined,
+  laneId?: string,
+) {
+  if (recorded?.observation?.state !== 'pending' || !progress) return undefined;
+  const code = recorded.error?.code;
+  const holdCode = code === 'MAIN_RED' || code === 'CI_DOWN' ? code : undefined;
+  // A metadata-only update leaves the recorded hold or stall details in effect.
+  if (
+    progress.phase === recorded.phase &&
+    progress.observation?.pendingReason === recorded.observation?.pendingReason &&
+    progress.error?.code === holdCode &&
+    progress.orderWait?.submissionId === recorded.orderWait?.submissionId
+  )
+    return undefined;
+  const submission: LandingRecord = { id: recorded.id, operationId: recorded.operationId, ...progress };
+  const blocker = progress.orderWait?.submissionId;
+  const knownOrder = blocker && recorded.orderWait?.submissionId === blocker && recorded.orderWait.message;
+  if (blocker)
+    submission.orderWait = {
+      submissionId: blocker,
+      message: knownOrder || `The check passed. Waiting for submission ${blocker} to clear.`,
+    };
+  const landingState = landingStateField(submission, laneId);
+  if (landingState.state === 'waiting-for-order' && !knownOrder)
+    landingState.label = 'Waiting for another landing';
+  return { submission, landingState };
+}
+
 /** A retryable compose child needs the retained public finish recovery. */
 export function retryableFinishSource(result: Reply) {
   const submission = result.submission as { phase?: string } | undefined;

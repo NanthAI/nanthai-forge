@@ -4,13 +4,14 @@ import { landingBodyCounts } from './observer-projection-budget.mjs';
 import { logicalTicket, ticketState, patchTicketState } from './landing-ticket-fixture.mjs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { landWaitCommand } from '../dist/hosted-land-wait.js';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { HostedAgentJournal } from '../dist/hosted-agent-journal.js';
 import { observationWaitHooks } from '../dist/hosted-agent-observe.js';
+import { landingStateField } from '../dist/landing-state.js';
 import { assertAgentResponseShape } from './agent-response-shape.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -1179,6 +1180,7 @@ function feedBackedCliWait(t, s, operationId) {
     process.exitCode = oldExit;
     rmSync(root, { recursive: true, force: true });
     rmSync(`${root}.forge-client`, { recursive: true, force: true });
+    rmSync(`${root}.forge-metrics.jsonl`, { force: true });
   });
   new HostedAgentJournal(root, address, 'owner', 'finish', { laneId: s.feedLane }, operationId);
   observationWaitHooks.subscribe = s.subscribe;
@@ -1191,8 +1193,126 @@ function feedBackedCliWait(t, s, operationId) {
     now += 1000;
     t.mock.timers.tick(1000);
   };
-  return { input, wait, address, expireBudget };
+  return { input, wait, address, expireBudget, root };
 }
+
+test('a foreground land at budget shows the observed check and resumes the original landing', async t => {
+  const s = await fixture(true);
+  const { request, state } = await s.start();
+  const { operationId } = request;
+  const requests = s.f.tables.projectHostedLandingRequests;
+  const [rowId, row] = [...requests.entries()].find(([, row]) => row.submissionId === state.id);
+  requests.delete(rowId);
+  const desired = s.f.tables.projectHostedLandingDesired;
+  desired.set('desired', {
+    projectId: s.f.projectId,
+    actor: 'owner',
+    operationId,
+    submissionId: state.id,
+    composeOperationId: randomUUID(),
+    selectionKey: 'synthetic',
+    request: JSON.stringify(request),
+    wake: null,
+    value: JSON.stringify({ ...state, phase: 'composing', preparing: true }),
+  });
+  const { wait, address, expireBudget, root } = feedBackedCliWait(t, s, operationId);
+  const snapshot = await s.transport.query('projectHostedFinishObserve:page', {
+    operationId,
+    nextVersion: 0,
+  });
+  const stub = '__foregroundLandProgress';
+  let submissions = 0;
+  globalThis[stub] = {
+    HostedAgentTransport: class {
+      constructor() {
+        return { ...s.transport, root };
+      }
+    },
+    hostedAgentCli: async (_root, action) => {
+      assert.equal(action, 'finish');
+      submissions++;
+      return {
+        action,
+        operationId,
+        result: { phase: 'finish', submission: snapshot.submission },
+      };
+    },
+  };
+  t.after(() => delete globalThis[stub]);
+  const imports = {
+    './hosted-agent-transport.js': 'HostedAgentTransport',
+    './hosted-agent-cli.js': 'hostedAgentCli',
+  };
+  const source = readFileSync(new URL('../dist/hosted-land-cli.js', import.meta.url), 'utf8').replace(
+    /from '([^']+)'/g,
+    (match, path) =>
+      imports[path]
+        ? `from 'data:text/javascript,export const ${imports[path]} = globalThis.${stub}.${imports[path]};'`
+        : path.startsWith('.')
+          ? `from '${new URL(`../dist/${path.slice(2)}`, import.meta.url).href}'`
+          : match,
+  );
+  const { hostedLandCli } = await import(
+    `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
+  );
+  const output = [];
+  t.mock.method(process.stderr, 'write', chunk => {
+    output.push(String(chunk));
+    return true;
+  });
+  const pending = hostedLandCli(root, { operationId, message: 'Land' }, address, {
+    detach: false,
+    wait: true,
+    timeoutSeconds: 1,
+  });
+  await turn();
+  await s.deliver();
+  desired.delete('desired');
+  requests.set(rowId, row);
+  await s.update(state.id, 'checking');
+  await s.deliver();
+  await turn();
+  const { submission } = await s.transport.query('projectHostedFinishObserve:page', {
+    operationId,
+    nextVersion: 0,
+  });
+  assert.equal(submission.operationId, operationId);
+  assert.equal(submission.attemptId, state.attemptId);
+  assert.equal(submission.phase, 'checking');
+  const beforeBudget = s.f.metrics.calls;
+  expireBudget();
+  const { result } = await pending;
+  assert.equal(process.exitCode, 3);
+  assert.equal(result.waitStatus, 'timeout');
+  assert.deepEqual(result.landingState, landingStateField(submission));
+  assert.equal(result.pendingProgress.phase, submission.phase);
+  assert.equal(result.pendingProgress.attemptId, submission.attemptId);
+  assert.equal(result.pendingProgress.version, submission.version);
+  assert.equal(result.submission.version, state.version, 'retain the canonical snapshot at its own version');
+  assert.match(output.join(''), /^CHECKING; not landed yet$/m);
+  assert.doesNotMatch(output.join(''), /^QUEUED;/m);
+  assert.match(output.join(''), /IN PROGRESS; wait deadline reached/);
+  assert.equal(s.f.metrics.calls, beforeBudget, 'formatting adds no Convex call');
+  assert.equal(submissions, 1);
+
+  const resumedInput = JSON.parse(result.waitCommand.split(" wait '")[1].slice(0, -1));
+  assert.deepEqual(resumedInput, { operationIds: [operationId], until: 'acceptance' });
+  const resumed = wait({ ...resumedInput, timeoutSeconds: 1 });
+  await turn();
+  const acceptance = { receiptId: randomUUID(), head: 'a'.repeat(64) };
+  await s.update(state.id, 'landed', { acceptance });
+  await s.record(state, 'landing.landed');
+  await s.deliver();
+  const { result: settled } = await resumed;
+  assert.equal(process.exitCode, 0);
+  assert.equal(settled.status, 'terminal');
+  assert.equal(settled.submission.operationId, operationId);
+  assert.equal(settled.submission.attemptId, state.attemptId);
+  assert.deepEqual(settled.submission.acceptance, (await s.f.status(state.id)).request.acceptance);
+  assert.deepEqual(settled.submission.acceptance, acceptance);
+  assert.equal(settled.waitCommand, undefined);
+  assert.equal(s.counts().opens, s.counts().closes);
+});
 
 test('a bounded acceptance wait reports the observed check and resumes the original landing', async t => {
   const s = await fixture(true);

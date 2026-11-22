@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-import { waitEventLine } from './hosted-wait-line.js';
+import { orderWaitOf, waitEventLine } from './hosted-wait-line.js';
 import { ForgeError } from './errors.js';
 import type { Failure } from './system-errors.js';
 import { suppliedLandingMessage } from './landing-message.js';
 import { clientCacheRoot } from './root-paths.js';
 import { isNetworkPending } from './network-continuation.js';
-import { normalizeHostedFinishResult, retryableFinishSource } from './hosted-agent-finish-result.js';
+import {
+  normalizeHostedFinishResult,
+  pendingLandingPresentation,
+  retryableFinishSource,
+} from './hosted-agent-finish-result.js';
+import type { LandingRecord } from './landing-state.js';
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -420,29 +425,51 @@ export async function hostedLandCli(
     | {
         status?: string;
         run?: unknown;
-        submissions?: { submission: unknown; recovery?: unknown; conflict?: unknown }[];
+        submissions?: {
+          submission: LandingRecord & { id: string; operationId: string };
+          recovery?: unknown;
+          conflict?: unknown;
+          orderWait?: unknown;
+        }[];
+        pendingProgress?: LandingRecord;
       }
     | undefined;
+  const selected = observation?.submissions?.[0];
+  const selection = (submitted.result as { replayParameters?: Record<string, unknown> }).replayParameters ?? {
+    ...command,
+    operationId: submitted.operationId,
+  };
+  const laneId = typeof selection.laneId === 'string' ? selection.laneId : undefined;
+  const pending =
+    observation?.status === 'timeout' && selected
+      ? pendingLandingPresentation(
+          { ...selected.submission, orderWait: orderWaitOf(selected.orderWait) },
+          observation.pendingProgress,
+          laneId,
+        )
+      : undefined;
+  const result = normalizeHostedFinishResult(transport.root ?? root, selection, {
+    ...(submitted.result as Record<string, unknown>),
+    ...(observation?.run ? { run: observation.run } : {}),
+    ...selected,
+    ...(pending ? { orderWait: selected?.orderWait } : {}),
+    ...(observation?.status && observation.status !== 'terminal'
+      ? { waitStatus: observation.status, inProgress: true }
+      : {}),
+  });
+  if (pending) {
+    result.pendingProgress = observation?.pendingProgress;
+    result.landingState = pending.landingState;
+    const hold = landingHold(pending.submission, laneId);
+    if (hold) result.hold = hold;
+    else delete result.hold;
+  }
   const final: HostedAgentResponse = {
     ...submitted,
-    result: normalizeHostedFinishResult(
-      transport.root ?? root,
-      (submitted.result as { replayParameters?: Record<string, unknown> }).replayParameters ?? {
-        ...command,
-        operationId: submitted.operationId,
-      },
-      {
-        ...(submitted.result as Record<string, unknown>),
-        ...(observation?.run ? { run: observation.run } : {}),
-        ...(observation?.submissions?.[0] ? observation.submissions[0] : {}),
-        ...(observation?.status && observation.status !== 'terminal'
-          ? { waitStatus: observation.status, inProgress: true }
-          : {}),
-      },
-    ),
+    result,
   };
   if (final.budget && Date.parse(final.budget.resetAt) <= Date.now()) delete final.budget;
-  const lines = landSummary(final);
+  const lines = landSummary(final, pending?.submission);
   for (const line of lines) process.stderr.write(`${line}\n`);
   if (typeof submitted.operationId === 'string')
     recordLaneHold(

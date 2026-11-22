@@ -16,6 +16,7 @@ import { landExitsFailed, landingStallReport, landSummary, selfReviewLine } from
 import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
 import { holdLines, landingHold } from './hosted-landing-hold.js';
 import { landingStateField, type LandingRecord } from './landing-state.js';
+import { pendingLandingPresentation } from './hosted-agent-finish-result.js';
 import { orderWaitOf } from './hosted-wait-line.js';
 import { learnFromLanding } from './preflight-learned.js';
 import { operationLine } from './hosted-land-wait.js';
@@ -341,25 +342,15 @@ async function dispatchHostedAgentCli(
         orderWait: orderWaitOf(selected.orderWait),
         providerDelay: selected.providerDelay,
       };
-      const recordedCode = recorded?.error?.code;
-      const recordedHoldCode =
-        recordedCode === 'MAIN_RED' || recordedCode === 'CI_DOWN' ? recordedCode : undefined;
-      // A metadata-only update can leave a recorded hold or stall in effect.
-      const changed =
-        pendingProgress &&
-        recorded &&
-        (pendingProgress.phase !== recorded.phase ||
-          pendingProgress.observation?.pendingReason !== recorded.observation?.pendingReason ||
-          pendingProgress.error?.code !== recordedHoldCode ||
-          pendingProgress.orderWait?.submissionId !== recorded.orderWait?.submissionId);
-      const presentation = changed
-        ? { id: recorded.id, operationId: recorded.operationId, ...pendingProgress }
-        : recorded;
+      const changed = pendingLandingPresentation(recorded, pendingProgress, laneId);
+      const presentation = changed?.submission ?? recorded;
       const phase = selected ? (presentation?.phase ?? 'unknown') : 'pending';
       // A landing held for a person or a dependency says so on every unfinished return (5c59940b).
       const hold = landingHold(presentation, laneId);
       // The same state word and next step people see (src/landing-state.ts); additive.
-      const landing = presentation ? { landingState: landingStateField(presentation, laneId) } : {};
+      const landing = presentation
+        ? { landingState: changed?.landingState ?? landingStateField(presentation, laneId) }
+        : {};
       // A stalled landing says so, with its source failure and replay, on every unfinished return
       // (friction c7f3afac: a wait stayed silent for 2 h on a failed compose step).
       const waitedOn = selectedWait.operationIds?.length === 1 ? selectedWait.operationIds[0]! : undefined;
