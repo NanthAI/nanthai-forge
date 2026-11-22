@@ -79,13 +79,18 @@ function splitTrailers(message: string) {
   return { prose: text.slice(0, at).replace(/\n+$/, ''), trailers };
 }
 
-/** One landing a mirror commit covers: its own message and declared agent client. */
-export type MirrorMember = { message?: string | undefined; agentClient?: string | undefined };
+/** One landing a mirror commit covers: its own message and declared agent client, and its receipt
+ * when the commit is its own (a batch member; a catch-up lists receipts in its prose instead). */
+export type MirrorMember = {
+  message?: string | undefined;
+  agentClient?: string | undefined;
+  acceptanceId?: string | undefined;
+};
 
 /** Supplied messages stay ordered. Every message's trailers move into one final block, then each
  * covered landing's own co-authors, or a credit for its declared agent when it names none, then
- * Forge's trailers;
- * an exactly repeated trailer appears once. Only Forge creates its identity trailers. */
+ * Forge's trailers, with one `Forge-Acceptance` per member receipt in acceptance order (a single
+ * landing has one); an exactly repeated trailer appears once. Only Forge creates its identity trailers. */
 export function mirrorMessage(input: {
   message?: string | undefined;
   cohortMessages?: string[] | undefined;
@@ -116,12 +121,17 @@ export function mirrorMessage(input: {
   const block = [...parts.flatMap(part => part.trailers), ...credits, ...(input.trailers ?? [])].filter(
     line => !seen.has(line) && !!seen.add(line),
   );
+  // Every batch member's receipt, then this one (its last member), each once.
+  const receipts = new Set([
+    ...(input.members ?? []).flatMap(member => (member.acceptanceId ? [member.acceptanceId] : [])),
+    input.acceptanceId,
+  ]);
   return [
     parts.map(part => part.prose).join('\n\n'),
     '',
     ...block,
     `Forge-State: ${input.state}`,
-    `Forge-Acceptance: ${input.acceptanceId}`,
+    ...[...receipts].map(id => `Forge-Acceptance: ${id}`),
     `Forge-View: ${input.viewId}`,
   ].join('\n');
 }

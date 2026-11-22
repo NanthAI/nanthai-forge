@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedAcceptanceMessage.ts": "83c8a1ce9b82606ae8cb58444648f7934978ced085373e903268f3b1fe757368"
+  },
+  "replay": {
+    "incident": "f233bf1c",
+    "test": "incident f233bf1c: a batch of a normal Lane and a resolution Lane mirrors both messages",
+    "receipt": "774b08f8-6e3e-4ea0-b2d8-ddb7d1e7cbc8"
+  },
+  "authorModel": "claude-opus-5-5",
+  "authorSession": "d9ed914c-3ff5-4781-ad93-292f0305f427",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A8ea77a33-a3d3-4be8-97a8-7e17c880bf14%3Adelegate-task%3Aad1771f2-1ba5-49c3-b6cd-c2d22d069c5d",
+    "receipt": "bfbc850c-267f-48b6-bf41-8fb68472e120"
+  }
+}

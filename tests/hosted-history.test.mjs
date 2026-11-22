@@ -2261,12 +2261,16 @@ test('an unmirrored project serves its landings as Git commits on the imported h
   });
   const batchId = crypto.randomUUID();
   const from = lastState(s, projectId);
-  land(s, projectId, from, batched, 'Batch one', { batchId, agentClient: 'claude-code:claude-opus-5-5' });
-  land(s, projectId, from, batched, 'Batch two', {
-    batchId,
-    agentClient: 'codex:gpt-6.1-sol',
-    cohortMessages: ['Batch one', 'Batch two'],
-  });
+  const batchReceipts = [
+    land(s, projectId, from, batched, 'Batch one', { batchId, agentClient: 'claude-code:claude-opus-5-5' }),
+  ];
+  batchReceipts.push(
+    land(s, projectId, from, batched, 'Batch two', {
+      batchId,
+      agentClient: 'codex:gpt-6.1-sol',
+      cohortMessages: ['Batch one', 'Batch two'],
+    }),
+  );
   await client(['-c', 'transfer.fsckObjects=true', 'fetch', '-q', 'origin'], one);
   assert.equal(git(one, ['rev-parse', 'origin/main~1']).toString().trim(), stepTip, 'one commit per batch');
   assert.equal(
@@ -2278,6 +2282,13 @@ test('an unmirrored project serves its landings as Git commits on the imported h
       .toString()
       .trim(),
     'claude-opus-5-5 (claude-code) <noreply@anthropic.com>\ngpt-6.1-sol (codex) <noreply@openai.com>',
+  );
+  // Shared-State attribution (Item 4e013cdb): every member receipt, in acceptance order.
+  assert.equal(
+    git(one, ['log', '-1', '--format=%(trailers:key=Forge-Acceptance,valueonly)', 'origin/main'])
+      .toString()
+      .trim(),
+    batchReceipts.join('\n'),
   );
   const three = join(work, 'three');
   await client(['-c', 'transfer.fsckObjects=true', 'clone', '-q', url(host, projectId), three]);
@@ -2310,9 +2321,10 @@ for (const referenced of [false, true])
       for (let i = 0; i < mainBatch - 2; i++) land(s, projectId, previous, (previous = fake(i)), `Step ${i}`);
       const batchId = crypto.randomUUID(),
         batched = fake('batch'),
-        clients = ['claude-code:claude-opus-5-5', 'codex:gpt-6.1-sol', 'pi'];
+        clients = ['claude-code:claude-opus-5-5', 'codex:gpt-6.1-sol', 'pi'],
+        memberReceipts = [];
       for (const [i, agentClient] of clients.entries())
-        land(s, projectId, previous, batched, `Member ${i}`, {
+        memberReceipts[i] = land(s, projectId, previous, batched, `Member ${i}`, {
           batchId,
           agentClient,
           ...(i === 2
@@ -2355,6 +2367,11 @@ for (const referenced of [false, true])
         landing.members.map(member => member.agentClient),
         clients,
         'every member is credited, read past the page start',
+      );
+      assert.deepEqual(
+        landing.members.map(member => member.acceptanceId),
+        memberReceipts,
+        'every member receipt, in acceptance order, read past the page start',
       );
     },
   );

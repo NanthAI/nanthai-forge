@@ -42,8 +42,14 @@ test.after(() => {
 });
 const supplied = i =>
   `Supplied subject ${i}\n\nBody ${i}.\n\nReviewed-by: Reviewer ${i} <review@example.invalid>\nCo-Authored-By: Synthetic Sol ${i} <noreply@openai.com>`;
-const trailers = r =>
-  `Forge-State: ${r.candidate.head}\nForge-Acceptance: ${r.id}\nForge-View: ${r.candidate.id}`;
+/** Forge's trailers for receipt r's commit; a cohort's commit lists every member receipt (4e013cdb). */
+const trailers = (r, cohort = [r]) =>
+  `Forge-State: ${r.candidate.head}\n${cohort.map(m => `Forge-Acceptance: ${m.id}`).join('\n')}\nForge-View: ${r.candidate.id}`;
+/** Accepted receipts in acceptance (sequence) order. */
+const accepted = f =>
+  [...f.tables.projectHostedAcceptances.values()]
+    .sort((a, b) => a.sequence - b.sequence)
+    .map(row => JSON.parse(row.value));
 /** The mirror shape for supplied(i) members: prose in order, then one trailer block. */
 const singleBlock = (members, forgeTrailers) =>
   members.map(i => `Supplied subject ${i}\n\nBody ${i}.`).join('\n\n') +
@@ -385,7 +391,7 @@ for (const [batching, legacy] of [
     // Each supplied message already names its co-author, so the receipt's client adds no credit;
     // every member's trailers join Forge's in one final block.
     const members = batching ? [0, 1, 2] : [messages.indexOf(first.message)];
-    const expected = singleBlock(members, trailers(first));
+    const expected = singleBlock(members, batching ? trailers(first, accepted(f)) : trailers(first));
     assert.equal(seed.message, expected);
     const io = {
       ...github.io,
@@ -403,6 +409,21 @@ for (const [batching, legacy] of [
     while (plan.phase !== 'done') plan = await stepMirror(plan, io);
     const published = github.commits.get(github.remote()).message;
     assert.equal(published, expected);
+    if (batching) {
+      // Shared-State attribution (e1311ddb): every member's receipt once, in acceptance order, and
+      // every member's title, in the same order.
+      const order = accepted(f);
+      assert.equal(new Set(order.map(r => r.batchId)).size, 1, 'one cohort, one accepted State');
+      assert.deepEqual(
+        [...published.matchAll(/^Forge-Acceptance: (\S+)$/gm)].map(m => m[1]),
+        order.map(r => r.id),
+      );
+      const titles = order.map(r => published.indexOf(`${r.message.split('\n')[0]}\n`));
+      assert(
+        titles.every((at, i) => at >= 0 && (i === 0 || at > titles[i - 1])),
+        'titles in order',
+      );
+    }
     // The guard: no finish message this commit lands loses a trailer.
     for (const message of batching ? messages : [first.message])
       assert.deepEqual(lostTrailers(message, published), [], 'mirror commit keeps every finish trailer');
@@ -669,7 +690,7 @@ async function batchConflictMessages(t, recomposed, choice) {
     ),
   );
   // The footer ends `conflicted`, so it opens the one final trailer block (Item 3968a655).
-  assert.equal(seed.message, `${normal}\n\n${conflicted}\n${trailers(mirrored)}`);
+  assert.equal(seed.message, `${normal}\n\n${conflicted}\n${trailers(mirrored, accepted(f))}`);
   for (const message of [normal, conflicted])
     assert.deepEqual(lostTrailers(message, seed.message), [], 'mirror commit keeps every finish trailer');
   // The f233bf1c commit shape itself fails the check.
@@ -877,6 +898,26 @@ test('batch with two agents: each member credits its own agent unless its own me
   );
 });
 
+test('batch receipts: one Forge-Acceptance per member in acceptance order, each once, final last', () => {
+  const members = [
+    { message: 'First', acceptanceId: 'r1' },
+    { message: 'Second', acceptanceId: 'r2' },
+    { message: 'Repeat', acceptanceId: 'r1' },
+    { message: 'Unnamed' },
+    { message: 'Last', acceptanceId: 'a' },
+  ];
+  const message = mirrorMessage({ ...base, cohortMessages: members.map(m => m.message), members });
+  assert.equal(
+    message,
+    'First\n\nSecond\n\nRepeat\n\nUnnamed\n\nLast\n\nForge-State: s\nForge-Acceptance: r1\nForge-Acceptance: r2\nForge-Acceptance: a\nForge-View: v',
+  );
+  // A catch-up's covered landings carry no receipt here; it keeps its own single trailer.
+  assert.equal(
+    mirrorMessage({ ...base, members: [{ message: 'Covered' }] }),
+    `A recorded landing\n\n${forgeBlock}`,
+  );
+});
+
 test('catch-up commit: a covered landing whose prose is summarised keeps its own co-author', () => {
   const members = [
     {
@@ -962,7 +1003,7 @@ test('batch with two agents end to end: the mirror seed credits each member from
       '',
       'Co-Authored-By: claude-opus-5-5 (claude-code) <noreply@anthropic.com>',
       'Co-Authored-By: gpt-6.1-sol (codex) <noreply@openai.com>',
-      trailers(main),
+      trailers(main, accepted(f)),
     ].join('\n'),
   );
   assert.equal(JSON.parse(await begin()).seed.message, seed.message, 'a replayed begin pins the same bytes');

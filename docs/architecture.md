@@ -2705,7 +2705,9 @@ limited to 1 KiB UTF-8; controls are stripped, CRLF normalized, and reserved
 Forge-State/Acceptance/View lines escaped with `> `. Other trailers retain their
 order; authoritative Forge trailers follow. A cohort's final receipt carries
 all supplied messages in member order for its shared commit. Native batches do
-the same. Raw State exports keep State messages; published history is unchanged.
+the same. On hosted projects that commit (mirror or Forge-built main) also names
+every member receipt in its own `Forge-Acceptance:` trailer, in acceptance order;
+a single landing, a catch-up and native sync have one. Raw State exports keep State messages; published history is unchanged.
 Legacy CLI `Agent change` defaults mean omission; negotiated requests distinguish
 an explicit identical subject. Pre-upgrade pending finishes recover their saved
 message at acceptance. Released status/wait projections omit this internal

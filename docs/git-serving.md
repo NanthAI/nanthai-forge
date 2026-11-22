@@ -100,8 +100,8 @@ tree is the landing's State published as the mirror would; its parent is the pre
 landing's commit (the import commit for the first); its author is the lander's public Forge
 handle (`handle/agent-run` for an agent) at `<handle>@users.noreply.forge`, at the landing
 time; its message is the landing message with its trailers, a `Co-Authored-By:` credit for each
-landing's declared agent client, and `Forge-State:`, `Forge-Acceptance:` and `Forge-View:` in one
-final trailer block, as on the mirror ([agent clients](agents/workflow.d/sections/0500-agent-board-hosted.md)). A built commit is stored and never rebuilt, so its id is stable.
+landing's declared agent client, and `Forge-State:`, `Forge-Acceptance:` (one per batch member's receipt, in
+acceptance order) and `Forge-View:` in one final trailer block, as on the mirror ([agent clients](agents/workflow.d/sections/0500-agent-board-hosted.md)). A built commit is stored and never rebuilt, so its id is stable.
 
 A build reads only the files the landings changed: the first lists the import commit's tree
 from the stored pack, later ones the previous build's tree listing. Its pack holds the new

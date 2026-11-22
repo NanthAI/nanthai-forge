@@ -77,6 +77,7 @@ export async function cohortMessageFields(
     cohort.map(async member => ({
       message: await landingMessageText(ctx, projectId, member),
       agentClient: member.agentClient,
+      acceptanceId: member.id,
     })),
   );
   return {
