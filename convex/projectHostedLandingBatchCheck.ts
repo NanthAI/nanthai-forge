@@ -20,7 +20,8 @@ import { readHostedRecord } from './projectHostedRecords';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { semanticVerdict } from '../src/intent-semantic-conflict';
 import type { MutationCtx } from './_generated/server';
-import type { LandingClaim, requireLandingLease } from './projectHostedLandingControl';
+import { reviewCheckAhead, type LandingClaim, type requireLandingLease } from './projectHostedLandingControl';
+import { cancelPendingTask } from './schedulerCancel';
 import {
   formLandingBatch,
   installBatchAttempt,
@@ -291,25 +292,44 @@ async function prepareLandingCheckOnce(
     return true;
   }
   if (!attempt.deferredCheck) return false;
-  if (!state.batchSolo && (await admittedReuseFirst(ctx, selected))) {
+  const protectedReview = selected.row.earlyReview === true;
+  if (protectedReview) {
+    const ahead = await reviewCheckAhead(ctx, queue, selected.row);
+    if (ahead) {
+      await cancelPendingTask(ctx, selected.row.alarm?.taskId);
+      await ctx.db.patch(selected.row._id, {
+        runnable: false,
+        orderWait: ahead.row.submissionId,
+        alarm: null,
+      });
+      if (!ahead.row.orderWaited) await ctx.db.patch(ahead.row._id, { orderWaited: true });
+      await releaseLandingQueue(ctx, queue, now);
+      return true;
+    }
+  }
+  if (!protectedReview && !state.batchSolo && (await admittedReuseFirst(ctx, selected))) {
     await releaseLandingQueue(ctx, queue, now);
     return true;
   }
   // A refused admitted member waits for peers still deciding their own Lane proof,
   // so they form one cohort (10b0a94b). Bounded, holds no order, armed wake.
-  if (await holdForPeers(ctx, selected)) {
+  if (!protectedReview && (await holdForPeers(ctx, selected))) {
     await releaseLandingQueue(ctx, queue, now);
     return true;
   }
-  if (!state.batchSolo && (await formLandingBatch(ctx, claim, { row: selected.row, state }))) {
+  if (
+    !protectedReview &&
+    !state.batchSolo &&
+    (await formLandingBatch(ctx, claim, { row: selected.row, state }))
+  ) {
     await releaseLandingQueue(ctx, queue, now);
     return true;
   }
-  if (!state.batchSolo && (await loneAdmission(ctx, claim, selected))) {
+  if (!protectedReview && !state.batchSolo && (await loneAdmission(ctx, claim, selected))) {
     await releaseLandingQueue(ctx, queue, now);
     return true;
   }
-  await retainLandingTrain(ctx, claim, [state.id]);
+  if (!protectedReview) await retainLandingTrain(ctx, claim, [state.id]);
   const main = await hostedStartMain(ctx, claim.projectId);
   if (main.head !== attempt.main.head || main.receipt.id !== attempt.main.receiptId) {
     const finish = await loadFinish(ctx, claim);
@@ -317,7 +337,10 @@ async function prepareLandingCheckOnce(
     await releaseLandingQueue(ctx, queue, now);
     return true;
   }
-  const selection = state.request.check;
+  const selection =
+    protectedReview && state.request.check?.kind === 'run'
+      ? (await loadFinish(ctx, claim)).value.check
+      : state.request.check;
   if (selection?.kind !== 'request' || !attempt.candidate.head) return false;
   const { kind: _kind, ...settings } = selection;
   void _kind;
@@ -334,6 +357,7 @@ async function prepareLandingCheckOnce(
   const run = await enqueueHostedCheck(ctx, {
     cause,
     ...(auditDonor?.attemptId === attempt.id ? { auditDonor: auditDonor.usable } : {}),
+    ...(protectedReview ? { protectedReview: true } : {}),
     usageSubmissions: [state.id],
     projectId: claim.projectId,
     actor: attempt.actor.id,
@@ -346,6 +370,10 @@ async function prepareLandingCheckOnce(
       expectedHead: attempt.candidate.head,
     },
   });
+  if (protectedReview) {
+    await ctx.db.patch(queue._id, { exactReview: state.id });
+    await ctx.db.patch(selected.row._id, { exactReview: true });
+  }
   await installBatchAttempt(ctx, {
     projectId: claim.projectId,
     original: attempt,

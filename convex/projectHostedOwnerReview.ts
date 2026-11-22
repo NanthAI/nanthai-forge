@@ -28,6 +28,20 @@ export const REVIEW_HELD = 'waiting-for-review';
 export const held = (state: HostedLandingState) =>
   state.observation.state === 'pending' && state.observation.pendingReason === REVIEW_HELD;
 
+/** Compact read projection. Grant source, identity and policy pins stay server-only. */
+export function reviewState(
+  row: Pick<Doc<'projectHostedLandingRequests'>, 'ownerGrant'>,
+  state: HostedLandingState,
+) {
+  const grant = row.ownerGrant;
+  if (held(state)) return grant ? ('needs-reapproval' as const) : ('held' as const);
+  if (state.phase === 'landed' && state.acceptance?.acceptedBy?.kind !== 'person') return;
+  if (grant)
+    return grant.verifiedDigest || state.acceptance?.acceptedBy?.carried
+      ? ('approved-carried' as const)
+      : ('approved' as const);
+}
+
 /** After an approval that could not publish at once (queue busy or main moved), the held entry
  * returns to the finish driver: this write wakes it once; it takes its turn and lands with the grant,
  * or recomposes on current main first. No timer of its own, no poll. */
@@ -40,8 +54,13 @@ export async function releaseApprovedReview(
   await writeLanding(
     ctx,
     row,
-    { ...state, version: state.version + 1, observation: landingObservation('queued'), error: null },
-    false,
+    {
+      ...state,
+      version: state.version + 1,
+      observation: landingObservation(state.phase === 'checking' ? 'checking' : 'queued'),
+      error: null,
+    },
+    state.phase === 'checking' && row.runnable,
   );
   return true;
 }

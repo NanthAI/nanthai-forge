@@ -14,6 +14,7 @@ const checkWorker = await import(moduleUrl('../convex/projectHostedCheckWorker.t
 const mainAudit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
 const ownerGrant = await import(moduleUrl('../convex/projectHostedOwnerGrant.ts'));
 const acceptanceStore = await import(moduleUrl('../convex/projectHostedAcceptanceStore.ts'));
+const ownerReview = await import(moduleUrl('../convex/projectHostedOwnerReview.ts'));
 export const states = f => [...f.tables.projectHostedLandingRequests.values()].map(r => ticketState(f, r));
 export async function batchesFixture(
   t,
@@ -250,7 +251,10 @@ export async function batchesFixture(
         {
           runAction: f.runReuseAction,
           // Item 9a04d916: a settled solo plan re-reads its bytes in the action.
-          runQuery: (ref, args) => f.transaction('batch-planValue', driver.planValue, args),
+          runQuery: (ref, args) =>
+            getFunctionName(ref).endsWith(':reviewFiles')
+              ? f.transaction('batch-reviewFiles', driver.reviewFiles, args)
+              : f.transaction('batch-planValue', driver.planValue, args),
           runMutation: (ref, args) => {
             const name = getFunctionName(ref).split(':')[1];
             if (name === 'resume' && stop === 'before-resume')
@@ -315,6 +319,7 @@ export async function batchesFixture(
       async (ctx, input) => {
         const { row, attempt } = await acceptanceStore.acceptanceSelection(ctx, input);
         await ownerGrant.grantOwnerApproval(ctx, row, { kind: 'person', id: 'owner' }, attempt);
+        if (row.earlyReview) await ownerReview.releaseApprovedReview(ctx, input);
       },
       f.select(state),
     );

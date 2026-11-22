@@ -125,6 +125,7 @@ export type OrderHeld =
   | 'unsealed'
   | 'no-proof'
   | 'combined'
+  | 'approved-check'
   | 'composing'
   // A later landing of reserved files waits for the holder (Issue 10d253c6).
   | 'reserved';
@@ -565,6 +566,12 @@ export function landingOrderWaitForReader(
       reason: 'reservation' as const,
       ...why,
       message: `Check passed; submission ${row.orderWait} holds a landing reservation on files this change touches (it was superseded after a passed check, Issue 10d253c6). This landing continues when that one lands or fails, or when its reservation ends (at most ${HOSTED_RESERVATION_MS / 60_000} minutes). observe {"submissionId":"${row.orderWait}"} follows it.`,
+    };
+  if (last?.submissionId === row.orderWait && last.held === 'approved-check')
+    return {
+      submissionId: row.orderWait,
+      ...why,
+      message: `Check passed. Submission ${row.orderWait} has the publication turn while its approved exact check runs.`,
     };
   return {
     submissionId: row.orderWait,

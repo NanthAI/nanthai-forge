@@ -162,6 +162,8 @@ export const hostedLandingTables = {
     sequence: v.number(),
     /** Written with the Channel publication and the existing queue release. */
     mainReceiptId: v.optional(v.string()),
+    /** Publication order for an approved exact replacement check, independent of the queue lease. */
+    exactReview: v.optional(v.string()),
     train: v.optional(v.array(v.string())),
     status: v.optional(
       v.object({
@@ -388,6 +390,17 @@ export const hostedLandingTables = {
     attemptId: v.string(),
     /** This exact solo generation is recomposing and cannot back a successor. */
     pipelineRetiredAttemptId: v.optional(v.string()),
+    /** A protected-path review known from trusted composition, independent of check state. */
+    earlyReview: v.optional(v.literal(true)),
+    reviewState: v.optional(
+      v.union(
+        v.literal('held'),
+        v.literal('approved'),
+        v.literal('approved-carried'),
+        v.literal('needs-reapproval'),
+      ),
+    ),
+    exactReview: v.optional(v.literal(true)),
     /** The owner's explicit approval of one exact held attempt (fe5bea80); server-only. */
     ownerGrant: v.optional(
       v.object({
@@ -397,6 +410,9 @@ export const hostedLandingTables = {
         dependencies: v.string(),
         policyDigest: v.string(),
         paths: v.union(v.array(v.string()), v.null()),
+        candidateDigest: v.optional(v.string()),
+        held: v.optional(v.literal(true)),
+        verifiedDigest: v.optional(v.string()),
         at: v.number(),
         /** The Candidate head the owner accepted (shown as acceptedBy.head once it lands). */
         head: v.optional(v.string()),

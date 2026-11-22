@@ -36,6 +36,7 @@ export const finishReadFields = {
     'priority',
     'priorityReason',
     'priorityVersion',
+    'reviewState',
     'wouldConflict',
     'runId',
     // A passed entry parked behind an older submission: the observe page names it (19328518).

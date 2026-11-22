@@ -48,9 +48,10 @@ import { failureDetail, recordFailure } from './projectFailureLog';
 import { bindRunnerAccounting, bindSupersededCheck } from './projectHostedLandingRunnerCosts';
 import { invariant } from '../src/errors';
 import { settleEndedBatch } from './projectHostedLandingBatchSettle';
+import { reviewState } from './projectHostedOwnerReview';
 export type { LandingChannel } from './projectHostedLandingEvents';
 export { landingQueue, ensureLandingQueue, recordLandingObservation } from './projectHostedLandingEvents';
-import { recordLandingObservation } from './projectHostedLandingEvents';
+import { landingQueue, recordLandingObservation } from './projectHostedLandingEvents';
 import { metricAliasRows, withMetricAliases } from './projectMetricAliasWriter';
 import { metricAttemptSource } from './projectMetricSourceRow';
 export type LandingIdentity = {
@@ -300,6 +301,13 @@ export async function writeLanding(
         : undefined,
       entersReview,
     );
+  const releasesExactReview =
+    row.exactReview &&
+    (ended || entersReview || parked || state.timing?.composeStartedAt !== previous.timing?.composeStartedAt);
+  if (releasesExactReview) {
+    const queue = await landingQueue(ctx, row);
+    if (queue?.exactReview === state.id) await ctx.db.patch(queue._id, { exactReview: undefined });
+  }
   const changedAttempt = previous.attemptId !== state.attemptId;
   if (changedAttempt) {
     const replacementCause =
@@ -420,7 +428,9 @@ export async function writeLanding(
     (speculative && !retireAdvice)
       ? row.orderWait
       : undefined;
+  const ownerDecision = reviewState(row, state);
   await ctx.db.patch(row._id, {
+    ...(ownerDecision !== row.reviewState ? { reviewState: ownerDecision } : {}),
     ...(alarm && alarm.id === row._id ? { alarm: alarm.alarm } : {}),
     ...(unsealed ? { unsealed } : {}),
     ...(passedAt !== row.passedAt ? { passedAt } : {}),
@@ -442,25 +452,28 @@ export async function writeLanding(
     admitting: admitting ? true : undefined,
     deciding,
     batchSelection:
-      !state.batchSolo && (attempt.deferredCheck || row.batchSelection)
+      !row.earlyReview && !state.batchSolo && (attempt.deferredCheck || row.batchSelection)
         ? canonicalPayload(attempt)
         : undefined,
-    batchable: Boolean(
-      !parked &&
-      !state.batchId &&
-      !state.batchSolo &&
-      !admissionRun &&
-      row.admission?.status !== 'failed' &&
-      // Pre-queue: an admitted change tries its own Lane run once before any cohort.
-      !(row.admission?.full && row.admission.status === 'passed' && !row.admission.reuse) &&
-      (attempt.deferredCheck || row.batchSelection) &&
-      (state.phase === 'queued' || state.phase === 'checking'),
-    ),
+    batchable: row.earlyReview
+      ? undefined
+      : Boolean(
+          !parked &&
+          !state.batchId &&
+          !state.batchSolo &&
+          !admissionRun &&
+          row.admission?.status !== 'failed' &&
+          // Pre-queue: an admitted change tries its own Lane run once before any cohort.
+          !(row.admission?.full && row.admission.status === 'passed' && !row.admission.reuse) &&
+          (attempt.deferredCheck || row.batchSelection) &&
+          (state.phase === 'queued' || state.phase === 'checking'),
+        ),
     phase: state.phase as LandingRow['phase'],
     runnable,
     ...(parked ? { hold } : ended && row.hold ? { hold: undefined } : {}),
     wouldConflict,
     orderLive: orderLive ? true : undefined,
+    ...(releasesExactReview ? { exactReview: undefined } : {}),
     reservedUntil: reserving ? row.reservedUntil : undefined,
     orderWait,
     // A handoff mark lasts only while the entry is a Ready waiter (43b51a5e case 2).
@@ -478,16 +491,20 @@ export async function writeLanding(
   });
   if (row.admitting && !admitting) await releaseAdmissionWaiters(ctx, row.projectId);
   if (row.deciding !== undefined && deciding === undefined) await releaseCohortHolds(ctx, row.projectId);
-  if (row.orderWaited && ((!orderLive && !reserving && !admissionHolds) || retiresSolo))
+  if (
+    row.orderWaited &&
+    (releasesExactReview || (!orderLive && !reserving && !admissionHolds) || retiresSolo)
+  )
     await wakeLandingOrderWaiters(
       ctx,
       row,
-      orderLive,
+      orderLive && !releasesExactReview,
       false,
       state.phase === 'landed',
       options?.publishedMainReceiptId ?? state.acceptance?.receiptId,
     );
-  if (bindsNewRun(row, previous, state, runId, orderLive)) await wakeNewRunFollower(ctx, row);
+  if (!row.exactReview && bindsNewRun(row, previous, state, runId, orderLive))
+    await wakeNewRunFollower(ctx, row);
   const releasedRun =
     releaseRun &&
     row.runId &&

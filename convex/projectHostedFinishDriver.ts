@@ -14,8 +14,57 @@ import { r2Config, r2Key, presignPut } from './r2';
 import { verifyArchiveUpload } from './archiveUpload';
 import { exchangeFetch } from '../src/exchange-request';
 import { invariant } from '../src/errors';
-import { readExactObject } from './projectR2ExactRead';
+import { readExactObject, type ExactGrant } from './projectR2ExactRead';
+import { candidateFileListSchema } from '../src/hosted-compose';
+import { hostedWriteProject } from './projectHostedRecords';
+import { findObject } from './projectObjectFind';
+import { isStored } from './projectObjectFields';
+import { packHeaders, packRange } from '../src/object-pack-range';
+import { presignGet } from './r2';
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() };
+const filePin = v.object({ sha256: v.string(), size: v.number() });
+
+/** Resolve only the current finish action's two exact Candidate listings. */
+export const reviewFiles = internalQuery({
+  args: { ...identity, wakeId: v.string(), files: v.array(filePin) },
+  returns: v.any(),
+  handler: async (ctx, { files, ...input }) => {
+    const finish = await finishRow(ctx, input);
+    if (finish?.wake?.id !== input.wakeId) return null;
+    const { state } = await loadLanding(ctx, input);
+    await hostedWriteProject(ctx, input.projectId, state.actor, state.request.authorityEpoch);
+    return Promise.all(
+      files.map(async pin => {
+        const object = await findObject(ctx, input.projectId, pin.sha256);
+        invariant(
+          object && !object.removed && object.size === pin.size && isStored(object) && object.r2Key,
+          'SOURCE_UNAVAILABLE',
+          'Exact reviewed Candidate files are unavailable.',
+        );
+        const range = packRange(object);
+        return {
+          url: await presignGet(r2Config(), object.r2Key, packHeaders(range, pin.size)),
+          size: pin.size,
+          ...(range ? { range } : {}),
+        };
+      }),
+    );
+  },
+});
+
+async function reviewedFiles(grant: ExactGrant, sha256: string) {
+  const bytes = await readExactObject(grant, {
+    failed: 'Exact reviewed Candidate files could not be read.',
+    exceeds: 'Reviewed Candidate files exceed their exact size.',
+  });
+  invariant(
+    bytes.length === grant.size && digest(bytes) === sha256,
+    'SOURCE_HASH_MISMATCH',
+    'Reviewed Candidate files differ from their exact bytes.',
+  );
+  const { files } = candidateFileListSchema.parse(JSON.parse(new TextDecoder().decode(bytes)));
+  return digest(canonicalPayload(files, true));
+}
 // `attempt`: mutation retries in a row since the last drive step (L2 budget, retryFinish);
 // absent on a first retry.
 const stepIdentity = { ...identity, wakeId: v.string(), attempt: v.optional(v.number()) };
@@ -164,6 +213,27 @@ export const drive = internalAction({
         projectId: input.projectId,
         submissionId: input.submissionId,
         pendingId: command.pendingId,
+      });
+      return null;
+    }
+    if (command.kind === 'review') {
+      const { before, after } = command;
+      const grants: [ExactGrant, ExactGrant] | null = await ctx.runQuery(
+        makeFunctionReference<'query'>('projectHostedFinishDriver:reviewFiles'),
+        {
+          projectId: input.projectId,
+          submissionId: input.submissionId,
+          wakeId: input.wakeId,
+          files: [before, after],
+        },
+      );
+      if (!grants) return null;
+      const same =
+        (await reviewedFiles(grants[0], before.sha256)) === (await reviewedFiles(grants[1], after.sha256));
+      await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedFinishDriver:resume'), {
+        ...input,
+        command: raw,
+        page: canonicalPayload(same),
       });
       return null;
     }

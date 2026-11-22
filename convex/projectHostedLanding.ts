@@ -447,6 +447,7 @@ export async function enqueueHostedLanding(
   let prior: Awaited<ReturnType<typeof priorLandingForReservation>> = null;
   let paths: string[] | null = null;
   let mainMoved = false;
+  let earlyReview: string | null = null;
   const attempt = await pinLandingAttempt(ctx, {
     projectId: input.projectId,
     actor,
@@ -469,6 +470,7 @@ export async function enqueueHostedLanding(
       return submittedCheckCause(reason);
     },
     paths: value => (paths = value),
+    review: reason => (earlyReview = reason),
     mainMoved: value => (mainMoved = value),
   });
   const queue = await ensureLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
@@ -505,7 +507,7 @@ export async function enqueueHostedLanding(
     version: reserved ? 1 : 0,
     firstAttemptId: attempt.id,
     attemptId: attempt.id,
-    phase: admission ? 'checking' : 'queued',
+    phase: earlyReview || admission ? 'checking' : 'queued',
     ...(carried.counts ? { counts: carried.counts } : {}),
     ...((reserved?.supersedes ?? reused.supersedes)
       ? {
@@ -520,8 +522,8 @@ export async function enqueueHostedLanding(
       ...landGateTiming(input.gates?.value),
       composedAt: new Date().toISOString(),
     },
-    observation: landingObservation(admission ? 'checking' : 'queued'),
-    error: null,
+    observation: landingObservation(earlyReview ? 'waiting-for-review' : admission ? 'checking' : 'queued'),
+    error: earlyReview ? { code: 'REVIEW_REQUIRED', message: earlyReview } : null,
   });
   await insertLandingAttempt(ctx, attempt);
   // Freeze the message before serializing the existing request row, while
@@ -567,15 +569,15 @@ export async function enqueueHostedLanding(
         }
       : {}),
     ...(request.revertOf ? { revertOf: request.revertOf } : {}),
-    ...reservation,
+    ...(earlyReview ? { earlyReview: true as const, reviewState: 'held' as const } : reservation),
     actor: actor.id,
     ...landingPriority(project, actor, request.priority),
     priorityVersion: 0,
     sequence,
     ...(reused.selectionKey ? { selectionKey: reused.selectionKey } : {}),
     runnable: !admission,
-    // An admission run is pre-queue: no queue order until it settles.
-    ...(admission ? {} : { orderLive: true as const }),
+    // Admission and early review run the check without holding queue order.
+    ...(admission || earlyReview ? {} : { orderLive: true as const }),
     phase: state.phase as import('./projectHostedLandingStore').LandingRow['phase'],
     runId: attempt.check?.runId ?? admission,
     // The check's kind, stamped with its start as writeLanding does for later checks (ecd6e610,

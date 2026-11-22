@@ -19,6 +19,7 @@ export type LandingHold = {
 type HoldInput = LandingReview & {
   id?: string;
   operationId?: string;
+  phase?: string | null;
   observation?: { state?: string; pendingReason?: string | null } | null;
   error?: { code?: string; message?: string } | null;
 };
@@ -60,7 +61,7 @@ export function landingHold(state: HoldInput | null | undefined, laneId?: string
         : null,
       next: review?.url
         ? `Hand the approval link to the owner and keep waiting for their decision. To withdraw: nforge agent ROOT land --withdraw '${lane}'.`
-        : `Check passed; held until the project owner approves ${state?.id ? `submission ${state.id}` : 'it'} as a person (agents cannot approve; it does not time out). Hand the owner the link from nforge agent ROOT approve-link '{"operationId":"${state?.operationId ?? 'ORIGINAL_UUID'}"}' and keep waiting: this wait returns on their decision. To drop it instead: nforge agent ROOT land --withdraw '${lane}'.`,
+        : `${state?.phase === 'checking' ? 'Check in progress' : 'Check passed'}; held until the project owner approves ${state?.id ? `submission ${state.id}` : 'it'} as a person (agents cannot approve; it does not time out). Hand the owner the link from nforge agent ROOT approve-link '{"operationId":"${state?.operationId ?? 'ORIGINAL_UUID'}"}' and keep waiting: this wait returns on their decision. To drop it instead: nforge agent ROOT land --withdraw '${lane}'.`,
     };
   }
   if (reason === 'waiting-for-dependency')

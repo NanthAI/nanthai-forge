@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingFields.ts": "03b42cdef1000f46149ad1d021116c34946ddbfb10e3e6027163d3ff97e6cd55"
+  },
+  "replay": {
+    "incident": "70477a56",
+    "test": "GitHub inbound: main moved after proof keeps a full check",
+    "receipt": "7244078b-429a-4ed6-b7e3-ee70116a7545"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Aa2d534e3-2233-4ee5-b0d2-5021f5081a41",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:subagent:0f04b3604f0cc6a4",
+    "receipt": "00b41e30-91ed-4981-8668-f1bffcfc5195"
+  }
+}

@@ -35,6 +35,7 @@ import { ForgeError, invariant } from '../src/errors';
 import { reuseDecision } from './projectHostedReuseStore';
 import { findObject, objectRow } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
+import { ownerReviewFiles } from './projectHostedOwnerGrant';
 export type FinishIdentity = LandingIdentity & { wakeId: string; attempt?: number };
 export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promise<FinishCommand | null> {
   const { row, value } = await loadFinish(ctx, input);
@@ -48,6 +49,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
       if (batchStep.handled) return batchStep.command;
     }
     if (state.phase === 'landed' || state.phase === 'terminal-failed') return null;
+    const reviewHeld = landing.earlyReview && state.observation.pendingReason === 'waiting-for-review';
     await hostedWriteProject(ctx, input.projectId, state.actor, state.request.authorityEpoch);
     if (value.recoveryRunId) {
       const audit = await ctx.db
@@ -79,7 +81,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
       if (parent.phase !== 'landed') {
         if (parent.phase === 'terminal-failed')
           await failFinish(ctx, input, 'DEPENDENCY_NOT_LANDED', 'The pinned parent submission did not land.');
-        else if (state.observation.pendingReason !== 'waiting-for-dependency')
+        else if (!reviewHeld && state.observation.pendingReason !== 'waiting-for-dependency')
           await writeLanding(
             ctx,
             landing,
@@ -105,6 +107,29 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
             // simultaneous analysis. Late callbacks are fenced by pending ID.
             await installFinishCompose(ctx, row, value, undefined, source, 'analysis-expired');
           }
+          return null;
+        }
+        if (
+          !value.pending.precompose &&
+          landing.ownerGrant &&
+          (landing.earlyReview || landing.ownerGrant.held || landing.ownerGrant.candidateDigest === undefined)
+        ) {
+          const files =
+            source.operation.terminal.outcome.status === 'completed'
+              ? await ownerReviewFiles(ctx, landing, source.state.candidateId)
+              : null;
+          if (files) {
+            await retryFinish(ctx, row, input);
+            return {
+              kind: 'review',
+              pendingId: value.pending.id,
+              approvedAttemptId: landing.ownerGrant.attemptId,
+              candidateDigest: files.digest,
+              before: files.before,
+              after: files.after,
+            };
+          }
+          await installFinishCompose(ctx, row, value, undefined, source);
           return null;
         }
         const decision = value.pending.precompose ? null : await reuseDecision(ctx, input);
@@ -184,7 +209,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
         },
       };
     }
-    if (state.phase !== 'ready') return null; // H13's run/queue events resume it
+    if (state.phase !== 'ready' && !reviewHeld) return null; // H13's run/queue events resume it
     if (
       state.batchNeedsSoloCompose &&
       !state.batchOriginId &&
@@ -224,6 +249,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
         },
       };
     }
+    if (reviewHeld) return null;
     const claim = await claimReadyLanding(
       ctx,
       { ...selection, channel: 'main', owner: plan.receiptId },
@@ -257,6 +283,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
       if (
         error instanceof ForgeError &&
         (['CHANNEL_CHANGED', 'CHECK_EVIDENCE_REFRESH'].includes(error.code) ||
+          (landing.earlyReview && landing.ownerGrant && error.code === 'POLICY_CHANGED') ||
           (landing.githubInboundProof &&
             state.attemptId === state.firstAttemptId &&
             ['EVIDENCE_CHANGED', 'NOT_FOUND', 'POLICY_CHANGED'].includes(error.code)))
@@ -306,13 +333,35 @@ async function resumeFinishIOOnce(
     'Proof completion uses its internal source verifier.',
   );
   if (row.wake?.id !== input.wakeId) return;
-  const { state } = await loadLanding(ctx, input);
+  const { row: landing, state } = await loadLanding(ctx, input);
   if (input.command.kind === 'plan' && input.command.batchId) {
     await resumeBatchIO(ctx, { ...input, command: input.command });
     return;
   }
   if (state.phase === 'landed' || state.phase === 'terminal-failed') return;
   await hostedWriteProject(ctx, input.projectId, state.actor, state.request.authorityEpoch);
+  if (input.command.kind === 'review') {
+    const command = input.command;
+    if (
+      value.pending?.id !== command.pendingId ||
+      landing.ownerGrant?.attemptId !== command.approvedAttemptId
+    )
+      return;
+    await cancelPendingTask(ctx, row.wake.taskId);
+    await ctx.db.patch(row._id, { wake: null });
+    await installFinishCompose(
+      ctx,
+      row,
+      value,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined, // auditDonor
+      input.page === true ? command.candidateDigest : undefined,
+    );
+    return;
+  }
   if (input.command.kind === 'page') {
     invariant(
       !value.pending && input.command.selection.attemptId === state.attemptId,

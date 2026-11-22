@@ -121,6 +121,7 @@ export async function enqueueHostedCheck(
     auditDonor?: boolean;
     /** Explicit proof-page action: execute the full configured command on these pins, without borrowing an old pass. */
     fullCheck?: { afterRunId: string };
+    protectedReview?: true;
     /** Main-race retry: a full gate may become the scoped recheck selection. */
     recheck?: ScopedRecheckBasis;
     /** A cohort's main-race retry (Issue 28f08555): every included member's full-pass basis. */
@@ -228,7 +229,12 @@ export async function enqueueHostedCheck(
   // No contract, a configured command that reads the changed paths: the contract gate's other
   // guards decide a package-graph-scoped first check (src/graph-first-check.ts). Same reads.
   const graphFirst =
-    !input.fullCheck && !member && !input.recheck && !input.cohortRecheck && graphFirstCheck(check);
+    !input.fullCheck &&
+    !input.protectedReview &&
+    !member &&
+    !input.recheck &&
+    !input.cohortRecheck &&
+    graphFirstCheck(check);
   const direct = runner.provider === 'github-actions' && !runner.credential;
   let gate =
     direct && project.autonomyPolicy?.acceptance.gate
@@ -268,7 +274,9 @@ export async function enqueueHostedCheck(
     )
   )
     gate = scopedRecheckBatchGate(input.cohortRecheck);
-  if (input.fullCheck)
+  if (input.protectedReview && direct)
+    gate = { mode: 'full', reason: 'Protected landing requires the full configured check.' };
+  else if (input.fullCheck)
     gate = {
       mode: 'full',
       reason: `Full configured check requested after run ${input.fullCheck.afterRunId}.`,

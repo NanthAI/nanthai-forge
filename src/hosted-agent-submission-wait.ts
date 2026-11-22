@@ -48,6 +48,7 @@ const approvalFields = { approver: z.string().optional(), url: z.string().option
 const eventSchema = z.object({
   submission: hostedLandingStateSchema.extend(approvalFields),
   providerDelay: z.string().optional(),
+  reviewState: z.enum(['held', 'approved', 'approved-carried', 'needs-reapproval']).optional(),
   /** Why a failed check did not pass and the one next step (src/check-failure-cause.ts failureCauseField). */
   failureCause: z.unknown().optional(),
   /** A stalled preparation's failed or fenced source step and its cause (incident e62d834b). */
@@ -162,6 +163,7 @@ export async function observeHostedSubmissions(
               const {
                 submission,
                 providerDelay,
+                reviewState,
                 failureCause,
                 sourceFailure,
                 pendingAttempt,
@@ -176,6 +178,7 @@ export async function observeHostedSubmissions(
               current.set(event.operationId, {
                 submission,
                 ...(providerDelay ? { providerDelay } : {}),
+                ...(reviewState ? { reviewState } : {}),
                 ...(failureCause ? { failureCause } : {}),
                 ...(sourceFailure ? { sourceFailure } : {}),
                 pendingAttempt,
@@ -557,6 +560,7 @@ async function observeHostedSubmissionsOnce(
                 ...(page.url ? { url: page.url } : {}),
               },
               ...(page.providerDelay ? { providerDelay: page.providerDelay } : {}),
+              ...(page.reviewState ? { reviewState: page.reviewState } : {}),
               ...(page.failureCause ? { failureCause: page.failureCause } : {}),
               ...(page.sourceFailure ? { sourceFailure: page.sourceFailure } : {}),
               ...((page.recovery ?? suppliedAdvice?.recovery)

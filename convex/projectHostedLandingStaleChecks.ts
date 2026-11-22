@@ -58,12 +58,37 @@ export async function cancelStaleLandingChecks(
     candidate: { id: string; actor: string; digest: string };
   },
 ) {
-  const rows = await ctx.db
+  let rows = await ctx.db
     .query('projectHostedLandingRequests')
     .withIndex('by_project_and_channel_and_phase_and_sequence', q =>
       q.eq('projectId', input.projectId).eq('channel', 'main').eq('phase', 'checking'),
     )
     .take(HOSTED_BATCH_MEMBERS);
+  if (rows.some(row => row.earlyReview)) {
+    // An early held Candidate's run belongs to review evidence. Its projection
+    // omits batchable, so neither ordinary checking range spends a slot on it.
+    const ordinary = await Promise.all(
+      [false, true].map(batchable =>
+        ctx.db
+          .query('projectHostedLandingRequests')
+          .withIndex('by_project_and_channel_and_batchable_and_phase_and_sequence', q =>
+            q
+              .eq('projectId', input.projectId)
+              .eq('channel', 'main')
+              .eq('batchable', batchable)
+              .eq('phase', 'checking'),
+          )
+          .take(HOSTED_BATCH_MEMBERS),
+      ),
+    );
+    rows = [
+      ...new Map(
+        [...rows.filter(row => !row.earlyReview), ...ordinary.flat()].map(row => [row._id, row]),
+      ).values(),
+    ]
+      .sort((a, b) => a.sequence - b.sequence)
+      .slice(0, HOSTED_BATCH_MEMBERS);
+  }
   if (!rows.length) return 0;
   const accepted = await readHostedRecord(ctx, {
     projectId: input.projectId,
@@ -99,7 +124,14 @@ export async function cancelStaleLandingChecks(
       submissionId: selected.submissionId,
     });
     const { row, state } = current;
-    if (state.phase !== 'checking' || !row.runId || !state.request.finish) continue;
+    if (
+      state.phase !== 'checking' ||
+      !row.runId ||
+      !state.request.finish ||
+      row.earlyReview ||
+      state.observation.pendingReason === 'waiting-for-review'
+    )
+      continue;
     const attempt = await loadLandingAttempt(ctx, { projectId: input.projectId, attemptId: state.attemptId });
     // Exact predicted-head checks already contain this acceptance, including its
     // receipt. An ancestry-only head match cannot conceal a receipt ABA.

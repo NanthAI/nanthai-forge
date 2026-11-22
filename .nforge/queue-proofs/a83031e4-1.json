@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedAcceptance.ts": "20dd190ce29279e6d8d86cc0f04140efe02b85fb4cd936d00f3d1c3cda480cc2",
+    "convex/projectHostedAcceptancePublish.ts": "35cbfaeaeceea5ba4642563150293f5c7f63b3e7ebaa8267bc56015dc4623754",
+    "convex/projectHostedChecks.ts": "dd6367ab760bc999a18cffcad0f7c004493fdd3f422637c6957c0bf04eec3cd7",
+    "convex/projectHostedFinishCompose.ts": "1153f5e239533affdb5bea76ce7243d614811f01dd93d8e348aec77d23357904",
+    "convex/projectHostedFinishControl.ts": "212ba8b31f4e7b4b903df31c160807d8d4cbac5ffde6ce4883fdc7c7cc9b8b84",
+    "convex/projectHostedFinishDriver.ts": "f3a3707ab8f5eae56ad7f0c5ff0b88d0d0f16d9919744e400bfb47bbd901d174",
+    "convex/projectHostedFinishObserve.ts": "96503e70c4ba997625fc73452f0b58858b573d7cad338bfbb439fbb98da4e4e2",
+    "convex/projectHostedFinishWake.ts": "9596ec8ad01ce751de85483b76f2fa4932a2b308e64a28a786e8c2192e5ef220",
+    "convex/projectHostedLanding.ts": "06594e9c2baec7531f8a30b4d952b992650982b50bc92e9637a76eb1c51188bb",
+    "convex/projectHostedLandingAttemptHistory.ts": "c210d37daa39cf420951d76618cc2f2ec2729ed86567c2fb9e3e4bd80f9469e5",
+    "convex/projectHostedLandingBatchCheck.ts": "f1656a2966f4e8873201bf7f814872991fda1e2cd5c2239dde6a97583ece5e17",
+    "convex/projectHostedLandingBatchStore.ts": "210bac455dc8b89d30d10b0d2c9abc13e6deda826ec52a5b75b9c8d2ae523685",
+    "convex/projectHostedLandingCheckRetry.ts": "4319ee0f33881112bfba3397ead839251d0aa90ed219769141943a8f74f248bb",
+    "convex/projectHostedLandingControl.ts": "f40c99951a57d482586126fd82754a03f3a6daa32b50e5aba636154b8f1605c7",
+    "convex/projectHostedLandingOrder.ts": "62e71cbc2a64769dc710f39bdab8bdcc04c48e860c678f7d90ea0d8e838d62c6",
+    "convex/projectHostedLandingPins.ts": "28e6f434972f9046bec3660dc7c8b30c4d3ff3bec69160fd42a5a0f1621baa84",
+    "convex/projectHostedLandingStaleChecks.ts": "47168b481a085af6db1ef92d97bc60d071cb5b072fd5101d3ea288aca15fff84",
+    "convex/projectHostedLandingStall.ts": "c768c61a53ba7ef27bc85dc4218ea64ccdc3ddca397bc57694434d342010a8d2",
+    "convex/projectHostedLandingStallWake.ts": "97701879773be7431ade61d7b41fae8b9111b33b7d0de96ed47c1c726471eb21",
+    "convex/projectHostedLandingStore.ts": "64cbab082345a0975eec78e4a45490bda5744066f8a48525622fe0b172c29884",
+    "convex/projectHostedOwnerGrant.ts": "7577c64cb8316d24cbd37e02504089f582c39f376a4da26a0836ae0dda9f8e78",
+    "convex/projectHostedOwnerReview.ts": "cb6d9b644527b5fd50a653c4c14696278f5c7203dec66f962f8a52778bde39df",
+    "src/hosted-finish.ts": "c9732e762ef6a29e172f3e10c012d1298189bd250c801b14e5fec438581e6492",
+    "src/hosted-landing-hold.ts": "029ada7d378aaf8c14d63313aab37c79e875c1f39b8ba8b4e13d7717f306b32e"
+  },
+  "replay": {
+    "incident": "9497ec68",
+    "test": "incident 9497ec68: protected review starts beside CI, stays idle through main moves, and one approved exact check owns publication",
+    "receipt": "5ee34b00-5497-4136-8386-41373b537c03"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Aa2d534e3-2233-4ee5-b0d2-5021f5081a41",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:subagent:0f04b3604f0cc6a4",
+    "receipt": "00b41e30-91ed-4981-8668-f1bffcfc5195"
+  }
+}

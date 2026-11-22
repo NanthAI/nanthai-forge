@@ -11,6 +11,7 @@ import { landingSelectionRead } from './projectHostedLandingSelectionRead';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { landingAttemptProgress, landingRow, landingStateFromRow } from './projectHostedLandingStore';
 import { finishRow } from './projectHostedFinishWake';
+import { reviewState } from './projectHostedOwnerReview';
 import { preparingSourceStep } from './projectHostedPreparingSource';
 import { hostedFinishSchema } from '../src/hosted-finish';
 import {
@@ -364,11 +365,13 @@ export const read = query({
       const gap = rows.some((entry, index) => index > 0 && rows[index - 1]!.number !== entry.number + 1);
       const missingFirst =
         nextBeforeAttempt === null && beforeAttempt !== 0 && oldest?.attemptId !== state.firstAttemptId;
+      const ownerReview = reviewState(row, state);
       const reply = {
         submissionId,
         observedAt,
         currentAttemptId,
         nextBeforeAttempt,
+        ...(ownerReview === undefined ? {} : { reviewState: ownerReview }),
         holdEdges: replayHoldEdges(row.orderWaits),
         ...(state.batchId ? { batchId: state.batchId } : {}),
         ...(state.batchOriginId ? { batchOriginId: state.batchOriginId } : {}),

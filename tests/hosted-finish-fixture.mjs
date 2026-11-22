@@ -411,7 +411,10 @@ export async function finishFixture(
           {
             runAction: runReuseAction,
             // Item 9a04d916: a settled solo plan re-reads its bytes in the action.
-            runQuery: (ref, args) => tx('finishPlanValue', driver.planValue, args),
+            runQuery: (ref, args) =>
+              getFunctionName(ref).endsWith(':reviewFiles')
+                ? tx('reviewFiles', driver.reviewFiles, args)
+                : tx('finishPlanValue', driver.planValue, args),
             runMutation: async (ref, args) => {
               const name = getFunctionName(ref);
               calls.push(name);

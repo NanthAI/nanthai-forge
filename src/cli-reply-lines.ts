@@ -157,6 +157,17 @@ export function cliReplyLines(args: string[], output: unknown): string[] {
       ].join(' · ');
     });
     if (!lines.length) lines.push('No retained attempts in this page.');
+    const reviewLabels = {
+      held: 'Waiting for owner approval',
+      approved: 'Owner approved',
+      'approved-carried': 'Owner approval carried to the updated attempt',
+      'needs-reapproval': 'Waiting for owner re-approval',
+    } as const;
+    const review =
+      typeof result.reviewState === 'string' && Object.hasOwn(reviewLabels, result.reviewState)
+        ? reviewLabels[result.reviewState as keyof typeof reviewLabels]
+        : undefined;
+    if (review) lines.unshift(review);
     if (result.historyPartial) lines.push('Some earlier attempt records are unavailable in this read.');
     if (result.batchId) lines.push(`Batch ${text(result.batchId)}`);
     if (result.batchOriginId) lines.push(`Origin batch ${text(result.batchOriginId)}`);

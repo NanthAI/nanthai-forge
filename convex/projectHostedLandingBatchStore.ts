@@ -184,7 +184,14 @@ export async function formLandingBatch(
   const members = ordered
     .flatMap(row => {
       const state = storedLandingStateSchema.parse(JSON.parse(row.value));
-      if (!row.batchSelection || state.batchId || state.batchSolo || state.request.finish?.after) return [];
+      if (
+        row.earlyReview ||
+        !row.batchSelection ||
+        state.batchId ||
+        state.batchSolo ||
+        state.request.finish?.after
+      )
+        return [];
       const attempt = hostedLandingAttemptSchema.parse(JSON.parse(row.batchSelection));
       return attempt.id === row.attemptId &&
         attempt.actor.id === own.actor.id &&
@@ -293,6 +300,7 @@ export async function installBatchAttempt(
   invariant(row, 'SOURCE_UNAVAILABLE', 'The batch member is unavailable.');
   const state = storedLandingStateSchema.parse(JSON.parse(row.value));
   const parent = await loadLandingAttempt(ctx, { projectId: input.projectId, attemptId: state.attemptId });
+  const reviewing = state.observation.pendingReason === 'waiting-for-review';
   // A retry or cohort pin is a new attempt: it never inherits the original's race reasons (7c2e69e1).
   const {
     deferredCheck: _deferred,
@@ -329,10 +337,12 @@ export async function installBatchAttempt(
       version: state.version + 1,
       attemptId: attempt.id,
       phase: 'checking',
-      observation: input.providerDelayed
-        ? { state: 'pending', pendingReason: 'pending-infra', cause: null }
-        : landingObservation('checking'),
-      error: null,
+      observation: reviewing
+        ? state.observation
+        : input.providerDelayed
+          ? { state: 'pending', pendingReason: 'pending-infra', cause: null }
+          : landingObservation('checking'),
+      error: reviewing ? state.error : null,
     },
     // A retained verdict has already sent its completion wake. The binding
     // itself makes the attempt selectable for the ordinary queue evaluator.

@@ -218,6 +218,27 @@ test('parity: speculative slots check the changed entry and follower together fo
   for (const [arm, check] of Object.entries(arms)) {
     outcomes[arm] = await wave(t, check, {
       concurrency: 2,
+      memberPaths: ['package.json', 'packages/b/src/b.ts'],
+      memberContents: ['{}', 'export const b = 1;'],
+      fileCount: 2,
+      ownerReview: true,
+    });
+    assert.deepEqual(outcomes[arm].phases, [
+      ['landed', null],
+      ['landed', null],
+    ]);
+    assert.equal(outcomes[arm].runs, 2, 'one predecessor check and one exact combined check');
+    assert.deepEqual(outcomes[arm].decisions, []);
+    assert(outcomes[arm].ranCommand, 'both runs use the configured command');
+  }
+  assert.deepEqual(outcomes.project, outcomes.standard);
+});
+
+test('parity: a protected check entry stays separate from a speculative follower for either command', async t => {
+  const outcomes = {};
+  for (const [arm, check] of Object.entries(arms)) {
+    outcomes[arm] = await wave(t, check, {
+      concurrency: 2,
       memberPaths: [entry(check), 'packages/b/src/b.ts'],
       fileCount: 2,
       ownerReview: true,
@@ -229,9 +250,14 @@ test('parity: speculative slots check the changed entry and follower together fo
   }
   t.diagnostic(JSON.stringify(outcomes));
   for (const arm of Object.keys(arms)) {
-    assert.equal(outcomes[arm].runs, 2, 'one predecessor check and one exact combined check');
+    assert.equal(
+      outcomes[arm].runs,
+      3,
+      'the protected check, the independent admission and its exact recheck',
+    );
+    assert.deepEqual(outcomes[arm].firstCheck, [null, { landedOn: 'recheck', reason: 'coverage-landing' }]);
     assert.deepEqual(outcomes[arm].decisions, [], 'no admission check was reused across the entry change');
-    assert(outcomes[arm].ranCommand, 'both runs use the configured command');
+    assert(outcomes[arm].ranCommand, 'every run uses its configured command');
   }
   assert.deepEqual(outcomes.project, outcomes.standard);
 });

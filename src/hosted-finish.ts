@@ -55,6 +55,14 @@ export const HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS = 30 * 60_000;
 export type FinishCommand =
   | { kind: 'reuse'; pendingId: string }
   | {
+      kind: 'review';
+      pendingId: string;
+      approvedAttemptId: string;
+      candidateDigest: string;
+      before: { sha256: string; size: number };
+      after: { sha256: string; size: number };
+    }
+  | {
       kind: 'page';
       url: string;
       range?: import('./object-pack-range.js').PackRange;

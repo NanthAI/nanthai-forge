@@ -504,7 +504,7 @@ async function redriveQueued(
 
 const stalledSince = (state: HostedLandingState, lastProgressAt: string) =>
   state.observation.state === 'pending' &&
-  state.observation.pendingReason !== 'waiting-for-review' &&
+  (state.phase === 'checking' || state.observation.pendingReason !== 'waiting-for-review') &&
   state.observation.pendingReason !== 'waiting-for-dependency' &&
   hostedLandingProgressAt(state) === lastProgressAt;
 

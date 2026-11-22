@@ -101,13 +101,18 @@ matches it at the final acceptance boundary used by both the finish driver and
 acceptance mutations. Client-supplied paths, graph coverage and check display facts
 cannot substitute for this evidence.
 
-A contributor Candidate touching one of these paths stays pending with
-`needs owner approval: protected paths X, Y`, even after checks pass. Missing
-legacy-worker path evidence also waits for owner approval. Review waits schedule
-no finish polling, queue work or stall alarm. Status remains a finite read. The
-held landing stays listed in `queue` without a position, and `land`, `wait`, `queue`
-and `status` name the hold, its paths and the next step (see
-[held landings](../agents/workflow.md)).
+A hosted finish with a trusted composition that touches a protected path shows the
+owner approval link while its first full check runs. The owner can review the change
+and check evidence in the same view. The hold yields queue order, and later main moves
+leave the attempt and its check record available for review. Once the first check settles,
+no check or background polling runs during the owner wait. Requirements that first
+become known from check results are applied at publication. Missing legacy path evidence
+still requires owner approval at publication.
+
+`queue {submissionId}` and `wait` show whether the entry is held, the owner has
+approved, approval carried to the updated attempt, or changed reviewed source or policy
+requires another approval. The held landing has no queue position. See
+[held landings](../agents/workflow.md).
 
 A signed-in owner approves or declines a held landing in one step: **Approve and land**
 or **Decline** on its review page, or on `/approve?project=…&submission=…`. The agent
@@ -124,15 +129,14 @@ original receipt. Decline ends the submission with `REVIEW_DECLINED` and the own
 reason. The submitter's `wait` is subscribed to the submission, so it returns on either
 decision with no polling.
 
-Approval names one exact attempt. A held landing does not recompose while it waits, so
-when main has moved the approval cannot publish that stale Candidate. Approve instead
-keeps a server-only grant on the landing (owner, attempt, input and dependency
-manifest pins, policy digest, changed paths), and the landing makes a fresh attempt on
-current main with a full check. That fresh attempt lands with the owner as approver only
-if its inputs and dependencies are byte-identical, the policy digest is unchanged, the
-owner is unchanged, its own check passed, and it changes no path the approved Candidate
-did not. Otherwise it holds for review again. A busy queue does the same without
-recomposing: the landing takes its turn. Agents cannot create a grant.
+Approval names one exact attempt. A current exact pass can publish once it has its
+turn. If main moved, the finish composes on current main. It compares the pinned file
+listings for the change the owner saw and the new Candidate, including each path,
+before and after content hashes, and file modes. The grant carries when the reviewed
+change, the selected inputs and dependencies, the owner and policy are the same.
+The replacement takes a publication turn while its exact full check runs. CI does not
+hold a publication lease. A changed reviewed diff gets a fresh approval link for the
+current attempt. Agents cannot create a grant.
 
 A held landing stays pinned to the policy its attempt was prepared under. A policy edit
 never re-checks it, and no sweep, alarm or recompose touches a held entry. Both `approve-link`

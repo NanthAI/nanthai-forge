@@ -220,9 +220,10 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
     const finish = await finishRow(ctx, claim);
     if (finish) await claimFinishPrecompose(ctx, finish);
   }
+  const reviewing = row.earlyReview && state.observation.pendingReason === 'waiting-for-review';
   let phase: HostedLandingState['phase'] = 'ready',
-    observation = landingObservation('queued');
-  let error: HostedLandingState['error'] = null;
+    observation = reviewing ? state.observation : landingObservation('queued');
+  let error: HostedLandingState['error'] = reviewing ? state.error : null;
   let passedAt: string | null = null;
   let replay: LandingReplay | undefined;
   try {
@@ -287,15 +288,20 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
         state.semanticConflicts = semantic.conflicts;
         error = { code: 'INTENT_SEMANTIC_CONFLICT', message: semanticConflictMessage(semantic.conflicts) };
       } else if (
+        !reviewing &&
         hostedCheckTerminal(run) &&
         (await holdSoloForCiDown(ctx, claim, { row, state, attempt }, run, held))
       ) {
         await releaseLandingQueue(ctx, held, now);
         return (await loadLanding(ctx, claim)).state;
-      } else if (hostedCheckTerminal(run) && (await retrySoloLandingCheck(ctx, claim, attempt, run))) {
+      } else if (
+        hostedCheckTerminal(run) &&
+        (await retrySoloLandingCheck(ctx, claim, attempt, run, row.earlyReview))
+      ) {
         await releaseLandingQueue(ctx, held, now);
         return (await loadLanding(ctx, claim)).state;
       } else if (
+        !reviewing &&
         run.status === 'failed' &&
         parkExactOnMainRed() &&
         (await parkRedOnlyEntry(ctx, claim, { row, state, attempt }, run))
@@ -304,9 +310,10 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
         return (await loadLanding(ctx, claim)).state;
       } else if (!hostedCheckTerminal(run)) {
         phase = 'checking';
-        observation = run.failureReason?.startsWith('provider-delayed:')
-          ? { state: 'pending', pendingReason: 'pending-infra', cause: null }
-          : landingObservation('checking');
+        if (!reviewing)
+          observation = run.failureReason?.startsWith('provider-delayed:')
+            ? { state: 'pending', pendingReason: 'pending-infra', cause: null }
+            : landingObservation('checking');
       } else if (run.status !== 'passed') {
         if (run.status === 'failed') rememberGuardCheck(ctx, state.id, run);
         phase = 'terminal-failed';
@@ -399,6 +406,18 @@ export async function recoverLandingQueue(ctx: MutationCtx, input: LandingChanne
   return true;
 }
 
+/** The exact check owns a place in publication order, not its worker's queue lease. */
+export async function reviewCheckAhead(
+  ctx: MutationCtx,
+  queue: NonNullable<Awaited<ReturnType<typeof landingQueue>>>,
+  row: LandingRow,
+) {
+  if (!queue.exactReview || queue.exactReview === row.submissionId) return null;
+  const holder = await landingRow(ctx, { projectId: row.projectId, submissionId: queue.exactReview });
+  invariant(holder?.exactReview, 'WORK_STALE', 'The approved check must still own its publication turn.');
+  return { row: holder, until: null, held: 'approved-check' as const, footprints: 'unknown' as const };
+}
+
 /** H14's constant-size final transaction can claim a prepared request directly.
  * This does no publication and cannot replace a live competing lease. */
 export async function claimReadyLanding(
@@ -436,8 +455,13 @@ export async function claimReadyLanding(
   // for the receipt (`orderWaits`).
   const spent: LandingRow[] = [];
   // A live landing reservation on files this one changes holds it first (Issue 10d253c6).
+  const exactReview = await reviewCheckAhead(ctx, queue, row);
   const ahead =
-    (await reservationAhead(ctx, row, state, now)) ?? (await olderLandingAhead(ctx, row, state, now, spent));
+    exactReview ??
+    (queue.exactReview === state.id
+      ? null
+      : ((await reservationAhead(ctx, row, state, now)) ??
+        (await olderLandingAhead(ctx, row, state, now, spent))));
   if (ahead) {
     if (row.alarm) await cancelPendingTask(ctx, row.alarm.taskId);
     // A handed entry (`orderWaitHanded`) has no wait of its own yet: this claim decides it.
@@ -483,7 +507,7 @@ export async function claimReadyLanding(
       ...closeOrderWait(row, now, false, 'claim'),
     });
   if (leased) return null;
-  if (row.priority !== 'urgent') {
+  if (row.priority !== 'urgent' && queue.exactReview !== state.id) {
     const [urgent] = await ctx.db
       .query('projectHostedLandingRequests')
       .withIndex('by_project_and_channel_and_phase_and_priority_and_sequence', q =>

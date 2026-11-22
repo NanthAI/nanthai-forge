@@ -12,3 +12,8 @@
   `queue {submissionId,attemptId}` shows the installed attempt's exact Candidate
   pins, a page of its retained Lane inputs, and stored check reuse proof or
   refusal evidence for that attempt. Each read is bounded and on demand.
+- Protected finishes whose composition identifies an owner review show the approval link
+  while the first full check runs. Main moves leave the held attempt available for review.
+  Approval after a main move carries only with the same reviewed bytes and policy, and the
+  replacement full check keeps its publication turn while CI runs. The queue attempt read
+  and wait report whether the owner needs to approve again.

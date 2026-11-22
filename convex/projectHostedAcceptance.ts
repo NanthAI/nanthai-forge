@@ -18,7 +18,7 @@ import { completeAcceptedHeads, guardAcceptanceCompletion } from './projectHoste
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { ForgeError, invariant } from '../src/errors';
 import { grantOwnerApproval } from './projectHostedOwnerGrant';
-import { heldPolicy, releaseApprovedReview } from './projectHostedOwnerReview';
+import { held, heldPolicy, releaseApprovedReview } from './projectHostedOwnerReview';
 import { finishRow } from './projectHostedFinishWake';
 import { landingQueue } from './projectHostedLandingStore';
 import { releaseLandingQueue } from './projectHostedLandingWake';
@@ -185,6 +185,16 @@ export async function approveHeldLanding(
     by: actor.id,
     status: 'granted',
   });
+  if (row.earlyReview && (held(state) || row.ownerGrant?.attemptId === attempt.id)) {
+    const plan =
+      state.phase === 'ready'
+        ? await acceptancePlan(ctx, { projectId: input.projectId, receiptId: attempt.operations.accept })
+        : null;
+    if (!plan || plan.inputsNext || plan.dependenciesNext) {
+      await releaseApprovedReview(ctx, input);
+      return { status: 'pending', reason: 'approved; waiting for the exact check and landing preparation' };
+    }
+  }
   const claim = await claimReadyLanding(
     ctx,
     { ...input, channel: 'main', owner: attempt.operations.accept },

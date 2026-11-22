@@ -158,7 +158,7 @@ export async function publishAcceptance(
   const granted =
     ownerApproval || candidate.kind !== 'candidate'
       ? undefined
-      : grantedApproval(row.ownerGrant, attempt, project.owner, candidate.governance?.paths ?? null);
+      : grantedApproval(row.ownerGrant, attempt, project.owner);
   const actor = ownerApproval ?? granted ?? attempt.actor;
   invariant(
     candidate.kind === 'candidate' &&

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { checkCause, submittedCheckCause, type CheckCause } from '../src/hosted-check';
-import { requireLandingCheck } from './projectHostedCheckEntries';
+import { refreshCheckEntries, requireLandingCheck } from './projectHostedCheckEntries';
 import { earlyPredecessor } from './projectHostedEarlyResolution';
 import { candidateOwnerInputs } from './projectHostedProvenance';
 import { fixGate } from '../src/culprit-bisect';
@@ -31,6 +31,7 @@ import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 import { hostedAcceptGate } from './projectHostedGate';
 import type { GithubInboundProof } from './projectGithubPullReuse';
 import { hasWriteRole } from './projectRole';
+import { governanceReason, protectedPathMatches } from '../src/public-governance';
 
 type ExactTreeProof = Extract<CrossHeadProof, { algorithm: 'exact-tree-v1' }>;
 
@@ -59,6 +60,8 @@ export async function pinLandingAttempt(
     /** Reuses the initial submission's reservation lookup for cause attribution. */
     intent?: (intentId: string) => Promise<CheckCause>;
     paths?: (paths: string[] | null) => void;
+    review?: (reason: string, verified: boolean) => void;
+    reviewedPolicy?: string;
     /** Current main is already read for pin validation; source preparation may have raced it. */
     mainMoved?: (moved: boolean) => void;
   },
@@ -126,18 +129,41 @@ export async function pinLandingAttempt(
     );
   }
   const recoveryGate = fixGate({ needsFix: row.restoreBases ?? project.needsFix?.[candidate.intentId] });
-  const deferredCheck =
-    !recoveryGate &&
-    candidateOwnerInputs(project, row, candidate, r.authorityEpoch) &&
-    input.deferCheck !== false &&
+  const policy = effectivePolicy(project);
+  const paths = candidate.governance?.paths ?? null;
+  const canReview =
+    input.review &&
     r.finish &&
-    !r.finish.after &&
-    !r.revertOf &&
-    r.check?.kind === 'request' &&
-    batchEligible(project, effectivePolicy(project), input.actor, candidate);
+    r.check &&
+    candidate.result.status === 'clean' &&
+    (input.actor.kind !== 'person' || input.actor.id !== project.owner);
+  // Use the same one-time definition projection as check enqueue. Legacy rows
+  // need its check-entry paths before choosing a potentially shared check.
+  const checkEntries =
+    canReview && paths?.length
+      ? (project.checkEntries ?? (await refreshCheckEntries(ctx, input.projectId)))
+      : project.checkEntries;
+  const earlyReview =
+    canReview && protectedPathMatches(policy, paths, checkEntries)?.length
+      ? governanceReason(project, policy, input.actor, paths, checkEntries)
+      : null;
+  const verifiedReview = Boolean(
+    earlyReview && input.reviewedPolicy && input.reviewedPolicy === acceptancePolicyDigest(policy),
+  );
+  if (earlyReview) input.review?.(earlyReview, verifiedReview);
+  const deferredCheck =
+    verifiedReview ||
+    (!recoveryGate &&
+      !earlyReview &&
+      candidateOwnerInputs(project, row, candidate, r.authorityEpoch) &&
+      input.deferCheck !== false &&
+      r.finish &&
+      !r.finish.after &&
+      !r.revertOf &&
+      r.check?.kind === 'request' &&
+      batchEligible(project, policy, input.actor, candidate));
   const cause =
     input.checkCause ?? (await input.intent?.(candidate.intentId)) ?? submittedCheckCause(r.retryReason);
-  const policy = effectivePolicy(project);
   let check = null;
   let crossHeadProof: ExactTreeProof | undefined;
   let semanticPlan: SemanticPlan | undefined;
@@ -217,6 +243,7 @@ export async function pinLandingAttempt(
               usageSubmissions: [input.submissionId],
               projectId: input.projectId,
               actor: input.actor.id,
+              ...(earlyReview ? { protectedReview: true } : {}),
               ...(input.recheck ? { recheck: input.recheck } : {}),
               ...(input.providerDelayReason ? { providerDelayReason: input.providerDelayReason } : {}),
               request: {

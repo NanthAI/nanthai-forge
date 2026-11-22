@@ -302,6 +302,7 @@ export async function installFinishCompose(
   recheckReason?: string,
   checkedRun?: HostedCheckRun,
   auditDonor?: boolean,
+  reviewedDigest?: string,
 ) {
   const input = { projectId: row.projectId, submissionId: row.submissionId };
   const { row: landing, state } = await loadLanding(ctx, input),
@@ -529,6 +530,8 @@ export async function installFinishCompose(
   // A main race without a transferable proof may recheck only the shared impact.
   const recheck =
     !proof &&
+    !landing.earlyReview &&
+    !landing.ownerGrant &&
     previous &&
     candidate.result.status === 'clean' &&
     !(landing.githubInboundProof && previous.crossHeadProof)
@@ -591,7 +594,14 @@ export async function installFinishCompose(
     const reason = retiredRun && (await loadHostedCheck(ctx, key, false, retiredRun)).run.failureReason;
     providerDelayReason = providerRetryDelay(reason ?? undefined, admission.endedAt);
   }
+  let earlyReview: string | null = null;
+  let verifiedReview = false;
   const attempt = await pinLandingAttempt(ctx, {
+    review: (reason, verified) => {
+      earlyReview = reason;
+      verifiedReview = verified;
+    },
+    ...(landing.ownerGrant && reviewedDigest ? { reviewedPolicy: landing.ownerGrant.policyDigest } : {}),
     ...(cause === undefined ? {} : { checkCause: cause }),
     ...(firstCheckDonor === undefined ? {} : { auditDonor: firstCheckDonor }),
     ...(recheck ? { recheck } : {}),
@@ -626,6 +636,25 @@ export async function installFinishCompose(
     attempt.recheckReason = recheckReason ?? 'not-eligible';
     if (scopedFallback) attempt.scopedFallback = scopedFallback;
   }
+  const reviewed = reviewedDigest === attempt.candidate.digest ? reviewedDigest : undefined;
+  invariant(
+    !verifiedReview || reviewed,
+    'EVIDENCE_CHANGED',
+    'The verified review selected another Candidate.',
+  );
+  const grant = landing.ownerGrant;
+  let ownerGrant = grant;
+  if (grant) {
+    const { verifiedDigest, ...originalGrant } = grant;
+    const currentDigest = grant.policyDigest === attempt.policyDigest ? reviewed : undefined;
+    if (currentDigest !== verifiedDigest)
+      ownerGrant = { ...originalGrant, ...(currentDigest ? { verifiedDigest: currentDigest } : {}) };
+  }
+  if (earlyReview || landing.earlyReview || ownerGrant !== landing.ownerGrant)
+    await ctx.db.patch(landing._id, {
+      earlyReview: earlyReview ? true : undefined,
+      ...(ownerGrant !== landing.ownerGrant ? { ownerGrant } : {}),
+    });
   await insertLandingAttempt(ctx, attempt);
   await writeFinish(ctx, row, { ...value, pending: null });
   const { batchNeedsSoloCompose: _needsSolo, ...installedState } = state;
@@ -644,14 +673,15 @@ export async function installFinishCompose(
       (compactDiscardedChecksOn() && checkCounts?.discardedRunnerSeconds === 0),
     ),
   );
+  const reviewHold = earlyReview && !verifiedReview ? earlyReview : null;
   await writeLanding(
     ctx,
-    landing,
+    { ...landing, earlyReview: earlyReview ? true : undefined, ...(ownerGrant ? { ownerGrant } : {}) },
     {
       ...installedState,
       version: state.version + 1,
       attemptId: attempt.id,
-      phase: 'queued',
+      phase: reviewHold ? 'checking' : 'queued',
       timing: {
         submittedAt: state.at,
         ...(state.timing?.ms ? { ms: state.timing.ms } : {}),
@@ -659,11 +689,12 @@ export async function installFinishCompose(
         composedAt: new Date().toISOString(),
       },
       counts,
-      observation: landingObservation('queued'),
-      error: null,
+      observation: landingObservation(reviewHold ? 'waiting-for-review' : 'queued'),
+      error: reviewHold ? { code: 'REVIEW_REQUIRED', message: reviewHold } : null,
     },
     true,
     checkedRun?.status !== 'passed' || landing.runId !== checkedRun.id,
   );
+  if (reviewHold) await scheduleFinish(ctx, (await ctx.db.get(row._id))!);
   await wakeLandingQueue(ctx, { projectId: row.projectId, channel: 'main' });
 }

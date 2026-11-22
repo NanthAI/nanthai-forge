@@ -7,6 +7,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { moduleUrl } from './convex-module.mjs';
 import { finishFixture, code, landingApi } from './hosted-finish-fixture.mjs';
+import { batchesFixture } from './hosted-landing-batches-fixture.mjs';
 import { policyPreset as preset } from '../dist/autonomy-policy.js';
 // Server preflight gate (Issue 029138ef) has its own tests (hosted-landing-desired.test.mjs).
 const policyPreset = name => ({ ...preset(name), agentDefaults: { preflight: 'advise' } });
@@ -24,6 +25,7 @@ const { OwnerApproval } = await import(moduleUrl('../web/src/review/OwnerApprova
 const { LaneApproval } = await import(moduleUrl('../web/src/review/LaneApproval.tsx'));
 const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
+const history = await import(moduleUrl('../convex/projectHostedLandingAttemptHistory.ts'));
 const finish = await import(moduleUrl('../convex/projectHostedFinish.ts'));
 const { set: setPolicy } = await import(moduleUrl('../convex/projectAutonomy.ts'));
 const { approvalDecisions } = await import(moduleUrl('../web/src/cockpit/attention.ts'));
@@ -83,6 +85,263 @@ async function heldLanding(t, mode = 'trusted', web) {
   return { f, state, select };
 }
 const device = { subject: 'owner', forgeCredential: 'synthetic-device' };
+
+async function approvalReadback(f, state) {
+  const input = { projectId: f.projectId, submissionId: state.id };
+  const operation = { projectId: f.projectId, operationId: state.operationId };
+  const queue = JSON.parse(await f.tx('reviewQueue', history.read, input));
+  const events = [];
+  await observeHostedSubmissions(
+    {
+      root: '/tmp/root',
+      address: { url: 'https://forge.example.invalid', projectId: f.projectId },
+      dispatch: async () => ({ result: { actor: 'owner' } }),
+      query: async (_, { nextVersion }) => f.tx('reviewWait', observe.page, { ...operation, nextVersion }),
+    },
+    { operationIds: [state.operationId], until: 'acceptance', timeoutSeconds: 0 },
+    undefined,
+    event => events.push(event),
+  );
+  const wait = events.map(waitEventLine).findLast(event => event?.line.type === 'submission')?.line;
+  return { queue, wait, operation, selection: { ...input, attemptId: queue.currentAttemptId } };
+}
+
+test('incident 9497ec68: protected review starts beside CI, stays idle through main moves, and one approved exact check owns publication', async t => {
+  syntheticR2(t);
+  const f = await batchesFixture(t, {
+    count: 0,
+    fileCount: 2,
+    requestCheck: true,
+    admissionCheck: 'full',
+    landingMode: 'fast',
+    checkCommand: { executable: 'bash', args: ['ci/verify.sh'] },
+    memberPaths: ['ci/verify.sh', 'one.txt', 'two.txt', 'three.txt', 'four.txt'],
+  });
+  const settleDue = async () => {
+    for (let count = 0; ; count++) {
+      const task = f.pending().find(task => task.scheduledTime <= f.now());
+      if (!task) return;
+      assert(count < 150, 'only event-driven work runs');
+      await f.execute(task);
+    }
+  };
+  const pass = async (id, runnerSeconds) => {
+    const run = await f.rawChecks.activate(id);
+    if (runnerSeconds === undefined) await f.rawChecks.pass(run);
+    else {
+      const shardSeconds = runnerSeconds / run.plan.shardCount;
+      const startedAt = new Date(f.now()).toISOString();
+      f.advanceClock(Math.ceil(shardSeconds * 1000));
+      const endedAt = new Date(f.now()).toISOString();
+      for (let i = 0; i < run.plan.shardCount; i++)
+        await f.rawChecks.callback(
+          f.rawChecks.shard(run, i, 'passed', {
+            execution: { startedAt, endedAt, seconds: shardSeconds },
+          }),
+        );
+      await f.rawChecks.callback(f.rawChecks.complete(run));
+    }
+    await settleDue();
+  };
+  const protectedAt = f.now();
+  const state = await f.add(0);
+  const initial = await approvalReadback(f, state);
+  const link = JSON.parse(await f.tx('earlyReviewLink', review.link, initial.operation));
+  const timeToLink = (f.now() - protectedAt) / 1000;
+  assert.equal(link.held, true);
+  assert.match(link.url, /\/approve\?/);
+  assert.equal(initial.queue.reviewState, 'held');
+  assert.equal(
+    cliReplyLines(['agent', '.', 'queue'], { result: initial.queue })[0],
+    'Waiting for owner approval',
+  );
+  assert.equal(initial.wait.reviewState, 'held');
+  assert.equal(initial.wait.phase, 'checking');
+  const first = f.runs()[0];
+  assert.equal(first.status, 'queued', 'the link and run are available together');
+  await settleDue();
+
+  // A later unrelated submission can land even while the first check is still live.
+  await f.add(1);
+  await settleDue();
+  await pass(f.runs().at(-1).id);
+  assert.equal(f.tables.projectHostedAcceptances.size, 1);
+  assert.equal(f.runs().filter(run => run.request.candidateId === first.request.candidateId).length, 1);
+  // Reuse the incident's measured first-run execution cost as a synthetic replay input.
+  await pass(first.id, 5476);
+  assert.equal(f.pending().length, 0, 'the settled check leaves the owner wait idle');
+  for (const i of [2, 3]) {
+    const follower = await f.add(i);
+    await settleDue();
+    await pass(f.runs().at(-1).id);
+    assert.equal((await f.current(follower.id)).submission.phase, 'landed');
+    assert.equal(f.pending().length, 0);
+  }
+  assert.equal(f.runs().length, 4, 'three main moves start no additional protected check');
+  const held = await approvalReadback(f, state);
+  assert.equal(held.selection.attemptId, initial.selection.attemptId, 'the same approval link remains live');
+  assert.equal(held.queue.reviewState, 'held');
+  assert.equal(held.wait.reviewState, 'held');
+  const readCount = f.counts.length;
+  f.advanceClock(60 * 60_000);
+  assert.equal(await f.drain(), 0);
+  assert.equal(f.counts.length, readCount, 'idle owner wait performs zero Convex calls');
+  const approved = JSON.parse(await f.tx('earlyOwnerApprove', acceptance.approve, held.selection));
+  assert.equal(approved.status, 'pending');
+  f.advanceClock(1_000);
+  await settleDue();
+  const exact = f.runs().at(-1);
+  assert.notEqual(exact.id, first.id);
+  assert.equal(f.runs().length, 5, 'exactly one replacement starts after approval');
+  const carried = await approvalReadback(f, state);
+  assert.equal(carried.queue.reviewState, 'approved-carried');
+  assert.equal(carried.wait.reviewState, 'approved-carried');
+  const queue = [...f.tables.projectHostedLandingQueues.values()][0];
+  assert.equal(queue.lease, null, 'CI does not hold the publication lease');
+
+  const mainBefore = f.currentMain().receipt.id;
+  const overtaker = await f.add(4);
+  await settleDue();
+  const fast = f.runs().at(-1);
+  assert.notEqual(fast.id, exact.id);
+  await pass(fast.id);
+  assert.equal(f.currentMain().receipt.id, mainBefore, 'the later pass cannot overtake approved exact CI');
+  assert.equal((await f.current(overtaker.id)).submission.phase, 'ready');
+  await pass(exact.id);
+  const landed = (await f.current(state.id)).submission;
+  assert.equal(landed.phase, 'landed');
+  const receipt = [...f.tables.projectHostedAcceptances.values()].find(
+    record => record.submissionId === state.id,
+  );
+  assert.equal(JSON.parse(receipt.value).check.runId, exact.id);
+  assert.equal(landed.acceptance.acceptedBy.carried, true);
+  const result = await approvalReadback(f, state);
+  assert.equal(result.queue.reviewState, 'approved-carried');
+  assert.equal(result.wait.reviewState, 'approved-carried');
+  const replayRuns = result.queue.attempts.filter(attempt => attempt.runId).map(attempt => attempt.runId);
+  assert.deepEqual([...new Set(replayRuns)], [exact.id, first.id]);
+  const discardedRunnerSeconds = [...f.tables.projectHostedCheckShards.values()]
+    .filter(shard => replayRuns.includes(shard.runId) && shard.runId !== exact.id)
+    .reduce((seconds, shard) => seconds + JSON.parse(shard.value).execution.seconds, 0);
+  assert.equal(discardedRunnerSeconds, 5476);
+  t.diagnostic(
+    JSON.stringify({
+      timeToLinkSeconds: timeToLink,
+      discardedRunnerSeconds,
+      preApprovalRechecks: 0,
+      postApprovalChecks: 1,
+      idleCalls: 0,
+    }),
+  );
+});
+
+test('incident 9497ec68: unchanged path names do not carry approval over changed reviewed bytes', async t => {
+  syntheticR2(t);
+  const file = 'selected.txt';
+  const f = await finishFixture(t, {
+    baselineFiles: [[file, 'one\nanchor\nthree\n']],
+    selectedFiles: [[file, 'ours\nanchor\nthree\n']],
+    mainFiles: [[file, 'one\nanchor\ntheirs\n']],
+  });
+  const policy = policyPreset('trusted');
+  policy.acceptance.ownerApprovalPaths = [file];
+  f.patch('hostedProjects', f.projectId, { autonomyPolicy: policy });
+  const state = await f.enqueue(f.request());
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  const before = await approvalReadback(f, state);
+  f.moveMain();
+  await f.tx('approvePreviousBytes', acceptance.approve, before.selection);
+  await f.drain();
+  const changed = await approvalReadback(f, state);
+  assert.notEqual(changed.selection.attemptId, before.selection.attemptId);
+  assert.equal(changed.queue.reviewState, 'needs-reapproval');
+  assert.equal(changed.wait.reviewState, 'needs-reapproval');
+  assert.deepEqual(changed.wait.hold.paths, [file]);
+  await assert.rejects(f.tx('staleApproval', acceptance.approve, before.selection), code('WORK_STALE'));
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+  await f.passChecks();
+  await f.drain();
+  const result = JSON.parse(await f.tx('approveNewBytes', acceptance.approve, changed.selection));
+  assert.equal(result.status, 'landed');
+  assert.equal((await f.current(state.id)).submission.acceptance.acceptedBy.carried, undefined);
+});
+
+test('incident 9497ec68: early approval carries if main moves while the first check still runs', async t => {
+  syntheticR2(t);
+  const f = await finishFixture(t);
+  const policy = policyPreset('trusted');
+  policy.acceptance.ownerApprovalPaths = ['selected.txt'];
+  f.patch('hostedProjects', f.projectId, { autonomyPolicy: policy });
+  const state = await f.enqueue(f.request());
+  await f.drain();
+  const first = await approvalReadback(f, state);
+  assert.equal(first.wait.phase, 'checking');
+  const approved = JSON.parse(await f.tx('approveDuringFirstCheck', acceptance.approve, first.selection));
+  assert.equal(approved.status, 'pending');
+  assert.equal((await approvalReadback(f, state)).wait.reviewState, 'approved');
+  f.moveMain();
+  await f.passChecks();
+  await f.drain();
+  const carried = await approvalReadback(f, state);
+  assert.equal(carried.wait.reviewState, 'approved-carried');
+  assert.equal(carried.wait.phase, 'checking');
+  assert.equal(f.tables.projectHostedCheckRuns.size, 2);
+  await f.passChecks();
+  await f.drain();
+  const landed = (await f.current(state.id)).submission;
+  assert.equal(landed.phase, 'landed');
+  assert.equal(landed.acceptance.acceptedBy.carried, true);
+});
+
+test('a lost provider attempt retries the first protected check and keeps owner review open', async t => {
+  syntheticR2(t);
+  const f = await finishFixture(t);
+  const policy = policyPreset('trusted');
+  policy.acceptance.ownerApprovalPaths = ['selected.txt'];
+  f.patch('hostedProjects', f.projectId, { autonomyPolicy: policy });
+  const state = await f.enqueue(f.request());
+  await f.drain();
+  const before = await approvalReadback(f, state);
+  assert.equal(before.queue.reviewState, 'held');
+  const run = await f.rawChecks.activate(before.queue.attempts[0].runId);
+  await f.rawChecks.callback(f.rawChecks.complete(run, 'runner-unavailable'));
+  await f.drain();
+  const retried = await approvalReadback(f, state);
+  assert.equal(retried.wait.phase, 'checking');
+  assert.equal(retried.wait.reviewState, 'held');
+  assert.equal(f.tables.projectHostedCheckRuns.size, 2);
+  await f.passChecks();
+  await f.drain();
+  assert.equal(f.pending().length, 0);
+  const ready = await approvalReadback(f, state);
+  assert.equal(ready.queue.reviewState, 'held');
+});
+
+test('a protected finish with a retained run starts one exact replacement after approval', async t => {
+  syntheticR2(t);
+  const f = await finishFixture(t);
+  const policy = policyPreset('trusted');
+  policy.acceptance.ownerApprovalPaths = ['selected.txt'];
+  f.patch('hostedProjects', f.projectId, { autonomyPolicy: policy });
+  const run = await f.rawChecks.enqueue(f.rawChecks.selection());
+  const state = await f.enqueue(f.request({ check: { kind: 'run', runId: run.id } }));
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  const original = await approvalReadback(f, state);
+  f.moveMain();
+  await f.tx('approveRetainedRun', acceptance.approve, original.selection);
+  await f.drain();
+  const replacement = await approvalReadback(f, state);
+  assert.equal(replacement.wait.reviewState, 'approved-carried');
+  assert.equal(replacement.wait.phase, 'checking');
+  assert.equal(f.tables.projectHostedCheckRuns.size, 2);
+  await f.passChecks();
+  await f.drain();
+  assert.equal((await f.current(state.id)).submission.phase, 'landed');
+});
 
 test('a supervised landing names its public approver and approval URL on land, observe and status', async t => {
   const web = 'https://forge-dogfood.example.invalid';
@@ -332,10 +591,14 @@ test('the owner declines: the submission ends REVIEW_DECLINED with the reason; a
   assert.equal(f.tables.projectHostedAcceptances.size, 0);
 });
 
-test('a retained grant carries only to identical source under the same policy, with a check and no new path', () => {
+test('a retained grant carries only to verified Candidate bytes under the same owner, pins and policy', () => {
   const attempt = {
     id: 'a1',
-    candidate: { inputs: { sha256: 'i', size: 1 }, dependencies: { sha256: 'd', size: 1 } },
+    candidate: {
+      digest: 'verified-files',
+      inputs: { sha256: 'i', size: 1 },
+      dependencies: { sha256: 'd', size: 1 },
+    },
     policyDigest: 'p',
     check: { runId: 'r' },
   };
@@ -346,26 +609,20 @@ test('a retained grant carries only to identical source under the same policy, w
     dependencies: JSON.stringify(attempt.candidate.dependencies),
     policyDigest: 'p',
     paths: ['selected.txt', 'src/a.ts'],
+    verifiedDigest: 'verified-files',
     at: 0,
   };
   const owner = { kind: 'person', id: 'owner' };
-  assert.deepEqual(grantedApproval(grant, attempt, 'owner', ['selected.txt']), owner);
-  assert.equal(grantedApproval(undefined, attempt, 'owner', ['selected.txt']), undefined);
-  assert.equal(grantedApproval(grant, attempt, 'someone-else', ['selected.txt']), undefined);
-  assert.equal(
-    grantedApproval({ ...grant, inputs: '{"sha256":"x","size":1}' }, attempt, 'owner', []),
-    undefined,
-  );
-  assert.equal(grantedApproval({ ...grant, dependencies: '{}' }, attempt, 'owner', []), undefined);
-  assert.equal(grantedApproval({ ...grant, policyDigest: 'q' }, attempt, 'owner', []), undefined);
-  assert.equal(grantedApproval(grant, attempt, 'owner', ['selected.txt', 'new.yml']), undefined);
-  assert.equal(grantedApproval(grant, attempt, 'owner', null), undefined);
-  assert.equal(grantedApproval(grant, { ...attempt, check: null }, 'owner', []), undefined);
-  // The exact approved attempt itself needs no extra condition.
-  assert.deepEqual(
-    grantedApproval({ ...grant, attemptId: 'a1', paths: null }, attempt, 'owner', null),
-    owner,
-  );
+  assert.deepEqual(grantedApproval(grant, attempt, 'owner'), owner);
+  assert.equal(grantedApproval(undefined, attempt, 'owner'), undefined);
+  assert.equal(grantedApproval(grant, attempt, 'someone-else'), undefined);
+  assert.equal(grantedApproval({ ...grant, inputs: '{"sha256":"x","size":1}' }, attempt, 'owner'), undefined);
+  assert.equal(grantedApproval({ ...grant, dependencies: '{}' }, attempt, 'owner'), undefined);
+  assert.equal(grantedApproval({ ...grant, policyDigest: 'q' }, attempt, 'owner'), undefined);
+  assert.equal(grantedApproval({ ...grant, verifiedDigest: undefined }, attempt, 'owner'), undefined);
+  assert.equal(grantedApproval({ ...grant, verifiedDigest: 'different-files' }, attempt, 'owner'), undefined);
+  assert.equal(grantedApproval(grant, { ...attempt, check: null }, 'owner'), undefined);
+  assert.deepEqual(grantedApproval({ ...grant, attemptId: 'a1', paths: null }, attempt, 'owner'), owner);
 });
 
 test('the /approve card shows Accept and Decline only for a held landing', () => {

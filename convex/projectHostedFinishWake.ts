@@ -372,9 +372,10 @@ export async function wakeLandingOrderWaiters(
       // cohorts and exact early resolutions need another compose before settlement.
       const early = Boolean(
         waiter.phase === 'queued' &&
-        waiter.batchSelection &&
-        hostedLandingAttemptSchema.parse(JSON.parse(waiter.batchSelection)).earlyResolutions?.length &&
-        !storedLandingStateSchema.parse(JSON.parse(waiter.value)).batchId,
+        (waiter.earlyReview ||
+          (waiter.batchSelection &&
+            hostedLandingAttemptSchema.parse(JSON.parse(waiter.batchSelection)).earlyResolutions?.length &&
+            !storedLandingStateSchema.parse(JSON.parse(waiter.value)).batchId)),
       );
       if (
         speculativeOnly &&

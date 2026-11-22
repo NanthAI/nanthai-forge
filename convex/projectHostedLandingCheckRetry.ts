@@ -16,6 +16,7 @@ export async function retrySoloLandingCheck(
   claim: LandingClaim,
   attempt: HostedLandingAttempt,
   run: HostedCheckRun,
+  protectedReview?: true,
 ) {
   if (
     !['runner-unavailable', 'interrupted'].includes(run.status) ||
@@ -30,6 +31,7 @@ export async function retrySoloLandingCheck(
   const reason = providerRetryDelay(run.failureReason);
   const next = await enqueueHostedCheck(ctx, {
     cause: checkCause.retry,
+    ...(protectedReview ? { protectedReview } : {}),
     usageSubmissions: [attempt.submissionId],
     ...(reason ? { providerDelayReason: reason } : {}),
     projectId: claim.projectId,

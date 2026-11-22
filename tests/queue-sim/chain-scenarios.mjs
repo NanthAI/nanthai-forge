@@ -57,8 +57,8 @@ export const CHAIN_MUTANTS = {
     },
     {
       file: 'convex/projectHostedLandingStore.ts',
-      find: '((!orderLive && !reserving && !admissionHolds) || retiresSolo)',
-      replace: '((!orderLive && !reserving && !admitting) || retiresSolo)',
+      find: '(!orderLive && !reserving && !admissionHolds)',
+      replace: '(!orderLive && !reserving && !admitting)',
     },
   ],
 };

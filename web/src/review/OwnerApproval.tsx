@@ -73,7 +73,7 @@ export function OwnerApproval({
         <>
           {head(
             'Approve this landing?',
-            `Submitted by ${phase.agent ? 'an agent' : 'you'}. Its check passed.`,
+            `Submitted by ${phase.agent ? 'an agent' : 'you'}. ${request.phase === 'checking' ? 'Its check is running.' : 'Its check passed.'}`,
           )}
           <dl className="fx-dv-facts">
             <div>

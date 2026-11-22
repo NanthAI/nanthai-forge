@@ -45,7 +45,8 @@ export async function landingAlarmPatch(
   if (!row) return null;
   const at = hostedLandingProgressAt(state);
   const live =
-    state.observation.state === 'pending' && state.observation.pendingReason !== 'waiting-for-review';
+    state.observation.state === 'pending' &&
+    (state.phase === 'checking' || state.observation.pendingReason !== 'waiting-for-review');
   const pending = live && state.observation.stall?.lastProgressAt !== at;
   // Same progress time: keep its alarm, or the supervisor round that follows a
   // raised stall (19328518); writes that make no progress must not cancel it.

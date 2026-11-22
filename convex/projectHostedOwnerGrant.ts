@@ -1,34 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx, QueryCtx } from './_generated/server';
-import type { Doc, Id } from './_generated/dataModel';
+import type { Doc } from './_generated/dataModel';
+import { loadLandingAttempt } from './projectHostedLandingAttemptRead';
 import { readHostedRecord } from './projectHostedRecords';
 import type { HostedLandingAttempt } from '../src/hosted-landing';
-import { hostedRecordSchema } from '../src/hosted-records';
+import type { LandingRow } from './projectHostedLandingStore';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import type { AcceptanceActor } from '../src/autonomy-policy';
 import { invariant } from '../src/errors';
 
-/** Issue fe5bea80: the owner's explicit approval of one exact held attempt, kept on its landing row
- * (server-only; never on the client-visible state). A fresh attempt of the same submission, made
- * because main moved, lands with it only when its inputs, dependencies and policy are byte-identical,
- * its own check ran, and it changes no path the approved Candidate did not. */
-export type OwnerGrant = NonNullable<Doc<'projectHostedLandingRequests'>['ownerGrant']>;
+/** Approval stays bound to the selected Candidate and can carry only after its exact file
+ * changes have been verified against the new composition. */
+type OwnerGrant = NonNullable<Doc<'projectHostedLandingRequests'>['ownerGrant']>;
 
-async function approvedPaths(
+export async function ownerReviewFiles(
   ctx: QueryCtx | MutationCtx,
-  projectId: Id<'hostedProjects'>,
-  attempt: HostedLandingAttempt,
+  landing: LandingRow,
+  candidateId: string,
 ) {
-  const row = await readHostedRecord(ctx, {
-    projectId,
-    actor: attempt.actor.id,
-    kind: 'candidate',
-    key: attempt.candidate.id,
+  const grant = landing.ownerGrant;
+  if (!grant) return null;
+  const approved = await loadLandingAttempt(ctx, {
+    projectId: landing.projectId,
+    attemptId: grant.attemptId,
   });
-  if (!row) return null;
-  const candidate = hostedRecordSchema.parse(JSON.parse(row.value));
-  return candidate.kind === 'candidate' ? (candidate.governance?.paths ?? null) : null;
+  const read = (key: string) =>
+    readHostedRecord(ctx, {
+      projectId: landing.projectId,
+      actor: landing.actor,
+      kind: 'candidate',
+      key,
+    });
+  const [before, after] = await Promise.all([read(approved.candidate.id), read(candidateId)]);
+  if (before?.digest !== approved.candidate.digest || !before.candidateFiles || !after?.candidateFiles)
+    return null;
+  return { before: before.candidateFiles, after: after.candidateFiles, digest: after.digest };
 }
+
 export async function grantOwnerApproval(
   ctx: MutationCtx,
   row: Doc<'projectHostedLandingRequests'>,
@@ -47,7 +55,11 @@ export async function grantOwnerApproval(
     inputs: canonicalPayload(attempt.candidate.inputs),
     dependencies: canonicalPayload(attempt.candidate.dependencies),
     policyDigest: attempt.policyDigest,
-    paths: await approvedPaths(ctx, row.projectId, attempt),
+    paths: null, // Retained field in pre-existing grant rows.
+    ...(JSON.parse(row.value).observation.pendingReason === 'waiting-for-review'
+      ? { held: true as const }
+      : {}),
+    candidateDigest: attempt.candidate.digest,
     at: Date.now(),
     ...(attempt.candidate.head ? { head: attempt.candidate.head } : {}),
   };
@@ -58,7 +70,6 @@ export function grantedApproval(
   grant: OwnerGrant | undefined,
   attempt: HostedLandingAttempt,
   owner: string,
-  paths: string[] | null,
 ): AcceptanceActor | undefined {
   if (
     !grant ||
@@ -68,10 +79,12 @@ export function grantedApproval(
     grant.policyDigest !== attempt.policyDigest
   )
     return undefined;
-  if (grant.attemptId !== attempt.id) {
-    if (!attempt.check || paths === null || grant.paths === null) return undefined;
-    const approved = new Set(grant.paths);
-    if (!paths.every(path => approved.has(path))) return undefined;
-  }
+  if (
+    grant.attemptId !== attempt.id &&
+    (!attempt.check ||
+      (grant.candidateDigest !== attempt.candidate.digest &&
+        grant.verifiedDigest !== attempt.candidate.digest))
+  )
+    return undefined;
   return { kind: 'person', id: grant.actor };
 }

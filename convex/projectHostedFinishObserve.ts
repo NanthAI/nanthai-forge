@@ -28,7 +28,7 @@ import { sourceAuthority } from '../src/hosted-source-authority';
 import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
 import { boardWake } from './projectBoardDelivery';
-import { held, heldReview, loadHeldPolicy, noteHeldPolicy } from './projectHostedOwnerReview';
+import { held, heldReview, loadHeldPolicy, noteHeldPolicy, reviewState } from './projectHostedOwnerReview';
 import { feedArrivalAnchor } from './projectFeedArrival';
 
 /** Finite selected-request pages. Every page/subscription rechecks current access;
@@ -88,7 +88,12 @@ async function selectOperation(
     const canonical = await landingRow(ctx, alias, false);
     if (canonical) rows.push(canonical);
   }
-  return { rows, alias, reviewHeld: rows[0]?.phase === 'ready' && held(JSON.parse(rows[0].value)) };
+  const row = rows[0];
+  return {
+    rows,
+    alias,
+    reviewHeld: (row?.phase === 'ready' || row?.reviewState !== undefined) && held(JSON.parse(row.value)),
+  };
 }
 
 async function observePage(
@@ -240,8 +245,10 @@ async function observePage(
     const cause = await failureCauseReply(ctx, input.projectId, selectedRow, state);
     for (const event of events)
       if (event.submission.version === state.version) Object.assign(event, delay, cause);
+    const decision = selectedRow.reviewState ?? reviewState(selectedRow, state);
     const payload = {
       ...review,
+      ...(decision ? { reviewState: decision } : {}),
       ...delay,
       ...cause,
       projectId: input.projectId,

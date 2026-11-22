@@ -153,3 +153,8 @@ Queue incidents `5e3c3a3c` and `e4aee4fe` run in `hosted-landing-queue-sim.test.
 pass-to-land alarm replay runs in `landing-pass-to-land-alarm.test.mjs`.
 The [invariant reference](../operations/landing-queue-invariants.md) states known violations;
 the retained bench model is unqualified. The owner rollout decision requires switched rules and a live watch.
+
+
+`9497ec68` replays protected owner review alongside the first check, idle waits through
+later main moves, and the exact replacement check after approval. The replay also checks
+that a change to reviewed bytes requires another approval.

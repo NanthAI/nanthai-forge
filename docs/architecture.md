@@ -2257,9 +2257,12 @@ cleanup job runs. Recovery/export folding of these snapshot deltas remains H21 w
 Owners can explicitly accept clean unchecked Candidates. Agents and public-project
 contributors need an exact passing run and current autonomy permission. Trusted
 compose results retain exact changed paths and server-derived owner-only input
-provenance. Public contributor changes to protected paths wait for explicit owner
-approval at final publication; missing legacy coverage cannot bypass that gate.
-Review waits schedule no idle work. See [public governance](operations/governance.md)
+provenance. For a hosted finish with a known protected-path match, owner review and
+the first full check start together. The review hold yields queue order. Main moves
+retain the first run as review evidence while held. After approval a fresh composition
+must retain the reviewed file changes, and its full check takes a publication turn
+without retaining a queue lease through CI. Results-only requirements and missing
+legacy coverage enter review at publication. Review waits schedule no idle work. See [public governance](operations/governance.md)
 for defaults, policy edits, version skew and the owner acceptance API. The API is
 exercised with local metadata/provider/source-worker fakes.
 
