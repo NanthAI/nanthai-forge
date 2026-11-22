@@ -122,7 +122,7 @@ test('a metrics read stopped at its deadline resumes from the recorded calls and
     };
   };
   const transport = () => Object.assign(s.transport(), { metricsDeadlineMs: 400 });
-  const asked = { from: '2026-11-12', to: '2026-11-20' };
+  const asked = { from: '2026-11-19T18:00:00Z', to: '2026-11-20' };
   let next;
   await assert.rejects(transport().dispatch('metrics', asked), error => {
     assert.equal(error.code, 'METRICS_TIMEOUT');
@@ -132,7 +132,7 @@ test('a metrics read stopped at its deadline resumes from the recorded calls and
   });
   // The printed command is the same window, resolved; no token or new field.
   assert.deepEqual(Object.keys(next), ['from', 'to', 'contextDays']);
-  assert.equal(next.from, '2026-11-12T00:00:00.000Z');
+  assert.equal(next.from, '2026-11-19T18:00:00.000Z');
   const first = answered.length;
   assert(first > 0, 'the stopped call read some pages');
   hangFrom = Infinity;

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { hostedAgentCommandSchemas, type HostedAgentAddress } from './hosted-agent-contract.js';
-import { readMetricRecords } from './self-metrics-source.js';
 import type { MetricQuery } from './self-metrics-hosted-pages.js';
 import { metricPeriod, metricsSurface } from './self-metrics-surface.js';
 import { pageMetrics } from './self-metrics-page.js';
@@ -8,20 +7,54 @@ import { networkDeadline, networkFailure } from './network-fetch.js';
 import { withExchangeProgress } from './exchange-progress.js';
 import { currentExchangeProgress } from './exchange-progress-hooks.js';
 import { ForgeError } from './errors.js';
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { join } from 'node:path';
-import { digest } from './hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { hostedAgentDirectory } from './hosted-agent-journal.js';
-import { METRICS_CONTEXT_DAYS_DEFAULT, METRICS_CONTEXT_DAYS_MAX } from './self-metrics-page.js';
+import {
+  hasNextPage,
+  METRICS_RESUME_TTL_MS,
+  metricsReadToken,
+  openMetricsRead,
+  readMetricRecords,
+} from './self-metrics-source.js';
 
 /** The whole metrics read, not only each page: it ends under an agent shell's
  * two-minute limit. Page reads grow with the window (about 70 s for 7 days at
  * 2026-11 dogfood size), so a larger window ends here with a typed next step. */
 export const METRICS_DEADLINE_MS = 100_000;
 
-/** How long the pages of a stopped read stay resumable on this machine. */
-export const METRICS_RESUME_TTL_MS = 60 * 60 * 1000;
+/**
+ * The agent surface reads a narrow window (Issue 686ecdde). A read costs about 0.2 MB of database reads per
+ * hour of window plus context at 2026-11 dogfood size (a 2 h window with the old 2-day context read 27 calls and
+ * 10.2 MB; 55 such reads an hour were a third of the day's included reads). The default is the last 3 hours with
+ * 90 minutes of context; the largest read a builder can ask for is 12 hours with 6 hours of context. Longer windows
+ * and the wide 2 to 30 day context stay with the lead: `nforge metrics ROOT` (src/metrics-cli.ts), which does not
+ * pass through here.
+ */
+export const AGENT_METRICS_DEFAULT_WINDOW_MS = 3 * 3_600_000;
+export const AGENT_METRICS_WINDOW_MAX_MS = 12 * 3_600_000;
+export const AGENT_METRICS_CONTEXT_DAYS_DEFAULT = 0.0625;
+export const AGENT_METRICS_CONTEXT_DAYS_MAX = 0.25;
+
+/** The agent surface's window and context, or a typed refusal before any server call. */
+export function agentMetricsRead(command: {
+  from?: string | undefined;
+  to?: string | undefined;
+  contextDays?: number | undefined;
+}) {
+  const ended = metricPeriod(undefined, command.to);
+  const period =
+    command.from === undefined
+      ? metricPeriod(new Date(Date.parse(ended.to) - AGENT_METRICS_DEFAULT_WINDOW_MS).toISOString(), ended.to)
+      : metricPeriod(command.from, command.to);
+  const contextDays = command.contextDays ?? AGENT_METRICS_CONTEXT_DAYS_DEFAULT;
+  const hours = (Date.parse(period.to) - Date.parse(period.from)) / 3_600_000;
+  if (hours * 3_600_000 > AGENT_METRICS_WINDOW_MAX_MS || contextDays > AGENT_METRICS_CONTEXT_DAYS_MAX)
+    throw new ForgeError(
+      'BAD_ARGUMENT',
+      `Agent metrics read at most ${AGENT_METRICS_WINDOW_MAX_MS / 3_600_000} hours with ${AGENT_METRICS_CONTEXT_DAYS_MAX} days of context (this read: ${Math.round(hours * 10) / 10} hours, contextDays ${contextDays}); a wider read costs the project about 0.2 MB of database reads per hour. Nothing changed. Next: narrow it to your Lane's own time, for example from your start time with contextDays 0.0625. A longer window is the lead's read: nforge metrics ROOT --from DATE --to DATE.`,
+    );
+  return { period, contextDays };
+}
+
 type MetricsRead = {
   token: string;
   period: { from: string; to: string };
@@ -36,18 +69,11 @@ const readKey = (input: unknown) => {
   delete parameters.operationId;
   return canonicalPayload(parameters);
 };
-const resumeDirectory = (root: string) => join(hostedAgentDirectory(root), 'metrics-read');
 
 /**
  * `metrics` over a window too large for one call's deadline (ad80e037; 8 days took 112 s at
- * 2026-11 dogfood size). Every answered server call of the read is appended to a local file
- * (the project's agent cache, mode 0600) under a token of the project, the exact window and the
- * context horizon. When the deadline stops the read, the same window asked again within the hour
- * answers the recorded calls from the file and asks the server only for the rest, so a page is
- * never read twice and the DB I/O of the whole read is that of one read, split across calls (no
- * new field: the MCP tool list stays at its ceiling). A finished read deletes its file, so a
- * later read always starts fresh; a stopped one is kept one hour. R2 object downloads (input hydration) are not
- * recorded: they are not Convex reads, and the machine object cache keeps them.
+ * 2026-11 dogfood size) resumes from its recorded server calls, and the pages of one window read the
+ * server once (`openMetricsRead` in self-metrics-source.ts).
  */
 export async function executeHostedMetrics(
   session: { root: string; address: HostedAgentAddress; query: MetricQuery },
@@ -55,59 +81,12 @@ export async function executeHostedMetrics(
   deadlineMs = METRICS_DEADLINE_MS,
 ) {
   const command = hostedAgentCommandSchemas.metrics.parse(input);
-  const period = metricPeriod(command.from, command.to);
-  const contextDays = Math.min(
-    METRICS_CONTEXT_DAYS_MAX,
-    Math.max(0, command.contextDays ?? METRICS_CONTEXT_DAYS_DEFAULT),
-  );
-  const token = digest(
-    canonicalPayload({
-      kind: 'forge-metrics-read',
-      url: session.address.url,
-      projectId: session.address.projectId,
-      from: period.from,
-      to: period.to,
-      contextDays,
-    }),
-  ).slice(0, 16);
-  const directory = resumeDirectory(session.root);
-  const file = join(directory, `${token}.jsonl`);
-  const answers = new Map<string, unknown>();
-  // The same window asked again within the hour continues a stopped read; an older file is gone.
-  let lines: string[] = [];
-  try {
-    if (Date.now() - statSync(file).mtimeMs < METRICS_RESUME_TTL_MS)
-      lines = readFileSync(file, 'utf8').split('\n');
-    else rmSync(file, { force: true });
-  } catch {
-    // No stopped read of this window: a fresh read.
-  }
-  for (const line of lines) {
-    if (!line) continue;
-    try {
-      const entry = JSON.parse(line) as { k: string; v: unknown };
-      answers.set(entry.k, entry.v);
-    } catch {
-      // A line cut by a killed process: that call is asked again.
-    }
-  }
-  if (!answers.size) pruneStoppedReads(directory);
-  const reused = answers.size;
-  const read: MetricsRead = { token, period, contextDays, answered: reused };
+  const { period, contextDays } = agentMetricsRead(command);
+  const token = metricsReadToken(session.address, period, contextDays);
+  const record = await openMetricsRead(session.root, token, session.query, command.cursor !== undefined);
+  const { reused, read: answered, query: recorded } = record;
+  const read: MetricsRead = Object.assign(answered, { token, period, contextDays });
   reads.set(readKey(input), read);
-  const recorded: MetricQuery = Object.assign(
-    async (name: string, args: Record<string, unknown>) => {
-      const key = JSON.stringify([name, args]);
-      if (answers.has(key)) return answers.get(key);
-      const value = await session.query(name, args);
-      answers.set(key, value);
-      if (read.answered === reused) mkdirSync(directory, { recursive: true, mode: 0o700 });
-      appendFileSync(file, `${JSON.stringify({ k: key, v: value })}\n`, { mode: 0o600 });
-      read.answered++;
-      return value;
-    },
-    session.query.objects ? { objects: session.query.objects } : {},
-  );
   const result = await metricsDeadline(
     input,
     async () => {
@@ -117,7 +96,7 @@ export async function executeHostedMetrics(
             await readMetricRecords(session.root, period, {
               address: session.address,
               query: recorded,
-              contextDays: command.contextDays,
+              contextDays,
             }),
             period,
           ),
@@ -131,27 +110,13 @@ export async function executeHostedMetrics(
     deadlineMs,
   );
   reads.delete(readKey(input));
-  rmSync(file, { force: true });
+  // A paged reply keeps its recorded calls until its last page: each `cursor` page of the window is
+  // recomputed from them, so N pages cost one read of the window, not N (Item 686ecdde; four 153 MB
+  // reads of one window in 12 minutes on 2026-11-22).
+  record.finish(hasNextPage(result));
   return reused
     ? { ...result, resumed: { recordedCalls: reused, newCalls: read.answered - reused } }
     : result;
-}
-
-/** Stopped reads older than the resume window are deleted when a new read starts. */
-function pruneStoppedReads(directory: string) {
-  let names: string[] = [];
-  try {
-    names = readdirSync(directory);
-  } catch {
-    return;
-  }
-  for (const name of names)
-    try {
-      if (Date.now() - statSync(join(directory, name)).mtimeMs >= METRICS_RESUME_TTL_MS)
-        rmSync(join(directory, name), { force: true });
-    } catch {
-      // Removed by a concurrent read.
-    }
 }
 
 /** Exact conflicts at save (flip 4): notices flagged in the window and the time from flag to the Lane's
@@ -216,9 +181,9 @@ function metricsTimeout(input: unknown, deadlineMs: number) {
   const command = hostedAgentCommandSchemas.metrics.safeParse(parameters);
   let period: { from: string; to: string } | undefined;
   try {
-    if (command.success) period = metricPeriod(command.data.from, command.data.to);
+    if (command.success) period = agentMetricsRead(command.data).period;
   } catch {
-    // An invalid window fails inside the action with its own BAD_ARGUMENT.
+    // An invalid or wide window fails inside the action with its own BAD_ARGUMENT.
   }
   const to = period?.to ?? new Date().toISOString();
   // Never suggest a window larger than the one that failed: the later half, at least an hour.
@@ -227,6 +192,6 @@ function metricsTimeout(input: unknown, deadlineMs: number) {
   const from = period && half < period.from ? period.from : half;
   return new ForgeError(
     'METRICS_TIMEOUT',
-    `metrics did not finish within ${Math.round(deadlineMs / 1000)} s${period ? ` for [${period.from}, ${period.to})` : ''}; it reads the window plus a context horizon (contextDays, default 2) page by page. Nothing changed. Next: nforge agent ROOT metrics '${JSON.stringify({ from, to, contextDays: 1 })}' for the later part of the window with a one-day horizon.`,
+    `metrics did not finish within ${Math.round(deadlineMs / 1000)} s${period ? ` for [${period.from}, ${period.to})` : ''}; it reads the window plus a context horizon (contextDays, default ${AGENT_METRICS_CONTEXT_DAYS_DEFAULT}) page by page. Nothing changed. Next: nforge agent ROOT metrics '${JSON.stringify({ from, to, contextDays: AGENT_METRICS_CONTEXT_DAYS_DEFAULT })}' for the later part of the window with the default horizon.`,
   );
 }

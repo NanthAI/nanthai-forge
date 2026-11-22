@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 import { writeFileSync } from 'node:fs';
 import { invariant } from './errors.js';
-import { readMetricRecords } from './self-metrics-source.js';
+import { hasNextPage, metricsReadToken, openMetricsRead, readMetricRecords } from './self-metrics-source.js';
 import { metricPeriod, metricsSurface } from './self-metrics-surface.js';
 import { formatMetrics, formatMetricReport } from './self-metrics-format.js';
 import { recordBillCli } from './metrics-bill-cli.js';
 import { metricAddress, metricQuery } from './self-metrics-source.js';
 import { nameFlakeIssues } from './self-metrics-flake-issues.js';
-import { pageMetrics, METRICS_PAGE_MAX, METRICS_CONTEXT_DAYS_MAX } from './self-metrics-page.js';
+import {
+  pageMetrics,
+  METRICS_PAGE_MAX,
+  METRICS_CONTEXT_DAYS_DEFAULT,
+  METRICS_CONTEXT_DAYS_MAX,
+} from './self-metrics-page.js';
 export async function metricsCli(args: string[]) {
   if (args[0] === 'record-bill') return recordBillCli(args.slice(1));
   if (!args.length || args[0] === '--help') {
@@ -136,11 +141,28 @@ export async function metricsCli(args: string[]) {
     else return failures;
     return;
   }
+  // Each page of a paged report is recomputed from the whole window's reads (Item 686ecdde): record the
+  // server calls of the first page and answer the next pages of the same window from them.
+  const json = Boolean(options['--json'] || (!options['--text'] && !process.stdout.isTTY));
+  const paged =
+    json && (limit !== undefined || options['--cursor'] !== undefined) && !options['--flake-issues'];
+  const resolved = paged && !compare ? metricAddress(owner) : null;
+  const pagedAddress = resolved?.address ?? null;
+  const recording = pagedAddress
+    ? await openMetricsRead(
+        resolved!.owner,
+        metricsReadToken(pagedAddress, period, contextDays ?? METRICS_CONTEXT_DAYS_DEFAULT),
+        metricQuery(pagedAddress),
+        options['--cursor'] !== undefined,
+      )
+    : null;
   const result = metricsSurface(
     await readMetricRecords(
-      owner,
+      resolved?.owner ?? owner,
       period,
-      options['--flake-issues'] ? { runsOnly: true, contextDays } : { contextDays },
+      options['--flake-issues']
+        ? { runsOnly: true, contextDays }
+        : { contextDays, ...(recording ? { address: pagedAddress!, query: recording.query } : {}) },
     ),
     period,
   );
@@ -165,8 +187,9 @@ export async function metricsCli(args: string[]) {
     else return flakes;
     return;
   }
-  if (options['--json'] || (!options['--text'] && !process.stdout.isTTY)) {
+  if (json) {
     const shown = pageMetrics(result, period, { limit, cursor: options['--cursor'] });
+    recording?.finish(hasNextPage(shown));
     return before ? { ...shown, compare: before } : shown;
   }
   process.stdout.write(formatMetrics(result) + '\n');

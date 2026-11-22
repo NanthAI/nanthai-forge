@@ -212,6 +212,14 @@ A brief or a lead comment on the Issue can override one for that slice.
   band. Past it, the guard names the scenario and the delta, and the change re-pins that row with
   its reason; a feature-sized move (a new fact on a row, an extra read) always does. Where the band
   numbers come from is written beside `WIRED_BYTE_BAND` in the file.
+- **Metrics reads are narrow; wide ones are the lead's.** Measure your own slice with
+  `nforge agent ROOT metrics '{"from":"YOUR_START_UTC"}'`: it defaults to the last 3 hours with
+  90 minutes of context and refuses more than 12 hours or `contextDays` above 0.25 before any server
+  call. Each hour of window or context costs about 0.2 MB of database reads, so 55 wide reads an hour
+  were a third of a day's included reads (Item 686ecdde). Do not run `nforge metrics ROOT` windows of
+  days or `--failures`/`--compare` reads; those are the lead's check-in reads
+  ([operations](../operations.md)). A new metrics read keeps `tests/metrics-bounded-reads.test.mjs` green:
+  calls and bytes depend on the window, never on older history.
 - **Automatic settings.** Forge adapts to each project ([principle 6](../../PRODUCT.md#product-principles)).
   Every new automatic setting declares:
   - its signal, read from the project's own records;

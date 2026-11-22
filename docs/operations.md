@@ -273,20 +273,34 @@ replacements retain the selected cause on their existing attempt or cohort row.
 lag) by one shared offset, and `page.nextCursor` continues the same `from`/`to`.
 Counts and totals are whole on every page; the per-day sections keep their counts and
 report `rowsOmitted` instead of rows (a one-day window returns them). Paging bounds the
-reply, not the read: each page recomputes the report from the same hosted pages.
+reply, not the read: each page recomputes the report from the same hosted pages, but the
+server is asked once. The first page records its calls on this machine, and every later page
+of the same window (`nforge agent ROOT metrics`, `nforge metrics ROOT --limit`) answers from
+them, for up to an hour, until the last page.
 The whole `metrics` action, capability discovery included, ends within 100 s. `from` and
-`to` bound the window. History-dependent streams also read `contextDays` before `from`
-(default 2, maximum 30); zero and fractional days are supported, for example `0.0625`
-for 90 minutes. Keep the context needed by the question: prior failed submissions, check
-reuse, Lane saves and billing history can affect the report. The coverage gap names the
-actual horizon and leaves missing evidence unknown. `--limit` pages the reply, not the read.
+`to` bound the window. History-dependent streams also read `contextDays` before `from`;
+zero and fractional days are supported, for example `0.0625` for 90 minutes. Keep the context
+needed by the question: prior failed submissions, check reuse, Lane saves and billing history
+can affect the report. The coverage gap names the actual horizon and leaves missing evidence
+unknown. `--limit` pages the reply, not the read.
+
+**Agent metrics are narrow; wide reads are the lead's** (Issue 686ecdde). A read costs about
+0.2 MB of database reads per hour of window plus context at 2026-11 dogfood size (a 2 h window with
+the old 2-day context read 27 calls and 10.2 MB; with `contextDays` 0.0625, 13 calls and 1.3 MB). The
+agent action and MCP `forge_work_overview` (`action:"metrics"`) therefore default to the last 3 hours with `contextDays` 0.0625 and
+refuse, before any server call and with `BAD_ARGUMENT`, a window over 12 hours or `contextDays` over 0.25.
+A builder's proof of its own Lane or receipt fits inside that. The lead's wide read (7-day windows,
+`contextDays` up to 30, `--failures`, `--compare`) is `nforge metrics ROOT`, which does not pass through
+this limit. Reads depend on the window and context, never on how much older history the project holds
+(`tests/metrics-bounded-reads.test.mjs`).
 A read that cannot finish within the 100 s returns `METRICS_TIMEOUT`; the same command
 (same window and horizon) asked again within the hour continues it. Every server call the
 read answered is kept in the project's agent cache on this machine (mode 0600, one hour);
 the next call answers those from the file and asks the server only for the rest, so no page
 is read twice and a window of any size costs the DB I/O of one read, split across calls.
 Repeat it until it answers (the reply says `resumed`, with the recorded and new call counts).
-A finished read deletes its file, so a later read of the same window starts fresh.
+A finished read deletes its file, so a later read of the same window starts fresh; a paged
+reply keeps it until its last page.
 
 Receipt counters need only in-window rows, plus the first receipt of each kind for collection
 coverage; their context is zero. Lane/save streams are read only when immutable input pins

@@ -70,7 +70,12 @@ import { executeHostedPolicy } from './hosted-agent-policy.js';
 import { executeHostedPlanning, markPlanningStarted, resolvePlanningId } from './hosted-agent-planning.js';
 import { isPlanningPrefix } from './planning-id.js';
 import { planningIssueArguments } from './planning-issue-arguments.js';
-import { executeHostedMetrics, METRICS_DEADLINE_MS, metricsDeadline } from './hosted-agent-metrics.js';
+import {
+  agentMetricsRead,
+  executeHostedMetrics,
+  METRICS_DEADLINE_MS,
+  metricsDeadline,
+} from './hosted-agent-metrics.js';
 import { laneLiveness, readLaneEntry, recordLane, withLaneCommand } from './lane-registry.js';
 import { convexLaneStates, markerIdentity, type LaneHousekeeping } from './lane-prune.js';
 import { shareDependencies, installScriptsNotice } from './shared-dependencies.js';
@@ -1016,6 +1021,8 @@ export class HostedAgentTransport {
           'start needs one of: planningItemId (an Issue id), intentId (join an Intent), or outcome (a new one).',
         );
       }
+      // A wide metrics read is refused before capability discovery, so it costs no server call (Issue 686ecdde).
+      if (action === 'metrics') agentMetricsRead(command.data as Parameters<typeof agentMetricsRead>[0]);
       // Policy needs no capability discovery: the server authorizes it, so each command is one call.
       if ((hostedAgentPolicyActions as readonly string[]).includes(action)) {
         const {

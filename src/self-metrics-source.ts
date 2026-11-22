@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-import { realpathSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
 import { join } from 'node:path';
+import { digest } from './hash.js';
 import { readHostState } from './host-binding.js';
 import { nativeOwner } from './native-source.js';
 import { sourceAuthority } from './hosted-source-authority.js';
@@ -120,4 +129,117 @@ export async function readMetricRecords(
       'Hosted cutover timestamp is unavailable; native history cannot be joined safely.',
     );
   return records;
+}
+
+/** How long the pages of a stopped or paged read stay answerable on this machine. */
+export const METRICS_RESUME_TTL_MS = 60 * 60 * 1000;
+
+/** The read's identity: project, exact window and context horizon. Paging fields are not part of it. */
+export const metricsReadToken = (
+  address: { url: string; projectId: string },
+  period: { from: string; to: string },
+  contextDays: number,
+) =>
+  digest(
+    JSON.stringify([
+      'forge-metrics-read',
+      address.url,
+      address.projectId,
+      period.from,
+      period.to,
+      contextDays,
+    ]),
+  ).slice(0, 16);
+
+/**
+ * Every answered server call of one metrics read is appended to a local file (the project's agent
+ * cache, mode 0600) under the read's token. The same window asked again within the hour answers the
+ * recorded calls from the file and asks the server only for the rest, so a page is never read twice
+ * and a read stopped by its deadline continues where it ended (ad80e037). `finish(true)` keeps the
+ * file for the next page of a paged reply (Item 686ecdde: four 153 MB reads of one window in 12
+ * minutes on 2026-11-22); `finish(false)` deletes it, so a later read starts fresh. R2 object
+ * downloads are not recorded: they are not Convex reads, and the machine object cache keeps them.
+ */
+export async function openMetricsRead(
+  root: string,
+  token: string,
+  base: MetricQuery,
+  /** True when the caller continues a paged reply; a read without a cursor never serves a finished paged record. */
+  continuing = false,
+) {
+  // Loaded on demand: the agent paths that read metrics have it already; no other command pays for it.
+  const { hostedAgentDirectory } = await import('./hosted-agent-journal.js');
+  const directory = join(hostedAgentDirectory(root), 'metrics-read');
+  const file = join(directory, `${token}.jsonl`);
+  const answers = new Map<string, unknown>();
+  let lines: string[] = [];
+  try {
+    if (Date.now() - statSync(file).mtimeMs < METRICS_RESUME_TTL_MS)
+      lines = readFileSync(file, 'utf8').split('\n');
+    else rmSync(file, { force: true });
+  } catch {
+    // No recorded read of this window: a fresh read.
+  }
+  let paged = false;
+  for (const line of lines) {
+    if (!line) continue;
+    try {
+      const entry = JSON.parse(line) as { k?: string; v?: unknown; paged?: true };
+      if (entry.paged) paged = true;
+      else if (entry.k !== undefined) answers.set(entry.k, entry.v);
+    } catch {
+      // A line cut by a killed process: that call is asked again.
+    }
+  }
+  if (paged && !continuing) {
+    // A finished paged record serves its own next pages only; any other read of the window starts fresh.
+    answers.clear();
+    rmSync(file, { force: true });
+  }
+  if (!answers.size) pruneStoppedReads(directory);
+  const reused = answers.size;
+  const read = { answered: reused };
+  const query: MetricQuery = Object.assign(
+    async (name: string, args: Record<string, unknown>) => {
+      const key = JSON.stringify([name, args]);
+      if (answers.has(key)) return answers.get(key);
+      const value = await base(name, args);
+      answers.set(key, value);
+      if (read.answered === reused) mkdirSync(directory, { recursive: true, mode: 0o700 });
+      appendFileSync(file, `${JSON.stringify({ k: key, v: value })}\n`, { mode: 0o600 });
+      read.answered++;
+      return value;
+    },
+    base.objects ? { objects: base.objects } : {},
+  );
+  return {
+    query,
+    read,
+    reused,
+    finish(keep: boolean) {
+      if (!keep) rmSync(file, { force: true });
+      else appendFileSync(file, `${JSON.stringify({ paged: true })}\n`, { mode: 0o600 });
+    },
+  };
+}
+
+/** The next page of a paged reply, when there is one. */
+export const hasNextPage = (reply: unknown) =>
+  Boolean((reply as { page?: { nextCursor?: unknown } } | null)?.page?.nextCursor);
+
+/** Stopped reads older than the resume window are deleted when a new read starts. */
+function pruneStoppedReads(directory: string) {
+  let names: string[] = [];
+  try {
+    names = readdirSync(directory);
+  } catch {
+    return;
+  }
+  for (const name of names)
+    try {
+      if (Date.now() - statSync(join(directory, name)).mtimeMs >= METRICS_RESUME_TTL_MS)
+        rmSync(join(directory, name), { force: true });
+    } catch {
+      // Removed by a concurrent read.
+    }
 }

@@ -106,7 +106,7 @@ test('METRICS_TIMEOUT never suggests a window larger than the one that failed', 
       const next = JSON.parse(/metrics '(\{.*\})'/.exec(error.message)[1]);
       assert.equal(next.to, window.to);
       assert.equal(next.from, iso(now - hour), 'the later half of a 2 h window');
-      assert.equal(next.contextDays, 1);
+      assert.equal(next.contextDays, 0.0625, 'inside the agent cap');
       return true;
     },
   );

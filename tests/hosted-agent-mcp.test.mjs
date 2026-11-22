@@ -552,7 +552,7 @@ test('MCP hosted metrics uses eight finite metadata streams, one bill page and i
     });
   });
   const tool = registry(t, s).get('forge_work_overview');
-  const command = { action: 'metrics', from: '2026-10-28', to: '2026-11-04' };
+  const command = { action: 'metrics', from: '2026-11-03T20:00:00Z', to: '2026-11-04' };
   const parsed = z.object(tool.inputSchema).parse({ command });
   const response = await tool.call(parsed);
   assert(!response.isError, response.content[0].text);
