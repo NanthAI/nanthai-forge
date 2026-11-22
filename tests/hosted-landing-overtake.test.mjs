@@ -304,10 +304,10 @@ test('c6b81429: an accepting wait ends when that entry re-checks instead', async
 // per pair (85f456c1). Keep this measured delta separate from other writers' exact bases.
 // The byte fixtures below include run cause attribution on their existing
 // dispatch and metrics rows. The two measured cases gained 220 read and 324 write bytes.
-const withoutFlowReceiptBytes = ({ calls, readBytes, writeBytes }) => ({
+const canonicalReplayCost = ({ calls, readBytes, writeBytes, aliasWriteBytes }) => ({
   calls,
   readBytes: readBytes - 122,
-  writeBytes: writeBytes - 144,
+  writeBytes: writeBytes - 144 - aliasWriteBytes,
 });
 
 test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5x solo timing bar', async t => {
@@ -361,7 +361,7 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // existing acceptance mutations. It reuses the loaded plan. Calls remain at 109.
   // Slice B adds 33 document bytes and 357 modeled index-key bytes per terminal
   // event (one per landing). This document-only cost row counts the 66 bytes.
-  const measured = withoutFlowReceiptBytes(pair);
+  const measured = canonicalReplayCost(pair);
   assert.deepEqual(
     measured,
     { calls: 109, readBytes: 1_875_029, writeBytes: 610_221 },
@@ -411,7 +411,7 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // Item 0930a720: compose root prefetch removes two descriptor calls. The fixture reads 22,433 fewer bytes.
   // Item f65d8024: the bounded two-Lane feed projection adds the same 640 read bytes here.
   // Slice B adds the same 66 document bytes for the pair, excluding the modeled index keys.
-  const measured = withoutFlowReceiptBytes(after);
+  const measured = canonicalReplayCost(after);
   assert.deepEqual(
     measured,
     { calls: 109, readBytes: 1_880_237, writeBytes: 612_726 },

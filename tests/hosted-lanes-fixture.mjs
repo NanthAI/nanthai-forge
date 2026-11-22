@@ -49,6 +49,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
   const counts = [];
   const scheduled = [];
   let serial = 0,
+    aliasSerial = 0,
     commitClock = fixtureCommitStart,
     decorate,
     lastReadSet;
@@ -95,6 +96,9 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         duplicateReadBytesByTable: {},
         writes: 0,
         writeRounds: 0,
+        canonicalWriteRounds: 0,
+        metricAliasWrites: 0,
+        metricAliasWriteBytes: 0,
         indexEntriesWritten: 0,
         indexEntriesRemoved: 0,
         writeBytes: 0,
@@ -116,9 +120,15 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         },
       };
       let inFlightWrites = 0;
-      const beginWrite = () => {
+      let canonicalWrites = 0;
+      const beginWrite = (alias = false) => {
         if (inFlightWrites++ === 0) meter.writeRounds++;
         queueMicrotask(() => inFlightWrites--);
+        if (alias) meter.metricAliasWrites++;
+        else {
+          if (canonicalWrites++ === 0) meter.canonicalWriteRounds++;
+          queueMicrotask(() => canonicalWrites--);
+        }
       };
       const lineKind = (table, row, hint) =>
         table === 'projectLiveLineLanes'
@@ -237,6 +247,8 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         meter.indexEntriesWritten += indexEntriesPerWrite(schema, table);
         meter.writes++;
         meter.writeBytes += bytes(row);
+        if (table === 'projectMetricFacts' && row.key.startsWith('metric-context-v1:'))
+          meter.metricAliasWriteBytes += bytes(row);
         lineWrite(table, row, bytes(row));
         // Keep real totals intact; controller-only guards account for delayed retention
         // allocations separately. The landing cost guard still prices all of these bytes.
@@ -305,9 +317,14 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
             meter.writes++;
           },
           insert: async (table, value) => {
-            beginWrite();
+            const alias = table === 'projectMetricFacts' && value.key.startsWith('metric-context-v1:');
+            beginWrite(alias);
             assertWorkRecordDomain(table, value, legacyWorkRecords);
-            const id = `${table}-${++serial}`;
+            // The provider's fixed-size IDs do not grow in other tables when
+            // an alias is inserted. Keep fixture-only decimal ID inflation
+            // out of the canonical index and storage ledgers.
+            const order = alias ? ++aliasSerial : ++serial;
+            const id = alias ? `${table}-alias-${order}` : `${table}-${order}`;
             // Real creation times are wall-clock; retention checks (Issue b78ca196) compare them with Date.now().
             // Operation receipts (expiry at 90 days) get wall-clock times, or every receipt would look
             // expired. Calendar tests opt their receipt tables in; others keep serial order.
@@ -315,7 +332,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
             put(
               table,
               id,
-              insertedDocument(schema, table, value, id, at ? Date.now() + serial / 1000 : serial),
+              insertedDocument(schema, table, value, id, at ? Date.now() + order / 1000 : order),
             );
             return id;
           },

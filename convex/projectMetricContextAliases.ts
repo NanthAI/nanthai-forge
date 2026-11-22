@@ -11,6 +11,7 @@ import {
   metricContextRange,
   metricContextStreams,
   metricMemberKey,
+  shiftedBillBoundary,
   type MetricContextLookup,
   type MetricContextStream,
 } from '../src/self-metrics-context';
@@ -83,14 +84,26 @@ export function metricContextAliases(
     });
   };
   async function select(lookup: MetricContextLookup, key: MetricIndexKey | null) {
-    const bounds = metricContextRange(lookup, context, from, to);
+    const boundary =
+      lookup.kind === 'bill-runs-shifted' ? shiftedBillBoundary(lookup.day, context, from) : null;
+    if (boundary && !key) {
+      const marker = await ctx.db
+        .query('projectMetricFacts')
+        .withIndex(index, q =>
+          q.eq('projectId', projectId).eq('key', metricContextKey(metricAliasGeneration, boundary.marker)),
+        )
+        .first();
+      if (!marker) return null;
+      budget.count(marker);
+    }
+    const bounds = boundary ?? metricContextRange(lookup, context, from, to);
     if (comparePrefix(bounds.start as MetricIndexKey, bounds.end as MetricIndexKey) >= 0) return null;
-    const edge = ([key, time]: [string, number?]) => [
+    const edge = ([key, time]: readonly [string, number?]) => [
       projectId,
       metricContextKey(metricAliasGeneration, key),
       ...(time === undefined ? [] : [time]),
     ];
-    const endTime = lookup.kind === 'root' || lookup.kind === 'passed-key' ? from : to;
+    const endTime = lookup.kind === 'root' || lookup.kind === 'passed-key' || boundary ? from : to;
     for await (const [alias, indexKey] of rows(edge(bounds.start), edge(bounds.end), key)) {
       budget.count(alias);
       const stream = metricContextStreams.find(stream => stream === alias.value);
@@ -106,6 +119,12 @@ export function metricContextAliases(
           row.sourceCreatedAt >= context &&
           row.sourceCreatedAt < endTime &&
           (!('stream' in lookup) || lookup.stream === stream) &&
+          (!boundary ||
+            (lookup.kind === 'bill-runs-shifted' &&
+              row.stream === 'runs' &&
+              row.row.started &&
+              Date.parse(row.row.at) >= lookup.from &&
+              Date.parse(row.row.at) < lookup.to)) &&
           [...metricContextKeys(row)].some(key => metricContextKey(metricAliasGeneration, key) === alias.key)
         ) {
           budget.emit(row);

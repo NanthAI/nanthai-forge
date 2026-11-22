@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { feedProjectionCounts, liveLineProjectionCounts } from './observer-projection-budget.mjs';
+import {
+  feedProjectionCounts,
+  liveLineProjectionCounts,
+  metricAliasProjectionCounts,
+} from './observer-projection-budget.mjs';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -232,6 +236,7 @@ test('incident replay: fallback detaches and requeues all three members atomical
     writes: sum(counts, 'writes'),
     liveLineWrites: counts.reduce((n, c) => n + liveLineProjectionCounts(c).writes, 0),
     feedWrites: counts.reduce((n, c) => n + feedProjectionCounts(c).writes, 0),
+    metricAliasWrites: counts.reduce((n, c) => n + metricAliasProjectionCounts(c).writes, 0),
     // S4: each distinct new source listing can mark its descriptor once in
     // existing publication calls. Keep the controller's original write bound.
     listingWriteAllowance: [...listingPins()].filter(pin => !originalListings.has(pin)).length,
@@ -262,6 +267,7 @@ test('incident replay: fallback detaches and requeues all three members atomical
       cost.writes -
         cost.liveLineWrites -
         cost.feedWrites -
+        cost.metricAliasWrites -
         cost.listingWriteAllowance -
         cost.stateSizeWrites <=
         1370,

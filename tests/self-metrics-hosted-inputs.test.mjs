@@ -1363,6 +1363,70 @@ test('exact bill selection preserves a pre-window run with fractional context bo
   assert.deepEqual(metricsSurface((await metrics()).records, period), canonical);
 });
 
+test('partial shifted bill days preserve the full scan and unmarked days keep the empty range cost', async () => {
+  const f = fixture();
+  evidence(f);
+  const day = Math.floor(Date.parse(at(-40)) / 86_400_000);
+  const from = at(-1100);
+  const contextDays = 1 / 24;
+  await f.recordBill({
+    operationId: randomUUID(),
+    provider: 'github-actions',
+    periodFrom: from,
+    periodTo: period.to,
+    billedUsd: 1,
+    listUsd: 1,
+    usage: { 'runner-minute': 1 },
+    rates: { 'runner-minute': 0.008 },
+    basis: 'Synthetic partial day',
+  });
+  const lookup = { kind: 'bill-runs-shifted', day, from: Date.parse(from), to: Date.parse(period.to) };
+  const select = async days => {
+    const before = { ...f.meter };
+    const page = JSON.parse(
+      await f.query('projectSelfMetrics:page', {
+        ...period,
+        stream: 'requests',
+        contextDays: days,
+        cursor: null,
+        contextSelection: { generation: metricAliasGeneration, lookups: [lookup] },
+      }),
+    );
+    assert(page.isDone);
+    return {
+      ids: page.page.map(item => item.row.id),
+      documents: f.meter.documents - before.documents,
+      bytes: f.meter.bytes - before.bytes,
+      calls: f.meter.calls - before.calls,
+    };
+  };
+  const { coverage } = coverMetricAliases(f, at(-1441));
+  assert.deepEqual(await select(contextDays), await select(1));
+  const addShifted = (id, created, start) => {
+    f.run(id, created, at(-5), 60, { at: start });
+    const sourceCreatedAt = Date.parse(created);
+    aliasMetricRow(f, 'runs', sourceCreatedAt, { id, at: start, endedAt: at(-5), started: true });
+  };
+  addShifted('inside-both-ranges', at(-40), at(-1000));
+  addShifted('outside-bill', at(-35), at(-1200));
+  const addOutsideContext = (start, end) => {
+    for (let i = start; i < end; i++) addShifted('older-' + i, at(-85), at(-1000 - i / 1000));
+    f.projectRuns();
+  };
+  addOutsideContext(0, 100);
+  const selected = await select(contextDays);
+  assert.deepEqual(selected.ids, ['inside-both-ranges']);
+  const metrics = async () =>
+    metricsSurface((await readHostedMetricPages(f.query, period, false, false, contextDays)).records, period);
+  delete f.project.metricContextCoverage;
+  const canonical = await metrics();
+  assert.equal(canonical.totals['5.8'].periods[0].usage['runner-minute'], 1);
+  f.project.metricContextCoverage = coverage;
+  assert.deepEqual(await metrics(), canonical);
+  addOutsideContext(100, 1000);
+  assert.deepEqual(await select(contextDays), selected);
+});
+
 test('metric aliases resolve live rows, skip dangling hits, and recheck insert-time skew', async () => {
   const f = fixture();
   const e = evidence(f);
@@ -1417,6 +1481,9 @@ test('metric context falls back after a blind run write or a landing that missed
   assert.equal((await read()).contextGeneration, undefined);
   f.projectRuns();
   assert.equal((await read()).contextGeneration, metricAliasGeneration);
+  f.project.metricContextGap = 'a late legacy recovery root';
+  assert.equal((await read()).contextGeneration, undefined);
+  delete f.project.metricContextGap;
   const value = JSON.parse(summary.value);
   // A same-head acceptance advances the landing sequence.
   summary.value = JSON.stringify({ ...value, landingSequence: 4 });

@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { synthetic } from './hosted-landing-batches-fixture.mjs';
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { metricAliasGeneration } from '../dist/self-metrics-context.js';
 const line = await import(moduleUrl('../convex/projectLiveLine.ts'));
 const sub = await import(moduleUrl('../convex/projectLiveLineSubmission.ts'));
 const store = await import(moduleUrl('../convex/projectLiveLineStore.ts'));
@@ -73,6 +74,47 @@ function countSummaryWrites(f) {
   return counter;
 }
 const today = async f => day.mainToday((await read(f)).flow, Date.now());
+
+test('an acceptance carries a granted metric stamp and cannot repair a missed acceptance', async t => {
+  const f = await finishFixture(t);
+  const head = 'a'.repeat(64);
+  const summary = () =>
+    [...f.tables.projectFinishReadRows.values()].find(row => row.kind === 'projectLiveLineSummary');
+  const value = () => JSON.parse(summary().value);
+  const publish = (head, sequence) =>
+    f.tx(
+      'publishMetricsContinuity',
+      {
+        _handler: ctx =>
+          store.writeLineMain(
+            { db: ctx.db },
+            f.projectId,
+            { head, at: new Date(Date.UTC(2026, 10, 10, 12, 0, 0, sequence)).toISOString() },
+            1,
+            false,
+            sequence,
+          ),
+      },
+      {},
+    );
+  const stamp = sequence => ({ generation: metricAliasGeneration, head, sequence });
+  const patch = fields =>
+    f.tx(
+      'seedMetricsContinuity',
+      {
+        _handler: ctx => ctx.db.patch(summary()._id, { value: JSON.stringify({ ...value(), ...fields }) }),
+      },
+      {},
+    );
+  await publish(head, 1);
+  assert.equal(value().metricContinuity, undefined);
+  await patch({ metricContinuity: stamp(1) });
+  await publish(head, 2);
+  assert.deepEqual(value().metricContinuity, stamp(2));
+  await patch({ landingSequence: 3 });
+  await publish(head, 4);
+  assert.equal(value().metricContinuity, undefined);
+});
 
 test('a first submission lands first try, within the existing publication and exit writes', async t => {
   const f = await finishFixture(t);

@@ -38,6 +38,24 @@ export const metricMemberKey = (kind: 'intent' | 'lane' | 'failed-input', ...ide
 export const metricTimeSlopMs = 60_000;
 const dayMs = 86_400_000;
 const shiftedBillFamily = (day: number) => `bill-runs-shifted:${day}`;
+const shiftedBillKeys = (day: number) => ({
+  creation: key('shifted-creation', String(day)),
+  marker: key('shifted-marker', String(day)),
+});
+
+/** A partial UTC day uses the creation-time index. Whole days can select by
+ * event time directly. The marker replaces the otherwise empty range read. */
+export function shiftedBillBoundary(day: number, context: number, reportFrom: number) {
+  const from = day * dayMs;
+  const to = from + dayMs;
+  if (context <= from && reportFrom >= to) return null;
+  const { marker, creation } = shiftedBillKeys(day);
+  return {
+    marker,
+    start: [creation, Math.max(context, from)] as const,
+    end: [creation, Math.min(reportFrom, to)] as const,
+  };
+}
 
 /** In-window creations already seed the report. For restored starts select
  * only the UTC creation days intersecting the bounded pre-window horizon. */
@@ -142,15 +160,18 @@ export function metricContextKeys({ stream, sourceCreatedAt, row }: ProjectableM
   const end = row.endedAt ? Date.parse(row.endedAt) : NaN;
   for (const time of [at, end]) if (time > sourceCreatedAt) lookups.add(timeKey(stream + '-activity', time));
   if (stream === 'runs') {
-    if (row.started)
-      lookups.add(
-        timeKey(
-          Math.abs(at - sourceCreatedAt) <= metricTimeSlopMs
-            ? 'runs-started'
-            : shiftedBillFamily(Math.floor(sourceCreatedAt / dayMs)),
-          at,
-        ),
-      );
+    if (row.started) {
+      if (Math.abs(at - sourceCreatedAt) <= metricTimeSlopMs) lookups.add(timeKey('runs-started', at));
+      else {
+        const day = Math.floor(sourceCreatedAt / dayMs);
+        const { creation, marker } = shiftedBillKeys(day);
+        lookups.add(timeKey(shiftedBillFamily(day), at));
+        lookups.add(creation);
+        // Per-run witnesses let readers test one day without querying or
+        // updating a shared marker on the landing path.
+        lookups.add(marker);
+      }
+    }
     if (row.fullSuite && row.endedAt) lookups.add(key('full'));
     if (row.endedAt && row.reuseKey && row.status === 'passed') lookups.add(key('passed-key', row.reuseKey));
     if (row.inputPin && row.endedAt && (row.status === 'failed' || row.status === 'interrupted'))

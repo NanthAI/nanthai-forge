@@ -26,6 +26,7 @@ import { checkPull, checkRequest } from './projectGithubPull';
 import { projectLink } from './projectGithubPullQueue';
 import { pullMessage, pullOperationId } from '../src/github-pull-check';
 import { invariant } from '../src/errors';
+import { metricComposeMembershipWrites } from './projectMetricComposeMembership';
 
 const identity = { jobId: v.id('projectGithubMirrorJobs'), step: v.number() };
 const pin = v.object({ sha256: v.string(), size: v.number() });
@@ -190,7 +191,7 @@ export const submit = internalMutation({
         status: 'active',
       },
     });
-    await writeHostedRecord(ctx, {
+    const laneRecord = await writeHostedRecord(ctx, {
       projectId: project._id,
       actor,
       authorityEpoch: epoch,
@@ -279,13 +280,28 @@ export const submit = internalMutation({
       jobId: first.ids.job,
       value: canonicalPayload(compose),
     });
-    await ctx.db.insert('projectHostedComposeSelections', {
-      projectId: project._id,
-      actor,
-      operationId: ids.compose,
-      kind: 'inputs',
-      key: ids.lane,
-    });
+    await Promise.all([
+      ctx.db.insert('projectHostedComposeSelections', {
+        projectId: project._id,
+        actor,
+        operationId: ids.compose,
+        kind: 'inputs',
+        key: ids.lane,
+      }),
+      ...metricComposeMembershipWrites(ctx, {
+        projectId: project._id,
+        root: inputs.manifest.root.sha256,
+        page: inputs.pages[0]!.pin.sha256,
+        members: [
+          {
+            laneId: ids.lane,
+            intentId: ids.intent,
+            head: input.head.sha256,
+            sourceCreatedAt: laneRecord._creationTime,
+          },
+        ],
+      }),
+    ]);
     const uploads = [...inputs.pages, ...dependencies.pages].map(page => ({
       value: canonicalPayload(page.value),
       pin: page.pin,

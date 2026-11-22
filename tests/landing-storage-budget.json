@@ -76,6 +76,12 @@
         "keyBytes": 32160
       },
       "written": 1611
+    },
+    "metricAliases": {
+      "before": { "entries": 3, "keyBytes": 733 },
+      "immediate": { "entries": 13, "keyBytes": 2531 },
+      "retained": { "entries": 13, "keyBytes": 2531 },
+      "written": 13
     }
   },
   "dogfood": {
@@ -155,6 +161,12 @@
         "keyBytes": 1714338
       },
       "written": 3028
+    },
+    "metricAliases": {
+      "before": { "entries": 3, "keyBytes": 739 },
+      "immediate": { "entries": 22, "keyBytes": 4194 },
+      "retained": { "entries": 22, "keyBytes": 4194 },
+      "written": 22
     }
   },
   "journal": {
@@ -178,6 +190,15 @@
   "tenLandingIndexes": {
     "landings": 10,
     "written": 13852,
+    "metricAliases": {
+      "written": 77,
+      "stored": [
+        { "entries": 13, "keyBytes": 2531 },
+        { "entries": 22, "keyBytes": 4166 },
+        { "entries": 43, "keyBytes": 9074 },
+        { "entries": 43, "keyBytes": 9074 }
+      ]
+    },
     "stored": [
       {
         "entries": 868,

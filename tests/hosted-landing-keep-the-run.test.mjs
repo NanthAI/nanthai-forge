@@ -19,6 +19,7 @@ import {
 } from './hosted-stale-check-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { WIRED } from './keep-the-run-scenarios.mjs';
+import { metricAliasProjectionCounts } from './observer-projection-budget.mjs';
 import { storageClock } from './storage-clock.mjs';
 import { armed, assertQueueProgress } from './queue-sim/invariants.mjs';
 const stale = await import(moduleUrl('../convex/projectHostedLandingStaleChecks.ts'));
@@ -717,6 +718,7 @@ async function lifecycle(t, { paths, mode, red, on }) {
     calls: costs.length,
     readBytes: costs.reduce((sum, cost) => sum + cost.readBytes, 0),
     writeBytes: costs.reduce((sum, cost) => sum + cost.writeBytes, 0),
+    aliasWriteBytes: costs.reduce((sum, cost) => sum + metricAliasProjectionCounts(cost).writeBytes, 0),
   };
 }
 for (const [name, options, kind] of [
@@ -740,7 +742,8 @@ for (const [name, options, kind] of [
     const delta = {
       calls: keep.calls - retire.calls,
       readBytes: keep.readBytes - retire.readBytes,
-      writeBytes: keep.writeBytes - retire.writeBytes,
+      // The alias ledger separately prices the leaf writes that vary with check outcome.
+      writeBytes: keep.writeBytes - keep.aliasWriteBytes - (retire.writeBytes - retire.aliasWriteBytes),
     };
     t.diagnostic(JSON.stringify({ kind, delta }));
     // Exact, both ways (review 379d19f5 nit 4): a drop fails too, so WIRED and the prices built on it

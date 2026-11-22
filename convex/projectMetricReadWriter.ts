@@ -4,6 +4,8 @@ import type { Doc } from './_generated/dataModel';
 import { metricReadProjection, metricRunKind } from './projectMetricReadProjection';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
+import { metricAliasRows, withMetricAliases } from './projectMetricAliasWriter';
+import type { metricRunRow } from '../src/self-metrics-run';
 
 /** Reuse canonical rows the mutation already read. The compact row's identity/digest ride on
  * the canonical write, so upkeep needs neither another lookup nor a status-observer change. */
@@ -89,7 +91,21 @@ export function metricReadWriter(db: MutationCtx['db']) {
       if (retained && retained.digest !== hash) await db.replace(rowId, projection as never);
       const fields = { metricsProjected: true as const, metricProjection: { rowId, digest: hash } };
       rows.set(id, { ...source, ...fields } as Doc<'projectHostedCheckRuns'>);
-      return { ...value, ...fields };
+      const previous = old.metricsProjected ? metricReadProjection(old) : null;
+      const metricSource = (projected: typeof projection) => ({
+        stream: 'runs' as const,
+        sourceCreatedAt: projected.sourceCreatedAt,
+        row: JSON.parse(projected.value) as ReturnType<typeof metricRunRow>,
+      });
+      return withMetricAliases(
+        { ...value, ...fields },
+        metricAliasRows(
+          projection.projectId as Doc<'projectHostedCheckRuns'>['projectId'],
+          projection.runId,
+          metricSource(projection),
+          previous ? metricSource(previous) : undefined,
+        ),
+      );
     },
   };
 }

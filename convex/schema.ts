@@ -465,6 +465,8 @@ const projectFields = {
    * a project row written before the rollback still validates. Remove with `stateTree` on objects. */
   stateTrees: v.optional(v.any()),
   sourceCutover: v.optional(v.object({ minimumCliVersion: v.string(), at: v.string() })),
+  /** A legacy recovery published a root without complete writer membership. */
+  metricContextGap: v.optional(v.string()),
   metricContextCoverage: v.optional(
     v.object({
       generation: v.string(),

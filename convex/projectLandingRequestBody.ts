@@ -5,11 +5,39 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { compactUnreportedCounts, expandUnreportedCounts } from '../src/hosted-landing';
 import { compactDiscardedChecksOn } from './projectHostedLandingRunnerCostSwitch';
+import { metricAliasRows, withMetricAliases } from './projectMetricAliasWriter';
+import { metricRequestRow } from './projectMetricSourceRow';
 
-type Row = Record<string, unknown> & { _id?: string; value?: string; requestBodyId?: string };
+type Row = Record<string, unknown> & {
+  _id?: string;
+  _creationTime?: number;
+  value?: string;
+  requestBodyId?: string;
+};
 type Port = QueryCtx['db'];
 const tag = Symbol('landingRequestBodies');
 const originals = new WeakMap<object, () => Port>();
+
+function ticketAliases(row: Row, sourceCreatedAt: number, previous?: Row | null) {
+  if (
+    typeof row.value !== 'string' ||
+    typeof row.projectId !== 'string' ||
+    typeof row.submissionId !== 'string'
+  )
+    return [];
+  const source = (value: Row) => ({
+    stream: 'requests' as const,
+    sourceCreatedAt,
+    row: metricRequestRow(value as Parameters<typeof metricRequestRow>[0]),
+  });
+  return metricAliasRows(
+    row.projectId as Id<'hostedProjects'>,
+    row.submissionId,
+    source(row),
+    typeof previous?.value === 'string' ? source(previous) : undefined,
+  );
+}
+
 export function landingRequestOriginalDb<D extends Port>(db: D): D {
   const source = originals.get(db);
   return source ? (landingRequestOriginalDb(source()) as D) : db;
@@ -197,8 +225,12 @@ export function landingRequestBodies<C extends QueryCtx | MutationCtx>(ctx: C): 
           const writer = source() as MutationCtx['db'];
           if (table !== 'projectHostedLandingRequests') return writer.insert(table as never, value as never);
           const saved = await split(value);
-          const id = await writer.insert('projectHostedLandingRequests', saved as never);
-          raw.set(id, { ...saved, _id: id });
+          const sourceCreatedAt = Date.now();
+          const id = await writer.insert(
+            'projectHostedLandingRequests',
+            withMetricAliases(saved, ticketAliases(saved, sourceCreatedAt)) as never,
+          );
+          raw.set(id, { ...saved, _id: id, _creationTime: sourceCreatedAt });
           return id;
         };
       if (key === 'patch' || key === 'replace' || key === 'delete')
@@ -218,9 +250,12 @@ export function landingRequestBodies<C extends QueryCtx | MutationCtx>(ctx: C): 
             return;
           }
           const next = await split(value!, previous ?? undefined);
-          if (key === 'patch') await writer.patch(id as never, next as never);
-          else await writer.replace(id as never, next as never);
-          raw.set(id, { ...(key === 'patch' ? previous : {}), ...next, _id: id });
+          const sourceCreatedAt = previous?._creationTime ?? Date.now();
+          const merged = { ...(key === 'patch' ? previous : {}), ...next };
+          const selected = withMetricAliases(next, ticketAliases(merged, sourceCreatedAt, previous));
+          if (key === 'patch') await writer.patch(id as never, selected as never);
+          else await writer.replace(id as never, selected as never);
+          raw.set(id, { ...merged, _id: id, _creationTime: sourceCreatedAt });
         };
       const value = Reflect.get(source(), key);
       return typeof value === 'function' ? value.bind(source()) : value;

@@ -13,6 +13,7 @@ export async function metricContextCoverage(
   const { metricContextCoverage: coverage, sourceAuthority, sourceCutover } = project;
   if (
     sourceAuthority?.mode !== 'server' ||
+    project.metricContextGap !== undefined ||
     coverage?.generation !== metricAliasGeneration ||
     !Number.isFinite(coverage.from) ||
     !Number.isFinite(coverage.to) ||

@@ -21,6 +21,14 @@ export function indexStorage(schema, tables, includeIndex = () => true) {
   return { entries, keyBytes };
 }
 
+export function metricAliasIndexStorage(schema, tables) {
+  return indexStorage(schema, {
+    projectMetricFacts: new Map(
+      [...tables.projectMetricFacts].filter(([, row]) => row.key.startsWith('metric-context-v1:')),
+    ),
+  });
+}
+
 // The controller ledger deliberately excludes provider dispatch. Measure one
 // real, metadata-only Actions export claim for each check as a separate floor:
 // later lease/export/dispatch updates also write the same index entry.

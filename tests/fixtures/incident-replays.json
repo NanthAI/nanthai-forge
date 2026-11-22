@@ -628,6 +628,8 @@
         "convex/projectHostedQueueRoom.ts",
         "convex/projectHostedQueueStatusWrite.ts",
         "convex/projectHostedSuperseded.ts",
+        "convex/projectMetricAliasWriter.ts",
+        "convex/projectMetricComposeMembership.ts",
         "convex/projectSourceJobs.ts",
         "convex/schedulerCancel.ts",
         "src/first-check-risk-v4.ts",

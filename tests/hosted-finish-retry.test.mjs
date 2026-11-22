@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { liveLineProjectionCounts } from './observer-projection-budget.mjs';
+import { liveLineProjectionCounts, metricAliasProjectionCounts } from './observer-projection-budget.mjs';
 import { ForgeError } from '../dist/errors.js';
 import test from 'node:test';
 import { landingBodyCounts } from './observer-projection-budget.mjs';
@@ -694,7 +694,11 @@ test('retry admission reads constant metadata with twice the dogfood landing his
     'constant selected metadata, independent of history size',
   );
   assert(
-    calls[0].writes - landingBodyCounts(calls[0]).writes - liveLineProjectionCounts(calls[0]).writes <= 25,
+    calls[0].writes -
+      landingBodyCounts(calls[0]).writes -
+      liveLineProjectionCounts(calls[0]).writes -
+      metricAliasProjectionCounts(calls[0]).writes <=
+      25,
     JSON.stringify(calls[0]),
   );
   t.diagnostic(

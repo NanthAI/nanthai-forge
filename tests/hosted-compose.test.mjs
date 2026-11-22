@@ -14,6 +14,20 @@ test('ordered multi-Lane compose publishes one clean immutable Candidate and lea
   const x = s.selection([a, b]);
   await s.prepare(x);
   await s.stage(x);
+  const memberships = () =>
+    [...s.tables.projectMetricFacts.values()].filter(row => row.sourceId === x.request.inputs.root.sha256);
+  assert.equal(memberships().length, 6, 'each pinned Lane contributes its Lane, Intent and failed-input key');
+  const stages = s.counts.filter(call => call.name === 'composeStage');
+  assert.equal(
+    stages.reduce((total, call) => total + call.metricAliasWrites, 0),
+    6,
+  );
+  for (const stage of stages) {
+    assert.equal(stage.writeRounds, stage.canonicalWriteRounds);
+    assert.equal(stage.readRangesByTable.projectMetricFacts ?? 0, 0);
+  }
+  await s.stage(x);
+  assert.equal(memberships().length, 6, 'replaying the original compose page does not add aliases');
   const beforeLanes = JSON.stringify(
     [...s.tables.projectHostedRecordHeads.values()].filter(r => r.kind === 'lane'),
   );

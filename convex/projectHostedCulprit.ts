@@ -66,6 +66,10 @@ import { ForgeError, invariant } from '../src/errors';
 import { lineMainState } from './projectLiveLineStore';
 import { findObject, objectRow } from './projectObjectFind';
 import { resolveObjects } from './projectGithubMirrorObjects';
+import { metricComposeMembershipWrites } from './projectMetricComposeMembership';
+import { finishReadOriginalDb } from './projectFinishReadWriter';
+import { landingRequestOriginalDb } from './projectLandingRequestBody';
+import { workRecordOriginalDb } from './projectWorkRecordWriter';
 
 type Identity = { projectId: Id<'hostedProjects'>; runId: string };
 type Recovery = {
@@ -95,6 +99,7 @@ type Recovery = {
   /** Newest first; a bounded hypothesis, never reported as a proven single culprit. */
   targets?: HostedAcceptance[];
   reverseLanes?: z.infer<typeof composeLaneSchema>[];
+  reverseMetricInputs?: Record<string, { intentId: string; sourceCreatedAt: number }>;
   reverseReceipts?: string[];
   reverseRunId?: string;
   reverseSubmissionId?: string;
@@ -1099,6 +1104,10 @@ async function prepareSystemCompose(
   if (!state.reverseReceipts.includes(receiptId)) {
     state.reverseLanes.push(selected);
     state.reverseReceipts.push(receiptId);
+    (state.reverseMetricInputs ??= {})[lane.id] = {
+      intentId: lane.intentId,
+      sourceCreatedAt: laneRow!._creationTime,
+    };
   }
   if (state.targets?.some(r => !state.reverseReceipts!.includes(r.id)))
     return prepareSystemRevert(ctx, project, row, state);
@@ -1136,14 +1145,36 @@ async function prepareSystemCompose(
     jobOperationId: operation.firstAttempt.ids.jobOperation!,
     status: 'ready',
   };
-  await ctx.db.insert('projectHostedComposes', {
-    projectId: project._id,
-    actor: project.owner,
-    operationId,
-    jobId: operation.firstAttempt.ids.job!,
-    culpritRunId: recoveryKey(state),
-    value: canonicalPayload(compose),
-  });
+  const missingMember = entries.some(entry => !state.reverseMetricInputs?.[entry.laneId]);
+  const raw = finishReadOriginalDb(landingRequestOriginalDb(workRecordOriginalDb(ctx.db)));
+  await Promise.all([
+    ctx.db.insert('projectHostedComposes', {
+      projectId: project._id,
+      actor: project.owner,
+      operationId,
+      jobId: operation.firstAttempt.ids.job!,
+      culpritRunId: recoveryKey(state),
+      value: canonicalPayload(compose),
+    }),
+    // A reversal first staged by older code can resume with no version time
+    // for earlier members. Keep canonical reports until a new bootstrap fills
+    // the root. This private scalar has no finish-read projection.
+    ...(missingMember && project.metricContextGap !== operationId
+      ? [raw.patch(project._id, { metricContextGap: operationId })]
+      : []),
+    ...inputs.pages.flatMap(page =>
+      metricComposeMembershipWrites(ctx, {
+        projectId: project._id,
+        root: inputs.manifest.root.sha256,
+        page: page.pin.sha256,
+        members: page.value.entries.flatMap(entry => {
+          if (!('laneId' in entry)) return [];
+          const member = state.reverseMetricInputs?.[entry.laneId];
+          return member ? [{ ...member, laneId: entry.laneId, head: entry.head }] : [];
+        }),
+      }),
+    ),
+  ]);
   for (const entry of entries)
     await ctx.db.insert('projectHostedComposeSelections', {
       projectId: project._id,

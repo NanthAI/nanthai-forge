@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import { synthetic, states } from './hosted-landing-batches-fixture.mjs';
 import { fixture, drain, settle, pendingTasks } from './hosted-stale-check-fixture.mjs';
 import { HOLD_ORDER, MEASURED } from './keep-the-run-scenarios.mjs';
+import { metricAliasProjectionCounts } from './observer-projection-budget.mjs';
 import { storageClock } from './storage-clock.mjs';
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
@@ -111,6 +112,7 @@ async function measureScenario(t, name) {
     documents: costs.reduce((sum, cost) => sum + cost.documents, 0),
     readBytes: costs.reduce((sum, cost) => sum + cost.readBytes, 0),
     writeBytes: costs.reduce((sum, cost) => sum + cost.writeBytes, 0),
+    aliasWriteBytes: costs.reduce((sum, cost) => sum + metricAliasProjectionCounts(cost).writeBytes, 0),
     // f65d8024: each existing feed event writes a measured 33-byte commit field.
     // Include only that field in the exact-cost allowance. New events' other bytes still count.
     feedCommitBytes:
@@ -155,7 +157,9 @@ async function measureScenario(t, name) {
 for (const [name, baseline] of Object.entries(MEASURED))
   test(`fa2c1383 cost guard: ${name} under a running full check stays within today's measured cost`, async t => {
     const measured = await measureScenario(t, name);
-    for (const [metric, limit] of Object.entries(ceiling(baseline, measured.feedCommitBytes)))
+    for (const [metric, limit] of Object.entries(
+      ceiling(baseline, measured.feedCommitBytes + measured.aliasWriteBytes),
+    ))
       assert(measured[metric] <= limit, `${metric} ${measured[metric]} > ${limit}`);
   });
 

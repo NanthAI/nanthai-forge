@@ -50,6 +50,8 @@ import { settleEndedBatch } from './projectHostedLandingBatchSettle';
 export type { LandingChannel } from './projectHostedLandingEvents';
 export { landingQueue, ensureLandingQueue, recordLandingObservation } from './projectHostedLandingEvents';
 import { recordLandingObservation } from './projectHostedLandingEvents';
+import { metricAliasRows, withMetricAliases } from './projectMetricAliasWriter';
+import { metricAttemptSource } from './projectMetricSourceRow';
 export type LandingIdentity = {
   projectId: Id<'hostedProjects'>;
   submissionId: string;
@@ -138,13 +140,27 @@ export async function insertLandingAttempt(ctx: MutationCtx, input: HostedLandin
     )
     .unique();
   invariant(!sameNumber, 'WORK_STALE', 'The next landing attempt was already selected.');
-  await ctx.db.insert('projectHostedLandingAttempts', {
+  const row = {
     projectId: attempt.projectId as Id<'hostedProjects'>,
     submissionId: attempt.submissionId,
     attemptId: attempt.id,
     number: attempt.number,
     value,
-  });
+  };
+  // Convex advances _creationTime from the same transaction clock. The
+  // reader widens the hint range and checks the real creation timestamp.
+  const sourceCreatedAt = Date.now();
+  await ctx.db.insert(
+    'projectHostedLandingAttempts',
+    withMetricAliases(
+      row,
+      metricAliasRows(row.projectId, row.attemptId, {
+        stream: 'attempts',
+        sourceCreatedAt,
+        row: metricAttemptSource({ ...row, _creationTime: sourceCreatedAt }),
+      }),
+    ),
+  );
   pinsFor(ctx).set(`${attempt.projectId}:${attempt.id}`, attempt);
 }
 export async function writeLanding(

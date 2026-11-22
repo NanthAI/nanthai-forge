@@ -39,6 +39,7 @@ import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { savePin } from '../src/hosted-save';
 import { invariant } from '../src/errors';
+import { metricComposeMembershipWrites } from './projectMetricComposeMembership';
 import { report } from './errors';
 import { markConflictLand } from './projectHostedConflicts';
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
@@ -192,6 +193,7 @@ export const stage = mutation({
       );
       await saveObject(ctx, input.projectId, pin);
       const contractMembers = new Map<string, Awaited<ReturnType<typeof semanticMember>>>();
+      const metricMembers: Parameters<typeof metricComposeMembershipWrites>[1]['members'] = [];
       for (const value of page.entries) {
         const entry = (input.kind === 'inputs' ? composeLaneSchema : composeDependencySchema).parse(value);
         const key = 'laneId' in entry ? entry.laneId : entry.candidateId;
@@ -209,7 +211,10 @@ export const stage = mutation({
         invariant(!duplicate || input.kind === 'dependencies', 'BAD_ARGUMENT', 'Select each Lane once.');
         let laneActor: string | undefined;
         if ('laneId' in entry) {
-          const { lane, ownerOnly } = await saveLaneRecord(ctx, { ...auth, laneId: entry.laneId });
+          const { lane, ownerOnly, sourceCreatedAt } = await saveLaneRecord(ctx, {
+            ...auth,
+            laneId: entry.laneId,
+          });
           // Landing a Lane's work is its author's (or the project owner's) choice.
           requireLaneSourceAuthority(project, lane, auth.actor);
           requireLaneHolder(lane, auth.actor, await laneSession(ctx, state.request.holderSessionId));
@@ -219,6 +224,7 @@ export const stage = mutation({
             'WORK_STALE',
             'Selected Lane changed or belongs to another Intent.',
           );
+          metricMembers.push({ laneId: lane.id, intentId: lane.intentId, head: entry.head, sourceCreatedAt });
           if (lane.earlyResolution && !lane.stack?.detached) {
             state.earlyResolutions = [...(state.earlyResolutions ?? []), lane.earlyResolution];
           }
@@ -303,12 +309,20 @@ export const stage = mutation({
       );
       state[input.kind] = next;
       if (state.inputs.next === null && state.dependencies.next === null) state.status = 'ready';
-      await ctx.db.insert('projectHostedComposePages', {
-        ...auth,
-        kind: input.kind,
-        index: input.index,
-        digest: pin.sha256,
-      });
+      await Promise.all([
+        ctx.db.insert('projectHostedComposePages', {
+          ...auth,
+          kind: input.kind,
+          index: input.index,
+          digest: pin.sha256,
+        }),
+        ...metricComposeMembershipWrites(ctx, {
+          projectId: input.projectId,
+          root: manifest.root.sha256,
+          page: pin.sha256,
+          members: metricMembers,
+        }),
+      ]);
       await writeComposeState(ctx, row._id, state);
       return canonicalPayload(state);
     } catch (error) {

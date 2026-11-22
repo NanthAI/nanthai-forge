@@ -6,6 +6,7 @@ import { internal } from './_generated/api';
 import { nextActivityHour } from './accountProjectOrderHour';
 import { readFlowLandings } from './projectLiveLineRecovery';
 import { flowDay, flowMain, HOUR_MS, stepFlow, utcDayStart, type FlowStep } from '../src/flow-day';
+import { metricAliasGeneration } from '../src/self-metrics-context';
 
 type Db = MutationCtx['db'];
 type Mark = Doc<'projectLiveLineLanes'>;
@@ -200,6 +201,12 @@ export async function writeLineMain(
   const value = old ? JSON.parse(old.value) : {};
   if (firstSequence !== undefined && (value.landingSequence ?? -1) >= firstSequence) return;
   if (firstSequence === undefined && JSON.stringify(value.main) === JSON.stringify(main)) return;
+  const previousSequence = value.landingSequence ?? null;
+  const continuity = value.metricContinuity;
+  const carried =
+    continuity?.generation === metricAliasGeneration &&
+    continuity.head === value.main?.head &&
+    continuity.sequence === previousSequence;
   // Seven UTC day buckets share this existing read/write. Replays and check-display patches do not count twice.
   // A new landing moves the head or, for a batch whose receipts leave main's tree as it was, the time: either counts.
   // A replay sends the same snapshot and returned above; a check-display patch keeps head and time.
@@ -242,6 +249,17 @@ export async function writeLineMain(
       value.publicWeek = { since: week.since, lastAt: at, days };
     }
   }
+  // Only a coverage grant starts continuity. A writer returning after a
+  // missed acceptance cannot turn an old stamp into a current one.
+  if (firstSequence !== undefined && value.landingSequence !== previousSequence) {
+    if (carried && (previousSequence === null || firstSequence === previousSequence + 1))
+      value.metricContinuity = {
+        generation: metricAliasGeneration,
+        head: main.head,
+        sequence: value.landingSequence,
+      };
+    else delete value.metricContinuity;
+  } else if (value.main?.head !== main.head) delete value.metricContinuity;
   value.main = main;
   const at = main.at ? Date.parse(main.at) : NaN;
   const hour = ctx.scheduler && Number.isFinite(at) ? nextActivityHour(value, at) : null;

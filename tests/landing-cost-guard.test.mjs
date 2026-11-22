@@ -7,7 +7,12 @@ import { assertCommandWeight } from '../scripts/agent-weight.mjs';
 import test from 'node:test';
 import { compactDiscardedChecks } from './landing-ticket-fixture.mjs';
 import { randomUUID } from 'node:crypto';
-import { indexEntriesPerWrite, indexStorage, measureIndexExportClaims } from './convex-index-cost.mjs';
+import {
+  indexEntriesPerWrite,
+  indexStorage,
+  measureIndexExportClaims,
+  metricAliasIndexStorage,
+} from './convex-index-cost.mjs';
 const indexSchema = (await import(moduleUrl('../convex/schema.ts'))).default;
 import { storageClock as fixedClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
@@ -317,6 +322,10 @@ function meter(
       const runtimes = await Promise.all(actions.map(kind));
       return {
         reuseCapture,
+        metricAliasWrites: sum('metricAliasWrites'),
+        metricAliasReadRanges: counts.reduce((n, c) => n + (c.readRangesByTable.projectMetricFacts ?? 0), 0),
+        writeRounds: sum('writeRounds'),
+        canonicalWriteRounds: sum('canonicalWriteRounds'),
         readDocuments: sum('documents'),
         dataRecordCalls: counts.filter(c => c.touched.includes('projectWorkDataRecords')).length,
         queries: counts.filter(c => c.query && c.name !== 'observerBudgetPage').length,
@@ -360,6 +369,7 @@ function meter(
         exportIndexEntriesWritten: exports.reduce((n, c) => n + c.indexEntriesWritten, 0),
         exportClaims: exports.length,
         storedIndexes: indexStorage(indexSchema, f.tables),
+        storedMetricAliases: metricAliasIndexStorage(indexSchema, f.tables),
         r2ClassA: r2.a,
         r2ClassB: r2.b,
         r2BytesPut: r2.bytesPut,
@@ -868,6 +878,14 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   // Retain the current six-landing cost mix; extend it by one real batch to
   // measure the brief's ten-landing index workload without changing its ledger.
   const ten = [...Object.values(baseline.scenarios), await batch(t, { indexExports: true })];
+  assert(
+    ten.some(scenario => scenario.metricAliasWrites > 0),
+    'the guard exercises the live alias writers',
+  );
+  for (const scenario of ten) {
+    assert.equal(scenario.writeRounds, scenario.canonicalWriteRounds, 'alias leaves add zero write rounds');
+    assert.equal(scenario.metricAliasReadRanges, 0, 'landing never reads metric aliases');
+  }
   t.diagnostic(
     `tenLandingIndexes ${JSON.stringify({
       landings: ten.reduce((n, s) => n + s.landings, 0),
@@ -875,7 +893,10 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
       exportClaims: ten.reduce((n, s) => n + s.exportClaims, 0),
       exportWritten: ten.reduce((n, s) => n + s.exportIndexEntriesWritten, 0),
       removed: ten.reduce((n, s) => n + s.indexEntriesRemoved, 0),
+      metricAliasWrites: ten.map(s => s.metricAliasWrites),
+      writeRounds: ten.map(s => s.writeRounds),
       stored: ten.map(s => s.storedIndexes),
+      storedMetricAliases: ten.map(s => s.storedMetricAliases),
       arrivals: ten.map(s => s.feed.arrivalIndexes),
     })}`,
   );
@@ -890,20 +911,31 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   // f65d8024: commit ordering adds 20 custom index writes across ten events.
   // Each adds 357 modeled key bytes to the existing per-project and per-Lane event-time keys.
   const indexBudget = storageBudgets.tenLandingIndexes;
+  const aliasWrites = ten.reduce((n, s) => n + s.metricAliasWrites, 0);
+  // 0de95ef2: the separately priced aliases must fit their measured budget.
+  // The original index ceilings continue to cover the canonical writes.
+  assert(aliasWrites <= indexBudget.metricAliases.written, 'ten-landing metric alias write budget');
   assert.equal(
     ten.reduce((n, s) => n + s.landings, 0),
     indexBudget.landings,
   );
   assert(
-    ten.reduce((n, s) => n + s.indexEntriesWritten + s.exportIndexEntriesWritten, 0) <= indexBudget.written,
+    ten.reduce((n, s) => n + s.indexEntriesWritten + s.exportIndexEntriesWritten, 0) - aliasWrites <=
+      indexBudget.written,
     'ten-landing custom index writes must not exceed the accepted storage budget',
   );
   for (const [i, scenario] of ten.entries())
-    for (const metric of ['entries', 'keyBytes'])
+    for (const metric of ['entries', 'keyBytes']) {
       assert(
-        scenario.storedIndexes[metric] <= indexBudget.stored[i][metric],
+        scenario.storedMetricAliases[metric] <= indexBudget.metricAliases.stored[i][metric],
+        `scenario ${i}: stored metric alias ${metric} budget`,
+      );
+      assert(
+        scenario.storedIndexes[metric] - scenario.storedMetricAliases[metric] <=
+          indexBudget.stored[i][metric],
         `scenario ${i}: stored index ${metric} must not grow without a storage decision`,
       );
+    }
   t.diagnostic(`measured in ${Math.round(performance.now() - started)} ms`);
   assert.equal(baseline.landings, 6);
   assert(
@@ -1495,13 +1527,24 @@ test('storage per landing ratchets every table on fresh and dogfood-shaped check
   // index key bytes to the immediate and retained budgets in both scenarios.
   for (const [name, scenario] of Object.entries(scenarios)) {
     const indexBudget = storageBudgets[name].indexes;
-    assert(scenario.indexes.written <= indexBudget.written, `${name}: custom index write budget`);
+    const aliasBudget = storageBudgets[name].metricAliases;
+    assert(scenario.metricAliases.written <= aliasBudget.written, `${name}: metric alias index write budget`);
+    assert(
+      scenario.indexes.written - scenario.metricAliases.written <= indexBudget.written,
+      `${name}: custom index write budget`,
+    );
     for (const phase of ['before', 'immediate', 'retained'])
-      for (const metric of ['entries', 'keyBytes'])
+      for (const metric of ['entries', 'keyBytes']) {
         assert(
-          scenario.indexes[phase][metric] <= indexBudget[phase][metric],
+          scenario.metricAliases[phase][metric] <= aliasBudget[phase][metric],
+          `${name}/${phase}: stored metric alias index ${metric} budget`,
+        );
+        assert(
+          scenario.indexes[phase][metric] - scenario.metricAliases[phase][metric] <=
+            indexBudget[phase][metric],
           `${name}/${phase}: stored index ${metric} budget`,
         );
+      }
     assert.equal(scenario.capsule.classA, 1, `${name}: one complete capsule PUT`);
     assert(scenario.capsule.compressedBytes < 100_000, `${name}: capsule egress budget`);
     // b149b16b: batched capture, 64-row publish and the V8 runtime cut a pack from 28 serial

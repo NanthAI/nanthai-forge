@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { batchesFixture, states } from '../hosted-landing-batches-fixture.mjs';
 import { landingApi } from '../hosted-finish-fixture.mjs';
+import { metricAliasProjectionCounts } from '../observer-projection-budget.mjs';
 export const overlapBase = 'export const a = 0;\n// gap\nexport const b = 0;\n';
 export const overlapEdits = [
   'export const a = 1;\n// gap\nexport const b = 0;\n',
@@ -121,6 +122,7 @@ export async function drive(
     calls: f.counts.length,
     readBytes: f.counts.reduce((n, c) => n + c.readBytes, 0),
     writeBytes: f.counts.reduce((n, c) => n + c.writeBytes, 0),
+    aliasWriteBytes: f.counts.reduce((n, c) => n + metricAliasProjectionCounts(c).writeBytes, 0),
     idle: f.pending().filter(task => !/MainAudit:start|LandingStall/.test(task.name)).length,
   };
   t.diagnostic(JSON.stringify({ ...result, ids: undefined, firstCheck: f.reuseDecisions }));

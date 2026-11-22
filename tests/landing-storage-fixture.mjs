@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
-import { indexStorage } from './convex-index-cost.mjs';
+import { indexStorage, metricAliasIndexStorage } from './convex-index-cost.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { synthetic } from './hosted-landing-batches-fixture.mjs';
@@ -171,6 +171,7 @@ export async function landingStorage(
   });
   const before = storedBytes(f);
   const indexBefore = indexStorage(schema, f.tables);
+  const aliasBefore = metricAliasIndexStorage(schema, f.tables);
   await storageSample?.('before', f);
   const state = await f.enqueue(f.request());
   await f.drain();
@@ -194,6 +195,7 @@ export async function landingStorage(
     );
   const immediate = delta();
   const indexImmediate = indexStorage(schema, f.tables);
+  const aliasImmediate = metricAliasIndexStorage(schema, f.tables);
   const fixedImmediate = fixedProjectStorage(f);
   caller = 'maintenance';
   let capsule = null;
@@ -271,6 +273,7 @@ export async function landingStorage(
   await journalSample?.(f);
   const retained = delta();
   const indexRetained = indexStorage(schema, f.tables);
+  const aliasRetained = metricAliasIndexStorage(schema, f.tables);
   await storageSample?.('retained', f);
   requestMeter.mock.restore();
   return {
@@ -280,6 +283,12 @@ export async function landingStorage(
       immediate: indexImmediate,
       retained: indexRetained,
       written: f.counts.reduce((n, c) => n + c.indexEntriesWritten, 0),
+    },
+    metricAliases: {
+      before: aliasBefore,
+      immediate: aliasImmediate,
+      retained: aliasRetained,
+      written: f.counts.reduce((n, c) => n + c.metricAliasWrites, 0),
     },
     perProject: { immediate: fixedImmediate, retained: fixedProjectStorage(f) },
     r2,

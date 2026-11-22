@@ -63,7 +63,11 @@ export async function saveLaneRecord(
 ) {
   const row = await readHostedRecord(ctx, { ...input, kind: 'lane', key: input.laneId });
   invariant(row, 'NOT_FOUND', 'Hosted Lane not found on this project.');
-  return { lane: hostedLaneSchema.parse(JSON.parse(row.value)), ownerOnly: row.ownerOnly === true };
+  return {
+    lane: hostedLaneSchema.parse(JSON.parse(row.value)),
+    ownerOnly: row.ownerOnly === true,
+    sourceCreatedAt: row._creationTime,
+  };
 }
 export async function saveLane(...args: Parameters<typeof saveLaneRecord>) {
   return (await saveLaneRecord(...args)).lane;

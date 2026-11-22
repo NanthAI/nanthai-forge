@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { batchesFixture, states } from './hosted-landing-batches-fixture.mjs';
 import { syncFixture } from './hosted-sync-fixture.mjs';
 import { compose } from './hosted-finish-fixture.mjs';
+import { metricAliasProjectionCounts } from './observer-projection-budget.mjs';
 
 export async function drainReady(f, skip = () => false) {
   for (let n = 0; ; n++) {
@@ -144,6 +145,7 @@ export const totals = f => ({
   calls: f.counts.length,
   reads: f.counts.reduce((n, r) => n + r.documents, 0),
   writes: f.counts.reduce((n, r) => n + r.writes, 0),
+  metricAliasWrites: f.counts.reduce((n, r) => n + metricAliasProjectionCounts(r).writes, 0),
   readBytes: f.counts.reduce((n, r) => n + r.readBytes, 0),
   writeBytes: f.counts.reduce((n, r) => n + r.writeBytes, 0),
 });

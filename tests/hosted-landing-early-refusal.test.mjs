@@ -4,7 +4,11 @@
 // other at each turn (wave 3b, 2026-11-05: 558 -> 559 -> 560 -> 563 took 4.3
 // minutes before their one cohort formed).
 import test from 'node:test';
-import { feedProjectionCounts, landingBodyCounts } from './observer-projection-budget.mjs';
+import {
+  feedProjectionCounts,
+  landingBodyCounts,
+  metricAliasProjectionCounts,
+} from './observer-projection-budget.mjs';
 import { ticketState, logicalTicket } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
@@ -79,6 +83,7 @@ async function wave(t, { count = 5, batchMaxSize = null, stop = () => false } = 
     documentsRead: spent.reduce((n, c) => n + c.documents - landingBodyCounts(c).reads, 0),
     documentsWritten: spent.reduce((n, c) => n + c.writes - landingBodyCounts(c).writes, 0),
     feedWrites: spent.reduce((n, c) => n + feedProjectionCounts(c).writes, 0),
+    metricAliasWrites: spent.reduce((n, c) => n + metricAliasProjectionCounts(c).writes, 0),
     maintenanceWrites: spent.reduce((n, c) => n + (c.maintenanceWrites ?? 0), 0),
     readBytes: spent.reduce((n, c) => n + c.readBytes, 0),
     writeBytes: spent.reduce((n, c) => n + c.writeBytes, 0),
@@ -108,7 +113,8 @@ test('stale Lane proofs behind a refusal recompose together into one cohort', as
   // No more Convex work than the serial path (BASELINE): not one more call.
   assert(budget.transactions <= BASELINE.transactions, JSON.stringify(budget));
   assert(
-    budget.documentsWritten - budget.maintenanceWrites - budget.feedWrites <= BASELINE.documentsWritten,
+    budget.documentsWritten - budget.maintenanceWrites - budget.feedWrites - budget.metricAliasWrites <=
+      BASELINE.documentsWritten,
     JSON.stringify(budget),
   );
   assert(budget.documentsRead <= BASELINE.documentsRead, JSON.stringify(budget));

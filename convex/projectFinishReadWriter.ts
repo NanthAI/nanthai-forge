@@ -6,6 +6,7 @@ import { landingRequestOriginalDb } from './projectLandingRequestBody';
 import { workRecordOriginalDb } from './projectWorkRecordWriter';
 import type { MutationCtx } from './_generated/server';
 import { metricReadWriter } from './projectMetricReadWriter';
+import { writeWithMetricAliases } from './projectMetricAliasWriter';
 import { planHeaderFits, planProjectHeaderWanted } from './projectPlanHeaderStore';
 import {
   finishReadFields,
@@ -97,7 +98,7 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
           if (!(table in finishReadFields)) return db.insert(table as never, value as never);
           return serial(async () => {
             const kind = table as FinishReadKind;
-            const id = await db.insert(kind, value as never);
+            const id = await writeWithMetricAliases(db, value, () => db.insert(kind, value as never));
             for (const selection of selections(kind)) {
               const row = project(kind, selection, { ...value, _id: id });
               if (fits(kind, selection, row, value)) await db.insert('projectFinishReadRows', row);
@@ -111,8 +112,12 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
           let selected = value;
           const mutate = async () => {
             if (key === 'delete') await db.delete(id as never);
-            else if (key === 'replace') await db.replace(id as never, selected as never);
-            else await db.patch(id as never, selected as never);
+            else
+              await writeWithMetricAliases(db, selected!, () =>
+                key === 'replace'
+                  ? db.replace(id as never, selected as never)
+                  : db.patch(id as never, selected as never),
+              );
           };
           if (!kind) {
             if (key === 'patch' && db.normalizeId('projectHostedOverlapLanes', id))

@@ -24,7 +24,9 @@ export function observerProjectionBudget(count) {
   // controller ceilings, and guard physical companion fanout separately. Byte meters
   // below and landing-cost-guard still include every cold read/write.
   const { reads: bodyReads, writes: bodyWrites, ranges: bodyRanges } = landingBodyCounts(count);
-  const sourceWrites = count.writes - projectionWrites - maintenanceWrites - bodyWrites - feed.writes;
+  const aliases = metricAliasProjectionCounts(count);
+  const sourceWrites =
+    count.writes - projectionWrites - maintenanceWrites - bodyWrites - feed.writes - aliases.writes;
   assert(
     projectionReads - markReads - lineMetaReads <= 2 * sourceWrites + 2,
     'at most two selected observer roles per source write, plus project lookup',
@@ -57,7 +59,8 @@ export function observerProjectionBudget(count) {
       feed.ranges,
     writes: sourceWrites,
     readBytes: count.readBytes - projectionReadBytes - feed.readBytes,
-    writeBytes: count.writeBytes - projectionWriteBytes - maintenanceWriteBytes - feed.writeBytes,
+    writeBytes:
+      count.writeBytes - projectionWriteBytes - maintenanceWriteBytes - feed.writeBytes - aliases.writeBytes,
     maintenanceWrites,
     maintenanceWriteBytes,
     bodyReads,
@@ -67,6 +70,19 @@ export function observerProjectionBudget(count) {
     projectionReadBytes,
     projectionWriteBytes,
   };
+}
+
+/** Item 0de95ef2 protects the controller's original ceilings while the
+ * landing-cost guard separately budgets every physical alias write. */
+export function metricAliasProjectionCounts(count) {
+  const writes = count.metricAliasWrites ?? 0;
+  const writeBytes = count.metricAliasWriteBytes ?? 0;
+  if (writes) {
+    assert.equal(count.writeRounds, count.canonicalWriteRounds, 'aliases share the canonical write round');
+    assert.equal(count.readRangesByTable?.projectMetricFacts ?? 0, 0, 'the controller does not read aliases');
+    assert(writeBytes <= writes * 512, 'aliases contain compact lookup keys');
+  }
+  return { writes, writeBytes };
 }
 
 /** Feed I/O is charged in the physical totals and its own fixture budget. */

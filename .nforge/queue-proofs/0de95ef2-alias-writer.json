@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedCompose.ts": "e46e89cca41a9d2f8bfe0b7124b24c081960b1ec6f407ffdba89bd28e4b985bd",
+    "convex/projectHostedLandingStore.ts": "93a2f2a8e580b618e1acbeec5ef4ea5a4fb73d5be90ec122e0f0e0d395f8554d",
+    "convex/projectMetricAliasWriter.ts": "733d960bfa2448e268baa7025d895fa4b89a6e607d8ddfd474bb1710250f50fb",
+    "convex/projectMetricComposeMembership.ts": "1dc4e72fb035c06d5b67c951dee6e7195b9795276a65a23afd63aaa745b228c6"
+  },
+  "replay": {
+    "incident": "a7de3a93",
+    "test": "incident a7de3a93 replay: an unacknowledged dispatch is re-checked by the stall alarm, then the head lands",
+    "receipt": "ca6bacde-88cd-4790-951a-986c142f39b4"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Aa95d0ca1-8c43-466c-b14f-249d370baf76",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Aa95d0ca1-8c43-466c-b14f-249d370baf76/root/review_writer",
+    "receipt": "ca6bacde-88cd-4790-951a-986c142f39b4"
+  }
+}

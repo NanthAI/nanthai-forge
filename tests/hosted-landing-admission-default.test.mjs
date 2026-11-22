@@ -29,7 +29,8 @@ for (const { cell, history } of [
       admissionQueueOnlyAudits: result.audits + result.deferredAudits,
       admissionQueueOnlyCalls: result.calls,
       admissionQueueOnlyDocumentsRead: result.documentsRead,
-      admissionQueueOnlyDocumentsWritten: result.documentsWritten - result.liveLineWrites - result.feedWrites,
+      admissionQueueOnlyDocumentsWritten:
+        result.documentsWritten - result.liveLineWrites - result.feedWrites - result.metricAliasWrites,
       admissionQueueOnlySubmitOverServiceMs:
         result.submitMaxMs - Math.max(...cell.entries.map(e => e.checkMs)),
     };
@@ -44,6 +45,7 @@ for (const { cell, history } of [
     assert.equal(result.idle, 0);
     assert.equal(result.landed.length, 10);
     assert.equal(result.feedWrites, result.landed.length, 'one feed insert per landed Lane');
+    assert.equal(result.metricAliasWrites, cell.concurrency === 10 ? 151 : 150);
     t.diagnostic(
       JSON.stringify({
         N: cell.concurrency,
@@ -51,6 +53,7 @@ for (const { cell, history } of [
         physicalWrites: result.documentsWritten,
         liveLineWrites: result.liveLineWrites,
         feedWrites: result.feedWrites,
+        metricAliasWrites: result.metricAliasWrites,
         peakRssBytes: process.resourceUsage().maxRSS * 1024,
       }),
     );

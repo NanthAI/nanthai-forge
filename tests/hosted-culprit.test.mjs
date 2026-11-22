@@ -1294,9 +1294,20 @@ test('incident 438e9ace: two passing landings fail together and a later failed a
 test('incident 438e9ace: detached admission reports preserve the passing-own-source proof and automatic pair recovery', t =>
   replaySystemReverse(t, { drill: true, pair: true, detachedOwn: true }));
 
+test('a resumed legacy pair reversal lands and records an incomplete metrics root', t =>
+  replaySystemReverse(t, { drill: true, pair: true, legacyMetricMember: true }));
+
 async function replaySystemReverse(
   t,
-  { firstCheck = false, conflict = false, held, drill = false, pair = false, detachedOwn = false } = {},
+  {
+    firstCheck = false,
+    conflict = false,
+    held,
+    drill = false,
+    pair = false,
+    detachedOwn = false,
+    legacyMetricMember = false,
+  } = {},
 ) {
   if (drill) t.mock.timers.enable({ apis: ['Date'], now: Date.parse(at) });
   const replayStarted = performance.now();
@@ -1426,6 +1437,7 @@ async function replaySystemReverse(
     seedRecord(f, reverseLane);
     await completeOperation(sync.request.operationId, { lane: { laneId: reverseLane.id }, status: 'merged' });
     f.patch('projectHostedSyncs', syncRow._id, { value: JSON.stringify({ ...sync, status: 'completed' }) });
+    if (legacyMetricMember && step > 0) delete recovery.reverseMetricInputs;
     delete recovery.uploads;
     f.patch('projectHostedOperations', row._id, { recovery: JSON.stringify(recovery) });
     await f.transaction('advance', culprit.advance, { projectId: f.projectId, runId: f.recoveryId() });
@@ -1450,6 +1462,8 @@ async function replaySystemReverse(
   assert.equal(JSON.parse(f.recovery().recovery).uploads.length, 3);
   const composeRow = [...f.tables.projectHostedComposes.values()][0],
     compose = JSON.parse(composeRow.value);
+  if (legacyMetricMember)
+    assert.equal(f.tables.hostedProjects.get(f.projectId).metricContextGap, compose.request.operationId);
   const candidate = {
     kind: 'candidate',
     id: compose.candidateId,
