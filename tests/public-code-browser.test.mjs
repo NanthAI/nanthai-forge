@@ -362,6 +362,21 @@ test('public code screens signed out: browse, read, history, nothing reaches Con
   await deepHistory.getByRole('link', { name: /Docs: the import format/ }).waitFor();
   assert.equal(await deepHistory.getByText('Looked through 96 landings.').count(), 0);
 
+  // What landed narrowed to one file (Item 3968a655): the same cached file-history GETs, step by step, and no
+  // Convex call; Look further back is the next GET.
+  const narrowed = await open('/-/ada/atlas/code?path=src/index.ts');
+  const narrowedList = narrowed.getByRole('region', { name: 'What landed' });
+  await narrowedList.getByText('Index: rebuild without downtime').waitFor();
+  assert.equal(await narrowedList.locator('.tbar .n').textContent(), '1 of 52 landings');
+  const stepsBack = () =>
+    asked.filter(path => path === `${code}/file-history/${hex('src/index.ts')}/2.json`).length;
+  const earlier = stepsBack();
+  await narrowedList.getByRole('button', { name: 'Look further back' }).click();
+  await narrowedList.getByRole('link', { name: /First landing/ }).waitFor();
+  assert.match(await narrowedList.locator('.path-foot').textContent(), /That is the first landing\./);
+  assert.equal(stepsBack(), earlier + 1, 'one cached GET per step back');
+  await noWrites(narrowed, 'narrowed history');
+
   // A private project and a missing one look the same: the read answers 404 for both.
   for (const path of ['/-/ada/private-one/code/files', '/-/nobody/atlas/code'])
     assert.match(

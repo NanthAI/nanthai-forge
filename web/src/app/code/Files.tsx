@@ -73,6 +73,7 @@ export function Files(props: CodeProps) {
     source.file?.path === path ||
     source.dirs.get(parent)?.entries.some(entry => entry.path === path && entry.kind !== 'dir');
   const before = landing ? landing.sequence + 1 : null;
+  const touched = Boolean(state && knownFile && (!pinned || (!history.loading && !exact.loading)));
   return (
     <>
       <Head trail={crumbsFor(route, projectName)} sentence={sentence}>
@@ -154,7 +155,7 @@ export function Files(props: CodeProps) {
             <h2>Landings that touched it</h2>
           </div>
           <div className="body">
-            {state && knownFile && (!pinned || (!history.loading && !exact.loading)) ? (
+            {touched ? (
               <FileHistory
                 key={JSON.stringify([projectId, state, path, before])}
                 projectId={projectId}
@@ -163,11 +164,13 @@ export function Files(props: CodeProps) {
                 route={route}
               />
             ) : null}
-            <div className="pf">
-              <A className="lk" href={hrefFor({ ...route, section: '', rest: landing?.receiptId ?? '' })}>
-                {landing ? 'This landing’s receipt' : 'Everything that landed'}
-              </A>
-            </div>
+            {landing || !touched ? (
+              <div className="pf">
+                <A className="lk" href={hrefFor({ ...route, section: '', rest: landing?.receiptId ?? '' })}>
+                  {landing ? 'This landing’s receipt' : 'Everything that landed'}
+                </A>
+              </div>
+            ) : null}
           </div>
         </section>
       </div>

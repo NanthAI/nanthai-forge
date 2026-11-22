@@ -2,17 +2,22 @@
 // What landed: landings on main, newest first (a timeline, DESIGN.md rule 13), beside the selected landing's receipt.
 // The list is one live page; earlier pages load on "Show earlier". The receipt adds two reads only for the landing
 // the reader opens: its evidence (the existing landings read) and what it changed (one source comparison).
+// Narrowed to one file (`?path=`, Item 3968a655) the list is that file's landings instead: one bounded read per step
+// back (projectCode:fileHistory), and the live page of every landing is not read at all.
 import { useState, type KeyboardEvent } from 'react';
 import { State, Who } from '../../ds';
 import { Head, crumbsFor } from '../Place';
 import { A } from '../frames';
 import { hrefFor } from '../paths';
+import { useSearch } from '../router';
 import { RegionBoundary, type CodeProps } from './CodePlace';
-import { ago, between, landedAt, landedBy, plural, titleOf } from './code-words';
+import { ago, between, landedAt, landedBy, pathHref, plural, timelinePath, titleOf } from './code-words';
+import { PathBar, PathFoot, PathNotice, pathSentence } from './FileHistory';
 import {
   useChanges,
   useCodeReceipt,
   useEvidence,
+  useFileHistory,
   useHistory,
   type CodeHistoryRow,
   type ProjectId,
@@ -31,39 +36,40 @@ function moveRows(event: KeyboardEvent<HTMLElement>) {
 
 export function History(props: CodeProps) {
   const { route, projectId, projectName } = props;
-  const history = useHistory(projectId);
-  const rows = history.rows;
+  const search = useSearch();
+  const path = timelinePath(`?${search.toString()}`);
+  const history = useHistory(projectId, { skip: path !== null });
+  const file = useFileHistory(projectId, path);
+  const rows = path ? file.rows : history.rows;
+  const loading = path ? file.loading : history.loading;
   const listed = rows.find(row => row.receiptId === route.rest) ?? (route.rest ? null : (rows[0] ?? null));
   const [retry, setRetry] = useState(0);
-  const receipt = useCodeReceipt(projectId, listed || history.loading ? '' : route.rest, retry);
+  const receipt = useCodeReceipt(projectId, listed || loading ? '' : route.rest, retry);
   const selected = listed ?? receipt.value?.landings.find(row => row.receiptId === route.rest) ?? null;
-  const today = new Date().toDateString();
-  const todays = rows.filter(row => new Date(row.at).toDateString() === today).length;
-  const allToday = todays === rows.length && history.next !== null;
-  const newest = rows[0];
-  const sentence = history.loading ? (
-    'What landed on main.'
-  ) : !rows.length ? (
-    'Nothing has landed on main yet. A landing appears here the moment it reaches main.'
-  ) : (
-    <>
-      <b>
-        {allToday ? 'At least ' : ''}
-        {plural(todays, 'landing')} today.
-      </b>{' '}
-      The newest landed {ago(newest!.at)}
-      {landedBy(newest!) ? `, by ${landedBy(newest!)}` : ''}.
-    </>
-  );
+  const at = (rest: string) => pathHref(hrefFor({ ...route, rest }), path);
+  const sentence = path ? pathSentence(path, file) : everySentence(history);
   return (
     <>
       <Head trail={crumbsFor(route, projectName)} sentence={sentence}>
-        <A className="btn sm" href={hrefFor({ ...route, section: 'files', rest: '' })}>
+        <A className="btn sm" href={hrefFor({ ...route, section: 'files', rest: path ?? '' })}>
           Read the files at main
         </A>
       </Head>
+      {path ? <PathNotice file={file} /> : null}
       <div className="panes code-h">
         <section className={`pane${route.rest ? ' off' : ''}`} aria-label="What landed" data-weight="ref">
+          <PathBar
+            key={path ?? ''}
+            route={route}
+            path={path}
+            count={
+              !path || file.loading || file.error
+                ? ''
+                : file.scanned === null
+                  ? plural(rows.length, 'landing')
+                  : `${rows.length.toLocaleString()} of ${plural(file.scanned, 'landing')}`
+            }
+          />
           <div className="th hrow" aria-hidden="true">
             <span>Landed</span>
             <span>Change</span>
@@ -71,25 +77,18 @@ export function History(props: CodeProps) {
             <span>Check</span>
           </div>
           <div className="body" onKeyDown={moveRows}>
-            {history.loading ? <Skeleton /> : null}
+            {loading ? <Skeleton /> : null}
             {rows.map(row => (
-              <A
+              <LandingRow
                 key={row.receiptId}
-                className={`row hrow${selected?.receiptId === row.receiptId ? ' sel' : ''}`}
-                href={hrefFor({ ...route, rest: row.receiptId })}
-                aria-current={selected?.receiptId === row.receiptId ? 'true' : undefined}
-              >
-                <span className="num t2" title={new Date(row.at).toLocaleString()}>
-                  {landedAt(row.at)}
-                </span>
-                <span className={`ttl${row.title ? '' : ' none'}`} dir="auto">
-                  {titleOf(row)}
-                </span>
-                <span className="who">{row.actor ? <Who handle={landedBy(row)!} /> : landedBy(row)}</span>
-                <span className="t2">{row.check ? 'Checked' : 'No check'}</span>
-              </A>
+                row={row}
+                href={at(row.receiptId)}
+                selected={selected?.receiptId === row.receiptId}
+              />
             ))}
-            {history.next ? (
+            {path ? (
+              <PathFoot file={file} clear={hrefFor({ ...route, rest: '' })} />
+            ) : history.next ? (
               <div className="pf">
                 <button
                   type="button"
@@ -120,7 +119,8 @@ export function History(props: CodeProps) {
                 route={route}
                 projectId={projectId}
                 row={selected}
-                loading={history.loading || receipt.loading}
+                listHref={at('')}
+                loading={loading || receipt.loading}
               />
             )}
           </RegionBoundary>
@@ -130,9 +130,54 @@ export function History(props: CodeProps) {
   );
 }
 
+function everySentence(history: ReturnType<typeof useHistory>) {
+  const rows = history.rows;
+  if (history.loading) return 'What landed on main.';
+  if (!rows.length)
+    return 'Nothing has landed on main yet. A landing appears here the moment it reaches main.';
+  const today = new Date().toDateString();
+  const todays = rows.filter(row => new Date(row.at).toDateString() === today).length;
+  const newest = rows[0]!;
+  return (
+    <>
+      <b>
+        {todays === rows.length && history.next !== null ? 'At least ' : ''}
+        {plural(todays, 'landing')} today.
+      </b>{' '}
+      The newest landed {ago(newest.at)}
+      {landedBy(newest) ? `, by ${landedBy(newest)}` : ''}.
+    </>
+  );
+}
+
+function LandingRow({ row, href, selected }: { row: CodeHistoryRow; href: string; selected: boolean }) {
+  return (
+    <A
+      className={`row hrow${selected ? ' sel' : ''}`}
+      href={href}
+      aria-current={selected ? 'true' : undefined}
+    >
+      <span className="num t2" title={new Date(row.at).toLocaleString()}>
+        {landedAt(row.at)}
+      </span>
+      <span className={`ttl${row.title ? '' : ' none'}`} dir="auto">
+        {titleOf(row)}
+      </span>
+      <span className="who">
+        {row.actor ? (
+          <Who handle={landedBy(row)!} />
+        ) : (
+          (landedBy(row) ?? <span className="nr">not reported</span>)
+        )}
+      </span>
+      <span className="t2">{row.check ? 'Checked' : 'No check'}</span>
+    </A>
+  );
+}
+
 function Skeleton() {
   return (
-    <div aria-busy="true" aria-label="Loading what landed">
+    <div role="status" aria-busy="true" aria-label="Loading what landed">
       {Array.from({ length: 6 }, (_, i) => (
         <div key={i} className="row hrow" aria-hidden="true">
           <span className="sk" />
@@ -150,18 +195,21 @@ function Receipt({
   route,
   projectId,
   row,
+  listHref,
   loading,
 }: {
   route: CodeProps['route'];
   projectId: ProjectId;
   row: CodeHistoryRow | null;
+  /** What landed, as narrowed: where the phone's way back goes. */
+  listHref: string;
   loading: boolean;
 }) {
   const evidence = useEvidence(projectId, row);
   const changes = useChanges(projectId, row);
   const [all, setAll] = useState(false);
   const back = (
-    <A className="lk hide-dt" href={hrefFor({ ...route, rest: '' })}>
+    <A className="lk hide-dt" href={listHref}>
       Everything that landed
     </A>
   );
@@ -172,7 +220,14 @@ function Receipt({
           <h2>Receipt</h2>
         </div>
         <div className="body pad">
-          <p className="t2">
+          {loading ? (
+            <div className="sk-rows" aria-hidden="true">
+              <div className="sk" />
+              <div className="sk" />
+              <div className="sk" />
+            </div>
+          ) : null}
+          <p className={loading ? 'sr' : 't2'} role={loading ? 'status' : undefined}>
             {loading
               ? 'Reading the receipt…'
               : route.rest

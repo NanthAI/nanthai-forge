@@ -755,6 +755,9 @@ layer out of both first paints.
 - Code (`web/src/app/code/`, lazy): `/-/{handle}/{project}/code` lists what
   landed, newest first, one receipt per row (`projectCode:history`, 25
   receipts a page, receipt fields only); `code/{receiptId}` opens one receipt.
+  `code?path={file}` narrows the list to one file: it reads that file's
+  history one step at a time (`projectCode:fileHistory`, no subscription) and
+  not the live page of every landing; steps already read stay for the visit.
   `code/files/{path}` reads files at main, and `?at={64-hex State}` pins any
   landing; `#L42` selects a line. `projectCodeBrowse:read` returns one folder
   page (200 entries) with the first page of each of its subfolders (at most

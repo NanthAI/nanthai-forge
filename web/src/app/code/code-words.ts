@@ -16,6 +16,19 @@ export function landedBy(row: Pick<CodeHistoryRow, 'actor' | 'agent' | 'agentRun
 export const titleOf = (row: Pick<CodeHistoryRow, 'title' | 'head'>) =>
   row.title ?? `Landing ${short(row.head)}`;
 
+/** What landed narrowed to one file: `?path=` (Item 3968a655), read verbatim (a file name may start with a space).
+ * Anything else lists every landing. */
+export function timelinePath(search: string): string | null {
+  const path = new URLSearchParams(search).get('path') ?? '';
+  return path && path.length <= 4096 ? path : null;
+}
+/** A path typed in the find field: edge spaces and a leading slash are typing, not part of the name. */
+export const typedPath = (typed: string): string | null =>
+  timelinePath(`?${new URLSearchParams({ path: typed.trim().replace(/^\/+/, '') })}`);
+/** An address of What landed that keeps the path it is narrowed to. */
+export const pathHref = (href: string, path: string | null) =>
+  path ? `${href}?path=${encodeURIComponent(path).replace(/%2F/g, '/')}` : href;
+
 export function selectedLine(hash: string): number | null {
   const match = /^#L(\d{1,7})$/.exec(hash);
   return match ? Number(match[1]) : null;

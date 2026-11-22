@@ -7,11 +7,25 @@
   .code-f { grid-template: minmax(0, 1fr) / 250px minmax(0, 1fr) 340px; }
   .code-h > .pane, .code-f > .pane { display: flex; flex-direction: column; }
   .code-h .body, .code-f .body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
-  .hrow { grid-template-columns: 72px minmax(0, 1fr) 160px 92px; min-height: 44px; color: inherit; }
+  /* 96px holds "Yesterday" and "9 Nov 2025" in the mono on one line. */
+  .hrow { grid-template-columns: 96px minmax(0, 1fr) 160px 92px; min-height: 44px; color: inherit; }
   .hrow > .num { white-space: nowrap; }
   .th.hrow { min-height: 30px; }
   a.hrow:focus-visible { outline-offset: -2px; }
-  .hrow .ttl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The Wrap Rule: a title wraps to two lines, never one line cut mid-word. */
+  .hrow .ttl { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; margin-block: 6px; }
+  .tbar .chip { max-width: min(100%, 520px); }
+  /* Cut at the start, so the file name stays (the leading LRM keeps the path's own order). */
+  .tbar .chip .path-cut { direction: rtl; unicode-bidi: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  /* A long run name shrinks to an ellipsis inside the By column instead of running under Check. */
+  .hrow > .who { min-width: 0; overflow: hidden; }
+  .hrow > .who .a-run { flex-shrink: 1; }
+  /* A receipt being read: three still bars where its title, words and facts will be. */
+  .sk-rows { display: grid; gap: 22px; padding-block: 6px; }
+  .sk-rows .sk:nth-child(odd) { width: 62%; }
+  .sk-rows .sk:nth-child(even) { width: 84%; }
+  .path-foot { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-3); align-items: center; }
+  .path-none { display: grid; gap: var(--s-3); justify-items: start; }
   .hrow .ttl.none { color: var(--text-2); font-weight: var(--w-regular); }
   .tree ul { list-style: none; margin: 0; padding: 0; }
   .tree a, .tree button.dir { display: flex; align-items: center; gap: var(--s-2); width: 100%; height: var(--ctl-h); padding: 0 var(--s-3) 0 calc(14px + var(--d, 0) * 14px); color: var(--text-2); font-size: var(--t-small); min-width: 0; text-align: left; background: transparent; border: 0; border-radius: 0; }
@@ -36,13 +50,21 @@
   .changes li a { min-width: 0; }
   .src-pin { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; font-size: var(--t-meta); color: var(--text-2); }
   @media (hover: hover) and (pointer: fine) { .tree a:hover, .tree button.dir:hover { background: var(--hover); color: var(--text); } }
-  @media (max-width: 1240px) { .code-f { grid-template-columns: 220px minmax(0, 1fr) 300px; } .hrow { grid-template-columns: 72px minmax(0, 1fr) 92px; } .hrow > .who { display: none; } }
+  /* A narrow list stacks: who landed it sits under the title, never dropped. */
+  @media (max-width: 1240px) {
+    .code-f { grid-template-columns: 220px minmax(0, 1fr) 300px; }
+    .hrow { grid-template-columns: 96px minmax(0, 1fr) auto; }
+    .th.hrow > .who { display: none; }
+    .hrow:not(.th) > .who { grid-column: 2; grid-row: 2; margin-top: -4px; padding-bottom: 6px; min-width: 0; }
+    .hrow:not(.th) > :nth-child(4) { grid-column: 3; grid-row: 1; }
+  }
   @media (max-width: 860px) {
     .code-h, .code-f { height: auto; grid-template: auto / minmax(0, 1fr); }
     .code-h .body, .code-f .body { overflow: visible; }
     .code-h > .pane.off, .code-f > .pane.off { display: none; }
     .hide-dt { display: inline; }
-    .hrow { grid-template-columns: 64px minmax(0, 1fr) auto; }
+    /* The history keeps its three columns on a phone (the system's rows wrap as flex there): who sits under the title. */
+    .code-h .row.hrow { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; }
     .th.hrow { display: none; }
     .tree a, .tree button.dir { height: 40px; }
     .tree .tsp { width: 28px; }

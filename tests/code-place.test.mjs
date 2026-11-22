@@ -243,3 +243,31 @@ test('the receipt evidence window comes from the receipt time alone, so the read
   });
   assert.equal(words.receiptWindow('not a time'), null);
 });
+
+test('What landed narrows to one file only by its ?path= address, and its links keep that path (Item 3968a655)', () => {
+  assert.equal(words.timelinePath('?path=src/parser/stream.ts'), 'src/parser/stream.ts');
+  assert.equal(words.timelinePath('?path=src%2Fparser%2Fstream.ts'), 'src/parser/stream.ts');
+  assert.equal(
+    words.timelinePath('?path=%20README.md'),
+    ' README.md',
+    'the address is read verbatim: a file name may start with a space (review of Lane 2954c0e3)',
+  );
+  assert.equal(
+    words.timelinePath(new URL(words.pathHref('/x', ' README.md'), 'https://forge.test').search),
+    ' README.md',
+  );
+  assert.equal(words.typedPath('  /src/a.ts '), 'src/a.ts', 'typing loses edge spaces and a leading slash');
+  assert.equal(words.typedPath('   '), null);
+  assert.equal(words.timelinePath('?path='), null, 'an empty path lists every landing');
+  assert.equal(words.timelinePath('?at=' + head), null);
+  assert.equal(
+    words.pathHref('/-/ada/atlas/code', 'src/a b&c.ts'),
+    '/-/ada/atlas/code?path=src/a%20b%26c.ts',
+  );
+  assert.equal(
+    words.timelinePath(new URL(words.pathHref('/x', 'src/a b&c.ts'), 'https://forge.test').search),
+    'src/a b&c.ts',
+    'the address reads back as the same path',
+  );
+  assert.equal(words.pathHref('/-/ada/atlas/code', null), '/-/ada/atlas/code');
+});
