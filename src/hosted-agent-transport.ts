@@ -312,6 +312,8 @@ export type HostedAgentResponse = Partial<CliProvenance> & {
   operationId: string | null;
   resolved: { operationId: string } | null;
   result: unknown;
+  /** Dotted paths retained in a policy read for compatibility. */
+  retiredPolicyFields?: string[];
   /** Local kept-file budget notice on checkout status and sync replies. */
   keptApplyBudget?: ReturnType<typeof keptApplyEnvelope>['keptApplyBudget'];
   /** The tightest member work budget reported by this command's mutations. */
@@ -957,13 +959,17 @@ export class HostedAgentTransport {
       }
       // Policy needs no capability discovery: the server authorizes it, so each command is one call.
       if ((hostedAgentPolicyActions as readonly string[]).includes(action)) {
-        const policy = await executeHostedPolicy(
+        const {
+          operationId: policyOperationId,
+          result,
+          ...labels
+        } = await executeHostedPolicy(
           this,
           action as (typeof hostedAgentPolicyActions)[number],
           command.data as Record<string, unknown>,
           operationId as string | undefined,
         );
-        return this.response(action, policy.operationId, policy.result);
+        return { ...(await this.response(action, policyOperationId, result)), ...labels };
       }
       // One query, no capability discovery; the page needs a signed-in owner, never this credential.
       if (action === 'request-approval') {

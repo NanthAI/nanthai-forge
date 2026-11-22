@@ -12,6 +12,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { policyPreset, policyReadView, samePolicy } from '../dist/autonomy-policy.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { hostedAgentActions, hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
+import { printedReceipt } from '../dist/receipt-slim.js';
 
 const autonomy = await import(moduleUrl('../convex/projectAutonomy.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
@@ -51,7 +52,7 @@ function cli(t, fixture) {
     state.calls = [];
     return await transport.dispatch(action, input);
   };
-  return { s, state, run };
+  return { s, state, run, projectId };
 }
 
 test('policy reads the effective policy with one query and nothing else', async t => {
@@ -64,12 +65,45 @@ test('policy reads the effective policy with one query and nothing else', async 
   assert.equal(read.result.preset, 'supervised');
   assert.equal(read.result.acceptance.gate, 'full');
   assert.equal(read.result.trust, undefined);
+  assert.deepEqual(read.retiredPolicyFields, ['agentDefaults.overlapGate']);
+  assert.equal(read.result.agentDefaults.overlapGate, 'off');
   assert.doesNotMatch(JSON.stringify(read.result), /secret|token|credential|private/i);
+  assert.equal(s.counts.at(-1).documents, 1);
   assert.equal(s.counts.at(-1).writes, 0, 'a read writes nothing');
   state.actor = 'peer';
   assert.equal((await run('policy')).result.preset, 'supervised', 'contributors can read');
   state.actor = 'stranger';
   await assert.rejects(run('policy'), code('PROJECT_UNAVAILABLE'));
+});
+
+test('policy labels the retired field in both CLI outputs and preserves the full legacy policy result', async t => {
+  const { s, state, run, projectId } = cli(t);
+  const preset = policyPreset('trusted');
+  const stored = {
+    ...preset,
+    autoExchange: { enabled: true, debounceMs: 40_000, maxPendingAgeMs: 120_000 },
+    agentDefaults: { overlapGate: 'block', preflight: 'require' },
+    acceptance: {
+      ...preset.acceptance,
+      disjointFastPath: true,
+      hostedCrossHeadReuse: false,
+      landingMode: 'fast',
+    },
+    ownerRootUpdates: true,
+  };
+  s.patch('hostedProjects', projectId, { autonomyPolicy: stored });
+  assert.deepEqual(state.calls, []);
+  const reply = await run('policy');
+  assert.deepEqual(state.calls, ['projectAutonomy:read']);
+  assert.equal(s.counts.at(-1).documents, 1);
+  assert.equal(s.counts.at(-1).writes, 0);
+  for (const detail of [false, true]) {
+    const output = printedReceipt(reply, { agent: true, detail, landChild: false });
+    assert.deepEqual(output.retiredPolicyFields, ['agentDefaults.overlapGate']);
+    assert.deepEqual(output.result, policyReadView(stored));
+    assert.equal(output.result.agentDefaults.overlapGate, 'off');
+  }
+  assert.deepEqual(s.tables.hostedProjects.get(projectId).autonomyPolicy, stored);
 });
 
 test('set-policy merges fields in one mutation and an operationId replay changes nothing', async t => {

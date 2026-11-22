@@ -111,19 +111,23 @@ export function hostedAgentHelp(action?: string) {
     ...(canonical
       ? entries.flatMap(entry => [helpExample(entry), JSON.stringify(entry.schema, helpSchemaField, 2)])
       : []),
-    ...(topic
-      ? [helpTopicText(topic)]
-      : canonical
-        ? []
-        : [
-            'Run land --save from the Lane. LANDED confirms acceptance.',
-            'Run waitCommand in the foreground until terminal; exit 3 means wait again.',
-            'Replay the receipt command with its original operationId and parameters.',
-            'Errors show {code,message,next,learn}. Full receipts use --detail or MCP replyDetail:true.',
-            helpTopicIndex(),
-            'MCP schemas: forge_work_overview {action:"help",topic}. Forms: nforge docs agents/workflow.',
-            '',
-          ]),
+    ...(canonical === 'policy'
+      ? [
+          'Read the effective hosted policy in result. retiredPolicyFields lists paths kept for compatibility. Copy result into set-policy expectedPolicy to compare before editing.',
+        ]
+      : topic
+        ? [helpTopicText(topic)]
+        : canonical
+          ? []
+          : [
+              'Run land --save from the Lane. LANDED confirms acceptance.',
+              'Run waitCommand in the foreground until terminal; exit 3 means wait again.',
+              'Replay the receipt command with its original operationId and parameters.',
+              'Errors show {code,message,next,learn}. Full receipts use --detail or MCP replyDetail:true.',
+              helpTopicIndex(),
+              'MCP schemas: forge_work_overview {action:"help",topic}. Forms: nforge docs agents/workflow.',
+              '',
+            ]),
   ].join('\n');
 }
 

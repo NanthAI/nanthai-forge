@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomUUID } from 'node:crypto';
+import type { AutonomyPolicy } from './autonomy-policy.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 
 type PolicyPort = Pick<HostedAgentSession, 'query' | 'mutation'>;
@@ -11,8 +12,18 @@ export async function executeHostedPolicy(
   action: 'policy' | 'set-policy',
   command: Record<string, unknown>,
   operationId?: string,
-): Promise<{ operationId: string | null; result: unknown }> {
-  if (action === 'policy') return { operationId: null, result: await port.query('projectAutonomy:read', {}) };
+): Promise<{ operationId: string | null; result: unknown; retiredPolicyFields?: string[] }> {
+  if (action === 'policy') {
+    const result = await port.query<AutonomyPolicy>('projectAutonomy:read', {});
+    // Keep result usable as set-policy's expectedPolicy, including the compatibility value.
+    return {
+      operationId: null,
+      result,
+      ...(result.agentDefaults?.overlapGate === undefined
+        ? {}
+        : { retiredPolicyFields: ['agentDefaults.overlapGate'] }),
+    };
+  }
   const id = operationId ?? randomUUID();
   const result = await port.mutation('projectAutonomy:set', {
     command: JSON.stringify({ action: 'set-policy', operationId: id, ...command }),
