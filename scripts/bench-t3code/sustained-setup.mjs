@@ -19,11 +19,15 @@ export function runCommand(command, args, { allowFail = false, input, timeoutMs 
     child.stdin.on('error', () => {});
     child.stdin.end(input);
     child.on('error', reject);
-    child.on('close', code => {
+    child.on('close', (code, signal) => {
       if (code !== 0 && !allowFail) {
         const structured = cliReplies(stdout + '\n' + stderr).findLast(reply => reply.error)?.error;
+        const status = signal ? `${command} exited on ${signal}` : `${command} exited with code ${code}`;
         reject(
-          Object.assign(Error(structured?.message ?? stderr.trim().slice(-1000)), { code: structured?.code }),
+          Object.assign(Error(structured?.message || stderr.trim().slice(-1000) || status), {
+            code: structured?.code,
+            signal,
+          }),
         );
       } else resolve({ code, stdout, stderr });
     });

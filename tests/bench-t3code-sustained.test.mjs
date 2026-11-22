@@ -15,7 +15,7 @@ import {
   stopSustainedForge,
   watchSustained,
 } from '../scripts/bench-t3code/sustained-capacity.mjs';
-import { readSustainedPins, seedSustained } from '../scripts/bench-t3code/sustained-setup.mjs';
+import { readSustainedPins, runCommand, seedSustained } from '../scripts/bench-t3code/sustained-setup.mjs';
 
 test('both arms get the same 40 releases with 10 solo reds and six overlapping green candidates', () => {
   const plan = sustainedPlan();
@@ -336,9 +336,10 @@ test('abort waits for preparing work and reuses the cancellation identity until 
   assert.equal(events.at(-1).event, 'forge-drained');
 });
 
-test('capacity monitor aborts when a dogfood job exceeded its runner wait before the sample', async () => {
+test('a transient jobs 404 still checks whether dogfood exceeded its runner wait before the sample', async () => {
   const atMs = 1_000_000;
   let stopped;
+  let jobsRead = false;
   const json = value => ({ stdout: JSON.stringify(value) });
   await watchSustained({
     repo: 'NanthAI/forge-sustained-fixture',
@@ -355,6 +356,10 @@ test('capacity monitor aborts when a dogfood job exceeded its runner wait before
       if (path.includes('status=in_progress'))
         return json([{ total_count: 1, workflow_runs: [{ id: 1, status: 'in_progress' }] }]);
       if (path.includes('status=queued')) return json([{ total_count: 0, workflow_runs: [] }]);
+      if (!jobsRead) {
+        jobsRead = true;
+        throw Error('gh: Not Found (HTTP 404)');
+      }
       return json({
         total_count: 1,
         jobs: [
@@ -368,4 +373,35 @@ test('capacity monitor aborts when a dogfood job exceeded its runner wait before
     },
   });
   assert.match(stopped, /Dogfood check waited more than 10 minutes/);
+});
+
+test('capacity monitor stops and identifies a GitHub read that stays unavailable', async () => {
+  let stopped;
+  let reads = 0;
+  await watchSustained({
+    repo: 'NanthAI/forge-sustained-fixture',
+    priorMinutes: 0,
+    signal: new AbortController().signal,
+    abort: reason => {
+      stopped = reason;
+    },
+    emit: () => {},
+    ready: () => assert.fail('An incomplete sample must not open the release gate'),
+    exec: async () => {
+      reads++;
+      throw Error('gh: Not Found (HTTP 404)');
+    },
+  });
+  assert.equal(reads, 2);
+  assert.match(
+    stopped,
+    /gh GET repos\/NanthAI\/forge-sustained-fixture\/actions\/workflows\/forge-check\.yml\/runs/,
+  );
+});
+
+test('bench subprocess errors identify a terminating signal without stderr', async () => {
+  await assert.rejects(runCommand(process.execPath, ['-e', "process.kill(process.pid, 'SIGTERM')"]), {
+    message: /exited on SIGTERM/,
+    signal: 'SIGTERM',
+  });
 });

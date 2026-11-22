@@ -12,14 +12,30 @@ const isWaiting = job => ['queued', 'pending', 'waiting', 'requested'].includes(
 const isActive = job => job.status === 'in_progress';
 const waitMs = (job, now) => now - Date.parse(job.created_at);
 
-const api = async (path, exec) => JSON.parse((await exec('gh', ['api', path])).stdout);
+async function api(path, exec, flags = []) {
+  const read = async () => JSON.parse((await exec('gh', ['api', ...flags, path])).stdout);
+  try {
+    return await read();
+  } catch (error) {
+    // Run listings can briefly lead job listings. Retry only transient read
+    // errors and still stop the arm if a complete safety sample is unavailable.
+    if (error.signal === 'SIGTERM' || /HTTP 404\b/.test(error.message)) {
+      try {
+        return await read();
+      } catch (retryError) {
+        throw Error(`gh GET ${path}: ${retryError.message}`, { cause: retryError });
+      }
+    }
+    throw Error(`gh GET ${path}: ${error.message}`, { cause: error });
+  }
+}
 async function activeRuns(repo, status, exec) {
   const path = `repos/${repo}/actions/runs?status=${status}&per_page=100`;
   let runs;
   // GitHub counts the filtered inventory separately from its paginated rows.
   // Re-read once; when the count still lags, reconcile against current run rows.
   for (let attempt = 0; attempt < 2; attempt++) {
-    const pages = JSON.parse((await exec('gh', ['api', '--paginate', '--slurp', path])).stdout);
+    const pages = await api(path, exec, ['--paginate', '--slurp']);
     runs = pages.flatMap(page => page.workflow_runs);
     if (pages[0]?.total_count === runs.length) return runs;
   }
@@ -39,9 +55,7 @@ const listJobs = async (repo, runId, exec) => {
 
 /** Read all non-archived visible org repos before a runner slot is taken. */
 export async function sampleOrg(exec = runCommand) {
-  const repos = JSON.parse(
-    (await exec('gh', ['api', '--paginate', '--slurp', 'orgs/NanthAI/repos?per_page=100'])).stdout,
-  ).flat();
+  const repos = (await api('orgs/NanthAI/repos?per_page=100', exec, ['--paginate', '--slurp'])).flat();
   const jobs = await Promise.all(
     repos
       .filter(repo => !repo.archived)
@@ -54,15 +68,11 @@ export async function sampleOrg(exec = runCommand) {
 }
 
 export async function readBenchJobs(repo, exec = runCommand) {
-  const runs = JSON.parse(
-    (
-      await exec('gh', [
-        'api',
-        '--paginate',
-        '--slurp',
-        `repos/${repo}/actions/workflows/forge-check.yml/runs?per_page=100`,
-      ])
-    ).stdout,
+  const runs = (
+    await api(`repos/${repo}/actions/workflows/forge-check.yml/runs?per_page=100`, exec, [
+      '--paginate',
+      '--slurp',
+    ])
   ).flatMap(page => page.workflow_runs);
   return Promise.all(
     runs.map(async run => ({
@@ -110,15 +120,11 @@ export async function watchSustained({
   const startedAtMs = now();
   while (!signal.aborted) {
     try {
-      const allBenchRuns = JSON.parse(
-        (
-          await exec('gh', [
-            'api',
-            '--paginate',
-            '--slurp',
-            `repos/${repo}/actions/workflows/forge-check.yml/runs?per_page=100`,
-          ])
-        ).stdout,
+      const allBenchRuns = (
+        await api(`repos/${repo}/actions/workflows/forge-check.yml/runs?per_page=100`, exec, [
+          '--paginate',
+          '--slurp',
+        ])
       ).flatMap(page => page.workflow_runs);
       const [bench, dogfoodRuns, current] = await Promise.all([
         Promise.all(
