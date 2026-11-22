@@ -10,10 +10,10 @@ import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction } from './_generated/server';
 import { internalMutation, type MutationCtx } from './server';
-import type { Doc, Id } from './_generated/dataModel';
+import type { Doc } from './_generated/dataModel';
 import { mirrorJob } from './projectGithubMirrorRows';
 import { finish, parseInbound } from './projectGithubInboundQueue';
-import { checkSetting } from './projectHostedCheckStore';
+import { checkRequest } from './projectGithubCheckRequest';
 import { enqueueHostedCheck } from './projectHostedChecks';
 import { cancelHostedCheck } from './projectHostedCheckCancel';
 import { loadCompose } from './projectHostedComposeStore';
@@ -29,27 +29,6 @@ import { forkGate } from './projectGithubPullFork';
 import type { InboundJob } from '../src/github-inbound-job';
 
 type Job = Doc<'projectGithubMirrorJobs'>;
-/** The project's verify check, or its only check; null lets project policy decide. */
-export async function checkRequest(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
-  const rows = await ctx.db
-    .query('projectHostedCheckSettings')
-    .withIndex('by_project_and_kind', q => q.eq('projectId', projectId).eq('kind', 'definition'))
-    .take(100);
-  const checks = rows.map(row => ({ key: row.key, value: JSON.parse(row.value) }));
-  const selected =
-    checks.find(row => row.value.name === 'verify') ?? (checks.length === 1 ? checks[0] : null);
-  if (!selected) return null;
-  const runner = await checkSetting(ctx, projectId, 'runner', 'runner');
-  if (!runner) return null;
-  const configuration = JSON.parse(runner.value);
-  return {
-    kind: 'request' as const,
-    checkId: selected.key,
-    expectedDefinition: selected.value.definition,
-    expectedConfiguration: runner.digest,
-    expectedEnvironment: configuration.environmentFingerprint,
-  };
-}
 /** A newer head of this PR was received after this job (one indexed read). */
 async function superseded(ctx: MutationCtx, job: Job) {
   const [latest] = await ctx.db

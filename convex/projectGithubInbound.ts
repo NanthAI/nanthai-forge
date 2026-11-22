@@ -22,7 +22,10 @@ import { savePin } from '../src/hosted-save';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { inboundMessage, type InboundJob } from '../src/github-inbound-job';
 import { finish, mirrorOn, parseInbound, twoWay } from './projectGithubInboundQueue';
-import { checkPull, checkRequest } from './projectGithubPull';
+import { checkPull } from './projectGithubPull';
+import { checkRequest } from './projectGithubCheckRequest';
+import { pullReuseProbe } from './projectGithubPullReuse';
+import { crossHeadProofSchema } from '../src/hosted-cross-head-proof';
 import { projectLink } from './projectGithubPullQueue';
 import { pullMessage, pullOperationId } from '../src/github-pull-check';
 import { invariant } from '../src/errors';
@@ -62,6 +65,7 @@ export async function inboundBegin(
     projectId: project._id,
     owner: project.owner,
     repository: job.repository,
+    reuseEnabled: !inbound.pull && Boolean(twoWay(project)),
     phase: inbound.phase,
     uploads: inbound.uploads ?? null,
     mapping: { commit: mapping.commit, tree: mapping.tree, state: mapping.state },
@@ -134,6 +138,7 @@ const submitArgs = {
   equivalent: pin,
   changes: v.number(),
   paths: v.array(v.string()),
+  pullBaseCommit: v.optional(v.string()),
 };
 /** One transaction writes the inbound Intent and Lane (as the project owner, an agent-kind
  * actor) and its composition; the action then uploads the small compose metadata. */
@@ -143,7 +148,7 @@ export const submit = internalMutation({
   handler: async (ctx, input) => {
     const active = await mirrorJob(ctx, input);
     invariant(active?.job.inbound, 'GITHUB_SYNC_PENDING', 'Inbound step changed.');
-    const { job, project } = active;
+    const { job, queue, project } = active;
     const inbound = parseInbound(job);
     if (inbound.phase !== 'pending') return canonicalPayload({ uploads: inbound.uploads ?? [] });
     const begun = (await inboundBegin(ctx, input))!;
@@ -311,6 +316,7 @@ export const submit = internalMutation({
     const next: InboundJob = {
       phase: 'compose',
       ...(pull ? { pull } : {}),
+      ...(pull && input.pullBaseCommit ? { pullBaseCommit: input.pullBaseCommit } : {}),
       ...(inbound.requested ? { requested: true } : {}),
       commit: input.commit,
       tree: input.tree,
@@ -325,14 +331,35 @@ export const submit = internalMutation({
       paths: input.paths.slice(0, 20),
       uploads,
     };
-    await ctx.db.patch(job._id, { inbound: canonicalPayload(next), state: input.head.sha256 });
-    return canonicalPayload({ uploads });
+    await ctx.db.patch(job._id, {
+      inbound: canonicalPayload(next),
+      state: input.head.sha256,
+      ...(pull ? { pullTree: input.tree } : {}),
+    });
+    const reuse = pull
+      ? undefined
+      : await pullReuseProbe(
+          ctx,
+          project,
+          job,
+          githubSyncCommitSchema.parse(JSON.parse(queue.mapping!)),
+          receipt,
+          main,
+          input,
+        );
+    return canonicalPayload({ uploads, ...(reuse ? { reuse } : {}) });
   },
 });
 /** After the action uploaded the compose metadata: bind it, submit the composition and the
  * desired landing through the normal pipeline. The job then holds the queue until it settles. */
 export const land = internalMutation({
-  args: identity,
+  args: {
+    ...identity,
+    proof: v.optional(v.string()),
+    trigger: v.optional(v.string()),
+    reason: v.optional(v.string()),
+    githubLookup: v.optional(v.literal(true)),
+  },
   returns: v.null(),
   handler: async (ctx, input) => {
     const active = await mirrorJob(ctx, input);
@@ -349,6 +376,7 @@ export const land = internalMutation({
       );
     const actor = project.owner;
     if (inbound.pull) return checkPull(ctx, active, inbound);
+    const proof = input.proof ? crossHeadProofSchema.parse(JSON.parse(input.proof)) : undefined;
     await submitHostedCompose(ctx, {
       projectId: project._id,
       actor,
@@ -364,14 +392,19 @@ export const land = internalMutation({
         await submitDesiredLanding(
           ctx,
           project._id,
-          hostedLandingDesiredSchema.parse({
-            operationId: inbound.landingOperationId!,
-            authorityEpoch: composed.state.request.authorityEpoch,
-            check: await checkRequest(ctx, project._id),
-            message: composed.state.request.message,
-            composeOperationId: inbound.composeOperationId!,
-            after: null,
-          }),
+          {
+            ...hostedLandingDesiredSchema.parse({
+              operationId: inbound.landingOperationId!,
+              authorityEpoch: composed.state.request.authorityEpoch,
+              check: await checkRequest(ctx, project._id),
+              message: composed.state.request.message,
+              composeOperationId: inbound.composeOperationId!,
+              after: null,
+            }),
+            ...(proof?.algorithm === 'exact-tree-v1' && input.trigger
+              ? { githubProof: { proof, trigger: input.trigger, repository: job.repository } }
+              : {}),
+          },
           { id: actor, kind: 'agent' },
           'github-inbound',
         ),
@@ -380,7 +413,13 @@ export const land = internalMutation({
     const { uploads: _uploads, ...rest } = inbound;
     void _uploads;
     await ctx.db.patch(job._id, {
-      inbound: canonicalPayload({ ...rest, phase: 'landing', submissionId: state.id } satisfies InboundJob),
+      inbound: canonicalPayload({
+        ...rest,
+        phase: 'landing',
+        submissionId: state.id,
+        ...(proof ? { proofRunId: proof.runId } : {}),
+        reuse: { reason: input.reason ?? 'proof-unavailable', githubLookups: input.githubLookup ? 1 : 0 },
+      } satisfies InboundJob),
     });
     return null;
   },

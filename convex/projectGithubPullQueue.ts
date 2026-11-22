@@ -11,6 +11,7 @@ import { internalMutation } from './server';
 import { scheduleMirror } from './projectGithubMirrorRows';
 import { parseInbound, twoWay } from './projectGithubInboundQueue';
 import { accountFor } from './urlIdentity';
+import { hasWriteRole } from './projectRole';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { hostedProjectRoot } from '../src/project-routes';
@@ -165,7 +166,14 @@ export const expire = internalMutation({
 /** HMAC-verified pull_request webhook (convex/http.ts): one indexed mirror read; a repository
  * without two-way sync writes nothing. Redelivery of a known head is a no-op. */
 export const receive = internalMutation({
-  args: { repository: v.string(), number: v.number(), head: v.string(), fork: v.boolean() },
+  args: {
+    repository: v.string(),
+    number: v.number(),
+    head: v.string(),
+    fork: v.boolean(),
+    repositoryId: v.optional(v.number()),
+    senderId: v.optional(v.string()),
+  },
   returns: v.null(),
   handler: async (ctx, input) => {
     const key = input.repository.toLowerCase();
@@ -203,6 +211,16 @@ export const receive = internalMutation({
           });
         else if (parseInbound(job).phase === 'checking') await settlePull(ctx, job, 'superseded');
       }
+      const senderId = input.senderId;
+      const senders =
+        !input.fork && input.repositoryId && senderId
+          ? await ctx.db
+              .query('users')
+              .withIndex('by_githubId', q => q.eq('githubId', senderId))
+              .take(2)
+          : [];
+      const sender = senders.length === 1 && !senders[0]!.githubConflict ? senders[0]!.accountKey : null;
+      const member = sender && (await hasWriteRole(ctx, project!, sender));
       const id = await ctx.db.insert('projectGithubMirrorJobs', {
         projectId: project!._id,
         receiptId: `pull:${crypto.randomUUID()}`,
@@ -214,6 +232,8 @@ export const receive = internalMutation({
         cursor: null,
         state: '0'.repeat(64),
         pullKey,
+        ...(!input.fork && input.repositoryId ? { pullRepositoryId: input.repositoryId } : {}),
+        ...(sender && member ? { pullMember: sender } : {}),
         inbound: canonicalPayload({
           phase: 'pending',
           pull: { number: input.number, head: input.head, fork: input.fork },

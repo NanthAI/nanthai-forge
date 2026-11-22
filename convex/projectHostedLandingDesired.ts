@@ -43,6 +43,9 @@ import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
 import { heldReview } from './projectHostedOwnerReview';
 import { landingMessageForReader, landingWithoutClientHold } from './projectHostedLandingMessageBody';
+import { crossHeadProofSchema } from '../src/hosted-cross-head-proof';
+import type { GithubInboundProof } from './projectGithubPullReuse';
+import { checkRequest } from './projectGithubCheckRequest';
 
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() };
 /** Register the goal while the first source job runs. The selected source pages
@@ -103,7 +106,9 @@ export const submit = receiptMutation({
 export async function submitDesiredLanding(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
-  command: z.infer<typeof hostedLandingDesiredSchema>,
+  inputCommand: z.infer<typeof hostedLandingDesiredSchema> & {
+    githubProof?: GithubInboundProof;
+  },
   actor: { id: string; kind: 'agent' | 'person' },
   agent?: string,
   agentClient?: string,
@@ -116,7 +121,11 @@ export async function submitDesiredLanding(
   includeReview = false,
   heldMs?: number,
 ): Promise<string> {
-  if (command.outside !== undefined) command = { ...command, outside: sanitizeOutside(command.outside) };
+  const { githubProof, ...requestCommand } = inputCommand;
+  const command =
+    requestCommand.outside === undefined
+      ? requestCommand
+      : { ...requestCommand, outside: sanitizeOutside(requestCommand.outside) };
   const input = { projectId, agent, agentClient };
   invariant(
     personStampValid({ ...command, agentClient, agentRun: agent }),
@@ -326,6 +335,7 @@ export async function submitDesiredLanding(
     },
   });
   const key = await ctx.db.insert('projectHostedLandingDesired', {
+    ...(githubProof ? { githubProof: canonicalPayload(githubProof) } : {}),
     runnerAccounting: previousAccounting ?? { root: id, pending: 0 },
     ...(carried?.supersededCheck ? { supersededCheck: carried.supersededCheck } : {}),
     preparing: true,
@@ -396,11 +406,14 @@ export const advance = internalMutation({
       if (terminal.outcome.status === 'failed')
         throw new ForgeError(terminal.outcome.error.code, terminal.outcome.error.message);
       const candidate = hostedRecordSchema.options[3].parse(terminal.outcome.result);
+      const inbound = row.githubProof ? (JSON.parse(row.githubProof) as GithubInboundProof) : null;
+      const githubProof = inbound ? crossHeadProofSchema.safeParse(inbound.proof) : null;
       const result = await enqueueHostedLanding(
         ctx,
         row,
         {
           ...state.request,
+          ...(row.githubProof ? { check: await checkRequest(ctx, row.projectId) } : {}),
           expectedMain: candidate.base,
           candidateId: candidate.id,
           expectedHead: candidate.result.status === 'clean' ? candidate.result.head : null,
@@ -416,6 +429,9 @@ export const advance = internalMutation({
           counts: state.counts,
           supersededCheck: row.supersededCheck,
           runnerAccounting: row.runnerAccounting,
+          ...(inbound && githubProof?.success && githubProof.data.algorithm === 'exact-tree-v1'
+            ? { githubProof: { ...inbound, proof: githubProof.data } }
+            : {}),
         },
       );
       await cancelPendingTask(ctx, row.wake?.taskId);
@@ -423,6 +439,7 @@ export const advance = internalMutation({
         value: canonicalPayload(result),
         wake: null,
         preparing: undefined,
+        ...(row.githubProof ? { githubProof: undefined } : {}),
         supersededCheck: undefined,
       });
       return canonicalPayload(result);

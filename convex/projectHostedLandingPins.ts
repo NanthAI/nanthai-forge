@@ -24,8 +24,15 @@ import {
 import { effectivePolicy, type AcceptanceActor } from '../src/autonomy-policy';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { acceptancePolicyDigest } from '../src/policy-digest';
-import { invariant } from '../src/errors';
+import { ForgeError, invariant } from '../src/errors';
 import type { ScopedRecheckBasis } from '../src/scoped-recheck-policy';
+import { validCrossHeadProof, type CrossHeadProof } from '../src/hosted-cross-head-proof';
+import { requireHostedCheckEvidence } from './projectHostedCheckRead';
+import { hostedAcceptGate } from './projectHostedGate';
+import type { GithubInboundProof } from './projectGithubPullReuse';
+import { hasWriteRole } from './projectRole';
+
+type ExactTreeProof = Extract<CrossHeadProof, { algorithm: 'exact-tree-v1' }>;
 
 /** Pin canonical metadata once. H14 still rechecks current main/policy/evidence
  * in its final transaction; neither this snapshot nor ready grants acceptance. */
@@ -45,6 +52,7 @@ export async function pinLandingAttempt(
     deferCheck?: boolean;
     retainedSelection?: HostedLandingAttempt['candidate'];
     recheck?: ScopedRecheckBasis;
+    githubProof?: GithubInboundProof;
     checkCause?: CheckCause;
     providerDelayReason?: string;
     /** Reuses the initial submission's reservation lookup for cause attribution. */
@@ -128,7 +136,9 @@ export async function pinLandingAttempt(
     batchEligible(project, effectivePolicy(project), input.actor, candidate);
   const cause =
     input.checkCause ?? (await input.intent?.(candidate.intentId)) ?? submittedCheckCause(r.retryReason);
+  const policy = effectivePolicy(project);
   let check = null;
+  let crossHeadProof: ExactTreeProof | undefined;
   let semanticPlan: SemanticPlan | undefined;
   if (candidate.result.status === 'clean') {
     const head = candidate.result.head;
@@ -143,7 +153,60 @@ export async function pinLandingAttempt(
       'SOURCE_HASH_MISMATCH',
       'Registered source size differs.',
     );
-    if (r.check && !deferredCheck) {
+    const proof = input.githubProof?.proof;
+    if (
+      proof &&
+      policy.githubMirror?.inbound &&
+      policy.githubMirror.autoPush &&
+      policy.githubMirror.repo.toLowerCase() === input.githubProof!.repository.toLowerCase() &&
+      r.check?.kind === 'request' &&
+      !recoveryGate &&
+      !deferredCheck &&
+      !candidate.semanticPlan &&
+      input.actor.id === project.owner &&
+      policy.acceptance.mode === 'auto-on-pass' &&
+      policy.acceptance.hostedCrossHeadReuse !== false &&
+      proof.head === head &&
+      proof.checkedBase.head === main.head &&
+      proof.checkedBase.receiptId === main.receipt.id &&
+      proof.main.head === main.head &&
+      proof.main.receiptId === main.receipt.id &&
+      r.expectedMain.head === main.head &&
+      r.expectedMain.receiptId === main.receipt.id &&
+      validCrossHeadProof(proof) &&
+      (await hasWriteRole(ctx, project, input.githubProof!.trigger))
+    ) {
+      const pins = {
+        runId: proof.runId,
+        checkId: r.check.checkId,
+        definition: r.check.expectedDefinition,
+        configuration: r.check.expectedConfiguration,
+        environment: r.check.expectedEnvironment,
+      };
+      try {
+        const run = await requireHostedCheckEvidence(ctx, {
+          ...pins,
+          projectId: input.projectId,
+          actor: input.actor.id,
+          authorityEpoch: r.authorityEpoch,
+          candidateId: proof.checked.id,
+          head: proof.checked.head,
+        });
+        if (
+          run.candidate.digest === proof.checked.digest &&
+          run.terminalDigest === proof.terminalDigest &&
+          run.planDigest === proof.planDigest &&
+          run.plan?.selection.sha256 === proof.checkedSelection &&
+          (await hostedAcceptGate(ctx, project, candidate, input.actor, run)) === 'pass'
+        ) {
+          check = pins;
+          crossHeadProof = proof;
+        }
+      } catch (error) {
+        if (!(error instanceof ForgeError)) throw error;
+      }
+    }
+    if (!check && r.check && !deferredCheck) {
       const run =
         r.check.kind === 'run'
           ? (await loadHostedCheck(ctx, { projectId: input.projectId, runId: r.check.runId })).run
@@ -201,7 +264,6 @@ export async function pinLandingAttempt(
   }
   const selectedCheck = check?.checkId ?? (r.check?.kind === 'request' ? r.check.checkId : undefined);
   if (selectedCheck) await requireLandingCheck(ctx, project, input.actor, selectedCheck);
-  const policy = effectivePolicy(project);
   const { parentAttemptId, number } = input;
   return hostedLandingAttemptSchema.parse({
     ...(semanticPlan ? { semanticPlan } : {}),
@@ -230,6 +292,7 @@ export async function pinLandingAttempt(
       algorithm: candidate.algorithm,
     },
     check,
+    ...(crossHeadProof ? { crossHeadProof } : {}),
     policy,
     policyDigest: acceptancePolicyDigest(policy),
     operations: input.operations,

@@ -14,7 +14,17 @@ export const inboundJobSchema = z
     phase: z.enum(['pending', 'compose', 'landing', 'checking']),
     /** The owner person asked to bring GitHub's commit into Forge on a one-way mirror (c63c2171). */
     requested: z.literal(true).optional(),
+    reuse: z
+      .object({ reason: z.string().max(80), githubLookups: z.union([z.literal(0), z.literal(1)]) })
+      .strict()
+      .optional(),
+    proofRunId: z.uuid().optional(),
     pull: pullJobSchema.optional(),
+    /** Last mirrored GitHub main was the PR's merge base when Forge read the head. */
+    pullBaseCommit: z
+      .string()
+      .regex(/^[0-9a-f]{40}$/)
+      .optional(),
     commit: z
       .string()
       .regex(/^[0-9a-f]{40}$/)

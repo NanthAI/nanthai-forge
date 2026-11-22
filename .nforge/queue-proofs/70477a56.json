@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedAcceptancePublish.ts": "3c11197910b6c8514c4fbc3339d21596cf1f6d07538fb245e167292d2c17e524",
+    "convex/projectHostedFinishCompose.ts": "8fe4adecb4ff4f3ba4062c066658b99ffb50a0da234367a902d3de68e7cd9532",
+    "convex/projectHostedFinishControl.ts": "da0e1666e94a37bfb66b8811a9b7faff25a31677152901d380e9e30a8e0af3b9",
+    "convex/projectHostedLanding.ts": "2f99152f9d662e73b22cdf69b3434aa87b386f9ad03466076f55ce9f129b6194",
+    "convex/projectHostedLandingControl.ts": "1cc02b670f9690b62cd2c54b70b9c2235f3e2b8f90caf37259315aa9777efa4f",
+    "convex/projectHostedLandingDesired.ts": "86b81bfa3a12e201ff4f2e90e3b27318c3fbcf93883f37bcff20cbd1391d1867",
+    "convex/projectHostedLandingFields.ts": "9785abd4eaf4c7ff23c1f08f8834ecc254f0e0ccb2ee5dff52de0c3675c2de34",
+    "convex/projectHostedLandingPins.ts": "dfae75abed26374ed2b153eba31da75ead62b9df3e0a37abff4dfe4f8dba5628",
+    "convex/projectHostedReuseDecision.ts": "34db952231980adc6c277f9e6219ebd0f32b471088d68ef1731f55f1f8161539"
+  },
+  "replay": {
+    "incident": "70477a56",
+    "test": "GitHub inbound: main moved after proof keeps a full check",
+    "receipt": "63b52898-38c4-45dc-b436-cca09f7d6d90"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Ade50b60d-e588-4186-ab03-1ec912458bcd",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Ade50b60d-e588-4186-ab03-1ec912458bcd/exact_pr_reuse_review",
+    "receipt": "bf139661-ac72-4f8e-96f2-a4c7130b2c64"
+  }
+}

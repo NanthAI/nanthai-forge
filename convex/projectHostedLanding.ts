@@ -368,6 +368,7 @@ export async function enqueueHostedLanding(
     retryReason?: import('../src/hosted-landing').HostedLandingState['retryReason'];
     counts?: import('../src/hosted-landing').HostedLandingState['counts'];
     supersededCheck?: SupersededCheck | undefined;
+    githubProof?: import('./projectGithubPullReuse').GithubInboundProof;
   },
 ) {
   invariant(
@@ -450,6 +451,7 @@ export async function enqueueHostedLanding(
     projectId: input.projectId,
     actor,
     allowStaleMain: reserved !== undefined,
+    githubProof: reserved?.githubProof,
     request,
     submissionId,
     attemptId: first.id,
@@ -526,6 +528,14 @@ export async function enqueueHostedLanding(
   // preserving the original queue/finish wake order and transaction IO count.
   const finish = await initializeFinish(ctx, state, true);
   await ctx.db.insert('projectHostedLandingRequests', {
+    ...(attempt.crossHeadProof && reserved?.githubProof
+      ? {
+          githubInboundProof: {
+            trigger: reserved.githubProof.trigger,
+            repository: reserved.githubProof.repository,
+          },
+        }
+      : {}),
     runnerAccounting: bindRunnerAccounting(
       reserved?.runnerAccounting ?? reused.runnerAccounting ?? { root: submissionId, pending: 0 },
       attempt.check?.runId ?? admission,

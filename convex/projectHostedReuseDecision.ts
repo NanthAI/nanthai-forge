@@ -53,6 +53,8 @@ export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingI
     projectId: input.projectId,
     attemptId: value.pending.parentAttemptId,
   });
+  // A GitHub PR run proved only its original main receipt. Any retry must check again.
+  if (landing.githubInboundProof && previous.crossHeadProof) return no('check-evidence');
   const project = await hostedWriteProject(ctx, input.projectId, previous.actor.id, previous.authorityEpoch);
   const policy = effectivePolicy(project);
   // The project's policy keeps the exact recheck (a choice, not a Forge limitation).

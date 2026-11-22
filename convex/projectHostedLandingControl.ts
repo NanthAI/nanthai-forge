@@ -344,9 +344,19 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
     // Unexpected/storage/scheduler failures abort and retain the watchdog. Only
     // structured domain outcomes settle this request, so later work can proceed.
     if (!(cause instanceof ForgeError)) throw cause;
-    phase = 'terminal-failed';
-    observation = landingObservation('failed', cause.code);
-    error = { code: cause.code, message: cause.message };
+    if (
+      row.githubInboundProof &&
+      attempt.crossHeadProof &&
+      ['EVIDENCE_CHANGED', 'NOT_FOUND'].includes(cause.code)
+    ) {
+      // H14 independently rechecks the proof. Let its existing retry driver replace this
+      // proof with a fresh configured check if settings or evidence changed in the queue.
+      phase = 'ready';
+    } else {
+      phase = 'terminal-failed';
+      observation = landingObservation('failed', cause.code);
+      error = { code: cause.code, message: cause.message };
+    }
   }
   // Its own exact check passed: suspicion from a combined failure ends here (a
   // later main-race recheck holds order and can be stacked on again), and a

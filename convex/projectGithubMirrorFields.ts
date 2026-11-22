@@ -52,12 +52,18 @@ export const githubMirrorTables = {
     inbound: v.optional(v.string()),
     /** A pull request job's PR number, so a newer head finds and supersedes older ones. */
     pullKey: v.optional(v.string()),
+    /** Signed GitHub identity pins and the Forge member who triggered this run. */
+    pullRepositoryId: v.optional(v.number()),
+    pullMember: v.optional(v.string()),
+    /** The GitHub tree verified by this job. A bounded merge lookup still verifies the PR head. */
+    pullTree: v.optional(v.string()),
     /** The compose operation, then the check run, a pull request job waits on (one indexed
      * read when either settles, never a poll). */
     waitKey: v.optional(v.string()),
   })
     .index('by_project_and_state', ['projectId', 'state'])
     .index('by_project_and_pull', ['projectId', 'pullKey'])
+    .index('by_project_and_pull_tree', ['projectId', 'pullTree'])
     .index('by_project_and_wait', ['projectId', 'waitKey'])
     .index('by_project_and_receipt', ['projectId', 'receiptId'])
     .index('by_project_and_status_and_sequence', ['projectId', 'status', 'sequence']),

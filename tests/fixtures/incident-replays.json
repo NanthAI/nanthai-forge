@@ -3,6 +3,23 @@
   "about": "Regression ladder rung 3 (docs/agents/regression-ladder.md): each core-claim incident and B1.5d case study names the normal-suite test that replays it. tests/incident-replays.test.mjs fails if a named test is renamed, removed, skipped or moved out of tests/*.test.mjs.",
   "replays": [
     {
+      "incident": "70477a56",
+      "what": "A two-way GitHub merge retained a PR pass, then Forge main changed while the landing waited",
+      "file": "tests/hosted-github-pull-reuse.test.mjs",
+      "paths": [
+        "convex/projectHostedAcceptancePublish.ts",
+        "convex/projectHostedFinishCompose.ts",
+        "convex/projectHostedFinishControl.ts",
+        "convex/projectHostedLanding.ts",
+        "convex/projectHostedLandingControl.ts",
+        "convex/projectHostedLandingDesired.ts",
+        "convex/projectHostedLandingFields.ts",
+        "convex/projectHostedLandingPins.ts",
+        "convex/projectHostedReuseDecision.ts"
+      ],
+      "test": "GitHub inbound: main moved after proof keeps a full check"
+    },
+    {
       "incident": "ced8e98f",
       "what": "Replay evidence links a main race and conflict to the retired attempt and distinguishes censoring from failure",
       "file": "tests/hosted-landing-attempt-history.test.mjs",

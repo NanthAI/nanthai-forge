@@ -28,7 +28,7 @@ export async function finish(
   queue: Queue,
   mapping: GithubSyncCommit | null,
   status: 'done' | 'failed',
-  outcome?: { error: string; detail: string },
+  outcome?: { error?: string; detail?: string; inbound?: string },
 ) {
   await ctx.db.patch(job._id, {
     status,
@@ -120,6 +120,19 @@ export async function settleInbound(
   // Item c63c2171: the owner chose to keep this GitHub commit. If it fails to land, Forge never takes it out of
   // GitHub main: the mapping stays on Forge's last push and no note is set, so the mirror stops as "moved" again.
   const kept = !landed && inbound.requested === true;
+  const reuse =
+    inbound.reuse?.reason === 'exact-tree-v1' &&
+    !(landed && receipt.crossHeadProof?.runId === inbound.proofRunId && inbound.proofRunId)
+      ? {
+          ...inbound.reuse,
+          reason:
+            landed &&
+            (receipt.previous.head !== inbound.base!.head ||
+              receipt.previous.receiptId !== inbound.base!.receiptId)
+              ? 'main-moved-after-proof'
+              : 'proof-refreshed',
+        }
+      : inbound.reuse;
   await finish(
     ctx,
     job,
@@ -127,20 +140,24 @@ export async function settleInbound(
     // Nothing was pushed: the mapping and its mirrored time stay as they are.
     kept ? null : mapping,
     landed ? 'done' : 'failed',
-    landed
-      ? undefined
-      : {
-          error: 'GITHUB_INBOUND_FAILED',
-          detail: kept
-            ? `GitHub ${inbound.commit!.slice(0, 12)} did not land on Forge (Lane ${lane}; ${settled.error ?? 'failed'}). GitHub main keeps it and the mirror stays stopped; fix and land Lane ${lane} to keep the change, then reset GitHub main to the commit Forge pushed last and resume; Forge then pushes the change on top.`
-            : `GitHub ${inbound.commit!.slice(0, 12)} did not land on Forge (Lane ${lane}; ${settled.error ?? 'failed'}). The next Forge landing publishes Forge main over it on GitHub; fix and land Lane ${lane} to keep the change.`,
-        },
+    {
+      ...(reuse !== inbound.reuse ? { inbound: canonicalPayload({ ...inbound, reuse }) } : {}),
+      ...(landed
+        ? {}
+        : {
+            error: 'GITHUB_INBOUND_FAILED',
+            detail: kept
+              ? `GitHub ${inbound.commit!.slice(0, 12)} did not land on Forge (Lane ${lane}; ${settled.error ?? 'failed'}). GitHub main keeps it and the mirror stays stopped; fix and land Lane ${lane} to keep the change, then reset GitHub main to the commit Forge pushed last and resume; Forge then pushes the change on top.`
+              : `GitHub ${inbound.commit!.slice(0, 12)} did not land on Forge (Lane ${lane}; ${settled.error ?? 'failed'}). The next Forge landing publishes Forge main over it on GitHub; fix and land Lane ${lane} to keep the change.`,
+          }),
+    },
   );
   await ctx.db.patch(queue._id, {
     inbound: canonicalPayload({
       commit: inbound.commit,
       laneId: inbound.laneId,
       outcome: settled.phase,
+      ...(reuse ? { reuse } : {}),
       ...(landed ? {} : kept ? { error: settled.error } : { note: true, error: settled.error }),
     }),
   });
@@ -151,6 +168,7 @@ export const inboundOutcomeSchema = z
     commit: z.string(),
     laneId: z.string(),
     outcome: z.enum(['landed', 'terminal-failed']),
+    reuse: inboundJobSchema.shape.reuse,
     note: z.boolean().optional(),
     error: z.string().nullable().optional(),
   })

@@ -248,7 +248,7 @@ this repository, so the table shows what Forge asks of each token.
 | Runner setup preflight | None minted; reads the installation's accepted permissions | `configure-runner` | `requireInstallationPermissions`; `projectHostedActionsConfigure.ts` |
 | Runner grant proof | `metadata: read`, one repository by name; reads its ID and one user's role | `configure-runner` without a stored binding or operator pair | `metadataProbeToken`; `githubRunnerGrants.ts` |
 | Mirror push | `contents: write` (Git data API, plus the Git LFS batch API for LFS paths; GitHub adds `metadata: read`), one repository; also `workflows: write` when the step's plan adds, changes or removes a path under `.github/workflows/`, or when no plan exists yet (unverified bootstrap) | One job per accepted landing | `mirrorPermissionsFor`; `projectGithubMirror.ts` `step`, `src/hosted-github-mirror.ts` |
-| Two-way read | `contents: read`, one repository | A GitHub `push` webhook to `main` on a two-way project | `inboundReadPermissions`; `projectGithubInboundRun.ts` |
+| Two-way read | `contents: read` and installed `pull_requests: read`, one repository | A GitHub `push` webhook to `main` on a two-way project | `inboundReadPermissions`; `projectGithubInboundRun.ts` |
 | Two-way PR check | `contents: read`, `statuses: write`, one repository | A `pull_request` webhook (opened, synchronize, reopened) into `main` on a two-way project: reads the head, posts `forge/verify` pending | `pullCheckPermissions`; `projectGithubInboundRun.ts` |
 | PR check result | `statuses: write`, one repository | The PR head's check-only run ends, fails to start, or is superseded | `pullStatusPermissions`; `projectGithubPullStatus.ts` |
 | Protection read | `metadata: read`, one repository | `nforge github connect` and `nforge github status` on a two-way project | `githubProtection.ts` |
@@ -339,6 +339,16 @@ first pull request or push is seen at once; no landing has to come first.
   onto current `main`. The landing is attributed to the project owner as agent
   `github-inbound`, and it claims no owner review bypass: protected paths still
   need their reviewers.
+- **A matching PR check:** Forge can carry the full, Forge-dispatched Actions
+  pass from a same-repository PR triggered by a linked account that still has
+  Forge project write access. The Git
+  tree, Forge file bytes and modes, base head and receipt, workflow, check
+  definition, runner and environment must match. Forge uses its existing
+  exact-tree proof and full main audit evidence. It makes one App-authenticated
+  commit-to-PR lookup once the local proof qualifies. If evidence is missing,
+  the lookup fails, or main moves, the normal check runs. The inbound outcome
+  records the reuse reason and whether the lookup ran. Queue order, review
+  rules and the existing coalesced main audit apply.
 - **Git LFS:** a changed file whose bytes are an LFS pointer, at a path the new tree's
   `.gitattributes` files mark `filter=lfs`, arrives as its object's bytes through the
   same resolver as [imports](github-project-import.md#git-lfs-files); the mirror pushes

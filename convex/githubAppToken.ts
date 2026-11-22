@@ -259,11 +259,28 @@ export async function installationTokenMinter(
   repo: string,
   request: typeof fetch = convexFetch,
   now = Date.now(),
-): Promise<(permissions: GithubAppPermissions) => Promise<string>> {
+) {
   const { api, installation } = await appInstallation(repo, request, now);
   const scope = await repositoryScope(ctx, projectId, repo, api, installation.id, request);
-  return async permissions => {
-    const token = await mintInstallationToken(api, installation.id, scope, permissions);
+  let pullRead = false;
+  const mint = async (permissions: GithubAppPermissions, readPullsIfGranted = false) => {
+    const pulls = installation.permissions?.pull_requests;
+    pullRead = readPullsIfGranted && (pulls === 'read' || pulls === 'write');
+    let token: string;
+    try {
+      token = await mintInstallationToken(
+        api,
+        installation.id,
+        scope,
+        pullRead ? { ...permissions, pull_requests: 'read' } : permissions,
+      );
+    } catch (error) {
+      // GitHub can revoke the optional grant between discovery and mint. Preserve ordinary sync.
+      if (!pullRead || !(error instanceof GithubMirrorApiError) || ![403, 422].includes(error.status))
+        throw error;
+      pullRead = false;
+      token = await mintInstallationToken(api, installation.id, scope, permissions);
+    }
     if (scope.repository_ids)
       await ctx.runQuery(makeFunctionReference<'query'>('githubBindingStore:requireId'), {
         projectId,
@@ -272,6 +289,7 @@ export async function installationTokenMinter(
       });
     return token;
   };
+  return Object.assign(mint, { canReadPulls: () => pullRead });
 }
 /** Metadata-read token for one named repository, used only inside the runner-grant proof
  * (`githubRunnerGrants.ts`) to read its numeric id and a user's role; never returned. */

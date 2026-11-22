@@ -9,3 +9,7 @@ direction. Owner CLI recovery remains available for enabled mirrors; Pause,
 un-pause and Disconnect require the person ([mirror workflow](../../workflows.md#automatic-main-mirror)).
 GitHub ruleset refusals on mirror ref writes surface as `GITHUB_RULE_BLOCKED`
 with the rule details GitHub supplies and the retained job's recovery step.
+
+Two-way GitHub sync can carry the verified PR's full Forge Actions pass to its
+merged tree when the repository, member, source, base receipt, check and runner
+pins match. The normal check runs when exact evidence is unavailable.

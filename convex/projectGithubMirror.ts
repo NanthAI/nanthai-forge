@@ -116,8 +116,7 @@ export const step = internalAction({
       if (!raw) return null;
       const loaded = JSON.parse(raw);
       // Two-way sync: an inbound job shares this queue, fence and failure policy.
-      if (loaded.inbound)
-        return (await runInbound(ctx, input, loaded, mirrorSource(ctx, input).states), null);
+      if (loaded.inbound) return (await runInbound(ctx, input, loaded, mirrorSource(ctx, input)), null);
       durable = sourceStorage(ctx, loaded.projectId);
       // The binding is proved before any source read. The one token per step is
       // minted once the plan names the changed paths (708b6943), or on the first

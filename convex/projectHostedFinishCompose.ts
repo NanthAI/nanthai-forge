@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkRequest as githubCheckRequest } from './projectGithubCheckRequest';
 import { candidateOwnerInputs } from './projectHostedProvenance';
 import { semanticPayload } from '../src/semantic-payload';
 import { finishChild } from '../src/finish-child';
@@ -537,7 +538,10 @@ export async function installFinishCompose(
     });
   // A main race without a transferable proof may recheck only the shared impact.
   const recheck =
-    !proof && previous && candidate.result.status === 'clean'
+    !proof &&
+    previous &&
+    candidate.result.status === 'clean' &&
+    !(landing.githubInboundProof && previous.crossHeadProof)
       ? await scopedRecheckBasis(ctx, previous, checkedRun)
       : undefined;
   const scopedFallback =
@@ -592,7 +596,11 @@ export async function installFinishCompose(
       expectedMain: pending.main,
       candidateId: candidate.id,
       expectedHead: candidate.result.status === 'clean' ? candidate.result.head : null,
-      check: proof ? null : value.check,
+      check: proof
+        ? null
+        : landing.githubInboundProof && previous?.crossHeadProof
+          ? await githubCheckRequest(ctx, row.projectId)
+          : value.check,
     },
     attemptId,
     ...fork,

@@ -70,6 +70,9 @@ Unqualified for bd0f850e/e7e35328.
 
 ## Rung 3: incident replays
 
+The two-way GitHub replay (`70477a56`) stages an exact PR check proof, moves the
+Forge main receipt while the merge waits, and verifies a fresh check at landing.
+
 `tests/fixtures/incident-replays.json` lists each incident and the normal-suite test that
 replays it. `tests/incident-replays.test.mjs` fails the check when a listed test is renamed,
 removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops naming an incident.

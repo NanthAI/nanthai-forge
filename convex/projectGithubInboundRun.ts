@@ -15,9 +15,13 @@ import { applyInbound, diffGithubTrees, inboundConflicts, type InboundChange } f
 import { bringInChanges } from '../src/github-inbound-bytes';
 import { isGitattributesPath } from '../src/github-lfs';
 import { lfsAttributeBytes } from '../src/github-lfs-import';
-import type { NativeFile } from '../src/state/format';
+import { parseNativeState } from '../src/state/format';
 import { digest } from '../src/state/hash';
 import { ForgeError, invariant } from '../src/errors';
+import type { PullReuseProbe } from './projectGithubPullReuse';
+import { analyzeCrossHeadReuse } from '../src/hosted-cross-head-analysis';
+import { checkEntryMatcher, ciConfigurationPath, firstCheckRisk } from '../src/first-check-risk';
+import type { MirrorIO } from '../src/hosted-github-mirror';
 
 const mutation = (name: string) => makeFunctionReference<'mutation'>(name);
 const query = (name: string) => makeFunctionReference<'query'>(name);
@@ -28,6 +32,7 @@ export type InboundBegin = {
   projectId: Id<'hostedProjects'>;
   owner: string;
   repository: string;
+  reuseEnabled?: boolean;
   phase: 'pending' | 'compose';
   uploads: { value: string; pin: Pin }[] | null;
   mapping: { commit: string; tree: string; state: string };
@@ -99,12 +104,12 @@ export async function runInbound(
   ctx: ActionCtx,
   input: Identity,
   loaded: InboundBegin,
-  states: (ids: string[]) => Promise<{ files: NativeFile[] }[]>,
+  source: { blobs: MirrorIO['blobs'] },
 ) {
   if (loaded.phase === 'compose') return composeAndLand(ctx, input, loaded.owner, loaded.uploads ?? []);
   const mint = await installationTokenMinter(ctx, loaded.projectId, loaded.repository);
   const pull = loaded.pull;
-  const token = await mint(pull ? pullCheckPermissions : inboundReadPermissions);
+  const token = await mint(pull ? pullCheckPermissions : inboundReadPermissions, loaded.reuseEnabled);
   const api = githubRequest(token);
   const prefix = `/repos/${loaded.repository}/git`;
   let commit: string;
@@ -153,9 +158,11 @@ export async function runInbound(
     return;
   }
   const same = loaded.mapping.state === loaded.base.head;
-  const read = await states(same ? [loaded.base.head] : [loaded.mapping.state, loaded.base.head]);
-  const equivalent = read[0]! as Parameters<typeof inboundConflicts>[0],
-    base = (same ? read[0] : read[1])! as Parameters<typeof inboundConflicts>[1];
+  const refs = await source.blobs(same ? [loaded.base.head] : [loaded.mapping.state, loaded.base.head]);
+  const equivalentBytes = await refs[0]!.read();
+  const baseBytes = same ? equivalentBytes : await refs[1]!.read();
+  const equivalent = parseNativeState(equivalentBytes);
+  const base = same ? equivalent : parseNativeState(baseBytes);
   const conflicts = inboundConflicts(equivalent, base, diff.changes);
   if (conflicts.length)
     throw new ForgeError(
@@ -185,12 +192,13 @@ export async function runInbound(
   });
   for (const change of diff.changes) if (!change.after) applied.push({ path: change.path, after: null });
   const at = new Date().toISOString();
-  const lane = applyInbound(base as never, loaded.base.head, applied, head.message, at);
-  const match = same
-    ? lane
-    : applyInbound(equivalent as never, loaded.mapping.state, applied, head.message, at);
+  const lane = applyInbound(base, loaded.base.head, applied, head.message, at);
+  const match = same ? lane : applyInbound(equivalent, loaded.mapping.state, applied, head.message, at);
   await store(ctx, input, loaded.owner, same ? [lane.bytes] : [lane.bytes, match.bytes]);
-  const reply: { uploads: { value: string; pin: Pin }[] } = JSON.parse(
+  const reply: {
+    uploads: { value: string; pin: Pin }[];
+    reuse?: { reason: string } | { probe: PullReuseProbe };
+  } = JSON.parse(
     await ctx.runMutation(mutation('projectGithubInbound:submit'), {
       ...input,
       commit,
@@ -200,9 +208,116 @@ export async function runInbound(
       equivalent: match.pin,
       changes: diff.changes.length,
       paths: diff.changes.slice(0, 20).map(change => change.path),
+      ...(pull && before.behind === null ? { pullBaseCommit: loaded.mapping.commit } : {}),
     }),
   );
-  await composeAndLand(ctx, input, loaded.owner, reply.uploads);
+  const decision =
+    reply.reuse && 'probe' in reply.reuse
+      ? mint.canReadPulls()
+        ? await provePullMerge(
+            source.blobs,
+            lane,
+            baseBytes,
+            reply.reuse.probe,
+            loaded.repository,
+            commit,
+            token,
+          )
+        : { reason: 'github-lookup-unavailable' }
+      : reply.reuse;
+  await composeAndLand(ctx, input, loaded.owner, reply.uploads, decision);
+}
+type ReuseDecision = { reason: string; proof?: string; trigger?: string; githubLookup?: true };
+async function provePullMerge(
+  blobs: MirrorIO['blobs'],
+  lane: { bytes: Uint8Array; pin: Pin },
+  baseBytes: Uint8Array,
+  probe: PullReuseProbe,
+  repository: string,
+  commit: string,
+  token: string,
+): Promise<ReuseDecision> {
+  const no = (reason: string) => ({ reason });
+  const { basis, checkEntries, selection } = probe;
+  let decision: Awaited<ReturnType<typeof analyzeCrossHeadReuse>>;
+  try {
+    const values = new Map([
+      [lane.pin.sha256, lane.bytes],
+      [basis.main.head, baseBytes],
+    ]);
+    const maxBytes = 8 * 1024 * 1024;
+    if ([...values.values()].some(bytes => bytes.byteLength > maxBytes)) return no('proof-unavailable');
+    const ids = [...new Set([basis.checked.head, selection, basis.audit.selection])].filter(
+      id => !values.has(id),
+    );
+    const refs = await blobs(ids);
+    if (refs.some(ref => ref.size > maxBytes)) return no('proof-unavailable');
+    for (const [i, ref] of refs.entries()) values.set(ids[i]!, await ref.read());
+    decision = await analyzeCrossHeadReuse(
+      basis,
+      selection,
+      async digests => digests.map(id => values.get(id)!),
+      checkEntries,
+      false,
+      true,
+    );
+  } catch {
+    return no('proof-unavailable');
+  }
+  if ('reason' in decision) return no(decision.reason);
+  if (decision.proof.algorithm !== 'exact-tree-v1') return no('proof-unavailable');
+  const matches = checkEntries.map(checkEntryMatcher);
+  if (
+    decision.proof.candidatePaths.some(
+      path =>
+        ciConfigurationPath(path) ||
+        matches.some(match => match(path)) ||
+        [
+          'package manifest or lockfile',
+          'build, lint or test configuration',
+          'check script or check contract',
+        ].includes(firstCheckRisk(path.includes('/') ? path : `./${path}`) ?? ''),
+    )
+  )
+    return no('check-source-changed');
+  // One bounded lookup, using the same token, after the local proof is eligible. GitHub identifies
+  // the PR that introduced the commit. Its current head must still match the checked webhook job.
+  const githubLookup = true;
+  try {
+    const lookup = githubRequest(token, (url, init) =>
+      convexFetch(url, init, { retries: 0, totalTimeoutMs: 2000 }),
+    );
+    const pulls = await lookup<
+      {
+        number?: number;
+        merge_commit_sha?: string;
+        merged_at?: string;
+        base?: { ref?: string; repo?: { id?: number } };
+        head?: { sha?: string; repo?: { id?: number } };
+      }[]
+    >(`/repos/${repository}/commits/${commit}/pulls?per_page=2`);
+    const pr = Array.isArray(pulls) && pulls.length === 1 ? pulls[0] : null;
+    if (
+      !pr ||
+      pr.number !== probe.number ||
+      pr.merge_commit_sha !== commit ||
+      !pr.merged_at ||
+      !Number.isFinite(Date.parse(pr.merged_at)) ||
+      pr.base?.ref !== 'main' ||
+      pr.base.repo?.id !== probe.repositoryId ||
+      pr.head?.repo?.id !== probe.repositoryId
+    )
+      return { reason: 'github-merge-unproven', githubLookup };
+    if (pr.head?.sha !== probe.head) return { reason: 'head-changed', githubLookup };
+    return {
+      reason: 'exact-tree-v1',
+      githubLookup,
+      proof: JSON.stringify(decision.proof),
+      trigger: probe.trigger,
+    };
+  } catch {
+    return { reason: 'github-lookup-unavailable', githubLookup };
+  }
 }
 /** The tree a PR's own changes start from: its merge base with the last mirrored GitHub main
  * (1 compare read), plus what main changed since then when the PR is behind (tree reads per
@@ -231,6 +346,7 @@ async function composeAndLand(
   input: Identity,
   owner: string,
   uploads: { value: string; pin: Pin }[],
+  decision?: ReuseDecision,
 ) {
   await store(
     ctx,
@@ -238,5 +354,5 @@ async function composeAndLand(
     owner,
     uploads.map(upload => new TextEncoder().encode(upload.value)),
   );
-  await ctx.runMutation(mutation('projectGithubInbound:land'), input);
+  await ctx.runMutation(mutation('projectGithubInbound:land'), { ...input, ...decision });
 }

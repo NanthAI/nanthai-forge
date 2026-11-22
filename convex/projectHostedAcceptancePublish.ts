@@ -44,7 +44,8 @@ import { scheduleWouldConflict } from './projectHostedLandingWouldConflict';
 import { governanceReason } from '../src/public-governance';
 import { mayLandUnchecked } from './projectUncheckedLanding';
 import { landingDocsUndo } from '../src/docs-resolution';
-import { invariant } from '../src/errors';
+import { ForgeError, invariant } from '../src/errors';
+import { hasWriteRole } from './projectRole';
 import { validCrossHeadProof, fastProof } from '../src/hosted-cross-head-proof';
 import { requireReuseAudit } from './projectHostedReuseAudit';
 import { acceptedLandingMessage } from './projectHostedLandingMessage';
@@ -166,7 +167,31 @@ export async function publishAcceptance(
   );
   const head = candidate.result.head;
   const reuse = attempt.crossHeadProof;
+  const github = reuse && row.githubInboundProof;
+  const evidenceChanged = github ? 'CHECK_EVIDENCE_REFRESH' : 'EVIDENCE_CHANGED';
+  async function currentEvidence<T>(read: () => Promise<T>): Promise<T> {
+    try {
+      return await read();
+    } catch (error) {
+      if (
+        github &&
+        error instanceof ForgeError &&
+        ['EVIDENCE_CHANGED', 'NOT_FOUND', 'CHECK_NOT_PASSED'].includes(error.code)
+      )
+        throw new ForgeError('CHECK_EVIDENCE_REFRESH', error.message);
+      throw error;
+    }
+  }
   if (reuse) {
+    if (github)
+      invariant(
+        policy.githubMirror?.inbound &&
+          policy.githubMirror.autoPush &&
+          policy.githubMirror.repo.toLowerCase() === github.repository.toLowerCase() &&
+          (await hasWriteRole(ctx, project, github.trigger)),
+        'CHECK_EVIDENCE_REFRESH',
+        'The GitHub mirror or check trigger no longer has the required project authority.',
+      );
     // The same policy decision as the reuse proof: owner agent, listed agent, or trusted agent.
     const trust =
       policy.trust?.enabled && attempt.actor.id !== project.owner
@@ -181,7 +206,7 @@ export async function publishAcceptance(
         reuse.main.head === main.head &&
         reuse.main.receiptId === main.receipt.id &&
         attempt.check?.runId === reuse.runId,
-      'EVIDENCE_CHANGED',
+      evidenceChanged,
       'The current acceptance does not match the cross-head proof.',
     );
     const savedAudit = await auditRow(ctx, claim.projectId);
@@ -198,15 +223,17 @@ export async function publishAcceptance(
       'CHECK_EVIDENCE_REFRESH',
       'Fast landing is not in effect now; prepare fresh evidence.',
     );
-    await requireReuseAudit(ctx, {
-      projectId: claim.projectId,
-      actor: attempt.actor.id,
-      authorityEpoch: attempt.authorityEpoch,
-      proof: reuse,
-      main,
-      check: attempt.check!,
-      savedAudit,
-    });
+    await currentEvidence(() =>
+      requireReuseAudit(ctx, {
+        projectId: claim.projectId,
+        actor: attempt.actor.id,
+        authorityEpoch: attempt.authorityEpoch,
+        proof: reuse,
+        main,
+        check: attempt.check!,
+        savedAudit,
+      }),
+    );
   }
   const registered = await ctx.db
     .query('projectHostedStates')
@@ -231,26 +258,29 @@ export async function publishAcceptance(
   );
   let run: HostedCheckRun | null = null;
   let check = null;
-  if (attempt.check) {
-    run = await requireHostedCheckEvidence(ctx, {
-      projectId: claim.projectId,
-      actor: attempt.actor.id,
-      candidateId: reuse?.checked.id ?? candidate.id,
-      head: reuse?.checked.head ?? head,
-      authorityEpoch: attempt.authorityEpoch,
-      ...attempt.check,
-    });
+  const checkPins = attempt.check;
+  if (checkPins) {
+    run = await currentEvidence(() =>
+      requireHostedCheckEvidence(ctx, {
+        projectId: claim.projectId,
+        actor: attempt.actor.id,
+        candidateId: reuse?.checked.id ?? candidate.id,
+        head: reuse?.checked.head ?? head,
+        authorityEpoch: attempt.authorityEpoch,
+        ...checkPins,
+      }),
+    );
     invariant(
       run.candidate.digest === (reuse?.checked.digest ?? candidateRow.digest) &&
         (!reuse ||
           (run.terminalDigest === reuse.terminalDigest &&
             run.planDigest === reuse.planDigest &&
             run.plan?.selection.sha256 === reuse.checkedSelection)),
-      'EVIDENCE_CHANGED',
+      evidenceChanged,
       'The exact run selected another Candidate record.',
     );
     check = {
-      ...attempt.check,
+      ...checkPins,
       terminalDigest: run.terminalDigest!,
       planDigest: run.planDigest!,
       executionId: run.executionId!,
@@ -266,7 +296,7 @@ export async function publishAcceptance(
     'CHECK_NOT_PASSED',
     'This actor requires an exact passing check under the current unchecked landing policy.',
   );
-  if (check) await requireLandingCheck(ctx, project, actor, check.checkId);
+  if (check) await currentEvidence(() => requireLandingCheck(ctx, project, actor, check!.checkId));
   // Entry files of every defined check and setup action are protected by default: the project
   // row's list plus the run's own check (covers a project whose list is not yet filled).
   const checks = [...(run?.check ? [run.check] : []), ...(project.checkEntries ?? [])];

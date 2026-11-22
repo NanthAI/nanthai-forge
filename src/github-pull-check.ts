@@ -50,11 +50,12 @@ export function pullRequestEvent(payload: Record<string, unknown>) {
   const pr = payload.pull_request as
     | {
         number?: unknown;
-        head?: { sha?: unknown; repo?: { full_name?: unknown } | null };
+        head?: { sha?: unknown; repo?: { id?: unknown; full_name?: unknown } | null };
         base?: { ref?: unknown; repo?: { full_name?: unknown } };
       }
     | undefined;
-  const repository = (payload.repository as { full_name?: unknown } | undefined)?.full_name;
+  const repo = payload.repository as { id?: unknown; full_name?: unknown } | undefined;
+  const repository = repo?.full_name;
   if (typeof repository !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(repository))
     throw new Error('Invalid repository');
   if (typeof payload.action !== 'string' || !pullActions.has(payload.action)) return null;
@@ -70,12 +71,19 @@ export function pullRequestEvent(payload: Record<string, unknown>) {
   )
     throw new Error('Invalid pull request');
   const from = pr.head?.repo?.full_name;
+  const sender = payload.sender as { id?: unknown; type?: unknown } | undefined;
   return {
     repository,
     number: number as number,
     head,
     // A deleted fork has no head repository; it is still not this repository.
     fork: typeof from !== 'string' || from.toLowerCase() !== repository.toLowerCase(),
+    ...(Number.isSafeInteger(repo?.id) && Number(repo?.id) > 0 && pr.head?.repo?.id === repo?.id
+      ? { repositoryId: Number(repo?.id) }
+      : {}),
+    ...(sender?.type === 'User' && Number.isSafeInteger(sender.id) && Number(sender.id) > 0
+      ? { senderId: String(sender.id) }
+      : {}),
   };
 }
 /** A fork PR head waits this long for the owner's grant, then settles with a named reason. */

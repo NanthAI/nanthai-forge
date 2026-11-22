@@ -245,7 +245,13 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
       if (state.batchId && !state.batchSolo) await publishLandingBatch(ctx, claim);
       else await publishAcceptance(ctx, claim);
     } catch (error) {
-      if (error instanceof ForgeError && ['CHANNEL_CHANGED', 'CHECK_EVIDENCE_REFRESH'].includes(error.code)) {
+      if (
+        error instanceof ForgeError &&
+        (['CHANNEL_CHANGED', 'CHECK_EVIDENCE_REFRESH'].includes(error.code) ||
+          (landing.githubInboundProof &&
+            state.attemptId === state.firstAttemptId &&
+            ['EVIDENCE_CHANGED', 'NOT_FOUND', 'POLICY_CHANGED'].includes(error.code)))
+      ) {
         // Yield the Channel so later independent runnable requests can advance.
         const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
         if (queue) await releaseLandingQueue(ctx, queue);

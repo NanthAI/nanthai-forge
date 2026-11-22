@@ -106,6 +106,8 @@ export const hostedLandingTables = {
     .index('by_project_and_batch', ['projectId', 'batchId'])
     .index('by_project_and_compose', ['projectId', 'composeOperationId']),
   projectHostedLandingDesired: defineTable({
+    /** Server-only exact-tree proof from a two-way GitHub inbound action. */
+    githubProof: v.optional(v.string()),
     runnerAccounting,
     supersededCheck,
     alarm,
@@ -214,6 +216,8 @@ export const hostedLandingTables = {
     messageProjectId: v.optional(v.id('hostedProjects')),
   }),
   projectHostedLandingRequests: defineTable({
+    /** The bound mirror repository and Forge writer rechecked at publication. */
+    githubInboundProof: v.optional(v.object({ trigger: v.string(), repository: v.string() })),
     runnerAccounting,
     supersededCheck,
     requestBodyId: v.optional(v.id('projectHostedLandingBodies')),
