@@ -5,6 +5,8 @@ import { activeProject } from './projectAuthority';
 import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
 import { findObject, objectRow } from './projectObjectFind';
+import { requireCatalogSeed } from './projectHostedSeedObjects';
+import { storeCatalogObjects } from './projectObjectCatalogStore';
 
 // Only the action that has streamed and verified complete logical bytes calls
 // this mutation. Binding is immutable; equivalent raw/recipe races keep the winner.
@@ -16,6 +18,7 @@ export const bind = internalMutation({
     size: v.number(),
     recipeDigest: v.string(),
     recipeSize: v.number(),
+    seedOperationId: v.optional(v.string()),
   },
   returns: v.null(),
   handler: async (ctx, input) => {
@@ -33,6 +36,20 @@ export const bind = internalMutation({
       'Content differs from its original binding.',
     );
     if (row && isStored(row)) return null;
+    const binding = { digest: input.recipeDigest, size: input.recipeSize };
+    if (input.seedOperationId) {
+      await requireCatalogSeed(ctx, input.projectId, input.actor, input.seedOperationId, true);
+      if (!row) {
+        await storeCatalogObjects(
+          ctx,
+          input.projectId,
+          [{ digest: input.digest, size: input.size, recipe: binding }],
+          input.seedOperationId,
+          true,
+        );
+        return null;
+      }
+    }
     if (!row) {
       const id = await ctx.db.insert('projectObjects', {
         projectId: input.projectId,
@@ -44,7 +61,7 @@ export const bind = internalMutation({
       row = (await ctx.db.get(id))!;
     }
     await ctx.db.patch((await objectRow(ctx, row))._id, {
-      recipe: { digest: input.recipeDigest, size: input.recipeSize },
+      recipe: binding,
     });
     return null;
   },

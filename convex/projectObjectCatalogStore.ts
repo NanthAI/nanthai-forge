@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { catalogPages, clearObjectCatalogCache } from './projectObjectFind';
+import { catalogPages, clearObjectCatalogCache, objectCatalogPage } from './projectObjectFind';
 import { pointMode } from './projectObjectPoints';
 import { storePointObjects } from './projectObjectPointStore';
 import { windowEntries } from './projectGithubImportCatalog';
@@ -47,6 +47,7 @@ export async function storeCatalogObjects(
   projectId: Id<'hostedProjects'>,
   pins: Entry[],
   origin: string,
+  balance = false,
 ) {
   if (await pointMode(ctx, projectId)) {
     const objects = pins.map(pin => ({
@@ -84,11 +85,23 @@ export async function storeCatalogObjects(
           .query('projectObjectCatalog')
           .withIndex('by_project_and_first', q => q.eq('projectId', projectId).gt('first', first))
           .take(1);
-    const merging = covering ?? (previous && previous.sizes.length < 256 ? previous : undefined);
+    // Seed carriers and large-object recipe pins arrive out of order. Fill a
+    // neighboring page across gaps and split evenly to avoid singleton pages.
+    const merging =
+      covering ??
+      (balance
+        ? (previous ?? next)
+        : previous && previous.sizes.length < objectCatalogPage
+          ? previous
+          : undefined);
     for (const row of [previous, next])
       if (row) readBytes += new TextEncoder().encode(JSON.stringify(row)).length;
     const group = pending.filter(pin =>
-      covering ? pin.digest <= covering.last : !next || pin.digest < next.first,
+      covering
+        ? pin.digest <= covering.last
+        : next && merging === next
+          ? pin.digest <= next.last
+          : !next || pin.digest < next.first,
     );
     pending = pending.slice(group.length);
     const entries = new Map<string, Entry>(
@@ -105,8 +118,28 @@ export async function storeCatalogObjects(
         'Immutable catalog binding changed.',
       );
       if (!old) entries.set(pin.digest, pin);
+      else if (pin.stateGeneration !== undefined || pin.stateSize !== undefined) {
+        invariant(
+          (old.stateGeneration === undefined ||
+            pin.stateGeneration === undefined ||
+            old.stateGeneration === pin.stateGeneration) &&
+            (old.stateSize === undefined ||
+              pin.stateSize === undefined ||
+              canonicalPayload(old.stateSize) === canonicalPayload(pin.stateSize)),
+          'SOURCE_HASH_MISMATCH',
+          'Immutable catalog State metadata changed.',
+        );
+        entries.set(pin.digest, {
+          ...old,
+          ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
+          ...(pin.stateSize === undefined ? {} : { stateSize: pin.stateSize }),
+        });
+      }
     }
-    const rows = catalogPages([...entries.values()]);
+    const pageSize = balance
+      ? Math.ceil(entries.size / Math.ceil(entries.size / objectCatalogPage))
+      : undefined;
+    const rows = catalogPages([...entries.values()], pageSize);
     // Preserve the original first row id; source lookup caches are request-local
     // and invalidated after publication, so subsequent writes see the new ranges.
     for (const [index, page] of rows.entries()) {

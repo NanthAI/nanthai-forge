@@ -12,7 +12,7 @@ import { buildUploadPack, uploadPackMembers } from './object-pack-upload.js';
 type Upload = { pin: ContentPin; read: () => Buffer | Promise<Buffer> };
 type Prepared = {
   index: number;
-  id: string;
+  id?: string;
   stored: boolean;
   created: boolean;
   target?: PutTarget;
@@ -22,6 +22,7 @@ type Prepared = {
 };
 /** A pack built before its prepare (the proposal names it): its exact bytes, PUT as they are. */
 export type BuiltPack = { digest: string; bytes: Uint8Array };
+type Sent = { id: string; pin?: { digest: string; size: number } };
 
 /** PUT the upload packs among prepared rows, once each, from the first row's target. The bytes are
  * the members in offset order, each checked against its pin (or `built`, already checked). Returns
@@ -31,12 +32,14 @@ async function putPacks(
   rows: readonly Omit<Prepared, 'index'>[],
   blobs: Pick<ExchangeBlobs, 'put'> | undefined,
   built?: BuiltPack,
+  seedOperationId?: string,
 ) {
   type Pack = { id: string; size: number; target?: PutTarget | undefined; members: Map<number, number> };
   const packs = new Map<string, Pack>();
   const carried = new Set<number>();
   for (const [index, row] of rows.entries()) {
     if (!row.pack || row.stored) continue;
+    invariant(row.id, 'EXCHANGE_UPLOAD_UNKNOWN', 'Original upload pack reservation is unavailable.');
     const pack: Pack = packs.get(row.pack.digest) ?? { id: row.id, size: row.pack.size, members: new Map() };
     invariant(pack.id === row.id, 'EXCHANGE_UPLOAD_UNKNOWN', 'Upload pack rows disagree.');
     pack.target ??= row.target;
@@ -44,7 +47,7 @@ async function putPacks(
     packs.set(row.pack.digest, pack);
     carried.add(index);
   }
-  const sent: { id: string }[] = [];
+  const sent: Sent[] = [];
   for (const [packDigest, pack] of packs) {
     invariant(pack.target, 'EXCHANGE_UPLOAD_UNKNOWN', 'Original upload pack destination is unavailable.');
     const order = [...pack.members.entries()].sort((a, b) => a[0] - b[0]);
@@ -68,7 +71,7 @@ async function putPacks(
       'Upload pack differs from its prepared digest.',
     );
     await (blobs?.put ?? putTarget)(pack.target, Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length));
-    sent.push({ id: pack.id });
+    sent.push({ id: pack.id, ...(seedOperationId ? { pin: { digest: packDigest, size: pack.size } } : {}) });
   }
   return { sent, carried };
 }
@@ -94,6 +97,7 @@ export function uploadPhysicalObjects(
     /** Feature upload-packs (hosting windows only): send each window's new small objects as one
      * pack with one PUT. */
     pack?: boolean;
+    seedOperationId?: string;
   } = {},
 ): Promise<{ uploadedObjects: number; uploadedBytes: number }> {
   const pending = [...objects];
@@ -134,6 +138,7 @@ export function uploadPhysicalObjects(
             projectId,
             objects: chosen.map(object => ({ digest: object.pin.sha256, size: object.pin.size })),
             ...(built ? { pack: built.proposal } : {}),
+            ...(options.seedOperationId ? { seedOperationId: options.seedOperationId } : {}),
           })
         : [];
       invariant(
@@ -148,15 +153,19 @@ export function uploadPhysicalObjects(
       schedule();
       // One PUT for the window's pack, beside the single PUTs of everything outside it.
       const packing = built
-        ? putPacks(chosen, rows, options.blobs, { digest: built.proposal.digest, bytes: built.bytes }).then(
-            result => {
-              for (const index of result.carried) {
-                uploadedObjects++;
-                uploadedBytes += chosen[index]!.pin.size;
-              }
-              return result;
-            },
-          )
+        ? putPacks(
+            chosen,
+            rows,
+            options.blobs,
+            { digest: built.proposal.digest, bytes: built.bytes },
+            options.seedOperationId,
+          ).then(result => {
+            for (const index of result.carried) {
+              uploadedObjects++;
+              uploadedBytes += chosen[index]!.pin.size;
+            }
+            return result;
+          })
         : null;
       packing?.catch(() => {});
       const attempts = await mapExchange(selected, options.batchSize ? 16 : 8, async row => {
@@ -181,7 +190,13 @@ export function uploadPhysicalObjects(
               uploadedObjects++;
               uploadedBytes += bytes.length;
               await (options.blobs?.put ?? putTarget)(row.target, bytes);
-              return { id: row.id };
+              invariant(row.id, 'EXCHANGE_UPLOAD_UNKNOWN', 'Original upload reservation is unavailable.');
+              return {
+                id: row.id,
+                ...(options.seedOperationId
+                  ? { pin: { digest: object.pin.sha256, size: object.pin.size } }
+                  : {}),
+              };
             })(),
           };
         } catch (reason) {
@@ -213,6 +228,7 @@ export function uploadPhysicalObjects(
         );
         await client.action(makeFunctionReference<'action'>('projectObjectCommit:commitBatch'), {
           objects: completed,
+          ...(options.seedOperationId ? { seed: { projectId, operationId: options.seedOperationId } } : {}),
         });
       }
       const carried = packed?.carried ?? new Set<number>();
@@ -298,6 +314,7 @@ export async function putPreparedObjects(
       const row = rows[index]!,
         object = objects[index]!;
       if (row.stored || row.pack) return null;
+      invariant(row.id, 'EXCHANGE_UPLOAD_UNKNOWN', 'Original upload reservation is unavailable.');
       invariant(row.target, 'EXCHANGE_UPLOAD_UNKNOWN', 'Original upload destination is unavailable.');
       const bytes = await object.read();
       invariant(

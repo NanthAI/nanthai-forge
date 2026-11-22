@@ -12,7 +12,7 @@ const pin = { projectId: v.id('hostedProjects'), digest: v.string(), size: v.num
 const valid = (digest: string, size: number) =>
   /^[0-9a-f]{64}$/.test(digest) && Number.isSafeInteger(size) && size >= 0;
 export const complete = action({
-  args: { ...pin, recipeDigest: v.string(), recipeSize: v.number() },
+  args: { ...pin, recipeDigest: v.string(), recipeSize: v.number(), seedOperationId: v.optional(v.string()) },
   returns: v.null(),
   handler: async (ctx, input): Promise<null> => {
     try {

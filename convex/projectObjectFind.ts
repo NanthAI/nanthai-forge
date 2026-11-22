@@ -195,16 +195,17 @@ type CatalogPageEntry = {
   pack?: ObjectPack;
 };
 /** Sorted catalog rows for a set of stored objects; callers write them once. */
-export function catalogPages(objects: CatalogPageEntry[]) {
+export function catalogPages(objects: CatalogPageEntry[], pageSize = objectCatalogPage) {
   return [
     ...sortedCatalogPages(
       [...objects].sort((a, b) => (a.digest < b.digest ? -1 : a.digest > b.digest ? 1 : 0)),
+      pageSize,
     ),
   ];
 }
 /** The same rows for objects already in ascending digest order, made one page at a time
  * so a caller never holds a second copy of the whole catalog. */
-export function* sortedCatalogPages(sorted: Iterable<CatalogPageEntry>) {
+export function* sortedCatalogPages(sorted: Iterable<CatalogPageEntry>, pageSize = objectCatalogPage) {
   let rows: CatalogPageEntry[] = [];
   const page = () => ({
     first: rows[0]!.digest,
@@ -228,7 +229,7 @@ export function* sortedCatalogPages(sorted: Iterable<CatalogPageEntry>) {
   });
   for (const row of sorted) {
     rows.push(row);
-    if (rows.length < objectCatalogPage) continue;
+    if (rows.length < pageSize) continue;
     yield page();
     rows = [];
   }

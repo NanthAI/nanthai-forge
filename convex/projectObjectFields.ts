@@ -32,6 +32,8 @@ export const objectFields = {
   storageId: v.optional(v.id('_storage')),
   ...backfillFields,
   r2SweepKey: v.optional(v.string()),
+  /** A pending reservation whose ID is private to a catalog seed upload. */
+  seedOperationId: v.optional(v.string()),
   r2PreparedAt: v.optional(v.number()),
   recipeClosure: v.optional(recipeClosure),
   recipe: v.optional(v.object({ digest: v.string(), size: v.number() })),

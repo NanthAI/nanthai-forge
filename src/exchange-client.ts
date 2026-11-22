@@ -148,6 +148,7 @@ export class ConvexExchange implements ExchangeTransport {
       deferCommit?: { id: string }[];
       /** Feature upload-packs: each hosting window's new small objects go up as one pack. */
       pack?: boolean;
+      seedOperationId?: string;
     } = {},
   ) {
     if (objects.every(object => !chunked(object.pin)))
@@ -156,20 +157,22 @@ export class ConvexExchange implements ExchangeTransport {
         options.batchSize,
         options.onRaw,
         options.deferCommit,
-        options.pack,
+        options.pack || !!options.seedOperationId,
+        options.seedOperationId,
       );
     let uploadedObjects = 0,
       uploadedBytes = 0,
       uploadedLogicalObjects = 0;
     for (const object of objects) {
       const sent = chunked(object.pin)
-        ? await this.uploadChunked(object.pin, await object.read())
+        ? await this.uploadChunked(object.pin, await object.read(), options.seedOperationId)
         : await this.uploadPhysical(
             [object],
             options.batchSize,
             options.onRaw,
             options.deferCommit,
-            options.pack,
+            options.pack || !!options.seedOperationId,
+            options.seedOperationId,
           );
       uploadedObjects += sent.uploadedObjects;
       uploadedBytes += sent.uploadedBytes;
@@ -179,7 +182,7 @@ export class ConvexExchange implements ExchangeTransport {
     }
     return { uploadedObjects, uploadedBytes, uploadedLogicalObjects };
   }
-  async uploadFile(pin: ContentPin, root: string, path: string) {
+  async uploadFile(pin: ContentPin, root: string, path: string, seedOperationId?: string) {
     const reader = new SourceFileReader(root, path);
     try {
       invariant(
@@ -202,12 +205,12 @@ export class ConvexExchange implements ExchangeTransport {
       });
       const observed = reader.scan(bytes => builder.update(bytes), pin.sha256);
       const built = builder.finish(observed);
-      return await this.uploadRecipe(pin, built.bytes, [...content.values()]);
+      return await this.uploadRecipe(pin, built.bytes, [...content.values()], seedOperationId);
     } finally {
       reader.close();
     }
   }
-  private async uploadChunked(pin: ContentPin, bytes: Buffer) {
+  private async uploadChunked(pin: ContentPin, bytes: Buffer, seedOperationId?: string) {
     const built = buildObjectRecipe(bytes);
     invariant(
       built.recipe.object.size === pin.size && built.recipe.object.sha256 === pin.sha256,
@@ -221,12 +224,14 @@ export class ConvexExchange implements ExchangeTransport {
         pin: { sha256, size: bytes.length },
         read: () => bytes,
       })),
+      seedOperationId,
     );
   }
   private async uploadRecipe(
     pin: ContentPin,
     recipe: Buffer,
     content: { pin: ContentPin; read: () => Buffer }[],
+    seedOperationId?: string,
   ) {
     const recipePin = { sha256: digest(recipe), size: recipe.length };
     content.push({ pin: recipePin, read: () => recipe });
@@ -239,13 +244,21 @@ export class ConvexExchange implements ExchangeTransport {
       async page => new Set(await this.missing(page.map(item => item.pin))),
     );
     const pending = pages.flatMap((page, index) => page.filter(item => missing[index]!.has(item.pin.sha256)));
-    const { uploadedObjects, uploadedBytes } = await this.uploadPhysical(pending);
+    const { uploadedObjects, uploadedBytes } = await this.uploadPhysical(
+      pending,
+      this.uploadBatchSize,
+      undefined,
+      undefined,
+      !!seedOperationId,
+      seedOperationId,
+    );
     await this.client.action(action('projectObjectRecipes:complete'), {
       projectId: this.projectId,
       digest: pin.sha256,
       size: pin.size,
       recipeDigest: recipePin.sha256,
       recipeSize: recipePin.size,
+      ...(seedOperationId ? { seedOperationId } : {}),
     });
     return { uploadedObjects, uploadedBytes, uploadedLogicalObjects: uploadedObjects ? 1 : 0 };
   }
@@ -274,6 +287,7 @@ export class ConvexExchange implements ExchangeTransport {
     onRaw?: (sha256: string) => void,
     deferCommit?: { id: string }[],
     pack?: boolean,
+    seedOperationId?: string,
   ) {
     return uploadPhysicalObjects(this.client, this.projectId, objects, {
       blobs: this.blobs,
@@ -281,6 +295,7 @@ export class ConvexExchange implements ExchangeTransport {
       ...(onRaw ? { onRaw } : {}),
       ...(deferCommit ? { deferCommit } : {}),
       ...(pack ? { pack } : {}),
+      ...(seedOperationId ? { seedOperationId } : {}),
     });
   }
   private async uploadRawBatch(

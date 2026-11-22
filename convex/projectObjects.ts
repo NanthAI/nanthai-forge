@@ -9,10 +9,11 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { r2Config, r2Key, presignPut, type R2Config } from './r2';
 import { pointObject } from './projectObjectPointBinding';
-import { findObject, findStoredObject, objectRow } from './projectObjectFind';
+import { findObject, findStoredObjects, findStoredObject, objectRow } from './projectObjectFind';
 import { chargeStorage, checkObjectSize } from './abuseLimits';
 import { preparePack, uploadPackProposal } from './projectObjectPacks';
 import type { UploadPackProposal } from '../src/object-pack-upload';
+import { requireCatalogSeed } from './projectHostedSeedObjects';
 const pin = v.object({ digest: v.string(), size: v.number() });
 const valid = (digest: string, size: number) =>
   /^[0-9a-f]{64}$/.test(digest) && Number.isSafeInteger(size) && size >= 0;
@@ -67,6 +68,7 @@ async function prepareObject(
   authorized = false,
   r2?: R2Config,
   known?: KnownObjects,
+  seedOperationId?: string,
 ): Promise<Infer<typeof preparedObject>> {
   try {
     if (!authorized) {
@@ -97,6 +99,7 @@ async function prepareObject(
         location: 'r2' as const,
         r2Key: r2Key(projectId, digest),
         r2PreparedAt: Date.now(),
+        ...(seedOperationId ? { seedOperationId } : {}),
       });
       row = (await ctx.db.get(id))!;
     } else if (!isStored(row) && row.location !== 'r2') {
@@ -111,6 +114,7 @@ async function prepareObject(
     if (row.location === 'r2' && !isStored(row)) {
       const patch = {
         r2PreparedAt: Date.now(),
+        ...(row.seedOperationId !== seedOperationId ? { seedOperationId: undefined } : {}),
         ...(row.r2SweepKey === row.r2Key
           ? {
               r2Key: `${r2Key(projectId, digest)}/u/${crypto.randomUUID()}`,
@@ -158,13 +162,56 @@ export const prepareBatch = mutation({
     objects: v.array(pin),
     /** Feature upload-packs: send these objects as one pack (see src/object-pack-upload.ts). */
     pack: v.optional(uploadPackProposal),
+    seedOperationId: v.optional(v.string()),
   },
-  returns: v.array(preparedObject),
-  handler: async (ctx, { projectId, objects, pack }) => {
+  returns: v.array(
+    v.union(
+      preparedObject,
+      v.object({ stored: v.literal(true), created: v.literal(false), contentType: v.literal('') }),
+    ),
+  ),
+  handler: async (ctx, { projectId, objects, pack, seedOperationId }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to exchange project source.');
-      return await prepareObjectTargets(ctx, projectId, user.subject, objects, pack);
+      if (!seedOperationId) return await prepareObjectTargets(ctx, projectId, user.subject, objects, pack);
+      await requireCatalogSeed(ctx, projectId, user.subject, seedOperationId, true);
+      invariant(
+        objects.length <= 100 && objects.every(p => valid(p.digest, p.size)),
+        'BAD_ARGUMENT',
+        'Prepare content in pages of at most 100 valid pins.',
+      );
+      const rows = await findStoredObjects(
+        ctx,
+        projectId,
+        objects.map(pin => pin.digest),
+      );
+      const known: KnownObjects = new Map();
+      const pending = objects.filter((pin, index) => {
+        const row = rows[index] ?? null;
+        invariant(
+          !row || (row.size === pin.size && !row.removed),
+          'INVALID_WORK_BACKUP',
+          'Content differs from its original binding.',
+        );
+        known.set(pin.digest, row);
+        return !row || !isStored(row);
+      });
+      const prepared = await prepareObjectTargets(
+        ctx,
+        projectId,
+        user.subject,
+        pending,
+        pending.length === objects.length ? pack : undefined,
+        known,
+        seedOperationId,
+      );
+      let next = 0;
+      return rows.map(row =>
+        row && isStored(row)
+          ? { stored: true as const, created: false as const, contentType: '' as const }
+          : prepared[next++]!,
+      );
     } catch (error) {
       return report(error);
     }
@@ -182,6 +229,7 @@ export async function prepareObjectTargets(
   objects: readonly { digest: string; size: number }[],
   pack?: UploadPackProposal,
   known?: KnownObjects,
+  seedOperationId?: string,
 ): Promise<PreparedObject[]> {
   invariant(
     objects.length <= 100 && objects.every(p => valid(p.digest, p.size)),
@@ -193,7 +241,7 @@ export async function prepareObjectTargets(
   if (!objects.length) return [];
   // Every project writes R2, including legacy projects created before R2 was the only path.
   const r2 = r2Config();
-  const packed = pack ? await preparePack(ctx, projectId, objects, pack, r2) : null;
+  const packed = pack ? await preparePack(ctx, projectId, objects, pack, r2, seedOperationId, known) : null;
   const result: PreparedObject[] = [],
     reserved: number[] = [...(packed?.reserved ?? [])];
   for (const pin of objects) {
@@ -203,7 +251,7 @@ export async function prepareObjectTargets(
       result.push(result.some(prior => prior.pack) ? member : { ...member, target: packed!.target });
       continue;
     }
-    const prepared = await prepareObject(ctx, { projectId, ...pin }, true, r2, known);
+    const prepared = await prepareObject(ctx, { projectId, ...pin }, true, r2, known, seedOperationId);
     if (prepared.created) reserved.push(pin.size);
     result.push(prepared);
   }

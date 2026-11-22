@@ -36,8 +36,14 @@ export interface ExchangeTransport {
   uploadBatch?(objects: { pin: ContentPin; bytes: Buffer }[]): Promise<void | TransferReceipt>;
   uploadLazyBatch?(
     objects: { pin: ContentPin; read: () => Buffer | Promise<Buffer> }[],
+    options?: { seedOperationId?: string },
   ): Promise<TransferReceipt>;
-  uploadFile?(pin: ContentPin, root: string, path: string): Promise<TransferReceipt>;
+  uploadFile?(
+    pin: ContentPin,
+    root: string,
+    path: string,
+    seedOperationId?: string,
+  ): Promise<TransferReceipt>;
   manifest(backupId: string): Promise<{ json: string; digest: string; size: number; sourceDigest?: string }>;
   download(pin: ContentPin): Promise<Buffer>;
   downloadBatch?(pins: ContentPin[]): Promise<Buffer[]>;

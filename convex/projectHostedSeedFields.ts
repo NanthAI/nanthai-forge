@@ -17,6 +17,8 @@ export const hostedSeedTables = {
     objects: v.number(),
     chain: v.string(),
     lastDigest: v.union(v.string(), v.null()),
+    /** Absent on seeds that started with individual object bindings. */
+    objectCatalog: v.optional(v.literal(true)),
     backupId: v.optional(v.id('projectBackups')),
     mainDigest: v.optional(v.string()),
   }).index('by_project', ['projectId']),

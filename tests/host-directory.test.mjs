@@ -271,7 +271,9 @@ test('fresh host authority and Plan publication use the same Convex calls as a p
   );
   assert.equal(fresh.s.tables.projectWorkGenerations.size, 1);
   const projectionRows = [...fresh.s.tables.projectWorkDataRecords.values()];
-  assert.equal(projectionRows.filter(row => row.collection === 'sourceTreePaths').length, 40);
+  const pathPages = projectionRows.filter(row => row.collection === 'sourceTreePaths');
+  assert.equal(pathPages.length, 8);
+  assert.equal(pathPages.flatMap(row => JSON.parse(row.value).paths).length, 4000);
   assert.equal(projectionRows.filter(row => row.collection === 'sourceBlobs').length, 0);
   assert(fresh.s.tables.projectFinishReadRows.size - legacy.s.tables.projectFinishReadRows.size <= 2);
   const indexBytes =

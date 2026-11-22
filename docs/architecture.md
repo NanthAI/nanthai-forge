@@ -1085,6 +1085,15 @@ idle work. Older pending seeds and existing projects retain their authority;
 their cutover guards are unchanged. Source bytes stay in R2 and metadata transfer
 remains bounded by seed pages.
 
+New seeds publish verified raw, packed and recipe pins to the existing sorted
+object catalog. A pack keeps a protected whole-object binding alongside its
+members. Seed pages record their chain hashes in groups of 64 for exact replay.
+State sizes and root generations stay on their catalog entries. The initial
+Code index uses the bulk import's 500-path pages with a smaller-page fallback
+for long names.
+Seeds already in progress keep their original upload and page format. Shared
+and storage-maintenance reservations retain their existing object IDs and keys.
+
 The final seed action uses the verified initial State and exact initial Work pin
 to stage a ready Work generation when its projection fits one transaction. The
 existing Work initialization selects that generation. Source blobs use the

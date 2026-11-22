@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { v } from 'convex/values';
+import { v, type Infer } from 'convex/values';
 import { action, internalQuery, internalMutation, type ActionCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
@@ -13,8 +13,15 @@ import { findStoredObject } from './projectObjectFind';
 import { readExactObject } from './projectR2ExactRead';
 import { uploadPackMismatch } from '../src/object-pack-upload';
 import { mapExchange } from '../src/exchange-parallel';
+import { digest } from '../src/state/hash';
+import { seedObjectPins, requireCatalogSeed } from './projectHostedSeedObjects';
+import { storeCatalogObjects } from './projectObjectCatalogStore';
+import { requireSourceAuthority } from '../src/hosted-source-authority';
 
 const member = v.object({ digest: v.string(), size: v.number() });
+const seedUpload = v.object({ projectId: v.id('hostedProjects'), operationId: v.string() });
+const upload = v.object({ id: v.id('projectObjects'), pin: v.optional(member) });
+type SeedUpload = Infer<typeof seedUpload>;
 const pending = v.object({
   id: v.id('projectObjects'),
   digest: v.string(),
@@ -31,9 +38,10 @@ export const pendingRows = internalQuery({
     actor: v.string(),
     ids: v.array(v.id('projectObjects')),
     projectId: v.optional(v.id('hostedProjects')),
+    seed: v.optional(v.object({ ...seedUpload.fields, pins: v.array(member) })),
   },
   returns: v.array(pending),
-  handler: async (ctx, { actor, ids, projectId }) => {
+  handler: async (ctx, { actor, ids, projectId, seed }) => {
     const sameProject = (owner: Id<'hostedProjects'>) =>
       invariant(
         projectId === undefined || owner === projectId,
@@ -41,9 +49,28 @@ export const pendingRows = internalQuery({
         'Commit only uploads prepared for the project this source submit names.',
       );
     try {
+      if (seed) await requireCatalogSeed(ctx, seed.projectId, actor, seed.operationId, false);
       const rows = [];
+      const pins = new Map(ids.map((id, index) => [id, seed?.pins[index]]));
       for (const id of new Set(ids)) {
         const row = await ctx.db.get(id);
+        const pin = pins.get(id);
+        if (seed) {
+          invariant(
+            pin && (!row || (row.digest === pin.digest && row.size === pin.size)),
+            'R2_OBJECT_MISSING',
+            'Commit the original seed upload.',
+          );
+          if (!row) {
+            const stored = await findStoredObject(ctx, seed.projectId, pin.digest);
+            invariant(
+              stored?.r2Committed && !stored.removed && stored.size === pin.size,
+              'R2_OBJECT_MISSING',
+              'Prepare the original seed upload again.',
+            );
+            continue;
+          }
+        }
         if (!row) {
           const receipt = await ctx.db
             .query('projectObjectReceipts')
@@ -66,7 +93,7 @@ export const pendingRows = internalQuery({
           continue;
         }
         sameProject(row.projectId);
-        await activeProject(ctx, row.projectId, actor);
+        if (!seed) await activeProject(ctx, row.projectId, actor);
         invariant(
           row.location === 'r2' && row.r2Key,
           'BAD_ARGUMENT',
@@ -93,9 +120,13 @@ export const pendingRows = internalQuery({
   },
 });
 export const markCommitted = internalMutation({
-  args: { rows: v.array(pending) },
+  args: { rows: v.array(pending), seed: v.optional(v.object({ ...seedUpload.fields, actor: v.string() })) },
   returns: v.null(),
-  handler: async (ctx, { rows }) => {
+  handler: async (ctx, { rows, seed }) => {
+    const scope =
+      seed && (await requireCatalogSeed(ctx, seed.projectId, seed.actor, seed.operationId, false));
+    const catalog = new Map<string, Parameters<typeof storeCatalogObjects>[2][number]>();
+    const retired: Id<'projectObjects'>[] = [];
     for (const expected of rows) {
       const id = expected.id;
       const row = await ctx.db.get(id);
@@ -117,6 +148,7 @@ export const markCommitted = internalMutation({
         !row.removed &&
         !row.r2Committed
       ) {
+        invariant(!seed || row.projectId === seed.projectId, 'BAD_ARGUMENT', 'Commit this seed’s uploads.');
         if (expected.members) {
           // The members this commit read and checked are the ones the row still names.
           invariant(
@@ -124,14 +156,36 @@ export const markCommitted = internalMutation({
             'R2_OBJECT_MISSING',
             'Prepare this upload pack again: its members changed.',
           );
+        }
+        if (seed && scope) {
+          invariant(!scope.seed.backupId, 'SEED_COMMITTED', 'This seed already selected its source.');
+          requireSourceAuthority(scope.project, scope.seed.authority);
+          const pins = await seedObjectPins(ctx, row, seed.operationId);
+          if (pins) {
+            // Within one transaction the verified raw carrier is the preferred
+            // binding if the same logical bytes also occur as a packed member.
+            for (const pin of pins) if (!catalog.has(pin.digest) || !pin.pack) catalog.set(pin.digest, pin);
+            retired.push(id);
+            continue;
+          }
+        }
+        if (expected.members)
           await bindPackMembers(
             ctx,
             { projectId: row.projectId, digest: row.digest, size: row.size, r2Key: expected.key },
             expected.members,
           );
-        }
-        await ctx.db.patch(id, { r2Committed: true, packMembers: undefined });
+        await ctx.db.patch(id, {
+          r2Committed: true,
+          packMembers: undefined,
+          seedOperationId: undefined,
+          ...(seed ? { sourceReferenced: true } : {}),
+        });
       }
+    }
+    if (seed && retired.length) {
+      await storeCatalogObjects(ctx, seed.projectId, [...catalog.values()], seed.operationId, true);
+      for (const id of retired) await ctx.db.delete(id);
     }
     return null;
   },
@@ -152,13 +206,13 @@ function mismatch(row: { digest: string; size: number }, head: HeadResult) {
 /** Verify each new R2 object with one signed HEAD (in parallel), then mark the verified rows
  * committed. Failures leave their rows pending; retrying the same call is safe and cheap. */
 export const commitBatch = action({
-  args: { objects: v.array(v.object({ id: v.id('projectObjects') })) },
+  args: { objects: v.array(upload), seed: v.optional(seedUpload) },
   returns: v.null(),
-  handler: async (ctx, { objects }): Promise<null> => {
+  handler: async (ctx, { objects, seed }): Promise<null> => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to exchange project source.');
-      await commitObjects(ctx, user.subject, objects);
+      await commitObjects(ctx, user.subject, objects, undefined, undefined, seed?.projectId, seed);
       return null;
     } catch (error) {
       return report(error);
@@ -171,8 +225,9 @@ export const commitBatch = action({
  * upload of the same digests prepares afresh. */
 async function packMismatch(
   config: ReturnType<typeof r2Config>,
-  row: { key: string; size: number; members: { digest: string; size: number }[] },
+  row: { digest: string; key: string; size: number; members: { digest: string; size: number }[] },
   held?: Map<string, Uint8Array>,
+  verifyCarrier?: boolean,
 ) {
   let bytes: Uint8Array;
   try {
@@ -186,7 +241,7 @@ async function packMismatch(
   } catch {
     return ['R2_VERIFY_FAILED', 'Object storage could not read an upload pack. Retry.'];
   }
-  if (uploadPackMismatch(bytes, row))
+  if ((verifyCarrier && digest(bytes) !== row.digest) || uploadPackMismatch(bytes, row))
     return ['R2_OBJECT_CHECKSUM_MISMATCH', 'An upload pack member differs from its declared digest.'];
   // A save packs its blobs first and its pages (and input) last: hold from the end.
   let end = row.size;
@@ -207,7 +262,7 @@ const heldBytes = 128 * 1024;
 export async function commitObjects(
   ctx: ActionCtx,
   actor: string,
-  objects: readonly { id: Id<'projectObjects'> }[],
+  objects: readonly Infer<typeof upload>[],
   held?: Map<string, Uint8Array>,
   bindings?: Map<
     string,
@@ -215,9 +270,16 @@ export async function commitObjects(
   >,
   /** The project a source submit names: every upload must belong to it (pendingRows). */
   projectId?: Id<'hostedProjects'>,
+  seed?: SeedUpload,
 ): Promise<{ sha256: string; size: number }[]> {
   invariant(objects.length <= 100, 'BAD_ARGUMENT', 'Commit content in pages of at most 100.');
   if (!objects.length) return [];
+  const pins = seed
+    ? objects.map(object => {
+        invariant(object.pin, 'BAD_ARGUMENT', 'Commit each seed upload with its original pin.');
+        return object.pin;
+      })
+    : undefined;
   const rows: {
     id: Id<'projectObjects'>;
     digest: string;
@@ -228,28 +290,45 @@ export async function commitObjects(
     actor,
     ids: objects.map(object => object.id),
     ...(projectId ? { projectId } : {}),
+    ...(seed && pins ? { seed: { ...seed, pins } } : {}),
   });
   if (!rows.length) return [];
   const config = r2Config();
   // Raw rows HEAD all at once; pack reads hold at most two packs (2 x 8 MiB) in memory.
   const [heads, packs] = await Promise.all([
-    Promise.all(
-      rows
-        .filter(row => !row.members)
-        .map(async row => {
-          const head = await headObject(config, row.key);
-          return {
-            row,
-            checked: head.status === 'ok' && head.checksum === checksumOf(row.digest),
-            failure: mismatch(row, head),
-          };
-        }),
+    mapExchange(
+      rows.filter(row => !row.members),
+      100,
+      async row => {
+        const head = await headObject(config, row.key);
+        let failure = mismatch(row, head);
+        if (seed && !failure && head.status === 'ok' && !head.checksum) {
+          const bytes = await readExactObject(
+            { url: await presignGet(config, row.key), size: row.size },
+            {
+              failed: 'Object storage could not verify the seed upload.',
+              exceeds: 'A seed upload is larger than declared.',
+            },
+          );
+          if (digest(bytes) !== row.digest)
+            failure = [
+              'R2_OBJECT_CHECKSUM_MISMATCH',
+              'An uploaded object has a different checksum than declared.',
+            ];
+        }
+        return {
+          row,
+          checked: head.status === 'ok' && head.checksum === checksumOf(row.digest),
+          failure,
+        };
+      },
+      seed ? { bytes: 16 * 1024 * 1024, size: row => row.size } : undefined,
     ),
     mapExchange(
       rows.filter(row => row.members),
       2,
       async row => {
-        const failure = await packMismatch(config, { ...row, members: row.members! }, held);
+        const failure = await packMismatch(config, { ...row, members: row.members! }, held, !!seed);
         return { row, checked: !failure, failure };
       },
     ),
@@ -261,17 +340,22 @@ export async function commitObjects(
   // normal <=100-object upload still commits in its existing single mutation.
   let page: typeof verified = [],
     members = 0;
+  const publish = (rows: typeof verified) =>
+    ctx.runMutation(internal.projectObjectCommit.markCommitted, {
+      rows,
+      ...(seed ? { seed: { ...seed, actor } } : {}),
+    });
   for (const row of verified) {
     const count = row.members?.length ?? 1;
     if (page.length && members + count > 100) {
-      await ctx.runMutation(internal.projectObjectCommit.markCommitted, { rows: page });
+      await publish(page);
       page = [];
       members = 0;
     }
     page.push(row);
     members += count;
   }
-  if (page.length) await ctx.runMutation(internal.projectObjectCommit.markCommitted, { rows: page });
+  if (page.length) await publish(page);
   const failed = results.find(r => r.failure);
   invariant(!failed, failed?.failure?.[0] ?? '', failed?.failure?.[1] ?? '');
   for (const { row, checked } of results) {

@@ -8,6 +8,7 @@ import { invariant } from '../src/errors';
 import { r2Key, presignPut, type R2Config, type R2PutTarget } from './r2';
 import { checkObjectSize } from './abuseLimits';
 import { uploadPackLayout, type UploadPackProposal } from '../src/object-pack-upload';
+import type { KnownObjects } from './projectObjects';
 
 export const uploadPackProposal = v.object({
   digest: v.string(),
@@ -33,12 +34,15 @@ export async function preparePack(
   objects: readonly { digest: string; size: number }[],
   proposal: UploadPackProposal,
   r2: R2Config,
+  seedOperationId?: string,
+  known?: KnownObjects,
 ): Promise<{ byDigest: Map<string, PackedObject>; target: R2PutTarget; reserved: number[] } | null> {
   const layout = uploadPackLayout(objects, proposal),
     reserved: number[] = [],
     fresh = new Set<string>();
   for (const member of layout) {
-    const row = await findObject(ctx, projectId, member.digest);
+    const cached = known?.get(member.digest);
+    const row = cached === undefined ? await findObject(ctx, projectId, member.digest) : cached;
     invariant(
       !row || (row.size === member.size && !row.removed),
       'INVALID_WORK_BACKUP',
@@ -74,12 +78,14 @@ export async function preparePack(
       r2Key: r2Key(projectId, proposal.digest),
       r2PreparedAt: Date.now(),
       packMembers,
+      ...(seedOperationId ? { seedOperationId } : {}),
     });
   else {
     id = found._id;
     await ctx.db.patch(id, {
       packMembers,
       r2PreparedAt: Date.now(),
+      ...(found.seedOperationId !== seedOperationId ? { seedOperationId: undefined } : {}),
       // A key under storage maintenance is never reused: a replayed DELETE could remove the new copy.
       ...(found.r2SweepKey === found.r2Key || !found.r2Key?.startsWith(r2Key(projectId, proposal.digest))
         ? { r2Key: `${r2Key(projectId, proposal.digest)}/u/${crypto.randomUUID()}` }

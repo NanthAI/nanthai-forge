@@ -134,7 +134,8 @@ export const finish = action({
           'SOURCE_HASH_MISMATCH',
           'Hosted main differs from native main.',
         );
-        if (metadata.schema === 2) initialIndex = initialSeedIndex(request, state);
+        if (metadata.schema === 2)
+          initialIndex = initialSeedIndex(request, state, row.objectCatalog === true);
       }
       return await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedSeed:commit'), {
         ...input,

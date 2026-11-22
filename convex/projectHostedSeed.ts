@@ -21,9 +21,11 @@ import {
 } from '../src/hosted-seed-protocol';
 import { invariant } from '../src/errors';
 import { report } from './errors';
-import { findObject } from './projectObjectFind';
+import { findObject, findObjects, findStoredObject, findStoredObjects } from './projectObjectFind';
 import { indexEntry } from './projectWorkIndexFields';
 import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
+import { seedRow as rowFor } from './projectHostedSeedObjects';
+import { commitCatalogSeedPage, replaySeedPage } from './projectHostedSeedPages';
 
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
 async function caller(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
@@ -32,11 +34,6 @@ async function caller(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects
   await activeOwnedProject(ctx, projectId, user.subject);
   return user.subject;
 }
-const rowFor = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) =>
-  ctx.db
-    .query('projectHostedSeeds')
-    .withIndex('by_project', q => q.eq('projectId', projectId))
-    .unique();
 const workHead = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) =>
   ctx.db
     .query('projectWorkHeads')
@@ -49,6 +46,7 @@ const progress = (row: NonNullable<Awaited<ReturnType<typeof rowFor>>>) =>
     chain: row.chain,
     backupId: row.backupId ?? null,
     mainDigest: row.mainDigest ?? null,
+    ...(row.objectCatalog ? { objectCatalog: true } : {}),
   });
 
 export const begin = mutation({
@@ -101,6 +99,7 @@ export const begin = mutation({
         objects: 0,
         chain: SEED_EMPTY,
         lastDigest: null,
+        ...(project.hostingRequest && project.revision === 0 ? { objectCatalog: true as const } : {}),
       });
       return progress((await ctx.db.get(id))!);
     } catch (error) {
@@ -191,15 +190,7 @@ export const commitPage = internalMutation({
       'Select a page in the original seed.',
     );
     if (input.index < row.nextPage) {
-      const old = await ctx.db
-        .query('projectHostedSeedPages')
-        .withIndex('by_seed_and_index', q => q.eq('seedId', row._id).eq('index', input.index))
-        .unique();
-      invariant(
-        old?.body === body && old.previous === input.previous && old.chain === chain,
-        'WORK_OPERATION_CHANGED',
-        'Retry the original committed page.',
-      );
+      await replaySeedPage(ctx, row, input.index, input.previous, body, chain);
       return progress(row);
     }
     invariant(
@@ -208,14 +199,20 @@ export const commitPage = internalMutation({
       'Resume the last committed seed page.',
     );
     let last = row.lastDigest;
-    for (const pin of entries) {
+    const resolve = row.objectCatalog ? findStoredObjects : findObjects;
+    const objects = await resolve(
+      ctx,
+      input.projectId,
+      entries.map(pin => pin.sha256),
+    );
+    for (const [index, pin] of entries.entries()) {
       invariant(
         last === null || pin.sha256 > last,
         'INVALID_WORK_BACKUP',
         'Seed objects must be unique and ordered across pages.',
       );
       last = pin.sha256;
-      const stored = await findObject(ctx, input.projectId, pin.sha256);
+      const stored = objects[index];
       invariant(
         stored && !stored.removed && isStored(stored) && stored.size === pin.size,
         'INVALID_WORK_BACKUP',
@@ -224,7 +221,12 @@ export const commitPage = internalMutation({
       // The fixed action verified these parentless State bytes on its existing
       // validation read. Git imports retain original commits in a bundle and
       // create one such Forge root, without a parent-generation RPC or R2 change.
-      if (pin.kind === 'state' && input.rootStates?.includes(pin.sha256) && stored._id) {
+      if (
+        !row.objectCatalog &&
+        pin.kind === 'state' &&
+        input.rootStates?.includes(pin.sha256) &&
+        stored._id
+      ) {
         invariant(
           stored.stateGeneration === undefined || stored.stateGeneration === 1,
           'SOURCE_HASH_MISMATCH',
@@ -233,7 +235,6 @@ export const commitPage = internalMutation({
         if (stored.stateGeneration === undefined) await ctx.db.patch(stored._id, { stateGeneration: 1 });
       }
     }
-    await recordSourceStateSizes(ctx, input.projectId, input.stateSizes);
     const next = {
       nextPage: row.nextPage + 1,
       objects: row.objects + entries.length,
@@ -247,14 +248,18 @@ export const commitPage = internalMutation({
       'INVALID_WORK_BACKUP',
       'The complete seed differs from its pinned closure.',
     );
-    await ctx.db.insert('projectHostedSeedPages', {
-      projectId: input.projectId,
-      seedId: row._id,
-      index: input.index,
-      body,
-      previous: input.previous,
-      chain,
-    });
+    if (row.objectCatalog) await commitCatalogSeedPage(ctx, row, input, chain, objects);
+    else {
+      await recordSourceStateSizes(ctx, input.projectId, input.stateSizes);
+      await ctx.db.insert('projectHostedSeedPages', {
+        projectId: input.projectId,
+        seedId: row._id,
+        index: input.index,
+        body,
+        previous: input.previous,
+        chain,
+      });
+    }
     await ctx.db.patch(row._id, next);
     return progress({ ...row, ...next });
   },
@@ -298,7 +303,8 @@ export const commit = internalMutation({
       'CHANNEL_CHANGED',
       'Selected source or journal moved after seed start.',
     );
-    const content = await findObject(ctx, input.projectId, request.root.sha256);
+    const resolve = row.objectCatalog ? findStoredObject : findObject;
+    const content = await resolve(ctx, input.projectId, request.root.sha256);
     invariant(
       content && isStored(content) && !content.removed && content.size === request.root.size,
       'INVALID_WORK_BACKUP',

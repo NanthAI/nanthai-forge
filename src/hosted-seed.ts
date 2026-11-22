@@ -94,6 +94,7 @@ export async function seedHostedProject(
   // A completed begin reconciles a lost finish reply. Validate its original
   // main pin too; receipt publication is idempotent for this seed operation.
   if (state.backupId) return complete();
+  const seedOperationId = state.objectCatalog === true ? input.operationId : undefined;
   const locations = JSON.parse(readFileSync(join(directory, 'locations.json'), 'utf8')) as Record<
     string,
     { path: string }
@@ -126,7 +127,10 @@ export async function seedHostedProject(
         },
       }));
       if (exchange.uploadLazyBatch) {
-        const receipt = await exchange.uploadLazyBatch(objects);
+        const receipt = await exchange.uploadLazyBatch(
+          objects,
+          seedOperationId ? { seedOperationId } : undefined,
+        );
         account(
           receipt,
           small.length,
@@ -138,7 +142,7 @@ export async function seedHostedProject(
     }
     for (const pin of pending.filter(pin => !small.includes(pin))) {
       const path = locations[pin.sha256]!.path;
-      account(await exchange.uploadFile!(pin, dirname(path), basename(path)), 1, pin.size);
+      account(await exchange.uploadFile!(pin, dirname(path), basename(path), seedOperationId), 1, pin.size);
     }
     state = JSON.parse(
       (await client.action(makeFunctionReference<'action'>('projectHostedSeedActions:stage'), {
