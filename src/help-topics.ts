@@ -214,7 +214,7 @@ Details: docs/operations.md.`,
 - *_LIMIT / *_TOO_LARGE: the file, page or output is over a size limit; the message names it.
 - IMPORT_* / HISTORY_* / BACKFILL_* / LEGACY_* / ARCHIVE_* / BATCH_*: an import, history catch-up, backfill or storage migration step is running, incomplete or changed; the message names the step and its resume.
 - INDEX_* / PROJECT_WORK_*: a derived index is missing or rebuilding; reads say what they could not cover.
-- PURGED: the project owner purged these saved bytes after a leak; the message names when and which purge, and the Lane history names who. Save the Lane without that file to go on.
+- PURGED: the project owner purged these saved bytes after a leak; the message names when and which purge, and the Lane page's thread (web) names what, when and who; lane-history and records do not carry it. Save the Lane without that file to go on.
 - PROJECT_WORK_INDEX_MISSING: the project owner runs nforge hosted-work ROOT '{"action":"rebuild-index"}' and retries the original command.
 Details: docs/data-placement.md.`,
   },

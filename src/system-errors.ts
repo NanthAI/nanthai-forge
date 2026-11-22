@@ -55,7 +55,23 @@ export function describeFailure(error: unknown, context?: TeachContext): Failure
   return context ? withTeaching(failure, context) : failure;
 }
 
+/** A typed server refusal (a Convex error carrying {code, message}) that reached the top level raw keeps
+ * its code and message instead of printing as INTERNAL_ERROR (Item 9d3c407d: diff and show hid PURGED).
+ * Duck-typed so the CLI startup loads no Convex client. The server's own generic wraps stay unexpected. */
+function serverRefusal(error: unknown): ForgeError | undefined {
+  const raw = error as { name?: unknown; data?: { code?: unknown; message?: unknown } } | null;
+  if (raw?.name !== 'ConvexError' || !raw.data || typeof raw.data !== 'object') return undefined;
+  const { code, message } = raw.data;
+  return typeof code === 'string' &&
+    typeof message === 'string' &&
+    code !== 'INTERNAL_ERROR' &&
+    code !== 'HOSTED_ACTION_FAILED'
+    ? new ForgeError(code, message)
+    : undefined;
+}
+
 function describeBare(error: unknown): Failure {
+  error = serverRefusal(error) ?? error;
   if (error instanceof ForgeError)
     return {
       code: error.code,
@@ -115,6 +131,7 @@ export function recordFailure(error: unknown, context?: TeachContext): Failure {
 /** The CLI's reply for any thrown value: known codes stay terse; system, unexpected and coded local
  * failures also log their stack and name the log. */
 export function reportFailure(error: unknown, context?: TeachContext): Failure {
+  error = serverRefusal(error) ?? error;
   return error instanceof ForgeError && localFailureOf(error) === undefined
     ? describeFailure(error, context)
     : recordFailure(error, context);

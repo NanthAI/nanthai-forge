@@ -20,6 +20,7 @@ import {
   DIAGNOSTICS_MAX_BYTES,
   describeFailure,
   recordFailure,
+  reportFailure,
   writeDiagnostics,
 } from '../dist/system-errors.js';
 
@@ -121,4 +122,20 @@ test('the diagnostics log rotates and stays bounded', t => {
   const files = readdirSync(directory).sort();
   assert.deepEqual(files, ['diagnostics.log', 'diagnostics.log.1', 'diagnostics.log.2']);
   assert.equal(files.length, DIAGNOSTICS_FILES);
+});
+
+test('a typed server refusal that reaches the top level keeps its code (PURGED on diff and show, 9d3c407d)', () => {
+  const refusal = data => Object.assign(new Error('Server Error'), { name: 'ConvexError', data });
+  const purged = reportFailure(
+    refusal({
+      code: 'PURGED',
+      message: 'These saved bytes were purged. Save the Lane without that file to go on.',
+    }),
+  );
+  assert.equal(purged.code, 'PURGED');
+  assert.match(purged.message, /Save the Lane without that file/);
+  assert.equal(purged.diagnostics, undefined, 'a typed refusal logs no stack');
+  for (const code of ['INTERNAL_ERROR', 'HOSTED_ACTION_FAILED'])
+    assert.equal(describeFailure(refusal({ code, message: 'generic' })).code, 'INTERNAL_ERROR');
+  assert.equal(describeFailure(refusal('text')).code, 'INTERNAL_ERROR');
 });
