@@ -36,6 +36,7 @@ import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { storedLandingStateSchema, landingObservation, type HostedLandingState } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
+import { requireLandingPaths } from './accessPolicy';
 import { validCrossHeadProof, type CrossHeadProof } from '../src/hosted-cross-head-proof';
 import { carriedCostCounts } from '../src/landing-speed-alerts';
 import { retiredCheckUsage } from './projectHostedLandingRunnerCosts';
@@ -404,6 +405,9 @@ export async function installFinishCompose(
     'WORK_OPERATION_CHANGED',
     'The named recompose changed the original exact selection.',
   );
+  // A folder-grant landing's recomposed files are checked before this step writes anything (df06081d).
+  if (landing.grant && candidate.governance)
+    requireLandingPaths(landing.grant.paths, candidate.governance.paths);
   if (pending.precompose) {
     const startMain =
       candidate.result.status === 'conflict' ? await hostedStartMain(ctx, row.projectId) : null;
@@ -461,6 +465,7 @@ export async function installFinishCompose(
         ...input,
         actor: original.actor,
         deferCheck: false,
+        grant: landing.grant,
         request: {
           ...state.request,
           expectedMain: pending.main,
@@ -646,6 +651,7 @@ export async function installFinishCompose(
     ...input,
     actor: original.actor,
     deferCheck: proof ? false : !state.batchSolo,
+    grant: landing.grant,
     request: {
       ...state.request,
       expectedMain: pending.main,

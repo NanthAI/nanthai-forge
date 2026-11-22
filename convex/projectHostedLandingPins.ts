@@ -32,6 +32,7 @@ import { hostedAcceptGate } from './projectHostedGate';
 import type { GithubInboundProof } from './projectGithubPullReuse';
 import { hasWriteRole } from './projectRole';
 import { governanceReason, protectedPathMatches } from '../src/public-governance';
+import { requireLandingPaths, type LandingGrant } from './accessPolicy';
 
 type ExactTreeProof = Extract<CrossHeadProof, { algorithm: 'exact-tree-v1' }>;
 
@@ -54,6 +55,8 @@ export async function pinLandingAttempt(
     retainedSelection?: HostedLandingAttempt['candidate'];
     recheck?: ScopedRecheckBasis;
     githubProof?: GithubInboundProof;
+    /** The landing row's folder grant stamp (df06081d). */
+    grant?: LandingGrant | undefined;
     checkCause?: CheckCause;
     providerDelayReason?: string;
     auditDonor?: boolean;
@@ -119,6 +122,8 @@ export async function pinLandingAttempt(
   );
   for (const early of candidate.earlyResolutions ?? [])
     await earlyPredecessor(ctx, input.projectId, early.predecessor);
+  // A folder-grant landing whose own files are known stops here, before any check (df06081d); in memory.
+  if (input.grant && candidate.governance) requireLandingPaths(input.grant.paths, candidate.governance.paths);
   input.paths?.(candidate.governance?.paths ?? null);
   if (input.retainedSelection) {
     invariant(
@@ -157,6 +162,8 @@ export async function pinLandingAttempt(
       !earlyReview &&
       candidateOwnerInputs(project, row, candidate, r.authorityEpoch) &&
       input.deferCheck !== false &&
+      // A folder-grant landing checks and lands alone, where its grant is rechecked (df06081d).
+      !input.grant &&
       r.finish &&
       !r.finish.after &&
       !r.revertOf &&

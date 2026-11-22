@@ -78,6 +78,31 @@ export function requireGrantPaths(row: Granted | null | undefined, paths: readon
   );
 }
 
+/** A landing submitted by a folder-grant device carries that grant (df06081d), taken from the guard's
+ * credential row: no read. People and whole-project devices carry none. */
+export type LandingGrant = { credentialId: string; paths: string[] };
+export function landingGrantStamp(ctx: object): { grant?: LandingGrant } {
+  const device = (ctx as { forgeDevice?: Doc<'cliCredentials'> | null }).forgeDevice;
+  const paths = device?.settings?.paths;
+  return device && paths ? { grant: { credentialId: device.credentialId, paths } } : {};
+}
+export const landElsewhere =
+  'Nothing landed; the Lane keeps its work. Land it from your Forge browser or an unrestricted device, or move those files to another Lane.';
+/** A grant landing's own files: the Candidate's trusted net change. Unknown files refuse (acceptance). */
+export function requireLandingPaths(scope: readonly string[], paths: readonly string[] | null) {
+  invariant(
+    paths !== null,
+    'AUTH_SCOPE_DENIED',
+    `This landing came from a device limited to ${scope.join(', ')}, and its changed files are not known. ${landElsewhere}`,
+  );
+  const outside = paths.filter(path => !grantAllows(scope, path));
+  invariant(
+    outside.length === 0,
+    'AUTH_SCOPE_DENIED',
+    `This landing changes ${outside.slice(0, 5).join(', ')}${outside.length > 5 ? ` and ${outside.length - 5} more` : ''}, outside its device's folder grant (${scope.join(', ')}). ${landElsewhere}`,
+  );
+}
+
 export function requireAccountWriteAccess(device?: Pick<Doc<'cliCredentials'>, 'settings'> | null) {
   const settings = device?.settings;
   invariant(

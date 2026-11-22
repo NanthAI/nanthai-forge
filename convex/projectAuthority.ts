@@ -2,8 +2,17 @@
 import { journalProject } from './projectJournalStore';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import { currentCredential } from './deviceFields';
-import { deviceAllowsSourceWrite, deviceProjectRefusal, liveGrant, requireGrantPaths } from './accessPolicy';
+import { currentCredential, deviceApprovalExpired } from './deviceFields';
+import {
+  deviceAllowsSourceWrite,
+  deviceProjectRefusal,
+  grantEndsAt,
+  landElsewhere,
+  liveGrant,
+  requireGrantPaths,
+  requireLandingPaths,
+  type LandingGrant,
+} from './accessPolicy';
 import type { Doc } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { projectExecution } from './projectExecution';
@@ -95,6 +104,53 @@ async function deviceProject(ctx: QueryCtx | MutationCtx, projectId: string, wri
 /** Every path a write under a scoped device grant names must be inside it (no read: the checked row). */
 export async function requireDeviceWritePaths(ctx: QueryCtx | MutationCtx, paths: readonly string[]) {
   requireGrantPaths(await deviceRow(ctx), paths);
+}
+/** A Channel move by a folder-grant device: every changed file must be inside the grant; unknown files refuse. */
+export async function requireDeviceLandingPaths(
+  ctx: QueryCtx | MutationCtx,
+  paths: readonly string[] | null,
+) {
+  const scope = (await deviceRow(ctx))?.settings?.paths;
+  if (scope) requireLandingPaths(scope, paths);
+}
+/** Publication of a folder-grant landing rechecks the credential it was submitted with (one indexed read,
+ * stamped landings only): a signed-out, removed or ended grant stops it; a narrowed grant applies. */
+export async function requireLandingGrant(
+  ctx: QueryCtx | MutationCtx,
+  projectId: string,
+  grant: LandingGrant,
+  paths: readonly string[] | null,
+  now = Date.now(),
+) {
+  const row = await ctx.db
+    .query('cliCredentials')
+    .withIndex('by_credentialId', q => q.eq('credentialId', grant.credentialId))
+    .unique();
+  const scope = row?.settings?.paths;
+  // As currentCredential (less the bearer sign-in, which publication has none of), and the folder grant itself
+  // must still be live: clearing the folders ends the grant this work was submitted under.
+  invariant(
+    row &&
+      !row.revoked &&
+      !row.removed &&
+      row.expiresAt > now &&
+      (!row.deviceKey || !deviceApprovalExpired(row, now)) &&
+      scope !== undefined &&
+      row.grant !== undefined &&
+      now < grantEndsAt(row.grant),
+    'AUTH_EXPIRED',
+    `The device that submitted this landing was signed out or removed, or its folder grant ended, before it landed. ${landElsewhere}`,
+  );
+  invariant(
+    row.scope === 'cli' &&
+      row.settings?.source === 'write' &&
+      row.settings.projects.kind === 'project' &&
+      row.settings.projects.projectId === projectId,
+    'AUTH_SCOPE_DENIED',
+    `The device that submitted this landing may no longer write to this project. ${landElsewhere}`,
+  );
+  requireLandingPaths(grant.paths, paths);
+  requireLandingPaths(scope, paths);
 }
 /** A revert's paths are known only after its worker runs, so a folder grant cannot start one. */
 export async function refuseScopedRevert(ctx: QueryCtx | MutationCtx) {

@@ -998,3 +998,99 @@ test('desired landing stamps survive handoff and reconcile after a model or app 
     code('WORK_OPERATION_CHANGED'),
   );
 });
+
+// Issue df06081d (review 80132c2d): land --save from a folder-grant device carries the grant from the guard's row
+// onto the goal and its landing; a file outside the grant stops the landing and main does not move.
+// A fixed instant for the folder-grant tests and the code under test (incident 822fb3db).
+const GRANT_NOW = Date.parse('2026-11-22T12:00:00Z');
+function grantDevice(f, paths, stable = false) {
+  const signIn = 'synthetic-sign-in';
+  f.insert('cliCredentials', {
+    // A stable device (browser-approved key): its sign-in renews; its approval clock and expiry still apply.
+    ...(stable
+      ? {
+          deviceKey: 'synthetic-device-key',
+          deviceApprovedAt: GRANT_NOW,
+          renewal: { operationId: signIn, requestHash: 'synthetic', issuedAt: GRANT_NOW },
+        }
+      : {}),
+    credentialId: 'grant-device',
+    owner: 'owner',
+    name: 'Agent sandbox',
+    tokenHash: 'synthetic-hash',
+    issuedAt: GRANT_NOW,
+    scope: 'cli',
+    expiresAt: GRANT_NOW + 30 * 86400000,
+    revoked: false,
+    settings: {
+      source: 'write',
+      projects: { kind: 'project', projectId: f.projectId },
+      ...(paths ? { paths } : {}),
+    },
+    ...(paths ? { grant: { at: GRANT_NOW, usedAt: GRANT_NOW } } : {}),
+  });
+  return { subject: 'owner', forgeCredential: 'grant-device', ...(stable ? { forgeSignIn: signIn } : {}) };
+}
+async function landFrom(f, device, beforePublish = () => {}) {
+  const command = request(f);
+  await f.tx(
+    'desiredSubmit',
+    desired.submit,
+    { projectId: f.projectId, request: JSON.stringify(command) },
+    device,
+  );
+  const goal = [...f.tables.projectHostedLandingDesired.values()].find(
+    r => r.operationId === command.operationId,
+  );
+  await f.drain();
+  beforePublish();
+  await f.passChecks();
+  await f.drain();
+  const landing = [...f.tables.projectHostedLandingRequests.values()].find(
+    r => r.operationId === command.operationId,
+  );
+  return { goal, landing, submission: (await read(f, command.operationId)).submission };
+}
+test('df06081d: land --save from a folder-grant device stops on a Lane file outside the grant', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: GRANT_NOW });
+  const f = await finishFixture(t);
+  const main = [...f.tables.projectHostedChannels.values()][0].selection;
+  const { goal, submission } = await landFrom(f, grantDevice(f, ['nowhere/']));
+  assert.deepEqual(goal.grant, { credentialId: 'grant-device', paths: ['nowhere/'] });
+  assert.equal(submission.phase, 'terminal-failed');
+  assert.equal(submission.error.code, 'AUTH_SCOPE_DENIED');
+  assert.match(submission.error.message, /outside its device's folder grant \(nowhere\/\)/);
+  assert.equal(f.tables.projectHostedCheckRuns.size, 0, 'refused at admission, before any check');
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+  assert.equal([...f.tables.projectHostedChannels.values()][0].selection, main);
+});
+test('df06081d: land --save from a whole-project device is unchanged and carries no grant', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: GRANT_NOW });
+  const f = await finishFixture(t);
+  const { goal, landing, submission } = await landFrom(f, grantDevice(f, null));
+  assert.equal(goal.grant, undefined);
+  assert.equal(landing.grant, undefined);
+  assert.equal(submission.phase, 'landed', JSON.stringify(submission.error));
+});
+test('df06081d: land --save from a stable folder-grant device stamps its landing and lands inside the grant', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: GRANT_NOW });
+  const f = await finishFixture(t);
+  const { landing, submission } = await landFrom(f, grantDevice(f, ['selected.txt'], true));
+  assert.deepEqual(landing.grant, { credentialId: 'grant-device', paths: ['selected.txt'] });
+  assert.equal(submission.phase, 'landed', JSON.stringify(submission.error));
+});
+test('df06081d: a stable device whose grant ends while its land --save is queued stops at publication', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: GRANT_NOW });
+  const f = await finishFixture(t);
+  const main = [...f.tables.projectHostedChannels.values()][0].selection;
+  const device = grantDevice(f, ['selected.txt'], true);
+  const row = [...f.tables.cliCredentials.values()].find(r => r.credentialId === 'grant-device');
+  const { landing, submission } = await landFrom(f, device, () =>
+    f.patch('cliCredentials', row._id, { grant: { at: GRANT_NOW - 31 * 86400000, usedAt: GRANT_NOW } }),
+  );
+  assert.deepEqual(landing.grant, { credentialId: 'grant-device', paths: ['selected.txt'] });
+  assert.equal(submission.phase, 'terminal-failed');
+  assert.equal(submission.error.code, 'AUTH_EXPIRED');
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+  assert.equal([...f.tables.projectHostedChannels.values()][0].selection, main);
+});

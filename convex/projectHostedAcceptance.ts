@@ -24,6 +24,8 @@ import { landingQueue } from './projectHostedLandingStore';
 import { releaseLandingQueue } from './projectHostedLandingWake';
 import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { report } from './errors';
+import { landElsewhere } from './accessPolicy';
+import type { Doc } from './_generated/dataModel';
 import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
 import { settleAttemptApprovals } from './projectHostedApprovalStore';
 import { receiptMessageForReader } from './projectHostedAcceptanceMessage';
@@ -59,6 +61,14 @@ async function caller(ctx: MutationCtx, input: AcceptanceIdentity) {
     actor.id === selected.attempt.actor.id && actor.kind === selected.attempt.actor.kind,
     'PROJECT_UNAVAILABLE',
     'Continue the original acceptance actor and authority kind.',
+  );
+  // A folder-grant device drives only a landing stamped with its own grant (df06081d), whose files and
+  // credential publication checks; another submitter's landing is that submitter's to publish.
+  const device = (ctx as { forgeDevice?: Doc<'cliCredentials'> | null }).forgeDevice;
+  invariant(
+    !device?.settings?.paths || selected.row.grant?.credentialId === device.credentialId,
+    'AUTH_SCOPE_DENIED',
+    `This device has a folder grant and may accept only landings it submitted under it. ${landElsewhere}`,
   );
   return selected;
 }

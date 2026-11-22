@@ -22,6 +22,9 @@ export function cohortHoldEvidence(row: HoldRow | null | undefined) {
   const status = !hold.done && row.phase === 'queued' && !row.runnable ? 'holding' : 'unavailable';
   return { status, startedAt, endedAt: null, seconds: null };
 }
+/** The folder grant a landing was submitted under (df06081d): server-only, set only for a folder-grant device;
+ * its files are checked at admission and its credential at publication. */
+const grant = v.optional(v.object({ credentialId: v.string(), paths: v.array(v.string()) }));
 /** Server-only accounting checkpoint; existing state/reply readers ignore it. Cleared at check binding. */
 const supersededCheck = v.optional(
   v.object({
@@ -110,6 +113,7 @@ export const hostedLandingTables = {
     githubProof: v.optional(v.string()),
     runnerAccounting,
     supersededCheck,
+    grant,
     alarm,
     preparing: v.optional(v.boolean()),
     projectId: v.id('hostedProjects'),
@@ -227,6 +231,7 @@ export const hostedLandingTables = {
     githubInboundProof: v.optional(v.object({ trigger: v.string(), repository: v.string() })),
     runnerAccounting,
     supersededCheck,
+    grant,
     requestBodyId: v.optional(v.id('projectHostedLandingBodies')),
     selectionBodyId: v.optional(v.id('projectHostedLandingBodies')),
     // Item 8c50ce13: the supplied message, stored once raw; receipts reference the same body.

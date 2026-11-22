@@ -19,7 +19,7 @@ import { noteTrustLanding, trustGateReader } from './projectHostedTrust';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { enqueueGithubMirror } from './projectGithubMirrorQueue';
 import type { MutationCtx } from './_generated/server';
-import { activeProject } from './projectAuthority';
+import { activeProject, requireLandingGrant } from './projectAuthority';
 import { requireLandingLease, type LandingClaim } from './projectHostedLandingControl';
 import { closeOrderWait } from './projectHostedLandingOrder';
 import { checkReplay } from './projectHostedLandingReplay';
@@ -161,6 +161,16 @@ export async function publishAcceptance(
       ? undefined
       : grantedApproval(row.ownerGrant, attempt, project.owner);
   const actor = ownerApproval ?? granted ?? attempt.actor;
+  // A folder-grant landing (df06081d): its device must still hold the grant and every file must be in it,
+  // unless the owner person accepts this exact source. One indexed read, stamped landings only.
+  if (row.grant && actor.kind !== 'person')
+    await requireLandingGrant(
+      ctx,
+      claim.projectId,
+      row.grant,
+      candidate.kind === 'candidate' ? (candidate.governance?.paths ?? null) : null,
+      now,
+    );
   invariant(
     candidate.kind === 'candidate' &&
       candidate.result.status === 'clean' &&

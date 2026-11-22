@@ -183,10 +183,25 @@ must be inside them; otherwise the save stops with `AUTH_SCOPE_DENIED` and
 nothing is written. A device with a folder grant cannot start a revert, since a
 revert's files are known only after it runs (`AUTH_SCOPE_DENIED`); revert from
 the browser or an unrestricted device. Reads are not narrowed by folder.
-Not yet checked: a landing's own files. Changes already in a Lane from
-another writer, or saved before its folders narrowed, can still land from it.
-Queued saves and landings also finish under the authority they were submitted
-with (Item df06081d keeps this line open).
+
+A landing is held to the grant too, including changes already in the Lane from
+another writer or saved before its folders narrowed. Submitting one stamps the
+grant's folders and credential on the landing request, from the row the access
+check already read. When the request pins its attempt, the Candidate's own
+changed files (its trusted net change against main) must be inside them, so an
+outside file stops it with `AUTH_SCOPE_DENIED`, naming the files, before any
+check runs. At publication the queue reads that credential once more: a device
+signed out or removed, or a grant that ended, stops publication with
+`AUTH_EXPIRED`. A grant narrowed after submit applies there too, and files not
+known earlier are checked then. Main does not move and the Lane keeps its work;
+land it from the browser or an unrestricted device. An owner's explicit approval
+of the exact source still lands it. Landings from people and whole-project
+devices carry no stamp and read nothing more. A stamped landing joins only
+earlier work under the same grant, is never batched with others, and only its own
+device may accept it explicitly; the older Channel acceptance route cannot name
+its files, so it refuses folder-grant devices. A queued save finishes in its Lane
+under the authority it was submitted with, but its files reach main only through
+such a landing.
 
 A folder grant ends 7 days after its last write, and 30 days after it was given,
 whichever comes first. Any write-level command from the device (a save, sync,

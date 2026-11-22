@@ -46,6 +46,7 @@ import { mutation, query, receiptMutation } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
 import { landingAgentClient, landingAgentRun } from '../src/agent-slug';
 import { activeProject, accessibleProject, authorizedReadProject } from './projectAuthority';
+import { landingGrantStamp, type LandingGrant } from './accessPolicy';
 import { beginHostedOperation } from './projectHostedOperations';
 import {
   ensureLandingQueue,
@@ -142,6 +143,7 @@ export const enqueue = receiptMutation({
           projectId: input.projectId,
           ...landingAgentRun(input.agent),
           ...landingAgentClient(input.agentClient),
+          ...landingGrantStamp(ctx),
           ...tokens,
           heldMs,
           gates: { value: input.gates },
@@ -356,6 +358,8 @@ export async function enqueueHostedLanding(
     gates?: { value: string | undefined };
     /** Public entry point only: `land {maxChecks}` (convex/projectHostedQueueRoom.ts). */
     maxChecks?: number;
+    /** The submitting device's folder grant (df06081d), stamped at submit; absent otherwise. */
+    grant?: LandingGrant | undefined;
   },
   request: import('../src/hosted-landing').HostedLandingRequest,
   actor: import('../src/autonomy-policy').AcceptanceActor,
@@ -385,6 +389,7 @@ export async function enqueueHostedLanding(
     request,
     project,
     workCharged: Boolean(reserved),
+    grant: input.grant,
   });
   if (reused.state) return reused.state;
   const expected = {
@@ -454,6 +459,7 @@ export async function enqueueHostedLanding(
     actor,
     allowStaleMain: reserved !== undefined,
     githubProof: reserved?.githubProof,
+    grant: input.grant,
     request,
     submissionId,
     attemptId: first.id,
@@ -552,6 +558,7 @@ export async function enqueueHostedLanding(
     ...(input.agentRun ? { agentRun: input.agentRun } : {}),
     ...(input.agentClient ? { agentClient: input.agentClient } : {}),
     ...(input.agentTokens === undefined ? {} : { agentTokens: input.agentTokens }),
+    ...(input.grant ? { grant: input.grant } : {}),
     ...(input.gates
       ? landGateGuardEvidence(input.gates.value)
       : {

@@ -26,7 +26,13 @@ import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { query, internalQuery, internalMutation } from './cliServer';
 import { projectDocument, hostedWorkEventDocument } from './schema';
-import { ownedProject, accessibleProject, activeOwnedProject, activeProject } from './projectAuthority';
+import {
+  ownedProject,
+  accessibleProject,
+  activeOwnedProject,
+  activeProject,
+  requireDeviceLandingPaths,
+} from './projectAuthority';
 import { intentAuthority } from './projectContributors';
 import { metadataCommandSchema } from '../src/work-intent-types';
 import { planningPurgeSchema } from '../src/work-planning-types';
@@ -332,6 +338,9 @@ export async function appendWork(
         'CHANNEL_DIVERGED',
         'Acceptance would lose the current Channel head.',
       );
+      // A folder-grant device cannot move a Channel (df06081d): this route's changed-file list is complete only
+      // when protected paths are set, so its files are treated as unknown. Device sign-ins only.
+      await requireDeviceLandingPaths(ctx, null);
       const reason = reviewReason(policy, actor, evidence.paths);
       invariant(!reason, 'REVIEW_REQUIRED', reason ?? 'Waiting for review by a person');
       if (actor.kind === 'agent') {

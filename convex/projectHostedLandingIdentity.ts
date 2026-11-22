@@ -11,6 +11,7 @@ import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
+import type { LandingGrant } from './accessPolicy';
 import type { HostedLandingRequest, HostedLandingState } from '../src/hosted-landing';
 import {
   latestCancelledRun,
@@ -40,6 +41,8 @@ export async function reuseHostedLanding(
     project: Doc<'hostedProjects'>;
     /** Preparing goals already charged their submission before source completion. */
     workCharged?: boolean;
+    /** A folder-grant submission joins only landings under the same grant (df06081d). */
+    grant?: LandingGrant | undefined;
   },
 ): Promise<{
   state?: HostedLandingState;
@@ -103,6 +106,7 @@ export async function reuseHostedLanding(
       agent: input.request.agent,
       check: input.request.check,
       after: input.request.finish.after,
+      ...(input.grant ? { grant: input.grant } : {}),
     }),
   );
   const [existing] = await ctx.db

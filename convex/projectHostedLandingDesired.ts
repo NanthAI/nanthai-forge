@@ -17,6 +17,7 @@ import type { z } from 'zod';
 import { acceptanceActor } from './projectAutonomy';
 import { landingAgentClient, landingAgentRun } from '../src/agent-slug';
 import { activeProject } from './projectAuthority';
+import { landingGrantStamp } from './accessPolicy';
 import { requireWriteEpoch } from './projectHostedRecords';
 import { loadCompose } from './projectHostedComposeStore';
 import { repairConvexSource } from './projectConvexSourceStore';
@@ -196,6 +197,7 @@ export async function submitDesiredLanding(
     'SOURCE_AUTHORITY_CHANGED',
     'Retain the original source authority.',
   );
+  const { grant } = landingGrantStamp(ctx);
   const selectionKey = digest(
     canonicalPayload({
       channel: 'main',
@@ -207,6 +209,8 @@ export async function submitDesiredLanding(
       inputs: source.state.request.inputs.root,
       dependencies: source.state.request.dependencies.root,
       after: command.after,
+      // A folder-grant goal joins only work under the same grant; other keys are unchanged (df06081d).
+      ...(grant ? { grant } : {}),
     }),
   );
   const [queued] = await ctx.db
@@ -350,6 +354,8 @@ export async function submitDesiredLanding(
     // The enqueue below receives this row as its input and copies the run to the landing row.
     ...landingAgentRun(input.agent),
     ...landingAgentClient(input.agentClient),
+    // A folder-grant device's grant, from the row the guard read (df06081d); checked when the goal enqueues.
+    ...(grant ? { grant } : {}),
     ...(agentTokens === undefined ? {} : { agentTokens }),
     ...landGateGuardEvidence(gates?.value),
     wake: null,
