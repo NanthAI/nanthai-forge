@@ -20,16 +20,60 @@ import { dropListing } from './projectGithubImportListing';
 
 type Identity = { id: Id<'projectGithubImports'>; actor: string };
 
-/** Progress of an archive import is the objects its windows stored: one receipt per window. */
-export async function storedObjects(ctx: ActionCtx, input: Identity) {
+/** One receipt per stored upload window. */
+export async function storedObjects(ctx: ActionCtx, input: Identity, step?: number) {
   const stored = new CatalogTable();
   for (let after = ''; ;) {
-    const rows = await ctx.runQuery(internal.projectGithubImportCatalog.stored, { ...input, after });
+    const rows = await ctx.runQuery(internal.projectGithubImportCatalog.stored, {
+      ...input,
+      after,
+      ...(step === undefined ? {} : { step }),
+    });
     if (!rows.length) break;
     for (const row of rows) for (const entry of windowEntries(row.value)) stored.set(entry.digest, entry);
     after = rows.at(-1)!.key;
   }
   return stored;
+}
+
+/** Paged imports keep the existing file cursor and commit its verified pins
+ * alongside it. A streamed object can checkpoint earlier physical windows. */
+export function pagedUploadCatalog(
+  ctx: ActionCtx,
+  job: Doc<'projectGithubImports'>,
+  stored: CatalogTable,
+  lfsOids?: Set<string>,
+) {
+  return {
+    stored,
+    rawChunks: true,
+    ...(lfsOids && job.completed > 0
+      ? {
+          known: (digests: string[]) =>
+            ctx.runQuery(internal.projectGithubImportInventory.storedBlobs, {
+              id: job._id,
+              actor: job.owner,
+              digests,
+            }),
+        }
+      : {}),
+    record: async (objects: CatalogEntry[]) => {
+      await ctx.runMutation(internal.projectGithubImportStore.archiveProgress, {
+        id: job._id,
+        actor: job.owner,
+        step: job.step,
+        completed: job.completed,
+        total: job.total,
+        bytes: job.bytes,
+        totalBytes: job.totalBytes,
+        submodules: job.submodules ?? 0,
+        objects,
+        ...(lfsOids?.size
+          ? { lfsOids: objects.filter(entry => lfsOids.has(entry.digest)).map(entry => entry.digest) }
+          : {}),
+      });
+    },
+  };
 }
 
 /** One stored object, read back from R2 (a raw object, or one range of its pack) and verified. */

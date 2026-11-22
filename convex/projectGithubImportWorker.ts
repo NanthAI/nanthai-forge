@@ -23,6 +23,8 @@ import { lfsAttributeBytes } from '../src/github-lfs-import';
 import { pagedLfs, resolvePageLfs } from './projectGithubImportLfs';
 import type { ImportProgress } from '../src/github-import-pages';
 import { ImportUpload } from './projectGithubImportUpload';
+import { CatalogTable } from '../src/import-catalog-table';
+import { pagedUploadCatalog, storedObjects } from './projectGithubImportResume';
 import { publishImport } from './projectGithubImportPublish';
 import { runArchiveImport } from './projectGithubImportArchive';
 import { importReadToken } from './githubAppToken';
@@ -175,7 +177,18 @@ export const run = internalAction({
         });
       } else if (job.completed < job.total) {
         const token = await readToken();
-        const upload = new ImportUpload(ctx, job.projectId, job.owner);
+        const lfsOids = new Set<string>();
+        const pageCatalog = job.pagedCatalog
+          ? pagedUploadCatalog(
+              ctx,
+              job,
+              job.pagedCheckpointStep === job.step
+                ? await storedObjects(ctx, input, job.step)
+                : new CatalogTable(),
+              lfsOids,
+            )
+          : undefined;
+        const upload = new ImportUpload(ctx, job.projectId, job.owner, 8, pageCatalog);
         const imported: { part: string; key: string; position: number; value: string }[] = [];
         let bytes = job.bytes,
           completed = job.completed;
@@ -198,7 +211,7 @@ export const run = internalAction({
             content = file.mode === '160000' ? Buffer.from(file.sha) : blobs.get(file.sha)!;
             pin = { blob: digest(content), size: content.length };
           } else {
-            const builder = new ObjectRecipeBuilder(upload.put);
+            const builder = new ObjectRecipeBuilder(upload.putChunk);
             pin = await streamGithubBlobPack(
               job.repository,
               file,
@@ -249,7 +262,7 @@ export const run = internalAction({
             github,
             fetchAttributes: entries => githubBlobPack(job.repository, entries, token, github),
             started,
-            actor: input.actor,
+            ...(pageCatalog ? { lfsOids } : {}),
           });
           completed = job.completed + resolved.rows;
           bytes = job.bytes + resolved.bytes;
@@ -265,10 +278,15 @@ export const run = internalAction({
           totalBytes: Math.max(job.totalBytes, bytes),
           discovering: false,
           entries: imported,
-          ...upload.receipt(),
+          ...(pageCatalog ? { catalog: upload.catalogReceipt(), lfsOids: [...lfsOids] } : upload.receipt()),
           githubRequests: meter.counts,
         });
-      } else await publishImport(ctx, job, undefined, undefined, meter);
+      } else {
+        const retained = job.pagedCatalog
+          ? pagedUploadCatalog(ctx, job, await storedObjects(ctx, input))
+          : undefined;
+        await publishImport(ctx, job, undefined, retained, meter);
+      }
     } catch (error) {
       const known = error instanceof ForgeError;
       await ctx.runMutation(internal.projectGithubImportStore.fail, {

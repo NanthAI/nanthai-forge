@@ -35,11 +35,13 @@ export async function inventory(
   jobId: Id<'projectGithubImports'>,
   part: string,
   after: string,
+  before?: string,
 ) {
   return boundedRows(
-    ctx.db
-      .query('projectGithubImportInventory')
-      .withIndex('by_job_and_part_and_key', q => q.eq('jobId', jobId).eq('part', part).gt('key', after)),
+    ctx.db.query('projectGithubImportInventory').withIndex('by_job_and_part_and_key', q => {
+      const range = q.eq('jobId', jobId).eq('part', part).gt('key', after);
+      return before === undefined ? range : range.lt('key', before);
+    }),
     importPageFiles,
   );
 }
@@ -70,6 +72,40 @@ export async function retain(
       });
   }
 }
+export async function retainBlob(
+  ctx: MutationCtx,
+  job: Doc<'projectGithubImports'>,
+  sha256: string,
+  size: number,
+) {
+  await retain(ctx, job, [
+    { part: 'blobs', key: sha256, position: 0, value: JSON.stringify({ sha256, size }) },
+  ]);
+}
+
+export const storedBlobs = internalQuery({
+  args: { ...jobIdentity, digests: v.array(v.string()) },
+  returns: v.array(v.string()),
+  handler: async (ctx, input) => {
+    const job = await readJob(ctx, input);
+    invariant(
+      job.pagedCatalog && input.digests.length <= importPageFiles,
+      'IMPORT_PAGE_CHANGED',
+      'Read a bounded page of stored import blobs.',
+    );
+    const rows = await Promise.all(
+      input.digests.map(sha256 =>
+        ctx.db
+          .query('projectGithubImportInventory')
+          .withIndex('by_job_and_part_and_key', q =>
+            q.eq('jobId', job._id).eq('part', 'blobs').eq('key', sha256),
+          )
+          .unique(),
+      ),
+    );
+    return rows.flatMap(row => (row ? [row.key] : []));
+  },
+});
 export const page = internalQuery({
   args: jobIdentity,
   returns: v.object({ job: githubImportDocument, entries: v.array(inventoryEntry) }),

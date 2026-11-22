@@ -5,7 +5,7 @@ import { internalMutation, internalQuery, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { readJob } from './projectGithubImportRead';
-import { inventory, jobIdentity, retain } from './projectGithubImportInventory';
+import { inventory, jobIdentity, retain, retainBlob } from './projectGithubImportInventory';
 import { objectCatalogPage } from './projectObjectFind';
 import { importPageFiles } from '../src/github-import-pages';
 import { digest } from '../src/state/hash';
@@ -45,6 +45,7 @@ const catalogRow = v.object({
   ),
 });
 const pin = /^[0-9a-f]{64}$/;
+const stepPrefix = (step: number) => String(step).padStart(16, '0') + ':';
 /** Field order is not identity: a stored row and a rebuilt page compare by sorted keys. */
 const same = (a: unknown, b: unknown) => canonicalPayload(a ?? []) === canonicalPayload(b ?? []);
 const validEntry = (entry: Entry) =>
@@ -66,9 +67,13 @@ const validEntry = (entry: Entry) =>
       Number.isSafeInteger(entry.pack.offset + entry.size) &&
       entry.pack.offset + entry.size <= entry.pack.size));
 
-/** One inventory row per stored upload window (archive imports): the
- * continuation skip set until publication writes the sorted catalog. */
-export async function recordWindow(ctx: MutationCtx, job: Doc<'projectGithubImports'>, objects: Entry[]) {
+/** One inventory row per stored upload window until the sorted catalog is published. */
+export async function recordWindow(
+  ctx: MutationCtx,
+  job: Doc<'projectGithubImports'>,
+  objects: Entry[],
+  lfsOids: string[] = [],
+) {
   if (!objects.length) return;
   invariant(
     objects.length <= 2 * importPageFiles + 1 && objects.every(validEntry),
@@ -95,7 +100,12 @@ export async function recordWindow(ctx: MutationCtx, job: Doc<'projectGithubImpo
     recipes: objects.flatMap((entry, index) => (entry.recipe ? [{ index, ...entry.recipe }] : [])),
     packs: objects.flatMap((entry, index) => (entry.pack ? [{ index, ...entry.pack }] : [])),
   });
-  await retain(ctx, job, [{ part: 'objects', key: digest(value), position: 0, value }]);
+  const key = (job.pagedCatalog ? stepPrefix(job.step) : '') + digest(value);
+  await retain(ctx, job, [{ part: 'objects', key, position: 0, value }]);
+  // LFS may store bytes before a paged import moves the file cursor.
+  const lfs = new Set(lfsOids);
+  for (const entry of objects)
+    if (lfs.has(entry.digest)) await retainBlob(ctx, job, entry.digest, entry.size);
 }
 export function windowEntries(value: string): Entry[] {
   const row: {
@@ -121,11 +131,14 @@ export function windowEntries(value: string): Entry[] {
 }
 /** Stored windows in bounded pages (a continuation reads them once per run). */
 export const stored = internalQuery({
-  args: { ...jobIdentity, after: v.string() },
+  args: { ...jobIdentity, after: v.string(), step: v.optional(v.number()) },
   returns: v.array(v.object({ key: v.string(), value: v.string() })),
   handler: async (ctx, input) => {
     await readJob(ctx, input);
-    return (await inventory(ctx, input.id, 'objects', input.after)).map(({ key, value }) => ({ key, value }));
+    const prefix = input.step === undefined ? undefined : stepPrefix(input.step);
+    return (
+      await inventory(ctx, input.id, 'objects', input.after || prefix || '', prefix && prefix + 'g')
+    ).map(({ key, value }) => ({ key, value }));
   },
 });
 /** Immutable sorted catalog rows; a replay finds the same rows and writes nothing. */
@@ -135,9 +148,12 @@ export const publish = internalMutation({
   handler: async (ctx, input) => {
     const job = await readJob(ctx, input);
     invariant(
-      job.protocol === 3 && job.step === input.step && job.phase !== 'ready' && input.pages.length <= 64,
+      (job.protocol === 3 || job.pagedCatalog) &&
+        job.step === input.step &&
+        job.phase !== 'ready' &&
+        input.pages.length <= 64,
       'IMPORT_PAGE_CHANGED',
-      'Publish the catalog of the current archive import in bounded pages.',
+      'Publish the catalog of the current import in bounded pages.',
     );
     if (input.pages.length) await retainCatalogFallback(ctx, job.projectId);
     for (const page of input.pages) {

@@ -14,7 +14,7 @@ import { findObject } from './projectObjectFind';
 import { invariant } from '../src/errors';
 import { initialImportProgress, initialArchiveCursor } from '../src/github-import-pages';
 import { completion, recipePin, completeObjects } from './projectGithubImportBatch';
-import { retain, inventoryEntry } from './projectGithubImportInventory';
+import { retain, retainBlob, inventoryEntry } from './projectGithubImportInventory';
 import { catalogEntry, recordWindow } from './projectGithubImportCatalog';
 import { beginHistory } from './projectHistoryStore';
 import { cancelPendingTask } from './schedulerCancel';
@@ -95,6 +95,7 @@ export const begin = internalMutation({
             ? JSON.stringify(initialImportProgress(input.lfsLimitBytes))
             : input.cursor,
       ...(input.rootTree ? { protocol: input.archive ? (3 as const) : (2 as const) } : {}),
+      ...(input.rootTree && !input.archive ? { pagedCatalog: true as const } : {}),
       step: 0,
       phase: input.archive ? 'importing' : 'discovering',
       totalKnown: Boolean(input.archive),
@@ -161,6 +162,8 @@ export const advance = internalMutation({
     discovering: v.boolean(),
     objects: v.optional(v.array(completion)),
     recipes: v.optional(v.array(recipePin)),
+    catalog: v.optional(v.array(catalogEntry)),
+    lfsOids: v.optional(v.array(v.string())),
     entries: v.optional(v.array(inventoryEntry)),
     githubRequests: v.optional(githubRequests),
   },
@@ -173,19 +176,13 @@ export const advance = internalMutation({
       return false;
     }
     if (row.protocol === 2) {
-      await completeObjects(ctx, row.projectId, input.objects ?? [], input.recipes ?? []);
+      if (row.pagedCatalog) await recordWindow(ctx, row, input.catalog ?? [], input.lfsOids);
+      else await completeObjects(ctx, row.projectId, input.objects ?? [], input.recipes ?? []);
       await retain(ctx, row, input.entries ?? []);
       for (const entry of input.entries ?? [])
         if (entry.part === 'imported') {
           const file = JSON.parse(entry.value);
-          await retain(ctx, row, [
-            {
-              part: 'blobs',
-              key: file.blob,
-              position: 0,
-              value: JSON.stringify({ sha256: file.blob, size: file.size }),
-            },
-          ]);
+          await retainBlob(ctx, row, file.blob, file.size);
         }
       await retain(ctx, row, [
         {
@@ -224,8 +221,8 @@ export const advance = internalMutation({
     return true;
   },
 });
-/** Archive window receipt: the verified objects one upload window stored (one
- * inventory row, no row per object) plus counters. It schedules nothing. */
+/** Verified pins from an upload window. Archive workers also checkpoint their counters.
+ * Paged workers move counters only when they advance the matching file inventory. */
 export const archiveProgress = internalMutation({
   args: {
     ...identity,
@@ -235,14 +232,26 @@ export const archiveProgress = internalMutation({
     totalBytes: v.number(),
     submodules: v.number(),
     objects: v.array(catalogEntry),
+    lfsOids: v.optional(v.array(v.string())),
     state: v.optional(v.object({ sha256: v.string(), size: v.number() })),
     githubRequests: v.optional(githubRequests),
   },
   returns: v.boolean(),
   handler: async (ctx, input) => {
     const row = await readJob(ctx, input);
-    invariant(row.protocol === 3, 'IMPORT_PAGE_CHANGED', 'Only archive imports record archive pages.');
+    invariant(
+      row.protocol === 3 || row.pagedCatalog,
+      'IMPORT_PAGE_CHANGED',
+      'This import does not use an object catalog.',
+    );
     if (row.phase === 'ready') return false;
+    if (row.pagedCatalog) {
+      if (row.step !== input.step) return false;
+      await recordWindow(ctx, row, input.objects, input.lfsOids);
+      if (input.objects.length && row.pagedCheckpointStep !== row.step)
+        await ctx.db.patch(row._id, { pagedCheckpointStep: row.step });
+      return true;
+    }
     // Objects name bytes already verified in storage, so a superseded run may still record them.
     await recordWindow(ctx, row, input.objects);
     if (row.step !== input.step) return false;

@@ -4,16 +4,27 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
-import { pagedFixture } from './github-import-pages-fixture.mjs';
-import { readObjectRecipe } from '../dist/object-chunks.js';
+import { importBytes, pagedFixture } from './github-import-pages-fixture.mjs';
 import { filePage, importPageBytes, importPathKey } from '../dist/github-import-pages.js';
 import { digest } from '../dist/hash.js';
-import { storedBytes } from './default-r2.mjs';
+import { defaultR2Objects, interceptDefaultR2 } from './default-r2.mjs';
 import { wantedBlobResponse } from './github-blob-pack-fixture.mjs';
 const sha = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 const hex = n => n.toString(16).padStart(40, '0');
 
 test('28,905 files / 4,089 directories / two gitlinks use bounded pages within the complete import call budget', async t => {
+  const started = performance.now();
+  let r2Puts = 0,
+    r2PutBytes = 0;
+  t.after(
+    interceptDefaultR2(async (url, init, serve) => {
+      if (init.method === 'PUT') {
+        r2Puts++;
+        r2PutBytes += init.body.byteLength;
+      }
+      return serve(url, init);
+    }),
+  );
   const s = pagedFixture(),
     files = 28905,
     directories = 4089,
@@ -130,6 +141,7 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
   const job = s.tables.projectGithubImports.get(id),
     calls = [...s.calls.values()].reduce((a, b) => a + b, 0) + 1; // public start
   assert.equal(job.phase, 'ready');
+  assert.equal(job.protocol, 2);
   assert.equal(job.completed, files + submodules);
   assert.equal(job.submodules, submodules);
   assert.equal(blobRequests, 0, 'no per-file REST calls');
@@ -140,7 +152,7 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
     importCalls <= 5 * Math.ceil(files / 1000),
     `${importCalls} file-page executions exceed 5 per 1,000 files`,
   );
-  assert.ok(calls <= 1000, `${calls} executions exceed the whole-import ceiling`);
+  assert.ok(calls <= 414, `${calls} executions exceed the prior whole-import count`);
   assert.ok(s.stats().maxCursorBytes < 1024);
   assert.ok(s.stats().maxPayloadBytes < 1024 * 1024);
   // Progress rows are transient: the purge chain deletes them in bounded pages after ready.
@@ -151,28 +163,29 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
     await s.modules.projectGithubImportCatalog.purge._handler(s.ctx, task.args);
   }
   assert.equal(s.tables.projectGithubImportInventory.size, 0);
+  const wallMillis = Math.round(performance.now() - started),
+    peakRssKiB = process.resourceUsage().maxRSS,
+    metadata = Object.fromEntries(
+      Object.entries(s.tables)
+        .filter(([, table]) => table.size)
+        .map(([name, table]) => [name, table.size]),
+    );
   const project = s.tables.hostedProjects.get(job.projectId),
     backup = s.tables.projectBackups.get(project.currentBackup);
-  const read = async pin => {
-    const row = [...s.tables.projectObjects.values()].find(
-      row => row.projectId === project._id && row.digest === pin.sha256,
-    );
-    return storedBytes(s, row);
-  };
-  const logical = async hash => {
-    const row = [...s.tables.projectObjects.values()].find(
-      row => row.projectId === project._id && row.digest === hash,
-    );
-    if (!row.recipe) return read({ sha256: hash });
-    const recipe = JSON.parse((await read({ sha256: row.recipe.digest })).toString());
-    const chunks = [];
-    for await (const chunk of readObjectRecipe(recipe, read)) chunks.push(chunk);
-    return Buffer.concat(chunks);
-  };
+  assert.equal(s.tables.projectObjects.size, 0);
+  assert.ok(s.tables.projectObjectCatalog.size > 0);
+  const retainedDocuments = Object.values(metadata).reduce((sum, count) => sum + count, 0);
+  assert.ok(retainedDocuments <= 10 * Math.ceil(files / 1000), `${retainedDocuments} retained documents`);
+  assert.ok(r2Puts <= 80, `${r2Puts} R2 PUTs; source must travel in packs`);
+  const logical = hash => importBytes(s, project._id, hash);
   const source = JSON.parse(await logical(backup.preview.head));
   assert.equal(source.files.length, files + submodules);
   assert.equal(source.files.filter(file => file.mode === 'gitlink').length, submodules);
   assert.equal(digest(await logical(backup.preview.head)), backup.preview.head);
+  for (const index of [0, 1000, files - 1]) {
+    const file = source.files.find(file => file.path.endsWith(`file-${String(index).padStart(5, '0')}`));
+    assert.deepEqual(await logical(file.blob), Buffer.from(`synthetic source ${index}\n`));
+  }
   // Issue 5bc16ea7: a paged import records the import commit and State a mirror bootstrap starts from.
   assert.deepEqual(
     { commit: job.commit, state: job.publication.head },
@@ -182,10 +195,7 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
   assert.equal(manifest.files.length, files + submodules + 2);
   assert.ok(source.files.some(file => file.mode === 'symlink'));
   assert.ok(source.files.some(file => file.mode === 'executable'));
-  assert.equal(
-    [...workRecordRows(s.tables)].filter(row => row.collection === 'sourceBlobs').length,
-    files + submodules + 1,
-  );
+  assert.ok([...workRecordRows(s.tables)].filter(row => row.collection === 'sourceBlobs').length <= 1);
   const count = calls,
     scheduled = s.scheduled.length;
   // Completion installs no continuation. A finite status read does not enqueue work.
@@ -200,7 +210,13 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
       filePageExecutions: importCalls,
       githubRequests: job.githubRequests,
       ...s.stats(),
-      memory: process.memoryUsage(),
+      r2Puts,
+      r2PutBytes,
+      r2RetainedBytes: [...defaultR2Objects.values()].reduce((sum, bytes) => sum + bytes.length, 0),
+      peakRssKiB,
+      wallMillis,
+      metadata,
+      retainedDocuments,
       idleScheduled: 0,
     }),
   );

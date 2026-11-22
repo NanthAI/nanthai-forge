@@ -40,7 +40,7 @@ export async function resolvePageLfs(
     github: GithubFetch;
     fetchAttributes: (entries: GithubSourceEntry[]) => Promise<Map<string, Buffer>>;
     started: number;
-    actor: string;
+    lfsOids?: Set<string>;
   },
 ) {
   const { job, progress, lfs, upload, held, imported, sizes } = input;
@@ -59,18 +59,27 @@ export async function resolvePageLfs(
     request: input.github,
     preload: async oids => {
       known = new Set();
-      for (let i = 0; i < oids.length; i += 100)
-        for (const oid of await ctx.runQuery(internal.projectGithubImportBatch.stored, {
-          projectId: job.projectId,
-          actor: input.actor,
-          digests: oids.slice(i, i + 100),
-        }))
-          known.add(oid);
+      for (let i = 0; i < oids.length; i += 100) {
+        const digests = oids.slice(i, i + 100);
+        if (input.lfsOids) for (const oid of digests) input.lfsOids.add(oid);
+        const stored = input.lfsOids
+          ? await ctx.runQuery(internal.projectGithubImportInventory.storedBlobs, {
+              id: job._id,
+              actor: job.owner,
+              digests,
+            })
+          : await ctx.runQuery(internal.projectGithubImportBatch.stored, {
+              projectId: job.projectId,
+              actor: job.owner,
+              digests,
+            });
+        for (const oid of stored) known.add(oid);
+      }
     },
     stored: oid => known.has(oid),
     put: upload.put,
     large: async (pointer, read) => {
-      const builder = new ObjectRecipeBuilder(upload.put);
+      const builder = new ObjectRecipeBuilder(upload.putChunk);
       await read(async part => {
         for (let offset = 0; offset < part.length; offset += 64 * 1024) {
           builder.update(part.subarray(offset, offset + 64 * 1024));

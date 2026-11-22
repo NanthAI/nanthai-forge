@@ -5,7 +5,8 @@ import type { StateSize } from '../src/state/size';
 import type { ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
-import { presignPut, r2Config, headObject, checksumOf, r2Key } from './r2';
+import { presignPut, presignGet, r2Config, headObject, checksumOf, r2Key } from './r2';
+import { readExactObject } from './projectR2ExactRead';
 import { exchangeFetch } from '../src/exchange-request';
 import { withExchangeObservation, currentExchangeObservation } from '../src/exchange-observation';
 import { ObjectRecipeBuilder } from '../src/object-chunks';
@@ -28,7 +29,7 @@ export type Recipes = {
   recipeSize: number;
 }[];
 export type { CatalogEntry };
-/** Catalog mode (archive imports): stored objects are this set (a CatalogTable in an
+/** Catalog mode: stored objects are this set (a CatalogTable in an
  * import; a Map in a test), not projectObjects rows. Each window is one receipt;
  * publication writes the sorted catalog. */
 export type ImportCatalog = {
@@ -38,10 +39,13 @@ export type ImportCatalog = {
     set(digest: string, entry: CatalogEntry): unknown;
   };
   record: (objects: CatalogEntry[], state?: { sha256: string; size: number }) => Promise<void>;
+  known?: (digests: string[]) => Promise<string[]>;
+  rawChunks?: boolean;
 };
 /** Retains one bounded source window plus its pack copy and one stream chunk. */
 export class ImportUpload {
   private objects = new Map<string, Buffer>();
+  private raw = new Set<string>();
   private bytes = 0;
   peakBufferedBytes = 0;
   /** Bytes staged for the next drain, so callers can size a fetch window. */
@@ -72,6 +76,11 @@ export class ImportUpload {
     }
     return pin;
   };
+  putChunk = (bytes: Buffer) => {
+    const pin = this.put(bytes);
+    if (this.catalog?.rawChunks && this.objects.has(pin.sha256)) this.raw.add(pin.sha256);
+    return pin;
+  };
   async drain(force = false) {
     if (!force && this.bytes < importPageBytes && this.objects.size < importPageFiles) return false;
     if (!this.objects.size) return false;
@@ -80,7 +89,9 @@ export class ImportUpload {
     this.objects.clear();
     this.bytes = 0;
     if (this.catalog) {
-      await this.storeCatalogWindow(pending);
+      const raw = this.raw;
+      this.raw = new Set();
+      await this.storeCatalogWindow(pending, raw);
       return true;
     }
     for (let start = 0; start < pending.length; start += importPageFiles) {
@@ -132,16 +143,29 @@ export class ImportUpload {
     }
     return true;
   }
-  /** One immutable pack per bounded window; empty and singleton objects stay raw. */
-  private async storeCatalogWindow(pending: [string, Buffer][]) {
+  /** One immutable pack per small-file window. Paged streams keep chunks raw
+   * so equal chunks use the same physical key across independently run pages. */
+  private async storeCatalogWindow(pending: [string, Buffer][], raw: Set<string>) {
     const started = Date.now();
     const config = r2Config(),
       stored = this.catalog!.stored;
+    const known = this.catalog!.known;
+    if (known) {
+      const candidates = pending.filter(([id]) => !raw.has(id) && !stored.has(id));
+      for (let at = 0; at < candidates.length; at += importPageFiles) {
+        const page = candidates.slice(at, at + importPageFiles);
+        const previous = new Set(await known(page.map(([id]) => id)));
+        // The durable binding is already in an earlier window; only remember
+        // membership locally, and leave that binding out of this receipt.
+        for (const [digest, bytes] of page)
+          if (previous.has(digest)) stored.set(digest, { digest, size: bytes.length });
+      }
+    }
     const fresh = pending.filter(([id]) => !stored.has(id));
-    const packed = fresh.filter(([, bytes]) => bytes.length > 0);
+    const packed = fresh.filter(([id, bytes]) => bytes.length > 0 && !raw.has(id));
     const groups =
       packed.length > 1
-        ? [packed, ...fresh.filter(([, bytes]) => !bytes.length).map(row => [row])]
+        ? [packed, ...fresh.filter(([id, bytes]) => !bytes.length || raw.has(id)).map(row => [row])]
         : fresh.map(row => [row]);
     await mapExchange(groups, this.concurrency, async group => {
       const bytes = group.length > 1 ? Buffer.concat(group.map(([, bytes]) => bytes)) : group[0]![1];
@@ -176,12 +200,22 @@ export class ImportUpload {
       if (!response.ok) {
         const head = await headObject(config, key);
         invariant(
-          head.status === 'ok' &&
-            head.size === bytes.length &&
-            (!head.checksum || head.checksum === checksumOf(packDigest)),
+          head.status === 'ok' && head.size === bytes.length,
           'R2_VERIFY_FAILED',
           'Object storage could not verify source.',
         );
+        const matches = head.checksum
+          ? head.checksum === checksumOf(packDigest)
+          : digest(
+              await readExactObject(
+                { url: await presignGet(config, key), size: bytes.length },
+                {
+                  failed: 'Object storage could not verify source.',
+                  exceeds: 'Stored source is larger than declared.',
+                },
+              ),
+            ) === packDigest;
+        invariant(matches, 'R2_VERIFY_FAILED', 'Stored source differs from the upload digest.');
       }
       let offset = 0;
       for (const [id, content] of group) {
@@ -255,7 +289,7 @@ export class ImportUpload {
     stateGeneration?: number,
     stateSize?: StateSize,
   ) {
-    const ref = this.put(bytes);
+    const ref = this.putChunk(bytes);
     this.recipes.push({
       ...(stateGeneration === undefined ? {} : { stateGeneration }),
       ...(stateSize === undefined ? {} : { stateSize }),
@@ -275,7 +309,7 @@ export class ImportUpload {
   ) {
     const hash = createHash('sha256');
     let size = 0;
-    const builder = new ObjectRecipeBuilder(this.put);
+    const builder = new ObjectRecipeBuilder(this.putChunk);
     for await (const bytes of parts) {
       hash.update(bytes);
       size += bytes.length;

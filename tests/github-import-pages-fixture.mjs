@@ -2,6 +2,9 @@
 import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
+import { storedBytes } from './default-r2.mjs';
+import { readObjectRecipe } from '../dist/object-chunks.js';
+const { findObject } = await import(moduleUrl('../convex/projectObjectFind.ts'));
 const modules = Object.fromEntries(
   await Promise.all(
     [
@@ -148,4 +151,18 @@ export function pagedFixture() {
 }
 function assertUnique(rows) {
   if (rows.length > 1) throw Error('Synthetic index uniqueness violated');
+}
+
+export async function importBytes(s, projectId, sha256) {
+  const read = async pin => {
+    const row = await findObject(s.ctx, projectId, pin.sha256);
+    const bytes = await storedBytes(s, row);
+    return row.pack ? bytes.subarray(row.pack.offset, row.pack.offset + row.size) : bytes;
+  };
+  const row = await findObject(s.ctx, projectId, sha256);
+  if (!row.recipe) return read({ sha256 });
+  const recipe = JSON.parse(await read({ sha256: row.recipe.digest }));
+  const chunks = [];
+  for await (const chunk of readObjectRecipe(recipe, read)) chunks.push(chunk);
+  return Buffer.concat(chunks);
 }

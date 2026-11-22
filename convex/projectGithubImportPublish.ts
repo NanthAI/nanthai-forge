@@ -23,7 +23,7 @@ const treePathsPerRow = 500;
 /** Row values (JSON) in key order. Re-iterable, so an archive import produces them lazily
  * instead of holding every JSON string; the keys only order the paged inventory. */
 export type ImportRows = Record<'imported' | 'blobs', Iterable<string>>;
-/** Archive publication sorts the catalog it stored in place, never copying it. */
+/** Publication sorts the catalog it stored in place, without copying it. */
 type PublishCatalog = ImportCatalog & { stored: CatalogTable };
 /** Metadata is traversed in bounded ordered pages. No whole repository array,
  * State string, manifest string or projection crosses an RPC boundary. Archive
@@ -139,6 +139,11 @@ async function publishRows(
         rows
           .map(row => {
             const pin = JSON.parse(row);
+            invariant(
+              !catalog || catalog.stored.get(pin.sha256)?.size === pin.size,
+              'IMPORT_INCOMPLETE',
+              'A source blob is missing from the stored catalog.',
+            );
             return ',' + JSON.stringify({ path: `objects/${pin.sha256}`, ...pin });
           })
           .join(''),
@@ -157,10 +162,13 @@ async function publishRows(
         'IMPORT_INCOMPLETE',
         'A recipe object is not stored.',
       );
+    // Packed pins carry a byte range. Keep paged-import RPCs inside their
+    // existing payload budget even when every entry belongs to a pack.
+    const pagesPerBatch = job.pagedCatalog ? 16 : 32;
     let pages = [];
     for (const page of sortedCatalogPages(catalog.stored.sorted())) {
       pages.push(page);
-      if (pages.length < 32) continue;
+      if (pages.length < pagesPerBatch) continue;
       await ctx.runMutation(internal.projectGithubImportCatalog.publish, {
         ...identity,
         step: job.step,

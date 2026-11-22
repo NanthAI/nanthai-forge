@@ -2,7 +2,7 @@
 import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultR2Config, defaultR2Objects, storedBytes } from './default-r2.mjs';
+import { defaultR2Config, defaultR2Objects, interceptDefaultR2 } from './default-r2.mjs';
 import { randomUUID, createHash, generateKeyPairSync } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
@@ -11,10 +11,13 @@ import { githubHostedProject } from '../dist/hosted-github-bootstrap.js';
 import { setup as r2Setup } from './r2-harness.mjs';
 import { digest } from '../dist/hash.js';
 import { wantedBlobResponse } from './github-blob-pack-fixture.mjs';
+import { importBytes } from './github-import-pages-fixture.mjs';
+const { findObject } = await import(moduleUrl('../convex/projectObjectFind.ts'));
 const modules = {};
 for (const name of [
   'projectGithubImportInventory',
   'projectGithubImportBatch',
+  'projectGithubImportCatalog',
   'projectGithubImportPublication',
   'projectGithubImportStore',
   'projectGithubImportObjects',
@@ -251,7 +254,7 @@ test('migration-count readers retain reported and unknown origin totals without 
   assert.equal(status.projectId, job.projectId);
 });
 
-test('retry-safe personal mirror publishes complete source/Work atomically and deduplicates across projects', async t => {
+test('retry-safe personal mirrors publish complete source and Work atomically with project-scoped bindings', async t => {
   const s = fixture(t),
     op = randomUUID(),
     id = await s.start(op),
@@ -267,10 +270,7 @@ test('retry-safe personal mirror publishes complete source/Work atomically and d
   assert.equal(s.tables.projectGithubImports.get(id).phase, 'ready');
   const project = s.tables.hostedProjects.get(job.projectId),
     backup = s.tables.projectBackups.get(project.currentBackup);
-  const row = [...s.tables.projectObjects.values()].find(
-    row => row.projectId === job.projectId && row.digest === digest(s.bytes),
-  );
-  assert.deepEqual(await storedBytes(s, row), s.bytes);
+  assert.deepEqual(await importBytes(s, job.projectId, digest(s.bytes)), s.bytes);
   assert.equal(backup.preview.channels[0].name, 'main');
   // Git history follows publication in its own scheduled run (Issue e103bacf).
   const history = [...s.tables.projectHistory.values()].find(row => row.projectId === job.projectId);
@@ -283,10 +283,12 @@ test('retry-safe personal mirror publishes complete source/Work atomically and d
   assert.equal(s.tables.projectBackups.size, count);
   const second = await s.start();
   for (let i = 0; i < 3; i++) await s.advance(second);
-  const bindings = [...s.tables.projectObjects.values()].filter(row => row.digest === digest(s.bytes));
-  assert.equal(bindings.length, 2);
-  assert.equal(bindings[0].storageId, bindings[1].storageId);
-  assert.equal(s.tables.hostedProjects.get(bindings[1].projectId).owner, 'owner');
+  const secondProject = s.tables.projectGithubImports.get(second).projectId;
+  assert.deepEqual(await importBytes(s, secondProject, digest(s.bytes)), s.bytes);
+  const firstBinding = await findObject(s.ctx, job.projectId, digest(s.bytes));
+  const secondBinding = await findObject(s.ctx, secondProject, digest(s.bytes));
+  assert.notEqual(firstBinding.r2Key, secondBinding.r2Key);
+  assert.equal(s.tables.hostedProjects.get(secondBinding.projectId).owner, 'owner');
   await assert.rejects(
     modules.projectGithubImport.start._handler(s.ctx, { operationId: op, url: 'example/different' }),
     e => e.data?.code === 'WORK_OPERATION_CHANGED',
@@ -318,7 +320,68 @@ test('a crash after storing a blob resumes from the durable cursor with the same
   job = s.tables.projectGithubImports.get(id);
   assert.equal(job.phase, 'ready');
   assert.equal(job.completed, 1);
-  assert.equal([...s.tables.projectObjects.values()].filter(row => row.digest === digest(s.bytes)).length, 1);
+  assert.deepEqual(await importBytes(s, job.projectId, digest(s.bytes)), s.bytes);
+});
+
+test('a paged replay verifies stored bytes when a conflicting R2 key has no checksum', async t => {
+  const s = fixture(t),
+    operationId = randomUUID(),
+    id = await s.start(operationId);
+  await s.advance(id);
+  const run = s.ctx.runMutation;
+  let interrupted = false;
+  s.ctx.runMutation = async (ref, args) => {
+    if (!interrupted && getFunctionName(ref) === 'projectGithubImportStore:advance') {
+      interrupted = true;
+      throw Error('interrupted after the source PUT');
+    }
+    return run(ref, args);
+  };
+  await s.advance(id);
+  const key = [...defaultR2Objects.keys()].find(key => key.endsWith(digest(s.bytes)));
+  t.after(() => defaultR2Objects.set(key, s.bytes));
+  defaultR2Objects.set(key, Buffer.alloc(s.bytes.length, 42));
+  let reads = 0;
+  t.after(
+    interceptDefaultR2(async (url, init, serve) => {
+      if (!decodeURIComponent(new URL(url).pathname).endsWith(key)) return serve(url, init);
+      if (init.method === 'HEAD')
+        return new Response(null, { headers: { 'content-length': String(s.bytes.length) } });
+      if (!init.method || init.method === 'GET') reads++;
+      return serve(url, init);
+    }),
+  );
+  await s.start(operationId);
+  await s.advance(id);
+  let job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.error?.code, 'R2_VERIFY_FAILED');
+  assert.equal(job.completed, 0);
+  assert.equal(s.tables.hostedProjects.get(job.projectId).currentBackup, null);
+  defaultR2Objects.set(key, s.bytes);
+  await s.start(operationId);
+  await s.advance(id);
+  await s.advance(id);
+  job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.phase, 'ready', JSON.stringify(job.error));
+  assert.equal(reads, 2);
+  assert.deepEqual(await importBytes(s, job.projectId, digest(s.bytes)), s.bytes);
+});
+
+test('a retained protocol-2 import finishes from its previously committed object rows', async t => {
+  const s = fixture(t),
+    id = await s.start();
+  // Rows retained from before the catalog marker was added.
+  await s.ctx.db.patch(id, { pagedCatalog: undefined });
+  await s.advance(id);
+  await s.advance(id);
+  const job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.completed, 1);
+  assert.deepEqual(await importBytes(s, job.projectId, digest(s.bytes)), s.bytes);
+  await s.advance(id);
+  assert.equal(s.tables.projectGithubImports.get(id).phase, 'ready');
+  const head = s.tables.projectGithubImports.get(id).publication.head;
+  const source = JSON.parse(await importBytes(s, job.projectId, head));
+  assert.equal(source.files[0].blob, digest(s.bytes));
 });
 
 test('provider revocation and foreign callers cannot publish or read a partial main', async t => {
@@ -511,9 +574,7 @@ test('existing explicit project deletion removes import progress and preserves a
   for (let i = 0; i < 3; i++) await s.advance(second);
   const a = s.tables.projectGithubImports.get(first),
     b = s.tables.projectGithubImports.get(second);
-  const shared = [...s.tables.projectObjects.values()].find(
-    row => row.projectId === b.projectId && row.digest === digest(s.bytes),
-  ).r2Key;
+  const shared = (await findObject(s.ctx, b.projectId, digest(s.bytes))).r2Key;
   const lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
   await s.ctx.db.patch(a.projectId, { removal: 'deleting' });
   for (let i = 0; i < 100 && s.tables.hostedProjects.get(a.projectId).removal !== 'deleted'; i++) {
@@ -559,14 +620,10 @@ test('supported new import writes source and metadata to R2 and retries an inter
   await s.advance(id);
   assert.equal(s.tables.projectGithubImports.get(id).phase, 'ready');
   assert.ok(fake.objects.size >= objects);
-  const bindings = [...s.tables.projectObjects.values()];
-  assert.ok(
-    bindings.length > 0 &&
-      bindings.every(row => (row.recipe || (row.location === 'r2' && row.r2Committed)) && !row.storageId),
-  );
-  const source = bindings.find(row => row.digest === digest(s.bytes));
+  assert.equal(s.tables.projectObjects.size, 0);
+  const source = await findObject(s.ctx, job.projectId, digest(s.bytes));
+  assert.equal(source.r2Committed, true);
   assert.deepEqual(fake.objects.get(fake.key(source.r2Key)), s.bytes);
-  assert.equal(bindings.filter(row => row.digest === digest(s.bytes)).length, 1);
   t.diagnostic(
     JSON.stringify({
       r2RetainedBytes: [...fake.objects.values()].reduce((sum, bytes) => sum + bytes.length, 0),
@@ -643,10 +700,7 @@ test('hosted import retains both gitlinks and gitmodules and reports pointer cov
   const job = s.tables.projectGithubImports.get(id),
     project = s.tables.hostedProjects.get(job.projectId),
     backup = s.tables.projectBackups.get(project.currentBackup);
-  const row = [...s.tables.projectObjects.values()].find(
-    row => row.projectId === job.projectId && row.digest === backup.preview.head,
-  );
-  const state = JSON.parse((await storedBytes(s, row)).toString());
+  const state = JSON.parse(await importBytes(s, job.projectId, backup.preview.head));
   assert.deepEqual(
     state.files.filter(f => f.mode === 'gitlink').map(f => f.path),
     ['vendor-a', 'vendor-b'],
@@ -696,21 +750,15 @@ test('a paged import binds Git LFS paths to their objects, once per oid, and kee
   assert.deepEqual(lfs.counts, { batch: 1, download: 2 }, 'one batch; the shared oid is fetched once');
   const project = s.tables.hostedProjects.get(job.projectId),
     backup = s.tables.projectBackups.get(project.currentBackup);
-  const row = digestValue =>
-    [...s.tables.projectObjects.values()].find(
-      row => row.projectId === job.projectId && row.digest === digestValue,
-    );
   const files = new Map(
-    JSON.parse((await storedBytes(s, row(backup.preview.head))).toString()).files.map(file => [
-      file.path,
-      file,
-    ]),
+    JSON.parse(await importBytes(s, job.projectId, backup.preview.head)).files.map(file => [file.path, file]),
   );
   assert.equal(files.get('asset.bin').blob, digest(lfs.small), 'a pointer-only import fails here');
   assert.equal(files.get('copy.bin').blob, digest(lfs.small));
-  assert.deepEqual(await storedBytes(s, row(digest(lfs.small))), lfs.small);
+  assert.deepEqual(await importBytes(s, job.projectId, digest(lfs.small)), lfs.small);
   assert.equal(files.get('big.dat').blob, digest(lfs.big));
-  assert.ok(row(digest(lfs.big)).recipe, 'a large object is a chunk recipe under its oid');
+  assert.deepEqual(await importBytes(s, job.projectId, digest(lfs.big)), lfs.big);
+  assert.ok((await findObject(s.ctx, job.projectId, digest(lfs.big))).recipe);
   assert.equal(
     files.get('notes.txt').blob,
     digest(lfsPointer(lfs.untracked)),
@@ -718,6 +766,80 @@ test('a paged import binds Git LFS paths to their objects, once per oid, and kee
   );
   const { lfsCoverage } = await import(moduleUrl('../convex/projectGithubImportPublish.ts'));
   assert.match(lfsCoverage(job), /hold their LFS object bytes/);
+});
+
+test('a later catalog-backed import page reuses ordinary bytes and the earlier LFS allowance', async t => {
+  const lfs = lfsRepo();
+  const repeated = Buffer.from('deduplicated across import pages');
+  lfs.files = [
+    ['.gitattributes', lfs.files[0][1]],
+    ['asset.bin', lfsPointer(lfs.small)],
+    ...Array.from({ length: 998 }, (_, index) => [`between-${index}`, repeated]),
+    ['copy.bin', lfsPointer(lfs.small)],
+    ['different.txt', Buffer.from('unique content for a new pack')],
+    ['repeated.txt', repeated],
+  ];
+  const s = fixture(t, { lfs });
+  const id = await modules.projectGithubImport.start._handler(s.ctx, {
+    operationId: randomUUID(),
+    url: 'example/repo',
+    lfsLimitBytes: lfs.small.length,
+  });
+  const job = await finish(s, id);
+  assert.equal(job.phase, 'ready', JSON.stringify(job.error));
+  assert.deepEqual(lfs.counts, { batch: 1, download: 1 });
+  const source = JSON.parse(await importBytes(s, job.projectId, job.publication.head));
+  assert.deepEqual(
+    source.files.filter(file => ['asset.bin', 'copy.bin'].includes(file.path)).map(file => file.blob),
+    [digest(lfs.small), digest(lfs.small)],
+  );
+  const { r2Key } = await findObject(s.ctx, job.projectId, digest(repeated));
+  const scope = r2Key.slice(0, r2Key.lastIndexOf('/') + 1);
+  assert.equal(
+    [...defaultR2Objects].filter(([key, bytes]) => key.includes(scope) && bytes.includes(repeated)).length,
+    1,
+  );
+});
+
+test('a paged retry leaves already checkpointed chunks in R2 and completes the original LFS recipe', async t => {
+  const lfs = lfsRepo();
+  const firstChunk = Buffer.alloc(1024 * 1024, 91);
+  const large = Buffer.concat([
+    firstChunk,
+    ...Array.from({ length: 8 }, (_, index) => Buffer.alloc(1024 * 1024, index)),
+  ]);
+  lfs.files = [lfs.files[0], ['large.dat', lfsPointer(large)]];
+  lfs.objects = new Map([[digest(large), large]]);
+  const s = fixture(t, { lfs });
+  const operationId = randomUUID();
+  const id = await s.start(operationId);
+  await s.advance(id);
+  const original = s.ctx.runMutation;
+  let interrupted = false;
+  s.ctx.runMutation = async (ref, args) => {
+    const result = await original(ref, args);
+    if (!interrupted && getFunctionName(ref) === 'projectGithubImportStore:archiveProgress') {
+      interrupted = true;
+      throw Error('lost streamed window response');
+    }
+    return result;
+  };
+  let firstChunkPuts = 0;
+  t.after(
+    interceptDefaultR2((url, init, serve) => {
+      if (init.method === 'PUT' && new URL(url).pathname.endsWith(digest(firstChunk))) firstChunkPuts++;
+      return serve(url, init);
+    }),
+  );
+  await s.advance(id);
+  assert.equal(s.tables.projectGithubImports.get(id).phase, 'error');
+  assert.equal(s.tables.projectGithubImports.get(id).completed, 0);
+  assert.equal(firstChunkPuts, 1);
+  await s.start(operationId);
+  const job = await finish(s, id);
+  assert.equal(job.phase, 'ready', JSON.stringify(job.error));
+  assert.equal(firstChunkPuts, 1);
+  assert.deepEqual(await importBytes(s, job.projectId, digest(large)), large);
 });
 
 test('a paged import over the LFS limit fails with GITHUB_LFS_LIMIT and fetches nothing; 0 keeps pointers', async t => {
@@ -764,10 +886,7 @@ test('a rejected public credential still imports and publishes complete hosted m
     sourceReads.every(call => call.auth === undefined),
     'ref, tree, blob and publication reads keep anonymous access',
   );
-  const row = [...s.tables.projectObjects.values()].find(
-    row => row.projectId === job.projectId && row.digest === digest(s.bytes),
-  );
-  assert.deepEqual(await storedBytes(s, row), s.bytes);
+  assert.deepEqual(await importBytes(s, job.projectId, digest(s.bytes)), s.bytes);
 });
 
 test('a public repository imports private when chosen; a private one refuses public and creates nothing (a488af2a)', async t => {

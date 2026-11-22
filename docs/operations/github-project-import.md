@@ -229,10 +229,15 @@ less progress: wall time, not memory, then limits the import.
 State, manifest and Work metadata use the same R2-backed object path. Catalog
 publication and source-index materialization use bounded pages. The ready
 transaction starts bounded deletion of transient inventory; large legacy
-inventories may need a cleanup continuation. Archive imports retain catalog
-pages and compact path-index pages, with no per-object `projectObjects` or
-`sourceBlobs` rows. Protocol-2 fallback and legacy seed/bootstrap still use their
-per-object records; they are not covered by that catalog-write claim.
+inventories may need a cleanup continuation. Archive and fresh protocol-2
+imports retain catalog pages and compact path-index pages, with no per-object
+`projectObjects` or `sourceBlobs` rows. Protocol 2 keeps its paged file inventory
+until publication. Each page reuses earlier file pins and commits verified
+object pins with its file cursor. Large files can record completed R2 windows
+while they stream. Their chunks use content-addressed keys across pages. A publication
+retry uses the stored inventory and windows. Protocol-2 jobs already in progress
+finish using their original object rows. Hosted seed and browser bootstrap
+still use per-object records.
 
 New imports write zero bytes to Convex file storage. Missing R2 configuration
 reports `R2_NOT_CONFIGURED`; it never switches byte stores. Old Convex copies
@@ -334,10 +339,11 @@ objects. The same structural assertion rejects the earlier per-file Maps (which 
 about 500 heap bytes per file). The guard counts the actual action tables and their owned
 data, independent of garbage collection, process caches, elapsed time and machine load;
 it does not estimate total action heap or RSS. The protocol-2 fixture in `tests/github-import-pages.test.mjs`
-(28,905 files, 4,089 directories) records 33,061 REST requests, one per directory
-and blob, so that path relies on the App installation token; without one, a
-private repository on that path proceeds at about 10 percent of the importer's
-hourly limit per window. Synthetic results establish budgets; live elapsed time and
+(28,905 files, two gitlinks and 4,089 directories) guards the complete import
+call budget, the retained metadata budget and packed uploads. It records 4,157
+GitHub REST requests for access and tree discovery. Git packs carry the blobs.
+Without an App installation token, a private repository on this path can proceed
+at about 10 percent of the importer's hourly limit per window. Synthetic results establish budgets; live elapsed time and
 billing require separate measurement. A source checkout or local fixture is not
 a published npm release or a production deployment.
 

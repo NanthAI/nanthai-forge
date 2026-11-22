@@ -27,6 +27,10 @@ export const migrationCounts = v.object({
 });
 export const githubImportFields = {
   protocol: v.optional(v.union(v.literal(2), v.literal(3))),
+  /** Existing protocol-2 jobs finish with the object layout they started with. */
+  pagedCatalog: v.optional(v.literal(true)),
+  /** A streamed window committed at this step before the file cursor advanced. */
+  pagedCheckpointStep: v.optional(v.number()),
   publication: v.optional(
     v.object({
       backupId: v.id('projectBackups'),
