@@ -1,0 +1,37 @@
+name: Nightly aged fixture check
+
+on:
+  schedule:
+    - cron: '37 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  aged-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.22.1'
+      - run: npm ci --ignore-scripts
+      - run: npm run build:core
+      - name: Run date-sensitive tests with the wall clock 30 days ahead
+        env:
+          FORGE_TEST_EVENTS: '1'
+          FORGE_TEST_WORKERS: '4'
+        run: |
+          set -o pipefail
+          node scripts/check-aged-fixtures.mjs | jq --unbuffered -Rr '
+            if startswith("__FORGE_TESTS__") then
+              ltrimstr("__FORGE_TESTS__") | fromjson |
+              if .failed then "\(.file): \(.firstError)"
+              elif .flaky then "\(.file) was flaky: \(.retry.firstError)"
+              else empty end
+            elif test("^(Running |# (tests|pass|fail|cancelled|skipped|todo) [0-9])") then .
+            else empty end'
