@@ -8,6 +8,10 @@ import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 
+// An ambient clock well past the fixtures makes a missing pin fail today instead of at a
+// future retention cutoff (Item 8b7b97ce). Tests that need hot planning rows pin their clock.
+test.before(t => t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2100, 0, 1) }));
+
 const { closeDay } = await import(moduleUrl('../convex/projectStats.ts'));
 const backfill = await import(moduleUrl('../convex/statsLanesBackfill.ts'));
 const { statsDay, statsFailedDay, NO_CARRY } = await import(moduleUrl('../src/stats-estimate.ts'));
@@ -424,21 +428,31 @@ test('past the change-row cap, everyone who can plan here is marked, even with n
   assert.deepEqual([read.closedPartial, read.days, read.projects, read.first], [true, [], [], null]);
 });
 
-// Done-when 22:05Z (Item a61d3c91): a day left not measured is not a closed day.
-test('a close after a day left not measured counts that day’s Lanes, marked partial', async t => {
-  // Keep the gap within planning retention so only the unmeasured day is partial.
-  storageClock(t);
+async function closeAfterUnmeasuredDay() {
   const tables = {
     projectStatsDays: [closedDay('2026-11-05'), failedDay('2026-11-06', '2026-11-06')],
     projectHostedAcceptances: [receipt('2026-11-08T09:00:00.000Z')],
     projectHostedOverlapLanes: [lane('2026-11-06T10:00:00.000Z'), lane('2026-11-07T10:00:00.000Z')],
   };
   await close(tables, '2026-11-08');
-  const rows = personRows(tables);
+  return personRows(tables);
+}
+
+// Done-when 22:05Z (Item a61d3c91): a day left not measured is not a closed day.
+test('a close after a day left not measured counts that day’s Lanes, marked partial', async t => {
+  // Keep the gap within planning retention so only the unmeasured day is partial.
+  storageClock(t);
+  const rows = await closeAfterUnmeasuredDay();
   assert.deepEqual(Object.keys(rows).sort(), ['2026-11-06', '2026-11-07', '2026-11-08']);
   assert.equal(rows['2026-11-06'].n, 1, 'the not-measured day’s Lane is counted');
   assert.equal(rows['2026-11-06'].pp, 1, 'its landings were never read: a floor');
   assert.equal(rows['2026-11-07'].pp, undefined, 'a day with no row had no landings: exact');
+});
+
+test('the same close marks the gap partial after its planning rows age out (incident a61d3c91)', async () => {
+  const rows = await closeAfterUnmeasuredDay();
+  assert.equal(rows['2026-11-07'].n, 1, 'the gap day’s Lane is still counted');
+  assert.equal(rows['2026-11-07'].pp, 1, 'archived planning rows make the count partial');
 });
 
 test('the backfill runs a gap on through a day left not measured, and files trailing ones', async () => {

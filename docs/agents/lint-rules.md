@@ -60,6 +60,7 @@ drops below its allowance fails lint too, so a deletion is recorded:
   `retry`/`retries` in a test's options or `retryTimes` is a `retry`; a `timeout` option over 10 s (or not a plain number) on a test
   or hook, `jest.setTimeout`, `testTimeout` is a `timeout`. `setTimeout(resolve, 0)` is a yield, not a sleep.
 - `forge/test-no-implicit-date` counts `Date.now`, `Date(...)` and `new Date()` (incident 822fb3db). Pass a fixed instant to time-dependent helpers and freeze the clock where the code under test reads it internally. Use a monotonic clock to measure elapsed time. Existing explicit wall-clock checks, such as the storage exemption expiry guard, remain covered by their file's allowance.
+- A clock read inside production code can escape that lint rule. [The Stats Lane-day tests](../../tests/stats-lane-days.test.mjs) set the ambient clock past fixture retention and pin it for cases that require recent rows. The same gap day is partial under the ambient clock and exact under the pinned clock (incident a61d3c91).
 - It overlaps the older [Test signal](#test-signal) ratchet below on sleeps; that ratchet stays until this one has covered every sleep it counts.
 
 ## Test signal
