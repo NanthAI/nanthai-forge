@@ -701,7 +701,11 @@ layer out of both first paints.
   Held (every held Lane, so its count is the line's; Needs me counts only what
   waits on the reader), the landing queue,
   being worked on and quiet. Folded regions read nothing until opened (Region
-  `foldState`). `history` lists what landed, newest first, with per-account
+  `foldState`). Each link goes to the screen its address is registered to: the
+  head to Sessions (which links each Lane's holder), a row to its Lane, a row
+  whose check failed to that check, shared files to `touching`. An address
+  under Lanes that no screen serves says so and links back to the overview.
+  `history` lists what landed, newest first, with per-account
   read marks (`convex/projectLandingReads.ts`: one row per account and
   project, a read line plus at most 500 one-by-one reads); it never counts
   toward Needs you. Its first page is read when the page opens and its empty

@@ -20,7 +20,9 @@ const routeFiles = readdirSync(app, { withFileTypes: true })
 // Route files and the registry hold only erasable types, so Node loads them as they are; the test compiler would also
 // compile every screen they lazily name.
 const { projectScreenFor, accountScreenFor } = await import(pathToFileURL(join(app, 'screen-route.ts')).href);
-const { projectPlaces, accountPlaces } = await import(pathToFileURL(join(app, 'paths.ts')).href);
+const { projectPlaces, accountPlaces, hrefFor, parseAppPath } = await import(
+  pathToFileURL(join(app, 'paths.ts')).href
+);
 const { Line, passedWaiting } = await import(moduleUrl('../web/src/app/Line.tsx'));
 const { mainHealth } = await import(moduleUrl('../web/src/app/flow/model.ts'));
 
@@ -132,6 +134,31 @@ test('every address keeps the screen the shared registry gave it, and project ma
   assert.equal(owner.get(accountScreenFor(entries, 'data')), 'data#0');
   // Account > Projects serves the bulk delete request page (Item 7456856f); the rest of the place is a placeholder.
   assert.equal(owner.get(accountScreenFor(entries, 'projects')), 'requests#0');
+});
+
+test('e317b6ea: every address the Lanes overview and Sessions link resolves to its one owning screen', () => {
+  // The links are built as the screens build them (Overview.tsx, SessionsView.tsx), then read back from the address
+  // alone, as a reload, a shared link or browser Back would.
+  const at = (section, rest = '') => hrefFor(project('lanes', section, rest));
+  const cases = [
+    [at(''), 'lanes#0'],
+    [at('sessions'), 'sessions#0'],
+    [at('sessions', 'mara/quiet-otter'), 'sessions#0'],
+    [at('', lane), 'lane#0'],
+    [at('', `${lane}/thread`), 'lane#0'],
+    [at('', `${lane}/check`), 'check#0'],
+    [at('', `${lane}/holder`), 'sessions#1'],
+    [at('', `${lane}/checked`), 'proof#0'],
+    [at('touching'), 'lanes#0'],
+    [at('history'), 'lanes#0'],
+  ];
+  for (const [href, expected] of cases) {
+    const route = parseAppPath(href);
+    assert.equal(hrefFor(route), href, `${href} reads back as itself`);
+    assert.equal(owner.get(projectScreenFor(entries, route)), expected, href);
+  }
+  // Only an address no screen serves is left to the Lanes place, which says so (LanesPlace.tsx).
+  assert.equal(owner.get(projectScreenFor(entries, parseAppPath(at('', 'not/a/lane')))), 'lanes#0');
 });
 
 // The visible text as axe reads it: the anchor's text nodes joined as they are, so "Editing" and "1" with no text

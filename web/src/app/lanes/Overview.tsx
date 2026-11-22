@@ -4,6 +4,9 @@
 // shares saved files with other open Lanes says so and links to Who is touching what (Item f787005c), which replaced
 // the Overlaps block that sat below the yard.
 // Regions move with the dock. Filters live in the address, so a link, a reload and browser Back show the same view.
+// Every link here goes to the one screen that owns it (route.ts in each folder): a row to its Lane (saved changes), a
+// failed row to its check, the head to Sessions (where each session links who holds its Lane), and shared files to
+// Who is touching what. They are built from the reads above, so following one adds no read here.
 import { useMemo, type ReactNode } from 'react';
 import { Dock, Key, Region, useDockLayout, type DockLayout } from '../../ds';
 import { A } from '../frames';
@@ -55,6 +58,7 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
     [feed, lanes, laneError, queue, queueError, shared.view, shared.error],
   );
   const laneHref = (laneId: string) => hrefFor({ ...route, section: '', rest: laneId });
+  const checkHref = (laneId: string) => hrefFor({ ...route, section: '', rest: `${laneId}/check` });
   const setFilter = (id: Filter) => {
     const next = new URLSearchParams(location.search);
     if (id === 'all') next.delete('show');
@@ -115,6 +119,7 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
                 rows={shown}
                 checking={filter === 'all' && (!stop || stop === 'checking') ? yard.checking : undefined}
                 hrefOf={laneHref}
+                checkHrefOf={checkHref}
                 dense={shown.length > 12}
                 sharesOf={laneId => shares.get(laneId)}
                 sharesHref={touchingFor}
@@ -124,7 +129,7 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
                   {shared.error
                     ? 'Which Lanes share files could not be read. '
                     : 'Some Lanes were not compared, so a row may share more files than it says. '}
-                  <A className="lk" href={touching}>
+                  <A className="lk lanes-inline" href={touching}>
                     Who is touching what
                   </A>
                 </div>
@@ -132,7 +137,7 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
               {shown.some(row => row.longWait) ? (
                 <div className="pf">
                   A Lane waits longer than a usual check.{' '}
-                  <A className="lk" href={touching}>
+                  <A className="lk lanes-inline" href={touching}>
                     Who waits on whom
                   </A>
                 </div>
@@ -144,7 +149,7 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
                     : null}
                   {laneError ? 'Lane titles could not be read; ids are shown instead. ' : null}
                   <a
-                    className="lk"
+                    className="lk lanes-inline"
                     href={`/${encodeURIComponent(route.handle)}/${encodeURIComponent(route.project)}/lanes`}
                   >
                     Every open Lane
@@ -184,6 +189,9 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
         <Key kind="ghost" size="sm" disabled={!moved} onClick={resetLayout} hidden={!moved}>
           Reset layout
         </Key>
+        <A className="btn" href={hrefFor({ ...route, section: 'sessions', rest: '' })}>
+          Sessions
+        </A>
         {yard?.open ? (
           <div className="seg" role="group" aria-label="Show">
             {filters.map(f => (

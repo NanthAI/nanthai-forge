@@ -6,7 +6,13 @@
 // Who waits on whom (Item 9e748e41) renders the same queue plus one Lane further back, so its wait is traced to the
 // front. Three Lanes share saved files (Item f787005c): each of their rows says how many, linked to Who is touching
 // what for that Lane.
+// Served under the app's own address (/-/…/lanes), it renders the real Lanes place on the same data plus one Lane whose
+// check failed, over a fake Convex client that counts reads, and names the screen the real route registry gives the
+// current address, so the links the overview draws, browser Back and unknown addresses are all followed for real
+// (Item e317b6ea). `?double` doubles the open Lanes for the scale measurement.
+import { ConvexProvider } from 'convex/react';
 import { createRoot } from 'react-dom/client';
+import type { Id } from '../../convex/_generated/dataModel';
 import { Region } from '../../web/src/ds';
 import '../../web/src/app/app.css';
 import '../../web/src/app/lanes/lanes.css';
@@ -21,6 +27,10 @@ import { WaitRow } from '../../web/src/app/lanes/Touching';
 import { HistoryView } from '../../web/src/app/lanes/History';
 import { Yard } from '../../web/src/app/lanes/Yard';
 import type { LineFeed } from '../../web/src/app/Line';
+import LanesPlace from '../../web/src/app/lanes/LanesPlace';
+import { useRoute } from '../../web/src/app/router';
+import { projectScreenFor, type ScreenRoutes } from '../../web/src/app/screen-route';
+import { fakeConvex } from '../convex-fake.mjs';
 
 const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
@@ -39,6 +49,7 @@ const ids = {
   acct3: 'a1d903ed-cf63-4d65-80ee-4eb026539545',
   origin: 'ac26ac6f-afcd-46f9-9637-cd543c51c900',
   resolution: 'c908b679-0edc-4c3c-83cf-bc44468343e5',
+  failed: 'f41ed0a2-3b6c-4d1e-9a7f-2c8e5b0d4f19',
 };
 const mark = (
   laneId: string,
@@ -176,79 +187,163 @@ const shares = sharesByLane([
   { path: 'web/src/app/account/account.css', laneIds: [ids.acct1, ids.acct2] },
 ]);
 
-createRoot(document.getElementById('root')!).render(
-  <main>
-    <h1 className="sr">Lanes</h1>
-    <Region
-      title="On the way to main"
-      weight="act"
-      waiting={yard.counts.needs}
-      count={yard.rows.length}
-      hint="stuck work first"
-    >
-      <Yard
-        project={project}
-        rows={yard.rows}
-        checking={yard.checking}
-        hrefOf={id => `#${id}`}
-        dense={params.get('dense') === '1'}
-        sharesOf={id => shares.get(id)}
-        sharesHref={id => `#touching-${id}`}
-      />
-    </Region>
-    {params.has('history') ? (
-      <HistoryView
-        project={project}
-        trail={[]}
-        page={{
-          started: false,
-          through: null,
-          newest: 3,
-          next: null,
-          scanned: 3,
-          rows: [
-            { sequence: 3, actor: 'mara', agent: true, agentRun: 'quiet-otter', model: 'gpt-example' },
-            { sequence: 2, actor: null, agent: true, agentRun: 'amber-fox', model: 'unknown' },
-            { sequence: 1, actor: 'devon', agent: false, agentRun: null, model: null },
-          ].map(stamp => ({
-            ...stamp,
-            title: ['Preserve read marks', 'Trace review order', 'Handle split UTF-8'][stamp.sequence - 1]!,
-            receiptId: String(stamp.sequence),
-            at: at(2),
-            goal: null,
-            message: null,
-            item: null,
-            laneId: null,
-            automatic: true,
-            read: false,
-          })),
-        }}
-        error={false}
-        filter={{ unread: false, by: null, item: null }}
-        approvals={0}
-        needsMe="#needs"
-        laneHref={id => `#${id}`}
-        receiptHref={id => `#receipt-${id}`}
-        onFilter={() => {}}
-        onMark={() => {}}
-        onMarkAll={() => {}}
-        showEarlier={() => {}}
-        busy={false}
-        earlierFailed={false}
-        status={null}
-      />
-    ) : null}
-    <Region title="Who waits on whom" weight="act" waiting={1} count={pairs.length}>
-      {pairs.map(pair => (
-        <WaitRow
-          key={pair.laneId}
-          pair={pair}
-          titleOf={titleOf}
-          laneHref={id => `#${id}`}
-          decideHref="#needs"
-          now={NOW}
+// The overview on its real address: the same Lanes, one more whose check failed, served by the real Lanes place.
+const failedMark = mark(ids.failed, 'checking', 12, true);
+const failedMeta = meta(ids.failed, 'stream', 'Stream parser: handle split UTF-8', 'devon/salt-wren', 12);
+const failedEntry: QueueEntry = {
+  position: null,
+  laneId: ids.failed,
+  landingState: { state: 'check-failed' },
+  phase: 'ready',
+  lastFailingTests: ['tests/stream-backpressure.test.ts'],
+  submittedAt: at(12),
+  lastProgressAt: at(12),
+};
+// Doubled scale: every open Lane again under a new id, the queue unchanged.
+const twin = (laneId: string) => `d${laneId.slice(1)}`;
+const scale = params.has('double') ? 2 : 1;
+const openMarks = [...feed.lanes, failedMark];
+const openMeta = [...lanes, failedMeta];
+const overviewFeed: LineFeed = {
+  ...feed,
+  lanes: scale === 2 ? [...openMarks, ...openMarks.map(m => ({ ...m, laneId: twin(m.laneId) }))] : openMarks,
+};
+const overviewMeta =
+  scale === 2 ? [...openMeta, ...openMeta.map(l => ({ ...l, laneId: twin(l.laneId) }))] : openMeta;
+const overviewQueue = { total: 2, held: 2, listed: 4, more: false, entries: [...entries, failedEntry] };
+const overlap = {
+  lanes: [{ laneId: ids.acct1 }, { laneId: ids.acct2 }, { laneId: ids.acct3 }],
+  paths: ['web/src/app/account/Projects.tsx', 'web/src/app/account/account.css'],
+  edits: [
+    { lane: 0, paths: [0, 1] },
+    { lane: 1, paths: [0, 1] },
+    { lane: 2, paths: [0] },
+  ],
+  complete: true,
+};
+const fake = fakeConvex({
+  resolve: (name: string) =>
+    name === 'projectHostedLiveLanes:list'
+      ? JSON.stringify({ page: overviewMeta, isDone: true })
+      : name === 'projectHostedQueueView:read'
+        ? JSON.stringify(overviewQueue)
+        : name === 'projectNowOverlaps:now'
+          ? JSON.stringify({ signals: overlap })
+          : null,
+});
+(window as unknown as { forgeReads: unknown }).forgeReads = fake.stats;
+// The real registry, collected the way screens.tsx collects it; each entry is named by its folder and index.
+const registry = Object.entries(
+  import.meta.glob<ScreenRoutes>('../../web/src/app/*/route.ts', { eager: true, import: 'default' }),
+);
+const entriesOfAll = registry.flatMap(([, routes]) => routes);
+const folderOf = new Map(
+  registry.flatMap(([path, routes]) =>
+    routes.map((entry, i) => [entry, `${/app\/([^/]+)\/route\.ts$/.exec(path)![1]}#${i}`] as const),
+  ),
+);
+
+function Routed() {
+  const route = useRoute();
+  if (route.frame !== 'project') return <main data-screen="none" />;
+  const entry = projectScreenFor(entriesOfAll, route);
+  const screen = (entry && folderOf.get(entry)) ?? 'placeholder';
+  return (
+    <main id="main" tabIndex={-1} data-screen={screen}>
+      {screen === 'lanes#0' ? (
+        <LanesPlace
+          route={route}
+          projectId={'sample' as Id<'hostedProjects'>}
+          projectName="Sample project"
+          feed={overviewFeed}
+          viewerHandle="mara"
         />
-      ))}
-    </Region>
-  </main>,
+      ) : (
+        <h1>Screen {screen}</h1>
+      )}
+    </main>
+  );
+}
+
+createRoot(document.getElementById('root')!).render(
+  location.pathname.startsWith('/-/') ? (
+    <ConvexProvider client={fake.client as never}>
+      <Routed />
+    </ConvexProvider>
+  ) : (
+    <main>
+      <h1 className="sr">Lanes</h1>
+      <Region
+        title="On the way to main"
+        weight="act"
+        waiting={yard.counts.needs}
+        count={yard.rows.length}
+        hint="stuck work first"
+      >
+        <Yard
+          project={project}
+          rows={yard.rows}
+          checking={yard.checking}
+          hrefOf={id => `#${id}`}
+          dense={params.get('dense') === '1'}
+          sharesOf={id => shares.get(id)}
+          sharesHref={id => `#touching-${id}`}
+        />
+      </Region>
+      {params.has('history') ? (
+        <HistoryView
+          project={project}
+          trail={[]}
+          page={{
+            started: false,
+            through: null,
+            newest: 3,
+            next: null,
+            scanned: 3,
+            rows: [
+              { sequence: 3, actor: 'mara', agent: true, agentRun: 'quiet-otter', model: 'gpt-example' },
+              { sequence: 2, actor: null, agent: true, agentRun: 'amber-fox', model: 'unknown' },
+              { sequence: 1, actor: 'devon', agent: false, agentRun: null, model: null },
+            ].map(stamp => ({
+              ...stamp,
+              title: ['Preserve read marks', 'Trace review order', 'Handle split UTF-8'][stamp.sequence - 1]!,
+              receiptId: String(stamp.sequence),
+              at: at(2),
+              goal: null,
+              message: null,
+              item: null,
+              laneId: null,
+              automatic: true,
+              read: false,
+            })),
+          }}
+          error={false}
+          filter={{ unread: false, by: null, item: null }}
+          approvals={0}
+          needsMe="#needs"
+          laneHref={id => `#${id}`}
+          receiptHref={id => `#receipt-${id}`}
+          onFilter={() => {}}
+          onMark={() => {}}
+          onMarkAll={() => {}}
+          showEarlier={() => {}}
+          busy={false}
+          earlierFailed={false}
+          status={null}
+        />
+      ) : null}
+      <Region title="Who waits on whom" weight="act" waiting={1} count={pairs.length}>
+        {pairs.map(pair => (
+          <WaitRow
+            key={pair.laneId}
+            pair={pair}
+            titleOf={titleOf}
+            laneHref={id => `#${id}`}
+            decideHref="#needs"
+            now={NOW}
+          />
+        ))}
+      </Region>
+    </main>
+  ),
 );

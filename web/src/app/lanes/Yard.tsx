@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The yard (DESIGN.md figures): every open Lane on the shell's four stops (Editing, Saved, In queue, Checking) and main, in bands, stuck work first. The
 // Checking and passed-waiting use the shell strip's counts. Each
-// row opens its Lane; the band that waits on the reader is the first stop. Static markup: no behaviour layer.
+// row opens its Lane; a Lane whose check failed opens that check instead (the approved flow's lanes.html), whose trail
+// leads on to the Lane. The band that waits on the reader is the first stop. Static markup: no behaviour layer.
 // A running check (Item ecd6e610) says how long it has run against the project's usual check, and its mark glides
 // along the Checking stop by a CSS animation drawn from the check's start: the browser moves it with no script per
 // frame and no server call. One timer at most, for the whole yard, armed only for the next minute its words change and
@@ -43,6 +44,7 @@ export function Yard({
   project,
   checking,
   hrefOf,
+  checkHrefOf,
   dense,
   sharesOf,
   sharesHref,
@@ -51,6 +53,8 @@ export function Yard({
   project?: WhoProject | undefined;
   checking?: ReturnType<typeof lineStopCounts> | undefined;
   hrefOf: (laneId: string) => string;
+  /** Where a Lane's check evidence is; a failed row links there. Without it every row opens its Lane. */
+  checkHrefOf?: (laneId: string) => string;
   dense: boolean;
   /** What a Lane shares with other open Lanes, from the one overlap read; absent when it shares nothing. */
   sharesOf?: (laneId: string) => LaneShares | undefined;
@@ -82,6 +86,7 @@ export function Yard({
                     row={row}
                     project={project}
                     href={hrefOf(row.laneId)}
+                    checkHref={row.state === 'failed' ? checkHrefOf?.(row.laneId) : undefined}
                     dense={dense}
                     now={now}
                     glide={!asleep}
@@ -129,6 +134,7 @@ function LaneLine({
   row,
   project,
   href,
+  checkHref,
   dense,
   now,
   glide,
@@ -136,6 +142,7 @@ function LaneLine({
   row: YardRow;
   project?: WhoProject | undefined;
   href: string;
+  checkHref?: string | undefined;
   dense: boolean;
   now: number;
   glide: boolean;
@@ -162,14 +169,17 @@ function LaneLine({
   const where = `${stopWords[row.stage]}${row.position ? `, number ${row.position} in the queue` : ''}`;
   // Two open Lanes of one Item must never look the same: the short Lane mark, and how many the Item has.
   const mark = row.untitled ? null : row.mark;
+  const name = [row.title, mark ? `Lane ${mark}` : null, checkHref ? 'open its check' : null]
+    .filter(Boolean)
+    .join(', ');
   return (
     <div className="ln" data-st={state}>
       <div className="lab">
         <A
           className={dense ? 'ttl ln-open' : 'ttl ln-open wrap2'}
-          href={href}
+          href={checkHref ?? href}
           dir="auto"
-          aria-label={mark ? `${row.title}, Lane ${mark}` : undefined}
+          aria-label={name === row.title ? undefined : name}
         >
           {row.title}
         </A>

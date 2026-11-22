@@ -6,7 +6,9 @@
 // yard the Lane mark is never cut (real case: Item 1dd4e095, whose two Lanes read the same once the meta line was
 // cut); axe is clean with no sideways scroll at desk and phone width in both themes, plain and dense; a parked Lane
 // names who it waits on and why (Item e1633718); a row that shares saved files says how many with how many Lanes, in
-// a link of its own to Who is touching what, never nested in the row's link (Item f787005c). Set
+// a link of its own to Who is touching what, never nested in the row's link (Item f787005c). On the app's own address
+// the real Lanes place draws each link to the one screen the real route registry gives it, a failed row to its check,
+// and phone Back returns to the same view (Item e317b6ea). Set
 // FORGE_LANE_SHOTS to a folder to also save the screenshots.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -57,7 +59,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
   if (shots) mkdirSync(shots, { recursive: true });
   const html = await buildFixture(out);
   const browser = await chromium.launch(launchOptions);
-  async function open(t, viewport, query = '') {
+  async function open(t, viewport, query = '', path = '/yard.html', ready = '.yard .ln') {
     const context = await browser.newContext({ viewport });
     const page = await context.newPage();
     const errors = [];
@@ -67,7 +69,8 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
       const url = new URL(route.request().url());
       if (url.protocol === 'data:') return route.continue();
       if (url.hostname !== 'forge.test') return route.abort();
-      if (url.pathname === '/yard.html') return route.fulfill({ contentType: 'text/html', body: html });
+      if (url.pathname === '/yard.html' || url.pathname.startsWith('/-/'))
+        return route.fulfill({ contentType: 'text/html', body: html });
       const file = join(out, url.pathname.slice(1));
       if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
       const contentType = file.endsWith('.js')
@@ -77,9 +80,9 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
           : 'text/html';
       return route.fulfill({ contentType, body: readFileSync(file) });
     });
-    await page.goto(`https://forge.test/yard.html${query}`);
+    await page.goto(`https://forge.test${path}${query}`);
     await page
-      .locator('.yard .ln')
+      .locator(ready)
       .first()
       .waitFor({ timeout: 10_000 })
       .catch(error => assert.fail(`${error.message}\n${errors.join('\n')}`));
@@ -277,14 +280,92 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
       }
     });
 
+    const LANES = '/-/sample-owner/sample-project/lanes';
+    const FAILED = 'f41ed0a2-3b6c-4d1e-9a7f-2c8e5b0d4f19';
+    await t.test(
+      'e317b6ea: the overview links Sessions, each Lane and a failed check to their own screens; Back returns',
+      async t => {
+        for (const viewport of [PHONE, DESK]) {
+          const page = await open(t, viewport, '', LANES);
+          const screen = () => page.locator('main').getAttribute('data-screen');
+          assert.equal(await screen(), 'lanes#0', 'the overview is the Lanes place itself');
+          assert.equal(
+            await page.evaluate(() => window.forgeReads.adds),
+            3,
+            'Lanes, queue and shared files: one read each, none per row or per link',
+          );
+          const failed = page.locator('.yard .ln').filter({ hasText: 'Stream parser' });
+          assert.equal(await failed.locator('.actn .st').textContent(), 'Check failed');
+          const routes = [
+            [page.getByRole('link', { name: 'Sessions', exact: true }), `${LANES}/sessions`, 'sessions#0'],
+            [
+              failed.getByRole('link', {
+                name: /^Stream parser: handle split UTF-8, Lane f41ed0a2, open its check$/,
+              }),
+              `${LANES}/${FAILED}/check`,
+              'check#0',
+            ],
+            [
+              page.locator('.yard .ln').filter({ hasText: 'Public pages' }).first().locator('a.ln-open'),
+              `${LANES}/9e8e8826-db5d-40d1-9199-328383d25641`,
+              'lane#0',
+            ],
+          ];
+          for (const [link, href, owner] of routes) {
+            assert.equal(await link.getAttribute('href'), href);
+            await link.click();
+            await page.waitForURL(`**${href}`);
+            assert.equal(await screen(), owner, `${href} opens its own screen`);
+            await page.goBack();
+            await page.waitForURL(`**${LANES}`);
+            await page.locator('.yard .ln').first().waitFor();
+            assert.equal(await screen(), 'lanes#0', `Back from ${href} at ${viewport.width}`);
+          }
+          // Lanes with no failed check keep opening the Lane; Held stays one count with the failed Lane in it.
+          const checks = await page
+            .locator('.yard a.ln-open')
+            .evaluateAll(links =>
+              links.map(link => link.getAttribute('href')).filter(href => href.endsWith('/check')),
+            );
+          assert.deepEqual(checks, [`${LANES}/${FAILED}/check`]);
+          const held = page.getByRole('list', { name: 'Held' });
+          assert.equal(await held.locator('[role="listitem"]').count(), 2);
+        }
+      },
+    );
+
+    await t.test(
+      'e317b6ea: an address under Lanes that no screen serves says so and links the overview',
+      async t => {
+        const page = await open(t, PHONE, '', `${LANES}/not/a/lane`, '.head');
+        assert.equal(await page.locator('main').getAttribute('data-screen'), 'lanes#0');
+        assert.equal(
+          await page.locator('.head .sit').textContent(),
+          'Forge has no Lanes screen at this address.',
+        );
+        await page.getByRole('link', { name: 'Open Lanes' }).click();
+        await page.waitForURL(`**${LANES}`);
+        await page.locator('.yard .ln').first().waitFor();
+        await page.goBack();
+        await page.waitForURL('**/not/a/lane');
+        assert.equal(
+          await page.getByRole('link', { name: 'Open Lanes' }).count(),
+          1,
+          'Back keeps the address',
+        );
+      },
+    );
+
     await t.test('axe and widths: both themes, desk and phone, plain and dense', async t => {
-      for (const [viewport, query] of [
+      for (const [viewport, query, path] of [
         [DESK, ''],
         [PHONE, ''],
         [DESK, '?dense=1'],
         [PHONE, '?dense=1'],
+        [DESK, '', LANES],
+        [PHONE, '', LANES],
       ]) {
-        const page = await open(t, viewport, query);
+        const page = await open(t, viewport, query, path);
         await page.addScriptTag({ path: axePath });
         for (const theme of ['dark', 'light']) {
           await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
@@ -308,7 +389,10 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
           assert.deepEqual(violations, [], `axe at ${viewport.width} ${theme}`);
           if (shots)
             await page.screenshot({
-              path: join(shots, `lanes-yard-${viewport.width}-${theme}${query ? '-dense' : ''}.png`),
+              path: join(
+                shots,
+                `lanes-${path ? 'overview' : 'yard'}-${viewport.width}-${theme}${query ? '-dense' : ''}.png`,
+              ),
               fullPage: true,
             });
         }
