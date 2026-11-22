@@ -346,6 +346,158 @@ test('a deletion started after the close began stops the close before any sign-i
   assert.equal(calls.filter(([name]) => name === 'revokeSessions').length, 0);
 });
 
+/** Turns op1 into a deletion whose begin stopped before sealing (Item 17cdc774: the two dormant dev accounts each held
+ * one since 2026-11-11, expectedItems 1, pending 0). `item` appends one pending item for that resource. */
+function stuck(t, { item, at = 1 } = {}) {
+  t.accountOperations.set('op1', {
+    ...t.accountOperations.get('op1'),
+    stage: 'preparing',
+    pending: item ? 1 : 0,
+    at,
+  });
+  t.accountItems.delete('op1-item');
+  if (item)
+    t.accountItems.set(
+      'op1-held',
+      row('op1-held', {
+        owner: 'owner',
+        accountId: 'op1',
+        key: `${item.kind}:${item.id}`,
+        resourceId: item.id,
+        kind: item.kind,
+        pin: 'p',
+        operationId: randomUUID(),
+        hidden: !!item.hidden,
+        state: 'pending',
+      }),
+    );
+}
+const closeFor = (f, input) => close.closeFor._handler(f.ctx, { owner: 'owner', ...input });
+
+test('a deletion stuck at preparing no longer blocks the close once nothing is held: the close drops it (Item 17cdc774)', async () => {
+  for (const item of [undefined, { kind: 'project', id: 'gone' }]) {
+    const { f, t } = emptyWorld();
+    // Without an item, or with one whose project is only a tombstone: nothing it could still remove is held.
+    stuck(t, { item });
+    as(f, 'owner');
+    assert.equal((await close.preview._handler(f.ctx, {})).blocker, null);
+    // The operator path, as run on the dormant dev accounts that nobody can sign in to.
+    assert.deepEqual(await closeFor(f, { operationId: randomUUID(), handle: 'sample-owner' }), {
+      stage: 'closing',
+    });
+    await background(f);
+    assert.equal(t.forgeAccounts.size, 0);
+    assert.equal(t.accountOperations.size + t.accountItems.size, 0);
+    assert.equal(t.secretGrants.size, 0, 'the hidden grant is left as in any close');
+    assert.ok(t.hostedProjects.has('gone'));
+  }
+});
+
+test('a preparing deletion whose item is still held stays refused, and the held item and receipt stay (Item 17cdc774)', async () => {
+  const cases = [
+    [
+      { kind: 'project', id: 'live' },
+      t => t.hostedProjects.set('live', row('live', { owner: 'owner', name: 'Live', key: 'live' })),
+      /still holds projects/,
+    ],
+    [
+      { kind: 'view', id: 'sv' },
+      t => t.savedViews.set('sv', row('sv', { owner: 'owner', name: 'View', importId: 'x', route: {} })),
+      /still holds saved views/,
+    ],
+    [
+      { kind: 'teams', id: 'tm', hidden: true },
+      t => {
+        t.teams.set('ft', row('ft', { owner: 'other', name: 'Their team', operationId: randomUUID() }));
+        t.teamMembers.set('tm', row('tm', { teamId: 'ft', member: 'owner' }));
+      },
+      /Leave them/,
+    ],
+  ];
+  for (const [item, add, words] of cases) {
+    const { f, t } = emptyWorld();
+    stuck(t, { item });
+    add(t);
+    as(f, 'owner');
+    assert.match((await close.preview._handler(f.ctx, {})).blocker, words);
+    for (const run of [closeAs, closeFor])
+      await assert.rejects(
+        run(f, { operationId: randomUUID(), handle: 'sample-owner' }),
+        e => code('ACCOUNT_CHANGED')(e) && words.test(e.data?.message ?? e.message),
+      );
+    assert.equal(t.forgeAccounts.get('acct').closing, undefined);
+    assert.equal(f.scheduled.length, 0);
+    assert.equal(t.accountOperations.get('op1').stage, 'preparing', 'the person can still continue it');
+    assert.ok(t.accountItems.has('op1-held'));
+  }
+});
+
+test('closing past a stuck preparing deletion is retry-safe; one begun during the close stops it (Item 17cdc774)', async () => {
+  const { f, t } = emptyWorld();
+  stuck(t);
+  const operationId = randomUUID();
+  await closeFor(f, { operationId, handle: 'sample-owner' });
+  assert.deepEqual(await closeFor(f, { operationId, handle: 'sample-owner' }), { stage: 'closing' });
+  assert.equal(f.scheduled.length, 1, 'a retry while the step is pending schedules nothing new');
+  await assert.rejects(
+    closeFor(f, { operationId: randomUUID(), handle: 'sample-owner' }),
+    code('ACCOUNT_OPERATION_CHANGED'),
+  );
+  const failed = f.scheduled.splice(0, 1)[0];
+  f.tasks.set(failed.id, { state: { kind: 'failed' } });
+  await closeFor(f, { operationId, handle: 'sample-owner' });
+  // Run the secrets step, then fail the receipts step that drops the stuck receipt: the same id restarts it there.
+  const secrets = f.scheduled.splice(0, 1)[0];
+  await f.transaction(() => close.step._handler(f.ctx, secrets.args));
+  const receipts = f.scheduled.find(x => getFunctionName(x.fn) === 'accountClose:step');
+  assert.equal(receipts.args.phase, 'receipts');
+  f.scheduled.splice(f.scheduled.indexOf(receipts), 1);
+  f.tasks.set(receipts.id, { state: { kind: 'failed' } });
+  await closeFor(f, { operationId, handle: 'sample-owner' });
+  await background(f);
+  assert.equal(t.forgeAccounts.size + t.accountOperations.size, 0);
+  assert.deepEqual(await closeFor(f, { operationId, handle: 'sample-owner' }), { stage: 'closed' });
+
+  // A begin that registers after the close started, even in the same millisecond, may be running in another tab: the
+  // receipts step meets it first (newest first) and stops before any older receipt goes (review of this fix #1, #2).
+  const late = emptyWorld();
+  as(late.f, 'owner');
+  await closeAs(late.f, { operationId: randomUUID(), handle: 'sample-owner' });
+  const { _id, _creationTime, ...op1 } = late.t.accountOperations.get('op1');
+  late.t.accountOperations.set(
+    'new',
+    row('new', {
+      ...op1,
+      operationId: randomUUID(),
+      stage: 'preparing',
+      at: late.t.forgeAccounts.get('acct').closing.at,
+    }),
+  );
+  await background(late.f);
+  assert.deepEqual([...late.t.accountOperations.keys()].sort(), ['new', 'op1', 'op2'], 'none dropped');
+  assert.equal(late.t.forgeAccounts.get('acct').closing, undefined);
+  assert.equal(late.t.cliCredentials.get('cred').revoked, false);
+
+  // One that registers after the receipts step stops the final transaction: the account stays whole.
+  const later = emptyWorld();
+  as(later.f, 'owner');
+  await closeAs(later.f, { operationId: randomUUID(), handle: 'sample-owner' });
+  const begun = { ...later.t.accountOperations.get('op1'), _id: 'new', operationId: randomUUID() };
+  for (let task; (task = later.f.scheduled.find(x => getFunctionName(x.fn) === 'accountClose:step'));) {
+    later.f.scheduled.splice(later.f.scheduled.indexOf(task), 1);
+    if (task.args.phase === 'finish')
+      later.t.accountOperations.set('new', {
+        ...begun,
+        stage: 'preparing',
+        at: later.t.forgeAccounts.get('acct').closing.at + 1,
+      });
+    await later.f.transaction(() => close.step._handler(later.f.ctx, task.args));
+  }
+  assert.ok(later.t.forgeAccounts.has('acct'));
+  assert.ok(later.t.accountHandles.has('h1'));
+  assert.ok(later.t.accountOperations.has('new'));
+});
+
 test('every device sign-in, on every page, and every waiting device code end before the account row goes (review #1)', async () => {
   const { f, t } = emptyWorld();
   for (let i = 0; i < close.STEP + 30; i++)

@@ -13,7 +13,8 @@
  * - `step`: the background removal, one bounded page per task, in this order (review of the delete path, round 1):
  *   1. `secrets` leaves the secret grants given to the person by the close's start, like a Your data cleanup
  *      (accountExecute.leaveSecrets). They stop giving access when `close` records its time; their rows go here.
- *   2. `receipts` deletes finished deletion receipts and their items; an unfinished one stops the close.
+ *   2. `receipts` deletes finished deletion receipts, and unsealed (`preparing`) ones from before the close, with their
+ *      items; an unfinished one, or one begun after the close started, stops the close.
  *   3. `signout` revokes every device sign-in page by page, denies device codes still waiting to be redeemed and ends
  *      every native browser session. From then on nothing but an old-provider (Clerk) browser acts as the account.
  *   4. `finish` removes handle operations, ordering hints, link receipts and earlier handles, then, in one final
@@ -69,7 +70,13 @@ const WORDS: Record<(typeof KINDS)[number], string> = {
 const AFTER = 'Delete it under "Delete your Forge data" first, then close the account.';
 const RUNNING =
   'An earlier deletion is still running. Continue it under "Earlier deletions", then close the account.';
-const unfinished = (r: Doc<'accountOperations'>) => r.stage !== 'completed' || r.secretsDone === false;
+/** A deletion that can still remove something. One still `preparing` (its begin stopped before sealing) cannot: no step
+ * runs on an unsealed receipt (accountExecute.step, startSecrets and accountPlan.complete refuse it), and continuing it
+ * means a new begin that checks every pin again. Each item it could target is either still held, which `blocker`
+ * refuses before it reads a receipt, or gone. So once nothing is held the close drops it with the finished receipts
+ * (Item 17cdc774: two dormant accounts held one since 2026-11-11 and nobody could sign in to continue it). */
+const unfinished = (r: Doc<'accountOperations'>) =>
+  (r.stage !== 'completed' && r.stage !== 'preparing') || r.secretsDone === false;
 
 /** What still stops the close, as the next step to take, or null when the account holds nothing. */
 export async function blocker(ctx: Ctx, actor: string): Promise<string | null> {
@@ -303,12 +310,16 @@ export const step = internalMutation({
       return null;
     }
     if (phase === 'receipts') {
+      // Newest first, so a receipt begun during the close (or one past the first scan) is met before any older one goes.
       const [receipt] = await ctx.db
         .query('accountOperations')
         .withIndex('by_owner', q => q.eq('owner', actor))
+        .order('desc')
         .take(1);
-      // A deletion started after the close began (or one past the first scan) is never cut short: the close stops.
-      if (receipt && unfinished(receipt)) return void (await stop());
+      // A deletion started after the close began (or one past the first scan) is never cut short: the close stops. That
+      // covers one still preparing too, which may be a begin running right now in another tab (same millisecond too).
+      if (receipt && (unfinished(receipt) || (receipt.stage === 'preparing' && receipt.at >= closing.at)))
+        return void (await stop());
       if (receipt) {
         const items = await ctx.db
           .query('accountItems')
@@ -362,7 +373,12 @@ export const step = internalMutation({
       return null;
     }
     // The final transaction: anything made or shared while the close ran keeps the account whole.
-    if (await blocker(ctx, actor)) return void (await stop());
+    // The `receipts` step removed every receipt, so any receipt now, even one still preparing, began after it.
+    const [late] = await ctx.db
+      .query('accountOperations')
+      .withIndex('by_owner', q => q.eq('owner', actor))
+      .take(1);
+    if (late || (await blocker(ctx, actor))) return void (await stop());
     if (user) await removeNativeSignIn(ctx, user);
     for (const alias of await ctx.db
       .query('accountHandles')
