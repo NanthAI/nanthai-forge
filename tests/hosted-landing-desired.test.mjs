@@ -25,6 +25,7 @@ test.after(() => {
   }
 });
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
+const { notifyDesiredCompose } = await import(moduleUrl('../convex/projectHostedLandingDesiredWake.ts'));
 const feed = await import(moduleUrl('../convex/projectFeed.ts'));
 const proof = await import(moduleUrl('../convex/projectRunProofActions.ts'));
 const feedRows = (f, operationId) =>
@@ -208,6 +209,99 @@ test('a failed source job ends the hosted desired landing with its stated reason
   assert.equal(rest.length, 0);
   assert.equal(event.id, `landing.failed:${failed.id}:${f.lane.laneId}`);
   assert.equal(event.code, failed.error.code);
+});
+
+test('a6120276 and ade19c72: cancel the observed preparing submission before check dispatch', async t => {
+  const f = await finishFixture(t);
+  const command = request(f);
+  const resumeSource = pauseSource(f);
+  const main = f.currentMain();
+  const submitted = await submit(f, command);
+  const { submission } = await read(f, command.operationId);
+  assert.equal(submission.id, submitted.id);
+  assert.equal(submission.phase, 'composing');
+  assert.equal(submission.preparing, true);
+  assert.equal(f.tables.projectHostedLandingRequests.size, 0);
+
+  const identity = { projectId: f.projectId, submissionId: submission.id };
+  const cancelRequest = {
+    projectId: f.projectId,
+    request: JSON.stringify({
+      operationId: randomUUID(),
+      authorityEpoch: command.authorityEpoch,
+      submissionId: submission.id,
+    }),
+  };
+  const cancel = actor => f.tx('cancelObservedPreparation', landingApi.cancel, cancelRequest, actor);
+  f.patch('hostedProjects', f.projectId, { visibility: 'public' });
+  f.insert('projectContributors', { projectId: f.projectId, contributor: 'other-writer' });
+  await assert.rejects(cancel(null), code('PROJECT_UNAVAILABLE'));
+  await assert.rejects(cancel('other-writer'), code('PROJECT_UNAVAILABLE'));
+  assert.deepEqual((await read(f, command.operationId)).submission, submission);
+
+  const [preparing] = f.tables.projectHostedLandingDesired.values();
+  const wakeId = await f.tx('claimBeforeCancel', desired.claim, { ...identity, wakeId: preparing.wake.id });
+  assert(wakeId, 'the admission worker has claimed the original submission');
+  const receipt = await cancel('owner');
+  const cancelled = JSON.parse(receipt);
+  assert.equal(cancelled.id, submission.id);
+  assert.equal(cancelled.operationId, command.operationId);
+  assert.equal(cancelled.attemptId, submission.attemptId);
+  assert.equal(cancelled.phase, 'terminal-failed');
+  assert.equal(cancelled.error.code, 'LANDING_CANCELLED');
+  assert(cancelled.timing.settledAt);
+
+  resumeSource();
+  assert.equal(await f.tx('advanceAfterCancel', desired.advance, { ...identity, wakeId }), null);
+  await f.tx(
+    'sourceCompletionAfterCancel',
+    { _handler: ctx => notifyDesiredCompose(ctx, f.projectId, command.composeOperationId) },
+    {},
+  );
+  await f.drain();
+  assert.equal(await cancel('owner'), receipt);
+  assert.deepEqual((await read(f, command.operationId)).submission, cancelled);
+  assert.deepEqual(await submit(f, command), cancelled);
+  assert.deepEqual(
+    feedRows(f, command.operationId).map(event => event.id),
+    [`landing.cancelled:${submission.id}:${f.lane.laneId}`],
+  );
+  assert.equal(f.tables.projectHostedLandingRequests.size, 0);
+  assert.equal(f.tables.projectHostedCheckRuns.size, 0);
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+  assert.equal(f.pending().length, 0);
+  assert.deepEqual(f.currentMain(), main);
+});
+
+test('the observed preparing handle still cancels if admission wins the race', async t => {
+  const f = await finishFixture(t);
+  const command = request(f);
+  const main = f.currentMain();
+  await submit(f, command);
+  const { submission } = await read(f, command.operationId);
+  assert.equal(submission.preparing, true);
+  await f.execute();
+  const { submission: admitted } = await f.current(submission.id);
+  assert.equal(admitted.id, submission.id);
+  assert.equal(admitted.phase, 'queued');
+
+  const cancelled = JSON.parse(
+    await f.tx('cancelAfterAdmission', landingApi.cancel, {
+      projectId: f.projectId,
+      request: JSON.stringify({
+        operationId: randomUUID(),
+        authorityEpoch: command.authorityEpoch,
+        submissionId: submission.id,
+      }),
+    }),
+  );
+  await f.drain();
+  assert.equal(cancelled.id, submission.id);
+  assert.equal(cancelled.phase, 'terminal-failed');
+  assert.equal(cancelled.error.code, 'LANDING_CANCELLED');
+  assert.equal((await read(f, command.operationId)).submission.error.code, 'LANDING_CANCELLED');
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+  assert.deepEqual(f.currentMain(), main);
 });
 
 test('a project writer can observe the exact pre-admission feed failure until access is lost', async t => {
@@ -709,7 +803,6 @@ test('incident replay 08169467: completed compose replaces a running desired wak
   const row = [...f.tables.projectHostedLandingDesired.values()][0];
   const old = row.wake;
   f.patch('_scheduled_functions', old.taskId, { state: { kind: 'inProgress' } });
-  const wake = await import(moduleUrl('../convex/projectHostedLandingDesiredWake.ts'));
   let cancelled = 0;
   f.extendContext(ctx => {
     const cancel = ctx.scheduler.cancel;
@@ -724,7 +817,7 @@ test('incident replay 08169467: completed compose replaces a running desired wak
   resume();
   await f.tx(
     'sourceCompletion',
-    { _handler: ctx => wake.notifyDesiredCompose(ctx, f.projectId, command.composeOperationId) },
+    { _handler: ctx => notifyDesiredCompose(ctx, f.projectId, command.composeOperationId) },
     {},
   );
   assert.equal(cancelled, 0, 'a running source/desired ancestor is never cancelled');
