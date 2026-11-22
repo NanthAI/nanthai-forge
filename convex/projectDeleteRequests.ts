@@ -144,10 +144,20 @@ export const prepare = accountMutation('write')({
           matched.push(project);
         }
         selector = `${ids.length} project ${ids.length === 1 ? 'id' : 'ids'}`;
+      } else if ('trash' in input.select) {
+        // The trash is one index range: the first DELETE_REQUEST_LIMIT trashed projects, however many projects the
+        // account holds. More than that stay in the trash for the next request.
+        matched = (
+          await ctx.db
+            .query('hostedProjects')
+            .withIndex('by_owner_and_removal', q => q.eq('owner', user.subject).eq('removal', 'trash'))
+            .take(DELETE_REQUEST_LIMIT)
+        ).filter(p => deletable(p, user.subject));
+        selector = 'the trash';
       } else {
         const page = await ctx.db
           .query('hostedProjects')
-          // Active and removed rows: the trash selector needs both.
+          // Active and removed rows: a name pattern may match either.
           .withIndex('by_owner_and_removal', q => q.eq('owner', user.subject))
           .take(SCAN + 1);
         invariant(
@@ -155,20 +165,15 @@ export const prepare = accountMutation('write')({
           'BAD_ARGUMENT',
           `This account has over ${SCAN} projects; list project ids instead.`,
         );
-        if ('glob' in input.select) {
-          const glob = input.select.glob.trim();
-          invariant(
-            glob && glob.length <= 200,
-            'BAD_ARGUMENT',
-            'Give a project name pattern such as bench-zoo-*.',
-          );
-          const pattern = slugPattern(glob);
-          matched = page.filter(p => deletable(p, user.subject) && pattern.test(p.slug ?? p.name));
-          selector = glob;
-        } else {
-          matched = page.filter(p => deletable(p, user.subject) && p.removal === 'trash');
-          selector = 'the trash';
-        }
+        const glob = input.select.glob.trim();
+        invariant(
+          glob && glob.length <= 200,
+          'BAD_ARGUMENT',
+          'Give a project name pattern such as bench-zoo-*.',
+        );
+        const pattern = slugPattern(glob);
+        matched = page.filter(p => deletable(p, user.subject) && pattern.test(p.slug ?? p.name));
+        selector = glob;
       }
       invariant(matched.length > 0, 'NOT_FOUND', `No project of yours matches ${selector}.`);
       invariant(

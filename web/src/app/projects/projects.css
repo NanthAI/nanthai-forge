@@ -9,8 +9,9 @@
   .account-projects .proj-facts { display: grid; justify-items: end; gap: 2px; font-size: var(--t-meta); color: var(--text-2); text-align: right; }
   .account-projects .proj-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2) var(--s-3); }
   .account-projects .empty .btns { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; }
+  .account-projects .row.proj .icb { margin-top: -3px; }
   @container (max-width: 560px) {
-    .account-projects .row.proj { grid-template-columns: minmax(0, 1fr) !important; row-gap: var(--s-2); }
-    .account-projects .proj-facts { justify-items: start; text-align: left; }
+    .account-projects .row.proj { grid-template-columns: minmax(0, 1fr) 28px !important; row-gap: var(--s-2); }
+    .account-projects .proj-facts { grid-column: 1 / -1; grid-row: 2; justify-items: start; text-align: left; }
   }
 }

@@ -35,6 +35,8 @@ export const accountProject = v.object({
   name: v.string(),
   handle: v.optional(v.string()),
   slug: v.optional(v.string()),
+  /** The project's revision, so Move to trash from this list is the one retry-safe mutation (no read first). */
+  revision: v.number(),
   role,
   visibility: v.union(v.literal('private'), v.literal('public')),
   starred: v.optional(v.boolean()),
@@ -142,6 +144,7 @@ async function row(
     name: project.name,
     ...(handle ? { handle } : {}),
     ...(project.slug ? { slug: project.slug } : {}),
+    revision: project.revision,
     role,
     visibility: project.visibility === 'public' ? 'public' : 'private',
     ...(star === undefined ? {} : { starred: star }),

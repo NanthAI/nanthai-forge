@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { useConvex, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import { Band, CodeBox, Key, Region, Row } from '../../ds';
+import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { Head } from '../Place';
 import type { AccountProps } from '../screen-route';
@@ -416,6 +417,10 @@ export function YourDataView(props: {
         </div>
       </Region>
       <DeleteRegion {...props} />
+      <p className="quietline">
+        To remove one project, move it to the trash in{' '}
+        <A href={hrefFor({ frame: 'account', place: 'projects' })}>Projects</A>. It stays there 90 days.
+      </p>
       {props.receipts.length ? (
         <Region title="Earlier deletions" weight="ref" count={props.receipts.length}>
           {props.receipts.map(receipt => (

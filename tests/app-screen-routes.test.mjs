@@ -116,7 +116,7 @@ test('every address keeps the screen the shared registry gave it, and project ma
     [project('settings'), 'people#0'],
     [project('settings', 'checks'), 'checks#0'],
     [project('settings', 'secrets'), 'secrets#0'],
-    [project('settings', 'project'), undefined],
+    [project('settings', 'project'), 'project-settings#0'],
     [project('stats'), 'stats#0'],
   ];
   for (const [route, expected] of cases) {

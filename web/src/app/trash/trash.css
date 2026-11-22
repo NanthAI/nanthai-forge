@@ -1,0 +1,46 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Account > Projects strip and Trash (SPEC-01-trash, Item 8fba39a4). Layout only: keys, rows, regions, sheets, states
+ * and type come from the design system. Time left is 232 px and Size 104 px so "deleted for good 5 Feb 2027" and
+ * "not reported" stay on one line. */
+[data-ds] {
+  .account-strip { display: flex; align-items: stretch; height: var(--ph-h); padding: 0 var(--s-1); background: var(--surface); border-bottom: var(--rule) solid var(--line); overflow-x: auto; scrollbar-width: none; }
+  .account-strip::-webkit-scrollbar { display: none; }
+  .account-strip a { display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-4); color: var(--text-2); font-size: var(--t-small); font-weight: var(--w-medium); white-space: nowrap; }
+  .account-strip a[aria-current] { color: var(--text); font-weight: var(--w-bold); box-shadow: inset 0 -2px 0 var(--brand); }
+  .trash-screen .row.tr { align-items: start; padding-block: 10px; }
+  .trash-screen .nm { display: grid; gap: 2px; min-width: 0; }
+  .trash-screen .nm .meta { overflow-wrap: anywhere; }
+  .trash-screen .nm .mono { overflow-wrap: anywhere; }
+  .trash-screen .ttl[dir="auto"] { text-align: left; }
+  .trash-screen .left b { display: block; font-weight: var(--w-strong); font-variant-numeric: tabular-nums; }
+  .trash-screen .left > span:not(.st):not(.only-narrow) { display: block; color: var(--text-2); font-size: var(--t-meta); }
+  .trash-screen .left > .st { font-size: var(--t-small); display: flex; }
+  .trash-screen .left .only-narrow { display: none; }
+  .trash-screen .row.out .ttl, .trash-screen .row.out .left b { color: var(--text-2); font-weight: var(--w-regular); }
+  .trash-screen .sz { white-space: nowrap; }
+  .trash-screen .sz.nr { font-family: var(--font-sans); color: var(--text-3); }
+  .trash-screen .btns { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: flex-end; align-items: center; min-width: 178px; }
+  .trash-screen .th.tr { grid-template-columns: minmax(0, 1fr) 232px 104px 178px; }
+  .trash-screen .proj-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2) var(--s-3); }
+  .trash-sheet { display: grid; gap: var(--s-3); }
+  .trash-sheet h3 { font-size: var(--t-lead); font-weight: var(--w-bold); line-height: var(--lh-head); letter-spacing: var(--head-track); overflow-wrap: anywhere; }
+  .trash-sheet p { color: var(--text-2); max-width: var(--m-prose); overflow-wrap: anywhere; }
+  .trash-sheet p strong { color: var(--text); font-weight: var(--w-strong); }
+  .trash-sheet .keeps { display: grid; gap: var(--s-1); margin: 0; }
+  .trash-sheet .keeps > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: var(--s-3); font-size: var(--t-small); }
+  .trash-sheet .keeps dt { color: var(--text-3); font-size: var(--t-meta); font-weight: var(--w-strong); padding-top: 1px; }
+  .trash-sheet .keeps dd { margin: 0; }
+  @container (max-width: 640px) {
+    .trash-screen .th.tr { display: none; }
+    .trash-screen .row.tr { grid-template-columns: minmax(0, 1fr) !important; row-gap: var(--s-2); }
+    .trash-screen .row.tr > .sz { display: none; }
+    .trash-screen .row.tr > .left { display: flex; flex-wrap: wrap; gap: 0 var(--s-2); align-items: baseline; }
+    .trash-screen .left b { display: inline; }
+    .trash-screen .left .only-narrow { display: inline; color: var(--text-2); font-size: var(--t-meta); }
+    .trash-screen .left .only-narrow.nr { color: var(--text-3); }
+    .trash-screen .row.tr > .btns { justify-content: flex-start; min-width: 0; }
+    .trash-screen .row.tr > .btns .btn { flex: 1 1 auto; min-height: 40px; }
+    .trash-screen .row.tr > .btns:empty { display: none; }
+  }
+  @media (max-width: 860px) { .trash-sheet .keeps > div { grid-template-columns: minmax(0, 1fr); gap: 0; } }
+}

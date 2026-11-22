@@ -9,9 +9,17 @@ import type { AccountProps } from '../screen-route';
 
 const DeleteRequest = lazy(() => import('./DeleteRequest'));
 const Projects = lazy(() => import('../projects/Projects'));
+const Trash = lazy(() => import('../trash/Trash'));
 
 export default function AccountProjects(props: AccountProps) {
-  const request = useSearch().get('request');
+  const search = useSearch();
+  const request = search.get('request');
+  if (!request && search.get('view') === 'trash')
+    return (
+      <Suspense fallback={<Head trail={[{ label: 'Trash' }]} sentence="The trash." />}>
+        <Trash />
+      </Suspense>
+    );
   if (!request)
     return (
       <Suspense fallback={<Head trail={[{ label: 'Projects' }]} sentence="Loading…" />}>

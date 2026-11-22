@@ -977,8 +977,8 @@ nforge host ROOT --delete-projects --withdraw REQUEST_ID
 ```
 
 Preparing deletes nothing. It freezes the exact list (slug, revision, newest landing, stored size, in the trash or
-not), prints it with the approval link `/-/account?request=ID`, and exits. A request holds at most 100 projects and
-expires 30 minutes after it is made. An expired request deletes nothing. While Clerk sign-in is available, the link
+not), prints it with the approval link `/-/account?request=ID`, and exits. A request holds at most 100 projects (with `--trash`, the first 100 in the trash; the rest
+stay for the next request) and expires 30 minutes after it is made. An expired request deletes nothing. While Clerk sign-in is available, the link
 also offers **Review with your existing sign-in** so the owner can review with that account session. On the page the
 owner reads the whole list, keeps any project out, types the number left and approves once. **Decline** tells the agent
 through the same read. Approval re-checks every project in
@@ -1091,13 +1091,13 @@ npx convex run projectPlanLaneBackfill:run '{"projectId":"PROJECT_ID","phase":"i
 
 ### Project retention and restore
 
-Deleting a project from Settings (or `projectLifecycle:trash`) tombstones it at
-once. Everyone loses access, the owner included: reads, writes, Lanes, landings,
+Moving a project to the trash from Settings, Project or the Projects list (or
+`projectLifecycle:trash`) tombstones it at once. Everyone loses access, the owner included: reads, writes, Lanes, landings,
 runners and tokens stop, and reader, contributor, invitation, maintainer, runner
 and worker grants are revoked in 100-row pages. The slug stays reserved. Deletion
 schedules exactly one expiry at `removedAt + 90 days` (no polling cron) and a
 bounded size count: live objects, backups and proposals, 1,000 rows per call.
-Settings shows the deleted date, the restore deadline and the retained size.
+Account, Projects, Trash shows the deleted date, the restore deadline and the retained size.
 
 The owner can restore the project until the deadline. Restore brings back source,
 Work and settings but **not** grants, invitations, runners or tokens; re-share

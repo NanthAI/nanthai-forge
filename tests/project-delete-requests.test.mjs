@@ -109,6 +109,32 @@ test('an agent prepares the exact list from a name pattern; only matching projec
   assert.equal(trash.projects.length, 6, 'only the projects in the trash');
 });
 
+test('the trash holds more than one request: the request lists the first 100 and the rest stay in the trash (Item 8fba39a4)', async t => {
+  const f = fixture(t, 0);
+  for (let i = 0; i < 130; i++)
+    f.s.tables.hostedProjects.set(`trashed-${i}`, {
+      _id: `trashed-${i}`,
+      _creationTime: i + 1,
+      owner: 'owner',
+      key: randomUUID(),
+      name: `old-${i}`,
+      slug: `old-${i}`,
+      currentBackup: null,
+      revision: 1,
+      removal: 'trash',
+      removedAt: 1,
+    });
+  const request = await prepare(f, { trash: true }, false);
+  assert.equal(request.projects.length, 100, 'one request holds 100 trashed projects, not an error');
+  assert.equal(request.selector, 'the trash');
+  assert.ok(request.projects.every(project => project.trash));
+  assert.equal(
+    f.s.tables.hostedProjects.get('keep-me').removal,
+    undefined,
+    'an active project is never listed',
+  );
+});
+
 test('a device or agent sign-in cannot approve; another account cannot even read the request', async t => {
   const f = fixture(t);
   const request = await prepare(f, { glob: 'bench-zoo-*' });

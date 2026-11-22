@@ -1,0 +1,31 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Settings > Project: facts as label and value rows, the rename form, and the lifecycle rows. Everything else is the
+ * design system's. */
+[data-ds] {
+  .project-settings .fact { align-items: baseline; padding-block: 10px; }
+  .project-settings .fact .val { min-width: 0; overflow-wrap: anywhere; }
+  .project-settings .nm { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+  .project-settings .meta { color: var(--text-2); font-size: var(--t-meta); }
+  .project-settings .rename { display: grid; gap: var(--s-3); padding: var(--s-3) var(--gut) var(--s-4); }
+  .project-settings .rename .inp { max-width: 48ch; }
+  .project-settings .btns { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }
+  .project-settings .pf { margin: 0; color: var(--text-2); font-size: var(--t-small); }
+  @media (max-width: 560px) {
+    .project-settings .fact { grid-template-columns: minmax(0, 1fr) !important; row-gap: 2px; }
+    .project-settings .row[style*="auto"] { grid-template-columns: minmax(0, 1fr) !important; row-gap: var(--s-2); }
+  }
+}
+[data-ds] {
+  .project-settings .backup { align-items: start; padding-block: 10px; }
+  .project-settings .backup .btns { justify-content: flex-end; }
+  .project-settings .prov summary { cursor: pointer; color: var(--text-2); font-size: var(--t-meta); }
+  .project-settings .prov p { margin: var(--s-1) 0 0; color: var(--text-2); font-size: var(--t-meta); overflow-wrap: anywhere; }
+  .project-settings .store { display: grid; gap: var(--s-3); padding: var(--s-3) var(--gut) var(--s-4); }
+  .project-settings .store p { margin: 0; max-width: var(--m-prose); }
+  .project-settings .quietline code { overflow-wrap: anywhere; }
+  .project-settings .proj-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2) var(--s-3); }
+  @media (max-width: 560px) {
+    .project-settings .backup { grid-template-columns: minmax(0, 1fr) !important; row-gap: var(--s-2); }
+    .project-settings .backup .btns { justify-content: flex-start; }
+  }
+}

@@ -6,10 +6,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useConvex } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
-import { Band, Key, Region, Row, State } from '../../ds';
+import { Band, Key, Menu, Region, Row, State } from '../../ds';
 import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { Head } from '../Place';
+import { navigate } from '../router';
+import { PlaceIcon } from '../places';
+import { MoveToTrash } from '../trash/MoveToTrash';
+import { Toasts, useToast } from '../trash/Toasts';
+import { useLifecycle } from '../trash/lifecycle';
+import { untilDay } from '../trash/trash-model';
+import { AccountStrip } from './AccountStrip';
 import type { AccountProps } from '../screen-route';
 import {
   grouped,
@@ -21,6 +28,7 @@ import {
   type AccountRead,
   type ProjectRow,
 } from './model';
+import '../trash/trash.css';
 import './projects.css';
 
 const PAGE = 50;
@@ -66,7 +74,18 @@ function useAccountProjects() {
 
 export default function Projects(_props: AccountProps) {
   const { read, retry, showMore } = useAccountProjects();
-  return <ProjectsView read={read} retry={retry} showMore={showMore} now={Date.now()} />;
+  const run = useLifecycle();
+  return (
+    <ProjectsView
+      read={read}
+      retry={retry}
+      showMore={showMore}
+      now={Date.now()}
+      moveToTrash={async row => {
+        await run('trash', { id: row.id, revision: row.revision });
+      }}
+    />
+  );
 }
 
 const trail = [
@@ -81,14 +100,25 @@ export function ProjectsView({
   retry,
   showMore,
   now,
+  moveToTrash,
 }: {
   read: Read;
   retry: () => void;
   showMore?: () => void;
   now: number;
+  /** Moves a project the person owns to the trash: one retry-safe mutation (the page supplies it). */
+  moveToTrash?: (row: ProjectRow) => Promise<void>;
 }) {
-  const data = read.state === 'ok' ? read.data : read.state === 'failed' ? read.last : undefined;
+  const [moving, setMoving] = useState<ProjectRow | null>(null);
+  const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
+  const { toast, show, clear } = useToast();
+  const loaded = read.state === 'ok' ? read.data : read.state === 'failed' ? read.last : undefined;
+  const data = useMemo(
+    () => (loaded ? { ...loaded, projects: loaded.projects.filter(row => !gone.has(row.id)) } : undefined),
+    [loaded, gone],
+  );
   const groups = useMemo(() => (data ? grouped(data.projects) : null), [data]);
+  const menu = moveToTrash ? setMoving : undefined;
   const tools = (
     <>
       <A className="btn sm" href={startHref}>
@@ -102,6 +132,7 @@ export function ProjectsView({
   if (!data)
     return (
       <div className="account-projects">
+        <AccountStrip current="projects" />
         <Head
           trail={trail}
           sentence={read.state === 'failed' ? 'Your projects could not be read.' : 'Loading…'}
@@ -122,6 +153,7 @@ export function ProjectsView({
   if (!data.projects.length)
     return (
       <div className="account-projects">
+        <AccountStrip current="projects" />
         <Head trail={trail} sentence="No projects yet." />
         {read.state === 'failed' ? <Notice retry={retry} /> : null}
         <div className="empty">
@@ -141,6 +173,7 @@ export function ProjectsView({
   const shown = data.projects.length;
   return (
     <div className="account-projects">
+      <AccountStrip current="projects" />
       <Head trail={trail} sentence={sentence(data)}>
         {tools}
       </Head>
@@ -156,13 +189,13 @@ export function ProjectsView({
           <>
             <Band title="Needs you" count={groups!.needs.length} needs hint="a Lane is held for a person" />
             {groups!.needs.map(row => (
-              <ProjectLine key={row.id} row={row} now={now} needs />
+              <ProjectLine key={row.id} row={row} now={now} needs onMove={menu} />
             ))}
             {groups!.rest.length ? <Band title="Everything else" count={groups!.rest.length} /> : null}
           </>
         ) : null}
         {groups!.rest.map(row => (
-          <ProjectLine key={row.id} row={row} now={now} />
+          <ProjectLine key={row.id} row={row} now={now} onMove={menu} />
         ))}
         {data.more ? (
           <div className="quietline proj-more">
@@ -175,6 +208,21 @@ export function ProjectsView({
           </div>
         ) : null}
       </Region>
+      {moving && moveToTrash ? (
+        <MoveToTrash
+          name={moving.name}
+          lanes={{ n: moving.held.n + moving.lanes.n, atLeast: moving.held.atLeast || moving.lanes.atLeast }}
+          now={now}
+          move={async () => {
+            await moveToTrash(moving);
+            setGone(was => new Set(was).add(moving.id));
+            setMoving(null);
+            show(`Moved ${moving.name} to the trash. It can be restored until ${untilDay(now)}.`);
+          }}
+          close={() => setMoving(null)}
+        />
+      ) : null}
+      <Toasts toast={toast} onGone={clear} />
     </div>
   );
 }
@@ -190,7 +238,28 @@ function Notice({ retry }: { retry: () => void }) {
   );
 }
 
-function ProjectLine({ row, now, needs }: { row: ProjectRow; now: number; needs?: boolean }) {
+function ProjectLine({
+  row,
+  now,
+  needs,
+  onMove,
+}: {
+  row: ProjectRow;
+  now: number;
+  needs?: boolean;
+  onMove?: ((row: ProjectRow) => void) | undefined;
+}) {
+  const settings =
+    row.handle && row.slug
+      ? hrefFor({
+          frame: 'project',
+          handle: row.handle,
+          project: row.slug,
+          place: 'settings',
+          section: 'project',
+          rest: '',
+        })
+      : null;
   const href =
     row.handle && row.slug
       ? hrefFor({
@@ -203,7 +272,7 @@ function ProjectLine({ row, now, needs }: { row: ProjectRow; now: number; needs?
         })
       : null;
   return (
-    <Row className="proj" weight={needs ? 'act' : 'watch'} cols="minmax(0, 1fr) auto">
+    <Row className="proj" weight={needs ? 'act' : 'watch'} cols="minmax(0, 1fr) auto 28px">
       <span className="proj-name">
         {href ? (
           <A className="ttl" href={href} dir="auto" translate="no">
@@ -228,6 +297,23 @@ function ProjectLine({ row, now, needs }: { row: ProjectRow; now: number; needs?
         <span>{laneWords(row)}</span>
         <span>{itemWords(row)}</span>
       </span>
+      {row.role === 'owner' ? (
+        <Menu
+          label={`More for ${row.name}`}
+          className="icb"
+          placement="bottom end"
+          onNavigate={navigate}
+          items={[
+            ...(settings ? [{ id: 'settings', label: 'Project settings', href: settings }] : []),
+            ...(settings && onMove ? ['separator' as const] : []),
+            ...(onMove ? [{ id: 'trash', label: 'Move to trash', onAction: () => onMove(row) }] : []),
+          ]}
+        >
+          <PlaceIcon name="more" />
+        </Menu>
+      ) : (
+        <span />
+      )}
     </Row>
   );
 }
