@@ -61,14 +61,13 @@ export type CacheGcResult = {
 };
 /** Nested Lane copies under ROOT.forge-client/lanes are a cache: bounded by size and age, evicted
  * least recently used first. Never the caller's own Lane, a copy in use (lock or touched within
- * ten minutes), a copy a sibling symlink points at, an open Lane checkout this machine's registry
+ * ten minutes), a copy a sibling symlink points at, a Lane checkout this machine's registry
  * records at that path, or one with unsaved edits. Local only. */
 export function gcNestedLanes(input: {
   root: string;
   /** The caller's own Lane, never evicted. */
   keepLaneIds?: string[];
-  settings?: Pick<ClientSettings, 'clientCacheMaxGB' | 'clientCacheMaxAgeHours'> &
-    Partial<Pick<ClientSettings, 'activeLanePruneHours'>>;
+  settings?: Pick<ClientSettings, 'clientCacheMaxGB' | 'clientCacheMaxAgeHours'>;
   now?: number;
   budgetMs?: number;
   isDirty?: (root: string) => boolean;
@@ -82,9 +81,10 @@ export function gcNestedLanes(input: {
   const maxBytes = settings.clientCacheMaxGB * 1e9,
     maxAgeMs = settings.clientCacheMaxAgeHours * hour;
   if (maxBytes === 0 && maxAgeMs === 0) return result;
-  const directory = join(clientCacheRoot(input.root), 'lanes');
+  let directory: string;
   let names: string[];
   try {
+    directory = canonicalRoot(join(clientCacheRoot(input.root), 'lanes'));
     names = readdirSync(directory).filter(isLaneDirectoryName);
   } catch {
     return result;
@@ -105,16 +105,8 @@ export function gcNestedLanes(input: {
   const registry = new Map(lanes.map(entry => [canonicalRoot(entry.root), entry.lastActionAt]));
   // Owner-pinned Lanes (this client's registry mirror of the server flag) are never evicted.
   const pinned = new Set(lanes.filter(entry => entry.pinned).map(entry => entry.laneId));
-  // A Lane this machine started, opened or resolved here and has not seen finish is a working folder,
-  // not a cache copy (7da396ed: evicted while its landing was in flight). lane-prune removes it once
-  // the server says it landed or was abandoned, or after the long active idle age; past that age (an
-  // entry prune cannot read, say) it is cache again, so every copy stays bounded.
-  const activeMs = (settings.activeLanePruneHours ?? 168) * hour;
-  const open = new Set(
-    lanes
-      .filter(entry => !entry.state && (activeMs === 0 || now - entry.lastActionAt < activeMs))
-      .map(entry => `${entry.laneId}\u0000${canonicalRoot(entry.root)}`),
-  );
+  // A local state or pin can be stale after activity on another machine. Registered
+  // checkouts go through the fresh hosted lifecycle and process checks in lane-prune.
   const keep = new Set(input.keepLaneIds ?? []);
   const copies = names.flatMap(name => {
     const copy = join(directory, name);
@@ -162,8 +154,8 @@ export function gcNestedLanes(input: {
           ? 'in use'
           : linked.has(item.copy)
             ? 'linked from a sibling directory'
-            : open.has(`${laneId}\u0000${item.copy}`)
-              ? 'open Lane checkout'
+            : registry.has(item.copy)
+              ? 'registered Lane checkout'
               : (processBlocker(item.copy, (processes ??= (input.processes ?? workingProcesses)())) ??
                 (unknownCacheMetadata(item.copy)
                   ? 'unknown Forge metadata'

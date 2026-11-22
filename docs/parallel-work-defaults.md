@@ -25,14 +25,14 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 
 | Setting | Default | Why | Change |
 | --- | --- | --- | --- |
-| `autoPruneHours` | `3` | Finished Lanes left full checkouts behind. On the dogfood Mac, 127 Lane roots used 38 GB, and the disk filled at 1.2 GB free. `start` removes the local roots of your landed or abandoned Lanes once they have had no Forge action and no file change for this long. | `nforge settings autoPruneHours 0` turns it off. `nforge prune` still works on demand. |
+| `autoPruneHours` | `3` | An online Lane start or landing completion can reclaim registered local checkouts after this many hours without a Forge action or file change. | `nforge settings autoPruneHours 0` turns it off. `nforge prune` still works on demand. |
 | `activeLanePruneHours` | `168` | A builder waiting on a long landing or review must keep its Lane folder; a 3-hour limit removed idle open Lanes. An open (`active`) Lane's root is removed only after this long with no Forge action and no unsaved edits. | `nforge settings activeLanePruneHours 0` never removes an open Lane's root. |
-| `idleLaneHours` | `1` | Agents forgot open Lanes, which kept counting as active work and kept their disk. `start` lists the open Lanes this agent run started on this machine that have had no Forge action for this long. | `nforge settings idleLaneHours 0` stops the list. |
+| `idleLaneHours` | `1` | Agents forgot open Lanes, which kept counting as active work and kept their disk. Start housekeeping lists the open Lanes this agent run started on this machine that have had no Forge action for this long. | `nforge settings idleLaneHours 0` stops the list. |
 | `localHeavySlots` | `auto` | About 20 agents shared a 16 GB laptop. Unlimited parallel builds and test runs swapped the machine; 3 at a time kept it responsive. `auto` allows one heavy command per 5 GB of RAM, capped at half the cores and never below 1 (16 GB with 8 cores gives 3). | A number sets the slots; `0` turns the limit off. |
 | `localHeavyMaxMinutes` | `60` | A finished reviewer's hung test held one of the machine's slots for 71 min (Item 593fc2d7). Heavy holds on the dogfood Mac take seconds to about 10 min, so a command still running after an hour is stopped (`SIGTERM`, then `SIGKILL` 10 s later; exit 124) and its slot freed. | A number of minutes, at most `1440` (a day), sets the bound; `0` removes it. |
 | `shareDependencies` | `true` | Each Lane needs `node_modules` (261 MB for Forge itself), and every agent ran the install. When a Lane opens, its `node_modules` becomes a link to one install per exact lockfile and package manager (npm, pnpm, yarn or bun). | `nforge settings shareDependencies false`. |
 | `installScripts` | `false` | A repository's own files could switch on dependency install scripts at `start`, so opening a Lane ran code its authors chose. A repository's declaration is a request: `start` shows it, and only you decide. | `nforge settings installScripts true` accepts repository requests on this machine; `start {"installScripts":true}` runs all scripts for one Lane. |
-| `clientCacheMaxGB` | `2` | `ROOT.forge-client/lanes` collected full ~100 MB copies of other Lanes that nothing removed (262 copies, 5.8 GB in one client directory). They are a cache now: past this size, the least recently used copies are removed (never an open Lane checkout). | `nforge settings clientCacheMaxGB 0` removes the size cap. |
+| `clientCacheMaxGB` | `2` | `ROOT.forge-client/lanes` caches disposable checkout copies. Past this size, the least recently used eligible copies are removed. Registered checkouts use hosted Lane pruning. | `nforge settings clientCacheMaxGB 0` removes the size cap. |
 | `clientCacheMaxAgeHours` | `24` | The same cache: a copy nobody used for this long is removed. | `nforge settings clientCacheMaxAgeHours 0` removes the age limit. |
 | `landWait` | `true` | Agents wrapped `land --save` in a polling loop to learn the outcome. `land --save` now waits by default and prints a compact summary. | `--no-wait` on one command, or `nforge settings landWait false`. |
 
@@ -41,10 +41,16 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 - The client keeps a small local index of the Lane checkouts it opened, at
   `$XDG_STATE_HOME/forge/lanes` (default `~/.local/state/forge/lanes`). It writes one small file
   when it opens a Lane and when an agent action touches one. Nothing runs in the background.
-- `start` reads the state of the Lanes that are due in bounded server pages of up to 250 Lane identities per deployment, combining projects
-  in the same read (one call for 99 or 165 roots). When nothing is due, `start` reads nothing. An idle machine costs nothing.
+- An online `start` or a client observing a successful landing with identified inputs can
+  sweep due registered roots.
+  Both share one machine-local window of 60 minutes. The next such command after the window
+  checks up to 48 due identities from its deployment in one read, batching across projects
+  and continuing larger inventories on later triggers. Nothing runs at idle or on offline startup.
+  When nothing is due, housekeeping makes no read. With automatic pruning disabled, `start`
+  can still use this window for idle advice on the current project.
 - A root is removed only when all of these hold:
-  - the server says the Lane is `completed` or `abandoned`;
+  - the server says the Lane is `abandoned`, or `completed` with a current landing receipt
+    for the checkout head;
   - there has been no Forge action and no file change for `autoPruneHours`;
   - the root is not where the command runs;
   - the root holds no other Lane roots;
@@ -66,8 +72,10 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 - Every removal appends one JSON line (time, Lane, root, server state, reason, idle hours, bytes) to
   `$XDG_STATE_HOME/forge/lane-prune.jsonl` (default `~/.local/state/forge/lane-prune.jsonl`) before the
   root is deleted; the file rotates to `lane-prune.jsonl.1` past 1 MB.
-- Pruning removes the root, its `ROOT.forge-client` cache and its `ROOT.forge-metrics.jsonl`.
-  A `node_modules` link is removed as a link; the shared install stays.
+- Automatic pruning removes the registered checkout, including its scratch. The receipt lists the
+  removed Lane IDs and how to restore saved source with `open`. Explicit pruning also removes
+  generated adjacent cache and metrics while saving retained recovery. A `node_modules` link
+  is removed as a link, preserving the shared install.
 - Unavailable project access, missing Lane records and incompatible/unreachable deployments
   retain the root and report the reason and recovery. Local checkout/registry state may be stale
   after a reopen and never substitutes for current hosted lifecycle state. Live processes and
@@ -104,16 +112,20 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   and runs no timer. A pass that runs out of its 15-second budget continues on the next start.
 - A copy is kept when it is the caller's own Lane, holds the work lock or was used in the last ten
   minutes, is the target of a symlink beside ROOT (conflict checkouts), is an open Lane checkout this
-  machine started, opened or resolved there (its registry entry has not seen it land or be abandoned,
-  so a folder whose landing is still checking is never cache), has unsaved edits, or a live
-  local process works in it. Open Lane roots are removed only by idle pruning above, after the
-  server's state read. Unknown process coverage also keeps it. Cache eviction and idle Lane
+  machine started, opened or resolved there, has unsaved edits, or a live local process works in it.
+  Registered Lane roots use the hosted state read above. Unknown process coverage also keeps a
+  copy. Cache eviction and idle Lane
   pruning share explicit cleanup's one batched process-directory observation, only when a copy
   might be removed. Cache eviction records its path, reason and bytes in the existing local Lane
   prune log before removal; it adds no server calls or idle activity.
 
 ### Local disk
 
+- In a hosted Lane, `nforge status .` shows allocated checkout and scratch bytes.
+  `nforge agent ROOT status '{"laneId":"LANE_ID"}'` reports the same local figures when the
+  checkout is present. The read checks scratch first and samples up to 4,096 entries or 25 ms.
+  Incomplete counts are reported as lower bounds. Scratch over 10% of free space on the
+  Lane's volume is flagged. This measurement makes no server calls.
 - Forge temp output goes to `$TMPDIR/forge-tmp/PURPOSE-PID-RANDOM`. Any CLI start removes entries
   there not written for 2 hours, at most once an hour, unless their process is still alive.
 - Forge writes an empty `.metadata_never_index` (Spotlight exclusion) into each `ROOT.forge-client`,

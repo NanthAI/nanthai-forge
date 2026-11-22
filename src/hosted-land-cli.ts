@@ -466,6 +466,9 @@ export async function hostedLandCli(
   }
   const final: HostedAgentResponse = {
     ...submitted,
+    ...(finished && 'localLanes' in finished && finished.localLanes
+      ? { localLanes: finished.localLanes }
+      : {}),
     result,
   };
   if (final.budget && Date.parse(final.budget.resetAt) <= Date.now()) delete final.budget;

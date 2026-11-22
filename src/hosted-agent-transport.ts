@@ -34,7 +34,7 @@ import { clientCacheRoot, rootSibling } from './root-paths.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { withExchangeProgress } from './exchange-progress.js';
-import { networkFailure } from './network-fetch.js';
+import { networkFailure, networkTimeout } from './network-fetch.js';
 import { networkContinuation } from './network-continuation.js';
 import { reconcileHostedSync, hasHostedSyncHandoff } from './hosted-sync-handoff.js';
 import { autoReplaySuperseded } from './hosted-replay-holds.js';
@@ -72,10 +72,9 @@ import { isPlanningPrefix } from './planning-id.js';
 import { planningIssueArguments } from './planning-issue-arguments.js';
 import { executeHostedMetrics, METRICS_DEADLINE_MS, metricsDeadline } from './hosted-agent-metrics.js';
 import { laneLiveness, readLaneEntry, recordLane, withLaneCommand } from './lane-registry.js';
-import { convexLaneStates, laneHousekeeping, markerIdentity } from './lane-prune.js';
+import { convexLaneStates, markerIdentity, type LaneHousekeeping } from './lane-prune.js';
 import { shareDependencies, installScriptsNotice } from './shared-dependencies.js';
 import { announceRegistryHosts } from './install-registry-hosts.js';
-import { readClientSettings } from './client-settings.js';
 import {
   knownCapabilities,
   localShapeError,
@@ -119,7 +118,13 @@ import { START_COMPLETION_SECONDS, boundedStep, startContinuation } from './host
 import { gcNestedLanesHourly } from './client-cache-gc.js';
 import { hostedStartResultSchema, replacedOpenLanes } from './hosted-lane.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
-import { HostedAgentJournal, agentSessionKey, hostedAgentRoot } from './hosted-agent-journal.js';
+import {
+  HostedAgentJournal,
+  agentSessionKey,
+  finishCommandLaneIds,
+  hostedAgentRoot,
+} from './hosted-agent-journal.js';
+import { landPhase } from './hosted-land-summary.js';
 import { sessionAgentSlug, sessionAgentIdentity } from './agent-slug-session.js';
 import { detectedClientProcess } from './agent-client-process.js';
 import {
@@ -334,8 +339,10 @@ export type HostedAgentResponse = Partial<CliProvenance> & {
   snapshot?: SnapshotReceipt;
   /** This agent session's public identity, `handle/slug` (start, save and land receipts). */
   as?: string;
-  /** start only: your idle open Lanes and finished Lane roots pruned on this machine. */
-  localLanes?: { idle: unknown[]; otherRuns?: unknown[]; pruned: { count: number; bytes: number } };
+  /** Local housekeeping performed alongside a start or a landed reply. */
+  localLanes?: Pick<LaneHousekeeping, 'idle' | 'otherRuns' | 'kept'> & {
+    pruned: { count: number; bytes: number; laneIds: string[]; recover: string };
+  };
   /** land --save only: where the submitting process spent its time before submission. */
   landTiming?: LandTiming;
   /** Lane-changing actions: other open Lanes on related work not shown before (≤3 lines, ~60 tokens each). */
@@ -728,6 +735,14 @@ export class HostedAgentTransport {
       );
       this.retainCaller(requestedAction, { result: response.result }, response.operationId);
       this.touchLane(requestedAction, input, response);
+      if (response.action === 'finish' && landPhase(response) === 'landed') {
+        const replay = (response.result as { replayParameters?: Record<string, unknown> }).replayParameters;
+        const laneIds = finishCommandLaneIds(input, running);
+        if (replay) laneIds.push(...finishCommandLaneIds(replay));
+        if (running && laneIds.length) laneIds.push(running);
+        const localLanes = await this.sweepLandedLanes(laneIds, signal);
+        if (localLanes) response.localLanes = localLanes;
+      }
       return response;
     } catch (error) {
       this.retainCaller(requestedAction, { error }, this.callerOperationId);
@@ -1298,7 +1313,9 @@ export class HostedAgentTransport {
           null,
           {
             needsFix: capabilities.needsFix ?? [],
-            ...(laneId ? { scratchPath: resolve(this.root, laneScratchPath) } : {}),
+            ...(laneId
+              ? { scratchPath: resolve(this.root, laneScratchPath), disk: await this.laneDisk(this.root) }
+              : {}),
             ...(hold ? { landingHold: hold } : {}),
             ...(capabilities.githubMirror !== undefined ? { githubMirror: capabilities.githubMirror } : {}),
             ...(capabilities.mainDay ? { mainToday: await mainTodayFrom(capabilities.mainDay) } : {}),
@@ -1320,7 +1337,7 @@ export class HostedAgentTransport {
             ...(capabilities.githubMirror !== undefined ? { githubMirror: capabilities.githubMirror } : {}),
             // Liveness: lastActivityAt above is the server record; this is the command this machine runs now.
             ...(typeof (command.data as { laneId?: string }).laneId === 'string'
-              ? this.localLane((command.data as { laneId: string }).laneId, observed)
+              ? await this.localLane((command.data as { laneId: string }).laneId, observed)
               : {}),
           },
           capabilities.overlapVersion === 1 ? (command.data as { laneId?: string }).laneId : undefined,
@@ -1855,12 +1872,13 @@ export class HostedAgentTransport {
             (command.data as { laneId?: string }).laneId ??
             readHostedLaneCheckout(root)?.selection.laneId)
           : undefined;
-      // start's housekeeping (one batched read, advice only) runs beside the overlap read, never after it.
+      // Start housekeeping runs beside the overlap read.
       const started =
         action === 'start' ? (result as { lane?: { laneId?: string } | null; path?: string }) : undefined;
       const housekeeping = started
         ? boundedStep(
             this.housekeeping(
+              'start',
               [root, ...(started.path ? [started.path] : [])],
               [...(started.lane?.laneId ? [started.lane.laneId] : [])],
             ),
@@ -2076,28 +2094,51 @@ export class HostedAgentTransport {
       /* Cache housekeeping is advisory. */
     }
   }
-  /** start lists the caller's idle open Lanes and prunes finished Lane roots: registry plus one batched read. */
-  private async housekeeping(roots: string[], laneIds: string[]) {
+  /** A landed observation can clean other finished copies while protecting every input Lane. */
+  async sweepLandedLanes(laneIds: string[], signal?: AbortSignal) {
+    if (laneIds.length === 0 || signal?.aborted) return;
+    const result = await boundedStep(this.housekeeping('landed', [this.root], laneIds, signal), 5_000);
+    if (result.status === 'done') return result.value;
+  }
+  private async housekeeping(
+    trigger: 'start' | 'landed',
+    roots: string[],
+    laneIds: string[],
+    signal?: AbortSignal,
+  ) {
     try {
-      const settings = readClientSettings();
-      const value = await laneHousekeeping({
+      const { automaticLaneHousekeeping } = await import('./lane-prune-automatic.js');
+      const budgetMs = trigger === 'start' ? Math.min(12_000, this.startBoundMs) : 5_000;
+      const value = await automaticLaneHousekeeping({
         readStates: convexLaneStates(() => ({
-          query: (name, args) => this.exchange.client.query(name as never, args as never),
+          query: (name, args) => {
+            const timeout = networkTimeout(Math.min(budgetMs, 2_000));
+            return withExchangeProgress(
+              { signal: signal ? AbortSignal.any([signal, timeout]) : timeout, networkRetries: 0 },
+              () => this.exchange.client.query(name as never, args as never),
+            );
+          },
         })),
         address: this.address,
-        apply: settings.autoPruneHours > 0,
-        budgetMs: Math.min(12_000, this.startBoundMs),
-        settings,
+        trigger,
+        budgetMs,
         exclude: { roots, laneIds },
         run: this.agentSlug() ?? null,
       });
-      if (!value.idle.length && !value.otherRuns.length && !value.pruned.length) return undefined;
+      if (
+        !value ||
+        (!value.idle.length && !value.otherRuns.length && !value.pruned.length && !value.kept.length)
+      )
+        return undefined;
       return {
         idle: value.idle,
-        ...(value.otherRuns.length ? { otherRuns: value.otherRuns } : {}),
+        otherRuns: value.otherRuns,
+        kept: value.kept,
         pruned: {
           count: value.pruned.length,
           bytes: value.pruned.reduce((sum, lane) => sum + lane.bytes, 0),
+          laneIds: value.pruned.map(lane => lane.laneId),
+          recover: 'Run nforge agent ROOT open with the Lane id to restore its saved checkout.',
         },
       };
     } catch {
@@ -2587,9 +2628,23 @@ export class HostedAgentTransport {
   }
   /** status {laneId}: this machine's liveness for the Lane and, when a sync conflict moved its folder
    * to a resolution Lane in place, that Lane (9bc3775b). Local files only. */
-  private localLane(laneId: string, observed: unknown) {
+  private async laneDisk(root: string) {
+    const { laneDiskUsage } = (await import(
+      /* @vite-ignore */ new URL('./lane-disk-usage.js', import.meta.url).href
+    )) as typeof import('./lane-disk-usage.js');
+    return laneDiskUsage(root);
+  }
+  private async localLane(laneId: string, observed: unknown) {
     const successor = laneSuccessor({ root: hostedAgentRoot(this.root), address: this.address }, laneId);
     const inFlight = (observed as { inFlight?: { operationId?: unknown } } | null)?.inFlight;
+    const root = [readLaneEntry(laneId)?.root, this.root].find(path => {
+      const marker = path ? markerIdentity(path) : null;
+      return (
+        marker?.laneId === laneId &&
+        marker.projectId === this.address.projectId &&
+        marker.url === this.address.url
+      );
+    });
     return {
       // The landing in flight resumes from this folder by its own id, with or without the Lane folder.
       ...(typeof inFlight?.operationId === 'string'
@@ -2601,6 +2656,7 @@ export class HostedAgentTransport {
           }
         : {}),
       local: laneLiveness(laneId),
+      ...(root ? { disk: await this.laneDisk(root) } : {}),
       ...(successor
         ? {
             continuesAs: {

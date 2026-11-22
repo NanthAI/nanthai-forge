@@ -211,14 +211,27 @@ export class HostedAgentJournal {
   }
 }
 
+/** A candidate or compose reference alone does not identify its Lane inputs. */
+export function finishCommandLaneIds(command: Record<string, unknown>, checkoutLaneId?: string) {
+  if (Array.isArray(command.inputs) && command.inputs.length > 0) {
+    const ids = command.inputs.map((input: { laneId?: unknown } | null) => input?.laneId);
+    return ids.every((id): id is string => typeof id === 'string') ? ids : [];
+  }
+  if (command.candidateId || command.composeOperationId) return [];
+  const laneId = command.laneId ?? checkoutLaneId;
+  return typeof laneId === 'string' ? [laneId] : [];
+}
+
 /** The original action and parameters of an operation this checkout started, from
  * its local journal: `wait` resumes a save (or other source operation) by exact
  * replay, the same path its receipt's command takes. Local read only. */
 export function retainedHostedOperation(root: string, operationId: string) {
   if (!z.uuid().safeParse(operationId).success) return null;
-  const path = join(hostedAgentDirectory(root), `${operationId}.json`);
-  if (!checkoutPathExists(path)) return null;
   try {
+    const cache = clientCacheRoot(hostedAgentRoot(root));
+    const directory = join(cache, 'agent');
+    if (!lstatSync(cache).isDirectory() || !lstatSync(directory).isDirectory()) return null;
+    const path = join(directory, `${operationId}.json`);
     const identity = JSON.parse(schema.parse(readAgentJson(path)).identity) as {
       action?: unknown;
       command?: unknown;

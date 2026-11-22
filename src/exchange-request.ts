@@ -38,7 +38,7 @@ export async function exchangeRequest<T>(
   const scope = currentExchangeProgress();
   const signals = [scope?.signal, init.signal].filter((value): value is AbortSignal => !!value);
   const signal = signals.length ? AbortSignal.any(signals) : undefined;
-  const attempts = (options.retries ?? 3) + 1;
+  const attempts = Math.min(scope?.networkRetries ?? Infinity, options.retries ?? 3) + 1;
   for (let attempt = 1; ; attempt++) {
     if (signal?.aborted) throw networkCancellation(signal);
     scope?.progress?.(call, false);

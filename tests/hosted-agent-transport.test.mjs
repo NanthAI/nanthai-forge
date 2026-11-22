@@ -21,6 +21,7 @@ import { agentFixture } from './hosted-agent-fixture.mjs';
 import { hostedAgentAddress, hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { hostedAgentActions, hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
 import { hostedAgentRoot } from '../dist/hosted-agent-journal.js';
+import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { slimReceipt } from '../dist/receipt-slim.js';
 import { readLaneEntry, recordLane } from '../dist/lane-registry.js';
@@ -28,6 +29,24 @@ import { laneCheckoutRoot, laneSuccessor } from '../dist/hosted-lane-location.js
 import { LAND_HELD_MS_ENV } from '../dist/land-timing.js';
 import { MAX_CONTRACT_FEATURES } from '../dist/hosted-contract-features.js';
 const errorCode = expected => error => error.code === expected;
+
+test('hosted Lane status reports local disk usage without a new hosted query', async t => {
+  const s = agentFixture(t);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const scratch = join(s.root, '.forge', 'scratch');
+  mkdirSync(scratch, { recursive: true });
+  writeFileSync(join(scratch, 'work.log'), Buffer.alloc(8192, 65));
+  const start = s.calls.length;
+  const status = await s.transport().dispatch('status', { laneId: s.lane.laneId });
+  assert(status.result.disk.scratchBytes > 0);
+  assert.deepEqual(
+    s.calls.slice(start).map(call => call.name),
+    ['projectHostedAgent:capabilities', 'projectHostedLanes:head'],
+  );
+  const plain = await readHostedCliStatus(s.root, s.transport());
+  assert(plain.value.disk.scratchBytes > 0);
+  assert.match(plain.text, /Lane disk: .* bytes, scratch .* bytes/);
+});
 
 test('the compact finish reply carries the tightest member budget without changing landing pins', async t => {
   const s = agentFixture(t);

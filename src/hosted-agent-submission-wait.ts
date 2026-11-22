@@ -33,6 +33,8 @@ import { contractSkew, replySkewError, replySkewSide } from './hosted-reply-skew
 import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
 import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
 import { feedCommitOrder } from './hosted-contract-features.js';
+import { finishCommandLaneIds, retainedHostedOperation } from './hosted-agent-journal.js';
+import { markerIdentity } from './hosted-lane-directory.js';
 
 export const hostedSubmissionWaitSchema = z
   .object({
@@ -91,7 +93,11 @@ type PendingProgress = {
   error?: { code: 'MAIN_RED' | 'CI_DOWN' };
   orderWait?: { submissionId: string };
 };
-type WaitNotes = { board?: unknown; progress: Map<string, PendingProgress> };
+type WaitNotes = {
+  board?: unknown;
+  progress: Map<string, PendingProgress>;
+  landedInputs: Map<string, string[]>;
+};
 /** Durable submission versions plus S05 selection-scoped deduplication. Live
  * queries are hints: register then reread to close the initial lost-wake window. */
 export async function observeHostedSubmissions(
@@ -112,7 +118,7 @@ export async function observeHostedSubmissions(
     active = true;
   // The latest board value any attempt saw: a budget or cancel stop still carries its conflict
   // note (a peer flag an acceptance wait did not wake for, ad80e037).
-  const noted: WaitNotes = { progress: new Map() };
+  const noted: WaitNotes = { progress: new Map(), landedInputs: new Map() };
   const pending = (status: 'timeout' | 'cancelled') => ({
     ...boardConflictEnvelope(board?.laneId, noted.board),
     schema: 1 as const,
@@ -201,8 +207,32 @@ export async function observeHostedSubmissions(
             .map(e => ({ e, advice: syncRequiredAdvice(e.wouldConflict, e.submission) }))
             .find(found => found.advice)
         : undefined;
+    let localLanes: Awaited<ReturnType<HostedAgentTransport['sweepLandedLanes']>>;
+    if (
+      !signal?.aborted &&
+      response.result.status === 'terminal' &&
+      response.result.submissions.some(entry => entry.submission.observation.state === 'landed')
+    ) {
+      const observedInputs = response.result.submissions.map(entry =>
+        noted.landedInputs.get(entry.submission.attemptId),
+      );
+      // When a wait cannot identify every input, it cannot safely sweep other registered roots.
+      let protectedLanes =
+        feedLanes ??
+        (observedInputs.every((ids): ids is string[] => Boolean(ids?.length)) ? observedInputs.flat() : []);
+      if (!protectedLanes.length) {
+        const checkoutLaneId = markerIdentity(transport.root)?.laneId;
+        const selections = command.operationIds.map(operationId => {
+          const retained = retainedHostedOperation(transport.root, operationId);
+          return retained?.action === 'finish' ? finishCommandLaneIds(retained.command, checkoutLaneId) : [];
+        });
+        if (selections.every(ids => ids.length)) protectedLanes = selections.flat();
+      }
+      if (protectedLanes.length) localLanes = await transport.sweepLandedLanes?.(protectedLanes, signal);
+    }
     return {
       ...response,
+      ...(localLanes ? { localLanes } : {}),
       result: {
         ...response.result,
         ...(entry &&
@@ -292,6 +322,7 @@ async function observeHostedSubmissionsOnce(
     }
     if (!selected.request.finish || observed.pendingAttempt) return;
     let index: number | null = 0;
+    const landedInputs = selected.phase === 'landed' ? new Set<string>() : undefined;
     do {
       const args = {
         projectId: transport.address.projectId,
@@ -337,7 +368,7 @@ async function observeHostedSubmissionsOnce(
         })
         .parse(await transport.query('projectHostedFinish:inputs', args));
       if (stopped || signal.aborted) return;
-      if (!page.staged) break;
+      if (!page.staged) return;
       for (const entry of page.entries) {
         invariant(
           entry.submissionId === selected.id &&
@@ -348,6 +379,7 @@ async function observeHostedSubmissionsOnce(
         );
         const key = `input:${entry.submissionId}:${entry.attemptId}:${entry.laneId}`,
           hash = digest(JSON.stringify(entry));
+        landedInputs?.add(entry.laneId);
         if (cursor.seen.seen.get(key) !== hash) {
           cursor.seen.seen.set(key, hash);
           changed = true;
@@ -361,6 +393,7 @@ async function observeHostedSubmissionsOnce(
       );
       index = page.nextIndex;
     } while (index !== null && !stopped);
+    if (index === null && landedInputs?.size) noted.landedInputs.set(selected.attemptId, [...landedInputs]);
   };
   let changed = false,
     baseline = command.cursor == null,

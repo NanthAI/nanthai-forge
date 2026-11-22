@@ -38,6 +38,7 @@ const DIRTY_CHECKS = 8;
  * Keep a launch window as long as the worker's one-minute deadline. */
 const SNAPSHOT_LAUNCH_MS = 60_000;
 const terminal = new Set(['completed', 'abandoned']);
+const receiptPageSize = 48;
 export { markerIdentity };
 export type LaneAddress = { url: string; projectId: string };
 type LaneState = string | { state: string; pinned?: boolean; reason?: string; landedHead?: string };
@@ -85,6 +86,7 @@ function scanTree(root: string, snapshots: string | null, deadline = Infinity, c
   const laneMarkerSuffix = `${sep}.forge${sep}${hostedLaneMarkerName}`;
   let newest = 0,
     bytes = 0,
+    rootBytes = 0,
     scratchBytes = 0,
     nested = false;
   const snapshotPrefix = snapshots === null ? null : snapshots + sep;
@@ -108,6 +110,7 @@ function scanTree(root: string, snapshots: string | null, deadline = Infinity, c
       path === cache && use?.isFile() && Math.abs(stat.mtimeMs - use.ctimeMs) < 1_000;
     if (!snapshotBookkeeping && !cacheUseReplacement) newest = Math.max(newest, stat.mtimeMs);
     bytes += stat.blocks * 512;
+    if (inside(path, root)) rootBytes += stat.blocks * 512;
     if (inside(path, scratch)) scratchBytes += stat.blocks * 512;
     if (stat.isFile() && path.endsWith(laneMarkerSuffix) && !inside(path, recovery)) {
       const checkout = dirname(dirname(path));
@@ -126,7 +129,7 @@ function scanTree(root: string, snapshots: string | null, deadline = Infinity, c
       for (const name of readdirSync(path)) stack.push(join(path, name));
     }
   }
-  return { newest, bytes, scratchBytes, nested };
+  return { newest, bytes, rootBytes, scratchBytes, nested };
 }
 const siblings = (root: string) => [root, clientCacheRoot(root), rootSibling(root, '.forge-metrics.jsonl')];
 const nestedLanes = (root: string) => {
@@ -180,8 +183,10 @@ export async function laneHousekeeping(input: {
   /** Never removed: the caller's own root and Lane. */
   exclude?: { roots?: string[]; laneIds?: string[] };
   scan?: string;
-  /** An explicit cleanup scoped to landed and abandoned Lanes. */
+  /** Cleanup scoped to landed and abandoned Lanes. */
   finishedOnly?: boolean;
+  /** One automatic page on the deployment the command has already contacted. */
+  automatic?: { url: string; idleProjectId: string; claim: () => boolean };
   /** The caller's automatic housekeeping time budget, including lifecycle reads. */
   budgetMs?: number;
   /** Report large scratch using the existing cache size budget as a reference. */
@@ -238,6 +243,7 @@ export async function laneHousekeeping(input: {
     if (folder) folder.reason = reason;
   };
   for (const entry of [...registered.filter(entry => !found.has(entry.laneId)), ...found.values()]) {
+    if (input.automatic && entry.url !== input.automatic.url) continue;
     if (input.address && (entry.url !== input.address.url || entry.projectId !== input.address.projectId))
       continue;
     // A missing checkout may be a start that has reserved its path but not installed
@@ -262,10 +268,11 @@ export async function laneHousekeeping(input: {
       kept(entry, 'checkout path could not be inspected');
       continue;
     }
-    if (excludedLanes.has(entry.laneId)) kept(entry, 'in use by this command');
-    else entries.push(entry);
+    if (excludedLanes.has(entry.laneId)) {
+      if (!input.automatic) kept(entry, 'in use by this command');
+    } else entries.push(entry);
   }
-  const thresholds = [pruneMs, idleMs].filter(value => value > 0);
+  const thresholds = [pruneMs, input.finishedOnly && input.automatic ? 0 : idleMs].filter(value => value > 0);
   // An open Lane's root is removed only past its own, longer age, and never when pruning is off.
   const activeLimit = !input.finishedOnly && pruneMs > 0 && activeMs > 0 ? Math.max(pruneMs, activeMs) : 0;
   if (!thresholds.length) return result;
@@ -275,11 +282,29 @@ export async function laneHousekeeping(input: {
     if (folder) folder.reason = 'recent Forge action';
     return false;
   });
+  const auto = input.automatic;
+  let cursorScope: unknown = input.address;
+  if (auto) {
+    due = due.filter(entry => {
+      try {
+        const path = canonicalRoot(entry.root);
+        return (
+          !inside(workingRoot, path) && !excludedRoots.some(root => inside(root, path) || inside(path, root))
+        );
+      } catch {
+        return false;
+      }
+    });
+    // Give the page to reclaimable ages before looking at advice for the caller's project.
+    const pruneDue = pruneMs > 0 ? due.filter(entry => now - entry.lastActionAt >= pruneMs) : [];
+    cursorScope = [auto.url, pruneDue.length ? null : auto.idleProjectId];
+    due = pruneDue.length ? pruneDue : due.filter(entry => entry.projectId === auto.idleProjectId);
+  }
   // Large local inventories continue from the previous bounded start instead
   // of repeatedly inspecting the same dirty or very large folders first.
   const cursor =
-    input.apply && input.budgetMs !== undefined && input.address && due.length
-      ? join(dirname(laneRegistryDirectory()), `prune-${digest(JSON.stringify(input.address))}.cursor`)
+    (input.apply || auto) && input.budgetMs !== undefined && (input.address || auto) && due.length
+      ? join(dirname(laneRegistryDirectory()), `prune-${digest(JSON.stringify(cursorScope))}.cursor`)
       : null;
   let resumed = false;
   if (cursor) {
@@ -295,6 +320,12 @@ export async function laneHousekeeping(input: {
       // A missing cursor starts at the first Lane.
     }
   }
+  const moreDue = Boolean(input.automatic && due.length > receiptPageSize);
+  if (input.automatic) {
+    due = due.slice(0, receiptPageSize);
+    if (!input.readStates.batch) return result;
+  }
+  const verifyCompleted = Boolean(input.finishedOnly || (auto && input.apply));
   const states = new Map<string, string | null>();
   const landedHeads = new Map<string, string>();
   const pins = new Map<string, boolean>();
@@ -320,7 +351,7 @@ export async function laneHousekeeping(input: {
       size = 0;
     for (const group of deployment) {
       for (const laneId of group.laneIds) {
-        const limit = input.finishedOnly ? 48 : input.readStates.batch ? 250 : 100;
+        const limit = verifyCompleted ? receiptPageSize : input.readStates.batch ? 250 : 100;
         if (
           size === limit ||
           (!input.readStates.batch && page.length > 0 && page[0]?.address !== group.address)
@@ -340,15 +371,18 @@ export async function laneHousekeeping(input: {
     }
     if (page.length) pages.push(page);
   }
+  let pageRead = false;
   for (const page of pages) {
     if (Date.now() >= scanDeadline) break;
+    if (input.automatic && !input.automatic.claim()) return result;
     let read: Map<string, LaneState> | null = null;
     let failure =
       'State read unavailable: check sign-in and deployment/CLI compatibility, then rerun nforge prune; copy retained.';
     try {
       read = input.readStates.batch
-        ? await input.readStates.batch(page, input.finishedOnly)
-        : await input.readStates(page[0]!.address, page[0]!.laneIds, input.finishedOnly);
+        ? await input.readStates.batch(page, verifyCompleted)
+        : await input.readStates(page[0]!.address, page[0]!.laneIds, verifyCompleted);
+      pageRead ||= read !== null;
     } catch (error) {
       const code =
         (error as { code?: string; data?: { code?: string } } | null)?.data?.code ??
@@ -397,7 +431,7 @@ export async function laneHousekeeping(input: {
   // so this check remains close to removal without one process census per Lane.
   const pending: ((observed: ReturnType<typeof workingProcesses>) => void)[] = [];
   const flush = () => {
-    if (!pending.length) return;
+    if (!pending.length || Date.now() >= deadline) return;
     processes = observe();
     for (const remove of pending.splice(0)) remove(processes);
   };
@@ -419,8 +453,9 @@ export async function laneHousekeeping(input: {
     const idleHours = Math.round((idleFor / hour) * 10) / 10;
     // Yours only when this run recorded the Lane: an entry with no run (older client, adopted or
     // reopened checkout) is the same account but an unknown run, and is never offered for abandon.
-    const listIdle = () =>
-      input.run === undefined || (entry.agent !== undefined && entry.agent === input.run)
+    const listIdle = () => {
+      if (auto && entry.projectId !== auto.idleProjectId) return;
+      return input.run === undefined || (entry.agent !== undefined && entry.agent === input.run)
         ? result.idle.push({
             laneId: entry.laneId,
             ...(entry.outcome ? { outcome: entry.outcome } : {}),
@@ -433,6 +468,7 @@ export async function laneHousekeeping(input: {
             run: entry.agent === undefined ? 'unknown' : 'other',
             ...(entry.agent ? { agent: entry.agent } : {}),
           });
+    };
     // An active Lane idle past the active prune age loses its root only when nothing in it is unsaved
     // and no command runs in it; `open` restores it from the saved head.
     const deleted = !input.finishedOnly && input.deletedProjects === true && state === 'project-deleted';
@@ -464,7 +500,7 @@ export async function laneHousekeeping(input: {
     }
     const identity = markerIdentity(root);
     if (
-      input.finishedOnly &&
+      verifyCompleted &&
       state === 'completed' &&
       (!identity?.head || landedHeads.get(entry.laneId) !== identity.head)
     ) {
@@ -534,6 +570,7 @@ export async function laneHousekeeping(input: {
       kept(entry, reason);
       continue;
     }
+    const reclaimedBytes = input.automatic ? tree.rootBytes : tree.bytes;
     const recordResult = () => {
       const companion = scanned?.byRoot.get(clientCacheRoot(root));
       if (companion)
@@ -547,7 +584,7 @@ export async function laneHousekeeping(input: {
       (input.apply ? result.pruned : result.wouldPrune).push({
         laneId: entry.laneId,
         root,
-        bytes: tree.bytes,
+        bytes: reclaimedBytes,
       });
     };
     if (!input.apply) {
@@ -590,6 +627,13 @@ export async function laneHousekeeping(input: {
         kept(entry, nestedCheckout);
         return;
       }
+      // A writer could have saved an edit and exited after the initial check and
+      // before the final process census. Check again before automatic removal.
+      if (input.automatic && isDirty(root)) {
+        kept(entry, 'unsaved edits');
+        return;
+      }
+      if (Date.now() >= deadline) return;
       logLanePrune(
         {
           laneId: entry.laneId,
@@ -597,15 +641,17 @@ export async function laneHousekeeping(input: {
           state,
           reason: `${state} Lane idle ${idleHours}h, threshold ${limit / hour}h`,
           idleHours,
-          bytes: tree.bytes,
+          bytes: reclaimedBytes,
         },
         now,
       );
       try {
         // Keep the checkout and its verifiable marker available for another pass if
         // adjacent generated files cannot be removed.
-        removeCachePreservingKept(clientCacheRoot(root));
-        rmSync(rootSibling(root, '.forge-metrics.jsonl'), { force: true, recursive: true });
+        if (!input.automatic) {
+          removeCachePreservingKept(clientCacheRoot(root));
+          rmSync(rootSibling(root, '.forge-metrics.jsonl'), { force: true, recursive: true });
+        }
         rmSync(root, { recursive: true, force: true });
         if (!deleted) for (const link of links.get(root) ?? []) rmSync(link, { force: true });
       } catch (error) {
@@ -620,9 +666,11 @@ export async function laneHousekeeping(input: {
     if (pending.length === 16) flush();
   }
   flush();
-  if (cursor && lastInspected && (resumed || Date.now() >= scanDeadline)) {
+  if (cursor && lastInspected && (!auto || pageRead)) {
     try {
-      writeFileSync(cursor, lastInspected, { mode: 0o600 });
+      if (moreDue || Date.now() >= scanDeadline || (!auto && resumed))
+        writeFileSync(cursor, lastInspected, { mode: 0o600 });
+      else if (auto) rmSync(cursor, { force: true });
     } catch {
       // Cursor bookkeeping is advisory.
     }

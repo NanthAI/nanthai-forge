@@ -109,6 +109,8 @@ function briefLocalLanes(out: Json) {
     ...(idle ? { idle } : {}),
     ...(otherRuns ? { otherRuns } : {}),
     ...(pruned?.count ? { pruned } : {}),
+    ...(Array.isArray(local.kept) && local.kept.length ? { kept: local.kept.slice(0, 10) } : {}),
+    ...(Array.isArray(local.kept) && local.kept.length > 10 ? { keptMore: local.kept.length - 10 } : {}),
   };
   if (Object.keys(kept).length) out.localLanes = kept;
   else delete out.localLanes;

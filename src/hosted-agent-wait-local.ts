@@ -7,6 +7,7 @@ import { clientCacheRoot } from './root-paths.js';
 import {
   hostedAgentDirectory,
   hostedAgentRoot,
+  finishCommandLaneIds,
   readAgentJson,
   retainedHostedOperation,
 } from './hosted-agent-journal.js';
@@ -310,8 +311,8 @@ async function continueFinish(
   const replayed = await transport.dispatch('finish', { ...command, operationId }, signal);
   const result = (replayed.result ?? {}) as Record<string, unknown>;
   const remaining = Math.max(0, (deadline - Date.now()) / 1000);
-  if (result.phase === 'finish' && result.submission)
-    return observeHostedSubmissions(
+  if (result.phase === 'finish' && result.submission) {
+    const observed = await observeHostedSubmissions(
       transport,
       { ...input, timeoutSeconds: remaining },
       signal,
@@ -320,6 +321,10 @@ async function continueFinish(
       board,
       landingFeedLanes(transport.root, [operationId]),
     );
+    return replayed.localLanes && !observed.localLanes
+      ? { ...observed, localLanes: replayed.localLanes }
+      : observed;
+  }
   // A check-only finish that reserved its run: wait on that run, as land does.
   const run = result.run as { id?: unknown } | undefined;
   if (result.phase === 'check' && typeof run?.id === 'string')
@@ -410,16 +415,9 @@ export function landingFeedLanes(root: string, operationIds: string[]) {
       return undefined;
     const retained = retainedHostedOperation(root, operationId);
     if (retained?.action !== 'finish') return undefined;
-    const { command } = retained;
-    const inputs = command.inputs as { laneId?: unknown }[] | undefined;
-    // Candidate/compose replays without retained inputs may select a different Lane than ROOT.
-    const laneId =
-      inputs?.[0]?.laneId ??
-      command.laneId ??
-      (command.composeOperationId || command.candidateId ? undefined : markerIdentity(root)?.laneId);
-    const lane = z.uuid().safeParse(laneId);
-    if (!lane.success) return undefined;
-    lanes.add(lane.data);
+    const selected = finishCommandLaneIds(retained.command, markerIdentity(root)?.laneId);
+    if (!selected.length || selected.some(laneId => !z.uuid().safeParse(laneId).success)) return undefined;
+    for (const laneId of selected) lanes.add(laneId);
   }
   return [...lanes];
 }

@@ -28,6 +28,9 @@ import { writeCacheUse } from '../dist/client-cache-use.js';
 import { pruneDependencyCache, touchDependencyEntry } from '../dist/dependency-cache.js';
 import { hostedLaneDirty } from '../dist/hosted-lane-dirty.js';
 import { laneHousekeeping } from '../dist/lane-prune.js';
+import { automaticLaneHousekeeping } from '../dist/lane-prune-automatic.js';
+import { laneDiskUsage } from '../dist/lane-disk-usage.js';
+import { clientSettingsSchema } from '../dist/client-settings.js';
 import { lanePruneLogFile } from '../dist/lane-prune-log.js';
 import { snapshotDirectory, snapshotLockPath } from '../dist/lane-snapshot-hint.js';
 import { recordLane } from '../dist/lane-registry.js';
@@ -36,6 +39,8 @@ import { createServer } from 'node:net';
 import { openWorkerNotifications } from '../dist/local-worker-notifications.js';
 import { socketDirectory } from '../dist/socket-directory.js';
 import { PeersCache } from '../dist/agent-peers-cache.js';
+import { getFunctionName } from 'convex/server';
+import { agentFixture } from './hosted-agent-fixture.mjs';
 
 const hour = 3_600_000;
 const address = { url: 'https://fixture.invalid', projectId: 'project' };
@@ -51,7 +56,7 @@ function isolated(t) {
   return directory;
 }
 /** A real hosted Lane checkout (marker, baseline State and files) at ROOT. */
-async function realCheckout(root, laneId = randomUUID()) {
+async function realCheckout(root, laneId = randomUUID(), hostedAddress = address) {
   const objects = new Map();
   const put = value => {
     const bytes = Buffer.from(value),
@@ -75,7 +80,7 @@ async function realCheckout(root, laneId = randomUUID()) {
   );
   const selection = {
     schema: 2,
-    projectId: address.projectId,
+    projectId: hostedAddress.projectId,
     laneId,
     intentId: randomUUID(),
     head,
@@ -91,7 +96,7 @@ async function realCheckout(root, laneId = randomUUID()) {
     objects: async ids => ids.map(sha256 => ({ sha256, size: objects.get(sha256).length })),
     downloadToFile: async (pin, path) => writeFileSync(path, objects.get(pin.sha256), { mode: 0o600 }),
   };
-  await checkoutHostedLane(root, { ...address, laneId, operationId: randomUUID() }, transport);
+  await checkoutHostedLane(root, { ...hostedAddress, laneId, operationId: randomUUID() }, transport);
   return laneId;
 }
 const age = (path, hours) => {
@@ -117,6 +122,205 @@ function copy(root, bytes, hours) {
 }
 const settings = (gb, hours) => ({ clientCacheMaxGB: gb, clientCacheMaxAgeHours: hours });
 const clean = () => false;
+
+test('the next online start or landing after the hour reclaims only finished, unused registered checkouts', async t => {
+  const directory = isolated(t);
+  const now = Date.parse('2026-11-19T10:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const prepare = async (name, state, changed) => {
+    const root = join(directory, name);
+    const laneId = await realCheckout(root);
+    const marker = JSON.parse(readFileSync(join(root, '.forge', 'hosted-lane.json'), 'utf8'));
+    if (changed) writeFileSync(join(root, 'src', 'a.txt'), 'unsaved\n');
+    mkdirSync(join(root, '.forge', 'scratch'), { recursive: true });
+    writeFileSync(join(root, '.forge', 'scratch', 'log'), 'local scratch');
+    for (const path of [root, `${root}.forge-client`, `${root}.forge-metrics.jsonl`]) ageTree(path, 6);
+    if (state !== 'unregistered') recordLane({ ...address, root, laneId, lastActionAt: now - 5 * hour }, now);
+    return { root, laneId, state, landedHead: marker.selection.head };
+  };
+  const dirty = await prepare('dirty', 'completed', true);
+  const live = await prepare('live', 'completed');
+  const pinned = await prepare('pinned', 'completed');
+  const abandoned = await prepare('abandoned', 'abandoned');
+  const manual = await prepare('manual', 'completed');
+  const outside = await prepare('unregistered', 'unregistered');
+  const landed = await prepare('landed', 'completed');
+  recordLane({ laneId: landed.laneId, lastActionAt: now - 2.5 * hour }, now);
+  const states = new Map(
+    [dirty, live, pinned, abandoned, manual, landed].map(row => [
+      row.laneId,
+      {
+        state: row.state,
+        ...(row === manual ? {} : { landedHead: row.landedHead }),
+        ...(row === pinned ? { pinned: true } : {}),
+      },
+    ]),
+  );
+  let calls = 0;
+  const readStates = Object.assign(() => assert.fail('automatic sweep must batch'), {
+    batch: async (groups, checkoutReceipts) => {
+      calls++;
+      assert.equal(checkoutReceipts, true);
+      return new Map(groups.flatMap(group => group.laneIds.map(id => [id, states.get(id)])));
+    },
+  });
+  const input = {
+    address,
+    budgetMs: 8000,
+    settings: clientSettingsSchema.parse({}),
+    readStates,
+    processes: () => ({ paths: [realpathSync(live.root)], unknown: false }),
+  };
+  const first = await automaticLaneHousekeeping({ ...input, trigger: 'landed', now });
+  assert.deepEqual(
+    first.pruned.map(row => row.laneId),
+    [abandoned.laneId],
+  );
+  assert(existsSync(`${abandoned.root}.forge-client`), 'adjacent cache is outside the registered root');
+  assert(existsSync(landed.root), 'its age bound has not elapsed');
+  assert.equal(calls, 1);
+  assert.equal(
+    await automaticLaneHousekeeping({ ...input, trigger: 'start', now: now + hour - 1 }),
+    undefined,
+  );
+  assert.equal(calls, 1, 'a second trigger in the same window adds no query');
+  const results = await Promise.all(
+    ['start', 'landed'].map(trigger => automaticLaneHousekeeping({ ...input, trigger, now: now + hour })),
+  );
+  const [next] = results.filter(result => result?.pruned.length);
+  assert.deepEqual(
+    next.pruned.map(row => row.laneId),
+    [landed.laneId],
+  );
+  assert.equal(calls, 2, 'concurrent triggers share the machine window');
+  const reasons = new Map(next.kept.map(row => [row.laneId, row.reason]));
+  assert.equal(reasons.get(dirty.laneId), 'unsaved edits');
+  assert.equal(reasons.get(live.laneId), 'A local process is working in this directory.');
+  assert.equal(reasons.get(pinned.laneId), 'pinned');
+  assert.equal(reasons.get(manual.laneId), 'no verified landing for this checkout head');
+  for (const kept of [dirty, live, pinned, manual, outside]) assert(existsSync(kept.root));
+});
+
+test('automatic sweep takes one receipt page across projects and resumes a large registry next hour', async t => {
+  const directory = isolated(t);
+  const now = Date.parse('2026-11-19T10:00:00Z');
+  for (let index = 0; index < 165; index++) {
+    const suffix = String(index).padStart(12, '0');
+    const laneId = `00000000-0000-4000-8000-${suffix}`;
+    const root = join(directory, laneId);
+    mkdirSync(root);
+    recordLane({ ...address, projectId: `project-${index % 2}`, root, laneId }, now - 5 * hour);
+  }
+  const batches = [];
+  const readStates = Object.assign(() => assert.fail('automatic sweep must batch'), {
+    batch: async groups => {
+      assert.equal(groups.length, 2, 'both projects share the deployment read');
+      const ids = groups.flatMap(group => group.laneIds);
+      batches.push(ids);
+      return batches.length === 2 ? null : new Map(ids.map(id => [id, 'active']));
+    },
+  });
+  const input = {
+    address,
+    trigger: 'landed',
+    budgetMs: 8000,
+    settings: clientSettingsSchema.parse({}),
+    readStates,
+  };
+  await automaticLaneHousekeeping({ ...input, now });
+  await automaticLaneHousekeeping({ ...input, now: now + hour });
+  await automaticLaneHousekeeping({ ...input, now: now + hour * 2 });
+  assert.deepEqual(
+    batches.map(ids => ids.length),
+    [48, 48, 48],
+  );
+  assert.equal(new Set(batches.flat()).size, 96, 'the next page advances instead of retrying the same roots');
+  assert.deepEqual(batches[1], batches[2], 'a failed read does not advance the cursor');
+});
+
+test('start idle advice still shares the hourly window when automatic deletion is off', async t => {
+  const directory = isolated(t);
+  const now = Date.parse('2026-11-19T10:00:00Z');
+  const laneId = randomUUID();
+  recordLane({ ...address, root: directory, laneId }, now - 2 * hour);
+  let batches = 0;
+  const input = {
+    address,
+    trigger: 'start',
+    budgetMs: 8000,
+    settings: clientSettingsSchema.parse({ autoPruneHours: 0 }),
+    readStates: Object.assign(() => assert.fail('automatic sweep must batch'), {
+      batch: async (_groups, receipts) => {
+        batches++;
+        assert.equal(receipts, false);
+        return new Map([[laneId, 'active']]);
+      },
+    }),
+  };
+  const first = await automaticLaneHousekeeping({ ...input, now });
+  assert.equal(first.idle[0].laneId, laneId);
+  assert.equal(await automaticLaneHousekeeping({ ...input, now: now + 10 }), undefined);
+  assert.equal(batches, 1);
+  assert(existsSync(directory));
+});
+
+test('an already-landed finish replay reclaims another registered checkout and returns its receipt', async t => {
+  const directory = isolated(t);
+  const s = agentFixture(t);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const command = { operationId: randomUUID(), laneId: s.lane.laneId, message: 'Synthetic replay' };
+  const first = await s.transport().dispatch('finish', command);
+  Object.assign(s.operations.get(first.operationId), {
+    phase: 'landed',
+    observation: { state: 'landed', pendingReason: null, cause: null },
+  });
+  const root = join(directory, 'old');
+  const laneId = await realCheckout(root, randomUUID(), s.address);
+  const now = Date.parse('2026-11-22T10:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  for (const path of [root, `${root}.forge-client`, `${root}.forge-metrics.jsonl`]) ageTree(path, 6);
+  recordLane({ ...s.address, laneId, root }, now - 6 * hour);
+  const query = s.exchange.client.query;
+  t.mock.method(s.exchange.client, 'query', (reference, args) =>
+    getFunctionName(reference) === 'projectHostedLanes:states'
+      ? Promise.resolve(args.laneIds.map(id => ({ laneId: id, state: 'abandoned' })))
+      : query(reference, args),
+  );
+  const replay = await s.transport().dispatch('finish', command);
+  assert.equal(replay.result.submission.phase, 'landed');
+  assert.deepEqual(replay.localLanes?.pruned.laneIds, [laneId]);
+  assert(!existsSync(root) && existsSync(s.root));
+});
+
+test('Lane disk reports allocated scratch above 10% of free disk and marks a bounded scan partial', t => {
+  const directory = isolated(t);
+  const root = join(directory, 'lane');
+  const scratch = join(root, '.forge', 'scratch');
+  mkdirSync(scratch, { recursive: true });
+  const log = join(scratch, 'log');
+  writeFileSync(log, Buffer.alloc(8192, 65));
+  symlinkSync(directory, join(scratch, 'outside'));
+  const bytes = lstatSync(log).blocks * 512;
+  t.mock.method(fs, 'statfsSync', () => ({ bavail: bytes * 5, bsize: 1 }));
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  const usage = laneDiskUsage(root);
+  assert.equal(usage.complete, true, 'a link back to the parent is counted without traversal');
+  assert.equal(usage.scratchComplete, true);
+  assert(usage.bytes >= usage.scratchBytes && usage.scratchBytes >= bytes);
+  assert.equal(usage.scratchThresholdBytes, bytes / 2);
+  assert.equal(usage.largeScratch, true);
+  const alias = join(directory, 'lane-alias');
+  symlinkSync(root, alias);
+  assert.deepEqual(laneDiskUsage(alias), usage, 'status reports the same checkout through a root alias');
+  const partial = laneDiskUsage(root, { entries: 1, milliseconds: 100 });
+  assert.equal(partial.complete, false);
+  assert.equal(partial.scratchComplete, false);
+  assert(partial.bytes < usage.bytes);
+});
 
 test('unsaved-edit check is read-only and sees edits, additions, deletions and mode changes', async t => {
   const directory = isolated(t),
@@ -913,13 +1117,15 @@ test('incident replay 7da396ed: cache GC never evicts an open Lane checkout whos
   recordLane({ laneId: landed.laneId, root: landed.path, ...address, state: 'completed' }, now - 30 * hour);
   const result = gcNestedLanes({ root, settings: settings(0.5, 0), isDirty: clean, now });
   assert(existsSync(landing.path), 'the open Lane folder survives the pass');
-  assert.equal(result.kept.find(item => item.laneId === landing.laneId)?.reason, 'open Lane checkout');
-  // A landed Lane and an unregistered copy are still cache: removed oldest first.
-  assert.deepEqual(result.evicted.map(item => item.laneId).sort(), [landed.laneId, cached.laneId].sort());
+  assert.equal(result.kept.find(item => item.laneId === landing.laneId)?.reason, 'registered Lane checkout');
+  assert(existsSync(landed.path), 'a landed registry entry needs a current hosted pin and lifecycle check');
+  assert.deepEqual(
+    result.evicted.map(item => item.laneId),
+    [cached.laneId],
+  );
 });
 
-test('7da396ed F1: an open Lane entry idle past the active-prune age is cache again', t => {
-  // An entry lane-prune never settles (say its server read keeps failing) must not pin disk forever.
+test('registered Lane roots past the active-prune age still need a current hosted lifecycle read', t => {
   const directory = isolated(t),
     root = join(directory, 'main'),
     now = Date.now();
@@ -930,14 +1136,12 @@ test('7da396ed F1: an open Lane entry idle past the active-prune age is cache ag
   );
   const result = gcNestedLanes({
     root,
-    settings: { ...settings(0.5, 0), activeLanePruneHours: 168 },
+    settings: settings(0.5, 0),
     isDirty: clean,
     now,
   });
-  assert.deepEqual(
-    result.evicted.map(item => item.laneId),
-    [forgotten.laneId],
-  );
+  assert.deepEqual(result.kept, [{ laneId: forgotten.laneId, reason: 'registered Lane checkout' }]);
+  assert(existsSync(forgotten.path));
 });
 
 test('prune keeps a checkout excluded through an alias of its physical root', async t => {

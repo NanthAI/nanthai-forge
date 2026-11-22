@@ -5,3 +5,7 @@ snapshot and cache inventory bookkeeping. Prune inventories physical checkout fo
 reports scratch usage against the local client cache budget. Test files use private temporary
 roots; the supervisor reclaims them after timeouts, and
 normal file exit fails on leaked Forge temporary entries.
+
+Online Lane starts and observed landings share one automatic housekeeping read per 60 minutes
+per machine, with one page of up to 48 Lane identities on the current deployment. Lane status
+uses a local 4,096-entry, 25 ms disk sample and flags scratch above 10% of currently free space.

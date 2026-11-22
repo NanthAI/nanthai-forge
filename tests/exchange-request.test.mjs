@@ -8,6 +8,7 @@ import { ConvexHttpClient } from 'convex/browser';
 import { makeFunctionReference } from 'convex/server';
 import { exchangeFetch, exchangeRequest } from '../dist/exchange-request.js';
 import { exchangeConvexFetch } from '../dist/exchange-convex-fetch.js';
+import { withExchangeProgress } from '../dist/exchange-progress.js';
 import { ForgeError } from '../dist/errors.js';
 import { getSigned } from '../dist/exchange-r2-read.js';
 import { ConvexExchange } from '../dist/exchange-client.js';
@@ -118,6 +119,24 @@ const timedOut = (call, reason) => error => {
   assert.doesNotMatch(error.message, /secret|127\.0\.0\.1/);
   return true;
 };
+
+test('an opportunistic Convex lifecycle read obeys the caller’s one-attempt budget on a 503', async t => {
+  const f = await fixture(t, (_req, res) => {
+    res.writeHead(503);
+    res.end();
+  });
+  const client = new ConvexHttpClient(f.url, {
+    skipConvexDeploymentUrlCheck: true,
+    fetch: exchangeConvexFetch(answered),
+  });
+  await assert.rejects(
+    withExchangeProgress({ networkRetries: 0 }, () =>
+      client.query(makeFunctionReference('projectHostedLanes:states'), { laneIds: [] }),
+    ),
+    error => error.code === 'EXCHANGE_REQUEST_FAILED',
+  );
+  assert.equal(f.requests.length, 1);
+});
 
 test('accepted HTTP connections that never return headers time out, abort and retry finitely', async t => {
   const f = await fixture(t, () => {});
