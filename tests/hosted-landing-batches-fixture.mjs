@@ -6,6 +6,7 @@ import { getFunctionName } from 'convex/server';
 import { finishFixture, compose, driver, records } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
+import { landingNote } from '../dist/landing-message.js';
 export const batchAbandon = await import(moduleUrl('../convex/projectHostedBatchAbandon.ts'));
 export const batchPublish = await import(moduleUrl('../convex/projectHostedLandingBatchPublish.ts'));
 export const batchStore = await import(moduleUrl('../convex/projectHostedLandingBatchStore.ts'));
@@ -167,7 +168,8 @@ export async function batchesFixture(
     const main = f.currentMain();
     selection.request.expectedMain = { head: main.head, receiptId: main.receipt.id };
     selection.request.intentId = intentId;
-    if (memberMessages?.[i] !== undefined) selection.request.message = memberMessages[i];
+    // The compose note is the message, or its subject past the 1 KiB note cap (Item 8c50ce13).
+    if (memberMessages?.[i] !== undefined) selection.request.message = landingNote(memberMessages[i]);
     // Seed the trusted owner provenance normally produced by start/save. The
     // generic compose fixture deliberately creates unverified arbitrary Lanes.
     for (const table of requestCheck ? [] : ['projectHostedRecords', 'projectHostedRecordHeads'])
@@ -191,6 +193,8 @@ export async function batchesFixture(
             },
           }
         : {}),
+      // The landing message is the request's own; the compose note above is capped at 1 KiB.
+      ...(memberMessages?.[i] !== undefined ? { message: memberMessages[i] } : {}),
       ...member.request,
     });
     // `member.enqueue(lane)`: extra enqueue arguments a CLI sends beside the request (land gates).

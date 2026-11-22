@@ -753,15 +753,15 @@ test('an over-long landing message is refused before any server call (friction d
   await s.transport().dispatch('open', { laneId: s.lane.laneId });
   writeFileSync(join(s.root, 'draft.txt'), 'Unsaved draft');
   const before = s.calls.length;
-  // 1,300 bytes, as in the dogfood case; multi-byte text counts in UTF-8 bytes.
+  // Just over 16 KiB (Item 8c50ce13); multi-byte text counts in UTF-8 bytes.
   for (const [message, bytes] of [
-    ['m'.repeat(1300), 1300],
-    ['é'.repeat(600), 1200],
+    ['m'.repeat(17_300), 17_300],
+    ['é'.repeat(8_800), 17_600],
   ])
     await assert.rejects(s.transport().dispatch('finish', { laneId: s.lane.laneId, message }), error => {
       assert.equal(error.code, 'LANDING_MESSAGE_TOO_LARGE');
       // The exact byte count and the limit (friction 330d1df6).
-      assert.match(error.message, new RegExp(`has ${bytes} UTF-8 bytes; the limit is 1024`));
+      assert.match(error.message, new RegExp(`has ${bytes} UTF-8 bytes; the limit is 16384`));
       return true;
     });
   assert.equal(s.calls.length, before, 'no capability read, save or compose');
@@ -789,12 +789,12 @@ test('ad80e037: preflight given the landing message refuses an over-long one bef
   const s = agentFixture(t);
   await s.transport().dispatch('open', { laneId: s.lane.laneId });
   const before = s.calls.length;
-  // The incident: a 2,279-byte note was refused only at submit, after the whole preflight and save.
+  // The incident: an over-limit message was refused only at submit, after the whole preflight and save.
   await assert.rejects(
-    s.transport().dispatch('preflight', { laneId: s.lane.laneId, message: 'm'.repeat(2279) }),
+    s.transport().dispatch('preflight', { laneId: s.lane.laneId, message: 'm'.repeat(20_000) }),
     error => {
       assert.equal(error.code, 'LANDING_MESSAGE_TOO_LARGE');
-      assert.match(error.message, /has 2279 UTF-8 bytes; the limit is 1024/);
+      assert.match(error.message, /has 20000 UTF-8 bytes; the limit is 16384/);
       return true;
     },
   );

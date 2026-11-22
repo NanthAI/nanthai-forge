@@ -2701,7 +2701,7 @@ subscriptions, writes or idle work.
 ### Landing message metadata
 
 Acceptance freezes supplied subject, body and trailers by value. Messages are
-limited to 1 KiB UTF-8; controls are stripped, CRLF normalized, and reserved
+limited to 16 KiB UTF-8; controls are stripped, CRLF normalized, and reserved
 Forge-State/Acceptance/View lines escaped with `> `. Other trailers retain their
 order; authoritative Forge trailers follow. A cohort's final receipt carries
 all supplied messages in member order for its shared commit. Native batches do
@@ -2715,18 +2715,25 @@ provenance so strict older clients keep working; canonical records retain it.
 Readers also understand project-owned message bodies and a final-cohort receipt
 that identifies the preceding members by sequence. They expand those records
 at message-reading boundaries and retain the original receipt text, order and
-trailers. With the deployment setting `FORGE_LANDING_MESSAGE_REFS=1` (default
-off while it is proved, then removed), a new landing stores its supplied
-message once: one raw body row owned by its landing record, read back into the
-request and deleted with it. Receipts and their events name that body, and the
-final cohort receipt names its member count. A publication step then writes no
-message text, whatever the batch size. Recovery exports such receipts in their
-inline form. Off, writers emit inline messages.
+trailers. A new landing stores its supplied message once: one raw body row
+owned by its landing record, read back into the request and deleted with it.
+Receipts and their events name that body, and the final cohort receipt names
+its member count. A publication step then writes no message text, whatever the
+batch size, so the message limit is 16 KiB (UTF-8, checked on the client before
+any server call and again at admission from one constant) and an eight-member
+step with worst-case messages stays inside the 512 KiB budget. Save, compose
+and resolve notes keep a 1 KiB cap; a landing derives its note from the message
+or its subject. A message a resolution Lane inherits from the conflicted landing is
+stored the same way, under an `inherited` reference. Recovery exports receipts in
+their inline form; a final cohort receipt with eight 16 KiB messages is one row of
+up to about 300 KiB, which a page admits whole, and a recovery client older than
+the 16 KiB limit refuses it (`nforge update`). A desired landing (`land --save`)
+still writes its message once in its request and once in its row at submission,
+one time per landing, before admission stores the single body. Records written
+before references stay inline and read back unchanged.
 
-Metadata uses existing calls and records, with zero idle calls. Inline, each
-message adds at most 2,061 JSON bytes; the final cohort receipt adds at most
-16,427 more for eight messages. Stored, each message is one body insert at
-admission and each receipt carries a short reference. Only legacy pending finishes need an indexed finish-record read.
+Metadata uses existing calls and records, with zero idle calls. Each message is
+one body insert at admission and each receipt carries a short reference. Only legacy pending finishes need an indexed finish-record read.
 Source and cursor artifact bytes remain in R2.
 
 ### GitHub containment and adoption

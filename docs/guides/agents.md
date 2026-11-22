@@ -49,7 +49,7 @@ nforge mcp ROOT --agent
    nforge agent LANE_PATH land --save '{"operationId":"NEW_UUID","message":"Problem and result; what was removed or why nothing can go"}'
    ```
 
-   The message is at most 1,024 UTF-8 bytes; retain requested authorship trailers. Landing saves, updates from main, composes, checks and accepts under current project policy. Follow the printed recovery for a failed or budget-exhausted inline preflight. Replay the complete original request if the source is unchanged. If you correct the source after the preflight refusal, submit with a new operation id. An unknown reply requires the same id and all original parameters.
+   The message is at most 16 KiB of UTF-8 (16,384 bytes); retain requested authorship trailers. Landing saves, updates from main, composes, checks and accepts under current project policy. Follow the printed recovery for a failed or budget-exhausted inline preflight. Replay the complete original request if the source is unchanged. If you correct the source after the preflight refusal, submit with a new operation id. An unknown reply requires the same id and all original parameters.
 
 4. Keep the turn active until terminal. After submission, do not edit, save or sync the Lane. Run the receipt's exact `waitCommand` in the foreground; repeat on `IN_PROGRESS`, without polling or sleeping. When it returns `wake.command`, run that command once in the background and block on it with the harness wait tool. [Waiting](../agents/workflow.md#waiting-for-outcomes) describes both paths and interrupted-shell recovery.
 

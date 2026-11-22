@@ -18,6 +18,7 @@ import { finishRow } from './projectHostedFinishWake';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
 import type { HostedLandingAttempt, HostedLandingState } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
+import { LANDING_MESSAGE_BYTES } from '../src/landing-message';
 import { passToLandMinutes } from '../src/landing-speed-alerts';
 import { landingOrderEvidence } from './projectHostedLandingOrder';
 import { nextCreationCursor, readCreationCursor } from './creationTimeCursor';
@@ -309,19 +310,26 @@ async function selectedReceipt(ctx: QueryCtx, projectId: Id<'hostedProjects'>, r
   return found[0]!;
 }
 
+/** The reply budget follows the landing message limit: a receipt's message plus an eight-member
+ * cohort's messages, each worst-escaped (a backslash doubles), then base64 (Item 8c50ce13). */
+const MESSAGE_FIELDS_BYTES = 9 * (2 * LANDING_MESSAGE_BYTES + 64) + 1024;
+const MESSAGE_REPLY_BYTES = Math.ceil((MESSAGE_FIELDS_BYTES * 4) / 3) + 4096;
 /** The public query layer can interpret embedded JSON as structured identity fields.
  * Encode the UTF-8 payload to preserve literal message text through that layer. */
 function messageReply(identity: object, fields: Record<string, string | string[] | null>) {
   const bytes = new TextEncoder().encode(JSON.stringify(fields));
   invariant(
-    bytes.length < 48 * 1024,
+    bytes.length < MESSAGE_FIELDS_BYTES,
     'SOURCE_UNAVAILABLE',
     'The retained landing message exceeds the selected read budget.',
   );
-  const messageBase64 = btoa(String.fromCharCode(...bytes));
+  let binary = '';
+  for (let at = 0; at < bytes.length; at += 8192)
+    binary += String.fromCharCode(...bytes.subarray(at, at + 8192));
+  const messageBase64 = btoa(binary);
   const reply = JSON.stringify({ schema: 1, ...identity, messageBase64 });
   invariant(
-    new TextEncoder().encode(reply).length < 64 * 1024,
+    new TextEncoder().encode(reply).length < MESSAGE_REPLY_BYTES,
     'SOURCE_UNAVAILABLE',
     'The retained landing message exceeds the selected read budget.',
   );

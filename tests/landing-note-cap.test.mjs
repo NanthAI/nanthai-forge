@@ -76,3 +76,36 @@ test('Item 8c50ce13: save admission refuses a new note over 1 KiB with the limit
   const admitted = await f.prepare(change(), { message: 'm'.repeat(1024) });
   assert(admitted.result, 'a note at the limit is admitted');
 });
+
+test('the landing message limit is 16 KiB, one constant for the client pre-check and the server admission', async () => {
+  const { LANDING_MESSAGE_BYTES, landingMessage, landingMessageSchema, suppliedLandingMessage } =
+    await import(moduleUrl('../src/landing-message.ts'));
+  assert.equal(LANDING_MESSAGE_BYTES, 16 * 1024);
+  const atLimit = 'm'.repeat(LANDING_MESSAGE_BYTES);
+  const over = `${atLimit}m`;
+  // The client's early check (land, finish, preflight) and every server schema share these functions.
+  for (const check of [landingMessage, suppliedLandingMessage, value => landingMessageSchema.parse(value)]) {
+    assert.equal(check(atLimit), atLimit);
+    assert.throws(
+      () => check(over),
+      error =>
+        error.code === 'LANDING_MESSAGE_TOO_LARGE' &&
+        error.message.includes(
+          `has ${LANDING_MESSAGE_BYTES + 1} UTF-8 bytes; the limit is ${LANDING_MESSAGE_BYTES}`,
+        ),
+    );
+  }
+});
+
+test('Item 8c50ce13: a receipt names a stored message it inherited, and copies one it does not hold', async () => {
+  const { receiptMessageField } = await import(moduleUrl('../convex/projectHostedLandingMessageBody.ts'));
+  const row = { messageBodyId: 'body' };
+  const own = { request: { message: 'Own message' } };
+  const inherited = { request: { message: null }, message: 'Inherited message' };
+  assert.deepEqual(receiptMessageField(row, own, 'Own message'), { messageRef: 'body' });
+  assert.deepEqual(receiptMessageField(row, inherited, 'Inherited message'), { messageRef: 'body' });
+  // A different accepted text, a ticket with no stored body, or an omission is never a reference.
+  assert.deepEqual(receiptMessageField(row, inherited, 'Other'), { message: 'Other' });
+  assert.deepEqual(receiptMessageField({}, inherited, 'Inherited message'), { message: 'Inherited message' });
+  assert.deepEqual(receiptMessageField(row, own, undefined), {});
+});

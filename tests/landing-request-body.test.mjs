@@ -173,13 +173,6 @@ test('the projected and canonical landing requests expand compact discarded coun
 });
 
 test('Item 8c50ce13: a stored message is one project-owned body, read back in place and deleted with its ticket', async t => {
-  const name = 'FORGE_LANDING_MESSAGE_REFS',
-    previous = process.env[name];
-  process.env[name] = '1';
-  t.after(() => {
-    if (previous === undefined) delete process.env[name];
-    else process.env[name] = previous;
-  });
   const s = state([]),
     ctx = landingRequestBodies(finishReadWriter(s.ctx));
   const message = 'Store the message once\n\nCo-Authored-By: Synthetic <noreply@openai.com>';
@@ -233,4 +226,46 @@ test('Item 8c50ce13: a stored message is one project-owned body, read back in pl
   for (const pointer of [raw.requestBodyId, raw.selectionBodyId, raw.messageBodyId])
     assert(!s.tables.projectHostedLandingBodies.has(pointer), 'purge and deletion remove every owned body');
   assert(s.tables.projectHostedLandingBodies.has(foreign));
+});
+
+test('Item 8c50ce13: a message a ticket inherited is stored once, named by a reference, and reads back as its own message', async t => {
+  const s = state([]),
+    ctx = landingRequestBodies(finishReadWriter(s.ctx));
+  const inherited = `${'\\'.repeat(16 * 1024 - 60)}\n\nCo-Authored-By: Synthetic <noreply@openai.com>`;
+  const value = {
+    ...ticket(),
+    value: canonicalPayload({
+      id: 'submission',
+      attemptId: 'attempt',
+      phase: 'queued',
+      // A resolution Lane with no message of its own: the conflicted landing's message is inherited.
+      request: { ...request, message: null },
+      message: inherited,
+    }),
+  };
+  const id = await ctx.db.insert('projectHostedLandingRequests', value);
+  const raw = structuredClone(s.tables.projectHostedLandingRequests.get(id));
+  assert.equal(s.tables.projectHostedLandingBodies.get(raw.messageBodyId).value, inherited);
+  const stored = JSON.parse(raw.value);
+  assert.equal(stored.message, undefined, 'the row no longer carries the text');
+  assert.deepEqual(stored.messageRef, { id: raw.messageBodyId, source: 'inherited' });
+  assert(Buffer.byteLength(raw.value) < 4096, 'the ticket row stays small');
+  const read = JSON.parse((await ctx.db.get(id)).value);
+  assert.equal(read.message, inherited, 'readers see the inherited message as before');
+  assert.equal(read.messageRef, undefined);
+  assert.equal(read.request.message, null, 'the request itself is unchanged');
+  // A later transition rewrites the ticket without copying the text or its body again.
+  const before = s.tables.projectHostedLandingBodies.size;
+  await ctx.db.patch(id, { phase: 'checking', value: JSON.stringify({ ...read, phase: 'checking' }) });
+  assert.equal(s.tables.projectHostedLandingBodies.size, before);
+  assert.equal(JSON.parse(s.tables.projectHostedLandingRequests.get(id).value).message, undefined);
+  assert.equal(JSON.parse((await ctx.db.get(id)).value).message, inherited);
+  // The reference is accepted only against the ticket's own body.
+  await s.ctx.db.patch(id, {
+    messageBodyId: await s.ctx.db.insert('projectHostedLandingBodies', {
+      value: inherited,
+      messageProjectId: 'foreign',
+    }),
+  });
+  await assert.rejects(ctx.db.get(id), /differs from its stored body/);
 });

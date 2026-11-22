@@ -51,20 +51,19 @@ export async function landingMessageForReader(
     : { ...result, message };
 }
 
-/** Item 8c50ce13, default off until proved on one project; then this switch and the inline
- * writer are deleted. On, a new ticket stores its supplied message once and receipts reference it. */
-export const landingMessageRefsOn = () => process.env.FORGE_LANDING_MESSAGE_REFS === '1';
-
 /** A receipt's message field: the ticket's stored body when the accepted message is that body,
- * else the inline value (legacy omission defaults, inherited resolution text, empty notes). */
+ * else the inline value (legacy omission defaults, inherited resolution text, empty notes).
+ * A new ticket stores its supplied message once and receipts reference it (Item 8c50ce13). */
 export function receiptMessageField(
   row: { messageBodyId?: string | undefined },
   state: HostedLandingState,
   message: string | undefined,
 ) {
   if (message === undefined) return {};
-  // Turning the switch off stops new references at once; stored tickets still read back inline.
-  return landingMessageRefsOn() && row.messageBodyId && !state.messageRef && state.request.message === message
+  // The body holds the request's message, or the message the ticket froze or inherited.
+  return row.messageBodyId &&
+    !state.messageRef &&
+    (typeof state.request.message === 'string' ? state.request.message : state.message) === message
     ? { messageRef: row.messageBodyId }
     : { message };
 }

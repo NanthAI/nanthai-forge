@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
-import { ticketState, patchTicketState, logicalReceipts, inlineMessages } from './landing-ticket-fixture.mjs';
+import { ticketState, patchTicketState, logicalReceipts } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
@@ -95,8 +95,7 @@ test('released strict wait and stack readers keep working while canonical messag
   assert.equal((await f.accept(state)).receipt.message, supplied(0));
 });
 
-test('inline and referenced cohort messages give identical receipt, history, Needs me and mirror replies', async t => {
-  inlineMessages(t);
+test('stored and legacy inline cohort messages give identical receipt, history, Needs me and mirror replies', async t => {
   const f = await batchesFixture(t, { count: 0 });
   const messages = [supplied(0), '', null, supplied(3)];
   for (const [index, message] of messages.entries()) await f.add(index, { request: { message } });
@@ -126,7 +125,7 @@ test('inline and referenced cohort messages give identical receipt, history, Nee
   }
   const rows = [...f.tables.projectHostedAcceptances.values()].sort((a, b) => a.sequence - b.sequence);
   const last = rows.at(-1);
-  const receipt = JSON.parse(last.value);
+  const receipt = logicalReceipts(f).at(-1);
   assert.deepEqual(
     receipt.cohortMessages,
     messages.filter(message => message !== null),
@@ -156,39 +155,21 @@ test('inline and referenced cohort messages give identical receipt, history, Nee
     mirror: await mirrors(),
     catchUp: await mirrors('9'.repeat(64)),
   });
-  const inline = await views();
-  assert.equal(JSON.parse(inline.receipt).receipt.message, messages.at(-1));
-  assert.equal(JSON.parse(inline.acceptReplay).receipt.message, messages.at(-1));
-  assert(JSON.parse(inline.landing).receipt.cohortMessages.length > 1);
-  for (const value of [inline.code, inline.history, inline.fyi, inline.mirror])
+  const stored = await views();
+  assert.equal(JSON.parse(stored.receipt).receipt.message, messages.at(-1));
+  assert.equal(JSON.parse(stored.acceptReplay).receipt.message, messages.at(-1));
+  assert(JSON.parse(stored.landing).receipt.cohortMessages.length > 1);
+  for (const value of [stored.code, stored.history, stored.fyi, stored.mirror])
     assert.match(value, /Supplied subject 0/);
-  assert.deepEqual(lostTrailers(messages.at(-1), inline.mirror), []);
+  assert.deepEqual(lostTrailers(messages.at(-1), stored.mirror), []);
+  assert.match(stored.catchUp, /^Catch up 4 Forge landings/);
 
-  // The reader-first release leaves the writer inline. Exercise the proposed storage shape with
-  // the exact same accepted identities and a mixed cohort (inline, reference, omitted and empty).
-  let lastRef;
-  for (const [index, row] of rows.entries()) {
-    const value = JSON.parse(row.value);
-    if (index !== 0 && value.message !== undefined) {
-      lastRef = f.insert('projectHostedLandingBodies', { messageProjectId: projectId, value: value.message });
-      const ticket = tickets().find(ticket => ticket.submissionId === row.submissionId);
-      const state = ticketState(f, ticket);
-      assert.equal(state.request.message, value.message);
-      delete state.request.message;
-      state.messageRef = { id: lastRef, source: 'request' };
-      patchTicketState(f, ticket, state);
-      delete value.message;
-      value.messageRef = lastRef;
-    }
-    if (index === rows.length - 1) {
-      delete value.cohortMessages;
-      value.cohortSize = rows.length;
-    }
-    f.patch('projectHostedAcceptances', row._id, { value: JSON.stringify(value) });
-  }
-  assert.deepEqual(await views(), inline);
-  assert.match(inline.catchUp, /^Catch up 4 Forge landings/);
+  // The writer stores each message once. A stored cohort that lost a member, a body that is not
+  // canonical, and a body of another project all fail closed without echoing the message.
   const referenced = JSON.parse(f.tables.projectHostedAcceptances.get(last._id).value);
+  assert.equal(referenced.cohortSize, rows.length);
+  const lastRef = referenced.messageRef;
+  assert(lastRef, 'the last member stored its message');
   f.patch('projectHostedAcceptances', last._id, {
     value: JSON.stringify({ ...referenced, cohortSize: rows.length - 1 }),
   });
@@ -196,125 +177,129 @@ test('inline and referenced cohort messages give identical receipt, history, Nee
     data: { code: 'EVIDENCE_CHANGED', message: 'The ordered landing cohort is incomplete.' },
   });
   f.patch('projectHostedAcceptances', last._id, { value: JSON.stringify(referenced) });
+  const body = f.tables.projectHostedLandingBodies.get(lastRef);
   f.patch('projectHostedLandingBodies', lastRef, { value: 'Forge-State: synthetic spoof' });
   await assert.rejects(run(acceptanceApi.receipt, { receiptId: receipt.id }), {
     data: { code: 'EVIDENCE_CHANGED', message: 'The stored landing message is not canonical.' },
   });
-  f.patch('projectHostedLandingBodies', lastRef, { messageProjectId: 'hostedProjects-999' });
+  f.patch('projectHostedLandingBodies', lastRef, {
+    value: body.value,
+    messageProjectId: 'hostedProjects-999',
+  });
   await assert.rejects(run(acceptanceApi.receipt, { receiptId: receipt.id }), error => {
     assert.equal(error.data?.code, 'EVIDENCE_CHANGED');
     assert(!error.message.includes(messages.at(-1)));
     return true;
   });
-});
+  f.patch('projectHostedLandingBodies', lastRef, { messageProjectId: body.messageProjectId });
+  assert.deepEqual(await views(), stored);
 
-test('friction 8c5666d2: one authorized CLI query returns exact receipt, cohort and request messages', async t => {
-  inlineMessages(t);
-  const exact = '{"actor":"user_syntheticAccount","email":"literal@example.invalid","body":"採用"}';
-  const messages = Array.from({ length: 8 }, (_, i) => {
-    const footer = `\n\nCo-Authored-By: Synthetic ${i} <noreply@openai.com>`;
-    return '\\'.repeat(LANDING_MESSAGE_BYTES - Buffer.byteLength(footer)) + footer;
-  });
-  messages[0] = exact;
-  const f = await batchesFixture(t, { count: 0 });
-  for (const [index, message] of messages.entries()) await f.add(index, { request: { message } });
-  const cli = agentFixture(t);
-  const transport = cli.transport();
-  let actor;
-  const queries = [];
-  transport.query = async (name, args) => {
-    queries.push(name);
-    const raw = await f.tx('selected-message', evidence.read, { projectId: f.projectId, ...args }, actor);
-    const cost = f.counts.findLast(row => row.name === 'selected-message');
-    assert.equal(cost.writes, 0);
-    assert(Buffer.byteLength(raw) < 64 * 1024);
-    assert(cost.readBytes < 64 * 1024, `${cost.readBytes} read bytes`);
-    return JSON.parse(raw);
-  };
-  const read = async args => {
-    const before = queries.length;
-    const reply = await hostedAgentCli(cli.root, 'landings', args, cli.address, transport);
-    assert.deepEqual(queries.slice(before), ['projectHostedLandings:read']);
-    return reply.result;
-  };
-  const submissionId = f.entries[0].state.id;
-  assert.deepEqual(await read({ submissionId }), {
-    schema: 1,
-    submissionId,
-    cohortHold: null,
-    message: null,
-    requestMessage: exact,
-  });
-  await assert.rejects(read({ submissionId: randomUUID() }), /NOT_FOUND/);
-  actor = 'outsider';
-  await assert.rejects(read({ submissionId }), /PROJECT_UNAVAILABLE/);
-  f.patch('hostedProjects', f.projectId, { visibility: 'public' });
-  await assert.rejects(read({ submissionId }), /NOT_FOUND/);
-  actor = undefined;
-
-  await f.drain();
-  await f.passChecks();
-  await f.drain();
-  const receipts = [...f.tables.projectHostedAcceptances.values()].sort((a, b) => a.sequence - b.sequence);
-  assert.equal(receipts.length, 8);
-  const [first] = receipts;
-  const last = receipts.at(-1);
-  const choose = { receiptId: last.receiptId.slice(0, 8), message: true };
-  assert.deepEqual(await read({ receiptId: first.receiptId, message: true }), {
-    schema: 1,
-    receiptId: first.receiptId,
-    submissionId,
-    message: exact,
-    cohortMessages: null,
-  });
-  const inline = await read(choose);
-  assert.equal(inline.message, messages.at(-1));
-  assert.deepEqual(inline.cohortMessages, messages);
-
-  // The normalized representation shares the same member messages without duplicating their text.
-  for (const row of receipts) {
+  // Records written before references keep their inline messages and read back the same replies.
+  for (const row of rows) {
     const value = JSON.parse(row.value);
-    value.messageRef = f.insert('projectHostedLandingBodies', {
-      messageProjectId: f.projectId,
-      value: value.message,
-    });
-    delete value.message;
+    if (value.messageRef) {
+      value.message = f.tables.projectHostedLandingBodies.get(value.messageRef).value;
+      delete value.messageRef;
+    }
     if (row === last) {
-      delete value.cohortMessages;
-      value.cohortSize = receipts.length;
+      value.cohortMessages = messages.filter(message => message !== null);
+      delete value.cohortSize;
     }
     f.patch('projectHostedAcceptances', row._id, { value: JSON.stringify(value) });
   }
-  assert.deepEqual(await read(choose), inline);
-  const cost = f.counts.findLast(row => row.name === 'selected-message');
-  t.diagnostic(
-    `Eight-member selected receipt: ${cost.documents} DB documents, ${cost.readBytes} DB bytes, ${Buffer.byteLength(JSON.stringify(inline))} CLI bytes`,
-  );
-
-  // A missing request body is different from a recorded message omission.
-  const request = [...f.tables.projectHostedLandingRequests.values()].find(
-    row => row.submissionId === submissionId,
-  );
-  assert(request.requestBodyId);
-  f.tables.projectHostedLandingBodies.delete(request.requestBodyId);
-  await assert.rejects(read({ submissionId }), /SOURCE_UNAVAILABLE/);
-  assert.equal((await read({ receiptId: first.receiptId, message: true })).message, exact);
-  await assert.rejects(read({ receiptId: randomUUID(), message: true }), /NOT_FOUND/);
+  for (const ticket of tickets()) {
+    if (!ticket.messageBodyId) continue;
+    const state = ticketState(f, ticket);
+    f.patch('projectHostedLandingRequests', ticket._id, { messageBodyId: undefined });
+    patchTicketState(f, f.tables.projectHostedLandingRequests.get(ticket._id), state);
+  }
+  assert.deepEqual(await views(), stored);
 });
 
-/** Item 8c50ce13: the writer that stores each supplied message once, default off until proved. */
-function storedMessages(t) {
-  const name = 'FORGE_LANDING_MESSAGE_REFS',
-    previous = process.env[name];
-  process.env[name] = '1';
-  t.after(() => {
-    if (previous === undefined) delete process.env[name];
-    else process.env[name] = previous;
+// Item 8c50ce13: the reply budget follows the limit. A 1 KiB cohort stays a small read; a
+// cohort of eight worst-escaped 16 KiB messages still reads back whole, in one query.
+for (const size of [1024, LANDING_MESSAGE_BYTES])
+  test(`friction 8c5666d2: one authorized CLI query returns exact receipt, cohort and request messages (${size} bytes each)`, async t => {
+    const budget = size === 1024 ? 64 * 1024 : 640 * 1024;
+    const exact = '{"actor":"user_syntheticAccount","email":"literal@example.invalid","body":"採用"}';
+    const messages = Array.from({ length: 8 }, (_, i) => {
+      const footer = `\n\nCo-Authored-By: Synthetic ${i} <noreply@openai.com>`;
+      return '\\'.repeat(size - Buffer.byteLength(footer)) + footer;
+    });
+    messages[0] = exact;
+    const f = await batchesFixture(t, { count: 0 });
+    for (const [index, message] of messages.entries()) await f.add(index, { request: { message } });
+    const cli = agentFixture(t);
+    const transport = cli.transport();
+    let actor;
+    const queries = [];
+    transport.query = async (name, args) => {
+      queries.push(name);
+      const raw = await f.tx('selected-message', evidence.read, { projectId: f.projectId, ...args }, actor);
+      const cost = f.counts.findLast(row => row.name === 'selected-message');
+      assert.equal(cost.writes, 0);
+      assert(Buffer.byteLength(raw) < budget, `${Buffer.byteLength(raw)} reply bytes`);
+      assert(cost.readBytes < budget, `${cost.readBytes} read bytes`);
+      return JSON.parse(raw);
+    };
+    const read = async args => {
+      const before = queries.length;
+      const reply = await hostedAgentCli(cli.root, 'landings', args, cli.address, transport);
+      assert.deepEqual(queries.slice(before), ['projectHostedLandings:read']);
+      return reply.result;
+    };
+    const submissionId = f.entries[0].state.id;
+    assert.deepEqual(await read({ submissionId }), {
+      schema: 1,
+      submissionId,
+      cohortHold: null,
+      message: null,
+      requestMessage: exact,
+    });
+    await assert.rejects(read({ submissionId: randomUUID() }), /NOT_FOUND/);
+    actor = 'outsider';
+    await assert.rejects(read({ submissionId }), /PROJECT_UNAVAILABLE/);
+    f.patch('hostedProjects', f.projectId, { visibility: 'public' });
+    await assert.rejects(read({ submissionId }), /NOT_FOUND/);
+    actor = undefined;
+
+    await f.drain();
+    await f.passChecks();
+    await f.drain();
+    const receipts = [...f.tables.projectHostedAcceptances.values()].sort((a, b) => a.sequence - b.sequence);
+    assert.equal(receipts.length, 8);
+    const [first] = receipts;
+    const last = receipts.at(-1);
+    const choose = { receiptId: last.receiptId.slice(0, 8), message: true };
+    assert.deepEqual(await read({ receiptId: first.receiptId, message: true }), {
+      schema: 1,
+      receiptId: first.receiptId,
+      submissionId,
+      message: exact,
+      cohortMessages: null,
+    });
+    const inline = await read(choose);
+    assert.equal(inline.message, messages.at(-1));
+    assert.deepEqual(inline.cohortMessages, messages);
+
+    assert.deepEqual(await read(choose), inline, 'the selected receipt reads the same twice');
+    const cost = f.counts.findLast(row => row.name === 'selected-message');
+    t.diagnostic(
+      `Eight-member selected receipt: ${cost.documents} DB documents, ${cost.readBytes} DB bytes, ${Buffer.byteLength(JSON.stringify(inline))} CLI bytes`,
+    );
+
+    // A missing request body is different from a recorded message omission.
+    const request = [...f.tables.projectHostedLandingRequests.values()].find(
+      row => row.submissionId === submissionId,
+    );
+    assert(request.requestBodyId);
+    f.tables.projectHostedLandingBodies.delete(request.requestBodyId);
+    await assert.rejects(read({ submissionId }), /SOURCE_UNAVAILABLE/);
+    assert.equal((await read({ receiptId: first.receiptId, message: true })).message, exact);
+    await assert.rejects(read({ receiptId: randomUUID(), message: true }), /NOT_FOUND/);
   });
-}
 
 test('Item 8c50ce13: stored messages are written once and read back as the same receipt, history, Needs me and mirror bytes', async t => {
-  storedMessages(t);
   const f = await batchesFixture(t, { count: 0 });
   const messages = [supplied(0), '', null, supplied(3)];
   for (const [index, message] of messages.entries()) await f.add(index, { request: { message } });
@@ -429,17 +414,21 @@ test('Item 8c50ce13: stored messages are written once and read back as the same 
 });
 
 test('Item 8c50ce13: an eight-member publication step writes the same bytes with worst-case messages as with none', async t => {
-  storedMessages(t);
   const steps = async messages => {
-    const f = await batchesFixture(t, { count: 0 });
-    for (let i = 0; i < 8; i++) await f.add(i, messages ? { request: { message: messages[i] } } : {});
+    // The current CLI shape: the full message on the landing, a note capped at 1 KiB on the compose.
+    const f = await batchesFixture(t, { count: 0, memberMessages: messages ?? undefined });
+    for (let i = 0; i < 8; i++) await f.add(i);
     const admitted = f.counts.length;
     await f.drain();
     await f.passChecks();
     await f.drain();
     assert.equal(f.pending().length, 0, 'zero idle work');
     const after = f.counts.slice(admitted);
-    return { calls: after.length, maxWriteBytes: Math.max(...after.map(c => c.writeBytes)) };
+    return {
+      calls: after.length,
+      maxWriteBytes: Math.max(...after.map(c => c.writeBytes)),
+      writeBytesPerLanding: f.counts.reduce((sum, c) => sum + c.writeBytes, 0) / 8,
+    };
   };
   const worst = Array.from({ length: 8 }, (_, i) => {
     const footer = `\n\nCo-Authored-By: Synthetic ${i} <noreply@openai.com>`;
@@ -449,9 +438,19 @@ test('Item 8c50ce13: an eight-member publication step writes the same bytes with
     full = await steps(worst);
   assert.equal(full.calls, none.calls, 'no added Convex calls');
   // Inline receipts copied each message into its receipt, its event and the cohort receipt and
-  // event: about 122 KB more in this step at this limit. Stored messages add only references.
-  assert(full.maxWriteBytes - none.maxWriteBytes < 1024, `largest step: ${JSON.stringify({ none, full })}`);
+  // event: about 122 KB more in this step at the old limit. Stored messages add only references;
+  // what remains is each member's note, capped at 1 KiB (4 KiB here is a few escaped notes).
+  assert(
+    full.maxWriteBytes - none.maxWriteBytes < 16 * 1024,
+    `largest step: ${JSON.stringify({ none, full })}`,
+  );
+  // Item 8c50ce13 limit: a git-like 16 KiB, eight worst-escaped members inside the 512 KiB budget.
+  assert.equal(LANDING_MESSAGE_BYTES, 16 * 1024);
   assert(full.maxWriteBytes < 512 * 1024);
+  t.diagnostic(JSON.stringify({ none, full }));
+  // Per landing at eight members: the 1 KiB reference measured 332,895 B. At 16 KiB, worst-escaped,
+  // the one stored body (32 KiB metered) is the only growth: under 375,000 B, 10.4% above it.
+  assert(full.writeBytesPerLanding <= 375_000, `per landing: ${JSON.stringify({ none, full })}`);
 });
 
 // Issue b30284de / class guard 8b7b97ce / eacfdb6e: run real finish, acceptance,
@@ -470,10 +469,12 @@ for (const [batching, legacy] of [
     const f = await batchesFixture(t, { count: 3, batching, memberMessages: messages, concurrency: 3 });
     if (legacy)
       for (const row of f.tables.projectHostedLandingRequests.values()) {
+        // A pre-upgrade ticket keeps no message at all, and no stored body either.
         const value = ticketState(f, row);
         delete value.message;
         delete value.request.message;
-        patchTicketState(f, row, value);
+        f.patch('projectHostedLandingRequests', row._id, { messageBodyId: undefined });
+        patchTicketState(f, f.tables.projectHostedLandingRequests.get(row._id), value);
       }
     if (!legacy)
       for (const row of f.tables.projectHostedLandingRequests.values())
@@ -944,10 +945,7 @@ test('oversize ASCII, multibyte and escaped messages fail before acceptance; rec
   assert.equal(Buffer.byteLength(JSON.stringify({ message: maximum })), 2 * LANDING_MESSAGE_BYTES + 14);
   const batch = Buffer.byteLength(JSON.stringify({ cohortMessages: Array(8).fill(maximum) }));
   assert.equal(batch, 8 * (2 * LANDING_MESSAGE_BYTES + 2) + 28);
-  assert(
-    batch < (512 * 1024) / 4,
-    'eight worst-case messages stay a small part of the 512 KiB publication budget',
-  );
+  assert(batch < 512 * 1024, 'even written inline, eight worst-case messages fit the 512 KiB budget');
 });
 
 test('friction 330d1df6: an over-limit landing message names its exact byte count and the limit', () => {
@@ -1158,32 +1156,4 @@ test('batch with two agents end to end: the mirror seed credits each member from
     ].join('\n'),
   );
   assert.equal(JSON.parse(await begin()).seed.message, seed.message, 'a replayed begin pins the same bytes');
-});
-
-test('Item 8c50ce13: switching references off after admission writes only inline receipts, from the stored tickets', async t => {
-  storedMessages(t);
-  const f = await batchesFixture(t, { count: 0 });
-  const messages = [supplied(0), supplied(1)];
-  for (const [index, message] of messages.entries()) await f.add(index, { request: { message } });
-  const tickets = () =>
-    [...f.tables.projectHostedLandingRequests.values()].sort((a, b) => a.sequence - b.sequence);
-  assert(
-    tickets().every(row => row.messageBodyId),
-    'admission stored each message once',
-  );
-  process.env.FORGE_LANDING_MESSAGE_REFS = '0';
-  for (let tick = 0; tickets().some(row => row.phase !== 'landed'); tick++) {
-    assert(tick < 300, 'the cohort reaches acceptance');
-    if (f.runs().some(run => run.status === 'queued')) await f.passChecks();
-    await f.execute(f.pending()[0]);
-  }
-  const receipts = [...f.tables.projectHostedAcceptances.values()]
-    .sort((a, b) => a.sequence - b.sequence)
-    .map(row => JSON.parse(row.value));
-  assert(receipts.every(r => r.messageRef === undefined && r.cohortSize === undefined));
-  assert.deepEqual(
-    receipts.map(r => r.message),
-    messages,
-  );
-  assert.deepEqual(receipts.at(-1).cohortMessages, messages);
 });

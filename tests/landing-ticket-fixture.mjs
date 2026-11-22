@@ -87,7 +87,8 @@ export function logicalTicket(f, row) {
 export function logicalReceipts(f) {
   const receipts = [...f.tables.projectHostedAcceptances.values()]
     .sort((a, b) => a.sequence - b.sequence)
-    .map(row => JSON.parse(row.value));
+    .map(row => JSON.parse(row.value))
+    .filter(receipt => receipt.synthetic === undefined);
   for (const receipt of receipts)
     if (receipt.messageRef) {
       receipt.message = f.tables.projectHostedLandingBodies.get(receipt.messageRef).value;
@@ -101,13 +102,4 @@ export function logicalReceipts(f) {
       delete receipt.cohortSize;
     }
   return receipts;
-}
-/** Tests that build stored-message records by hand pin the inline writer. */
-export function inlineMessages(t) {
-  const name = 'FORGE_LANDING_MESSAGE_REFS',
-    previous = process.env[name];
-  delete process.env[name];
-  t.after(() => {
-    if (previous !== undefined) process.env[name] = previous;
-  });
 }

@@ -7,8 +7,7 @@ import { compactUnreportedCounts, expandUnreportedCounts } from '../src/hosted-l
 import { compactDiscardedChecksOn } from './projectHostedLandingRunnerCostSwitch';
 import { metricAliasRows, withMetricAliases } from './projectMetricAliasWriter';
 import { metricRequestRow } from './projectMetricSourceRow';
-import { landingMessage } from '../src/landing-message';
-import { landingMessageRefsOn } from './projectHostedLandingMessageBody';
+import { landingMessage, LANDING_NOTE_BYTES } from '../src/landing-message';
 
 type Row = Record<string, unknown> & {
   _id?: string;
@@ -85,6 +84,7 @@ export async function deleteLandingRequestBodies(db: MutationCtx['db'], row: Row
   for (const body of bodies) await db.delete(body._id);
   return bodies;
 }
+const utf8 = (text: string) => new TextEncoder().encode(text).length;
 /** Only admitted canonical text is stored; anything else keeps its existing inline form. */
 function storable(message: unknown): message is string {
   if (typeof message !== 'string' || message === '') return false;
@@ -112,6 +112,11 @@ async function messageBody(db: Port, row: Row, id: string) {
 export async function hydrateLandingRequest(db: Port, row: Row | null): Promise<Row | null> {
   if (!row) return row;
   const result = { ...row };
+  // The body holds a message the ticket inherited or froze, not the request's own.
+  const inheritedMessage =
+    typeof row.messageBodyId === 'string' &&
+    typeof row.value === 'string' &&
+    /"messageRef":\{[^}]*"source":"inherited"/.test(row.value);
   for (const [pointer, field] of [
     ['requestBodyId', 'request'],
     ['selectionBodyId', 'batchSelection'],
@@ -130,11 +135,24 @@ export async function hydrateLandingRequest(db: Port, row: Row | null): Promise<
       result.value = canonicalPayload({
         ...expandUnreportedCounts(JSON.parse(row.value!)),
         request:
-          typeof row.messageBodyId === 'string'
+          typeof row.messageBodyId === 'string' && !inheritedMessage
             ? { ...cold.request, message: await messageBody(db, row, row.messageBodyId) }
             : cold.request,
       });
     else if (cold.batchSelection !== undefined) result.batchSelection = cold.batchSelection;
+  }
+  // An inherited or frozen message reads back as the ticket's own `message`, as before references.
+  if (typeof row.messageBodyId === 'string' && typeof result.value === 'string') {
+    const state = JSON.parse(result.value);
+    if (state.messageRef?.source === 'inherited') {
+      const { messageRef, ...rest } = state;
+      invariant(
+        messageRef.id === row.messageBodyId,
+        'EVIDENCE_CHANGED',
+        'The landing message reference differs from its stored body.',
+      );
+      result.value = canonicalPayload({ ...rest, message: await messageBody(db, row, row.messageBodyId) });
+    }
   }
   return result;
 }
@@ -221,17 +239,41 @@ export function landingRequestBodies<C extends QueryCtx | MutationCtx>(ctx: C): 
       // The pointer is immutable; an existing body must hold this request's exact message.
       const messageId = previous?.messageBodyId ?? row.messageBodyId;
       const message = state.request.message;
-      if (typeof messageId === 'string') {
+      // A message the ticket froze or inherited (a resolution Lane keeps the conflicted landing's
+      // message) is not the request's own: it is stored once too, named by an `inherited` reference.
+      const frozen = typeof message !== 'string' && typeof state.message === 'string';
+      if (
+        typeof messageId === 'string' &&
+        typeof message !== 'string' &&
+        state.messageRef?.source === 'inherited'
+      ) {
+        row.messageBodyId = messageId;
+      } else if (typeof messageId === 'string') {
+        const text = await messageBody(bodyPort, row.projectId ? row : previous!, messageId);
         invariant(
-          message === (await messageBody(bodyPort, row.projectId ? row : previous!, messageId)),
+          (frozen ? state.message : message) === text,
           'EVIDENCE_CHANGED',
           'The landing request message differs from its stored body.',
         );
         row.messageBodyId = messageId;
-        const { message: _message, ...request } = state.request;
-        void _message;
-        state.request = request;
-      } else if (!previous && storable(message) && landingMessageRefsOn()) {
+        if (frozen) {
+          delete state.message;
+          state.messageRef = { id: messageId, source: 'inherited' };
+        } else {
+          const { message: _message, ...request } = state.request;
+          void _message;
+          state.request = request;
+        }
+      } else if (!previous && frozen && storable(state.message) && utf8(state.message) > LANDING_NOTE_BYTES) {
+        const id = await writer.insert('projectHostedLandingBodies', {
+          value: state.message,
+          messageProjectId: row.projectId as Id<'hostedProjects'>,
+        });
+        bodies.set(id, Promise.resolve({ _id: id, value: state.message, messageProjectId: row.projectId }));
+        row.messageBodyId = id;
+        delete state.message;
+        state.messageRef = { id, source: 'inherited' };
+      } else if (!previous && storable(message)) {
         const id = await writer.insert('projectHostedLandingBodies', {
           value: message,
           messageProjectId: row.projectId as Id<'hostedProjects'>,

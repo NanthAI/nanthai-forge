@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { ticketState } from './landing-ticket-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -1633,15 +1634,7 @@ async function replaySystemReverse(
   // rewound, no accepted receipt changes, and its receipt message names how to
   // bring the culprit back (owner 2026-11-06: no lost code).
   const reverseRow = [...f.tables.projectHostedLandingRequests.values()][0];
-  const reverse = {
-    ...JSON.parse(reverseRow.value),
-    ...(reverseRow.requestBodyId
-      ? {
-          request: JSON.parse(f.tables.projectHostedLandingBodies.get(reverseRow.requestBodyId).value)
-            .request,
-        }
-      : {}),
-  };
+  const reverse = ticketState(f, reverseRow);
   assert.equal(reverse.request.revertOf, culpritReceipt.id);
   assert.equal(reverse.request.expectedMain.head, f.heads[pair ? 2 : 1], 'composed on current main');
   assert.match(

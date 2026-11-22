@@ -3,9 +3,9 @@ import { z } from 'zod';
 import { invariant } from './errors.js';
 import { AGENT_CLIENT } from './agent-slug.js';
 
-/** Keeps eight worst-case escaped messages within the existing 512 KiB publication budget: an
- * eight-member batch step writes about 264 bytes per message byte (478 KB at this limit). */
-export const LANDING_MESSAGE_BYTES = 1024;
+/** A git-like 16 KiB. Each message is stored once and referenced (Item 8c50ce13), so an eight-member
+ * batch step writes the same bytes whatever its messages hold and stays inside the 512 KiB budget. */
+export const LANDING_MESSAGE_BYTES = 16 * 1024;
 export function landingMessage(value: string) {
   const size = new TextEncoder().encode(value).length;
   invariant(

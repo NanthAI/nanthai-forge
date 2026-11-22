@@ -239,7 +239,7 @@ Details: docs/data-placement.md.`,
 - RATE_LIMITED: run next after recovery.retryAt. A reply's budget shows what is left under 20%.
 - QUOTA_EXCEEDED: over a storage quota, which has no time reset; retrying will not help.
 - *_LIMIT, *_TOO_LARGE, *_TOO_LONG, OUTPUT_LIMIT: shrink the input (fewer paths, a smaller page, shorter text) or follow the cursor the receipt gives.
-- LANDING_MESSAGE_TOO_LARGE: the landing message is the GitHub commit message, at most 1024 UTF-8 bytes; shorten it. land --save refuses it before it saves; preflight with the same --message-file (or "message") refuses it before any test runs.
+- LANDING_MESSAGE_TOO_LARGE: the landing message is the GitHub commit message, at most 16384 UTF-8 bytes (16 KiB); shorten it. land --save refuses it before it saves; preflight with the same --message-file (or "message") refuses it before any test runs.
 - BOARD_FULL: the board holds its maximum of notes; resolve old ones with board --resolve.
 Service limits are set by Forge. Some settings, such as the stored-history budget, are configurable by the project owner; the refusal names the applicable limit.`,
   },

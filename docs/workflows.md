@@ -745,7 +745,7 @@ the real file, and the next mirror publishes the same pointer.
 
 Each pushed mirror commit that touches Convex paths starts `.github/workflows/convex-deploy.yml` (dev deploy). Its first job skips, ending green with a notice, any run whose commit has a newer deploy-path commit on `main`, so a drained mirror backlog deploys only the newest head. Dev deploys permit large-index deletions after the schema index guard passes; re-adding an index rebuilds it, and index removal leaves documents intact. The exit bench's own deployment is deployed only by hand: `.github/workflows/convex-bench-deploy.yml` runs on dispatch with a full commit on `main` (`gh workflow run convex-bench-deploy.yml -f ref=SHA`), in its own `convex-bench` environment and deploy key, so builders' landings never move the code under measurement. Its boolean `allow_deleting_large_indexes` input defaults to false; the lead sets it to true only for a bench redeploy that should remove large indexes.
 
-Messages retain trailer order, are capped at 1 KiB UTF-8, have controls stripped
+Messages retain trailer order, are capped at 16 KiB UTF-8, have controls stripped
 and reserved Forge trailers escaped. [Message metadata](architecture.md#landing-message-metadata)
 describes cohort ordering, legacy finish recovery and byte bounds. Existing
 history and raw State exports are unchanged; normal landings add no Convex calls.

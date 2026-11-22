@@ -29,7 +29,7 @@ Walked: `nforge --help`, `nforge status .`, `nforge settings`, the `start`, `sav
 | J40-4 | S2 | **Existing Lane folders still have their original names.** New default folders use the title and short id. Reopening a local checkout uses its recorded path, and a start retry uses the path pinned to that operation. | source, fixture |
 | J40-5 | S2 | **No quick path for trivial changes.** A typo fix runs the same check and queue as a feature. Docs-only changes do skip tests, which helps. There is no "edit this file" on the web for a README, where GitHub's pencil icon is the most used contribution path for small fixes. | docs |
 | J40-6 | S3 | **Editors are not a target.** Hooks cover two agent harnesses. An editor extension that shows the Lane, the save state and overlaps does not exist, and no Issue was found for one. | docs |
-| J40-7 | S3 | **The message at save and at land are both called "message".** One describes a step, the other becomes the mirror's commit message (1,024 bytes). A person used to commit messages expects one. | ran: help |
+| J40-7 | S3 | **The message at save and at land are both called "message".** One describes a step, the other becomes the mirror's commit message (16 KiB). A person used to commit messages expects one. | ran: help |
 
 ## Dead ends
 

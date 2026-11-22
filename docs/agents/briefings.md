@@ -138,7 +138,7 @@ If a command waits for approval and nobody can answer, cancel it and use the rou
     wait tool ([asynchronous land](workflow.md#asynchronous-land-one-wake-no-waiting-turns)). If the turn-end hook blocks a stop, run its `nforge wait ID`.
     Repeat on IN PROGRESS; follow terminal recovery on failure/conflict. A passed
     check alone is not a landing. Your finish `message` is the GitHub commit message
-    (at most 1024 UTF-8 bytes, checked before any server call; pass the same
+    (at most 16 KiB of UTF-8, checked before any server call; pass the same
     `--message-file` to preflight to check it before the tests run): end it with the commit trailers your harness asks for (for example `Co-Authored-By:`). Before admission, replay the full original request. Retryable source work follows its returned recovery.
 11. Fix failures in the same Lane and land again; never cancel and recreate.
     Follow exact conflict/stale/stalled continuations; replay unknown outcomes.
