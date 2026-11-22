@@ -83,19 +83,27 @@ export function FlowChecks({
           <b>CI minutes today</b>
           {day.ciMinutes > 0 ? (
             <span className="flow-ci-split" aria-hidden="true">
-              <i style={{ flexGrow: Math.max(0, day.ciMinutes - day.lostMinutes) }} />
-              <i style={{ flexGrow: day.lostMinutes }} />
+              <i className="l" style={{ flexGrow: Math.max(0, day.ciMinutes - day.lostMinutes) }} />
+              <i className="x" style={{ flexGrow: day.lostMinutes }} />
             </span>
           ) : null}
-          <span>
-            <strong title={day.partial.includes('ciMinutes') ? 'Partial CI coverage' : undefined}>
-              {day.ciMinutes.toLocaleString('en')}
-            </strong>{' '}
-            min,{' '}
-            <strong title={day.partial.includes('lostMinutes') ? 'Partial coverage' : undefined}>
-              {day.lostMinutes.toLocaleString('en')}
-            </strong>{' '}
-            on checks that did not land
+          <span className="flow-ci-key">
+            <span>
+              <i className="l" aria-hidden="true" />
+              Landed{' '}
+              <strong title={day.partial.includes('ciMinutes') ? 'Partial CI coverage' : undefined}>
+                {Math.max(0, day.ciMinutes - day.lostMinutes).toLocaleString('en')}
+              </strong>{' '}
+              min
+            </span>
+            <span>
+              <i className="x" aria-hidden="true" />
+              Did not land{' '}
+              <strong title={day.partial.includes('lostMinutes') ? 'Partial coverage' : undefined}>
+                {day.lostMinutes.toLocaleString('en')}
+              </strong>{' '}
+              min
+            </span>
           </span>
         </div>
       </div>

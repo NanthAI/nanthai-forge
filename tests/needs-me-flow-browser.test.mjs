@@ -175,7 +175,7 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
         assert.match(await page.locator('.flow-free').textContent(), /2 slots in the check queue/);
         assert.match(
           await page.locator('.flow-ci').textContent(),
-          /CI minutes today.+min, 20 on checks that did not land/,
+          /CI minutes today.*Landed [\d,]+ min\s*Did not land 20 min/,
         );
         assert.equal(await idleTimers(page), 0);
         await page.getByRole('button', { name: /^Checks/ }).click();
