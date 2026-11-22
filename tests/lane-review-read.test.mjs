@@ -6,11 +6,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
-import { saveFixture } from './hosted-saves-fixture.mjs';
+import { api as saves, saveFixture } from './hosted-saves-fixture.mjs';
 import { digest } from '../dist/hash.js';
 
 const review = await import(moduleUrl('../convex/projectLaneReview.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+const lanes = await import(moduleUrl('../convex/projectHostedLiveLanes.ts'));
 
 async function lane(changes, extra = {}, savedBy) {
   const s = await saveFixture('original', 'a.txt');
@@ -54,13 +55,13 @@ async function lane(changes, extra = {}, savedBy) {
     },
     0,
   );
-  const read = (args = {}) =>
+  const read = (args = {}, actor = 'owner') =>
     s
       .transaction(
         'projectLaneReview:read',
         review.read,
         { projectId: s.projectId, laneId: saved.id, ...args },
-        'owner',
+        actor,
       )
       .then(JSON.parse);
   return { s, saved, read, write };
@@ -108,10 +109,26 @@ test('one read names the pinned head and every changed path with its exact blobs
     assert(!meter.touched.includes(table), `does not read ${table}`);
 });
 
-test('Lane review forwards the public save failure from its existing head read', async () => {
+test('Lane review and the Lanes list project dismissal permission with the same database reads', async () => {
   const { s, saved, read } = await lane([]);
-  await read();
-  const healthy = s.counts.at(-1);
+  const { projectId } = s;
+  const laneId = saved.id;
+  s.insert('projectContributors', { projectId, contributor: 'writer' });
+  s.insert('projectContributors', { projectId, contributor: 'other-writer' });
+  s.insert('projectReaders', { projectId, reader: 'reader' });
+  const credentialId = randomUUID();
+  s.insert('cliCredentials', {
+    credentialId,
+    owner: 'owner',
+    name: 'Synthetic read-only device',
+    scope: 'cli',
+    tokenHash: 'synthetic',
+    issuedAt: 1,
+    expiresAt: 8_000_000_000_000,
+    revoked: false,
+    settings: { source: 'read', projects: { kind: 'all' } },
+  });
+  const device = { subject: 'owner', forgeCredential: credentialId };
   const head = [...s.tables.projectHostedRecordHeads.values()].find(row => row.key === saved.id);
   const saveFailure = {
     operationId: randomUUID(),
@@ -119,16 +136,67 @@ test('Lane review forwards the public save failure from its existing head read',
     code: 'WORK_STALE',
     at: 1_790_000_000_000,
   };
-  s.patch('projectHostedRecordHeads', head._id, {
-    saveFailure: { ...saveFailure, actor: 'owner', boardRowId: 'synthetic-board-row' },
+  const boardRowId = s.insert('projectFinishReadRows', {
+    kind: 'projectHostedSaveFailure',
+    projectId,
+    sourceId: laneId,
+    sourceCreatedAt: saveFailure.at,
+    value: JSON.stringify(saveFailure),
   });
-  assert.deepEqual((await read()).lane.saveFailure, saveFailure);
-  const failed = s.counts.at(-1);
-  assert.equal(failed.documents, healthy.documents);
-  assert.equal(failed.ranges, healthy.ranges);
+  const setFailure = actor =>
+    s.patch('projectHostedRecordHeads', head._id, {
+      saveFailure: actor ? { ...saveFailure, actor, boardRowId } : undefined,
+    });
+  const list = async actor => {
+    const value = await s.transaction(
+      'projectHostedLiveLanes:list',
+      lanes.list,
+      { projectId, cursor: null, limit: 10, byline: true },
+      actor,
+    );
+    return JSON.parse(value).page.find(lane => lane.laneId === laneId);
+  };
+  const { operationId, attemptId } = saveFailure;
+  const dismiss = actor =>
+    s.transaction(
+      'dismissFailure',
+      saves.dismissFailure,
+      { projectId, laneId, operationId, attemptId },
+      actor,
+    );
+
+  for (const visibility of ['private', 'public']) {
+    s.patch('hostedProjects', projectId, { visibility });
+    for (const [viewer, failingActor, canDismiss] of [
+      ['owner', 'writer', true],
+      ['writer', 'writer', true],
+      ['other-writer', 'writer', false],
+      ['reader', 'reader', false],
+      [device, 'writer', false],
+      ...(visibility === 'public' ? [['former-writer', 'former-writer', false]] : []),
+    ]) {
+      for (const readLane of [async actor => (await read({}, actor)).lane, list]) {
+        setFailure();
+        assert.equal((await readLane(viewer)).saveFailure, undefined);
+        const healthy = s.counts.at(-1);
+        setFailure(failingActor);
+        assert.deepEqual((await readLane(viewer)).saveFailure, { ...saveFailure, canDismiss });
+        const failed = s.counts.at(-1);
+        assert.deepEqual(failed.readDocumentsByTable, healthy.readDocumentsByTable);
+        assert.deepEqual(failed.readRangesByTable, healthy.readRangesByTable);
+      }
+    }
+  }
+  setFailure('reader');
+  await assert.rejects(dismiss('reader'), error => error.data?.code === 'PROJECT_UNAVAILABLE');
+  assert.deepEqual((await read({}, 'reader')).lane.saveFailure, { ...saveFailure, canDismiss: false });
+  setFailure('writer');
+  await assert.rejects(dismiss(device), error => error.data?.code === 'AUTH_SCOPE_DENIED');
+  assert.equal(await dismiss('other-writer'), false);
   assert.equal((await read({ offset: 400 })).lane.saveFailure, undefined);
-  s.patch('projectHostedRecordHeads', head._id, { saveFailure: undefined });
+  assert.equal(await dismiss('writer'), true);
   assert.equal((await read()).lane.saveFailure, undefined);
+  assert.equal((await list('writer')).saveFailure, undefined);
 });
 
 test('the Lane title comes from its Intent even with UUID-only overlap metadata, and a failed read leaves the files', async t => {

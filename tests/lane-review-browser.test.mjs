@@ -114,7 +114,7 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
 
   try {
     await t.test(
-      'an unattended save failure appears and dismisses through the existing live Lane and board reads',
+      'the same live Lane and board reads show the failure to readers and let an authorized writer dismiss it',
       async t => {
         const board = '/-/sample-owner/tide-pool/lanes';
         const laneId = '7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
@@ -138,6 +138,14 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
             names,
           );
           assert.equal(await calls(healthy), 0);
+
+          const reader = await open(t, PHONE, 'routes&s=save-reader', path);
+          const readerNotice = reader.getByRole('status').filter({ hasText: 'Save failed' });
+          await readerNotice.waitFor();
+          assert.match(await readerNotice.textContent(), /WORK_STALE/);
+          assert.equal(await reader.getByRole('button', { name: /^Dismiss save failure/ }).count(), 0);
+          assert.deepEqual(await subscriptions(reader), healthyReads);
+          assert.equal(await calls(reader), 0);
 
           const failed = await open(t, PHONE, 'routes&s=save-failed', path);
           await failed.getByRole('heading', { name: loaded }).waitFor();

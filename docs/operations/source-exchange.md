@@ -849,7 +849,9 @@ Fast paths (fea47345 B; each falls back to the full path when it cannot prove it
   These views carry the operation and attempt IDs, failure code and timestamp. Capability discovery
   and checkout board or Lane reads that see their exact failure acknowledge it. Other fast reads
   keep their existing call paths. An exact retry clears its own notice,
-  and `projectHostedSaves:dismissFailure` accepts the displayed identity. An explicit wait leaves
+  and `projectHostedSaves:dismissFailure` accepts the displayed identity from the project owner or
+  the failing account with project write access. The web Lane review and Lanes list include that
+  viewer's `canDismiss` capability in the existing failure reply. An explicit wait leaves
   the notice available for the next command. The retained save receipt still answers exact reads
   and retries. A newly committed save preparation clears the older notice and fences late failures in that
   Lane. Publication adds up to three metadata lookups and three writes only on a terminal background

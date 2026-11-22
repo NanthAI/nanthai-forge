@@ -7,7 +7,11 @@ import type { Id } from '../../../convex/_generated/dataModel';
 import { Key, State } from '../ds';
 import { A } from './frames';
 
-export type SaveFailure = NonNullable<FunctionReturnType<typeof api.projectHostedLanes.head>['saveFailure']>;
+export type SaveFailure = NonNullable<
+  FunctionReturnType<typeof api.projectHostedLanes.head>['saveFailure']
+> & {
+  canDismiss?: boolean;
+};
 
 export function SaveFailureNotice({
   projectId,
@@ -60,16 +64,20 @@ export function SaveFailureNotice({
         ) : null}
         <code className="mono">{failure.code}</code>
       </p>
-      <Key
-        kind="ghost"
-        size="sm"
-        aria-label={lane ? `Dismiss save failure for ${lane.label}` : 'Dismiss save failure'}
-        aria-disabled={status === 'dismissing'}
-        onClick={() => void press()}
-      >
-        {status === 'dismissing' ? 'Dismissing…' : 'Dismiss'}
-      </Key>
-      {status === 'error' ? <p role="alert">Could not dismiss this save failure.</p> : null}
+      {failure.canDismiss === true ? (
+        <>
+          <Key
+            kind="ghost"
+            size="sm"
+            aria-label={lane ? `Dismiss save failure for ${lane.label}` : 'Dismiss save failure'}
+            aria-disabled={status === 'dismissing'}
+            onClick={() => void press()}
+          >
+            {status === 'dismissing' ? 'Dismissing…' : 'Dismiss'}
+          </Key>
+          {status === 'error' ? <p role="alert">Could not dismiss this save failure.</p> : null}
+        </>
+      ) : null}
     </div>
   );
 }

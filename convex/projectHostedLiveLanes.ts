@@ -17,7 +17,7 @@ import { abandonClass, dormantCutoff, landedByReceipt, overlapEvidence } from '.
 import { intentFinished, maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
 import { isPlanningUuid } from '../src/planning-id';
 import { presenceMayShare } from '../src/hosted-presence';
-import { saveFailureSummary } from './projectHostedSaveStore';
+import { saveFailureForViewer } from './projectHostedSaveStore';
 import type { TreeOverlap } from '../src/lanes-tree';
 
 /** One bounded indexed page, selected metadata only; no source objects or idle work. */
@@ -243,7 +243,9 @@ export const list = query({
             : {}),
           state: lane.state,
           head: lane.head,
-          ...(head.saveFailure ? { saveFailure: saveFailureSummary(head.saveFailure) } : {}),
+          ...(head.saveFailure
+            ? { saveFailure: await saveFailureForViewer(ctx, head.saveFailure, project, actor) }
+            : {}),
           // A resolution Lane names the conflicted Lane it continues (Item d9e1ac62): from the record already read.
           ...(lane.resolution?.origin ? { resolves: lane.resolution.origin.laneId } : {}),
           // Parked (Item e1633718): who it waits on, why and since when, from the record already read.

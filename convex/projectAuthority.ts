@@ -3,7 +3,7 @@ import { journalProject } from './projectJournalStore';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { currentCredential } from './deviceFields';
-import { deviceProjectRefusal } from './accessPolicy';
+import { deviceAllowsSourceWrite, deviceProjectRefusal } from './accessPolicy';
 import type { Doc } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { projectExecution } from './projectExecution';
@@ -76,7 +76,7 @@ async function deviceProject(ctx: QueryCtx | MutationCtx, projectId: string, wri
     deviceProjectRefusal,
   );
   invariant(
-    !writing || settings?.source !== 'read',
+    !writing || deviceAllowsSourceWrite(row),
     'AUTH_SCOPE_DENIED',
     'This device is read only. Change its settings in your Forge browser to write; local work is kept.',
   );

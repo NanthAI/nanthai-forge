@@ -17,7 +17,7 @@ import { lineCounts, type OverlapChange } from '../src/hosted-overlap';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { landedTiming } from './projectLaneTiming';
-import { saveFailureSummary } from './projectHostedSaveStore';
+import { saveFailureForViewer } from './projectHostedSaveStore';
 
 /** Changed paths per reply page. A 128 KB overlap row holds at most about 800, so one page is the usual case. */
 export const REVIEW_PAGE = 400;
@@ -139,7 +139,11 @@ export const read = query({
           head: lane.head,
           base: lane.base,
           landed: row?.landed ? { ...row.landed, timing } : null,
-          ...(record.saveFailure ? { saveFailure: saveFailureSummary(record.saveFailure.value) } : {}),
+          ...(record.saveFailure
+            ? {
+                saveFailure: await saveFailureForViewer(ctx, record.saveFailure.value, project, user.subject),
+              }
+            : {}),
           // Parked (Item e1633718): who it waits on and why, from the record already read.
           ...(lane.state === 'active' && lane.park
             ? { park: { ...lane.park, named: Boolean(lane.park.to) } }

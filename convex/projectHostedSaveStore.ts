@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { sessionMetadataSchema } from '../src/hosted-lane';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { activeProject } from './projectAuthority';
+import { activeProject, readProjectRole } from './projectAuthority';
 import { readHostedRecord, recordHead, hostedWriteProject } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { saveRequestSchema, saveWorkerObjectSchema, saveObjectSchema } from '../src/hosted-save';
@@ -15,6 +15,7 @@ import { invariant } from '../src/errors';
 import { hostedSaveStatuses } from '../src/hosted-save-state';
 import { findStoredObject, type ObjectView } from './projectObjectFind';
 import { sourceServerTimingSchema } from './projectSourceStepTiming';
+import { deviceAllowsSourceWrite } from './accessPolicy';
 
 export const saveStateSchema = z
   .object({
@@ -155,6 +156,23 @@ export const saveFailureSummary = ({
   at,
 });
 
+const mayClearSaveFailure = (failure: SaveFailure, actor: string, owner?: string) =>
+  failure.actor === actor || owner === actor;
+
+export async function saveFailureForViewer(
+  ctx: QueryCtx & { forgeDevice?: Doc<'cliCredentials'> | null },
+  failure: SaveFailure,
+  project: Doc<'hostedProjects'>,
+  actor: string,
+) {
+  // Private reads already checked membership. Public Work projection shares this query's role lookup.
+  const canDismiss =
+    deviceAllowsSourceWrite(ctx.forgeDevice) &&
+    mayClearSaveFailure(failure, actor, project.owner) &&
+    (project.owner === actor || (await readProjectRole(ctx, project, actor)) === 'write');
+  return { ...saveFailureSummary(failure), canDismiss };
+}
+
 /** Only terminal background failures do these indexed reads and writes. The latest prepared
  * save wins even if both saves used the same source pins. A newer prepare clears the old notice in
  * the same transaction that inserts its save row. */
@@ -220,7 +238,7 @@ export async function clearSaveFailure(
   const failure = head?.saveFailure;
   if (!head || failure?.operationId !== input.operationId || failure.attemptId !== input.attemptId)
     return false;
-  if (failure.actor !== input.actor && owner !== input.actor) return false;
+  if (!mayClearSaveFailure(failure, input.actor, owner)) return false;
   await clearLaneSaveFailure(ctx, { id: head._id, value: failure });
   return true;
 }

@@ -30,6 +30,7 @@ const saveFailure =
         attemptId: '5a78d310-8a93-4e4b-a236-f6b76aea2057',
         code: 'WORK_STALE',
         at: 1_790_000_000_000,
+        canDismiss: scenario !== 'save-reader',
       }
     : undefined;
 

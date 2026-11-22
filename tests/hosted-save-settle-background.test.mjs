@@ -684,7 +684,7 @@ test('a settle that fails after the save returned is reported by the next comman
   assert.deepEqual((await query('projectHostedLanes:detail', { laneId })).saveFailure, summary);
   assert.deepEqual(
     (await query('projectHostedLiveLanes:list', { cursor: null, limit: 10 })).page[0].saveFailure,
-    summary,
+    { ...summary, canDismiss: true },
   );
   const laneRead = f.s.counts.at(-1);
   assert.equal(

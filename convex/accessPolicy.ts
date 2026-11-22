@@ -21,6 +21,9 @@ export const keepsDeviceSettings = (action: 'signout' | 'remove') =>
 
 export const deviceProjectRefusal =
   'This device is approved for its selected project only. Change its settings in your Forge browser.';
+export const deviceAllowsSourceWrite = (device?: Pick<Doc<'cliCredentials'>, 'settings'> | null) =>
+  device?.settings?.source !== 'read';
+
 export function requireAccountWriteAccess(device?: Pick<Doc<'cliCredentials'>, 'settings'> | null) {
   const settings = device?.settings;
   invariant(
