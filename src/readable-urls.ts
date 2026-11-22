@@ -27,6 +27,8 @@ export const reservedHandles = new Set([
   'public',
   'terms',
   'privacy',
+  // Static top-level paths the site serves (the built documentation); `assets` above is the other.
+  'docs',
 ]);
 export function handleError(value: string): string | null {
   if (!/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])$/.test(value))

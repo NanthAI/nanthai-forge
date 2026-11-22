@@ -47,6 +47,10 @@ test('default handles come from the username, then the GitHub login, never a rea
   // Every app address under /-/ is reserved, so a profile page never collides with one (Item 8947a779).
   for (const place of ['account', 'signin', 'device', 'new', 'public', 'explore', 'terms', 'privacy'])
     assert.ok(reservedHandles.has(place), place);
+  // Extensionless static paths the site serves at the top level (the built docs, the font and image assets): once the
+  // app serves the root, a handle with the same name would collide with them (Item f8270f82).
+  for (const place of ['docs', 'assets'])
+    assert.equal(handleError(place), 'This handle is reserved for Forge.', place);
   assert.equal(handleError('a1'), null);
   assert.equal(handleError('a'.repeat(39)), null);
   assert.equal(await uniqueUrlName('dino', async value => ['dino', 'dino-2'].includes(value), 39), 'dino-3');
