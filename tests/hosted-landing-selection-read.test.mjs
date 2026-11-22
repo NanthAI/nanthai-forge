@@ -5,14 +5,17 @@ import test from 'node:test';
 import { z } from 'zod';
 import { cliReplyLines } from '../dist/cli-reply-lines.js';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
+import { queueHostedSource } from '../dist/hosted-agent-reads.js';
 import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
 import { slimReceipt } from '../dist/receipt-slim.js';
 import { moduleUrl } from './convex-module.mjs';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { finishFixture, code } from './hosted-finish-fixture.mjs';
 import { batchesFixture, batchStore, synthetic } from './hosted-landing-batches-fixture.mjs';
+import { capsuleMaintenanceFixture } from './landing-capsule-maintenance-fixture.mjs';
 
 const api = await import(moduleUrl('../convex/projectHostedLandingAttemptHistory.ts'));
+const { metricAttemptRow } = await import(moduleUrl('../convex/projectMetricReadProjection.ts'));
 const { splitLandingBatch } = await import(moduleUrl('../convex/projectHostedLandingBatchSplit.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
 test.before(() => Object.assign(process.env, synthetic));
@@ -22,8 +25,10 @@ test.after(() => {
     else process.env[key] = value;
   }
 });
-const read = (f, selection, actor) =>
+const wireRead = (f, selection, actor) =>
   f.tx('landing-selection', api.read, { projectId: f.projectId, ...selection }, actor).then(JSON.parse);
+const read = (f, selection, actor) =>
+  queueHostedSource({ query: (_name, input) => wireRead(f, input, actor) }, selection);
 
 test('incident replay c329d191: CLI and MCP read an exact Candidate selection and the retained origin batch phase', async t => {
   const f = await batchesFixture(t, { count: 2 });
@@ -74,7 +79,7 @@ test('incident replay c329d191: CLI and MCP read an exact Candidate selection an
   const queries = [];
   transport.query = async (name, input) => {
     queries.push(name);
-    return read(f, input);
+    return wireRead(f, input);
   };
   const result = slimReceipt(await hostedAgentCli(cli.root, 'queue', { batchId }, cli.address, transport));
   assert.equal(result.result.batch.phase, 'split');
@@ -136,6 +141,7 @@ test('an exact attempt pages immutable Lane pins and distinguishes missing retai
   f.patch('projectHostedComposeSelections', indexed[0]._id, { head: undefined });
   const initial = await read(f, args);
   const cost = f.counts.findLast(row => row.name === 'landing-selection');
+  assert.equal(cost.readDocumentsByTable.projectHostedLandingAttempts, 1);
   assert.equal(cost.readDocumentsByTable.projectHostedComposeSelections, 33);
   assert.equal(cost.writes, 0);
   const bytes = Buffer.byteLength(JSON.stringify(initial));
@@ -189,6 +195,178 @@ test('a recomposed Candidate reads the original indexed Lane pins even after the
   assert.deepEqual(recomposed.selection, earlier.selection);
   assert.deepEqual(recomposed.selection.lanes, [{ laneId: f.lane.laneId, head: f.lane.head }]);
 });
+
+test('a recheck refusal comes from the selected generation even when the original admission has its own reason', async t => {
+  const f = await finishFixture(t);
+  const state = await f.enqueue(f.request({ agent: false }));
+  await f.drain();
+  f.moveMain();
+  await f.passChecks();
+  await f.drain();
+  const { currentAttemptId } = await read(f, { submissionId: state.id });
+  assert.notEqual(currentAttemptId, state.firstAttemptId);
+  const request = [...f.tables.projectHostedLandingRequests.values()].find(
+    row => row.submissionId === state.id,
+  );
+  f.patch('projectHostedLandingRequests', request._id, {
+    admission: { runId: randomUUID(), status: 'passed', full: true, recheck: 'audit-baseline' },
+  });
+  const initial = await read(f, { submissionId: state.id, attemptId: state.firstAttemptId });
+  assert.equal(initial.checkReuse.proofStatus, 'unavailable');
+  assert.equal(initial.checkReuse.recheckReason, null);
+  const latest = await read(f, { submissionId: state.id, attemptId: currentAttemptId });
+  const generation = [...f.tables.projectHostedLandingAttempts.values()].find(
+    row => row.attemptId === currentAttemptId,
+  );
+  assert.equal(latest.checkReuse.proofStatus, 'unavailable');
+  assert.equal(latest.checkReuse.recheckReason, 'reuse-policy');
+  assert.equal(latest.checkReuse.parentAttemptId, state.firstAttemptId);
+  const lines = cliReplyLines(['agent', '.', 'queue'], { result: latest });
+  assert(lines.includes('Check reuse refusal · reuse-policy'));
+  assert(!lines.some(line => line.includes('audit-baseline')));
+  f.patch('projectHostedLandingRequests', request._id, { admission: request.admission });
+
+  // Replace this checked generation again, then move the request into its ordinary archive.
+  f.moveMain();
+  await f.passChecks();
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  const terminal = await read(f, { submissionId: state.id });
+  assert.notEqual(terminal.currentAttemptId, currentAttemptId);
+  const h = await capsuleMaintenanceFixture(t, { f, state });
+  await h.pack();
+  const requests = h.requests.length;
+  const archived = await read(f, { submissionId: state.id, attemptId: currentAttemptId });
+  assert.deepEqual(archived.checkReuse, latest.checkReuse);
+  assert.equal(archived.candidate, null);
+  assert.equal(archived.main, null);
+  assert.equal(archived.selection, null);
+  assert.equal(h.requests.length, requests);
+  const cost = f.counts.findLast(row => row.name === 'landing-selection');
+  // The meter charges the terminal-pointer index miss as one read, then the compact row.
+  assert.equal(cost.readDocumentsByTable.projectFinishReadRows, 2);
+  assert.equal(cost.writes, 0);
+  t.diagnostic(`Archived refusal: ${cost.documents} metered reads, ${cost.readBytes} DB bytes`);
+  await assert.rejects(
+    read(f, { submissionId: randomUUID(), attemptId: currentAttemptId }),
+    code('NOT_FOUND'),
+  );
+  const compact = [...f.tables.projectFinishReadRows.values()].find(
+    row => row.kind === 'projectHostedLandingAttempts' && row.attemptId === currentAttemptId,
+  );
+  const original = JSON.parse(compact.value);
+  const forkReason = 'retired-running',
+    scopedFallback = 'parent-not-full';
+  const snapshot = {
+    ...original,
+    value: JSON.stringify({
+      ...JSON.parse(original.value),
+      metric: metricAttemptRow({ ...JSON.parse(generation.value), forkReason, scopedFallback }),
+    }),
+  };
+  f.patch('projectFinishReadRows', compact._id, { value: JSON.stringify(snapshot) });
+  assert.deepEqual((await read(f, { submissionId: state.id, attemptId: currentAttemptId })).checkReuse, {
+    ...latest.checkReuse,
+    forkReason,
+    scopedFallback,
+  });
+  f.patch('projectFinishReadRows', compact._id, {
+    value: JSON.stringify({ ...snapshot, submissionId: randomUUID() }),
+  });
+  await assert.rejects(
+    read(f, { submissionId: state.id, attemptId: currentAttemptId }),
+    code('EVIDENCE_CHANGED'),
+  );
+});
+
+function storedFastProof(attempt, extraPaths) {
+  const literalPath = '{"owner":"user_test"}';
+  const checked = { id: randomUUID(), head: 'a'.repeat(64), digest: 'b'.repeat(64) };
+  const runId = attempt.check.runId;
+  const planDigest = 'c'.repeat(64),
+    terminalDigest = 'd'.repeat(64),
+    checkedSelection = 'e'.repeat(64);
+  return {
+    algorithm: 'fast-first-check-v1',
+    checked,
+    checkedBase: { head: 'f'.repeat(64), receiptId: randomUUID() },
+    main: attempt.main,
+    head: attempt.candidate.head,
+    runId,
+    terminalDigest,
+    planDigest,
+    candidatePaths: [literalPath, 'package.json', ...extraPaths],
+    mainPaths: [literalPath, 'src/peer.ts'],
+    checkedSelection,
+    cleanComposition: true,
+    audit: {
+      source: 'audit',
+      head: attempt.main.head,
+      runId: randomUUID(),
+      terminalDigest,
+      planDigest,
+      selection: checkedSelection,
+      sequence: 1,
+      coverage: 'main-audit-debt',
+    },
+    riskRule: 'first-check-risk-v7',
+    checkEntries: [],
+    checkedScope: 'full',
+    docsOverlap: [],
+    identicalPaths: [literalPath],
+    testedDocsRule: 'name-mention-v1',
+    relaxed: ['global-risk'],
+    riskPaths: ['package.json'],
+  };
+}
+
+for (const wide of [false, true])
+  test(`terminal capsule keeps the exact attempt's ${wide ? 'proof pins when detail exceeds the reply budget' : 'retained reuse proof'}`, async t => {
+    const h = await capsuleMaintenanceFixture(t);
+    const { f, state } = h;
+    const { currentAttemptId: attemptId } = await read(f, { submissionId: state.id });
+    const args = { submissionId: state.id, attemptId };
+    const row = [...f.tables.projectHostedLandingAttempts.values()].find(row => row.attemptId === attemptId);
+    const attempt = JSON.parse(row.value);
+    const extraPaths = wide ? Array.from({ length: 400 }, (_, i) => `src/${i}-${'試'.repeat(64)}.ts`) : [];
+    const proof = storedFastProof(attempt, extraPaths);
+    f.patch('projectHostedLandingAttempts', row._id, {
+      value: JSON.stringify({ ...attempt, crossHeadProof: proof }),
+    });
+
+    const before = await read(f, args);
+    if (wide) {
+      assert.equal(before.checkReuse.proofStatus, 'byte-omitted');
+      assert.equal(before.checkReuse.crossHeadProof, undefined);
+      assert.deepEqual(before.checkReuse.proofPins.checked, proof.checked);
+      assert.deepEqual(before.checkReuse.proofPins.audit, proof.audit);
+      assert.equal(before.checkReuse.proofPins.riskRule, proof.riskRule);
+      assert.deepEqual(before.checkReuse.proofPins.relaxed, proof.relaxed);
+      assert.equal(before.checkReuse.proofPins.testedDocsRule, proof.testedDocsRule);
+      assert.equal(before.checkReuse.proofPins.checkedScope, proof.checkedScope);
+      assert.equal(before.checkReuse.proofPins.cleanComposition, proof.cleanComposition);
+    } else {
+      assert.equal(before.checkReuse.proofStatus, 'retained');
+      assert.deepEqual(before.checkReuse.crossHeadProof, proof);
+    }
+
+    await h.pack();
+    assert(!f.tables.projectHostedLandingAttempts.has(row._id));
+    const requestsBefore = h.requests.length;
+    const wire = await wireRead(f, args);
+    const cost = f.counts.findLast(row => row.name === 'landing-selection');
+    assert.deepEqual(await read(f, args), before);
+    assert.equal(h.requests.length, requestsBefore);
+    assert.equal(cost.writes, 0);
+    const bytes = Buffer.byteLength(JSON.stringify(JSON.stringify(wire)));
+    assert(bytes < 64_000);
+    t.diagnostic(
+      `Archived selection: ${cost.documents} DB documents, ${cost.readBytes} DB bytes, ${bytes} encoded query bytes`,
+    );
+    await assert.rejects(read(f, { ...args, submissionId: randomUUID() }), code('NOT_FOUND'));
+    await assert.rejects(read(f, args, 'outsider'), code('PROJECT_UNAVAILABLE'));
+  });
 
 test('a retained batch conflict Candidate reads the member’s original selection with matching roots', async t => {
   const f = await batchesFixture(t, { conflict: true });

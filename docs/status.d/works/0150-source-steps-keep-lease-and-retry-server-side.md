@@ -10,4 +10,5 @@
   retained phase durations and causes, including a source failure during recomposition.
   `queue {batchId}` shows a retained batch's phase and members.
   `queue {submissionId,attemptId}` shows the installed attempt's exact Candidate
-  pins and a page of its retained Lane inputs. Each read is bounded and on demand.
+  pins, a page of its retained Lane inputs, and stored check reuse proof or
+  refusal evidence for that attempt. Each read is bounded and on demand.

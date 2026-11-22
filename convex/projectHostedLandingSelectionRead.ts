@@ -7,14 +7,99 @@ import { composeStateSchema } from './projectHostedComposeStore';
 import { landingAttemptRow, loadLandingAttempt } from './projectHostedLandingAttemptRead';
 import { landingRow, landingStateFromRow } from './projectHostedLandingStore';
 import { capsuleAttempt } from './projectLandingCapsuleStore';
+import { readMetricAttemptPins } from './projectMetricReadProjection';
 import { invariant } from '../src/errors';
 import { saveObjectSchema } from '../src/hosted-save';
 import type { HostedLandingAttempt } from '../src/hosted-landing';
+import type { CrossHeadProof } from '../src/hosted-cross-head-proof';
+import { LANDINGS_OUTPUT_BYTES } from '../src/hosted-landings-view';
 
 const LANE_PAGE = 32;
 type Project = Id<'hostedProjects'>;
 type Candidate = HostedLandingAttempt['candidate'];
 const composePinSchema = composeStateSchema.pick({ candidateId: true, request: true, status: true });
+
+function reuseProofPins(proof: CrossHeadProof) {
+  const {
+    algorithm,
+    checked,
+    checkedBase,
+    main,
+    head,
+    runId,
+    terminalDigest,
+    planDigest,
+    checkedSelection,
+    cleanComposition,
+    audit,
+  } = proof;
+  return {
+    algorithm,
+    checked,
+    checkedBase,
+    main,
+    head,
+    runId,
+    terminalDigest,
+    planDigest,
+    checkedSelection,
+    cleanComposition,
+    audit,
+    ...('checkedScope' in proof ? { checkedScope: proof.checkedScope } : {}),
+    ...('riskRule' in proof ? { riskRule: proof.riskRule } : {}),
+    ...('testedDocsRule' in proof ? { testedDocsRule: proof.testedDocsRule } : {}),
+    ...('relaxed' in proof ? { relaxed: proof.relaxed } : {}),
+  };
+}
+
+type ReusePins = {
+  parentAttemptId: string | null;
+  runId: string | null;
+  recheckReason: string | null;
+  forkReason: string | null;
+  scopedFallback: string | null;
+};
+
+function selectedAttemptReply(reply: object, checkReuse: ReusePins, proof?: CrossHeadProof) {
+  const encoder = new TextEncoder();
+  const encode = (proofStatus: 'retained' | 'unavailable' | 'byte-omitted', fields: object = {}) => {
+    // Paths can look like embedded JSON. Keep those literal bytes through the public person mapper.
+    const bytes = encoder.encode(JSON.stringify({ ...checkReuse, proofStatus, ...fields }));
+    if (Math.ceil(bytes.length / 3) * 4 > LANDINGS_OUTPUT_BYTES) return null;
+    const text = JSON.stringify({ ...reply, checkReuseBase64: btoa(String.fromCharCode(...bytes)) });
+    return encoder.encode(JSON.stringify(text)).length <= LANDINGS_OUTPUT_BYTES ? text : null;
+  };
+  if (proof) {
+    const full = encode('retained', { crossHeadProof: proof });
+    if (full) return full;
+    const pins = encode('byte-omitted', { proofPins: reuseProofPins(proof) });
+    if (pins) return pins;
+  }
+  const bounded = encode(proof ? 'byte-omitted' : 'unavailable');
+  invariant(bounded, 'SOURCE_UNAVAILABLE', 'The retained attempt selection exceeds the reply budget.');
+  return bounded;
+}
+
+async function archivedRefusal(ctx: QueryCtx, projectId: Project, submissionId: string, attemptId: string) {
+  const row = await ctx.db
+    .query('projectFinishReadRows')
+    .withIndex('by_kind_and_project_and_attempt', q =>
+      q.eq('kind', 'projectHostedLandingAttempts').eq('projectId', projectId).eq('attemptId', attemptId),
+    )
+    .unique();
+  invariant(row?.submissionId === submissionId, 'NOT_FOUND', 'Hosted landing attempt not found.');
+  const pins = readMetricAttemptPins(row);
+  invariant(
+    pins.id === attemptId && pins.submissionId === submissionId,
+    'EVIDENCE_CHANGED',
+    'The retained attempt identity differs.',
+  );
+  const { parentAttemptId, runId, recheckReason, forkReason, scopedFallback } = pins;
+  return selectedAttemptReply(
+    { submissionId, attemptId, main: null, candidate: null, selection: null },
+    { parentAttemptId, runId, recheckReason, forkReason, scopedFallback },
+  );
+}
 
 function composeForCandidate(ctx: QueryCtx, projectId: Project, candidateId: string) {
   return ctx.db
@@ -104,7 +189,7 @@ export async function landingSelectionRead(
     invariant(row, 'NOT_FOUND', 'Hosted landing batch not found.');
     const batch = batchSchema.parse(JSON.parse(row.value));
     invariant(batch.id === selection.batchId, 'EVIDENCE_CHANGED', 'The retained batch identity differs.');
-    return {
+    return JSON.stringify({
       batch: {
         id: batch.id,
         phase: batch.phase,
@@ -116,24 +201,35 @@ export async function landingSelectionRead(
           head: member.candidate.head,
         })),
       },
-    };
+    });
   }
   const { attemptId, submissionId, afterLaneId } = selection;
   const key = { projectId, attemptId };
   const row = await landingAttemptRow(ctx, key);
   const attempt = row ? await loadLandingAttempt(ctx, key, row) : await capsuleAttempt(ctx, key);
-  invariant(attempt?.submissionId === submissionId, 'NOT_FOUND', 'Hosted landing attempt not found.');
+  if (!attempt) return archivedRefusal(ctx, projectId, submissionId, attemptId);
+  invariant(attempt.submissionId === submissionId, 'NOT_FOUND', 'Hosted landing attempt not found.');
   const { candidate } = attempt;
-  return {
-    submissionId,
-    attemptId,
-    main: attempt.main,
-    candidate: {
-      id: candidate.id,
-      head: candidate.head,
-      inputs: candidate.inputs,
-      dependencies: candidate.dependencies,
+  return selectedAttemptReply(
+    {
+      submissionId,
+      attemptId,
+      main: attempt.main,
+      candidate: {
+        id: candidate.id,
+        head: candidate.head,
+        inputs: candidate.inputs,
+        dependencies: candidate.dependencies,
+      },
+      selection: await candidateSelection(ctx, projectId, attempt, afterLaneId),
     },
-    selection: await candidateSelection(ctx, projectId, attempt, afterLaneId),
-  };
+    {
+      parentAttemptId: attempt.parentAttemptId,
+      runId: attempt.check?.runId ?? null,
+      recheckReason: attempt.recheckReason ?? null,
+      forkReason: attempt.forkReason ?? null,
+      scopedFallback: attempt.scopedFallback ?? null,
+    },
+    attempt.crossHeadProof,
+  );
 }

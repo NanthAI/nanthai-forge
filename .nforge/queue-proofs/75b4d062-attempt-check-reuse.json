@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingAttemptHistory.ts": "af249bf7622c795465383fce4b2a20b83bd985a44c1814b12e8e16e1f1ac7e71",
+    "convex/projectHostedLandingSelectionRead.ts": "5c0c86bcaef0008ddee6c53cf806dd1c240e58840afce3749ffef416be2e536e"
+  },
+  "replay": {
+    "incident": "c329d191",
+    "test": "incident replay c329d191: CLI and MCP read an exact Candidate selection and the retained origin batch phase",
+    "receipt": "710b099e-f498-4f4a-bd0d-a9077799706e"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Ad7d19e38-6cea-47e8-8b46-35205b417543",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:subagent:428353302aace1d5",
+    "receipt": "2eea461e-4f0c-4baf-837d-2be16453373b"
+  }
+}

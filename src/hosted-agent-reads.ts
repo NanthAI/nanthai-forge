@@ -111,7 +111,7 @@ export const hostedQueueSchema = z
     submissionId: z.uuid().optional(),
     /** Continue with the selected submission's nextBeforeAttempt. */
     beforeAttempt: z.number().int().nonnegative().optional(),
-    /** Read the Candidate and its inputs for this exact attempt of submissionId. */
+    /** Read the Candidate inputs and check reuse evidence for this exact attempt of submissionId. */
     attemptId: z.uuid().optional(),
     /** Continue with the selected Candidate's nextAfterLaneId. */
     afterLaneId: z.uuid().optional(),
@@ -133,7 +133,11 @@ export async function queueHostedSource(transport: HostedAgentTransport, input: 
   const { laneId: selected, limit, ...selection } = parsed.data;
   if (selection.submissionId || selection.batchId) {
     const query = 'projectHostedLandingAttemptHistory:read';
-    const page = await transport.query<{ archived?: true }>(query, selection);
+    const page = await transport.query<{ archived?: true; checkReuseBase64?: string }>(query, selection);
+    if (typeof page?.checkReuseBase64 === 'string') {
+      const { checkReuseBase64, ...attempt } = page;
+      return { ...attempt, checkReuse: JSON.parse(Buffer.from(checkReuseBase64, 'base64').toString('utf8')) };
+    }
     return page?.archived
       ? transport.action('projectLandingCapsuleRead:history', { query, request: JSON.stringify(selection) })
       : page;

@@ -40,7 +40,8 @@ export function metricAttemptRow(attempt: import('../src/hosted-landing').Hosted
     ...(attempt.forkReason ? [attempt.forkReason] : []),
   ];
 }
-export function readMetricAttempt(row: import('./_generated/dataModel').Doc<'projectFinishReadRows'>) {
+/** An archived generation's compact row keeps its two reason fields separately. */
+export function readMetricAttemptPins(row: import('./_generated/dataModel').Doc<'projectFinishReadRows'>) {
   const value = JSON.parse(row.value);
   const attempt = JSON.parse(value.value);
   const [
@@ -62,8 +63,14 @@ export function readMetricAttempt(row: import('./_generated/dataModel').Doc<'pro
     mainHead,
     inputPin: memberInputs ?? attempt.candidate.inputs,
     runId,
-    recheckReason: recheckReason ?? forkReason ?? null,
+    recheckReason: recheckReason ?? null,
+    forkReason: forkReason ?? null,
     scopedFallback,
     actorKind,
   };
+}
+
+export function readMetricAttempt(row: import('./_generated/dataModel').Doc<'projectFinishReadRows'>) {
+  const { forkReason, ...metric } = readMetricAttemptPins(row);
+  return { ...metric, recheckReason: metric.recheckReason ?? forkReason };
 }

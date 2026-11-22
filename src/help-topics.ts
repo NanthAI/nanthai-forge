@@ -124,7 +124,7 @@ CHECK_NOT_PASSED: acceptance needs a passed check for this exact head; land --sa
     title: 'The landing queue',
     text: `queue {limit?,laneId?} lists Lane, Intent, phase, suspect, failing files and recompose count in dispatch order. yourLane gives your position. Held entries follow with position null and hold {kind,reason,paths,next}. One bounded read, no idle cost.
 - queue {submissionId,beforeAttempt?} shows attempts newest first with phase times and causes. Continue with nextBeforeAttempt.
-- queue {batchId} shows retained phase and members. queue {submissionId,attemptId,afterLaneId?} shows Candidate pins and Lane inputs. Continue with nextAfterLaneId.
+- queue {batchId} shows retained phase and members. queue {submissionId,attemptId,afterLaneId?} shows Candidate pins, Lane inputs and retained check reuse evidence. Continue with nextAfterLaneId.
 - SYNC_REQUIRED while queued: main landed a file your entry changes; run the one land --save it names instead of waiting.
 - cancel {submissionId} stops one named submission. land --withdraw selects the Lane's own live landing by default.
 - LANDING_CANCELLED: the landing was withdrawn or cancelled; the Lane and its saves stay. Fix if needed and land --save again.

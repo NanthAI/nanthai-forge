@@ -100,10 +100,29 @@ export function cliReplyLines(args: string[], output: unknown): string[] {
       ),
     ];
   const candidate = row(result.candidate);
-  if (action === 'queue' && result.attemptId && candidate.id) {
+  if (action === 'queue' && result.attemptId && (candidate.id || result.checkReuse)) {
     const selection = row(result.selection);
+    const reuse = row(result.checkReuse);
+    const proof = row(reuse.crossHeadProof ?? reuse.proofPins);
     return [
-      `Candidate ${text(candidate.id)} · attempt ${text(result.attemptId)} · main ${text(row(result.main).head)}`,
+      candidate.id
+        ? `Candidate ${text(candidate.id)} · attempt ${text(result.attemptId)} · main ${text(row(result.main).head)}`
+        : `Attempt ${text(result.attemptId)} · full Candidate pins unavailable`,
+      ...(reuse.proofStatus === 'retained'
+        ? [`Check reuse proof · ${text(proof.algorithm)} · run ${text(proof.runId)}`]
+        : []),
+      ...(reuse.proofStatus === 'byte-omitted'
+        ? ['Check reuse proof detail omitted by the reply byte budget.']
+        : []),
+      ...(reuse.recheckReason ? [`Check reuse refusal · ${text(reuse.recheckReason)}`] : []),
+      ...(reuse.forkReason ? [`Check attempt fork · ${text(reuse.forkReason)}`] : []),
+      ...(reuse.scopedFallback ? [`Scoped recheck fallback · ${text(reuse.scopedFallback)}`] : []),
+      ...(reuse.proofStatus === 'unavailable' &&
+      !reuse.recheckReason &&
+      !reuse.forkReason &&
+      !reuse.scopedFallback
+        ? ['Check reuse evidence unavailable for this attempt.']
+        : []),
       result.selection === null
         ? 'Retained input selection unavailable.'
         : `${count(selection.inputCount)} Lane inputs · ${count(selection.dependencyCount)} Candidate dependencies`,

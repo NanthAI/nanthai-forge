@@ -32,8 +32,19 @@ MCP `forge_review` exposes hosted `show`, `diff`, `peers` and `queue`.
   count with an empty list is a recorded empty input set, as for a shared Candidate
   composed entirely from dependencies. Compare the total Lane rows with the count
   to identify incomplete history. The selector uses transactional attempt pins,
-  including the terminal attempt retained for a capsule. Earlier capsule-only
-  attempts and unavailable batch IDs return `NOT_FOUND`.
+  including the terminal attempt retained for a capsule. Earlier archived attempts
+  with a compact record return its stored check reasons and null main, Candidate
+  and selection fields. Evidence that requires the capsule bytes stays unavailable
+  in this selector. Unknown attempts and unavailable batch IDs return `NOT_FOUND`.
+  `checkReuse` names that attempt's parent and stored check run, recheck reason,
+  fork reason and scoped fallback. A null reason means that field was unavailable
+  in the selected attempt record. The receipt's aggregate first-check reason
+  describes the admission check. A `retained` proof includes the exact
+  `crossHeadProof`. `unavailable` means this selector found no proof in the
+  transactional records it reads.
+  `byte-omitted` means the proof exceeded the reply budget, with its identity
+  and rule pins in `proofPins` when they fit. The reply stays under 64 KB,
+  including the Candidate and the selected page of Lane inputs.
   Both selectors use one authorized query per reply, without source downloads or writes.
 
 - `peers {laneId,path?,detail?}` reads saved peer evidence in one query,
