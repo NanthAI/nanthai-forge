@@ -17,6 +17,7 @@ import {
   PUBLIC_CODE_INGRESS,
   publicCodeIngressKey,
 } from '../dist/public-code-cache.js';
+import { clientHash } from '../dist/client-hash.js';
 
 const functionSource = moduleSource('../netlify/functions/public-read.mts')
   .replace(
@@ -131,6 +132,35 @@ test('a public file uses scoped Worker ingress and the site keeps only its remai
     response.headers.get('netlify-cdn-cache-control'),
     'public, durable, s-maxage=14, must-revalidate',
   );
+});
+
+test('b6588425: a miss forwards only the keyed hash of the platform address, never one the visitor sends', async t => {
+  const asked = backend(t, () => json({ found: true }));
+  const previous = process.env.FORGE_CLIENT_HASH_KEY;
+  process.env.FORGE_CLIENT_HASH_KEY = 'synthetic-client-hash-key';
+  t.after(() =>
+    previous === undefined
+      ? delete process.env.FORGE_CLIENT_HASH_KEY
+      : (process.env.FORGE_CLIENT_HASH_KEY = previous),
+  );
+  process.env.FORGE_PUBLIC_CODE_WORKER_URL = WORKER_URL;
+  const forged = { headers: { 'x-forge-client': 'f'.repeat(64), 'x-forwarded-for': '198.51.100.9' } };
+  const ip = '203.0.113.7';
+  await serve(new Request('https://site.example/-' + CODE_PATH, forged), { ip });
+  await serve(new Request('https://site.example/-/public/v1/code/ada/atlas/history.json', forged), { ip });
+  await serve(new Request('https://site.example/-' + CODE_PATH, forged));
+  const hash = await clientHash('synthetic-client-hash-key', ip);
+  assert.deepEqual(
+    asked.map(({ url, headers }) => [new URL(url).origin, headers.get('x-forge-client')]),
+    [
+      [WORKER_URL, hash],
+      [SITE, hash],
+      [WORKER_URL, null],
+    ],
+    'the Worker and the backend get the hash; without a platform address nothing is forwarded',
+  );
+  for (const { url, headers } of asked)
+    assert.ok(!`${url} ${JSON.stringify([...headers])}`.match(/203\.0\.113\.7|198\.51\.100\.9/));
 });
 
 test('past or out-of-window Worker expiries cannot populate the site cache', async t => {

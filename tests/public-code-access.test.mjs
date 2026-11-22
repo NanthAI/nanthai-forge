@@ -167,7 +167,9 @@ test('signed-in Code opens a registered exact State without loading its stale Wo
   );
   project.visibility = 'public';
   s.caller(null);
-  assert.equal((await outcome(read)).code, 'SOURCE_UNAVAILABLE', 'visitors keep the checkpoint boundary');
+  // Signed out, the members' action refuses: visitors read through the cached public route, which carries their
+  // per-visitor limit (Item b6588425), so a direct client cannot skip it.
+  assert.equal((await outcome(read)).code, 'PROJECT_UNAVAILABLE', 'visitors use the public route');
   project.visibility = 'private';
   s.caller('reader');
   const received = [];
@@ -227,13 +229,13 @@ test('signed-in Code opens a registered exact State without loading its stale Wo
   assert.equal((await outcome(() => read({ state: revoked }))).code, 'PROJECT_UNAVAILABLE');
 });
 
-async function visitor(s, path, method = 'GET') {
+async function visitor(s, path, method = 'GET', client) {
   s.caller(null);
   const response = await route.serve._handler(
     s.ctx,
     new Request(`https://backend.test/public/v1/code/${path}`, {
       method,
-      headers: { 'x-forge-public-key': KEY },
+      headers: { 'x-forge-public-key': KEY, ...(client ? { 'x-forge-client': client } : {}) },
     }),
   );
   return { status: response.status, body: await response.text(), headers: response.headers };
@@ -590,6 +592,48 @@ test('the visitor route only reads: GET only, no person, no Lane or Item id, and
     writes.every(name => name === 'projectSourceReviewStore:checkpoint'),
     writes.join(),
   );
+});
+
+test('per-visitor limit (b6588425): a noisy visitor is refused after 60 source reads an hour while another is served', async t => {
+  storageClock(t);
+  const { VISITOR_BUDGET } = await import(moduleUrl('../convex/visitorBudget.ts'));
+  const { ANONYMOUS_READ_BUDGET } = await import(moduleUrl('../convex/abuseLimits.ts'));
+  assert.equal(VISITOR_BUDGET.reads.perHour, 60, 'owner number 2026-11-22');
+  const s = await setup(t, 'public');
+  const noisy = '1'.repeat(64),
+    quiet = '2'.repeat(64);
+  const folder = `ada/atlas/${s.head}/open/-.json`;
+  const at = Date.UTC(2026, 10, 10, 12);
+  let now = at;
+  t.mock.method(Date, 'now', () => now);
+  // Two reads a minute keep the project's own per-minute budget out of the way; the visitor's hour fills.
+  for (let i = 0; i < VISITOR_BUDGET.reads.perHour; i++) {
+    now = at + i * 30_000;
+    assert.equal((await visitor(s, folder, 'GET', noisy)).status, 200, `read ${i + 1}`);
+  }
+  const spent = () =>
+    [...(s.tables.projectReadBudgets?.values() ?? [])].reduce((sum, row) => sum + row.count, 0);
+  const before = spent();
+  const refused = await visitor(s, folder, 'GET', noisy);
+  assert.equal(refused.status, 429);
+  assert.equal(
+    refused.headers.get('cache-control'),
+    'no-store',
+    "one visitor's refusal is never cached for others",
+  );
+  const body = JSON.parse(refused.body);
+  assert.equal(body.code, 'RATE_LIMITED');
+  assert.match(
+    body.message,
+    /^Signed-out reads from your network are at their limit of 60 an hour\. Sign in/,
+  );
+  assert.equal(spent(), before, 'a refused visitor spends none of the project budget');
+  assert.equal((await visitor(s, folder, 'GET', quiet)).status, 200, 'the other visitor is served');
+  assert.ok(ANONYMOUS_READ_BUDGET.calls >= 120, 'the project backstop stays');
+  // The site always sends the key; a site that sends none (an older edge) still reads under the project budget.
+  assert.equal((await visitor(s, folder)).status, 200);
+  const rows = [...s.tables.deviceAttempts.values()].filter(row => row.owner.startsWith('visitor:read:'));
+  assert.deepEqual(rows.map(row => row.owner).sort(), [`visitor:read:${noisy}`, `visitor:read:${quiet}`]);
 });
 
 test('signed out, a failing read says what happened: over budget 429, no source yet 409, made private mid-read 404', async t => {

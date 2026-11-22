@@ -11,6 +11,7 @@ import { internal } from './_generated/api';
 import { bytesFromRow } from './projectExchangeReader';
 import { readSourceReview, renderCheckpointSource } from './projectSourceReview';
 import { report } from './errors';
+import { holdVisitorRead } from './visitorBudget';
 import { invariant } from '../src/errors';
 import {
   ancestors,
@@ -198,7 +199,10 @@ export const read = action({
   returns: v.string(),
   handler: async (ctx, input): Promise<string> => {
     try {
-      return await readCode(ctx, input, (await ctx.auth.getUserIdentity())?.subject ?? '');
+      const user = await ctx.auth.getUserIdentity();
+      // Signed-out visitors read through the site's cached public route, which carries their visitor limit.
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read code here, or open the project’s public page.');
+      return await readCode(ctx, input, user.subject);
     } catch (error) {
       return report(error);
     }
@@ -207,12 +211,13 @@ export const read = action({
 
 /** The same read for a signed-out visitor of a public project (Item 4c164732), run only by the cached public route
  * (publicHttp.ts) on a cache miss. It carries no identity: a private or removed project is refused like a missing one,
- * and the read is charged to the project's signed-out read budget. */
+ * and the read is charged to the visitor's limit, then to the project's signed-out read budget. */
 export const visitorRead = internalAction({
-  args: readArgs,
+  args: { ...readArgs, client: v.optional(v.string()) },
   returns: v.string(),
-  handler: async (ctx, input): Promise<string> => {
+  handler: async (ctx, { client, ...input }): Promise<string> => {
     try {
+      holdVisitorRead(ctx, client);
       return await readCode(ctx, input, '');
     } catch (error) {
       // Only a ConvexError keeps its code across runAction: the route maps codes to 404, 429 and 409.

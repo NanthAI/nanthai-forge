@@ -424,9 +424,9 @@ test('browser renews retired Convex object URLs through describe and verifies th
   );
 });
 
-test('public anonymous Code reads retain exact checkpoint selection', async t => {
+test('public rendered Code reads retain exact checkpoint selection', async t => {
   const f = await sourceFixture(t);
-  f.s.caller(null);
+  f.s.caller('public-reader');
   f.s.tables.hostedProjects.get('project').visibility = 'public';
   assert.equal(
     JSON.parse(await readBrowserSource(f.browser, { ...f.input, file: 'a.ts' }, true)).after.text,
@@ -718,14 +718,21 @@ test('verifiedBytes returns matching bytes and rejects a mismatch with BLOB_DIGE
   });
 });
 
-test('signed-out people can view a public file but cannot download its object archive, even after a view warmed the cache', async t => {
+// Signed-out visitors read public code through the site's cached route, which carries their per-visitor limit
+// (Item b6588425); a direct signed-out client gets neither the rendered view nor an archive, and spends no source IO.
+test('signed-out direct clients get neither the rendered view nor the object archive; a signed-in public reader gets both', async t => {
   const f = await sourceFixture(t);
-  f.s.caller(null);
   f.s.tables.hostedProjects.get('project').visibility = 'public';
+  f.s.caller('public-reader');
   const view = JSON.parse(await readBrowserSource(f.browser, { ...f.input, file: 'a.ts' }, true));
   assert(!JSON.stringify(view).includes('X-Amz-'), 'public rendering returns no object URLs');
   assert.equal(view.after.text, 'export const value = 2;\n');
+  f.s.caller(null);
   const before = f.fake.requests.length;
+  await assert.rejects(
+    readBrowserSource(f.browser, { ...f.input, file: 'a.ts' }, true),
+    code('PROJECT_UNAVAILABLE'),
+  );
   await assert.rejects(downloadObjectArchive(f.browser, 'project', 'backup'), code('PROJECT_UNAVAILABLE'));
   assert.equal(f.fake.requests.length, before, 'refusal performs no object IO');
   f.s.caller('public-reader');
@@ -736,7 +743,7 @@ test('signed-out people can view a public file but cannot download its object ar
 test('public rendered views return file pages and paths, while binary bodies and archive plans stay private', async t => {
   const f = await sourceFixture(t, [true, true], [Buffer.from([0, 1, 2]), Buffer.from([0, 3, 4])]);
   f.s.tables.hostedProjects.get('project').visibility = 'public';
-  f.s.caller(null);
+  f.s.caller('public-reader');
   const file = JSON.parse(await readBrowserSource(f.browser, { ...f.input, file: 'a.ts' }, true));
   assert.equal(file.after.kind, 'binary');
   assert.equal(file.after.text, undefined);
@@ -745,6 +752,7 @@ test('public rendered views return file pages and paths, while binary bodies and
   assert(!JSON.stringify(file).includes('X-Amz-'));
   const tree = JSON.parse(await readBrowserSource(f.browser, f.input, true));
   assert.equal(tree.paths[0].path, 'a.ts');
+  f.s.caller(null);
   for (const method of ['source', 'describe', 'signDownloads'])
     await assert.rejects(
       modules.projectObjectDownloads[method]._handler(
@@ -759,13 +767,17 @@ test('public rendered views return file pages and paths, while binary bodies and
 
 test('public rendering refuses private projects before source IO and rechecks a public project after IO', async t => {
   const f = await sourceFixture(t, [true, true]);
-  f.s.caller(null);
   const before = f.fake.requests.length;
-  await assert.rejects(
-    readBrowserSource(f.browser, { ...f.input, file: 'a.ts' }, true),
-    code('PROJECT_UNAVAILABLE'),
-  );
-  assert.equal(f.fake.requests.length, before);
+  for (const caller of ['public-reader', null]) {
+    f.s.caller(caller);
+    await assert.rejects(
+      readBrowserSource(f.browser, { ...f.input, file: 'a.ts' }, true),
+      code('PROJECT_UNAVAILABLE'),
+    );
+    await assert.rejects(downloadObjectArchive(f.browser, 'project', 'backup'), code('PROJECT_UNAVAILABLE'));
+  }
+  assert.equal(f.fake.requests.length, before, 'signed in or out, a private project costs no object IO');
+  f.s.caller('public-reader');
   f.s.tables.hostedProjects.get('project').visibility = 'public';
   const fetch = globalThis.fetch;
   globalThis.fetch = async (...args) => {
@@ -799,7 +811,7 @@ for (const files of [4000, 29000])
     const directCalls = f.browser.calls.length + internal;
     internal = 0;
     f.browser.calls.length = 0;
-    f.s.caller(null);
+    f.s.caller('public-reader');
     const rendered = JSON.parse(await readBrowserSource(f.browser, selection, true));
     const renderCalls = f.browser.calls.length + internal;
     assert.equal(rendered.after.text, baseline.after.text);

@@ -2,6 +2,7 @@
 import { v } from 'convex/values';
 import { internalMutation } from './server';
 import { takeDeviceBudget } from './deviceBudget';
+import { takeVisitorDevice } from './visitorBudget';
 import { deviceOperation, finishDeviceOperation } from './deviceOperation';
 import { invariant } from '../src/errors';
 import { deviceApprovalExpired, deviceSignInExpiry } from './deviceFields';
@@ -12,6 +13,14 @@ const args = {
   at: v.number(),
   proofHash: v.string(),
 };
+/** The visitor key the site forwarded (convex/visitorBudget.ts); charged before the deployment budget. */
+async function allowed(ctx: import('./server').MutationCtx, client: string | undefined) {
+  const refused = await takeVisitorDevice(ctx, client, () => takeDeviceBudget(ctx));
+  // A renewal keeps its `status: 'slow_down'` answer; the visitor sentence rides along for the CLI.
+  if (!refused) return null;
+  const { error_description } = refused as { error_description?: string };
+  return { status: 'slow_down' as const, ...(error_description ? { error_description } : {}) };
+}
 async function selected(
   ctx: import('./server').QueryCtx | import('./server').MutationCtx,
   input: { credentialId: string; key: string },
@@ -29,16 +38,16 @@ async function selected(
 }
 /** Budget and reserve the original operation before signing; lost replies spend no second allowance. */
 export const renewal = internalMutation({
-  args,
+  args: { ...args, client: v.optional(v.string()) },
   returns: v.string(),
-  handler: async (ctx, input) => {
+  handler: async (ctx, { client, ...input }) => {
     const row = await ctx.db
       .query('cliCredentials')
       .withIndex('by_credentialId', q => q.eq('credentialId', input.credentialId))
       .unique();
     if (!row || row.deviceKey !== input.key) {
-      const allowed = await takeDeviceBudget(ctx);
-      return JSON.stringify({ row: null, result: { status: allowed ? 'unapproved' : 'slow_down' } });
+      const refused = await allowed(ctx, client);
+      return JSON.stringify({ row: null, result: refused ?? { status: 'unapproved' } });
     }
     const receipt = await deviceOperation(ctx, row.owner, input.operationId, input);
     if (receipt.result) {
@@ -53,7 +62,8 @@ export const renewal = internalMutation({
               : null;
       return JSON.stringify(status ? { row: null, result: { status } } : { row, result: receipt.result });
     }
-    if (!(await takeDeviceBudget(ctx))) return JSON.stringify({ row: null, result: { status: 'slow_down' } });
+    const refused = await allowed(ctx, client);
+    if (refused) return JSON.stringify({ row: null, result: refused });
     const issuedAt = Math.floor(Date.now() / 1000) * 1000;
     const reserved = { status: 'reserved', issuedAt, expiresAt: deviceSignInExpiry(row, issuedAt) };
     await finishDeviceOperation(ctx, receipt, input.operationId, row.credentialId, reserved);

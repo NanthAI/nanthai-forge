@@ -12,6 +12,8 @@ import { httpRouter } from 'convex/server';
 import { httpAction } from './_generated/server';
 import { internal } from './_generated/api';
 import { workerAuthorized } from '../src/worker-auth';
+import { CLIENT_HASH, CLIENT_HEADER, SITE_DEVICE_HEADER } from '../src/client-hash';
+import { sameSecret } from './siteSecret';
 import { githubWebhookAuthorized } from '../src/github-webhook';
 import { pullRequestEvent } from '../src/github-pull-check';
 import { INSTALLATION_EVENT_PAGE, installationRepositories } from './sync';
@@ -185,13 +187,50 @@ http.route({
     }
   }),
 });
+/** Sign-in starts and renewals come through the site's edge (netlify/functions/device-auth.mts) once
+ * FORGE_SITE_DEVICE_KEY is set here: the edge proves itself with that key and forwards the visitor's keyed hash, which
+ * carries the per-visitor limit (convex/visitorBudget.ts). A direct caller is told where to go and nothing runs. */
+async function deviceVisitor(request: Request) {
+  const required = process.env.FORGE_SITE_DEVICE_KEY;
+  if (!required) return { client: undefined };
+  if (!(await sameSecret(required, request.headers.get(SITE_DEVICE_HEADER)))) {
+    const site = process.env.FORGE_WEB_URL;
+    return {
+      refusal: Response.json(
+        {
+          error: 'use_site',
+          ...(site && /^https:\/\/[a-z0-9.-]+$/i.test(site) ? { site } : {}),
+          error_description: 'Sign-ins go through the Forge site. Update the CLI with: nforge update',
+        },
+        { status: 421, headers: { 'Cache-Control': 'no-store' } },
+      ),
+    };
+  }
+  const client = request.headers.get(CLIENT_HEADER) ?? '';
+  if (CLIENT_HASH.test(client)) return { client };
+  return {
+    refusal: Response.json(
+      { error: 'invalid_request', error_description: 'The site sent no visitor key.' },
+      { status: 400, headers: { 'Cache-Control': 'no-store' } },
+    ),
+  };
+}
 for (const operation of ['start-v2', 'renew'] as const)
   http.route({
     path: `/auth/device/${operation}`,
     method: 'POST',
     handler: httpAction(async (ctx, request) => {
+      const visitor = await deviceVisitor(request);
+      if (visitor.refusal) return visitor.refusal;
       try {
-        const input = { ...(await request.json()), origin: new URL(request.url).origin };
+        // The visitor key and the origin come from the request itself, never from its JSON.
+        const body = { ...(await request.json()) };
+        delete body.client;
+        const input = {
+          ...body,
+          origin: new URL(request.url).origin,
+          ...(visitor.client ? { client: visitor.client } : {}),
+        };
         const result = JSON.parse(
           await ctx.runAction(
             operation === 'renew' ? internal.deviceStableActions.renew : internal.deviceStableActions.start,

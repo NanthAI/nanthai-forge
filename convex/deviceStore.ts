@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { deviceStartLimit, takeDeviceBudget } from './deviceBudget';
+import { takeVisitorDevice } from './visitorBudget';
 export { deviceStartLimit } from './deviceBudget';
 import { internalMutation, internalQuery } from './server';
 import {
@@ -25,10 +26,19 @@ import { isDeviceIdentity } from './cliServer';
  * removed by each new start. Retries of an existing start are not counted. */
 /** Returns null when the start limit is reached. */
 export const start = internalMutation({
-  args: { ...deviceFields, forceApproval: v.optional(v.literal(true)) },
-  returns: v.union(deviceDocument, v.object({ known: credentialDocument }), v.null()),
+  args: { ...deviceFields, forceApproval: v.optional(v.literal(true)), client: v.optional(v.string()) },
+  returns: v.union(
+    deviceDocument,
+    v.object({ known: credentialDocument }),
+    v.object({
+      error: v.literal('slow_down'),
+      interval: v.number(),
+      error_description: v.optional(v.string()),
+    }),
+    v.null(),
+  ),
   handler: async (ctx, args) => {
-    const { forceApproval, ...proposed } = args;
+    const { forceApproval, client, ...proposed } = args;
     const old = await ctx.db
       .query('deviceCodes')
       .withIndex('by_operationId', q => q.eq('operationId', args.operationId))
@@ -61,7 +71,10 @@ export const start = internalMutation({
       if (known && !known.removed && !forceApproval) return { known };
     }
     const now = Date.now();
-    if (!(await takeDeviceBudget(ctx))) return null;
+    // The visitor's own limit first, so a refused visitor spends none of the deployment's budget, and a start the
+    // deployment budget refuses spends none of the visitor's.
+    const refused = await takeVisitorDevice(ctx, client, () => takeDeviceBudget(ctx), now);
+    if (refused) return refused;
     // Expired login rows are removed a few at a time by later starts; no scheduled job runs.
     const expired = await ctx.db
       .query('deviceCodes')

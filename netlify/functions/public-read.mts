@@ -2,12 +2,13 @@
 /** The cached public read (Items 6a60e89a, 875a4b60, 8947a779). Signed-out visitors and crawlers of public pages are
  * served from the CDN's durable cache: a hit runs no function and makes no Convex call. On a miss this function asks
  * the backend's public route once (convex/publicHttp.ts) and the CDN keeps the answer for the cache period, so the
- * backend is reached only on misses. Ordinary query parameters do not affect the shared bytes. No visitor credential is forwarded.
+ * backend is reached only on misses. Ordinary query parameters do not affect the shared bytes. No visitor credential is forwarded;
+ * a miss carries only a keyed hash of the visitor's address (src/client-hash.ts) for the per-visitor limit, never the address.
  * Failures and missing reads are cached for 30 seconds to absorb repeated retries.
  *
  * It also gives the app page of explore, profiles and public projects its title, description and share-card tags
  * (netlify/lib/public-meta.ts), so link previews and crawlers see them without running the app. */
-import type { Config } from '@netlify/functions';
+import type { Config, Context } from '@netlify/functions';
 import fs from 'node:fs/promises';
 import { join } from 'node:path';
 import { networkFetch, networkTimeout } from '../../src/network-fetch.js';
@@ -22,6 +23,7 @@ import {
   publicCodeRemaining,
 } from '../../src/public-code-cache.js';
 import { reservedHandles } from '../../src/readable-urls.js';
+import { CLIENT_HEADER, clientHash } from '../../src/client-hash.js';
 import { earlierAppPath, isAppPath, normalizeAccountPathname } from '../../web/src/app/paths.js';
 import { exploreMeta, profileMeta, projectMeta, withMeta, type PageMeta } from '../lib/public-meta.js';
 
@@ -87,7 +89,7 @@ function codeWorker(path: string) {
   return worker && /^https:\/\/[a-z0-9.-]+$/i.test(worker) && publicCodeFileAddress(path) ? worker : null;
 }
 
-async function proxy(path: string) {
+async function proxy(path: string, client: string | null) {
   const site = backend();
   const key = process.env.FORGE_PUBLIC_READ_SECRET;
   if (!site || !key) return unavailable(503, 'Public reads are not configured.');
@@ -106,12 +108,13 @@ async function proxy(path: string) {
     return unavailable(502, 'The public read is unavailable; try again.');
   }
   const worker = codeWorker(path);
+  const visitor: Record<string, string> = client ? { [CLIENT_HEADER]: client } : {};
   // A Worker timeout may arrive after an origin call. In that case the existing failure
   // response is the only safe continuation within the one-attempt public read budget.
   const response = await (
     worker
-      ? get(worker + path, { [PUBLIC_CODE_INGRESS]: await publicCodeIngressKey(key) })
-      : get(cacheKey, { 'x-forge-public-key': key })
+      ? get(worker + path, { [PUBLIC_CODE_INGRESS]: await publicCodeIngressKey(key), ...visitor })
+      : get(cacheKey, { 'x-forge-public-key': key, ...visitor })
   ).catch(() => null);
   if (!response || response.status >= 500 || response.status === 401) {
     if (cache)
@@ -172,12 +175,12 @@ export function readFor(
 
 /** This immutable built shell is included in the function, so settings and upstream failures
  * cannot replace a member's app with an error page. No request-controlled self-fetch. */
-async function page(origin: string | null, pathname: string) {
+async function page(origin: string | null, pathname: string, client: string | null) {
   let html = await fs.readFile(join(process.cwd(), 'hosted-web-dist', 'app.html'), 'utf8');
   const read = readFor(pathname);
   if (origin && read) {
     try {
-      const data = await proxy(read.json.slice(2));
+      const data = await proxy(read.json.slice(2), client);
       // Unavailable, unauthorized, private and missing reads all keep the plain app shell.
       if (data.ok) html = withMeta(html, read.meta(origin, (await data.json()) as never));
     } catch {
@@ -208,7 +211,7 @@ function canonicalPath(pathname: string) {
   }
 }
 
-async function respond(request: Request) {
+async function respond(request: Request, client: string | null) {
   if (request.method !== 'GET' && request.method !== 'HEAD') return new Response(null, { status: 405 });
   const url = new URL(request.url);
   const origin = siteOrigin();
@@ -243,15 +246,15 @@ async function respond(request: Request) {
     });
   }
   if (data && !origin) return unavailable(503, 'Public reads are not configured.');
-  if (path === '/sitemap.xml') return proxy('/public/v1/sitemap.xml');
-  if (path.startsWith('/-/public/v1/')) return proxy(path.slice(2));
-  return page(origin, path);
+  if (path === '/sitemap.xml') return proxy('/public/v1/sitemap.xml', client);
+  if (path.startsWith('/-/public/v1/')) return proxy(path.slice(2), client);
+  return page(origin, path, client);
 }
 
-export default async (request: Request) => {
+export default async (request: Request, context?: Context) => {
   let response: Response;
   try {
-    response = await respond(request);
+    response = await respond(request, await clientHash(process.env.FORGE_CLIENT_HASH_KEY, context?.ip));
   } catch {
     response = unavailable(502, 'The public read is unavailable; try again.');
   }

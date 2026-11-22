@@ -11,6 +11,7 @@ import {
   publicCodeRemaining,
 } from './public-code-cache.js';
 import { networkFetch, networkTimeout } from './network-fetch.js';
+import { CLIENT_HASH, CLIENT_HEADER } from './client-hash.js';
 
 type Replica = {
   get(key: string): Promise<{ body: ReadableStream; customMetadata?: Record<string, string> } | null>;
@@ -92,13 +93,18 @@ async function serve(request: Request, env: Bindings, ctx: { waitUntil(promise: 
   const site = env.FORGE_CONVEX_SITE_URL;
   if (!env.FORGE_PUBLIC_READ_SECRET || !/^https:\/\/[a-z0-9.-]+$/i.test(site)) return refuse(503);
   const expiresAt = Date.now() + PUBLIC_CODE_TTL_MS;
+  // The site's keyed visitor hash (never an address) reaches the origin only on a miss, for the per-visitor limit.
+  const client = request.headers.get(CLIENT_HEADER) ?? '';
   const response = await networkFetch(
     site + pathname,
     {
       redirect: 'manual',
       cache: 'no-store',
       signal: networkTimeout(7_000),
-      headers: { 'x-forge-public-key': env.FORGE_PUBLIC_READ_SECRET },
+      headers: {
+        'x-forge-public-key': env.FORGE_PUBLIC_READ_SECRET,
+        ...(CLIENT_HASH.test(client) ? { [CLIENT_HEADER]: client } : {}),
+      },
     },
     { retries: 0 },
   ).catch(() => null);

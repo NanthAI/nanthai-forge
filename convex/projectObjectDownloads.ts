@@ -22,6 +22,7 @@ import {
   readablePhysical,
 } from './projectObjectFind';
 import { chargeAnonymousRead } from './abuseLimits';
+import { chargeVisitorRead } from './visitorBudget';
 import { packRange, packHeaders, type ObjectPack } from '../src/object-pack-range';
 import { signRecipeClosure } from './projectRecipeClosure';
 import { runValue, signRuns, type RunBinding } from './projectObjectRuns';
@@ -47,7 +48,12 @@ async function selectedCheckpoint(
 const signedClosureValue = v.array(
   v.object({ digest: v.string(), size: v.number(), url: v.string(), range: rangeValue }),
 );
-export async function readableProject(ctx: MutationCtx, projectId: Id<'hostedProjects'>, charge = true) {
+export async function readableProject(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  charge = true,
+  client?: string,
+) {
   const user = await ctx.auth.getUserIdentity();
   if (user) return accessibleProject(ctx, projectId, user.subject);
   const project = await ctx.db.get(projectId);
@@ -56,7 +62,11 @@ export async function readableProject(ctx: MutationCtx, projectId: Id<'hostedPro
     'PROJECT_UNAVAILABLE',
     'This Forge project is unavailable with the current account.',
   );
-  if (charge) await chargeAnonymousRead(ctx, projectId);
+  if (charge) {
+    // The visitor's own limit comes first, so a visitor over it spends none of the project's shared budget.
+    if (client) await chargeVisitorRead(ctx, client);
+    await chargeAnonymousRead(ctx, projectId);
+  }
   return project;
 }
 

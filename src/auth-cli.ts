@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { networkFetch, networkTimeout } from './network-fetch.js';
+import { devicePost, deviceRefusal } from './device-endpoint.js';
 import { browserApproval } from './browser-approval.js';
 export { openBrowser } from './browser-approval.js';
 import { localDevice, signedDevice, deviceCode, renewDevice } from './device-key.js';
@@ -19,26 +20,31 @@ export { httpOrigin } from './auth-store.js';
 async function request(origin: string, operation: string, input: unknown) {
   let response: Response;
   try {
-    response = await networkFetch(`${origin}/auth/device/${operation}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-      redirect: 'error',
-      signal: networkTimeout(15_000),
-    });
+    response =
+      operation === 'start-v2'
+        ? await devicePost(origin, operation, JSON.stringify(input))
+        : await networkFetch(`${origin}/auth/device/${operation}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(input),
+            redirect: 'error',
+            signal: networkTimeout(15_000),
+          });
   } catch {
     throw new ForgeError('AUTH_NETWORK', 'Device login could not reach Forge.');
   }
-  invariant(
-    response.status !== 429,
-    'AUTH_SLOW_DOWN',
-    'Too many device logins were started on this Forge deployment. Try again in a minute.',
-  );
-  invariant(
-    response.ok,
-    'AUTH_REQUEST_FAILED',
-    'Forge could not process device login. Check the deployment configuration.',
-  );
+  if (response.status === 429)
+    throw new ForgeError(
+      'AUTH_SLOW_DOWN',
+      deviceRefusal(await response.json().catch(() => null)) ??
+        'Too many device logins were started on this Forge deployment. Try again in a minute.',
+    );
+  if (!response.ok)
+    throw new ForgeError(
+      'AUTH_REQUEST_FAILED',
+      deviceRefusal(await response.json().catch(() => null)) ??
+        'Forge could not process device login. Check the deployment configuration.',
+    );
   try {
     return await response.json();
   } catch {

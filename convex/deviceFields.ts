@@ -77,7 +77,13 @@ export const deviceTables = {
     count: v.number(),
     /** Passkey budgets retain only handles charged within their fixed global allowance. */
     handles: v.optional(v.array(v.object({ handle: v.string(), count: v.number() }))),
-  }).index('by_owner', ['owner']),
+    /** Per-visitor rows (convex/visitorBudget.ts): the device minute window, and when the row may be removed. */
+    minuteAt: v.optional(v.number()),
+    minuteCount: v.optional(v.number()),
+    expiresAt: v.optional(v.number()),
+  })
+    .index('by_owner', ['owner'])
+    .index('by_expiresAt', ['expiresAt']),
 };
 
 /** Current stable sign-in generation; old bearer tokens never regain access after a re-login. */

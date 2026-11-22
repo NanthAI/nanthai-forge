@@ -769,7 +769,9 @@ design-system behaviour layer out of the first paint.
   address printed by builds before the switch to the root, `/-/device`, redirects
   to it. Only the stable device flow
   (`/auth/device/start-v2`) starts a sign-in; a CLI that still posts to
-  `/auth/device/start` gets HTTP 426 telling it to run `nforge update`.
+  `/auth/device/start` gets HTTP 426 telling it to run `nforge update`. With
+  `FORGE_SITE_DEVICE_KEY` set, starts and renewals come through the site
+  (`netlify/functions/device-auth.mts`) for the per-visitor limit.
 - One Lane, `/{handle}/{project}/lanes/{laneId}` (`web/src/app/lane/`, lazy
   with its route): one bounded read, `projectLaneReview.read`, names the pinned
   saved head and every changed path with its exact blobs from the Lane's overlap
@@ -1496,6 +1498,11 @@ site function can also use Netlify's configured `URL`. An unset key closes the b
 I/O. An unset web origin closes share-tag generation and the sitemap API. HTML front pages still serve the
 bundled SPA shell when settings or public reads are unavailable. The function bundle includes
 `hosted-web-dist/app.html`; its response security headers are set directly in the function.
+
+[Per-visitor limits](security.d/sections/0810-per-visitor-limits.md) need two more private keys, never `VITE_`
+variables. Set `FORGE_CLIENT_HASH_KEY` (random, at least 32 bytes) on the site only; without it the site forwards no
+visitor hash and the functions answer device sign-ins with 503. Set `FORGE_SITE_DEVICE_KEY` on the site, then the same
+value on Convex once the site's `device-auth` function is live; on Convex it moves device sign-in to the site.
 
 For local browser development, set `VITE_FORGE_WEB_URL` to the deployed web origin; public reads go through that
 site's cache and budget. A bare Vite server does not host the site function. The

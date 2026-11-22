@@ -12,6 +12,8 @@ export const checkpoint = internalMutation({
     backupId: v.id('projectBackups'),
     recheck: v.boolean(),
     digests: v.array(v.string()),
+    /** The visitor key a signed-out read carries from the site (convex/visitorBudget.ts). */
+    client: v.optional(v.string()),
   },
   returns: v.object({
     backup: projectBackupDocument,
@@ -19,7 +21,7 @@ export const checkpoint = internalMutation({
   }),
   handler: async (ctx, input) => {
     try {
-      const project = await readableProject(ctx, input.projectId, !input.recheck);
+      const project = await readableProject(ctx, input.projectId, !input.recheck, input.client);
       const backup = await ctx.db.get(input.backupId);
       invariant(
         backup && backup.projectId === input.projectId && backup.status === 'stored',

@@ -3,13 +3,18 @@
 import { v } from 'convex/values';
 import { internalAction } from './server';
 import { internal } from './_generated/api';
-import { beginDeviceLogin, deviceConfig, startSlowDown } from './deviceActions';
+import { beginDeviceLogin, deviceConfig } from './deviceActions';
 import { deviceProof, deviceScope, deviceSignInExpiry } from './deviceFields';
 import { verifyDeviceProof, issueDeviceToken, deviceHash } from '../src/device-token';
 import { invariant } from '../src/errors';
 type Proof = { id: string; key: string; at: number; proof: string };
 /** The HTTP handler supplies the actual request origin; it is not taken from request JSON. */
-async function renewVerified(ctx: import('./server').ActionCtx, operationId: string, device: Proof) {
+async function renewVerified(
+  ctx: import('./server').ActionCtx,
+  operationId: string,
+  device: Proof,
+  client: string | undefined,
+) {
   const request = {
     credentialId: device.id,
     key: device.key,
@@ -17,7 +22,9 @@ async function renewVerified(ctx: import('./server').ActionCtx, operationId: str
     at: device.at,
     proofHash: deviceHash(device.proof),
   };
-  const selected = JSON.parse(await ctx.runMutation(internal.deviceStableStore.renewal, request));
+  const selected = JSON.parse(
+    await ctx.runMutation(internal.deviceStableStore.renewal, { ...request, ...(client ? { client } : {}) }),
+  );
   if (!selected.row) return selected.result;
   const issuedAt =
     typeof selected.result?.issuedAt === 'number'
@@ -58,7 +65,7 @@ async function renewVerified(ctx: import('./server').ActionCtx, operationId: str
   };
 }
 export const renew = internalAction({
-  args: { origin: v.string(), operationId: v.string(), device: deviceProof },
+  args: { origin: v.string(), operationId: v.string(), device: deviceProof, client: v.optional(v.string()) },
   returns: v.string(),
   handler: async (ctx, input): Promise<string> => {
     invariant(
@@ -66,7 +73,7 @@ export const renew = internalAction({
       'AUTH_REQUIRED',
       'Use this device’s own key to renew.',
     );
-    return JSON.stringify(await renewVerified(ctx, input.operationId, input.device));
+    return JSON.stringify(await renewVerified(ctx, input.operationId, input.device, input.client));
   },
 });
 export const start = internalAction({
@@ -78,6 +85,8 @@ export const start = internalAction({
     scope: deviceScope,
     projectId: v.optional(v.string()),
     device: deviceProof,
+    /** The visitor key the site forwarded (convex/visitorBudget.ts); the HTTP route sets it, never request JSON. */
+    client: v.optional(v.string()),
   },
   returns: v.string(),
   handler: async (ctx, input): Promise<string> => {
@@ -95,6 +104,6 @@ export const start = internalAction({
     );
     const result = await beginDeviceLogin(ctx, { ...input, stable: input.device, forceApproval: true });
     if (result && 'known' in result) return JSON.stringify({ status: 'removed' });
-    return JSON.stringify(result === startSlowDown ? startSlowDown : result);
+    return JSON.stringify(result);
   },
 });

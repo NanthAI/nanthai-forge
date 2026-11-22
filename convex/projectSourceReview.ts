@@ -14,6 +14,7 @@ import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
 import type { SourceAnchor } from '../src/work-intent-types';
 import { report } from './errors';
+import { takeVisitorRead } from './visitorBudget';
 
 async function checkpoint(
   ctx: ActionCtx,
@@ -23,11 +24,13 @@ async function checkpoint(
   view?: { recheck: boolean; digests: string[] },
 ): Promise<Doc<'projectBackups'> & { viewPins?: { sha256: string; size: number }[] | null }> {
   if (view) {
+    const client = actor ? undefined : takeVisitorRead(ctx);
     const result: { backup: Doc<'projectBackups'>; pins: { sha256: string; size: number }[] | null } =
       await ctx.runMutation(makeFunctionReference<'mutation'>('projectSourceReviewStore:checkpoint'), {
         projectId,
         backupId,
         ...view,
+        ...(client ? { client } : {}),
       });
     return { ...result.backup, viewPins: result.pins };
   }
@@ -190,7 +193,9 @@ export const read = action({
           'Select exact source State identities.',
         );
         const user = await ctx.auth.getUserIdentity();
-        return JSON.stringify(await readSourceReview(ctx, input, user?.subject ?? '', true));
+        // Signed-out visitors read through the site's cached public route, which carries their visitor limit.
+        invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read this comparison.');
+        return JSON.stringify(await readSourceReview(ctx, input, user.subject, true));
       }
       // Signed-in browser callers receive a checkpoint plan. They verify objects directly,
       // including Convex rows; server-only anchor validation still uses readSourceReview above.

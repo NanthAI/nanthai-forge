@@ -50,7 +50,7 @@ type DeviceFlow = {
   expires_in: number;
   interval: number;
 };
-type SlowDown = typeof startSlowDown;
+type SlowDown = { error: 'slow_down'; interval: number; error_description?: string };
 export async function beginDeviceLogin(
   ctx: import('./_generated/server').ActionCtx,
   args: {
@@ -61,6 +61,8 @@ export async function beginDeviceLogin(
     projectId?: string;
     stable: { id: string; key: string };
     forceApproval?: true;
+    /** The visitor key the site forwarded (convex/visitorBudget.ts). */
+    client?: string;
   },
 ): Promise<DeviceFlow | SlowDown | { known: Doc<'cliCredentials'> }> {
   const { key, web } = deviceConfig();
@@ -77,6 +79,7 @@ export async function beginDeviceLogin(
   const row = await ctx.runMutation(internal.deviceStore.start, {
     operationId: args.operationId,
     ...(args.forceApproval ? { forceApproval: true } : {}),
+    ...(args.client ? { client: args.client } : {}),
     // Stored as checked: trimmed (review R-07).
     name,
     scope: args.scope,
@@ -97,6 +100,7 @@ export async function beginDeviceLogin(
     // The bearer secret is never persisted.
   });
   if (!row) return startSlowDown;
+  if ('error' in row) return row;
   if ('known' in row) return { known: row.known };
   return {
     device_code: deviceCode,

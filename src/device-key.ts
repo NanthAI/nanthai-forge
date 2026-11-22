@@ -9,7 +9,7 @@ import {
   type SavedDevice,
   type SavedCredential,
 } from './auth-store.js';
-import { networkFetch, networkTimeout } from './network-fetch.js';
+import { devicePost, deviceRefusal } from './device-endpoint.js';
 import { ForgeError, invariant } from './errors.js';
 /** The private half remains in the existing owner-only local auth store. Never print this object. */
 export function localDevice(deployment: string, replace = false): SavedDevice {
@@ -79,23 +79,18 @@ export async function renewDevice(deployment: string): Promise<SavedCredential> 
       device: { id: device.id, key: device.publicKey, at: pending.at, proof: pending.proof },
     };
     const send = async () => {
-      const response = await networkFetch(`${endpoint}/auth/device/renew`, {
-        method: 'POST',
-        redirect: 'error',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
-        signal: networkTimeout(15_000),
-      });
+      const response = await devicePost(endpoint, 'renew', JSON.stringify(input));
       const result = (await response.json()) as Record<string, unknown>;
       if (response.status === 429)
         throw new ForgeError(
           'AUTH_SLOW_DOWN',
-          'Device logins and renewals share this deployment’s request budget. Try the original command in a minute.',
+          deviceRefusal(result) ??
+            'Device logins and renewals share this deployment’s request budget. Try the original command in a minute.',
         );
       if (!response.ok)
         throw new ForgeError(
           'AUTH_REQUEST_FAILED',
-          'Forge could not renew this sign-in. Retry the original command.',
+          deviceRefusal(result) ?? 'Forge could not renew this sign-in. Retry the original command.',
         );
       return result;
     };

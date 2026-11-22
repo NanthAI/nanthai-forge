@@ -9,11 +9,15 @@
  *   /public/v1/profile/HANDLE.json        a person's or organisation's public projects, or 404
  *   /public/v1/sitemap.xml                listed projects and profiles
  *   /public/v1/code/HANDLE/SLUG/…         read-only code and history (publicCode.ts lists the addresses)
- * Missing, private and removed answer with the same 404 body. Only GET reads; anything else is refused before a call. */
+ * Missing, private and removed answer with the same 404 body. Only GET reads; anything else is refused before a call.
+ * The site forwards a keyed hash of the visitor's address (never the address); a source read that misses the cache
+ * is charged to that visitor first (convex/visitorBudget.ts), so one noisy visitor cannot spend the project's budget. */
 import { httpAction, type ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import { codeAddress, type CodeAddress } from './publicCode';
+import { sameSecret } from './siteSecret';
+import { CLIENT_HASH, CLIENT_HEADER } from '../src/client-hash';
 
 /** Shared-cache lifetime: browsers always revalidate; the CDN keeps a page 30 seconds, with no stale serving. */
 export const PUBLIC_CACHE = {
@@ -76,7 +80,11 @@ const codeOf = (error: unknown) => {
 };
 /** One visitor read of code or history. A refusal is a missing project; a passing failure (the read budget, a source
  * that changed while reading) is never cached and says what happened. */
-async function code(ctx: ActionCtx, path: { handle: string; slug: string; address: CodeAddress }) {
+async function code(
+  ctx: ActionCtx,
+  path: { handle: string; slug: string; address: CodeAddress },
+  client: string | undefined,
+) {
   try {
     if ('history' in path.address) {
       const page = await ctx.runQuery(internal.publicCode.history, {
@@ -103,6 +111,7 @@ async function code(ctx: ActionCtx, path: { handle: string; slug: string; addres
     const reply: string = await ctx.runAction(internal.projectCodeBrowse.visitorRead, {
       projectId,
       ...path.address.read,
+      ...(client ? { client } : {}),
     });
     return new Response(reply, { headers: headers('application/json; charset=utf-8') });
   } catch (error) {
@@ -142,18 +151,8 @@ export function sitemapXml(origin: string, rows: readonly { handle: string; slug
     .join('\n')}\n</urlset>\n`;
 }
 
-/** Fixed-length digest comparison; the service key never enters a reply or a DB row. */
-async function siteCaller(request: Request) {
-  const key = process.env.FORGE_PUBLIC_READ_SECRET;
-  const supplied = request.headers.get('x-forge-public-key');
-  if (!key || !supplied) return false;
-  const hash = async (value: string) =>
-    new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
-  const [expected, actual] = await Promise.all([hash(key), hash(supplied)]);
-  let different = 0;
-  for (let i = 0; i < expected.length; i++) different |= expected[i]! ^ actual[i]!;
-  return different === 0;
-}
+const siteCaller = (request: Request) =>
+  sameSecret(process.env.FORGE_PUBLIC_READ_SECRET, request.headers.get('x-forge-public-key'));
 
 export const serve = httpAction(async (ctx, request) => {
   if (request.method !== 'GET')
@@ -185,7 +184,11 @@ export const serve = httpAction(async (ctx, request) => {
       });
     return json({ ...body, deployment, starLookup });
   }
-  if (path.kind === 'code') return code(ctx, path);
+  if (path.kind === 'code') {
+    // The site's verified visitor key (src/client-hash.ts); a source read charges it before the project budget.
+    const client = request.headers.get(CLIENT_HEADER) ?? '';
+    return code(ctx, path, CLIENT_HASH.test(client) ? client : undefined);
+  }
   if (path.kind === 'explore') {
     const page = await ctx.runQuery(internal.publicRead.explorePage, { order: path.order, now });
     return json({ ...page, deployment, starLookup });
