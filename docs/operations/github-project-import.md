@@ -215,24 +215,29 @@ below the threshold publishes in the same action. Main is published only after a
 files are verified and stored. A continuation that verifies no new files reports a
 structured failure.
 
-Convex Node actions have a 512 MB memory limit. A near-empty import action has
-measured about 190 to 200 MB. Start holds no file table and the listing step's
-memory follows the largest replies and a single write page. An archive step keeps
-its per-file state in columns: the listing (one UTF-8 path buffer, looked up by
-binary search over sorted paths), the verified pin of each listed row
-(a 32-byte blob digest and a size) and the stored-object catalog (binary digests, sizes and
-pack offsets in an open-addressing index, about 70 bytes an object). Publication sorts
-that catalog in place and writes it 32 pages at a time. A publication retry
-scans file entries from the stored State bytes. In the earlier archive implementation, 150,612 files
-(1.47 GB; `rssBytes` in the `FORGE_IMPORT_METRIC` records) read the listing at 292 MB,
-finished the archive at 448 MB and peaked at 494 MB during publication. Now the same
-150,612 files peak at 381 MB in the archive and 422 MB in publication (metadata; catalog
-392 MB, projection 389 MB), in 10.5 minutes instead of 13. Measured ceiling (2026-11-10,
-Firefox's 487,756 files and 3.67 GB): the start listing passes, and archive steps stayed at
-or under 418 MB through 419,111 files; publication at that size is not yet measured, so
-150,612 files is the measured bound for a full hosted import. A later Firefox-scale
-run hit 512 MB while storing the old one-object listing in start. Hosted throughput
-and publication memory for the paged listing and fresh-action handoff remain unmeasured.
+Convex documents a 512 MiB RAM allocation for Node actions by default. Its
+compute usage field reports billed memory. The `rssBytes` and `peakRssBytes` fields
+in `FORGE_IMPORT_METRIC` report current and lifetime Node process RSS. A hosted
+Firefox-shaped Dev import published 487,756 files and 3.67 GB of source in 26m11s.
+The publication action reported a 756 MB process RSS high-water mark and 512 MiB
+of billed memory. Convex's dynamic executor can allocate more RAM than it bills.
+The usage field does not identify which executor ran the action. See
+[Convex action limits](https://docs.convex.dev/production/state/limits) and the
+[Convex Node executor](https://github.com/get-convex/convex-backend/blob/0e4f90d3e0/npm-packages/node-executor/src/executor.ts#L36-L56).
+
+Start holds no listing rows. The listing step retains bounded tree replies
+and one write page. Each archive or publication action verifies one listing
+page at a time and writes it to a private action-local file. Archive lookups
+use sparse path offsets to read small verified blocks. Sequential scans keep stable
+global row numbers for pins, State publication and the source path index.
+Repeated scans use the same local copy, so the index and each page need one
+R2 read per action. The file is discarded when the action ends.
+
+Verified pins and the stored-object catalog still grow with the file and
+object counts. The catalog uses binary digests, sizes and pack offsets in an
+open-addressing index, about 70 bytes per object. Publication sorts that
+catalog in place and writes it 32 pages at a time. A publication retry with a
+pinned State scans file entries from the stored State bytes.
 
 State, manifest and Work metadata use the same R2-backed object path. Catalog
 publication and source-index materialization use bounded pages. The ready

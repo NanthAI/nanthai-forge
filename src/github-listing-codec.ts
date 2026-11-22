@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { invariant } from './errors.js';
+import { digest } from './hash.js';
 import { importPageBytes } from './github-import-pages.js';
 import type { GithubSourceEntry } from './github-project-source.js';
 
 const modes = ['100644', '100755', '120000', '160000'] as const;
 const gitId = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const pageRows = 65_536;
+const lookupRows = 32;
+const lookupBytes = 8 * 1024;
 // Normally zero. A damaged create-only key can be superseded by a fresh checksum.
 const pageNonceBytes = 16;
 // Each row has two u32s (path length and blob size), one mode byte, the binary Git ID, then UTF-8.
@@ -112,88 +115,84 @@ export class ListingPageWriter {
   }
 }
 
-/** The file table in columns, with one UTF-8 path buffer. Decode a verified
- * page at a time directly into the finished table's preallocated columns. */
-export class ListingTable {
+export type ListedGithubEntry = GithubSourceEntry & { row: number };
+type ListingSpan = { offset: number; size: number; sha256: string };
+type ListingRange = { pin: Page; first: string; start: number; rows: number; span?: ListingSpan };
+
+/** One page owns its bytes and a row-offset column. File positions are global so
+ * an archive member, a fallback fetch and publication use the same pin. */
+class ListingPage {
   private constructor(
-    private paths: Buffer,
+    private raw: Buffer,
     private starts: Uint32Array,
-    private shas: Buffer,
     private shaBytes: number,
-    private sizes: Uint32Array,
-    private modes: Uint8Array,
+    readonly start: number,
     readonly totalBytes: number,
     readonly submodules: number,
   ) {}
   get length() {
-    return this.sizes.length;
+    return this.starts.length - 1;
   }
 
-  static async fromPages(index: ListingIndex, read: (pin: Page) => Promise<Buffer | null>) {
-    const fixed = fixedBytes + index.shaBytes;
-    const pathBytes = index.pages.reduce(
-      (sum, page) => sum + page.size - pageNonceBytes - page.rows * fixed,
-      0,
-    );
-    if (pathBytes > 0xffffffff) return null; // Offsets fit the existing column width.
-    const paths = Buffer.allocUnsafe(pathBytes);
-    const starts = new Uint32Array(index.files + 1);
-    const shas = Buffer.allocUnsafe(index.files * index.shaBytes);
-    const sizes = new Uint32Array(index.files);
-    const codes = new Uint8Array(index.files);
-    let row = 0,
-      bytes = 0,
+  static decode(raw: Buffer, range: ListingRange, shaBytes: number) {
+    if (raw.length !== (range.span?.size ?? range.pin.size)) return null;
+    const fixed = fixedBytes + shaBytes;
+    const starts = new Uint32Array(range.rows + 1);
+    let offset = range.span ? 0 : pageNonceBytes,
       totalBytes = 0,
       submodules = 0;
-    let last = '';
-    for (const page of index.pages) {
-      const raw = await read(page);
-      if (!raw || raw.length !== page.size) return null;
-      let offset = pageNonceBytes;
-      for (let i = 0; i < page.rows; i++, row++) {
-        if (offset + fixed > raw.length) return null;
-        const length = raw.readUInt32LE(offset);
-        const start = offset + fixed;
-        if (!length || start + length > raw.length || bytes + length > paths.length) return null;
-        const path = raw.toString('utf8', start, start + length);
-        if (path <= last || (i === 0 && path !== page.first)) return null;
-        last = path;
-        const code = raw[offset + 8]!;
-        if (code >= modes.length) return null;
-        codes[row] = code;
-        sizes[row] = raw.readUInt32LE(offset + 4);
-        totalBytes += sizes[row]!;
-        submodules += Number(modes[code] === '160000');
-        raw.copy(shas, row * index.shaBytes, offset + fixedBytes, start);
-        raw.copy(paths, bytes, start, start + length);
-        starts[row + 1] = bytes += length;
-        offset = start + length;
-      }
-      if (offset !== raw.length) return null;
+    for (let row = 0; row < range.rows; row++) {
+      if (offset + fixed > raw.length) return null;
+      const length = raw.readUInt32LE(offset);
+      const pathStart = offset + fixed;
+      if (!length || pathStart + length > raw.length) return null;
+      const code = raw[offset + 8]!;
+      if (code >= modes.length) return null;
+      totalBytes += raw.readUInt32LE(offset + 4);
+      submodules += Number(modes[code] === '160000');
+      starts[row] = offset;
+      offset = pathStart + length;
     }
-    if (
-      row !== index.files ||
-      bytes !== paths.length ||
-      totalBytes !== index.totalBytes ||
-      submodules !== index.submodules
-    )
-      return null;
-    return new ListingTable(paths, starts, shas, index.shaBytes, sizes, codes, totalBytes, submodules);
+    if (offset !== raw.length) return null;
+    starts[range.rows] = offset;
+    return new ListingPage(raw, starts, shaBytes, range.start, totalBytes, submodules);
   }
-  path(index: number) {
-    return this.paths.toString('utf8', this.starts[index]!, this.starts[index + 1]!);
+  path(row: number) {
+    return this.raw.toString('utf8', this.starts[row]! + fixedBytes + this.shaBytes, this.starts[row + 1]!);
   }
-  sha(index: number) {
-    return this.shas.toString('hex', index * this.shaBytes, (index + 1) * this.shaBytes);
+  size(row: number) {
+    return this.raw.readUInt32LE(this.starts[row]! + 4);
   }
-  size(index: number) {
-    return this.sizes[index]!;
+  mode(row: number): GithubSourceEntry['mode'] {
+    return modes[this.raw[this.starts[row]! + 8]!]!;
   }
-  mode(index: number): GithubSourceEntry['mode'] {
-    return modes[this.modes[index]!]!;
+  entry(row: number): ListedGithubEntry {
+    const shaStart = this.starts[row]! + fixedBytes;
+    return {
+      row: this.start + row,
+      path: this.path(row),
+      sha: this.raw.toString('hex', shaStart, shaStart + this.shaBytes),
+      size: this.size(row),
+      mode: this.mode(row),
+    };
   }
-  entry(index: number): GithubSourceEntry {
-    return { path: this.path(index), sha: this.sha(index), size: this.size(index), mode: this.mode(index) };
+
+  *blocks(pin: Page): Iterable<ListingRange> {
+    for (let row = 0; row < this.length;) {
+      const offset = this.starts[row]!;
+      let end = row + 1;
+      while (end < this.length && end - row < lookupRows && this.starts[end + 1]! - offset <= lookupBytes)
+        end++;
+      const bytes = this.raw.subarray(offset, this.starts[end]!);
+      yield {
+        pin,
+        first: this.path(row),
+        start: this.start + row,
+        rows: end - row,
+        span: { offset, size: bytes.length, sha256: digest(bytes) },
+      };
+      row = end;
+    }
   }
   index(path: string) {
     let low = 0,
@@ -206,6 +205,90 @@ export class ListingTable {
       else high = middle - 1;
     }
     return -1;
+  }
+}
+
+type ReadPage = (pin: Page, span?: ListingSpan) => Promise<Buffer | null>;
+
+/** Verify the selected listing before doing acquisition work. Later passes
+ * walk its ranges in order. Tar members select small blocks by first path so
+ * an out-of-order archive cannot force a whole page read per member.
+ * The reader may reuse its backing bytes. Consume each page before reading
+ * another page or looking up another range. Individual entries own their values. */
+export class ListingPages {
+  private loaded: { range: ListingRange; page: ListingPage } | undefined;
+
+  private constructor(
+    private readonly index: ListingIndex,
+    private readonly ranges: ListingRange[],
+    private readonly blocks: ListingRange[],
+    private readonly read: ReadPage,
+  ) {}
+
+  static async open(index: ListingIndex, read: ReadPage, indexTarMembers = true) {
+    const ranges: ListingRange[] = [];
+    const blocks: ListingRange[] = [];
+    let start = 0,
+      totalBytes = 0,
+      submodules = 0,
+      last = '';
+    for (const pin of index.pages) {
+      if (pin.first <= last) return null;
+      const range = { pin, first: pin.first, start, rows: pin.rows };
+      const raw = await read(pin);
+      const page = raw && ListingPage.decode(raw, range, index.shaBytes);
+      if (!page || page.path(0) !== pin.first) return null;
+      for (let row = 0; row < page.length; row++) {
+        const path = page.path(row);
+        if (path <= last) return null;
+        last = path;
+      }
+      ranges.push(range);
+      if (indexTarMembers) for (const block of page.blocks(pin)) blocks.push(block);
+      start += page.length;
+      totalBytes += page.totalBytes;
+      submodules += page.submodules;
+    }
+    if (start !== index.files || totalBytes !== index.totalBytes || submodules !== index.submodules)
+      return null;
+    return new ListingPages(index, ranges, blocks, read);
+  }
+
+  get length() {
+    return this.index.files;
+  }
+  get totalBytes() {
+    return this.index.totalBytes;
+  }
+  get submodules() {
+    return this.index.submodules;
+  }
+
+  private async load(range: ListingRange) {
+    if (this.loaded?.range === range) return this.loaded.page;
+    const raw = await this.read(range.pin, range.span);
+    const page = raw && ListingPage.decode(raw, range, this.index.shaBytes);
+    invariant(page, 'IMPORT_INCOMPLETE', 'A verified import listing page could not be read.');
+    this.loaded = { range, page };
+    return page;
+  }
+
+  async *pages() {
+    for (const range of this.ranges) yield await this.load(range);
+  }
+
+  async lookup(path: string) {
+    let low = 0,
+      high = this.blocks.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (this.blocks[middle]!.first <= path) low = middle + 1;
+      else high = middle;
+    }
+    if (!low) return undefined;
+    const page = await this.load(this.blocks[low - 1]!);
+    const row = page.index(path);
+    return row < 0 ? undefined : page.entry(row);
   }
 }
 const pinsHeaderBytes = 92;
@@ -237,8 +320,8 @@ export class ImportedPins {
   isLfs(index: number) {
     return this.done[index] === 2;
   }
-  retain(keep: (index: number) => boolean) {
-    for (let index = 0; index < this.length; index++) {
+  retain(keep: (index: number) => boolean, start = 0, end = this.length) {
+    for (let index = start; index < end; index++) {
       if (!this.has(index) || keep(index)) continue;
       this.done[index] = 0;
       this.blobs.fill(0, index * 32, (index + 1) * 32);

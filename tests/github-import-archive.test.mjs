@@ -3,19 +3,19 @@ import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { gzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { pagedFixture } from './github-import-pages-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { tarEntries } from '../dist/github-tar.js';
 import { readObjectRecipe } from '../dist/object-chunks.js';
 import { readFileSync } from 'node:fs';
-import { listGithubTree as streamListing } from '../dist/github-archive-source.js';
+import { githubArchiveFiles, listGithubTree as streamListing } from '../dist/github-archive-source.js';
 import { wantedBlobResponse } from './github-blob-pack-fixture.mjs';
 import {
   decodeListingIndex,
   ImportedPins,
   ListingPageWriter,
-  ListingTable,
+  ListingPages,
 } from '../dist/github-listing-codec.js';
 import { TreeRows, readTreeReply } from '../dist/github-tree-split.js';
 import { CatalogTable } from '../dist/import-catalog-table.js';
@@ -40,7 +40,13 @@ function listingPages() {
     pages.set(sha256, Buffer.from(page));
     return { sha256, size: page.length };
   });
-  return { writer, read: async pin => pages.get(pin.sha256) ?? null };
+  return {
+    writer,
+    read: async (pin, span) => {
+      const page = pages.get(pin.sha256);
+      return (span ? page?.subarray(span.offset, span.offset + span.size) : page) ?? null;
+    },
+  };
 }
 
 async function listGithubTree(repository, tree, token, request) {
@@ -48,7 +54,14 @@ async function listGithubTree(repository, tree, token, request) {
   const totals = await streamListing(repository, tree, token, request, writer);
   if (!totals) return null;
   const index = await writer.finish(tree, totals);
-  return ListingTable.fromPages(index, read);
+  return ListingPages.open(index, read);
+}
+
+async function listedEntries(listing) {
+  const entries = [];
+  for await (const page of listing.pages())
+    for (let row = 0; row < page.length; row++) entries.push(page.entry(row));
+  return entries;
 }
 
 /** Minimal GitHub-shaped tarball: pax global comment, one root, pax paths when long. */
@@ -446,14 +459,14 @@ test('Issue c6426ee9: a root truncated by entry count lists as the complete tree
     counts = {};
   const listing = await listGithubTree('fixture/arch', hex(1), undefined, treeFetch(repo, counts));
   const whole = await listGithubTree('fixture/arch', hex(1), undefined, wholeFetch(repo));
-  assert.deepEqual(listing, whole);
+  assert.deepEqual(await listedEntries(listing), await listedEntries(whole));
   // The truncated recursive root, the root without recursion, then each of the 4 directories once.
   assert.deepEqual(counts, { recursive: 1 + 4, flat: 1 });
   assert.equal(listing.submodules, 2);
-  const mode = path => listing.mode(listing.index(path));
-  assert.equal(mode('vendor-1'), '160000');
-  assert.equal(mode('dir-1/file-1'), '120000');
-  assert.equal(mode('dir-0/' + 'x'.repeat(90) + '-file-0'), '100755');
+  const mode = async path => (await listing.lookup(path)).mode;
+  assert.equal(await mode('vendor-1'), '160000');
+  assert.equal(await mode('dir-1/file-1'), '120000');
+  assert.equal(await mode('dir-0/' + 'x'.repeat(90) + '-file-0'), '100755');
 });
 
 test('Issue c6426ee9: a directory still truncated by reply size is split again; a nested gitlink and identical subtrees survive', async () => {
@@ -469,7 +482,7 @@ test('Issue c6426ee9: a directory still truncated by reply size is split again; 
   const counts = {};
   const listing = await listGithubTree('fixture/arch', hex(1), undefined, treeFetch(repo, counts, hex(3)));
   const reference = repo.tree.filter(e => e.type !== 'tree').map(e => e.path);
-  const paths = Array.from({ length: listing.length }, (_, i) => listing.path(i));
+  const paths = (await listedEntries(listing)).map(entry => entry.path);
   assert.deepEqual(
     paths,
     reference.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
@@ -477,7 +490,7 @@ test('Issue c6426ee9: a directory still truncated by reply size is split again; 
   assert.ok(paths.some(path => path.startsWith('dir-copy/')));
   // Root recursive, root flat, dir-1 recursive + flat (truncated), dir-0/2/3 recursive; dir-copy reuses dir-0's reply.
   assert.deepEqual(counts, { recursive: 1 + 4, flat: 2 });
-  assert.equal(listing.mode(listing.index('dir-1/vendor-nested')), '160000');
+  assert.equal((await listing.lookup('dir-1/vendor-nested')).mode, '160000');
   assert.equal(listing.submodules, 1);
 });
 
@@ -1373,7 +1386,7 @@ for (const damage of [
     assert.deepEqual(listingKeys(bucket), []);
   });
 
-test('Issue 96f164ce: the stored file table round-trips as columns; a lookup finds every listed path and nothing else', async () => {
+test('Issue 96f164ce: a stored listing lookup finds every listed path and nothing else', async () => {
   const files = [
     { path: '.gitattributes', sha: hex(1), size: 3, mode: '100644' },
     { path: 'a/b', sha: hex(2), size: 0, mode: '100755' },
@@ -1386,20 +1399,63 @@ test('Issue 96f164ce: the stored file table round-trips as columns; a lookup fin
   for (const file of files) await writer.append(file);
   const index = await writer.finish(hex(9), { files: files.length, totalBytes: 70_000_018, submodules: 1 });
   const encoded = Buffer.from(JSON.stringify(index));
-  const back = await ListingTable.fromPages(decodeListingIndex(encoded, hex(9)), read);
+  const back = await ListingPages.open(decodeListingIndex(encoded, hex(9)), read);
   assert.equal(back.length, files.length);
   assert.deepEqual([back.totalBytes, back.submodules], [70_000_018, 1]);
-  files.forEach((file, index) => {
-    assert.deepEqual(back.entry(index), file);
-    assert.equal(back.index(file.path), index);
-  });
-  for (const absent of ['', 'a', 'a/b/', 'link2', 'zz']) assert.equal(back.index(absent), -1, absent);
+  const expected = files.map((file, row) => ({ ...file, row }));
+  assert.deepEqual(await listedEntries(back), expected);
+  for (const file of expected) assert.deepEqual(await back.lookup(file.path), file);
+  for (const absent of ['', 'a', 'a/b/', 'link2', 'zz'])
+    assert.equal(await back.lookup(absent), undefined, absent);
   assert.equal(decodeListingIndex(encoded, hex(8)), null, 'another tree');
   assert.equal(decodeListingIndex(encoded.subarray(0, 80), hex(9)), null, 'truncated');
   assert.equal(decodeListingIndex(Buffer.from(JSON.stringify({ ...index, schema: 1 })), hex(9)), null);
-  assert.equal(await ListingTable.fromPages(index, async () => null), null, 'page unavailable');
+  assert.equal(await ListingPages.open(index, async () => null), null, 'page unavailable');
   for (const badPath of ['0', files.at(-1).path])
     assert.throws(() => writer.append({ ...files[0], path: badPath }), { code: 'GITHUB_RESPONSE' });
+});
+
+test('Issue e165787c: interleaved archive members retain their pin rows and read bounded local blocks', async () => {
+  const { writer, read } = listingPages();
+  const path = row => `path/${row.toString().padStart(6, '0')}`;
+  const size = row => 1 + (row % 3);
+  const files = 65_568;
+  let totalBytes = 0;
+  for (let row = 0; row < files; row++) {
+    totalBytes += size(row);
+    const pending = writer.append({ path: path(row), sha: hex(row), size: size(row), mode: '100644' });
+    if (pending) await pending;
+  }
+  const index = await writer.finish(hex(9), {
+    files,
+    totalBytes,
+    submodules: 0,
+  });
+  assert.equal(index.pages.length, 2);
+  let readBytes = 0;
+  const listing = await ListingPages.open(index, async (page, span) => {
+    const bytes = await read(page, span);
+    readBytes += bytes.length;
+    return bytes;
+  });
+  readBytes = 0;
+  const wanted = Array.from({ length: 32 }, (_, i) => i).flatMap(i => [65_536 + i, 65_535 - i]);
+  const members = wanted.map(row => ({ path: path(row), bytes: Buffer.alloc(size(row)) }));
+  const archive = (async function* () {
+    yield gunzipSync(tarball(members));
+  })();
+  const found = [];
+  for await (const { entry } of githubArchiveFiles(archive, listing, 1024)) {
+    found.push(entry);
+  }
+  assert.deepEqual(
+    found,
+    wanted.map(row => ({ row, path: path(row), sha: hex(row), size: size(row), mode: '100644' })),
+  );
+  assert.ok(readBytes <= wanted.length * 8192, `archive lookups read ${readBytes} listing bytes`);
+  assert.equal(await listing.lookup(path(65_535) + 'a'), undefined);
+  const corrupt = { ...index, pages: [index.pages[0], { ...index.pages[1], first: path(65_535) }] };
+  assert.equal(await ListingPages.open(corrupt, read), null);
 });
 
 test('Issue e165787c: whole, nested and split 64-digit trees emit the same ordered rows and page digest', async () => {
@@ -1455,11 +1511,11 @@ test('Issue e165787c: whole, nested and split 64-digit trees emit the same order
     const { writer, read } = listingPages();
     const totals = await streamListing('fixture/arch', id(1), undefined, request, writer);
     const index = await writer.finish(id(1), totals);
-    const table = await ListingTable.fromPages(index, read);
+    const table = await ListingPages.open(index, read);
     assert.equal(index.shaBytes, 32);
     assert.deepEqual(
-      Array.from({ length: table.length }, (_, i) => table.entry(i)),
-      reference,
+      await listedEntries(table),
+      reference.map((entry, row) => ({ ...entry, row })),
     );
     if (split)
       assert.equal(reads.filter(sha => sha === id(4)).length, 1, 'identical small tree reuses its reply');

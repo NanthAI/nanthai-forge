@@ -6,7 +6,7 @@ import { githubBlobEndpointBytes, type GithubSourceEntry } from './github-projec
 import { tarEntries } from './github-tar.js';
 import { invariant } from './errors.js';
 import { refuseLossyGitPaths } from './git-path-bytes.js';
-import type { ListingTable } from './github-listing-codec.js';
+import type { ListedGithubEntry, ListingPages } from './github-listing-codec.js';
 import { streamGithubTree, TreeSplitUnavailable } from './github-tree-split.js';
 
 const gitId = (value: unknown): value is string =>
@@ -137,9 +137,7 @@ export const gitBlobId = (sha: string, bytes: Buffer) =>
     .digest('hex');
 
 export type ArchiveFile = {
-  entry: GithubSourceEntry;
-  /** The entry's row in the listing table. */
-  index: number;
+  entry: ListedGithubEntry;
   bytes: Buffer | null;
   read: TarRead | null;
 };
@@ -152,7 +150,7 @@ type TarRead = (consume: (bytes: Buffer) => Promise<void>) => Promise<void>;
  * Members seen are marked by row, so no path string outlives its member. */
 export async function* githubArchiveFiles(
   archive: AsyncIterable<Uint8Array>,
-  listed: ListingTable,
+  listed: ListingPages,
   smallBytes: number,
 ): AsyncGenerator<ArchiveFile> {
   const seen = new Uint8Array(listed.length);
@@ -164,22 +162,22 @@ export async function* githubArchiveFiles(
     prefix ??= root;
     invariant(root === prefix, 'GITHUB_RESPONSE', 'GitHub archive has more than one root.');
     const path = slash < 0 ? '' : member.path.slice(slash + 1).replace(/\/$/, '');
-    const index = path ? listed.index(path) : -1;
-    if (index < 0 || seen[index] || listed.mode(index) === '160000') continue;
-    const entry = listed.entry(index);
+    if (member.type !== 'file' && member.type !== 'symlink') continue;
+    const entry = path ? await listed.lookup(path) : undefined;
+    if (!entry || seen[entry.row] || entry.mode === '160000') continue;
     if (member.type === 'symlink') {
       if (entry.mode !== '120000') continue;
-      seen[index] = 1;
-      yield { entry, index, bytes: Buffer.from(member.linkname), read: null };
+      seen[entry.row] = 1;
+      yield { entry, bytes: Buffer.from(member.linkname), read: null };
     } else if (member.type === 'file' && entry.mode !== '120000' && member.size === entry.size) {
-      seen[index] = 1;
-      if (member.size > smallBytes) yield { entry, index, bytes: null, read: member.read };
+      seen[entry.row] = 1;
+      if (member.size > smallBytes) yield { entry, bytes: null, read: member.read };
       else {
         const parts: Buffer[] = [];
         await member.read(async part => {
           parts.push(Buffer.from(part));
         });
-        yield { entry, index, bytes: Buffer.concat(parts), read: null };
+        yield { entry, bytes: Buffer.concat(parts), read: null };
       }
     }
   }

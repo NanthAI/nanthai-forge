@@ -12,7 +12,7 @@ import type { ImportRequestMeter } from '../src/github-import-meter';
 import { githubSourceMode, type GithubSourceEntry } from '../src/github-project-source';
 import { openGithubArchive, githubArchiveFiles, gitBlobId } from '../src/github-archive-source';
 import { archiveCursorSchema, importPageFiles, lfsImportDefaultBytes } from '../src/github-import-pages';
-import { ImportedPins, type ListingTable } from '../src/github-listing-codec';
+import { ImportedPins, type ListedGithubEntry, type ListingPages } from '../src/github-listing-codec';
 import { ObjectRecipeBuilder, objectChunkBytes } from '../src/object-chunks';
 import { githubBlobPack } from '../src/github-blob-pack';
 import { streamGithubBlobPack } from '../src/github-blob-pack-stream';
@@ -71,8 +71,42 @@ export async function runArchiveImport(
       (access.repository as { id?: unknown }).id,
       meter.wrap(convexFetch),
     )) ?? access.token;
-  const ready = await jobListing(ctx, job, input, cursor.tree, token, github, meter);
+  const ready = await jobListing(ctx, job, input, cursor.tree, token, github, meter, !cursor.pins);
   if (!ready) return;
+  try {
+    await runListedArchiveImport(ctx, job, input, meter, ready, {
+      started,
+      cursor,
+      github,
+      token,
+      privateRepository: access.repository.private,
+    });
+  } finally {
+    // Publication may already have selected main. A scratch close cannot undo it.
+    await ready.close().catch(() => {});
+  }
+}
+
+async function runListedArchiveImport(
+  ctx: ActionCtx,
+  job: Doc<'projectGithubImports'>,
+  input: Identity,
+  meter: ImportRequestMeter,
+  ready: NonNullable<Awaited<ReturnType<typeof jobListing>>>,
+  {
+    started,
+    cursor,
+    github,
+    token,
+    privateRepository,
+  }: {
+    started: number;
+    cursor: ReturnType<typeof archiveCursorSchema.parse>;
+    github: ReturnType<ImportRequestMeter['wrap']>;
+    token: string | undefined;
+    privateRepository: boolean;
+  },
+) {
   const { listing, pin: listingPin } = ready;
   console.log(
     `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'listing', at: Date.now(), elapsedMillis: Date.now() - started, files: listing.length, sourceBytes: listing.totalBytes, rssBytes: process.memoryUsage().rss })}`,
@@ -98,17 +132,22 @@ export async function runArchiveImport(
   let lfsBytes = 0;
   const lfsOids = new Set<string>();
   if (cursor.pins)
-    imported.retain(index => {
-      const blob = imported.blob(index),
-        size = imported.size(index);
-      if (!stored.has(blob)) return false;
-      if (listing.mode(index) !== '160000') bytes += size;
-      if (imported.isLfs(index) && !lfsOids.has(blob)) {
-        lfsOids.add(blob);
-        lfsBytes += size;
-      }
-      return true;
-    });
+    for await (const page of listing.pages())
+      imported.retain(
+        index => {
+          const blob = imported.blob(index),
+            size = imported.size(index);
+          if (!stored.has(blob)) return false;
+          if (page.mode(index - page.start) !== '160000') bytes += size;
+          if (imported.isLfs(index) && !lfsOids.has(blob)) {
+            lfsOids.add(blob);
+            lfsBytes += size;
+          }
+          return true;
+        },
+        page.start,
+        page.start + page.length,
+      );
   const initialCount = imported.count;
   const counters = () => ({
     completed: imported.count,
@@ -138,15 +177,9 @@ export async function runArchiveImport(
     return;
   }
   const upload = new ImportUpload(ctx, job.projectId, job.owner, archiveUploadConcurrency, catalog);
-  const record = (
-    entry: GithubSourceEntry,
-    pin: { blob: string; size: number },
-    lfs?: true,
-    index = listing.index(entry.path),
-  ) => {
-    invariant(index >= 0, 'GITHUB_RESPONSE', 'GitHub returned a file outside the listed tree.');
-    if (imported.has(index)) return;
-    imported.set(index, pin.blob, pin.size, lfs);
+  const record = (entry: ListedGithubEntry, pin: { blob: string; size: number }, lfs?: true) => {
+    if (imported.has(entry.row)) return;
+    imported.set(entry.row, pin.blob, pin.size, lfs);
     if (entry.mode !== '160000') bytes += pin.size;
   };
   const pendingReceipts: CatalogEntry[][] = [];
@@ -165,9 +198,8 @@ export async function runArchiveImport(
   // Large members stream through bounded chunk windows into a recipe; the
   // recipe is only bound once the whole member matches its Git object ID.
   const streamLarge = async (
-    entry: GithubSourceEntry,
+    entry: ListedGithubEntry,
     read: (consume: (part: Buffer) => Promise<void>) => Promise<void>,
-    index?: number,
   ) => {
     const git = createHash(entry.sha.length === 40 ? 'sha1' : 'sha256').update(`blob ${entry.size}\0`),
       logical = createHash('sha256'),
@@ -185,11 +217,14 @@ export async function runArchiveImport(
     if (size !== entry.size || git.digest('hex') !== entry.sha) return false;
     const pin = { blob: logical.digest('hex'), size };
     upload.recipe(pin, builder.finish({ sha256: pin.blob, size }).bytes);
-    record(entry, pin, undefined, index);
+    record(entry, pin);
     return true;
   };
   const limit = cursor.lfsLimitBytes ?? lfsImportDefaultBytes;
-  const lfs = new LfsImport(limit, { carried: lfsBytes, previouslyCounted: oid => lfsOids.has(oid) });
+  const lfs = new LfsImport<ListedGithubEntry>(limit, {
+    carried: lfsBytes,
+    previouslyCounted: oid => lfsOids.has(oid),
+  });
   const fallback = {
     upload,
     fetchBlobs: (entries: GithubSourceEntry[]) => githubBlobPack(job.repository, entries, token, github),
@@ -198,29 +233,34 @@ export async function runArchiveImport(
     over,
     hold: lfs.hold.bind(lfs),
   };
-  const missing = function* (start: number, end: number, kind: 'gitlink' | 'small' | 'large') {
-    for (let index = start; index < end; index++) {
-      if (imported.has(index) || lfs.isHeld(listing.path(index))) continue;
-      const mode = listing.mode(index);
-      const rowKind =
-        mode === '160000' ? 'gitlink' : listing.size(index) <= objectChunkBytes ? 'small' : 'large';
-      if (kind === rowKind) yield listing.entry(index);
+  const missing = async function* (kind: 'gitlink' | 'small' | 'large') {
+    for await (const page of listing.pages()) {
+      for (let row = 0; row < page.length; row++) {
+        if (imported.has(page.start + row)) continue;
+        const mode = page.mode(row);
+        const rowKind =
+          mode === '160000' ? 'gitlink' : page.size(row) <= objectChunkBytes ? 'small' : 'large';
+        if (kind === rowKind && !lfs.isHeld(page.path(row))) yield page.entry(row);
+      }
     }
   };
-  const attributes = function* () {
-    for (let index = 0; index < listing.length; index++) {
-      if (
-        listing.size(index) <= lfsAttributeBytes &&
-        (listing.mode(index) === '100644' || listing.mode(index) === '100755') &&
-        isGitattributesPath(listing.path(index))
-      )
-        yield listing.entry(index);
+  const attributes = async function* () {
+    for await (const page of listing.pages()) {
+      for (let row = 0; row < page.length; row++) {
+        const mode = page.mode(row);
+        if (
+          page.size(row) <= lfsAttributeBytes &&
+          (mode === '100644' || mode === '100755') &&
+          isGitattributesPath(page.path(row))
+        )
+          yield page.entry(row);
+      }
     }
   };
-  const stageMissing = async (start: number, end: number, pageFiles?: number) => {
+  const stageMissing = async (pageFiles?: number) => {
     // Gitlinks and large blobs use separate passes so their presence cannot
     // fragment packs of small blobs, regardless of where they sort.
-    for (const entry of missing(start, end, 'gitlink')) {
+    for await (const entry of missing('gitlink')) {
       if (cursor.pins && over()) break;
       const pin = upload.put(Buffer.from(entry.sha));
       record(entry, { blob: pin.sha256, size: pin.size });
@@ -230,8 +270,8 @@ export async function runArchiveImport(
     const sourceOver = () =>
       over() ||
       Boolean(cursor.pins && lfs.holding && Date.now() - started >= archiveRunMillis - packTimeoutMillis);
-    await stageFallbackBlobs(missing(start, end, 'small'), { ...fallback, over: sourceOver }, pageFiles);
-    for (const entry of missing(start, end, 'large')) {
+    await stageFallbackBlobs(missing('small'), { ...fallback, over: sourceOver }, pageFiles);
+    for await (const entry of missing('large')) {
       if (sourceOver()) break;
       const matched = await streamLarge(entry, async consume => {
         await streamGithubBlobPack(job.repository, entry, consume, token, github);
@@ -282,7 +322,7 @@ export async function runArchiveImport(
     if (cursor.pins) {
       // Every rule must be present even when the file that defines it is pinned.
       if (limit) await stageFallbackBlobs(attributes(), fallback, importPageFiles);
-      await stageMissing(0, listing.length, importPageFiles);
+      await stageMissing(importPageFiles);
     } else {
       const archive = await openGithubArchive(job.repository, job.commit, token, github);
       console.log(
@@ -299,18 +339,18 @@ export async function runArchiveImport(
         if (file.bytes) {
           if (gitBlobId(file.entry.sha, file.bytes) === file.entry.sha && !lfs.hold(file.entry, file.bytes)) {
             const pin = upload.put(file.bytes);
-            record(file.entry, { blob: pin.sha256, size: pin.size }, undefined, file.index);
+            record(file.entry, { blob: pin.sha256, size: pin.size });
           }
-        } else await streamLarge(file.entry, file.read!, file.index);
+        } else await streamLarge(file.entry, file.read!);
         await drain();
       }
-      if (complete) await stageMissing(0, listing.length);
+      if (complete && imported.count < listing.length) await stageMissing();
     }
     if (!over() || (cursor.pins && lfs.holding))
       await lfs.resolve({
         repository: job.repository,
         // Public repositories read LFS anonymously; private ones use the import token.
-        ...(access.repository.private ? { token } : {}),
+        ...(privateRepository ? { token } : {}),
         stored: oid => stored.has(oid),
         put: upload.put,
         large: async (pointer, read) => {
@@ -367,19 +407,24 @@ export async function runArchiveImport(
   }
 }
 
-function archiveRows(listing: ListingTable, imported: ImportedPins): ImportRows {
+function archiveRows(listing: ListingPages, imported: ImportedPins): ImportRows {
   // Rows are produced page by page while publication reads them: 100,000 files
   // as materialized JSON rows held about 190 MB of a 512 MB action.
   return {
     imported: {
-      *[Symbol.iterator]() {
-        for (let index = 0; index < listing.length; index++)
-          yield JSON.stringify({
-            path: listing.path(index),
-            blob: imported.blob(index),
-            size: imported.size(index),
-            mode: githubSourceMode(listing.mode(index)),
-          });
+      async *[Symbol.asyncIterator]() {
+        for await (const page of listing.pages())
+          yield (function* () {
+            for (let row = 0; row < page.length; row++) {
+              const index = page.start + row;
+              yield JSON.stringify({
+                path: page.path(row),
+                blob: imported.blob(index),
+                size: imported.size(index),
+                mode: githubSourceMode(page.mode(row)),
+              });
+            }
+          })();
       },
     },
     blobs: {

@@ -18,7 +18,7 @@ import {
 } from './github-lfs.js';
 
 type Pin = { blob: string; size: number };
-export type LfsImportIO = {
+export type LfsImportIO<Entry extends GithubSourceEntry = GithubSourceEntry> = {
   repository: string;
   /** Undefined for a public repository: the batch API is read anonymously. */
   token?: string;
@@ -31,7 +31,7 @@ export type LfsImportIO = {
   ): Promise<void>;
   /** Called once with every LFS oid before `stored` is asked (one batched lookup). */
   preload?(oids: string[]): Promise<void>;
-  record(entry: GithubSourceEntry, pin: Pin, lfs?: true): void;
+  record(entry: Entry, pin: Pin, lfs?: true): void;
   drain(): Promise<void>;
   over(): boolean;
   request?: GithubFetch;
@@ -59,8 +59,8 @@ const defaultAdvice = {
 /** Archive imports hold pointer-shaped files until every `.gitattributes` has
  * been seen; only paths Git would smudge (`filter=lfs`) become their objects.
  * A limit of 0 keeps every pointer as committed bytes. */
-export class LfsImport {
-  private held = new Map<string, { entry: GithubSourceEntry; pointer: LfsPointer; bytes?: Buffer }>();
+export class LfsImport<Entry extends GithubSourceEntry = GithubSourceEntry> {
+  private held = new Map<string, { entry: Entry; pointer: LfsPointer; bytes?: Buffer }>();
   private attributes: { path: string; text: string }[] = [];
   /** Unique LFS bytes bound into the State (counted once per oid). */
   objectBytes = 0;
@@ -81,7 +81,7 @@ export class LfsImport {
   }
 
   /** True when the caller must not store these committed bytes yet. */
-  hold(entry: GithubSourceEntry, bytes: Buffer): boolean {
+  hold(entry: Entry, bytes: Buffer): boolean {
     if (entry.mode !== '100644' && entry.mode !== '100755') return false;
     if (isGitattributesPath(entry.path) && bytes.length <= attributeBytes)
       this.attributes.push({ path: entry.path, text: bytes.toString('utf8') });
@@ -97,9 +97,9 @@ export class LfsImport {
 
   /** Binds held paths: pointers Git would not smudge keep their bytes; LFS paths
    * bind their object, fetched once per oid unless an earlier run stored it. */
-  async resolve(io: LfsImportIO): Promise<void> {
+  async resolve(io: LfsImportIO<Entry>): Promise<void> {
     const rules = lfsRules(this.attributes);
-    const wanted = new Map<string, { pointer: LfsPointer; entries: GithubSourceEntry[] }>();
+    const wanted = new Map<string, { pointer: LfsPointer; entries: Entry[] }>();
     for (const { entry, pointer, bytes } of this.held.values()) {
       if (!isLfsPath(rules, entry.path)) {
         const pin = io.put(bytes ?? formatLfsPointer(pointer));

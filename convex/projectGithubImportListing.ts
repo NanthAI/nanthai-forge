@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import { randomBytes, randomFillSync } from 'node:crypto';
+import { open, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import type { ActionCtx } from './_generated/server';
@@ -13,7 +16,7 @@ import {
   decodeListingIndex,
   ImportedPins,
   ListingPageWriter,
-  ListingTable,
+  ListingPages,
 } from '../src/github-listing-codec';
 import { listGithubTree } from '../src/github-archive-source';
 import type { GithubFetch } from '../src/github';
@@ -80,12 +83,65 @@ async function storeScratch(
   }
   return pin;
 }
-/** The stored table when it is present and still the verified table for `tree`; null otherwise. */
-async function readListing(projectId: Id<'hostedProjects'>, pin: Pin, tree: string) {
-  const bytes = await readScratch(projectId, pin, 'listing', listingHeader);
+/** Fetch and verify each page once. A private action-local copy serves repeated
+ * scans and out-of-order tar members without making another R2 request. */
+async function readListing(
+  projectId: Id<'hostedProjects'>,
+  pin: Pin,
+  tree: string,
+  indexTarMembers: boolean,
+) {
+  const bytes = await readScratch(projectId, pin, 'listing', { header: listingHeader });
   const index = bytes && decodeListingIndex(bytes, tree);
   if (!index) return null;
-  return ListingTable.fromPages(index, page => readScratch(projectId, page, 'listing'));
+  const buffer = Buffer.allocUnsafe(index.pages.reduce((max, page) => Math.max(max, page.size), 0));
+  const path = join(tmpdir(), `forge-github-listing-${randomBytes(16).toString('hex')}`);
+  const file = await open(path, 'wx+', 0o600);
+  // Lambda can interrupt an action without unwinding it. On POSIX the open
+  // descriptor keeps the bytes available after unlink and owns their lifetime.
+  const linked = await unlink(path).then(
+    () => false,
+    () => true,
+  );
+  const close = async () => {
+    try {
+      await file.close();
+    } finally {
+      if (linked) await unlink(path);
+    }
+  };
+  const offsets = new Map<string, number>();
+  let offset = 0;
+  let keep = false;
+  try {
+    const listing = await ListingPages.open(
+      index,
+      async (page, span) => {
+        if (!keep) {
+          const raw = await readScratch(projectId, page, 'listing', { buffer });
+          if (!raw) return null;
+          await file.writeFile(raw);
+          offsets.set(page.sha256, offset);
+          offset += raw.length;
+          return raw;
+        }
+        const start = offsets.get(page.sha256)! + (span?.offset ?? 0);
+        const raw = buffer.subarray(0, span?.size ?? page.size);
+        for (let at = 0; at < raw.length;) {
+          const { bytesRead } = await file.read(raw, at, raw.length - at, start + at);
+          if (bytesRead === 0) return null;
+          at += bytesRead;
+        }
+        return digest(raw) === (span?.sha256 ?? page.sha256) ? raw : null;
+      },
+      indexTarMembers,
+    );
+    if (!listing) return null;
+    keep = true;
+    return { listing, close };
+  } finally {
+    if (!keep) await close();
+  }
 }
 
 export async function readPins(
@@ -103,7 +159,7 @@ async function readScratch(
   projectId: Id<'hostedProjects'>,
   pin: Pin,
   kind: 'listing' | 'pins',
-  header?: Buffer,
+  { header, buffer }: { header?: Buffer; buffer?: Buffer } = {},
 ) {
   try {
     const url = await presignGet(r2Config(), r2ImportListingKey(projectId, pin.sha256));
@@ -126,7 +182,7 @@ async function readScratch(
             if (header && offset < header.length)
               for (let i = 0; i < Math.min(chunk.value.length, header.length - offset); i++)
                 if (header[offset + i] !== chunk.value[i]) return null;
-            bytes ??= Buffer.allocUnsafe(pin.size);
+            bytes ??= buffer?.subarray(0, pin.size) ?? Buffer.allocUnsafe(pin.size);
             bytes.set(chunk.value, offset);
             offset += chunk.value.byteLength;
             progressed();
@@ -152,14 +208,15 @@ export async function jobListing(
   token: string | undefined,
   github: GithubFetch,
   meter: ImportRequestMeter,
+  indexTarMembers: boolean,
 ) {
   const started = Date.now();
-  const listing = job.listing && (await readListing(job.projectId, job.listing, tree));
-  if (listing) {
+  const stored = job.listing && (await readListing(job.projectId, job.listing, tree, indexTarMembers));
+  if (stored) {
     console.log(
-      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'listing-stored', at: Date.now(), elapsedMillis: Date.now() - started, files: listing.length })}`,
+      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'listing-stored', at: Date.now(), elapsedMillis: Date.now() - started, files: stored.listing.length })}`,
     );
-    return { listing, pin: job.listing! };
+    return Object.assign(stored, { pin: job.listing! });
   }
   const writer = new ListingPageWriter((page, nonce) =>
     storeScratch(job.projectId, page, 'listing', () => {

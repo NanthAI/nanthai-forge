@@ -22,7 +22,10 @@ const stagedPageBytes = 2 * 1024 * 1024;
 const treePathsPerRow = 500;
 /** Row values (JSON) in key order. Re-iterable, so an archive import produces them lazily
  * instead of holding every JSON string; the keys only order the paged inventory. */
-export type ImportRows = Record<'imported' | 'blobs', Iterable<string>>;
+export type ImportRows = {
+  imported: Iterable<string> | AsyncIterable<Iterable<string>>;
+  blobs: Iterable<string>;
+};
 /** Publication sorts the catalog it stored in place, without copying it. */
 type PublishCatalog = ImportCatalog & { stored: CatalogTable };
 /** Metadata is traversed in bounded ordered pages. No whole repository array,
@@ -68,12 +71,15 @@ async function publishRows(
   async function* pages(part: string) {
     if (memory) {
       let page: string[] = [];
-      for (const row of memory[part as keyof ImportRows]) {
-        page.push(row);
-        if (page.length < importPageFiles) continue;
-        yield page;
-        page = [];
-      }
+      const rows = memory[part as keyof ImportRows];
+      const ranges = Symbol.asyncIterator in rows ? rows : [rows];
+      for await (const range of ranges)
+        for (const row of range) {
+          page.push(row);
+          if (page.length < importPageFiles) continue;
+          yield page;
+          page = [];
+        }
       if (page.length) yield page;
       return;
     }
