@@ -1460,7 +1460,11 @@ attempt time. Source construction defaults to the fixed Convex worker, using the
 native State format and bounded, resumable changed-blob verification. One-window
 raw saves run in the Convex runtime to avoid Node cold starts; larger/recipe
 saves retain the resumable Node worker under the same execution and publication
-fences. Dispatch is transactional and adds no Node action. Unchanged
+fences. Retained catalog and point bindings already prove source reference
+and, for R2 objects, verified storage. Transfers and worker publication update
+these flags on existing object rows when needed. Publication materializes a
+retained binding when it must add State or recipe metadata or change its
+storage encoding. Dispatch is transactional and adds no Node action. Unchanged
 paths are preserved from the verified baseline; no repository code runs.
 The Node worker entries load their static import graph on every cold start, so
 they reach no CLI hub (local workspace, records, checks, GitHub, network clients)

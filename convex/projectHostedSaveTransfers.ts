@@ -14,7 +14,7 @@ import { invariant } from '../src/errors';
 import { r2Config, r2Key, presignGet, presignPut, headObject, checksumOf } from './r2';
 import { blobStore } from './blobStore';
 import { isStored } from './projectObjectFields';
-import { findObject, objectRow } from './projectObjectFind';
+import { findObject } from './projectObjectFind';
 import { packHeaders, packRange } from '../src/object-pack-range';
 
 const args = {
@@ -144,21 +144,32 @@ export const verified = internalMutation({
   returns: v.null(),
   handler: async (ctx, input) => {
     const { pin } = await authorizeSaveTransfer(ctx, input);
-    const object = await findObject(ctx, input.projectId, pin.sha256);
-    invariant(
-      object &&
-        !object.removed &&
-        object.location === 'r2' &&
-        object.r2Key === input.key &&
-        object.r2SweepKey !== input.key &&
-        object.size === pin.size,
-      'SOURCE_UNAVAILABLE',
-      'The output binding changed during storage verification.',
-    );
-    if (!object.r2Committed) await ctx.db.patch((await objectRow(ctx, object))._id, { r2Committed: true });
+    await markSourceTransferVerified(ctx, input.projectId, pin, input.key);
     return null;
   },
 });
+
+/** A retained R2 binding already proves the flag. Only a pending upload row needs a patch. */
+export async function markSourceTransferVerified(
+  ctx: MutationCtx,
+  projectId: Transfer['projectId'],
+  pin: Transfer['pin'],
+  key: string,
+) {
+  const object = await findObject(ctx, projectId, pin.sha256);
+  invariant(
+    object &&
+      !object.removed &&
+      object.location === 'r2' &&
+      object.r2Key === key &&
+      object.r2SweepKey !== key &&
+      object.size === pin.size,
+    'SOURCE_UNAVAILABLE',
+    'The output binding changed during storage verification.',
+  );
+  if (object._id !== undefined && !object.r2Committed) await ctx.db.patch(object._id, { r2Committed: true });
+}
+
 export const commit = internalAction({
   args,
   returns: v.null(),
@@ -242,9 +253,9 @@ export async function sourceTransferGrant(
     });
     object = (await ctx.db.get(id))!;
   }
-  if (!object.r2Committed && object.r2SweepKey === object.r2Key) {
+  if (object._id !== undefined && !object.r2Committed && object.r2SweepKey === object.r2Key) {
     const key = `${r2Key(input.projectId, pin.sha256)}/u/${crypto.randomUUID()}`;
-    await ctx.db.patch((await objectRow(ctx, object))._id, { r2Key: key, r2PreparedAt: Date.now() });
+    await ctx.db.patch(object._id, { r2Key: key, r2PreparedAt: Date.now() });
     object = { ...object, r2Key: key };
   }
   invariant(object.r2Key, 'SOURCE_UNAVAILABLE', 'Output storage binding is unavailable.');

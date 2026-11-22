@@ -86,8 +86,8 @@ export async function storeSourceOutputs(
           'SOURCE_HASH_MISMATCH',
           'Source pack is not committed in this project.',
         );
-        if (!pack.sourceReferenced) {
-          await ctx.db.patch((await objectRow(ctx, pack))._id, { sourceReferenced: true });
+        if (pack._id !== undefined && !pack.sourceReferenced) {
+          await ctx.db.patch(pack._id, { sourceReferenced: true });
           fence = pack.digest;
           packs.set(pin.r2Key, { ...pack, sourceReferenced: true });
         }
@@ -270,7 +270,6 @@ export async function storeSourceOutputs(
         sourceReferenced: true,
       });
     else if (
-      !old.sourceReferenced ||
       (old.stateGeneration === undefined && pin.stateGeneration !== undefined) ||
       (old.stateParents === undefined && pin.stateParents !== undefined) ||
       (old.statePhysical === undefined && statePhysical !== undefined) ||
@@ -279,6 +278,8 @@ export async function storeSourceOutputs(
       (old.recipeClosure === undefined && pin.recipeClosure !== undefined)
     )
       await ctx.db.patch((await objectRow(ctx, old))._id, { sourceReferenced: true, ...patchGraph });
+    else if (old._id !== undefined && !old.sourceReferenced)
+      await ctx.db.patch(old._id, { sourceReferenced: true, ...patchGraph });
     if (!old?.sourceReferenced) fence = pin.sha256;
   }
   if (fence) await ctx.db.insert('projectCheckLogSourcePins', { projectId, digest: fence });

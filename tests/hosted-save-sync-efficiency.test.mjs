@@ -24,6 +24,10 @@ import { sourceDispatch } from '../dist/hosted-source-job-controller.js';
 import { digest } from '../dist/hash.js';
 import { composeAgentSource, selectAgentLane, agentState } from '../dist/hosted-agent-source.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
+import { moduleUrl } from './convex-module.mjs';
+import { readObjectRecipe } from '../dist/object-chunks.js';
+
+const { catalogPages } = await import(moduleUrl('../convex/projectObjectFind.ts'));
 
 function checkout(t, s, entry, state, changed = true) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-efficiency-')),
@@ -115,19 +119,39 @@ async function changedSave(
   scale = false,
   provider = 'synthetic',
   contract = false,
-  { baselineGeneration, wrap, retryLost = false, retryContract } = {},
+  { baselineGeneration, wrap, retryLost = false, retryContract, catalogFileCount } = {},
 ) {
   environment(t);
   const now = Date.now();
   t.mock.method(Date, 'now', () => now);
   process.env.FORGE_SOURCE_PROVIDER = 'convex';
   const s = await composeFixture();
-  const files = Array.from({ length: 3000 }, (_, i) =>
-    s.file(`f${String(i).padStart(4, '0')}`, `first\noriginal-${i}\nlast\n`),
+  const fileCount = catalogFileCount ?? 3000;
+  const files = Array.from({ length: fileCount }, (_, i) =>
+    s.file(
+      `f${String(i).padStart(Math.max(4, String(fileCount - 1).length), '0')}`,
+      `first\noriginal-${i}\nlast\n`,
+    ),
   );
   const baseline = s.state(files),
     entry = await s.lane(baseline),
     state = JSON.parse(s.objects.get(baseline.sha256));
+  if (catalogFileCount) {
+    const pins = [...files.map(({ blob }) => blob), baseline.sha256];
+    const pinsSet = new Set(pins);
+    for (const page of catalogPages(
+      pins.map(digest => ({
+        digest,
+        size: s.objects.get(digest).length,
+        ...(digest === baseline.sha256
+          ? { stateGeneration: 1, stateSize: { fileCount, manifestBytes: baseline.size } }
+          : {}),
+      })),
+    ))
+      s.insert('projectObjectCatalog', { projectId: s.projectId, origin: 'synthetic', ...page });
+    for (const row of s.tables.projectObjects.values())
+      if (pinsSet.has(row.digest)) s.tables.projectObjects.delete(row._id);
+  }
   if (baselineGeneration !== undefined)
     for (const row of s.tables.projectObjects.values())
       if (row.digest === baseline.sha256)
@@ -143,7 +167,7 @@ async function changedSave(
     randomUUID(),
     null,
   );
-  exchange.client = wrap ? wrap(c.client, s) : c.client;
+  exchange.client = wrap ? wrap(c.client, s, c) : c.client;
   const command = { operationId: randomUUID(), message: 'ten-file save' };
   s.counts.length = 0;
   const overlapWrites = () =>
@@ -183,8 +207,6 @@ async function changedSave(
       terminal = await saveHostedLane(root, command, exchange, contract);
     }
     const output = terminal.outcome.result;
-    assert.equal(JSON.parse(s.objects.get(output.head)).files.length, 3000);
-    assert.equal(readHostedLaneCheckout(root).tree, sourceTree(JSON.parse(s.objects.get(output.head)).files));
     const stats = {
       ...c.stats(),
       overlapWrites: overlapWrites(),
@@ -192,7 +214,36 @@ async function changedSave(
       wallMs: performance.now() - started,
     };
     stats.totalCalls = stats.calls + stats.storageCalls;
-    return { stats, calls: c.calls, s, c, root, command, transport, first: pending, files };
+    let stateBytes = s.objects.get(output.head);
+    if (!stateBytes) {
+      const rows = new Map([...s.tables.projectObjects.values()].map(row => [row.digest, row]));
+      const recipe = JSON.parse(s.objects.get(rows.get(output.head).recipe.digest));
+      const chunks = await Array.fromAsync(
+        readObjectRecipe(recipe, async ({ sha256, size }) => {
+          const pack = rows.get(sha256)?.pack;
+          return pack
+            ? s.objects.get(pack.digest).subarray(pack.offset, pack.offset + size)
+            : s.objects.get(sha256);
+        }),
+      );
+      stateBytes = Buffer.concat(chunks);
+    }
+    const saved = JSON.parse(stateBytes);
+    assert.equal(saved.files.length, fileCount);
+    assert.equal(readHostedLaneCheckout(root).tree, sourceTree(saved.files));
+    return {
+      stats,
+      calls: c.calls,
+      s,
+      c,
+      root,
+      command,
+      transport,
+      first: pending,
+      files,
+      started,
+      stateBytes,
+    };
   }
   const owner = randomUUID();
   await c.call('projectSourceJobApi:claim', { ...args, owner, leaseMs: 60000 });
@@ -789,6 +840,95 @@ test('a direct save whose submit reply was lost replays the same operation to th
   assert.equal(count('projectConvexSourceStore:commit'), 1);
   assert.equal(count('projectHostedSaves:prepare'), 2);
   assert.equal(run.first.outcome.status, 'completed');
+});
+
+test('a 29,000-file catalog save and its original-operation replay keep retained objects in the catalog', async t => {
+  const fileCount = 29_000;
+  const r2 = controls => ({
+    gets: controls.r2Gets.length,
+    readBytes: controls.r2ReadBytes(),
+    puts: controls.r2Puts.length,
+    putBytes: controls.r2PutBytes(),
+    heads: controls.r2Heads(),
+  });
+  let beforeRetry;
+  let published;
+  const run = await changedSave(
+    t,
+    false,
+    false,
+    'convex',
+    { ...directContract, uploadPacks: true },
+    {
+      catalogFileCount: fileCount,
+      retryLost: true,
+      wrap: (client, s, c) => ({
+        ...client,
+        action: async (ref, args) => {
+          const reply = await client.action(ref, args);
+          if (getFunctionName(ref) === 'projectSourceRun:submit') {
+            assert.equal(beforeRetry, undefined, 'the original save runs once');
+            beforeRetry = {
+              transactions: s.counts.length,
+              objects: s.tables.projectObjects.size,
+              repliedAt: performance.now(),
+              r2: r2(c),
+            };
+            const result = JSON.parse(reply);
+            published = (result.terminal ?? result).outcome;
+            throw new Error('Synthetic reply lost after catalog-backed save publication');
+          }
+          return reply;
+        },
+      }),
+    },
+  );
+  const output = run.first.outcome;
+  assert.equal(output.status, 'completed');
+  assert.deepEqual(output.result, published.result);
+  const saved = JSON.parse(run.stateBytes);
+  const expected = run.files.map((file, index) =>
+    index < 10 ? { ...file, blob: digest(`first\nchanged-${file.path}\nlast\n`) } : file,
+  );
+  assert.deepEqual(saved.files, expected);
+  assert.equal(saved.parents.length, 1);
+  assert.equal(digest(run.stateBytes), output.result.head);
+  const pages = [...run.s.tables.projectObjectCatalog.values()];
+  assert.equal(pages.length, Math.ceil((fileCount + 1) / 256));
+  assert.equal(
+    pages.reduce((total, page) => total + page.sizes.length, 0),
+    fileCount + 1,
+  );
+  const retained = new Set([...run.files.map(file => file.blob), saved.parents[0]]);
+  const promoted = [...run.s.tables.projectObjects.values()].filter(row => retained.has(row.digest));
+  assert.equal(promoted.length, 0);
+  assert.equal(run.s.tables.projectObjects.size, beforeRetry.objects);
+  assert.equal(run.calls.at(-1), 'projectHostedSaves:prepare');
+  assert.equal(run.calls.filter(name => name === 'projectHostedSaves:prepare').length, 2);
+  assert(run.stats.totalCalls <= 8, JSON.stringify(run.calls));
+  const replay = run.s.counts.slice(beforeRetry.transactions);
+  assert.equal(replay.length, 1);
+  assert.equal(replay[0].writes, 0);
+  assert.deepEqual(r2(run.c), beforeRetry.r2);
+  t.diagnostic(
+    JSON.stringify({
+      save: {
+        calls: run.stats.totalCalls - 1,
+        documentsRead: run.stats.documents - replay[0].documents,
+        documentsWritten: run.stats.writes,
+        wallMs: beforeRetry.repliedAt - run.started,
+      },
+      replay: {
+        calls: 1,
+        documentsRead: replay[0].documents,
+        documentsWritten: replay[0].writes,
+        wallMs: run.started + run.stats.wallMs - beforeRetry.repliedAt,
+      },
+      materializedRows: promoted.length,
+      r2: beforeRetry.r2,
+      peakRssBytes: process.resourceUsage().maxRSS * 1024,
+    }),
+  );
 });
 
 test('a direct save that crashed before its submit ran resumes from its retained request: prepare replays the targets', async t => {

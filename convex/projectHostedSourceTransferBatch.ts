@@ -2,14 +2,18 @@
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalMutation, internalAction } from './server';
-import { authorizeSourceTransfer, sourceTransferGrant } from './projectHostedSaveTransfers';
+import {
+  authorizeSourceTransfer,
+  markSourceTransferVerified,
+  sourceTransferGrant,
+} from './projectHostedSaveTransfers';
 import { saveObject } from './projectHostedSaveStore';
 import { saveObjectSchema } from '../src/hosted-save';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { isStored } from './projectObjectFields';
 import { r2Config, headObject, checksumOf } from './r2';
-import { findObject, objectRow } from './projectObjectFind';
+import { findObject } from './projectObjectFind';
 
 const identity = { projectId: v.id('hostedProjects'), input: v.string(), executionId: v.string() };
 const pin = v.object({ sha256: v.string(), size: v.number() });
@@ -77,21 +81,8 @@ export const verified = internalMutation({
   handler: async (ctx, input) => {
     page(input.objects.length);
     await authorizeSourceTransfer(ctx, input);
-    for (const expected of input.objects) {
-      const pin = saveObjectSchema.parse(expected.pin);
-      const object = await findObject(ctx, input.projectId, pin.sha256);
-      invariant(
-        object &&
-          !object.removed &&
-          object.location === 'r2' &&
-          object.r2Key === expected.key &&
-          object.r2SweepKey !== expected.key &&
-          object.size === pin.size,
-        'SOURCE_UNAVAILABLE',
-        'The output binding changed during storage verification.',
-      );
-      if (!object.r2Committed) await ctx.db.patch((await objectRow(ctx, object))._id, { r2Committed: true });
-    }
+    for (const { pin, key } of input.objects)
+      await markSourceTransferVerified(ctx, input.projectId, saveObjectSchema.parse(pin), key);
     return null;
   },
 });

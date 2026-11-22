@@ -7,6 +7,8 @@ import { saveFixture, maxima } from './hosted-saves-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { digest } from '../dist/hash.js';
 const transfer = await import(moduleUrl('../convex/projectHostedSaveTransfers.ts'));
+const batch = await import(moduleUrl('../convex/projectHostedSourceTransferBatch.ts'));
+const { catalogPages } = await import(moduleUrl('../convex/projectObjectFind.ts'));
 const jobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
 const callbacks = await import(moduleUrl('../convex/projectSourceJobApi.ts'));
 const code = value => error => (error.data?.code ?? error.code) === value;
@@ -174,6 +176,44 @@ test('exact grants and HEAD commits recheck execution, epoch, project membership
   );
   t.diagnostic(JSON.stringify({ HEAD: heads, sourceBytesThroughActions: 0, maxima }));
 });
+test('verified single and batch transfers reuse a catalog binding and commit only the exact pending row', async t => {
+  const s = await fixture(t);
+  const pin = { sha256: digest('retained output'), size: 15 };
+  const [page] = catalogPages([{ digest: pin.sha256, size: pin.size }]);
+  s.insert('projectObjectCatalog', { projectId: s.projectId, origin: 'synthetic', ...page });
+  const { pin: _, ...identity } = s.args;
+  const key = `v1/p/${s.projectId}/o/${pin.sha256}`;
+  const rows = s.tables.projectObjects.size;
+  await s.call('verifiedCatalog', transfer.verified, { ...identity, pin, key });
+  assert.equal(s.tables.projectObjects.size, rows);
+  await assert.rejects(
+    s.call('verifiedCatalog', transfer.verified, { ...identity, pin: { ...pin, size: 16 }, key }),
+    code('SOURCE_UNAVAILABLE'),
+  );
+  await assert.rejects(
+    s.call('verifiedCatalog', transfer.verified, { ...identity, pin, key: `${key}/u/old` }),
+    code('SOURCE_UNAVAILABLE'),
+  );
+
+  const pendingPin = { sha256: digest('pending output'), size: 14 };
+  await s.call('grant', transfer.grant, { ...identity, pin: pendingPin, action: 'upload' });
+  const pending = await s.call('pending', transfer.pending, { ...identity, pin: pendingPin });
+  assert.equal(pending.stored, false);
+  const input = {
+    ...identity,
+    objects: [
+      { pin, key, stored: true },
+      { pin: pendingPin, ...pending },
+    ],
+  };
+  for (let attempt = 0; attempt < 2; attempt++) await s.call('verifiedCatalogBatch', batch.verified, input);
+  assert.equal(s.tables.projectObjects.size, rows + 1);
+  assert.deepEqual(await s.call('pending', transfer.pending, { ...identity, pin: pendingPin }), {
+    key: pending.key,
+    stored: true,
+  });
+});
+
 test('revoked project writes and expired workers cannot obtain or commit transfers', async t => {
   const s = await fixture(t);
   s.patch('hostedProjects', s.projectId, { removal: 'trash' });
