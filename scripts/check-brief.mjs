@@ -14,6 +14,15 @@ const POINTER = /briefings\.md#standard-builder-block|standard\s+(?:builder|safe
 // Canonical rule files define the fields; naming them never counts as a brief's own rules file.
 const CANONICAL = new Set(['briefings.md', 'brief-template.md', 'agents.md', 'claude.md']);
 const MAX_RULES_BYTES = 256 * 1024;
+const BRIEFINGS_PATH = new URL('../docs/agents/briefings.md', import.meta.url);
+const REVIEWER_PROMPT_RULE = 'The reviewer prompt must include the AGENTS.md safety line verbatim.';
+
+function hasReviewerPromptRule(briefings) {
+  const block = briefings
+    .split(/\r?\n(?=#{1,3} )/)
+    .find(section => /^### Standard builder block[ \t]*\r?\n/.test(section));
+  return block?.split('\n').some(line => line.trim() === REVIEWER_PROMPT_RULE) ?? false;
+}
 
 const labeled = (text, labels) => {
   const line = new RegExp(`^\\s*(?:[-*]\\s*)?\\**(?:${labels})\\b[^:\\n]*:\\**[ \\t]*(\\S[^\\n]*)$`, 'gim');
@@ -170,7 +179,7 @@ export async function resolveBriefIssue(brief, reader = cliBoardReader) {
 
 export async function checkBriefMain(
   args,
-  { reader = cliBoardReader, out = console.log, err = console.error } = {},
+  { reader = cliBoardReader, out = console.log, err = console.error, briefingsPath = BRIEFINGS_PATH } = {},
 ) {
   const board = !args.includes('--no-board');
   const rest = args.filter(arg => arg !== '--no-board');
@@ -186,8 +195,19 @@ export async function checkBriefMain(
     err('check-brief: cannot read the brief');
     return 2;
   }
+  let briefings;
+  try {
+    briefings = readFileSync(briefingsPath, 'utf8');
+  } catch {
+    err('check-brief: cannot read docs/agents/briefings.md');
+    return 2;
+  }
   const missing = new Set(lintBrief(brief, path === '-' ? '.' : dirname(resolve(path))));
   let failed = missing.size > 0;
+  if (!hasReviewerPromptRule(briefings)) {
+    err(`check-brief: reviewer-prompt-safety: the standard builder block must say "${REVIEWER_PROMPT_RULE}"`);
+    failed = true;
+  }
   for (const field of briefFields) {
     if (missing.has(field.name)) err(`check-brief: missing ${field.name}: ${field.need}`);
   }

@@ -155,6 +155,36 @@ test('unsafe-command: a brief that tells an agent to print env values or process
   assert.deepEqual(briefFindings(brief(), 'Inspect workers with `pgrep -fl node`.'), ['unsafe-command']);
 });
 
+test('243aa313: brief lint fails when the standard block drops or paraphrases the reviewer-prompt rule', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'check-brief-'));
+  try {
+    const file = join(dir, 'brief.md');
+    const briefingsPath = join(dir, 'briefings.md');
+    writeFileSync(file, brief());
+    const rule = 'The reviewer prompt must include the AGENTS.md safety line verbatim.';
+    const block = instruction =>
+      `### Standard builder block\n\n10. Review before landing.\n    ${instruction}\n`;
+    const errors = [];
+    const run = async candidate => {
+      writeFileSync(briefingsPath, candidate);
+      errors.length = 0;
+      return checkBriefMain(['--no-board', file], {
+        briefingsPath,
+        out: () => {},
+        err: line => errors.push(line),
+      });
+    };
+
+    assert.equal(await run(block(rule)), 0);
+    for (const replacement of ['', 'Tell the reviewer about the safety rules in AGENTS.md.']) {
+      assert.equal(await run(`${block(replacement)}\n### Other instructions\n${rule}\n`), 1);
+      assert.match(errors.join('\n'), /reviewer-prompt-safety/);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('ed4c5852: the brief Issue UUID is resolved on the board with one read of its first 8 characters', async () => {
   assert.equal(briefIssueId(brief()), ISSUE);
   const dir = mkdtempSync(join(tmpdir(), 'check-brief-'));

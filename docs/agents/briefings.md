@@ -121,8 +121,12 @@ If a command waits for approval and nobody can answer, cancel it and use the rou
    and counts; label unrun work. Runtime/storage changes also need real billed
    usage and byte-placement evidence; otherwise that acceptance stays open.
    Perf/cost claims: [perf-claims](perf-claims.md).
-10. Finish your own Lane unless review is required first. Check the benchmark hold
-    before each submission; wait without touching it. No routine urgent priority.
+10. Finish your own Lane unless review is required first.
+    The reviewer prompt must include the AGENTS.md safety line verbatim.
+    Copy the full line starting with “Never print environment values or secrets”
+    from [AGENTS.md](../../AGENTS.md#hard-rules).
+    Check the benchmark hold before each submission; wait without touching it.
+    No routine urgent priority.
     Freeze edits/saves/sync until terminal. Stay with your own landing, dry run or
     wait and all dependent work: never end the turn while one runs, and never end on a
     status line. Resume a killed shell with the receipt's blocking `waitCommand`:
@@ -307,4 +311,4 @@ Briefs point here instead of repeating these rules or naming a private file; mac
 specifics (heavy slots, disk reserve, builder count, local paths) come from local
 machine setup and the brief's own lines.
 
-Before delegating, lint the brief: `npm run check:brief -- BRIEF.md` (`-` reads stdin). It exits 1 and names each missing field: full Issue UUID, safety block, scale budget, disk floor with a number, checkpoint cadence, no-end-turn rule. It also fails `unsafe-command` when the brief or its common rules tell an agent to run `env`, `printenv`, `npx convex env list`, `pgrep -fl` or `ps -E`; sentences that forbid them pass. The standard-block pointer covers safety, cadence and no-end-turn, so a brief should link [the block](#standard-builder-block) rather than a private rules file (a local `.md` file it names is still read, for older briefs). It also resolves the brief's Issue UUID against the planning board with one read (`planning` by the first 8 characters, no reconcile) and fails `unknown-issue` when no item has that prefix and `issue-mismatch` when the full id differs. With no login, no Forge checkout in the working directory or an unreachable board it prints a `warning` and lints offline (exit 0); `--no-board` skips the read. Output never echoes the brief.
+Before delegating, lint the brief: `npm run check:brief -- BRIEF.md` (`-` reads stdin). It exits 1 and names each missing field: full Issue UUID, safety block, scale budget, disk floor with a number, checkpoint cadence, no-end-turn rule. It also fails `unsafe-command` when the brief or its common rules tell an agent to run `env`, `printenv`, `npx convex env list`, `pgrep -fl` or `ps -E`; sentences that forbid them pass. The standard-block pointer covers safety, cadence and no-end-turn, so a brief should link [the block](#standard-builder-block) rather than a private rules file (a local `.md` file it names is still read, for older briefs). The lint checks that the standard builder block retains its exact reviewer-prompt instruction (`reviewer-prompt-safety`). It also resolves the brief's Issue UUID against the planning board with one read (`planning` by the first 8 characters, no reconcile) and fails `unknown-issue` when no item has that prefix and `issue-mismatch` when the full id differs. With no login, no Forge checkout in the working directory or an unreachable board it prints a `warning` and lints offline. `--no-board` skips the board read. Output never echoes the brief.
