@@ -47,6 +47,8 @@ const workStore = await import(moduleUrl('../convex/projectWorkStore.ts'));
 const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const { commandPlanningRows } = await import(moduleUrl('../convex/projectWorkCommandRows.ts'));
 const hostedRecords = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+const artifactStorage = await import(moduleUrl('../convex/artifactStorage.ts'));
+const { resolve: resolveAttachment } = await import(moduleUrl('../convex/discussionAttachmentRead.ts'));
 const { successorIntentId } = await import('../dist/hosted-intent-chain.js');
 const { dispatchHostedWork } = await import('../dist/hosted-work-client.js');
 const { indexedRecord } = await import('../dist/work-hosted-index.js');
@@ -431,6 +433,146 @@ test('purge cost budget: one redaction call per step page, one check query per s
   assert.ok(workRecordRows(s.tables).length > 0);
 });
 
+function discussionArtifact(s, projectId, itemId, commentId, text) {
+  return artifactStorage.reserve._handler(s.ctx, {
+    namespace: `v1/p/${projectId}/discussion/${itemId}/${commentId}`,
+    digest: digest(text),
+    size: Buffer.byteLength(text),
+    contentType: 'text/plain',
+  });
+}
+
+test('Item purge resumes attachment pages, fences delayed commits and queues only the exact Item’s R2 keys', async t => {
+  const { s, itemId, keep } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const commentId = [...s.tables.projectHostedRecordHeads.values()].find(
+    row => row.kind === 'comment' && row.parent === itemId,
+  ).key;
+  const add = async (projectId, item, comment, text, committed = true) => {
+    const row = await discussionArtifact(s, projectId, item, comment, text);
+    if (committed) await artifactStorage.markCommitted._handler(s.ctx, { ref: `r2blob:${row._id}` });
+    r2.objects.set(row.r2Key, Buffer.from(text));
+    return row;
+  };
+  const rows = [];
+  for (let i = 0; i < 17; i++) rows.push(await add(s.projectId, itemId, commentId, `target ${i}`, i !== 0));
+  const [, readable] = rows;
+  const unrelated = [
+    await add(s.projectId, keep.itemId, commentId, 'other Item'),
+    await add(s.projectId, itemId + '-other', commentId, 'similar Item prefix'),
+    await add(s.projectId + '-other', itemId, commentId, 'other project'),
+  ];
+  const selection = { projectId: s.projectId, itemId, commentId, attachmentId: readable._id };
+  assert.equal((await resolveAttachment._handler(s.ctx, selection))?.digest, readable.digest);
+  const removed = () => rows.filter(row => s.tables.artifactBlobs.get(row._id).removed);
+  const scheduled = () =>
+    s.scheduled.filter(task => getFunctionName(task.fn) === 'artifactStorage:deleteBytes');
+  const operationId = randomUUID();
+  const stop = executor(s, Infinity, (module, name, args) => {
+    if (
+      module === 'projectPlanningPurge' &&
+      name === 'redact' &&
+      args.step === 'storeHeads' &&
+      removed().length
+    )
+      throw new Error('stopped between discussion artifact pages');
+  });
+  await assert.rejects(stop.run(itemId, operationId), /stopped between discussion artifact pages/);
+  assert.equal(removed().length, 8);
+  assert.equal(s.tables.hostedProjects.get(s.projectId).itemPurges[0].purgedAt, undefined);
+  const stillCommitted = rows.find(row => row !== rows[0] && !s.tables.artifactBlobs.get(row._id).removed);
+  assert.equal(
+    await resolveAttachment._handler(s.ctx, { ...selection, attachmentId: stillCommitted._id }),
+    null,
+    'The durable Item tombstone denies a binding outside the first removal page',
+  );
+
+  const done = await executor(s).run(itemId, operationId);
+  assert.ok(done.purgedAt);
+  assert.equal(removed().length, rows.length);
+  assert.equal(await resolveAttachment._handler(s.ctx, selection), null);
+  await assert.rejects(
+    artifactStorage.markCommitted._handler(s.ctx, { ref: `r2blob:${rows[0]._id}` }),
+    code('INVALID_ARTIFACT'),
+  );
+  assert.equal(s.tables.artifactBlobs.get(rows[0]._id).committed, false);
+  assert.deepEqual(await executor(s).run(itemId, operationId), done);
+  assert.deepEqual(
+    scheduled()
+      .map(task => task.args.ref)
+      .sort(),
+    rows.map(row => `r2blob:${row._id}`).sort(),
+  );
+  assert.deepEqual(r2.requests, [], 'The purge transactions do no R2 work');
+  for (const task of scheduled()) await artifactStorage.deleteBytes._handler(s.ctx, task.args);
+  assert.equal(r2.requests.length, rows.length);
+  assert.ok(r2.requests.every(request => request.method === 'DELETE'));
+  assert.deepEqual(new Set(r2.objects.keys()), new Set(unrelated.map(row => row.r2Key)));
+  assert.ok(unrelated.every(row => !s.tables.artifactBlobs.get(row._id).removed));
+});
+
+test('purge charges one check and redaction per additional attachment page', async t => {
+  for (const count of [0, 8, 16]) {
+    await t.test(String(count), async t => {
+      const { s, itemId } = await deletedItem(t);
+      const commentId = randomUUID();
+      for (let i = 0; i < count; i++) await discussionArtifact(s, s.projectId, itemId, commentId, String(i));
+      const meter = meterWorkIO(s.ctx, s.tables);
+      const worker = executor(s);
+      const start = performance.now();
+      const io = await meter.cost(() => worker.run(itemId, randomUUID()));
+      meter.restore();
+      const pages = purgeSteps.length + 4 + Math.max(0, Math.ceil(count / 8) - 1);
+      assert.equal(worker.calls.mutation, pages + 2);
+      assert.equal(worker.calls.query, pages + 6);
+      const scheduled = s.scheduled.filter(
+        task => getFunctionName(task.fn) === 'artifactStorage:deleteBytes',
+      );
+      assert.equal(scheduled.length, count);
+      t.diagnostic(
+        JSON.stringify({
+          ...worker.calls,
+          ...io,
+          cleanupActions: scheduled.length,
+          wallMs: Math.round((performance.now() - start) * 100) / 100,
+          processPeakRssKiB: process.resourceUsage().maxRSS,
+        }),
+      );
+    });
+  }
+});
+
+test('a pre-upgrade terminal check checkpoint cannot finish over a live discussion artifact', async t => {
+  const { s, itemId } = await deletedItem(t);
+  const operationId = randomUUID();
+  let checked;
+  const stopped = executor(s, Infinity, (module, name, args) => {
+    if (module === 'projectPlanningPurge' && name === 'finish') {
+      checked = args;
+      throw new Error('old check stopped before finish');
+    }
+  });
+  await assert.rejects(stopped.run(itemId, operationId), /old check stopped before finish/);
+  // Seed the binding that the old walk would have left untouched.
+  const row = await discussionArtifact(s, s.projectId, itemId, randomUUID(), 'retained artifact');
+  const result = await modules.projectPlanningPurge.run._handler(executor(s).ctx, {
+    projectId: s.projectId,
+    itemId,
+    operationId,
+    walk: {
+      phase: 'check',
+      round: 0,
+      step: purgeSteps.length,
+      after: null,
+      dirty: 0,
+      generationId: checked.generationId,
+      partitions: checked.partitions,
+    },
+  });
+  assert.ok(result.purgedAt);
+  assert.equal(s.tables.artifactBlobs.get(row._id).removed, true);
+});
+
 test('records mode (work store primary): a purge of an Item with an alias-written comment leaves the words in no store', async t => {
   const { s, itemId, keep, alias } = await deletedItem(t, { records: true, intentBorn: false });
   assert.equal(s.tables.hostedProjects.get(s.projectId).workStore, 'records');
@@ -782,8 +924,13 @@ function storage(t) {
   const original = globalThis.fetch;
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     const path = new URL(url).pathname;
-    if (!path.includes('/journal-segments/')) return original(url, init);
-    const key = path.split('/').at(-1);
+    const discussion = path.indexOf('/v1/p/');
+    const key = path.includes('/journal-segments/')
+      ? path.split('/').at(-1)
+      : discussion >= 0 && path.includes('/discussion/')
+        ? path.slice(discussion + 1)
+        : null;
+    if (key === null) return original(url, init);
     const method = init?.method ?? 'GET';
     requests.push({ key, method });
     if (method === 'PUT') {

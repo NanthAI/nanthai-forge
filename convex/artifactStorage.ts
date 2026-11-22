@@ -2,7 +2,7 @@
 import { v } from 'convex/values';
 import { internalMutation, internalQuery, internalAction, type QueryCtx, type MutationCtx } from './server';
 import { internal } from './_generated/api';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { legacySystemMetadata } from './legacyStorageRead';
 import { artifactBlobId } from './artifactBlobFields';
 import { r2Config, headObject, checksumOf, presignDelete } from './r2';
@@ -103,16 +103,22 @@ export const markCommitted = internalMutation({
 });
 // Deletion follows the existing owning resource's explicit cleanup. A durable
 // tombstone prevents an interrupted upload from resurrecting a removed artifact.
+export async function removeArtifact(
+  { db, scheduler }: Pick<MutationCtx, 'db' | 'scheduler'>,
+  row: Doc<'artifactBlobs'>,
+) {
+  if (row.removed) return;
+  await db.patch(row._id, { removed: true });
+  await scheduler.runAfter(0, internal.artifactStorage.deleteBytes, { ref: `r2blob:${row._id}` });
+}
+
 export const remove = internalMutation({
   args: { ref: v.string() },
   returns: v.null(),
   handler: async (ctx, { ref }) => {
     const id = artifactBlobId(ref),
       row = id ? await ctx.db.get(id) : null;
-    if (row && !row.removed) {
-      await ctx.db.patch(row._id, { removed: true });
-      await ctx.scheduler.runAfter(0, internal.artifactStorage.deleteBytes, { ref });
-    }
+    if (row) await removeArtifact(ctx, row);
     return null;
   },
 });

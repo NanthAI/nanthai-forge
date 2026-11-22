@@ -14,6 +14,7 @@ export const purgeWalk = v.object({
   dirty: v.number(),
   generationId: v.optional(v.string()),
   partitions: v.optional(v.string()),
+  discussionChecked: v.optional(v.literal(true)),
 });
 type Walk = typeof purgeWalk.type;
 
@@ -36,6 +37,9 @@ export async function walkPurge(
 ): Promise<{ done: true } | { done: false; walk: Walk }> {
   const ref = internal.projectPlanningPurge;
   let walk = saved ?? start(0, purge.segmentSweep?.after ? 'sweep' : 'redact');
+  // A checkpoint written before attachment cleanup may already have passed the heads check.
+  if (walk.phase === 'check' && walk.step === purgeSteps.length && !walk.discussionChecked)
+    walk = { ...walk, step: purgeSteps.length - 1 };
   while (walk.round < 3) {
     if (Date.now() >= deadline) return { done: false, walk };
     if (walk.phase === 'sweep') {
@@ -68,6 +72,7 @@ export async function walkPurge(
       walk.generationId = page.generationId;
       walk.partitions = page.partitions;
       advance(walk, page.after);
+      if (walk.step === purgeSteps.length) walk.discussionChecked = true;
       continue;
     }
     if (walk.dirty === 0) {

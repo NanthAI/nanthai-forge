@@ -3,7 +3,7 @@
 // page of one store into its purged form, and the same code with `apply` false is the completeness check (it counts
 // what a step would still change). Stores, in order (the Item purge inventory, `planningPurgeStores`):
 // journal rows, the Work index (events, versions, comments, notes, lifecycle, Intent, search root), the work store
-// (issue, comment, lifecycle and Intent versions, their bodies and heads) and the store fingerprints.
+// (issue, comment, lifecycle and Intent versions, their bodies and heads), the store fingerprints and discussion artifacts.
 import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { invariant } from '../src/errors';
@@ -23,6 +23,8 @@ import { hostedRecordBody, recordHead, recordVersion } from './projectHostedReco
 import { fingerprintHostedIntent } from './projectWorkStoreFingerprintWrites';
 import { purgeLifecyclePlans } from './projectPlanningPurgeLifecycle';
 import { purgeIntentChain } from './projectPlanningPurgeSelect';
+import { removeArtifact } from './artifactStorage';
+import { projectPrefix } from './r2Operations';
 
 /** Every store an Item purge redacts, and how. The end-to-end test (tests/planning-purge-executor.test.mjs) searches
  * every table for the purged words, so a new store that keeps them fails the build. */
@@ -46,6 +48,7 @@ export const planningPurgeStores = {
   projectHostedLifecycleEvents: 'redacted reason in the plan event and its cascaded child events',
   projectHostedOverlapLanes:
     "overlap rows of the Lanes on the Item's Intents: the outcome copy reads 'Deleted Item'",
+  artifactBlobs: 'tombstone discussion bindings under the Item namespace and schedule artifact byte cleanup',
 } as const;
 
 export type ItemPurge = NonNullable<Doc<'hostedProjects'>['itemPurges']>[number];
@@ -209,7 +212,16 @@ async function pageOf(
     return { changes, after: null };
   }
   if (input.step === 'payloads') return stalePayloads(ctx, write, partition!, purge, input.after);
-  if (input.step === 'storeHeads') return storeHeads(ctx, write, input.projectId, purge, input.after);
+  if (input.step === 'storeHeads') {
+    const { projectId, after } = input;
+    if (after?.startsWith(discussionCursor))
+      return discussionArtifacts(ctx, apply, projectId, purge.itemId, after.slice(discussionCursor.length));
+    const heads = await storeHeads(ctx, write, projectId, purge, after);
+    if (heads.after !== null) return heads;
+    // Share the last heads transaction with the first artifact page, including the common empty range.
+    const artifacts = await discussionArtifacts(ctx, apply, projectId, purge.itemId, null);
+    return { changes: heads.changes + artifacts.changes, after: artifacts.after };
+  }
   if (input.step === 'lifecyclePlans') {
     const project = await ctx.db.get(input.projectId);
     const generation = project && (await selectedGeneration(ctx, project));
@@ -645,6 +657,31 @@ async function storeHeads(
         ? `${at + 1}|`
         : null;
   return { changes, after: next };
+}
+
+const discussionCursor = 'discussion:';
+
+async function discussionArtifacts(
+  ctx: Ctx,
+  apply: boolean,
+  projectId: Id<'hostedProjects'>,
+  itemId: string,
+  cursor: string | null,
+) {
+  const prefix = `${projectPrefix(projectId)}discussion/${itemId}/`;
+  const page = await ctx.db
+    .query('artifactBlobs')
+    .withIndex('by_namespace_and_digest', q =>
+      q.gte('namespace', prefix).lt('namespace', prefix.slice(0, -1) + '0'),
+    )
+    .paginate({ cursor, numItems: 8 });
+  let changes = 0;
+  for (const row of page.page) {
+    if (row.removed) continue;
+    changes++;
+    if (apply) await removeArtifact(ctx as MutationCtx, row);
+  }
+  return { changes, after: page.isDone ? null : discussionCursor + page.continueCursor };
 }
 
 /** The Item's search row in its purged form: preview and searchable text carry no words, and a payload (its chunks

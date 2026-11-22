@@ -4,7 +4,7 @@ import type { ActionCtx, MutationCtx } from './server';
 import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { artifactBlobId } from './artifactBlobFields';
-import { artifactMetadata } from './artifactStorage';
+import { artifactMetadata, removeArtifact } from './artifactStorage';
 import { presignPut, presignGet, r2Config } from './r2';
 import { exchangeFetch } from '../src/exchange-request';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -94,10 +94,7 @@ export function blobStore(ctx: Context): BlobStore {
       if (!artifactBlobId(id)) return (ctx.storage as StorageWriter).delete(id);
       if (ctx.db && ctx.scheduler) {
         const value = await ctx.db.get(artifactBlobId(id)!);
-        if (value && !value.removed) {
-          await ctx.db.patch(value._id, { removed: true });
-          await ctx.scheduler.runAfter(0, internal.artifactStorage.deleteBytes, { ref: id });
-        }
+        if (value) await removeArtifact({ db: ctx.db, scheduler: ctx.scheduler }, value);
       } else {
         invariant(ctx.runMutation, 'INVALID_ARTIFACT', 'Artifact cleanup requires a writer.');
         await ctx.runMutation(internal.artifactStorage.remove, { ref: id });

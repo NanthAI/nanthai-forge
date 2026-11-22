@@ -167,6 +167,11 @@ record partitions differs from the one the check walked. The same pages
 run read-only as the completeness check; the purge's `purgedAt` (project `itemPurges`) is set only when the check
 finds nothing left on the generation still selected. A stopped purge resumes by running again with the same
 operation id, also after an index rebuild. New Issue and comment versions stay in Convex.
+The durable Item tombstone ends discussion downloads as soon as the purge begins.
+The executor also walks the Item's discussion namespace in indexed pages and marks every
+artifact binding removed, including unfinished reservations. Each new artifact tombstone
+schedules the existing R2 byte cleanup. Completion checks the bindings, while R2 deletion
+runs through those scheduled cleanup actions.
 A purged Intent or lifecycle version, read by version, answers `PLANNING_ITEM_PURGED` naming the Item. A note or
 status change on the Item's Intent is still accepted after the first step (refusing it would cost every note write a
 read); the last step refuses to finish while such a note exists, so the purge never reports done over it. A purged decision

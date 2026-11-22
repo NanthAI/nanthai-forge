@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { getDocumentSize } from 'convex/values';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
@@ -337,4 +338,40 @@ test('one and two MB downloads do constant metadata work with zero idle calls', 
       );
     });
   }
+});
+
+test('the approved 25 MB download delivers its exact byte length and SHA-256', async t => {
+  const size = 25_000_000;
+  const bytes = Buffer.alloc(size, 42);
+  bytes[0] = 0;
+  bytes[size - 1] = 255;
+  const f = await fixture(t, { bytes });
+  const started = performance.now();
+  const response = await f.download({ viewer: 'visitor' });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-length'), String(size));
+  const hash = createHash('sha256');
+  let length = 0;
+  for await (const chunk of response.body) {
+    length += chunk.length;
+    hash.update(chunk);
+  }
+  const sha256 = hash.digest('hex');
+  assert.equal(length, size);
+  assert.equal(sha256, createHash('sha256').update(bytes).digest('hex'));
+  assert.equal(f.stats.calls, 2);
+  assert.deepEqual(
+    f.fake.requests.map(r => [r.method, r.status]),
+    [['GET', 200]],
+  );
+  t.diagnostic(
+    JSON.stringify({
+      ...f.stats,
+      bytesFromR2: size,
+      bytesToClient: length,
+      sha256,
+      wallMs: Math.round((performance.now() - started) * 100) / 100,
+      processPeakRssKiB: process.resourceUsage().maxRSS,
+    }),
+  );
 });
