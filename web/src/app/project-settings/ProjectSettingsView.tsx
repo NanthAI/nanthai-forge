@@ -6,11 +6,19 @@ import { Key, Region, Row } from '../../ds';
 import { hostedError } from '../../snapshot';
 import { Head } from '../Place';
 import { MoveToTrash } from '../trash/MoveToTrash';
+import { MakePrivate, MakePublic } from './VisibilitySheets';
 import '../trash/trash.css';
 import './project-settings.css';
 import { createdWords, renameProblem, sentence, visibilityWords, type ProjectFacts } from './project-model';
 
 type Crumb = { label: string; href?: string };
+/** One opened confirmation: its own operation id and the revision the person saw, kept for retries of that sheet only. */
+export type VisibilityChange = {
+  visibility: ProjectFacts['visibility'];
+  confirm?: string;
+  operationId: string;
+  expectedRevision: number;
+};
 export type RenameInput = { name: string; slug: string; operationId: string; expectedRevision: number };
 
 export function ProjectSettingsView({
@@ -21,6 +29,7 @@ export function ProjectSettingsView({
   now,
   rename,
   moveToTrash,
+  setVisibility,
   extra,
 }: {
   facts: ProjectFacts;
@@ -30,10 +39,17 @@ export function ProjectSettingsView({
   now: number;
   rename: (input: RenameInput) => Promise<void>;
   moveToTrash: () => Promise<void>;
+  /** Owner person only: the server refuses anyone else. Going public carries the typed name. */
+  setVisibility: (change: VisibilityChange) => Promise<void>;
   /** Further regions of the page (backups, transfer, imports), after the lifecycle. */
   extra?: ReactNode;
 }) {
   const [moving, setMoving] = useState(false);
+  const [changing, setChanging] = useState<{
+    to: ProjectFacts['visibility'];
+    operationId: string;
+    revision: number;
+  } | null>(null);
   return (
     <div className="project-settings">
       <Head trail={trail} sentence={sentence(facts, owner)} />
@@ -58,6 +74,34 @@ export function ProjectSettingsView({
       </Region>
       {owner ? <RenameForm facts={facts} rename={rename} /> : null}
       {owner ? (
+        <Region title="Visibility" weight="ref">
+          <Row cols="minmax(0, 1fr) auto">
+            <span className="nm">
+              <span className="ttl">
+                {facts.visibility === 'public' ? 'Make this project private' : 'Make this project public'}
+              </span>
+              <span className="meta">
+                {facts.visibility === 'public'
+                  ? 'Only you and the people you invited can see it. Its public pages and listing stop.'
+                  : 'Anyone can read its source, history, Lanes and plan. Only you and the people you invite can change it.'}
+              </span>
+            </span>
+            <Key
+              size="sm"
+              onClick={() =>
+                setChanging({
+                  to: facts.visibility === 'public' ? 'private' : 'public',
+                  operationId: crypto.randomUUID(),
+                  revision: facts.revision,
+                })
+              }
+            >
+              {facts.visibility === 'public' ? 'Make private' : 'Make public'}
+            </Key>
+          </Row>
+        </Region>
+      ) : null}
+      {owner ? (
         <Region title="Trash" weight="ref">
           <Row cols="minmax(0, 1fr) auto">
             <span className="nm">
@@ -74,6 +118,35 @@ export function ProjectSettingsView({
         </Region>
       ) : null}
       {extra}
+      {changing?.to === 'public' ? (
+        <MakePublic
+          name={facts.name}
+          apply={async typed => {
+            await setVisibility({
+              visibility: 'public',
+              confirm: typed,
+              operationId: changing.operationId,
+              expectedRevision: changing.revision,
+            });
+            setChanging(null);
+          }}
+          close={() => setChanging(null)}
+        />
+      ) : null}
+      {changing?.to === 'private' ? (
+        <MakePrivate
+          name={facts.name}
+          apply={async () => {
+            await setVisibility({
+              visibility: 'private',
+              operationId: changing.operationId,
+              expectedRevision: changing.revision,
+            });
+            setChanging(null);
+          }}
+          close={() => setChanging(null)}
+        />
+      ) : null}
       {moving ? (
         <MoveToTrash
           name={facts.name}

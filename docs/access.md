@@ -35,7 +35,7 @@ The table is `projectVerbs` in `convex/projectAccessContract.ts`; `projectMay` g
 | Remove people, end invitations (`removePeople`) | no | no | no | yes | same | `projectContributors.remove`, `projectReaders.set` |
 | Change settings and policy (`changeSettings`) | no | no | no | yes | held | `projectAutonomy`, `projectSettingApprovals` |
 | Approve a protected path (`approveProtected`) | no | no | no | yes | never | `projectHostedApprovals`, `projectHostedAcceptance` |
-| Secret values, permanent delete, runner keys (`ownerPersonOnly`) | no | no | no | yes | never | `requireOwnerPerson` |
+| Secret values, permanent delete, runner keys, public or private (`ownerPersonOnly`) | no | no | no | yes | never | `requireOwnerPerson`; visibility: `projectVisibility.setVisibility` |
 
 Sealed secret writes are authorised by the owner device key in the signed roster.
 The storage endpoint accepts only the project owner account on an unrestricted

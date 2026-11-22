@@ -24,7 +24,7 @@ const q = new URLSearchParams(location.search);
 const owner = q.get('who') !== 'member';
 const worst = q.get('data') === 'worst';
 window.calls = [];
-const facts = { name: worst ? 'A very long project name that keeps going well past any sensible width for a settings row' : 'Docs site', slug: worst ? 'a-very-long-project-name-that-keeps-going-well-past-any-sensible-width-for-a-settings-row' : 'docs-site', handle: 'sample-owner', visibility: 'public', createdAt: now - 400 * 86400000, revision: 5, removal: undefined };
+const facts = { name: worst ? 'A very long project name that keeps going well past any sensible width for a settings row' : 'Docs site', slug: worst ? 'a-very-long-project-name-that-keeps-going-well-past-any-sensible-width-for-a-settings-row' : 'docs-site', handle: 'sample-owner', visibility: q.get('vis') === 'private' ? 'private' : 'public', createdAt: now - 400 * 86400000, revision: 5, removal: undefined };
 const preview = (revision, format = 'native') => ({ format, head: 'b'.repeat(40), revision, intents: 12, lanes: 3, views: 4, runs: 20, files: 310, unavailable: 0, channels: [{ name: 'main', head: 'c'.repeat(40) }] });
 const backups = [
   { id: 'b1', operationId: 'op1', projectId: 'p', name: 'Docs site', status: 'stored', digest: 'd'.repeat(64), size: 5 * 1024 * 1024, preview: preview(41), previous: 'b2', current: true, at: now - 3600000, transport: 'objects', objectManifest: { digest: 'e'.repeat(64), size: 900000 } },
@@ -47,7 +47,8 @@ createRoot(document.getElementById('root')).render(
     controls={{ viewerHandle: owner ? 'sample-owner' : 'sample-peer', onPicker() {}, onPalette() {}, onKeys() {} }}>
     <ProjectSettingsView facts={facts} owner={owner} trail={trail} lanes={{ n: 3, atLeast: false }} now={now}
       rename={async input => { window.calls.push({ ...input, name: 'rename' }); if (failOnce) { failOnce = false; throw new Error('The project changed. Reload and try again.'); } }}
-      moveToTrash={async () => { window.calls.push({ name: 'trash' }); }} extra={extra} />
+      moveToTrash={async () => { window.calls.push({ name: 'trash' }); }}
+      setVisibility={async change => { window.calls.push({ name: 'visibility', visibility: change.visibility, confirm: change.confirm, op: change.operationId, rev: change.expectedRevision }); if (q.get('visfail') === '1') throw new Error('Only the owner person can change who can see the project; open Forge in a browser.'); }} extra={extra} />
   </ProjectFrame>,
 );
 `;
@@ -122,7 +123,12 @@ test('settings project: facts, rename keeps one operation across a failed save, 
   {
     const { page, context } = await open(390, 'dark', 'who=member', path);
     const text = await page.locator('main').textContent();
-    assert.match(text, /Only the owner can rename it or move it to the trash\./);
+    assert.match(text, /Only the owner can rename it, change who can see it, or move it to the trash\./);
+    assert.equal(
+      await page.getByRole('button', { name: /Make (public|private)/ }).count(),
+      0,
+      'a member cannot change visibility',
+    );
     assert.equal(
       await page.getByRole('button', { name: 'Move to trash' }).count(),
       0,
@@ -141,12 +147,18 @@ test('settings project: facts, rename keeps one operation across a failed save, 
     );
     await context.close();
   }
-  for (const query of ['who=owner', 'who=owner&data=worst', 'who=owner&data=empty', 'who=member'])
+  for (const query of [
+    'who=owner',
+    'who=owner&vis=private',
+    'who=owner&data=worst',
+    'who=owner&data=empty',
+    'who=member',
+  ])
     for (const width of [1440, 390])
       for (const theme of ['light', 'dark']) {
         const { page, errors, context } = await open(width, theme, query, path);
         await check(page, `${query} ${width} ${theme}`);
-        if (query === 'who=owner') {
+        if (query.startsWith('who=owner')) {
           if (shots && query === 'who=owner') {
             const store = page.locator('.store');
             await store.locator('input[type=file]').setInputFiles({
@@ -160,6 +172,15 @@ test('settings project: facts, rename keeps one operation across a failed save, 
           await page.getByRole('button', { name: 'Move to trash' }).click();
           await page.getByRole('dialog').waitFor();
           await check(page, `trash sheet ${width} ${theme}`);
+          await page.keyboard.press('Escape');
+          await page.getByRole('dialog').waitFor({ state: 'detached' });
+          await page.getByRole('button', { name: /^Make (public|private)$/ }).click();
+          await page.getByRole('dialog').waitFor();
+          await check(page, `visibility sheet ${query} ${width} ${theme}`);
+          if (shots)
+            await page.screenshot({
+              path: join(shots, `visibility-sheet-${query.replace(/\W/g, '-')}-${width}-${theme}.png`),
+            });
         }
         if (shots)
           await page.screenshot({
@@ -169,4 +190,58 @@ test('settings project: facts, rename keeps one operation across a failed save, 
         assert.deepEqual(errors, []);
         await context.close();
       }
+});
+
+test('settings project: visibility needs the typed name to go public, one button to go private, and keeps one operation on a refusal', async t => {
+  const executablePath = testBrowser(t);
+  if (!executablePath) return;
+  const browser = await chromium.launch({ executablePath });
+  const fx = await viewFixture(t, fixture, 'Project settings', browser);
+  const path = '/-/sample-owner/docs-site/settings/project';
+  {
+    const { page, errors, context } = await fx.open(1440, 'light', 'who=owner&vis=private', path);
+    assert.match(await page.locator('main').textContent(), /Private/);
+    await page.getByRole('button', { name: 'Make public' }).click();
+    const sheet = page.getByRole('dialog');
+    const go = sheet.getByRole('button', { name: 'Make public' });
+    assert.equal(await go.isDisabled(), true, 'public stays off until the name is typed');
+    await sheet.getByRole('textbox').fill('docs');
+    assert.equal(await go.isDisabled(), true, 'a partial name is not enough');
+    await sheet.getByRole('textbox').fill('Docs site');
+    await go.click();
+    await page.waitForFunction(() => window.calls.some(call => call.name === 'visibility'));
+    const [call] = (await page.evaluate(() => window.calls)).filter(call => call.name === 'visibility');
+    assert.deepEqual(
+      [call.visibility, call.confirm, call.rev, typeof call.op],
+      ['public', 'Docs site', 5, 'string'],
+    );
+    assert.deepEqual(errors, []);
+    await context.close();
+  }
+  {
+    const { page, errors, context } = await fx.open(390, 'dark', 'who=owner&vis=public', path);
+    await page.getByRole('button', { name: 'Make private' }).click();
+    const sheet = page.getByRole('dialog');
+    assert.equal(await sheet.getByRole('textbox').count(), 0, 'going private takes no typing');
+    await sheet.getByRole('button', { name: 'Make private' }).click();
+    await page.waitForFunction(() => window.calls.some(call => call.name === 'visibility'));
+    const [call] = (await page.evaluate(() => window.calls)).filter(call => call.name === 'visibility');
+    assert.deepEqual([call.visibility, call.confirm, call.rev], ['private', undefined, 5]);
+    assert.deepEqual(errors, []);
+    await context.close();
+  }
+  {
+    const { page, context } = await fx.open(1440, 'light', 'who=owner&vis=public&visfail=1', path);
+    await page.getByRole('button', { name: 'Make private' }).click();
+    const sheet = page.getByRole('dialog');
+    await sheet.getByRole('button', { name: 'Make private' }).click();
+    await sheet.getByRole('alert').waitFor();
+    assert.match(await sheet.getByRole('alert').textContent(), /open Forge in a browser/);
+    assert.equal(
+      await sheet.getByRole('button', { name: 'Make private' }).isEnabled(),
+      true,
+      'the person can retry',
+    );
+    await context.close();
+  }
 });

@@ -70,6 +70,21 @@ export default function ProjectSettings(props: PlaceProps) {
           });
         read();
       }}
+      setVisibility={async change => {
+        try {
+          await client.mutation(api.projectVisibility.setVisibility, {
+            projectId,
+            visibility: change.visibility,
+            operationId: change.operationId,
+            expectedRevision: change.expectedRevision,
+            ...(change.confirm === undefined ? {} : { confirm: change.confirm.trim() }),
+          });
+        } catch (failure) {
+          read(); // a stale refusal shows the project as it is now; the next sheet opens at that revision
+          throw failure;
+        }
+        read();
+      }}
       extra={
         <>
           {owner ? <Backups projectId={projectId} owner /> : null}

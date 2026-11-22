@@ -23,8 +23,8 @@ export const visibilityWords = (visibility: ProjectFacts['visibility']) =>
 /** The page sentence: one fact, then what the person may do here. */
 export function sentence(facts: ProjectFacts, owner: boolean) {
   return owner
-    ? `${visibilityWords(facts.visibility)} project. You own it, so you can rename it or move it to the trash.`
-    : `${visibilityWords(facts.visibility)} project owned by @${facts.handle}. Only the owner can rename it or move it to the trash.`;
+    ? `${visibilityWords(facts.visibility)} project. You own it, so you can rename it, change who can see it, or move it to the trash.`
+    : `${visibilityWords(facts.visibility)} project owned by @${facts.handle}. Only the owner can rename it, change who can see it, or move it to the trash.`;
 }
 
 /** Why the rename form may not be saved, or null when it may. */
