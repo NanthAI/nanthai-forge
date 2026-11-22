@@ -17,6 +17,7 @@ type Selection = Project & {
   collection: string;
   parentId?: string;
   newestFirst?: boolean;
+  memberCommentsOnly?: true;
 };
 type Row = { id: string; position: number; value: string };
 type Page = PaginationResult<Row> & { generationId: string | null; revision: number | null };
@@ -124,18 +125,17 @@ function useWorkRows(
   // Match the server's existing 100-row window. Smaller pages kept the same
   // complete histories but multiplied queries and ancestry/authority reads.
   const initialNumItems = 100;
+  const itemDiscussion = collection === 'planningComments' && parentId !== undefined;
+  const archiveCapable = collection === 'planningVersions' || itemDiscussion;
   // A refused or failed page is `status: 'Error'`, reported as `failed`, not thrown into the root boundary.
-  const ordinary = useSafePaginatedQuery(
-    workIndex.records,
-    collection === 'planningVersions' ? 'skip' : selection,
-    { initialNumItems },
-  );
-  const archived = useArchivePaginatedQuery(
-    workIndex.records,
-    collection === 'planningVersions' ? selection : 'skip',
-    { initialNumItems },
-  );
-  const { results, status, loadMore } = collection === 'planningVersions' ? archived : ordinary;
+  const ordinary = useSafePaginatedQuery(workIndex.records, archiveCapable ? 'skip' : selection, {
+    initialNumItems,
+  });
+  const archived = useArchivePaginatedQuery(workIndex.records, archiveCapable ? selection : 'skip', {
+    initialNumItems,
+    followLiveCursors: itemDiscussion,
+  });
+  const { results, status, loadMore } = archiveCapable ? archived : ordinary;
   // Convex splits any page longer than twice `initialNumItems` into two new subscriptions; larger
   // continuation pages would each be re-read and split twice before the page settles.
   const pageSize = Math.min(100, initialNumItems * 2);

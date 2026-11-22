@@ -116,10 +116,11 @@ test('incident replay 2bf85ddf: a parked Lane the queue lands after its agent st
   );
   const laneId = f.entries[1].lane.laneId;
   // What the Item read shows (projectWorkIndex:records merges exactly these rows into the Item's comments).
-  const shown = await f.c.run('itemComments', (ctx, input) => notes.intentLandingComments(ctx, ...input), [
-    f.projectId,
-    parkedItem,
-  ]);
+  const { comments: shown } = await f.c.run(
+    'itemComments',
+    (ctx, input) => notes.intentLandingComments(ctx, ...input),
+    [f.projectId, parkedItem],
+  );
   assert.equal(shown.length, 1, 'one system comment on the parked Lane’s Item');
   const comment = shown[0].value;
   assert.equal(comment.system, true);
@@ -189,10 +190,11 @@ test('an Item reopened onto a successor Intent shows the notes of every Intent i
     f.projectId,
     { ...template, intentId: successor, receiptId: 'later-receipt', at: new Date().toISOString() },
   ]);
-  const shown = await f.c.run('itemComments', (ctx, input) => notes.intentLandingComments(ctx, ...input), [
-    f.projectId,
-    parkedItem,
-  ]);
+  const { comments: shown } = await f.c.run(
+    'itemComments',
+    (ctx, input) => notes.intentLandingComments(ctx, ...input),
+    [f.projectId, parkedItem],
+  );
   assert.deepEqual(
     shown.map(row => row.value.landing.receiptId),
     ['later-receipt', template.receiptId],

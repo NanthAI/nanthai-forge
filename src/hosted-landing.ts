@@ -408,6 +408,7 @@ export const LANDING_CAPSULE_TABLES = [
   'projectHostedComposePages',
   'projectHostedCheckCallbacks',
   'legacyStorageCleanupPages',
+  'projectIntentLandingNotes',
 ] as const;
 export type LandingCapsulePointer = {
   protocol: 1;

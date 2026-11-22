@@ -18,7 +18,7 @@ type Cached = { token: string; value?: Page; error?: Error };
 export function useArchivePaginatedQuery<Q extends PaginatedQueryReference>(
   query: Q,
   args: PaginatedQueryArgs<Q> | 'skip',
-  options: { initialNumItems: number; throwOnError?: boolean },
+  options: { initialNumItems: number; throwOnError?: boolean; followLiveCursors?: boolean },
 ) {
   const client = useConvex(),
     name = getFunctionName(query);
@@ -54,7 +54,7 @@ export function useArchivePaginatedQuery<Q extends PaginatedQueryReference>(
     mounted = useRef(false);
   const candidates = Object.entries(requests).map(([id, request]) => {
     const raw = observed[id],
-      token = `${selection}:${id}:${raw instanceof Error && !hasJournalHistory(raw) ? raw.message : JSON.stringify(raw instanceof Error ? (raw as Error & { data?: unknown }).data : raw)}`;
+      token = `${selection}:${id}:${JSON.stringify(pages[Number(id)])}:${raw instanceof Error && !hasJournalHistory(raw) ? raw.message : JSON.stringify(raw instanceof Error ? (raw as Error & { data?: unknown }).data : raw)}`;
     return { id, request, raw, token };
   });
   current.current = new Map(candidates.map(item => [item.id, item.token]));
@@ -105,7 +105,19 @@ export function useArchivePaginatedQuery<Q extends PaginatedQueryReference>(
   let error: Error | undefined,
     loading = false;
   const resolved: Page[] = [];
-  for (const item of candidates) {
+  let resetIndex: number | null = null;
+  let resetCursor: string | null = null;
+  for (const [index, item] of candidates.entries()) {
+    const predecessor = resolved.at(-1);
+    if (options.followLiveCursors && predecessor) {
+      const cursor = predecessor.isDone ? null : predecessor.continueCursor;
+      if (pages[index]?.cursor !== cursor) {
+        resetIndex = index;
+        resetCursor = cursor;
+        loading = cursor !== null;
+        break;
+      }
+    }
     if (item.raw instanceof Error && !hasJournalHistory(item.raw)) {
       error = item.raw;
       break;
@@ -122,6 +134,18 @@ export function useArchivePaginatedQuery<Q extends PaginatedQueryReference>(
     }
     resolved.push(value);
   }
+  useEffect(() => {
+    if (resetIndex === null) return;
+    // A reactive write can move a page's boundary. The old continuation then
+    // skips or repeats records, so refetch the affected suffix from the new cut.
+    setRequested(previous => {
+      const old = previous.pages[resetIndex];
+      if (previous.selection !== selection || !old || old.cursor === resetCursor) return previous;
+      const prefix = previous.pages.slice(0, resetIndex);
+      if (resetCursor !== null) prefix.push({ cursor: resetCursor, numItems: old.numItems });
+      return { selection, pages: prefix };
+    });
+  }, [selection, resetIndex, resetCursor]);
   const last = resolved.at(-1);
   const status: PaginationStatus | 'Error' = error
     ? 'Error'

@@ -108,6 +108,7 @@ export const records = query({
     planningFilter: v.optional(planningFilter),
     counts: v.optional(v.boolean()),
     initiativeProgress: v.optional(v.literal(true)),
+    memberCommentsOnly: v.optional(v.literal(true)),
     newestFirst: v.optional(v.boolean()),
     parentId: v.optional(v.string()),
     paginationOpts: paginationOptsValidator,
@@ -235,6 +236,7 @@ export async function journalWorkRecordsRead(
     planningFilter?: Infer<typeof planningFilter>;
     counts?: boolean;
     initiativeProgress?: true;
+    memberCommentsOnly?: true;
     newestFirst?: boolean;
     parentId?: string;
     paginationOpts: PaginationOptions;

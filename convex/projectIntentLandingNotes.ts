@@ -9,6 +9,15 @@ import { v } from 'convex/values';
 import { internalQuery } from './server';
 import { ownedProject } from './projectAuthority';
 import { recordHead } from './projectHostedRecords';
+import {
+  archiveNoteReference,
+  landingNoteOrder,
+  landingNoteWindow,
+  pinArchivedNotes,
+  type ArchivedNote,
+  type LoadedLandingNote,
+} from './projectIntentLandingNoteArchive';
+import { invariant } from '../src/errors';
 import { intentFinished, maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
 import {
   LANDING_NOTE_LANES,
@@ -37,15 +46,16 @@ export async function postIntentLandingNote(
 ) {
   const old = await ctx.db
     .query('projectIntentLandingNotes')
-    .withIndex('by_project_and_intent_and_receipt_and_kind', q =>
+    .withIndex('by_project_and_receipt_and_intent_and_kind', q =>
       q
         .eq('projectId', projectId)
-        .eq('intentId', note.intentId)
         .eq('receiptId', note.receiptId)
+        .eq('intentId', note.intentId)
         .eq('kind', note.kind),
     )
     .unique();
   if (old) {
+    if ('capsule' in old) return false;
     const laneIds = [...new Set([...old.laneIds, ...note.laneIds])].slice(0, LANDING_NOTE_LANES);
     const viaLaneId = old.viaLaneId ?? note.viaLaneId;
     if (laneIds.length === old.laneIds.length && viaLaneId === old.viaLaneId) return false;
@@ -103,6 +113,7 @@ export async function itemIntentChain(
 }
 
 /** System landing comments from the Item's own Intent chain and its linked chains, newest first. */
+export type DiscussionNoteCursor = { at: number; intentId: string; skip: number };
 export async function intentLandingComments(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
@@ -110,6 +121,7 @@ export async function intentLandingComments(
   limit = LANDING_NOTES_PER_ITEM,
   links: readonly string[] = [itemId],
   chainRoots?: ReadonlySet<string>,
+  before?: DiscussionNoteCursor,
 ) {
   const intents = new Set<string>();
   for (const link of links) {
@@ -120,34 +132,96 @@ export async function intentLandingComments(
       intents.add(intentId);
     }
   }
-  const notes = [];
+  const notes: Awaited<ReturnType<typeof landingNoteWindow>> = [];
+  let includeThrough = before === undefined || !intents.has(before.intentId);
   for (const intentId of intents) {
-    const rows = await ctx.db
-      .query('projectIntentLandingNotes')
-      .withIndex('by_project_and_intent', q => q.eq('projectId', projectId).eq('intentId', intentId))
-      .order('desc')
-      .take(limit);
-    notes.push(...rows);
+    const sameIntent = before?.intentId === intentId;
+    const alreadyShown = sameIntent ? (before?.skip ?? 0) : 0;
+    includeThrough ||= sameIntent;
+    const window = await landingNoteWindow(
+      ctx,
+      projectId,
+      intentId,
+      limit + 1 + alreadyShown,
+      before?.at,
+      includeThrough,
+    );
+    let offset = 0;
+    while (offset < alreadyShown && window[offset]?._creationTime === before?.at) offset++;
+    notes.push(...window.slice(offset));
     notes.sort((a, b) => b._creationTime - a._creationTime);
-    if (notes.length > limit) notes.length = limit;
+    if (notes.length > limit + 1) notes.length = limit + 1;
   }
-  return notes.map(row => ({ position: row._creationTime, value: landingNoteComment(itemId, row) }));
+  const selected = notes.slice(0, limit);
+  const loaded = (ctx as QueryCtx & { landingNotesLoaded?: LoadedLandingNote[] }).landingNotesLoaded;
+  const byKey = new Map(loaded?.map(entry => [entry.key, entry]));
+  if (byKey.size) {
+    const references = selected.flatMap(note => {
+      if (!('capsule' in note)) return [];
+      const ref = archiveNoteReference(note);
+      return byKey.has(ref.key) ? [ref] : [];
+    });
+    for (const pin of await pinArchivedNotes(ctx, projectId, references))
+      invariant(
+        byKey.get(pin.key)?.sha256 === pin.pointer.sha256,
+        'WORK_STALE',
+        'Landing note history changed during the read.',
+      );
+  }
+  const pending: ArchivedNote[] = [];
+  const comments = selected.flatMap(note => {
+    if ('capsule' in note) {
+      const reference = archiveNoteReference(note);
+      const stored = byKey.get(reference.key);
+      if (!stored || stored.submissionId !== note.capsule) {
+        pending.push(reference);
+        return [];
+      }
+      return [{ position: note._creationTime, value: landingNoteComment(itemId, stored.row) }];
+    }
+    return [{ position: note._creationTime, value: landingNoteComment(itemId, note) }];
+  });
+  const last = notes.length > limit ? selected.at(-1) : undefined;
+  if (!last) return { comments, pending };
+  const at = last._creationTime;
+  const { intentId } = last;
+  const previous = before?.at === at && before.intentId === intentId ? before.skip : 0;
+  const skip =
+    previous + selected.filter(note => note._creationTime === at && note.intentId === intentId).length;
+  return { comments, pending, before: { at, intentId, skip } };
 }
 
 /** The owner-only planning export scans the existing project index in pages. */
+const exportArgs = {
+  projectId: v.id('hostedProjects'),
+  owner: v.string(),
+  cursor: v.union(v.string(), v.null()),
+};
 export const exportPage = internalQuery({
-  args: { projectId: v.id('hostedProjects'), owner: v.string(), cursor: v.union(v.string(), v.null()) },
-  returns: v.object({ notes: v.string(), continueCursor: v.string(), isDone: v.boolean() }),
+  args: exportArgs,
+  returns: v.object({
+    notes: v.string(),
+    continueCursor: v.string(),
+    isDone: v.boolean(),
+    archived: v.optional(v.string()),
+  }),
   handler: async (ctx, { projectId, owner, cursor }) => {
     await ownedProject(ctx, projectId, owner);
     const page = await ctx.db
       .query('projectIntentLandingNotes')
       .withIndex('by_project_and_intent', q => q.eq('projectId', projectId))
       .paginate({ cursor, numItems: 200 });
+    const archived = page.page.flatMap(row => ('capsule' in row ? [archiveNoteReference(row)] : []));
+    const notes = page.page.flatMap(row =>
+      'capsule' in row ? [] : [[landingNoteOrder(row), landingNoteExport(row)]],
+    );
     return {
-      notes: JSON.stringify(page.page.map(landingNoteExport)),
+      notes: JSON.stringify(notes),
       continueCursor: page.continueCursor,
       isDone: page.isDone,
+      ...(archived.length
+        ? { archived: JSON.stringify(await pinArchivedNotes(ctx, projectId, archived)) }
+        : {}),
     };
   },
 });

@@ -10,6 +10,10 @@ authorized action; the fixture drill restores capsule-only acceptance history an
 hosted source. Live dev packing and cold reads are recorded on Item b149b16b;
 billed storage is a dated re-check there.
 
+Item discussion and owner planning export read landing notes across the live
+table and verified capsules. Packed notes keep their original pagination position
+and the Lane attribution needed by Item Work and Initiative rebuilds.
+
 Selected CLI and MCP landing attempts can read an exact reuse proof from a private
 capsule for an earlier archived attempt. The reply gives explicit missing and
 byte-omitted results and rechecks access after the read.

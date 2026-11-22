@@ -11,10 +11,20 @@ import { policyPreset } from '../dist/autonomy-policy.js';
 import { mergeItems } from '../dist/planning-batch.js';
 import { digest } from '../dist/hash.js';
 import { landingNoteId, landingNoteText } from '../dist/intent-landing-note.js';
+import { canonicalPayload } from '../dist/hosted-source-operation.js';
+import { landingFixture } from './hosted-landing-fixture.mjs';
+import { ticketState } from './landing-ticket-fixture.mjs';
 
 const notes = await import(moduleUrl('../convex/projectIntentLandingNotes.ts'));
 const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+const { read: archiveSelection } = await import(moduleUrl('../convex/projectJournalRead.ts'));
+const { history: archiveReader } = await import(moduleUrl('../convex/projectJournalActions.ts'));
+const { encodeLandingCapsule } = await import(moduleUrl('../convex/projectLandingCapsuleCodec.ts'));
+const { retainLandingNoteReference } = await import(
+  moduleUrl('../convex/projectIntentLandingNoteArchive.ts')
+);
+const { capsuleKind } = await import(moduleUrl('../convex/projectLandingCapsuleStore.ts'));
 const hostedStart = await import(moduleUrl('../convex/projectHostedStart.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
 test.before(() => Object.assign(process.env, synthetic));
@@ -502,6 +512,189 @@ test('the planning export carries every landing note, across export pages', asyn
   }
   assert.equal(exported.sha256, digest(exported.json));
   assert.match(manifest.coverage, /system landing notes/);
+});
+
+test('merged Item discussion and owner export retain hot, legacy and verified capsule notes', async t => {
+  const s = await planningSetup(t);
+  s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
+  await recordsStore(s);
+  const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const duplicate = s.item({ itemId: id(1), title: 'Duplicate' });
+  const survivor = s.item({ itemId: id(2), title: 'Survivor', intentIds: [duplicate.itemId] });
+  await s.send(duplicate);
+  await s.send(survivor);
+  await s.send({
+    action: 'comment-planning-item',
+    operationId: id(3),
+    itemId: survivor.itemId,
+    text: 'Member comment',
+  });
+  const makeNote = (sequence, receiptId, kind = 'landed') => ({
+    intentId: duplicate.itemId,
+    receiptId,
+    kind,
+    at: AT,
+    laneIds: [id(4)],
+    commit: 'd'.repeat(64),
+    sequence,
+    actor: 'owner',
+    ...(kind === 'reverted' ? { revertOf: id(5) } : {}),
+  });
+  const cold = [makeNote(1, id(6)), makeNote(1, id(6), 'reverted')];
+  const legacy = makeNote(2, id(7));
+  const all = [...cold, legacy, ...Array.from({ length: 48 }, (_, i) => makeNote(i + 3, id(i + 100)))];
+  for (const note of all) await notes.postIntentLandingNote(s.ctx, s.projectId, note);
+  const landing = await landingFixture();
+  const submitted = await landing.enqueue(landing.request());
+  const source = [...landing.tables.projectHostedLandingRequests.values()].find(
+    row => row.submissionId === submitted.id,
+  );
+  const anchor = { ...ticketState(landing, source), phase: 'landed' };
+  const objects = new Map();
+  const requests = [];
+  const originalFetch = globalThis.fetch;
+  t.mock.method(globalThis, 'fetch', (url, init) => {
+    const path = new URL(url).pathname;
+    if (!path.includes('/landing-capsules/')) return originalFetch(url, init);
+    requests.push(init?.method ?? 'GET');
+    const body = objects.get(path.split('/').at(-1));
+    return new Response(body, { status: body ? 200 : 404 });
+  });
+  async function publish(submissionId, receiptId, rows) {
+    const capsule = {
+      protocol: 1,
+      projectId: s.projectId,
+      submissionId,
+      anchor: {
+        ...anchor,
+        id: submissionId,
+        projectId: s.projectId,
+        acceptance: { receiptId, head: 'd'.repeat(64) },
+      },
+      tables: rows.length ? { projectIntentLandingNotes: rows.map(canonicalPayload) } : {},
+    };
+    const { body, pointer } = encodeLandingCapsule(capsule);
+    objects.set(pointer.sha256, body);
+    await s.ctx.db.insert('projectFinishReadRows', {
+      kind: capsuleKind,
+      sourceId: submissionId,
+      projectId: s.projectId,
+      submissionId,
+      value: canonicalPayload(pointer),
+    });
+    for (const row of rows) {
+      await retainLandingNoteReference(s.ctx, submissionId, row);
+    }
+    return pointer.size;
+  }
+  const hotExport = JSON.parse(await workActions.exportPlanning._handler(s.ctx, { projectId: s.projectId }));
+  const coldRows = [...s.tables.projectIntentLandingNotes.values()].filter(row => row.receiptId === id(6));
+  const capsuleBytes = await publish(id(8), id(6), coldRows);
+  await publish(id(9), id(7), []);
+  const query = s.ctx.runQuery;
+  let selectionCalls = 0;
+  let revoke = false;
+  s.ctx.runQuery = async (ref, args) => {
+    if (getFunctionName(ref) !== 'projectJournalRead:read') return query(ref, args);
+    selectionCalls++;
+    const result = await archiveSelection._handler(s.ctx, args);
+    if (revoke) s.caller('visitor');
+    return result;
+  };
+  const request = {
+    projectId: s.projectId,
+    collection: 'planningComments',
+    parentId: survivor.itemId,
+    newestFirst: true,
+    paginationOpts: { cursor: null, numItems: 50 },
+  };
+  const marker = await workIndex.records._handler(s.ctx, request);
+  assert.equal(marker.journalHistory, true);
+  assert.equal(marker.landingNotePins, undefined, 'capsule selection stays private');
+  assert.equal(requests.length, 0, 'the live query makes no object-store request');
+  const read = async cursor =>
+    JSON.parse(
+      await archiveReader._handler(s.ctx, {
+        projectId: s.projectId,
+        query: 'projectWorkIndex:records',
+        request: JSON.stringify({ ...request, paginationOpts: { ...request.paginationOpts, cursor } }),
+      }),
+    );
+  const first = await read(null);
+  assert.equal(first.isDone, false);
+  const last = await read(first.continueCursor);
+  assert.equal(last.isDone, true);
+  const discussion = [...first.page, ...last.page].map(row => JSON.parse(row.value));
+  assert.deepEqual(
+    discussion.filter(row => !row.system).map(row => row.text),
+    ['Member comment'],
+  );
+  const system = discussion.filter(row => row.system);
+  assert.deepEqual(system.map(row => row.id).sort(), all.map(landingNoteId).sort());
+  assert(system.every(row => row.itemId === survivor.itemId && row.landing.intentId === duplicate.itemId));
+  assert(requests.every(method => method === 'GET'));
+  const after = JSON.parse(await workActions.exportPlanning._handler(s.ctx, { projectId: s.projectId }));
+  assert.equal(after.sha256, hotExport.sha256, 'the export and its digest survive relocation');
+  const db = s.ctx.db;
+  let dbDocuments = 0;
+  let dbReadBytes = 0;
+  const countReads =
+    method =>
+    async (...args) => {
+      const result = await method(...args);
+      const documents = Array.isArray(result) ? result : (result?.page ?? (result ? [result] : []));
+      dbDocuments += documents.length;
+      dbReadBytes += documents.reduce((total, row) => total + Buffer.byteLength(JSON.stringify(row)), 0);
+      return result;
+    };
+  s.ctx.db = {
+    ...db,
+    get: countReads(db.get),
+    query: table => {
+      const query = db.query(table);
+      for (const operation of ['unique', 'first', 'take', 'paginate', 'collect'])
+        query[operation] = countReads(query[operation]);
+      return query;
+    },
+  };
+  let historySize = all.length;
+  for (const history of [2148, 4296]) {
+    while (historySize < history) {
+      historySize++;
+      await s.ctx.db.insert('projectIntentLandingNotes', {
+        ...makeNote(historySize, id(20_000 + historySize)),
+        intentId: id(30_000 + historySize),
+        projectId: s.projectId,
+      });
+    }
+    const samples = [];
+    const beforeCalls = selectionCalls;
+    const beforeGets = requests.length;
+    dbDocuments = 0;
+    dbReadBytes = 0;
+    for (let sample = 0; sample < 20; sample++) {
+      const start = performance.now();
+      await workIndex.records._handler(s.ctx, request);
+      await read(null);
+      samples.push(performance.now() - start);
+    }
+    samples.sort((a, b) => a - b);
+    t.diagnostic(
+      JSON.stringify({
+        history,
+        fixtureColdReadP90Ms: +samples[17].toFixed(2),
+        functionCalls: 2 + (selectionCalls - beforeCalls) / samples.length,
+        dbDocumentsPerPage: dbDocuments / samples.length,
+        dbReadBytesPerPage: dbReadBytes / samples.length,
+        objectGetsPerPage: (requests.length - beforeGets) / samples.length,
+        objectBytesPerPage: capsuleBytes,
+        peakRssKiB: process.resourceUsage().maxRSS,
+      }),
+    );
+  }
+  s.ctx.db = db;
+  revoke = true;
+  await assert.rejects(read(null), error => (error.code ?? error.data?.code) === 'PROJECT_UNAVAILABLE');
 });
 
 test('later input pages merge Lane IDs into the same note using the existing completion ticks', async t => {

@@ -18,6 +18,7 @@ import { LANDING_CAPSULE_TABLES, type LandingCapsulePointer } from '../src/hoste
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
+import { retainLandingNoteReference, type HotLandingNote } from './projectIntentLandingNoteArchive';
 export const capsuleRows = v.array(v.object({ table: v.string(), row: v.string() }));
 export const capsuleProgressKind = 'projectLandingCapsuleProgress';
 /** Rows per publish or removal page; the packer also bounds each page to 128 KB of row bytes. */
@@ -173,7 +174,9 @@ export async function removeVerifiedCapsuleRows(
       );
     }
     if (current) {
-      await raw.db.delete(id);
+      if (table === 'projectIntentLandingNotes')
+        await retainLandingNoteReference(raw, input.submissionId, archived as HotLandingNote);
+      else await raw.db.delete(id);
       removed++;
     }
   }

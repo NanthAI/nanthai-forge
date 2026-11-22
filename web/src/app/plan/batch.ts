@@ -145,6 +145,7 @@ export async function readComments(
         projectId,
         generationId: ws.generationId,
         collection: 'planningComments',
+        memberCommentsOnly: true,
         parentId,
         paginationOpts: { cursor: null, numItems: 50 },
       }),

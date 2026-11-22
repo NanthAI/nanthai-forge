@@ -370,9 +370,12 @@ Completion skips this comment for Intents created independently. Linking one to 
 receipt available under Work. Older Intents without a recorded origin continue to produce notes.
 Later ticks and input pages add Lanes to the same note
 within the existing five-Lane display limit. The Item discussion shows up to 50 system notes per page from its
-own and linked Intent chains. The comment cursor continues large sets of links. A merged Item shows the
-duplicate's receipt-backed notes alongside copied member comments. Planning exports include these notes as
-evidence. Project backups continue to derive from the recorded Work history.
+own and linked Intent chains. The comment cursor continues through older notes and large sets of links.
+A merged Item shows the duplicate's receipt-backed notes alongside copied member comments.
+Notes stay in the live table until their landing reaches the existing seven-day capsule window.
+Verified capsules then hold the original note bytes. Item discussion and planning export read both
+locations under the same project access checks. Capsules written before notes were included leave
+their live note copies available. Project backups continue to derive from the recorded Work history.
 
 An Item read (`planning {planningItemId}`) returns its newest 50 comments, oldest first. When more exist it adds
 `commentsMore: true` and `commentsCursor`; `planning {planningItemId, cursor: commentsCursor}` returns the next 50

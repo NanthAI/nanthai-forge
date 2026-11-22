@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { maxIntentChain } from '../src/hosted-intent-chain';
 import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
+import { landingNoteWindow } from './projectIntentLandingNoteArchive';
+import { acceptanceRow } from './projectHostedAcceptanceStore';
+import type { HostedAcceptance } from '../src/hosted-acceptance';
+import { invariant } from '../src/errors';
 
 export const ITEM_LANDINGS_PAGE = 10;
 
@@ -56,6 +60,29 @@ type HistoryCursor = z.infer<typeof landingHistoryCursor>;
 type TimePosition = z.infer<typeof timePosition>;
 type NotePosition = z.infer<typeof notePosition>;
 type LegacyPosition = z.infer<typeof legacyPosition>;
+type NoteWindow = Awaited<ReturnType<typeof landingNoteWindow>>;
+
+/** Archive routes retain Lane membership. Canonical receipts already hold the other Item Work fields. */
+export async function itemLandingFromNote(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  note: NoteWindow[number],
+): Promise<ItemLanding> {
+  let evidence: Pick<ItemLanding, 'commit' | 'at' | 'sequence'>;
+  if ('commit' in note) {
+    evidence = { commit: note.commit, at: note.at, sequence: note.sequence };
+  } else {
+    const row = await acceptanceRow(ctx, { projectId, receiptId: note.receiptId });
+    invariant(row, 'SOURCE_UNAVAILABLE', 'The archived note’s landing receipt is unavailable.');
+    const receipt = JSON.parse(row.value) as HostedAcceptance;
+    evidence = { commit: receipt.candidate.head, at: receipt.at, sequence: receipt.snapshot.revision };
+  }
+  return {
+    receiptId: note.receiptId,
+    ...evidence,
+    ...(note.landedBy ? { landedBy: note.landedBy.by } : {}),
+  };
+}
 
 function windowFrom<T extends { _creationTime: number }>(rows: T[], from: TimePosition | undefined) {
   if (!from) return rows;
@@ -89,38 +116,34 @@ async function notePage(
   const streams = await Promise.all(
     (from ?? intents.map(() => false as const)).map(async (position, index) => {
       const intentId = intents[index];
-      if (!intentId || position === null) return { position, rows: [], consumed: 0 };
+      if (!intentId || position === null) return { position, rows: [] as NoteWindow, consumed: 0 };
       const time = position || undefined;
-      const rows = await ctx.db
-        .query('projectIntentLandingNotes')
-        .withIndex('by_project_and_intent', q => {
-          const range = q.eq('projectId', projectId).eq('intentId', intentId);
-          return time ? range.lte('_creationTime', time.at) : range;
-        })
-        .order('desc')
-        .take(rawLimit + 1 + (time?.skip ?? 0));
+      const rows = await landingNoteWindow(
+        ctx,
+        projectId,
+        intentId,
+        rawLimit + 1 + (time?.skip ?? 0),
+        time?.at,
+      );
       return { position, rows: windowFrom(rows, time), consumed: 0 };
     }),
   );
   const merged = streams.flatMap(stream => stream.rows.map(note => ({ note, stream })));
   merged.sort((a, b) => b.note._creationTime - a.note._creationTime);
-  const receipts = new Map<string, ItemLanding>();
+  const receipts = new Map<string, NoteWindow[number]>();
   for (const { note, stream } of merged.slice(0, rawLimit)) {
     stream.consumed++;
     if (note.kind !== 'landed') continue;
-    receipts.set(note.receiptId, {
-      receiptId: note.receiptId,
-      commit: note.commit,
-      at: note.at,
-      sequence: note.sequence,
-      ...(note.landedBy ? { landedBy: note.landedBy.by } : {}),
-    });
+    receipts.set(note.receiptId, note);
     if (receipts.size === limit) break;
   }
   const next = streams.map(({ position, rows, consumed }) =>
     consumed >= rows.length ? null : consumed ? windowAfter(rows, consumed, position || undefined) : position,
   );
-  return { rows: [...receipts.values()], next: next.some(value => value !== null) ? next : null };
+  return {
+    rows: await Promise.all([...receipts.values()].map(note => itemLandingFromNote(ctx, projectId, note))),
+    next: next.some(value => value !== null) ? next : null,
+  };
 }
 
 async function hasLandingNote(
@@ -129,14 +152,13 @@ async function hasLandingNote(
   intentId: string,
   receiptId: string,
 ) {
-  return Boolean(
-    await ctx.db
-      .query('projectIntentLandingNotes')
-      .withIndex('by_project_and_intent_and_receipt_and_kind', q =>
-        q.eq('projectId', projectId).eq('intentId', intentId).eq('receiptId', receiptId).eq('kind', 'landed'),
-      )
-      .unique(),
-  );
+  const hot = await ctx.db
+    .query('projectIntentLandingNotes')
+    .withIndex('by_project_and_receipt_and_intent_and_kind', q =>
+      q.eq('projectId', projectId).eq('receiptId', receiptId).eq('intentId', intentId).eq('kind', 'landed'),
+    )
+    .unique();
+  return !!hot;
 }
 
 /** Older projects recorded their last landing per Lane. Walk only the Item's Lane

@@ -17,6 +17,7 @@ import { itemIntentChain } from './projectIntentLandingNotes';
 import {
   cursorJson,
   itemLandingHistory,
+  itemLandingFromNote,
   landingHistoryCursor,
   itemLandingStamp,
   itemLaneLandingStamp,
@@ -28,6 +29,7 @@ import { report } from './errors';
 import { isPlanningUuid } from '../src/planning-id';
 import { AGENT_CLIENT, agentActor, isAgentSlug } from '../src/agent-slug';
 import { LANDING_NOTES_PER_ITEM } from '../src/intent-landing-note';
+import { landingNoteWindow } from './projectIntentLandingNoteArchive';
 
 /** Lane heads counted per Intent before the total reads "at least". */
 const LANES_COUNTED = 50;
@@ -152,26 +154,21 @@ export const read = query({
         lanes.filter(lane => lane.state !== 'abandoned').map(lane => lane.intentId),
       );
       for (const intentId of landingIntents) {
-        const notes = await ctx.db
-          .query('projectIntentLandingNotes')
-          .withIndex('by_project_and_intent', q => q.eq('projectId', projectId).eq('intentId', intentId))
-          .order('desc')
-          .take(LANDING_NOTES_PER_ITEM);
+        const notes = await landingNoteWindow(ctx, projectId, intentId, LANDING_NOTES_PER_ITEM);
         const reverted = new Map(
           notes.filter(note => note.kind === 'reverted' && note.revertOf).map(note => [note.revertOf!, note]),
         );
         for (const note of notes) {
           if (note.kind !== 'landed') continue;
+          const laneIds = [...note.laneIds, ...(note.viaLaneId ? [note.viaLaneId] : [])].filter(
+            id => lanes.some(lane => lane.id === id) && !landed.has(id),
+          );
+          if (!laneIds.length) continue;
           const receipt = {
-            receiptId: note.receiptId,
-            commit: note.commit,
-            at: note.at,
-            sequence: note.sequence,
-            ...(note.landedBy ? { landedBy: note.landedBy.by } : {}),
+            ...(await itemLandingFromNote(ctx, projectId, note)),
             ...(reverted.has(note.receiptId) ? { revertedBy: reverted.get(note.receiptId)!.receiptId } : {}),
           };
-          for (const laneId of [...note.laneIds, ...(note.viaLaneId ? [note.viaLaneId] : [])])
-            if (!landed.has(laneId)) landed.set(laneId, receipt);
+          for (const laneId of laneIds) landed.set(laneId, receipt);
         }
       }
       const stamps = new Map<string, Doc<'projectHostedOverlapLanes'>['landed']>();

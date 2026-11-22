@@ -149,6 +149,22 @@ test('Item Work preserves earlier landings of a Lane that was kept open and page
   assert.equal(next.moreLandings, false);
 });
 
+test('Item Work keeps Lane attribution and receipt history after a landing note moves to its capsule', async () => {
+  const s = await fixture({ details: true });
+  const { retainLandingNoteReference } = await import(
+    moduleUrl('../convex/projectIntentLandingNoteArchive.ts')
+  );
+  const [note] = [...s.tables.projectIntentLandingNotes.values()];
+  const receipt = [...s.tables.projectHostedAcceptances.values()].find(
+    row => row.receiptId === note.receiptId,
+  );
+  const before = await s.read({ details: true });
+  await retainLandingNoteReference(s.ctx, receipt.submissionId, note);
+  const after = await s.read({ details: true });
+  assert.deepEqual(after.landings, before.landings);
+  assert.deepEqual(after.lanes, before.lanes);
+});
+
 test('landing history advances through 10,000 retained notes without offset reads or shifting on a new landing', async t => {
   const s = await fixture({ details: true });
   const [note] = [...s.tables.projectIntentLandingNotes.values()];

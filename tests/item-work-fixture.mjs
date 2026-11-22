@@ -249,6 +249,8 @@ export async function itemWorkFixture({
       attemptId: randomUUID(),
       sequence: 42,
       value: JSON.stringify({
+        at,
+        snapshot: { revision: 42 },
         candidate: { id: candidateId, head: 'c'.repeat(64) },
         check: { runId: randomUUID() },
       }),

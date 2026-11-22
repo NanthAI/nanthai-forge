@@ -7,14 +7,23 @@ import { invariant } from '../src/errors';
  * references, not ownership, and must never make those records purge candidates. */
 export function storageOwners() {
   return Object.entries(schema.tables).flatMap(([table, definition]) => {
-    const fields = definition.validator.fields as Record<string, { kind: string; tableName?: string }>;
-    return Object.entries(fields).flatMap(([field, validator]) => {
+    const variants =
+      definition.validator.kind === 'union' ? definition.validator.members : [definition.validator];
+    const [fields, ...otherFields] = variants.map(
+      variant =>
+        (variant.kind === 'object' ? variant.fields : {}) as Record<
+          string,
+          { kind: string; tableName?: string }
+        >,
+    );
+    return Object.entries(fields ?? {}).flatMap(([field, validator]) => {
       const parent = validator.kind === 'id' ? validator.tableName : undefined;
       if (
         !(
           (field === 'projectId' && parent === 'hostedProjects') ||
           (parent === 'projectWorkGenerations' && (field === 'generationId' || field === 'partitionId'))
-        )
+        ) ||
+        otherFields.some(fields => fields[field]?.kind !== 'id' || fields[field]?.tableName !== parent)
       )
         return [];
       const index = definition[' indexes']().find(item => item.fields[0] === field)?.indexDescriptor;

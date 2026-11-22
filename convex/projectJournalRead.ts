@@ -16,6 +16,7 @@ import { decodeRequest, publicWorkResult, publicWorkSelected } from './publicWor
 import { journalRecordRead } from './projectHostedRecordReads';
 import { journalProvenanceRead } from './projectHostedProvenanceRead';
 import { parseLoadedJournalSegment } from './projectJournalStore';
+import type { LoadedLandingNote } from './projectIntentLandingNoteArchive';
 const NESTED_READERS = new Set(['projectHostedRecordReads:read', 'projectHostedProvenanceRead:read']);
 /** Raw verified rows travel only across the private server boundary. The action maps current identities. */
 export const read = internalQuery({
@@ -24,6 +25,7 @@ export const read = internalQuery({
     query: v.string(),
     request: v.string(),
     segments: v.array(v.string()),
+    landingNotes: v.optional(v.array(v.string())),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -61,11 +63,16 @@ async function journalResult(
     query: string;
     request: string;
     segments: string[];
+    landingNotes?: string[];
   },
 ) {
   await guard(ctx, input.query.startsWith('projectCoordination') ? 'coordination' : 'cli');
   const journalLoaded = input.segments.map(parseLoadedJournalSegment);
-  const selected = { ...ctx, journalLoaded, journalPrivate: true };
+  const landingNotesLoaded =
+    input.query === 'projectWorkIndex:records'
+      ? (input.landingNotes ?? []).map(text => JSON.parse(text) as LoadedLandingNote)
+      : undefined;
+  const selected = { ...ctx, journalLoaded, journalPrivate: true, landingNotesLoaded };
   const command = JSON.parse(input.request);
   const original = { ...command, projectId: input.projectId };
   if (input.query === 'projectCoordination:recent')

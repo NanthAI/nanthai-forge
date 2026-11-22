@@ -109,6 +109,12 @@ function selected(
       return ctx.db
         .query(scope.table)
         .withIndex('by_project_and_receipt', q => q.eq('projectId', projectId).eq('receiptId', scope.key!));
+    case 'projectIntentLandingNotes':
+      return ctx.db
+        .query(scope.table)
+        .withIndex('by_project_and_receipt_and_intent_and_kind', q =>
+          q.eq('projectId', projectId).eq('receiptId', scope.key!),
+        );
     case 'projectHostedAcceptancePages':
       invariant(
         scope.kind === 'inputs' || scope.kind === 'dependencies',
@@ -179,6 +185,7 @@ async function captureScope(ctx: MutationCtx, input: CaptureInput, scope: Capsul
 }
 const kept = (input: CaptureInput, scope: CapsuleScope, row: Row) => {
   if ('eventId' in row && String(row.eventId).startsWith('reuse:')) return false;
+  if (scope.table === 'projectIntentLandingNotes' && 'capsule' in row) return false;
   if (scope.table === 'legacyStorageCleanupPages')
     return 'request' in row && JSON.parse(String(row.request)).projectId === input.projectId;
   return true;

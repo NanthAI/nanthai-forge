@@ -68,6 +68,14 @@ export function landingCapsuleText(input: LandingCapsule) {
         'EVIDENCE_CHANGED',
         'Check reuse aliases must remain transactional.',
       );
+      invariant(
+        name !== 'projectIntentLandingNotes' ||
+          (typeof row.actor === 'string' &&
+            typeof row.receiptId === 'string' &&
+            row.receiptId === value.anchor.acceptance?.receiptId),
+        'EVIDENCE_CHANGED',
+        'A landing note belongs to another receipt.',
+      );
     }
   }
   return canonicalPayload(value);

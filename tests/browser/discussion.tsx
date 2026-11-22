@@ -16,6 +16,7 @@ document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
 const reader = params.get('viewer') === 'reader';
 const withThread = params.has('thread');
 const withPages = params.has('pages');
+const withNotePages = params.has('notePages');
 
 const uuid = (n: number) => `7be2c41a-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const ITEM = uuid(1),
@@ -105,7 +106,8 @@ const calls: string[] = [];
 const writes: unknown[] = [];
 const watches = new Set<() => void>();
 let newest = 3,
-  answered = false;
+  answered = false,
+  noteTotal = 51;
 Object.assign(window, {
   __calls: calls,
   __writes: writes,
@@ -114,10 +116,41 @@ Object.assign(window, {
     else answered = true;
     for (const notify of watches) notify();
   },
+  addLandingNote: () => {
+    noteTotal++;
+    for (const notify of watches) notify();
+  },
 });
 type Before = { message?: [number, number, string] };
-function answer(name: string, before?: Before) {
+function answer(name: string, before?: Before, noteCursor?: string | null, hydrate = false) {
   if (name === 'projectWorkIndex:workspace') return workspace;
+  if (name === 'projectWorkIndex:records' && withNotePages) {
+    const newestNote = noteCursor ? Number(noteCursor) - 1 : noteTotal;
+    const oldestNote = Math.max(1, newestNote - 49);
+    const archived = noteCursor && !hydrate;
+    return {
+      page: archived
+        ? []
+        : Array.from({ length: newestNote - oldestNote + 1 }, (_, index) => {
+            const note = newestNote - index;
+            const id = uuid(100 + note);
+            return {
+              id,
+              position: note,
+              value: JSON.stringify({
+                id,
+                itemId: ITEM,
+                at: minutes(note),
+                text: `Landing note ${note}`,
+                system: true,
+              }),
+            };
+          }),
+      isDone: oldestNote === 1,
+      continueCursor: String(oldestNote),
+      ...(archived ? { journalHistory: true } : {}),
+    };
+  }
   if (name === 'projectWorkIndex:records')
     return {
       page: comments.map((comment, position) => ({
@@ -190,17 +223,25 @@ function answer(name: string, before?: Before) {
   throw new Error(`Unexpected read ${name}`);
 }
 const client = {
-  watchQuery: (fn: FunctionReference<'query'>, args: { before?: Before }) => {
+  watchQuery: (
+    fn: FunctionReference<'query'>,
+    args: { before?: Before; paginationOpts?: { cursor: string | null } },
+  ) => {
     const name = getFunctionName(fn);
     calls.push(name);
     return {
-      localQueryResult: () => answer(name, args.before),
+      localQueryResult: () => answer(name, args.before, args.paginationOpts?.cursor),
       journal: () => undefined,
       onUpdate: (notify: () => void) => {
         watches.add(notify);
         return () => watches.delete(notify);
       },
     };
+  },
+  action: async (fn: FunctionReference<'action'>, args: { query: string; request: string }) => {
+    if (getFunctionName(fn) !== 'projectJournalActions:history') throw new Error('Unexpected archive read');
+    const { paginationOpts } = JSON.parse(args.request);
+    return JSON.stringify(answer(args.query, undefined, paginationOpts.cursor, true));
   },
   mutation: async (fn: FunctionReference<'mutation'>, args: unknown) => {
     writes.push([getFunctionName(fn), args]);

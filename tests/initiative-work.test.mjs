@@ -36,6 +36,8 @@ async function addLanding(s, sequence, paths, itemIds = [s.itemId]) {
     attemptId: randomUUID(),
     sequence,
     value: JSON.stringify({
+      at,
+      snapshot: { revision: sequence },
       candidate: { id: randomUUID(), head: commit },
       memberCandidate: { id: candidateId, head: commit },
     }),
@@ -117,6 +119,26 @@ test('one receipt on two Items counts once, and replay adds no writes', async t 
   assert.equal(subsequent.writes, 2);
   assert.equal((await view(s)).landings, 2);
   assert.equal((await view(s)).files, 9);
+});
+
+test('rebuilding Initiative work includes the receipts of archived Item landing notes', async () => {
+  const s = await emptyInitiative();
+  const landing = await addLanding(s, 43, ['src/archive.ts']);
+  const { retainLandingNoteReference } = await import(
+    moduleUrl('../convex/projectIntentLandingNoteArchive.ts')
+  );
+  const note = [...s.tables.projectIntentLandingNotes.values()].find(
+    row => row.receiptId === landing.receiptId,
+  );
+  const receipt = [...s.tables.projectHostedAcceptances.values()].find(
+    row => row.receiptId === landing.receiptId,
+  );
+  await retainLandingNoteReference(s.ctx, receipt.submissionId, note);
+  await s.rebuildInitiative();
+  const result = await view(s);
+  assert.equal(result.landings, 1);
+  assert.equal(result.files, 1);
+  assert.equal(result.missingFiles, 0);
 });
 
 test('a long Candidate is folded in 500-path pages and unfinished file coverage is explicit', async () => {

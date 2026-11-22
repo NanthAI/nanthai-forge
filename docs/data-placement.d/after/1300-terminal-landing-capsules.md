@@ -13,11 +13,13 @@ refused, `restart` cancels the pending call. There is no cron or idle work, and 
 module is deleted once dev and bench are done. After the approved seven-day
 terminal grace, one complete private gzip object
 holds canonical observations, attempts, landing-owned finish projections,
-acceptance events/pages/plans/snapshots, compose pages and expired callback digest
-receipts. Relocated per-landing expiry receipts travel in that object too. A
+acceptance events/pages/plans/snapshots, compose pages, Item landing notes and expired
+callback digest receipts. Relocated per-landing expiry receipts travel in that object too. A
 verified pointer precedes bounded removal of duplicate Convex copies. Reuse
 aliases, canonical acceptance receipts/compose selections, exact transaction
-ledgers and shared metric/control projections remain in Convex. A fixed bootstrap
+ledgers and shared metric/control projections remain in Convex. Compact per-note
+references retain the original creation order and point to verified capsule bytes.
+A fixed bootstrap
 cursor/revision is charged per project, separately from landing history.
 
 Capsule objects use the private project `landing-capsules` namespace, outside the

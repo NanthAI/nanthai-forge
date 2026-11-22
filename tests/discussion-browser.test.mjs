@@ -144,6 +144,21 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
       },
     );
 
+    await t.test(
+      'a new landing refreshes the older capsule page without dropping its boundary note',
+      async t => {
+        const page = await open(t, DESK, 'notePages=1');
+        const section = page.locator('section[aria-label="Comments"]');
+        const count = 'section[aria-label="Comments"] .band .cnt';
+        await page.waitForFunction(selector => document.querySelector(selector)?.textContent === '51', count);
+        await page.evaluate(() => window.addLandingNote());
+        await page.waitForFunction(selector => document.querySelector(selector)?.textContent === '52', count);
+        await section.getByRole('button', { name: /^Show .* earlier$/ }).click();
+        await section.getByRole('button', { name: /^Show .* earlier$/ }).click();
+        assert.equal(await section.getByText('Landing note 2', { exact: true }).count(), 1);
+      },
+    );
+
     await t.test('a reader of a public project sees no people, no composer and no reaction keys', async t => {
       const page = await open(t, DESK, 'viewer=reader');
       const section = page.locator('section[aria-label="Comments"]');

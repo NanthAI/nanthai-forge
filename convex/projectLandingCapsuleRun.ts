@@ -170,6 +170,7 @@ export async function packLandingCapsule(
     const identities = new Map<string, Map<string, string>>();
     let rawBytes = 0;
     const add = (table: CapsuleScope['table'], rows: string[]) => {
+      if (table === 'projectIntentLandingNotes' && !rows.length) return;
       if (!identities.has(table)) identities.set(table, new Map());
       for (const text of rows) {
         const row = JSON.parse(text),
@@ -273,6 +274,7 @@ export async function packLandingCapsule(
       scopes.push(
         { table: 'projectHostedAcceptanceEvents', sequence: selection.receipt.sequence },
         { table: 'projectHostedAcceptanceSnapshots', key: receipt.snapshot.id },
+        { table: 'projectIntentLandingNotes', key: selection.receipt.receiptId },
       );
     }
     for (const ref of selectedRefs) {

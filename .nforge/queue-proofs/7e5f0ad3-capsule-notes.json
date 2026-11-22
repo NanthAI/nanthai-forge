@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "src/hosted-landing.ts": "52b049d91030d3d96f41c62819827f8b1c886b79e5cbd29a91e7bfa5cf163d5b"
+  },
+  "replay": {
+    "incident": "2bf85ddf",
+    "test": "incident replay 2bf85ddf: a parked Lane the queue lands after its agent stopped posts its receipt to its Item",
+    "receipt": "0382b02b-85d5-4aee-b3c9-aeb3f4fe2c81"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A6d434769-92ce-4b34-8aae-aa2c709bcec1",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:subagent:2d3f5d6becb41f19",
+    "receipt": "0382b02b-85d5-4aee-b3c9-aeb3f4fe2c81"
+  }
+}

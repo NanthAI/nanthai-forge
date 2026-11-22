@@ -7,7 +7,9 @@ import { internalAction } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { exportPlanning as planningExport } from '../src/work-planning-state';
-import type { landingNoteExport } from '../src/intent-landing-note';
+import { landingNoteExport } from '../src/intent-landing-note';
+import { loadArchivedLandingNotes } from './projectIntentLandingNoteArchiveRead';
+import type { ArchivedNotePin } from './projectIntentLandingNoteArchive';
 import { invariant } from '../src/errors';
 import { workDigest } from '../src/work-metadata';
 import { report } from './errors';
@@ -161,19 +163,28 @@ export const exportPlanning = action({
       const owner = await caller(ctx);
       await ctx.runQuery(internal.projectWork.owner, { projectId, owner });
       const snapshot = await load(ctx, projectId, owner);
-      const notes: ReturnType<typeof landingNoteExport>[] = [];
+      type ExportNote = [string, ReturnType<typeof landingNoteExport>];
+      const notes: ExportNote[] = [];
       let cursor: string | null = null;
       for (;;) {
-        const page: { notes: string; continueCursor: string; isDone: boolean } = await ctx.runQuery(
-          internal.projectIntentLandingNotes.exportPage,
-          { projectId, owner, cursor },
-        );
-        notes.push(...(JSON.parse(page.notes) as typeof notes));
+        const page: { notes: string; continueCursor: string; isDone: boolean; archived?: string } =
+          await ctx.runQuery(internal.projectIntentLandingNotes.exportPage, { projectId, owner, cursor });
+        notes.push(...(JSON.parse(page.notes) as ExportNote[]));
+        if (page.archived) {
+          const archived = await loadArchivedLandingNotes(
+            projectId,
+            JSON.parse(page.archived) as ArchivedNotePin[],
+          );
+          notes.push(...archived.map(({ key, row }): ExportNote => [key, landingNoteExport(row)]));
+        }
         if (page.isDone) break;
         cursor = page.continueCursor;
       }
       // Name people by handle before the digest is taken, so the returned digest covers them.
-      const exported = { data: snapshot.data, landingNotes: notes };
+      notes.sort(([a, x], [b, y]) =>
+        x.intentId < y.intentId ? -1 : x.intentId > y.intentId ? 1 : a < b ? -1 : a > b ? 1 : 0,
+      );
+      const exported = { data: snapshot.data, landingNotes: notes.map(([, note]) => note) };
       const { data, landingNotes } = (await actionPublicPeople(
         ctx,
         { projectId },
