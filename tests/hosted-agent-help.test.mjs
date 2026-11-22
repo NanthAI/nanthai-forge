@@ -388,6 +388,27 @@ test('landings directs unsupported file filters to history log and blame without
   );
 });
 
+test('df06081d: the CLI landings read filters a window to agents or to people and refuses it for one receipt', async () => {
+  const { landingsHostedSource } = await import('../dist/hosted-agent-landings.js');
+  const sent = [];
+  const transport = {
+    async query(name, args) {
+      sent.push([name, args]);
+      return { landings: [] };
+    },
+  };
+  const window = { from: '2026-11-01T00:00:00Z', to: '2026-11-02T00:00:00Z' };
+  await landingsHostedSource(transport, { ...window, kind: 'agent' });
+  assert.equal(sent[0][0], 'projectHostedLandings:read');
+  assert.equal(sent[0][1].kind, 'agent');
+  for (const input of [
+    { ...window, kind: 'robot' },
+    { receiptId: 'abcdef12', kind: 'person' },
+  ])
+    await assert.rejects(landingsHostedSource(transport, input), error => error.code === 'BAD_ARGUMENT');
+  assert.equal(sent.length, 1, 'invalid input stays local');
+});
+
 test('journey 61 (Issue 47558a99): action help leads with a runnable example and prints ids as format uuid, without the pattern', () => {
   for (const [action, example] of [
     ['lane-history', `Example: nforge agent ROOT lane-history '{}'`],

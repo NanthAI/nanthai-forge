@@ -3,7 +3,7 @@ import { journalProject } from './projectJournalStore';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { currentCredential } from './deviceFields';
-import { deviceAllowsSourceWrite, deviceProjectRefusal } from './accessPolicy';
+import { deviceAllowsSourceWrite, deviceProjectRefusal, liveGrant, requireGrantPaths } from './accessPolicy';
 import type { Doc } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { projectExecution } from './projectExecution';
@@ -45,30 +45,34 @@ export function readProjectRole(
 const deviceReads = new WeakMap<object, Promise<Doc<'cliCredentials'> | null>>();
 /** Reuse the public guard's row; a nested caller checks once in its transaction.
  * Source workers carry trusted job authority and may have no auth surface. */
-async function deviceProject(ctx: QueryCtx | MutationCtx, projectId: string, writing = false) {
-  let row: Doc<'cliCredentials'> | null | undefined = (ctx as { forgeDevice?: Doc<'cliCredentials'> | null })
-    .forgeDevice;
-  if (row === undefined) {
-    let selected = deviceReads.get(ctx);
-    if (!selected) {
-      selected = (async () => {
-        const user = await ctx.auth?.getUserIdentity();
-        if (typeof user?.forgeCredential !== 'string' || typeof user.forgeSignIn !== 'string') return null;
-        const found = await ctx.db
-          .query('cliCredentials')
-          .withIndex('by_credentialId', q => q.eq('credentialId', user.forgeCredential as string))
-          .unique();
-        invariant(
-          currentCredential(found, user.subject, user.forgeSignIn),
-          'AUTH_REVOKED',
-          'This device sign-in ended. Run nforge login; saved work remains.',
-        );
-        return found;
-      })();
-      deviceReads.set(ctx, selected);
-    }
-    row = await selected;
+async function deviceRow(ctx: QueryCtx | MutationCtx) {
+  const row: Doc<'cliCredentials'> | null | undefined = (
+    ctx as { forgeDevice?: Doc<'cliCredentials'> | null }
+  ).forgeDevice;
+  if (row !== undefined) return row;
+  let selected = deviceReads.get(ctx);
+  if (!selected) {
+    selected = (async () => {
+      const user = await ctx.auth?.getUserIdentity();
+      if (typeof user?.forgeCredential !== 'string' || typeof user.forgeSignIn !== 'string') return null;
+      const found = await ctx.db
+        .query('cliCredentials')
+        .withIndex('by_credentialId', q => q.eq('credentialId', user.forgeCredential as string))
+        .unique();
+      invariant(
+        currentCredential(found, user.subject, user.forgeSignIn),
+        'AUTH_REVOKED',
+        'This device sign-in ended. Run nforge login; saved work remains.',
+      );
+      return found;
+    })();
+    deviceReads.set(ctx, selected);
   }
+  return selected;
+}
+const renewed = new WeakSet<object>();
+async function deviceProject(ctx: QueryCtx | MutationCtx, projectId: string, writing = false) {
+  const row = await deviceRow(ctx);
   const settings = row?.settings;
   invariant(
     !settings || settings.projects.kind === 'all' || settings.projects.projectId === projectId,
@@ -79,6 +83,25 @@ async function deviceProject(ctx: QueryCtx | MutationCtx, projectId: string, wri
     !writing || deviceAllowsSourceWrite(row),
     'AUTH_SCOPE_DENIED',
     'This device is read only. Change its settings in your Forge browser to write; local work is kept.',
+  );
+  if (!writing || !row) return;
+  // The grant rides on the credential row already read: no extra read; renewal at most hourly.
+  const renewal = liveGrant(row);
+  if (renewal && 'patch' in ctx.db && !renewed.has(row)) {
+    renewed.add(row);
+    await (ctx as MutationCtx).db.patch(row._id, renewal);
+  }
+}
+/** Every path a write under a scoped device grant names must be inside it (no read: the checked row). */
+export async function requireDeviceWritePaths(ctx: QueryCtx | MutationCtx, paths: readonly string[]) {
+  requireGrantPaths(await deviceRow(ctx), paths);
+}
+/** A revert's paths are known only after its worker runs, so a folder grant cannot start one. */
+export async function refuseScopedRevert(ctx: QueryCtx | MutationCtx) {
+  invariant(
+    !(await deviceRow(ctx))?.settings?.paths,
+    'AUTH_SCOPE_DENIED',
+    'This device has a folder grant and cannot revert a landing, whose files may lie outside it. Revert from your Forge browser or an unrestricted device.',
   );
 }
 export async function ownedProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedProjects'>, owner: string) {

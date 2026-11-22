@@ -653,6 +653,45 @@ test('landings read the source builder model separately from approval without ad
   assert.doesNotMatch(legacy.raw, /user_fixtureBuilder/);
 });
 
+test('df06081d: landings say who built each one, agent or person, and filter by it before reading evidence', async () => {
+  const f = fixture();
+  for (const n of [1, 2, 3]) f.landing(n, { at: 100 + n });
+  const receipts = f.tables.projectHostedAcceptances;
+  const stamp = (n, fields) => {
+    receipts[n - 1].value = JSON.stringify({ ...JSON.parse(receipts[n - 1].value), ...fields });
+  };
+  stamp(1, { actor: { id: 'owner', kind: 'person' } });
+  stamp(2, { actor: { id: 'owner', kind: 'agent' }, agentRun: 'amber-fox' });
+  // An older supervised receipt names only its approving person; its first attempt names the agent builder.
+  stamp(3, { actor: { id: 'owner', kind: 'person' } });
+  const attempt = f.tables.projectHostedLandingAttempts[2];
+  attempt.value = JSON.stringify({ ...JSON.parse(attempt.value), actor: { id: 'owner', kind: 'agent' } });
+  const all = await f.read();
+  assert.deepEqual(
+    all.landings.map(row => row.builtBy),
+    ['person', 'agent', 'agent'],
+  );
+  const before = f.meter.queries;
+  const agents = await f.read({ kind: 'agent' });
+  const agentReads = f.meter.queries - before;
+  assert.deepEqual(
+    agents.landings.map(row => row.receiptId),
+    [receipts[1].receiptId, receipts[2].receiptId],
+  );
+  const beforePeople = f.meter.queries;
+  const people = await f.read({ kind: 'person' });
+  assert.deepEqual(
+    people.landings.map(row => row.receiptId),
+    [receipts[0].receiptId],
+  );
+  // The stamped agent receipt is skipped without its evidence reads; only the ambiguous older one needs them.
+  assert(f.meter.queries - beforePeople < agentReads);
+  await assert.rejects(
+    f.read({ receiptId: receipts[0].receiptId, from: undefined, to: undefined, kind: 'agent' }),
+    /BAD_ARGUMENT|window/,
+  );
+});
+
 test('landings title comes from the retained receipt message without additional record reads', async () => {
   const f = fixture();
   f.landing(1, { at: 60, message: 'Fix source comparison\n\nRemoves duplicate source parsing.' });

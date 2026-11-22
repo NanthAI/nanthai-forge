@@ -6,6 +6,7 @@ import { githubSignIn } from './auth';
 import { confirmAccount, confirmationOptions, digest, linkAccount } from './authLinkAccount';
 import { authenticationResponse, requestOptions } from './authPasskeyWire';
 import { completeGithubLink, libraryCall } from './authGithubLink';
+import { linkedGithub } from './deviceApprovalStore';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 const PURPOSE = 'forge:link-github';
@@ -13,15 +14,7 @@ const FRESH_MS = 10 * 60 * 1000;
 export const current = query({
   args: {},
   returns: v.boolean(),
-  handler: async ctx => {
-    const identity = await ctx.auth.getUserIdentity();
-    const id =
-      typeof identity?.forgeAuthUser === 'string'
-        ? ctx.db.normalizeId('users', identity.forgeAuthUser)
-        : null;
-    const user = id && (await ctx.db.get(id));
-    return Boolean(user?.githubId && !user.githubConflict);
-  },
+  handler: async ctx => linkedGithub(ctx, await ctx.auth.getUserIdentity()),
 });
 export const startConfirmation = accountMutation('same')({
   args: {},

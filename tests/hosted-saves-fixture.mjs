@@ -142,7 +142,7 @@ export async function saveFixture(originalText = 'original', originalPath = 'a.t
     record: lane,
   });
   const expected = { head: baseline.sha256, version: 0, sourceVersion: 0, lifecycleVersion: 0 };
-  const prepare = async (changes, overrides = {}) => {
+  const prepare = async (changes, overrides = {}, actor = 'owner') => {
     const built = buildSavePages(changes);
     const request = {
       operationId: randomUUID(),
@@ -156,19 +156,24 @@ export async function saveFixture(originalText = 'original', originalPath = 'a.t
       ...overrides,
     };
     const result = JSON.parse(
-      await call('prepare', api.prepare, { projectId, request: JSON.stringify(request) }),
+      await call('prepare', api.prepare, { projectId, request: JSON.stringify(request) }, actor),
     );
     return { request, result, pages: built.pages };
   };
-  const stage = async x => {
+  const stage = async (x, actor = 'owner') => {
     for (const [index, page] of x.pages.entries()) {
       put(saveBytes(page.value));
-      await call('stage', api.stage, {
-        projectId,
-        operationId: x.request.operationId,
-        index,
-        page: JSON.stringify(page.value),
-      });
+      await call(
+        'stage',
+        api.stage,
+        {
+          projectId,
+          operationId: x.request.operationId,
+          index,
+          page: JSON.stringify(page.value),
+        },
+        actor,
+      );
     }
   };
   const submit = async (x, timing = {}) => {

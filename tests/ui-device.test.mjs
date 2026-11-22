@@ -315,3 +315,94 @@ test('B-02: the link the CLI prints opens a page the web app serves (switch to /
   }
   assert(paths.includes('/device') && paths.includes('/-/device'));
 });
+
+test('df06081d: the GitHub check keeps the typed terminal code through its redirect, and hides its button without a linked GitHub identity', () => {
+  const kept = new Map();
+  const browser = {
+    location: { href: 'https://forge.example/-/device?code=QK7PM2XDHT', origin: 'https://forge.example' },
+    history: {
+      state: null,
+      replaceState(_s, _u, url) {
+        browser.location.href = new URL(url, browser.location.href).href;
+      },
+    },
+    sessionStorage: {
+      getItem: key => kept.get(key) ?? null,
+      setItem: (key, value) => kept.set(key, String(value)),
+      removeItem: key => kept.delete(key),
+    },
+  };
+  const saved = Object.fromEntries(
+    Object.keys(browser).map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]),
+  );
+  for (const [name, value] of Object.entries(browser))
+    Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
+  // The page reads the link code first, then the typed code (web/src/app/Device.tsx order).
+  const arrive = (href, now) => {
+    browser.location.href = href;
+    const code = linkCode.takeLinkCode(now);
+    const requestId = new URL(href).searchParams.get('request') ?? '';
+    return { code, typed: linkCode.takeTypedCode({ requestId, code }, now) };
+  };
+  try {
+    const now = Date.UTC(2026, 10, 10, 12);
+    // A link code: the person types it again, leaves for GitHub and comes back with it still typed.
+    assert.deepEqual(arrive('https://forge.example/-/device?code=QK7PM2XDHT', now), {
+      code: 'QK7PM-2XDHT',
+      typed: '',
+    });
+    let back = linkCode.githubReturn(
+      { code: 'QK7PM-2XDHT', typed: 'QK7PM-2XDHT', fromLink: true, requestId: '' },
+      now,
+    );
+    assert.equal(back, 'https://forge.example/-/device');
+    assert.deepEqual(arrive(back, now + 60_000), { code: 'QK7PM-2XDHT', typed: 'QK7PM-2XDHT' });
+    linkCode.forgetLinkCode();
+    // A request link (remembered device): the request id comes back in the address and the typed code from this tab.
+    back = linkCode.githubReturn(
+      { code: '', typed: 'AB3CD-EF4GH', fromLink: false, requestId: 'req-1' },
+      now,
+    );
+    assert.equal(back, 'https://forge.example/-/device?request=req-1');
+    assert.deepEqual(
+      arrive('https://forge.example/-/device?request=req-2', now + 60_000),
+      { code: '', typed: '' },
+      'another request never inherits it',
+    );
+    assert.equal(kept.size, 0, 'a typed code for another request is forgotten');
+    back = linkCode.githubReturn(
+      { code: '', typed: 'AB3CD-EF4GH', fromLink: false, requestId: 'req-1' },
+      now,
+    );
+    assert.deepEqual(arrive(back, now + 60_000), { code: '', typed: 'AB3CD-EF4GH' });
+    linkCode.forgetLinkCode();
+    // A code typed into the first field comes back like a link code, already typed.
+    back = linkCode.githubReturn({ code: 'QK7PM-2XDHT', typed: '', fromLink: false, requestId: '' }, now);
+    assert.deepEqual(arrive(back, now + 60_000), { code: 'QK7PM-2XDHT', typed: 'QK7PM-2XDHT' });
+    assert.deepEqual(
+      arrive(back, now + 600_000),
+      { code: '', typed: '' },
+      "never kept past a code's 10 minutes",
+    );
+    assert.equal(kept.size, 0, 'an expired typed code is removed, not left in the tab');
+    linkCode.githubReturn({ code: 'QK7PM-2XDHT', typed: '', fromLink: false, requestId: '' }, now);
+    linkCode.forgetLinkCode();
+    assert.equal(kept.size, 0, 'an answer forgets both');
+  } finally {
+    for (const [name, descriptor] of Object.entries(saved))
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else delete globalThis[name];
+  }
+  const review = github =>
+    renderNew(
+      {
+        kind: 'review',
+        request: pending({ needsConfirmation: true, ...(github === undefined ? {} : { github }) }),
+      },
+      { confirmPasskey() {}, confirmGithub() {} },
+    );
+  assert.doesNotMatch(review(false), /Check with GitHub/);
+  assert.match(review(false), /Check with passkey/);
+  assert.match(review(true), /Check with GitHub/);
+  assert.match(review(undefined), /Check with GitHub/, 'an older server without the field keeps the button');
+});

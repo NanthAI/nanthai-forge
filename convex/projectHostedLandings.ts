@@ -23,6 +23,7 @@ import { landingOrderEvidence } from './projectHostedLandingOrder';
 import { nextCreationCursor, readCreationCursor } from './creationTimeCursor';
 import { landingAcceptedBySchema, receiptAcceptedBy } from '../src/landing-accepted-by';
 import { authorshipLabel } from './projectAuthorshipLabel';
+import { readAuthorship } from '../src/work-actor-types';
 import { landingMessageForReader, landingMessageText } from './projectHostedLandingMessageBody';
 import {
   LANDINGS_ATTEMPTS,
@@ -248,6 +249,8 @@ async function evidence(
         : receipt.actor
           ? receiptAcceptedBy(receipt)
           : null,
+      // Who built it: an agent run or a person (df06081d), from the receipt's own authorship stamp.
+      builtBy: readAuthorship({ ...receipt, actor: builder }).kind ?? null,
       // The agent run and its declared client (harness, model) that submitted it (81d12a32).
       agentRun: receipt.agentRun ?? null,
       agentClient: receipt.agentClient ?? null,
@@ -369,6 +372,8 @@ export const read = query({
     receiptId: v.optional(v.string()),
     message: v.optional(v.literal(true)),
     submissionId: v.optional(v.string()),
+    /** A window's landings built by an agent run, or by a person (df06081d); a page still examines `limit` receipts. */
+    kind: v.optional(v.union(v.literal('agent'), v.literal('person'))),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -381,6 +386,7 @@ export const read = query({
           input.from === undefined &&
             input.to === undefined &&
             input.cursor === undefined &&
+            input.kind === undefined &&
             !(
               input.submissionId !== undefined &&
               (input.receiptId !== undefined || input.message !== undefined)
@@ -440,18 +446,25 @@ export const read = query({
       for (const [index, receipt] of receipts.entries()) {
         if (
           index >= limit ||
-          (rows.length && (read >= LANDINGS_READ_BYTES || output >= LANDINGS_OUTPUT_BYTES))
+          // After any scanned receipt (a filter that matches nothing still stops at the read budget).
+          (index > 0 && (read >= LANDINGS_READ_BYTES || output >= LANDINGS_OUTPUT_BYTES))
         ) {
           next = nextCreationCursor(fetched, skip + index);
           break;
         }
-        const found = await evidence(
-          ctx,
-          input.projectId,
-          JSON.parse(receipt.value) as HostedAcceptance,
-          receipt.sequence,
+        const parsed = JSON.parse(receipt.value) as HostedAcceptance;
+        // A stamped receipt is filtered before its evidence reads, so a skipped one costs only its own row. An
+        // older receipt that names only its approving person needs its first attempt to say who built it.
+        const stamped = Boolean(
+          parsed.authorship || parsed.agentRun || parsed.agentClient || parsed.actor?.kind === 'agent',
         );
+        if (input.kind && stamped && readAuthorship(parsed).kind !== input.kind) {
+          read += receipt.value.length;
+          continue;
+        }
+        const found = await evidence(ctx, input.projectId, parsed, receipt.sequence);
         read += receipt.value.length + found.bytes;
+        if (input.kind && found.row.builtBy !== input.kind) continue;
         output += JSON.stringify(found.row).length;
         rows.push(found.row);
       }

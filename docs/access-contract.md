@@ -173,3 +173,31 @@ key and code of rows marked removed. Replaying a page safely skips rows already
 cleared. If a reply is lost, record the cleared total as incomplete because the
 replay counts only new clears. The function is internal, runs only on Forge dev,
 and schedules no work.
+
+## Folder grants
+
+A device for agent work can be limited to folders of one project. In the
+browser, choose write access, one project and **Only some folders**, then name
+1–20 folders (ending in `/`) or files. Every changed path a save page names
+must be inside them; otherwise the save stops with `AUTH_SCOPE_DENIED` and
+nothing is written. A device with a folder grant cannot start a revert, since a
+revert's files are known only after it runs (`AUTH_SCOPE_DENIED`); revert from
+the browser or an unrestricted device. Reads are not narrowed by folder.
+Not yet checked: a landing's own files. Changes already in a Lane from
+another writer, or saved before its folders narrowed, can still land from it.
+Queued saves and landings also finish under the authority they were submitted
+with (Item df06081d keeps this line open).
+
+A folder grant ends 7 days after its last write, and 30 days after it was given,
+whichever comes first. Any write-level command from the device (a save, sync,
+land or Lane heartbeat) renews it, at most once per grant per hour, inside that
+command's own transaction; queries never write. An ended grant leaves the device
+able only to read, like a read-only device. The end is computed when
+a write is checked, from the credential row the access check already reads: no
+extra read, cron, sweep or idle call. An ended grant refuses writes with
+`AUTH_EXPIRED`; `nforge login` and approval in the browser, or saving the
+device's settings, give it again for another 30 days. `nforge auth status`
+shows the folders and the end. Revoke at any time: remove the device or sign it
+out, set it to read only, or save its settings without folders. A device that
+writes anywhere in its project keeps the ordinary device lifetime above. A
+grant minted per agent run belongs to the Send-to-agent credential work.

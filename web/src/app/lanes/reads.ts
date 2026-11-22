@@ -71,8 +71,13 @@ export type LandedPage = {
   next: number | null;
   scanned: number;
 };
-/** History's filters, kept in the address: `by` a handle or handle/run, `item` an Item id. */
-export type HistoryFilter = { unread: boolean; by: string | null; item: string | null };
+/** History's filters, kept in the address: `by` a handle or handle/run, `item` an Item id, `kind` agents or people. */
+export type HistoryFilter = {
+  unread: boolean;
+  by: string | null;
+  item: string | null;
+  kind: 'agent' | 'person' | null;
+};
 
 /** History: the first page live (it re-runs when a landing is accepted or the reader marks), then earlier pages read
  * once each on "Show earlier". Changing a filter starts again from the first page. */
@@ -83,6 +88,7 @@ export function useHistoryPages(projectId: Id<'hostedProjects'>, filter: History
     view: filter.unread ? ('unread' as const) : ('recent' as const),
     ...(filter.by ? { by: filter.by } : {}),
     ...(filter.item ? { item: filter.item } : {}),
+    ...(filter.kind ? { kind: filter.kind } : {}),
   };
   const key = JSON.stringify(args);
   const read = useSafeQuery(api.projectLandingReads.list, args);

@@ -22,6 +22,8 @@ export const hostedLandingsSchema = z
       /** One canonical submission with its request message and cohort hold. */
       submissionId: z.uuid().optional(),
       limit: z.number().int().min(1).max(LANDINGS_MAX_LIMIT).optional(),
+      /** Only landings an agent run built, or only those a person built; `builtBy` on each row says which. */
+      kind: z.enum(['agent', 'person']).optional(),
       /** `nextCursor` of the previous page of the same window. */
       cursor: z.string().min(1).max(64).optional(),
     },
@@ -37,9 +39,10 @@ export const hostedLandingsSchema = z
         ? !input.from &&
           !input.to &&
           !input.cursor &&
+          !input.kind &&
           !(input.submissionId && (input.receiptId || input.message))
         : !input.message && input.from && input.to,
-    'Pass from and to for a window, receiptId with optional message:true, or submissionId alone.',
+    'Pass from and to for a window (optional kind: agent or person), receiptId with optional message:true, or submissionId alone.',
   );
 /** One bounded page of accepted landings (Issue b78ca196), read from rows already stored. */
 export async function landingsHostedSource(transport: HostedAgentTransport, input: unknown) {

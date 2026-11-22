@@ -14,6 +14,7 @@ import {
   deviceSignInExpiry,
 } from './deviceFields';
 import { accessibleProject } from './projectAuthority';
+import { grantStamp } from './accessPolicy';
 import { freshDeviceApproval } from './authDeviceFresh';
 import { deviceApproval } from './deviceApproval';
 import { deviceOperation, finishDeviceOperation } from './deviceOperation';
@@ -211,6 +212,8 @@ export const decide = internalMutation({
           source: row.scope === 'coordination' ? ('coordination' as const) : ('write' as const),
           projects: { kind: 'project' as const, projectId: proposal.projectId },
         };
+      // A browser approval gives a folder grant (again): its 7-day/30-day clock starts now.
+      const stamp = grantStamp(settings);
       if (settings.projects.kind === 'project' && !device.current) {
         const id = ctx.db.normalizeId('hostedProjects', settings.projects.projectId);
         invariant(id, 'PROJECT_UNAVAILABLE', 'Select an available project.');
@@ -241,10 +244,10 @@ export const decide = internalMutation({
       await ctx.db.patch(accountId, {
         deviceNotice: { at: Date.now(), credentialId, signInId: args.operationId },
       });
-      if (device.current) await ctx.db.patch(device.current._id, value);
+      if (device.current) await ctx.db.patch(device.current._id, { ...value, ...stamp });
       else if ('removedId' in device && device.removedId)
-        await ctx.db.patch(device.removedId, { ...value, removed: undefined });
-      else await ctx.db.insert('cliCredentials', value);
+        await ctx.db.patch(device.removedId, { ...value, ...stamp, removed: undefined });
+      else await ctx.db.insert('cliCredentials', { ...value, ...(stamp.grant ? stamp : {}) });
     }
     await ctx.db.patch(row._id, {
       ...(issuedAt !== undefined ? { issuedAt } : {}),

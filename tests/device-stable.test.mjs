@@ -70,12 +70,14 @@ function fixture(t) {
   f.insert('users', { accountKey: 'owner', emailVerified: false });
   f.insert('users', { accountKey: 'other', emailVerified: false });
   let actor = 'owner',
+    authUser,
     freshUntil = Date.now() + 600000;
   const dispatch = (ref, args) => {
     const [name, method] = getFunctionName(ref).split(':');
     return f.call(`${name}:${method}`, modules[name][method], args, {
       subject: actor,
       forgeAuthDeviceVerifiedUntil: freshUntil,
+      ...(authUser ? { forgeAuthUser: authUser } : {}),
     });
   };
   const ctx = {
@@ -123,6 +125,9 @@ function fixture(t) {
     },
     actor(value) {
       actor = value;
+    },
+    authUser(value) {
+      authUser = value;
     },
   };
 }
@@ -892,4 +897,92 @@ test('SI-01 review: a remembered browser approval near month twelve caps its sto
   assert.equal(f.tables.cliCredentials.get(row._id).expiresAt, end);
   assert.equal(signed.expiresAt, end);
   assert.equal(JSON.parse(Buffer.from(signed.token.split('.')[1], 'base64url')).exp, end / 1000);
+});
+
+test('df06081d: approving a folder grant starts its clock, re-approval in the browser gives it again, and settings without folders end it', async t => {
+  storageClock(t);
+  const now = Date.UTC(2026, 10, 10, 12);
+  const f = fixture(t),
+    device = key(),
+    { flow } = await f.start(device);
+  const settings = {
+    source: 'write',
+    projects: { kind: 'project', projectId: f.projectId },
+    paths: ['docs/'],
+  };
+  await assert.rejects(
+    f.approve(flow, { name: 'Agent', settings: { ...settings, paths: ['../outside'] } }),
+    code('BAD_ARGUMENT'),
+  );
+  await f.approve(flow, { name: 'Agent', settings });
+  const signed = await f.poll(flow);
+  const row = () => [...f.tables.cliCredentials.values()][0];
+  assert.equal(row().grant.at, row().grant.usedAt);
+  const user = { subject: 'owner', forgeCredential: signed.credentialId, forgeSignIn: signed.signInId };
+  const status = await f.call('status', credentials.status, {}, user);
+  assert.equal(
+    status.device.grantEndsAt,
+    row().grant.usedAt + 7 * 86400000,
+    'nforge auth status shows the end',
+  );
+  assert.deepEqual(status.device.settings.paths, ['docs/']);
+  // Ended: 31 days after it was given. A write is refused; re-login approved in the browser gives it again.
+  f.patch('cliCredentials', row()._id, {
+    grant: { at: now - 31 * 86400000, usedAt: now - 3600000 },
+  });
+  await assert.rejects(
+    f.call('ended write', { _handler: ctx => authority.activeProject(ctx, f.projectId, 'owner') }, {}, user),
+    code('AUTH_EXPIRED'),
+  );
+  const next = await f.start(device);
+  await f.approve(next.flow);
+  const again = await f.poll(next.flow);
+  assert.equal(row().grant.at, now, 'browser re-approval gives the grant again');
+  await f.call(
+    'renewed write',
+    { _handler: ctx => authority.activeProject(ctx, f.projectId, 'owner') },
+    {},
+    { subject: 'owner', forgeCredential: again.credentialId, forgeSignIn: again.signInId },
+  );
+  await assert.rejects(
+    f.call('bad folders', credentials.rename, {
+      credentialId: again.credentialId,
+      name: 'Agent',
+      settings: { ...settings, paths: [] },
+      operationId: randomUUID(),
+    }),
+    code('BAD_ARGUMENT'),
+  );
+  await f.call('whole project', credentials.rename, {
+    credentialId: again.credentialId,
+    name: 'Agent',
+    settings: { source: 'write', projects: { kind: 'project', projectId: f.projectId } },
+    operationId: randomUUID(),
+  });
+  assert.equal(row().grant, undefined);
+  assert.equal(row().settings.paths, undefined);
+});
+
+test('df06081d: a stale browser is offered the GitHub check only when its account has a linked GitHub identity', async t => {
+  const f = fixture(t),
+    device = key(),
+    { flow } = await f.start(device);
+  f.fresh(false);
+  const owner = [...f.tables.users.entries()].find(([, row]) => row.accountKey === 'owner')[0];
+  f.authUser(owner);
+  assert.equal(
+    (await f.inspect({ code: flow.user_code })).github,
+    false,
+    'no linked GitHub: no GitHub button',
+  );
+  f.patch('users', owner, { githubId: '424242' });
+  assert.equal((await f.inspect({ code: flow.user_code })).github, true);
+  f.patch('users', owner, { githubConflict: true });
+  assert.equal((await f.inspect({ code: flow.user_code })).github, false, 'a conflicted link is not offered');
+  f.fresh(true);
+  assert.equal(
+    (await f.inspect({ code: flow.user_code })).github,
+    undefined,
+    'a fresh browser needs no check and reads nothing more',
+  );
 });

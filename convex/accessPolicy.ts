@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from '../src/errors';
+import { safeRelative } from '../src/safe-relative';
 import type { Doc } from './_generated/dataModel';
 /** Owner-approved access policies. Each rule has one setting; consumers call the policy. */
 export const accessPolicy = {
@@ -23,6 +24,59 @@ export const deviceProjectRefusal =
   'This device is approved for its selected project only. Change its settings in your Forge browser.';
 export const deviceAllowsSourceWrite = (device?: Pick<Doc<'cliCredentials'>, 'settings'> | null) =>
   device?.settings?.source !== 'read';
+
+/** Scoped grants (df06081d, owner 2026-11-22): one project and a folder/path set; the grant ends 7 days
+ * after its last write or 30 days after it was given, whichever is first. Computed here, at check time. */
+export const GRANT_IDLE_MS = 7 * 86400000;
+export const GRANT_MAX_MS = 30 * 86400000;
+/** Renewal on use writes at most once per grant per hour, never on every request. */
+export const GRANT_RENEW_MS = 3600000;
+export const GRANT_PATHS = 20;
+const GRANT_PATH_CHARS = 200;
+type Grant = { at: number; usedAt: number };
+type Granted = Pick<Doc<'cliCredentials'>, 'settings' | 'grant'>;
+export const grantEndsAt = (grant: Grant) => Math.min(grant.usedAt + GRANT_IDLE_MS, grant.at + GRANT_MAX_MS);
+/** A browser approval or settings change gives the grant again; settings without paths have no grant clock. */
+export function grantStamp(settings: Doc<'cliCredentials'>['settings'], now = Date.now()) {
+  const paths = settings?.paths;
+  if (paths === undefined) return { grant: undefined };
+  invariant(
+    settings!.source === 'write' &&
+      settings!.projects.kind === 'project' &&
+      paths.length > 0 &&
+      paths.length <= GRANT_PATHS &&
+      new Set(paths).size === paths.length &&
+      paths.every(
+        path =>
+          path.length <= GRANT_PATH_CHARS && safeRelative(path.endsWith('/') ? path.slice(0, -1) : path),
+      ),
+    'BAD_ARGUMENT',
+    `A folder grant writes to one selected project: 1 to ${GRANT_PATHS} relative folders (ending in /) or files.`,
+  );
+  return { grant: { at: now, usedAt: now } };
+}
+export const grantAllows = (paths: readonly string[], path: string) =>
+  paths.some(entry => entry === path || (entry.endsWith('/') && path.startsWith(entry)));
+/** A write under a scoped grant: refused once it ended. Returns the renewal patch when one is due. */
+export function liveGrant(row: Granted | null | undefined, now = Date.now()) {
+  if (!row?.settings?.paths) return null;
+  invariant(
+    row.grant && now < grantEndsAt(row.grant),
+    'AUTH_EXPIRED',
+    'This device’s folder grant ended (7 days without a write, or 30 days after it was given). Run nforge login and approve it in your Forge browser to grant it again; local work is kept.',
+  );
+  return now - row.grant.usedAt >= GRANT_RENEW_MS ? { grant: { ...row.grant, usedAt: now } } : null;
+}
+export function requireGrantPaths(row: Granted | null | undefined, paths: readonly string[]) {
+  const scope = row?.settings?.paths;
+  if (!scope) return;
+  const outside = paths.find(path => !grantAllows(scope, path));
+  invariant(
+    outside === undefined,
+    'AUTH_SCOPE_DENIED',
+    `This device may write only to ${scope.join(', ')}; ${outside} is outside its folder grant. Nothing was saved; local work is kept.`,
+  );
+}
 
 export function requireAccountWriteAccess(device?: Pick<Doc<'cliCredentials'>, 'settings'> | null) {
   const settings = device?.settings;

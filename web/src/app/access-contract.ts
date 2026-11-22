@@ -4,6 +4,9 @@
 export type DeviceSettings = {
   source: 'write' | 'read' | 'coordination';
   projects: { kind: 'all' } | { kind: 'project'; projectId: string };
+  /** Folder grant: writes only inside these folders (`dir/`) or files of the selected project. It ends
+   * 7 days after its last write and at most 30 days after it was given; approving or saving gives it again. */
+  paths?: string[];
 };
 export type DeviceIdentity = {
   id: string;

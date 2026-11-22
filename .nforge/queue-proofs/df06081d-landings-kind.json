@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandings.ts": "ad2e4e6b1651ef9d8a6b137263aaaea36fbcfe94b48bac39d552d9ec83fa6824"
+  },
+  "replay": {
+    "incident": "65e2d743",
+    "test": "landings reads short order waits and the client hold from existing receipt and request rows",
+    "receipt": "0310bddd-bc7b-4a8e-b54b-cbcbfb2bdddd"
+  },
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A0ff8cda0-8965-48f3-81a6-c3f23e6fc9e8",
+  "authorModel": "claude-opus-5-5",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A79f4f249-2f8b-4dfb-883c-8b5740c5c6dd%3Adelegate-task%3Af9ae13d5-929a-4d9b-8937-eb714fdb42eb",
+    "receipt": "80132c2d-30f5-4c85-930c-7ef17d325fc8"
+  }
+}

@@ -195,6 +195,8 @@ const approvalView = v.union(
   v.object({
     name: v.string(),
     needsConfirmation: v.optional(v.boolean()),
+    /** With needsConfirmation: whether this account has a linked GitHub identity to check with. */
+    github: v.optional(v.boolean()),
     scope: deviceScope,
     expiresAt: v.number(),
     state: v.string(),

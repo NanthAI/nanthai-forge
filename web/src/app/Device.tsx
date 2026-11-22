@@ -14,7 +14,7 @@ import { useAction, useMutation } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import type { DeviceSettings as Settings } from './access-contract';
 import { codeComplete, codeProblem } from '../device/code';
-import { forgetLinkCode, takeLinkCode } from '../device/link-code';
+import { forgetLinkCode, githubReturn, takeLinkCode, takeTypedCode } from '../device/link-code';
 import { DeviceView, type DevicePhase } from './DeviceView';
 export { DeviceView } from './DeviceView';
 export type { DeviceRequest, DevicePhase } from './DeviceView';
@@ -40,7 +40,8 @@ export function Device({ viewerHandle }: { viewerHandle: string | undefined }) {
   const checked = useRef(false);
   // A code that arrived in a link must be typed again before Approve unlocks: a link alone never approves a device.
   const fromLink = useRef(codeComplete(code));
-  const [typed, setTyped] = useState('');
+  // A GitHub check returns here: the code typed before it comes back typed.
+  const [typed, setTyped] = useState(() => takeTypedCode({ requestId, code }));
   const fail = (error: unknown, back: DevicePhase) => {
     const known = codeProblem(errorCode(error));
     if (known) {
@@ -147,9 +148,9 @@ export function Device({ viewerHandle }: { viewerHandle: string | undefined }) {
         })()
       }
       confirmGithub={() =>
-        void github({ redirectTo: new URL('/-/device', location.origin).href }).catch(error =>
-          fail(error, phase),
-        )
+        void github({
+          redirectTo: githubReturn({ code, typed, fromLink: fromLink.current, requestId }),
+        }).catch(error => fail(error, phase))
       }
       phase={phase}
       name={name}

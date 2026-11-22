@@ -77,7 +77,11 @@ export async function authStatus(args: string[]): Promise<unknown> {
     settings: {
       source: 'write' | 'read' | 'coordination';
       projects: { kind: 'all' } | { kind: 'project'; projectId: string };
+      /** Folder grant: writes only inside these folders or files. */
+      paths?: string[];
     };
+    /** When the folder grant ends (7 days after its last write, at most 30 days after it was given). */
+    grantEndsAt?: number;
   };
   let device: Device | undefined;
   let identity: { handle: string | null; credentialId: string | null; pick?: true };
@@ -112,7 +116,12 @@ export async function authStatus(args: string[]): Promise<unknown> {
             source: reported.settings.source,
             projects:
               projects.kind === 'all' ? { kind: 'all' } : { kind: 'project', projectId: projects.projectId },
+            ...(Array.isArray(reported.settings.paths) &&
+            reported.settings.paths.every(path => typeof path === 'string')
+              ? { paths: reported.settings.paths }
+              : {}),
           },
+          ...(Number.isFinite(reported.grantEndsAt) ? { grantEndsAt: reported.grantEndsAt! } : {}),
         };
     }
     // Servers before the handle-only identity rule return `subject`; it is never printed.

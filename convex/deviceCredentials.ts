@@ -5,7 +5,7 @@ import { query, coordinationQuery, isDeviceIdentity, accountMutation } from './c
 // Reviewed exception: self-revocation remains retryable after revocation and only removes
 // authority. Every other export uses the guarded cliServer builders.
 import { mutation as revocationMutation } from './server';
-import { keepsDeviceSettings, maySeeDeviceName } from './accessPolicy';
+import { grantEndsAt, grantStamp, keepsDeviceSettings, maySeeDeviceName } from './accessPolicy';
 import { deviceOperation, finishDeviceOperation } from './deviceOperation';
 import { currentCredential, deviceSettings, deviceScope, deviceApprovalExpired } from './deviceFields';
 import { accessibleProject, memberProject } from './projectAuthority';
@@ -94,7 +94,14 @@ export const revoke = revocationMutation({
       await ctx.db.patch(row._id, {
         revoked: true,
         ...(!keep
-          ? { removed: true, name: '', settings: undefined, deviceKey: undefined, deviceCode: undefined }
+          ? {
+              removed: true,
+              name: '',
+              settings: undefined,
+              grant: undefined,
+              deviceKey: undefined,
+              deviceCode: undefined,
+            }
           : {}),
       });
     if (receipt) await finishDeviceOperation(ctx, receipt, args.operationId, credentialId, { ended: action });
@@ -142,6 +149,8 @@ export const rename = accountMutation('same')({
         })
       : null;
     if (receipt?.result) return null;
+    // Saving settings in the browser gives a folder grant again; settings without paths end it.
+    const stamp = args.settings ? grantStamp(args.settings) : {};
     if (args.settings?.projects.kind === 'project') {
       const id = ctx.db.normalizeId('hostedProjects', args.settings.projects.projectId);
       invariant(id, 'PROJECT_UNAVAILABLE', 'Select an available project.');
@@ -153,6 +162,7 @@ export const rename = accountMutation('same')({
         ...(args.settings
           ? {
               settings: args.settings,
+              ...stamp,
               scope: args.settings.source === 'coordination' ? ('coordination' as const) : ('cli' as const),
             }
           : {}),
@@ -178,6 +188,8 @@ export const status = coordinationQuery({
         approvedAt: v.number(),
         expiresAt: v.number(),
         settings: deviceSettings,
+        /** A folder grant's end: 7 days after its last write or 30 days after it was given. */
+        grantEndsAt: v.optional(v.number()),
       }),
     ),
   }),
@@ -195,6 +207,7 @@ export const status = coordinationQuery({
               approvedAt: device.deviceApprovedAt,
               expiresAt: device.expiresAt,
               settings: device.settings,
+              ...(device.settings.paths && device.grant ? { grantEndsAt: grantEndsAt(device.grant) } : {}),
             },
           }
         : {}),

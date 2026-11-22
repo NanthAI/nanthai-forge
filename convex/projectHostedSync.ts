@@ -7,7 +7,7 @@ import { v } from 'convex/values';
 import { requireLaneHolder, laneSession } from './projectLaneHolder';
 import { receiptMutation, query, type QueryCtx, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
-import { activeProject } from './projectAuthority';
+import { activeProject, refuseScopedRevert } from './projectAuthority';
 import { beginHostedOperation } from './projectHostedOperations';
 import { candidateOwnerInputs } from './projectHostedProvenance';
 import { requireLaneSourceAuthority } from './projectLaneAuthority';
@@ -145,6 +145,7 @@ export async function prepareHostedSync(
     return { record, ownerInputs: candidateOwnerInputs(project, row, record, request.authorityEpoch) };
   };
   if (request.kind === 'revert') {
+    await refuseScopedRevert(ctx);
     const selected = await prepareHostedRevert(ctx, auth, request, prepared.operation.firstAttempt);
     intentId = selected.intentId;
     base = selected.base;

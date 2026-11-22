@@ -118,7 +118,7 @@ async function goalOf(ctx: QueryCtx, projectId: Id<'hostedProjects'>, intentId: 
 }
 
 /** `recent` (History): the newest landings whatever their read state, each with `read`. `unread`: only those this
- * account has not read. `before` pages below a landing sequence; `by` and `item` filter (see HISTORY_SCAN). */
+ * account has not read. `before` pages below a landing sequence; `by`, `item` and `kind` filter (see HISTORY_SCAN). */
 export const list = query({
   args: {
     projectId: v.id('hostedProjects'),
@@ -126,9 +126,11 @@ export const list = query({
     before: v.optional(v.number()),
     by: v.optional(v.string()),
     item: v.optional(v.string()),
+    /** Only landings built by an agent run, or only those a person built (df06081d). */
+    kind: v.optional(v.union(v.literal('agent'), v.literal('person'))),
   },
   returns: v.string(),
-  handler: async (ctx, { projectId, view = 'unread', before, by, item }) => {
+  handler: async (ctx, { projectId, view = 'unread', before, by, item, kind }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read what landed.');
@@ -143,7 +145,7 @@ export const list = query({
       const through = state?.through ?? -1;
       const marked = new Set(state?.read ?? []);
       const isRead = (sequence: number) => sequence <= through || marked.has(sequence);
-      const filtered = Boolean(by || item);
+      const filtered = Boolean(by || item || kind);
       const extra = view === 'unread' ? Math.min(marked.size, HISTORY_PAGE) : 0;
       const budget = filtered ? HISTORY_SCAN : HISTORY_PAGE + 1 + extra;
       const fetched = await ctx.db
@@ -165,6 +167,7 @@ export const list = query({
         const receipt = JSON.parse(row.value) as Receipt;
         const who = whoOf(receipt);
         if (by && !byMatches(by, who)) continue;
+        if (kind && (who.agent ? 'agent' : 'person') !== kind) continue;
         const intentId = await intentOf(ctx, projectId, row);
         if (chain && !(intentId && chain.has(intentId))) continue;
         const lane = intentId

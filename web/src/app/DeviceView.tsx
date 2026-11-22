@@ -10,6 +10,8 @@ import { hrefFor } from './paths';
 export type DeviceRequest = {
   name: string;
   needsConfirmation?: boolean;
+  /** False when the account has no linked GitHub identity: the GitHub check is not offered. */
+  github?: boolean;
   scope: 'cli' | 'coordination';
   expiresAt: number;
   state: string;
@@ -170,9 +172,11 @@ export function DeviceView({
                     <Key onClick={confirmPasskey} disabled={busy}>
                       Check with passkey
                     </Key>
-                    <Key onClick={confirmGithub} disabled={busy}>
-                      Check with GitHub
-                    </Key>
+                    {request.github === false ? null : (
+                      <Key onClick={confirmGithub} disabled={busy}>
+                        Check with GitHub
+                      </Key>
+                    )}
                   </div>
                 ) : null}
                 {error}

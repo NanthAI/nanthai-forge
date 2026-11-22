@@ -842,6 +842,44 @@ test("History filters by person, by agent run and by Item, including the Item's 
   await assert.rejects(f.list('owner', 'recent', { by: '' }), /BAD_ARGUMENT|handle/);
 });
 
+test('df06081d: History shows agent or person on every landing and filters to agents or to people', async () => {
+  const f = readsFixture();
+  const agent = run => ({
+    actor: { id: 'mara', kind: 'agent' },
+    agentRun: run,
+    agentClient: 'claude-code:claude-opus-5-5',
+  });
+  f.accept(1, 'By hand', { who: { actor: { id: 'jon', kind: 'person' } } });
+  f.accept(2, 'By an agent', { who: agent('amber-fox') });
+  // A person approved an agent's protected change: the receipt names the approver, the stamp the builder.
+  f.accept(3, 'Approved agent work', {
+    who: { actor: { id: 'mara', kind: 'person' }, authorship: { kind: 'agent', actor: 'mara' } },
+  });
+  const kind = async value =>
+    (await f.list('owner', 'recent', value ? { kind: value } : {})).rows.map(row => [
+      row.sequence,
+      row.agent,
+    ]);
+  assert.deepEqual(await kind(), [
+    [3, true],
+    [2, true],
+    [1, false],
+  ]);
+  assert.deepEqual(await kind('agent'), [
+    [3, true],
+    [2, true],
+  ]);
+  assert.deepEqual(await kind('person'), [[1, false]]);
+  assert.equal(
+    model.historyEmpty(
+      { rows: [], next: null, newest: null, started: false },
+      { unread: false, by: null, item: null, kind: 'agent' },
+    ),
+    'no-match',
+  );
+  await assert.rejects(f.list('owner', 'recent', { kind: 'robot' }), /BAD_ARGUMENT|kind|Validator/);
+});
+
 test('a filtered page looks through a bounded number of receipts and resumes below them', async () => {
   const f = readsFixture();
   const total = reads.HISTORY_SCAN + 10;
@@ -982,8 +1020,16 @@ test('the old To read address opens History, and History keeps its filters in th
     unread: true,
     by: 'mara/amber-fox',
     item: 'i-1',
+    kind: null,
   });
-  assert.deepEqual(historyFilter(new URLSearchParams('')), { unread: false, by: null, item: null });
+  assert.deepEqual(historyFilter(new URLSearchParams('')), {
+    unread: false,
+    by: null,
+    item: null,
+    kind: null,
+  });
+  assert.equal(historyFilter(new URLSearchParams('kind=agent')).kind, 'agent');
+  assert.equal(historyFilter(new URLSearchParams('kind=robot')).kind, null);
 });
 
 test("a Lanes layout saved while it still had Landed today or Overlaps gives way to today's regions (f787005c)", () => {

@@ -10,6 +10,8 @@ export const deviceSettings = v.object({
     // This account-owned setting retains an opaque reference; it is not project-owned data.
     v.object({ kind: v.literal('project'), projectId: v.string() }),
   ),
+  /** Scoped grant (df06081d): writes only to these folders (`dir/`) or files of the selected project. */
+  paths: v.optional(v.array(v.string())),
 });
 export const deviceProof = v.object({ id: v.string(), key: v.string(), at: v.number(), proof: v.string() });
 export const credentialFields = {
@@ -29,6 +31,8 @@ export const credentialFields = {
   removed: v.optional(v.boolean()),
   renewal: v.optional(v.object({ operationId: v.string(), requestHash: v.string(), issuedAt: v.number() })),
   settings: v.optional(deviceSettings),
+  /** Clock of a scoped grant (settings.paths): granted at, last renewed by a write. Expiry is computed at check time. */
+  grant: v.optional(v.object({ at: v.number(), usedAt: v.number() })),
 };
 export const credentialDocument = v.object({
   _id: v.id('cliCredentials'),

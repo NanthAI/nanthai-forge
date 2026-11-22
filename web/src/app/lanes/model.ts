@@ -732,11 +732,11 @@ export function historyEmpty(
   page:
     | { rows: readonly unknown[]; next: number | null; newest: number | null; started: boolean }
     | undefined,
-  filter: { unread: boolean; by: string | null; item: string | null },
+  filter: { unread: boolean; by: string | null; item: string | null; kind?: 'agent' | 'person' | null },
 ): 'nothing-landed' | 'all-read' | 'no-match' | 'look-further' | null {
   if (!page || page.rows.length) return null;
   if (page.next !== null) return 'look-further';
-  if (filter.by || filter.item) return 'no-match';
+  if (filter.by || filter.item || filter.kind) return 'no-match';
   // The unread view reads only above the read line: with a line set, an empty answer means everything was read.
   if (filter.unread) return page.started ? 'all-read' : 'nothing-landed';
   return 'nothing-landed';

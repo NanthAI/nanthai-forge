@@ -1,11 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { internalQuery } from './server';
+import type { QueryCtx } from './_generated/server';
+import type { UserIdentity } from 'convex/server';
 import { freshDeviceApproval } from './authDeviceFresh';
 import { deviceApprovalExpired } from './deviceFields';
 import { deviceApproval } from './deviceApproval';
 import { invariant } from '../src/errors';
 import { digest } from '../src/state/hash';
+/** The signed-in account has a linked, unconflicted GitHub identity (one indexed read). */
+export async function linkedGithub(ctx: QueryCtx, identity: UserIdentity | null) {
+  const id =
+    typeof identity?.forgeAuthUser === 'string' ? ctx.db.normalizeId('users', identity.forgeAuthUser) : null;
+  const user = id && (await ctx.db.get(id));
+  return Boolean(user?.githubId && !user.githubConflict);
+}
 /** One account-authorized projection replaces the old code lookup, without another RPC. */
 export const inspect = internalQuery({
   args: { userHash: v.optional(v.string()), requestId: v.optional(v.string()), owner: v.string() },
@@ -37,12 +46,11 @@ export const inspect = internalQuery({
         state: 'removed',
       });
     const identity = await ctx.auth.getUserIdentity();
+    const needsConfirmation =
+      device?.enabled && (!current || deviceApprovalExpired(current)) && !freshDeviceApproval(identity ?? {});
     return JSON.stringify({
-      ...(device?.enabled &&
-      (!current || deviceApprovalExpired(current)) &&
-      !freshDeviceApproval(identity ?? {})
-        ? { needsConfirmation: true }
-        : {}),
+      // The GitHub check is offered only to an account with a linked GitHub identity (one read, only here).
+      ...(needsConfirmation ? { needsConfirmation: true, github: await linkedGithub(ctx, identity) } : {}),
       name: current?.name ?? row.name,
       scope: current?.scope ?? row.scope,
       expiresAt: row.expiresAt,

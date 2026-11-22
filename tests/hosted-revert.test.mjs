@@ -303,3 +303,31 @@ test('the revert note id is stable per revert and Lane, so a replay posts nothin
   assert.notEqual(revertNoticeId(a, b), revertNoticeId(b, a));
   assert.match(revertNoticeId(a, b), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/);
 });
+
+test('df06081d: a device with a folder grant cannot prepare or submit a revert through the public mutations', async t => {
+  const f = await revertFixture(t),
+    receipt = await f.landOriginal();
+  const device = { subject: 'owner', forgeCredential: 'grant-device', forgeSignIn: 'grant-sign-in' };
+  const at = Date.UTC(2026, 10, 10, 12);
+  f.insert('cliCredentials', {
+    credentialId: device.forgeCredential,
+    owner: 'owner',
+    name: 'Agent sandbox',
+    tokenHash: 'synthetic-hash',
+    issuedAt: at,
+    scope: 'cli',
+    expiresAt: Number.MAX_SAFE_INTEGER,
+    revoked: false,
+    settings: { source: 'write', projects: { kind: 'project', projectId: f.projectId }, paths: ['docs/'] },
+    grant: { at: Number.MAX_SAFE_INTEGER / 2, usedAt: Number.MAX_SAFE_INTEGER / 2 },
+  });
+  const r = f.revertRequest({ kind: 'receipt', receiptId: receipt.id });
+  await assert.rejects(f.prepareRevert(r, device), code('AUTH_SCOPE_DENIED'));
+  // Prepared by the person, then submitted from the folder-grant device: still refused.
+  await f.prepareRevert(r);
+  await assert.rejects(
+    f.revertCall('revertSubmit', syncJobs.submit, { operationId: r.operationId }, device),
+    code('AUTH_SCOPE_DENIED'),
+  );
+  await f.submitRevert(r);
+});

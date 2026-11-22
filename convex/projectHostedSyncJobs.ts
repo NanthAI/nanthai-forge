@@ -16,6 +16,7 @@ import { savePin } from '../src/hosted-save';
 import { blobStore } from './blobStore';
 import { presignGet, r2Config } from './r2';
 import { invariant } from '../src/errors';
+import { refuseScopedRevert } from './projectAuthority';
 import { readExactObject } from './projectR2ExactRead';
 import { report } from './errors';
 import { finishHostedOperation } from './projectHostedOperations';
@@ -54,6 +55,8 @@ export async function submitHostedSync(
     'Prepare the original sync before submitting.',
   );
   if (state.status === 'ready') {
+    // A revert prepared before the device got a folder grant still cannot start from it.
+    if (state.request.kind === 'revert') await refuseScopedRevert(ctx);
     const inputPin = savePin(hostedSyncInput(state, operation.firstAttempt.at));
     await saveObject(ctx, input.projectId, inputPin);
     const expected = operation.expected,

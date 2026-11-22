@@ -36,12 +36,14 @@ const modelOf = (row: Landed) =>
       : row.model;
 const titleOf = (row: Landed) => row.item?.title ?? row.goal ?? row.title ?? 'Untitled landing';
 
-/** The filters in the address (`?unread=1&by=…&item=…`), so a link, a reload and Back show the same view. */
+/** The filters in the address (`?unread=1&by=…&item=…&kind=agent`), so a link, a reload and Back show the same view. */
 export function historyFilter(search: URLSearchParams): HistoryFilter {
+  const kind = search.get('kind');
   return {
     unread: search.get('unread') === '1',
     by: search.get('by') || null,
     item: search.get('item') || null,
+    kind: kind === 'agent' || kind === 'person' ? kind : null,
   };
 }
 
@@ -71,6 +73,7 @@ export function History({ route, projectId, projectName }: LanesProps) {
     if (merged.unread) query.set('unread', '1');
     if (merged.by) query.set('by', merged.by);
     if (merged.item) query.set('item', merged.item);
+    if (merged.kind) query.set('kind', merged.kind);
     const text = query.toString();
     navigate(`${location.pathname}${text ? `?${text}` : ''}`);
   };
@@ -243,6 +246,26 @@ export function HistoryView(props: HistoryViewProps) {
                 </option>
               ))}
             </select>
+            <label className="sr" htmlFor="history-kind">
+              Agents or people
+            </label>
+            <select
+              className={filter.kind ? 'chip' : 'chip off'}
+              id="history-kind"
+              value={filter.kind ?? ''}
+              onChange={event =>
+                onFilter({
+                  kind:
+                    event.target.value === 'agent' || event.target.value === 'person'
+                      ? event.target.value
+                      : null,
+                })
+              }
+            >
+              <option value="">Agents and people</option>
+              <option value="agent">Agents</option>
+              <option value="person">People</option>
+            </select>
             <label className="sr" htmlFor="history-item">
               Item
             </label>
@@ -298,7 +321,10 @@ export function HistoryView(props: HistoryViewProps) {
             </div>
           ))}
           {empty ? (
-            <Empty kind={empty} onClear={() => onFilter({ by: null, item: null, unread: false })} />
+            <Empty
+              kind={empty}
+              onClear={() => onFilter({ by: null, item: null, kind: null, unread: false })}
+            />
           ) : null}
           {page && page.next !== null ? (
             <div className="pf">

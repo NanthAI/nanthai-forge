@@ -9,7 +9,7 @@ import { withoutAuthorship } from '../src/work-actor-types';
 import { sessionIdentity } from './projectSessionIdentity';
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
-import { activeProject } from './projectAuthority';
+import { activeProject, requireDeviceWritePaths } from './projectAuthority';
 import { beginHostedOperation } from './projectHostedOperations';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { saveRequestSchema, validateSavePage, savePin, saveInputSchema } from '../src/hosted-save';
@@ -269,6 +269,11 @@ export async function stageSavePage(
       input.index === state.stagedPages ? state.lastPath : null,
     ),
     pin = savePin(page);
+  // A scoped device grant (df06081d) writes only inside its folders: refused before any byte is bound.
+  await requireDeviceWritePaths(
+    ctx,
+    page.changes.map(change => change.path),
+  );
   const old = await ctx.db
     .query('projectHostedSavePages')
     .withIndex('by_project_and_actor_and_operation_and_index', q =>
