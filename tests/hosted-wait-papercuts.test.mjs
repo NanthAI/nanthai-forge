@@ -31,7 +31,7 @@ const transport = progress => {
     advertisedFeatures: [],
     query: async (name, args) => {
       queries.push({ name, args });
-      return progress(args);
+      return progress(args, name);
     },
   };
 };
@@ -62,11 +62,14 @@ test('frictions 7ad45fe5 and ecf43f8d: wait on a save operation id from a folder
   );
 });
 
-test('an operation id that is neither a landing nor a save keeps the original NOT_FOUND', async t => {
+const missingSource = (_args, name) => {
+  const kind = name === 'projectHostedSync:progress' ? 'sync' : 'save';
+  throw new ForgeError('NOT_FOUND', `Prepare this original hosted ${kind} first.`);
+};
+
+test('an operation id outside the supported waits keeps the original NOT_FOUND', async t => {
   const root = projectFolder(t);
-  const server = transport(() => {
-    throw new ForgeError('NOT_FOUND', 'Prepare this original hosted save first.');
-  });
+  const server = transport(missingSource);
   const reply = await followLocalOperation(
     server,
     root,
@@ -74,15 +77,16 @@ test('an operation id that is neither a landing nor a save keeps the original NO
     notFound,
   );
   assert.equal(reply, undefined, 'the caller rethrows the landing NOT_FOUND');
-  assert.equal(server.queries.length, 1);
+  assert.deepEqual(
+    server.queries.map(query => query.name),
+    ['projectHostedSaves:progress', 'projectHostedSync:progress'],
+  );
 });
 
-test('ad80e037: a wait whose id is in no landing or save says which project folder it looked in', async t => {
+test('ad80e037: an unknown wait id says which project folder it looked in', async t => {
   const root = projectFolder(t);
   const server = {
-    ...transport(() => {
-      throw new ForgeError('NOT_FOUND', 'Prepare this original hosted save first.');
-    }),
+    ...transport(missingSource),
     dispatch: async () => ({ result: { actor: 'owner', features: [] } }),
   };
   await assert.rejects(

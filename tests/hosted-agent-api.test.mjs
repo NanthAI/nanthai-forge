@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -9,6 +9,9 @@ import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { revertFixture, synthetic } from './hosted-revert-fixture.mjs';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
+import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
+import { HostedAgentJournal, hostedAgentDirectory, hostedAgentRoot } from '../dist/hosted-agent-journal.js';
+import { readTurnLedger } from '../dist/agent-turn-work.js';
 import { digest } from '../dist/hash.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
 const names = [
@@ -24,6 +27,7 @@ const names = [
   'projectHostedLanding',
   'projectHostedLandingDesired',
   'projectHostedFinish',
+  'projectHostedFinishObserve',
   'projectHostedCheckDefinitions',
   'projectHostedChecks',
   'projectHostedLifecycle',
@@ -52,14 +56,14 @@ async function setup(t) {
     address = { url: 'https://fixture.invalid', projectId: f.projectId },
     calls = [];
   let lost = null;
-  const invoke = async (ref, args) => {
+  const invoke = async (ref, args, actor = 'owner') => {
     const name = getFunctionName(ref),
       [module, member] = name.split(':');
     assert(modules[module]?.[member], `Only synthetic registered API handlers: ${name}`);
     calls.push({ name, args: structuredClone(args) });
     let result;
     try {
-      result = await f.tx(`agent:${name}`, modules[module][member], args);
+      result = await f.tx(`agent:${name}`, modules[module][member], args, actor);
     } catch (error) {
       t.diagnostic(`Synthetic handler ${name}: ${error.message}`);
       throw error;
@@ -72,7 +76,10 @@ async function setup(t) {
   };
   const exchange = {
     projectId: f.projectId,
-    client: { query: invoke, mutation: invoke },
+    client: {
+      query: (ref, args) => invoke(ref, args),
+      mutation: (ref, args) => invoke(ref, args),
+    },
     upload: async (pin, value) => {
       assert.equal(digest(value), pin.sha256);
       f.c.put(value);
@@ -93,8 +100,23 @@ async function setup(t) {
   return {
     f,
     root,
+    address,
     calls,
     transport: () => new HostedAgentTransport(root, address, exchange),
+    readTransport: (subscribe, actor) =>
+      new HostedAgentTransport(
+        root,
+        address,
+        {
+          ...exchange,
+          client: {
+            query: (ref, args) => invoke(ref, args, actor),
+            mutation: ref => assert.fail(`Wait must not call mutation ${getFunctionName(ref)}`),
+          },
+        },
+        subscribe,
+      ),
+    invoke,
     lose: name => {
       lost = name;
     },
@@ -174,6 +196,169 @@ test('revert uses the exact acceptance receipt, retains sync UUID after lost sub
   const lane = result.result.outcome.result.lane;
   const composed = await s.transport().dispatch('compose', { laneId: lane.laneId });
   assert.equal(composed.result.status, 'submitted');
+});
+
+async function printedRevertWait(t, s) {
+  const receipt = await s.f.landOriginal();
+  const stderr = process.stderr.write;
+  const previousExit = process.exitCode;
+  t.after(() => (process.exitCode = previousExit));
+  let output = '';
+  process.stderr.write = line => ((output += line), true);
+  let revert;
+  try {
+    revert = await hostedAgentCli(
+      s.root,
+      'revert',
+      { target: { kind: 'receipt', receiptId: receipt.id }, message: 'Compensate actual delta' },
+      s.address,
+      s.transport(),
+    );
+  } finally {
+    process.stderr.write = stderr;
+  }
+  assert.equal(revert.result.status, 'submitted');
+  const printed = /^revert: .*; resume with: nforge agent '([^']+)' wait '([^']+)'$/m.exec(output);
+  assert(printed, output);
+  assert.equal(printed[1], hostedAgentRoot(s.root));
+  const input = JSON.parse(printed[2]);
+  assert.deepEqual(input, { operationIds: [revert.operationId] });
+  return { input, operationId: revert.operationId };
+}
+
+test('friction f0a90837: the printed revert wait follows its original submitted operation without replaying it', async t => {
+  const s = await setup(t);
+  const { input, operationId } = await printedRevertWait(t, s);
+  const read = (parameters, transport = s.readTransport()) =>
+    hostedAgentCli(s.root, 'wait', parameters, s.address, transport);
+  // An old continuation can outlive its local journal. The same folder can still see the exact revert.
+  const journal = join(hostedAgentDirectory(s.root), `${operationId}.json`);
+  renameSync(journal, `${journal}.fixture-backup`);
+  const withoutJournal = await read({ ...input, timeoutSeconds: 0 });
+  assert.equal(withoutJournal.result.status, 'IN_PROGRESS');
+  assert.equal(withoutJournal.result.phase, 'revert');
+  renameSync(`${journal}.fixture-backup`, journal);
+
+  const pending = await read({ ...input, timeoutSeconds: 0 });
+  assert.equal(process.exitCode, 3);
+  assert.equal(pending.result.status, 'IN_PROGRESS');
+  assert.equal(pending.result.phase, 'revert');
+  assert.deepEqual(pending.result.operationIds, [operationId]);
+
+  const state = JSON.parse(
+    [...s.f.tables.projectHostedSyncs.values()].find(row => row.operationId === operationId).value,
+  );
+  const output = await s.f.workRevert(state.request);
+  const snapshotBytes = [];
+  let subscriptions = 0;
+  let closed = false;
+  const before = s.calls.length;
+  const observed = await read(
+    input,
+    s.readTransport(() => ({
+      onUpdate(ref, args, update, error) {
+        assert.equal(getFunctionName(ref), 'projectHostedSync:progress');
+        assert.equal(args.operationId, operationId);
+        subscriptions++;
+        (async () => {
+          const snapshot = await s.invoke(ref, args);
+          assert.equal(JSON.parse(snapshot).terminal, null);
+          snapshotBytes.push(Buffer.byteLength(snapshot));
+          update(snapshot);
+          await s.f.publishRevert(output);
+          const terminal = await s.invoke(ref, args);
+          snapshotBytes.push(Buffer.byteLength(terminal));
+          update(terminal);
+        })().catch(error);
+        return () => {};
+      },
+      async close() {
+        closed = true;
+      },
+    })),
+  );
+  assert.equal(subscriptions, 1);
+  assert(closed);
+  assert.deepEqual(
+    s.calls.slice(before).map(call => call.name),
+    ['projectHostedSync:progress', 'projectHostedSync:progress'],
+  );
+  assert.equal(process.exitCode, 0);
+  assert.equal(observed.operationId, operationId);
+  assert.equal(observed.result.status, 'terminal');
+  assert.equal(observed.result.outcome.status, 'completed');
+  assert.equal(observed.result.outcome.result.operationId, operationId);
+  assert.deepEqual(await read({ ...input, timeoutSeconds: 0 }), observed);
+  const reads = s.f.counts.filter(count => count.name === 'agent:projectHostedSync:progress');
+  assert(reads.length >= 4 && reads.every(count => count.writes === 0 && count.readBytes < 64 * 1024));
+  assert(snapshotBytes.every(bytes => bytes < 64 * 1024));
+  t.diagnostic(
+    `Revert progress snapshots: ${snapshotBytes.join(', ')} reply bytes; maximum ${Math.max(...reads.map(count => count.readBytes))} DB bytes; zero writes`,
+  );
+});
+
+test('revert wait keeps unknown ids and current authority refusals distinct from pending work', async t => {
+  const s = await setup(t);
+  const { input, operationId } = await printedRevertWait(t, s);
+  const read = (selection, actor) =>
+    hostedAgentCli(
+      s.root,
+      'wait',
+      { ...selection, timeoutSeconds: 0 },
+      s.address,
+      s.readTransport(undefined, actor),
+    );
+  await assert.rejects(read({ operationIds: [randomUUID()] }), {
+    code: 'NOT_FOUND',
+    message: /This wait looked in the project of/,
+  });
+  await assert.rejects(read(input, 'unrelated'), { code: 'PROJECT_UNAVAILABLE' });
+  s.f.patch('hostedProjects', s.f.projectId, { sourceAuthority: { mode: 'server', epoch: 2 } });
+  const authorityRefusal = error => {
+    assert.equal(error.code, 'SOURCE_AUTHORITY_CHANGED');
+    assert.equal(error.recovery.next.action, 'revert');
+    assert.notEqual(error.recovery.next.operationId, operationId);
+    assert.equal(error.recovery.next.message, 'Compensate actual delta');
+    return true;
+  };
+  await assert.rejects(read(input), authorityRefusal);
+
+  const session = randomUUID();
+  const originalSession = process.env.FORGE_AGENT_SESSION;
+  process.env.FORGE_AGENT_SESSION = session;
+  t.after(() => {
+    if (originalSession === undefined) delete process.env.FORGE_AGENT_SESSION;
+    else process.env.FORGE_AGENT_SESSION = originalSession;
+  });
+  const journal = join(hostedAgentDirectory(s.root), `${operationId}.json`);
+  renameSync(journal, `${journal}.fixture-backup`);
+  await assert.rejects(read(input), authorityRefusal);
+  assert.deepEqual(readTurnLedger(session).work, [], 'the turn hook cannot resume an old-epoch revert');
+});
+
+test('a revert journal without a registered server operation returns the original replay command', async t => {
+  const s = await setup(t);
+  const operationId = randomUUID();
+  const command = { target: { kind: 'receipt', receiptId: randomUUID() }, message: 'Original revert' };
+  new HostedAgentJournal(s.root, s.address, 'owner', 'revert', command, operationId);
+  await assert.rejects(
+    hostedAgentCli(
+      s.root,
+      'wait',
+      { operationIds: [operationId], timeoutSeconds: 0 },
+      s.address,
+      s.readTransport(),
+    ),
+    error => {
+      assert.equal(error.code, 'NOT_FOUND');
+      assert.deepEqual(error.recovery.next, { action: 'revert', ...command, operationId });
+      return true;
+    },
+  );
+  assert.deepEqual(
+    s.calls.map(call => call.name),
+    ['projectHostedSync:progress'],
+  );
 });
 
 test('incident replay 8dbccdfb: a CLI revert lands as compensating and tells the reverted Lane and Intent', async t => {

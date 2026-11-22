@@ -20,6 +20,7 @@ import { finishRefusedKey } from './hosted-agent-finish-identity.js';
 import { preparingFinishSource } from './hosted-agent-finish-result.js';
 import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
 import { sourceWaitSnapshot } from './hosted-agent-source-wait.js';
+import { observeHostedRevert } from './hosted-revert-wait.js';
 import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
 import { BeganAtOlderEpoch } from './hosted-main-pin.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
@@ -39,6 +40,8 @@ import {
   readBoardServerFeatures,
   type BoardWaitOption,
 } from './hosted-board-wait.js';
+
+export { observeHostedRevert };
 
 /** What this client's own records say an operation id is, when the server has no landing for it. */
 export type LocalOperation =
@@ -355,18 +358,19 @@ export async function followLocalOperation(
     return undefined;
   const operationId = input.operationIds[0]!,
     local = localOperation(root, operationId);
-  // Saves are keyed by project and operation, not by folder: from the project folder, or after the
-  // Lane's local marker settled and went away, the save's own record still answers (one read, on
-  // this NOT_FOUND path only).
+  // Saves and reverts can outlive the local journal. Check their exact project and operation
+  // records on this NOT_FOUND path without replaying either action.
   if (!local)
-    return observeHostedSave(
-      transport,
-      operationId,
-      input.timeoutSeconds,
-      signal,
-      subscribe,
-      board,
-      'unrecorded',
+    return (
+      (await observeHostedSave(
+        transport,
+        operationId,
+        input.timeoutSeconds,
+        signal,
+        subscribe,
+        board,
+        'unrecorded',
+      )) ?? observeHostedRevert(transport, operationId, input.timeoutSeconds, signal, board)
     );
   if (local.kind === 'check-run')
     return observeHostedRun(

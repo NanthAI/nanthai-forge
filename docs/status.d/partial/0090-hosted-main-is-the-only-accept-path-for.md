@@ -1,5 +1,7 @@
 Hosted main is the only accept path for a project with server authority (the dogfood project since 2026-10-28). `nforge host --listen`, `--sync-agent`, `--auto-sync` and `--no-auto-sync` are refused with `CLI_UPGRADE_REQUIRED`, and no accept waits for a local owner receipt. The local owner HTTP server, native-owner recovery/reconnect and supervised owner release selection are removed. Hosted runner/cache recovery remains available; the retired native reconnect RPC returns `CLI_UPGRADE_REQUIRED` without writing. The six retired dev authority/publication tables are empty; definitions and restore readers remain for older backups. Revert creates an Intent and agent prompt for a checked compensating Lane, never a main rewind. A landed revert tells the reverted Lane (board note with its reopen command), marks its landing reverted in Lane status and `lane-history`, and puts a `reverted` notice on its Intent in Now and CLI status.
 
+The wait printed by a CLI revert follows its original operation through reverse Lane preparation. It returns the retained outcome when it settles and can resume with the same command when still in progress.
+
 CLI release swaps stop orphaned native auto-exchange and sync-agent workers from
 older managed builds in the same installation. MCP stdio connections also close
 when their client process exits with pipes held open.

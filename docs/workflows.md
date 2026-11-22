@@ -53,6 +53,11 @@ outcome and links to its reverse submission. Source preparation/composition use
 finite job subscriptions; the landing queue continues independently once submitted.
 The Hand to an agent prompt remains available as a secondary route.
 
+For a CLI revert, run the printed wait from the same folder. It follows the
+original operation and returns the reverse Lane when ready. An `IN_PROGRESS`
+reply repeats the same wait command. The reverse Lane can then be landed through
+the normal checked flow.
+
 In the rebuilt app under `/-`, the same revert is one press, **Take it out of main**,
 on a landed Lane's review page, its landing check and its proof page (one shared
 control, `web/src/app/take-out.ts`). It keeps one operation id per landing for the

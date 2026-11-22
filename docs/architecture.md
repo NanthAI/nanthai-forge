@@ -2536,6 +2536,14 @@ pages. A submission with no acceptance receipt fails explicitly, including when
 its final reply is unknown. The original operation retains its target, time,
 Intent/Lane IDs and source job; authorized retries reconcile those same identities.
 
+The printed CLI wait observes that operation through the existing sync progress query.
+With the local journal, a finite wait reads one snapshot and a live wait keeps one
+subscription on the original operation. If the journal is missing, the fallback identifies the revert by its
+stored request kind and operation ID. The progress reply includes the current authority
+epoch from the project already read by the query, so an unfinished revert at an older
+epoch returns the existing fresh-operation recovery. If an interrupted request never
+registered, the wait names the original command as recovery. Observation makes no source writes.
+
 The existing fixed sync worker reuses native `compensatingState`: pre-acceptance
 files with the accepted head as synthetic parent. This reverses the actual main
 transition, including all batch inputs, dependency merges and prior compensation.

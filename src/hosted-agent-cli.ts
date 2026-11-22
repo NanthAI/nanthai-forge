@@ -79,7 +79,13 @@ async function dispatchHostedAgentCli(
     // The wait observers are large module graphs that only a wait uses.
     const [
       { observeHostedRun },
-      { acknowledgedBackgroundSave, observeHostedSave, observeOperations, restackObservedSave },
+      {
+        acknowledgedBackgroundSave,
+        observeHostedRevert,
+        observeHostedSave,
+        observeOperations,
+        restackObservedSave,
+      },
       board$,
       { approvalNext, observeApproval },
     ] = await Promise.all([
@@ -115,7 +121,9 @@ async function dispatchHostedAgentCli(
       const operation = retainedHostedOperation(root, id);
       return operation && operation.action !== 'finish' ? [{ id, ...operation }] : [];
     });
-    if (retained.length) {
+    const revert =
+      selectedWait.operationIds?.length === 1 && retained[0]?.action === 'revert' ? retained[0] : undefined;
+    if (retained.length && !revert) {
       invariant(
         retained.length === selectedWait.operationIds!.length,
         'BAD_ARGUMENT',
@@ -156,7 +164,20 @@ async function dispatchHostedAgentCli(
         let response: Awaited<ReturnType<HostedAgentTransport['dispatch']>> | undefined;
         for (const operation of retained) {
           const replay = { ...operation.command, operationId: operation.id };
-          response = await transport.dispatch(operation.action, replay);
+          const observedRevert =
+            operation.action === 'revert'
+              ? await observeHostedRevert(
+                  transport,
+                  operation.id,
+                  Math.max(0, (deadline - Date.now()) / 1000),
+                  signal,
+                  board,
+                  operation.command,
+                )
+              : undefined;
+          if (operation.action === 'revert')
+            invariant(observedRevert, 'NOT_FOUND', 'This operation is not a hosted revert.');
+          response = observedRevert ?? (await transport.dispatch(operation.action, replay));
           const delivered = sourceMessage(response, response.result);
           if (delivered) return delivered;
           // A still-running save returns `submitted` or split-save `settling`: wait on its source
@@ -170,7 +191,7 @@ async function dispatchHostedAgentCli(
               transport.advertisedFeatures?.includes('source-board-wait') ? board : undefined,
               operation.action === 'compose'
                 ? 'Compose'
-                : ['sync', 'resolve', 'revert'].includes(operation.action)
+                : ['sync', 'resolve'].includes(operation.action)
                   ? 'Sync'
                   : 'Saves',
             );
@@ -189,7 +210,13 @@ async function dispatchHostedAgentCli(
                 }
               : replayed;
           }
-          if (isNetworkPending(response) || sourcePending(response, true)) {
+          const revertStatus = observedRevert?.result.status;
+          if (
+            isNetworkPending(response) ||
+            sourcePending(response, true) ||
+            revertStatus === 'timeout' ||
+            revertStatus === 'cancelled'
+          ) {
             process.exitCode = 3;
             const resume = operationWait(root, {
               operationIds: selectedWait.operationIds!,
@@ -200,10 +227,20 @@ async function dispatchHostedAgentCli(
               result: {
                 ...(response.result as object),
                 status: 'IN_PROGRESS',
-                reason: 'budget',
+                reason: revertStatus === 'cancelled' ? 'cancelled' : 'budget',
                 ...resume,
               },
             };
+          }
+          if (
+            revertStatus === 'terminal' &&
+            observedRevert &&
+            'successful' in observedRevert.result &&
+            observedRevert.result.successful === false
+          ) {
+            process.exitCode = 2;
+            settleTurnWork([operation.id]);
+            return response;
           }
           process.stderr.write(`${operation.action.toUpperCase()} ${operation.id} finished\n`);
         }
@@ -319,25 +356,34 @@ async function dispatchHostedAgentCli(
       let response = await withLaneCommand(laneId, 'wait', async () =>
         selectedWait.runId
           ? observeHostedRun(transport, observed, controller.signal, undefined, undefined, board)
-          : backgroundSave
-            ? observeHostedSave(
+          : revert
+            ? observeHostedRevert(
                 transport,
-                backgroundSave,
+                revert.id,
                 budgetSeconds,
                 controller.signal,
-                undefined,
                 board,
-                'background',
+                revert.command,
               )
-            : observeOperations(
-                transport,
-                root,
-                observed as Parameters<typeof observeOperations>[2],
-                controller.signal,
-                undefined,
-                undefined,
-                board,
-              ),
+            : backgroundSave
+              ? observeHostedSave(
+                  transport,
+                  backgroundSave,
+                  budgetSeconds,
+                  controller.signal,
+                  undefined,
+                  board,
+                  'background',
+                )
+              : observeOperations(
+                  transport,
+                  root,
+                  observed as Parameters<typeof observeOperations>[2],
+                  controller.signal,
+                  undefined,
+                  undefined,
+                  board,
+                ),
       ).catch(error => {
         if (
           backgroundSave &&
@@ -346,6 +392,13 @@ async function dispatchHostedAgentCli(
             (error.code === 'SOURCE_AUTHORITY_CHANGED' && error.recovery))
         )
           settleTurnWork([backgroundSave]);
+        if (
+          onlyOperation &&
+          error instanceof ForgeError &&
+          ['SOURCE_AUTHORITY_CHANGED', 'NOT_FOUND'].includes(error.code) &&
+          (error.recovery?.next as { action?: unknown } | undefined)?.action === 'revert'
+        )
+          settleTurnWork([onlyOperation]);
         throw waitFailure(error, continuation);
       });
       invariant(response, 'NOT_FOUND', 'The selected operation has no hosted progress.');
@@ -375,8 +428,8 @@ async function dispatchHostedAgentCli(
       const changed = pendingLandingPresentation(recorded, pendingProgress, laneId);
       const presentation = changed?.submission ?? recorded;
       const phase =
-        'phase' in response.result && response.result.phase === 'save'
-          ? 'save'
+        'phase' in response.result && (response.result.phase === 'save' || response.result.phase === 'revert')
+          ? response.result.phase
           : selected
             ? (presentation?.phase ?? 'unknown')
             : 'pending';
@@ -484,7 +537,11 @@ async function dispatchHostedAgentCli(
         };
       }
       process.exitCode =
-        backgroundSave && 'successful' in response.result && response.result.successful === false ? 2 : 0;
+        (backgroundSave || phase === 'revert') &&
+        'successful' in response.result &&
+        response.result.successful === false
+          ? 2
+          : 0;
       settleTurnWork(selectedWait.runId ? [selectedWait.runId] : (selectedWait.operationIds ?? []));
       // A single-target wait exposes the same observed outcome as finish, while
       // retaining the complete selection below. Continuation consumers can follow

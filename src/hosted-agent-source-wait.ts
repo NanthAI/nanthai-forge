@@ -4,6 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agent-observe.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
 import { hostedActionError } from './hosted-action-error.js';
+import type { ForgeError } from './errors.js';
 import { boardConflictEnvelope, boardWaker, type BoardWaitOption } from './hosted-board-wait.js';
 /** Compact the public observation without retaining source inputs in a pending reply.
  * A live query does not tick when wall time alone crosses a lease deadline. */
@@ -58,6 +59,8 @@ export async function waitHostedAgentSource(
   observe?: (progress: unknown) => void,
   settle?: SourceWaitSettle,
   board?: BoardWaitOption,
+  /** A freshly announced operation may still be registering its original request. */
+  registering?: (error: ForgeError) => boolean,
 ) {
   let latest = initial;
   return retryHostedObservation({
@@ -79,6 +82,7 @@ export async function waitHostedAgentSource(
         observe,
         settle,
         board,
+        registering,
       ),
   });
 }
@@ -93,6 +97,7 @@ async function waitHostedAgentSourceOnce(
   observe?: (progress: unknown) => void,
   settle?: SourceWaitSettle,
   board?: BoardWaitOption,
+  registering?: (error: ForgeError) => boolean,
 ) {
   const raw = initial;
   const withNotice = (value: unknown, progress: unknown) => {
@@ -154,7 +159,10 @@ async function waitHostedAgentSourceOnce(
             reject(error);
           }
         },
-        error => reject(hostedActionError(error, 'conflict recovery')),
+        error => {
+          const failure = hostedActionError(error, 'conflict recovery');
+          if (!registering?.(failure)) reject(failure);
+        },
       );
     });
   } finally {

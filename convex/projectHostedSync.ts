@@ -25,6 +25,7 @@ import { savePin } from '../src/hosted-save';
 import { prepareObjectTargets } from './projectObjects';
 import { upToDateSync, finishUpToDateSync } from './projectHostedSyncUpToDate';
 import { liveLaneFinish } from './projectHostedLaneFinish';
+import { sourceAuthority } from '../src/hosted-source-authority';
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
 const laneOrigin = (lane: NonNullable<SyncState['lane']>) => ({
   laneId: lane.id,
@@ -354,11 +355,12 @@ export const progress = query({
   handler: async (ctx, { board: cursor, ...input }) => {
     try {
       const auth = await caller(ctx, input),
-        { row, state, operation } = await loadSync(ctx, auth, false);
+        { row, state, project, operation } = await loadSync(ctx, auth, false);
       const board = cursor
         ? await boardWake(ctx, { projectId: input.projectId, viewer: auth.actor, ...cursor })
         : undefined;
       return canonicalPayload({
+        ...(state.request.kind === 'revert' ? { authorityEpoch: sourceAuthority(project).epoch } : {}),
         ...(board ? { board } : {}),
         ...(state.status === 'submitted' || state.status === 'failed'
           ? await sourceProgress(ctx, input.projectId, row.jobId)
