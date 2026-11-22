@@ -19,6 +19,7 @@ import { decodeSealedReply } from './sealed-decode.js';
 import { safeSecretName } from './sealed-display.js';
 import type { SealedProposal } from './sealed-future-records.js';
 import {
+  automaticJoinAnchor,
   checkpointAnchor,
   codeAnchor,
   deviceHeadAnchor,
@@ -28,6 +29,7 @@ import {
   type PinConfirmation,
   walkOnly,
 } from './sealed-anchors.js';
+import { automaticShareNotice } from './sealed-join.js';
 
 export type SealedReply = {
   v: 1;
@@ -57,7 +59,8 @@ export type VerifyRequest = {
   forgeProjectId: string;
   setKind: Roster['setKind'];
   firstContact?: boolean;
-  development?: Pick<SecretPin, 'roster'>;
+  /** The trusted Development pin a Checks read rests on; a `tofu` one is refused as a Checks anchor. */
+  development?: Pick<SecretPin, 'roster' | 'confirmed'>;
   checks?: SecretPin;
   developmentRevoked?: Buffer[];
   recipient?: { id: Buffer; enc: Buffer; kind: 1 | 2 | 3 };
@@ -117,8 +120,14 @@ function verifyCore(
     const projectId = forgeSecretId('project', request.forgeProjectId),
       h = reply.head,
       r = reply.roster;
-    if (r.setKind !== 1 && !request.machine)
+    if (r.setKind !== 1 && !request.machine) {
       refuse(request.development, 'This set needs a trusted Development roster.');
+      // Gate B1 M2: Development trusted on first use never anchors Checks (genesis pointer, replacement proofs).
+      refuse(
+        request.development?.confirmed !== 'tofu',
+        'Checks and Production always need a person: this device trusted Development on first use.',
+      );
+    }
     invariant(
       reply.v === 1 && h.v === 1 && r.v === 1 && reply.genesis.v === 1 && (!pin || pin.v <= reply.v),
       'SECRETS_FORMAT_REFUSED',
@@ -233,6 +242,9 @@ function verifyCore(
         case 'code':
           anchor = code!.roster;
           break;
+        case 'automatic-join':
+          anchor = automaticJoinAnchor(reply, request, request.anchor.value);
+          break;
         default:
           refuse(false, 'Unknown journey anchor.');
       }
@@ -242,12 +254,17 @@ function verifyCore(
       : request.machine
         ? 'machine'
         : (carried ??
-          // own-genesis without a recipient proves nothing about this device's keys.
-          (!request.anchor ||
-          request.anchor.kind === 'checks-genesis' ||
-          (request.anchor.kind === 'own-genesis' && !request.recipient)
-            ? 'none'
-            : 'holder'));
+          // Gate B1 M2: trust on first use through this device's own Automatic join. A rebuild from this device's
+          // own head keeps it when its signed entry was added automatically (the old pin is unreadable then).
+          (request.anchor?.kind === 'automatic-join' ||
+          (request.anchor?.kind === 'device-head' && findEntry(r, request.anchor.value.id)?.how === 3)
+            ? 'tofu'
+            : // own-genesis without a recipient proves nothing about this device's keys.
+              !request.anchor ||
+                request.anchor.kind === 'checks-genesis' ||
+                (request.anchor.kind === 'own-genesis' && !request.recipient)
+              ? 'none'
+              : 'holder'));
     // GB-08 d4: a wrap is never opened on a Checks view reached only by the walk from genesis.
     invariant(
       r.setKind === 1 || !request.recipient || base !== 'none',
@@ -316,6 +333,9 @@ function verifyCore(
       }
       // GB-08 d2: the cross-set Checks owner rule applies to the final roster below, not to each step.
       verified = walkTransition(verified, next, reply.revoked);
+      // Guard 3: every holder's notice of an automatic share is derived from the signed step it walked.
+      for (const added of next.delta.added)
+        if (added.how === 3) notices.push(automaticShareNotice(added, next.signerId));
       hashes.push({ version: verified.rosterVersion, hash: framedHash(rosterBytes(verified)) });
     }
     invariant(

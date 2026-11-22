@@ -140,9 +140,9 @@ a non-holder sees names only.
 A passkey contact needs a person-signed checkpoint
 with matching roster bytes and the public keys derived locally from its seed;
 a listed person entry alone grants no trust. A missing checkpoint or a walk
-outside retained history requires holder confirmation. These are verification
-foundations: joined Development devices without a confirmed anchor remain
-refused. Sharing commands, passkey browser delivery and Checks delivery are
-not available yet. Pins protect subsequent reads, including the
+outside retained history requires holder confirmation. A device that joined
+Development automatically uses the `automatic-join` anchor (Sealed Automatic
+join); other joined devices without a confirmed anchor remain refused. Code
+sharing, passkey browser delivery and Checks delivery are not available yet. Pins protect subsequent reads, including the
 ciphertext-only offline cache. A compromised server can withhold records or keep
 an offline device on its last verified view. No decrypted cache is written.

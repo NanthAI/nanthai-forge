@@ -12,7 +12,7 @@ import { safeSecretName } from './sealed-display.js';
 import { checkSecretWriteName } from './secret-names.js';
 
 export const sealedUsage =
-  'nforge secret set NAME [--file] [--root ROOT] [--operation-id UUID]\nnforge secret list [--root ROOT]\nnforge secret rm NAME [--root ROOT] [--operation-id UUID]\nnforge secret repin [--root ROOT]\nnforge secret resolve --operation-id UUID [--root ROOT]';
+  'nforge secret set NAME [--file] [--root ROOT] [--operation-id UUID]\nnforge secret list [--root ROOT]\nnforge secret rm NAME [--root ROOT] [--operation-id UUID]\nnforge secret repin [--root ROOT]\nnforge secret resolve --operation-id UUID [--root ROOT]\nnforge secret unshare FINGERPRINT|DEVICE_ID [--root ROOT]';
 export function sealedAgent() {
   const source = process.env;
   return (
@@ -40,6 +40,7 @@ export async function sealedClientForRoot(root: string, agent = sealedAgent()) {
     hostedSealedTransport(address.url, address.projectId, token),
     agent,
     line => process.stderr.write(`${line}\n`),
+    !agent && process.stderr.isTTY === true,
   );
   return client;
 }
@@ -121,8 +122,13 @@ export async function sealedCli(args: string[]) {
     return;
   }
   const command = args.shift();
-  invariant(['set', 'list', 'rm', 'repin', 'resolve'].includes(command!), 'BAD_ARGUMENT', sealedUsage);
+  invariant(
+    ['set', 'list', 'rm', 'repin', 'resolve', 'unshare'].includes(command!),
+    'BAD_ARGUMENT',
+    sealedUsage,
+  );
   const name = ['set', 'rm'].includes(command!) ? args.shift() : undefined;
+  const fingerprint = command === 'unshare' ? args.shift() : undefined;
   let root = '.',
     file = false,
     operationId: string | undefined;
@@ -140,6 +146,7 @@ export async function sealedCli(args: string[]) {
   const agent = sealedAgent();
   if (name) checkSecretWriteName(name, { set: 'development', agent, writeLine: () => {} });
   if (command === 'set' || command === 'rm') invariant(name, 'BAD_ARGUMENT', sealedUsage);
+  if (command === 'unshare') invariant(fingerprint, 'BAD_ARGUMENT', sealedUsage);
   const client = await sealedClientForRoot(secretRunRoot(resolve(root)), agent);
   try {
     if (command === 'set' || command === 'rm') {
@@ -152,6 +159,12 @@ export async function sealedCli(args: string[]) {
       } finally {
         value?.fill(0);
       }
+    } else if (command === 'unshare') {
+      const { unshareDevice } = await import('./sealed-unshare.js');
+      const result = await unshareDevice(client, fingerprint!);
+      process.stdout.write(
+        `${result.already ? `Device ${result.removed} was already removed from Development` : `Removed device ${result.removed} from Development and re-keyed it`}. Rotate at their provider what it could open: ${result.rotate.length ? result.rotate.map(safeSecretName).join(', ') : 'nothing'}.\n`,
+      );
     } else if (command === 'resolve') {
       invariant(operationId, 'BAD_ARGUMENT', 'Use nforge secret resolve --operation-id UUID.');
       const result = await client.resolve(operationId, agent ? undefined : confirmRepin);

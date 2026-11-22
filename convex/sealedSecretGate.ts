@@ -7,6 +7,7 @@ import { checkSealedPart } from '../src/sealed-schema';
 import { decodeSealedWire } from '../src/sealed-wire';
 import { equalBytes, forgeSecretId, framedHash } from '../src/sealed-portable';
 import { headBytes, rosterBytes, type Head, type Roster, type Transition } from '../src/sealed-records';
+import { AUTOMATIC_SET_KIND, decodeJoinRequest, type JoinRequest } from '../src/sealed-join';
 
 type Payload = { head: Head; roster: Roster; revoked: Uint8Array[]; proposals: unknown[] };
 export type SealedJoinRequest = { deviceId: ArrayBuffer; request: ArrayBuffer; at: number };
@@ -58,7 +59,8 @@ export const extendsStored = (set: StoredSealedSet | null, facts: SealedWriteFac
 
 /** The history and side records after an accepted write. The server appends the one transition the
  * write introduces after checking that it chains from the stored roster to the signed head; a client
- * never supplies the ring. A removal clears its own markers; an addition answers its join request. */
+ * never supplies the ring. A removal clears its own markers; an addition answers its join request, and a step
+ * drops requests it made stale. */
 export function nextSealedState(input: {
   set: StoredSealedSet | null;
   facts: SealedWriteFacts;
@@ -116,11 +118,73 @@ export function nextSealedState(input: {
     'The transition delta does not match the signed roster.',
   );
   revoked = revoked.filter(id => !t.delta.removed.some(removed => equalBytes(removed, u8(id))));
-  joinRequests = joinRequests.filter(j => !t.delta.added.some(e => equalBytes(e.id, u8(j.deviceId))));
+  // A roster step also drops requests it made stale: every request once the set leaves Automatic, and one whose
+  // account now has an entry. Requests were validated when stored, so only the account field is read (at most 32).
+  const automatic = facts.roster.setKind === AUTOMATIC_SET_KIND && facts.roster.sharingMode === 1;
+  const listed = (j: SealedJoinRequest) => {
+    const accountId = (decodeSealedWire(u8(j.request)) as Partial<JoinRequest>).accountId;
+    return !accountId || facts.roster.entries.some(e => equalBytes(e.accountId, accountId));
+  };
+  joinRequests = automatic
+    ? joinRequests.filter(j => !t.delta.added.some(e => equalBytes(e.id, u8(j.deviceId))) && !listed(j))
+    : [];
   return {
     genesis: stored.genesis,
     transitions: [...stored.transitions, transition],
     revoked,
     joinRequests,
   };
+}
+
+/** Design 5.1 join request, stored for the next holder device's run (no timer, no polling). The request must
+ * name this project and the caller's own account, and Development must be in Automatic mode with no entry for
+ * that account (guards 1 and 2). One request per account, replaced by its newest device; at most 32 waiting.
+ * Only the holder's roster step that adds the device clears it (nextSealedState). Returns null for a replay. */
+export function nextJoinRequests(input: {
+  projectId: string;
+  account: string;
+  kind: 1 | 2 | 3;
+  set: StoredSealedSet | null;
+  request: ArrayBuffer;
+  at: number;
+}): SealedJoinRequest[] | null {
+  invariant(
+    input.kind === AUTOMATIC_SET_KIND,
+    'SECRETS_NOT_ALLOWED',
+    'Only Development shares automatically. A Checks recipient always needs a person with a code.',
+  );
+  const request = decodeJoinRequest(u8(input.request));
+  refuse(
+    equalBytes(request.projectId, forgeSecretId('project', input.projectId)) &&
+      equalBytes(request.accountId, forgeSecretId('account', input.account)),
+    'A join request names this project and the signed-in account.',
+  );
+  const set = input.set;
+  invariant(
+    set,
+    'SECRETS_NOT_SET_UP',
+    'Development is not set up yet. The owner runs nforge secret set NAME.',
+  );
+  const roster = (decodeSealedWire(u8(set.payload)) as Payload).roster;
+  invariant(
+    roster.sharingMode === 1,
+    'SECRETS_NOT_ALLOWED',
+    'Development uses Confirm: a holder adds this device with a code.',
+  );
+  invariant(
+    !roster.entries.some(e => equalBytes(e.accountId, request.accountId)),
+    'SECRETS_NOT_ALLOWED',
+    'This account already has a device in Development. Add this device from that one with a code.',
+  );
+  const waiting = set.joinRequests ?? [];
+  if (waiting.some(j => equalBytes(u8(j.request), u8(input.request)))) return null;
+  const others = waiting.filter(
+    j => !equalBytes((decodeSealedWire(u8(j.request)) as JoinRequest).accountId, request.accountId),
+  );
+  invariant(
+    others.length < 32,
+    'SECRETS_NOT_ALLOWED',
+    "32 devices are already waiting for Development; a holder device's next run shares them.",
+  );
+  return [...others, { deviceId: Uint8Array.from(request.id).buffer, request: input.request, at: input.at }];
 }

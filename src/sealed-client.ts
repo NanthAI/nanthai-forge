@@ -10,7 +10,16 @@ import { SealedJournal } from './sealed-journal.js';
 import { newSealedSet } from './sealed-genesis.js';
 import { headBytes, changeBytes, type NameRecord } from './sealed-records.js';
 import { verifySealedReply, type SealedReply, type VerifyRequest } from './sealed-verify.js';
-import { sealedRead, sealedWrite, sealedWriteArgs, type SealedTransport } from './sealed-transport.js';
+import {
+  sealedRead,
+  sealedRefusal,
+  sealedWrite,
+  sealedWriteArgs,
+  type SealedReadWire,
+  type SealedTransport,
+} from './sealed-transport.js';
+import type { JourneyAnchor } from './sealed-anchors.js';
+import { afterVerified, firstContactAnchor } from './sealed-auto-client.js';
 import { SecretPins } from './sealed-pins.js';
 import { sealValue } from './sealed-value.js';
 import { checkSecretWriteName } from './secret-names.js';
@@ -26,14 +35,16 @@ export class SealedClient {
     readonly transport: SealedTransport,
     readonly agent: boolean,
     readonly notice: (line: string) => void = () => {},
+    /** A person sees stderr on a terminal: kept automatic-share notices are cleared once shown here. */
+    readonly terminal = false,
   ) {}
-  request(): VerifyRequest {
+  request(anchor?: JourneyAnchor): VerifyRequest {
     return {
       forgeProjectId: this.project,
       setKind: 1,
-      // Preserve the original creator-only proof: this locally held identity must be
-      // the sole genesis entry, and every subsequent transition must chain from it.
-      anchor: { kind: 'own-genesis', deviceId: this.keys.id },
+      // Without a journey anchor, preserve the original creator-only proof: this locally held identity must
+      // be the sole genesis entry, and every subsequent transition must chain from it.
+      anchor: anchor ?? { kind: 'own-genesis', deviceId: this.keys.id },
       recipient: { id: this.keys.id, enc: this.keys.enc, kind: 1 },
     };
   }
@@ -41,11 +52,18 @@ export class SealedClient {
     reply: SealedReply,
     current: Awaited<ReturnType<SecretPins['load']>>,
     cached: boolean,
+    wire: SealedReadWire,
   ): Promise<Awaited<ReturnType<SealedClient['read']>>> {
     try {
-      const result = await this.pins.verifyAndSave(reply, this.request(), Date.now());
-      if (cached) result.key?.fill(0);
+      const anchor = current ? undefined : await firstContactAnchor(this, reply, wire);
+      const result = await this.pins.verifyAndSave(reply, this.request(anchor), Date.now());
       for (const line of result.notices) this.notice(line);
+      try {
+        for (const line of await afterVerified(this, reply, result, current?.pin ?? null, anchor, wire))
+          this.notice(line);
+      } finally {
+        if (cached) result.key?.fill(0);
+      }
       return { reply, ...result, key: cached ? undefined : result.key };
     } catch (error) {
       if (error instanceof ForgeError && ['SECRETS_ROLLBACK', 'SECRETS_FORK'].includes(error.code)) {
@@ -79,7 +97,7 @@ export class SealedClient {
           'Development is not set up. The owner runs nforge secret set NAME.',
         );
         const reply = sealedRead(wire, current.cache);
-        return await this.verifyFetched(reply, current, true);
+        return await this.verifyFetched(reply, current, true, wire);
       } catch (error) {
         // Offline only: authentication/verification failures never silently fall back to cached source.
         if (!networkFailure(error)) throw error;
@@ -94,7 +112,7 @@ export class SealedClient {
     });
     if (!wire) return null;
     const reply = sealedRead(wire, current?.cache);
-    return this.verifyFetched(reply, current, false);
+    return this.verifyFetched(reply, current, false, wire);
   }
   async write(name: string, value: Buffer | null, options: { file?: boolean; operationId?: string } = {}) {
     const operationId = options.operationId ?? randomUUID();
@@ -281,25 +299,10 @@ export class SealedClient {
       try {
         receipt = await this.transport.write({ ...sealedWriteArgs(pending.wire), kind: 1 });
       } catch (error) {
-        const code =
-          error instanceof ForgeError ? error.code : (error as { data?: { code?: unknown } })?.data?.code;
-        if (
-          typeof code === 'string' &&
-          [
-            'AUTH_REQUIRED',
-            'AUTH_EXPIRED',
-            'AUTH_REVOKED',
-            'AUTH_SCOPE_DENIED',
-            'PROJECT_UNAVAILABLE',
-            'SECRETS_FORMAT_REFUSED',
-            'SECRETS_SET_REPLACED',
-            'WORK_OPERATION_REUSED',
-            'HOSTED_SCHEMA_REJECTED',
-            'BAD_ARGUMENT',
-          ].includes(code)
-        ) {
+        const refused = sealedRefusal(error);
+        if (refused) {
           await journal.refuse(operationId);
-          throw new ForgeError(code, 'Secret storage refused this operation; local trust was not changed.');
+          throw refused;
         }
         throw unknown();
       }

@@ -24,8 +24,11 @@ their own markers; the replacement flow will fill those from the server's marker
 the old set. Every read reply returns the server's
 markers and join requests, including an unchanged-cache reply. A transition that
 removes a device clears that device's marker, and one that adds a device clears its
-join request. Nothing else in a head write changes them. The commands that place
-markers and post join requests arrive with removal and Automatic join.
+join request; a step also drops requests it made stale (an account that now has an
+entry, or every request once Development leaves Automatic). Nothing else in a head
+write changes them. Join requests are posted
+by the join mutation (Sealed Automatic join); the command that places markers
+arrives with member removal.
 
 The record transport header must round-trip as exact UTF-8, so the decode refuses
 invalid bytes and a byte-order mark the same way in Node and in Convex, with no

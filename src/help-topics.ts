@@ -90,6 +90,7 @@ SECRET_FOUND: a save (or land --save) held a credential and stored nothing. Remo
 - WORK_OPERATION_CHANGED / OPERATION_REUSED: that id already ran with other parameters. Replay the exact original, or drop operationId (Forge makes a fresh one) for new work.
 - WORK_STALE, *_CHANGED, *_STALE: something moved while you ran (main, the Lane, a policy). Run the same command again; it reads fresh state.
 - WORK_BUSY, *_UNAVAILABLE, HOSTED_REQUEST_FAILED: transient; retry the same command once, then record friction with the code if it repeats.
+- SECRETS_WAITING: this device asked for Development and a holder device shares it on its own next run. Never retry in a loop; run the command once after a holder has run (each try reads the whole set).
 - After a killed shell, resume with wait '{"operationIds":["ORIGINAL_UUID"]}', never by starting new work.`,
   },
   hosted: {

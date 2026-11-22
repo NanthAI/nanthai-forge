@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 1,
+  "reason": "SECRETS_WAITING is the waiting state the 41a0df87 Automatic-join line names verbatim (design 5.1 guard 9); it is distinct from refusal codes because the run succeeds on retry once a holder shares. Nothing to merge: SECRETS_NOT_ALLOWED means no route without a person.",
+  "date": "2026-11-22"
+}

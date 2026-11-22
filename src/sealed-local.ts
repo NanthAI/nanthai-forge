@@ -182,7 +182,23 @@ export async function secretLocked<T>(path: string, run: () => T, waitMs = 10_00
     unlinkSync(temporary);
   }
 }
-export type StoredDeviceKeys = DeviceKeys & { pinCounter: number; pinned?: Record<string, number[]> };
+export type StoredDeviceKeys = DeviceKeys & {
+  pinCounter: number;
+  pinned?: Record<string, number[]>;
+  /** Design 5.1 local state (sealed-share-log): own Automatic join requests and automatic shares made. */
+  joins?: Record<string, number>;
+  /** `unconfirmed`: signed and sent, but no verified roster lists it yet (refused, lost or hidden by the server). */
+  shares?: {
+    at: number;
+    project: string;
+    forgeProject: string;
+    deviceId: string;
+    state: 'sending' | 'done' | 'unconfirmed';
+    shown: boolean;
+  }[];
+  /** A storage refusal of this device's automatic share: sharing pauses a day per project (no retry each run). */
+  shareRefused?: Record<string, { code: string; at: number }>;
+};
 export interface KeyStore {
   load(): StoredDeviceKeys | null;
   save(keys: StoredDeviceKeys): void;

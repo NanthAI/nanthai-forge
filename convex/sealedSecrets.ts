@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v, getConvexSize } from 'convex/values';
 import { query, mutation } from './cliServer';
-import { activeOwnedProject, memberProject } from './projectAuthority';
+import { activeOwnedProject, activeProject, memberProject } from './projectAuthority';
 import { currentCredential } from './deviceFields';
 import { sealedKind } from './sealedSecretFields';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { equalBytes } from '../src/sealed-portable';
-import { extendsStored, nextSealedState, sealedWriteFacts } from './sealedSecretGate';
+import { extendsStored, nextJoinRequests, nextSealedState, sealedWriteFacts } from './sealedSecretGate';
 
 const history = v.object({
   genesis: v.bytes(),
@@ -172,6 +172,46 @@ export const write = mutation({
       else await ctx.db.insert('sealedSecretSets', next);
       if (previous) await ctx.db.replace(previous._id, nextHistory);
       else await ctx.db.insert('sealedSecretHistory', nextHistory);
+      return { accepted: true, replay: false };
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+/** Design 5.1: a write member's new device asks to be shared Development. One small patch of the set row; the
+ * next holder device that runs wraps the key for it in its own signed write. Idempotent by request bytes. */
+export const join = mutation({
+  args: { projectId: v.id('hostedProjects'), kind: sealedKind, request: v.bytes() },
+  returns: v.object({ accepted: v.boolean(), replay: v.boolean() }),
+  handler: async (ctx, args) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'AUTH_REQUIRED', 'Sign in to join sealed secrets.');
+      const { forgeDevice } = ctx;
+      invariant(
+        forgeDevice?.deviceKey &&
+          currentCredential(forgeDevice, user.subject, user.forgeSignIn) &&
+          forgeDevice.scope === 'cli',
+        'AUTH_SCOPE_DENIED',
+        'Sealed secrets need a stable device sign-in from nforge login.',
+      );
+      await activeProject(Object.assign(ctx, { forgeDevice }), args.projectId, user.subject);
+      const set = await ctx.db
+        .query('sealedSecretSets')
+        .withIndex('by_project_and_kind_and_active', q =>
+          q.eq('projectId', args.projectId).eq('kind', args.kind).eq('active', true),
+        )
+        .unique();
+      const joinRequests = nextJoinRequests({
+        projectId: args.projectId,
+        account: user.subject,
+        kind: args.kind,
+        set,
+        request: args.request,
+        at: Date.now(),
+      });
+      if (!joinRequests) return { accepted: true, replay: true };
+      await ctx.db.patch(set!._id, { joinRequests });
       return { accepted: true, replay: false };
     } catch (error) {
       return report(error);

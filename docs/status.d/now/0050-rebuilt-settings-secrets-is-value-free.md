@@ -3,7 +3,10 @@ Rebuilt Settings → Secrets is value-free with an unavailable metadata provider
 sealed Development set, signed metadata, local pins and a ciphertext-only cache.
 Release name rules, exact root `.env.example` reading, credential stripping,
 masking and private temporary-file cleanup remain the process boundary. Device
-keys use a private local file; an OS keychain backend remains planned. Sharing,
+keys use a private local file; an OS keychain backend remains planned. A write
+member's first device gets Development automatically on its next run after an
+owner device's run, and `nforge secret unshare` undoes it by removing and
+re-keying. Code sharing,
 proposals, passkey recovery, Checks/machine delivery, import, per-added-name owner
 alerts and Secret Object retirement remain pending. Gate B follows the sharing
 slice; no completed code-review gate is claimed. Default policies protect

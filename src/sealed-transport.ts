@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import { coordinationClient } from './coordination-client.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { framedHash } from './sealed-format.js';
 import { headBytes } from './sealed-records.js';
 import { decodeSealedReply } from './sealed-decode.js';
@@ -54,6 +54,53 @@ export interface SealedTransport {
     rosterVersion?: number;
   }): Promise<SealedReadWire | null>;
   write(input: SealedWriteArgs & { kind: 1 | 2 | 3 }): Promise<{ accepted: boolean; replay: boolean }>;
+  /** Design 5.1: post this device's own join request (sealedSecrets:join). */
+  join?(input: { kind: 1 | 2 | 3; request: ArrayBuffer }): Promise<{ accepted: boolean; replay: boolean }>;
+}
+const refusals = new Set([
+  'AUTH_REQUIRED',
+  'AUTH_EXPIRED',
+  'AUTH_REVOKED',
+  'AUTH_SCOPE_DENIED',
+  'PROJECT_UNAVAILABLE',
+  'SECRETS_FORMAT_REFUSED',
+  'SECRETS_SET_REPLACED',
+  'SECRETS_NOT_ALLOWED',
+  'SECRETS_NOT_SET_UP',
+  'WORK_OPERATION_REUSED',
+  'HOSTED_SCHEMA_REJECTED',
+  'BAD_ARGUMENT',
+]);
+/** A storage reply that proves the mutation stored nothing, as a terminal error; null when the outcome is unknown.
+ * Convex checks arguments before a mutation runs, so an argument-validation failure (a CLI build whose request
+ * shape the deployment does not take) is a refusal, never an unknown outcome to retry for ever. */
+export function sealedRefusal(error: unknown): ForgeError | null {
+  const code =
+    error instanceof ForgeError ? error.code : (error as { data?: { code?: unknown } })?.data?.code;
+  if (typeof code === 'string' && refusals.has(code)) {
+    // The server's own reason for a sealed refusal is shown as untrusted text: printable, one line, bounded.
+    const raw =
+      error instanceof ForgeError
+        ? error.message
+        : (error as { data?: { message?: unknown } })?.data?.message;
+    const reason =
+      code.startsWith('SECRETS_') && typeof raw === 'string'
+        ? raw
+            .replace(/[^\x20-\x7e]/g, ' ')
+            .trim()
+            .slice(0, 240)
+        : '';
+    return new ForgeError(
+      code,
+      `Secret storage refused this operation${reason ? `: ${reason}` : ''}; local trust was not changed.`,
+    );
+  }
+  if (error instanceof Error && /ArgumentValidationError|Value does not match validator/.test(error.message))
+    return new ForgeError(
+      'CLI_UPDATE_REQUIRED',
+      "Secret storage does not take this CLI build's request, so nothing was stored. Update the CLI (nforge update), then repeat the change as a new operation.",
+    );
+  return null;
 }
 /** Transport serialization is never signed or hashed. All authentication uses format frames.
  * `previous` is the verified head this write replaces. Markers and proposals are server-owned, so the
@@ -118,5 +165,7 @@ export function hostedSealedTransport(deployment: string, projectId: string, tok
       client.query(makeFunctionReference<'query'>('sealedSecrets:read'), { projectId, ...input }),
     write: input =>
       client.mutation(makeFunctionReference<'mutation'>('sealedSecrets:write'), { projectId, ...input }),
+    join: input =>
+      client.mutation(makeFunctionReference<'mutation'>('sealedSecrets:join'), { projectId, ...input }),
   };
 }

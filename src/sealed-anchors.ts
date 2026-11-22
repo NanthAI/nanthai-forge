@@ -6,7 +6,8 @@ import { equalBytes, framedHash } from './sealed-format.js';
 import { recipientId, verifyBytes } from './sealed-keys.js';
 import { headBytes, rosterBytes, type Roster } from './sealed-records.js';
 import { checkRoster, findEntry, sameId } from './sealed-roster.js';
-import type { SealedReply, SecretPin } from './sealed-verify.js';
+import { AUTOMATIC_SET_KIND } from './sealed-join.js';
+import type { SealedReply, SecretPin, VerifyRequest } from './sealed-verify.js';
 
 export type PersonCheckpointAnchor = {
   checkpoint: PersonCheckpoint;
@@ -21,12 +22,22 @@ export type CodeAnchor = {
   /** Purpose re-pin only: the holder's own verified head becomes this device's head floor. */
   headFloor: { version: number; hash: Buffer } | null;
 };
+/** Gate B1 M2: this device's own keys and the time it posted its own Automatic join request. Only the client
+ * that holds a local record of that request builds this; nothing here comes from a server reply. */
+export type AutomaticJoinAnchor = {
+  id: Buffer;
+  accountId: Buffer;
+  signPub: Buffer;
+  encPub: Buffer;
+  requestedAt: number;
+};
 export type JourneyAnchor =
   | { kind: 'own-genesis'; deviceId: Buffer }
   | { kind: 'checks-genesis' }
   | { kind: 'person-checkpoint'; value: PersonCheckpointAnchor }
   | { kind: 'device-head'; value: DeviceHeadAnchor }
-  | { kind: 'code'; value: CodeAnchor };
+  | { kind: 'code'; value: CodeAnchor }
+  | { kind: 'automatic-join'; value: AutomaticJoinAnchor };
 
 /** GB-08 d4: how a pin's trust started, independent of signed data. `none` is a Checks view reached only by
  * the walk from genesis: display-only. `holder` is this device's own genesis, its own signed head, a passkey
@@ -123,4 +134,41 @@ export function deviceHeadAnchor(reply: SealedReply, local: DeviceHeadAnchor): R
     'This device cannot rebuild trust from a head it did not sign.',
   );
   return reply.roster;
+}
+
+/** Gate B1 M2: the accepted trust-on-first-use residual of owner decision 2 (design 5.1 guard 8, section 8).
+ * The joiner has nothing to verify the served roster against, so the anchor is that roster, accepted only for
+ * Development in Automatic mode, only for this device's own request, and only when the roster lists exactly this
+ * device as an automatic member of its own account. The pin records `confirmed: tofu`; Checks never accepts it. */
+export function automaticJoinAnchor(
+  reply: SealedReply,
+  request: Pick<VerifyRequest, 'setKind' | 'recipient' | 'machine'>,
+  local: AutomaticJoinAnchor,
+): Roster {
+  const r = reply.roster,
+    entry = findEntry(r, local.id);
+  invariant(
+    request.setKind === AUTOMATIC_SET_KIND &&
+      r.setKind === AUTOMATIC_SET_KIND &&
+      reply.genesis.setKind === AUTOMATIC_SET_KIND &&
+      !request.machine,
+    'SECRETS_ROSTER_REFUSED',
+    'Automatic join is for Development only; Checks and Production always need a person with a code.',
+  );
+  invariant(
+    r.sharingMode === 1 &&
+      Number.isSafeInteger(local.requestedAt) &&
+      local.requestedAt > 0 &&
+      request.recipient?.kind === 1 &&
+      sameId(request.recipient.id, local.id) &&
+      entry?.entryKind === 1 &&
+      entry.role === 2 &&
+      entry.how === 3 &&
+      sameId(entry.accountId, local.accountId) &&
+      sameId(entry.signPub, local.signPub) &&
+      sameId(entry.encPub, local.encPub),
+    'SECRETS_ROSTER_REFUSED',
+    "Automatic join trusts only a Development roster in Automatic mode that lists this device as an automatic member of its own account, after this device's own join request.",
+  );
+  return r;
 }
