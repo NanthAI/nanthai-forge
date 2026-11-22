@@ -117,6 +117,18 @@ export function commandKind(args: string[]): HeavyKind {
 }
 
 const minutes = (ms: number) => Math.round(ms / 6000) / 10;
+/** p50/p90 queue wait in seconds over the holds that recorded one; null before any did. */
+function waitSummary(holds: HeavyHold[]) {
+  const waits = holds
+    .flatMap(hold => (typeof hold.wait === 'number' ? [hold.wait] : []))
+    .sort((a, b) => a - b);
+  if (!waits.length) return null;
+  const at = (share: number) => {
+    const ms = waits[Math.min(waits.length - 1, Math.floor(share * waits.length))] ?? 0;
+    return Math.round(ms / 100) / 10;
+  };
+  return { holds: waits.length, p50Seconds: at(0.5), p90Seconds: at(0.9) };
+}
 /** The last day of holds in a few lines: time per kind, the busiest Lanes and the peaks with who
  * held the slot then, so a load spike can be explained afterwards. */
 export function holdSummary(holds: HeavyHold[], now = Date.now(), windowMs = 86_400_000) {
@@ -155,6 +167,8 @@ export function holdSummary(holds: HeavyHold[], now = Date.now(), windowMs = 86_
       .map(([lane, ms]) => ({ lane, minutes: minutes(ms) })),
     peakCpu: peak('cpu'),
     peakLoad: peak('load'),
+    // Queue wait before each hold (ff33e9a6), for the measured before/after of the admission rule.
+    wait: waitSummary(day),
   };
 }
 

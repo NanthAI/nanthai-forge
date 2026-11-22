@@ -146,6 +146,32 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 - A waiting caller prints its queue position and, after three finished heavy commands on this
   machine, an estimate: the median of the last 32 hold times, applied to the earliest slot to free
   for each waiter ahead. It is a rough guide, not a promise.
+- `localHeavySlots` is the base, not a hard count (ff33e9a6). On one day, all 3 slots were full for
+  597 min. For 371 of those minutes at least one holder used 2 cores or less, often a one-core
+  model check holding a slot for 97 min while load sat at 4-14 on 10 cores. Past the base, extra
+  slots (up to twice the base, never more than the cores) open one at a time. The caller at the
+  front of the queue gets one when all of these hold:
+  - the larger of the 1-minute load and the holders' CPU, plus the newcomer's cores, is at most
+    the cores. A holder counts the CPU its process tree uses now (one `ps` of pids and CPU),
+    at least 1 core. A holder younger than 30 s, or unmeasured, counts its full share or its
+    declared cores.
+  - at least 25% of memory is free: macOS's kernel free percentage (what `memory_pressure`
+    reports; swap there grows on demand, so its used share is no signal), or Linux's
+    MemAvailable with swap under half used.
+  - when two burst claims race past the limit, the one in the higher slot backs off.
+- Freeze guard: while anyone holds a slot, no command starts, base slot or not, with under 10%
+  memory free. Load gates only the extra slots: a shared CI runner sits past 2 x cores through
+  a whole suite, and holding its base slots there only stalled its own tests. A machine with no
+  holder admits at once and reads nothing. Each decision reads load, memory once and `ps` at most once, and reuses that
+  reading for 2 s. A waiting caller at the front prints why it is held.
+- `nforge heavy --cores N [--max-minutes M] -- CMD` declares and caps a command's cores (test
+  concurrency, `GOMAXPROCS`, `RAYON_NUM_THREADS`). It counts N instead of a slot's share.
+  `--max-minutes` sets its own bound. A bound past `localHeavyMaxMinutes` needs N below the
+  slot share, so long one-core work (a TLA model check) runs without changing the machine-wide
+  bound and leaves room for test runs. Example: `nforge heavy --cores 1 --max-minutes 120 -- CMD`.
+- The outermost heavy runs its command in its own process group. When the command exits, is
+  stopped or runs past its bound, whatever it started and left running is stopped too (TERM,
+  then KILL 2 s later). Nested heavy commands stay in their parent's group.
 - A slot or ticket whose process died is reclaimed at the next check. Liveness compares the
   process start time as well as the pid, so a reused pid cannot hold a slot or a place in line.
 - A slot limits jobs, not CPU, so heavy also bounds every runner its command starts, at any depth
@@ -193,7 +219,8 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   (`overBound` marks one past its bound); it never prints folders, arguments or environment. Its
   `today` field sums the last 24 hours: holds and minutes per kind, the three busiest Lanes, and the
   hold with the highest CPU and with the highest load (when, which Lane, what kind), so a load spike
-  can be explained afterwards.
+  can be explained afterwards. Its `wait` field gives the queue wait p50 and p90 in seconds over the holds that
+  recorded one (each hold records its wait since ff33e9a6).
 - Every hold appends one line to the hold history: when the slot was taken, wall time, Lane, kind
   (test, typecheck, build or other, from the command words, which are not stored), peak CPU of the
   command's process tree in cores and peak 1-minute load. CPU comes from one `ps` per 10 seconds

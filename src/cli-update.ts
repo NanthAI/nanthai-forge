@@ -22,6 +22,7 @@ import {
   HEAVY_KILL_GRACE_MS,
   heavySlotDirectory,
   inheritedHeavySlot,
+  measuredHeavyAdmission,
   tryHeavySlot,
   waitingMessage,
 } from './heavy-slots.js';
@@ -192,7 +193,7 @@ async function updateBuildLease(installation: string, inherited: string | null):
         directory,
         slots,
         wait => process.stderr.write(waitingMessage(slots(), directory, wait)),
-        { command: 'cli-update-build', cwd: installation },
+        { command: 'cli-update-build', cwd: installation, admission: await measuredHeavyAdmission() },
       );
   const startedAt = Date.now();
   let cap: ReturnType<typeof slotCapEnv> | undefined;

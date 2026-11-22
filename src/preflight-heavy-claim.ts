@@ -5,7 +5,13 @@
 import { writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { heavySlots, readClientSettings } from './client-settings.js';
-import { acquireHeavySlot, heavySlotDirectory, inheritedHeavySlot, waitingMessage } from './heavy-slots.js';
+import {
+  acquireHeavySlot,
+  heavySlotDirectory,
+  inheritedHeavySlot,
+  measuredHeavyAdmission,
+  waitingMessage,
+} from './heavy-slots.js';
 import { canonicalRoot } from './root-paths.js';
 
 const [holder, cwd] = [Number(process.argv[2]), process.argv[3] ?? process.cwd()];
@@ -13,6 +19,7 @@ const directory = heavySlotDirectory();
 const slots = heavySlots(readClientSettings().localHeavySlots);
 const inherited = inheritedHeavySlot(directory);
 let waited = false;
+const queuedAt = Date.now();
 const claimed =
   inherited || slots === 0
     ? null
@@ -27,6 +34,8 @@ const claimed =
           onQueue: () => {
             waited = true;
           },
+          // The same measured admission as nforge heavy (ff33e9a6): a preflight counts a full share.
+          admission: await measuredHeavyAdmission(),
         },
       );
 if (claimed)
@@ -38,4 +47,6 @@ if (claimed)
 const parent = inherited
   ? process.env.FORGE_HEAVY_PARENT
   : claimed && JSON.stringify({ directory: canonicalRoot(directory), slot: basename(claimed), pid: holder });
-process.stdout.write(JSON.stringify({ slot: claimed, parent: parent || null, slots, waited }));
+process.stdout.write(
+  JSON.stringify({ slot: claimed, parent: parent || null, slots, waited, waitedMs: Date.now() - queuedAt }),
+);

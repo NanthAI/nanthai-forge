@@ -33,7 +33,7 @@ import {
   type ManagerRunner,
   type SkippedScriptsHint,
 } from './package-manager-install.js';
-import { acquireHeavySlot, heavySlotDirectory, tryHeavySlot } from './heavy-slots.js';
+import { acquireHeavySlot, heavySlotDirectory, measuredHeavyAdmission, tryHeavySlot } from './heavy-slots.js';
 import { heavySlots, readClientSettings } from './client-settings.js';
 import { installRegistryHosts, type RegistryHosts } from './install-registry-hosts.js';
 import { dependencyProject, sharesDownloads } from './install-download-cache.js';
@@ -389,7 +389,11 @@ export async function shareDependencies(
       // that runs package scripts keeps a private one (code that could write the shared directory).
       const settings = readClientSettings(),
         slots = options.heavy === false ? 0 : heavySlots(settings.localHeavySlots);
-      const slot = slots ? await acquireHeavySlot(heavySlotDirectory(), slots) : null;
+      const slot = slots
+        ? await acquireHeavySlot(heavySlotDirectory(), slots, undefined, {
+            admission: await measuredHeavyAdmission(),
+          })
+        : null;
       let downloads: ReturnType<typeof import('./dependency-cache.js').retainDownloadCache> = null;
       try {
         if (!runScripts && !rebuild.length && sharesDownloads(pm)) {

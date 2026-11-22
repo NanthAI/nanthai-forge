@@ -34,3 +34,22 @@ export function stopProcessTree(
     child.kill(signal);
   }
 }
+/** After the command exits: anything still in its process group is stopped (TERM, then KILL after
+ * 2 s), so no child it started keeps running outside heavy. Unix only; a no-op with nothing left. */
+export async function stopLeftovers(child: Pick<ChildProcess, 'pid' | 'exitCode' | 'signalCode' | 'kill'>) {
+  const pid = child.pid;
+  if (!pid || process.platform === 'win32') return;
+  const left = () => {
+    try {
+      process.kill(-pid, 0);
+      return true;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'EPERM';
+    }
+  };
+  if (!left()) return;
+  stopProcessTree(child, 'SIGTERM');
+  for (let waited = 0; waited < 2000 && left(); waited += 100)
+    await new Promise(done => setTimeout(done, 100));
+  if (left()) stopProcessTree(child, 'SIGKILL');
+}

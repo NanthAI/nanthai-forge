@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { canonicalRoot } from './root-paths.js';
 import { spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { isatty } from 'node:tty';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import type { HeavyAdmission, HeavyHolderUse } from './heavy-admission.js';
 import { availableParallelism, constants, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { heavySlots, readClientSettings } from './client-settings.js';
@@ -73,6 +75,37 @@ export const holderOverdue = (slot: string, now = Date.now()) => {
   const { startedAt, maxMs } = holderBound(slot);
   return startedAt !== undefined && maxMs > 0 && now - startedAt > maxMs + HEAVY_OVERDUE_GRACE_MS;
 };
+/** Claim `slot` for `pid`; false when someone else has it. */
+function claimSlot(slot: string, pid: number) {
+  try {
+    mkdirSync(slot);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    return false;
+  }
+  writeFileSync(join(slot, 'pid'), String(pid));
+  const startTime = startIdentity(pid);
+  if (startTime) writeFileSync(join(slot, 'start'), startTime);
+  return true;
+}
+/** An existing slot's holder, or null after reclaiming a slot whose holder died or ran far past its
+ * bound. A slot without a pid file is still being claimed (pid 0), unless its claimer died a minute
+ * ago. An overdue holder is not signalled: its process may still be someone's live work. */
+function liveHolder(slot: string, deep: boolean): { pid: number; claimedAt: number } | null {
+  let holder = NaN,
+    claimedAt = Date.now();
+  try {
+    claimedAt = statSync(slot).mtimeMs;
+    holder = Number(readFileSync(join(slot, 'pid'), 'utf8'));
+  } catch {}
+  const valid = Number.isSafeInteger(holder) && holder > 0;
+  const dead = valid
+    ? !holderAlive(slot, holder, deep) || holderOverdue(slot)
+    : Date.now() - claimedAt > 60_000;
+  if (!dead) return { pid: valid ? holder : 0, claimedAt };
+  rmSync(slot, { recursive: true, force: true });
+  return null;
+}
 /** One attempt over all slots; a slot whose holder died, or ran far past its bound, is reclaimed. */
 export function tryHeavySlot(
   directory: string,
@@ -84,34 +117,78 @@ export function tryHeavySlot(
   if (createDirectory) mkdirSync(directory, { recursive: true });
   for (let index = 1; index <= slots; index++) {
     const slot = join(directory, String(index));
-    try {
-      mkdirSync(slot);
-      writeFileSync(join(slot, 'pid'), String(pid));
-      const startTime = startIdentity(pid);
-      if (startTime) writeFileSync(join(slot, 'start'), startTime);
-      return slot;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    }
-    let holder = NaN,
-      claimedAt = Date.now();
-    try {
-      claimedAt = statSync(slot).mtimeMs;
-      holder = Number(readFileSync(join(slot, 'pid'), 'utf8'));
-    } catch {}
-    // A slot without a pid file is still being claimed, unless its claimer died a minute ago.
-    // An overdue holder is not signalled: its process may still be someone's live work.
-    const dead =
-      Number.isSafeInteger(holder) && holder > 0
-        ? !holderAlive(slot, holder, deep) || holderOverdue(slot)
-        : Date.now() - claimedAt > 60_000;
-    if (dead) {
-      rmSync(slot, { recursive: true, force: true });
-      index--;
-    }
+    if (claimSlot(slot, pid)) return slot;
+    if (!liveHolder(slot, deep)) index--;
   }
   return null;
 }
+/** Numbered slot folders present, with 1..`at least`; a slot above the current limit still counts. */
+function slotIndexes(directory: string, atLeast: number) {
+  const indexes = new Set(Array.from({ length: atLeast }, (_, index) => index + 1));
+  try {
+    for (const name of readdirSync(directory)) if (/^[1-9][0-9]*$/.test(name)) indexes.add(Number(name));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  return [...indexes].sort((a, b) => a - b);
+}
+/** The live holders as the admission sees them: pid, time held and declared cores (holder.json). */
+function holderUses(directory: string, indexes: number[], deep: boolean, now = Date.now()) {
+  const holders: (HeavyHolderUse & { index: number })[] = [];
+  for (const index of indexes) {
+    const slot = join(directory, String(index));
+    if (!existsSync(slot)) continue;
+    const live = liveHolder(slot, deep);
+    if (!live) continue;
+    let record: { startedAt?: unknown; cores?: unknown } = {};
+    try {
+      record = JSON.parse(readFileSync(join(slot, 'holder.json'), 'utf8'));
+    } catch {}
+    const startedAt = typeof record.startedAt === 'number' ? record.startedAt : live.claimedAt;
+    holders.push({
+      index,
+      pid: live.pid,
+      elapsedMs: Math.max(0, now - startedAt),
+      declared: typeof record.cores === 'number' && record.cores > 0 ? record.cores : null,
+    });
+  }
+  return holders;
+}
+/**
+ * One measured attempt (Item ff33e9a6): the base slots as before, then extra slots up to the
+ * admission's limit while it finds room. Measured attempts decide and claim under one lock (the
+ * caller at the front of the queue, plus a caller finding no queue), so two never both take the
+ * last room; a busy lock is a retry on the next change or tick.
+ */
+export function tryHeavyAdmission(
+  directory: string,
+  base: number,
+  admission: HeavyAdmission,
+  pid = process.pid,
+  deep = true,
+  now = Date.now(),
+): { slot: string | null; reason: string | null } {
+  mkdirSync(directory, { recursive: true });
+  // Held by the deciding process (a preflight claims for its parent through a child); one folder,
+  // removed whole, so nothing stays behind. A lock whose holder died is reclaimed.
+  const lock = join(directory, ADMIT_LOCK);
+  if (!claimSlot(lock, process.pid) && (liveHolder(lock, deep) || !claimSlot(lock, process.pid)))
+    return { slot: null, reason: null };
+  try {
+    const limit = admission.limit(base);
+    const holders = holderUses(directory, slotIndexes(directory, limit), deep, now);
+    const decision = admission.decide(base, holders);
+    if (!decision.admit) return { slot: null, reason: decision.reason };
+    const taken = new Set(holders.map(holder => holder.index));
+    for (let index = 1; index <= limit; index++)
+      if (!taken.has(index) && claimSlot(join(directory, String(index)), pid))
+        return { slot: join(directory, String(index)), reason: null };
+    return { slot: null, reason: null };
+  } finally {
+    rmSync(lock, { recursive: true, force: true });
+  }
+}
+const ADMIT_LOCK = 'admit.lock';
 export type HeavyWait = {
   /** 1 = next to run. */
   position: number;
@@ -119,6 +196,8 @@ export type HeavyWait = {
   estimateMs: number | null;
   medianMs: number | null;
   samples: number;
+  /** Why the measured admission holds the caller although a base slot or burst room was asked for. */
+  reason?: string | null;
 };
 /**
  * Slots go first come, first served. A caller finding anyone queued joins the back of the queue;
@@ -140,6 +219,9 @@ export function acquireHeavySlot(
     onQueue?: () => void;
     /** The process the slot is held for (default this one): preflight claims it through a child. */
     holder?: number;
+    /** Measured admission (Item ff33e9a6): extra slots while CPU, load and memory leave room, and a
+     * memory freeze guard on every slot. Without it the count is fixed, as for the locks built on slots. */
+    admission?: HeavyAdmission;
   } = {},
 ): Promise<string> {
   mkdirSync(directory, { recursive: true });
@@ -153,13 +235,21 @@ export function acquireHeavySlot(
       return count; // A settings file mid-edit keeps the last good limit.
     }
   };
+  let reason: string | null = null;
+  const tryOnce = (limit: number, deep: boolean) => {
+    if (!info.admission) return tryHeavySlot(directory, limit, holder, deep);
+    const result = tryHeavyAdmission(directory, limit, info.admission, holder, deep);
+    reason = result.reason;
+    return result.slot;
+  };
   if (!queuedNames(directory).length) {
-    const slot = tryHeavySlot(directory, count, holder);
+    const slot = tryOnce(count, true);
     if (slot) return Promise.resolve(slot);
   }
   info.onQueue?.();
   let ticket = joinQueue(directory, info),
-    reported = 0;
+    reported = 0,
+    reportedReason: string | null = null;
   return new Promise<string>((resolve, reject) => {
     let finished = false;
     const handles: { watcher?: LocalWatcher; timer?: NodeJS.Timeout } = {};
@@ -179,11 +269,13 @@ export function acquireHeavySlot(
         const rank = queue.findIndex(item => item.name === ticket.name);
         if (rank < 0) ticket = joinQueue(directory, { ...info, seq: ticket.seq });
         else if (rank === 0) {
-          const slot = tryHeavySlot(directory, current(), holder, deep);
+          const slot = tryOnce(current(), deep);
           if (slot) return finish(slot);
         }
-        if (rank >= 0 && rank + 1 !== reported) {
+        // A held caller says why once; reasons that only change their numbers rescan nothing.
+        if (rank >= 0 && (rank + 1 !== reported || (rank === 0 && !reportedReason && reason))) {
           reported = rank + 1;
+          reportedReason = rank === 0 ? reason : null;
           const running = heavyStatus(directory, count).holders.map(holder => holder.elapsedMs);
           const estimate = estimateWaitMs(readHolds(directory), running, count, rank);
           onWait({
@@ -192,6 +284,7 @@ export function acquireHeavySlot(
             estimateMs: estimate?.estimateMs ?? null,
             medianMs: estimate?.medianMs ?? null,
             samples: estimate?.samples ?? 0,
+            ...(reportedReason ? { reason: reportedReason } : {}),
           });
         }
       } catch (error) {
@@ -232,17 +325,24 @@ export function wakeHeavyWaiters(directory = heavySlotDirectory()) {
 
 export const HEAVY_HELP = `nforge heavy [--] CMD [ARGS...]
 nforge heavy --no-build [--] CMD [ARGS...]
+nforge heavy --cores N [--max-minutes M] [--] CMD [ARGS...]
 nforge heavy --status | status
 nforge heavy --help | -h | help
 Run bounded builds and test batches under the machine-wide slot limit.
 Nested commands reuse their live parent slot.
 --no-build runs tests against the existing dist/ without rebuilding it (failing-first checks).
 Callers wait first come, first served; a waiting caller prints its queue position and an estimate.
+Past the localHeavySlots base, extra slots (up to twice the base, at most the cores) open one at a time
+while measured load plus the holders' CPU leaves room for the next command and a quarter of memory is
+free. While anyone holds a slot, no command starts under 10% free memory.
+--cores N declares and caps a command's cores (test concurrency, GOMAXPROCS); it counts N, not a slot's
+share. --max-minutes M sets its own bound; a bound past localHeavyMaxMinutes needs --cores below the
+slot share (long one-core work such as a model check).
 --status lists the holders and the queue by Lane, command and time, never folders or arguments,
 and sums the last day of holds (per kind, busiest Lanes, CPU and load peaks).
 A command still running after localHeavyMaxMinutes (nforge settings; default 60, 0 = no bound) is
 stopped (exit 124) and frees its slot; a signal to heavy reaches the command, which is killed if it
-has not exited 10 s later. A holder that never stopped itself is freed 5 min past its bound, unsignalled.
+has not exited 10 s later. When the command ends, anything it started that is still running stops too. A holder that never stopped itself is freed 5 min past its bound, unsignalled.
 Run long-lived servers (Vite/dev servers) directly, outside heavy.
 node --test with no test file path is refused (Node would run the whole suite); name the files.
 `;
@@ -254,7 +354,8 @@ export function heavySlotHolders(
   identifyLane = laneOf,
 ) {
   const holders = [];
-  for (let index = 1; index <= slots; index++) {
+  // Extra slots above the base limit are holders too.
+  for (const index of slotIndexes(directory, slots)) {
     const slot = join(directory, String(index));
     try {
       const pid = Number(readFileSync(join(slot, 'pid'), 'utf8'));
@@ -305,6 +406,20 @@ const loadHold = async () =>
   (await import(
     /* @vite-ignore */ new URL('./heavy-hold.js', import.meta.url).href
   )) as typeof import('./heavy-hold.js');
+/** The measured admission, loaded like heavy-hold: only for a heavy command. */
+const loadAdmission = async () =>
+  (await import(
+    /* @vite-ignore */ new URL('./heavy-admission.js', import.meta.url).href
+  )) as typeof import('./heavy-admission.js');
+/** The measured admission for any machine-wide heavy lease (nforge heavy, preflight, a shared
+ * dependency install, a CLI update build); private locks built on slots keep a fixed count. */
+export const measuredHeavyAdmission = async (declared: number | null = null) =>
+  (await loadAdmission()).heavyAdmission({ cores: availableParallelism(), declared });
+/** Stopping a command's process group, loaded like heavy-hold: only for a heavy command. */
+const loadStop = async () =>
+  (await import(
+    /* @vite-ignore */ new URL('./stop-process-tree.js', import.meta.url).href
+  )) as typeof import('./stop-process-tree.js');
 /** `nforge heavy --status`: the live slots plus the last day of holds (when, who, what kind, peaks). */
 async function heavyStatusReport(directory: string, slots: number) {
   const { holdSummary } = await loadHold();
@@ -323,7 +438,8 @@ export const waitingMessage = (slots: number, directory: string, wait: HeavyWait
     )
     .join('; ');
   return (
-    `heavy: waiting for one of ${slots} machine-wide slots, first come, first served. Queue position ${wait.position} of ${wait.waiting}` +
+    `heavy: waiting for one of ${slots} machine-wide slots (more while CPU, load and memory leave room), first come, first served. Queue position ${wait.position} of ${wait.waiting}` +
+    (wait.reason ? `; next in line but held: ${wait.reason}` : '') +
     (wait.estimateMs === null
       ? '; no estimate yet (needs a few finished heavy commands on this machine)'
       : `; estimated wait about ${minutes(wait.estimateMs)} (median heavy command ${minutes(wait.medianMs ?? 0)}, last ${wait.samples})`) +
@@ -397,6 +513,7 @@ export function inheritedHeavySlot(directory: string): string | null {
   }
 }
 
+const HEAVY_OPTION = /^--(no-build|cores|max-minutes)(?:=(.*))?$/;
 /** nforge heavy CMD [ARGS...]: run one heavy local command under the machine-wide slot limit. */
 export async function heavyCli(
   args: string[],
@@ -407,8 +524,37 @@ export async function heavyCli(
   // of that name still runs after --.
   if (args.length === 1 && (args[0] === 'status' || args[0] === 'help'))
     args = [args[0] === 'status' ? '--status' : '--help'];
-  const noBuild = args[0] === '--no-build';
-  if (noBuild) args = args.slice(1);
+  let noBuild = false,
+    cores: number | null = null,
+    maxMinutes: number | null = null;
+  // heavy's own options, in any order, before the command (or its --).
+  for (let option; (option = HEAVY_OPTION.exec(args[0] ?? ''));) {
+    const [, name, inline] = option;
+    if (name === 'no-build') {
+      invariant(inline === undefined, 'BAD_ARGUMENT', 'heavy --no-build takes no value.');
+      noBuild = true;
+      args = args.slice(1);
+      continue;
+    }
+    const text = inline ?? args[1];
+    const value = Number(text);
+    args = args.slice(inline === undefined ? 2 : 1);
+    if (name === 'cores') {
+      invariant(
+        text !== undefined && /^[1-9][0-9]*$/.test(text) && value <= availableParallelism(),
+        'BAD_ARGUMENT',
+        `heavy --cores takes a whole number from 1 to ${availableParallelism()} (this machine's cores).`,
+      );
+      cores = value;
+    } else {
+      invariant(
+        text !== undefined && text.trim() !== '' && Number.isFinite(value) && value > 0 && value <= 1440,
+        'BAD_ARGUMENT',
+        'heavy --max-minutes takes minutes above 0, at most 1440.',
+      );
+      maxMinutes = value;
+    }
+  }
   // A leading -- ends heavy's own options, as in most CLIs; everything after it is the command.
   const endOfOptions = args[0] === '--';
   if (endOfOptions) {
@@ -452,7 +598,18 @@ export async function heavyCli(
   }
   if (beforeRun && !(await beforeRun())) return Number(process.exitCode ?? 0);
   // Loaded before a slot is taken, so a failure here can never leave one held.
-  const { commandKind, sampleHold, slotCapEnv } = await loadHold();
+  const { commandKind, sampleHold, slotCapEnv, testWorkersPerSlot } = await loadHold();
+  const machineBound = readClientSettings().localHeavyMaxMinutes;
+  // A bound past the machine's is for long light work only: it must leave most of a slot's share free.
+  invariant(
+    maxMinutes === null ||
+      machineBound === 0 ||
+      maxMinutes <= machineBound ||
+      (cores !== null && cores < testWorkersPerSlot(availableParallelism(), Math.max(1, slots))),
+    'BAD_ARGUMENT',
+    `heavy --max-minutes ${maxMinutes} is past localHeavyMaxMinutes (${machineBound}); that needs --cores below the slot share (${testWorkersPerSlot(availableParallelism(), Math.max(1, slots))}), as for a one-core model check.`,
+  );
+  const { stopLeftovers, stopProcessTree } = await loadStop();
   const inherited = inheritedHeavySlot(heavySlotDirectory());
   const queuedAt = Date.now();
   const slot =
@@ -462,11 +619,15 @@ export async function heavyCli(
           heavySlotDirectory(),
           slotLimit,
           wait => process.stderr.write(waitingMessage(slotLimit(), heavySlotDirectory(), wait)),
-          { command: args[0]!, cwd: process.cwd() },
+          {
+            command: args[0]!,
+            cwd: process.cwd(),
+            admission: await measuredHeavyAdmission(cores),
+          },
         );
   const heldSince = Date.now();
   // Only the slot's own holder bounds the command; a nested command runs inside its parent's bound.
-  const maxMs = slot ? Math.round(readClientSettings().localHeavyMaxMinutes * 60_000) : 0;
+  const maxMs = slot ? Math.round((maxMinutes ?? machineBound) * 60_000) : 0;
   // One compiled-module cache for every test file this command runs (Item dceb1bef): helpers that
   // read FORGE_TEST_MODULE_DIRECTORY reuse content-addressed outputs instead of each file
   // recompiling. Created on first use; an inherited directory belongs to the command that set it.
@@ -475,7 +636,24 @@ export async function heavyCli(
     : join(tmpdir(), `forge-test-modules-${process.pid}-${heldSince.toString(36)}`);
   // Every runner the command (and the core build before it) starts, at any depth, gets the slot's
   // core share (Item 7008ff18) when slots are enabled.
-  const cap = slotCapEnv(process.env, availableParallelism(), slot || inherited ? slots : 0);
+  // --cores N lowers that share to N for every capped runner, slots on or off (an outer, smaller
+  // cap still wins), since the declaration is what earns a long bound.
+  const capped = (name: string, limit: number) => {
+    const outer = Number(process.env[name]);
+    return String(Number.isSafeInteger(outer) && outer > 0 ? Math.min(outer, limit) : limit);
+  };
+  const cap = slotCapEnv(
+    cores === null
+      ? process.env
+      : {
+          ...process.env,
+          FORGE_HEAVY_TEST_CONCURRENCY: capped('FORGE_HEAVY_TEST_CONCURRENCY', cores),
+          GOMAXPROCS: capped('GOMAXPROCS', cores),
+          RAYON_NUM_THREADS: capped('RAYON_NUM_THREADS', cores),
+        },
+    availableParallelism(),
+    slot || inherited || cores !== null ? Math.max(1, slots) : 0,
+  );
   const before = Object.keys(cap.env).map(name => [name, process.env[name]] as const);
   Object.assign(process.env, cap.env);
   let sampler: ReturnType<typeof sampleHold> | undefined;
@@ -494,7 +672,13 @@ export async function heavyCli(
     slot &&
     writeFileSync(
       join(slot, 'holder.json'),
-      JSON.stringify({ cwd: process.cwd(), startedAt: Date.now(), command: basename(args[0]!), maxMs }),
+      JSON.stringify({
+        cwd: process.cwd(),
+        startedAt: Date.now(),
+        command: basename(args[0]!),
+        maxMs,
+        ...(cores === null ? {} : { cores }),
+      }),
     );
   try {
     writeHolder();
@@ -507,8 +691,15 @@ export async function heavyCli(
     }
     return await new Promise<number>((resolve, reject) => {
       const held = slot ?? inherited;
+      // The outermost heavy runs its command in its own process group (Unix), so whatever it starts
+      // stops with it (orphaned `tsc` children of a killed preflight ran 18 min outside heavy,
+      // ff33e9a6); signals to heavy are forwarded below. A nested command stays in its parent's group,
+      // which the parent stops as a whole. A command on a terminal keeps the terminal's session (a new
+      // one could not open /dev/tty to prompt); Ctrl-C there reaches its whole group anyway.
+      const group = !inherited && process.platform !== 'win32' && !isatty(0);
       const child = spawn(args[0]!, args.slice(1), {
         stdio: 'inherit',
+        detached: group,
         env: {
           ...process.env,
           ...(moduleCache ? { FORGE_TEST_MODULE_DIRECTORY: moduleCache } : {}),
@@ -530,8 +721,9 @@ export async function heavyCli(
       let kill: NodeJS.Timeout | undefined,
         timedOut = false;
       const stop = (signal: NodeJS.Signals) => {
-        child.kill(signal);
-        kill ??= setTimeout(() => child.kill('SIGKILL'), grace);
+        if (group) stopProcessTree(child, signal);
+        else child.kill(signal);
+        kill ??= setTimeout(() => (group ? stopProcessTree(child, 'SIGKILL') : child.kill('SIGKILL')), grace);
       };
       const bound =
         maxMs > 0
@@ -550,10 +742,23 @@ export async function heavyCli(
       if (slot && child.pid) sampler = sampleHold(child.pid);
       child.once('error', reject);
       child.once('exit', (code, signal) => {
-        for (const [name, handler] of handlers) process.removeListener(name, handler);
         clearTimeout(bound);
         clearTimeout(kill);
-        resolve(timedOut ? 124 : (code ?? 128 + (signal ? constants.signals[signal] : 0)));
+        kill = undefined;
+        const status = timedOut ? 124 : (code ?? 128 + (signal ? constants.signals[signal] : 0));
+        // Signal handlers stay until the leftovers are gone: a Ctrl-C meanwhile still reaches them.
+        const settle = () => {
+          for (const [name, handler] of handlers) process.removeListener(name, handler);
+          clearTimeout(kill);
+        };
+        if (!group) {
+          settle();
+          resolve(status);
+          return;
+        }
+        stopLeftovers(child)
+          .finally(settle)
+          .then(() => resolve(status), reject);
       });
     });
   } finally {
@@ -564,6 +769,7 @@ export async function heavyCli(
         at: heldSince,
         lane: laneOf(process.cwd()),
         kind: commandKind(args),
+        wait: heldSince - queuedAt,
         ...(sampler?.stop() ?? {}),
       });
   }

@@ -1607,7 +1607,9 @@ function holdHeavySlot(cwd: string, base: NodeJS.ProcessEnv): HeldHeavySlot | nu
     [fileURLToPath(new URL('./preflight-heavy-claim.js', import.meta.url)), String(process.pid), cwd],
     { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
   );
-  let held: { slot: string | null; parent: string | null; slots?: number; waited?: boolean } | undefined;
+  let held:
+    | { slot: string | null; parent: string | null; slots?: number; waited?: boolean; waitedMs?: number }
+    | undefined;
   try {
     held = claim.status === 0 ? JSON.parse(claim.stdout) : undefined;
   } catch {}
@@ -1617,7 +1619,7 @@ function holdHeavySlot(cwd: string, base: NodeJS.ProcessEnv): HeldHeavySlot | nu
   }
   if (!held.parent) return null;
   const since = Date.now();
-  const { slot } = held;
+  const { slot, waitedMs } = held;
   // The build's checker and any nested test runner get the slot's core share (7008ff18); its own
   // test groups already run --test-concurrency=1.
   const cap = slotCapEnv(base, availableParallelism(), held.slots ?? 0);
@@ -1634,7 +1636,13 @@ function holdHeavySlot(cwd: string, base: NodeJS.ProcessEnv): HeldHeavySlot | nu
       rmSync(slot, { recursive: true, force: true });
       // A synchronous run cannot sample its tree; the load when it ends is the one reading.
       const load = process.platform === 'win32' ? null : Math.round(loadavg()[0]! * 10) / 10;
-      recordHold(dirname(slot), Date.now() - since, { at: since, lane: laneOf(cwd), kind, load });
+      recordHold(dirname(slot), Date.now() - since, {
+        at: since,
+        lane: laneOf(cwd),
+        kind,
+        load,
+        ...(typeof waitedMs === 'number' ? { wait: waitedMs } : {}),
+      });
     },
   };
 }

@@ -138,6 +138,8 @@ export type HeavyHold = {
   kind: HeavyKind;
   cpu: number | null;
   load: number | null;
+  /** How long the command queued for its slot (ff33e9a6); absent on older lines. */
+  wait?: number;
 };
 const HISTORY = 'holds.jsonl';
 /** Rolling bound: past maxBytes the file is rewritten with its newest `keep` holds (~110 bytes
@@ -158,6 +160,7 @@ export function recordHold(
     kind: hold.kind ?? 'other',
     cpu: hold.cpu ?? null,
     load: hold.load ?? null,
+    ...(typeof hold.wait === 'number' && hold.wait >= 0 ? { wait: Math.round(hold.wait) } : {}),
   };
   try {
     const path = join(directory, HISTORY);
