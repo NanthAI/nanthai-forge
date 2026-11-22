@@ -203,6 +203,14 @@ A brief or a lead comment on the Issue can override one for that slice.
   reason (the 2026-11-17 wake cut saved a little and cost hours of landing time; incident 5e3c3a3c).
   The landing check also requires a [qualifying proof](#attaching-queue-proof) for every
   changed core queue path (Guard 1, Item d4289a6a).
+- **Cost pins have a byte band.** The pinned Convex baselines in `tests/keep-the-run-scenarios.mjs`
+  (`MEASURED`, `WIRED`) keep calls and document counts exact, and allow stored bytes to move inside a
+  stated band: `WIRED` deltas by 256 B either way, `MEASURED` totals up to 0.25% (at least 64 B) over
+  the pin. Growth of a few bytes in a stored message therefore edits no pinned row, so concurrent
+  Lanes do not conflict on it (Item 168e4ed8). Do not touch a pin while the measurement is inside the
+  band. Past it, the guard names the scenario and the delta, and the change re-pins that row with
+  its reason; a feature-sized move (a new fact on a row, an extra read) always does. Where the band
+  numbers come from is written beside `WIRED_BYTE_BAND` in the file.
 - **Automatic settings.** Forge adapts to each project ([principle 6](../../PRODUCT.md#product-principles)).
   Every new automatic setting declares:
   - its signal, read from the project's own records;

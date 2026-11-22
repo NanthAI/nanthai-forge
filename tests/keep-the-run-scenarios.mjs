@@ -113,6 +113,75 @@ export const MEASURED = {
   },
 };
 
+/** Byte tolerance (Item 168e4ed8, friction e5d08bac). Calls and document counts stay exact; stored bytes
+ * may drift inside a band, so two Lanes that each grow a stored message by a few bytes do not both edit
+ * the same pinned rows and conflict (2026-11-22: receipts 3b12acba and f464dea8 both moved WIRED.red, and
+ * Lanes 5aab97d0 and aff9138d then conflicted; one landing took 3 land runs).
+ *
+ * Where the numbers come from, the history of edits to these rows (the comments above `WIRED` and
+ * `MEASURED`): message and field growth moved a delta by 1, 1, 19, 34, 35, 90, 135 or 180 bytes. Features
+ * that wired a new fact (receipt pins, replay evidence, donor evidence, queue-row read) moved it by 724 to
+ * 4,162 bytes and each carried its own Item. So:
+ * - `WIRED` (keep minus retire, small deltas): a measured delta within 256 bytes of the pin passes, in
+ *   either direction, on read and write bytes. 256 covers every message-growth edit above with margin and
+ *   stays under every feature-sized one, so a feature still re-pins with its reason.
+ * - `MEASURED` (whole-scenario totals of 0.4 to 3.1 MB read): a ceiling of the pin plus 0.25%, never less
+ *   than 64 bytes (about 3 bytes on each of the 1,194 rows the main scenario reads). One-sided: a drop
+ *   never fails. An extra row is an extra document, which stays exact, so the band hides only growth
+ *   of rows already read or written.
+ * The band is measured from the pin, not from the last landing, so drift cannot accumulate: the first
+ * change that moves a number past the band re-pins it, with the reason, as before. A change that edits
+ * these rows without need should not: leave the pin alone while the measurement is inside the band. */
+export const WIRED_BYTE_BAND = 256;
+export const MEASURED_BYTE_BAND = { relative: 0.0025, floor: 64 };
+const measuredBand = pinned =>
+  Math.max(MEASURED_BYTE_BAND.floor, Math.ceil(pinned * MEASURED_BYTE_BAND.relative));
+
+/** The per-metric ceiling a `MEASURED` scenario must stay under. `extraWriteBytes` is the fixture's
+ * feed-commit and alias projection writes, which are added on top of the pinned write total. */
+export const measuredCeiling = (pin, extraWriteBytes = 0) => ({
+  calls: pin.calls,
+  documents: pin.documents,
+  readBytes: pin.readBytes + measuredBand(pin.readBytes),
+  writeBytes: pin.writeBytes + measuredBand(pin.writeBytes) + extraWriteBytes,
+});
+
+/** Problems of one `MEASURED` scenario, empty when it passes. Each names the scenario, the metric and the delta. */
+export function measuredProblems(name, pin, measured, extraWriteBytes = 0) {
+  const limit = measuredCeiling(pin, extraWriteBytes);
+  const problems = [];
+  for (const metric of ['calls', 'documents'])
+    if (measured[metric] > pin[metric])
+      problems.push(
+        `${name}: ${metric} ${measured[metric]} > pinned ${pin[metric]} (${signed(measured[metric] - pin[metric])}; calls and documents have no band)`,
+      );
+  for (const metric of ['readBytes', 'writeBytes']) {
+    const base = pin[metric] + (metric === 'writeBytes' ? extraWriteBytes : 0);
+    const delta = measured[metric] - base;
+    if (measured[metric] > limit[metric])
+      problems.push(
+        `${name}: ${metric} ${measured[metric]} is ${signed(delta)} B over the pin ${base} (band +${limit[metric] - base} B); re-pin MEASURED with the reason`,
+      );
+  }
+  return problems;
+}
+
+/** Problems of one `WIRED` kind: calls exact, bytes within WIRED_BYTE_BAND of the pin either way. */
+export function wiredProblems(kind, pin, delta) {
+  const problems = [];
+  if (delta.calls !== pin.calls)
+    problems.push(
+      `${kind}: calls delta ${delta.calls} != pinned ${pin.calls} (${signed(delta.calls - pin.calls)}; exact)`,
+    );
+  for (const metric of ['readBytes', 'writeBytes'])
+    if (Math.abs(delta[metric] - pin[metric]) > WIRED_BYTE_BAND)
+      problems.push(
+        `${kind}: ${metric} delta ${delta[metric]} is ${signed(delta[metric] - pin[metric])} B from the pin ${pin[metric]} (band +/-${WIRED_BYTE_BAND} B); set WIRED.${kind}.${metric} to the measured delta, with the reason`,
+      );
+  return problems;
+}
+const signed = n => (n >= 0 ? `+${n}` : `${n}`);
+
 /** The wired hold-order write: the kept run's landing row and one forked attempt (bindAdmissionProof's
  * shape), read and written once. Bound: twice the largest measured pair (8,082 B). */
 export const HOLD_ORDER = { calls: 0, readBytes: 16_384, writeBytes: 16_384 };

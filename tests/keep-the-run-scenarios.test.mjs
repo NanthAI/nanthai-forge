@@ -9,11 +9,16 @@ import {
   COMPOSE,
   KEPT_CONVEX,
   MEASURED,
+  MEASURED_BYTE_BAND,
   PROBE_SETTLE,
+  WIRED,
+  WIRED_BYTE_BAND,
   fullListUsd,
   probeOverhead,
   scenarioTable,
+  measuredProblems,
   servingUsd,
+  wiredProblems,
 } from './keep-the-run-scenarios.mjs';
 import { replayKeepTheRun } from './keep-the-run-replay.mjs';
 
@@ -121,5 +126,85 @@ test('fa2c1383 Lane B scenarios: every probe compose and its mutations are price
   assert.equal(
     one({ ...none, first: 1 }, 0.5),
     price(PROBE_SETTLE) + 0.5 * (price(COMPOSE) + price(PROBE_SETTLE)),
+  );
+});
+
+// Item 168e4ed8 (friction e5d08bac): pinned byte baselines no longer make concurrent Lanes conflict.
+// Two Lanes that each grow a stored message by a few bytes both pass on the same pins, so neither edits
+// the pinned rows; growth past the band, or any change in calls or documents, still fails by name.
+const grown = (pin, bytes) => ({
+  ...pin,
+  readBytes: pin.readBytes + bytes.read,
+  writeBytes: pin.writeBytes + bytes.write,
+});
+const SCENARIO = 'global-risk mover, strict';
+
+test('168e4ed8 byte band: two Lanes that each grow a stored message a few bytes pass on the same pins', () => {
+  const pin = MEASURED[SCENARIO];
+  // Lane A: -30 write bytes on red (the 11-22 edit), +34 on acceptance rows; Lane B: +90 read/+90 write.
+  for (const bytes of [
+    { read: 34, write: 34 },
+    { read: 90, write: 90 },
+    { read: 124, write: 124 },
+  ])
+    assert.deepEqual(measuredProblems(SCENARIO, pin, grown(pin, bytes)), []);
+  for (const [kind, pinned] of Object.entries(WIRED)) {
+    const lane = (read, write) => ({
+      ...pinned,
+      readBytes: pinned.readBytes + read,
+      writeBytes: pinned.writeBytes + write,
+    });
+    for (const delta of [lane(0, -30), lane(135, 35), lane(-19, -1), lane(WIRED_BYTE_BAND, -WIRED_BYTE_BAND)])
+      assert.deepEqual(wiredProblems(kind, pinned, delta), [], kind);
+  }
+});
+
+test('168e4ed8 byte band: growth past the band fails naming the scenario and the delta', () => {
+  const pin = MEASURED[SCENARIO];
+  const band = Math.max(MEASURED_BYTE_BAND.floor, Math.ceil(pin.readBytes * MEASURED_BYTE_BAND.relative));
+  assert.deepEqual(measuredProblems(SCENARIO, pin, grown(pin, { read: band, write: 0 })), []);
+  const over = measuredProblems(SCENARIO, pin, grown(pin, { read: band + 1, write: 0 }));
+  assert.equal(over.length, 1);
+  assert.match(
+    over[0],
+    new RegExp(
+      `^${SCENARIO}: readBytes ${pin.readBytes + band + 1} is \\+${band + 1} B over the pin ${pin.readBytes} \\(band \\+${band} B\\)`,
+    ),
+  );
+  // A realistic regression (a whole extra 490-byte row on every one of 60 calls) is far past the band.
+  assert.equal(measuredProblems(SCENARIO, pin, grown(pin, { read: 0, write: 60 * 490 })).length, 1);
+  const wired = WIRED.red;
+  const grew = wiredProblems('red', wired, { ...wired, writeBytes: wired.writeBytes + WIRED_BYTE_BAND + 1 });
+  assert.equal(grew.length, 1);
+  assert.match(
+    grew[0],
+    new RegExp(
+      `^red: writeBytes delta ${wired.writeBytes + WIRED_BYTE_BAND + 1} is \\+${WIRED_BYTE_BAND + 1} B from the pin ${wired.writeBytes}`,
+    ),
+  );
+  // A drop past the band fails too, so the pin ratchets down with the change that earned it.
+  assert.equal(
+    wiredProblems('red', wired, { ...wired, readBytes: wired.readBytes - WIRED_BYTE_BAND - 1 }).length,
+    1,
+  );
+});
+
+test('168e4ed8 byte band: calls and documents have no band', () => {
+  const pin = MEASURED[SCENARIO];
+  assert.match(
+    measuredProblems(SCENARIO, pin, { ...pin, calls: pin.calls + 1 })[0],
+    /^global-risk mover, strict: calls 60 > pinned 59 \(\+1;/,
+  );
+  assert.match(
+    measuredProblems(SCENARIO, pin, { ...pin, documents: pin.documents + 1 })[0],
+    /documents 1195 > pinned 1194 \(\+1;/,
+  );
+  assert.match(
+    wiredProblems('carry', WIRED.carry, { ...WIRED.carry, calls: WIRED.carry.calls + 1 })[0],
+    /^carry: calls delta 6 != pinned 5 \(\+1;/,
+  );
+  assert.match(
+    wiredProblems('red', WIRED.red, { ...WIRED.red, calls: WIRED.red.calls - 1 })[0],
+    /^red: calls delta -18 != pinned -17 \(-1;/,
   );
 });

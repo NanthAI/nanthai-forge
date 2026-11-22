@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Keep the run (Item fa2c1383) cost guard: a mover lands under a running full admission check, in
 // strict and fast, and every landing settles. Ceilings use the deterministic fixture measurements:
-// calls and documents exact, with 64 B of headroom each for read and write bytes. Rows that retire are the
+// calls and documents exact, read and write bytes inside the band of tests/keep-the-run-scenarios.mjs. Rows that retire are the
 // comparison the wiring answers to; the unrelated rows are today's keep paths, the lifecycle a kept
 // run will follow: its pass carries, or, with carry off, a fresh check follows. The red rows are a
 // kept run that fails (today's keep path) against a retired one whose replacement fails. The C1 rows
@@ -13,7 +13,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { synthetic, states } from './hosted-landing-batches-fixture.mjs';
 import { fixture, drain, settle, pendingTasks } from './hosted-stale-check-fixture.mjs';
-import { HOLD_ORDER, MEASURED } from './keep-the-run-scenarios.mjs';
+import { HOLD_ORDER, MEASURED, measuredProblems } from './keep-the-run-scenarios.mjs';
 import { metricAliasProjectionCounts } from './observer-projection-budget.mjs';
 import { storageClock } from './storage-clock.mjs';
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
@@ -25,13 +25,6 @@ test.after(() => {
   }
 });
 
-const byteMargin = 64;
-const ceiling = (measured, feedCommitBytes) => ({
-  calls: measured.calls,
-  documents: measured.documents,
-  readBytes: measured.readBytes + byteMargin,
-  writeBytes: measured.writeBytes + byteMargin + feedCommitBytes,
-});
 const strictRed = 'global-risk mover, strict, red';
 const MOVERS = {
   'global-risk mover': 'package.json',
@@ -157,10 +150,14 @@ async function measureScenario(t, name) {
 for (const [name, baseline] of Object.entries(MEASURED))
   test(`fa2c1383 cost guard: ${name} under a running full check stays within today's measured cost`, async t => {
     const measured = await measureScenario(t, name);
-    for (const [metric, limit] of Object.entries(
-      ceiling(baseline, measured.feedCommitBytes + measured.aliasWriteBytes),
-    ))
-      assert(measured[metric] <= limit, `${metric} ${measured[metric]} > ${limit}`);
+    // Calls and documents are exact ceilings; bytes get the stated band (MEASURED_BYTE_BAND).
+    const problems = measuredProblems(
+      name,
+      baseline,
+      measured,
+      measured.feedCommitBytes + measured.aliasWriteBytes,
+    );
+    assert.deepEqual(problems, [], problems.join('\n'));
   });
 
 test('52e56db7 incident replay: two strict red runs measure identical database bytes', async t => {

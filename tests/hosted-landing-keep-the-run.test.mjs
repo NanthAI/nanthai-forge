@@ -18,7 +18,7 @@ import {
   assertProgressOwners,
 } from './hosted-stale-check-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { WIRED } from './keep-the-run-scenarios.mjs';
+import { WIRED, wiredProblems } from './keep-the-run-scenarios.mjs';
 import { metricAliasProjectionCounts } from './observer-projection-budget.mjs';
 import { storageClock } from './storage-clock.mjs';
 import { armed, assertQueueProgress } from './queue-sim/invariants.mjs';
@@ -746,13 +746,11 @@ for (const [name, options, kind] of [
       writeBytes: keep.writeBytes - keep.aliasWriteBytes - (retire.writeBytes - retire.aliasWriteBytes),
     };
     t.diagnostic(JSON.stringify({ kind, delta }));
-    // Exact, both ways (review 379d19f5 nit 4): a drop fails too, so WIRED and the prices built on it
-    // (keep-the-run-scenarios.mjs) ratchet down with the change that earned it, instead of drifting.
-    assert.deepEqual(
-      delta,
-      WIRED[kind],
-      `${kind}: the keep's Convex delta moved; set WIRED.${kind} to the measured delta, with the reason`,
-    );
+    // Calls exact; bytes within the band of the pin, both ways (review 379d19f5 nit 4): a drop past the
+    // band fails too, so WIRED and the prices built on it (keep-the-run-scenarios.mjs) ratchet down with
+    // the change that earned it. Item 168e4ed8: small stored-byte growth no longer re-pins the row.
+    const problems = wiredProblems(kind, WIRED[kind], delta);
+    assert.deepEqual(problems, [], problems.join('\n'));
   });
 
 /** Incident fa2c1383 replay (regression ladder rung 3): the guards above catch the wiring's own
