@@ -141,7 +141,8 @@
        the offered filters, order, layout and folds are in Tune. */
     .plan .plan-phone { display: inline-flex; flex: none; }
     .plan .plan-tbar :is(.plan-desk, .chip.off) { display: none; }
-    .plan .plan-tbar .find { flex: 1 1 0; }
+    .plan .plan-tbar .find { flex: 1 1 200px; min-width: 200px; }   /* Find keeps its width beside Tune; Group and Save this view wrap to the next row (check 3, d3357f40) */
+    .plan .plan-tbar > .chip:not(.off) { flex: none; }
     .plan .plan-tbar .find .inp { height: var(--ctl-h-touch); }
     .plan .plan-save { min-height: var(--ctl-h-touch); }
     .plan .plan-tbar > .n { flex: 1 1 100%; order: 1; }   /* the board's count, on a line of its own (mock 02-plan-board) */

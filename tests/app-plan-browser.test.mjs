@@ -937,6 +937,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
         Math.abs(findBox.y - tuneBox.y) < 1 && Math.abs(findBox.height - tuneBox.height) < 1,
         'one row, one height',
       );
+      assert.ok(findBox.width >= 200, `Find keeps at least 200px at 390 (was ${findBox.width})`);
       assert.equal(await page.locator('.plan-tbar .find svg').isVisible(), true, 'Find shows its icon');
       // A row: its status on the line under its name, the name keeping the width.
       const row = page.locator('.row', { hasText: 'Recover from a truncated frame' });
