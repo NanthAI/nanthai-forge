@@ -43,7 +43,29 @@ const shared = [
   { kind: 'readers', id: 'ir', label: 'A repository shared with you' },
 ];
 const mode = new URLSearchParams(location.search).get('data') || 'sample';
-const held = ['empty', 'leave-only'].includes(mode) ? none() : mode === 'worst' ? worst : sample;
+const closing = mode.startsWith('close');
+const held = ['empty', 'leave-only'].includes(mode) || closing ? none() : mode === 'worst' ? worst : sample;
+const preview = {
+  handle: 'sample-owner',
+  handles: ['older-' + long, 'sample-owner'],
+  receipts: 2,
+  more: false,
+  passkeys: 1,
+  devices: 0,
+  github: true,
+  blocker: mode === 'close-blocked' ? 'Other people still share things with you. Leave them under "Delete your Forge data" first, then close the account.' : null,
+  closing: mode === 'close-resume' ? '00000000-0000-4000-8000-000000000000' : null,
+};
+const close = closing ? {
+  preview: mode === 'close' ? null : preview,
+  busy: null,
+  error: '',
+  closed: mode === 'close-done',
+  onReview() { document.body.dataset.closeReview = 'yes'; },
+  onCancel() { document.body.dataset.closeCancel = 'yes'; },
+  onClose(handle) { document.body.dataset.closed = handle; },
+  onContinue() { document.body.dataset.closeContinue = 'yes'; },
+} : undefined;
 const owned = held => kinds.flatMap(kind => held[kind].rows.map(r => ({ ...r, kind })));
 const review =
   mode === 'review' ? { owned: owned(sample), shared, incoming: 't' }
@@ -64,7 +86,7 @@ function Page() {
         onDownload={() => {}} onReview={() => {}} onCancel={() => {}}
         onDelete={() => { document.body.dataset.deleted = 'asked'; }} onReconcile={() => {}}
         onRetry={() => { document.body.dataset.retried = 'yes'; }} onStartOver={() => { document.body.dataset.over = 'yes'; }}
-        onContinue={() => {}} />
+        onContinue={() => {}} close={close} />
     </AccountFrame>
   );
 }
@@ -225,7 +247,73 @@ test('your data: holdings, take-out, the before-list behind the typed handle, an
     assert.equal(await page.locator('.group .row').count(), 50);
     await context.close();
   }
-  for (const data of ['sample', 'worst', 'empty', 'review', 'leave-only', 'refused', 'unanswered', 'waiting'])
+  {
+    // Close account: offered only when the account holds nothing; the exact before-list, then the typed handle.
+    const { page, context } = await open(1440, 'light', 'sample');
+    assert.equal(await page.getByRole('heading', { name: 'Close your account' }).count(), 0, 'not offered');
+    await context.close();
+  }
+  {
+    const { page, context } = await open(390, 'dark', 'close');
+    await page.getByRole('button', { name: 'Review closing your account' }).click();
+    assert.equal(await page.evaluate(() => document.body.dataset.closeReview), 'yes');
+    await context.close();
+  }
+  {
+    const { page, context } = await open(1440, 'dark', 'close-review');
+    const main = page.locator('main');
+    assert.match(await main.textContent(), /2 handles freed/);
+    assert.match(await main.textContent(), /2 receipts/);
+    assert.match(await main.textContent(), /1 passkey, 0 devices/);
+    assert.match(await main.textContent(), /This cannot be undone\./);
+    const key = page.getByRole('button', { name: 'Close my account' });
+    assert.equal(await key.isDisabled(), true);
+    const field = page.getByLabel('Type your handle, sample-owner, to close your account');
+    await field.fill('sample-owne');
+    assert.equal(await key.isDisabled(), true);
+    await field.fill('Sample-Owner');
+    await page.keyboard.press('Enter');
+    assert.equal(
+      await page.evaluate(() => document.body.dataset.closed),
+      'sample-owner',
+      'sends the exact handle',
+    );
+    await page.getByRole('button', { name: 'Keep my account' }).click();
+    assert.equal(await page.evaluate(() => document.body.dataset.closeCancel), 'yes');
+    await context.close();
+  }
+  {
+    const { page, context } = await open(390, 'light', 'close-blocked');
+    assert.match(
+      await page.getByRole('alert').textContent(),
+      /Leave them under "Delete your Forge data" first/,
+    );
+    assert.equal(await page.getByRole('button', { name: 'Close my account' }).count(), 0);
+    await context.close();
+  }
+  {
+    // A close that started but did not finish (a reload, or a sign-in while it ran) is continued, never restarted.
+    const { page, context } = await open(1440, 'light', 'close-resume');
+    await page.getByRole('button', { name: 'Continue closing' }).click();
+    assert.equal(await page.evaluate(() => document.body.dataset.closeContinue), 'yes');
+    assert.equal(await page.getByRole('button', { name: 'Close my account' }).count(), 0);
+    await context.close();
+  }
+  for (const data of [
+    'sample',
+    'worst',
+    'empty',
+    'review',
+    'leave-only',
+    'refused',
+    'unanswered',
+    'waiting',
+    'close',
+    'close-review',
+    'close-blocked',
+    'close-resume',
+    'close-done',
+  ])
     for (const width of [1440, 390])
       for (const theme of ['light', 'dark']) {
         const { page, errors, context } = await open(width, theme, data);

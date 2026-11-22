@@ -274,6 +274,13 @@ is enabled; the measured comparison below explains the default.
    can move main first, so the wave recomposes in one pass instead of one change
    after another. It is the same one refusal and recomposition, earlier: no new
    check and no added Convex calls (Issue 7fe54c7c).
+   A Lane run the queue binds after main has already moved, with no older change
+   holding order, no urgent change ready, no other landing reservation and no
+   approved check ahead, starts that recomposition in the write that binds it. It
+   is never shown ready only for publication to refuse it. The attempt ledger is
+   unchanged (`check-binding`, then `main-race`), and so is the carry or recheck
+   that follows. It costs one landing-state write and one finish round trip less
+   (Issue 5b4b5918).
 
 ### Global-risk files
 

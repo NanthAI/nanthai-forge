@@ -75,6 +75,21 @@ later time stays. Those grants stop giving access as soon as the cleanup starts;
 their rows are then deleted in bounded background work, which never changes what
 the cleanup reports.
 
+Closing the account (Your data, once it holds nothing) is person-only too, behind
+the typed handle. Another person's handle is refused, so nobody closes an account
+but its own person. The close refuses with the next step while the account holds
+or is shared anything, or while an earlier deletion runs. Secret grants given to
+the person by the time the close starts stop giving access then, and their rows go
+before the account row. The close then ends every device sign-in, every waiting
+device code and every native browser session. Only after that does it check the
+holdings again. In one transaction it then removes the passkeys, username, current
+handle and account row. If anything is held by then, the account stays whole.
+The native user gets a fresh account key and keeps only a GitHub numeric id (and
+any conflict mark). The next GitHub sign-in therefore starts a new, empty account
+and never acts as the closed key. Old-provider (Clerk) sessions cannot be ended
+from Forge. Until that provider is removed, signing in there again starts a new
+account on the old key.
+
 Selected-project and read-only devices cannot make account-level writes, including
 team changes, project creation, import starts and saved-view writes. The public
 wrapper decides from the credential it already reads. Public actions and

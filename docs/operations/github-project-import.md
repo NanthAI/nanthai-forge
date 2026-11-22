@@ -21,13 +21,24 @@ the start action, one subscription and one final status action.
 
 ## Migration scope
 
-The source import brings the selected commit's source into hosted main. Git history is
-acquired separately; source readiness does not mean that history catch-up has finished.
-Issues, milestones, pull requests, other branch heads, tags, CI configuration outside
-source files and collaborator accounts stay at the origin. Existing source files such
-as CI workflow files are ordinary imported source. Backlog recreation uses the separate
-[source-agnostic planning import](../planning.md#imported-history-attribution), not ongoing
-tracker synchronization or imported pull-request work.
+**Comes across:** the selected commit's source in hosted main, and the full Git history, with the same commit ids.
+History is acquired separately; source readiness does not mean that history catch-up has finished.
+
+**Stays on GitHub:** issues, milestones, pull requests, other branch heads, tags and people (collaborator
+accounts). There is no GitHub issue import (owner decision, 2026-11-22). CI configuration is ordinary imported
+source, so workflow files stay in the repository and keep working with the project's own CI; Forge infers no
+check command and installs no runner for it ([connecting CI](../ux/journeys/13-connecting-ci.md)).
+
+**Issues:** the web import screen, the `nforge import` reply and `--preview` all say this and suggest the next
+step: ask an agent to triage the issues worth keeping and recreate them as Items, through the
+[source-agnostic planning import](../planning.md#recipe-recreate-past-milestones-then-plan-the-next-one). This
+is not ongoing tracker synchronization and brings no pull-request work. The words come from one place,
+`src/migration-ledger.ts`, so the screen, the reply and these docs agree.
+
+**Open pull requests:** they stay on GitHub. Land them on GitHub first (the mirror brings the merge in), or ask
+an agent to recreate the ones that matter as Lanes. A list of them by number and title after the import is not
+built: the existing metadata request reads totals only, and no existing GitHub read lists titles within one
+bounded request without a new stored field and a new read path. Tracked on Item bd24f0a6.
 
 Readers retain an optional `migration` object with origin counts for `issues`,
 `pullRequests`, `branches` and `collaborators`. A `null` count means **not reported**;

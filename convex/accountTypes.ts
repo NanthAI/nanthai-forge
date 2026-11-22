@@ -60,6 +60,15 @@ export const accountItemFields = {
     }),
   ),
 };
+/** A closing account (convex/accountClose.ts): the close operation, when it started (secret grants given to the person
+ * by then stop giving access at once) and the background step that runs next, with its task. */
+export const accountClosing = v.object({
+  operationId: v.string(),
+  at: v.number(),
+  phase: v.union(v.literal('secrets'), v.literal('receipts'), v.literal('signout'), v.literal('finish')),
+  cursor: v.union(v.string(), v.null()),
+  task: v.optional(v.id('_scheduled_functions')),
+});
 export const accountReceipt = v.object({
   operationId: v.string(),
   request: v.string(),

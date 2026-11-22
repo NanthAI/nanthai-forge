@@ -49,7 +49,10 @@ const receipts = f =>
     .sort((a, b) => a.snapshot.revision - b.snapshot.revision);
 // Runners report the selection they ran; a full check reports scope "full".
 const full = JSON.stringify({ scope: 'full', tests: [] });
-async function drive(f, { until = () => false, skip = /MainAudit:start/, ownerReview = false } = {}) {
+async function drive(
+  f,
+  { until = () => false, skip = /MainAudit:start/, ownerReview = false, hold = () => false } = {},
+) {
   const reviewed = new Set();
   for (let tick = 0; !until(f); tick++) {
     if (ownerReview)
@@ -62,7 +65,7 @@ async function drive(f, { until = () => false, skip = /MainAudit:start/, ownerRe
         }
     assert(tick < 900, JSON.stringify(states(f).map(s => s.phase)));
     for (const run of f.runs().filter(run => run.status === 'queued' && run.gate?.mode !== 'audit'))
-      await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+      if (!hold(f, run)) await f.rawChecks.pass(await f.rawChecks.activate(run.id));
     const task = f.pending().find(t => !skip.test(t.name)) ?? null;
     if (!task) break;
     await f.execute(task);
@@ -111,7 +114,7 @@ async function wave(t, options = {}) {
   }
   if (options.landing) options.landing(f);
   for (let i = 0; i < (options.count ?? 2); i++) await f.add(i);
-  await drive(f, { until: options.until, ownerReview: options.ownerReview });
+  await drive(f, { until: options.until, ownerReview: options.ownerReview, hold: options.hold });
   return f;
 }
 const runCount = f => f.runs().length;
@@ -202,6 +205,48 @@ test('Item 5b4b5918: a lone admitted change binds its admission run and is judge
   assert.deepEqual(admitted.replacementCause, { kind: 'check-binding', link: receipts(f)[0].check.runId });
   assert.equal(bound.outcome, 'landed');
   assert.equal(runCount(f), 1, 'no new run');
+});
+
+test('Item 5b4b5918 moved main: a proof bound after main moved recomposes in its binding tick, not after a publish refusal', async t => {
+  // The second admission run passes only once the first change has landed, so its proof binds on a
+  // main that already moved: publication could only refuse it (CHANNEL_CHANGED).
+  let first;
+  const f = await wave(t, {
+    ...disjoint,
+    hold: (fixture, run) => (first ??= run.id) !== run.id && !states(fixture).some(s => s.phase === 'landed'),
+  });
+  assert.deepEqual(
+    states(f).map(s => s.phase),
+    ['landed', 'landed'],
+  );
+  const [, carried] = receipts(f);
+  assert.deepEqual(carried.firstCheck, {
+    landedOn: 'admission-run',
+    mainMoved: true,
+    rule: 'clean-disjoint-v2',
+  });
+  assert.equal(runCount(f), 2, 'the admission run carries: no new run');
+  const state = states(f).find(s => s.id === carried.submissionId);
+  // Submit, admission settles, claim, bind-and-recompose, carry installs, claim, judge, publish.
+  // Judging the bound proof ready first cost a write, and its publish refusal another (9).
+  assert.equal(state.version + 1, 8);
+  // Cost ledger for this wave: the skipped ready write, acceptance preparation and refused publish
+  // were 114 transactions, 1,982 documents read and 804 document writes. Run alone it is 1,820 and
+  // 746; after the earlier tests in this file, 1,824 and 750, so those two are ceilings.
+  const cost = budget(f);
+  assert.equal(cost.transactions, 107);
+  assert(cost.documentsRead <= 1824 && cost.writes <= 750, JSON.stringify(cost));
+  // The ledger is unchanged: the bound attempt is replaced by the main-race carry on the same run.
+  const history = JSON.parse(
+    await f.tx('attempt-history', attemptHistory.read, { projectId: f.projectId, submissionId: state.id }),
+  ).attempts.map(attempt => attempt.replay);
+  assert.deepEqual(
+    history.map(replay => replay.replacementCause?.kind ?? replay.outcome),
+    ['landed', 'main-race', 'check-binding'],
+  );
+  assert.equal(history[1].censorReason, 'CHANNEL_CHANGED');
+  assert.equal(history[1].runId, carried.check.runId, 'the bound attempt keeps its check evidence');
+  assert.equal(history[2].censorReason, 'ATTEMPT_REPLACED');
 });
 
 test('Item 5b4b5918 review: progress the admission run reported while running stays on the bound attempt', async t => {

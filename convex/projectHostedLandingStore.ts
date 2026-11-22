@@ -454,8 +454,11 @@ export async function writeLanding(
     ...(passToLand === null ? {} : { passToLandMinutes: passToLand }),
     ...(proofMainReceiptId === row.proofMainReceiptId ? {} : { proofMainReceiptId }),
     attemptId: state.attemptId,
+    // A retire named for the new attempt itself (a bound proof retried in its binding write) stays.
     pipelineRetiredAttemptId:
-      previous.attemptId === state.attemptId ? row.pipelineRetiredAttemptId : undefined,
+      previous.attemptId === state.attemptId || row.pipelineRetiredAttemptId === state.attemptId
+        ? row.pipelineRetiredAttemptId
+        : undefined,
     runId,
     ...(row.runnerAccounting && runId && runId !== row.runId
       ? { runnerAccounting: bindRunnerAccounting(row.runnerAccounting, runId) }

@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
-import { landingQueue, landingRow, loadLandingAttempt, type LandingRow } from './projectHostedLandingStore';
+import {
+  landingQueue,
+  landingRow,
+  loadLandingAttempt,
+  type LandingRow,
+  type writeLanding,
+} from './projectHostedLandingStore';
+import { loadFinish } from './projectHostedFinishStore';
+import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { holdsLandingOrder } from './projectHostedLandingOrder';
 import { hostedStartMain } from './projectHostedChannels';
 import {
@@ -156,4 +164,81 @@ export async function laneRefusalCohort(
   if (!preQueueCheck(attempt.policy) || !hostedBatching(attempt.policy)) return null;
   const queue = await landingQueue(ctx, { projectId: row.projectId, channel: 'main' });
   return { position: 1, limit: cohortSize(attempt.policy, queue?.checkHistory, true) };
+}
+/** A stale Lane proof bound in this queue tick that nothing holds back at publication: no approved
+ * check owns the turn, no older entry holds order, no urgent entry is Ready and no other landing
+ * reservation is live. Its publication could only refuse it, at once, so the binding tick starts
+ * that retry itself (5b4b5918). Three indexed windows of at most one, one and two rows, usually empty. Anything ahead
+ * keeps the ordinary path, which waits for its turn (or refuses early) before recomposing. */
+async function unheldStaleLaneProof(
+  ctx: MutationCtx,
+  queue: { exactReview?: string } | null,
+  selected: { row: LandingRow; state: HostedLandingState; attempt: HostedLandingAttempt },
+  main: Main,
+  now: number,
+) {
+  const { row, state, attempt } = selected;
+  if (!staleLaneProof(row, state, attempt, main)) return false;
+  if (queue?.exactReview && queue.exactReview !== row.submissionId) return false;
+  const [older] = await ctx.db
+    .query('projectHostedLandingRequests')
+    .withIndex('by_project_and_channel_and_orderLive_and_sequence', q =>
+      q
+        .eq('projectId', row.projectId)
+        .eq('channel', row.channel)
+        .eq('orderLive', true)
+        .lt('sequence', row.sequence),
+    )
+    .take(1);
+  if (older) return false;
+  // Publication gives way to an urgent Ready entry of any age (claimReadyLanding): any one keeps the path.
+  if (row.priority !== 'urgent') {
+    const [urgent] = await ctx.db
+      .query('projectHostedLandingRequests')
+      .withIndex('by_project_and_channel_and_phase_and_priority_and_sequence', q =>
+        q
+          .eq('projectId', row.projectId)
+          .eq('channel', row.channel)
+          .eq('phase', 'ready')
+          .eq('priority', 'urgent'),
+      )
+      .take(1);
+    if (urgent) return false;
+  }
+  const reserved = await ctx.db
+    .query('projectHostedLandingRequests')
+    .withIndex('by_project_and_channel_and_reservedUntil', q =>
+      q.eq('projectId', row.projectId).eq('channel', row.channel).gt('reservedUntil', now),
+    )
+    .take(2);
+  // Any other row in the window keeps the ordinary path, even an ended one: only this row can be
+  // skipped, so the window cannot hide a live holder.
+  return reserved.every(other => other.submissionId === row.submissionId);
+}
+/** The binding tick's refusal (5b4b5918): a proof bound on a moved main that nothing holds back
+ * starts the finish retry publication would start, in the one write that binds it, so it is never
+ * judged ready only to be refused. Same retry, cause (main-race) and cohort wake as that refusal.
+ * False writes nothing: the caller keeps the ordinary path. */
+export async function retryUnheldStaleLaneProof(
+  ctx: MutationCtx,
+  identity: { projectId: LandingRow['projectId']; submissionId: string },
+  queue: { exactReview?: string } | null,
+  selected: { row: LandingRow; state: HostedLandingState; attempt: HostedLandingAttempt },
+  main: Main,
+  now: number,
+  write: NonNullable<Parameters<typeof writeLanding>[6]>,
+) {
+  if (!selected.state.request.finish || !(await unheldStaleLaneProof(ctx, queue, selected, main, now)))
+    return false;
+  const finish = await loadFinish(ctx, identity);
+  if (finish.value.pending) return false;
+  const { row, state } = selected;
+  await reserveFinishRetry(ctx, finish.row, finish.value, undefined, undefined, main, undefined, {
+    landing: row,
+    state,
+    write,
+  });
+  const cohort = await laneRefusalCohort(ctx, { row, state });
+  if (cohort) await wakeAfterLaneRefusal(ctx, identity, cohort);
+  return true;
 }

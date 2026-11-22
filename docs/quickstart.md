@@ -97,8 +97,12 @@ expires, run `nforge login DEPLOYMENT_URL` again and approve the new code.
 This imports the selected committed snapshot, including binary files, executable
 modes and symlink targets. Submodules remain commit pointers. Git LFS files hold
 their object bytes (up to 1 GiB of LFS objects per import by default; see
-[Git LFS files](operations/github-project-import.md#git-lfs-files)). Git history
-is separate. A public upstream produces a public mirror;
+[Git LFS files](operations/github-project-import.md#git-lfs-files)). The full Git
+history comes across too, with the same commit ids. Issues, pull requests, people
+and tags stay on GitHub; CI config stays in the repository and keeps working with the
+project's own CI. To keep issues, ask an agent to triage the ones worth keeping and
+[recreate them as Items](planning.md#recipe-recreate-past-milestones-then-plan-the-next-one).
+See [what comes across](operations/github-project-import.md#migration-scope). A public upstream produces a public mirror;
 a private upstream retains private visibility and needs current GitHub access.
 If the Forge GitHub App is installed for selected repositories only, a private
 repository outside that selection is refused with its name and a link to the

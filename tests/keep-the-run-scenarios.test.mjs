@@ -201,7 +201,7 @@ test('168e4ed8 byte band: calls and documents have no band', () => {
   );
   assert.match(
     wiredProblems('carry', WIRED.carry, { ...WIRED.carry, calls: WIRED.carry.calls + 1 })[0],
-    /^carry: calls delta 6 != pinned 5 \(\+1;/,
+    new RegExp(`^carry: calls delta ${WIRED.carry.calls + 1} != pinned ${WIRED.carry.calls} \\(\\+1;`),
   );
   assert.match(
     wiredProblems('red', WIRED.red, { ...WIRED.red, calls: WIRED.red.calls - 1 })[0],

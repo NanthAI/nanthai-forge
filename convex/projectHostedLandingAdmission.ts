@@ -305,10 +305,12 @@ export async function admissionProof(
   row: LandingRow,
   attempt: HostedLandingAttempt,
   movedMain = false,
+  seen?: { main?: Awaited<ReturnType<typeof hostedStartMain>> },
 ) {
   if (row.admission?.status !== 'passed' || !attempt.candidate.head) return null;
   const { run } = await loadHostedCheck(ctx, { projectId, runId: row.admission.runId });
   const main = await hostedStartMain(ctx, projectId);
+  if (seen) seen.main = main;
   if (
     run.status !== 'passed' ||
     run.request.candidateId !== attempt.candidate.id ||
@@ -367,12 +369,13 @@ export async function loneAdmission(ctx: MutationCtx, claim: LandingClaim, selec
 }
 /** Pre-queue reuse first, once per admission: an admitted change lands on its own
  * Lane run before any cohort forms. On unchanged main that run is exact evidence.
- * On a moved main the bound run is refused at publication (CHANNEL_CHANGED), and
- * the existing finish retry either carries it by the conservative-impact proof
- * or recomposes on current main with a deferred check, which joins a cohort for
- * one combined check. No new run or provider call here. The bound attempt is
- * returned unwritten: the caller judges it in this same queue tick, so its one
- * state write carries both the binding and the verdict (5b4b5918). */
+ * On a moved main (`staleOn`, the main it read) the bound run can only be refused
+ * at publication (CHANNEL_CHANGED), and the existing finish retry either carries
+ * it by the conservative-impact proof or recomposes on current main with a
+ * deferred check, which joins a cohort for one combined check. No new run or
+ * provider call here. The bound attempt is returned unwritten: the caller judges
+ * it in this same queue tick, so its one state write carries both the binding and
+ * the verdict, or, on a moved main, the binding and that retry (5b4b5918). */
 export async function admittedReuseFirst(ctx: MutationCtx, selected: Selected) {
   const { row, attempt } = selected;
   if (
@@ -385,9 +388,16 @@ export async function admittedReuseFirst(ctx: MutationCtx, selected: Selected) {
   const admission = { ...row.admission, reuse: 'tried' as const };
   await ctx.db.patch(row._id, { admission });
   const tried = { ...selected, row: { ...row, admission } };
-  const proof = await admissionProof(ctx, row.projectId, tried.row, attempt, true);
+  const seen: { main?: Awaited<ReturnType<typeof hostedStartMain>> } = {};
+  const proof = await admissionProof(ctx, row.projectId, tried.row, attempt, true, seen);
   if (!proof) return null;
-  return { row: tried.row, ...(await bindAdmissionAttempt(ctx, tried, attempt, proof)) };
+  const main = seen.main!;
+  const moved = main.head !== attempt.main.head || main.receipt.id !== attempt.main.receiptId;
+  return {
+    row: tried.row,
+    ...(await bindAdmissionAttempt(ctx, tried, attempt, proof)),
+    ...(moved ? { staleOn: main } : {}),
+  };
 }
 /** Bind a held admission proof as the exact check of a new attempt pinned to
  * the member's own Candidate; the next queue tick evaluates it like any passed

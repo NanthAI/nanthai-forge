@@ -21,6 +21,7 @@ import {
   writeLanding,
   retainLandingProgress,
   type LandingIdentity,
+  type LandingRow,
 } from './projectHostedLandingStore';
 import { pinLandingAttempt } from './projectHostedLandingPins';
 import { wakeLandingQueue, releaseLandingQueue } from './projectHostedLandingWake';
@@ -93,7 +94,9 @@ async function installCause(
     : { kind: 'unknown', link: 'finish-install:ATTEMPT_REPLACED' };
 }
 /** A main race is not a retry of the old request or a reusable check. Retain a
- * named child before IO, yield with bounded backoff, and resume that child only. */
+ * named child before IO, yield with bounded backoff, and resume that child only.
+ * `bound`: the landing as this transaction already holds it, unwritten (a proof
+ * the queue tick bound on a moved main, 5b4b5918); its one write carries both. */
 export async function reserveFinishRetry(
   ctx: MutationCtx,
   row: Doc<'projectHostedFinishes'>,
@@ -102,10 +105,18 @@ export async function reserveFinishRetry(
   precompose?: NonNullable<HostedFinish['pending']>['precompose'],
   observedMain?: { head: string; receipt: { id: string } },
   replayCause?: ReplayCause,
+  bound?: {
+    landing: LandingRow;
+    state: HostedLandingState;
+    write: NonNullable<Parameters<typeof writeLanding>[6]>;
+  },
 ) {
   invariant(!value.pending, 'WORK_STALE', 'Resume the already pending finish attempt.');
+  invariant(!bound || !precompose, 'WORK_STALE', 'A bound landing retries without a probe.');
   const input = { projectId: row.projectId, submissionId: row.submissionId };
-  const { row: landing, state } = await loadLanding(ctx, input);
+  const { row: landing, state } = bound
+    ? { row: bound.landing, state: bound.state }
+    : await loadLanding(ctx, input);
   const previous = await loadLandingAttempt(ctx, { projectId: row.projectId, attemptId: state.attemptId });
   const main = observedMain ?? (await hostedStartMain(ctx, row.projectId));
   const cached =
@@ -152,7 +163,8 @@ export async function reserveFinishRetry(
             : 'The acceptance evidence needs an exact refresh; main did not change.',
       },
       pending.main,
-      { replacedByAttemptId: pending.id },
+      // A bound landing's check evidence rides its censor: the censor settles the attempt's record.
+      { ...bound?.write.replay, replacedByAttemptId: pending.id },
     );
   const retiringSolo =
     !precompose && !state.batchId && (state.phase === 'checking' || state.phase === 'ready');
@@ -175,6 +187,9 @@ export async function reserveFinishRetry(
         error: null,
       },
       false,
+      true,
+      undefined,
+      bound?.write,
     );
   if (retiringSolo && landing.orderWaited) {
     await wakeLandingOrderWaiters(ctx, landing, true);

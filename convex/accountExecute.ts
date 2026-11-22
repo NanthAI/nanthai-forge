@@ -136,7 +136,12 @@ async function finish(
   });
 }
 /** Leaves one secret grant: the object's policy moves on (so existing use stops) and the grant row goes. */
-async function leaveSecret(ctx: MutationCtx, grant: Doc<'secretGrants'>, actor: string, operationId: string) {
+export async function leaveSecret(
+  ctx: MutationCtx,
+  grant: Doc<'secretGrants'>,
+  actor: string,
+  operationId: string,
+) {
   // Read now, not from the page: several grants on one object move its policy once each.
   const object = await ctx.db.get(grant.secretId);
   if (object && !object.deleting) {

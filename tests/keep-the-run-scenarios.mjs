@@ -275,9 +275,12 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // Item ced8e98f (recheck none): every attempt write stamps the causes on the replay it already
 // writes, adding 251 read/40 write bytes to carry, 375 read/122 write bytes to scoped recheck and
 // moves red by -233 read/-122 write bytes. No call is added.
+// Item 5b4b5918 moved main: a kept proof bound on a moved main with nothing ahead starts its retry in the
+// binding write, so its ready write, acceptance preparation and refused publish go: carry and scoped
+// recheck each 7 fewer calls, about 184 KB fewer reads and 42 KB fewer writes.
 export const WIRED = {
-  carry: { calls: 5, readBytes: 373_355, writeBytes: 57_248 },
-  'scoped-recheck': { calls: 15, readBytes: 511_616, writeBytes: 128_187 },
+  carry: { calls: -2, readBytes: 188_729, writeBytes: 14_836 },
+  'scoped-recheck': { calls: 8, readBytes: 326_875, writeBytes: 85_765 },
   red: { calls: -17, readBytes: -388_303, writeBytes: -145_358 },
 };
 

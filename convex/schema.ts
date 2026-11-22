@@ -67,7 +67,7 @@ import { initiativeWorkTables } from './projectInitiativeWorkFields';
 import { deleteRequestTables } from './projectDeleteRequestFields';
 import { defineSchema, defineTable } from 'convex/server';
 import { feedTables } from './projectFeedFields';
-import { accountFields, accountItemFields } from './accountTypes';
+import { accountClosing, accountFields, accountItemFields } from './accountTypes';
 import { v } from 'convex/values';
 import { authTables } from './authFields';
 import { AGENT_TOOLS } from '../src/types';
@@ -718,10 +718,16 @@ export default defineSchema({
      * before this time stops giving access at once (secretGrantAuthority), before the grants themselves are deleted
      * in the background (accountExecute.leaveSecrets). */
     secretsLeftBefore: v.optional(v.number()),
+    /** Set while the account closes (convex/accountClose.ts): its operation, start time and where the background
+     * removal stands. The row itself goes last. */
+    closing: v.optional(accountClosing),
   })
     .index('by_owner', ['owner'])
     .index('by_handle', ['handle']),
-  accountHandles: defineTable({ owner: v.string(), handle: v.string() }).index('by_handle', ['handle']),
+  accountHandles: defineTable({ owner: v.string(), handle: v.string() })
+    .index('by_handle', ['handle'])
+    // Closing an account releases every handle it ever held (convex/accountClose.ts).
+    .index('by_owner', ['owner']),
   handleOperations: defineTable({ owner: v.string(), operationId: v.string(), handle: v.string() }).index(
     'by_owner_and_operation',
     ['owner', 'operationId'],

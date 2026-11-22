@@ -53,6 +53,7 @@ import {
 } from './projectHostedFinishWake';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { claimFinishPrecompose } from './projectHostedFinishPrecompose';
+import { retryUnheldStaleLaneProof } from './projectHostedLandingEarlyRefusal';
 import { alertExhausted, exhaustLanding, exhaustedReason } from './projectHostedLandingExhaust';
 export type LandingClaim = LandingChannel & {
   owner: string;
@@ -230,6 +231,7 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
   let passedAt: string | null = null;
   let replay: LandingReplay | undefined;
   let bound = false;
+  let staleOn: { head: string; receipt: { id: string } } | undefined;
   try {
     const prepared = await prepareLandingCheck(ctx, claim, { row, state, attempt, queue: held }, now);
     if (prepared === true) return (await loadLanding(ctx, claim)).state;
@@ -237,6 +239,7 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
     if (prepared) {
       ({ row, state, attempt } = prepared);
       bound = true;
+      staleOn = (prepared as { staleOn?: typeof staleOn }).staleOn;
     }
     await hostedWriteProject(ctx, claim.projectId, attempt.actor.id, attempt.authorityEpoch);
     const candidate = await readHostedRecord(ctx, {
@@ -393,12 +396,31 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
     };
   if (phase === 'terminal-failed')
     state.timing = { submittedAt: state.at, ...state.timing, settledAt: new Date(now).toISOString() };
-  const next = { ...state, version: state.version + 1, phase, observation, error };
-  await writeLanding(ctx, row, next, false, true, undefined, {
+  const write = {
     replay,
     ...(passedAt ? { settlement: { passedAt, startedAt: now } } : {}),
     ...(bound ? { freshProgress: true as const } : {}),
-  });
+  };
+  // Bound on a moved main, nothing ahead: publication could only refuse it, so its retry starts in
+  // this write instead of after a ready write and that refusal (5b4b5918).
+  if (
+    phase === 'ready' &&
+    staleOn &&
+    (await retryUnheldStaleLaneProof(
+      ctx,
+      claim,
+      held,
+      { row, state: { ...state, phase, observation, error }, attempt },
+      staleOn,
+      now,
+      write,
+    ))
+  ) {
+    await releaseLandingQueue(ctx, held, now);
+    return (await loadLanding(ctx, claim)).state;
+  }
+  const next = { ...state, version: state.version + 1, phase, observation, error };
+  await writeLanding(ctx, row, next, false, true, undefined, write);
   if (phase === 'terminal-failed') await settleLandingOperation(ctx, next);
   await releaseLandingQueue(ctx, held, now);
   return next;

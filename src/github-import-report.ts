@@ -5,6 +5,7 @@
 // (src/github-import-pages.ts). The web, the CLI and the server use this one wording.
 import { sourceStateLimits } from './source-state-size.js';
 import { lfsImportDefaultBytes, lfsImportMaxBytes } from './github-import-pages.js';
+import { importStaysLine } from './migration-ledger.js';
 
 export type ImportVisibility = 'public' | 'private';
 /** `code` names the existing refusal a warning foresees (SOURCE_STATE_TOO_LARGE); null for a notice. */
@@ -72,5 +73,5 @@ export function importEnvelopeWarnings(files: number | null): ImportWarning[] {
 export function importPreviewLine(preview: ImportPreview) {
   const files = preview.files === null ? 'files' : `${n.format(preview.files)} files`;
   const first = preview.warnings[0];
-  return `${preview.repository} at ${preview.ref} (${preview.commit.slice(0, 7)}): ${files} and the full history come across; ${preview.origin} on GitHub${preview.choices.length > 1 ? ', can import private' : ', imports private'}.${first ? ` ${first.message}` : ''}`;
+  return `${preview.repository} at ${preview.ref} (${preview.commit.slice(0, 7)}): ${files} and the full history come across; ${preview.origin} on GitHub${preview.choices.length > 1 ? ', can import private' : ', imports private'}.${first ? ` ${first.message}` : ''} ${importStaysLine}`;
 }

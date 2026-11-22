@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import { githubMigrationCounts } from '../dist/github-migration-ledger.js';
 import { migrationSummary } from '../dist/migration-ledger.js';
 import { importReport } from '../dist/github-import-cli.js';
+import { importAgentGuide, importStaysLine } from '../dist/migration-ledger.js';
+import { importPreviewLine } from '../dist/github-import-report.js';
+import { readFileSync } from 'node:fs';
 
 test('one aggregate metadata request reports original totals at current and doubled scale, without identities', async t => {
   for (const size of [1000, 2000]) {
@@ -130,4 +133,34 @@ test('CLI migration language names omissions without inventing counts or changin
   assert.equal(report.ref, journal.ref);
   assert.equal(report.commit, status.commit);
   assert.match(report.next, /--resume operation/);
+});
+
+test('Item bd24f0a6: the preview and the import reply both say what stays on GitHub, and the agent guide they link exists', () => {
+  const preview = {
+    repository: 'example/project',
+    origin: 'public',
+    choices: ['public', 'private'],
+    ref: 'main',
+    commit: 'c'.repeat(40),
+    files: 12,
+    bytes: 1000,
+    submodules: 0,
+    attributes: 0,
+    lfs: 'No .gitattributes, so no Git LFS files.',
+    warnings: [],
+  };
+  for (const line of [importPreviewLine(preview), migrationSummary()]) {
+    assert.ok(line.includes(importStaysLine), 'issues, pull requests, people, tags and CI config are named');
+  }
+  assert.doesNotMatch(importStaysLine, /import(ed)? (your )?issues/i, 'no GitHub issue import is promised');
+  const heading = importAgentGuide.split('#')[1];
+  // test-signal: allow a link the web and CLI ship must reach a real heading, not a dead anchor
+  const docs = readFileSync(new URL('../docs/planning.md', import.meta.url), 'utf8');
+  const slugs = [...docs.matchAll(/^#{1,6} (.+)$/gm)].map(match =>
+    match[1]
+      .toLowerCase()
+      .replace(/[^a-z0-9 -]/g, '')
+      .replace(/ /g, '-'),
+  );
+  assert.ok(slugs.includes(heading), `docs/planning.md has the heading behind ${importAgentGuide}`);
 });

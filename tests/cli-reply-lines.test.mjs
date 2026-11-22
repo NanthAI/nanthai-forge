@@ -161,8 +161,11 @@ test('readable import replies distinguish reported zero from unavailable migrati
     lines.join('\n'),
     /Issues 0, pull requests not reported, branch heads 2, collaborators not reported/,
   );
-  assert.match(lines.join('\n'), /Git history is acquired separately/);
-  assert.match(lines.join('\n'), /pull-request work, tags, CI run history and accounts are not imported/);
+  const text = lines.join('\n');
+  assert.match(text, /full Git history is acquired separately/);
+  assert.match(text, /Issues, pull requests, people and tags stay on GitHub/);
+  assert.match(text, /CI config comes with the source and keeps working with your own CI/);
+  assert.match(text, /ask an agent to triage the ones worth keeping and recreate them as Items/);
   assert.deepEqual(report, original);
   assert.equal(cliReplyLines(['import'], { repository: 'example/repo', ready: true }).length, 2);
 });

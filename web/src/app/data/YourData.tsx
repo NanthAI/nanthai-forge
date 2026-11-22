@@ -48,6 +48,7 @@ import {
   type Run,
   type Shared,
 } from './model';
+import { CloseRegion, useCloseAccount, type CloseView } from './CloseAccount';
 import './data.css';
 
 const PAGE = 50;
@@ -87,8 +88,9 @@ function useShown() {
   return shown;
 }
 
-export default function YourData({ handle }: AccountProps) {
+export default function YourData({ handle, leave }: AccountProps) {
   const client = useConvex();
+  const close = useCloseAccount(client, leave);
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -290,6 +292,7 @@ export default function YourData({ handle }: AccountProps) {
           first();
         }}
         onContinue={operationId => void resume(operationId)}
+        close={close}
       />
     </>
   );
@@ -343,6 +346,8 @@ export function YourDataView(props: {
   onRetry: () => void;
   onStartOver: () => void;
   onContinue: (operationId: string) => void;
+  /** The close-account step, offered once the account holds nothing. */
+  close?: CloseView;
 }) {
   const { held, failed, busy } = props;
   if (!held)
@@ -439,6 +444,11 @@ export function YourDataView(props: {
             </Row>
           ))}
         </Region>
+      ) : null}
+      {/* No row shown: a kind whose first page held only deleted records still says "more", so the server's check, on
+          press, decides. */}
+      {props.close && KINDS.every(kind => !held[kind].rows.length) ? (
+        <CloseRegion {...props.close} handle={props.handle} />
       ) : null}
     </div>
   );

@@ -9,6 +9,7 @@ import { useConvex } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import type { ImportPreview, ImportVisibility } from '../../../../src/github-import-report';
+import { importAgentGuide, importAgentLine, importStaysLine } from '../../../../src/migration-ledger';
 import { Key, Region, Row, State } from '../../ds';
 import { useSafeQuery } from '../../safe-query';
 import { hostedError, hostedErrorCode } from '../../snapshot';
@@ -215,6 +216,21 @@ function Choose() {
                 <span className="sub">{preview.lfs}</span>
               </span>
             </Row>
+            <Row cols="minmax(0, 1fr)">
+              <span>
+                Stays on GitHub
+                <span className="sub">{importStaysLine}</span>
+              </span>
+            </Row>
+            <details className="gs-peek">
+              <summary>Your issues</summary>
+              <div className="pad gs-stack">
+                <p className="t2">{importAgentLine}</p>
+                <a className="lk" href={importAgentGuide}>
+                  How an agent does it
+                </a>
+              </div>
+            </details>
             {preview.warnings.map(warning => (
               <Row key={warning.message} cols="auto minmax(0, 1fr)" className="gs-row">
                 <State word="Needs you" state="waiting">
