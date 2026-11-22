@@ -14,6 +14,7 @@ import type { PlaceProps } from '../screens';
 import type { InitiativeDetails } from './batch';
 import type { Reads } from './Bulk';
 import { groupBreakdown, statusOf, type PlanGroup, type PlanView } from './model';
+import { writeQuery } from './query';
 import { breakdownTotal, breakdownWords } from '../progress';
 import type { Put, Settled } from './Plan';
 import { BreakdownWords, COLS, Line, Roll, Status } from './rows';
@@ -196,7 +197,15 @@ export function InitiativePage({
             </ReorderList>
           ) : (
             <div className="quietline">
-              {group.total ? 'No open Items.' : 'Nothing in it yet. Items added here count toward it.'}
+              {group.live ? (
+                <A className="lk" href={at({}) + writeQuery({ initiative: initiative.id, layout: 'tree' })}>
+                  See open Items under their parents in Plan
+                </A>
+              ) : group.total ? (
+                'No open Items.'
+              ) : (
+                'Nothing in it yet. Items added here count toward it.'
+              )}
             </div>
           )}
           <div className={`grp plan-grp${showDone ? '' : ' shut'}`} data-fold="">

@@ -292,9 +292,11 @@ Needs me and Plan show the same project-wide Item counts, including when Plan is
 closed Items, In progress counts Items in progress, and Left counts planned Items and lists proposed Items
 separately. A `+` marks a lower bound.
 
-An Initiative's progress counts its Items and their sub-items, one tick each for done, in progress, open,
-proposed or removed. Plan and the Initiative page use the same breakdown. A narrow Plan group header shows
-each status as a coloured swatch and count so the Initiative title stays readable. Hover or focus a count to
+An Initiative's progress counts each Item under its stored Initiative, with one tick for done, in progress, open,
+proposed or removed. In the tree, a sub-item still sits under its displayed parent. A closed or abandoned Initiative
+that still has live Items shows its settled counts too. Visitors see a lower bound of the visible settled counts
+for those Initiatives. Plan and the Initiative page use the same breakdown. A narrow Plan group header shows each
+status as a coloured swatch and count so the Initiative title stays readable. Hover or focus a count to
 see its status word. There is no typed percentage (`progress`).
 
 ## Public plan

@@ -81,20 +81,32 @@ export function planView(
 ): PlanView {
   const all = parseRows(read).map(row => (orders.has(row.id) ? { ...row, order: orders.get(row.id)! } : row));
   const byId = new Map(all.map(row => [row.id, row]));
-  // Live Initiatives and the live Items; a settled Initiative's live Items show under it too.
   const items = all.filter(row => row.kind === 'issue' && isLive(row));
-  const withItems = new Set(items.map(row => row.initiativeId).filter(Boolean));
-  const shown = all.filter(row => row.kind === 'issue' || isLive(row) || withItems.has(row.id));
+  const initiatives = all.filter(row => row.kind === 'initiative');
+  const known = new Set(initiatives.map(row => row.id));
+  const emptyLive = { open: 0, inProgress: 0, proposed: 0 };
+  const liveByInitiative = new Map<string | null, typeof emptyLive>();
+  // Tree placement can follow a parent in a different Initiative. Counts follow stored membership.
+  for (const row of items) {
+    const id = row.initiativeId || null;
+    const key = id && known.has(id) ? id : null;
+    let counts = liveByInitiative.get(key);
+    if (!counts) liveByInitiative.set(key, (counts = { ...emptyLive }));
+    if (row.status === 'in-progress') counts.inProgress++;
+    else if (row.status === 'proposed') counts.proposed++;
+    else counts.open++;
+  }
+  const shown = [...initiatives.filter(row => isLive(row) || liveByInitiative.has(row.id)), ...items];
   const { next } = nextItem(shown);
   const open = new Set(items.map(row => row.id));
-  const initiatives = new Set(all.filter(row => row.kind === 'initiative').map(row => row.id));
   const settled = new Map(read.settled.map(entry => [entry.initiativeId, entry]));
   const groups: PlanGroup[] = [];
   for (const { initiative, rows } of planOrder(shown)) {
-    const done = initiative ? (settled.get(initiative.id)?.done ?? 0) : 0;
-    const dropped = initiative ? (settled.get(initiative.id)?.dropped ?? 0) : 0;
-    const live = rows.length;
-    if (initiative && !isLive(initiative) && !live) continue;
+    const counts = liveByInitiative.get(initiative?.id ?? null) ?? emptyLive;
+    const live = counts.open + counts.inProgress + counts.proposed;
+    const settledCounts = initiative && settled.get(initiative.id);
+    const done = settledCounts?.done ?? 0;
+    const dropped = settledCounts?.dropped ?? 0;
     const lines: PlanLine[] = [];
     let top = 0;
     rows.forEach(({ row, depth }) => {
@@ -110,7 +122,7 @@ export function planView(
         rank: top,
         next: row.id === next?.id,
         ...(blocker ? { blockedBy: byId.get(blocker.id) } : {}),
-        ...(!initiative && !read.more && row.initiativeId && !initiatives.has(row.initiativeId)
+        ...(!initiative && !read.more && row.initiativeId && !known.has(row.initiativeId)
           ? { shelvedInitiative: true as const }
           : {}),
       });
@@ -119,13 +131,11 @@ export function planView(
       initiative,
       lines,
       live,
-      inProgress: rows.filter(({ row }) => row.status === 'in-progress').length,
-      open: rows.filter(({ row }) => row.status === 'open').length,
-      proposed: rows.filter(({ row }) => row.status === 'proposed').length,
+      ...counts,
       done,
       dropped,
       total: live + done + dropped,
-      atLeast: initiative ? (settled.get(initiative.id)?.atLeast ?? false) : false,
+      atLeast: settledCounts?.atLeast ?? false,
     });
   }
   const count = (status: PlanRow['status']) => items.filter(row => row.status === status).length;

@@ -13,6 +13,10 @@ import { moduleUrl } from './convex-module.mjs';
 
 const read = await import(moduleUrl('../convex/projectPlanView.ts'));
 const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
+const { workRecordWriter, finishWorkRecordWrites } = await import(
+  moduleUrl('../convex/projectWorkRecordWriter.ts')
+);
+const { planningPage } = await import(moduleUrl('../convex/projectPlanningList.ts'));
 const { planView, planSentence, movedRank, movedInitiativeRank, groupBreakdown, captureBody, matches } =
   await import(moduleUrl('../web/src/app/plan/model.ts'));
 const { isShut, toggled, allFolds, readFolds, FOLD_FLIPS } = await import(
@@ -180,6 +184,154 @@ test('the Plan names an eligible sub-item as Next even when the list filters it 
     [parent.id],
   );
   assert.equal(planSentence(filtered).bold, 'The next free Item is Check split bytes.');
+});
+
+test('Plan keeps a sub-item under its displayed parent while counting it under its stored Initiative', () => {
+  const source = item({ kind: 'initiative', title: 'Source' }, 0);
+  const target = item({ kind: 'initiative', status: 'closed', title: 'Target' }, 1);
+  const parent = item({ initiativeId: source.id }, 2);
+  const child = item({ initiativeId: target.id, parentId: parent.id, hidden: true, status: 'proposed' }, 3);
+  const loose = item({ status: 'in-progress' }, 4);
+  const shelved = item({ initiativeId: randomUUID() }, 5);
+  const read = {
+    rows: JSON.stringify([source, target, parent, child, loose, shelved]),
+    more: false,
+    settled: [{ initiativeId: target.id, done: 2, dropped: 1, atLeast: true }],
+    canEdit: true,
+  };
+  const [a, b, none] = planView(read).groups;
+  assert.deepEqual(
+    a.lines.map(line => [line.row.id, line.depth]),
+    [
+      [parent.id, 0],
+      [child.id, 1],
+    ],
+  );
+  assert.deepEqual([a.open, a.proposed, a.total], [1, 0, 1]);
+  assert.equal(b.initiative.id, target.id);
+  assert.deepEqual(b.lines, []);
+  assert.deepEqual([b.proposed, b.done, b.dropped, b.total], [1, 2, 1, 4]);
+  assert.equal(
+    breakdownWords(groupBreakdown(b)),
+    '2+ done · 0 in progress · 0 open · 1 proposed · 1+ removed',
+  );
+  assert.equal(none.live, 2);
+  assert.equal(none.lines.find(line => line.row.id === shelved.id).shelvedInitiative, true);
+
+  const [filteredA, filteredB, filteredNone] = planView(read, parent.title).groups;
+  assert.equal(filteredA.lines.length, 1);
+  assert.equal(filteredB.total, b.total);
+  assert.equal(filteredNone.live, 2);
+
+  const partialView = planView({ ...read, more: true });
+  const [, partial, partialNone] = partialView.groups;
+  assert.equal(partialView.more, true);
+  assert.equal(partial.proposed, 1);
+  assert.equal(breakdownTotal(groupBreakdown(partial)), '4+ Items');
+  assert.equal(
+    breakdownWords(groupBreakdown(partial)),
+    '2+ done · 0 in progress · 0 open · 1 proposed · 1+ removed',
+  );
+  assert.equal(partialNone.live, 2, 'loaded Items stay in the fallback count while coverage is incomplete');
+  assert.equal(partialNone.lines.find(line => line.row.id === shelved.id).shelvedInitiative, undefined);
+});
+
+test('settled Initiative progress matches indexed counts for members and follows public visibility for visitors', async t => {
+  const s = await setup(t);
+  const project = s.tables.hostedProjects.get(s.projectId);
+  const generationId = project.work.generationId;
+  const writer = workRecordWriter(s.ctx);
+  let position = 0;
+  const add = async fields => {
+    const row = item(fields, position);
+    for (const entry of indexedRecord('planningItems', row.id, '', position++, row))
+      await writer.db.insert('projectPlanningRecords', { ...entry, projectId: s.projectId, generationId });
+    return row;
+  };
+  const live = await add({ kind: 'initiative' });
+  const closed = await add({ kind: 'initiative', status: 'closed' });
+  const abandoned = await add({ kind: 'initiative', status: 'abandoned' });
+  const hiddenWork = await add({ kind: 'initiative', status: 'closed' });
+  const shelved = await add({ kind: 'initiative', status: 'archived' });
+  const parent = await add({ initiativeId: live.id });
+  const child = await add({ initiativeId: closed.id, parentId: parent.id, status: 'proposed' });
+  await add({ initiativeId: abandoned.id, status: 'in-progress' });
+  await add({ initiativeId: hiddenWork.id, hidden: true });
+  await add({ initiativeId: shelved.id });
+  for (const initiativeId of [closed.id, abandoned.id, hiddenWork.id]) {
+    await add({ initiativeId, status: 'closed' });
+    await add({ initiativeId, status: 'closed', hidden: true });
+    await add({ initiativeId, status: 'abandoned' });
+    await add({ initiativeId, status: 'archived', was: 'closed' });
+    await add({ initiativeId, status: 'deleted', was: 'abandoned' });
+  }
+  await finishWorkRecordWrites(writer);
+  const request = { projectId: s.projectId };
+  const compact = await read.read._handler(s.ctx, request);
+  await finishReadWriter(s.ctx).db.patch(generationId, { planRowsVersion: undefined });
+  const legacy = await read.read._handler(s.ctx, request);
+  assert.deepEqual(JSON.parse(compact.rows), JSON.parse(legacy.rows));
+  assert.deepEqual(compact.settled, legacy.settled);
+  const model = planView(compact);
+  assert.equal(model.groups.find(group => group.initiative?.id === live.id).lines[1].row.id, child.id);
+  for (const initiative of [live, closed, abandoned, hiddenWork]) {
+    const indexed = await planningPage(s.ctx, project, s.tables.projectWorkGenerations.get(generationId), {
+      planningFilter: { kind: 'issue', initiativeId: initiative.id },
+      counts: true,
+      paginationOpts: { numItems: 1000, cursor: null },
+    });
+    const group = model.groups.find(group => group.initiative?.id === initiative.id);
+    assert.equal(indexed.isDone, true);
+    assert.deepEqual(
+      [group.proposed, group.open, group.inProgress, group.done, group.dropped],
+      ['proposed', 'open', 'in-progress', 'closed', 'abandoned'].map(status => indexed.counts[status]),
+    );
+  }
+  assert.equal(model.groups.find(group => !group.initiative).lines[0].shelvedInitiative, true);
+
+  s.ctx.meta.getTransactionMetrics = async () => ({
+    bytesRead: { remaining: 16 * 1024 * 1024 },
+    documentsRead: { remaining: 3 },
+    databaseQueries: { remaining: 4096 },
+  });
+  const partial = await read.planView(s.ctx, s.projectId);
+  delete s.ctx.meta.getTransactionMetrics;
+  assert.deepEqual(JSON.parse(partial.rows), JSON.parse(legacy.rows));
+  assert.deepEqual(
+    partial.settled.find(group => group.initiativeId === live.id),
+    legacy.settled[0],
+  );
+  assert.deepEqual(
+    partial.settled.find(group => group.initiativeId === closed.id),
+    {
+      initiativeId: closed.id,
+      done: 2,
+      dropped: 0,
+      atLeast: true,
+    },
+  );
+
+  await finishReadWriter(s.ctx).db.patch(s.projectId, { visibility: 'public' });
+  s.caller('stranger');
+  const visitor = await read.read._handler(s.ctx, request);
+  assert.deepEqual(
+    visitor.settled,
+    [live.id, closed.id, abandoned.id].map((initiativeId, index) => ({
+      initiativeId,
+      done: index === 0 ? 0 : 1,
+      dropped: index === 0 ? 0 : 1,
+      atLeast: index !== 0,
+    })),
+  );
+  // Hidden history crossing the shared count window must not change the visitor's coverage signal.
+  for (let i = 0; i < read.PLAN_SETTLED_LIMIT; i++) {
+    const hidden = item({ initiativeId: closed.id, status: 'closed', hidden: true }, position);
+    const root = indexedRecord('planningItems', hidden.id, '', position++, hidden).find(
+      entry => entry.collection === 'planningSearch',
+    );
+    await s.ctx.db.insert('projectPlanningRecords', { ...root, projectId: s.projectId, generationId });
+  }
+  assert.deepEqual((await read.read._handler(s.ctx, request)).settled, visitor.settled);
 });
 
 test('a move takes one rank strictly between its new sibling neighbours', () => {

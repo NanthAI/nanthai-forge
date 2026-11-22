@@ -13,6 +13,7 @@ import { publicWorkPlan, type PublicPlanRoot } from './publicWorkPlan';
 import { publicRow } from './publicListing';
 import { finishReadSourceDb } from './projectFinishReadReader';
 import { digest } from '../src/state/hash';
+import { isLive, type PlanRow } from '../src/planning-model';
 
 type ObjectValue = Record<string, unknown>;
 const REMOVE = Symbol('hidden');
@@ -170,7 +171,6 @@ export async function publicWorkResult(
     }
     return true;
   };
-  const roots = plan.visibleLoaded;
   // A selection of plan work this viewer may not see already ran as an absent Item (publicWorkSelection).
   const membersOnly = project.planVisibility === 'members';
   const visit = async (node: unknown, hint = collection, key = ''): Promise<unknown> => {
@@ -216,8 +216,6 @@ export async function publicWorkResult(
         return REMOVE;
     }
     if (scope.planning && typeof row.itemId === 'string' && !(await allowed(row.itemId))) return REMOVE;
-    if (typeof row.initiativeId === 'string' && key === 'settled' && !(await allowed(row.initiativeId)))
-      return REMOVE;
     const lane =
       scope.lanes &&
       (lanes(ownHint) ||
@@ -301,13 +299,6 @@ export async function publicWorkResult(
           else if (['nextCursor', 'next'].includes(name)) out[name] = null;
         }
     }
-    if (key === 'settled') {
-      const visible = [...(await roots()).values()].filter(
-        item => item.kind === 'issue' && item.initiativeId === row.initiativeId,
-      );
-      out.done = visible.filter(item => item.status === 'closed').length;
-      out.dropped = visible.filter(item => item.status === 'abandoned').length;
-    }
     if (
       out.counts &&
       typeof out.counts === 'object' &&
@@ -344,6 +335,45 @@ export async function publicWorkResult(
     return typeof result === 'string' ? JSON.stringify(filtered) : filtered;
   }
   const out = await visit(result);
+  const reply = object(out);
+  if (scope.planning && typeof reply.rows === 'string' && Array.isArray(reply.settled)) {
+    // A settled Initiative with only hidden live work must not gain a public count entry.
+    const shown = new Map<string, boolean>();
+    for (const row of JSON.parse(reply.rows) as PlanRow[]) {
+      if (!isLive(row)) continue;
+      if (row.kind === 'initiative') shown.set(row.id, true);
+      else if (row.initiativeId && !shown.has(row.initiativeId)) shown.set(row.initiativeId, false);
+    }
+    const counts = new Map<string, { done: number; dropped: number }>();
+    for (const row of (await plan.visibleLoaded()).values()) {
+      if (row.kind !== 'issue' || !row.initiativeId || !shown.has(row.initiativeId)) continue;
+      if (row.status !== 'closed' && row.status !== 'abandoned') continue;
+      let tally = counts.get(row.initiativeId);
+      if (!tally) counts.set(row.initiativeId, (tally = { done: 0, dropped: 0 }));
+      if (row.status === 'closed') tally.done++;
+      else tally.dropped++;
+    }
+    reply.settled = reply.settled.flatMap(entry => {
+      const { initiativeId, done, dropped } = entry as {
+        initiativeId: string;
+        done: number;
+        dropped: number;
+      };
+      if (!shown.has(initiativeId)) return [];
+      const count = counts.get(initiativeId);
+      const visibleDone = count?.done ?? 0;
+      const visibleDropped = count?.dropped ?? 0;
+      return [
+        {
+          ...entry,
+          done: Math.min(done, visibleDone),
+          dropped: Math.min(dropped, visibleDropped),
+          // Visitors get a lower bound for supplemental history regardless of how much private work shares its window.
+          atLeast: !shown.get(initiativeId) || visibleDone > done || visibleDropped > dropped,
+        },
+      ];
+    });
+  }
   return out === REMOVE ? null : out;
 }
 

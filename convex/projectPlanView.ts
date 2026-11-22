@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Plan screen's one read (Items d3357f40, b7a0dff1): the Initiatives, every live Item (proposed, planned, in
-// progress) and, per live Initiative, how many of its Items are done and dropped. All of it comes from the planning
-// compact pages once their generation is covered, with indexed search roots as the legacy fallback. The query
-// never hydrates bodies or writes; one subscription per view re-runs on writes in its ranges. Members see hidden Items with their mark; the public
-// plan is read elsewhere through publicPlanVisible (src/planning-model.ts).
-import { v } from 'convex/values';
+// progress) and settled counts for each live Initiative or settled Initiative with live Items. It uses compact
+// planning pages once the partition is covered and indexed search roots otherwise. It never hydrates bodies or
+// writes. One subscription reruns on writes in its ranges. Members see hidden Items with their mark.
+import { getDocumentSize, v } from 'convex/values';
 import { planQuery as query } from './cliServer';
 import { finishReadReader } from './projectFinishReadReader';
 import type { QueryCtx } from './_generated/server';
@@ -14,12 +13,12 @@ import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { planningRecordTable } from './projectWorkRecordTables';
 import { report } from './errors';
 import { invariant } from '../src/errors';
-import type { PlanRow } from '../src/planning-model';
+import { isLive, type PlanRow } from '../src/planning-model';
 export { planViewRow } from './projectPlanRows';
 import { markPlanPage } from './projectPlanLaneMarks';
 import { decodePlanPage, PLAN_ROWS, planParent, planViewRow } from './projectPlanRows';
 
-/** Live Items read per status, Initiatives read, and settled Items counted per live Initiative; beyond these the
+/** Live Items read per status, Initiatives read, and settled Items counted per shown Initiative; beyond these the
  * screen says "at least". On the dogfood board (2026-11-17) the read is 22 Initiatives, 271 live Items and 31 settled
  * Items of the 4 live Initiatives. */
 export const PLAN_LIVE_LIMIT = 500;
@@ -32,7 +31,7 @@ export const planViewResult = v.object({
   rows: v.string(),
   /** Some live Items or Initiatives were not read. */
   more: v.boolean(),
-  /** Done and dropped Items per live Initiative. */
+  /** Done and dropped Items per live Initiative or settled Initiative with live Items. */
   settled: v.array(
     v.object({ initiativeId: v.string(), done: v.number(), dropped: v.number(), atLeast: v.boolean() }),
   ),
@@ -111,7 +110,6 @@ export async function planView(ctx: QueryCtx, projectId: Id<'hostedProjects'>): 
     return result.sort((a, b) => a.position - b.position).slice(0, limit + 1);
   };
   let more = false;
-  const out: PlanRow[] = [];
   const initiatives = (
     await Promise.all(
       [...liveStatuses, 'closed', 'abandoned'].map(status =>
@@ -120,9 +118,7 @@ export async function planView(ctx: QueryCtx, projectId: Id<'hostedProjects'>): 
     )
   ).flat();
   if (initiatives.length > PLAN_INITIATIVE_LIMIT) more = true;
-  for (const root of initiatives.slice(0, PLAN_INITIATIVE_LIMIT)) {
-    out.push(root);
-  }
+  const loadedInitiatives = initiatives.slice(0, PLAN_INITIATIVE_LIMIT);
   const livePages = await Promise.all(
     liveStatuses.map(async status => {
       const page = await readRows('issue', status, PLAN_LIVE_LIMIT);
@@ -132,27 +128,55 @@ export async function planView(ctx: QueryCtx, projectId: Id<'hostedProjects'>): 
       };
     }),
   );
-  for (const page of livePages) {
-    more ||= page.more;
-    out.push(...page.rows);
-  }
-  const live = out.filter(
-    row => row.kind === 'initiative' && (liveStatuses as readonly string[]).includes(row.status),
-  );
+  more ||= livePages.some(page => page.more);
+  const liveItems = livePages.flatMap(page => page.rows);
+  const withLiveItems = new Set(liveItems.map(row => row.initiativeId));
+  const tally = (initiativeId: string, done: number, dropped: number, partial = false) => ({
+    initiativeId,
+    done: Math.min(done, PLAN_SETTLED_LIMIT),
+    dropped: Math.min(dropped, PLAN_SETTLED_LIMIT),
+    atLeast: partial || done > PLAN_SETTLED_LIMIT || dropped > PLAN_SETTLED_LIMIT,
+  });
   const settled = await Promise.all(
-    live.map(async ({ id }) => {
-      const [done, dropped] = await Promise.all(
-        (['closed', 'abandoned'] as const).map(status => readRows('issue', status, PLAN_SETTLED_LIMIT, id)),
-      );
-      return {
-        initiativeId: id,
-        done: Math.min(done!.length, PLAN_SETTLED_LIMIT),
-        dropped: Math.min(dropped!.length, PLAN_SETTLED_LIMIT),
-        atLeast: done!.length > PLAN_SETTLED_LIMIT || dropped!.length > PLAN_SETTLED_LIMIT,
-      };
+    loadedInitiatives.filter(isLive).map(async ({ id }) => {
+      const [done, dropped] = await Promise.all([
+        readRows('issue', 'closed', PLAN_SETTLED_LIMIT, id),
+        readRows('issue', 'abandoned', PLAN_SETTLED_LIMIT, id),
+      ]);
+      return tally(id, done.length, dropped.length);
     }),
   );
-  return { rows: JSON.stringify(out), more, settled, canEdit };
+  const extra = loadedInitiatives.filter(
+    initiative => !isLive(initiative) && withLiveItems.has(initiative.id),
+  );
+  if (extra.length) {
+    // Supplemental history shares the existing transaction. Leave space for one maximum-sized
+    // document and for the response's visibility work before opening or advancing another range.
+    const metrics = await ctx.meta?.getTransactionMetrics?.();
+    const MiB = 1024 * 1024;
+    let bytes = (metrics?.bytesRead.remaining ?? Infinity) - 2 * MiB;
+    let documents = (metrics?.documentsRead.remaining ?? Infinity) - 1;
+    let queries = (metrics?.databaseQueries.remaining ?? Infinity) - 1;
+    const room = () => bytes > 0 && documents > 0;
+    const count = async (id: string, status: 'closed' | 'abandoned') => {
+      let n = 0;
+      if (!room() || queries <= 0) return { n, partial: true };
+      queries--;
+      for await (const doc of rows('issue', status, id)) {
+        bytes -= getDocumentSize(doc);
+        documents--;
+        n += compact ? decodePlanPage(doc.value, doc.parent).length : Number(parse(doc) !== null);
+        if (n > PLAN_SETTLED_LIMIT || !room()) return { n, partial: true };
+      }
+      return { n, partial: false };
+    };
+    for (const { id } of extra) {
+      const done = await count(id, 'closed');
+      const dropped = await count(id, 'abandoned');
+      settled.push(tally(id, done.n, dropped.n, done.partial || dropped.partial));
+    }
+  }
+  return { rows: JSON.stringify([...loadedInitiatives, ...liveItems]), more, settled, canEdit };
 }
 
 export const read = query({

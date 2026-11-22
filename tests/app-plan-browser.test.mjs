@@ -45,13 +45,14 @@ const uuid = n => '00000000-0000-4000-8000-' + String(n).padStart(12, '0');
 const launch = { id: uuid(1), kind: 'initiative', title: 'Launch the parser', status: 'open', position: 0, version: 3, owner: 'example-builder/amber-fox' };
 const docs = { id: uuid(2), kind: 'initiative', title: 'Documentation and recovery paths', status: 'open', position: 1, version: 1 };
 const largeInitiative = new URLSearchParams(location.search).has('large-initiative');
-const big = { id: uuid(3), kind: 'initiative', title: 'A long running release with a name that will not fit on a phone line', status: 'open', position: 2, version: 1, hidden: largeInitiative };
+const splitInitiative = new URLSearchParams(location.search).has('split-initiative');
+const big = { id: uuid(3), kind: 'initiative', title: 'A long running release with a name that will not fit on a phone line', status: splitInitiative ? 'closed' : 'open', position: 2, version: 1, hidden: largeInitiative };
 const item = (n, fields) => ({ id: uuid(n), kind: 'issue', status: 'open', position: n, version: 2, doneWhen: [1, 3], ...fields });
 const rows = [launch, docs, big,
-  item(17, { title: 'Last open step of the long release', initiativeId: big.id, status: 'in-progress', inLane: true, order: 'a' }),
+  item(17, { title: 'Last open step of the long release', initiativeId: splitInitiative ? docs.id : big.id, status: 'in-progress', inLane: true, order: 'a' }),
   item(10, { title: 'Stream parser: preserve split bytes across reads', initiativeId: launch.id, owner: '@example-builder', type: 'bug', order: 'a' }),
   item(11, { title: 'Recover from a truncated frame without losing the next one', initiativeId: launch.id, status: 'in-progress', owner: '@example-builder/amber-fox', order: 'b' }),
-  item(12, { title: 'Bench the parser against the old reader', initiativeId: launch.id, parentId: uuid(10), order: 'c', doneWhen: null }),
+  item(12, { title: 'Bench the parser against the old reader', initiativeId: splitInitiative ? big.id : launch.id, parentId: uuid(10), order: 'c', doneWhen: null }),
   item(13, { title: 'Name every error the parser can return', initiativeId: launch.id, status: 'proposed', relations: [{ kind: 'depends-on', id: uuid(10) }], order: 'd' }),
   item(14, { title: 'Write the recovery guide', initiativeId: docs.id, owner: '@peer-builder', type: 'docs', order: 'a' }),
   item(15, { title: 'Examples for every reader option, including the rarely used ones', initiativeId: docs.id, order: 'b', doneWhen: [0, 12] }),
@@ -713,6 +714,25 @@ test('plan views and bulk bar: real components keep the view in the address and 
     assert.deepEqual(errors, []);
     await context.close();
   }
+  await t.test(
+    'an Initiative with live work under another parent links to its Items in the Plan tree',
+    async () => {
+      const initiative = '00000000-0000-4000-8000-000000000003';
+      const { page, errors, context } = await open(390, 'dark', `/${initiative}?split-initiative`);
+      await page
+        .getByText(/131 Items in this Initiative · 123 done · 0 in progress · 1 open · 7 removed/)
+        .waitFor();
+      assert.equal(await page.getByText('No open Items.', { exact: true }).count(), 0);
+      await page.getByRole('link', { name: 'See open Items under their parents in Plan' }).click();
+      await page.waitForURL(url => url.searchParams.get('initiative') === initiative);
+      await page
+        .locator('.tt.sub')
+        .getByRole('link', { name: 'Bench the parser against the old reader' })
+        .waitFor();
+      assert.deepEqual(errors, []);
+      await context.close();
+    },
+  );
   const initiativeFixture = await itemWorkFixture({ initiativeId: launchId, details: true, extraOpen: 2 });
   await initiativeFixture.rebuildInitiative();
   for (const width of [1440, 390])
