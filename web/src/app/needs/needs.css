@@ -29,12 +29,20 @@
     .needs-me .fyi-row .ttl { order: 1; flex: 1 1 100%; }
     .needs-me .fyi-row .fyi-links { order: 2; }
   }
-  .loose-ends .loose-tools { display: flex; gap: var(--s-2); flex-wrap: wrap; }
-  .loose-ends .loose-row { align-items: start; }
-  .loose-ends .loose-row input[type="checkbox"] { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--accent); }
-  .loose-ends .loose-row .ttl .who { display: inline-flex; vertical-align: middle; }
-  @media (max-width: 560px) {
-    .loose-ends .loose-row:has(> input) { grid-template-columns: auto minmax(0, 1fr) !important; }
-    .loose-ends .loose-row:has(> input) > .meta, .loose-ends .loose-row:has(> input) > .r { grid-column: 2; justify-self: start; }
+  /* Loose ends page (forge-design-p7/flow/loose-ends.html): what, evidence, age, one action; at phone width the
+     evidence and age wrap under the name and the action stays on the first line. */
+  /* Its own phone grid, like an access row: the shared phone rule would wrap it as flex (ds/parts.css). */
+  .loose-ends .row.le { display: grid; grid-template-columns: 22px minmax(0, 1.5fr) minmax(0, 1.3fr) 176px 150px; }
+  .loose-ends .row.le > .r { justify-self: end; }
+  .loose-ends .le-what { min-width: 0; }
+  .loose-ends .le-what > .meta { margin-top: 2px; }
+  .loose-ends .band .ckhit { margin-left: -6px; margin-right: 0; }
+  /* The key cap's dimming fails contrast on the selection bar's tint in light theme (axe). */
+  .loose-ends .bulk .btn kbd { opacity: 1; }
+  .loose-ends .le-more { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); color: var(--text-2); font-size: var(--t-meta); }
+  @container (max-width: 700px) {
+    .loose-ends .row.le { grid-template-columns: 22px minmax(0, 1fr) auto; row-gap: 2px; }
+    .loose-ends .row.le > :nth-child(3), .loose-ends .row.le > :nth-child(4) { grid-column: 2 / -1; text-align: left; justify-self: start; }
+    .loose-ends .row.le > :nth-child(5) { grid-column: 3; grid-row: 1; }
   }
 }

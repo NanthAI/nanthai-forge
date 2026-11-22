@@ -1,0 +1,306 @@
+// SPDX-License-Identifier: Apache-2.0
+// Needs me › Loose ends (Item fc1831eb) on synthetic data, through the real shell frame and the real route screen, with
+// a Convex client that records every call (window.calls) behind the app's sleeping live reads (window.reads).
+// `?data=demo` has all five groups (checked not reported), with more pages in Lanes nobody holds, leftover projects
+// and dated checks; the second dated page is empty and continues. `?data=worst` has long, right-to-left and CJK text,
+// 25 Lanes with more, and dated coverage still being prepared. `?data=one` is exactly one Lane; `?data=empty` is
+// nothing left; `?data=loading` never answers; `?data=error` fails the live read and a retry answers.
+// `&fail=page` fails the first next-page call; `&fail=stale` refuses the first dated cursor as WORK_STALE; `&fail=set`
+// fails the first set-aside call; `&owner=0` is a member. A Lane set aside or saved meanwhile leaves the live read.
+import { ConvexProvider, type ConvexReactClient } from 'convex/react';
+import { getFunctionName, type FunctionReference } from 'convex/server';
+import { ConvexError } from 'convex/values';
+import { createRoot } from 'react-dom/client';
+import '../../web/src/ds';
+import '../../web/src/app/app.css';
+import { ProjectFrame } from '../../web/src/app/frames';
+import type { LooseEndsRead } from '../../web/src/app/needs/loose-ends';
+import { createLiveReads } from '../../web/src/live-reads';
+
+const params = new URLSearchParams(location.search);
+const data = params.get('data') ?? 'demo';
+const fail = params.get('fail');
+document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
+const NOW = Date.UTC(2026, 10, 22, 10, 2);
+const ago = (minutes: number) => NOW - minutes * 60_000;
+const day = 24 * 60;
+const LONG = 'bartholomew-fitzgerald';
+const LONG_AGENT = 'incandescent-mantis-shrimp';
+const lane = (n: number, title: string, minutes: number, extra = {}) => ({
+  laneId: `5d1c7a0e-0000-4000-8000-${String(n).padStart(12, '0')}`,
+  intentId: `5d1c7a0e-0000-4000-8001-${String(n).padStart(12, '0')}`,
+  title,
+  actor: 'sample-one',
+  agent: 'quiet-otter',
+  paths: 2,
+  at: ago(minutes),
+  ...extra,
+});
+const project = (n: number, name: string, days: number | null, role = 'owner') => ({
+  projectId: `p${n}`,
+  name,
+  role,
+  lastLandingAt: days === null ? null : ago(days * day),
+  reason: days === null ? 'No landing recorded since creation' : 'No landing in the past 30 days',
+});
+const dated = (n: number, text: string, date: string, reason: string, title = 'v3 release') => ({
+  selection: { itemId: `0e6c1f2a-0000-4000-8000-${String(n).padStart(12, '0')}`, expectedVersion: 9 },
+  title,
+  date,
+  line: 3,
+  text,
+  reason,
+});
+const checked = {
+  reported: false as const,
+  why: 'A passed check that nobody asked to land is not recorded per Lane yet.',
+};
+const none = { reported: true as const, rows: [], continueCursor: null };
+
+function first(): LooseEndsRead {
+  const setAside = params.get('owner') === '0' ? null : { authorityEpoch: 1 };
+  if (data === 'empty')
+    return { at: NOW, setAside, groups: { idle: none, stopped: none, checked, projects: none, dated: none } };
+  if (data === 'one')
+    return {
+      at: NOW,
+      setAside,
+      groups: {
+        idle: { reported: true, rows: [lane(1, 'Fix flaky retry timer', 6 * day)], continueCursor: null },
+        stopped: none,
+        checked,
+        projects: none,
+        dated: none,
+      },
+    };
+  if (data === 'worst')
+    return {
+      at: NOW,
+      setAside,
+      groups: {
+        idle: {
+          reported: true,
+          continueCursor: 'idle-p2',
+          rows: [
+            lane(1, 'ストリームパーサー：チャンク境界で分割されたUTF-8シーケンスを処理する', 330 * day, {
+              actor: LONG,
+              agent: LONG_AGENT,
+              paths: 12_840,
+            }),
+            lane(2, 'x', 2 * day, { actor: 'jo', agent: 'ox', paths: 1 }),
+            lane(3, '', 3 * day, { paths: 0 }),
+            ...Array.from({ length: 22 }, (_, i) =>
+              lane(10 + i, `Sample Lane ${i + 4}`, (4 + i) * day, i % 2 ? {} : { actor: LONG }),
+            ),
+          ],
+        },
+        stopped: {
+          reported: true,
+          continueCursor: null,
+          rows: [
+            lane(40, 'Benachrichtigungseinstellungen für Übersetzungsaufträge', 3 * day, {
+              actor: LONG,
+              agent: LONG_AGENT,
+            }),
+          ],
+        },
+        checked,
+        projects: {
+          reported: true,
+          continueCursor: 'projects-p2',
+          rows: [
+            project(
+              1,
+              'tidepool-benchmark-streaming-backpressure-integration-fixtures-zoo-n10-rerun-after-queue-fix-2',
+              400,
+            ),
+            project(2, 'x', null),
+            project(3, 'مشروع-اختبار-٣', 31, 'write'),
+          ],
+        },
+        dated: {
+          reported: true,
+          why: 'The Plan search index is still being prepared. Dated checks may be incomplete.',
+          continueCursor: null,
+          rows: [
+            dated(
+              1,
+              'تحديث مكتبة الاختبار لدعم البث المتقطع في المحولات الجديدة قبل إصدار النسخة الثالثة',
+              '2026-11-06',
+              'Date passed',
+              'Revert "Revert "Stream parser: handle split UTF-8 sequences across chunk boundaries""',
+            ),
+            dated(2, 'x', '2027-01-01', 'Upcoming date'),
+          ],
+        },
+        active: {
+          reported: true,
+          rows: [lane(50, 'Compare and restore Item versions', 108, { heldBy: 'Landing queue' })],
+        },
+      },
+    };
+  return {
+    at: NOW,
+    setAside,
+    groups: {
+      idle: {
+        reported: true,
+        continueCursor: 'idle-p2',
+        rows: [
+          lane(1, 'Fix flaky retry timer', 6 * day, { paths: 2 }),
+          lane(2, 'Try streaming decoder', 3 * day, { actor: 'mara', agent: 'salt-wren', paths: 7 }),
+          lane(3, 'Docs: typo sweep', 3 * day - 60, { actor: 'mara', agent: 'still-heron', paths: 1 }),
+        ],
+      },
+      stopped: {
+        reported: true,
+        continueCursor: null,
+        rows: [lane(4, 'Docs: migration guide v3', 180, { actor: 'jun', agent: 'copper-moth', paths: 3 })],
+      },
+      checked,
+      projects: {
+        reported: true,
+        continueCursor: 'projects-p2',
+        rows: [project(1, 'mara-scratch', 41), project(2, 'tidepool-import-test', null)],
+      },
+      dated: {
+        reported: true,
+        continueCursor: 'dated-p2',
+        rows: [
+          dated(1, 'Run the benchmark again after v3 ships', '2026-12-01', 'Upcoming date'),
+          dated(2, 'Re-check the mirror lag', '2026-11-20', 'Date passed', 'Mirror health'),
+        ],
+      },
+    },
+  };
+}
+
+/** The next page for a cursor, as projectLooseEnds:read answers it. */
+function next(cursor: string): LooseEndsRead {
+  if (cursor === 'idle-p2')
+    return {
+      at: NOW,
+      setAside: { authorityEpoch: 1 },
+      groups: {
+        idle: { reported: true, continueCursor: null, rows: [lane(60, 'Older experiment', 20 * day)] },
+        stopped: none,
+      },
+    };
+  if (cursor === 'projects-p2')
+    return {
+      at: NOW,
+      groups: {
+        projects: { reported: true, continueCursor: null, rows: [project(9, 'tidepool-docs-old', 30)] },
+      },
+    };
+  if (cursor === 'dated-p2')
+    return { at: NOW, groups: { dated: { reported: true, rows: [], continueCursor: 'dated-p3' } } };
+  return {
+    at: NOW,
+    groups: {
+      dated: {
+        reported: true,
+        continueCursor: null,
+        rows: [dated(3, 'Remove the legacy fallback', '2026-12-15', 'Upcoming date', 'Loose ends')],
+      },
+    },
+  };
+}
+
+const calls: string[] = [];
+let pageFailures = fail === 'page' ? 1 : 0;
+let setFailures = fail === 'set' ? 1 : 0;
+let subscriptions = 0;
+let staleSeen = false;
+/** Lanes the live read no longer lists: set aside, or saved meanwhile (no longer idle). */
+const gone = new Set<string>();
+const listeners = new Set<() => void>();
+const name = (query: FunctionReference<'query' | 'mutation'>) => getFunctionName(query);
+const live = () => {
+  const read = first();
+  const idle = read.groups.idle;
+  if (idle?.reported) idle.rows = idle.rows.filter(row => !gone.has(row.laneId));
+  return JSON.stringify(read);
+};
+const fake = {
+  watchQuery(query: FunctionReference<'query'>, args: Record<string, unknown>) {
+    const { projectId: _, ...rest } = args;
+    return {
+      localQueryResult: () => {
+        if (data === 'loading') return undefined;
+        // The failed read answers once the page subscribes again (its Try again).
+        if (data === 'error' && subscriptions < 2) throw new Error('Synthetic read failure');
+        return live();
+      },
+      onUpdate: (listener: () => void) => {
+        subscriptions++;
+        listeners.add(listener);
+        calls.push(`subscribe ${name(query)} ${JSON.stringify(rest)}`);
+        // The fresh subscription's answer arrives from the server.
+        if (data === 'error' && subscriptions === 2) queueMicrotask(listener);
+        return () => {
+          listeners.delete(listener);
+          calls.push(`unsubscribe ${name(query)}`);
+        };
+      },
+    };
+  },
+  async query(query: FunctionReference<'query'>, args: { cursor?: string; details?: true }) {
+    calls.push(`query ${name(query)} ${args.cursor ?? (args.details ? 'details' : '')}`);
+    if (args.cursor?.startsWith('dated') && fail === 'stale' && !staleSeen) {
+      staleSeen = true;
+      throw new ConvexError({
+        code: 'WORK_STALE',
+        message: 'The Plan changed. Start a new Loose ends read.',
+      });
+    }
+    if (args.cursor && pageFailures-- > 0) throw new Error('Synthetic page failure');
+    return JSON.stringify(args.cursor ? next(args.cursor) : first());
+  },
+  async mutation(mutation: FunctionReference<'mutation'>, args: { abandon: string[] }) {
+    calls.push(`mutation ${name(mutation)} ${JSON.stringify(args.abandon)}`);
+    if (setFailures-- > 0) throw new Error('Synthetic set-aside failure');
+    // Lane 2 gained a save while the reader was choosing. Both leave the live list, which re-runs at once.
+    for (const laneId of args.abandon) gone.add(laneId);
+    queueMicrotask(() => listeners.forEach(listener => listener()));
+    return JSON.stringify({
+      results: args.abandon.map(laneId => ({
+        laneId,
+        result: laneId.endsWith('000000000002') ? 'not-dormant' : 'abandoned',
+      })),
+    });
+  },
+};
+const reads = createLiveReads();
+Object.assign(window, { calls, reads });
+const client = reads.client(fake) as unknown as ConvexReactClient;
+const route = {
+  frame: 'project' as const,
+  handle: 'sample-one',
+  project: 'tidepool',
+  place: 'needs' as const,
+  section: 'loose-ends',
+  rest: '',
+};
+const { default: LooseEnds } = await import('../../web/src/app/needs/LooseEnds');
+
+createRoot(document.getElementById('root')!).render(
+  <ProjectFrame
+    route={route}
+    name="tidepool"
+    feed={undefined}
+    needs={{ n: 0, atLeast: false }}
+    projects={null}
+    controls={{ onPalette: () => {}, onKeys: () => {}, viewerHandle: 'sample-one', onPicker: () => {} }}
+  >
+    <ConvexProvider client={client}>
+      <LooseEnds
+        route={route}
+        projectId={'fixture-project' as never}
+        projectName="tidepool"
+        feed={undefined}
+        viewerHandle="sample-one"
+      />
+    </ConvexProvider>
+  </ProjectFrame>,
+);

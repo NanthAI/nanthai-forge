@@ -14,7 +14,9 @@ import { meterReads } from './hosted-read-set.mjs';
 const { digest } = await import(moduleUrl('../src/state/hash.ts'));
 
 const loose = await import(moduleUrl('../convex/projectLooseEnds.ts'));
-const { looseEndsView, setAsideWord } = await import(moduleUrl('../web/src/app/needs/loose-ends.ts'));
+const { looseEndsView, looseEndsScreen, mergePage, setAsideWord } = await import(
+  moduleUrl('../web/src/app/needs/loose-ends.ts')
+);
 const { liveLanes } = await import('../dist/hosted-live-lanes.js');
 const { hostedAgentCli } = await import('../dist/hosted-agent-cli.js');
 const { recordLane } = await import('../dist/lane-registry.js');
@@ -98,9 +100,13 @@ test('one read lists dormant and quiet Lanes oldest first and names the groups i
   }
   assert.equal(typeof result.setAside.authorityEpoch, 'number', 'the owner may set Lanes aside');
   const view = looseEndsView(result, result.at);
-  assert.equal(view.listed, 3);
-  assert.match(view.sentence.rest, /Nothing here is deleted\. 3 of 5 groups are not reported yet/);
   assert.equal(view.groups[0].rows[0].who, 'owner/quiet-otter');
+  const screen = looseEndsScreen(result, {}, result.at);
+  assert.equal(screen.total, 3);
+  assert.match(
+    screen.sentence.rest,
+    /nothing here is deleted\. Checked, never landed, Leftover projects and Waiting for a date are not reported yet/,
+  );
 });
 
 test('an agent lists dated checks and inactive projects in bounded pages without exposing revoked projects', async t => {
@@ -293,6 +299,300 @@ test('an agent lists dated checks and inactive projects in bounded pages without
     next.rows.map(row => row.selection.itemId),
     ['dated'],
   );
+});
+
+/** The Loose ends page's data at `scale`: 26 × scale of the reader's projects with no landing, and as many open Issues
+ * with a dated Done-when line, over the four-Lane fixture. `ready: false` leaves the Plan search index on its old
+ * version, so dated coverage is incomplete. */
+async function pageFixture(t, scale, { ready = true } = {}) {
+  const { HOSTED_WORK_INDEX_FORMAT } = await import(moduleUrl('../src/work-hosted-summary.ts'));
+  const { planningSearchEntries } = await import(moduleUrl('../src/planning-search.ts'));
+  const now = 2_000_000_000_000;
+  t.mock.method(Date, 'now', () => now);
+  const s = fixture(); // Lane times are relative to the mocked clock
+  const work = {
+    generationId: 'dates',
+    backupId: 'backup',
+    operationId: 'work',
+    initialRevision: 0,
+    revision: 1,
+  };
+  s.tables.hostedProjects.set('project', projectRow({ _id: 'project', _creationTime: now - 60 * day, work }));
+  s.tables.projectWorkGenerations.set('dates', {
+    _id: 'dates',
+    _creationTime: 1,
+    format: HOSTED_WORK_INDEX_FORMAT,
+    status: 'ready',
+    planningSearchVersion: ready ? 2 : 1,
+    projectId: 'project',
+    backupId: 'backup',
+  });
+  const n = 26 * scale;
+  for (let i = 1; i <= n; i++) {
+    const id = `owned-${String(i).padStart(3, '0')}`;
+    s.tables.hostedProjects.set(id, projectRow({ _id: id, _creationTime: now - 60 * day }));
+    s.tables.accountProjectOrder.set(`order-${id}`, {
+      _id: `order-${id}`,
+      _creationTime: i,
+      projectId: id,
+      person: 'owner',
+      activityHour: i,
+    });
+    const [entry] = planningSearchEntries(
+      {
+        id,
+        kind: 'issue',
+        status: 'open',
+        title: `Release ${i}`,
+        // The mocked clock is 18 May 2033: line 1 is due later the same year, every fourth one has passed.
+        body: `- [ ] @due ${i % 4 ? `2033-06-0${(i % 9) + 1}` : '2033-05-01'} Run the benchmark again`,
+        version: 2,
+      },
+      i,
+    );
+    s.tables.projectPlanningRecords.set(id, {
+      ...entry,
+      _id: id,
+      _creationTime: i,
+      projectId: 'project',
+      generationId: 'dates',
+    });
+  }
+  return { s, now };
+}
+
+test('fc1831eb page: the details read renders the five groups, dated Item links and leftover projects from their own row shapes', async t => {
+  const { s, now } = await pageFixture(t, 1);
+  const first = await read(s, 'owner', { details: true });
+  const screen = looseEndsScreen(first, {}, first.at);
+  assert.deepEqual(
+    screen.sections.map(section => section.key),
+    ['idle', 'checked', 'stopped', 'projects', 'dated'],
+    'the approved order; nothing is held meanwhile in this fixture',
+  );
+  const byKey = Object.fromEntries(screen.sections.map(section => [section.key, section]));
+  assert.equal(
+    byKey.checked.reported,
+    false,
+    'checked-never-landed stays unreported until its record exists',
+  );
+  assert.match(byKey.checked.why, /not recorded per Lane/);
+  assert.equal(byKey.idle.pickable, true, 'the owner may set Lanes nobody holds aside');
+  assert.deepEqual(
+    byKey.idle.rows.map(row => [row.title, row.age]),
+    [
+      ['Try streaming decoder', '9 days'],
+      ['Fix flaky retry timer', '3 days'],
+    ],
+  );
+  assert.equal(byKey.stopped.rows[0].age, 'not seen for 3 h');
+  const dated = byKey.dated.rows[0];
+  assert.deepEqual(
+    {
+      title: dated.title,
+      itemId: dated.itemId,
+      laneId: dated.laneId,
+      age: dated.age,
+      evidence: dated.evidence,
+    },
+    {
+      title: 'Run the benchmark again',
+      itemId: 'owned-001',
+      laneId: null,
+      age: 'due 2 June',
+      evidence: 'Done-when line 1 on the Item “Release 1”',
+    },
+    'a dated row is the Done-when line, linked to its Item, never a Lane',
+  );
+  assert.equal(byKey.dated.rows[3].age, 'was due 1 May', 'a passed date says so');
+  const project = byKey.projects.rows[0];
+  assert.deepEqual(
+    {
+      title: project.title,
+      mono: project.mono,
+      laneId: project.laneId,
+      itemId: project.itemId,
+      age: project.age,
+    },
+    { title: 'Synthetic project', mono: true, laneId: null, itemId: null, age: 'never landed' },
+  );
+  assert.match(project.evidence, /No landing recorded since creation; you are its owner/);
+  assert.equal(
+    byKey.projects.pickable || byKey.dated.pickable || byKey.stopped.pickable,
+    false,
+    'only Lanes are set aside here',
+  );
+  assert.ok(byKey.projects.cursor && byKey.dated.cursor, 'more than one page in both account-wide groups');
+  assert.equal(byKey.dated.why, null, 'complete dated coverage says nothing extra');
+  assert.match(screen.sentence.bold, /^\d+ or more loose ends\.$/);
+  assert.match(
+    screen.sentence.rest,
+    /The oldest is a Lane with no save for 9 days\. .*Checked, never landed is not reported yet; it says why\./,
+  );
+  assert.equal(now, first.at);
+});
+
+test('fc1831eb page: a group continues with its own cursor, one read per page; an empty page keeps its cursor and repeats nothing', async t => {
+  const { s } = await pageFixture(t, 1);
+  let calls = 0;
+  const call = async args => (calls++, read(s, 'owner', args));
+  const first = await call({ details: true });
+  let pages = {};
+  let screen = looseEndsScreen(first, pages, first.at);
+  const dated = () => screen.sections.find(section => section.key === 'dated');
+  const shownBefore = dated().rows.length;
+  const reply = await call({ cursor: dated().cursor });
+  assert.deepEqual(Object.keys(reply.groups), ['dated'], 'a page reads only the group asked for');
+  pages = mergePage(pages, 'dated', reply);
+  screen = looseEndsScreen(first, pages, first.at);
+  assert.equal(dated().rows.length, shownBefore + reply.groups.dated.rows.length);
+  assert.equal(dated().cursor, null, 'the last page clears the cursor');
+  const projectsBefore = screen.sections.find(section => section.key === 'projects').cursor;
+  assert.ok(projectsBefore, 'paging one group leaves the other group’s cursor alone');
+  assert.equal(calls, 2, 'one call at entry and one per requested page');
+
+  // An empty continued page (25 open Issues without a date) keeps the cursor and repeats no row.
+  const emptyPage = { at: first.at, groups: { dated: { reported: true, rows: [], continueCursor: 'next' } } };
+  const kept = mergePage(pages, 'dated', emptyPage);
+  assert.equal(
+    looseEndsScreen(first, kept, first.at).sections.find(section => section.key === 'dated').cursor,
+    'next',
+  );
+  const again = mergePage(kept, 'dated', reply);
+  assert.equal(
+    looseEndsScreen(first, again, first.at).sections.find(section => section.key === 'dated').rows.length,
+    dated().rows.length,
+    'a page read twice repeats no row',
+  );
+
+  // A Lane page merges only its own group; the Lanes it found held meanwhile join Still active.
+  const lanePage = {
+    at: first.at,
+    groups: {
+      idle: { reported: true, rows: [], more: false, continueCursor: null },
+      stopped: { reported: true, rows: [], more: false, continueCursor: null },
+      active: {
+        reported: true,
+        more: false,
+        rows: [{ ...first.groups.idle.rows[0], laneId: 'held', heldBy: 'Landing queue' }],
+      },
+    },
+  };
+  const withLanes = mergePage(pages, 'idle', lanePage);
+  assert.equal(withLanes.stopped, undefined, 'the stopped cursor is untouched by an idle page');
+  assert.deepEqual(
+    withLanes.active.rows.map(row => row.laneId),
+    ['held'],
+  );
+});
+
+test('fc1831eb page: incomplete dated coverage is said on the group, not hidden', async t => {
+  const { s } = await pageFixture(t, 1, { ready: false });
+  const first = await read(s, 'owner', { details: true });
+  const dated = looseEndsScreen(first, {}, first.at).sections.find(section => section.key === 'dated');
+  assert.equal(dated.reported, true);
+  assert.match(dated.why, /may be incomplete/);
+});
+
+test('fc1831eb page: a continued Lane the live read now lists elsewhere shows once; held rows form Still active; empty pages claim nothing', () => {
+  const at = 2_000_000_000_000;
+  const lane = (n, extra = {}) => ({
+    laneId: `l${n}`,
+    intentId: `i${n}`,
+    title: `Lane ${n}`,
+    actor: 'sample-one',
+    agent: 'quiet-otter',
+    paths: 1,
+    at: at - n * day,
+    ...extra,
+  });
+  const none = { reported: true, rows: [], continueCursor: null };
+  const live = {
+    at,
+    setAside: { authorityEpoch: 1 },
+    groups: {
+      idle: { reported: true, rows: [lane(1)], continueCursor: 'idle-p2' },
+      stopped: none,
+      projects: none,
+      dated: none,
+      active: { reported: true, rows: [lane(2, { heldBy: 'Landing queue' })] },
+    },
+  };
+  // The next idle page still lists Lane 2 (live now holds it) and Lane 3, which that page found held.
+  const pages = mergePage({}, 'idle', {
+    at,
+    groups: {
+      idle: { reported: true, rows: [lane(2), lane(3), lane(4)], continueCursor: null },
+      active: { reported: true, rows: [lane(3, { heldBy: 'Landing queue' })] },
+    },
+  });
+  const screen = looseEndsScreen(live, pages, at);
+  const keys = key => screen.sections.find(section => section.key === key).rows.map(row => row.laneId);
+  assert.deepEqual(keys('idle'), ['l1', 'l4']);
+  assert.deepEqual(keys('active'), ['l2', 'l3']);
+  // Rows held only on a continued page still show when the live read held none.
+  const { active: _, ...quiet } = live.groups;
+  assert.deepEqual(
+    looseEndsScreen({ ...live, groups: quiet }, pages, at)
+      .sections.find(section => section.key === 'active')
+      .rows.map(row => row.laneId),
+    ['l3'],
+  );
+  // Nothing shown yet is not "nothing left" while a cursor or a coverage gap remains.
+  const empty = {
+    at,
+    groups: { idle: { ...none, continueCursor: 'idle-p2' }, dated: { ...none, why: 'Still preparing.' } },
+  };
+  const shown = looseEndsScreen(empty, {}, at);
+  assert.equal(shown.total, 0);
+  assert.equal(shown.exhausted, false);
+  assert.equal(shown.sentence.bold, 'No loose ends shown yet.');
+  const ended = looseEndsScreen(empty, mergePage({}, 'idle', { at, groups: { idle: none } }), at);
+  assert.equal(ended.exhausted, false, 'dated coverage is still incomplete');
+  assert.match(ended.sentence.rest, /not fully read yet/);
+});
+
+test('fc1831eb page budget: the details read at current and doubled scale against b294a5d8 and the compact read', async t => {
+  const rows = [];
+  for (const scale of [1, 2]) {
+    const { s } = await pageFixture(t, scale);
+    for (const details of [false, true]) {
+      const meter = meterReads(s.ctx);
+      const heapAtStart = process.memoryUsage().heapUsed;
+      const started = performance.now();
+      let reply;
+      const cost = await meter.cost(async () => {
+        reply = await read(s, 'owner', details ? { details: true } : {});
+      });
+      meter.restore();
+      rows.push({
+        scale,
+        mode: details ? 'details' : 'compact',
+        documents: cost.documents,
+        bytes: cost.bytes,
+        reply: Buffer.byteLength(JSON.stringify(reply)),
+        ms: Math.round(performance.now() - started),
+        heap: process.memoryUsage().heapUsed - heapAtStart,
+      });
+    }
+  }
+  for (const row of rows)
+    t.diagnostic(
+      `${row.mode} ×${row.scale}: 1 query, ${row.documents} documents, ${row.bytes} fixture B, ${row.reply} reply B, ${row.ms} ms, ${row.heap} sampled heap B`,
+    );
+  const measured = (scale, mode) => rows.find(row => row.scale === scale && row.mode === mode);
+  // b294a5d8's details budget: one query, at most 110 documents for all five groups (84 measured there).
+  for (const scale of [1, 2])
+    assert.ok(
+      measured(scale, 'details').documents <= 110,
+      `details ×${scale} within the 110-document budget`,
+    );
+  assert.equal(
+    measured(2, 'details').documents,
+    measured(1, 'details').documents,
+    'doubling the account does not grow one page',
+  );
+  assert.equal(measured(2, 'compact').documents, measured(1, 'compact').documents);
 });
 
 test('another account cannot read loose ends', async () => {
