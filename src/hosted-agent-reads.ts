@@ -59,11 +59,14 @@ export const hostedDiffSchema = z
       .string()
       .regex(/^[0-9a-fA-F]{8,64}$/)
       .optional(),
+    /** Output shape: default JSON hunks (`items`), or a standard `patch -p1` unified diff (`diff`). */
+    format: z.enum(['hunks', 'unified']).optional(),
     cursor: z
       .object({
         base: hash,
         head: hash,
         offset: z.number().int().nonnegative().safe(),
+        hunk: z.number().int().positive().safe().optional(),
         laneId: z.uuid(),
         paths: z.array(z.string()).optional(),
       })
@@ -211,6 +214,7 @@ function diffMore(
     laneId: next.laneId,
     ...(command.paths ? { paths: command.paths } : {}),
     ...(command.summary ? { summary: true } : {}),
+    ...(command.format ? { format: command.format } : {}),
     ...(command.byteBudget !== 48000 ? { byteBudget: command.byteBudget } : {}),
     cursor: next,
   };
@@ -226,6 +230,11 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
   const parsed = hostedDiffSchema.safeParse(input);
   invariant(parsed.success, 'BAD_ARGUMENT', 'Invalid hosted diff parameters. Use diff --help.');
   const command = parsed.data;
+  invariant(
+    !(command.summary && command.format === 'unified'),
+    'BAD_ARGUMENT',
+    'summary:true returns path standings without hunks; drop summary or format:"unified".',
+  );
   const lane = await selectHostedSource(transport, { laneId: command.laneId });
   const cursor = command.cursor;
   invariant(
@@ -238,6 +247,11 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
     !(cursor && command.from),
     'BAD_ARGUMENT',
     'A diff cursor keeps its original from State; drop from.',
+  );
+  invariant(
+    !cursor?.hunk || command.format === 'unified',
+    'BAD_ARGUMENT',
+    'A mid-file hunk cursor continues format:"unified".',
   );
   const from = command.from
     ? await (await import('./hosted-saved-state.js')).resolveLaneState(transport, lane, command.from)
@@ -258,7 +272,11 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
     item => item.status !== 'unchanged' && (!requested || requested.has(item.path)),
   );
   const offset = cursor?.offset ?? 0;
-  invariant(offset <= changes.length, 'BAD_ARGUMENT', 'Diff cursor is beyond the pinned paths.');
+  invariant(
+    offset <= changes.length && (!cursor?.hunk || offset < changes.length),
+    'BAD_ARGUMENT',
+    'Diff cursor is beyond the pinned paths.',
+  );
   if (command.summary) {
     // One more manifest (current main's State); every standing is decided from manifest entries.
     const main = await selectHostedMain(transport);
@@ -310,11 +328,57 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
       },
     };
   }
-  const { readHostedDiffPage } = await import('./hosted-diff-page.js');
+  const { readHostedDiffPage, readHostedUnifiedDiffPage } = await import('./hosted-diff-page.js');
+  const window = changes.slice(offset, offset + 50);
+  if (command.format === 'unified') {
+    const page = await readHostedUnifiedDiffPage(
+      clientCacheRoot(transport.root),
+      objects,
+      window,
+      command.byteBudget,
+      cursor?.hunk ?? 0,
+    );
+    await transport.query('projectHostedLanes:select', { laneId: lane.laneId });
+    const nextOffset = offset + page.consumedFiles;
+    const nextCursor =
+      page.nextHunk !== null || nextOffset < changes.length
+        ? {
+            base,
+            head,
+            offset: nextOffset,
+            ...(page.nextHunk !== null ? { hunk: page.nextHunk } : {}),
+            laneId: lane.laneId,
+            ...(command.paths ? { paths: command.paths } : {}),
+          }
+        : null;
+    return {
+      sourceContext: { laneId: lane.laneId, base, head, scope: 'saved' },
+      result: {
+        format: 'unified' as const,
+        base,
+        head,
+        diff: page.diff,
+        omitted: page.omitted,
+        total: changes.length,
+        nextCursor,
+        truncated: page.omitted.length > 0 || nextCursor !== null,
+        ...diffMore(transport.root, command, nextCursor, {
+          from: offset,
+          to: offset + page.shownFiles,
+          total: changes.length,
+        }),
+        cost: {
+          ...page.cost,
+          downloadedBytes: cache.downloadedBytes + page.cost.downloadedBytes,
+          manifestBytes: read(base).length + (head === base ? 0 : read(head).length),
+        },
+      },
+    };
+  }
   const { items, omitted, cost } = await readHostedDiffPage(
     clientCacheRoot(transport.root),
     objects,
-    changes.slice(offset, offset + 50),
+    window,
     command.byteBudget,
   );
   const end = offset + items.length + omitted.length;

@@ -55,8 +55,12 @@ MCP `forge_review` exposes hosted `show`, `diff`, `peers` and `queue`.
   including paths before their first save, as `peerEvidence`. Detail shows 50 items
   instead of five. Count/coverage disclose omissions; unsaved edits remain
   unavailable and missing notices never prove independence.
-- `diff {laneId,paths?,byteBudget?,cursor?}` pins base/saved-head R2 States.
-  Defaults: 48,000 hunk payload bytes plus path metadata, 50 paths/page. A small
+- `diff {laneId,paths?,byteBudget?,format?,cursor?}` pins base/saved-head R2 States.
+  Defaults: 48,000 hunk payload bytes plus path metadata, 50 paths/page. `format:"unified"`
+  returns a standard unified diff in `result.diff` (`--- a/path`, `+++ b/path`, `@@` hunks,
+  `\ No newline at end of file`, renames as delete + add, and a one-line `Binary files differ`
+  note for binary or non-UTF-8 paths) that applies with `patch -p1 -E` (or `git apply` when
+  filtered to text `paths`), ending each page on a whole file or hunk boundary. A small
   hunk can fit even when both file versions exceed the reply budget. The source
   read keeps the ordinary small-file window and allows larger comparisons up to
   1 MiB per version and 2 MiB per page. `cost.sourceBytes` reports the source

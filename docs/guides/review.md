@@ -12,6 +12,12 @@ nforge agent ROOT diff '{"laneId":"LANE_ID"}'
 nforge agent ROOT show '{"laneId":"LANE_ID","path":"README.md"}'
 ```
 
+From inside a Lane folder, a builder can read a base-pinned unified diff (`--- a/path`, `+++ b/path` and `@@` hunks in `result.diff`, ready for `patch -p1 -E`) to feed a fresh-context reviewer without converting JSON hunks:
+
+```sh
+nforge agent . diff '{"format":"unified"}'
+```
+
 Follow `nextCursor` with the same pinned selection when a diff is partial. Missing graph edges do not prove two changes independent. [Line provenance](../agents/workflow.md#hosted-reads-and-coordination-limits) describes retained evidence and its gaps.
 
 ## Check and land

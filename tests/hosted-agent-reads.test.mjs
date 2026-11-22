@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { digest } from '../dist/hash.js';
 import { showHostedSource } from '../dist/mcp-hosted-source.js';
@@ -363,4 +367,229 @@ test('diff from a short saved State id compares that save with the head; ambigui
     transport.dispatch('diff', { laneId: f.lane.laneId, from: older.slice(0, 7) }),
     e => e.code === 'BAD_ARGUMENT',
   );
+});
+
+function writeTree(root, files) {
+  for (const [path, content] of Object.entries(files)) {
+    const target = join(root, path);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, content);
+  }
+}
+
+function readTree(root, base = root) {
+  const out = {};
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const full = join(root, entry.name);
+    const rel = base === root ? entry.name : `${root.slice(base.length + 1)}/${entry.name}`;
+    if (entry.isDirectory()) Object.assign(out, readTree(full, base));
+    else out[rel] = readFileSync(full);
+  }
+  return out;
+}
+
+function assertWholeHunks(diffText) {
+  const lines = diffText.split('\n');
+  if (lines.at(-1) === '') lines.pop();
+  for (let i = 0; i < lines.length;) {
+    const line = lines[i];
+    if (!line.startsWith('@@ ')) {
+      i++;
+      continue;
+    }
+    const match = /^@@ -\d+,(\d+) \+\d+,(\d+) @@$/.exec(line);
+    assert(match, `valid unified hunk header: ${line}`);
+    let expectedBefore = Number(match[1]),
+      expectedAfter = Number(match[2]),
+      seenBefore = 0,
+      seenAfter = 0;
+    i++;
+    while (i < lines.length && !lines[i].startsWith('@@ ') && !lines[i].startsWith('diff --git ')) {
+      const current = lines[i++];
+      if (current === '\\ No newline at end of file') continue;
+      if (current.startsWith(' ')) {
+        seenBefore++;
+        seenAfter++;
+      } else if (current.startsWith('-')) {
+        seenBefore++;
+      } else if (current.startsWith('+')) {
+        seenAfter++;
+      } else {
+        assert.fail(`unexpected line inside hunk: ${current}`);
+      }
+    }
+    assert.equal(seenBefore, expectedBefore, `hunk before-line count intact (${line})`);
+    assert.equal(seenAfter, expectedAfter, `hunk after-line count intact (${line})`);
+  }
+}
+
+test('Issue a37a53d3: diff format:"unified" from inside a Lane covers add, delete, edit, rename, no-newline and binary files and applies with patch -p1', async t => {
+  const baseText = {
+    'src/deleted.ts': 'export const gone = true;\nexport const second = 2;\n',
+    'src/edited.ts': 'line 1\nline 2 old\nline 3\nline 4\n',
+    'src/old-name.ts': 'export const moved = "renamed";\n',
+    'src/no-newline.txt': 'first line\nwithout trailing newline old',
+    'src/newline-removed.txt': 'keep 1\nlast line\n',
+    'src/newline-added.txt': 'keep 1\nlast line',
+  };
+  const headText = {
+    'src/added.ts': 'export const added = 1;\nexport const next = 2;\n',
+    'src/edited.ts': 'line 1\nline 2 new\nline 3\nline 4\n',
+    'src/new-name.ts': 'export const moved = "renamed";\n',
+    'src/no-newline.txt': 'first line\nwithout trailing newline new',
+    'src/newline-removed.txt': 'keep 1\nlast line',
+    'src/newline-added.txt': 'keep 1\nlast line\n',
+  };
+  const f = agentFixture(t, {
+    base: {
+      ...baseText,
+      'assets/logo.bin': '\x00\x01\x02base',
+      'assets/latin1.txt': Buffer.from('caf\xe9 old\n', 'latin1'),
+    },
+    lane: {
+      ...headText,
+      'assets/logo.bin': '\x00\x01\x03head',
+      'assets/latin1.txt': Buffer.from('caf\xe9 new\n', 'latin1'),
+    },
+  });
+  const transport = f.transport();
+  // Open the Lane checkout so `diff` works from inside the Lane without an explicit laneId.
+  await transport.dispatch('open', { laneId: f.lane.laneId });
+  await assert.rejects(
+    transport.dispatch('diff', { format: 'unified', summary: true }),
+    error => error.code === 'BAD_ARGUMENT',
+  );
+  const { result: withBinary } = await hostedAgentCli(
+    f.root,
+    'diff',
+    { format: 'unified' },
+    f.address,
+    transport,
+  );
+  assert.equal(withBinary.format, 'unified');
+  assert.equal(withBinary.base, f.lane.base.head);
+  assert.equal(withBinary.head, f.lane.head);
+  assert.equal(withBinary.nextCursor, null);
+  assert.equal(withBinary.truncated, false);
+  assert.match(withBinary.diff, /Binary files a\/assets\/logo\.bin and b\/assets\/logo\.bin differ/);
+  assert.match(withBinary.diff, /Binary files a\/assets\/latin1\.txt and b\/assets\/latin1\.txt differ/);
+  assert.doesNotMatch(withBinary.diff, /\\xe9/);
+  assert.match(withBinary.diff, /Binary files differ/);
+  assert.match(withBinary.diff, /--- a\/src\/edited\.ts\n\+\+\+ b\/src\/edited\.ts/);
+  assert.match(withBinary.diff, /\\ No newline at end of file/);
+  assertWholeHunks(withBinary.diff);
+
+  // Text-only unified diff applies cleanly with `patch -p1` (and `git apply`) and matches head byte for byte.
+  const textPaths = [...new Set([...Object.keys(baseText), ...Object.keys(headText)])].sort();
+  const { result: textOnly } = await transport.dispatch('diff', {
+    format: 'unified',
+    paths: textPaths,
+  });
+  for (const tool of ['patch', 'git']) {
+    const dir = mkdtempSync(join(tmpdir(), `forge-unified-${tool}-`));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    writeTree(dir, baseText);
+    if (tool === 'patch') execFileSync('patch', ['-p1', '-E', '-d', dir], { input: textOnly.diff });
+    else execFileSync('git', ['apply'], { cwd: dir, input: textOnly.diff });
+    const actual = readTree(dir);
+    const expected = Object.fromEntries(
+      Object.entries(headText).map(([path, text]) => [path, Buffer.from(text)]),
+    );
+    assert.deepEqual(actual, expected, `${tool} applied output equals head byte for byte`);
+  }
+});
+
+test('Issue a37a53d3: unified diff paging ends on a whole file or hunk boundary, never splits a hunk, and concatenated pages apply with patch -p1', async t => {
+  const block = (label, value) =>
+    [
+      `${label} context 1`,
+      `${label} context 2`,
+      `${label} context 3`,
+      `${label} context 4`,
+      `${label} ${value} ${'x'.repeat(160)}`,
+      `${label} context 5`,
+      `${label} context 6`,
+      `${label} context 7`,
+      `${label} context 8`,
+    ].join('\n');
+  const multiBase = ['a', 'b', 'c', 'd'].map(id => block(id, 'before')).join('\n') + '\n';
+  const multiHead = ['a', 'b', 'c', 'd'].map(id => block(id, 'after')).join('\n') + '\n';
+  const baseFiles = {
+    '01-multi.txt': multiBase,
+    '02-edit.txt': `start\n${'before-two-'.repeat(40)}\nend`,
+    '03-delete.txt': 'remove line 1\nremove line 2\n',
+  };
+  const headFiles = {
+    '01-multi.txt': multiHead,
+    '02-edit.txt': `start\n${'after-two-'.repeat(40)}\nend`,
+    '04-add.txt': 'brand new line 1\nbrand new line 2',
+  };
+  const f = agentFixture(t, { base: baseFiles, lane: headFiles });
+  const transport = f.transport();
+  await transport.dispatch('open', { laneId: f.lane.laneId });
+
+  const pages = [];
+  let command = { format: 'unified', byteBudget: 1024 };
+  let sawMidFileHunkCursor = false;
+  let sawWholeFileBoundaryCursor = false;
+  while (command) {
+    const { result } = await transport.dispatch('diff', command);
+    assert.equal(result.format, 'unified');
+    assert(result.cost.outputBytes <= 1024, `page respects byteBudget: ${result.cost.outputBytes}`);
+    assertWholeHunks(result.diff);
+    pages.push(result.diff);
+    if (result.nextCursor) {
+      assert.equal(result.truncated, true);
+      assert.match(
+        result.more,
+        /^This page shows changed paths \d+-\d+ of 4; more pages follow\. Next page: /,
+      );
+      assert.equal(result.next.format, 'unified');
+      assert.deepEqual(result.next.cursor, result.nextCursor);
+      if (result.nextCursor.hunk !== undefined) sawMidFileHunkCursor = true;
+      else sawWholeFileBoundaryCursor = true;
+      const { action: _action, ...nextCommand } = result.next;
+      command = nextCommand;
+    } else {
+      assert.equal(result.truncated, false);
+      assert.equal(result.more, undefined);
+      command = null;
+    }
+  }
+  assert(pages.length >= 3, `expected at least 3 pages, got ${pages.length}`);
+  assert.equal(sawMidFileHunkCursor, true, 'multi-hunk file splits cleanly at a hunk boundary');
+  assert.equal(sawWholeFileBoundaryCursor, true, 'subsequent files split at a whole-file boundary');
+
+  const dir = mkdtempSync(join(tmpdir(), 'forge-unified-paged-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeTree(dir, baseFiles);
+  execFileSync('patch', ['-p1', '-E', '-d', dir], { input: pages.join('') });
+  const actual = readTree(dir);
+  const expected = Object.fromEntries(
+    Object.entries(headFiles).map(([path, text]) => [path, Buffer.from(text)]),
+  );
+  assert.deepEqual(actual, expected, 'concatenated unified pages apply byte for byte');
+
+  // An oversized single hunk on a fresh page is reported in omitted with requiredByteBudget instead of exceeding byteBudget.
+  const hugeHunk = agentFixture(t, {
+    base: { 'row.txt': `${'a'.repeat(1400)}\n` },
+    lane: { 'row.txt': `${'b'.repeat(1400)}\n` },
+  });
+  const { result: oversized } = await hugeHunk
+    .transport()
+    .dispatch('diff', { laneId: hugeHunk.lane.laneId, format: 'unified', byteBudget: 1024 });
+  assert.equal(oversized.diff, '');
+  assert.equal(oversized.cost.outputBytes, 0);
+  assert.equal(oversized.truncated, true);
+  assert.equal(oversized.omitted.length, 1);
+  assert.equal(oversized.omitted[0].path, 'row.txt');
+  assert.equal(oversized.omitted[0].reason, 'hunk-too-large');
+  assert(oversized.omitted[0].requiredByteBudget > 1024);
+  const { result: fitsOversized } = await hugeHunk.transport().dispatch('diff', {
+    laneId: hugeHunk.lane.laneId,
+    format: 'unified',
+    byteBudget: oversized.omitted[0].requiredByteBudget,
+  });
+  assert.equal(fitsOversized.truncated, false);
+  assertWholeHunks(fitsOversized.diff);
 });

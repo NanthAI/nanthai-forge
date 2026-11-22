@@ -119,15 +119,6 @@ function fieldToken(key: string, seen: Json[]): string {
 }
 
 const LEGEND = ':b bool :n num :o obj :a arr';
-/** Required fields of a nested object, as `head,sourceVersion?`: the names, not its schema. */
-const nestedKeys = (value: Json): string => {
-  const required = Array.isArray(value.required) ? (value.required as string[]) : [];
-  return Object.keys(value.properties as Json)
-    .map(key => key + (required.includes(key) ? '' : '?'))
-    .join(',');
-};
-const withNested = (schema: Json, token: string): string =>
-  isObject(schema.properties) ? `${token}(${nestedKeys(schema)})` : token;
 
 /** A flat tool lists its fields by name in one description, like a command tool; the strict Zod schema
  * still validates every call. */
@@ -135,7 +126,7 @@ function flatSchema(schema: Json): Json {
   const stripped = stripSchemaNoise(schema) as Json;
   if (!isObject(stripped.properties)) return stripped;
   const fields = Object.entries(stripped.properties).map(([key, value]) =>
-    withNested(isObject(value) ? value : {}, fieldToken(key, [isObject(value) ? value : {}])),
+    fieldToken(key, [isObject(value) ? value : {}]),
   );
   const required = Array.isArray(stripped.required) ? (stripped.required as string[]) : [];
   return {
