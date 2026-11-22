@@ -5,7 +5,7 @@ import { internalMutation, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { sessionArgs, actionsSession } from './projectHostedActionsSession';
 import { scopedRecheckBase, scopedRecheckPairs } from '../src/scoped-recheck-policy';
-import { findStoredObject as findObject, isRegisteredState } from './projectObjectFind';
+import { findStoredObject as findObject, isRegisteredState, readablePhysical } from './projectObjectFind';
 import { isStored } from './projectObjectFields';
 import { describeObjects } from './projectObjectDownloads';
 import { downloadProject } from './projectDownloadAccess';
@@ -36,22 +36,28 @@ async function selection(
   if (registered)
     invariant(await isRegisteredState(ctx, row), 'SOURCE_UNAVAILABLE', 'Select a registered source State.');
   const object = { sha256: state, size: row.size };
+  const physical = await readablePhysical(ctx, row);
   // The first selection already marked the State as a source. Keep the normal
   // marking and signing path if that fact or the exact physical pin changed.
   if (
     recheck &&
     row.sourceReferenced &&
     recheck.size === row.size &&
-    recheck.physical?.sha256 === row.statePhysical?.sha256 &&
-    recheck.physical?.size === row.statePhysical?.size
+    recheck.physical?.sha256 === physical?.sha256 &&
+    recheck.physical?.size === physical?.size
   )
     return JSON.stringify({
       descriptor: { object, recipe: null },
-      ...(row.statePhysical ? { statePhysical: row.statePhysical } : {}),
+      ...(physical ? { statePhysical: physical } : {}),
       storageId: null,
       url: null,
     } satisfies Awaited<ReturnType<typeof sourceObjectLocation>>);
-  const value = await sourceObjectLocation(ctx, projectId, object, row);
+  const value = await sourceObjectLocation(
+    ctx,
+    projectId,
+    object,
+    physical ? row : { ...row, statePhysical: undefined },
+  );
   if (!value.url && value.storageId) value.url = await blobStore(ctx).getUrl(value.storageId);
   return JSON.stringify(value);
 }

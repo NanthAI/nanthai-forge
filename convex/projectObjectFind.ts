@@ -6,6 +6,8 @@ import type { Doc, Id } from './_generated/dataModel';
 import { r2Key } from './r2';
 import { findPointObjects, clearPointObjectCache, pointMode } from './projectObjectPoints';
 import type { ObjectPack } from '../src/object-pack-range';
+import { ForgeError } from '../src/errors';
+import { purgedMessage } from '../src/save-purge';
 
 /** Objects per catalog row (~19 KB): a lookup reads one small document. */
 export const objectCatalogPage = 256;
@@ -94,6 +96,15 @@ async function page(ctx: QueryCtx, projectId: Id<'hostedProjects'>, digest: stri
   seen.push(found);
   return found;
 }
+/** A purged object's row stays as its tombstone (Item 9d3c407d): every read through this lookup,
+ * whatever its route (checkout, diff, show, Git, compose), refuses with the same PURGED reply. The
+ * row is already read, so this costs nothing. Maintenance that must see it queries the index directly. */
+function refusePurged(row: Doc<'projectObjects'> | null) {
+  if (row?.purged)
+    throw new ForgeError('PURGED', purgedMessage(row.purged), undefined, {
+      purged: { at: row.purged.at, operationId: row.purged.operationId },
+    });
+}
 /** The only digest lookup for project objects (guarded by tests/object-catalog.test.mjs):
  * a per-object row first, then the sorted catalog written by GitHub import. */
 export async function findObject(
@@ -105,6 +116,7 @@ export async function findObject(
     .query('projectObjects')
     .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', digest))
     .unique();
+  refusePurged(row);
   if (row || !digestPattern.test(digest)) return row;
   return (await findSourceObjects(ctx, projectId, [digest])).get(digest) ?? null;
 }
@@ -125,6 +137,7 @@ export async function findObjects(
         .unique(),
     ),
   );
+  for (const row of rows) refusePurged(row);
   const found = new Map<string, ObjectView | null>(unique.map((digest, i) => [digest, rows[i] ?? null]));
   const missing = unique.filter(digest => !found.get(digest) && digestPattern.test(digest));
   for (const [digest, object] of await findSourceObjects(ctx, projectId, missing)) found.set(digest, object);
@@ -185,6 +198,38 @@ export async function objectRow(ctx: MutationCtx, object: ObjectView): Promise<D
   delete fields._creationTime;
   const id = await ctx.db.insert('projectObjects', { ...fields, nonce: object.nonce || crypto.randomUUID() });
   return (await ctx.db.get(id))!;
+}
+// One indexed read per request and project, only where a physical binding is handed out.
+const purgedProjects = new WeakMap<QueryCtx, Map<string, Promise<boolean>>>();
+/** A State's physical manifest maps file digests straight to stored bytes, past this lookup. Once a
+ * project has an owner save purge (Item 9d3c407d), reads drop that shortcut and take the catalog
+ * path, where every blob goes through findObjects and a purged one refuses PURGED. */
+export async function readablePhysical(ctx: QueryCtx, row: Pick<ObjectView, 'projectId' | 'statePhysical'>) {
+  if (!row.statePhysical) return undefined;
+  let projects = purgedProjects.get(ctx);
+  if (!projects) purgedProjects.set(ctx, (projects = new Map()));
+  let purged = projects.get(row.projectId);
+  if (!purged)
+    projects.set(
+      row.projectId,
+      (purged = ctx.db
+        .query('projectSavePurges')
+        .withIndex('by_project_and_state', q => q.eq('projectId', row.projectId))
+        .take(1)
+        .then(found => found.length > 0)),
+    );
+  return (await purged) ? undefined : row.statePhysical;
+}
+/** The owner save purge's target (Item 9d3c407d): the object's own row even when already purged
+ * (the one reader that must see a tombstone), a catalog entry copied into a row, or null. */
+export async function purgeTargetRow(ctx: MutationCtx, projectId: Id<'hostedProjects'>, digest: string) {
+  const row = await ctx.db
+    .query('projectObjects')
+    .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', digest))
+    .unique();
+  if (row) return row;
+  const source = (await findSourceObjects(ctx, projectId, [digest])).get(digest);
+  return source ? objectRow(ctx, source) : null;
 }
 type CatalogPageEntry = {
   digest: string;

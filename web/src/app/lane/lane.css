@@ -26,5 +26,7 @@
   .lr-file > .tick:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .lr-tools { display: flex; gap: var(--s-2) var(--s-3); align-items: center; flex-wrap: wrap; padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); }
   .lr-tools .right { margin-left: auto; }
+  .lr-purge { display: grid; gap: var(--s-3); padding: var(--s-3) var(--gut); }
+  .lr-purge label { display: grid; gap: var(--s-1); }
   .lr-more { width: 100%; justify-content: flex-start; border-radius: 0; border-bottom: var(--rule) solid var(--line); }
 }

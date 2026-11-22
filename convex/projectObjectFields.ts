@@ -43,6 +43,8 @@ export const objectFields = {
    * cleared. */
   packMembers: v.optional(v.array(v.object({ digest: v.string(), size: v.number() }))),
   removed: v.boolean(),
+  /** Owner purge of a leaked save (Item 9d3c407d): bytes deleted, every lookup refuses PURGED. */
+  purged: v.optional(v.object({ at: v.number(), operationId: v.string() })),
   sourceReferenced: v.optional(v.boolean()),
 };
 /** Readable bytes exist: Convex storage, a recipe, or an R2 object a HEAD check confirmed. */

@@ -331,7 +331,7 @@ export function secretScanNotice(
     ...result.findings.map(
       item => `secret-scan: ${item.path}:${item.line} ${item.kind} (fingerprint ${item.fingerprint})`,
     ),
-    'secret-scan: remove the credential from this change and rotate it at its provider; once it reached a Lane save it may be retained.',
+    'secret-scan: remove the credential from this change and rotate it at its provider; if a Lane save holds it, the project owner can purge its saved bytes from that file on the Lane page.',
     `secret-scan: only if it is not a secret, add its entry below to the "allow" list of ${SECRET_SCAN_ALLOW_FILE} and write why in "reason" (an empty reason allows nothing), in its own landing first. Allow entries count only once they are on main, and project owners are alerted.`,
     ...result.findings.map(
       item => `secret-scan: allow entry for ${item.path}:${item.line} ${allowEntryText(item)}`,

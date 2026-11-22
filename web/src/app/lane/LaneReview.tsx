@@ -53,6 +53,7 @@ import { LaneDecision, useHeldView } from '../needs/LaneDecision';
 import { holdLine, parkLine } from '../needs/model';
 import { uniqueBy } from '../../ui/unique';
 import { usePageCritical } from '../../ui/page-critical';
+import { PurgeFile } from './PurgeFile';
 import './lane.css';
 
 type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
@@ -562,7 +563,14 @@ function FileRow({
   const [open, setOpen] = useState(false);
   const [body, setBody] = useState<FileBody | 'loading' | 'failed' | null>(null);
   const [view, setView] = useState<'changes' | 'origin'>('changes');
+  const [purging, setPurging] = useState(false);
+  const [purged, setPurged] = useState(false);
   const origin = originInputs(reply, file);
+  // Owner only, on a Lane not yet on main, for bytes the Lane wrote (Item 9d3c407d); the server checks again.
+  const purgeable =
+    Boolean(reply.owner) &&
+    !reply.lane.landed &&
+    (file.after?.mode === 'file' || file.after?.mode === 'executable');
   useEffect(() => {
     if (!open || body) return;
     setBody('loading');
@@ -596,17 +604,49 @@ function FileRow({
         </summary>
         {open ? (
           <>
-            {origin ? (
+            {origin || purgeable ? (
               <div className="lr-tools">
-                <div className="seg" role="group" aria-label={`View of ${file.path}`}>
-                  <button type="button" aria-pressed={view === 'changes'} onClick={() => setView('changes')}>
-                    Changes
-                  </button>
-                  <button type="button" aria-pressed={view === 'origin'} onClick={() => setView('origin')}>
-                    Where lines came from
-                  </button>
-                </div>
+                {origin ? (
+                  <div className="seg" role="group" aria-label={`View of ${file.path}`}>
+                    <button
+                      type="button"
+                      aria-pressed={view === 'changes'}
+                      onClick={() => setView('changes')}
+                    >
+                      Changes
+                    </button>
+                    <button type="button" aria-pressed={view === 'origin'} onClick={() => setView('origin')}>
+                      Where lines came from
+                    </button>
+                  </div>
+                ) : null}
+                {purgeable && !purged ? (
+                  <Key kind="ghost" size="sm" className="right" onClick={() => setPurging(true)}>
+                    Purge saved bytes…
+                  </Key>
+                ) : null}
+                {purged ? (
+                  <span className="right" role="status">
+                    Purged. Reads of it now say PURGED.
+                  </span>
+                ) : null}
               </div>
+            ) : null}
+            {purging ? (
+              <PurgeFile
+                projectId={projectId}
+                laneId={reply.lane.laneId}
+                head={reply.lane.head}
+                base={reply.lane.base.head}
+                path={file.path}
+                close={done => {
+                  setPurging(false);
+                  if (done) {
+                    setPurged(true);
+                    setBody(null);
+                  }
+                }}
+              />
             ) : null}
             {origin && view === 'origin' ? (
               <OriginView

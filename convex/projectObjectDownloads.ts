@@ -16,7 +16,11 @@ import { r2Config, presignGet, r2ObjectKey } from './r2';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { hostedDownloadPageSize, type HostedDownloadDescriptor } from '../src/hosted-download-page';
-import { findStoredObject as findObject, findStoredObjects as findObjects } from './projectObjectFind';
+import {
+  findStoredObject as findObject,
+  findStoredObjects as findObjects,
+  readablePhysical,
+} from './projectObjectFind';
 import { chargeAnonymousRead } from './abuseLimits';
 import { packRange, packHeaders, type ObjectPack } from '../src/object-pack-range';
 import { signRecipeClosure } from './projectRecipeClosure';
@@ -223,7 +227,7 @@ export async function describeObjects(
       const pin = {
         digest,
         size: row.size,
-        ...(stateSource && row.statePhysical ? { statePhysical: row.statePhysical } : {}),
+        ...(stateSource && (await readablePhysical(ctx, row)) ? { statePhysical: row.statePhysical } : {}),
         ...(stateSource === 2 && project.sourceManifestVersion === 2 ? { sourceVersion: 2 as const } : {}),
       };
       if (isR2Object(row)) {

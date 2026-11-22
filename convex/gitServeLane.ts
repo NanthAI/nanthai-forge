@@ -148,6 +148,7 @@ export async function buildLane(ctx: ActionCtx, projectId: Id<'hostedProjects'>,
     baseReceiptId: lane.baseReceiptId,
     commit,
     parent: parent.commit,
+    builtFrom: started,
     ...(pack ? { pack } : {}),
     ...(aliasPin ? { aliases: aliasPin } : {}),
   });

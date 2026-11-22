@@ -243,6 +243,14 @@ export const resolve = internalQuery({
 const pruneWindow = 16;
 const chunkSet = (row: Pick<Doc<'projectGitLaneCommits'>, 'pack'> | null) =>
   row?.pack ? [...row.pack.chunks, ...(row.pack.framed ?? [])].map(chunk => chunk.sha256) : [];
+/** Owner save purge (Item 9d3c407d): drop this Lane's built Git commit, which may hold the purged
+ * bytes; the next fetch rebuilds it from objects and meets PURGED. Returns its R2 chunk digests. */
+export async function dropLaneCommit(ctx: MutationCtx, projectId: Id<'hostedProjects'>, laneId: string) {
+  const row = await commitRow(ctx, projectId, laneId);
+  if (!row) return [];
+  await ctx.db.delete(row._id);
+  return chunkSet(row);
+}
 /** Records a build unless the Lane moved meanwhile. Returns the R2 objects nothing references
  * any more: a replaced pack and alias object, and packs of closed Lanes (bounded window). */
 export const record = internalMutation({
@@ -263,10 +271,12 @@ export const record = internalMutation({
       }),
     ),
     aliases: v.optional(historyChunk),
+    /** When the build started: an owner save purge of this Lane since then voids it (Item 9d3c407d). */
+    builtFrom: v.optional(v.number()),
   },
   returns: v.object({ recorded: v.boolean(), discard: v.array(v.string()) }),
   handler: async (ctx, input) => {
-    const { aliases, ...fields } = input;
+    const { aliases, builtFrom, ...fields } = input;
     const discard: string[] = [];
     const history = await ctx.db
       .query('projectHistory')
@@ -278,7 +288,15 @@ export const record = internalMutation({
     } else if (aliases && !history) discard.push(aliases.sha256);
     const lane = await laneRow(ctx, input.projectId, input.laneId);
     const existing = await commitRow(ctx, input.projectId, input.laneId);
-    const recorded = !!lane?.open && lane.head === input.head && lane.baseReceiptId === input.baseReceiptId;
+    const [purge] = await ctx.db
+      .query('projectSavePurges')
+      .withIndex('by_project_and_lane', q => q.eq('projectId', input.projectId).eq('laneId', input.laneId))
+      .order('desc')
+      .take(1);
+    // A build that read objects before a save purge may hold the purged bytes: never cache it.
+    const fenced = !!purge && purge.at >= (builtFrom ?? 0);
+    const recorded =
+      !fenced && !!lane?.open && lane.head === input.head && lane.baseReceiptId === input.baseReceiptId;
     if (!recorded) discard.push(...chunkSet({ pack: input.pack }));
     else if (!existing || !current(existing, lane) || existing.commit !== input.commit) {
       // Content-addressed: a rebuild to the same commit shares its pack chunks.

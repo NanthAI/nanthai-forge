@@ -15,6 +15,8 @@ export function catalogEligible(row: Doc<'projectObjects'>) {
   return (
     row.sourceReferenced === true &&
     !row.removed &&
+    // A purged row is the PURGED tombstone (Item 9d3c407d); a catalog entry would lose it.
+    !row.purged &&
     !row.storageId &&
     !row.packMembers &&
     row.stateGeneration === undefined &&

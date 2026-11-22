@@ -80,6 +80,8 @@ export type Reply = {
   };
   /** For the owner: this Lane's open request (Item 0a99ab23), asked or declined while it still holds the Lane. */
   request?: Approval & { state: string; decision?: { reason?: string } };
+  /** The viewer owns the project: a file row offers the saved-bytes purge (Item 9d3c407d). */
+  owner?: boolean;
   supervised: boolean;
   protectedRules: number;
   files: {

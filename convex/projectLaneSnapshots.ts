@@ -383,6 +383,18 @@ export const restore = mutation({
   },
 });
 
+/** Schedules the real delete of every snapshot of a Lane (R2 objects, then rows) once; also used by
+ * the owner save purge (Item 9d3c407d). Returns the Lane row, or null when it has none. */
+export async function purgeLaneSnapshots(ctx: MutationCtx, projectId: Id<'hostedProjects'>, laneId: string) {
+  const row = await laneRow(ctx, projectId, laneId);
+  if (row && row.state !== 'purging') {
+    if (row.job) await cancelPendingTask(ctx, row.job);
+    const job = await ctx.scheduler.runAfter(0, drop, { projectId, laneId, reason: 'purge' });
+    // The drop sweeps once more after every PUT URL signed before now has expired.
+    await ctx.db.patch(row._id, { state: 'purging', job, expiresAt: Date.now() + (putExpiry + 60) * 1000 });
+  }
+  return row;
+}
 /** Owner purge: delete every snapshot of this Lane for real (R2 objects, then rows). The Lane
  * author or the project owner; new snapshots of the Lane wait until it finishes. */
 export const purge = mutation({
@@ -393,22 +405,8 @@ export const purge = mutation({
       const actor = await signedIn(ctx);
       await activeProject(ctx, input.projectId, actor);
       await laneFor(ctx, input.projectId, input.laneId);
-      const row = await laneRow(ctx, input.projectId, input.laneId);
+      const row = await purgeLaneSnapshots(ctx, input.projectId, input.laneId);
       if (!row) return canonicalPayload({ laneId: input.laneId, state: 'none', entries: 0 });
-      if (row.state !== 'purging') {
-        if (row.job) await cancelPendingTask(ctx, row.job);
-        const job = await ctx.scheduler.runAfter(0, drop, {
-          projectId: input.projectId,
-          laneId: input.laneId,
-          reason: 'purge',
-        });
-        // The drop sweeps once more after every PUT URL signed before now has expired.
-        await ctx.db.patch(row._id, {
-          state: 'purging',
-          job,
-          expiresAt: Date.now() + (putExpiry + 60) * 1000,
-        });
-      }
       return canonicalPayload({
         laneId: input.laneId,
         state: 'purging',

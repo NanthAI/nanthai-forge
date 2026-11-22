@@ -16,9 +16,9 @@ See [secrets for checks](../../security.md#secrets-for-checks).
 
 | # | Situation | What happens | Evidence |
 | --- | --- | --- | --- |
-| 1 | An agent saves a file that looks like credentials | A save leaves out "ignored files and credential names", counted as `notSaved`. | docs |
+| 1 | An agent saves a file that looks like credentials | A save leaves out "ignored files and credential names", counted as `notSaved`. Then the landing scanner reads every changed file before upload. A finding refuses the save with `SECRET_FOUND`, stores nothing, and names path, line, kind and fingerprint plus the command to run after removing it (CLI and MCP reply alike). | docs, tests |
 | 2 | A change that contains a credential reaches a landing | "Every hosted landing check scans the paths its composed Candidate changes … before project code runs." It looks for known shapes (private keys, cloud, GitHub, GitLab, Slack, npm, Google, Anthropic and OpenAI tokens) and "a random-looking value assigned to a secret-named key". "A finding fails the check like a failing test: the landing stops with `CHECK_FAILED`, and the notice names the file, line, kind and a 16-character fingerprint, never the value." | docs |
-| 3 | It was a real secret | "Remove a real credential first, and rotate it at its provider: once it reached a Lane save it may be retained." | docs |
+| 3 | It was a real secret | Remove and rotate it. If it reached a Lane save anyway (a shape the scanner does not know), the project owner opens that file on the Lane page, presses **Purge saved bytes…** and types PURGE. Its stored bytes are deleted. Reads, diffs, checkouts and Git fetches of them return `PURGED`, and the Lane's thread says who purged what and when. | docs, tests |
 | 4 | It was not a secret | The notice prints the exact `{"fingerprint":"…","path":"…","reason":""}` entry per finding; paste it into `.forge-secret-allow.json` and write the reason. "Entries count only from main … so a change cannot allow its own finding: land the entry on its own first, then land the change." The file is on the Forge project's protected list, so that first landing needs the owner. | docs, ran |
 | 5 | Who hears of an override | "Every landing that adds or edits an entry sends the project owners one alert on the landing alert channel (email or webhook, the same settings as stall alerts)", and the receipt carries `secretAllowAdded`. | docs |
 | 6 | What the scan misses | "It does not see encoded or split values, text in skipped files, history that landed before it, or local (not hosted) checks." Files over 1 MiB and binaries are skipped. With a bring-your-own check, an allow-file change is reported as "unknown". | docs |
@@ -32,7 +32,7 @@ See [secrets for checks](../../security.md#secrets-for-checks).
 
 | Id | Severity | Finding | Evidence |
 | --- | --- | --- | --- |
-| J29-1 | S1 | **A leaked credential is caught after it is stored.** The scan runs at the landing check. By then the value is in a Lane save ("it may be retained"). The save step already skips files with credential names; it does not run the value scan. The reply says to rotate, which is right, and nothing offers to remove the saved bytes. | docs |
+| J29-1 | S1 | **Fixed (9d3c407d).** The landing scanner also runs at save, before any byte is stored, with the same allow entries from main. The owner can purge a save that leaked a credential the scanner missed. | docs, tests |
 | J29-2 | S2 | **A false positive costs two landings and an owner's approval.** The allow entry must land first, alone; on a project that protects the allow file, that landing is held for the owner. An agent that adds a test fixture with a fake key stops for a person. The rule is sound (a change cannot allow itself) and expensive. | docs, ran |
 | J29-3 | S2 | **Secret Objects are a product inside the product with no job in the main journeys.** They have creation, rotation, capabilities, delegation, audit and archive. Checks do not use them; deploy after landing (not built) is the stated future user. A person finds a secrets page that does not feed their CI (journey 13, J13-6). | source, docs |
 | J29-4 | S2 | **The page speaks its own language.** "Secret Object", "broker status", "capabilities", "delegation", "discoverable". The archive note reads "Archiving changes your list only. Broker status and granted capabilities stay the same." | source |
@@ -44,7 +44,6 @@ See [secrets for checks](../../security.md#secrets-for-checks).
 
 ## Dead ends
 
-- Removing a secret from a saved Lane.
 - Using a Secret Object in a check.
 - Hiding one file from readers.
 

@@ -186,6 +186,8 @@ export const read = query({
             : {}),
         },
         ...(request ? { request } : {}),
+        // The owner may purge a leaked file's saved bytes from its row (Item 9d3c407d).
+        ...(project.owner === user.subject ? { owner: true } : {}),
         supervised: policy.acceptance.mode === 'review',
         protectedRules: policy.acceptance.protectedPaths.length,
         files: {

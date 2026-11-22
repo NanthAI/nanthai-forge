@@ -16,12 +16,24 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { makeFunctionReference } from 'convex/server';
 import { hostedObjectWriter } from './hosted-object-store.js';
 import { captureHostedSave, type SaveInventory } from './hosted-save-capture.js';
+import { localObjects } from './machine-object-store.js';
+import { readSource } from './files.js';
+import { parseNativeState } from './state/format.js';
+import { shellQuote } from './shell-quote.js';
+import {
+  scanSecretPaths,
+  SECRET_SCAN_ALLOW_FILE,
+  SECRET_SCAN_MAX_FILE_BYTES,
+  type SecretScanResult,
+} from './secret-scan.js';
+import type { HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { durableReplace } from './state/durability.js';
 import { digest } from './hash.js';
@@ -322,6 +334,16 @@ async function saveOnce(
       return { status: 'nothing-to-save' };
     }
     cleanStaging();
+  }
+  // Before any byte is uploaded (Item 9d3c407d). A refusal drops this capture, so the same command
+  // captures the fixed files afresh. A save whose request exists already uploaded under an older CLI.
+  // Every save the server has not acknowledged is scanned, a resumed one too (cheap, local).
+  if (!checkoutPathExists(join(directory, 'acknowledged'))) {
+    const secrets = saveSecretScan(root, capture.marker, capture.changes, directory);
+    if (secrets) {
+      dropRetainedSave(root, command.operationId);
+      throw secretFoundError(root, capture.marker.selection.laneId, secrets, continuation);
+    }
   }
   await contract.onCapture?.(capture);
   markLandStep('captured');
@@ -1245,4 +1267,100 @@ export function staleEpochSaveRefusal(
     continuation,
     ', and this checkout no longer replays it',
   );
+}
+
+// Kept in this module: the MCP and CLI bundles already load it, so the save scan adds no module.
+/** Save-time secret scan (Item 9d3c407d, owner decision Q83): the landing scanner runs on a save's
+ * changed files after capture and before any upload, so a credential never reaches R2. Same patterns,
+ * same 1 MiB file bound, same allow entries: those of the Lane's base (main) State only, never the
+ * Lane's own edit of the allow file (R-01). Cost: no Convex call or I/O; CPU bounded by the changed
+ * bytes (~13-20 MB/s), one State manifest and one allow file read from this machine's object store. */
+function saveSecretScan(
+  root: string,
+  marker: HostedLaneCheckoutMarker,
+  changes: readonly SaveChange[],
+  staged: string,
+): SecretScanResult | null {
+  const after = new Map<string, string>();
+  for (const change of changes)
+    if (change.after && change.after.mode !== 'symlink' && change.after.mode !== 'gitlink')
+      after.set(change.path, change.after.blob);
+  if (!after.size) return null;
+  const read = (path: string) => {
+    const blob = after.get(path);
+    if (!blob) return undefined;
+    const file = join(staged, blob);
+    try {
+      // Files over the scanner's bound are skipped, as at landing; never read them whole.
+      return statSync(file).size > SECRET_SCAN_MAX_FILE_BYTES ? undefined : readFileSync(file);
+    } catch {
+      return localObjects(root, SECRET_SCAN_MAX_FILE_BYTES)(blob) ?? undefined;
+    }
+  };
+  const result = scanSecretPaths([...after.keys()], read, { baseAllow: baseAllow(root, marker) });
+  return result.findings.length ? result : null;
+}
+
+/** Main's allow file as the Lane's base State holds it: the checkout copy when its bytes match that
+ * blob, else this machine's object store. Undefined when main has none, or it cannot be read here
+ * (then no entry applies, as at landing when the base is unreadable). */
+function baseAllow(root: string, marker: HostedLaneCheckoutMarker) {
+  const { head, base } = marker.selection;
+  let files = head === base.head ? marker.state.files : undefined;
+  if (!files) {
+    const state = localObjects(root)(base.head);
+    try {
+      files = state ? parseNativeState(state).files : undefined;
+    } catch {
+      files = undefined;
+    }
+  }
+  const allow = files?.find(file => file.path === SECRET_SCAN_ALLOW_FILE);
+  if (!allow || allow.mode === 'symlink') return undefined;
+  try {
+    const bytes = readSource(root, allow.path, SECRET_SCAN_MAX_FILE_BYTES, allow.blob);
+    if (bytes && digest(bytes) === allow.blob) return bytes;
+  } catch {
+    /* Edited or unreadable here: try the stored object. */
+  }
+  return localObjects(root, SECRET_SCAN_MAX_FILE_BYTES)(allow.blob) ?? undefined;
+}
+
+/** The refusal: path, line, kind and fingerprint, never the value, and the next step. */
+function secretFoundError(
+  root: string,
+  laneId: string,
+  result: SecretScanResult,
+  continuation?: ConflictContinuation,
+) {
+  const parameters = continuation?.parameters ?? { laneId };
+  const next = { action: continuation?.action ?? 'save', ...parameters };
+  const command = `nforge agent ${shellQuote(root)} ${next.action} ${shellQuote(JSON.stringify(parameters))}`;
+  const findings = result.findings.map(({ path, line, kind, fingerprint }) => ({
+    path,
+    line,
+    kind,
+    fingerprint,
+  }));
+  const listed = findings.map(
+    item => `${item.path}:${item.line} ${item.kind} (fingerprint ${item.fingerprint})`,
+  );
+  const more = result.more ? `; +${result.more} more` : '';
+  const self = result.selfAllowed
+    ? ` ${result.selfAllowed} finding(s) match an allow entry this Lane adds; it counts only once it is on main.`
+    : '';
+  const instruction =
+    `Save refused before upload: credential found in ${listed.join('; ')}${more}. Nothing was stored. ` +
+    `Remove it and rotate it at its provider, then run: ${command}. ` +
+    `Only if it is not a secret: add its entry from allowEntries, with a reason, to ${SECRET_SCAN_ALLOW_FILE} in its own landing first, then sync this Lane and save.${self}`;
+  return new ForgeError('SECRET_FOUND', instruction, undefined, {
+    root,
+    laneId,
+    findings,
+    ...(result.more ? { more: result.more } : {}),
+    allowEntries: findings.map(({ path, fingerprint }) => ({ fingerprint, path, reason: '' })),
+    next,
+    command,
+    instruction,
+  });
 }

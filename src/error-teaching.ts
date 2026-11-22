@@ -50,6 +50,9 @@ export const teachingByCode: Record<string, Entry> = {
   PREFLIGHT_REQUIRED: { learn: 'land', next: `nforge agent <root> preflight '<lane>'` },
   PREFLIGHT_BUDGET_EXCEEDED: { learn: 'land', next: '<replay>' },
   CONFLICT_MARKERS: { learn: 'conflict' },
+  // Save-time secret scan and owner purge (Item 9d3c407d); the SECRET_ family teaches auth.
+  SECRET_FOUND: { learn: 'check' },
+  PURGED: { learn: 'storage' },
   CONFLICT_SIDE_REQUIRED: { learn: 'conflict' },
   LANDING_MESSAGE_TOO_LARGE: { learn: 'limits' },
   OPERATION_REUSED: { learn: 'retry' },

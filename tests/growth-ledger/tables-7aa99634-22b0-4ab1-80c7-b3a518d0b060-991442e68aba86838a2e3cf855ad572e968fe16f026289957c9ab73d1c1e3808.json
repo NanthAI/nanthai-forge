@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "Item 9d3c407d (owner Q83, public beta): SECRET_FOUND is the save-time credential refusal and PURGED the read refusal of owner-purged bytes; no existing code says either (SECRET_SCAN is a landing check result, not a save refusal). projectSavePurges is the retry-safe purge receipt; no existing deletion table holds per-operation object targets (item retention and Lane snapshots key by Item or Lane).",
+  "date": "2026-11-22"
+}

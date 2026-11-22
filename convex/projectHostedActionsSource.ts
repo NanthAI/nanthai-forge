@@ -9,7 +9,7 @@ import { presignGet, r2Config } from './r2';
 import { blobStore } from './blobStore';
 import { directSourceWindow, directSourceBatch } from '../src/hosted-actions-direct';
 import { invariant } from '../src/errors';
-import { findStoredObjects as findObjects } from './projectObjectFind';
+import { findStoredObjects as findObjects, readablePhysical } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
 import { signRecipeClosure } from './projectRecipeClosure';
 import { signRuns, type RunBinding } from './projectObjectRuns';
@@ -113,8 +113,9 @@ export const resolve = internalMutation({
           'SOURCE_UNAVAILABLE',
           'Exact project object is unavailable.',
         );
-        if (input.bound && row.digest === run.request.expectedHead && row.statePhysical)
-          physical = { state: row.digest, pin: row.statePhysical };
+        const statePhysical = input.bound ? await readablePhysical(ctx, row) : undefined;
+        if (row.digest === run.request.expectedHead && statePhysical)
+          physical = { state: row.digest, pin: statePhysical };
         sourceBytes += row.size;
         const url =
           input.runs && row.pack && row.location === 'r2' && row.r2Key
@@ -130,7 +131,7 @@ export const resolve = internalMutation({
           'Source storage binding is unavailable.',
         );
         const value = {
-          ...(input.bound && row.statePhysical ? { statePhysical: row.statePhysical } : {}),
+          ...(statePhysical ? { statePhysical } : {}),
           descriptor: {
             object: { sha256: row.digest, size: row.size },
             recipe: row.recipe ? { sha256: row.recipe.digest, size: row.recipe.size } : null,
