@@ -46,6 +46,8 @@ const launch = { id: uuid(1), kind: 'initiative', title: 'Launch the parser', st
 const docs = { id: uuid(2), kind: 'initiative', title: 'Documentation and recovery paths', status: 'open', position: 1, version: 1 };
 const largeInitiative = new URLSearchParams(location.search).has('large-initiative');
 const splitInitiative = new URLSearchParams(location.search).has('split-initiative');
+const exactCounts = new URLSearchParams(location.search).has('exact-counts');
+const partialCounts = new URLSearchParams(location.search).has('partial-counts');
 const big = { id: uuid(3), kind: 'initiative', title: 'A long running release with a name that will not fit on a phone line', status: splitInitiative ? 'closed' : 'open', position: 2, version: 1, hidden: largeInitiative };
 const item = (n, fields) => ({ id: uuid(n), kind: 'issue', status: 'open', position: n, version: 2, doneWhen: [1, 3], ...fields });
 const rows = [launch, docs, big,
@@ -67,7 +69,16 @@ if (largeInitiative) {
 const bigSettled = largeInitiative
   ? { done: 1000, dropped: 1000, atLeast: true }
   : { done: 123, dropped: 7, atLeast: false };
-const read = { rows: JSON.stringify(rows), more: false, settled: [{ initiativeId: launch.id, done: 4, dropped: 1, atLeast: false }, { initiativeId: docs.id, done: 0, dropped: 0, atLeast: false }, { initiativeId: big.id, ...bigSettled }], canEdit: true };
+const launchProgress = exactCounts
+  ? { done: 1024, dropped: 1, atLeast: false, live: { inProgress: 1, open: 525, proposed: 1 } }
+  : { done: 4, dropped: 1, atLeast: false };
+const read = {
+  rows: JSON.stringify(partialCounts ? rows.filter(row => row.initiativeId !== docs.id) : rows),
+  more: exactCounts || partialCounts,
+  liveMore: exactCounts || partialCounts,
+  settled: [{ initiativeId: launch.id, ...launchProgress }, { initiativeId: docs.id, done: partialCounts ? 2 : 0, dropped: 0, atLeast: partialCounts }, { initiativeId: big.id, ...bigSettled }],
+  canEdit: true,
+};
 const settledRows = [item(20, { title: 'Old reader removed', status: 'closed', initiativeId: launch.id }), item(21, { title: 'Ship a second parser', status: 'abandoned' })];
 const settled = { rows: settledRows, more: false, loading: false, failed: false, loadMore() {} };
 // Archive and Deleted (Item 4c9e961e): each row says when it went and the status it left.
@@ -757,6 +768,36 @@ test('plan views and bulk bar: real components keep the view in the address and 
         .getByRole('link', { name: 'Bench the parser against the old reader' })
         .waitFor();
       assert.deepEqual(errors, []);
+      await context.close();
+    },
+  );
+  await t.test('Initiative headers and detail show exact counts beyond the display window', async () => {
+    const words = '1,024 done · 1 in progress · 525 open · 1 proposed · 1 removed';
+    for (const layout of ['list', 'tree']) {
+      const { page, context } = await open(390, 'dark', `?layout=${layout}&exact-counts`);
+      const box = (await headers(page)).find(box => box.words === words);
+      assert.equal(box?.chip, 1552);
+      assert.equal(await page.getByText('Stream parser: preserve split bytes across reads').count(), 1);
+      await context.close();
+    }
+    const { page, context } = await open(390, 'dark', `/${launchId}?exact-counts`);
+    assert.match(
+      await page.locator('main').textContent(),
+      new RegExp(`1,552 Items in this Initiative · ${words}`),
+    );
+    await context.close();
+  });
+  await t.test(
+    'a partial Initiative view names its lower bounds without saying all work is done',
+    async () => {
+      const { page, context } = await open(390, 'dark', `/${docsId}?partial-counts`);
+      await page.getByText('No open Items shown.', { exact: true }).waitFor();
+      assert.match(await page.locator('main').textContent(), /2\+ Items in this Initiative/);
+      assert.equal(await page.getByRole('button', { name: 'Close the Initiative' }).count(), 0);
+      const liveCount = page.locator('.plan-ini-body .ph .cnt').first();
+      assert.equal(await liveCount.textContent(), '0+');
+      assert.equal(await liveCount.isVisible(), true);
+      assert.equal(await page.locator('.plan-gh .cnt').textContent(), '2+');
       await context.close();
     },
   );

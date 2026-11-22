@@ -4,7 +4,10 @@ import type { Doc } from './_generated/dataModel';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { publicPlanVisible, type PlanRow } from './publicVisibility';
 import { maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
+import { getDocumentSize } from 'convex/values';
 export type PublicPlanRoot = PlanRow & Record<string, unknown>;
+type LookupBudget = { take: () => boolean; refund: (size: number) => void };
+const MAX_DOCUMENT_BYTES = 1024 * 1024;
 /** Reuse current roots a page already read. History and comment pages resolve only their selected
  * Items and referenced parents: O(page) indexed document reads inside the existing query, no board scan,
  * additional function call, fixed root window, body hydration or capability limit. */
@@ -16,14 +19,16 @@ export function publicWorkPlan(
   const known = new Map<string, PublicPlanRoot | null>(loaded);
   const pending = new Map<string, Promise<PublicPlanRoot | null>>();
   let generation: ReturnType<typeof selectedGeneration> | undefined;
-  const lookup = async (id: unknown): Promise<PublicPlanRoot | null> => {
+  const lookup = async (id: unknown, budget?: LookupBudget): Promise<PublicPlanRoot | null> => {
     if (typeof id !== 'string' || !id) return null;
     if (known.has(id)) return known.get(id)!;
     let read = pending.get(id);
     if (!read) {
+      if (budget && !budget.take()) return null;
       read = (async () => {
         const selected = await (generation ??= selectedGeneration(ctx, project));
         const row = selected ? await record(ctx, recordPartition(selected), 'planningSearch', id) : null;
+        if (budget) budget.refund(row ? getDocumentSize(row) : 0);
         const root = row ? (JSON.parse(row.value) as PublicPlanRoot) : null;
         known.set(id, root);
         return root;
@@ -34,11 +39,11 @@ export function publicWorkPlan(
   };
   type Row = Pick<PublicPlanRoot, 'hidden' | 'initiativeId' | 'parentId'> & { status?: string | undefined };
   /** The one rule for a row this read holds, its Initiative and parent looked up (cached). */
-  const rowAllowed = async (item: Row | null) => {
+  const rowAllowed = async (item: Row | null, related = lookup) => {
     if (project.visibility !== 'public' || project.planVisibility === 'members') return false;
     if (!item) return false;
-    const [initiative, parent] = await Promise.all([lookup(item.initiativeId), lookup(item.parentId)]);
-    const parentInitiative = await lookup(parent?.initiativeId);
+    const [initiative, parent] = await Promise.all([related(item.initiativeId), related(item.parentId)]);
+    const parentInitiative = await related(parent?.initiativeId);
     return publicPlanVisible({
       projectVisibility: 'public',
       item,
@@ -97,10 +102,27 @@ export function publicWorkPlan(
     intentHidden,
     workHidden,
     selectionVisible,
-    async visibleLoaded() {
-      const out = new Map<string, PublicPlanRoot>();
-      for (const [id, row] of loaded) if (await allowed(id)) out.set(id, row);
-      return out;
+    async *visibleLoaded(keep: (row: PublicPlanRoot) => boolean) {
+      // Only history counts may omit an unproved row. Reuse resolved relations and leave space for
+      // the generation lookup and response projection. Concurrent lookups reserve a full document first.
+      const metrics = await ctx.meta?.getTransactionMetrics?.();
+      let bytes = (metrics?.bytesRead.remaining ?? Infinity) - 2 * MAX_DOCUMENT_BYTES;
+      let documents = (metrics?.documentsRead.remaining ?? Infinity) - 2;
+      let queries = (metrics?.databaseQueries.remaining ?? Infinity) - 2;
+      const budget = {
+        take() {
+          if (bytes < MAX_DOCUMENT_BYTES || documents <= 0 || queries <= 0) return false;
+          bytes -= MAX_DOCUMENT_BYTES;
+          documents--;
+          queries--;
+          return true;
+        },
+        refund(size: number) {
+          bytes += MAX_DOCUMENT_BYTES - size;
+        },
+      };
+      for (const row of loaded.values())
+        if (keep(row) && !row.hidden && (await rowAllowed(row, id => lookup(id, budget)))) yield row;
     },
   };
 }

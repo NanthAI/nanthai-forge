@@ -14,6 +14,7 @@ export const finishReadFields = {
     'format',
     'status',
     'recordsGenerationId',
+    'planningSearchVersion',
     'planRowsVersion',
     'planRowsOversized',
     'metadata',

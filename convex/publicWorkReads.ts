@@ -338,18 +338,26 @@ export async function publicWorkResult(
   const reply = object(out);
   if (scope.planning && typeof reply.rows === 'string' && Array.isArray(reply.settled)) {
     // A settled Initiative with only hidden live work must not gain a public count entry.
-    const shown = new Map<string, boolean>();
+    const shown = new Set<string>();
     for (const row of JSON.parse(reply.rows) as PlanRow[]) {
       if (!isLive(row)) continue;
-      if (row.kind === 'initiative') shown.set(row.id, true);
-      else if (row.initiativeId && !shown.has(row.initiativeId)) shown.set(row.initiativeId, false);
+      if (row.kind === 'initiative') shown.add(row.id);
+      else if (row.initiativeId) shown.add(row.initiativeId);
     }
+    // The visitor sees bounded, filtered rows. Coverage marks cannot depend on hidden rows occupying a window.
+    if (!membersOnly) reply.liveMore = true;
     const counts = new Map<string, { done: number; dropped: number }>();
-    for (const row of (await plan.visibleLoaded()).values()) {
-      if (row.kind !== 'issue' || !row.initiativeId || !shown.has(row.initiativeId)) continue;
-      if (row.status !== 'closed' && row.status !== 'abandoned') continue;
-      let tally = counts.get(row.initiativeId);
-      if (!tally) counts.set(row.initiativeId, (tally = { done: 0, dropped: 0 }));
+    const history = plan.visibleLoaded(
+      row =>
+        row.kind === 'issue' &&
+        !!row.initiativeId &&
+        shown.has(row.initiativeId) &&
+        (row.status === 'closed' || row.status === 'abandoned'),
+    );
+    for await (const row of history) {
+      const id = row.initiativeId!;
+      let tally = counts.get(id);
+      if (!tally) counts.set(id, (tally = { done: 0, dropped: 0 }));
       if (row.status === 'closed') tally.done++;
       else tally.dropped++;
     }
@@ -368,8 +376,7 @@ export async function publicWorkResult(
           ...entry,
           done: Math.min(done, visibleDone),
           dropped: Math.min(dropped, visibleDropped),
-          // Visitors get a lower bound for supplemental history regardless of how much private work shares its window.
-          atLeast: !shown.get(initiativeId) || visibleDone > done || visibleDropped > dropped,
+          atLeast: true,
         },
       ];
     });

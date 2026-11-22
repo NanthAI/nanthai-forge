@@ -65,6 +65,7 @@ export type RegionProps = {
   /** What waits on the reader here, for the first stop's beat (only with weight "act"). */
   waiting?: string | number;
   count?: number;
+  countAtLeast?: boolean;
   hint?: ReactNode;
   /** A one-line summary shown while folded. */
   sum?: ReactNode;
@@ -87,6 +88,7 @@ export function Region({
   weight,
   waiting = 0,
   count,
+  countAtLeast = false,
   hint,
   sum,
   fold,
@@ -126,7 +128,7 @@ export function Region({
             title
           )}
         </H>
-        {count === undefined ? null : <Count n={count} hot={weight === 'act'} />}
+        {count === undefined ? null : <Count n={count} hot={weight === 'act'} atLeast={countAtLeast} />}
         {sum ? <span className="sum">{sum}</span> : null}
         {hint ? <span className="hint">{hint}</span> : null}
         {tools ? <span className="tools">{tools}</span> : null}

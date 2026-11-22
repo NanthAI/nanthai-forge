@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// The Plan screen's one read (Items d3357f40, b7a0dff1): the Initiatives, every live Item (proposed, planned, in
-// progress) and settled counts for each live Initiative or settled Initiative with live Items. It uses compact
-// planning pages once the partition is covered and indexed search roots otherwise. It never hydrates bodies or
-// writes. One subscription reruns on writes in its ranges. Members see hidden Items with their mark.
+// The Plan screen's one read (Items d3357f40, b7a0dff1): bounded display rows and Initiative counts. It uses
+// compact planning pages once covered and indexed search roots otherwise. Members can use the same complete
+// Initiative tallies as CLI/MCP. It never hydrates bodies or writes. Members see hidden Items with their mark.
 import { getDocumentSize, v } from 'convex/values';
 import { planQuery as query } from './cliServer';
-import { finishReadReader } from './projectFinishReadReader';
+import { finishReadReader, finishReadSourceDb } from './projectFinishReadReader';
 import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { accessibleProject, readProjectRole } from './projectAuthority';
@@ -17,6 +16,7 @@ import { isLive, type PlanRow } from '../src/planning-model';
 export { planViewRow } from './projectPlanRows';
 import { markPlanPage } from './projectPlanLaneMarks';
 import { decodePlanPage, PLAN_ROWS, planParent, planViewRow } from './projectPlanRows';
+import { coveredInitiativeTallies, zeroTally } from './projectPlanCountsStore';
 
 /** Live Items read per status, Initiatives read, and settled Items counted per shown Initiative; beyond these the
  * screen says "at least". On the dogfood board (2026-11-17) the read is 22 Initiatives, 271 live Items and 31 settled
@@ -31,9 +31,17 @@ export const planViewResult = v.object({
   rows: v.string(),
   /** Some live Items or Initiatives were not read. */
   more: v.boolean(),
-  /** Done and dropped Items per live Initiative or settled Initiative with live Items. */
+  /** The member fallback may have incomplete live counts even when all available rows fit. */
+  liveMore: v.optional(v.boolean()),
+  /** Bounded history or, when `live` is present, all five exact counts for a loaded Initiative. */
   settled: v.array(
-    v.object({ initiativeId: v.string(), done: v.number(), dropped: v.number(), atLeast: v.boolean() }),
+    v.object({
+      initiativeId: v.string(),
+      done: v.number(),
+      dropped: v.number(),
+      atLeast: v.boolean(),
+      live: v.optional(v.object({ proposed: v.number(), open: v.number(), inProgress: v.number() })),
+    }),
   ),
   canEdit: v.boolean(),
 });
@@ -53,7 +61,21 @@ export async function planView(ctx: QueryCtx, projectId: Id<'hostedProjects'>): 
   const partition = generation.recordsGenerationId ? await ctx.db.get(generationId) : generation;
   // Settled compact pages retain positions only, so they cannot enforce Item visibility.
   // Role-less viewers use the existing exact-root fallback until those pages carry that metadata.
-  const compact = partition?.planRowsVersion === 1 && !!(await readProjectRole(ctx, project, user.subject));
+  const member = !!(await readProjectRole(ctx, project, user.subject));
+  const compact = member && partition?.planRowsVersion === 1;
+  // Complete compact rows also prove search coverage. Old projected headers can omit the field,
+  // including when compact rows were unavailable. Check those source headers only when needed.
+  const headers = partition && partition !== generation ? [generation, partition] : [generation];
+  let searchComplete = compact || headers.some(row => row.planningSearchVersion === 2);
+  if (member && !searchComplete)
+    for (const row of headers)
+      if (row.planningSearchVersion === undefined && row._creationTime === undefined) {
+        const source = await finishReadSourceDb(ctx).get(row._id);
+        if (source?.planningSearchVersion === 2) {
+          searchComplete = true;
+          break;
+        }
+      }
   const table = await planningRecordTable(ctx, generationId);
   const rows = (kind: 'issue' | 'initiative', status: string, initiativeId?: string) =>
     compact
@@ -92,18 +114,13 @@ export async function planView(ctx: QueryCtx, projectId: Id<'hostedProjects'>): 
       return null;
     }
   };
-  const readRows = async (
-    kind: 'issue' | 'initiative',
-    status: string,
-    limit: number,
-    initiativeId?: string,
-  ) => {
+  const readRows = async (kind: 'issue' | 'initiative', status: string, limit: number) => {
     if (!compact)
-      return (await rows(kind, status, initiativeId).take(limit + 1))
+      return (await rows(kind, status).take(limit + 1))
         .map(parse)
         .filter((row): row is PlanRow => row !== null);
     const result: PlanRow[] = [];
-    for await (const page of rows(kind, status, initiativeId)) {
+    for await (const page of rows(kind, status)) {
       result.push(...decodePlanPage(page.value, page.parent));
       if (result.length > limit) break;
     }
@@ -128,55 +145,70 @@ export async function planView(ctx: QueryCtx, projectId: Id<'hostedProjects'>): 
       };
     }),
   );
-  more ||= livePages.some(page => page.more);
+  const liveMore = livePages.some(page => page.more);
+  more ||= liveMore;
   const liveItems = livePages.flatMap(page => page.rows);
-  const withLiveItems = new Set(liveItems.map(row => row.initiativeId));
-  const tally = (initiativeId: string, done: number, dropped: number, partial = false) => ({
-    initiativeId,
-    done: Math.min(done, PLAN_SETTLED_LIMIT),
-    dropped: Math.min(dropped, PLAN_SETTLED_LIMIT),
-    atLeast: partial || done > PLAN_SETTLED_LIMIT || dropped > PLAN_SETTLED_LIMIT,
-  });
-  const settled = await Promise.all(
-    loadedInitiatives.filter(isLive).map(async ({ id }) => {
-      const [done, dropped] = await Promise.all([
-        readRows('issue', 'closed', PLAN_SETTLED_LIMIT, id),
-        readRows('issue', 'abandoned', PLAN_SETTLED_LIMIT, id),
-      ]);
-      return tally(id, done.length, dropped.length);
-    }),
-  );
-  const extra = loadedInitiatives.filter(
-    initiative => !isLive(initiative) && withLiveItems.has(initiative.id),
-  );
-  if (extra.length) {
-    // Supplemental history shares the existing transaction. Leave space for one maximum-sized
-    // document and for the response's visibility work before opening or advancing another range.
-    const metrics = await ctx.meta?.getTransactionMetrics?.();
-    const MiB = 1024 * 1024;
-    let bytes = (metrics?.bytesRead.remaining ?? Infinity) - 2 * MiB;
-    let documents = (metrics?.documentsRead.remaining ?? Infinity) - 1;
-    let queries = (metrics?.databaseQueries.remaining ?? Infinity) - 1;
-    const room = () => bytes > 0 && documents > 0;
-    const count = async (id: string, status: 'closed' | 'abandoned') => {
-      let n = 0;
-      if (!room() || queries <= 0) return { n, partial: true };
-      queries--;
-      for await (const doc of rows('issue', status, id)) {
-        bytes -= getDocumentSize(doc);
-        documents--;
-        n += compact ? decodePlanPage(doc.value, doc.parent).length : Number(parse(doc) !== null);
-        if (n > PLAN_SETTLED_LIMIT || !room()) return { n, partial: true };
-      }
-      return { n, partial: false };
+  const reply = {
+    rows: JSON.stringify([...loadedInitiatives, ...liveItems]),
+    more,
+    ...(member ? { liveMore: liveMore || !searchComplete } : {}),
+    canEdit,
+  };
+  const tallies =
+    member && searchComplete && loadedInitiatives.length
+      ? await coveredInitiativeTallies(ctx.db, generationId)
+      : null;
+  if (tallies)
+    return {
+      ...reply,
+      settled: loadedInitiatives.map(({ id }) => {
+        const counts = tallies.get(id) ?? zeroTally();
+        return {
+          initiativeId: id,
+          done: counts.closed,
+          dropped: counts.abandoned,
+          atLeast: false,
+          live: { proposed: counts.proposed, open: counts.open, inProgress: counts['in-progress'] },
+        };
+      }),
     };
-    for (const { id } of extra) {
-      const done = await count(id, 'closed');
-      const dropped = await count(id, 'abandoned');
-      settled.push(tally(id, done.n, dropped.n, done.partial || dropped.partial));
+
+  const withLiveItems = new Set(liveItems.map(row => row.initiativeId));
+  const shown = [
+    ...loadedInitiatives.filter(isLive),
+    ...loadedInitiatives.filter(initiative => !isLive(initiative) && withLiveItems.has(initiative.id)),
+  ];
+  // All fallback history shares the transaction. Leave space for one maximum-sized document and
+  // the response's visibility work before opening or advancing a range.
+  const metrics = shown.length ? await ctx.meta?.getTransactionMetrics?.() : undefined;
+  let bytes = (metrics?.bytesRead.remaining ?? Infinity) - 2 * 1024 * 1024;
+  let documents = (metrics?.documentsRead.remaining ?? Infinity) - 1;
+  let queries = (metrics?.databaseQueries.remaining ?? Infinity) - 1;
+  const room = () => bytes > 0 && documents > 0;
+  const count = async (id: string, status: 'closed' | 'abandoned') => {
+    let n = 0;
+    if (!room() || queries <= 0) return { n, partial: true };
+    queries--;
+    for await (const doc of rows('issue', status, id)) {
+      bytes -= getDocumentSize(doc);
+      documents--;
+      n += compact ? decodePlanPage(doc.value, doc.parent).length : Number(parse(doc) !== null);
+      if (n > PLAN_SETTLED_LIMIT || !room()) return { n: Math.min(n, PLAN_SETTLED_LIMIT), partial: true };
     }
+    return { n, partial: false };
+  };
+  const settled: Result['settled'] = [];
+  for (const { id } of shown) {
+    const done = await count(id, 'closed');
+    const dropped = await count(id, 'abandoned');
+    settled.push({
+      initiativeId: id,
+      done: done.n,
+      dropped: dropped.n,
+      atLeast: (member && !searchComplete) || done.partial || dropped.partial,
+    });
   }
-  return { rows: JSON.stringify([...loadedInitiatives, ...liveItems]), more, settled, canEdit };
+  return { ...reply, settled };
 }
 
 export const read = query({

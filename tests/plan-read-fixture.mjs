@@ -24,9 +24,12 @@ const { workRecordWriter, finishWorkRecordWrites, preparePlanRowsWrites } = awai
   moduleUrl('../convex/projectWorkRecordWriter.ts')
 );
 const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
+const { planCounter } = await import(moduleUrl('../convex/projectPlanCountsStore.ts'));
 export async function planFixture(t, scale = 1, sparse = false) {
   const s = await setup(t);
   const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
+  // The fixture loads historical search roots directly and prepares only the compact rows.
+  await s.ctx.db.delete((await planCounter(s.ctx.db, generationId))._id);
   await finishReadWriter(s.ctx).db.patch(generationId, { planRowsVersion: undefined });
   const initiatives = Array.from({ length: 22 * scale }, () => randomUUID());
   const topics = [

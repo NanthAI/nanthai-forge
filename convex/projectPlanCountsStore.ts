@@ -136,6 +136,22 @@ export const planCounter = (db: QueryCtx['db'], partition: Id<'projectWorkGenera
     )
     .unique();
 
+/** An empty map entry means zero only when every counted Issue kept its Initiative membership. */
+export async function coveredInitiativeTallies(db: QueryCtx['db'], partition: Id<'projectWorkGenerations'>) {
+  const row = await planCounter(db, partition);
+  const stored = row ? (JSON.parse(row.value) as PlanCounts) : null;
+  if (!stored?.done || stored.v !== 2 || stored.g?.h?.some(Boolean) || stored.x?.some(Boolean)) return null;
+  const byInitiative = new Map<string, Tally>();
+  for (const [group, tally] of Object.entries(stored.g ?? {})) {
+    const [id] = group.split('|', 1);
+    if (!id) continue;
+    let counts = byInitiative.get(id);
+    if (!counts) byInitiative.set(id, (counts = zeroTally()));
+    PLAN_STATUSES.forEach((status, index) => (counts[status] += tally[index] ?? 0));
+  }
+  return byInitiative;
+}
+
 /** The row a new partition starts with: complete, so every root the writer adds is counted. */
 export const planCountsBirth = (
   projectId: Id<'hostedProjects'>,

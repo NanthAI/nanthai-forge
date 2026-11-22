@@ -298,9 +298,11 @@ closed Items, In progress counts Items in progress, and Left counts planned Item
 separately. A `+` marks a lower bound.
 
 An Initiative's progress counts each Item under its stored Initiative, with one tick for done, in progress, open,
-proposed or removed. In the tree, a sub-item still sits under its displayed parent. A closed or abandoned Initiative
-that still has live Items shows its settled counts too. Visitors see a lower bound of the visible settled counts
-for those Initiatives. Plan and the Initiative page use the same breakdown. A narrow Plan group header shows each
+proposed or removed. In the tree, a sub-item still sits under its displayed parent. When the maintained counter
+covers the Initiative, members see the same counts as CLI and MCP even beyond the display window. Archived and
+deleted Items stay out. The existing Plan subscription carries the counts for List, Tree, Board and Initiative
+detail. If the counter cannot prove membership, the bounded reads show a `+` wherever their counts may be incomplete.
+Visitors see lower bounds from the visible work in the bounded read. A narrow Plan group header shows each
 status as a coloured swatch and count so the Initiative title stays readable. Hover or focus a count to
 see its status word. There is no typed percentage (`progress`).
 

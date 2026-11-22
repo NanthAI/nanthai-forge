@@ -13,10 +13,18 @@ import {
 } from '../../../../src/planning-model';
 import { initiativeBreakdown } from '../progress';
 
+type LiveCounts = { open: number; inProgress: number; proposed: number };
 export type PlanRead = {
   rows: string;
   more: boolean;
-  settled: readonly { initiativeId: string; done: number; dropped: number; atLeast: boolean }[];
+  liveMore?: boolean;
+  settled: readonly {
+    initiativeId: string;
+    done: number;
+    dropped: number;
+    atLeast: boolean;
+    live?: LiveCounts;
+  }[];
   canEdit: boolean;
 };
 
@@ -44,9 +52,11 @@ export type PlanGroup = {
   /** Live + done + dropped: every Item, the header's chip. */
   total: number;
   atLeast: boolean;
+  liveAtLeast: boolean;
 };
 export type PlanView = {
   groups: PlanGroup[];
+  initiativeGroups: ReadonlyMap<string, PlanGroup>;
   next: PlanRow | null;
   live: number;
   planned: number;
@@ -84,8 +94,8 @@ export function planView(
   const items = all.filter(row => row.kind === 'issue' && isLive(row));
   const initiatives = all.filter(row => row.kind === 'initiative');
   const known = new Set(initiatives.map(row => row.id));
-  const emptyLive = { open: 0, inProgress: 0, proposed: 0 };
-  const liveByInitiative = new Map<string | null, typeof emptyLive>();
+  const emptyLive: LiveCounts = { open: 0, inProgress: 0, proposed: 0 };
+  const liveByInitiative = new Map<string | null, LiveCounts>();
   // Tree placement can follow a parent in a different Initiative. Counts follow stored membership.
   for (const row of items) {
     const id = row.initiativeId || null;
@@ -96,18 +106,35 @@ export function planView(
     else if (row.status === 'proposed') counts.proposed++;
     else counts.open++;
   }
-  const shown = [...initiatives.filter(row => isLive(row) || liveByInitiative.has(row.id)), ...items];
+  const settled = new Map(read.settled.map(entry => [entry.initiativeId, entry]));
+  const progressFor = (initiative: PlanRow | null) => {
+    const summary = initiative && settled.get(initiative.id);
+    const counts = summary?.live ?? liveByInitiative.get(initiative?.id ?? null) ?? emptyLive;
+    const live = counts.open + counts.inProgress + counts.proposed;
+    const done = summary?.done ?? 0;
+    const dropped = summary?.dropped ?? 0;
+    return {
+      initiative,
+      ...counts,
+      live,
+      done,
+      dropped,
+      total: live + done + dropped,
+      atLeast: summary?.atLeast ?? initiative !== null,
+      liveAtLeast: !summary?.live && (read.liveMore ?? read.more),
+    };
+  };
+  const initiativeGroups = new Map<string, PlanGroup>(
+    initiatives.map(row => [row.id, { ...progressFor(row), lines: [] }]),
+  );
+  const shown = [...initiatives.filter(row => isLive(row) || initiativeGroups.get(row.id)!.live), ...items];
   const { next } = nextItem(shown);
   const open = new Set(items.map(row => row.id));
-  const settled = new Map(read.settled.map(entry => [entry.initiativeId, entry]));
   const groups: PlanGroup[] = [];
   for (const { initiative, rows } of planOrder(shown)) {
-    const counts = liveByInitiative.get(initiative?.id ?? null) ?? emptyLive;
-    const live = counts.open + counts.inProgress + counts.proposed;
-    const settledCounts = initiative && settled.get(initiative.id);
-    const done = settledCounts?.done ?? 0;
-    const dropped = settledCounts?.dropped ?? 0;
-    const lines: PlanLine[] = [];
+    const group: PlanGroup = initiative
+      ? initiativeGroups.get(initiative.id)!
+      : { ...progressFor(null), lines: [] };
     let top = 0;
     rows.forEach(({ row, depth }) => {
       // Sub-items share their parent's place; only top-level Items are numbered.
@@ -116,7 +143,7 @@ export function planView(
       const blocker = row.relations?.find(
         relation => relation.kind === 'depends-on' && relation.id !== row.id && open.has(relation.id),
       );
-      lines.push({
+      group.lines.push({
         row,
         depth,
         rank: top,
@@ -127,20 +154,12 @@ export function planView(
           : {}),
       });
     });
-    groups.push({
-      initiative,
-      lines,
-      live,
-      ...counts,
-      done,
-      dropped,
-      total: live + done + dropped,
-      atLeast: settledCounts?.atLeast ?? false,
-    });
+    groups.push(group);
   }
   const count = (status: PlanRow['status']) => items.filter(row => row.status === status).length;
   return {
     groups,
+    initiativeGroups,
     next,
     live: items.length,
     planned: count('open'),
@@ -202,7 +221,7 @@ export function movedInitiativeRank(
 
 /** An Initiative's breakdown from the one progress definition (web/src/app/progress.ts). */
 export const groupBreakdown = (
-  group: Pick<PlanGroup, 'done' | 'inProgress' | 'open' | 'proposed' | 'dropped' | 'atLeast'>,
+  group: Pick<PlanGroup, 'done' | 'inProgress' | 'open' | 'proposed' | 'dropped' | 'atLeast' | 'liveAtLeast'>,
 ) =>
   initiativeBreakdown({
     done: group.done,
@@ -211,6 +230,7 @@ export const groupBreakdown = (
     proposed: group.proposed,
     removed: group.dropped,
     atLeast: group.atLeast,
+    liveAtLeast: group.liveAtLeast,
   });
 
 /** Done-when lines written in capture become the body's task lines (docs/planning.md, Status). */

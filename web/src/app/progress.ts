@@ -74,7 +74,7 @@ export function progressCells(
  * order. Done is closed, In progress is in-progress, Open is planned, Proposed only when there is any, Removed is
  * dropped or abandoned. The parts add up to `total`, which is the header's chip; the roll draws its ticks in the
  * same order and colours (`tick`), so the words and the bar tell one story on the Plan list, the tree and the
- * Initiative page. Done and Removed come from a capped count: `atLeast` marks them "N+". */
+ * Initiative page. Capped fallback counts have an explicit "N+" marker. */
 export type InitiativeCounts = {
   done: number;
   inProgress: number;
@@ -82,6 +82,7 @@ export type InitiativeCounts = {
   proposed: number;
   removed: number;
   atLeast: boolean;
+  liveAtLeast?: boolean;
 };
 export type BreakdownKey = 'done' | 'inProgress' | 'open' | 'proposed' | 'removed';
 export type BreakdownPart = { key: BreakdownKey; n: number; word: string; tick: string; atLeast: boolean };
@@ -100,11 +101,11 @@ export function initiativeBreakdown(counts: InitiativeCounts): Breakdown {
     .map(part => ({
       ...part,
       n: counts[part.key],
-      atLeast: counts.atLeast && (part.key === 'done' || part.key === 'removed'),
+      atLeast: Boolean(part.key === 'done' || part.key === 'removed' ? counts.atLeast : counts.liveAtLeast),
     }));
   return {
     total: parts.reduce((sum, part) => sum + part.n, 0),
-    atLeast: counts.atLeast,
+    atLeast: counts.atLeast || Boolean(counts.liveAtLeast),
     parts,
   };
 }

@@ -7,13 +7,19 @@
 // of 50 each, subscribed only while that fold is open. Writes: projectWorkCommand:command, retry-safe by operation id.
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Band, Count, Key, Region, ReorderList, Sheet, Who } from '../../ds';
-import { itemStatus, itemStatusLabel, type PlanRow, type StoredStatus } from '../../../../src/planning-model';
+import {
+  isLive,
+  itemStatus,
+  itemStatusLabel,
+  type PlanRow,
+  type StoredStatus,
+} from '../../../../src/planning-model';
 import { A } from '../frames';
 import { Head, crumbsFor } from '../Place';
 import type { PlaceProps } from '../screens';
 import type { InitiativeDetails } from './batch';
 import type { Reads } from './Bulk';
-import { groupBreakdown, statusOf, type PlanGroup, type PlanView } from './model';
+import { groupBreakdown, type PlanGroup, type PlanView } from './model';
 import { writeQuery } from './query';
 import { breakdownTotal, breakdownWords } from '../progress';
 import type { Put, Settled } from './Plan';
@@ -23,23 +29,20 @@ import { accountableHandle, workingAgentsLabel, type Workers } from './workers';
 
 type At = (patch: Partial<PlaceProps['route']>) => string;
 const statuses: StoredStatus[] = ['proposed', 'open', 'in-progress', 'closed', 'abandoned'];
+const allItemsSettled = (group: PlanGroup) =>
+  group.total > 0 && !group.live && !group.liveAtLeast && group.initiative && isLive(group.initiative);
 
 /** The sentence under the Initiative's name: what is done, what is moving, and what to do when nothing is left. */
 export function initiativeSentence(group: PlanGroup) {
-  if (!group.total)
+  const breakdown = groupBreakdown(group);
+  if (!group.total && !breakdown.atLeast)
     return { bold: 'No Items in this Initiative yet.', rest: 'Add one, or move Items in from the plan.' };
-  if (
-    !group.live &&
-    group.initiative &&
-    statusOf(group.initiative) !== 'done' &&
-    statusOf(group.initiative) !== 'abandoned'
-  )
+  if (allItemsSettled(group))
     return {
       bold: 'Every Item in this Initiative is done or dropped.',
       rest: 'Close the Initiative, or keep it open for what comes next.',
     };
   const next = group.lines.find(line => line.next);
-  const breakdown = groupBreakdown(group);
   return {
     bold: `${breakdownTotal(breakdown)} in this Initiative · ${breakdownWords(breakdown)}.`,
     rest: next ? `The next free one is ${next.row.title}.` : '',
@@ -88,20 +91,7 @@ export function InitiativePage({
   announce: (text: string) => void;
 }) {
   const [failed, setError] = useState('');
-  const group =
-    view.groups.find(entry => entry.initiative?.id === initiative.id) ??
-    ({
-      initiative,
-      lines: [],
-      live: 0,
-      inProgress: 0,
-      open: 0,
-      proposed: 0,
-      done: 0,
-      dropped: 0,
-      total: 0,
-      atLeast: false,
-    } as PlanGroup);
+  const group = view.initiativeGroups.get(initiative.id)!;
   const [editing, setEditing] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const full = useFullItem(reads, initiative);
@@ -130,8 +120,9 @@ export function InitiativePage({
   const sentence = initiativeSentence(group);
   const breakdown = groupBreakdown(group);
   const settled = [...closed.rows, ...dropped.rows].filter(row => row.initiativeId === initiative.id);
-  const status = statusOf(initiative);
-  const allDone = group.total > 0 && !group.live && status !== 'done' && status !== 'abandoned';
+  const underOtherParents =
+    !ordered.length &&
+    view.groups.some(group => group.lines.some(line => line.row.initiativeId === initiative.id));
   return (
     <div className="plan plan-ini">
       <Head
@@ -157,6 +148,7 @@ export function InitiativePage({
         <Region
           title={initiative.title}
           count={group.live}
+          countAtLeast={group.liveAtLeast}
           hint={group.live ? 'open, in the order set by hand' : undefined}
         >
           {error || failed ? (
@@ -164,7 +156,7 @@ export function InitiativePage({
               {error || failed}
             </div>
           ) : null}
-          {allDone && view.canEdit ? (
+          {view.canEdit && allItemsSettled(group) ? (
             <div className="plan-ini-close">
               <span>Everything in it is done or dropped.</span>
               <Key
@@ -197,10 +189,12 @@ export function InitiativePage({
             </ReorderList>
           ) : (
             <div className="quietline">
-              {group.live ? (
+              {underOtherParents ? (
                 <A className="lk" href={at({}) + writeQuery({ initiative: initiative.id, layout: 'tree' })}>
                   See open Items under their parents in Plan
                 </A>
+              ) : group.live || breakdown.atLeast ? (
+                'No open Items shown.'
               ) : group.total ? (
                 'No open Items.'
               ) : (
@@ -211,7 +205,7 @@ export function InitiativePage({
           <div className={`grp plan-grp${showDone ? '' : ' shut'}`} data-fold="">
             <div className="band plan-gh">
               <span className="plan-gn">Done and dropped</span>
-              <Count n={group.done + group.dropped} />
+              <Count n={group.done + group.dropped} atLeast={group.atLeast} />
               <span className="plan-pl t3">{showDone ? 'newest first' : ''}</span>
               <button
                 type="button"
@@ -266,7 +260,13 @@ export function InitiativePage({
           <div className="fig">
             <div className="big">
               {breakdownTotal(breakdown)}
-              <small>{group.total ? <BreakdownWords breakdown={breakdown} /> : 'nothing to count yet'}</small>
+              <small>
+                {group.total || breakdown.atLeast ? (
+                  <BreakdownWords breakdown={breakdown} />
+                ) : (
+                  'nothing to count yet'
+                )}
+              </small>
             </div>
             {group.total ? <Roll breakdown={breakdown} large /> : null}
           </div>
@@ -285,7 +285,7 @@ export function InitiativePage({
                   ordered.map(line => line.row.id),
                   observedLanes,
                   missingIdentity,
-                  !view.more && group.total === 0 ? 0 : openLanes,
+                  !breakdown.atLeast && group.total === 0 ? 0 : openLanes,
                 )}
               </A>
             </dd>

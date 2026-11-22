@@ -13,6 +13,7 @@ import { moduleUrl } from './convex-module.mjs';
 
 const read = await import(moduleUrl('../convex/projectPlanView.ts'));
 const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
+const { planCounter } = await import(moduleUrl('../convex/projectPlanCountsStore.ts'));
 const { workRecordWriter, finishWorkRecordWrites } = await import(
   moduleUrl('../convex/projectWorkRecordWriter.ts')
 );
@@ -51,6 +52,7 @@ const item = (fields, i) => ({
 test('the plan read lists live work and counts settled Items of live Initiatives only, from root rows', async t => {
   const s = await setup(t);
   const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
+  await s.ctx.db.delete((await planCounter(s.ctx.db, generationId))._id);
   await finishReadWriter(s.ctx).db.patch(generationId, { planRowsVersion: undefined });
   let position = 0;
   const add = async row => {
@@ -100,7 +102,7 @@ test('the plan read lists live work and counts settled Items of live Initiatives
   assert(!('body' in third$), 'no body reaches the screen');
   assert.equal(rows.find(row => row.id === first.id).owner, '@sample');
   // Roots read: 2 Initiatives + 5 live Items + 2 settled Items of the live Initiative; 40 closed history rows: none.
-  assert.equal(cost.documents, 9 + 2, 'plus the project and its generation');
+  assert.equal(cost.documents, 9 + 2, 'plus the project and its generation, with no maintained counter');
 
   // A complete compact projection gives exactly the same rows and counts as the legacy reader.
   const pages = new Map();
@@ -230,7 +232,7 @@ test('Plan keeps a sub-item under its displayed parent while counting it under i
   assert.equal(breakdownTotal(groupBreakdown(partial)), '4+ Items');
   assert.equal(
     breakdownWords(groupBreakdown(partial)),
-    '2+ done · 0 in progress · 0 open · 1 proposed · 1+ removed',
+    '2+ done · 0+ in progress · 0+ open · 1+ proposed · 1+ removed',
   );
   assert.equal(partialNone.live, 2, 'loaded Items stay in the fallback count while coverage is incomplete');
   assert.equal(partialNone.lines.find(line => line.row.id === shelved.id).shelvedInitiative, undefined);
@@ -320,7 +322,7 @@ test('settled Initiative progress matches indexed counts for members and follows
       initiativeId,
       done: index === 0 ? 0 : 1,
       dropped: index === 0 ? 0 : 1,
-      atLeast: index !== 0,
+      atLeast: true,
     })),
   );
   // Hidden history crossing the shared count window must not change the visitor's coverage signal.
@@ -332,6 +334,26 @@ test('settled Initiative progress matches indexed counts for members and follows
     await s.ctx.db.insert('projectPlanningRecords', { ...root, projectId: s.projectId, generationId });
   }
   assert.deepEqual((await read.read._handler(s.ctx, request)).settled, visitor.settled);
+  assert.equal(visitor.liveMore, true);
+
+  const publicParent = await add({ status: 'closed' });
+  await add({ status: 'closed', initiativeId: live.id, parentId: publicParent.id });
+  await finishWorkRecordWrites(writer);
+  const settledForLive = result => result.settled.find(group => group.initiativeId === live.id);
+  assert.equal(settledForLive(await read.read._handler(s.ctx, request)).done, 1);
+  let measurements = 0;
+  s.ctx.meta.getTransactionMetrics = async () => ({
+    bytesRead: { remaining: 16 * 1024 * 1024 },
+    documentsRead: { remaining: 4000 },
+    databaseQueries: { remaining: ++measurements === 1 ? 4096 : 2 },
+  });
+  const budgeted = await read.read._handler(s.ctx, request);
+  delete s.ctx.meta.getTransactionMetrics;
+  assert.deepEqual(
+    settledForLive(budgeted),
+    { initiativeId: live.id, done: 0, dropped: 0, atLeast: true },
+    'a visitor count leaves out history whose parent could not be checked',
+  );
 });
 
 test('a move takes one rank strictly between its new sibling neighbours', () => {

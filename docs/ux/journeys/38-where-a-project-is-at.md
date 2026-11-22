@@ -8,7 +8,7 @@ Walked: `planning` with `counts:true`, `queue`, `lanes`, `nforge status`, `check
 
 | # | Question | Agent or terminal | Person on the web |
 | --- | --- | --- | --- |
-| 1 | How far along is this Initiative? | `planning '{"initiativeId":"…","counts":true,"limit":1}'` → `{"abandoned":1,"closed":20,"in-progress":11,"open":122,"proposed":6}` with a `coverage` field. One read. (ran) | Work → Planning groups Items under Initiatives. Per-Initiative counts are not shown; open Issue b7a0dff1: "to see Phase 6 progress the lead pages the whole planning list through the CLI … and counts statuses in a private script. The owner cannot see it from the web or a phone without asking." |
+| 1 | How far along is this Initiative? | `planning '{"initiativeId":"…","counts":true}'` returns five status counts, their total and coverage. The maintained path uses one read. | Plan's Initiative headers and detail show the same [progress counts](../../planning.md#progress). A `+` marks a lower bound when the bounded read cannot prove completeness. |
 | 2 | What is in motion right now? | `lanes '{"limit":N}'` (actor, Item title, last save, latest landing, state); `queue '{}'` → `total`, each entry with `position`, `landingState:{"state":"checking","label":"Checking","nextStep":"The check is running on this Candidate; wait for its result."}` and `intentTitle`. (ran) | Now → What's changing, with the journey rail per Lane; Who's working. |
 | 3 | What is stuck? | No single read. Dormant Lanes: `lanes '{"view":"dormant"}'`. Held landings sit in `queue` "without a position". Stalls raise an alert. | Needs you ([journey 27](27-what-needs-me.md)). "Quiet Lanes expand from one summary line." |
 | 4 | Is main healthy? | `check-settings` → `mainAudit`: `result:"passed"`, `redMinutes:0`, `lastGreen`, `landing.label:"Fast landing"`, `window:{"audits":50,"red":0}`. (ran) | Not found as a line on Now ([journey 30](30-provider-outage.md), J30-6). |
@@ -23,7 +23,7 @@ Walked: `planning` with `counts:true`, `queue`, `lanes`, `nforge status`, `check
 
 | Id | Severity | Finding | Evidence |
 | --- | --- | --- | --- |
-| J38-1 | S1 | **The question that started the planning work still has no answer on the web.** "What is the status of this phase?" takes one CLI read with `counts:true` and returns five numbers. A person on the web or a phone cannot get them. The read exists; the page does not (b7a0dff1). | ran, docs |
+| J38-1 | S1 | **Plan now shows where an Initiative stands.** The five counts agree with the CLI and MCP for covered Initiatives, including Items outside the displayed rows (b7a0dff1). | fixture, docs |
 | J38-2 | S2 | **The counts use the stored status words, not the ones people will see.** `open`, `in-progress`, `closed`, `proposed`, `abandoned` against the decided Proposed, Planned, In motion, Done, Abandoned (journey 8, J8-3). "122 open" hides how many are planned and how many nobody has looked at. | ran |
 | J38-3 | S2 | **Progress, motion, health and blockage live in five reads.** `planning`, `lanes`, `queue`, `check-settings` and Needs you each hold one part. A lead agent asked "where are we?" runs all five and writes the sentence itself, which costs tokens and differs every time. | ran |
 | J38-4 | S2 | **"Stuck" is not a state.** A Lane idle for two days is dormant. A landing held for a person has no queue position. A check that never reports is stalled after 15 minutes. An Item in motion with no save for a week is nothing in particular. A person asking "what is stuck?" has no list (journey 5 names the same gap). | ran, docs |
@@ -34,7 +34,6 @@ Walked: `planning` with `counts:true`, `queue`, `lanes`, `nforge status`, `check
 
 ## Dead ends
 
-- "How is Phase 7 going?" from a phone.
 - "What is stuck?"
 - "Will this Initiative finish, at this rate?"
 

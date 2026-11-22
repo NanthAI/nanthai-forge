@@ -8,7 +8,7 @@ import { record, recordPartition } from './projectWorkIndexStore';
 import { hostedRecordValue } from './hostedRecordValue';
 import { readsStore, storeItem } from './projectWorkStoreReads';
 import { planningWaitingKinds } from '../src/work-planning-types';
-import { PLAN_STATUSES, planCounter, zeroTally, type PlanCounts } from './projectPlanCountsStore';
+import { coveredInitiativeTallies, zeroTally } from './projectPlanCountsStore';
 
 export const planningFilter = v.object({
   kind: v.optional(v.union(v.literal('issue'), v.literal('initiative'))),
@@ -134,14 +134,9 @@ export async function countedInitiative(
     generation.planningSearchVersion !== 2
   )
     return null;
-  const row = await planCounter(ctx.db, recordPartition(generation));
-  const stored = row ? (JSON.parse(row.value) as PlanCounts) : null;
-  if (!stored?.done || stored.v !== 2 || stored.g?.h?.some(Boolean) || stored.x?.some(Boolean)) return null;
-  const counts = zeroTally();
-  for (const [group, tally] of Object.entries(stored.g ?? {})) {
-    if (group.split('|', 1)[0] !== initiativeId) continue;
-    PLAN_STATUSES.forEach((state, index) => (counts[state] += tally[index] ?? 0));
-  }
+  const tallies = await coveredInitiativeTallies(ctx.db, recordPartition(generation));
+  if (!tallies) return null;
+  const counts = tallies.get(initiativeId) ?? zeroTally();
   return { counts, page: [], isDone: true, continueCursor: '' };
 }
 

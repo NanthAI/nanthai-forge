@@ -269,10 +269,21 @@ export function Who({
 }
 
 /** A count. `hot` is only for Needs you above zero; zero is never hidden. */
-export function Count({ n, hot = false, label }: { n: number; hot?: boolean; label?: string }) {
+export function Count({
+  n,
+  hot = false,
+  atLeast = false,
+  label,
+}: {
+  n: number;
+  hot?: boolean;
+  atLeast?: boolean;
+  label?: string;
+}) {
   return (
     <span className={`cnt${hot && n > 0 ? ' hot' : ''}`} aria-label={label}>
       {n.toLocaleString()}
+      {atLeast ? '+' : ''}
     </span>
   );
 }

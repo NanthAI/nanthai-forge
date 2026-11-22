@@ -2652,7 +2652,10 @@ test('Initiative progress agrees across Plan, CLI and MCP after status and scope
     ),
   );
   const webRead = await import(moduleUrl('../convex/projectPlanView.ts'));
-  const { planView } = await import(moduleUrl('../web/src/app/plan/model.ts'));
+  const { planView, groupBreakdown } = await import(moduleUrl('../web/src/app/plan/model.ts'));
+  const { workRecordWriter, finishWorkRecordWrites } = await import(
+    moduleUrl('../convex/projectWorkRecordWriter.ts')
+  );
   const projectId = s.projectId;
   const group = async title => (await put(p, { kind: 'initiative', title })).result.itemId;
   const initiativeId = await group('First Initiative');
@@ -2675,8 +2678,9 @@ test('Initiative progress agrees across Plan, CLI and MCP after status and scope
 
   const check = async (id, expected, from = p) => {
     const board = planView(await webRead.read._handler(s.ctx, { projectId }));
-    const group = board.groups.find(group => group.initiative?.id === id);
+    const group = board.initiativeGroups.get(id);
     const { proposed, open, inProgress, done, dropped, total } = group;
+    assert.equal(groupBreakdown(group).atLeast, false);
     const selection = { counts: true, initiativeId: id };
     from.calls.length = 0;
     const cli = await list(from, selection);
@@ -2700,6 +2704,7 @@ test('Initiative progress agrees across Plan, CLI and MCP after status and scope
     const mcp = await tools.get('forge_planning')({ command: { action: 'planning', ...selection } });
     assert.ok(!mcp.isError, JSON.stringify(mcp.content));
     assert.deepEqual(JSON.parse(mcp.content[0].text).result, cli);
+    return board;
   };
   const initial = { proposed: 1, open: 1, 'in-progress': 1, closed: 1, abandoned: 1 };
   await check(initiativeId, initial);
@@ -2722,6 +2727,80 @@ test('Initiative progress agrees across Plan, CLI and MCP after status and scope
 
   await update(parentId, { fields: { hidden: true } });
   await check(initiativeId, { proposed: 0, open: 2, 'in-progress': 0, closed: 1, abandoned: 1 });
+  await update(parentId, { fields: { hidden: false } });
+
+  const settledOnly = (await put(p, { kind: 'initiative', title: 'Shipped', status: 'closed' })).result
+    .itemId;
+  await item('Shipped step', 'closed', { initiativeId: settledOnly });
+  const generationId = s.tables.hostedProjects.get(projectId).work.generationId;
+  const writer = workRecordWriter(s.ctx);
+  let position = 10_000;
+  const addRoot = async (status, initiativeId, parentId) => {
+    const id = randomUUID();
+    await writer.db.insert('projectPlanningRecords', {
+      projectId,
+      generationId,
+      collection: 'planningSearch',
+      key: id,
+      parent: '',
+      position: position++,
+      value: JSON.stringify({ id, kind: 'issue', title: 'Synthetic step', status, initiativeId, parentId }),
+      planning: { text: 'Synthetic step', kind: 'issue', status, initiativeId, open: status === 'open' },
+    });
+    return id;
+  };
+  for (let i = 0; i < webRead.PLAN_LIVE_LIMIT; i++) await addRoot('open', initiativeId);
+  const beyond = await addRoot('open', other, parentId);
+  for (let i = 0; i <= webRead.PLAN_SETTLED_LIMIT; i++) await addRoot('closed', initiativeId);
+  await finishWorkRecordWrites(writer);
+
+  const board = await check(initiativeId, {
+    proposed: 0,
+    open: webRead.PLAN_LIVE_LIMIT + 2,
+    'in-progress': 0,
+    closed: webRead.PLAN_SETTLED_LIMIT + 2,
+    abandoned: 1,
+  });
+  assert.equal(board.more, true);
+  assert.equal(board.byId.has(beyond), false, 'the foreign sub-item is beyond the live display window');
+  assert.equal(board.initiativeGroups.get(initiativeId).lines.length, webRead.PLAN_LIVE_LIMIT);
+  const otherBoard = await check(other, { proposed: 0, open: 1, 'in-progress': 0, closed: 1, abandoned: 0 });
+  assert.equal(otherBoard.initiativeGroups.get(other).lines.length, 0);
+  const detail = await check(settledOnly, {
+    proposed: 0,
+    open: 0,
+    'in-progress': 0,
+    closed: 1,
+    abandoned: 0,
+  });
+  assert.equal(
+    detail.groups.some(group => group.initiative?.id === settledOnly),
+    false,
+  );
+  assert.equal(detail.initiativeGroups.get(settledOnly).done, 1);
+
+  // An older projected header can omit search coverage even when the indexed roots are complete.
+  const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
+  const headers = finishReadWriter(s.ctx);
+  await headers.db.patch(generationId, { planRowsVersion: undefined });
+  const generationHeader = [...s.tables.projectFinishReadRows.values()].find(
+    row => row.kind === 'projectWorkGenerations' && row.sourceId === generationId,
+  );
+  const { planningSearchVersion, ...oldHeader } = JSON.parse(generationHeader.value);
+  assert.equal(planningSearchVersion, 2);
+  await s.ctx.db.patch(generationHeader._id, { value: JSON.stringify(oldHeader) });
+  await check(settledOnly, { proposed: 0, open: 0, 'in-progress': 0, closed: 1, abandoned: 0 });
+  await headers.db.patch(generationId, { planRowsVersion: 1 });
+
+  // The existing counter folds hidden members into one bucket. Bound the read when it cannot prove membership.
+  await update(parentId, { fields: { hidden: true } });
+  const fallback = planView(await webRead.read._handler(s.ctx, { projectId })).initiativeGroups.get(
+    initiativeId,
+  );
+  assert.equal(fallback.open, webRead.PLAN_LIVE_LIMIT);
+  assert.equal(fallback.done, webRead.PLAN_SETTLED_LIMIT);
+  const parts = groupBreakdown(fallback).parts;
+  for (const key of ['open', 'done']) assert.equal(parts.find(part => part.key === key).atLeast, true);
 });
 
 test('maintained Initiative counts use one bounded read at current and doubled board scale (b7a0dff1)', async t => {
