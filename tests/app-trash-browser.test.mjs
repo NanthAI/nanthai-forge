@@ -44,7 +44,7 @@ const s = query.get('s') || 'trash';
 window.calls = [];
 const call = name => async (...args) => { window.calls.push({ name, id: args[0]?.id ?? args[0]?.name }); };
 const actions = {
-  restore: async project => { window.calls.push({ name: 'restore', id: project.id }); return async () => { window.calls.push({ name: 'undo', id: project.id }); }; },
+  restore: async project => { window.calls.push({ name: 'restore', id: project.id }); return async () => { if (query.get('undo') === 'refused') throw new Error('The project changed after you restored it, so Undo left it alone.'); window.calls.push({ name: 'undo', id: project.id }); }; },
   forever: async (project, typed) => { window.calls.push({ name: 'forever', id: project.id, typed }); },
   retry: call('retry'),
   empty: call('empty'),
@@ -103,6 +103,22 @@ test('trash: forms per phase, restore with Undo, typed delete, owner-only menu a
       (await page.evaluate(() => window.calls)).map(call => call.name),
       ['restore', 'undo'],
     );
+    await context.close();
+  }
+  {
+    // An Undo the server refuses (someone joined after the restore) says so; it never vanishes silently.
+    const { page, context } = await open(1440, 'light', 's=trash&undo=refused');
+    await page.getByRole('button', { name: 'Restore' }).first().click();
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await page.getByText('The project changed after you restored it, so Undo left it alone.').waitFor();
+    assert.equal(
+      (await page.evaluate(() => window.calls)).some(call => call.name === 'undo'),
+      false,
+    );
+    await context.close();
+  }
+  {
+    const { page, errors, context } = await open(1440, 'light', 's=trash');
     // The sheet: the Delete forever key stays off until the exact name is typed; Esc keeps the project.
     await page.getByRole('button', { name: 'Delete forever' }).nth(1).click();
     const dialog = page.getByRole('dialog');

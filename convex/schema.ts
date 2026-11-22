@@ -532,6 +532,8 @@ const projectFields = {
       expectedRevision: v.number(),
       /** A restore that moved to a free address (Item eb631a53): its answer, kept for a retry. */
       address: v.optional(v.object({ slug: v.string(), previousSlug: v.string() })),
+      /** A person joined after this restore (Item 966cb821): its Undo no longer applies. */
+      shared: v.optional(v.literal(true)),
     }),
   ),
 };

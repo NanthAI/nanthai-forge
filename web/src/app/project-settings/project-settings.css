@@ -21,6 +21,8 @@
   .project-settings .prov summary { cursor: pointer; color: var(--text-2); font-size: var(--t-meta); }
   .project-settings .prov p { margin: var(--s-1) 0 0; color: var(--text-2); font-size: var(--t-meta); overflow-wrap: anywhere; }
   .project-settings .store { display: grid; gap: var(--s-3); padding: var(--s-3) var(--gut) var(--s-4); }
+  .project-settings .pick { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); }
+  .project-settings .pick-name { min-width: 0; overflow-wrap: anywhere; }
   .project-settings .store p { margin: 0; max-width: var(--m-prose); }
   .project-settings .quietline code { overflow-wrap: anywhere; }
   .project-settings .proj-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2) var(--s-3); }

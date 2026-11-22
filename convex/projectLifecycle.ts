@@ -25,6 +25,7 @@ import { purgeProjectRowsPage } from './projectPurgeRows';
 import { projectPurgeWriter } from './projectFinishReadWriter';
 import { dropProjectOrder, restoreProjectOrder } from './accountProjectOrder';
 import { latestLanding } from './projectLatestLanding';
+import { receiptOf, restoreReceipt, undoOpen, type RestoreReceipt } from './projectRestoreReceipt';
 
 const args = { projectId: v.id('hostedProjects'), operationId: v.string(), expectedRevision: v.number() };
 async function schedule(ctx: MutationCtx, project: Doc<'hostedProjects'>) {
@@ -43,7 +44,7 @@ export async function transition(
   /** Account deletion carries its own reviewed plan as the confirmation. `guard` checks a caller's own evidence pin
    * on a new owner transition, after authority and replay and before the revision check. */
   options: { confirmed?: boolean; guard?: (project: Doc<'hostedProjects'>) => Promise<void> } = {},
-) {
+): Promise<RestoreReceipt | null> {
   const user = await ctx.auth.getUserIdentity(),
     project = await ctx.db.get(input.projectId);
   projectExecution(
@@ -74,12 +75,12 @@ export async function transition(
     );
     if (project.removal === 'deleting') await schedule(ctx, project);
     // A retried restore answers as the first one did (its response may have been lost).
-    return project.lifecycle.address ?? null;
+    return action === 'restore' ? receiptOf(project.lifecycle) : null;
   }
   // SM-D guards (machine M1): restoring an active project and trashing a trashed one already
   // hold the state they ask for. They return before the revision check and write nothing, so a stale
   // second tab neither bumps the revision (which would fail every other holder with WORK_STALE) nor
-  // re-measures retention and moves its expiry.
+  // re-measures retention and moves its expiry. A restore that changed nothing has no receipt, so it offers no Undo.
   if ((action === 'restore' && !project.removal) || (action === 'trash' && project.removal === 'trash'))
     return null;
   await options.guard?.(project);
@@ -168,10 +169,10 @@ export async function transition(
           address: moved,
         },
       });
-      return moved;
+      return { restoreId: input.operationId, revision: input.expectedRevision + 1, ...moved };
     }
   }
-  return null;
+  return action === 'restore' ? { restoreId: input.operationId, revision: input.expectedRevision + 1 } : null;
 }
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 /** Project slugs are at most 100 characters, like repository names and the derived default (uniqueUrlName). */
@@ -334,22 +335,37 @@ async function applyRename(ctx: MutationCtx, project: Doc<'hostedProjects'>, inp
  * says whether this operation moved the project (`applied`), so a project another tab trashed is not claimed as
  * this caller's. Callers that omit it keep the null reply. */
 export const trash = mutation({
-  args: { ...args, expectedLastLanding: v.optional(v.union(v.string(), v.null())) },
+  args: {
+    ...args,
+    expectedLastLanding: v.optional(v.union(v.string(), v.null())),
+    /** Undo of a restore (Item 966cb821): the restore's own operation id from its receipt; `expectedRevision` is the
+     * receipt's revision. Refused as WORK_STALE once another transition ran or a person joined after that restore. */
+    afterRestore: v.optional(v.string()),
+  },
   returns: v.union(v.null(), v.object({ applied: v.boolean() })),
-  handler: async (ctx, { expectedLastLanding, ...input }) => {
+  handler: async (ctx, { expectedLastLanding, afterRestore, ...input }) => {
     try {
-      if (expectedLastLanding === undefined) {
+      if (expectedLastLanding === undefined && afterRestore === undefined) {
         await transition(ctx, input, 'trash');
         return null;
       }
       await transition(ctx, input, 'trash', {
-        guard: async project =>
-          invariant(
-            ((await latestLanding(ctx, project._id))?._id ?? null) === expectedLastLanding,
-            'WORK_STALE',
-            'The project landed work since you looked. It was left alone.',
-          ),
+        guard: async project => {
+          if (afterRestore !== undefined)
+            invariant(
+              undoOpen(project, afterRestore),
+              'WORK_STALE',
+              'The project changed after you restored it, so Undo left it alone.',
+            );
+          if (expectedLastLanding !== undefined)
+            invariant(
+              ((await latestLanding(ctx, project._id))?._id ?? null) === expectedLastLanding,
+              'WORK_STALE',
+              'The project landed work since you looked. It was left alone.',
+            );
+        },
       });
+      if (expectedLastLanding === undefined) return null;
       const after = await ctx.db.get(input.projectId);
       return { applied: after?.removal === 'trash' && after.lifecycle?.operationId === input.operationId };
     } catch (error) {
@@ -359,8 +375,8 @@ export const trash = mutation({
 });
 export const restore = mutation({
   args,
-  /** Item eb631a53: the new address when a live project took the old one while this one was removed. */
-  returns: v.union(v.null(), v.object({ slug: v.string(), previousSlug: v.string() })),
+  /** Undo's receipt (Item 966cb821), or null when this call changed nothing (the project was already restored). */
+  returns: v.union(v.null(), restoreReceipt),
   handler: async (ctx, input) => {
     try {
       return await transition(ctx, input, 'restore');

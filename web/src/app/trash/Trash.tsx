@@ -69,9 +69,17 @@ export default function Trash() {
   const empty = useRef<string | null>(null);
   const actions: Actions = {
     restore: async project => {
-      await run('restore', { id: project.id, revision: project.revision });
+      const receipt = await run('restore', { id: project.id, revision: project.revision });
       reread();
-      return () => run('trash', { id: project.id, revision: project.revision + 1 }).then(reread);
+      // No receipt: another tab had already restored it, so this call offers no Undo (Item 966cb821).
+      return receipt
+        ? () =>
+            run('trash', {
+              id: project.id,
+              revision: receipt.revision,
+              afterRestore: receipt.restoreId,
+            }).then(reread)
+        : undefined;
     },
     forever: async (project, typed) => {
       await run('delete', { id: project.id, revision: project.revision }, typed);
@@ -95,8 +103,8 @@ export default function Trash() {
 }
 
 export type Actions = {
-  /** Resolves with an Undo for the toast. */
-  restore: (project: TrashProject) => Promise<() => Promise<unknown>>;
+  /** Resolves with an Undo for the toast, or none when the project was already restored. */
+  restore: (project: TrashProject) => Promise<(() => Promise<unknown>) | undefined>;
   forever: (project: TrashProject, typed: string) => Promise<void>;
   retry: (project: TrashProject) => Promise<void>;
   empty: () => Promise<void>;
@@ -137,10 +145,12 @@ export function TrashView({
         ? actions
             .restore(project)
             .then(undo =>
-              show(
-                `Restored ${project.name}. Other people's access, runners and tokens did not come back.`,
-                undo,
-              ),
+              undo
+                ? show(
+                    `Restored ${project.name}. Other people's access, runners and tokens did not come back.`,
+                    undo,
+                  )
+                : show(`${project.name} was already restored.`),
             )
         : actions.retry(project).then(() => show('Removal started again from where it stopped.'));
     done.catch(failure => show(hostedError(failure))).finally(() => setBusy(null));

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The backups regions of Settings > Project as one view over what the page read (Item 966cb821). Rows, keys, notices and
 // states are the design system's; the words are the old project screen's, tightened.
-import { useId } from 'react';
 import { Key, Region, Row, State } from '../../ds';
+import { ArchivePicker } from './ArchivePicker';
 import type { Backup, Selected, Upload } from './backup-actions';
 
 const mib = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
@@ -61,7 +61,6 @@ export function BackupsView({
   /** The owner's project key is known, so an archive may be stored. */
   ready: boolean;
 }) {
-  const file = useId();
   return (
     <>
       <Region
@@ -188,17 +187,12 @@ export function BackupsView({
               files and ignored credentials are excluded; tracked history and retained logs may contain
               private data.
             </p>
-            <label className="f" htmlFor={file}>
-              <span>Choose archive</span>
-              <input
-                id={file}
-                className="inp"
-                type="file"
-                accept=".tar.gz,application/gzip"
-                disabled={busy || !!upload}
-                onChange={event => choose(event.target.files?.[0])}
-              />
-            </label>
+            <ArchivePicker
+              accept=".tar.gz,application/gzip"
+              disabled={busy || !!upload}
+              settled={!selected && !busy && !error}
+              choose={choose}
+            />
             {selected ? (
               <div role="status" className="meta">
                 <p>

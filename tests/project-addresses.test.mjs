@@ -48,13 +48,13 @@ test('a new project takes an address held only by removed copies; restoring the 
   assert.equal(await create(s, 'new'), 'forge');
   assert.equal((await at(s, 'forge')).id, 'new');
   const moved = await lifecycle.restore._handler(s.ctx, op(s, 'old'));
-  assert.deepEqual(moved, { slug: 'forge-2', previousSlug: 'forge' });
+  assert.deepEqual([moved.slug, moved.previousSlug], ['forge-2', 'forge']);
   assert.equal(project(s, 'old').slug, 'forge-2');
   assert.equal((await at(s, 'forge')).id, 'new', 'restore never takes a live project address back');
   assert.equal((await at(s, 'forge-2')).id, 'old');
   // A restore whose address is still free keeps it and reports nothing.
   await lifecycle.trash._handler(s.ctx, op(s, 'old'));
-  assert.equal(await lifecycle.restore._handler(s.ctx, op(s, 'old')), null);
+  assert.equal((await lifecycle.restore._handler(s.ctx, op(s, 'old'))).slug, undefined);
   assert.equal(project(s, 'old').slug, 'forge-2');
 });
 
@@ -70,10 +70,8 @@ test('the owner person renames onto an address only a removed project held; the 
   for (const slug of ['forge', 'forge-2'])
     assert.deepEqual(await at(s, slug), { id: 'second', handle: 'dino', slug: 'forge', name: 'Forge' }, slug);
   // The removed project's restore moves to a free suffix, and its old alias stays with the live project.
-  assert.deepEqual(await lifecycle.restore._handler(s.ctx, op(s, 'first')), {
-    slug: 'forge-3',
-    previousSlug: 'forge',
-  });
+  const third = await lifecycle.restore._handler(s.ctx, op(s, 'first'));
+  assert.deepEqual([third.slug, third.previousSlug], ['forge-3', 'forge']);
   assert.equal((await at(s, 'forge-2')).id, 'second');
 });
 
@@ -243,7 +241,7 @@ test('review 3: a retried restore returns the same moved address and changes not
   await create(s, 'new');
   const input = op(s, 'old');
   const first = await lifecycle.restore._handler(s.ctx, input);
-  assert.deepEqual(first, { slug: 'forge-2', previousSlug: 'forge' });
+  assert.deepEqual([first.slug, first.previousSlug], ['forge-2', 'forge']);
   const revision = project(s, 'old').revision;
   const aliases = JSON.stringify([...s.tables.projectSlugs.values()]);
   assert.deepEqual(await lifecycle.restore._handler(s.ctx, input), first, 'the response may have been lost');

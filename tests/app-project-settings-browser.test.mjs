@@ -38,7 +38,7 @@ let failOnce = q.get('fail') === '1';
 const extra = (
   <>
     <BackupsView backups={q.get('data') === 'empty' ? [] : backups} failed={false} more={worst} showMore={noop} retry={noop} owner={owner} busy={false} message="" error="" selected={null} upload={null}
-      choose={noop} download={b => window.calls.push({ name: 'download', id: b.id })} recovery={b => window.calls.push({ name: 'recovery', id: b.id })} reconcileOne={noop} resume={noop} start={noop} resumeOriginal={noop} dropOriginal={noop} ready />
+      choose={file => window.calls.push({ name: 'choose', file: file?.name })} download={b => window.calls.push({ name: 'download', id: b.id })} recovery={b => window.calls.push({ name: 'recovery', id: b.id })} reconcileOne={noop} resume={noop} start={noop} resumeOriginal={noop} dropOriginal={noop} ready />
     {owner ? <ImportsView rows={imports} failed={false} more={false} showMore={noop} retry={noop} remove={async row => { window.calls.push({ name: 'remove', id: row.id }); }} /> : null}
   </>
 );
@@ -91,6 +91,22 @@ test('settings project: facts, rename keeps one operation across a failed save, 
     );
     assert.match(await main.textContent(), /Current backup/);
     assert.match(await main.textContent(), /Upload pending/);
+    // The archive picker is the design system's button and the chosen name, never the browser's own input (OS language).
+    const store = page.locator('.store');
+    assert.equal(await store.locator('input[type=file]').isVisible(), false, 'the native input stays hidden');
+    assert.match(await store.textContent(), /No file chosen/);
+    await store.locator('input[type=file]').setInputFiles({
+      name: 'docs-site-work.tar.gz',
+      mimeType: 'application/gzip',
+      buffer: Buffer.from('synthetic'),
+    });
+    await store.getByText('docs-site-work.tar.gz').waitFor();
+    assert.deepEqual(
+      (await page.evaluate(() => window.calls)).filter(call => call.name === 'choose').map(call => call.file),
+      ['docs-site-work.tar.gz'],
+    );
+    assert.equal(await store.getByRole('button', { name: 'Choose archive' }).isEnabled(), true);
+    await check(page, 'archive picker with a chosen file 1440 light');
     await page.getByRole('button', { name: 'Remove sample/parser' }).click();
     assert.match(await page.getByRole('dialog').textContent(), /GitHub repository is\s+untouched/);
     await page.getByRole('dialog').getByRole('button', { name: 'Remove analysis' }).click();
@@ -131,6 +147,16 @@ test('settings project: facts, rename keeps one operation across a failed save, 
         const { page, errors, context } = await open(width, theme, query, path);
         await check(page, `${query} ${width} ${theme}`);
         if (query === 'who=owner') {
+          if (shots && query === 'who=owner') {
+            const store = page.locator('.store');
+            await store.locator('input[type=file]').setInputFiles({
+              name: 'docs-site-work.tar.gz',
+              mimeType: 'application/gzip',
+              buffer: Buffer.from('synthetic'),
+            });
+            await store.getByText('docs-site-work.tar.gz').waitFor();
+            await store.screenshot({ path: join(shots, `picker-${width}-${theme}.png`) });
+          }
           await page.getByRole('button', { name: 'Move to trash' }).click();
           await page.getByRole('dialog').waitFor();
           await check(page, `trash sheet ${width} ${theme}`);

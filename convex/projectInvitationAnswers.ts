@@ -15,6 +15,7 @@ import {
 } from './projectInvitationRecipient';
 import { invitationStatus } from './projectInvitationPolicy';
 import { syncPersonOrder } from './accountProjectOrder';
+import { closeRestoreUndo } from './projectRestoreReceipt';
 import { invitationInviter, invitationWasRevoked } from './projectInvitationRevocation';
 
 /** Acceptance is the sole invitation grant path; an existing write grant is never lowered. */
@@ -89,8 +90,11 @@ export const answer = accountMutation('person')({
         'BAD_ARGUMENT',
         'Invitations from this account are blocked. Unblock it in your invitations first.',
       );
-      if (input.choice === 'accept' && project.owner !== user.subject)
+      if (input.choice === 'accept' && project.owner !== user.subject) {
         await grant(ctx, row.projectId, user.subject, row.role ?? 'write');
+        // A person who joins after a restore closes its Undo (Item 966cb821).
+        await closeRestoreUndo(ctx, project);
+      }
       if (input.choice === 'block') {
         const address = row.recipient ? await recipientEmail(ctx, user, { anyAge: true }) : row.email;
         await setInvitationBlock(ctx, user.subject, project.owner, blocked, address);
