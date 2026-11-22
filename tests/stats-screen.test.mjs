@@ -30,7 +30,6 @@ async function fixture(out) {
     import {ConvexProvider, ConvexReactClient} from 'convex/react';
     import {StatsView} from ${JSON.stringify(join(root, 'web/src/app/stats/Stats.tsx'))};
     import {ProjectFrame} from ${JSON.stringify(join(root, 'web/src/app/frames.tsx'))};
-    import {rebuildFlowLandings, stepFlow, utcDayStart} from ${JSON.stringify(join(root, 'src/flow-day.ts'))};
     import {statsCarry, statsDay, statsFailedDay} from ${JSON.stringify(join(root, 'src/stats-estimate.ts'))};
     import {classifyRuns} from ${JSON.stringify(join(root, 'src/stats-runs.ts'))};
     import {statsRangeReply} from ${JSON.stringify(join(root, 'src/stats-period.ts'))};
@@ -51,11 +50,6 @@ async function fixture(out) {
     // Samples, as [UTC start of day, landings]: November so far with one October day; two days; one day; a full
     // 31-day October; a few early landings; nothing closed at all (an empty month).
     const sample = new URLSearchParams(location.search).get('sample');
-    let flow = stepFlow(undefined, now - 86400000, {landed: 1, first: true});
-    flow = stepFlow(flow, now - 2 * min, {landed: 1, first: true});
-    flow = stepFlow(flow, now - min, {landed: 1, first: false});
-    if (sample === 'now') flow = stepFlow(flow, now, {landed: 1});
-    if (sample === 'two') flow = rebuildFlowLandings(flow, utcDayStart(now), [], false);
     const dayAt = (y, m, d) => Date.UTC(y, m, d);
     const nov = [22, 18, 14, 9, 21, 24, 19, 23, 20, 13, 11, 25, 27, 26, 14].map((n, i) => [base + i * 86400000, n]);
     const plan = {
@@ -78,6 +72,8 @@ async function fixture(out) {
       landingsCut: [[base, 30], [base + 86400000, 30]],
       // A third of the landings report their agent's tokens (Item a61d3c91).
       tokens: nov,
+      // Today so far (Item 580b1a1a): the open day's provisional row, counted up to 10:00 UTC.
+      today: [...nov, [dayAt(2026, 10, 19), 12]],
       notMeasured: [[dayAt(2026, 9, 31), 30], [base, 30], [base + 86400000, 30]],
     }[sample ?? 'now'];
     // Every check run of a day: each landing's own solo run, a recheck after main moved for every 11th, a failed earlier
@@ -116,6 +112,7 @@ async function fixture(out) {
       const landings = day(start, n);
       const d = statsDay(name, landings, runsOf(landings), carry);
       carry = statsCarry(d);
+      if (sample === 'today' && i === plan.length - 1) return {...d, provisional: Date.UTC(2026, 10, 19, 10)};
       return sample === 'landingsCut' ? {...d, partial: true} : d;
     });
     const client = new ConvexReactClient('https://forge.test.convex.cloud');
@@ -128,7 +125,7 @@ async function fixture(out) {
       const data = statsRangeReply(days, period);
       // Each fold's part, recorded so the test can tell an unopened fold made no read.
       const usePart = part => ((window.foldReads ??= new Set()).add(part), statsRangeReply(days, period, part));
-      return h(StatsView, {data, period, busy: new URLSearchParams(search).has('busy'), flow: sample === 'none' ? undefined : flow, now, usePart, historyHref: '/-/example/tidepool/lanes/history', onPeriod: setSearch});
+      return h(StatsView, {data, period, busy: new URLSearchParams(search).has('busy'), now, usePart, historyHref: '/-/example/tidepool/lanes/history', onPeriod: setSearch});
     }
     createRoot(document.getElementById('root')).render(h(ConvexProvider, {client},
       h(ProjectFrame, {route, name: 'tidepool', projects: [], controls: {onPalette(){}, onKeys(){}, onPicker(){}, viewerHandle: 'example'}},
@@ -162,7 +159,7 @@ async function fixture(out) {
   return `<!doctype html><html lang="en" data-ds><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Stats · tidepool · Forge</title><style>body{margin:0}</style>${styles}</head><body><div id="root"></div><script type="module" src="/${script}"></script></body></html>`;
 }
 
-test('stats: closed-day freshness, today so far, comparison, tables and both themes', async t => {
+test('stats: short headline, one freshness line, today so far, comparison, tables and both themes', async t => {
   const launchOptions = chromiumLaunchOptions(t);
   if (!launchOptions) return;
   const out = mkdtempSync(join(tmpdir(), 'forge-stats-screen-'));
@@ -204,16 +201,23 @@ test('stats: closed-day freshness, today so far, comparison, tables and both the
   };
   const page = await open();
   const sentence = await page.locator('.sit').textContent();
+  // Item 580b1a1a: the merge queue's CI minutes and the median time to main, for the landings and days counted.
   assert.match(
     sentence,
-    /^[\d,.]+ CI minutes (fewer|more) than your own history replayed through a merge queue building 5 at once, over 1–15 Nov 2026 \(15 closed days\)\./,
-    'the headline is against the merge queue, replayed, over the closed days only',
+    /^[\d,.]+ (fewer|more) CI minutes than a GitHub merge queue would have used for these [\d,]+ landings, 1–15 Nov\. Changes reached main [\w ]+ (sooner|later) \(median\)\.(Through|$)/,
+    'the headline is short and exact',
   );
-  assert.match(sentence, /than one at a time, the worst case\./);
-  assert.deepEqual(await page.locator('.stats-freshness').allTextContents(), [
-    'Through Sun, Nov 15. Stats updates after the first landing on a later UTC day.',
-    'Today so far (UTC) · 3 landings · 50% first try among judged landings',
+  assert.doesNotMatch(sentence, /one at a time/i, 'one at a time stays in the chart');
+  assert.deepEqual(
+    await page.locator('.stats-freshness').allTextContents(),
+    ['Through Sun 15 Nov.'],
+    'today in the period with no row for it yet: the newest day counted',
+  );
+  const today = await open(1440, 'today');
+  assert.deepEqual(await today.locator('.stats-freshness').allTextContents(), [
+    'Includes today up to 10:00 UTC.',
   ]);
+  assert.match(await today.locator('.sit').textContent(), /landings, 1–19 Nov\./, 'today is in the totals');
   const pending = await open(1440, 'now', 'dark', 'busy');
   assert.equal(
     await pending.locator('.stats-freshness').count(),
@@ -357,22 +361,18 @@ test('stats: closed-day freshness, today so far, comparison, tables and both the
   await page.getByLabel('From', { exact: true }).fill('2026-10-01');
   await page.getByLabel('To', { exact: true }).fill('2026-11-19');
   await page.getByRole('button', { name: 'Show' }).click();
-  assert.match(await page.locator('.sit').textContent(), /over 20 Oct – 15 Nov 2026 \(16 closed days\)\./);
+  assert.match(await page.locator('.sit').textContent(), /landings, 20 Oct – 15 Nov\./);
   await page.getByRole('button', { name: 'By month' }).click();
   assert.equal(await page.getByRole('table', { name: 'Stats by month' }).locator('tbody tr').count(), 2);
   // October 20 to November 1 had no closed day: the gap draws as zero-landing days, not as nothing.
   assert.equal(await page.locator('.stats-days button').count(), 27);
   await page.getByLabel('Period').selectOption('this');
-  assert.match(await page.locator('.sit').textContent(), /over 1–15 Nov 2026/);
+  assert.match(await page.locator('.sit').textContent(), /landings, 1–15 Nov\./);
   // Last 7 days ends today (19 Nov): its label names only the closed days in it.
   await page.getByLabel('Period').selectOption('7');
-  assert.match(await page.locator('.sit').textContent(), /over 13–15 Nov 2026 \(3 closed days\)/);
+  assert.match(await page.locator('.sit').textContent(), /landings, 13–15 Nov\./);
   await page.getByLabel('Period').selectOption('30');
-  assert.match(
-    await page.locator('.sit').textContent(),
-    /over 1–15 Nov 2026 \(15 closed days\)/,
-    '21 Oct to 19 Nov',
-  );
+  assert.match(await page.locator('.sit').textContent(), /landings, 1–15 Nov\./, '21 Oct to 19 Nov');
 
   // Fixed-width bars fill from the left: two days stay two narrow bars, 31 days fit a phone.
   const bars = async p =>
@@ -388,11 +388,7 @@ test('stats: closed-day freshness, today so far, comparison, tables and both the
     assert(first.width <= 26 && second.width <= 26, `${width}: bars keep their width`);
     assert(second.left + second.width - plot < 60, `${width}: two days sit at the left, not across the page`);
     assert.deepEqual(await two.locator('.stats-days .v').allTextContents(), ['31', '128']);
-    assert.equal(
-      await two.locator('.stats-freshness').last().textContent(),
-      'Today so far (UTC) · at least 2 landings',
-      'partial live counts are lower bounds and omit the incomplete first-try share',
-    );
+    assert.deepEqual(await two.locator('.stats-freshness').allTextContents(), ['Through Wed 18 Nov.']);
     const one = await open(width, 'one');
     assert.equal((await bars(one)).length, 1);
     assert.match(await one.locator('.sit').textContent(), /^7 landings on 18 Nov 2026 \(1 closed day\)\./);
@@ -415,9 +411,7 @@ test('stats: closed-day freshness, today so far, comparison, tables and both the
   }
   const empty = await open(390, 'none');
   assert.match(await empty.locator('.sit').textContent(), /^No closed days in November 2026\./);
-  assert.deepEqual(await empty.locator('.stats-freshness').allTextContents(), [
-    'Stats updates after the first landing on a later UTC day.',
-  ]);
+  assert.deepEqual(await empty.locator('.stats-freshness').allTextContents(), [], 'nothing counted: no line');
   await empty.getByLabel('Period').selectOption('last');
   assert.match(await empty.locator('.sit').textContent(), /^No closed days in October 2026\./);
   const early = await open(390, 'early');
@@ -460,7 +454,7 @@ test('stats: closed-day freshness, today so far, comparison, tables and both the
   assert.match(await monthRows.first().textContent(), /October 2026 · read in part: saving is at most this/);
   assert.match(
     await partialMonths.getByRole('table', { name: 'Stats by month' }).textContent(),
-    /Fewer than a merge queue, replayed/,
+    /Fewer than a merge queue \(estimate\)/,
   );
   // Landings read in part, every run read: every run's minutes over fewer landings, so minutes per landing are an upper
   // bound, never a lower one; rates and times cover the landings read; saved minutes a lower bound (review d6b0f1aa
@@ -483,9 +477,7 @@ test('stats: closed-day freshness, today so far, comparison, tables and both the
   assert.equal(await notMeasured.locator('.stats-days button:not([data-missing])').count(), 2);
   assert.match(await notMeasured.locator('.sit').textContent(), /60 landings/, 'the missing day adds none');
   const newestFailed = await open(1440, 'notMeasured', 'dark', 'from=2026-10-31&to=2026-11-01');
-  assert.deepEqual(await newestFailed.locator('.stats-freshness').allTextContents(), [
-    'Through Sat, Oct 31. Stats updates after the first landing on a later UTC day.',
-  ]);
+  assert.deepEqual(await newestFailed.locator('.stats-freshness').allTextContents(), ['Through Sat 31 Oct.']);
   await notMeasured.getByRole('button', { name: 'By month' }).click();
   assert.match(
     await notMeasured.getByRole('table', { name: 'Stats by month' }).locator('tbody tr').nth(1).textContent(),
@@ -494,6 +486,7 @@ test('stats: closed-day freshness, today so far, comparison, tables and both the
 
   for (const [sample, query] of [
     ['now', ''],
+    ['today', ''],
     ['month31', 'period=last'],
     ['two', ''],
     ['none', ''],

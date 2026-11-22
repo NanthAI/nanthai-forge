@@ -28,6 +28,8 @@ async function readClosedDay(ctx: MutationCtx, projectId: Id<'hostedProjects'>, 
       .unique();
     if (!row) return undefined;
     const parsed = statsDaySchema.safeParse(JSON.parse(row.value));
+    // Today so far (Item 580b1a1a) is not closed: its real close reads the corrected counts itself.
+    if (parsed.success && parsed.data.schema === 2 && parsed.data.provisional !== undefined) return undefined;
     return parsed.success ? { row, value: parsed.data } : null;
   } catch {
     return null;

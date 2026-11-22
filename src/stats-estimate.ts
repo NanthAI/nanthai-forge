@@ -175,6 +175,9 @@ const statsDayV2Schema = statsDayV1Schema
     /** The close stopped writing people's days before it had written them all (the transaction's meter): some people's
      * work of this close's window is not on their profile. */
     peoplePartial: z.literal(true).optional(),
+    /** Today so far (Item 580b1a1a): the same close run on the open UTC day when Stats was opened, up to this time
+     * (epoch ms). The day's real close after midnight UTC replaces it; no month rollup and no late correction reads it. */
+    provisional: z.number().int().positive().optional(),
     /** Agent-reported tokens (Item a61d3c91): how many of the day's landings reported and their sum. Absent when none
      * did, so a day without reports stores nothing more. */
     tokens: z

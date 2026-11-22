@@ -242,6 +242,31 @@ from where the failed close would have read (its mark keeps `since`), so its peo
 Anything past a cap or the meter is not guessed: the day is marked `partial`. The close then writes one
 `projectStatsDays` row.
 `projectStats:recloseDays` rebuilds closed days only (it refuses today and later).
+
+Today counts so far (Item 580b1a1a). Opening Stats on a period that holds today calls
+`projectStatsToday:refreshToday` once. That mutation reads today's row and at most one receipt.
+It schedules the same close over the open UTC day only after a landing since the last such close,
+at most once every `STATS_TODAY_REFRESH_MS` (60 min). The shell's feed already rules out a day with
+no landing, so most opens make no call. The close writes today's row marked `provisional` with the
+time it covers up to. It probes no earlier day, judges no day budget, rolls no month and keeps no
+late-correction lists; it does write the same person days, which the real close replaces.
+
+The day's real close after midnight UTC replaces the provisional row with a fresh row. No month
+rollup, late correction or Lane backfill reads a provisional row. A later close that finds an
+earlier day still provisional marks it not measured (try 1) and closes it first, as for a gap day.
+A refresh scheduled twice before it ran, or one that runs after midnight, writes nothing. A re-close of a day still
+provisional rebuilds its figures and leaves it provisional. Metrics reads the day-budget ratchet from the newest
+closed row (it reads the newest two rows).
+
+Measured in `tests/stats-today.test.mjs` with two check runs per landing:
+
+| Day | Open (one call) | Provisional close (one call) | DB I/O a close | Worst day, 24 closes |
+| --- | --- | --- | --- | --- |
+| 200 landings (dogfood) | 3 documents, 4.4 KB | 1,243 documents, 430 queries, 2 writes | 1.40 MB, $0.00028 | $0.0067 |
+| 400 landings (doubled) | 3 documents, 4.4 KB | 2,445 documents, 832 queries, 2 writes | 2.72 MB, $0.00055 | $0.013 |
+
+A close is capped at 14 MiB (about $0.0029), so 24 a day cost at most about $0.07 per project. With
+Stats closed, or no landing today, nothing runs: no cron and no new work per landing.
 A month's rollup is written by `projectStats:rollMonth` (at most 31 day rows read, one write): scheduled by the first
 close of a later month, or by a reclose that rebuilds a month's last day or the end of its run. An idle project
 schedules nothing, and a month with no closed day has no row.
@@ -254,11 +279,15 @@ shut by default; each reads its own part of the same rows only once opened, so a
 range also has "Against the days before", a fold setting it beside the same number of days just before it (landings
 per closed day, first try, median time to main, CI minutes per landing); opened, it reads the previous range's day
 rows too (at most 184 rows for the two), and its method is on hover only. A read
-re-runs only when a day inside its period closes; it takes no clock argument. Until a period has fully closed, the
-page names the closed days it covers ("over 17–18 Nov 2026 (2 closed days)"), never the whole month. A day left not
-measured is not a closed day: it is in neither the span nor the count, and a period holding one has not wholly closed.
-The Stats headline names the latest measured day and says when figures update. When the selected period includes today
-and the project's live line is available, Stats also shows today's UTC landings and the share of judged landings
-that were first try. It uses the shell's existing feed with no extra reads or idle timer.
+re-runs only when a day inside its period closes or today's row is refreshed; it takes no clock argument.
+
+The headline is the merge queue's CI minutes and the median time to main: "2,345 fewer CI minutes than a GitHub merge
+queue would have used for these 3,000 landings, 1–22 Nov. Changes reached main 12 min sooner (median)." It names the
+whole period only once every day of it is counted; until then it names the days counted ("1–22 Nov"). One at a time
+stays in the chart, and replayed figures are marked as estimates there. Below a comparison the headline counts
+landings over the closed days ("over 17–18 Nov 2026 (2 closed days)"). A day left not measured is not a closed day:
+it is in neither the span nor the count, and a period holding one has not wholly closed. One line says how far the
+figures reach: "Includes today up to 10:00 UTC." when the period holds today and today's row counts so far, otherwise
+"Through Sat 21 Nov.", the newest day counted.
 By agent shows agents in four first-try buckets (100%, 75–99%, 50–74%, under 50%), never a list per agent; each landing's own
 time to main and stops are on its Lane page.

@@ -12,7 +12,7 @@ import { internalMutation } from './server';
 import { recordPersonDays } from './personDays';
 import { DAY_MS, dayStart, lanesByDay } from './statsLanes';
 import { statsDaySchema } from '../src/stats-estimate';
-import { notMeasured } from '../src/stats-period';
+import { notMeasured, provisionalAt } from '../src/stats-period';
 
 /** Closed-day rows one run looks at. */
 export const BACKFILL_DAYS = 40;
@@ -63,8 +63,11 @@ export const project = internalMutation({
         paused = true;
         break;
       }
+      const kept = statsDaySchema.parse(JSON.parse(row.value));
+      // Today so far (Item 580b1a1a) is not a closed day, and its person days are its own close's: never filed here.
+      if (provisionalAt(kept) !== null) continue;
       seen = row.day;
-      if (notMeasured(statsDaySchema.parse(JSON.parse(row.value)))) continue;
+      if (notMeasured(kept)) continue;
       await fill(dayStart(row.day));
       last = row.day;
     }

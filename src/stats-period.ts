@@ -17,6 +17,8 @@ import {
  * STATS_RANGE_MAX_DAYS days, so a read is at most that many rows; the figures' methods stay statsWindow's. All time
  * reads one stored rollup per closed month (statsMonth) and the day rows of the months not rolled up yet. */
 export const STATS_RANGE_MAX_DAYS = 92;
+/** Today so far (Item 580b1a1a): a Stats open refreshes the open UTC day's row at most once in this long. */
+export const STATS_TODAY_REFRESH_MS = 60 * 60_000;
 export type StatsRange = { from: string; to: string };
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -66,6 +68,8 @@ export type StatsPart = (typeof STATS_PARTS)[number];
 
 /** A day whose close did not finish: in no figure, and not a closed day (src/stats-estimate.ts#statsFailedDay). */
 export const notMeasured = (d: StatsDay) => d.schema === 2 && d.failed !== undefined;
+/** Until when a day row counts so far (src/stats-estimate.ts `provisional`, Item 580b1a1a), or null for a closed day. */
+export const provisionalAt = (d: StatsDay | undefined) => (d?.schema === 2 ? (d.provisional ?? null) : null);
 /** The closed days a read covers: the first and newest measured day, how many were measured and how many were not.
  * A day not measured is never a closed day here. */
 export type StatsCover = { first: string | null; last: string | null; closed: number; notMeasured: number };
@@ -224,7 +228,15 @@ function trendLine(rows: readonly StatsDay[], range: StatsRange) {
 
 /** A reply's parts from a window's figures. */
 function reply(
-  base: { kind: 'range' | 'all'; from: string; to: string; through: string | null; cover: StatsCover },
+  base: {
+    kind: 'range' | 'all';
+    from: string;
+    to: string;
+    through: string | null;
+    cover: StatsCover;
+    /** The newest row is today so far, up to this time (epoch ms); null when every row is a closed day. */
+    todayUpTo: number | null;
+  },
   part: StatsPart,
   figures: ReturnType<typeof statsFigures>,
   bars: { perDay: Array<[string, number | null]>; perMonth: Array<[string, number]> | null },
@@ -264,6 +276,7 @@ export function statsRangeReply(
     /** The newest closed day in the range, or null when none has closed. */
     through: rows.at(-1)?.day ?? null,
     cover: coverOf(rows),
+    todayUpTo: provisionalAt(rows.at(-1)),
   };
   if (part === 'trend')
     return {
@@ -308,6 +321,7 @@ export function statsAllReply(
     to: cover.last ?? '',
     through: cover.last,
     cover,
+    todayUpTo: provisionalAt(tail.at(-1)),
   };
   // All time has no previous period to set beside it: a trend read gets the head.
   const p = part === 'trend' ? 'head' : part;

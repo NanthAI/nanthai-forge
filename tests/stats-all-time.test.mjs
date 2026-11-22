@@ -243,3 +243,11 @@ test('a day left not measured is not a closed day in the covered-days words', ()
     'over 13–19 Nov 2026 (6 closed days)',
   );
 });
+
+test('how far a provisional row counts: its day and UTC time, and nothing for a reply without the field', () => {
+  // Review of Item 580b1a1a: a reply from a backend before the field had no todayUpTo; the line must not throw.
+  assert.equal(model.soFarOf(undefined), null);
+  assert.equal(model.soFarOf(null), null);
+  assert.deepEqual(model.soFarOf(Date.UTC(2026, 10, 21, 9, 5)), { day: '2026-11-21', time: '09:05' });
+  assert.equal(model.weekdayName('2026-11-21'), 'Sat 21 Nov');
+});

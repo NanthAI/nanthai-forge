@@ -269,7 +269,7 @@ export function ByMonth({ r }: { r: StatsMonths }) {
         },
         {
           key: 's',
-          title: 'Fewer than a merge queue, replayed',
+          title: 'Fewer than a merge queue (estimate)',
           numeric: true,
           cell: row => (row.savedVsQueue === null ? gapWords(row).short : minutes(row.savedVsQueue)),
         },

@@ -83,14 +83,16 @@ async function landingSpeedSummary(ctx: QueryCtx, projectId: Id<'hostedProjects'
     ...(await dayBudgetSummary(ctx, projectId)),
   };
 }
-/** The day budgets' ratchet (the daily waste tripwire) lives on the newest Stats day row, never on the
- * landing row: one indexed read of that row, beside the one above (review d2d1a7e8). */
+/** The day budgets' ratchet (the daily waste tripwire) lives on the newest closed Stats day row, never on the
+ * landing row: one indexed read of the newest two rows, beside the one above (review d2d1a7e8). The newest may be today
+ * so far (Item 580b1a1a), which only carries an older day's state. */
 async function dayBudgetSummary(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
-  const row = await ctx.db
+  const rows = await ctx.db
     .query('projectStatsDays')
     .withIndex('by_project_and_day', q => q.eq('projectId', projectId))
     .order('desc')
-    .first();
+    .take(2);
+  const row = rows.find(r => (JSON.parse(r.value) as { provisional?: number }).provisional === undefined);
   const parsed = row?.budgets ? dayBudgetStateSchema.safeParse(JSON.parse(row.budgets)) : null;
   return parsed?.success && parsed.data.ratchet
     ? { dayBudgets: { day: row!.day, ratchet: parsed.data.ratchet } }

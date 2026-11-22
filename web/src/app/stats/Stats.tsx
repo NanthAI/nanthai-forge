@@ -5,15 +5,16 @@
 // days; each other chart is a fold that reads its own part only once opened, so an unopened fold costs nothing. A read
 // re-runs only when a day in its period closes; choosing another period or opening a fold are the only other calls.
 // All time reads one stored rollup per closed month and the open month's days; "Against the days before" (a range
-// only) is a fold too.
+// only) is a fold too. Today counts so far (Item 580b1a1a): opening a period that holds today asks once for a
+// provisional close of today, which the server runs at most hourly and only after a landing today.
 import './stats.css';
 import '../../ds/figures.css';
-import { useRef, type ReactNode } from 'react';
-import { useQuery } from 'convex/react';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import { Region, useFold } from '../../ds';
-import { firstTryPercent, flowToday, utcDayStart, type FlowDayFeed } from '../../../../src/flow-day';
-import { rangeDays } from '../../../../src/stats-period';
+import { flowToday, utcDayStart } from '../../../../src/flow-day';
+import { STATS_TODAY_REFRESH_MS, rangeDays } from '../../../../src/stats-period';
 import type {
   StatsAgents,
   StatsMonths,
@@ -30,10 +31,10 @@ import { ByMonth, ByWho, PerDay, Trend, Waited } from './Charts';
 import { Compare, Measured } from './Compare';
 import { PeriodPicker } from './PeriodPicker';
 import {
-  dayName,
   duration,
   filledDays,
   gapWords,
+  holdsToday,
   partialWords,
   int,
   minutes,
@@ -41,6 +42,9 @@ import {
   periodOf,
   periodWords,
   plural,
+  spanWords,
+  soFarOf,
+  weekdayName,
   type Period,
   type StatsRead,
 } from './model';
@@ -70,12 +74,30 @@ export default function Stats(props: PlaceProps) {
   const key = `${period.kind}/${period.from}/${period.to}`;
   if (result !== undefined) last.current = { data: JSON.parse(result) as Reply, key };
   const data = last.current?.data;
+  const busy = result === undefined && data !== undefined;
+  // Today so far: once per opening, when the period holds today, today's row is missing or an hour old, and the shell's
+  // feed (no extra read) does not rule out a landing today. The server checks both again before it schedules.
+  const refresh = useMutation(api.projectStatsToday.refreshToday);
+  const asked = useRef(false);
+  const flow = props.feedError ? undefined : props.feed?.flow;
+  const stale =
+    data !== undefined &&
+    !busy &&
+    !('error' in data) &&
+    holdsToday(period, now) &&
+    (soFarOf(data.todayUpTo) === null || now - data.todayUpTo! >= STATS_TODAY_REFRESH_MS);
+  const today = flow ? flowToday(flow, now, utcDayStart(now)) : null;
+  const landedToday = !today || today.landed > 0 || today.partial.includes('landed');
+  useEffect(() => {
+    if (asked.current || !stale || !landedToday) return;
+    asked.current = true;
+    refresh({ projectId: props.projectId }).catch(() => undefined);
+  }, [stale, landedToday, refresh, props.projectId]);
   return (
     <StatsView
       data={data}
       period={period}
-      busy={result === undefined && data !== undefined}
-      flow={props.feedError ? undefined : props.feed?.flow}
+      busy={busy}
       now={now}
       historyHref={hrefFor({ ...props.route, place: 'lanes', section: 'history', rest: '' })}
       usePart={usePart}
@@ -88,7 +110,6 @@ export function StatsView({
   data,
   period,
   busy = false,
-  flow,
   now,
   historyHref,
   usePart,
@@ -97,7 +118,6 @@ export function StatsView({
   data: Reply | undefined;
   period: Period;
   busy?: boolean;
-  flow?: FlowDayFeed | undefined;
   now: number;
   historyHref: string;
   usePart: UsePart;
@@ -127,9 +147,7 @@ export function StatsView({
     );
   const w = data.window;
   const billing = hrefFor({ frame: 'account', place: 'billing' });
-  const freshness = busy ? null : (
-    <Freshness through={data.cover.last} period={period} flow={flow} now={now} />
-  );
+  const freshness = busy ? null : <Freshness data={data} period={period} now={now} />;
   const notice = period.error ? (
     <p role="alert" className="stats-note">
       {period.error}
@@ -230,37 +248,19 @@ export function StatsView({
   );
 }
 
-function Freshness({
-  through,
-  period,
-  flow,
-  now,
-}: {
-  through: string | null;
-  period: Period;
-  flow: FlowDayFeed | undefined;
-  now: number;
-}) {
-  const day = new Date(now).toISOString().slice(0, 10);
-  const includesToday = period.kind === 'all' || (period.from <= day && day <= period.to);
-  const today = flow && includesToday ? flowToday(flow, now, utcDayStart(now)) : null;
-  const firstTry = today && !today.partial.includes('firstTry') ? firstTryPercent(today) : null;
-  return (
-    <>
-      <span className="stats-freshness">
-        {through ? `Through ${dayName(through)}. ` : ''}
-        Stats updates after the first landing on a later UTC day.
-      </span>
-      {today ? (
-        <span className="stats-freshness">
-          Today so far (UTC) · {today.partial.includes('landed') ? 'at least ' : ''}
-          {plural(today.landed, 'landing')}
-          {firstTry === null ? '' : ` · ${firstTry}% first try`}
-          {firstTry !== null && today.judged < today.landed ? ' among judged landings' : ''}
-        </span>
-      ) : null}
-    </>
-  );
+/** One short line: how far the figures reach. "Includes today up to 10:00 UTC." when the period holds today and today's
+ * row counts so far; otherwise the newest day counted, with the time when that day still counts only so far. */
+function Freshness({ data, period, now }: { data: StatsRead; period: Period; now: number }) {
+  const soFar = soFarOf(data.todayUpTo);
+  const last = data.cover.last;
+  const today = new Date(now).toISOString().slice(0, 10);
+  const text =
+    soFar && soFar.day === today && holdsToday(period, now)
+      ? `Includes today up to ${soFar.time} UTC.`
+      : last
+        ? `Through ${weekdayName(last)}${soFar?.day === last ? `, ${soFar.time} UTC` : ''}.`
+        : null;
+  return text ? <span className="stats-freshness">{text}</span> : null;
 }
 
 function Sentence({ data, period }: { data: StatsRead; period: Period }) {
@@ -280,20 +280,24 @@ function Sentence({ data, period }: { data: StatsRead; period: Period }) {
         {part ? ` ${part.measured}` : ''}
       </>
     );
-  // Headline against the merge queue (the setup a busy GitHub project uses); one at a time is the worst case.
-  const q = c.mergeQueue,
-    one = c.oneAtATime;
-  const ci = (saved: number) =>
-    saved >= 0 ? `${minutes(saved)} CI minutes fewer` : `${minutes(-saved)} CI minutes more`;
-  const time = (s: number | null) =>
-    s === null ? 'no replay' : s >= 0 ? `${duration(s)} sooner` : `${duration(-s)} later`;
+  // Headline against the merge queue (the setup a busy GitHub project uses): its CI minutes and the median time to
+  // main. One at a time, the worst case, stays in the chart.
+  const q = c.mergeQueue;
+  const ci =
+    q.savedMinutes >= 0
+      ? `${minutes(q.savedMinutes)} fewer CI minutes`
+      : `${minutes(-q.savedMinutes)} more CI minutes`;
+  const s = q.sooner;
+  const time =
+    s === null
+      ? ''
+      : s === 0
+        ? ' Changes reached main in the same time (median).'
+        : ` Changes reached main ${duration(Math.abs(s))} ${s > 0 ? 'sooner' : 'later'} (median).`;
   return (
     <>
-      <b>
-        {ci(q.savedMinutes)} than your own history replayed through a merge queue building 5 at once, {when}.
-      </b>{' '}
-      {plural(c.landings, 'landing')}. The median change reached main {time(q.sooner)} than through that
-      queue, and {time(one.sooner)} than one at a time, the worst case.
+      <b>{ci} than a GitHub merge queue would have used</b> for these {plural(c.landings, 'landing')}
+      {spanWords(data.cover, period)}.{time}
       {part ? ` ${part.saved}` : ''}
     </>
   );

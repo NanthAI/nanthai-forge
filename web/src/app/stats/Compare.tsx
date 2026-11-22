@@ -100,7 +100,7 @@ export function Compare({ w }: { data: StatsRead; w: StatsWindow }) {
           <div
             className="vb"
             role="img"
-            aria-label={`CI minutes: Forge ${minutes(c.forgeMinutes)} measured. Replayed: one at a time ${minutes(one.ciMinutes)}, merge queue 5 at a time ${minutes(queue.ciMinutes)}.`}
+            aria-label={`CI minutes: Forge ${minutes(c.forgeMinutes)} measured. Replayed estimates: one at a time ${minutes(one.ciMinutes)}, merge queue 5 at a time ${minutes(queue.ciMinutes)}.`}
           >
             <div className="col">
               <span className="val">{minutes(c.forgeMinutes)}</span>
@@ -126,7 +126,7 @@ export function Compare({ w }: { data: StatsRead; w: StatsWindow }) {
           <div
             className="vb"
             role="img"
-            aria-label={`Median time to main: Forge ${duration(forgeToMain)} measured. Replayed: one at a time ${duration(one.toMainSeconds)}, merge queue 5 at a time ${duration(queue.toMainSeconds)}.`}
+            aria-label={`Median time to main: Forge ${duration(forgeToMain)} measured. Replayed estimates: one at a time ${duration(one.toMainSeconds)}, merge queue 5 at a time ${duration(queue.toMainSeconds)}.`}
           >
             <div className="col">
               <span className="val">{forgeToMain === null ? '–' : clock(forgeToMain)}</span>
@@ -151,7 +151,7 @@ export function Compare({ w }: { data: StatsRead; w: StatsWindow }) {
         </span>
         <span>
           <i className="est" />
-          Your own history replayed
+          Your own history replayed, an estimate
         </span>
         <Key
           kind="ghost"

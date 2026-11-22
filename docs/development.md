@@ -730,8 +730,11 @@ layer out of both first paints.
   time (`src/stats-period.ts`): the head on open, each fold once opened,
   all computed by `statsWindow` (`src/stats-estimate.ts`). A day closes once
   (`projectStats.closeDay`), scheduled by the project's first landing of a
-  later UTC day, so the read re-runs once a day and an idle project costs
-  nothing. See [Stats](run-evidence.md#stats).
+  later UTC day, so an idle project costs nothing. Opening Stats on a period
+  that holds today calls `projectStatsToday.refreshToday`, which schedules the
+  same close over today as a provisional row at most hourly and only after a
+  landing since the last; the real close replaces it. See
+  [Stats](run-evidence.md#stats).
 - Invitations: Home and `/-/account/people` load the recipient inbox lazily. The link carries no grant; the signed-in recipient accepts or declines. `FORGE_INVITATION_EMAIL=1` enables the separate sender on dev; its default is off. See [access](access.md#invitations).
 - Sign-in: one handle field (passkey sign-in or sign-up, browser autofill) and
   GitHub. After a first GitHub sign-in with no passkey, `/-/signin/passkey`

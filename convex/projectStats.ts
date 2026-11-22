@@ -39,7 +39,9 @@ import { makeFunctionReference } from 'convex/server';
 import {
   STATS_PARTS,
   STATS_RANGE_MAX_DAYS,
+  STATS_TODAY_REFRESH_MS,
   previousRange,
+  provisionalAt,
   rangeDays,
   statsAllReply,
   statsMonth,
@@ -213,10 +215,17 @@ export const closeDay = internalMutation({
     reclose: v.optional(v.object({ through: v.string() })),
     /** Close this later day next: a close that found an earlier day with runs and no landing closes that day first. */
     then: v.optional(v.string()),
+    /** Today so far (Item 580b1a1a, scheduled by `refreshToday`): the same close over the open UTC day, written as a
+     * provisional row. It probes no earlier day, judges no day budget, rolls no month and keeps no late-correction
+     * lists; the day's real close replaces it. */
+    provisional: v.optional(v.literal(true)),
   },
   returns: v.null(),
-  handler: async (ctx, { projectId, day, reclose, then }) => {
+  handler: async (ctx, { projectId, day, reclose, then, provisional }) => {
     invariant(/^\d{4}-\d{2}-\d{2}$/.test(day), 'BAD_ARGUMENT', 'A day is YYYY-MM-DD.');
+    const now = Date.now();
+    // A refresh that runs after midnight UTC leaves the day to its real close.
+    if (provisional && (reclose || then || day !== utcDay(now))) return null;
     const closeNext = async () => {
       if (then)
         await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectStats:closeDay'), {
@@ -228,9 +237,15 @@ export const closeDay = internalMutation({
       .query('projectStatsDays')
       .withIndex('by_project_and_day', q => q.eq('projectId', projectId).eq('day', day))
       .unique();
-    // A day left as not measured (src/stats-estimate.ts#statsFailedDay) is closed again when asked.
-    const unfinished = existing ? notMeasured(existing.value) : undefined;
-    if (existing && !reclose && !unfinished) {
+    // A day left as not measured (src/stats-estimate.ts#statsFailedDay) is closed again when asked, and so is a day
+    // closed so far only (provisional). A refresh runs at most once in STATS_TODAY_REFRESH_MS: a second refresh
+    // scheduled before the first ran reads this one row.
+    const kept = existing ? statsDaySchema.parse(JSON.parse(existing.value)) : null;
+    const unfinished = kept?.schema === 2 ? kept.failed : undefined;
+    const keptSoFar = kept?.schema === 2 ? kept.provisional : undefined;
+    if (provisional && existing && (keptSoFar === undefined || now - keptSoFar < STATS_TODAY_REFRESH_MS))
+      return null;
+    if (existing && !reclose && !unfinished && keptSoFar === undefined && !provisional) {
       await closeNext();
       return null;
     }
@@ -251,7 +266,41 @@ export const closeDay = internalMutation({
     const priorFailed = prior?.schema === 2 ? prior.failed : undefined;
     // A previous day left not measured wrote no person days: count its people's work from where its close would have.
     const since = priorFailed?.since;
-    if (!reclose && before && priorFailed && priorFailed.tries < STATS_CLOSE_TRIES) {
+    // The earlier-day probes are the real close's only: a provisional close neither tries nor marks an earlier day.
+    const probe = !reclose && !provisional;
+    // An earlier day still provisional is not closed: its real close did not finish (it threw, or has not run). It is
+    // marked not measured (try 1), as a gap day is, and closed first, then this day; the tries then run as for any day.
+    if (probe && before && prior?.schema === 2 && prior.provisional !== undefined) {
+      const back = await ctx.db
+        .query('projectStatsDays')
+        .withIndex('by_project_and_day', q => q.eq('projectId', projectId).lt('day', before.day))
+        .order('desc')
+        .first();
+      const backDay = back ? statsDaySchema.parse(JSON.parse(back.value)) : null;
+      const backSince = backDay?.schema === 2 ? backDay.failed?.since : undefined;
+      // A fresh row, so its creation time stays its close's (convex/projectCancelledRunDay.ts reads it).
+      await ctx.db.delete(before._id);
+      await ctx.db.insert('projectStatsDays', {
+        projectId,
+        day: before.day,
+        value: canonicalPayload(
+          statsFailedDay(
+            before.day,
+            statsCarry(backDay),
+            1,
+            utcDay(laneWindowStart(back?.day, before.day, backSince)),
+          ),
+        ),
+        ...(back?.budgets ? { budgets: back.budgets } : {}),
+      });
+      await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectStats:closeDay'), {
+        projectId,
+        day: before.day,
+        then: day,
+      });
+      return null;
+    }
+    if (probe && before && priorFailed && priorFailed.tries < STATS_CLOSE_TRIES) {
       await ctx.db.patch(before._id, {
         value: canonicalPayload({ ...prior, failed: { ...priorFailed, tries: priorFailed.tries + 1 } }),
       });
@@ -263,7 +312,7 @@ export const closeDay = internalMutation({
       return null;
     }
     const gapFrom = before ? Date.parse(`${before.day}T00:00:00.000Z`) + DAY_MS : from;
-    if (!reclose && gapFrom < from) {
+    if (probe && gapFrom < from) {
       const gapAt = await firstRunAt(ctx, projectId, gapFrom, from);
       if (gapAt !== null) {
         const gap = utcDay(gapAt);
@@ -415,10 +464,14 @@ export const closeDay = internalMutation({
     const carry = statsCarry(prior);
     const runs = await statsDayRuns(ctx, projectId, from, from + DAY_MS, landedAttemptIds);
     const closed = statsDay(day, landings, runs, carry);
+    // Today so far, or a re-close of a day still provisional: rebuilt figures, still provisional, so the day's real
+    // close (person days, day budgets, late-correction lists) still runs.
+    const soFar = provisional ? now : reclose ? keptSoFar : undefined;
     const value = canonicalPayload({
       ...(receipts.length > landingsRead ? { ...closed, partial: true } : closed),
       ...(planningPartial ? { planningPartial: true as const } : {}),
       ...(peoplePartial ? { peoplePartial: true as const } : {}),
+      ...(soFar !== undefined ? { provisional: soFar } : {}),
     });
     const reruns = rerunsWhileWaiting(landings);
     const runnerContributions = [...contributionIds].map(([i, submissionId]) => ({
@@ -433,34 +486,55 @@ export const closeDay = internalMutation({
     // as unknown.
     const unread = receipts.length - landingsRead;
     const judged =
-      !reclose && receipts.length
+      probe && receipts.length
         ? judgeClosedDay(
             before?.budgets ? dayBudgetStateSchema.parse(JSON.parse(before.budgets)) : undefined,
             closedDay(day, landings, unread),
             speedBudgets,
           )
         : null;
+    // A provisional row carries the previous day's state unchanged (Metrics reads the newest row's ratchet).
     const budgets = reclose
       ? {}
-      : {
-          budgets: judged
-            ? Object.keys(judged.state).length
-              ? canonicalPayload(judged.state)
-              : undefined
-            : before?.budgets,
-        };
-    if (existing) await ctx.db.patch(existing._id, { value, runnerContributions, lateRuns, ...budgets });
+      : provisional
+        ? { budgets: before?.budgets }
+        : {
+            budgets: judged
+              ? Object.keys(judged.state).length
+                ? canonicalPayload(judged.state)
+                : undefined
+              : before?.budgets,
+          };
+    // Late corrections (convex/projectCancelledRunDay.ts) apply to closed days only: a provisional row keeps no lists.
+    const lists =
+      soFar !== undefined
+        ? {}
+        : {
+            ...(runnerContributions.length ? { runnerContributions } : {}),
+            ...(lateRuns.length ? { lateRuns } : {}),
+          };
+    // An ordinary close replaces a provisional row or a not-measured mark with a fresh row, so a closed row's creation
+    // time is its close's (convex/projectCancelledRunDay.ts compares it with correction baselines). A re-close patches.
+    const replace = !reclose && (keptSoFar !== undefined || unfinished !== undefined);
+    if (existing && !replace)
+      await ctx.db.patch(existing._id, {
+        value,
+        runnerContributions: soFar === undefined ? runnerContributions : undefined,
+        lateRuns: soFar === undefined ? lateRuns : undefined,
+        ...budgets,
+      });
     // A re-close writes no row for a day with no landings and no check runs; an ordinary close always marks its day
     // closed.
-    else if (!reclose || landings.length || runs.all.runs + runs.audits.runs > 0)
+    else if (existing || !reclose || landings.length || runs.all.runs + runs.audits.runs > 0) {
+      if (existing) await ctx.db.delete(existing._id);
       await ctx.db.insert('projectStatsDays', {
         projectId,
         day,
         value,
-        ...(runnerContributions.length ? { runnerContributions } : {}),
-        ...(lateRuns.length ? { lateRuns } : {}),
+        ...lists,
         ...(budgets.budgets ? { budgets: budgets.budgets } : {}),
       });
+    }
     if (judged) await deliverBudgetEvents(ctx, projectId, judged.events);
     if (reclose && day < reclose.through)
       await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectStats:closeDay'), {
@@ -470,14 +544,16 @@ export const closeDay = internalMutation({
       });
     // A month closes for All time once a day of a later month closes (or a re-close finishes it): one rollup a month.
     const month = day.slice(0, 7);
-    const rolled = reclose
-      ? (day === reclose.through || utcDay(from + DAY_MS).slice(0, 7) !== month) &&
-        month < utcDay(Date.now()).slice(0, 7)
-        ? month
-        : null
-      : before && before.day.slice(0, 7) < month
-        ? before.day.slice(0, 7)
-        : null;
+    const rolled = provisional
+      ? null
+      : reclose
+        ? (day === reclose.through || utcDay(from + DAY_MS).slice(0, 7) !== month) &&
+          month < utcDay(Date.now()).slice(0, 7)
+          ? month
+          : null
+        : before && before.day.slice(0, 7) < month
+          ? before.day.slice(0, 7)
+          : null;
     if (rolled)
       await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectStats:rollMonth'), {
         projectId,
@@ -504,12 +580,11 @@ export const rollMonth = internalMutation({
         q.eq('projectId', projectId).gte('day', `${month}-01`).lte('day', `${month}-31`),
       )
       .take(31);
-    const value = canonicalPayload(
-      statsMonth(
-        month,
-        rows.map(row => statsDaySchema.parse(JSON.parse(row.value))),
-      ),
-    );
+    // A provisional row (today so far, Item 580b1a1a) is never a month's input: its day's real close replaces it.
+    const days = rows
+      .map(row => statsDaySchema.parse(JSON.parse(row.value)))
+      .filter(d => provisionalAt(d) === null);
+    const value = canonicalPayload(statsMonth(month, days));
     const existing = await ctx.db
       .query('projectStatsMonths')
       .withIndex('by_project_and_month', q => q.eq('projectId', projectId).eq('month', month))

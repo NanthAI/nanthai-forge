@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Stats screen model (Items 2cf30e0a, a61d3c91): the chosen period, the read reply of convex/projectStats.ts and the
-// words the screen prints. Figures come only from the project's own closed days (src/stats-period.ts); nothing here
-// estimates.
+// words the screen prints. Figures come only from the project's own day rows (src/stats-period.ts): closed days and
+// today so far; nothing here estimates.
 import type { StatsCover, StatsHead } from '../../../../src/stats-period';
 import { STATS_RANGE_MAX_DAYS, rangeDays, validRange } from '../../../../src/stats-period';
 
@@ -93,6 +93,37 @@ export function coverWords(period: Period, cover: StatsCover) {
       : `${shortDay(first, first.slice(0, 4) !== last.slice(0, 4))} – ${shortDay(last, true)}`;
   return `over ${span} ${closed}`;
 }
+
+/** The period holds today (UTC), so today's row counts so far (Item 580b1a1a). All time always does. */
+export function holdsToday(period: Period, now: number) {
+  const today = utc(now);
+  return period.kind === 'all' || (period.from <= today && today <= period.to);
+}
+/** The days the headline covers, after its landings: " in October 2026" when the whole period is counted, else short:
+ * ", 22 Nov", ", 1–22 Nov", ", 28 Oct – 22 Nov", with years only across a new year. */
+export function spanWords(cover: StatsCover, period: Period) {
+  const { first, last } = cover;
+  const whole = period.kind !== 'all' && first === period.from && last === period.to && !cover.notMeasured;
+  if (first === null || last === null || whole) return ` ${periodWords(period)}`;
+  const years = first.slice(0, 4) !== last.slice(0, 4);
+  if (first === last) return `, ${shortDay(first)}`;
+  if (first.slice(0, 7) === last.slice(0, 7)) return `, ${Number(first.slice(8))}–${shortDay(last)}`;
+  return `, ${shortDay(first, years)} – ${shortDay(last, years)}`;
+}
+/** How far a provisional newest row counts: its UTC day and "10:00"; null for none (or a reply without the field). */
+export function soFarOf(upTo: number | null | undefined) {
+  if (upTo === null || upTo === undefined || !Number.isFinite(upTo)) return null;
+  const iso = new Date(upTo).toISOString();
+  return { day: iso.slice(0, 10), time: iso.slice(11, 16) };
+}
+/** "Sat 21 Nov". */
+export const weekdayName = (day: string) =>
+  new Intl.DateTimeFormat('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+  }).format(new Date(`${day}T00:00:00Z`));
 
 /** Every day from the first to the newest closed day of the read, a day with no row at zero: a day closes only
  * when it had landings and a later one landed, so a gap between closed days had none. Before the first closed day
