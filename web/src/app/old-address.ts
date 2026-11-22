@@ -5,7 +5,7 @@
 // `/review/<id>`) needs one access-checked read (convex/urlLegacy.ts): the page that renders it is OldAddress.tsx.
 import { longId } from '../../../src/project-routes';
 import { reservedHandles } from '../../../src/readable-urls';
-import { hrefFor, ROOT, type AppRoute } from './paths';
+import { hrefFor, type AppRoute } from './paths';
 
 type Dest = { place: Extract<AppRoute, { frame: 'project' }>['place']; section: string; rest: string };
 type Ref = { projectId: string } | { handle: string; slug: string };
@@ -23,32 +23,34 @@ const lanes = (rest = ''): Dest => ({ place: 'lanes', section: '', rest });
 const projectHref = (handle: string, slug: string, dest: Dest) =>
   hrefFor({ frame: 'project', handle, project: slug, ...dest });
 
-/** The page of a project's settings an old settings section opens. `pending` while that page has no rebuilt screen:
- * the old screen keeps serving it until the switch, so nobody is sent to a placeholder. `null`: no new home yet
- * (guidance, contributions; Item 84125787 slice E). `account`: the old per-project Devices list is the account's. */
-const settings: Record<string, { section: string; pending?: true } | 'account' | null> = {
-  access: { section: '' },
-  checks: { section: 'checks' },
-  autonomy: { section: 'checks' },
-  secrets: { section: 'secrets' },
-  you: { section: 'you' },
-  appearance: { section: 'you' },
-  github: { section: 'mirror' },
-  general: { section: 'project', pending: true },
-  sharing: { section: 'project', pending: true },
-  settings: { section: 'project', pending: true },
-  project: { section: 'project', pending: true },
-  backups: { section: 'project', pending: true },
-  transfer: { section: 'project', pending: true },
+const page = (section: string): Dest => ({ place: 'settings', section, rest: '' });
+
+/** Where an old settings section opens. `account`: the old per-project Devices list is the account's. Contributions
+ * (offered work) is dropped with its screen and rebuilt with the fork work (Item d1303286); Lanes is where offered
+ * work is reviewed. */
+const settings: Record<string, Dest | 'account'> = {
+  access: page(''),
+  checks: page('checks'),
+  autonomy: page('checks'),
+  secrets: page('secrets'),
+  you: page('you'),
+  appearance: page('you'),
+  github: page('mirror'),
+  general: page('project'),
+  sharing: page('project'),
+  settings: page('project'),
+  project: page('project'),
+  backups: page('project'),
+  transfer: page('project'),
+  agents: page('agents'),
+  contributions: lanes(),
   devices: 'account',
-  agents: null,
-  contributions: null,
 };
 
 /** An old `?projectTab=` or `?settingsSection=` page that settles settings. */
 const settingsTabs = Object.keys(settings);
 
-type Pick = { dest: Dest; find?: Find; pending?: true; keep?: true; search?: string };
+type Pick = { dest: Dest; find?: Find; search?: string };
 
 /** An old exact-State pin (`?head=<64 hex>`) is the rebuilt Code place's `?at=`. */
 const pin = (value: string | null) => (value && /^[a-f0-9]{64}$/.test(value) ? `?at=${value}` : '');
@@ -74,16 +76,11 @@ function fromQuery(p: URLSearchParams): Pick {
     return { dest: { place: 'needs', section: 'held', rest: '' } };
   if (tab === 'settings' || settingsTabs.includes(section ?? '')) {
     const home = settings[settingsId];
-    if (home && home !== 'account')
-      return {
-        dest: { place: 'settings', section: home.section, rest: '' },
-        ...(home.pending && { pending: true }),
-      };
-    // A page with no new home stays on the old screen; the old devices list is the account's.
-    return home === null
-      ? { dest: front, keep: true }
-      : { dest: { place: 'settings', section: '', rest: '' } };
+    // The old devices list is the account's: the project's settings open instead.
+    return { dest: home && home !== 'account' ? home : page('') };
   }
+  // The dropped code map (`view=map`) opens the Code place.
+  if (p.get('view') === 'map') return { dest: { place: 'code', section: '', rest: '' } };
   if (tab === 'code' || section === 'delivery' || (!tab && !section && p.has('file'))) {
     const file = p.get('file');
     return file
@@ -112,35 +109,29 @@ const dec = (part: string) => {
 
 /**
  * What an old address maps to, or null when it is not an old address (the new app's own, or one that keeps its shape:
- * `/<handle>/<project>`, `.../lanes/<uuid>`, `.../code/...`). `stillServed`: the old screens still serve the page that
- * has no rebuilt screen yet, so those are left alone until the switch (ROOT "").
+ * `/<handle>/<project>`, `.../lanes/<uuid>`, `.../code/...`).
  */
-export function oldAddress(
-  pathname: string,
-  search: string,
-  stillServed = (ROOT as string) !== '',
-): OldAddress | null {
+export function oldAddress(pathname: string, search: string): OldAddress | null {
   const parts = pathname.split('/').filter(Boolean).map(dec);
   const params = new URLSearchParams(search);
   const [first = '', second = '', section = '', id = '', ...tail] = parts;
   if (first === '-') return null;
   if (parts.length <= 1 && (first === '' || first === 'projects' || first === 'settings')) {
-    // Map, source zones and contact keep their old screens until their keep/drop decision (Item 84125787 slice E).
-    if (params.has('codescape') || params.has('zone') || params.get('surface') === 'contact') return null;
+    // Explore an import, followed imports, source zones and the code map are dropped (Item f2ee8381): Explore covers
+    // discovery. Contact keeps its old screen.
+    if (params.has('codescape') || params.has('zone'))
+      return { kind: 'go', to: hrefFor({ frame: 'discover', page: 'explore' }) };
+    if (params.get('surface') === 'contact') return null;
     const projectId = params.get('project');
     if (projectId) {
       const picked = fromQuery(params);
-      return picked.pending && stillServed
-        ? null
-        : picked.keep
-          ? null
-          : {
-              kind: 'look',
-              ref: { projectId },
-              dest: picked.dest,
-              ...(picked.find && { find: picked.find }),
-              ...(picked.search && { search: picked.search }),
-            };
+      return {
+        kind: 'look',
+        ref: { projectId },
+        dest: picked.dest,
+        ...(picked.find && { find: picked.find }),
+        ...(picked.search && { search: picked.search }),
+      };
     }
     if (first === '') return null;
     // The old Home keeps its search (a delete-request link carries `request=` and `auth=`).
@@ -188,8 +179,7 @@ export function oldAddress(
       const key = params.get('settingsSection') || id;
       const home = key ? settings[key] : undefined;
       if (home === 'account') return { kind: 'go', to: hrefFor({ frame: 'account', place: 'devices' }) };
-      if (!home || (home.pending && stillServed)) return null;
-      return to({ place: 'settings', section: home.section, rest: '' });
+      return home ? to(home) : null;
     }
     default:
       return null;

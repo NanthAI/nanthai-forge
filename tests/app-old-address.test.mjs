@@ -54,15 +54,22 @@ const paths = [
   [`${base}/settings/appearance`, '', project('settings', 'you')],
   [`${base}/settings/github`, '', project('settings', 'mirror')],
   [`${base}/settings/devices`, '', hrefFor({ frame: 'account', place: 'devices' })],
+  // Pages whose rebuilt screen has landed (Settings > Project: Item 966cb821).
+  [`${base}/settings/general`, '', project('settings', 'project')],
+  [`${base}/settings/sharing`, '', project('settings', 'project')],
+  [`${base}/settings/backups`, '', project('settings', 'project')],
+  [`${base}/settings/transfer`, '', project('settings', 'project')],
+  // Dropped screens and the page that replaced one (Item f2ee8381). Guidance is the rebuilt Settings > Agents;
+  // contributions are rebuilt with the fork work (d1303286), so their old page opens Lanes, where offered work is read;
+  // an import's explorer, its source zones and the code map open Explore, which covers discovery.
+  [`${base}/settings/agents`, '', project('settings', 'agents')],
+  [`${base}/settings/contributions`, '', project('lanes')],
+  ['/', '?codescape=1', hrefFor({ frame: 'discover', page: 'explore' })],
+  ['/projects', '?codescape=1&tour=1', hrefFor({ frame: 'discover', page: 'explore' })],
+  ['/', '?codescape=1&zone=src&view=map', hrefFor({ frame: 'discover', page: 'explore' })],
+  ['/', '?zone=src', hrefFor({ frame: 'discover', page: 'explore' })],
 ];
-// Pages with no rebuilt screen yet: left to the old screen until the switch, redirected after it.
-const pending = [
-  [`${base}/settings/general`, project('settings', 'project')],
-  [`${base}/settings/sharing`, project('settings', 'project')],
-  [`${base}/settings/backups`, project('settings', 'project')],
-  [`${base}/settings/transfer`, project('settings', 'project')],
-];
-// Addresses that are already the new ones, or keep their shape, or wait for their keep/drop decision.
+// Addresses that are already the new ones, or keep their shape, or keep their old screen.
 const unchanged = [
   ['/', ''],
   [base, ''],
@@ -70,10 +77,9 @@ const unchanged = [
   [`${base}/lanes/${LANE}`, ''],
   [`${base}/code/src/a.ts`, ''],
   [`${base}/settings`, ''],
-  [`${base}/settings/agents`, ''],
-  [`${base}/settings/contributions`, ''],
-  ['/projects', '?codescape=1'],
-  ['/', '?zone=src'],
+  // The code place keeps its address; the rebuilt Code ignores a map view.
+  [`${base}/code`, '?view=map'],
+  ['/', '?surface=contact'],
   [`${ROOT}/account`, ''],
   [`${ROOT}/mara/tide-pool/plan`, ''],
   ['/explore', ''],
@@ -86,57 +92,48 @@ const unchanged = [
 
 for (const [pathname, search, to] of paths)
   test(`old ${pathname}${search} opens ${to} with no read`, () => {
-    assert.deepEqual(oldAddress(pathname, search, false), { kind: 'go', to });
-    assert.deepEqual(oldAddress(pathname, search, true), { kind: 'go', to });
+    assert.deepEqual(oldAddress(pathname, search), { kind: 'go', to });
     assert.ok(isAppPath(to), 'the target is in the rebuilt app');
   });
 
 // These keep their shape: under "/-" the old screen's address opens the rebuilt one, and after the switch it is the same.
-for (const section of ['you', 'checks', 'secrets'])
+for (const section of ['you', 'checks', 'secrets', 'agents', 'project'])
   test(`old settings/${section} opens the rebuilt page, and is not a redirect once the root is empty`, () => {
-    const go = oldAddress(`${base}/settings/${section}`, '', false);
+    const go = oldAddress(`${base}/settings/${section}`, '');
     assert.deepEqual(go, ROOT ? { kind: 'go', to: project('settings', section) } : null);
-  });
-
-for (const [pathname, to] of pending)
-  test(`old ${pathname} is left to the old screen until the switch, then opens ${to}`, () => {
-    assert.equal(oldAddress(pathname, '', true), null);
-    assert.deepEqual(oldAddress(pathname, '', false), { kind: 'go', to });
   });
 
 for (const [pathname, search] of unchanged)
   test(`${pathname}${search} is not redirected`, () => {
-    assert.equal(oldAddress(pathname, search, false), null);
-    assert.equal(oldAddress(pathname, search, true), null);
+    assert.equal(oldAddress(pathname, search), null);
   });
 
 test('an old address never redirects to itself, and a redirect never lands on another old address', () => {
-  for (const [pathname, search] of [...paths, ...pending.map(([p]) => [p, ''])]) {
-    const go = oldAddress(pathname, search, false);
+  for (const [pathname, search] of paths) {
+    const go = oldAddress(pathname, search);
     assert.notEqual(go.to, pathname + search);
-    assert.equal(oldAddress(new URL(go.to, 'https://x.test').pathname, '', false), null, go.to);
+    assert.equal(oldAddress(new URL(go.to, 'https://x.test').pathname, ''), null, go.to);
   }
   // Every handle the old paths reserve stays out of the project rows.
-  for (const handle of reservedHandles)
-    assert.equal(oldAddress(`/${handle}/x/activity`, '', false), null, handle);
+  for (const handle of reservedHandles) assert.equal(oldAddress(`/${handle}/x/activity`, ''), null, handle);
 });
 
 test('a decision or review id is looked up in its project: path form', () => {
   const ref = { handle: 'mara', slug: 'tide-pool' };
-  assert.deepEqual(oldAddress(`${base}/decisions/${short('d', LANE)}`, '', false), {
+  assert.deepEqual(oldAddress(`${base}/decisions/${short('d', LANE)}`, ''), {
     kind: 'look',
     ref,
     find: { kind: 'decision', id: LANE },
     dest: { place: 'needs', section: '', rest: '' },
   });
-  assert.deepEqual(oldAddress(`${base}/review/${short('v', LANE)}`, '', false), {
+  assert.deepEqual(oldAddress(`${base}/review/${short('v', LANE)}`, ''), {
     kind: 'look',
     ref,
     find: { kind: 'review', id: LANE },
     dest: { place: 'needs', section: '', rest: '' },
   });
   // A review has no list page.
-  assert.equal(oldAddress(`${base}/review`, '', false), null);
+  assert.equal(oldAddress(`${base}/review`, ''), null);
 });
 
 // [search of an old `?project=<id>` link, where it opens inside the project]
@@ -164,11 +161,18 @@ const queries = [
   ['&projectTab=checks', project('settings', 'checks')],
   ['&projectTab=sharing&settingsSection=access', project('settings')],
   ['&projectTab=settings&settingsSection=you', project('settings', 'you')],
+  // Settings pages whose screen has landed, and the dropped ones (Item f2ee8381).
+  ['&projectTab=general', project('settings', 'project')],
+  ['&projectTab=transfer', project('settings', 'project')],
+  ['&projectTab=agents', project('settings', 'agents')],
+  ['&projectTab=contributions', project('lanes')],
+  ['&view=map', project('code')],
+  [`&file=src/a.ts&view=map`, project('code')],
 ];
 for (const [search, to] of queries)
   for (const entry of ['/', '/projects'])
     test(`old ${entry}?project=<id>${search} resolves the project, then opens ${to}`, () => {
-      const look = oldAddress(entry, `?project=abc123${search}`, false);
+      const look = oldAddress(entry, `?project=abc123${search}`);
       assert.deepEqual(look.ref, { projectId: 'abc123' });
       assert.equal(look.kind, 'look');
       assert.equal(look.find, undefined);
@@ -176,13 +180,9 @@ for (const [search, to] of queries)
     });
 
 test('a ?project= link to a decision or a review is looked up, and the server answer wins', () => {
-  const review = oldAddress('/projects', `?project=abc123&projectTab=intent&reviewView=${LANE}`, false);
+  const review = oldAddress('/projects', `?project=abc123&projectTab=intent&reviewView=${LANE}`);
   assert.deepEqual(review.find, { kind: 'review', id: LANE });
-  const decision = oldAddress(
-    '/',
-    `?project=abc123&projectTab=decisions&decision=${short('d', LANE)}`,
-    false,
-  );
+  const decision = oldAddress('/', `?project=abc123&projectTab=decisions&decision=${short('d', LANE)}`);
   assert.deepEqual(decision.find, { kind: 'decision', id: LANE });
   const found = { handle: 'mara', slug: 'tide-pool' };
   assert.equal(lookHref(review, { ...found, to: { place: 'lanes', id: LANE } }), project('lanes', '', LANE));
@@ -192,30 +192,18 @@ test('a ?project= link to a decision or a review is looked up, and the server an
   assert.equal(lookHref(review, { ...found, to: null }), project('needs'));
 });
 
-test('an old page with no new home keeps its old screen, and a pending settings page waits for the switch', () => {
-  assert.equal(oldAddress('/', '?project=abc&projectTab=agents', false), null);
-  assert.equal(oldAddress('/', '?project=abc&projectTab=contributions', false), null);
-  assert.equal(oldAddress('/', '?project=abc&projectTab=general', true), null);
-  assert.deepEqual(oldAddress('/', '?project=abc&projectTab=general', false).dest, {
-    place: 'settings',
-    section: 'project',
-    rest: '',
-  });
-});
-
 test('a redirect target parses as the page it names in the rebuilt app', () => {
   for (const [pathname, search] of paths) {
-    const { to } = oldAddress(pathname, search, false);
+    const { to } = oldAddress(pathname, search);
     const route = parseAppPath(new URL(to, 'https://x.test').pathname);
     assert.notEqual(route.frame, 'missing', to);
   }
 });
 
 test('an old settings page named by ?settingsSection= follows that page, as the old screen did', () => {
-  // The path says Checks, the query says Transfer: the old screen opened Transfer, which has no rebuilt page yet.
-  assert.equal(oldAddress(`${base}/settings/checks`, '?settingsSection=transfer', true), null);
+  // The path says Checks, the query says Transfer: the old screen opened Transfer, now Settings > Project.
   assert.equal(
-    oldAddress(`${base}/settings/checks`, '?settingsSection=transfer', false).to,
+    oldAddress(`${base}/settings/checks`, '?settingsSection=transfer').to,
     project('settings', 'project'),
   );
 });
