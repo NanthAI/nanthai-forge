@@ -94,6 +94,23 @@ in a signed Checks replacement proof when this device has no Checks pin. That
 proof opens no Checks values. Current revocation markers apply to every step
 being verified. For a walk from genesis that includes the full walked history,
 so a marker for an early signer can prevent a fresh reader from verifying it.
+Roster transitions are built with the same reconstruction and authority checks
+that every reader runs; the genesis roster is kept apart and only the latest 64
+transitions are retained, so a pin further behind gets `SECRETS_PIN_TOO_OLD`
+with its pin unchanged. A step never removes or lowers its own signer, so a
+device leaves a set through another device of that set. The rule
+that each Checks owner's account has a full owner device in Development is
+checked on the final Checks roster against this device's trusted Development,
+not on each earlier step, so an honest co-owner's later removal does not lock
+out lagging or new readers. The account in a device entry is asserted by that
+device's own key, so this rule is a consistency check, not a trust boundary: a
+listed Checks owner can add a device that claims an eligible account, and its
+authority ends only when a Checks step removes it. Residual: a device whose Checks pin predates the
+removal of a Checks owner device, or that walks Checks from genesis without a
+code, can be shown a forked Checks history by that removed device with the
+server's help, even when the removed device's account has since left
+Development. A holder accepts it and may seal new Checks values to the forger;
+a non-holder sees names only.
 A passkey contact needs a person-signed checkpoint
 with matching roster bytes and the public keys derived locally from its seed;
 a listed person entry alone grants no trust. A missing checkpoint or a walk

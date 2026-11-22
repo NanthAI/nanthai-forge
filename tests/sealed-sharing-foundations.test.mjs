@@ -22,6 +22,7 @@ import { ensureSecretDevice, FileKeyStore, secretLocked, wipeDeviceKeys } from '
 import { SecretPins } from '../dist/sealed-pins.js';
 import { forgeSecretId } from '../dist/sealed-format.js';
 import { deviceKeys } from '../dist/sealed-keys.js';
+import { verifySealedReply } from '../dist/sealed-verify.js';
 import { fixture } from './helpers/sealed-fixture.mjs';
 
 const clear = result => {
@@ -79,35 +80,95 @@ for (const cause of ['older project file', 'missing index and project file'])
     assert.equal(await pins.load('never-pinned-project', 1), null);
   });
 
-test('L8 an invalid intermediate Checks owner is refused even when a later removal leaves a valid final roster', async t => {
+// GB-08 d2: the Checks owner rule is checked on the final roster only, against today's Development.
+// An honest "add a co-owner, later remove them" history must stay readable after that co-owner left
+// Development; the account claim is self-asserted, so per-step checks protected nothing (Gate B1).
+function coOwnerHistory(t, { laterSigner = false, removeAtEnd = true } = {}) {
   const f = fixture(17, 'fixture-project', 2),
-    { directory, pins } = local(t, f);
-  clear(await pins.verifyAndSave(f.reply, f.request, 1));
-  const before = pinBytes(directory),
+    local_ = local(t, f),
     accountId = forgeSecretId('account', 'second-owner'),
     other = deviceKeys(accountId, f.random);
-  f.bump();
-  f.transition({
-    added: [f.entry(other, { accountId, role: 1, how: 6, addedAtRosterVersion: 2 })],
-  });
-  f.rekey({ removed: [other.id], epochBumped: 1 });
-  await assert.rejects(
-    pins.verifyAndSave(f.reply, f.request, 2),
-    error =>
-      error.code === 'SECRETS_ROSTER_REFUSED' &&
-      error.message === 'Checks owner account has no Development owner device.',
-  );
-  assert.deepEqual(pinBytes(directory), before);
+  f.name('CHECKS_TOKEN', Buffer.from('synthetic-checks-value-0001'));
+  return {
+    ...local_,
+    f,
+    other,
+    async build() {
+      f.bump();
+      f.transition({
+        added: [f.entry(other, { accountId, role: 1, how: 6, addedAtRosterVersion: 2 })],
+      });
+      // L8 follow-up: the ineligible co-owner itself signs a later step.
+      if (laterSigner) f.transition({ newSharingMode: 2 }, other);
+      if (removeAtEnd) f.rekey({ removed: [other.id], epochBumped: 1 });
+      else f.wrap();
+    },
+  };
+}
 
-  // The identical Checks chain remains valid when trusted Development authorizes that account.
-  const development = fixture();
-  development.transition({
-    added: [development.entry(other, { accountId, role: 1, how: 6, addedAtRosterVersion: 2 })],
-  });
-  development.transition({ newChecksPointer: f.request.development.roster.checksPointer });
-  const request = { ...f.request, development: development.pin() };
-  clear(await pins.verifyAndSave(f.reply, request, 2));
+test('L8/d2 a lagging Checks holder reads after an honest co-owner was added and removed', async t => {
+  const h = coOwnerHistory(t);
+  clear(await h.pins.verifyAndSave(h.f.reply, h.f.request, 1));
+  await h.build();
+  const result = await h.pins.verifyAndSave(h.f.reply, h.f.request, 2);
+  try {
+    assert.equal(result.secrets.map(s => s.name).join(), 'CHECKS_TOKEN');
+    assert.equal(result.pin.roster.rosterVersion, 3);
+  } finally {
+    clear(result);
+  }
 });
+
+test('L8/d2 a fresh Checks reader walks the same history from genesis and sees names only', async t => {
+  const h = coOwnerHistory(t);
+  await h.build();
+  const { recipient, ...publicRequest } = h.f.request;
+  assert(recipient);
+  const result = verifySealedReply(h.f.reply, null, publicRequest);
+  assert.equal(result.key, undefined);
+  assert.equal(result.secrets.length, 0);
+  assert.deepEqual(
+    result.pin.head.names.map(n => n.name),
+    ['CHECKS_TOKEN'],
+  );
+});
+
+test('L8/d2 a later step signed by the ineligible co-owner is accepted once the final roster is clean', async t => {
+  const h = coOwnerHistory(t, { laterSigner: true });
+  clear(await h.pins.verifyAndSave(h.f.reply, h.f.request, 1));
+  await h.build();
+  clear(await h.pins.verifyAndSave(h.f.reply, h.f.request, 2));
+});
+
+for (const laterSigner of [false, true])
+  test(`L8/d2 an ineligible Checks owner still in the final roster is refused${laterSigner ? ' after signing a later step' : ''}`, async t => {
+    const h = coOwnerHistory(t, { laterSigner, removeAtEnd: false });
+    clear(await h.pins.verifyAndSave(h.f.reply, h.f.request, 1));
+    const before = pinBytes(h.directory);
+    await h.build();
+    await assert.rejects(
+      h.pins.verifyAndSave(h.f.reply, h.f.request, 2),
+      error =>
+        error.code === 'SECRETS_ROSTER_REFUSED' &&
+        error.message === 'Checks owner account has no Development owner device.',
+    );
+    assert.deepEqual(pinBytes(h.directory), before);
+
+    // The identical Checks chain remains valid when trusted Development authorizes that account.
+    const development = fixture();
+    development.transition({
+      added: [
+        development.entry(h.other, {
+          accountId: forgeSecretId('account', 'second-owner'),
+          role: 1,
+          how: 6,
+          addedAtRosterVersion: 2,
+        }),
+      ],
+    });
+    development.transition({ newChecksPointer: h.f.request.development.roster.checksPointer });
+    clear(await h.pins.verifyAndSave(h.f.reply, { ...h.f.request, development: development.pin() }, 2));
+  });
 
 for (const [kind, label] of [
   [1, 'Development'],

@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 1,
+  "reason": "49099490: sharing transition writers add the design-required SECRETS_LAST_OWNER refusal; no existing error conveys this recoverable owner-retention case. Reuses reader reconstruction and authority checks; nothing else can be removed in this finite foundation.",
+  "date": "2026-11-17"
+}

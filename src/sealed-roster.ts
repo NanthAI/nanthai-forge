@@ -7,6 +7,7 @@ import {
   displayText,
   rosterBytes,
   transitionBytes,
+  type Delta,
   type Entry,
   type Roster,
   type Transition,
@@ -177,6 +178,27 @@ function checkAdded(from: Roster, entry: Entry, signer: Entry, transition: Trans
       refuse(false, 'Genesis is valid only at version one.');
   }
 }
+/** Rebuild bytes only; walkTransition checks all authority before accepting this result. */
+export function rosterAfterDelta(from: Roster, d: Delta): Roster {
+  const created = from.entries
+    .filter(e => e.entryKind === 1 && d.removed.some(id => sameId(id, e.id)))
+    .map(e => ({ deviceId: e.id, signPub: e.signPub, lastEpoch: from.epoch }));
+  return {
+    ...from,
+    rosterVersion: from.rosterVersion + 1,
+    epoch: from.epoch + d.epochBumped,
+    prevRosterHash: framedHash(rosterBytes(from)),
+    sharingMode: d.newSharingMode ?? from.sharingMode,
+    checksPointer: d.newChecksPointer ?? from.checksPointer,
+    entries: [
+      ...from.entries
+        .filter(e => !d.removed.some(id => sameId(id, e.id)))
+        .map(e => ({ ...e, role: d.roles.find(r => sameId(r.id, e.id))?.role ?? e.role })),
+      ...d.added,
+    ],
+    former: [...from.former, ...created].filter(e => !d.droppedFormer.some(id => sameId(id, e.deviceId))),
+  };
+}
 export function walkTransition(
   from: Roster,
   t: Transition,
@@ -199,6 +221,12 @@ export function walkTransition(
     'Roster transition signer is not authorized.',
   );
   const d = t.delta;
+  // GB-08 d3: a roster step never removes or lowers its own signer.
+  refuse(
+    !d.removed.some(id => sameId(id, signer!.id)) &&
+      !d.roles.some(r => sameId(r.id, signer!.id) && r.role !== signer!.role),
+    'A transition cannot remove or lower its own signer.',
+  );
   refuse(
     unique(d.added.map(e => e.id)) &&
       unique(d.removed) &&
@@ -245,30 +273,14 @@ export function walkTransition(
     );
   if (d.newChecksPointer)
     refuse(from.setKind === 1 && ownerDevice(signer), 'Checks pointer requires a Development owner device.');
-  const created = from.entries
-    .filter(e => e.entryKind === 1 && d.removed.some(id => sameId(id, e.id)))
-    .map(e => ({ deviceId: e.id, signPub: e.signPub, lastEpoch: from.epoch }));
-  const former = [...from.former, ...created];
   for (const id of d.droppedFormer)
     refuse(
-      former.some(e => sameId(e.deviceId, id)),
+      from.former.some(e => sameId(e.deviceId, id)) ||
+        from.entries.some(e => e.entryKind === 1 && sameId(e.id, id) && d.removed.some(r => sameId(r, id))),
       'Dropped former signer is absent.',
     );
-  const next: Roster = {
-    ...from,
-    rosterVersion: t.toVersion,
-    epoch: from.epoch + d.epochBumped,
-    prevRosterHash: t.fromHash,
-    sharingMode: d.newSharingMode ?? from.sharingMode,
-    checksPointer: d.newChecksPointer ?? from.checksPointer,
-    entries: [
-      ...from.entries
-        .filter(e => !d.removed.some(id => sameId(id, e.id)))
-        .map(e => ({ ...e, role: d.roles.find(r => sameId(r.id, e.id))?.role ?? e.role })),
-      ...d.added,
-    ],
-    former: former.filter(e => !d.droppedFormer.some(id => sameId(id, e.deviceId))),
-  };
+  const next = rosterAfterDelta(from, d);
+  // The cross-set rule is the caller's: readers pass Development for the final roster only (GB-08 d2).
   checkRoster(next, development);
   invariant(
     sameId(framedHash(rosterBytes(next)), t.toHash),

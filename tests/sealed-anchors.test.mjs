@@ -185,3 +185,52 @@ test('F1/T40/T81 bad, missing or mismatched checkpoint bytes never fall back to 
     assert.throws(() => verifySealedReply(f.reply, null, request), { code: 'SECRETS_PIN_TOO_OLD' });
   }
 });
+
+// F1 journey integration: the pin-committing journey code takes only the journey's own anchor.
+function pinStore(t, keys) {
+  const directory = mkdtempSync(join(tmpdir(), 'forge-anchor-journey-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const store = new FileKeyStore(join(directory, 'device.bin'));
+  store.save({ ...keys, pinCounter: 0 });
+  const files = () =>
+    Object.fromEntries(readdirSync(directory).map(name => [name, readFileSync(join(directory, name))]));
+  return { pins: new SecretPins(directory, store), files };
+}
+
+test('F1 a joined Development member commits no pin from a served roster or a borrowed creator anchor', async t => {
+  const f = fixture(),
+    accountId = forgeSecretId('account', 'joining-member'),
+    member = deviceKeys(accountId, f.random);
+  f.transition({ added: [f.entry(member, { accountId, role: 2, how: 2, addedAtRosterVersion: 2 })] });
+  f.wrap();
+  const { pins, files } = pinStore(t, member),
+    before = files();
+  for (const anchor of [
+    undefined,
+    { kind: 'own-genesis', deviceId: member.id },
+    { kind: 'own-genesis', deviceId: f.keys.id },
+  ]) {
+    await assert.rejects(
+      pins.verifyAndSave(f.reply, { ...f.request, anchor, recipient: recipient(member) }, 1),
+      { code: 'SECRETS_ROSTER_REFUSED' },
+    );
+    assert.deepEqual(files(), before);
+  }
+  assert.equal(await pins.load(f.request.forgeProjectId, 1), null);
+});
+
+test('F1 a non-creator Checks holder and a passkey contact each pin through their own journey anchor', async t => {
+  const checks = fixture(17, 'fixture-project', 2),
+    holder = deviceKeys(checks.account, checks.random);
+  checks.transition({ added: [checks.entry(holder, { how: 4, addedAtRosterVersion: 2 })] });
+  checks.wrap();
+  const c = pinStore(t, holder);
+  clear(await c.pins.verifyAndSave(checks.reply, { ...checks.request, recipient: recipient(holder) }, 1));
+  assert.equal((await c.pins.load(checks.request.forgeProjectId, 2)).pin.holder, true);
+
+  const { f, person, request } = passkeyContact(),
+    p = pinStore(t, deviceKeys(f.account, f.random));
+  clear(await p.pins.verifyAndSave(f.reply, request, 1));
+  const pinned = (await p.pins.load(request.forgeProjectId, 1)).pin;
+  assert(pinned.roster.entries.some(entry => entry.id.equals(person.id)));
+});

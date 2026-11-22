@@ -252,7 +252,8 @@ export function verifySealedReply(reply: SealedReply, pin: SecretPin | null, req
           'Checks pointer replacement lacks a forward owner-signed record.',
         );
       }
-      verified = walkTransition(verified, next, reply.revoked, request.development?.roster);
+      // GB-08 d2: the cross-set Checks owner rule applies to the final roster below, not to each step.
+      verified = walkTransition(verified, next, reply.revoked);
       hashes.push({ version: verified.rosterVersion, hash: framedHash(rosterBytes(verified)) });
     }
     invariant(
