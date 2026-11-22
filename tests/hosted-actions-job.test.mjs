@@ -37,6 +37,7 @@ import {
 } from '../dist/hosted-actions-job-source.js';
 import { prepareActionsJob, actionsGateSelection } from '../dist/hosted-actions-job-plan.js';
 import { browserSelection } from '../scripts/browser-test-policy.mjs';
+import { REGISTRY } from '../scripts/core-queue-paths.mjs';
 import { executeActionsJob, isolateCandidates, useBrowserInstaller } from '../dist/hosted-actions-job-run.js';
 import { directRequestSchema } from '../dist/hosted-actions-direct.js';
 import { savePin } from '../dist/hosted-save.js';
@@ -50,6 +51,7 @@ import { truncateSync } from 'node:fs';
 import { partitionTests, timedShards, shardDuration, checkCallBudget } from '../scripts/test-shards.mjs';
 import { poolUnits, keptFiles } from '../scripts/shard-pool.mjs';
 import { mountPlan } from '../scripts/candidate-sandbox-plan.mjs';
+import { buildExercisedScope } from '../scripts/queue-proof-scope.mjs';
 function fixture(
   t,
   {
@@ -59,6 +61,8 @@ function fixture(
     capabilities = hostedActionsCapabilities,
     reader = false,
     queue = false,
+    // { base: {path: text}, candidate: {path: text} }: main's and the composed Candidate's own files.
+    composed = null,
     submodule = null,
     placement = false,
     // A browser test plus a web change, so the standard plan selects browser coverage (pinned Playwright).
@@ -96,6 +100,7 @@ function fixture(
           entry('convex/projectHostedFinishWake.ts', 'export const wake = false;'),
         ]
       : []),
+    ...Object.entries(composed?.base ?? {}).map(([path, text]) => entry(path, text)),
     entry('scripts/example.sh', '#!/bin/sh\nexit 0\n', 'executable'),
     entry('test-link', 'package-lock.json', 'symlink'),
     entry('README.md', 'synthetic before'),
@@ -125,7 +130,15 @@ function fixture(
     candidate = state([
       ...files
         .filter(file => !queue || file.path !== 'convex/projectHostedFinishWake.ts')
-        .map(file => (file.path === 'README.md' ? entry(file.path, 'synthetic after') : file)),
+        .map(file => (file.path === 'README.md' ? entry(file.path, 'synthetic after') : file))
+        .map(file =>
+          Object.hasOwn(composed?.candidate ?? {}, file.path)
+            ? entry(file.path, composed.candidate[file.path])
+            : file,
+        ),
+      ...Object.entries(composed?.candidate ?? {})
+        .filter(([path]) => !files.some(file => file.path === path))
+        .map(([path, text]) => entry(path, text)),
       ...(queue
         ? [
             entry('convex/projectHostedLandingWake.ts', 'export const wake = true;'),
@@ -1299,6 +1312,69 @@ test('a docs-only change shards the tests that read the changed document and kee
   assert.equal(prepared.singleShard, '');
   // The plan carries a test shard, so the landing waits for it.
   assert.equal(s.run.plan.shardCount, 2);
+});
+test('incident 9cd6c0ec: a proof main made stale refuses in the plan before any test job; one main left intact is pinned', async t => {
+  const file = 'convex/projectHostedLandings.ts';
+  const proofPath = '.nforge/queue-proofs/mirror.json';
+  const replay = { incident: '65e2d743', test: 'landings read the mirror receipt' };
+  const lane = [
+    "import { query } from './cliServer';",
+    'function evidence(rows) {\n  return rows.length;\n}',
+    'async function oneLanding(rows) {\n  return { landings: [evidence(rows)], mirror: true };\n}',
+    'function pageBytes(near) {\n  return near.length * 160;\n}',
+    'export const read = query({ handler: async (_ctx, input) => oneLanding([input]) });',
+  ].join('\n');
+  // Main's change to a helper the replay never ran, on the Lane's base and in the composed Candidate.
+  const mainEdit = text =>
+    text.replace('near.length * 160', 'near.reduce((size, row) => size + 160 + row.size, 0)');
+  const onMain = mainEdit(lane.replace('mirror: true', 'mirror: false'));
+  const proof = exercised =>
+    JSON.stringify({
+      version: 1,
+      kind: 'replay',
+      changes: { [file]: digest(Buffer.from(lane)) },
+      ...(exercised ? { exercised: { [file]: exercised } } : {}),
+      replay: { ...replay, receipt: randomUUID() },
+      authorModel: 'claude-opus-5-5',
+      authorSession: randomUUID(),
+      review: { model: 'gpt-6.2-sol', session: randomUUID(), receipt: randomUUID() },
+    });
+  const plans = {};
+  for (const [label, exercised] of [
+    ['unscoped', undefined],
+    ['scoped', buildExercisedScope(file, lane, ['evidence', 'oneLanding', 'read'])],
+  ]) {
+    const s = fixture(t, {
+      composed: {
+        base: {
+          [file]: onMain,
+          [REGISTRY]: JSON.stringify({
+            schema: 1,
+            replays: [{ ...replay, file: 'tests/demo.test.mjs', paths: [file] }],
+          }),
+          'tests/demo.test.mjs': `import "../${file}";`,
+        },
+        candidate: { [file]: mainEdit(lane), [proofPath]: proof(exercised) },
+      },
+    });
+    const downloads = s.traffic.downloads;
+    const prepared = await prepareActionsJob(
+      s.client,
+      join(s.directory, label),
+      join(s.directory, label + '-cache'),
+    );
+    plans[label] = { selection: prepared.recipe.selection, downloads: s.traffic.downloads - downloads };
+  }
+  // No scope recorded: refused at the plan, so every job fails at once without running tests.
+  const refused = plans.unscoped.selection.planError;
+  assert.equal(refused.code, 'QUEUE_PROOF_REQUIRED');
+  assert.match(refused.message, /bytes of convex\/projectHostedLandings\.ts differ/);
+  assert.ok(refused.message.includes(`refresh-queue-proof.mjs ${proofPath}`), refused.message);
+  // The replay never ran the unit main changed: the proof holds, pinned for the static job.
+  assert.equal(plans.scoped.selection.planError, undefined);
+  assert.deepEqual(plans.scoped.selection.queueProof.scoped, { [file]: proofPath });
+  // Main's bytes cost at most one object read, only on this path.
+  assert.ok(plans.scoped.downloads - plans.unscoped.downloads <= 1, JSON.stringify(plans));
 });
 test('the standard Actions plan pins changed and deleted queue paths with the Candidate proof files', async t => {
   const s = fixture(t, { queue: true });

@@ -125,6 +125,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `9064e885` | Earlier passes parked behind unrelated solo checks waited across replacement generations. The replay covers six receipts, preserves exact predecessor and multi-member fences, and verifies that the re-pin wakes earlier independent passes without another holder check. |
 | `65e2d743` | The passed landing waited behind an older submission. Individual and batch receipts record the elapsed order wait, and `landings` includes waits shorter than one minute. |
 | `78a97771` | Withdrawal by Lane keeps the builder's saves and ends the pending check. An old withdrawal reader can still read a reply after a newer CLI stamps the submit. |
+| `9cd6c0ec` | A green check refused acceptance: composition onto a moved main changed covered shared-file bytes after the proof. A stale proof now refuses at preflight or in the hosted planner before any test job, naming the offline refresh; a proof whose replay scope main left intact holds. |
 
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.

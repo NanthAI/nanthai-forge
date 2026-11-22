@@ -59,7 +59,7 @@ function qualifiedPaths(proof, replays) {
   return reached ? queueBenchPaths(rule) : [];
 }
 
-function fileDigest(file) {
+export function fileDigest(file) {
   try {
     const bytes = lstatSync(file).isSymbolicLink()
       ? readlinkSync(file, { encoding: 'buffer' })
@@ -71,9 +71,50 @@ function fileDigest(file) {
   }
 }
 
-/** Validate retained links and their applicability in this exact checkout. No external lookups. */
-export function assertQueueProof({ source, receipts }, { readText, digest }) {
+const SHA256 = /^[\da-f]{64}$/;
+/** A refreshed proof's `exercised[path]` record (scripts/queue-proof-scope.mjs); this check is light. */
+export function validExercisedScope(scope) {
+  return (
+    !!scope &&
+    typeof scope === 'object' &&
+    Array.isArray(scope.executed) &&
+    scope.executed.every(name => typeof name === 'string' && name) &&
+    typeof scope.digest === 'string' &&
+    SHA256.test(scope.digest) &&
+    // [name, sha256] pairs, not a name-keyed object: a unit named like a credential followed by a
+    // colon and a digest reads as a secret assignment to the secret scanner.
+    Array.isArray(scope.units) &&
+    scope.units.every(
+      pair =>
+        Array.isArray(pair) &&
+        pair.length === 2 &&
+        typeof pair[0] === 'string' &&
+        typeof pair[1] === 'string' &&
+        SHA256.test(pair[1]),
+    ) &&
+    new Set(scope.units.map(([name]) => name)).size === scope.units.length
+  );
+}
+
+/** Run where a proof's bytes no longer match: only its registered replay, offline (ec229a55). */
+export const REFRESH_QUEUE_PROOF =
+  'nforge heavy npm run build:core && nforge heavy node scripts/refresh-queue-proof.mjs';
+
+const shellWord = word => (/^[\w./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`);
+const printable = path =>
+  path.replace(/\p{Cc}/gu, char => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0'));
+const shown = paths =>
+  paths.slice(0, 5).map(printable).join(', ') + (paths.length > 5 ? ` and ${paths.length - 5} more` : '');
+
+/** Validate retained links and their applicability in this exact checkout. No external lookups.
+ * A qualifying proof covers a changed core file at its exact bytes, or at a scope the trusted
+ * planner pinned (`scoped`: file -> proof path) or `reads.scoped` accepts (Item ec229a55).
+ * `missing`: no qualifying proof names the file. `stale`: file -> proofs that name it at other bytes. */
+export function queueProofGaps({ source, receipts, scoped: pinned }, { readText, digest, scoped }) {
   const missing = new Set(source);
+  const stale = new Map();
+  const viaScope = {};
+  const scopable = new Set();
   const digests = new Map();
   let replays;
   for (const path of receipts) {
@@ -89,18 +130,69 @@ export function assertQueueProof({ source, receipts }, { readText, digest }) {
     for (const file of qualifiedPaths(proof, replays ?? [])) {
       if (!missing.has(file) || !Object.hasOwn(proof.changes, file)) continue;
       if (!digests.has(file)) digests.set(file, digest(file));
-      if (digests.get(file) === proof.changes[file]) missing.delete(file);
+      const scope =
+        proof.kind === 'replay' &&
+        typeof proof.changes[file] === 'string' &&
+        digests.get(file) !== null &&
+        validExercisedScope(proof.exercised?.[file]);
+      let held = digests.get(file) === proof.changes[file] || (scope && pinned?.[file] === path);
+      if (!held && scope) scopable.add(file);
+      if (!held && scope && scoped?.(file, proof, path)) held = viaScope[file] = path;
+      if (held) {
+        missing.delete(file);
+        stale.delete(file);
+      } else stale.set(file, [...(stale.get(file) ?? []), path]);
     }
-    if (!missing.size) return;
+    if (!missing.size) break;
   }
-  const paths = [...missing].sort();
-  const shown = paths
-    .slice(0, 5)
-    .map(path => path.replace(/\p{Cc}/gu, char => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0')));
-  const more = paths.length > 5 ? ` and ${paths.length - 5} more` : '';
-  throw new Error(
-    `QUEUE_PROOF_REQUIRED: Attach a registered incident replay with fresh-context review or an on-path bench cell for ${shown.join(', ')}${more}. See “Attaching queue proof” in the agent briefings.`,
-  );
+  return {
+    missing: [...missing].filter(file => !stale.has(file)).sort(),
+    stale,
+    scoped: viaScope,
+    scopable: [...scopable].filter(file => stale.has(file)).sort(),
+  };
+}
+
+export function queueProofMessage({ missing, stale }) {
+  const parts = [];
+  if (missing.length)
+    parts.push(
+      `Attach a registered incident replay with fresh-context review or an on-path bench cell for ${shown(missing)}.`,
+    );
+  if (stale.size) {
+    const proofs = [...new Set([...stale.values()].flat())].sort();
+    parts.push(
+      `The Candidate's bytes of ${shown([...stale.keys()].sort())} differ from those ${shown(proofs)} prove: an edit after the proof, or main's change to what its replay ran. If main changed them, sync this Lane onto main first. Then run \`${REFRESH_QUEUE_PROOF} ${proofs.map(path => shellWord(printable(path))).join(' ')}\` (a bench proof needs a new on-path cell), save and land again.`,
+    );
+  }
+  return `QUEUE_PROOF_REQUIRED: ${parts.join(' ')} See “Attaching queue proof” in the agent briefings.`;
+}
+
+/** Throws QUEUE_PROOF_REQUIRED; returns the files a scope covered. */
+export function assertQueueProof(changes, reads) {
+  const gaps = queueProofGaps(changes, reads);
+  if (gaps.missing.length || gaps.stale.size) throw new Error(queueProofMessage(gaps));
+  return gaps.scoped;
+}
+
+/** The hosted planner's pass, before any test job (Item ec229a55). Exact bytes first; only a
+ * stale file whose proof records a replay scope reads main's bytes (`mainTexts`: path -> text or
+ * null), once. `error` is the refusal; `scoped` the files a scope covered, for the static job. */
+export async function planQueueProof(changes, { readText, digest, mainTexts }) {
+  // The parser loads only on this path, never on an agent's land.
+  let gaps = queueProofGaps(changes, { readText, digest });
+  if (!gaps.missing.length && gaps.stale.size && gaps.scopable.length === gaps.stale.size) {
+    const { composedScopeHolds } = await import('./queue-proof-scope.mjs');
+    const main = await mainTexts(gaps.scopable);
+    gaps = queueProofGaps(changes, {
+      readText,
+      digest,
+      scoped: (file, proof) =>
+        main.has(file) && composedScopeHolds(proof.exercised[file], file, readText(file), main.get(file)),
+    });
+  }
+  if (gaps.missing.length || gaps.stale.size) return { error: queueProofMessage(gaps) };
+  return { scoped: gaps.scoped };
 }
 
 /** Hosted static check and the standard machine check already have these pinned inputs. */

@@ -10469,6 +10469,35 @@
       "test": "withdraw by Lane cancels the live landing, keeps the Lane and fences the late check"
     },
     {
+      "incident": "9cd6c0ec",
+      "what": "A green check refused acceptance after composition onto an advancing main changed three covered shared-file digests; a stale proof now refuses in the plan before any test job, and one main left outside its replay scope is pinned",
+      "file": "tests/hosted-actions-job.test.mjs",
+      "paths": [
+        "src/first-check-risk.ts",
+        "src/hosted-actions-job-client.ts",
+        "src/hosted-actions-job-plan.ts",
+        "src/hosted-check.ts",
+        "src/package-placement-pin.ts",
+        "src/package-placement.ts",
+        "src/scoped-recheck-policy.ts"
+      ],
+      "test": "incident 9cd6c0ec: a proof main made stale refuses in the plan before any test job; one main left intact is pinned"
+    },
+    {
+      "incident": "9cd6c0ec",
+      "what": "The same case before submission: a proof main changed under refuses land before compose with the sync and offline refresh commands",
+      "file": "tests/agent-inline-preflight.test.mjs",
+      "paths": [
+        "src/hosted-compose.ts",
+        "src/hosted-finish-guard.ts",
+        "src/hosted-land-gates.ts",
+        "src/hosted-would-conflict.ts",
+        "src/landing-freeze.ts",
+        "src/queue-ahead-hosted.ts"
+      ],
+      "test": "incident 9cd6c0ec: a proof main changed under refuses land before compose; a recorded scope goes to the planner"
+    },
+    {
       "incident": "779d17be",
       "what": "The November 5 legacy maintenance required a 22-minute write outage. An online copy-and-switch fixture keeps ordinary landings in order and lets a URL reader reissue its grant and verify the retired copy.",
       "file": "tests/maintenance-online.test.mjs",

@@ -483,7 +483,19 @@ async function queueProofFixture(t, { attach, standard = true } = {}) {
     [REGISTRY]: JSON.stringify({ replays: [{ incident: '2bf85ddf', test: testName, paths: [source] }] }),
   };
   const stale = JSON.stringify({ ...proof, changes: { [source]: digest(Buffer.from('Stale change')) } });
-  const proofBytes = attach === 'stale' ? stale : attach === 'valid' ? JSON.stringify(proof) : undefined;
+  // A refreshed proof's recorded replay scope (Item ec229a55); its contents are the planner's to test.
+  const exercised = { [source]: { executed: [], digest: 'a'.repeat(64), units: [] } };
+  const scoped = { ...proof, exercised };
+  const proofBytes =
+    attach === 'stale'
+      ? stale
+      : attach === 'valid'
+        ? JSON.stringify(proof)
+        : attach === 'scoped'
+          ? JSON.stringify(scoped)
+          : attach === 'scoped-stale'
+            ? JSON.stringify({ ...JSON.parse(stale), exercised })
+            : undefined;
   const s = agentFixture(t, {
     base,
     lane: { ...base, [source]: saved, ...(proofBytes ? { [receipt]: proofBytes } : {}) },
@@ -554,20 +566,72 @@ test('preflight reports the same stale queue proof as the hosted check on saved 
   const observedPreflight = await f.transport().dispatch('preflight', { run: false });
   assert.deepEqual(observedPreflight.result.queueProof, { ...expected, main: f.main.head });
 
-  // The source path now diverges, so only the hosted Candidate has its final bytes.
+  // Main changed the same core file: composition gives it new bytes no Lane proof can name, so a
+  // proof without a recorded replay scope refuses now, with the offline refresh (incident 9cd6c0ec).
+  moveMain(f, source);
+  const movedPreflight = await f.transport().dispatch('preflight', { run: false });
+  assert.equal(movedPreflight.result.queueProof.code, 'QUEUE_PROOF_REQUIRED');
+  assert.equal(movedPreflight.result.queueProof.refresh, true);
+  assert.ok(movedPreflight.result.queueProof.message.includes(`refresh-queue-proof.mjs ${receipt}`));
+});
+
+/** Main lands its own edit to `source` after the Lane's base, or only makes it executable. */
+function moveMain(f, source, { modeOnly = false } = {}) {
+  const before = JSON.parse(f.objects.get(f.main.head));
   const peerBytes = Buffer.from('Main changed the same core file');
   const peerBlob = digest(peerBytes);
+  const edit = modeOnly ? { mode: 'executable' } : { blob: peerBlob };
   const main = Buffer.from(
     JSON.stringify({
       ...before,
-      files: before.files.map(file => (file.path === source ? { ...file, blob: peerBlob } : file)),
+      files: before.files.map(file => (file.path === source ? { ...file, ...edit } : file)),
     }),
   );
   f.main.head = digest(main);
   f.objects.set(f.main.head, main);
   f.objects.set(peerBlob, peerBytes);
-  const movedPreflight = await f.transport().dispatch('preflight', { run: false });
-  assert.equal(movedPreflight.result.queueProof, undefined);
+}
+
+test('incident 9cd6c0ec: a proof main changed under refuses land before compose; a recorded scope goes to the planner', async t => {
+  const { s, receipt } = await queueProofFixture(t, { attach: 'valid' });
+  moveMain(s, 'src/hosted-landing.ts');
+  const message = 'Synthetic mirror cadence change';
+  const from = s.calls.length;
+  t.mock.method(process.stderr, 'write', () => true);
+  await assert.rejects(
+    submitHostedLand(s.root, { operationId: randomUUID(), message }, s.address, s.transport()),
+    error => {
+      assert.equal(error.code, 'QUEUE_PROOF_REQUIRED');
+      const root = realpathSync(s.root);
+      const sync = `nforge agent '${root}' save --sync '${JSON.stringify({ laneId: s.lane.laneId })}'`;
+      const command = `nforge agent '${root}' land --save '${JSON.stringify({ after: null, dependencies: [], message })}'`;
+      assert.deepEqual(error.recovery, { sync, command });
+      assert.ok(error.message.includes(`refresh-queue-proof.mjs ${receipt}`), error.message);
+      assert.ok(error.message.includes(sync) && error.message.includes(command));
+      return true;
+    },
+  );
+  assert(
+    !s.calls.slice(from).some(call => /Compose:prepare|Checks:enqueue|Landing.*:enqueue$/.test(call.name)),
+  );
+
+  const scoped = await queueProofFixture(t, { attach: 'scoped' });
+  moveMain(scoped.s, 'src/hosted-landing.ts');
+  const preview = await scoped.s.transport().dispatch('preflight', { run: false });
+  assert.equal(preview.result.queueProof, undefined);
+
+  // A recorded scope never covers a Lane edit after its proof: the saved bytes must be the proven ones.
+  const edited = await queueProofFixture(t, { attach: 'scoped-stale' });
+  moveMain(edited.s, 'src/hosted-landing.ts');
+  const editedPreview = await edited.s.transport().dispatch('preflight', { run: false });
+  assert.equal(editedPreview.result.queueProof.code, 'QUEUE_PROOF_REQUIRED');
+  assert.equal(editedPreview.result.queueProof.refresh, true);
+
+  // Main changing only the mode keeps the Lane's proven bytes: the exact proof holds.
+  const mode = await queueProofFixture(t, { attach: 'valid' });
+  moveMain(mode.s, 'src/hosted-landing.ts', { modeOnly: true });
+  const modePreview = await mode.s.transport().dispatch('preflight', { run: false });
+  assert.equal(modePreview.result.queueProof, undefined);
 });
 
 test('incident 7e5f0ad3: missing queue proof refuses land before any hosted job, and attached proof proceeds', async t => {

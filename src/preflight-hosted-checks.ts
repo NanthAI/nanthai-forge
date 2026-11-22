@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { REGISTRY, queueProofPaths } from '../scripts/core-queue-paths.mjs';
-import { assertQueueProof } from '../scripts/test-queue-proof.mjs';
+import { queueProofGaps, queueProofMessage, validExercisedScope } from '../scripts/test-queue-proof.mjs';
 import { scrubText } from './client-error-text.js';
 import { STANDARD_CHECK_ENTRY } from './standard-check.js';
 import type { readSource } from './files.js';
@@ -103,8 +103,12 @@ export function reportPreflightChecks(
   }
 }
 
-/** Only paths this Lane would change on main. A divergent proof, registry or source
- * can affect the verdict, so leave that comparison to the Candidate check. */
+/** Only paths this Lane would change on main. A divergent proof or registry can affect the
+ * verdict, so leave that comparison to the Candidate check. A covered source file that main also
+ * changed is composed to new bytes (incident 9cd6c0ec): its proof holds there only by a recorded
+ * replay scope, which the hosted planner tests, so one without a scope, or whose Lane bytes are not
+ * the proven ones, refuses now (Item ec229a55). The proof binds bytes only, so a file main changed
+ * only in mode keeps the side whose bytes moved. */
 function previewQueueProof(
   paths: readonly string[],
   before: Map<string, NativeFile>,
@@ -127,10 +131,21 @@ function previewQueueProof(
     if (equal(base, current) || equal(saved, current)) return saved;
     throw new Error();
   };
+  const blobs = (path: string) => [before, after, main].map(files => files.get(path)?.blob ?? null);
+  const composed = new Set(
+    changed.source.filter(path => {
+      const [base, saved, current] = blobs(path);
+      return base !== saved && base !== current && saved !== current;
+    }),
+  );
+  const sourceBlob = (path: string) => {
+    if (performance.now() >= deadline) throw new Error();
+    const [base, saved, current] = blobs(path);
+    return (base === saved ? current : saved) ?? null;
+  };
   try {
-    for (const path of changed.source) candidate(path);
     for (const path of changed.receipts) candidate(path);
-    assertQueueProof(changed, {
+    const gaps = queueProofGaps(changed, {
       readText: path => {
         const file = candidate(path);
         if (!file && path !== REGISTRY) return 'null';
@@ -140,12 +155,23 @@ function previewQueueProof(
         if (!bytes) throw new Error();
         return bytes.toString('utf8');
       },
-      digest: path => candidate(path)?.blob ?? null,
+      // No proof digest names composed bytes this preview cannot produce.
+      digest: path => (composed.has(path) ? 'composed' : sourceBlob(path)),
+      // The planner tests main's change against the scope; the Lane's own bytes must be the proven ones.
+      scoped: (path, proof) =>
+        composed.has(path) &&
+        after.get(path)?.blob === proof.changes?.[path] &&
+        validExercisedScope(proof.exercised?.[path]),
     });
-  } catch (error) {
+    if (!gaps.missing.length && !gaps.stale.size) return undefined;
     const code = 'QUEUE_PROOF_REQUIRED';
-    if (!(error instanceof Error) || !error.message.startsWith(code + ': ')) return undefined;
-    return { code, message: scrubText(error.message.replace(/\s+/g, ' '), 500) };
+    const message = queueProofMessage(gaps).replace(/\s+/g, ' ');
+    return {
+      code,
+      message: scrubText(message, 700),
+      ...([...gaps.stale.keys()].some(path => composed.has(path)) ? { refresh: true } : {}),
+    };
+  } catch {
+    return undefined;
   }
-  return undefined;
 }

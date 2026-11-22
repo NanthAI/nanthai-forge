@@ -827,8 +827,16 @@ saved paths, digests and available proof and replay registry files. With preflig
 enabled, `land --save` refuses a confirmed missing or stale proof for a single
 Lane before it composes, when the selected check runs the standard Forge recipe.
 `QUEUE_PROOF_REQUIRED` names the proof, where to attach it in the Lane and the
-command to retry after attaching it. The hosted check still verifies proof on
-the composed Candidate, including when the local comparison is inconclusive.
+command to retry after attaching it. When main also changed a covered file, composition gives
+that file new bytes, so a proof with no recorded replay scope, or whose Lane bytes are not the proven
+ones, refuses there too. A change of mode alone keeps the proven bytes. The refusal
+names the files, the `save --sync` command and the offline refresh, which re-runs only the
+named proofs' registered replays. The hosted planner verifies proof on the composed Candidate
+before any test job starts. A refusal there fails every planned job at once, without running
+tests. A refreshed proof records the top-level units its replay ran. It still holds after main
+changes only functions the replay neither ran nor referenced; import order, load-time code, referenced
+signatures and removed units stay bound. The planner pins that result for the static job.
+That path reads main's bytes of those files once. Otherwise it reads nothing extra.
 When static verification is the reported
 cause, the compact landing receipt retains the first safe coded diagnostic line.
 

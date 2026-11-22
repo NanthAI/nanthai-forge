@@ -10,7 +10,8 @@ import { checkPin } from './hosted-check.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { guardedSelection, standardSelection } from '../scripts/test-impact.mjs';
 import { pinImportFacts } from '../scripts/test-import-cache.mjs';
-import { queueProofPaths } from '../scripts/core-queue-paths.mjs';
+import { queueProofPaths, REGISTRY } from '../scripts/core-queue-paths.mjs';
+import { planQueueProof } from '../scripts/test-queue-proof.mjs';
 import { describeShardPlan, timedShards } from '../scripts/test-shards.mjs';
 import { browserSelection, browserGroups, browserShard } from '../scripts/browser-test-policy.mjs';
 import { hostedActionsRecipeSchema } from './hosted-actions.js';
@@ -68,6 +69,32 @@ async function baseAllowBytes(source: Awaited<ReturnType<typeof materializeActio
     console.log('secret scan: the base allow file is unreadable; no allow entries apply');
     return undefined;
   }
+}
+/** Main's bytes of the named files, null where main has none (Item ec229a55). Only a stale proof
+ * with a recorded scope asks, so this is one small object read on that path and none otherwise. */
+async function baseTexts(
+  source: Awaited<ReturnType<typeof materializeActionsSource>>,
+  cache: string,
+  paths: readonly string[],
+) {
+  const byPath = new Map(
+    source.base.files.filter(file => paths.includes(file.path)).map(file => [file.path, file]),
+  );
+  const uncached = [...byPath.values()]
+    .filter(file => !existsSync(join(cache, file.blob)))
+    .map(file => file.blob);
+  if (uncached.length) {
+    await source.connection.resolve(uncached);
+    await source.connection.prepareRecipes(uncached);
+    await source.reader.resolveMany(uncached);
+  }
+  const texts = new Map<string, string | null>();
+  for (const path of paths) {
+    const file = byPath.get(path);
+    if (!file) texts.set(path, null);
+    else if (file.mode !== 'symlink') texts.set(path, readFileSync(join(cache, file.blob), 'utf8'));
+  }
+  return texts;
 }
 /** Keep only paths/hashes in memory. Import analysis reads one source file at a time. */
 class SourceFiles extends Map<string, string> {
@@ -178,8 +205,34 @@ export async function prepareActionsJob(
         : ''),
   );
   // The actual Candidate delta, not a scoped test selection or an already accepted main audit.
-  const queueProof =
+  const changedProof =
     standard && run.gate?.mode !== 'audit' && run.gate?.mode !== 'probe' ? queueProofPaths(paths) : undefined;
+  // Guard 1 before any test job runs (Item ec229a55): a refusal fails every planned job at once, and a
+  // proof that holds only by its recorded replay scope is pinned for the static job.
+  let proofRefusal: string | undefined;
+  let queueProof: (NonNullable<typeof changedProof> & { scoped?: Record<string, string> }) | undefined =
+    changedProof;
+  if (changedProof)
+    try {
+      const verdict = await planQueueProof(changedProof, {
+        readText: path => {
+          const text = files.get(path);
+          if (text !== undefined) return text;
+          if (path === REGISTRY) return '';
+          throw Object.assign(new Error(`${path} is not in the Candidate`), { code: 'ENOENT' });
+        },
+        digest: path => inventory.get(path)?.blob ?? null,
+        mainTexts: wanted => baseTexts(source, cache, wanted),
+      });
+      proofRefusal = verdict.error;
+      if (verdict.scoped && Object.keys(verdict.scoped).length)
+        queueProof = { ...changedProof, scoped: verdict.scoped };
+    } catch (error) {
+      // The static job still judges the exact bytes.
+      console.log(
+        `queue proof: plan pass unavailable (${error instanceof Error ? error.message : 'error'}); the static job decides`,
+      );
+    }
   const selection = {
     scope: selected.scope,
     reason: selected.reason,
@@ -262,6 +315,9 @@ export async function prepareActionsJob(
   // Every planned job reports a Candidate refusal before running project code.
   const planError =
     source.planError ??
+    (proofRefusal
+      ? { code: 'QUEUE_PROOF_REQUIRED', message: proofRefusal.replace(/^QUEUE_PROOF_REQUIRED: /, '') }
+      : undefined) ??
     (browserIndex >= 0 && !playwrightVersion
       ? {
           code: 'CHECK_FAILED',

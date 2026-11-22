@@ -813,6 +813,19 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
           const retry = { ...parameters };
           delete retry.operationId;
           const next = hostedRecoveryCommand(session.root, 'land --save', retry);
+          // Main changed a covered file (ec229a55): sync onto it, refresh the named proofs offline, then land.
+          if (proof.refresh) {
+            const sync = hostedRecoveryCommand(session.root, 'save --sync', { laneId: selection.laneId });
+            throw new ForgeError(
+              'QUEUE_PROOF_REQUIRED',
+              `${proof.message} Sync with ${sync}; after the refresh, run ${next}.`,
+              undefined,
+              {
+                sync,
+                command: next,
+              },
+            );
+          }
           const attach = '.nforge/queue-proofs/<change>.json';
           throw new ForgeError(
             'QUEUE_PROOF_REQUIRED',

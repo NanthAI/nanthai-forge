@@ -39,16 +39,44 @@ export function staleReplayPaths(paths, reached) {
   return (paths ?? []).filter(path => !reached.has(path));
 }
 
+/** Start offsets of executed functions other than the module body, per core module URL. The
+ * queue proof scope (scripts/queue-proof-scope.mjs) maps them to the top-level units a replay ran. */
+export function executedCoreOffsets(scripts, into = new Map()) {
+  for (const { url, functions } of scripts) {
+    if (!url.startsWith('file:')) continue;
+    const path = repoPath(fileURLToPath(url)).replace(/^dist\/(.*)\.js$/, 'src/$1.ts');
+    if (!coreQueuePath(path)) continue;
+    for (const [index, { functionName, ranges }] of functions.entries()) {
+      const entry = ranges[0];
+      if (!(entry.count > 0) || (index === 0 && !functionName && entry.startOffset === 0)) continue;
+      if (!into.has(url)) into.set(url, new Set());
+      into.get(url).add(entry.startOffset);
+    }
+  }
+  return into;
+}
+
 export function runReplayCoverage(entry, moduleCache = process.env.FORGE_TEST_MODULE_DIRECTORY) {
+  return replayRun(entry, moduleCache, false).paths;
+}
+
+/** One isolated replay with its reached paths and executed function offsets (Item ec229a55). */
+export function runReplayScope(entry, moduleCache) {
+  return replayRun(entry, moduleCache, true);
+}
+
+function replayRun(entry, moduleCache, scope) {
   if (!/^tests\/[^/\\]+\.test\.mjs$/.test(entry.file))
     throw new Error(`${entry.incident}: replay file is outside the normal suite: ${entry.file}`);
   const temp = fileTemp();
   const report = join(temp.root, 'coverage.json');
+  const offsets = scope ? join(temp.root, 'scope.json') : undefined;
   const childEnv = {
     ...process.env,
     ...temp.env,
     ...(moduleCache && { FORGE_TEST_MODULE_DIRECTORY: moduleCache }),
     FORGE_REPLAY_COVERAGE_OUTPUT: report,
+    ...(offsets && { FORGE_REPLAY_SCOPE_OUTPUT: offsets }),
     FORGE_REPLAY_COVERAGE_TEST: entry.test,
     FORGE_TEST_NAME_PATTERN: replayTitle(entry.test).source,
     FORGE_TEST_MAX_RETRIES: '0',
@@ -69,13 +97,15 @@ export function runReplayCoverage(entry, moduleCache = process.env.FORGE_TEST_MO
       !/^# pass [1-9]\d*$/m.test(result.stdout) ||
       !/^# skipped 0$/m.test(result.stdout) ||
       !/^# todo 0$/m.test(result.stdout) ||
-      !existsSync(report)
+      !existsSync(report) ||
+      (offsets && !existsSync(offsets))
     )
       throw new Error(
         `${entry.file}: replay "${entry.test}" did not produce passing coverage.\n` +
           (result.error?.message ?? (result.stderr + result.stdout).slice(-12_000)),
       );
-    return JSON.parse(readFileSync(report, 'utf8'));
+    const paths = JSON.parse(readFileSync(report, 'utf8'));
+    return { paths, offsets: offsets ? JSON.parse(readFileSync(offsets, 'utf8')) : undefined };
   } finally {
     const leaks = temp.cleanup();
     if (leaks.length) throw new Error(`${entry.file}: leaked temporary entries: ${leaks.join('; ')}`);

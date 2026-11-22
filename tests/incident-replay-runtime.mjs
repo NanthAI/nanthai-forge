@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach } from 'node:test';
 import { takeCoverage } from 'node:v8';
 import {
+  executedCoreOffsets,
   executedCorePaths,
   replayTitle,
   runReplayCoverage,
@@ -14,6 +15,9 @@ import { temporaryDirectory } from '../scripts/test-temp.mjs';
 
 export function watchIncidentReplays(entries, output, confirmInIsolation = false) {
   const replays = entries.map(entry => ({ entry, title: replayTitle(entry.test), reached: new Set() }));
+  // A queue proof refresh also records which functions ran (Item ec229a55).
+  const scopeOutput = output && process.env.FORGE_REPLAY_SCOPE_OUTPUT;
+  const offsets = new Map();
   const previousCoverage = process.env.NODE_V8_COVERAGE || undefined;
   const session = previousCoverage ? undefined : new Session();
   session?.connect();
@@ -64,6 +68,7 @@ export function watchIncidentReplays(entries, output, confirmInIsolation = false
       const { result } = profile('takePreciseCoverage');
       profile('stopPreciseCoverage');
       reached = executedCorePaths(result);
+      if (scopeOutput && !deferred && t.passed) executedCoreOffsets(result, offsets);
     } else {
       takeCoverage();
       reached = new Set();
@@ -73,6 +78,7 @@ export function watchIncidentReplays(entries, output, confirmInIsolation = false
       if (!/^coverage-.+\.json$/.test(name) || before.has(name)) continue;
       const scripts = JSON.parse(readFileSync(join(directory, name), 'utf8')).result;
       for (const path of executedCorePaths(scripts)) reached.add(path);
+      if (scopeOutput && !deferred && t.passed) executedCoreOffsets(scripts, offsets);
     }
     if (!previousCoverage) rmSync(directory, { recursive: true, force: true });
     for (const replay of matches) {
@@ -92,6 +98,13 @@ export function watchIncidentReplays(entries, output, confirmInIsolation = false
     for (const { entry, reached, ran, deferred } of replays) {
       if (output) {
         if (ran) writeFileSync(output, JSON.stringify([...reached].sort()) + '\n');
+        if (ran && scopeOutput)
+          writeFileSync(
+            scopeOutput,
+            JSON.stringify(
+              Object.fromEntries([...offsets].map(([url, set]) => [url, [...set].sort((a, b) => a - b)])),
+            ),
+          );
         continue;
       }
       if (deferred) {

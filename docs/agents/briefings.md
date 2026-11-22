@@ -248,8 +248,14 @@ Before landing a core queue change, retain its proof and attach a JSON file at
 `.nforge/queue-proofs/<item-or-change>.json` in the Lane. Use a distinct filename for each
 proof. The `changes` object maps each covered queue path to the SHA-256 of its final source
 bytes (`shasum -a 256 PATH`), or to `null` for a deletion. For a symbolic link, hash its target
-text. Recheck the proof if a merge changes those bytes. A Candidate can carry multiple proofs,
-and together they must cover every changed core queue path.
+text. A Candidate can carry multiple proofs, and together they must cover every changed core
+queue path. After fixes or a sync, refresh a replay proof offline instead of hashing by hand:
+`nforge heavy npm run build:core && nforge heavy node scripts/refresh-queue-proof.mjs PROOF.json`.
+It re-runs only that proof's registered replay, rewrites the digests and records in `exercised`
+the top-level units the replay ran. With that scope, the proof still holds when main changes
+only functions the replay neither ran nor referenced. A change to a unit it ran, a referenced
+function's signature, the import order or anything that runs at load, a removed unit, or a Lane
+edit after the proof still refuses before any test job, with this command.
 
 For an **incident replay**, identify the incident and exact test title in
 [`incident-replays.json`](../../tests/fixtures/incident-replays.json). From the Lane, run
