@@ -143,3 +143,58 @@ test('d357d772: the opaque link opens the Lane for a member and is not-found for
   assert.deepEqual(found, { handle: 'ada', slug: 'tide-pool', laneId: f.lane.laneId });
   assert.equal(await f.tx('stranger', urls.approvalTarget, args, 'stranger'), null);
 });
+
+// Follow-up (receipt 03d241c7): a terminal-failure description never carries free-form detail for a private project.
+const secretDetail = 'tests/secret-path.test.mjs failed for ada/tide-pool';
+const store = await import(moduleUrl('../convex/projectGithubMirrorStore.ts'));
+for (const visibility of ['private', 'public']) {
+  test(`d357d772: ${visibility} project: a pull request job's terminal mirror failure description`, async t => {
+    const f = await fixture(t, visibility);
+    const failing = job(f, {}, { status: 'running', step: 1 });
+    f.insert('projectGithubMirrors', {
+      projectId: f.projectId,
+      repository: 'synthetic/mirror',
+      activeId: failing,
+      mapping: null,
+    });
+    await f.tx('failed', store.failed, {
+      jobId: failing,
+      step: 1,
+      code: 'GITHUB_SYNC_REJECTED',
+      detail: secretDetail,
+    });
+    const status = posted(f);
+    assert.equal(status.state, 'error');
+    if (visibility === 'public') assert.equal(status.description, `GITHUB_SYNC_REJECTED: ${secretDetail}`);
+    else {
+      assert.equal(status.description, 'GITHUB_SYNC_REJECTED: Open the Lane in Forge for details.');
+      assert.doesNotMatch(status.description, /secret|ada|tide/);
+    }
+  });
+
+  test(`d357d772: ${visibility} project: a check that could not start settles with the error code only when private`, async t => {
+    const f = await fixture(t, visibility);
+    const starting = job(f, {}, { waitKey: 'k' });
+    await f.tx(
+      'settle',
+      queue.settle,
+      {
+        jobId: starting,
+        outcome: 'error',
+        description: `Forge could not start the check (CODE: ${secretDetail}).`,
+        privateDescription: 'Forge could not start the check (CODE). Open the Lane in Forge for details.',
+        waitKey: 'k',
+      },
+      'owner',
+    );
+    const status = posted(f);
+    if (visibility === 'public') assert.match(status.description, /secret-path/);
+    else {
+      assert.equal(
+        status.description,
+        'Forge could not start the check (CODE). Open the Lane in Forge for details.',
+      );
+      assert.doesNotMatch(status.description, /secret|ada|tide/);
+    }
+  });
+}

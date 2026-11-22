@@ -50,6 +50,8 @@ export async function projectLink(
   url.hash = '';
   return url.href;
 }
+/** The one sentence a non-public project's failure status carries instead of worker or error detail. */
+export const openLane = 'Open the Lane in Forge for details.';
 const descriptions: Record<Outcome, string> = {
   success: 'Forge check passed.',
   failure: 'Forge check failed.',
@@ -57,8 +59,16 @@ const descriptions: Record<Outcome, string> = {
   superseded: 'Superseded by a newer push to this pull request.',
 };
 /** Record the final outcome once and schedule its one forge/verify write, plus the Lane's
- * retirement. Later events for this head change nothing. */
-export async function settlePull(ctx: MutationCtx, job: Job, result: Outcome, description?: string) {
+ * retirement. Later events for this head change nothing. `privateDescription` replaces
+ * `description` for a non-public project: a description built from worker or error detail can
+ * name a project, Lane, path or person, and a GitHub status on a public repo is world-readable. */
+export async function settlePull(
+  ctx: MutationCtx,
+  job: Job,
+  result: Outcome,
+  description?: string,
+  privateDescription?: string,
+) {
   const inbound = parseInbound(job),
     pull = inbound.pull;
   if (!pull || pull.outcome) return null;
@@ -76,7 +86,9 @@ export async function settlePull(ctx: MutationCtx, job: Job, result: Outcome, de
     repository: job.repository,
     sha: pull.head,
     state: result === 'superseded' ? 'error' : result,
-    description: description ?? descriptions[result],
+    description:
+      (project.visibility !== 'public' ? (privateDescription ?? description) : description) ??
+      descriptions[result],
     link: await projectLink(ctx, project, inbound.laneId),
     jobId: job._id,
   });
@@ -258,6 +270,7 @@ export const settle = internalMutation({
     jobId: v.id('projectGithubMirrorJobs'),
     outcome,
     description: v.optional(v.string()),
+    privateDescription: v.optional(v.string()),
     runId: v.optional(v.string()),
     waitKey: v.optional(v.string()),
   },
@@ -268,6 +281,6 @@ export const settle = internalMutation({
     const pull = pullOf(job);
     if (input.runId && pull?.runId !== input.runId) return null;
     if (input.waitKey && job.waitKey !== input.waitKey) return null;
-    return settlePull(ctx, job, input.outcome, input.description);
+    return settlePull(ctx, job, input.outcome, input.description, input.privateDescription);
   },
 });

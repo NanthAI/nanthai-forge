@@ -21,7 +21,7 @@ import { mirrorPublishMessage } from './projectGithubMirrorMessage';
 import { missingObjectDelays, transientMirrorCodes } from '../src/hosted-github-retry';
 import { inboundBegin } from './projectGithubInbound';
 import { finish, inboundOutcomeSchema, yieldToInbound } from './projectGithubInboundQueue';
-import { projectLink, settlePull } from './projectGithubPullQueue';
+import { openLane, projectLink, settlePull } from './projectGithubPullQueue';
 import { pusherNotice } from '../src/github-inbound-job';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { beginMirrorBurst, mirrorAudit, startMirrorPublish } from './projectGithubMirrorCadence';
@@ -360,7 +360,13 @@ export const failed = internalMutation({
     // A pull request job never holds the queue on a terminal failure: forge/verify says why.
     if (delay === null && job.pullKey) {
       await finish(ctx, job, queue, null, 'failed', { error: input.code, detail: input.detail });
-      await settlePull(ctx, (await ctx.db.get(job._id))!, 'error', `${input.code}: ${input.detail}`);
+      await settlePull(
+        ctx,
+        (await ctx.db.get(job._id))!,
+        'error',
+        `${input.code}: ${input.detail}`,
+        `${input.code}: ${openLane}`,
+      );
       return null;
     }
     // Advance the worker fence, retaining the exact cursor/seed. Duplicate or

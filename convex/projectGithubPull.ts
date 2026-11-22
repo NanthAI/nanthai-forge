@@ -24,7 +24,7 @@ import { hostedLaneSchema } from '../src/hosted-lane';
 import { hostedCheckTerminal, checkCause } from '../src/hosted-check';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { checkRunStatus, pullOperationId } from '../src/github-pull-check';
-import { pullOf, settlePull } from './projectGithubPullQueue';
+import { openLane, pullOf, settlePull } from './projectGithubPullQueue';
 import { forkGate } from './projectGithubPullFork';
 import type { InboundJob } from '../src/github-inbound-job';
 
@@ -85,14 +85,15 @@ export const start = internalAction({
       await ctx.runMutation(makeFunctionReference<'mutation'>('projectGithubPull:startCheck'), input);
     } catch (error) {
       const data = (error as { data?: { code?: unknown; message?: unknown } }).data;
-      const reason =
-        typeof data?.code === 'string'
-          ? `${data.code}${typeof data.message === 'string' ? `: ${data.message}` : ''}`
-          : 'unexpected failure';
+      const code = typeof data?.code === 'string' ? data.code : null;
+      const reason = code
+        ? `${code}${typeof data?.message === 'string' ? `: ${data.message}` : ''}`
+        : 'unexpected failure';
       await ctx.runMutation(makeFunctionReference<'mutation'>('projectGithubPullQueue:settle'), {
         jobId: input.jobId,
         outcome: 'error',
         description: `Forge could not start the check (${reason}).`,
+        privateDescription: `Forge could not start the check (${code ?? 'unexpected failure'}). ${openLane}`,
         waitKey: input.key,
       });
     }
@@ -123,6 +124,7 @@ export const startCheck = internalMutation({
         job,
         'failure',
         `Does not apply to Forge main (${terminal.outcome.error.code}).`,
+        `Does not apply to Forge main (${terminal.outcome.error.code}). ${openLane}`,
       );
     const candidate = hostedRecordSchema.options[3].parse(terminal.outcome.result);
     if (candidate.result.status !== 'clean')
