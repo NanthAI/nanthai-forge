@@ -513,3 +513,20 @@ test('an already pinned rollout plan replays its original input digest and publi
   );
   assert(candidate.candidateFiles);
 });
+
+test('Item 8c50ce13: compose admission refuses a new note over 1 KiB with the limit and byte count', async () => {
+  const c = await composeFixture({ baselineFiles: [['src/a.ts', 'same\n']] });
+  const files = parseNativeState(c.objects.get(c.baseline.sha256)).files;
+  const changed = c.file(files[0].path, 'changed\n');
+  const head = c.state([changed], [c.baseline.sha256]);
+  const selected = c.selection([await c.lane(head)]);
+  const long = { ...selected, request: { ...selected.request, message: 'm'.repeat(2009) } };
+  await assert.rejects(
+    c.prepare(long),
+    error =>
+      /LANDING_MESSAGE_TOO_LARGE/.test(error.message) &&
+      /has 2009 UTF-8 bytes; the limit is 1024/.test(error.message),
+  );
+  const reply = await c.prepare({ ...selected, request: { ...selected.request, message: 'm'.repeat(1024) } });
+  assert(!JSON.stringify(reply).includes('LANDING_MESSAGE_TOO_LARGE'), 'a note at the limit is admitted');
+});

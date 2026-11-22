@@ -9,7 +9,7 @@ import { hostedMirrorStatusSchema } from './hosted-github-mirror-status.js';
 import { contractTestsInput } from './intent-test-contract.js';
 import { z } from 'zod';
 import { predecessorPinSchema } from './early-resolution.js';
-import { landingMessageSchema } from './landing-message.js';
+import { landingMessageSchema, noteSchema } from './landing-message.js';
 import { githubActionsRunsOnSchema } from './github-actions-runner-label.js';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
 import { hostedMainV2Schema, mainDaySchema } from './hosted-main.js';
@@ -188,7 +188,7 @@ const planningStatuses = [
 const uuid = z.uuid(),
   hash = z.string().regex(/^[0-9a-f]{64}$/);
 const lane = { laneId: uuid.optional() };
-const message = { message: z.string().default('Agent change') };
+const message = { message: noteSchema.default('Agent change') };
 const selection = {
   ...lane,
   ...message,

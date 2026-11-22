@@ -12,6 +12,7 @@ import { mutation, query } from './cliServer';
 import { activeProject, requireDeviceWritePaths } from './projectAuthority';
 import { beginHostedOperation } from './projectHostedOperations';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
+import { noteText } from '../src/landing-message';
 import { saveRequestSchema, validateSavePage, savePin, saveInputSchema } from '../src/hosted-save';
 import { validateNotVerified } from '../src/agent-handoff-types';
 import {
@@ -109,6 +110,7 @@ export const prepare = mutation({
   handler: async (ctx, input) => {
     try {
       const parsed = saveRequestSchema.parse(JSON.parse(input.request));
+      noteText(parsed.message);
       validateNotVerified(parsed.notVerified);
       const request = {
         ...parsed,

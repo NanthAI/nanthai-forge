@@ -21,6 +21,33 @@ export function landingMessage(value: string) {
   );
   return clean;
 }
+/** The cap on a save or compose note: the note travels in finish rows and operations, so a long
+ * landing message (stored once, by reference) is never copied into it (Item 8c50ce13). */
+export const LANDING_NOTE_BYTES = 1024;
+const utf8 = new TextEncoder();
+/** A save or compose note as supplied: over the cap it fails with the limit and the byte count. */
+export function noteText(value: string) {
+  const size = utf8.encode(value).length;
+  invariant(
+    size <= LANDING_NOTE_BYTES,
+    'LANDING_MESSAGE_TOO_LARGE',
+    `This save or compose note has ${size} UTF-8 bytes; the limit is ${LANDING_NOTE_BYTES}. Shorten it and run the same command again.`,
+  );
+  return value;
+}
+/** The note a landing writes for its save and compose steps: the message itself, or its subject
+ * (first line, whole characters) when the message is longer than the cap. */
+export function landingNote(message: string) {
+  if (utf8.encode(message).length <= LANDING_NOTE_BYTES) return message;
+  let note = '';
+  const subject = message.split(/\r?\n/).find(line => line.trim() !== '') ?? 'Agent change';
+  for (const char of subject) {
+    if (utf8.encode(note + char).length > LANDING_NOTE_BYTES) break;
+    note += char;
+  }
+  return note;
+}
+export const noteSchema = z.string().transform(noteText);
 /** A message the client supplies (land, finish, --message-file): empty text never reaches the server (friction 737e85cb). */
 export function suppliedLandingMessage(value: string) {
   invariant(

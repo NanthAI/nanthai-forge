@@ -1,0 +1,220 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedCompose.ts": "5b9f9a1412ec8d0d86a547b30e0ce35308c978326accf1f84abaa0a4b6e00a5e"
+  },
+  "replay": {
+    "incident": "025470bf",
+    "test": "a refused change holds for a peer still deciding and they form one cohort",
+    "receipt": "2d242795-830b-4d64-a4a2-7292e02b7482"
+  },
+  "authorModel": "claude-sonnet-5-5",
+  "authorSession": "86a034c3-a702-4939-b9bf-99a89e14342a",
+  "review": {
+    "model": "claude-sonnet-5-5",
+    "session": "a5b3f214289899f9c",
+    "receipt": "2d242795-830b-4d64-a4a2-7292e02b7482"
+  },
+  "exercised": {
+    "convex/projectHostedCompose.ts": {
+      "executed": [
+        "caller",
+        "prepare",
+        "progress",
+        "stage"
+      ],
+      "digest": "5135facf8d61825454a6620f575cde5203c028d6d3b2ce127297a02b9c8389ac",
+      "units": [
+        [
+          "activeProject",
+          "d18cc6b641cd45a0e474d0afe7700101c46cef8057b70e172637d1e1d30d2be9"
+        ],
+        [
+          "beginHostedOperation",
+          "d1957e3c5db8585d728949c5534a9a4f4d14f7603d823f5b890fa99f2e56e40f"
+        ],
+        [
+          "boardWake",
+          "9d40543c48619121e1c647ceddcf90c19b4b62950588ccab8cc8ef3883f7fca0"
+        ],
+        [
+          "caller",
+          "a5736119904e77d85e1841575dcd1b3f761fcfcd3df9a935526786fb5e5dffe2"
+        ],
+        [
+          "candidate",
+          "cd33797ba5fda04ce18e8aaea4879928c6448399ff77077e3fc3846742b731b4"
+        ],
+        [
+          "candidateOwnerInputs",
+          "7e64861abde58bdaf07c327eef9d0fde40ac8372b76393250653932226dc1bf6"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "capsuleReceiptDigest",
+          "0a12501462957038e10681177471d87f199feee26b161d69c113102d81e4df3b"
+        ],
+        [
+          "composeDependencySchema",
+          "0c6f66cd2dc8db38c166b8f09d8c561ef53f685c19ee4dffffca0bbe2eb64cd5"
+        ],
+        [
+          "composeLaneSchema",
+          "38f595d8263d0421fbce1bfedab7edbec272f9f975154206f05721bdd7813d17"
+        ],
+        [
+          "composeRequestSchema",
+          "248bbc60638a4930df78f05fd802b4195ee36848e9ccc77d580ced309f00a80b"
+        ],
+        [
+          "composeRow",
+          "6d1690ca7576a44d53b47bba902f7bdff2078a397da53ffdaebea4a436702a1c"
+        ],
+        [
+          "composeStateSchema",
+          "c969701c240a5d71d76d456e0c36ae96f696b8415b0bb91af6f5ce62b00a419f"
+        ],
+        [
+          "hostedComposeInput",
+          "f714b6f1f2e1c0826e6d209123a866aa8723fb156e37354cb6f55b68513093e9"
+        ],
+        [
+          "hostedPayloadHash",
+          "dd878479813234bbf14db3ad1ea1b9d68605840ca3eec856231f180ae5455fa5"
+        ],
+        [
+          "hostedRecordSchema",
+          "508c659caa39090faf59eafb8c7320cc42ca43240ec90785756c1840e7c03f61"
+        ],
+        [
+          "hostedStartMain",
+          "b363e9608e562023c7b2963703c2aa02c302faf29032c2afe9c22405b82e1a0a"
+        ],
+        [
+          "identity",
+          "0e63024573f04abe0ffb257bef932a0688a8d7bedae6cb0e13432915bf072ab0"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "laneSession",
+          "0eed7f4dbe5b55a8e921d1b5795ad0b6b53099973920c48cc4b08f398ac2f66d"
+        ],
+        [
+          "loadCompose",
+          "e095ddabe4cb65b45c7b9f000a39aa14399f606c990cca259c7b66aca8503257"
+        ],
+        [
+          "mainSemanticMembers",
+          "2e16e112a1f8911db06faefc035bcbf92deae0e897fa4051c0518a2faaf6c190"
+        ],
+        [
+          "markConflictLand",
+          "b38126f1d2432f1e92f24ca13933cca9adaf64f44c92117cb100baec152c55e0"
+        ],
+        [
+          "memberWorkBudgetReply",
+          "aec19661e09d89bfedabd1f44cf1e149bd0c1e412953c84f6bc476015d4553e5"
+        ],
+        [
+          "mergeSemanticMembers",
+          "c915ba6916b75f2e3410fd4c5cecb93dd1c75969a640dfc16ed7f71326c7030a"
+        ],
+        [
+          "metricComposeMembershipWrites",
+          "ae4708ee16e066a0a3b8da7583a8d92379144d0c3ea01f5757860e5225640775"
+        ],
+        [
+          "mutation",
+          "4f17c7855059ce010489b8b943f417aba3333721a20f7872a46abe0eee887bc9"
+        ],
+        [
+          "noteText",
+          "d792a055ad760d39722c6978fe8d465ca033ca0cdb0b79b81976ee941c57f641"
+        ],
+        [
+          "prepare",
+          "e05021beb9b8e7afe180242e02db24241ae87b86b70d39d80371a95867701b6a"
+        ],
+        [
+          "progress",
+          "7a12813ce5e7ba72efd8972370217cdd454fee9c8f6e83593e4f76b02d0c03ad"
+        ],
+        [
+          "query",
+          "daf3f45820a616be793e9371cc4c356cef17e60a669e2c4a3587a50a99345ee8"
+        ],
+        [
+          "readHostedRecord",
+          "f8ebe857e46255798f036f3db0acb78682a740661afb1147e12c1163e7ad5ee2"
+        ],
+        [
+          "report",
+          "11f51c908ed7b15c3270a2410f7282cdb9c431b81d35e62cdff8695c9d306e0b"
+        ],
+        [
+          "requireLaneHolder",
+          "52b7f74673ce5d2ffadd87300291c55de591f4354d03f97de585bb464d4afa18"
+        ],
+        [
+          "requireLaneSourceAuthority",
+          "c2771f6f3c3d41fd2fb06b0e9bde5a8b9914d0cd71f425c99c6d729bd878ccfd"
+        ],
+        [
+          "sameSaveLane",
+          "eae4bc08c57e16fb8a8d99ef3a5b4fa9698ca7a4f80fd6ba9e31befd35e2358c"
+        ],
+        [
+          "saveLaneRecord",
+          "403a64a40f3343a35ee8f69271ab8b0d712fbe7fa5606235e41af7f5e162130e"
+        ],
+        [
+          "saveObject",
+          "17e863ada21108d974af54f19859da8e055f11d7ed994f47f4f9aa00b55d5ce5"
+        ],
+        [
+          "savePin",
+          "e5b9c59bb3ad5963b9afbcfc3a1070b9f60c113e75b09cf0bee8a0e08cb77788"
+        ],
+        [
+          "semanticBaseSequence",
+          "c653628f8b060040f4f7bc1e7c42dfc57a874e4e867118fc8cde07fb94ad236c"
+        ],
+        [
+          "semanticMember",
+          "ed9d20c3f4ee2f274f9cb3060520fa0c64e2ae1b0a377a05a920b6b6d3be64b7"
+        ],
+        [
+          "semanticPayload",
+          "9566e6a72ec87c00eb0fe6294bb2c7f917bfbb20db70f7a6fc9538d4f7a06023"
+        ],
+        [
+          "sourceProgress",
+          "17aba4312f6e0c0d5091bee87aa3c4f1d4109fd3eda1ca3d4265c73f475f5c50"
+        ],
+        [
+          "stage",
+          "a2a5e791a17d5f4ad8da91c1187ac92ca3eeed7a7f04726a321e2a7fab2df9a1"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ],
+        [
+          "validateComposePage",
+          "a780f580bd94295a19c6503c156d34f012d97195fcba207a4477f76d3d193da3"
+        ],
+        [
+          "writeComposeState",
+          "9cfdc083419fa4630c29b95df878dcfe6b29d179d8c2dcb31d114aba4d469b54"
+        ]
+      ]
+    }
+  }
+}

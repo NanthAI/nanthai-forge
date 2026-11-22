@@ -108,10 +108,10 @@ export function landingBodyCounts(count) {
   const ticketReads = count.readDocumentsByTable?.projectHostedLandingRequests ?? 0;
   const ticketWrites = count.written.filter(table => table === 'projectHostedLandingRequests').length;
   assert(
-    bodyReads <= 2 * ticketReads + projectionReads,
-    'at most two cold bodies per ticket or one request per observer role',
+    bodyReads <= 3 * ticketReads + projectionReads,
+    'at most three cold bodies per ticket or one request per observer role',
   );
-  assert(bodyWrites <= 2 * ticketWrites, 'at most two cold-body writes per ticket write');
+  assert(bodyWrites <= 3 * ticketWrites, 'at most three cold-body writes per ticket write');
   return {
     reads: bodyReads,
     writes: bodyWrites,

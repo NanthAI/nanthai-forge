@@ -7,6 +7,7 @@
 // clean; then one resolve (its retained operationId) and the finish it hands out.
 import { z } from 'zod';
 import { invariant } from './errors.js';
+import { landingNote } from './landing-message.js';
 import { retainedHostedOperation } from './hosted-agent-journal.js';
 import { validateNotVerified } from './agent-handoff-types.js';
 import {
@@ -109,7 +110,7 @@ export async function landEditedResolution(
   if (!here.pending || !edited(root, here.laneId)) return undefined;
   validateNotVerified(command.notVerified);
   const parameters = parametersOf(resolutionContinuation(root, here.laneId, []).next);
-  const message = typeof command.message === 'string' ? { message: command.message } : {};
+  const message = typeof command.message === 'string' ? { message: landingNote(command.message) } : {};
   const response = await dispatch('resolve', { ...parameters, ...message });
   const next = (response?.result as { next?: Command } | undefined)?.next;
   if (next?.action !== 'finish' || !z.uuid().safeParse(next.operationId).success) return { response };

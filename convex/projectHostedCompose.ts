@@ -41,6 +41,7 @@ import { savePin } from '../src/hosted-save';
 import { invariant } from '../src/errors';
 import { metricComposeMembershipWrites } from './projectMetricComposeMembership';
 import { report } from './errors';
+import { noteText } from '../src/landing-message';
 import { markConflictLand } from './projectHostedConflicts';
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
 async function caller(
@@ -59,6 +60,8 @@ export const prepare = mutation({
     try {
       const request = composeRequestSchema.parse(JSON.parse(input.request)),
         auth = await caller(ctx, { projectId: input.projectId, operationId: request.operationId });
+      // A new request's note is capped here; stored and replayed requests parse unchanged.
+      noteText(request.message);
       const reply = memberWorkBudgetReply(
         ctx,
         { projectId: auth.projectId, actor: auth.actor },

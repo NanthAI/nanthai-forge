@@ -767,6 +767,24 @@ test('an over-long landing message is refused before any server call (friction d
   assert.equal(s.calls.length, before, 'no capability read, save or compose');
 });
 
+test('Item 8c50ce13: a save or compose note over 1 KiB is refused before any server call, with the limit and byte count', async t => {
+  const s = agentFixture(t);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  writeFileSync(join(s.root, 'draft.txt'), 'Unsaved draft');
+  const before = s.calls.length;
+  // The friction case: a 2,009-byte note was accepted by save and copied into every later row.
+  for (const action of ['save', 'compose', 'resolve'])
+    await assert.rejects(
+      s.transport().dispatch(action, { laneId: s.lane.laneId, message: 'm'.repeat(2009) }),
+      error => {
+        assert.equal(error.code, 'LANDING_MESSAGE_TOO_LARGE');
+        assert.match(error.message, /note has 2009 UTF-8 bytes; the limit is 1024/);
+        return true;
+      },
+    );
+  assert.equal(s.calls.length, before, 'no capability read, save or compose');
+});
+
 test('ad80e037: preflight given the landing message refuses an over-long one before any call or test', async t => {
   const s = agentFixture(t);
   await s.transport().dispatch('open', { laneId: s.lane.laneId });

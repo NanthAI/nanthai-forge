@@ -3,6 +3,7 @@ import type { LandingReview } from './hosted-landing-hold.js';
 import { reconcileSourceRequest } from './hosted-source-request.js';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { landingNote } from './landing-message.js';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { unadvertisedActionError } from './hosted-agent-version.js';
 import { hostedLandingDesiredSchema } from './hosted-landing-desired.js';
@@ -744,7 +745,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       markLandStep('saveStarted');
       const saved = await saveHostedLane(
         session.root,
-        { operationId: saveOperationId, message: command.message ?? 'Agent change' },
+        { operationId: saveOperationId, message: landingNote(command.message ?? 'Agent change') },
         session.exchange,
         {
           ...saveContract(session.capabilities),
@@ -863,7 +864,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
           ...(command.intentId ? { intentId: command.intentId } : {}),
           ...(command.inputs ? { inputs: command.inputs } : {}),
           dependencies: command.dependencies,
-          message: command.message ?? 'Agent change',
+          message: landingNote(command.message ?? 'Agent change'),
         }),
         composeOperationId,
         false,

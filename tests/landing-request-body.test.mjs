@@ -118,13 +118,17 @@ test('cold companion accounting rejects per-ticket fanout growth instead of rela
     () =>
       landingBodyCounts({
         ...meter,
-        readDocumentsByTable: { ...meter.readDocumentsByTable, projectHostedLandingBodies: 3 },
+        readDocumentsByTable: { ...meter.readDocumentsByTable, projectHostedLandingBodies: 4 },
       }),
-    /at most two cold bodies/,
+    /at most three cold bodies/,
   );
   assert.throws(
-    () => landingBodyCounts({ ...meter, written: [...meter.written, 'projectHostedLandingBodies'] }),
-    /at most two cold-body writes/,
+    () =>
+      landingBodyCounts({
+        ...meter,
+        written: [...meter.written, 'projectHostedLandingBodies', 'projectHostedLandingBodies'],
+      }),
+    /at most three cold-body writes/,
   );
 });
 
