@@ -584,6 +584,51 @@ test('window read lists each Item once across scan pages, keeps its older close 
   }
 });
 
+test('window read names where imported records begin and flags Items recorded after they changed', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-01T10:00:00.000Z') });
+  const s = await setup(t);
+  await s.ctx.db.patch(s.projectId, { workStore: 'records', workStoreWriters: ['planning'] });
+  addDeviceAndAccounts(s);
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
+  const p = makePort(s);
+  const old = (await runPut(p, { kind: 'issue', title: 'Made before the import' })).itemId;
+  t.mock.timers.setTime(Date.parse('2026-11-02T10:00:00.000Z'));
+  await runPut(p, { planningItemId: old, expectedVersion: 1, status: 'closed', reason: 'Done early' });
+  // The import writes these versions to the store on Nov 10; their bodies keep the real dates.
+  const imported = Date.parse('2026-11-10T01:00:00.000Z');
+  let offset = 0;
+  for (const row of s.tables.projectHostedRecords.values())
+    if (row.kind === 'issue' && row.key === old) row._creationTime = imported + offset++;
+  t.mock.timers.setTime(Date.parse('2026-11-12T10:00:00.000Z'));
+  const fresh = (await runPut(p, { kind: 'issue', title: 'Made after the import' })).itemId;
+  t.mock.timers.setTime(Date.parse('2026-11-13T10:00:00.000Z'));
+
+  const { readBacklogWindowAudit } = await import(moduleUrl('../convex/projectPlanningWindow.ts'));
+  const project = await s.ctx.db.get(s.projectId);
+  const read = (from, until) => readBacklogWindowAudit(s.ctx, project, null, { from, until });
+  const before = await read('2026-10-01', '2026-11-05');
+  assert.equal(before.items.length, 0);
+  assert.equal(before.coverage, 'partial', 'an empty window before the store began is not complete');
+  assert.equal(before.recordsFrom, '2026-11-10T01:00:00.000Z');
+  const burst = await read('2026-11-10', '2026-11-10');
+  assert.deepEqual(
+    burst.items.map(item => item.itemId),
+    [old],
+  );
+  assert.equal(burst.items[0].at, '2026-11-02T10:00:00.000Z', 'the real date, not the import time');
+  assert.equal(burst.items[0].recordedAt, '2026-11-10T01:00:00.001Z');
+  assert.equal(burst.recordedLater, 1);
+  assert.equal(burst.coverage, 'partial');
+  const after = await read('2026-11-11', '2026-11-13');
+  assert.deepEqual(
+    after.items.map(item => item.itemId),
+    [fresh],
+  );
+  assert.equal(after.items[0].recordedAt, undefined);
+  assert.equal(after.recordedLater, 0);
+  assert.equal(after.coverage, 'complete');
+});
+
 test('Item timeline pages every version past lifecycle-plan rows that share its key and version', async t => {
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-18T10:00:00.000Z') });
   const s = await setup(t);

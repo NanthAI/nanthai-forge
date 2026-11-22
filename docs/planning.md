@@ -219,7 +219,11 @@ neither).
   now) and returns at most 100 Items; bodies are read only for the returned Items. A busy window continues on later
   scan pages: each Item is listed once, on the page with its newest version in the window, and `countsScope` is
   `scan-page` when the counts cover one page rather than the whole window. Restoring a shelved `closed` Item does
-  not count as a new close. `kind` is refused here, since version headers do not record it.
+  not count as a new close. `kind` is refused here, since version headers do not record it. Versions imported from
+  an earlier store were recorded after they happened: when the store's first record is one, `recordsFrom` names
+  where its records begin, and a window starting earlier is `partial` (read those changes on each Item's timeline,
+  which keeps their real dates). A listed Item whose newest version was imported carries `recordedAt` (the time the
+  window placed it by), is counted in `recordedLater`, and also makes the page `partial`.
 - **Access and identity**: Audit reads require project membership (`readProjectRole`). Writers and the owner see public
   handles; read-only members see agent slugs and models without person handles; signed-out viewers and non-members are
   refused. Both reads make zero idle calls and run no polling.

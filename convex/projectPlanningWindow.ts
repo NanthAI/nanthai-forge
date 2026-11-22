@@ -19,6 +19,12 @@ const WINDOW_SCAN_BYTES = 8 * 1024 * 1024;
 const PAGE_BYTES = 2 * 1024 * 1024;
 const PER_ITEM_LOOKUPS = 32;
 const MAX_LIMIT = 100;
+/** A version whose own time is this much older than its record was written later (an import). */
+const RECORDED_LATER_MS = 60_000;
+const recordedLater = (at: string | undefined, row: Row) => {
+  const ms = at === undefined ? NaN : Date.parse(at);
+  return Number.isFinite(ms) && ms < row._creationTime - RECORDED_LATER_MS;
+};
 
 const scanPos = z.object({ ts: z.number().min(0), skip: z.number().int().min(0).max(RECENT_VERSIONS) });
 const windowCursorSchema = z
@@ -48,6 +54,9 @@ type WindowAuditItem = {
   reopenedAt: string | null;
   reason?: string;
   summary: string;
+  /** Set when the newest version was written to the store later than it happened (imported): the window
+   * placed it by this time, and the Item's own timeline has the real dates. */
+  recordedAt?: string;
 } & ResolvedWriter;
 
 /** One Item's in-window versions, classified from record headers. */
@@ -234,6 +243,9 @@ async function describe(
     reopenedAt: at(entry.reopened, reopened),
     ...(reason ? { reason } : {}),
     summary: entry.versions > 1 ? `${diff.summary} (+${entry.versions - 1} earlier in window)` : diff.summary,
+    ...(recordedLater(latest.item.at, entry.newest)
+      ? { recordedAt: new Date(entry.newest._creationTime).toISOString() }
+      : {}),
   };
 }
 
@@ -272,6 +284,8 @@ export async function readBacklogWindowAudit(
     items: WindowAuditItem[];
     coverage: 'complete' | 'partial' | 'unavailable';
     unresolved: number;
+    recordsFrom: string | null;
+    recordedLater: number;
     nextCursor: string | null;
   }) => ({
     window: { from: new Date(fromMs).toISOString(), until: new Date(untilMs).toISOString() },
@@ -287,11 +301,28 @@ export async function readBacklogWindowAudit(
       items: [],
       coverage: 'unavailable',
       unresolved: 0,
+      recordsFrom: null,
+      recordedLater: 0,
       nextCursor: null,
     });
 
   const scanBudget = planningHistoryBudget(WINDOW_SCAN_BYTES);
   const charge = planningHistoryBudget(PAGE_BYTES);
+  // Where this store's Item records begin (one indexed read, plus its body). When its first record was
+  // imported from an earlier store, changes before that point are only on each Item's own timeline.
+  let oldest: Row | null = null;
+  for await (const row of ctx.db
+    .query('projectHostedRecords')
+    .withIndex('by_project_and_kind', q => q.eq('projectId', project._id).eq('kind', 'issue'))
+    .order('asc')) {
+    oldest = row;
+    break;
+  }
+  const oldestItem =
+    oldest && scanBudget.record(oldest)
+      ? (await loadVersionSnapshot(ctx, project._id, partition, oldest, charge))?.item
+      : undefined;
+  const recordsFrom = oldest && recordedLater(oldestItem?.at, oldest) ? oldest._creationTime : null;
   const purgedItems = new Set(project.itemPurges?.map(({ itemId }) => itemId));
   const scanBefore = cur?.scanBefore;
   const upper = scanBefore?.ts ?? untilMs;
@@ -419,12 +450,16 @@ export async function readBacklogWindowAudit(
     nextCursor = cursorFor({ until: untilMs, scanBefore: { ts: end.ts, skip: end.skip + 1 } });
   }
   const onePage = !scanBefore && !truncated && stoppedAt === null;
+  const later = items.filter(item => item.recordedAt).length;
+  const beforeRecords = recordsFrom !== null && fromMs < recordsFrom;
   return result({
     counts,
     countsScope: onePage ? 'window' : 'scan-page',
     items,
-    coverage: onePage && !unresolved ? 'complete' : 'partial',
+    coverage: onePage && !unresolved && !later && !beforeRecords ? 'complete' : 'partial',
     unresolved,
+    recordsFrom: recordsFrom === null ? null : new Date(recordsFrom).toISOString(),
+    recordedLater: later,
     nextCursor,
   });
 }
