@@ -11,7 +11,9 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { enableCompileCache } from 'node:module';
@@ -124,6 +126,120 @@ function dead(owner: { pid?: number; host?: string; startTime?: string }) {
   const observed = kernelStart(owner.pid!);
   return !!owner.startTime && !!observed && observed !== owner.startTime;
 }
+type LockOwner = { pid?: number; host?: string; startTime?: string };
+/** A recovery fence is held for milliseconds. One past this bound has lost its owner. */
+export const CLI_RUNTIME_FENCE_MAX_MS = 10_000;
+/** A pending file that cannot be read is a torn write only once it is this old. */
+const PENDING_TORN_MS = 60_000;
+const readOwner = (file: string): LockOwner | undefined => {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return undefined;
+  }
+};
+/** The fence is a directory holding an `owner` file; fences made by older builds hold none. */
+function staleFence(fence: string) {
+  const info = statSync(fence);
+  const holder = info.isDirectory() ? readOwner(join(fence, 'owner')) : undefined;
+  return (holder !== undefined && dead(holder)) || Date.now() - info.mtimeMs > CLI_RUNTIME_FENCE_MAX_MS;
+}
+/** Remove a fence whose owner is gone. The rename is the compare-and-remove: only one caller
+ * moves a given directory, and the moved inode must be the one judged stale. */
+function clearStaleFence(fence: string) {
+  const judged = statSync(fence).ino;
+  if (!staleFence(fence)) return;
+  const moved = `${fence}-stale-${process.pid}-${randomUUID()}`;
+  renameSync(fence, moved);
+  if (statSync(moved).ino !== judged)
+    try {
+      // A fresh fence was swapped in between the check and the move: give it back.
+      renameSync(moved, fence);
+      return;
+    } catch {
+      /* Its owner's own cleanup finds nothing to remove. */
+    }
+  rmSync(moved, { recursive: true, force: true });
+}
+/** Remove the lock of a dead holder, under the recovery fence so two callers never both remove
+ * a lock and one removes a live successor's. A live, unknown or other-host holder is left. */
+function recoverDeadHolder(path: string, owner: string) {
+  // A live holder is the common case: leave it without touching the fence.
+  try {
+    if (!dead(JSON.parse(readFileSync(path, 'utf8')))) return;
+  } catch {
+    return;
+  }
+  const fence = `${path}-recovery`;
+  let fenced = false;
+  for (let tries = 0; tries < 2 && !fenced; tries++)
+    try {
+      mkdirSync(fence, { mode: 0o700 });
+      fenced = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') return;
+      try {
+        clearStaleFence(fence);
+      } catch {
+        return;
+      }
+    }
+  if (!fenced) return;
+  try {
+    // A per-call token: if another caller evicted this fence while we paused, our token is gone
+    // and we must not remove a lock that a successor may now hold.
+    const mine = JSON.stringify({ ...JSON.parse(owner), token: randomUUID() }),
+      ownerFile = join(fence, 'owner');
+    writeFileSync(ownerFile, mine, { mode: 0o600 });
+    const before = readFileSync(path, 'utf8');
+    if (
+      dead(JSON.parse(before)) &&
+      readFileSync(path, 'utf8') === before &&
+      readFileSync(ownerFile, 'utf8') === mine
+    )
+      rmSync(path);
+  } catch {
+    /* A live/unknown holder or another recovery owns this lock. */
+  } finally {
+    rmSync(fence, { recursive: true, force: true });
+  }
+}
+const pidGone = (owner: LockOwner) => {
+  if (owner.host !== hostname() || !Number.isSafeInteger(owner.pid) || owner.pid! <= 0) return false;
+  try {
+    process.kill(owner.pid!, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+};
+/** Pending files of killed callers (a waiter killed before its own cleanup) never grow without bound. */
+function clearDeadPending(installation: string) {
+  try {
+    for (const name of readdirSync(installation).slice(0, 200)) {
+      if (!/^runtime\.lock-\d+-[0-9a-f-]+\.pending$/.test(name)) continue;
+      const file = join(installation, name),
+        owner = readOwner(file);
+      const age = Date.now() - statSync(file).mtimeMs;
+      // A waiter lives at most CLI_RUNTIME_WAIT_MS, so a young file of a live pid is skipped
+      // without a process-table read; only an old one pays for the full start-time compare.
+      if (owner ? pidGone(owner) || (age > PENDING_TORN_MS && dead(owner)) : age > PENDING_TORN_MS)
+        rmSync(file, { force: true });
+    }
+  } catch {
+    /* Housekeeping only. */
+  }
+}
+function busyMessage(path: string) {
+  const holder = readOwner(path);
+  if (!holder || !Number.isSafeInteger(holder.pid))
+    return 'Another CLI runtime operation holds the lock. Next: wait a few seconds and retry the original command.';
+  if (holder.host !== hostname())
+    return `Another CLI runtime operation holds the lock (pid ${holder.pid} on another host). Next: wait for it to finish and retry the original command.`;
+  if (dead(holder))
+    return `The runtime lock is held by pid ${holder.pid}, which is not running, and another process is still clearing it. Next: retry the original command in a few seconds; the stale lock is removed automatically.`;
+  return `Another CLI runtime operation holds the lock: pid ${holder.pid} is running. Next: wait for it to finish; if it is hung, confirm pid ${holder.pid} is still an nforge/node process, stop it with kill ${holder.pid} and retry the original command.`;
+}
 /** How long a user command, the launcher or the updater waits for a live runtime-lock holder. */
 export const CLI_RUNTIME_WAIT_MS = 30_000;
 const sleepSync = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -157,7 +273,8 @@ export function withCliRuntimeLock<T>(installation: string, run: () => T, waitMs
   } finally {
     closeSync(fd);
   }
-  let acquired = false;
+  let acquired = false,
+    contended = false;
   try {
     const deadline = Date.now() + waitMs;
     let delay = 10;
@@ -187,29 +304,17 @@ export function withCliRuntimeLock<T>(installation: string, run: () => T, waitMs
           )
             throw failure('CLI_RUNTIME_LOCK_REENTERED', 'This CLI process already holds the runtime lock.');
         }
-        const fence = `${path}-recovery`;
-        try {
-          mkdirSync(fence, { mode: 0o700 });
-          try {
-            const before = readFileSync(path, 'utf8');
-            if (dead(JSON.parse(before)) && readFileSync(path, 'utf8') === before) rmSync(path);
-          } finally {
-            rmSync(fence, { recursive: true, force: true });
-          }
-        } catch {
-          /* A live/unknown holder or another recovery owns this lock. */
-        }
+        contended = true;
+        recoverDeadHolder(path, owner);
       }
     }
-    if (!acquired)
-      throw failure(
-        'CLI_RUNTIME_BUSY',
-        `Another CLI runtime operation is finishing. Next: ${recovery(installation)}`,
-      );
+    if (!acquired) throw failure('CLI_RUNTIME_BUSY', busyMessage(path));
     return run();
   } finally {
     if (acquired) rmSync(path, { force: true });
     rmSync(pending, { force: true });
+    // Only a call that met contention looks: the healthy path adds no file operation.
+    if (contended) clearDeadPending(installation);
   }
 }
 export function claimCliRuntime(installation: string, root: string, waitMs = 0) {

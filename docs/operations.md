@@ -1492,6 +1492,12 @@ the CLI installation folder (the launcher takes `runtime.lock` there on every co
 `tests/sandbox-process-identity.test.mjs` runs the identity paths under a minimal
 `sandbox-exec` profile on macOS.
 
+A killed process cannot wedge that lock: a dead holder's `runtime.lock` is removed under the
+`runtime.lock-recovery` fence, and a fence whose recorded owner is dead (or that is older than 10 s)
+is itself removed, so the next call recovers without a manual step. Pending files of dead pids go
+when a call meets contention. `CLI_RUNTIME_BUSY` names the holder pid and whether it runs; for a hung
+live holder the step is `kill PID`, because `nforge update` takes the same lock.
+
 ### Landing lifecycle drill
 
 Run the Q4 drill from a prepared checkout (Node 24.22.1+, dependencies installed
