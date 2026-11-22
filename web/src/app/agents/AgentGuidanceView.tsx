@@ -96,10 +96,10 @@ function GuidanceRegion({
   return (
     <Region title={title} weight="ref" hint={editable ? undefined : 'read only'}>
       <form className="guide" onSubmit={submit}>
-        <label className="f" htmlFor={`${id}-text`}>
-          <span>{title}</span>
+        <div className="field">
           <textarea
             id={`${id}-text`}
+            aria-label={title}
             className="inp"
             rows={6}
             maxLength={GUIDANCE_LIMIT}
@@ -119,7 +119,7 @@ function GuidanceRegion({
           <span className="help" id={`${id}-hint`}>
             {hint}
           </span>
-        </label>
+        </div>
         {error ? (
           <p className="pf" role="alert">
             {error}

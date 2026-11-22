@@ -51,6 +51,13 @@ test('settings agents: project and personal guidance save separately, a failed s
     const { page, errors, context } = await open(1440, 'light', 'who=owner&fail=1', path);
     const project = page.getByRole('textbox', { name: 'For this project' });
     const mine = page.getByRole('textbox', { name: 'Just for me' });
+    // The section heading is the only visible name: the field takes it as its accessible name, not a second label.
+    for (const heading of ['For this project', 'Just for me'])
+      assert.equal(
+        await page.locator('main').getByText(heading, { exact: true }).count(),
+        1,
+        `${heading} is shown once`,
+      );
     assert.equal(await project.inputValue(), 'Keep changes small. Run npm run verify before finishing.');
     assert.equal(await mine.inputValue(), 'Explain what you changed in plain words.');
     assert.equal(

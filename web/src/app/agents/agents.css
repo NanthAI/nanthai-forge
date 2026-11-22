@@ -2,6 +2,8 @@
 /* Settings > Agents: a guidance text, its count and its save. Everything else is the design system's. */
 [data-ds] {
   .agent-guidance .guide { display: grid; gap: var(--s-3); padding: var(--s-3) var(--gut) var(--s-4); }
+  .agent-guidance .field { display: grid; gap: 5px; }
+  .agent-guidance .field .help { font-size: var(--t-meta); color: var(--text-3); }
   .agent-guidance .guide .inp { max-width: var(--m-prose); min-height: 8em; }
   .agent-guidance .guide .inp[readonly] { background: transparent; }
   .agent-guidance .btns { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-3); align-items: center; }
