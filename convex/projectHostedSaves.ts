@@ -3,6 +3,7 @@ import { journalIndexAt } from './projectJournalStore';
 import { sourceProgress } from './projectSourceProgress';
 import { boardWake } from './projectBoardDelivery';
 import { hostedSaveState } from '../src/hosted-save-state';
+import { sourceAuthority } from '../src/hosted-source-authority';
 import { boundOverlapChanges, type OverlapChange } from '../src/hosted-overlap';
 import { withoutAuthorship } from '../src/work-actor-types';
 import { sessionIdentity } from './projectSessionIdentity';
@@ -349,11 +350,12 @@ export const progress = query({
   handler: async (ctx, { board: cursor, ...input }) => {
     try {
       const auth = await caller(ctx, input),
-        { row, state, operation } = await loadSave(ctx, auth, false);
+        { row, state, project, operation } = await loadSave(ctx, auth, false);
       const board = cursor
         ? await boardWake(ctx, { projectId: input.projectId, viewer: auth.actor, ...cursor })
         : undefined;
       return canonicalPayload({
+        authorityEpoch: sourceAuthority(project).epoch,
         ...(board ? { board } : {}),
         ...(state.status === 'submitted' || state.status === 'failed'
           ? await sourceProgress(ctx, input.projectId, row.jobId)

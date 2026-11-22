@@ -5,7 +5,11 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { followLocalOperation, observeOperations } from '../dist/hosted-agent-wait-local.js';
+import {
+  followLocalOperation,
+  observeHostedSave,
+  observeOperations,
+} from '../dist/hosted-agent-wait-local.js';
 import { ForgeError } from '../dist/errors.js';
 import { interruptedWait } from '../dist/agent-operation-wait.js';
 import { wakeContinuation } from '../dist/agent-wake.js';
@@ -89,6 +93,48 @@ test('ad80e037: a wait whose id is in no landing or save says which project fold
       /run it from the Lane or project folder that started the operation/.test(error.message),
   );
 });
+
+for (const stop of ['timeout', 'cancelled', 'access refused'])
+  test(`a live background save wait closes its subscription on ${stop}`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const operationId = randomUUID();
+    const controller = new AbortController();
+    const server = transport(() => assert.fail('a live background wait uses the subscription only'));
+    let unread = false;
+    let closed = false;
+    const refused = new ForgeError('PROJECT_UNAVAILABLE', 'Project access ended.');
+    const waiting = observeHostedSave(
+      server,
+      operationId,
+      2,
+      controller.signal,
+      () => ({
+        onUpdate(_ref, args, update, fail) {
+          assert.equal(args.operationId, operationId);
+          update({ state: { status: 'submitted' }, terminal: null });
+          if (stop === 'access refused') fail(refused);
+          return () => {
+            unread = true;
+          };
+        },
+        async close() {
+          closed = true;
+        },
+      }),
+      undefined,
+      'background',
+    );
+    if (stop === 'timeout') t.mock.timers.tick(2_000);
+    if (stop === 'cancelled') controller.abort();
+    if (stop === 'access refused') await assert.rejects(waiting, refused);
+    else {
+      const reply = await waiting;
+      assert.equal(reply.result.status, stop);
+      assert.equal(reply.result.inProgress, true);
+      assert.equal(reply.operationId, operationId);
+    }
+    assert(unread && closed);
+  });
 
 test('2026-11-18 lead: a wake wait stopped at the harness background limit (SIGTERM) resumes like a budget return', () => {
   const stopped = interruptedWait('SIGTERM');

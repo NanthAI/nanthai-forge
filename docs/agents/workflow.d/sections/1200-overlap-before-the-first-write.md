@@ -113,4 +113,12 @@ Progress reads never schedule work or renew leases. An active source wait return
 a stopped job immediately and uses the latest observed lease at its deadline,
 so a dead job is not reported as merely submitted after sixty seconds.
 
+The printed wait for an acknowledged background save subscribes to that save's original
+operation. If the save record has yet to appear, the subscription stays open through
+registration. A failed worker can report progress before its save receipt is published.
+The wait stays open through that publication. A zero-budget wait takes one snapshot. An expired wait returns
+`IN_PROGRESS` with the same command. The terminal receipt advances the matching
+checkout or reports the save's failure. Repeating the wait after local settlement
+reads the same save through the current project access check.
+
 For fresh context, read the linked Issue with `planning {id,reconcile:false}`, Lane `status` and the repo instructions.

@@ -34,6 +34,7 @@ export const saveCommandSchema = z
 /** A save returned before its settle (fea47345 C) keeps this marker in its directory until the
  * outcome is applied and, when it failed, reported. */
 export const backgroundSaveName = 'background';
+export const settledBackgroundSaveName = 'background-settled';
 
 /** The operation id of this checkout's pending save when it returned before its settle (local
  * files only, no call). */

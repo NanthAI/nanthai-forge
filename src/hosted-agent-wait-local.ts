@@ -13,10 +13,18 @@ import {
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { ForgeError } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
+import { backgroundSaveName, settledBackgroundSaveName } from './hosted-save-pending.js';
+import { applyObservedBackgroundSave, staleEpochSaveRefusal } from './hosted-save-client.js';
 import { settleTurnWork } from './agent-turn-work.js';
 import { finishRefusedKey } from './hosted-agent-finish-identity.js';
 import { preparingFinishSource } from './hosted-agent-finish-result.js';
 import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
+import { sourceWaitSnapshot } from './hosted-agent-source-wait.js';
+import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
+import { BeganAtOlderEpoch } from './hosted-main-pin.js';
+import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
+import { readHostedOverlapAdvice } from './hosted-overlap-client.js';
+import { restackAfterSave } from './hosted-stack-restack.js';
 import { markerIdentity } from './lane-prune.js';
 import {
   observeHostedRun,
@@ -24,7 +32,13 @@ import {
   type HostedRunSubscription,
 } from './hosted-agent-observe.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
-import { boardWaker, freshBoardDelivery, type BoardWaitOption } from './hosted-board-wait.js';
+import {
+  boardConflictEnvelope,
+  boardWaker,
+  freshBoardDelivery,
+  readBoardServerFeatures,
+  type BoardWaitOption,
+} from './hosted-board-wait.js';
 
 /** What this client's own records say an operation id is, when the server has no landing for it. */
 export type LocalOperation =
@@ -58,13 +72,40 @@ export function localOperation(root: string, operationId: string): LocalOperatio
 }
 
 const progressSchema = z.object({
+  authorityEpoch: z.number().optional(),
+  state: z.object({ request: z.object({ authorityEpoch: z.number().optional() }).optional() }).optional(),
   terminal: z
-    .object({
-      outcome: z.object({ status: z.string(), result: z.unknown().optional() }),
+    .looseObject({
+      outcome: z.looseObject({ status: z.string(), result: z.unknown().optional() }),
     })
     .nullable()
     .optional(),
 });
+
+/** Preserve the save's existing conditional restack after observing its receipt. */
+export async function restackObservedSave<R extends { result: Record<string, unknown> }>(
+  transport: HostedAgentTransport,
+  reply: R,
+  signal: AbortSignal,
+) {
+  const lane = readHostedLaneCheckout(transport.root)?.selection;
+  if (!lane?.stack || lane.stack.detached || lane.head !== reply.result.head || signal.aborted) return reply;
+  const { stack } = await readHostedOverlapAdvice(transport, lane.laneId);
+  return restackAfterSave({ ...reply, stack }, lane.laneId, (action, input) =>
+    transport.dispatch(action, input, signal),
+  );
+}
+
+/** Acknowledged split saves already have a worker; earlier saves may still need exact replay. */
+export function acknowledgedBackgroundSave(root: string, operationId: string): boolean {
+  const directory = join(clientCacheRoot(root), 'saves', operationId);
+  return (
+    checkoutPathExists(join(directory, 'acknowledged')) &&
+    (checkoutPathExists(join(directory, backgroundSaveName)) ||
+      checkoutPathExists(join(directory, settledBackgroundSaveName)))
+  );
+}
+
 const response = (result: Record<string, unknown>) => ({
   schema: 1 as const,
   transport: 'hosted' as const,
@@ -74,48 +115,105 @@ const response = (result: Record<string, unknown>) => ({
   result,
 });
 
-/** Wait on a save operation by its id: terminal as soon as the server's save record is, via one
- * live query for the length of the wait. No polling and no marker write (preflight and finish
- * reconcile the checkout from the same original operation). */
-async function observeHostedSave(
+/** Read or subscribe to the original save. An acknowledged background save skips the HTTP
+ * probe on a live wait: the same subscription sees its first snapshot and every subsequent state. */
+export async function observeHostedSave(
   transport: HostedAgentTransport,
   operationId: string,
   timeoutSeconds: number,
-  signal: AbortSignal | undefined,
-  subscribe: () => HostedRunSubscription,
+  signal?: AbortSignal,
+  subscribe = transport.subscribeSource ?? (() => hostedRunSubscription(transport.address)),
   board?: BoardWaitOption,
-  /** No local record names this id: a missing save is not this wait's answer (undefined), so the
-   * caller keeps the landing read's NOT_FOUND. */
-  unrecorded = false,
+  mode: 'local' | 'unrecorded' | 'background' = 'local',
 ) {
-  const boardWait = transport.advertisedFeatures?.includes('source-board-wait') ? board : undefined;
+  const features = transport.advertisedFeatures ?? readBoardServerFeatures(transport.address.projectId);
+  const boardWait = features.includes('source-board-wait') ? board : undefined;
   const boardArgs = boardWait ? { board: { laneId: boardWait.laneId, after: boardWait.after } } : {};
-  const terminal = (value: unknown) => {
-    const outcome = progressSchema.parse(value).terminal?.outcome;
-    if (!outcome) return null;
-    const result = outcome.result as { head?: string; sourceVersion?: number } | undefined;
-    return response({
+  const saveResponse = (result: Record<string, unknown>) =>
+    mode === 'background' ? { ...response(result), action: 'save' as const, operationId } : response(result);
+  let registered = false;
+  let source: unknown;
+  const stoppedSource = () => {
+    const snapshot = sourceWaitSnapshot(source) as { status?: string } | undefined;
+    // A failed worker still has to publish the save's terminal receipt. The
+    // subscription stays attached through that separate transaction.
+    if (snapshot?.status !== 'retryable') return null;
+    const retained = retainedHostedOperation(transport.root, operationId);
+    return saveResponse({
+      ...snapshot,
       status: 'terminal',
-      successful: outcome.status === 'completed',
+      successful: false,
       phase: 'save',
       operationId,
-      outcome: outcome.status,
-      ...(result?.head ? { head: result.head, sourceVersion: result.sourceVersion } : {}),
-      next: 'Run preflight or land: they settle the checkout from this original save without repeating it.',
+      outcome: snapshot.status,
+      ...(retained
+        ? {
+            command: hostedRecoveryCommand(transport.root, retained.action, {
+              ...retained.command,
+              operationId,
+            }),
+          }
+        : {}),
     });
   };
+  const terminal = (value: unknown) => {
+    const progress = progressSchema.parse(value);
+    const receipt = progress.terminal;
+    registered = true;
+    if (!receipt) {
+      if (mode !== 'background') return null;
+      const began = progress.state?.request?.authorityEpoch;
+      const epoch = progress.authorityEpoch;
+      if (began !== undefined && epoch !== undefined && began !== epoch) {
+        const error = new BeganAtOlderEpoch(began, epoch);
+        const retained = retainedHostedOperation(transport.root, operationId);
+        if (!retained || !['save', 'checkpoint'].includes(retained.action)) throw error;
+        throw staleEpochSaveRefusal(
+          transport.root,
+          operationId,
+          epoch,
+          { action: 'save', parameters: retained.command },
+          error,
+        );
+      }
+      if (typeof (value as { jobId?: unknown }).jobId !== 'string') return null;
+      source = sourceWaitSnapshot(value);
+      return stoppedSource();
+    }
+    const { outcome } = receipt;
+    if (mode === 'background') applyObservedBackgroundSave(transport.root, operationId, receipt);
+    const result = outcome.result as { head?: string; sourceVersion?: number } | undefined;
+    return {
+      ...boardConflictEnvelope(boardWait?.laneId, value),
+      ...saveResponse({
+        ...(mode === 'background' ? receipt : { outcome: outcome.status }),
+        status: 'terminal',
+        successful: outcome.status === 'completed',
+        phase: 'save',
+        operationId,
+        ...(result?.head ? { head: result.head, sourceVersion: result.sourceVersion } : {}),
+        ...(mode === 'background'
+          ? {}
+          : {
+              next: 'Run preflight or land: they settle the checkout from this original save without repeating it.',
+            }),
+      }),
+    };
+  };
+  const registering = (error: ForgeError) =>
+    mode === 'background' &&
+    !registered &&
+    error.code === 'NOT_FOUND' &&
+    error.message === 'Prepare this original hosted save first.';
   const read = async () => {
+    let value: unknown;
     try {
-      const value = await transport.query('projectHostedSaves:progress', { operationId, ...boardArgs });
-      // Every real save reply carries the save's own state; anything else is not this id's save.
-      if (unrecorded && !(value as { state?: unknown } | null)?.state) return undefined;
-      const done = terminal(value);
-      if (done) return done;
-      const delivery = boardWait ? freshBoardDelivery(boardWait, value) : undefined;
-      return delivery ? response({ status: 'message', board: delivery, inProgress: true }) : null;
+      value = await transport.query('projectHostedSaves:progress', { operationId, ...boardArgs });
     } catch (error) {
-      if (hostedActionError(error, 'save observation').code !== 'NOT_FOUND') throw error;
-      if (unrecorded) return undefined;
+      const failure = hostedActionError(error, 'save observation');
+      if (registering(failure)) return null;
+      if (failure.code !== 'NOT_FOUND' || mode === 'background') throw failure;
+      if (mode === 'unrecorded') return undefined;
       return response({
         status: 'terminal',
         successful: false,
@@ -124,11 +222,17 @@ async function observeHostedSave(
         reason: 'The server has no record of this save yet. Replay the original save with this operationId.',
       });
     }
+    // Every real save reply carries the save's own state; anything else is not this id's save.
+    if (mode === 'unrecorded' && !(value as { state?: unknown } | null)?.state) return undefined;
+    const done = terminal(value);
+    if (done) return done;
+    const delivery = boardWait ? freshBoardDelivery(boardWait, value) : undefined;
+    return delivery ? saveResponse({ status: 'message', board: delivery, inProgress: true }) : null;
   };
-  const initial = await read();
+  const initial = mode === 'background' && timeoutSeconds ? null : await read();
   if (initial !== null) return initial;
   const pending = (status: 'timeout' | 'cancelled') =>
-    response({
+    saveResponse({
       status,
       inProgress: true,
       successful: false,
@@ -138,50 +242,49 @@ async function observeHostedSave(
   if (!timeoutSeconds) return pending('timeout');
   if (signal?.aborted) return pending('cancelled');
   const client = subscribe();
-  let release = () => {};
+  let unsubscribe: (() => void) | undefined;
+  let stop: (() => void) | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let waker: ReturnType<typeof boardWaker> | undefined;
   try {
-    return await new Promise<ReturnType<typeof response>>((resolve, reject) => {
-      const waker = boardWait
+    return await new Promise<ReturnType<typeof saveResponse>>((resolve, reject) => {
+      waker = boardWait
         ? boardWaker(boardWait, delivery =>
-            settle(response({ status: 'message', board: delivery, inProgress: true })),
+            resolve(saveResponse({ status: 'message', board: delivery, inProgress: true })),
           )
         : undefined;
-      const timer = setTimeout(() => settle(pending('timeout')), timeoutSeconds * 1000);
-      const stop = () => settle(pending('cancelled'));
-      const unsubscribe = client.onUpdate(
+      timer = setTimeout(() => resolve(stoppedSource() ?? pending('timeout')), timeoutSeconds * 1000);
+      stop = () => resolve(pending('cancelled'));
+      signal?.addEventListener('abort', stop, { once: true });
+      if (signal?.aborted) return stop();
+      unsubscribe = client.onUpdate(
         makeFunctionReference<'query'>('projectHostedSaves:progress'),
         { projectId: transport.address.projectId, operationId, ...boardArgs },
         value => {
           try {
             const parsed = typeof value === 'string' ? JSON.parse(value) : value;
             const done = terminal(parsed);
-            if (done) settle(done);
+            if (done) resolve(done);
             else waker?.offer(parsed);
           } catch (error) {
-            release();
             reject(error);
           }
         },
         error => {
-          release();
-          reject(hostedActionError(error, 'save observation'));
+          const failure = hostedActionError(error, 'save observation');
+          if (!registering(failure)) reject(failure);
         },
       );
-      release = () => {
-        waker?.stop();
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', stop);
-        unsubscribe();
-      };
-      function settle(value: ReturnType<typeof response>) {
-        release();
-        resolve(value);
-      }
-      signal?.addEventListener('abort', stop, { once: true });
     });
   } finally {
-    release();
-    await client.close();
+    waker?.stop();
+    clearTimeout(timer);
+    if (stop) signal?.removeEventListener('abort', stop);
+    try {
+      unsubscribe?.();
+    } finally {
+      await client.close();
+    }
   }
 }
 
@@ -256,7 +359,15 @@ export async function followLocalOperation(
   // Lane's local marker settled and went away, the save's own record still answers (one read, on
   // this NOT_FOUND path only).
   if (!local)
-    return observeHostedSave(transport, operationId, input.timeoutSeconds, signal, subscribe, board, true);
+    return observeHostedSave(
+      transport,
+      operationId,
+      input.timeoutSeconds,
+      signal,
+      subscribe,
+      board,
+      'unrecorded',
+    );
   if (local.kind === 'check-run')
     return observeHostedRun(
       transport,

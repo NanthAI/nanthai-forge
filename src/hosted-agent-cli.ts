@@ -9,7 +9,7 @@ import type { HostedAgentAddress } from './hosted-agent-contract.js';
 import { hostedAgentRoot, hostedAgentDirectory, retainedHostedOperation } from './hosted-agent-journal.js';
 import { durableReplace } from './state/durability.js';
 import { hostedWaitSchema } from './hosted-wait-schema.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { recordLaneHold, withLaneCommand } from './lane-registry.js';
 import { markerIdentity } from './lane-prune.js';
 import { landExitsFailed, landingStallReport, landSummary, selfReviewLine } from './hosted-land-summary.js';
@@ -77,13 +77,17 @@ async function dispatchHostedAgentCli(
   );
   if (action === 'wait') {
     // The wait observers are large module graphs that only a wait uses.
-    const [{ observeHostedRun }, { observeOperations }, board$, { approvalNext, observeApproval }] =
-      await Promise.all([
-        import('./hosted-agent-observe.js'),
-        import('./hosted-agent-wait-local.js'),
-        import('./hosted-board-wait.js'),
-        import('./hosted-agent-approval.js'),
-      ]);
+    const [
+      { observeHostedRun },
+      { acknowledgedBackgroundSave, observeHostedSave, observeOperations, restackObservedSave },
+      board$,
+      { approvalNext, observeApproval },
+    ] = await Promise.all([
+      import('./hosted-agent-observe.js'),
+      import('./hosted-agent-wait-local.js'),
+      import('./hosted-board-wait.js'),
+      import('./hosted-agent-approval.js'),
+    ]);
     const { boardWaitOption, boardWakeEnvelope, observePeerLane, freshBoardDelivery } = board$;
     const selectedWait = hostedWaitSchema.parse(command);
     const alone = selectedWait.peer ?? selectedWait.approval;
@@ -98,10 +102,16 @@ async function dispatchHostedAgentCli(
         ? 'Wait for a peer Lane or an approval in its own command, without runId or operationIds.'
         : 'Choose one run or hosted landing operationIds.',
     );
-    // Wait accepts any operation id the CLI handed out. A save (or other non-landing
-    // operation) this checkout started resumes by exact replay of its local journal,
-    // the same request its receipt command makes; no new hosted call type.
-    const retained = (selectedWait.operationIds ?? []).flatMap(id => {
+    const [onlyOperation] = selectedWait.operationIds ?? [];
+    const backgroundSave =
+      selectedWait.operationIds?.length === 1 &&
+      onlyOperation &&
+      acknowledgedBackgroundSave(root, onlyOperation)
+        ? onlyOperation
+        : undefined;
+    // Non-landing operations that may still need preparation resume their exact journal request.
+    // An acknowledged background save already has a worker and uses its own observation below.
+    const retained = (backgroundSave ? [] : (selectedWait.operationIds ?? [])).flatMap(id => {
       const operation = retainedHostedOperation(root, id);
       return operation && operation.action !== 'finish' ? [{ id, ...operation }] : [];
     });
@@ -306,21 +316,41 @@ async function dispatchHostedAgentCli(
       // This session now waits on this work: its turn-end hook sees a live observer.
       recordTurnWait(root, continuation.next, process.pid);
       // Events stay internal: the caller gets one line when the budget or outcome returns.
-      const response = await withLaneCommand(laneId, 'wait', async () =>
+      let response = await withLaneCommand(laneId, 'wait', async () =>
         selectedWait.runId
-          ? await observeHostedRun(transport, observed, controller.signal, undefined, undefined, board)
-          : await observeOperations(
-              transport,
-              root,
-              observed as Parameters<typeof observeOperations>[2],
-              controller.signal,
-              undefined,
-              undefined,
-              board,
-            ),
+          ? observeHostedRun(transport, observed, controller.signal, undefined, undefined, board)
+          : backgroundSave
+            ? observeHostedSave(
+                transport,
+                backgroundSave,
+                budgetSeconds,
+                controller.signal,
+                undefined,
+                board,
+                'background',
+              )
+            : observeOperations(
+                transport,
+                root,
+                observed as Parameters<typeof observeOperations>[2],
+                controller.signal,
+                undefined,
+                undefined,
+                board,
+              ),
       ).catch(error => {
+        if (
+          backgroundSave &&
+          error instanceof ForgeError &&
+          (error.code === 'SAVE_SETTLE_FAILED' ||
+            (error.code === 'SOURCE_AUTHORITY_CHANGED' && error.recovery))
+        )
+          settleTurnWork([backgroundSave]);
         throw waitFailure(error, continuation);
       });
+      invariant(response, 'NOT_FOUND', 'The selected operation has no hosted progress.');
+      if (backgroundSave && 'successful' in response.result && response.result.successful === true)
+        response = await restackObservedSave(transport, response, controller.signal);
       const { submissions, status, run, pendingProgress } = response.result as {
         submissions?: {
           submission: { id: string; operationId: string; phase?: string } & NonNullable<
@@ -344,7 +374,12 @@ async function dispatchHostedAgentCli(
       };
       const changed = pendingLandingPresentation(recorded, pendingProgress, laneId);
       const presentation = changed?.submission ?? recorded;
-      const phase = selected ? (presentation?.phase ?? 'unknown') : 'pending';
+      const phase =
+        'phase' in response.result && response.result.phase === 'save'
+          ? 'save'
+          : selected
+            ? (presentation?.phase ?? 'unknown')
+            : 'pending';
       // A landing held for a person or a dependency says so on every unfinished return (5c59940b).
       const hold = landingHold(presentation, laneId);
       // The same state word and next step people see (src/landing-state.ts); additive.
@@ -448,7 +483,8 @@ async function dispatchHostedAgentCli(
           },
         };
       }
-      process.exitCode = 0;
+      process.exitCode =
+        backgroundSave && 'successful' in response.result && response.result.successful === false ? 2 : 0;
       settleTurnWork(selectedWait.runId ? [selectedWait.runId] : (selectedWait.operationIds ?? []));
       // A single-target wait exposes the same observed outcome as finish, while
       // retaining the complete selection below. Continuation consumers can follow

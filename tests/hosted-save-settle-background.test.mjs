@@ -18,6 +18,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getFunctionName, makeFunctionReference } from 'convex/server';
+import { ConvexError } from 'convex/values';
 import { composeFixture } from './hosted-compose-fixture.mjs';
 import { controls, environment } from './hosted-source-efficiency-fixture.mjs';
 import { ConvexExchange } from '../dist/exchange-client.js';
@@ -125,7 +126,7 @@ async function setup(t, { fromBase = false, protectedPath = false } = {}) {
 }
 const count = (calls, name) => calls.filter(value => value === name).length;
 
-// ad80e037: the save's printed wait must follow source work, including split saves.
+// Issue 75b4d062: the printed wait follows a background save through registration and settlement.
 for (const budget of [0, 540])
   test(`the printed wait for a split save ${budget ? 'applies its settled receipt' : 'keeps the original operation when its budget ends'}`, async t => {
     const f = await setup(t),
@@ -133,10 +134,12 @@ for (const budget of [0, 540])
       transport = new HostedAgentTransport(f.root, address, f.exchange),
       written = [],
       oldExit = process.exitCode,
-      originalWait = sourceWaitHooks.wait;
+      operationMissing = new ConvexError({
+        code: 'NOT_FOUND',
+        message: 'Prepare this original hosted save first.',
+      });
     t.after(() => {
       process.exitCode = oldExit;
-      sourceWaitHooks.wait = originalWait;
     });
     t.mock.method(process.stderr, 'write', text => {
       written.push(String(text));
@@ -148,32 +151,72 @@ for (const budget of [0, 540])
     assert(recovery, 'the initial operation announcement carries a recovery command');
     const command = JSON.parse(recovery[2]);
     assert.deepEqual(command.operationIds, [saved.operationId]);
-    let subscribed = false;
-    sourceWaitHooks.wait = async (_address, operationId, _initial, _signal, _subscribe, kind) => {
-      subscribed = true;
-      assert.equal(operationId, saved.operationId);
-      assert.equal(kind, 'Saves');
-      const dispatch = f.scheduled.find(item => item.name === 'projectConvexSource:dispatch');
-      await f.settle(dispatch.args.jobId);
-      return JSON.parse(
-        await f.c.client.query(makeFunctionReference('projectHostedSaves:progress'), {
-          projectId: f.s.projectId,
-          operationId,
-        }),
-      ).terminal;
+    const query = f.exchange.client.query;
+    let progressReads = 0,
+      subscriptions = 0,
+      released = false,
+      closed = false;
+    f.exchange.client.query = async (ref, args) => {
+      if (getFunctionName(ref) === 'projectHostedSaves:progress') {
+        assert.equal(args.operationId, saved.operationId);
+        progressReads++;
+        // The reported replay fails on its initial HTTP observation, while the
+        // separate live progress stream can still see the original save.
+        if (budget) throw new Error('[Request ID: 0123abcd] Server Error');
+        throw operationMissing;
+      }
+      return query(ref, args);
     };
+    const waitTransport = new HostedAgentTransport(f.root, address, f.exchange, () => ({
+      onUpdate(ref, args, update, fail) {
+        subscriptions++;
+        assert.equal(getFunctionName(ref), 'projectHostedSaves:progress');
+        assert.equal(args.operationId, saved.operationId);
+        void (async () => {
+          fail(operationMissing);
+          const pending = await query(ref, args);
+          if (JSON.parse(pending).terminal) {
+            update(pending);
+            return;
+          }
+          assert.equal(JSON.parse(pending).state.status, 'submitted');
+          update(pending);
+          assert.equal(released, false, 'a submitted save keeps its wait attached');
+          const dispatch = f.scheduled.find(item => item.name === 'projectConvexSource:dispatch');
+          await f.settle(dispatch.args.jobId);
+          update(await query(ref, args));
+        })().catch(fail);
+        return () => {
+          released = true;
+        };
+      },
+      async close() {
+        closed = true;
+      },
+    }));
     const waited = await hostedAgentCli(
       recovery[1],
       'wait',
       { ...command, timeoutSeconds: budget },
       address,
-      transport,
+      waitTransport,
     );
-    assert.equal(subscribed, Boolean(budget));
+    assert.equal(subscriptions, budget ? 1 : 0);
+    assert.equal(progressReads, budget ? 0 : 1, 'one snapshot or one live subscription');
     if (budget) {
-      assert.notEqual(waited.result.status, 'settling');
-      assert.notEqual(readHostedLaneCheckout(f.root).selection.head, f.entry.head);
-      assert.equal(process.exitCode, oldExit);
+      assert.equal(waited.result.status, 'terminal');
+      assert.equal(waited.operationId, saved.operationId);
+      assert.equal(waited.result.operationId, saved.operationId);
+      assert.equal(waited.result.outcome.status, 'completed');
+      assert.equal(readHostedLaneCheckout(f.root).selection.head, waited.result.outcome.result.head);
+      assert.notEqual(waited.result.outcome.result.head, f.entry.head);
+      assert(released && closed, 'terminal success closes the subscription');
+      assert.equal(process.exitCode ?? 0, 0);
+      const repeat = await hostedAgentCli(recovery[1], 'wait', command, address, waitTransport);
+      assert.equal(subscriptions, 2, 'local settlement preserves the read-only continuation');
+      assert.equal(progressReads, 0);
+      assert.equal(repeat.operationId, saved.operationId);
+      assert.deepEqual(repeat.result.outcome, waited.result.outcome);
     } else {
       assert.equal(waited.result.status, 'IN_PROGRESS');
       assert.equal(process.exitCode, 3);
@@ -280,12 +323,8 @@ test('593fc2d7: lanes run in a checkout whose save is still settling marks that 
   assert.equal((await list()).result.page[0].saving, undefined, 'a settled save leaves no mark');
 });
 
-test('a settle that fails after the save returned is reported by the next command, once', async t => {
-  const f = await setup(t);
-  const command = { operationId: randomUUID(), message: 'split save' };
-  const returned = await saveHostedLane(f.root, command, f.exchange, contract);
-  assert.equal(returned.status, 'submitted');
-  // Another writer moves the Lane before the scheduled settle publishes: the settle fails WORK_STALE.
+async function moveLaneBeforeSettle(f) {
+  // Another writer moves the Lane before the scheduled settle publishes.
   const head = [...f.s.tables.projectHostedRecordHeads.values()].find(
     row => row.kind === 'lane' && row.key === f.entry.laneId,
   );
@@ -297,7 +336,151 @@ test('a settle that fails after the save returned is reported by the next comman
     digest: digest(value),
     bytes: Buffer.byteLength(value),
   });
-  await f.settle(returned.jobId);
+  const dispatch = f.scheduled.find(item => item.name === 'projectConvexSource:dispatch');
+  await f.settle(dispatch.args.jobId);
+}
+
+test('a printed background wait reports the real failed receipt and keeps the checkout head', async t => {
+  const f = await setup(t),
+    address = { url: 'https://fixture.invalid', projectId: f.s.projectId },
+    transport = new HostedAgentTransport(f.root, address, f.exchange);
+  t.mock.method(process.stderr, 'write', () => true);
+  const saved = await hostedAgentCli(
+    f.root,
+    'save',
+    { message: 'wait on failed settle' },
+    address,
+    transport,
+  );
+  assert.equal(saved.result.status, 'settling');
+  let closed = false;
+  const waitTransport = new HostedAgentTransport(f.root, address, f.exchange, () => ({
+    onUpdate(ref, args, update, fail) {
+      void (async () => {
+        const pending = JSON.parse(await f.exchange.client.query(ref, args));
+        if (!pending.terminal) {
+          update({ ...pending, status: 'failed', error: { code: 'SOURCE_WORKER_FAILED' } });
+          await Promise.resolve();
+          assert.equal(closed, false, 'a worker failure stays attached while its receipt publishes');
+          await moveLaneBeforeSettle(f);
+        }
+        update(await f.exchange.client.query(ref, args));
+      })().catch(fail);
+      return () => {};
+    },
+    async close() {
+      closed = true;
+    },
+  }));
+  await assert.rejects(
+    hostedAgentCli(f.root, 'wait', { operationIds: [saved.operationId] }, address, waitTransport),
+    { code: 'SAVE_SETTLE_FAILED', recovery: { failedSave: saved.operationId, cause: 'WORK_STALE' } },
+  );
+  assert.equal(readHostedLaneCheckout(f.root).selection.head, f.entry.head);
+  const wait = f.c.calls.length;
+  await settleBackgroundSave(f.root, f.exchange);
+  assert.equal(f.c.calls.length, wait, 'the already-reported failure is settled locally');
+  await assert.rejects(
+    hostedAgentCli(f.root, 'wait', { operationIds: [saved.operationId] }, address, waitTransport),
+    { code: 'SAVE_SETTLE_FAILED', recovery: { failedSave: saved.operationId, cause: 'WORK_STALE' } },
+  );
+});
+
+test('a background wait refuses an old source epoch from the same progress subscription', async t => {
+  const f = await setup(t),
+    address = { url: 'https://fixture.invalid', projectId: f.s.projectId },
+    transport = new HostedAgentTransport(f.root, address, f.exchange);
+  t.mock.method(process.stderr, 'write', () => true);
+  const saved = await hostedAgentCli(f.root, 'save', { message: 'wait after cutover' }, address, transport);
+  assert.equal(saved.result.status, 'settling');
+  f.s.patch('hostedProjects', f.s.projectId, { sourceAuthority: { mode: 'server', epoch: 2 } });
+  const waitTransport = new HostedAgentTransport(f.root, address, f.exchange, () => ({
+    onUpdate(ref, args, update, fail) {
+      void f.exchange.client.query(ref, args).then(update, fail);
+      return () => {};
+    },
+    async close() {},
+  }));
+  await assert.rejects(
+    hostedAgentCli(f.root, 'wait', { operationIds: [saved.operationId] }, address, waitTransport),
+    error => {
+      assert.equal(error.code, 'SOURCE_AUTHORITY_CHANGED');
+      assert.match(error.message, /epoch 1.*epoch 2/);
+      assert.equal(error.recovery.next.action, 'save');
+      assert.notEqual(error.recovery.next.operationId, saved.operationId);
+      return true;
+    },
+  );
+  assert.equal(readHostedLaneCheckout(f.root).selection.head, f.entry.head);
+});
+
+test('a completed background wait preserves the stacked Lane restack', async t => {
+  const f = await setup(t),
+    address = { url: 'https://fixture.invalid', projectId: f.s.projectId },
+    transport = new HostedAgentTransport(f.root, address, f.exchange);
+  t.mock.method(process.stderr, 'write', () => true);
+  const markerPath = join(f.root, '.forge/hosted-lane.json');
+  const marker = readHostedLaneCheckout(f.root);
+  const parentLaneId = randomUUID(),
+    parentHead = 'b'.repeat(64),
+    restackedHead = 'c'.repeat(64);
+  marker.selection.stack = { laneId: parentLaneId, head: 'a'.repeat(64) };
+  writeFileSync(markerPath, JSON.stringify(marker));
+  const saved = await hostedAgentCli(f.root, 'save', { message: 'save stacked child' }, address, transport);
+  assert.equal(saved.result.status, 'settling');
+  const job = f.scheduled.find(item => item.name === 'projectConvexSource:dispatch');
+  await f.settle(job.args.jobId);
+  const waitTransport = new HostedAgentTransport(f.root, address, f.exchange, () => ({
+    onUpdate(ref, args, update, fail) {
+      void f.exchange.client.query(ref, args).then(update, fail);
+      return () => {};
+    },
+    async close() {},
+  }));
+  t.mock.method(waitTransport, 'query', async (name, args) => {
+    assert.equal(name, 'projectHostedOverlaps:read');
+    assert.equal(args.laneId, f.entry.laneId);
+    return {
+      behindMain: { commits: 0, conflictingPaths: [], more: 0, coverage: 'exact' },
+      stack: { laneId: f.entry.laneId, parentLaneId, parentHead, restack: 'ready' },
+    };
+  });
+  t.mock.method(waitTransport, 'dispatch', async (action, args) => {
+    assert.equal(action, 'sync');
+    assert.equal(args.laneId, f.entry.laneId);
+    assert.equal(args.cleanOnly, true);
+    return {
+      result: {
+        outcome: {
+          status: 'completed',
+          result: {
+            status: 'merged',
+            lane: { laneId: f.entry.laneId, head: restackedHead },
+          },
+        },
+        applied: true,
+      },
+    };
+  });
+  const waited = await hostedAgentCli(
+    f.root,
+    'wait',
+    { operationIds: [saved.operationId] },
+    address,
+    waitTransport,
+  );
+  assert.equal(waited.operationId, saved.operationId);
+  assert.equal(waited.result.outcome.status, 'completed');
+  assert.equal(waited.restack.from, waited.result.outcome.result.head);
+  assert.equal(waited.restack.head, restackedHead);
+});
+
+test('a settle that fails after the save returned is reported by the next command, once', async t => {
+  const f = await setup(t);
+  const command = { operationId: randomUUID(), message: 'split save' };
+  const returned = await saveHostedLane(f.root, command, f.exchange, contract);
+  assert.equal(returned.status, 'submitted');
+  await moveLaneBeforeSettle(f);
   const progress = JSON.parse(
     await f.c.client.query(makeFunctionReference('projectHostedSaves:progress'), {
       projectId: f.s.projectId,

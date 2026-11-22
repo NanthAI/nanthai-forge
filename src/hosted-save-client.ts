@@ -14,6 +14,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -35,6 +36,7 @@ import { ForgeError, invariant } from './errors.js';
 import { keepPatchCommand, rebaseHostedCheckout } from './hosted-save-rebase.js';
 import {
   backgroundSaveName,
+  settledBackgroundSaveName,
   backgroundSaveOperation,
   pendingSavePath,
   saveCommandSchema,
@@ -408,7 +410,7 @@ async function saveOnce(
       );
       if (progress.terminal) {
         applyHostedSaveReceipt(root, capture, request, progress.terminal);
-        rmSync(join(directory, backgroundSaveName), { force: true });
+        rememberBackgroundSettlement(directory);
         return progress.terminal;
       }
       // Its job was submitted at an older epoch: every callback is refused, so it never settles (N3).
@@ -697,7 +699,7 @@ async function saveOnce(
     if (result.outcome) {
       applyHostedSaveReceipt(root, capture, request, result);
       // Settled already (a retry): this command reports the outcome itself.
-      if (background) rmSync(join(directory, backgroundSaveName), { force: true });
+      if (background) rememberBackgroundSettlement(directory);
     }
     return result;
   }
@@ -865,17 +867,23 @@ export function applyObservedSaveOutcome(
   terminal: { outcome: { status: string; result?: unknown } },
 ) {
   root = realpathSync(root);
-  const directory = join(clientCacheRoot(root), `saves/${operationId}`);
-  if (checkoutPathExists(join(directory, 'terminal.json'))) return;
+  const directory = join(clientCacheRoot(root), `saves/${operationId}`),
+    settled = join(directory, 'terminal.json');
+  if (checkoutPathExists(settled)) return;
   const capturePath = join(directory, 'capture.json'),
     requestPath = join(directory, 'request.json');
   if (!checkoutPathExists(capturePath) || !checkoutPathExists(requestPath)) return;
-  applyHostedSaveReceipt(
-    root,
-    JSON.parse(readFileSync(capturePath, 'utf8')),
-    saveRequestSchema.parse(JSON.parse(readFileSync(requestPath, 'utf8'))),
-    terminal,
-  );
+  let capture: Awaited<ReturnType<typeof captureHostedSave>>;
+  let request: SaveRequest;
+  try {
+    capture = JSON.parse(readFileSync(capturePath, 'utf8'));
+    request = saveRequestSchema.parse(JSON.parse(readFileSync(requestPath, 'utf8')));
+  } catch (error) {
+    // A competing command may have cached this receipt and removed its capture.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' && checkoutPathExists(settled)) return;
+    throw error;
+  }
+  applyHostedSaveReceipt(root, capture, request, terminal);
 }
 /** Once its outcome is applied, a save keeps only its command, request and outcome: the capture
  * (a full baseline copy, ~400 KB for 3,000 files) and pages are never read again. */
@@ -1064,6 +1072,17 @@ async function resumeRetainedSave(
   }
 }
 
+/** Preserve observation routing for the same printed wait after local settlement. */
+function rememberBackgroundSettlement(directory: string): boolean {
+  try {
+    renameSync(join(directory, backgroundSaveName), join(directory, settledBackgroundSaveName));
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    return false;
+  }
+}
+
 /** Apply the outcome of the save that returned before its settle and, when it did not complete,
  * report that once as SAVE_SETTLE_FAILED: the command that reads it does nothing else, so the agent
  * sees the failure and runs the command again (its edits are still in the checkout). */
@@ -1071,10 +1090,10 @@ function reportBackgroundSave(
   root: string,
   operationId: string,
   terminal: { outcome: { status: string; error?: { code?: string; message?: string } } },
+  reportRetained = false,
 ) {
-  const flag = join(clientCacheRoot(root), `saves/${operationId}`, backgroundSaveName);
-  if (!checkoutPathExists(flag)) return;
-  rmSync(flag, { force: true });
+  const firstReport = rememberBackgroundSettlement(join(clientCacheRoot(root), 'saves', operationId));
+  if (!firstReport && !reportRetained) return;
   if (terminal.outcome.status === 'completed') return;
   const error = terminal.outcome.error;
   throw new ForgeError(
@@ -1084,6 +1103,17 @@ function reportBackgroundSave(
     { failedSave: operationId, ...(error?.code ? { cause: error.code } : {}) },
   );
 }
+/** Reconcile the exact terminal receipt from a background wait without another read or dispatch. */
+export function applyObservedBackgroundSave(
+  root: string,
+  operationId: string,
+  terminal: { outcome: { status: string; result?: unknown; error?: { code?: string; message?: string } } },
+  reportRetained = true,
+) {
+  applyObservedSaveOutcome(root, operationId, terminal);
+  reportBackgroundSave(root, operationId, terminal, reportRetained);
+}
+
 /** Before any agent command (fea47345 C): when this checkout's pending save returned before its
  * settle, read its outcome (one query; none when no such save is pending, so idle costs nothing).
  * A completed save advances the marker; a failed one is reported (SAVE_SETTLE_FAILED); one still
@@ -1096,7 +1126,6 @@ export async function settleBackgroundSave(
 ) {
   const prior = backgroundSaveOperation(root);
   if (!prior) return;
-  const directory = join(clientCacheRoot(root), `saves/${prior}`);
   type Terminal = { outcome: { status: string; result?: unknown } };
   let terminal: Terminal | null | undefined;
   if (known?.operationId === prior) terminal = known.terminal as Terminal | null;
@@ -1115,14 +1144,7 @@ export async function settleBackgroundSave(
       if (hostedActionError(error, 'save reconciliation').code === 'NOT_FOUND') return;
       throw error;
     }
-  if (!terminal) return;
-  applyHostedSaveReceipt(
-    root,
-    JSON.parse(readFileSync(join(directory, 'capture.json'), 'utf8')),
-    saveRequestSchema.parse(JSON.parse(readFileSync(join(directory, 'request.json'), 'utf8'))),
-    terminal,
-  );
-  reportBackgroundSave(root, prior, terminal);
+  if (terminal) applyObservedBackgroundSave(root, prior, terminal, false);
 }
 
 /** Forget one retained save of this checkout: its staged request and capture, and the pending
@@ -1144,7 +1166,7 @@ function dropRetainedSave(root: string, operationId: string, pending?: string) {
  * pinned epoch on every later write to it (loadSave). Drop it here, so no later save of this checkout
  * replays it first, and name the one next command: the same action under a fresh operation (review
  * b1448b61 N3). Any other error, or an epoch this command cannot compare, is returned unchanged. */
-function staleEpochSaveRefusal(
+export function staleEpochSaveRefusal(
   root: string,
   operationId: string,
   epoch: number | undefined,

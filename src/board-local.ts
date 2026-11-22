@@ -189,6 +189,7 @@ const boardFeatureNames = [
   'board-resolve',
   'board-lane-after',
   'board-project-after',
+  'source-board-wait',
 ];
 export function readBoardServerFeatures(projectId: string): string[] {
   if (noState()) return [];
