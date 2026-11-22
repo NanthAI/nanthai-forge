@@ -38,13 +38,8 @@ import { automaticCleanup } from './work-auto-clean.js';
 import { readPolicy } from './work-autonomy.js';
 import { CheckQueue, foregroundQueued } from './check-queue.js';
 import { diskGuard } from './disk-guard.js';
-import {
-  processAlive,
-  processIdentity,
-  processStartTime,
-  processGroupAlive,
-  stopProcessTree,
-} from './local-process.js';
+import { processAlive, processIdentity, processStartTime, processGroupAlive } from './local-process.js';
+import { stopProcessTree } from './stop-process-tree.js';
 import { spawn } from 'node:child_process';
 import { finalizeDeadRunCancellation } from './work-run-cancellation.js';
 import { recoverRecordRuns } from './work-record-runs.js';

@@ -11,12 +11,11 @@ import {
   windowsLookup,
   windowsStart,
   processesAlive,
-  stopProcessTree,
   WINDOWS_START_SCRIPT,
   windowsPowerShell,
   windowsStartArgs,
-  windowsTaskkill,
 } from '../dist/local-process.js';
+import { stopProcessTree, windowsTaskkill } from '../dist/stop-process-tree.js';
 import { LAUNCHER_WINDOWS_START_SCRIPT } from '../dist/cli-launcher.js';
 
 test('fresh queue liveness distinguishes live, reused, legacy and exited identities', async t => {

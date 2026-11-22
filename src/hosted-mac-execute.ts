@@ -51,7 +51,7 @@ import {
   SECRET_SCAN_ALLOW_FILE,
 } from './secret-scan.js';
 import type { OutputRoot } from './hosted-check-output.js';
-import { stopProcessTree } from './local-process.js';
+import { stopProcessTree } from './stop-process-tree.js';
 
 /** A machine runner's browser is its own install, not a pinned cache. */
 export const macBrowserNext =

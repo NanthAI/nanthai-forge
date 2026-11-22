@@ -5,7 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { childEnv } from '../scripts/child-env.mjs';
 import { ForgeError } from './errors.js';
-import { stopProcessTree } from './local-process.js';
+import { stopProcessTree } from './stop-process-tree.js';
 import { durableReplace } from './state/durability.js';
 import { cliBuildCommit } from './cli-installation.js';
 import { landedOperations } from './landed-operations.js';
