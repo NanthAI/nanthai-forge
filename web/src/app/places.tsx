@@ -32,6 +32,7 @@ export const sectionLabels: Record<ProjectPlace, Record<string, string>> = {
     checks: 'Landing and checks',
     mirror: 'GitHub mirror',
     secrets: 'Secrets',
+    agents: 'Agents',
     project: 'Project',
     you: 'You',
   },

@@ -63,6 +63,7 @@ const frames = [
       ['Landing and checks', '/settings/checks'],
       ['GitHub mirror', '/settings/mirror'],
       ['Secrets', '/settings/secrets'],
+      ['Agents', '/settings/agents'],
       ['Project', '/settings/project'],
       ['You', '/settings/you'],
     ],

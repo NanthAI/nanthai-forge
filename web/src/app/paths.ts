@@ -19,7 +19,7 @@ export const placeSections: Record<ProjectPlace, readonly string[]> = {
   plan: [''],
   code: ['', 'files'],
   stats: [''],
-  settings: ['', 'checks', 'mirror', 'secrets', 'project', 'you'],
+  settings: ['', 'checks', 'mirror', 'secrets', 'agents', 'project', 'you'],
 };
 
 export type AppRoute =
@@ -203,6 +203,6 @@ export function currentScreenHref(route: AppRoute): string | null {
     case 'stats':
       return null;
     case 'settings':
-      return `${root}/settings/${{ '': 'access', checks: 'checks', mirror: 'general', secrets: 'general', project: 'general', you: 'you' }[route.section] ?? 'general'}`;
+      return `${root}/settings/${{ '': 'access', checks: 'checks', mirror: 'general', secrets: 'general', agents: 'general', project: 'general', you: 'you' }[route.section] ?? 'general'}`;
   }
 }

@@ -1,0 +1,10 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Settings > Agents: a guidance text, its count and its save. Everything else is the design system's. */
+[data-ds] {
+  .agent-guidance .guide { display: grid; gap: var(--s-3); padding: var(--s-3) var(--gut) var(--s-4); }
+  .agent-guidance .guide .inp { max-width: var(--m-prose); min-height: 8em; }
+  .agent-guidance .guide .inp[readonly] { background: transparent; }
+  .agent-guidance .btns { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-3); align-items: center; }
+  .agent-guidance .meta { color: var(--text-2); font-size: var(--t-meta); }
+  .agent-guidance .pf { margin: 0; color: var(--text-2); font-size: var(--t-small); }
+}
