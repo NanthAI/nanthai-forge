@@ -17,7 +17,8 @@ import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, coordinationAccess } from './projectAuthority';
+import { shareQueryRoles } from './projectRole';
 import { finishRow } from './projectHostedFinishWake';
 import { culpritOf } from './projectMainRed';
 import { landingRow } from './projectHostedLandingStore';
@@ -71,6 +72,10 @@ export async function messagesTo(
   asks: boolean,
 ) {
   const projectId = project._id;
+  // Coordination is team-only (Item b6588425): a public project's outsider has no messages here, not even ones a
+  // former membership received. A query is one snapshot, so the conversation check below reuses this role read.
+  shareQueryRoles(ctx);
+  if (!(await coordinationAccess(ctx, project, actor))) return { rows: [], more: false };
   const recent = (kind: 'message' | 'handoff') =>
     ctx.db
       .query('projectCoordinationEvents')

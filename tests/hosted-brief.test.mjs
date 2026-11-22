@@ -182,6 +182,32 @@ test('briefing authorization is checked on every read: non-member and source-onl
   s.caller(undefined);
   await assert.rejects(briefs.brief._handler(s.ctx, input), code('PROJECT_UNAVAILABLE'));
 });
+test('team-only coordination (b6588425): a public project reader is briefed without messages, handoffs or claims', async () => {
+  const s = await setup();
+  s.tables.hostedProjects.get(s.projectId).visibility = 'public';
+  s.tables.projectReaders.set('public-reader', { projectId: s.projectId, reader: 'reader' });
+  const input = { projectId: s.projectId, situation: 'resolve-conflict', laneId: ids.lane, agent: 'codex' };
+  s.caller('reader');
+  const reader = await briefs.brief._handler(s.ctx, input);
+  assert.equal(reader.context.lane.head, head, 'the reader still gets the Lane context');
+  assert.deepEqual(reader.context.claims, []);
+  assert.deepEqual(reader.context.messages, []);
+  assert.ok(reader.context.coverage.some(line => /team-only/.test(line)));
+  await assert.rejects(
+    briefs.brief._handler(s.ctx, {
+      projectId: s.projectId,
+      situation: 'answer-message',
+      messageId: ids.message,
+    }),
+    code('NOT_FOUND'),
+    'a message is not found for a reader outside coordination',
+  );
+  // The same account with write access (team) reads coordination again.
+  s.tables.projectContributors.set('public-writer', { projectId: s.projectId, contributor: 'reader' });
+  const member = await briefs.brief._handler(s.ctx, input);
+  assert.equal(member.context.claims[0].actor, 'worker-2');
+  assert.equal(member.context.messages.length, 2);
+});
 test('hosted selected records stay project-scoped and missing path projection is explicitly unknown', async () => {
   const s = await setup();
   await assert.rejects(

@@ -16,6 +16,8 @@ export async function hostedBriefRecords(
   project: Doc<'hostedProjects'>,
   input: BriefInput,
   readConversation: boolean,
+  /** Coordination is team-only (Item b6588425): without it the briefing carries no messages, handoffs or claims. */
+  readCoordination = true,
 ) {
   const generation = await selectedGeneration(ctx, project);
   invariant(
@@ -66,14 +68,15 @@ export async function hostedBriefRecords(
     const full = JSON.parse(parts.map(row => row.value).join(''));
     return (collection === 'intents' ? { ...full, status: header.status } : full) as T;
   }
-  const eventRow = input.messageId
-    ? await ctx.db
-        .query('projectCoordinationEvents')
-        .withIndex('by_project_and_operation', q =>
-          q.eq('projectId', project._id).eq('operationId', input.messageId!),
-        )
-        .unique()
-    : null;
+  const eventRow =
+    input.messageId && readCoordination
+      ? await ctx.db
+          .query('projectCoordinationEvents')
+          .withIndex('by_project_and_operation', q =>
+            q.eq('projectId', project._id).eq('operationId', input.messageId!),
+          )
+          .unique()
+      : null;
   invariant(
     !input.messageId || (eventRow && (!eventRow.conversation || readConversation)),
     'NOT_FOUND',
@@ -102,25 +105,29 @@ export async function hostedBriefRecords(
   const runRows: CheckRun[] = run ? [run] : latestView ? await page('runs', latestView.id) : [];
   const latestRun = run ?? (runRows.at(-1) ? await get<CheckRun>('runs', runRows.at(-1)!.id) : undefined);
   const events = selectedEvent ? [selectedEvent] : [];
-  const scopes = intentId
+  const scopes =
+    intentId && readCoordination
+      ? await ctx.db
+          .query('projectCoordinationEvents')
+          .withIndex('by_project_and_intentId', q => q.eq('projectId', project._id).eq('intentId', intentId))
+          .order('desc')
+          .take(100)
+      : [];
+  const laneEvents =
+    lane && readCoordination
+      ? await ctx.db
+          .query('projectCoordinationEvents')
+          .withIndex('by_project_and_laneId', q => q.eq('projectId', project._id).eq('laneId', lane.id))
+          .order('desc')
+          .take(100)
+      : [];
+  const recentEvents = readCoordination
     ? await ctx.db
         .query('projectCoordinationEvents')
-        .withIndex('by_project_and_intentId', q => q.eq('projectId', project._id).eq('intentId', intentId))
+        .withIndex('by_project', q => q.eq('projectId', project._id))
         .order('desc')
         .take(100)
     : [];
-  const laneEvents = lane
-    ? await ctx.db
-        .query('projectCoordinationEvents')
-        .withIndex('by_project_and_laneId', q => q.eq('projectId', project._id).eq('laneId', lane.id))
-        .order('desc')
-        .take(100)
-    : [];
-  const recentEvents = await ctx.db
-    .query('projectCoordinationEvents')
-    .withIndex('by_project', q => q.eq('projectId', project._id))
-    .order('desc')
-    .take(100);
   for (const row of [...scopes, ...laneEvents, ...recentEvents]) {
     if (row.conversation && !readConversation) continue;
     const item = briefEvent(row);
@@ -130,10 +137,18 @@ export async function hostedBriefRecords(
     coverage.push(
       'Coordination: latest 100 events per Intent/Lane/project scope examined; older context may exist.',
     );
-  const claims = await ctx.db
-    .query('projectCoordinationClaims')
-    .withIndex('by_project_and_expiresAt', q => q.eq('projectId', project._id).gt('expiresAt', Date.now()))
-    .take(500);
+  const claims = readCoordination
+    ? await ctx.db
+        .query('projectCoordinationClaims')
+        .withIndex('by_project_and_expiresAt', q =>
+          q.eq('projectId', project._id).gt('expiresAt', Date.now()),
+        )
+        .take(500)
+    : [];
+  if (!readCoordination)
+    coverage.push(
+      'Coordination: team-only on this project, so no messages, handoffs or claims are included.',
+    );
   if (claims.length === 500)
     coverage.push('Claims: first 500 active candidates examined; overlap coverage may be incomplete.');
   const channels = await page('channels');

@@ -2,6 +2,9 @@
 import type { Doc } from '../../convex/_generated/dataModel';
 import { commandScope } from '../../src/coordination-paths';
 import { COORDINATION_STALE_MS } from '../../src/coordination-types';
+import { hostedErrorCode } from './snapshot';
+/** Coordination is team-only (Item b6588425): a viewer outside the team is refused, and the page hides it. */
+export const coordinationRefused = (error: unknown) => hostedErrorCode(error) === 'PROJECT_UNAVAILABLE';
 export type Session = Omit<
   Doc<'projectCoordinationSessions'>,
   '_id' | '_creationTime' | 'projectId' | 'operationId' | 'sequence'

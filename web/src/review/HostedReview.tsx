@@ -25,6 +25,7 @@ import SourceComments from './SourceComments';
 import { HostedConversation } from '../lane/HostedConversation';
 import { PendingWrite } from '../pending-write';
 import { useCoordination } from '../cockpit/coordination';
+import { useSafeQuery } from '../safe-query';
 import { reviewViewLabel } from './review-model';
 import type { ReviewRead } from './review-model';
 import { protectedMatches } from '../../../src/autonomy-policy';
@@ -117,7 +118,8 @@ export function HostedReview({
     channels.find(move => move.viewId === view.id && move.channel === 'main' && move.head === view.head);
   const superseded = !acceptance && story?.status === 'superseded';
   const policy = useQuery(api.projectAutonomy.read, { projectId });
-  const claims = useQuery(api.projectCoordinationReads.claims, { projectId });
+  // Claims are team-only coordination (Item b6588425): a public project's outsider is refused and sees no overlaps.
+  const claims = useSafeQuery(api.projectCoordinationReads.claims, { projectId }).value;
   const overlaps = new Map<string, string[]>();
   const files = story?.files.items.map(file => file.path) ?? [];
   for (const claim of claims?.claims ?? [])

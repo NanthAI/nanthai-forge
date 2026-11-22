@@ -37,6 +37,8 @@ The table is `projectVerbs` in `convex/projectAccessContract.ts`; `projectMay` g
 | Approve a protected path (`approveProtected`) | no | no | no | yes | never | `projectHostedApprovals`, `projectHostedAcceptance` |
 | Secret values, permanent delete, runner keys, public or private (`ownerPersonOnly`) | no | no | no | yes | never | `requireOwnerPerson`; visibility: `projectVisibility.setVisibility` |
 
+Agent coordination (sessions, messages, handoffs, claims, activity counts and the feed) is team-only on every project: the owner and write members, plus readers of a private project; a public project's outsider gets the same "unavailable" answer as a private project without a role (`coordinationProject` in `convex/projectAuthority.ts`, `b6588425`).
+
 Sealed secret writes are authorised by the owner device key in the signed roster.
 The storage endpoint accepts only the project owner account on an unrestricted
 stable device sign-in with source-write access. Scoped, read-only, browser-only

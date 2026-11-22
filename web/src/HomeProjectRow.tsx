@@ -23,7 +23,11 @@ export function HomeProjectRow({
   choose: () => void;
 }) {
   const now = useNow();
-  const counts = useExpiringCounts(useQuery(api.projectCoordination.counts, { projectId: project.id }));
+  // Activity counts are team-only coordination (Item b6588425): a public project's reader is not asked for them.
+  const team = project.visibility !== 'public' || project.role !== 'Reader';
+  const counts = useExpiringCounts(
+    useQuery(api.projectCoordination.counts, team ? { projectId: project.id } : 'skip'),
+  );
   const raw = useQuery(workIndex.workspace, { projectId: project.id });
   const workspace = useMemo(() => (raw ? (JSON.parse(raw) as WorkIndexWorkspace) : null), [raw]);
   const local = useWorkRecords<MoveRecord & { head: string }>(project.id, workspace, 'channelMoves');

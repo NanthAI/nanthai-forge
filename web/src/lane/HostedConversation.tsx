@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useArchivePaginatedQuery } from '../archive-pagination';
 import { useRef, useState } from 'react';
-import { useMutation, usePaginatedQuery } from 'convex/react';
+import { useMutation } from 'convex/react';
+import { useSafePaginatedQuery } from '../safe-query';
 import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type { CoordinationCommand } from '../../../src/coordination-types';
-import type { ActivityEvent, Session } from '../coordination-view';
+import { coordinationRefused, type ActivityEvent, type Session } from '../coordination-view';
 import { PendingWrite } from '../pending-write';
 import { Conversation } from './Conversation';
 import { Button } from '../ui/primitives';
@@ -24,13 +25,21 @@ export function HostedConversation({
   const feed = useArchivePaginatedQuery(
     api.projectCoordination.feed,
     { projectId, ...(laneId ? { laneId } : intentId ? { intentId } : {}) },
-    { initialNumItems: 40, throwOnError: true },
+    { initialNumItems: 40 },
   );
-  const people = usePaginatedQuery(api.projectCoordination.sessions, { projectId }, { initialNumItems: 30 });
+  const people = useSafePaginatedQuery(
+    api.projectCoordination.sessions,
+    { projectId },
+    { initialNumItems: 30 },
+  );
   const publish = useMutation(api.projectCoordination.publish);
   const writer = useRef<PendingWrite<CoordinationCommand, unknown> | null>(null);
   writer.current ??= new PendingWrite(attempt => publish({ projectId, ...attempt }));
   const [error, setError] = useState('');
+  // Outside the team there is no conversation to show (Item b6588425); any other failure still throws.
+  const failed = feed.error ?? people.error;
+  if (failed && !coordinationRefused(failed)) throw failed;
+  if (failed) return null;
   return (
     <>
       <Conversation

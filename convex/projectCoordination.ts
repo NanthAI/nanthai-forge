@@ -8,7 +8,7 @@ import { v } from 'convex/values';
 import { canReadConversation, coordinationFeed, coordinationRecent, feedPageSize } from './coordinationFeed';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { coordinationMutation as mutation, coordinationQuery as query } from './cliServer';
-import { activeProject, accessibleProject } from './projectAuthority';
+import { activeProject, coordinationProject } from './projectAuthority';
 import { command, eventDocument } from './coordinationFields';
 import { applyCommand, canonical, denormalized, eventByOperation, session } from './coordinationWrite';
 import { invariant } from '../src/errors';
@@ -16,7 +16,7 @@ import { COORDINATION_TOUCH_MIN_MS, coordinationCommandSchema } from '../src/coo
 import { report } from './errors';
 import { sessionStructure, sessionView, sessionTree } from './coordinationSessions';
 import { ask, handBack } from './coordinationConversation';
-export { counts, publicCounts } from './coordinationCounts';
+export { counts } from './coordinationCounts';
 
 const feedResult = v.object({
   journalHistory: v.optional(v.literal(true)),
@@ -190,7 +190,7 @@ export const sessions = query({
   handler: async (ctx, { projectId, paginationOpts, parentSessionId, all }) => {
     try {
       const actor = await signedIn(ctx, 'read project activity');
-      await accessibleProject(ctx, projectId, actor);
+      await coordinationProject(ctx, projectId, actor);
       feedPageSize(paginationOpts.numItems);
       const rows = ctx.db.query('projectCoordinationSessions');
       const scoped = all
@@ -251,7 +251,7 @@ export async function journalCoordinationFeed(
 ) {
   try {
     const actor = await signedIn(ctx, 'read project coordination');
-    const project = await accessibleProject(ctx, projectId, actor);
+    const project = await coordinationProject(ctx, projectId, actor);
     invariant(
       [intentId, laneId, planningItemId].filter(Boolean).length <= 1,
       'BAD_ARGUMENT',
@@ -292,7 +292,7 @@ export async function journalCoordinationRecent(
 ) {
   try {
     const actor = await signedIn(ctx, 'read project coordination');
-    const project = await accessibleProject(ctx, projectId, actor);
+    const project = await coordinationProject(ctx, projectId, actor);
     const result = await coordinationRecent(ctx, projectId, paginationOpts.cursor, paginationOpts.numItems);
     if (!(await canReadConversation(ctx, project, actor, result.page)))
       result.page = result.page.filter(row => !row.conversation);

@@ -30,7 +30,7 @@ import type {
   HostedViewSummary,
   HostedRunSummary,
 } from '../../../src/work-hosted-summary';
-import type { ActivityEvent, Session } from '../coordination-view';
+import { coordinationRefused, type ActivityEvent, type Session } from '../coordination-view';
 import { withSessions, hostedFeed, usePresenceSessions } from '../cockpit/coordination';
 import { cockpitLanes, latestRun, type CockpitWork } from '../cockpit/model';
 import {
@@ -481,8 +481,10 @@ export function HostedLane({
   const feed = useArchivePaginatedQuery(
     api.projectCoordination.feed,
     { projectId, laneId },
-    { initialNumItems: 100, throwOnError: true },
+    { initialNumItems: 100 },
   );
+  // Outside the team the Lane page still opens, without its conversation; any other failure still throws.
+  if (feed.error && !coordinationRefused(feed.error)) throw feed.error;
   usePageCritical('Lane', {
     intents: !intents.initialLoading,
     lanes: !lanes.initialLoading,

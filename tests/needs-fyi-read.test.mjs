@@ -169,6 +169,49 @@ test('a message clears when it is acknowledged, or when its Lane lands or is aba
   assert.deepEqual((await f.read('reader')).messages, [], 'messages to someone else never show');
 });
 
+test('team-only coordination (b6588425): a public project outsider gets no messages, its landings stay readable', async () => {
+  const f = fixture();
+  f.lane('lane-a');
+  f.accept(1, 'Adapter: abort on timeout');
+  // Messages a former member received while on the team: a note (FYI) and a question (Needs you).
+  const to = (text, extra = {}) => {
+    const operationId = randomUUID();
+    f.s.insert('projectCoordinationEvents', {
+      projectId: f.projectId,
+      operationId,
+      actor: 'agent-principal',
+      at: DAY + 5 * 60_000,
+      command: { kind: 'message', recipient: 'former', text, context: { laneId: 'lane-a' }, ...extra },
+      kind: 'message',
+      recipientActor: 'former',
+      laneId: 'lane-a',
+    });
+    return operationId;
+  };
+  const note = to('Heads up: I changed the CI matrix.');
+  const ask = to('Which lands first?', { choices: ['Mine', 'Theirs'] });
+  const outsider = await f.read('former');
+  assert.deepEqual(outsider.messages, [], 'no coordination message reaches an outsider');
+  assert.deepEqual(
+    outsider.landings.map(row => row.title),
+    ['Adapter: abort on timeout'],
+    'public landings are unchanged',
+  );
+  const held = await f.s.call('needsRead', needs.read, { projectId: f.projectId }, 'former');
+  assert.deepEqual(held.asks, [], 'no question reaches an outsider');
+  // The same account as a contributor (write member) reads both again.
+  f.s.insert('projectContributors', { projectId: f.projectId, contributor: 'former' });
+  assert.deepEqual(
+    (await f.read('former')).messages.map(row => row.id),
+    [note],
+  );
+  const member = await f.s.call('needsRead', needs.read, { projectId: f.projectId }, 'former');
+  assert.deepEqual(
+    member.asks.map(row => row.id),
+    [ask],
+  );
+});
+
 test('settings changes are the owner’s; readers never see them', async () => {
   const f = fixture();
   const before = policyPreset('trusted');

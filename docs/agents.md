@@ -126,9 +126,9 @@ MCP detects client/harness metadata and returns `childEnvironment` for child
 launches; a child must announce itself. See [session setup and coordination](agents/workflow.md#concurrent-agents-and-the-human-cockpit)
 for detection overrides, commands, paging, acknowledgements and retry rules.
 
-`projectCoordination.counts({projectId})` is authorized like session reads.
-`publicCounts({projectId})` works only for public, untrashed projects. It returns
-only five numbers, never names, actors, credentials, paths, Lane or session ids:
+`projectCoordination.counts({projectId})` is authorized like session reads: team-only on
+every project ([access](access.md)), with no signed-out variant. It returns only five
+numbers, never names, actors, credentials, paths, Lane or session ids:
 
 | Field | Meaning |
 | --- | --- |

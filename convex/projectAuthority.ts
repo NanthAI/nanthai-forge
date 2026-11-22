@@ -16,7 +16,8 @@ import {
 import type { Doc } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { projectExecution } from './projectExecution';
-import { checkedProjectRole, hasWriteRole, projectRole } from './projectRole';
+import { checkedProjectRole, hasWriteRole, projectRole, shareQueryRoles } from './projectRole';
+import type { ProjectRole } from './projectAccessContract';
 const readProjects = new WeakMap<
   object,
   Map<string, import('./_generated/dataModel').Doc<'hostedProjects'>>
@@ -260,6 +261,29 @@ export async function activeProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedP
     !project.removal,
     'PROJECT_UNAVAILABLE',
     'Restore this project before changing its source or Work.',
+  );
+  return project;
+}
+
+/** Agent coordination is team-only on every project (Item b6588425): the owner and write members always, and the
+ * readers of a private project. A public project's visibility opens its source and public Items, never coordination.
+ * Call only after `accessibleProject`, which has already required a role on a private project: a public project
+ * costs one indexed membership read (the owner none), a private one none. */
+export const readsCoordination = (project: Doc<'hostedProjects'>, role: ProjectRole | null) =>
+  role !== null && (role !== 'read' || project.visibility !== 'public');
+export async function coordinationAccess(ctx: QueryCtx, project: Doc<'hostedProjects'>, actor: string) {
+  return project.visibility !== 'public' || (await hasWriteRole(ctx, project, actor));
+}
+/** The one gate for coordination reads. A refused outsider gets the same answer as a private project without a
+ * role. Query-only: the query reuses the role it checked here (one snapshot), so a later conversation check reads
+ * no second membership row. */
+export async function coordinationProject(ctx: QueryCtx, projectId: Id<'hostedProjects'>, actor: string) {
+  shareQueryRoles(ctx);
+  const project = await accessibleProject(ctx, projectId, actor);
+  invariant(
+    await coordinationAccess(ctx, project, actor),
+    'PROJECT_UNAVAILABLE',
+    'This Forge project is unavailable with the current account.',
   );
   return project;
 }

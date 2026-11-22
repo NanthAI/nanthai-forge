@@ -265,23 +265,22 @@ test('active Lanes include saves, imported checks and claims without announcemen
     ),
     expected,
   );
-  await assert.rejects(f.query('publicCounts'), /public project is unavailable/);
+  // Team-only coordination (Item b6588425): no signed-out aggregate exists, and a public project's outsider is refused
+  // exactly like a private project's; its contributor still reads the counts.
+  assert.equal(coordination.publicCounts, undefined);
   f.tables.hostedProjects.get('project').visibility = 'public';
   f.identity(null);
-  const aggregate = await f.query('publicCounts');
-  assert.deepEqual(tally(aggregate), expected);
-  assert.deepEqual(Object.keys(aggregate).sort(), [...Object.keys(empty), 'nextExpiryAt'].sort());
-  assert.ok(Object.values(aggregate).every(value => typeof value === 'number'));
   await assert.rejects(f.query('sessions', { paginationOpts: { cursor: null, numItems: 50 } }), /Sign in/);
   await assert.rejects(f.query('counts'), /Sign in/);
-  f.tables.hostedProjects.get('project').visibility = 'private';
   f.identity('outsider');
-  await assert.rejects(f.query('counts'), /unavailable/);
+  await assert.rejects(f.query('counts'), /This Forge project is unavailable with the current account/);
+  f.tables.hostedProjects.get('project').visibility = 'private';
+  await assert.rejects(f.query('counts'), /This Forge project is unavailable with the current account/);
   f.tables.hostedProjects.get('project').visibility = 'public';
+  f.identity('other');
+  assert.deepEqual(tally(await f.query('counts')), expected);
   f.tables.hostedProjects.get('project').removal = 'trash';
-  await assert.rejects(f.query('publicCounts'), /unavailable/);
-  f.tables.hostedProjects.delete('project');
-  await assert.rejects(f.query('publicCounts'), /unavailable/);
+  await assert.rejects(f.query('counts'), /unavailable/);
 });
 
 test('stale attributed sessions leave active Lanes unannounced; no announcement alone counts as a save', async t => {

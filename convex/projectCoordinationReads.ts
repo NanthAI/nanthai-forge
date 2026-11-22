@@ -6,7 +6,7 @@ import { v } from 'convex/values';
 import { paginationOptsValidator } from 'convex/server';
 import { coordinationQuery as query, type QueryCtx } from './cliServer';
 import type { Doc, Id } from './_generated/dataModel';
-import { accessibleProject } from './projectAuthority';
+import { coordinationProject } from './projectAuthority';
 import { claimDocument, eventDocument } from './coordinationFields';
 import { canReadConversation, feedCursor, feedPageSize, feedPosition, feedRows } from './coordinationFeed';
 import { canAcknowledge, receipt, session } from './coordinationWrite';
@@ -23,7 +23,7 @@ const RELATED_SCAN = 200,
 async function reader(ctx: QueryCtx, projectId: Id<'hostedProjects'>, sessionId?: string) {
   const user = await ctx.auth.getUserIdentity();
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read project coordination.');
-  const project = await accessibleProject(ctx, projectId, user.subject);
+  const project = await coordinationProject(ctx, projectId, user.subject);
   const own = sessionId ? await session(ctx, projectId, sessionId) : null;
   invariant(
     !sessionId || own?.actor === user.subject,

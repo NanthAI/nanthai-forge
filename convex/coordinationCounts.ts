@@ -4,7 +4,7 @@ import { v, type Infer } from 'convex/values';
 import type { QueryCtx } from './_generated/server';
 import { coordinationQuery } from './cliServer';
 import type { Doc } from './_generated/dataModel';
-import { accessibleProject } from './projectAuthority';
+import { coordinationProject } from './projectAuthority';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { liveSession } from './coordinationSessions';
 import { COORDINATION_LANE_ACTIVE_MS, COORDINATION_STALE_MS } from '../src/coordination-types';
@@ -135,24 +135,7 @@ export const counts = coordinationQuery({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read project activity.');
-      return await activityCounts(ctx, await accessibleProject(ctx, projectId, user.subject));
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
-export const publicCounts = coordinationQuery({
-  args,
-  returns: countFields,
-  handler: async (ctx, { projectId }) => {
-    try {
-      const project = await ctx.db.get(projectId);
-      invariant(
-        project?.visibility === 'public' && !project.removal,
-        'PROJECT_UNAVAILABLE',
-        'This public project is unavailable.',
-      );
-      return await activityCounts(ctx, project);
+      return await activityCounts(ctx, await coordinationProject(ctx, projectId, user.subject));
     } catch (error) {
       return report(error);
     }

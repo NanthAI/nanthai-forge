@@ -387,15 +387,22 @@ test('public Activity and read-only roles cannot read questions, answers or hand
   for (const pick of [{ action: 'feed' }, { action: 'recent' }, { action: 'related', laneIds: [laneId] }]) {
     const owner = await f.coord('owner', pick);
     assert((owner.page ?? owner.items).some(row => (row.operationId ?? row.id) === back.operationId));
-    for (const actor of ['reader', 'visitor']) {
-      const reply = await f.coord(actor, { ...pick, pageSize: 10 });
-      assert.deepEqual(
-        (reply.page ?? reply.items).map(row => row.operationId ?? row.id),
-        [legacyId],
+    // Coordination is team-only on every project (b6588425): a public project's visitor and its reader grant are
+    // refused the whole feed, not only its conversation rows.
+    for (const actor of ['reader', 'visitor'])
+      await assert.rejects(
+        f.coord(actor, { ...pick, pageSize: 10 }),
+        error => /unavailable/i.test(String(error?.data?.message ?? error?.message)),
+        `${actor} ${pick.action}`,
       );
-      assert(reply.isDone);
-    }
   }
+  // A private project's reader still reads Activity, without the conversation rows.
+  f.patch('hostedProjects', f.projectId, { visibility: 'private' });
+  const reply = await f.coord('reader', { action: 'feed', pageSize: 10 });
+  assert.deepEqual(
+    reply.page.map(row => row.operationId),
+    [legacyId],
+  );
 });
 
 test('a Lane thread pages retained notes and scoped messages without skips or duplicates', async t => {
