@@ -25,10 +25,13 @@ const mentions = doc => {
   const path = new RegExp(`(?:^|[^\\w./-])(?:\\.{1,2}/)${root ? '+' : '*'}${escape(doc)}(?![\\w/-])`);
   const name = root && quoted(doc);
   // A link/heading test can pass an extensionless, root-relative route to the Markdown reader.
-  const route = !root && new RegExp(`['"]/${escape(doc.slice(0, -3))}/?(?:#[^'"]*)?['"]`);
+  const routePath = root ? null : `/${doc.slice(0, -3)}`;
+  const route = routePath && new RegExp(`['"]${escape(routePath)}/?(?:#[^'"]*)?['"]`);
   return text => {
-    if (route && route.test(text) && /\breadDocument\s*\(/.test(text)) return 'link';
-    if (path.test(text) || (name && rootRelative.test(text) && name.test(text))) return 'path';
+    if (route && text.includes(routePath) && /\breadDocument\s*\(/.test(text) && route.test(text))
+      return 'link';
+    if (text.includes(doc) && (path.test(text) || (name && rootRelative.test(text) && name.test(text))))
+      return 'path';
     return undefined;
   };
 };
@@ -53,10 +56,14 @@ export function docsReaders(files, changed) {
     ),
   ];
   const patterns = docs.map(doc => [doc, mentions(doc)]);
-  const tests = [...files.keys()].filter(testFile).sort();
+  const tests = [];
   const carriers = [];
-  for (const [path, text] of files) {
-    if (packager(path) || !/^(?:tests|scripts)\//.test(path) || typeof text !== 'string') continue;
+  for (const path of files.keys()) {
+    if (packager(path) || !/^(?:tests|scripts)\//.test(path)) continue;
+    const text = files.get(path);
+    if (typeof text !== 'string') continue;
+    const test = testFile(path);
+    if (test) tests.push(path);
     let reader;
     for (const [doc, named] of patterns) {
       const match = named(text);
@@ -67,15 +74,23 @@ export function docsReaders(files, changed) {
       if (match && !reader) reader = { doc, via: path };
     }
     if (!reader) continue;
-    if (testFile(path)) found.set(path, reader);
+    if (test) found.set(path, reader);
     else
       carriers.push({
         reader,
         loaded: new RegExp(`/${escape(stem(path))}\\.[cm]?[jt]sx?['"\`]`),
+        tests: [],
       });
   }
-  for (const { reader, loaded } of carriers)
-    for (const test of tests) if (!found.has(test) && loaded.test(files.get(test))) found.set(test, reader);
+  if (carriers.length) {
+    for (const test of tests.sort()) {
+      if (found.has(test)) continue;
+      const text = files.get(test);
+      carriers.find(({ loaded }) => loaded.test(text))?.tests.push(test);
+    }
+    // Read each unmatched test once, then emit in the original carrier-first order.
+    for (const { reader, tests } of carriers) for (const test of tests) found.set(test, reader);
+  }
   for (const [test, scan] of scanReaders(files, docs))
     if (!found.has(test)) found.set(test, { doc: scan.path, via: test, scan: scan.folder });
   return found;

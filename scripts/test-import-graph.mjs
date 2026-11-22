@@ -136,9 +136,8 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
   };
   let uncertain;
   const domains = ['src/', 'web/src/', 'convex/', 'netlify/', 'scripts/', 'tests/'];
-  const jsonFiles = [...files.keys()].filter(
-    file => file.endsWith('.json') && domains.some(dir => file.startsWith(dir)),
-  );
+  const paths = [...files.keys()];
+  const jsonFiles = paths.filter(file => file.endsWith('.json') && domains.some(dir => file.startsWith(dir)));
   const jsonGlobs = new Map();
   const matchingJson = pattern => {
     if (!jsonGlobs.has(pattern)) {
@@ -169,11 +168,18 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
     if (!loaderDefinitions.has(home)) loaderDefinitions.set(home, raw.get(home).defines);
     return loaderDefinitions.get(home);
   };
-  const convexModules = [...files.keys()]
+  const convexModules = paths
     .map(file => file.match(/^convex\/(?!_generated\/)(.+)\.[jt]s$/)?.[1])
     .filter(name => name && !name.endsWith('.d'));
-  const convexModule = name =>
-    ['.ts', '.js'].map(ext => 'convex/' + name + ext).find(file => files.has(file));
+  const convexResolutions = new Map();
+  const convexModule = name => {
+    if (!convexResolutions.has(name)) {
+      const tsPath = `convex/${name}.ts`;
+      const jsPath = `convex/${name}.js`;
+      convexResolutions.set(name, files.has(tsPath) ? tsPath : files.has(jsPath) ? jsPath : undefined);
+    }
+    return convexResolutions.get(name);
+  };
   // Convex calls functions by name ("module:function", api.module.function), not by
   // import. Every file's names are recorded; a name we cannot read stands for the
   // matching modules, or for every module. Backend and test code dispatch names
@@ -183,14 +189,18 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
   // import, by a literal list, or by name through a by-name loader (below).
   const named = new Map(),
     nameLoaders = new Set();
-  const dispatches = path => /^(?:convex|tests)\//.test(path);
   const functionReference = (path, names, detail, kind = 'function-reference') => {
-    if (!named.has(path)) named.set(path, new Map());
+    let references = named.get(path);
+    if (!references) {
+      references = new Map();
+      named.set(path, references);
+    }
+    const dispatches = /^(?:convex|tests)\//.test(path);
     for (const name of names) {
       const module = convexModule(name),
         evidence = { kind, detail: kind === 'dynamic' ? detail : `${detail}: ${name}` };
-      if (named.get(path).get(module)?.kind !== 'function-reference') named.get(path).set(module, evidence);
-      if (dispatches(path)) edge(module, path, evidence.kind, evidence.detail);
+      if (references.get(module)?.kind !== 'function-reference') references.set(module, evidence);
+      if (dispatches) edge(module, path, evidence.kind, evidence.detail);
     }
   };
   const widenFunctions = (path, prefix, detail) => {
@@ -198,7 +208,6 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
     functionReference(path, matches.length ? matches : convexModules, detail, 'dynamic');
   };
   const changedScripts = new Set(scriptsChanged.map(item => item.path));
-  const paths = [...files.keys()];
   const domainPaths = new Map(domains.map(domain => [domain, []]));
   const sourcePaths = [];
   for (const path of paths) {
@@ -212,6 +221,37 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
   const namesAt = path => {
     if (!built.has(path)) built.set(path, builtNames(path));
     return built.get(path);
+  };
+  const suffixMatches = new Map();
+  const templateMatches = new Map();
+  const widenedPaths = (prefix, from) => {
+    if (prefix.suffix) {
+      const suffix = prefix.suffix;
+      if (!suffixMatches.has(suffix))
+        suffixMatches.set(
+          suffix,
+          paths.filter(candidate =>
+            namesAt(candidate).some(name => name === suffix || name.endsWith(`/${suffix}`)),
+          ),
+        );
+      return suffixMatches.get(suffix);
+    }
+    const template = Array.isArray(prefix) ? prefix : null;
+    const head = template ? template[0] : prefix;
+    const normalized = head.startsWith('.') ? posix.normalize(posix.join(posix.dirname(from), head)) : head;
+    const domain = normalized.startsWith('dist/') ? 'src/' : domains.find(dir => normalized.startsWith(dir));
+    if (!domain) return sourcePaths;
+    const candidates = domainPaths.get(domain);
+    if (!template) return candidates;
+    const patternSource = `^${[normalized, ...template.slice(1)].map(escape).join('.*')}(?:/.*)?$`;
+    if (!templateMatches.has(patternSource)) {
+      const pattern = new RegExp(patternSource, 's');
+      templateMatches.set(
+        patternSource,
+        candidates.filter(candidate => namesAt(candidate).some(name => pattern.test(name))),
+      );
+    }
+    return templateMatches.get(patternSource);
   };
   const workspaceUsers = new Set();
   for (const path of paths.slice().sort()) {
@@ -266,25 +306,7 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
         .map(([name]) => name),
     );
     const widen = (prefix, detail = 'Computed module path', kind = 'dynamic', from = path) => {
-      if (prefix.suffix) {
-        for (const candidate of paths)
-          if (namesAt(candidate).some(name => name === prefix.suffix || name.endsWith(`/${prefix.suffix}`)))
-            edge(candidate, path, kind, detail);
-        return;
-      }
-      const template = Array.isArray(prefix) ? prefix : null;
-      const head = template ? template[0] : prefix;
-      const normalized = head.startsWith('.') ? posix.normalize(posix.join(posix.dirname(from), head)) : head;
-      const domain = normalized.startsWith('dist/')
-        ? 'src/'
-        : domains.find(dir => normalized.startsWith(dir));
-      const pattern =
-        template && domain
-          ? new RegExp(`^${[normalized, ...template.slice(1)].map(escape).join('.*')}(?:/.*)?$`, 's')
-          : null;
-      for (const candidate of domain ? domainPaths.get(domain) : sourcePaths)
-        if (!pattern || namesAt(candidate).some(name => pattern.test(name)))
-          edge(candidate, path, kind, detail);
+      for (const candidate of widenedPaths(prefix, from)) edge(candidate, path, kind, detail);
     };
     const loadStack = [];
     for (const fact of facts.events) {

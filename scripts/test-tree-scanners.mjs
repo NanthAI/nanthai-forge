@@ -2,9 +2,10 @@
 // Guards that read repository files without importing them become consumers of the paths they read.
 import { posix } from 'node:path';
 import { treeReaders } from './test-tree-readers.mjs';
+import { treeScanCache } from './test-import-cache.mjs';
 
 const testFile = path => /^tests\/[^/]+\.test\.mjs$/.test(path);
-export const treeScanners = files => treeReaders(files, testFile);
+export const treeScanners = files => treeReaders(files, testFile, undefined, treeScanCache(files));
 
 /** A scan covers a path inside its folder (anywhere below it when recursive, directly in it when not);
  * an import walk (`code`) covers no Markdown document. */

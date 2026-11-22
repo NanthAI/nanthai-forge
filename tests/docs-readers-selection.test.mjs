@@ -50,6 +50,24 @@ test('a document no test reads still runs 0 test files', () => {
   assert.doesNotMatch(selection.reason, /plus the/);
 });
 
+test('the first matching document helper supplies the reason for a test that imports two helpers', () => {
+  const a = at('docs', 'a.md');
+  const z = at('docs', 'z.md');
+  const files = new Map([
+    ['tests/a.test.mjs', "import './a-helper.mjs';"],
+    ['tests/two.test.mjs', "import './a-helper.mjs'; import './z-helper.mjs';"],
+    ['tests/z-helper.mjs', `readFileSync('../${z}');`],
+    ['tests/a-helper.mjs', `readFileSync('../${a}');`],
+  ]);
+  assert.deepEqual(
+    [...docsReaders(files, [a, z])],
+    [
+      ['tests/two.test.mjs', { doc: z, via: 'tests/z-helper.mjs' }],
+      ['tests/a.test.mjs', { doc: a, via: 'tests/a-helper.mjs' }],
+    ],
+  );
+});
+
 test('the main audit and an explicit full run are not narrowed by the readers', () => {
   const files = fixture();
   for (const input of [{ mainCheck: { channel: 'main' } }, { env: { FORGE_CHECK_FULL: '1' } }]) {

@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { pinImportFacts } from '../scripts/test-import-cache.mjs';
 import { testImportGraph } from '../scripts/test-import-graph.mjs';
 import { selectTests } from '../scripts/test-impact.mjs';
+import { scanReaders, treeScanners } from '../scripts/test-tree-scanners.mjs';
 
 const sha = text => createHash('sha256').update(text).digest('hex');
 const base = {
@@ -146,4 +147,45 @@ test('a browser-only parse retains type reach and leaves symbols to the runtime 
   assert.equal(runtime.reverse.has('src/first.ts'), false);
   assert.ok(runtime.symbols.get('src/hub.ts').exports.has('affected'));
   assert.ok(opened.has('src/hub.ts'));
+});
+
+test('warm guard scopes follow changed test pins, folder eligibility and package file lists', t => {
+  const { read } = fixture(t);
+  const guard = 'tests/list.test.mjs';
+  const manifestGuard = 'tests/shipped.test.mjs';
+  const sources = {
+    'package.json': '{"files":["src/a.ts"]}',
+    [guard]: "import { readdirSync } from 'node:fs'; readdirSync('src');",
+    [manifestGuard]: `import { readFileSync } from 'node:fs';
+      const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+      for (const file of pkg.files) readFileSync(file);`,
+    'src/a.ts': '',
+  };
+  assert.ok(scanReaders(read(sources).files, ['src/a.ts']).has(guard));
+  const { 'src/a.ts': removed, ...next } = sources;
+  const added = { ...next, 'lib/b.ts': removed, 'package.json': '{"files":["lib/b.ts"]}' };
+  const files = read(added).files;
+  assert.equal(treeScanners(files).has(guard), false);
+  assert.ok(scanReaders(files, ['lib/b.ts']).has(manifestGuard));
+  assert.equal(scanReaders(files, ['src/a.ts']).has(manifestGuard), false);
+  const changed = { ...added, [guard]: sources[guard].replace("'src'", "'lib'") };
+  assert.ok(scanReaders(read(changed).files, ['lib/b.ts']).has(guard));
+});
+
+test('a shared binding in a new test invalidates warm guard scopes from the old program', t => {
+  const { read } = fixture(t);
+  const guard = 'tests/list.test.mjs';
+  const sources = {
+    'src/a.ts': '',
+    [guard]: "import { readdirSync } from 'node:fs'; readdirSync(new URL('../src', import.meta.url));",
+  };
+  assert.ok(treeScanners(read(sources).files).has(guard));
+  const withGlobal = {
+    ...sources,
+    'tests/globals.test.mjs': 'declare global { const URL = replacement; } // globSync',
+  };
+  const warm = treeScanners(read(withGlobal).files);
+  assert.equal(warm.has(guard), false);
+  assert.deepEqual(warm, treeScanners(new Map(Object.entries(withGlobal))));
+  assert.ok(treeScanners(read(sources).files).has(guard));
 });

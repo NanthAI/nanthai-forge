@@ -489,10 +489,6 @@ function selectWithGraph(
   // Product source and JSON are data to the static tools (build, typecheck, lint, format,
   // schema, package smoke), which run on every exact Candidate. Their chains stop at
   // those commands, and at those tools when the tool reads it rather than imports it.
-  const fenced = (item, importer, edge) =>
-    (productSource(item.changedPath) || item.changedPath.endsWith('.json')) &&
-    (packageGraph.staticCommands?.has(importer) ||
-      (packageGraph.staticTools?.has(importer) && edge.kind !== 'import'));
   // The docs-check wrapper only spawns the docs check; the runner importing it is not a consumer.
   const affected = new Map();
   // Workspace-path edges wait here; they reach only code that makes this repository a workspace.
@@ -508,11 +504,9 @@ function selectWithGraph(
   // there, once as affected and once as held. An importer that uses none of them is not reached.
   // A changed path, a module without symbols and an edge without a known site are whole.
   const taints = { affected: new Map(), held: new Map() };
-  const transfer = (taint, dependency, importer) => {
-    if (!taint.whole && !taint.names.size) return null;
-    const info = symbols?.get(importer),
-      record = sites?.get(dependency)?.get(importer),
-      declared = info?.imports.get(dependency);
+  const transfer = (taint, dependency, importer, record) => {
+    const info = symbols?.get(importer);
+    const declared = info?.imports.get(dependency);
     if (
       !info ||
       !record ||
@@ -520,7 +514,7 @@ function selectWithGraph(
       (!declared && !record.statements.size) ||
       (declared && taint.whole)
     )
-      return { whole: true };
+      return wholeTaint;
     const delta = { statements: [...record.statements], locals: [], exports: [] };
     const has = name => (name === '*' ? taint.names.size > 0 : taint.names.has(name));
     for (const [local, imported] of declared?.bindings ?? []) if (has(imported)) delta.locals.push(local);
@@ -531,14 +525,17 @@ function selectWithGraph(
   };
   /** Adds `delta` to the module's entries; true when what it passes on grew (or it is new). */
   const merge = (mode, path, delta) => {
-    if (!taints[mode].has(path))
-      taints[mode].set(path, {
+    let state = taints[mode].get(path);
+    if (state?.entries.whole) return false;
+    if (!state) {
+      state = {
         entries: { whole: false, statements: new Set(), locals: new Set(), exports: new Set() },
         taint: null,
-      });
-    const state = taints[mode].get(path);
-    let grew = false;
-    if (delta.whole) grew = !state.entries.whole;
+      };
+      taints[mode].set(path, state);
+    }
+    let grew = delta.whole;
+    if (delta.whole) state.entries.whole = true;
     else
       for (const key of ['statements', 'locals', 'exports'])
         for (const value of delta[key])
@@ -546,7 +543,6 @@ function selectWithGraph(
             state.entries[key].add(value);
             grew = true;
           }
-    if (delta.whole) state.entries.whole = true;
     if (!grew) return false;
     const info = symbols?.get(path);
     const previous = state.taint;
@@ -563,14 +559,21 @@ function selectWithGraph(
       const previous = (mode === 'affected' ? affected : held).get(current);
       if (blocked && docsWrapper(current, previous.changedPath)) continue;
       const { taint } = taints[mode].get(current);
-      for (const importer of reverse.get(current) ?? []) {
-        const edge = evidence.get(current).get(importer);
-        if (fenced(previous, importer, edge)) continue;
+      if (!taint.whole && !taint.names.size) continue;
+      const fenceStatic = productSource(previous.changedPath) || previous.changedPath.endsWith('.json');
+      const currentSites = sites?.get(current);
+      for (const [importer, edge] of evidence.get(current) ?? []) {
+        if (
+          fenceStatic &&
+          (packageGraph.staticCommands?.has(importer) ||
+            (packageGraph.staticTools?.has(importer) && edge.kind !== 'import'))
+        )
+          continue;
         const target =
           (mode === 'held' || edge.kind === 'workspace-path') && !workspaceUsers?.has(importer)
             ? 'held'
             : 'affected';
-        const delta = transfer(taint, current, importer);
+        const delta = transfer(taint, current, importer, currentSites?.get(importer));
         if (!delta) continue;
         const reached = target === 'affected' ? affected : held;
         if (!reached.has(importer)) reached.set(importer, step(previous, edge, importer));
@@ -590,7 +593,7 @@ function selectWithGraph(
             edges: [],
             ...(item.reason ? { detail: item.reason } : {}),
           });
-        if (merge('affected', seed, { whole: true })) queue.push([seed, 'affected']);
+        if (merge('affected', seed, wholeTaint)) queue.push([seed, 'affected']);
       }
     walk(queue, blocked);
   };

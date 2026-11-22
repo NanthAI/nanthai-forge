@@ -750,10 +750,35 @@ export function recursiveRootListings(ast) {
 }
 
 const memo = new WeakMap();
+function scannerSource(path, text) {
+  // Each test runs as its own module even when the inventory text has no import or export.
+  return ts.createSourceFile(
+    path,
+    text,
+    {
+      languageVersion: ts.ScriptTarget.Latest,
+      jsDocParsingMode: ts.JSDocParsingMode.ParseNone,
+      setExternalModuleIndicator: file => {
+        file.externalModuleIndicator = file;
+      },
+    },
+    true,
+    ts.ScriptKind.JS,
+  );
+}
+
+// The pinned TypeScript binder records declarations that can affect other source
+// files. Preserve the full program when a test contributes any such declaration.
+const sharedBindings = ast =>
+  ast.jsGlobalAugmentations?.size ||
+  ast.patternAmbientModules?.length ||
+  ast.moduleAugmentations?.length ||
+  ast.symbol?.globalExports?.size;
+
 /** Test file -> the scopes it reads. Folder '' is the repository root. A `code` scope is an import
  * walk and excludes Markdown; a `file` or `entry` scope covers individual paths. Memoized per
  * inventory, test rule and skip set. */
-export function treeReaders(files, isTest, skip = new Set()) {
+export function treeReaders(files, isTest, skip = new Set(), cache) {
   // One entry per inventory, reused only for the same test rule and the same skipped tests.
   const key = [...skip].sort().join('\n');
   const hit = memo.get(files);
@@ -785,37 +810,41 @@ export function treeReaders(files, isTest, skip = new Set()) {
     }
     return manifests.get(path);
   };
-  const sources = new Map();
-  for (const [path, text] of files) {
-    if (!isTest(path) || skip.has(path) || typeof text !== 'string' || !maybe(text, folders)) continue;
-    // Each test runs as its own module even when the inventory text has no import or export.
-    sources.set(
-      path,
-      ts.createSourceFile(
-        path,
-        text,
-        {
-          languageVersion: ts.ScriptTarget.Latest,
-          jsDocParsingMode: ts.JSDocParsingMode.ParseNone,
-          setExternalModuleIndicator: file => {
-            file.externalModuleIndicator = file;
-          },
-        },
-        true,
-        ts.ScriptKind.JS,
-      ),
-    );
+  let sources = new Map();
+  const candidates = new Map();
+  const cached = new Map();
+  for (const path of files.keys()) {
+    if (!isTest(path) || skip.has(path)) continue;
+    const text = files.get(path);
+    if (typeof text !== 'string' || !maybe(text, folders)) continue;
+    candidates.set(path, text);
+    const scans = cache?.get(path);
+    if (scans) cached.set(path, scans);
+    else sources.set(path, scannerSource(path, text));
   }
-  const checker = sources.size ? treeChecker(sources) : undefined;
-  for (const [path, ast] of sources) {
-    let scans;
-    try {
-      scans = analyse(ast, undefined, mentionsManifestFiles(ast.text) ? manifestFiles : undefined, checker);
-    } catch {
-      continue; /* An unparseable test is the graph's problem; it fails selection there. */
+  let checker = sources.size ? treeChecker(sources) : undefined;
+  const sharesBindings = cache && [...sources.values()].some(sharedBindings);
+  if (sharesBindings && cached.size) {
+    sources = new Map([...candidates].map(([path, text]) => [path, scannerSource(path, text)]));
+    checker = treeChecker(sources);
+    cached.clear();
+  }
+  for (const [path, text] of candidates) {
+    let scans = cached.get(path);
+    if (!scans) {
+      const readsManifest = mentionsManifestFiles(text);
+      try {
+        scans = analyse(sources.get(path), undefined, readsManifest ? manifestFiles : undefined, checker);
+      } catch {
+        continue; /* An unparseable test is the graph's problem; it fails selection there. */
+      }
+      // Folder eligibility was checked on this inventory. Manifest readers also
+      // need the current package file lists, so reuse only independent scopes.
+      if (!sharesBindings && !readsManifest) cache?.set(path, scans);
     }
     if (scans.length) found.set(path, scans);
   }
+  cache?.flush();
   memo.set(files, { isTest, key, found });
   return found;
 }

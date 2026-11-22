@@ -6,7 +6,7 @@ import { deserialize, serialize } from 'node:v8';
 import ts from 'typescript';
 import { parseImportFacts } from './test-import-facts.mjs';
 
-// Bump when any parser, symbol, or fact semantics change. The TS version pins its AST semantics.
+// Bump when parser, symbol, guard-scope or fact semantics change. The TS version pins AST semantics.
 const schema = `3:${ts.version}`;
 const sha256 = bytes => createHash('sha256').update(bytes).digest();
 const validHash = hash => typeof hash === 'string' && /^[a-f0-9]{64}$/.test(hash);
@@ -58,6 +58,47 @@ function writeCache(path, entries) {
   }
 }
 
+function loadBucket(input, bucket) {
+  if (!input.buckets.has(bucket)) input.buckets.set(bucket, readCache(join(input.cacheDirectory, bucket)));
+  return input.buckets.get(bucket);
+}
+
+function flushBuckets(files, input, changed) {
+  for (const bucket of changed) {
+    const entries = input.buckets.get(bucket);
+    for (const [file, [hash]] of entries)
+      if (!files.has(file) || input.blobs.get(file) !== hash) entries.delete(file);
+    writeCache(join(input.cacheDirectory, bucket), entries);
+  }
+}
+
+/** Optional scanner facts are stored beside import facts for the same pinned test bytes. */
+export function treeScanCache(files) {
+  const input = inputs.get(files);
+  if (!input?.cacheDirectory) return;
+  const changed = new Set();
+  return {
+    get(file) {
+      const hash = input.blobs.get(file);
+      if (!validHash(hash)) return;
+      const entry = loadBucket(input, bucketOf(file)).get(file);
+      if (entry?.[0] === hash) return entry[2];
+    },
+    set(file, scans) {
+      const hash = input.blobs.get(file);
+      if (!validHash(hash)) return;
+      const bucket = bucketOf(file);
+      const entries = loadBucket(input, bucket);
+      const entry = entries.get(file);
+      entries.set(file, [hash, entry?.[0] === hash ? entry[1] : undefined, scans]);
+      changed.add(bucket);
+    },
+    flush() {
+      flushBuckets(files, input, changed);
+    },
+  };
+}
+
 export function importFacts(files, withSymbols) {
   const input = inputs.get(files);
   const directory = input?.cacheDirectory;
@@ -70,8 +111,7 @@ export function importFacts(files, withSymbols) {
       if (complete(existing)) return existing;
       const hash = input?.blobs.get(file);
       const bucket = directory && validHash(hash) ? bucketOf(file) : undefined;
-      if (bucket && !input.buckets.has(bucket)) input.buckets.set(bucket, readCache(join(directory, bucket)));
-      const entries = bucket && input.buckets.get(bucket);
+      const entries = bucket && loadBucket(input, bucket);
       const entry = entries?.get(file);
       if (entry && entry[0] === hash && complete(entry[1])) {
         current.set(file, entry[1]);
@@ -80,7 +120,7 @@ export function importFacts(files, withSymbols) {
       const fact = parseImportFacts(file, files.get(file) ?? '', withSymbols);
       current.set(file, fact);
       if (entries) {
-        entries.set(file, [hash, fact]);
+        entries.set(file, entry?.[0] === hash && entry[2] ? [hash, fact, entry[2]] : [hash, fact]);
         changed.add(bucket);
       }
       return fact;
@@ -89,12 +129,7 @@ export function importFacts(files, withSymbols) {
       if (!input || !validHash(input.blobs.get(file))) current.delete(file);
     },
     flush() {
-      for (const bucket of changed) {
-        const entries = input.buckets.get(bucket);
-        for (const [file, [hash]] of entries)
-          if (!files.has(file) || input.blobs.get(file) !== hash) entries.delete(file);
-        writeCache(join(directory, bucket), entries);
-      }
+      flushBuckets(files, input, changed);
     },
   };
 }

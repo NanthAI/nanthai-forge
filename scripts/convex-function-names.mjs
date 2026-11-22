@@ -101,18 +101,31 @@ export function byNameDispatch(files, evidence, edge, named, nameLoaders) {
     ]);
   const seen = new Uint32Array(paths.length);
   const visit = new Uint32Array(paths.length);
+  const namedAt = new Uint32Array(paths.length);
+  const exactAt = new Uint32Array(paths.length);
+  const namedFrom = new Uint32Array(paths.length);
+  const namedOrder = new Uint32Array(paths.length);
   let stamp = 0;
   for (const test of tests) {
     stamp++;
     seen[test] = stamp;
     visit[0] = test;
     let end = 1;
-    const names = new Map();
+    let nameCount = 0;
     for (let i = 0; i < end; i++) {
       const current = visit[i];
       for (const [module, exact] of namedById[current] ?? []) {
-        const previous = names.get(module);
-        if (!previous || (exact && !previous.exact)) names.set(module, { exact, current });
+        // Keep breadth-first discovery order, replacing only the explanation when an
+        // exact reference beats an earlier dynamic one.
+        if (namedAt[module] !== stamp) {
+          namedAt[module] = stamp;
+          namedOrder[nameCount++] = module;
+          namedFrom[module] = current;
+          if (exact) exactAt[module] = stamp;
+        } else if (exact && exactAt[module] !== stamp) {
+          namedFrom[module] = current;
+          exactAt[module] = stamp;
+        }
         if (seen[module] !== stamp) {
           seen[module] = stamp;
           visit[end++] = module;
@@ -124,15 +137,17 @@ export function byNameDispatch(files, evidence, edge, named, nameLoaders) {
           visit[end++] = dependency;
         }
     }
-    for (const [module, item] of names)
+    for (let i = 0; i < nameCount; i++) {
+      const module = namedOrder[i];
       if (module !== test && files.has(paths[module]))
         edge(
           paths[module],
           paths[test],
-          item.exact ? 'function-reference' : 'dynamic',
-          detail(paths[item.current]),
+          exactAt[module] === stamp ? 'function-reference' : 'dynamic',
+          detail(paths[namedFrom[module]]),
           true,
         );
+    }
   }
 }
 // `../convex/${module}.ts` where module is the first part of name.split(':'): the

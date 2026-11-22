@@ -60,6 +60,28 @@ test('temporary and fixture folders are not repository scans', () => {
   );
 });
 
+test('lazy guard discovery leaves unrelated source blobs unread', () => {
+  const files = new (class extends Map {
+    get(path) {
+      assert.notEqual(path, 'src/a.ts');
+      return super.get(path);
+    }
+    *entries() {
+      for (const path of this.keys()) yield [path, this.get(path)];
+    }
+    [Symbol.iterator]() {
+      return this.entries();
+    }
+  })([
+    ['src/a.ts', ''],
+    ['tests/guard.test.mjs', header + "readdirSync(new URL('../src', import.meta.url));"],
+  ]);
+  assert.deepEqual(
+    [...scanReaders(files, ['src/a.ts'])],
+    [['tests/guard.test.mjs', { path: 'src/a.ts', folder: 'src' }]],
+  );
+});
+
 test('a scan covers files in its folder: below it when recursive, directly in it when not', () => {
   assert.ok(scanCovers({ folder: 'src', recursive: true }, 'src/a/b.ts'));
   assert.ok(scanCovers({ folder: 'src', recursive: false }, 'src/b.ts'));
