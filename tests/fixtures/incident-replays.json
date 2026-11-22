@@ -11116,6 +11116,13 @@
         "src/scoped-recheck-policy.ts"
       ],
       "test": "incident replay bf111983 line 4 (Item 0d14c456): a cohort whose check environment fails waits under the hold instead of splitting into re-checks that fail the same way"
+    },
+    {
+      "incident": "67771ca6",
+      "what": "Core claim: a no-op landing staged in a mirror burst POSTed a commit for its unchanged State and GitHub returned a new SHA, stopping the mirror with GITHUB_SYNC_HASH (2026-11-22)",
+      "file": "tests/github-mirror-noop-burst.test.mjs",
+      "paths": [],
+      "test": "incident 67771ca6: a no-op landing staged in a burst publishes no commit and the burst tip lands"
     }
   ]
 }

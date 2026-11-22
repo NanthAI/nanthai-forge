@@ -247,7 +247,12 @@ test('real action: GitHub 422 on trees fails once with its bounded message in jo
   assert.notEqual(job.cursor, f.cursor, 'verified blob progress is checkpointed');
   assert.equal(f.scheduled.length, 1, 'a 422 schedules no retry');
   const status = await f.status();
-  assert.equal(status.detail, `Job for State ${f.github.head.slice(0, 8)}: ${job.detail}`);
+  // Incident 67771ca6: the stop record names the receipt whose publish holds the mirror.
+  assert.equal(
+    status.detail,
+    `Job for State ${f.github.head.slice(0, 8)} (receipt ${job.receiptId.slice(0, 8)}): ${job.detail}`,
+  );
+  assert.equal(status.receiptId, job.receiptId);
   assert.match(hostedMirrorStatusText(status, Date.now()), /GitRPC::BadObjectState/);
 });
 

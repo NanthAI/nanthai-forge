@@ -98,15 +98,17 @@ export async function githubMirrorStatus(
       failedError ?? job?.error ?? (settled?.phase === 'terminal-failed' ? 'GITHUB_INBOUND_FAILED' : null),
     // targetHead is current main; name the State this failing job publishes.
     detail: hold
-      ? `Job for State ${hold.state.slice(0, 8)}: ${hold.detail ?? 'did not run'}${stranded.length > 1 ? ` (+${stranded.length - 1} more failed publishes)` : ''}`
+      ? `Job for State ${hold.state.slice(0, 8)} (receipt ${hold.receiptId.slice(0, 8)}): ${hold.detail ?? 'did not run'}${stranded.length > 1 ? ` (+${stranded.length - 1} more failed publishes)` : ''}`
       : verifyFailed
         ? `forge/verify could not be posted to GitHub for PR #${verifyPost!.number} at ${verifyPost!.head.slice(0, 12)} (${verifyFailed.error}); GitHub keeps blocking the merge.`
         : job?.detail
           ? inbound
             ? `Inbound job: ${job.detail}`
-            : `Job for State ${job.state.slice(0, 8)}: ${job.detail}`
+            : `Job for State ${job.state.slice(0, 8)} (receipt ${job.receiptId.slice(0, 8)}): ${job.detail}`
           : inboundDetail,
     jobId: hold?._id ?? job?._id ?? null,
+    // The receipt whose publish holds the mirror, from the job row already read (incident 67771ca6).
+    receiptId: hold?.receiptId ?? (job && !inbound ? job.receiptId : null),
     push,
     ...(queue?.hold && policy.autoPush
       ? { held: { count: queue.queuedPublishes ?? 1, until: queue.hold.until, red: queue.hold.red } }

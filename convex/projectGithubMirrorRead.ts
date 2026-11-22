@@ -34,6 +34,8 @@ export const read = query({
         pendingSince: v.union(v.number(), v.null()),
         error: v.union(v.string(), v.null()),
         detail: v.union(v.string(), v.null()),
+        /** The receipt whose publish holds the mirror (incident 67771ca6). */
+        receiptId: v.optional(v.union(v.string(), v.null())),
       }),
       v.null(),
     ),
@@ -76,6 +78,7 @@ export const read = query({
               pendingSince: status.pendingSince,
               error: status.error,
               detail: status.detail,
+              receiptId: status.receiptId ?? null,
             }
           : null,
         owner,

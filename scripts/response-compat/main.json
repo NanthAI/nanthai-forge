@@ -460,6 +460,12 @@
                     "null"
                   ]
                 },
+                "receiptId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "push": {
                   "type": "object",
                   "properties": {

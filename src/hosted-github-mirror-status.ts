@@ -94,6 +94,8 @@ export const hostedMirrorStatusSchema = z.object({
   error: z.string().nullable(),
   detail: z.string().nullable(),
   jobId: z.string().nullable(),
+  /** The receipt whose publish holds the mirror (absent from older servers). */
+  receiptId: z.string().nullable().optional(),
   push: mirrorCadenceSchema.optional(),
   held: mirrorHeldSchema.optional(),
   verifyError: z.string().optional(),

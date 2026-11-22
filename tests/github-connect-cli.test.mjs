@@ -297,3 +297,50 @@ test('nforge import --preview makes one read and starts nothing (a488af2a)', asy
   assert.equal(report.next, 'nforge import example/repo [--private]');
   assert.deepEqual(readdirSync(directory), [], 'no journal: nothing was started');
 });
+
+test('incident 67771ca6: github status names the stopped mirror invariant and receipt, with no extra read', async () => {
+  const queries = [];
+  const detail =
+    'Job for State 541ed345 (receipt 893d4653): GitHub commit differs from the deterministic mirror commit (expected 95fe4ed52dc8, GitHub returned 0123456789ab). Next: fix the cause, then the project owner runs nforge github resume PROJECT (or Resume in the mirror panel); the cursor and State are kept.';
+  const reads = {
+    'githubBindingStore:list': { page: [], isDone: true, continueCursor: '' },
+    'projectGithubMirrorRead:read': {
+      repository: 'synthetic/mirror',
+      direction: 'one-way',
+      state: 'stopped',
+      weight: 'act',
+      sentence: 'The mirror to synthetic/mirror stopped (GITHUB_SYNC_HASH). Landings on Forge continue.',
+      next: 'fix the cause, then the project owner runs nforge github resume . (or Resume in the mirror panel)',
+      ends: {
+        forgeHead: 'a'.repeat(64),
+        mirroredHead: 'b'.repeat(64),
+        gitHead: 'c'.repeat(40),
+        mirroredAt: 1,
+        pendingSince: 2,
+        error: 'GITHUB_SYNC_HASH',
+        detail,
+        receiptId: '893d4653-e7a5-4d1b-8639-8f9ec839a8ee',
+      },
+      repoId: null,
+      inbound: false,
+      owner: true,
+    },
+  };
+  const result = await githubConnectCli(['status', address.projectId, '--url', address.url], {
+    transport: () => ({
+      query: async name => {
+        queries.push(name);
+        return reads[name];
+      },
+    }),
+  });
+  assert.deepEqual(queries, ['githubBindingStore:list', 'projectGithubMirrorRead:read']);
+  assert.equal(result.mirror.error, 'GITHUB_SYNC_HASH');
+  assert.equal(result.mirror.detail, detail);
+  assert.equal(result.mirror.receiptId, '893d4653-e7a5-4d1b-8639-8f9ec839a8ee');
+  assert.match(
+    result.summary,
+    /deterministic mirror commit \(expected 95fe4ed52dc8, GitHub returned 0123456789ab\)\./,
+  );
+  assert.doesNotMatch(result.summary, /Next:/, 'the recovery stays in next, said once');
+});

@@ -517,19 +517,24 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
     );
     if (current?.object.sha !== commit) {
       if (seed.notice && !branch && publish) await tellPusher(seed.repository, seed.notice, io);
-      const date = new Date(entry.seconds * 1000).toISOString();
-      const created = await io.api<{ sha: string }>(`${prefix}/commits`, 'POST', {
-        tree,
-        parents: mergeParent ? [plan.parent, mergeParent] : [plan.parent],
-        message: `${entry.message}\n`,
-        author: { ...entry.author, date },
-        committer: { ...entry.committer, date },
-      });
-      invariant(
-        created.sha === commit,
-        'GITHUB_SYNC_HASH',
-        'GitHub commit differs from the deterministic mirror commit.',
-      );
+      // An unchanged State (a no-op landing, incident 67771ca6) is its parent commit: there is
+      // nothing to create, only a ref to move. A staged burst member or a new Candidate branch
+      // reads no ref, so this must not depend on `current`.
+      if (commit !== plan.parent) {
+        const date = new Date(entry.seconds * 1000).toISOString();
+        const created = await io.api<{ sha: string }>(`${prefix}/commits`, 'POST', {
+          tree,
+          parents: mergeParent ? [plan.parent, mergeParent] : [plan.parent],
+          message: `${entry.message}\n`,
+          author: { ...entry.author, date },
+          committer: { ...entry.committer, date },
+        });
+        invariant(
+          created.sha === commit,
+          'GITHUB_SYNC_HASH',
+          `GitHub commit differs from the deterministic mirror commit (expected ${commit.slice(0, 12)}, GitHub returned ${String(created.sha).slice(0, 12)}).`,
+        );
+      }
       if (branch) await io.api(`${prefix}/refs`, 'POST', { ref: `refs/heads/${branch}`, sha: commit });
       else if (publish)
         await io.api(`${prefix}/refs/heads/main`, 'PATCH', {

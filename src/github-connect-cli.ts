@@ -39,6 +39,15 @@ const mirrorReadSchema = z.object({
   push: mirrorCadenceSchema.optional(),
   held: mirrorHeldSchema.optional(),
   verifyError: z.string().optional(),
+  /** The stop record a stopped mirror keeps: code, invariant message and receipt (incident 67771ca6). */
+  ends: z
+    .object({
+      error: z.string().nullable(),
+      detail: z.string().nullable(),
+      receiptId: z.string().nullable().optional(),
+    })
+    .nullable()
+    .optional(),
 });
 /** One reactive observation of the existing connection operation, no polling or
  * scheduler. Closing the command closes the subscription and its connection. */
@@ -179,9 +188,13 @@ export async function githubConnectCli(
     });
     const bindings = typeof listed === 'string' ? JSON.parse(listed) : listed;
     const mirror = mirrorReadSchema.parse(await transport.query<unknown>('projectGithubMirrorRead:read', {}));
+    // A failing mirror names its invariant and receipt, not only the code (incident 67771ca6).
+    const stop = mirror.ends?.error ? mirror.ends : null;
     const summary = {
       summary: [
         mirror.sentence,
+        // The summary keeps the cause; `next` already says the one recovery.
+        stop?.detail?.replace(/ Next: .*$/s, ''),
         mirror.push?.reason,
         mirror.verifyError === 'GITHUB_APP_PERMISSIONS' ? mirrorStatusesPermission : null,
       ]
@@ -192,6 +205,9 @@ export async function githubConnectCli(
         direction: mirror.direction,
         repository: mirror.repository,
         next: mirror.next?.replace(/ \. /, ` ${project} `) ?? null,
+        ...(stop?.error ? { error: stop.error } : {}),
+        ...(stop?.detail ? { detail: stop.detail } : {}),
+        ...(stop?.receiptId ? { receiptId: stop.receiptId } : {}),
         ...(mirror.push ? { push: mirror.push } : {}),
         ...(mirror.held ? { held: mirror.held } : {}),
         ...(mirror.verifyError ? { verifyError: mirror.verifyError } : {}),
