@@ -8,10 +8,6 @@ import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 
-// An ambient clock well past the fixtures makes a missing pin fail today instead of at a
-// future retention cutoff (Item 8b7b97ce). Tests that need hot planning rows pin their clock.
-test.before(t => t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2100, 0, 1) }));
-
 const { closeDay } = await import(moduleUrl('../convex/projectStats.ts'));
 const backfill = await import(moduleUrl('../convex/statsLanesBackfill.ts'));
 const { statsDay, statsFailedDay, NO_CARRY } = await import(moduleUrl('../src/stats-estimate.ts'));
@@ -449,7 +445,8 @@ test('a close after a day left not measured counts that day’s Lanes, marked pa
   assert.equal(rows['2026-11-07'].pp, undefined, 'a day with no row had no landings: exact');
 });
 
-test('the same close marks the gap partial after its planning rows age out (incident a61d3c91)', async () => {
+test('the same close marks the gap partial after its planning rows age out (incident a61d3c91)', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 10, 22) });
   const rows = await closeAfterUnmeasuredDay();
   assert.equal(rows['2026-11-07'].n, 1, 'the gap day’s Lane is still counted');
   assert.equal(rows['2026-11-07'].pp, 1, 'archived planning rows make the count partial');

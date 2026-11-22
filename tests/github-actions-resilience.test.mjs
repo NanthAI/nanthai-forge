@@ -315,6 +315,8 @@ test('test names mentioning SIGKILL are not an OOM diagnosis; only failed jobs r
 });
 
 test('gh transport classifies rate-limit stderr without exposing it', async t => {
+  const now = Date.UTC(2026, 0, 1);
+  t.mock.timers.enable({ apis: ['Date'], now });
   const root = mkdtempSync(join(tmpdir(), 'forge-actions-gh-limit-'));
   const previous = process.env.PATH;
   t.after(() => {
@@ -323,7 +325,7 @@ test('gh transport classifies rate-limit stderr without exposing it', async t =>
   });
   writeFileSync(
     join(root, 'gh'),
-    `#!${process.execPath}\nconst a=process.argv.slice(2);if(a[1]==='rate_limit'){process.stdout.write(String(Math.floor(Date.now()/1000)+90));process.exit(0)}process.stderr.write(a[1].includes('limited')?'gh: API rate limit already exceeded for user ID 1234. (HTTP 403)':'HTTP 404: secret-ish detail');process.exit(1);\n`,
+    `#!${process.execPath}\nconst a=process.argv.slice(2);if(a[1]==='rate_limit'){process.stdout.write('${now / 1000 + 90}');process.exit(0)}process.stderr.write(a[1].includes('limited')?'gh: API rate limit already exceeded for user ID 1234. (HTTP 403)':'HTTP 404: secret-ish detail');process.exit(1);\n`,
     { mode: 0o755 },
   );
   process.env.PATH = `${root}:${previous}`;
@@ -337,8 +339,7 @@ test('gh transport classifies rate-limit stderr without exposing it', async t =>
     assert.doesNotMatch(error.message, /secret-ish/);
     return true;
   });
-  const reset = await actionsApi.rateLimitResetMs();
-  assert.ok(reset > 60_000 && reset <= 90_000);
+  assert.equal(await actionsApi.rateLimitResetMs(), 90_000);
 });
 
 test('git transport classifies push failures before truncating redacted diagnostics', async t => {

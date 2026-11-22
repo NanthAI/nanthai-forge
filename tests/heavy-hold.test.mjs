@@ -178,8 +178,9 @@ test('the cap preload loads only from a private folder this user owns, never fro
 });
 
 test('incident 7008ff18: the hold history records when, which Lane, what kind and the peaks, and --status summarises the day', t => {
-  const { files, heavy, slots } = project(t);
-  const started = Date.now();
+  const { root, files, heavy, slots } = project(t);
+  // heavyEnv isolates the spawned CLI's clock from Node preloads on this process.
+  const started = Math.floor(performance.timeOrigin + performance.now());
   heavy([process.execPath, '--test', files[0]]);
   heavy(['sh', '-c', 'echo npm run typecheck']);
   const holds = readHoldHistory(slots);
@@ -191,13 +192,16 @@ test('incident 7008ff18: the hold history records when, which Lane, what kind an
     ],
   );
   for (const hold of holds) {
-    assert(hold.at >= started && hold.at <= Date.now(), 'dated by when the slot was taken');
+    assert(
+      hold.at >= started && hold.at <= performance.timeOrigin + performance.now(),
+      'dated by when the slot was taken',
+    );
     assert(Number.isInteger(hold.ms) && hold.ms >= 0);
     assert('cpu' in hold && 'load' in hold);
   }
   const status = spawnSync(process.execPath, [cli, 'heavy', '--status'], {
     encoding: 'utf8',
-    env: { ...process.env, FORGE_HEAVY_DIR: slots },
+    env: heavyEnv(root),
   });
   const today = JSON.parse(status.stdout).today;
   assert.equal(today.holds, 2);

@@ -1664,10 +1664,9 @@ test('a failed background install is not retried by every read within the retry 
   gatedEntry(f.old, 'current');
   gatedEntry(f.build(b), 'main');
   installLauncher(f, f.old);
-  writeFileSync(
-    join(f.installation, 'update-failed.json'),
-    JSON.stringify({ code: 'CLI_UPDATE_BUILD_FAILED' }),
-  );
+  const mark = join(f.installation, 'update-failed.json');
+  writeFileSync(mark, JSON.stringify({ code: 'CLI_UPDATE_BUILD_FAILED' }));
+  const stampedAt = statSync(mark).mtimeMs;
   const reply = await launch(f, ['status']);
   assert.equal(reply.status, 0, reply.stderr);
   assert.match(
@@ -1676,8 +1675,8 @@ test('a failed background install is not retried by every read within the retry 
   );
   assert.equal(existsSync(join(f.installation, 'update.log')), false, 'no background updater started');
   // After the retry window a read starts one again.
-  const past = new Date(Date.now() - 11 * 60_000);
-  utimesSync(join(f.installation, 'update-failed.json'), past, past);
+  const past = new Date(stampedAt - 11 * 60_000);
+  utimesSync(mark, past, past);
   const later = await launch(f, ['status']);
   assert.match(later.stderr, /main bbbbbbbb is installing; this read ran on aaaaaaaa/);
   await until(

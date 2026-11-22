@@ -295,12 +295,16 @@ test('compact framing retains split machine reports, coverage and bounded failur
 });
 test('local retention dry-run changes nothing, expiry removes full logs and keeps reports/results', t => {
   const f = fixture(t, 'local');
+  const now = Date.UTC(2026, 0, 10);
   const date = new Date(now - 8 * DAY_MS);
   const data = f.store.load();
   data.runs[0].endedAt = date.toISOString();
   data.revision++;
   f.store.save(data);
   for (const name of ['stdout.log', 'stderr.log']) utimesSync(join(f.folder, name), date, date);
+  // The report fixture stays fresh even when the runner's filesystem uses a different clock.
+  const fresh = new Date(now);
+  utimesSync(join(f.folder, 'test-reports.json'), fresh, fresh);
   const plan = cleanLocalCheckLogs(f.store, { now });
   assert.equal(plan.files.length, 2);
   const late = join(f.folder, 'late.log');

@@ -5,10 +5,18 @@
 // a left-out edit is always named.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs, { mkdirSync, realpathSync, utimesSync, lstatSync, writeFileSync } from 'node:fs';
+import fs, {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  utimesSync,
+  lstatSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { syncBuiltinESMExports } from 'node:module';
-import { performance } from 'node:perf_hooks';
 import { fixture } from './hosted-sync-client-fixture.mjs';
 import { resolutionFixture } from './hosted-agent-resolution-fixture.mjs';
 import { unsavedPaths } from '../dist/hosted-save-receipt-state.js';
@@ -36,16 +44,18 @@ async function listings(t, root, run) {
   }
 }
 
-/** Stamp the walks recorded inside `run` 2 s later, on the client clock and the file-system clock
+/** Stamp the walks recorded inside `run` 3 s later, on the client clock and the file-system clock
  * (the record's own mtime bounds its start) alike: as if each walk began after its directories last
  * changed. An injected clock instead of a fixed sleep (lint guard ffbec6ef). */
 async function recordLater(t, run) {
-  const later = () => Math.floor(performance.timeOrigin + performance.now()) + 2000;
+  const stamp = mkdtempSync(join(tmpdir(), 'forge-tree-time-'));
+  const later = Math.ceil(lstatSync(stamp).ctimeMs) + 3000;
+  rmSync(stamp, { recursive: true });
   const rename = fs.renameSync;
-  const clock = t.mock.method(Date, 'now', later),
+  const clock = t.mock.method(Date, 'now', () => later),
     renamed = t.mock.method(fs, 'renameSync', (from, to) => {
       rename(from, to);
-      if (String(to).endsWith('/checkout-tree.json')) fs.utimesSync(to, later() / 1000, later() / 1000);
+      if (String(to).endsWith('/checkout-tree.json')) fs.utimesSync(to, later / 1000, later / 1000);
     });
   syncBuiltinESMExports();
   try {
