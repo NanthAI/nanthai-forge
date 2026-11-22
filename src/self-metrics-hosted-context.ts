@@ -8,6 +8,7 @@ import {
   type MetricContextStream,
 } from './self-metrics-context.js';
 import type { MetricPin } from './self-metrics-hosted-inputs.js';
+import { hostedActionError } from './hosted-action-error.js';
 import type { MetricInput, MetricPeriod } from './self-metrics-types.js';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
 
@@ -49,7 +50,7 @@ export async function readExactHostedContext(
   generation: string,
   epoch: number,
   cutover: string | null,
-  moves: ContextEvidence[],
+  moves: () => Promise<ContextEvidence[]>,
   billPeriods: { from: number; to: number }[],
   parse: (kind: MetricContextStream, row: unknown) => ContextEvidence,
   resolveInputs: (pins: MetricPin[]) => Promise<Map<string, MetricInput[]>>,
@@ -66,11 +67,11 @@ export async function readExactHostedContext(
       requested.add(key);
       return true;
     });
-    for (let offset = 0; offset < fresh.length; offset += 100) {
+    const readBatch = async (offset: number, order: Map<string, number>, stopped: () => boolean) => {
       const lookups = fresh.slice(offset, offset + 100);
       let cursor: string | null = null;
       const seen = new Set<string>();
-      for (;;) {
+      while (!stopped()) {
         const raw = await query('projectSelfMetrics:page', {
           stream: 'requests',
           from: period.from,
@@ -85,16 +86,46 @@ export async function readExactHostedContext(
           'SOURCE_AUTHORITY_CHANGED',
           'Authority changed during metric history selection.',
         );
-        for (const item of page.page)
-          selected.set(item.sourceId, { ...item, row: parse(item.stream, item.row) });
+        for (const item of page.page) {
+          const row = parse(item.stream, item.row);
+          // Overlapping batches can find the same mutable source row. Keep
+          // the result from the later batch, as in serial selection.
+          if ((order.get(item.sourceId) ?? -1) > offset) continue;
+          order.set(item.sourceId, offset);
+          selected.set(item.sourceId, { ...item, row });
+        }
         if (page.isDone) break;
         cursor = page.continueCursor;
         invariant(cursor && !seen.has(cursor), 'EVIDENCE_CHANGED', 'Metric context cursor did not advance.');
         seen.add(cursor);
       }
+    };
+    for (let start = 0; start < fresh.length; start += 400) {
+      const order = new Map<string, number>();
+      const batches = [];
+      let failed = false;
+      for (let offset = start; offset < Math.min(start + 400, fresh.length); offset += 100)
+        batches.push(
+          readBatch(offset, order, () => failed).catch(error => {
+            failed = true;
+            throw error;
+          }),
+        );
+      const outcomes = await Promise.allSettled(batches);
+      const errors = outcomes.flatMap(result => (result.status === 'rejected' ? [result.reason] : []));
+      // In-flight pages still validate their authority. Do not downgrade
+      // such a failure just because another batch invalidated its cursor.
+      if (errors.length) {
+        const priority = errors.find(
+          error =>
+            !['EVIDENCE_CHANGED', 'HOSTED_ACTION_FAILED', 'HOSTED_REQUEST_FAILED'].includes(
+              hostedActionError(error, 'metrics').code,
+            ),
+        );
+        throw priority ?? errors[0];
+      }
     }
   };
-  const periodMoves = moves.filter(move => during(move.at));
   await load([
     ...metricContextStreams.flatMap(stream => [
       { kind: 'created', stream } as const,
@@ -106,6 +137,7 @@ export async function readExactHostedContext(
       ...shiftedBillLookups(from - contextDays * 86_400_000, from, billFrom, billTo),
     ]),
   ]);
+  const periodMoves = (await moves()).filter(move => during(move.at));
 
   const rows = (stream: MetricContextStream) =>
     [...selected.values()].filter(item => item.stream === stream).map(item => item.row);

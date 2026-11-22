@@ -38,56 +38,87 @@ export async function resolveMetricInputPins(
   objects?: MetricObjects,
   lookup?: MetricInputLookup,
   cached: MetricInputPages = new Map(),
+  parallelObjects = false,
 ) {
   const selectedPins = [...pins];
   const pages: MetricInputPages = new Map();
   const pending = new Map(selectedPins.map(pin => [pin.sha256, pin]));
+  const inFlight = new Set<string>();
   const remember = (pin: MetricPin, page: NonNullable<ReturnType<MetricInputPages['get']>>) => {
     invariant(page.size === pin.size, 'EVIDENCE_CHANGED', 'Metric input page differs from its pin.');
     pages.set(pin.sha256, page);
     pending.delete(pin.sha256);
-    if (page.next && !pages.has(page.next.sha256)) pending.set(page.next.sha256, page.next);
+    if (page.next && !pages.has(page.next.sha256) && !inFlight.has(page.next.sha256))
+      pending.set(page.next.sha256, page.next);
+  };
+  const takeBatch = () => {
+    // Select one transfer window without copying the remaining queue.
+    const batch: MetricPin[] = [];
+    for (const pin of pending.values()) {
+      const known = cached.get(pin.sha256);
+      if (known) remember(pin, known);
+      else batch.push(pin);
+      if (batch.length === 8) break;
+    }
+    return batch;
   };
   if (objects)
     while (pending.size) {
-      // Select one transfer window without copying the entire remaining queue each time.
-      const batch: MetricPin[] = [];
-      for (const pin of pending.values()) {
-        const known = cached.get(pin.sha256);
-        if (known) remember(pin, known);
-        else batch.push(pin);
-        if (batch.length === 8) break;
+      const batches: MetricPin[][] = [];
+      const parallel = parallelObjects ? 4 : 1;
+      while (batches.length < parallel) {
+        const batch = takeBatch();
+        // Let completed pages fill the final partial batch before sending it.
+        if (!batch.length || (batches.length && batch.length < 8)) break;
+        for (const pin of batch) {
+          invariant(
+            pin.size <= 128 * 1024,
+            'EVIDENCE_CHANGED',
+            'Metric input page exceeds compose metadata size.',
+          );
+          pending.delete(pin.sha256);
+          inFlight.add(pin.sha256);
+        }
+        batches.push(batch);
       }
-      if (!batch.length) continue;
-      for (const pin of batch) {
-        invariant(
-          pin.size <= 128 * 1024,
-          'EVIDENCE_CHANGED',
-          'Metric input page exceeds compose metadata size.',
-        );
-        pending.delete(pin.sha256);
+      if (!batches.length) continue;
+      const transferred = await Promise.allSettled(batches.map(async batch => objects(batch)));
+      const errors: unknown[] = [];
+      for (const [index, batch] of batches.entries()) {
+        const transfer = transferred[index]!;
+        if (transfer.status === 'rejected') {
+          errors.push(transfer.reason);
+          continue;
+        }
+        // Finish verifying successful transfers before allowing canonical
+        // fallback to reuse the cache.
+        try {
+          const bytes = transfer.value;
+          invariant(bytes.length === batch.length, 'EVIDENCE_CHANGED', 'Metric input batch is incomplete.');
+          batch.forEach((pin, i) => {
+            const data = bytes[i]!;
+            invariant(
+              !!data && data.length === pin.size && digest(data) === pin.sha256,
+              'EVIDENCE_CHANGED',
+              'Metric input page differs from its pin.',
+            );
+            const page = composePageSchema.parse(JSON.parse(Buffer.from(data).toString('utf8')));
+            const selected = {
+              size: data.length,
+              entries: page.entries.flatMap(entry =>
+                'laneId' in entry ? [{ laneId: entry.laneId, version: entry.version, head: entry.head }] : [],
+              ),
+              next: page.next,
+            };
+            inFlight.delete(pin.sha256);
+            cached.set(pin.sha256, selected);
+            remember(pin, selected);
+          });
+        } catch (error) {
+          errors.push(error);
+        }
       }
-      const bytes = await objects(batch);
-      invariant(bytes.length === batch.length, 'EVIDENCE_CHANGED', 'Metric input batch is incomplete.');
-      batch.forEach((pin, i) => {
-        const data = bytes[i]!;
-        invariant(
-          !!data && data.length === pin.size && digest(data) === pin.sha256,
-          'EVIDENCE_CHANGED',
-          'Metric input page differs from its pin.',
-        );
-        const page = composePageSchema.parse(JSON.parse(Buffer.from(data).toString('utf8')));
-        const selected = {
-          size: data.length,
-          entries: page.entries.flatMap(entry =>
-            'laneId' in entry ? [{ laneId: entry.laneId, version: entry.version, head: entry.head }] : [],
-          ),
-          next: page.next,
-        };
-        cached.set(pin.sha256, selected);
-        remember(pin, selected);
-      });
-      for (const pin of batch) pending.delete(pin.sha256);
+      if (errors.length) throw errors[0];
     }
   if (lookup) {
     const references = new Map<string, MetricInputReference>();
@@ -145,8 +176,17 @@ export async function hydrateMetricInputs(
   objects?: MetricObjects,
   lookup?: MetricInputLookup,
   cached?: MetricInputPages,
+  parallelObjects = false,
 ) {
-  const resolved = await resolveMetricInputPins(pins.values(), lanes, saves, objects, lookup, cached);
+  const resolved = await resolveMetricInputPins(
+    pins.values(),
+    lanes,
+    saves,
+    objects,
+    lookup,
+    cached,
+    parallelObjects,
+  );
   const rowIndex = new Map<string, { inputs: MetricInput[] }>([
     ...records.moves.map(row => [`move:${row.id}`, row] as const),
     ...records.runs.map(row => [`run:${row.id}`, row] as const),

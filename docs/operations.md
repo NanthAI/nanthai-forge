@@ -310,6 +310,12 @@ history stays on the canonical reader unless the entire context is covered.
 Partial UTC creation days use a single indexed marker read for shifted bill
 runs. Only a marked day opens the creation-bounded range. Whole days can use
 the existing event-time range. Reports make no writes and there is no idle work.
+Covered reports read independent operation and receipt pages during context
+selection and transfer up to four existing eight-page compose batches at once.
+Each compose page is verified before its next pin is added to the read.
+Context pages return up to 100 selected rows and check scan budgets of 512
+documents and 512 KiB between steps. Independent selection batches can overlap
+while each batch follows its own cursor in order.
 
 To enable coverage for a server-authority project with an accepted landing and
 its live main summary, run the internal

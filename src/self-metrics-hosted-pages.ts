@@ -28,6 +28,10 @@ import { dayBudgetSummarySchema, landingSpeedSummarySchema } from './landing-spe
 export type MetricQuery = ((name: string, args: Record<string, unknown>) => Promise<unknown>) & {
   objects?: MetricObjects;
 };
+const metricReadCanFallback = (error: unknown) =>
+  ['EVIDENCE_CHANGED', 'HOSTED_ACTION_FAILED', 'HOSTED_REQUEST_FAILED'].includes(
+    hostedActionError(error, 'metrics').code,
+  );
 const pin = z.object({ sha256: z.string(), size: z.number().nonnegative() }).nullable().optional();
 const stamp = z.iso.datetime(),
   nullableStamp = stamp.nullable();
@@ -273,6 +277,7 @@ export async function readHostedMetricPages(
     flakesProjected = true;
   let inputReferences = false;
   let exactSaveHeads = false;
+  let parallelInputTransfers = false;
   const pins = new Map<string, MetricPin>();
   const attempts: MetricAttempt[] = [],
     lanes: MetricLane[] = [],
@@ -362,12 +367,7 @@ export async function readHostedMetricPages(
       try {
         return await lookup(exactSaveHeads);
       } catch (error) {
-        const code = hostedActionError(error, 'metrics').code;
-        if (
-          !exactSaveHeads ||
-          !['EVIDENCE_CHANGED', 'HOSTED_ACTION_FAILED', 'HOSTED_REQUEST_FAILED'].includes(code)
-        )
-          throw error;
+        if (!exactSaveHeads || !metricReadCanFallback(error)) throw error;
         // A cached probe can outlive coverage or a compatible server.
         // A downgraded validator refuses the extra fields before the handler.
         return lookup(false);
@@ -389,6 +389,7 @@ export async function readHostedMetricPages(
     const scoped = !summary && !runsOnly && inputReferences && objects && probe.contextGeneration;
     let exact: Awaited<ReturnType<typeof readExactHostedContext>> | undefined;
     let acceptances: StreamPage[] | undefined;
+    let auxiliary: { operations: StreamPage[]; receipts: StreamPage[] } | undefined;
     if (scoped) {
       invariant(
         probe.authority.mode === 'server',
@@ -396,47 +397,60 @@ export async function readHostedMetricPages(
         'Hosted metrics require server source authority.',
       );
       cutover = probe.cutover;
-      [acceptances, bills] = await Promise.all([
-        readStream(query, 'acceptances', period, contextDays, false, probe),
-        hostedBillRows(query, period),
-      ]);
-      try {
-        const { readExactHostedContext: readContext } = await import('./self-metrics-hosted-context.js');
-        exact = await readContext(
-          query,
-          period,
-          contextDays,
-          scoped,
-          probe.authority.epoch,
-          cutover,
-          acceptances.flatMap(page => page.page.map(row => rowSchemas.acceptances.parse(row))),
-          currentBills(bills ?? []).flatMap(bill =>
-            bill.provider === 'github-actions'
-              ? [{ from: Date.parse(bill.periodFrom), to: Date.parse(bill.periodTo) }]
-              : [],
-          ),
-          (stream, row) => rowSchemas[stream].parse(row),
-          pins =>
-            resolveMetricInputPins(
-              pins,
-              [],
-              [],
-              objects,
-              inputLookup(probe.authority.epoch, false),
-              inputPages,
+      const acceptedPages = readStream(query, 'acceptances', period, contextDays, false, probe);
+      const readSelection = async () => {
+        bills = await hostedBillRows(query, period);
+        try {
+          const { readExactHostedContext: readContext } = await import('./self-metrics-hosted-context.js');
+          exact = await readContext(
+            query,
+            period,
+            contextDays,
+            scoped,
+            probe.authority.epoch,
+            cutover,
+            async () =>
+              (await acceptedPages).flatMap(page => page.page.map(row => rowSchemas.acceptances.parse(row))),
+            currentBills(bills ?? []).flatMap(bill =>
+              bill.provider === 'github-actions'
+                ? [{ from: Date.parse(bill.periodFrom), to: Date.parse(bill.periodTo) }]
+                : [],
             ),
-        );
-      } catch (error) {
-        const code = hostedActionError(error, 'metrics').code;
-        if (!['EVIDENCE_CHANGED', 'HOSTED_ACTION_FAILED', 'HOSTED_REQUEST_FAILED'].includes(code))
-          throw error;
-        // The fact generation can be invalidated while the report is in flight.
-        // No selected request, attempt or run has reached the report yet.
-      }
+            (stream, row) => rowSchemas[stream].parse(row),
+            pins =>
+              resolveMetricInputPins(
+                pins,
+                [],
+                [],
+                objects,
+                inputLookup(probe.authority.epoch, false),
+                inputPages,
+                true,
+              ),
+          );
+          parallelInputTransfers = true;
+        } catch (error) {
+          if (!metricReadCanFallback(error)) throw error;
+          // The fact generation can be invalidated while the report is in flight.
+          // No selected request, attempt or run has reached the report yet.
+        }
+      };
+
+      // Initial context selection needs only the bill intervals. Later joins
+      // also await the accepted inputs. Operation and receipt pages are independent.
+      const [operations, receipts, selectedAcceptances] = await Promise.all([
+        readStream(query, 'operations', period, contextDays, false),
+        readStream(query, 'receipts', period, contextDays, false),
+        acceptedPages,
+        readSelection(),
+      ]);
+      acceptances = selectedAcceptances;
+      auxiliary = { operations, receipts };
     }
     const fetched = await Promise.all(
       streams.map((stream, index) => {
         if (stream === 'acceptances' && acceptances) return acceptances;
+        if (auxiliary && (stream === 'operations' || stream === 'receipts')) return auxiliary[stream];
         if ((stream === 'requests' || stream === 'attempts' || stream === 'runs') && exact) {
           const pages: StreamPage[] = [];
           for (let offset = 0; offset < exact[stream].length; offset += 100)
@@ -667,6 +681,7 @@ export async function readHostedMetricPages(
       objects,
       inputReferences ? inputLookup(records.source!.revision as number, true) : undefined,
       inputPages,
+      parallelInputTransfers,
     );
     const selectedByEntry = new Map<string, Set<string>>();
     for (const row of records.submissions) {

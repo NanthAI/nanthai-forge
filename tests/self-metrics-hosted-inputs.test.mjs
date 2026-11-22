@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { buildComposePages } from '../dist/hosted-compose.js';
+import { ForgeError } from '../dist/errors.js';
+import { readExactHostedContext } from '../dist/self-metrics-hosted-context.js';
 import { readHostedMetricPages } from '../dist/self-metrics-hosted-pages.js';
 import {
   metricAliasGeneration,
@@ -1425,6 +1427,96 @@ test('partial shifted bill days preserve the full scan and unmarked days keep th
   assert.deepEqual(await metrics(), canonical);
   addOutsideContext(100, 1000);
   assert.deepEqual(await select(contextDays), selected);
+});
+
+test('scoped pagination settles in-flight lookups before reporting a fatal authority change', async () => {
+  const moves = Array.from({ length: 250 }, (_, i) => ({
+    id: 'move-' + i,
+    submissionId: 'entry-' + i,
+    at: at(1),
+  }));
+  let requests = 0;
+  let continuations = 0;
+  const page = (epoch, isDone, continueCursor) => ({
+    page: [],
+    authority: { mode: 'server', epoch },
+    cutover: null,
+    isDone,
+    continueCursor,
+  });
+  const query = async (_name, { contextSelection, cursor }) => {
+    const first = contextSelection.lookups[0];
+    if (first.kind === 'created') return page(1, true, '');
+    requests++;
+    if (cursor) {
+      continuations++;
+      return page(1, true, '');
+    }
+    if (first.id === 'entry-0') throw new ForgeError('EVIDENCE_CHANGED', 'Coverage moved.');
+    await Promise.resolve();
+    return first.id === 'entry-100' ? page(1, false, 'next') : page(2, true, '');
+  };
+  await assert.rejects(
+    readExactHostedContext(
+      query,
+      period,
+      2,
+      metricAliasGeneration,
+      1,
+      null,
+      async () => moves,
+      [],
+      (_stream, row) => row,
+      async () => new Map(),
+    ),
+    error => error.code === 'SOURCE_AUTHORITY_CHANGED',
+  );
+  assert.equal(requests, 3);
+  assert.equal(continuations, 0);
+});
+
+test('many stale aliases fit in a scoped page without expanding its 100-row reply', async () => {
+  const f = fixture();
+  const e = evidence(f);
+  const retired = 'old-entry';
+  const created = at(-10);
+  for (let i = 0; i < 220; i++)
+    aliasMetricRow(f, 'requests', Date.parse(created), {
+      id: 'dangling-' + i,
+      at: created,
+      retry: { supersedes: retired },
+    });
+  const wanted = new Set();
+  for (let i = 0; i < 105; i++) {
+    const id = 'created-' + i;
+    wanted.add(id);
+    e.fail(id, at(1), at(2), null);
+  }
+  f.projectRuns();
+  coverMetricAliases(f, at(-3 * 1440));
+  const query = async cursor =>
+    JSON.parse(
+      await f.query('projectSelfMetrics:page', {
+        ...period,
+        stream: 'requests',
+        cursor,
+        contextDays: 2,
+        contextSelection: {
+          generation: metricAliasGeneration,
+          lookups: [
+            { kind: 'entry-retry', id: retired },
+            { kind: 'created', stream: 'requests' },
+          ],
+        },
+      }),
+    );
+  const first = await query(null);
+  const rest = await query(first.continueCursor);
+  assert.equal(first.page.length, 100);
+  assert.equal(first.isDone, false);
+  assert.equal(rest.page.length, 5);
+  assert.equal(rest.isDone, true);
+  assert.deepEqual(new Set([...first.page, ...rest.page].map(item => item.row.id)), wanted);
 });
 
 test('metric aliases resolve live rows, skip dangling hits, and recheck insert-time skew', async () => {

@@ -82,7 +82,10 @@ export async function metricContextPage(
   let bytes = 0;
   const page: MetricContextRow[] = [];
   const seen = new Set<string>();
-  const full = () => scanned >= 100 || bytes >= 512 * 1024;
+  // Alias hits often share or miss a source row. Empty hits still consume
+  // the byte and scan budgets, but they need not force another network page
+  // after 100 reads when the reply has room for the selected rows.
+  const full = () => page.length >= 100 || scanned >= 512 || bytes >= 512 * 1024;
   const count = (row: unknown) => {
     scanned++;
     bytes += metricRowBytes(row);
