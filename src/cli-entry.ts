@@ -4,7 +4,7 @@ import { beginCheckoutPrepObservation } from './checkout-prep-observation.js';
 import { isAbsolute } from 'node:path';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { ForgeError, invariant } from './errors.js';
-import { describeFailure, recordFailure } from './system-errors.js';
+import { reportFailure } from './system-errors.js';
 import { cliTeachContext } from './error-teaching.js';
 
 if (['agent', 'x'].includes(process.argv[2]!)) beginCheckoutPrepObservation();
@@ -36,8 +36,7 @@ if (process.argv[2] === 'wait') {
     process.argv.splice(2, process.argv.length - 2, ...resolveTurnWait(process.argv.slice(3)));
   } catch (error) {
     const teaching = cliTeachContext(process.argv.slice(2));
-    const failure =
-      error instanceof ForgeError ? describeFailure(error, teaching) : recordFailure(error, teaching);
+    const failure = reportFailure(error, teaching);
     process.stderr.write(`${JSON.stringify({ error: failure })}\n`);
     process.exit(1);
   }
@@ -67,8 +66,7 @@ try {
   runCommand = await cliStartup();
 } catch (error) {
   const teaching = cliTeachContext(process.argv.slice(2));
-  const failure =
-    error instanceof ForgeError ? describeFailure(error, teaching) : recordFailure(error, teaching);
+  const failure = reportFailure(error, teaching);
   process.stderr.write(`${JSON.stringify({ error: failure })}\n`);
   process.exitCode = 1;
 }
@@ -98,8 +96,7 @@ if (runCommand) {
       if (output !== undefined) process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     } catch (error) {
       const teaching = cliTeachContext(process.argv.slice(2));
-      const failure =
-        error instanceof ForgeError ? describeFailure(error, teaching) : recordFailure(error, teaching);
+      const failure = reportFailure(error, teaching);
       process.stderr.write(`${JSON.stringify({ error: failure })}\n`);
       process.exitCode = 1;
     }

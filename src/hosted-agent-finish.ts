@@ -30,7 +30,12 @@ import {
 } from './hosted-agent-actions.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { ForgeError, invariant } from './errors.js';
-import { hostedActionError, hostedFailureCause } from './hosted-action-error.js';
+import {
+  hostedActionError,
+  hostedFailureCause,
+  hostedFailureCauseOf,
+  transientFailureCause,
+} from './hosted-action-error.js';
 import { shellQuote } from './shell-quote.js';
 import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 import {
@@ -504,8 +509,9 @@ async function recordFinishStop(session: HostedAgentSession, error: unknown) {
   if (session.journal.get(finishRefusedKey) === 'PREFLIGHT_BUDGET_EXCEEDED')
     session.journal.forget(finishRefusedKey);
   await session.journal.retain(finishStoppedKey, () => safe.code);
-  const cause = hostedFailureCause(error);
-  if (safe.code === 'HOSTED_ACTION_FAILED' && cause !== 'server-limit')
+  // An already coded failure names its cause in its message (Item 3f76a3df).
+  const cause = hostedFailureCauseOf(safe.message) ?? hostedFailureCause(error);
+  if (safe.code === 'HOSTED_ACTION_FAILED' && transientFailureCause(cause))
     await session.journal.retain(finishTransientKey, () => cause);
 }
 /** The code a pre-submit refusal ends its operation with: WORK_STALE whenever the cheap pass named

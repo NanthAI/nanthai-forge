@@ -9,7 +9,12 @@ import { ForgeError } from '../dist/errors.js';
 import { digest } from '../dist/hash.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
+import { replayTiming } from '../dist/hosted-failure-reply.js';
+
 import { hostedAgentActions } from '../dist/hosted-agent-contract.js';
+
+// The in-command replay of a transient failure (Item 3f76a3df) needs no wall-clock pause here.
+replayTiming.delayMs = 0;
 const at = '2026-01-01T00:00:00.000Z';
 export function agentFixture(t, source) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-hosted-agent-'));

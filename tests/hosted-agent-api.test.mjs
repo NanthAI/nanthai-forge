@@ -426,12 +426,9 @@ test('real source save uses opened marker, direct bytes and same request after l
   const command = { message: 'Synthetic delta' };
   writeFileSync(join(s.root, 'added.txt'), 'new bytes\n');
   s.lose('projectHostedSaves:prepare');
-  await assert.rejects(
-    s.transport().dispatch('save', command),
-    error => error.code === 'HOSTED_ACTION_FAILED',
-  );
-  // Split save (save-settle-background, fea47345 C): the save returns once it is submitted and the
-  // server settles it (its job never runs in this fixture); the next command reads the outcome.
+  // The lost reply is replayed inside the same command with the same request (Item 3f76a3df). Split
+  // save (save-settle-background, fea47345 C): the save returns once it is submitted and the server
+  // settles it (its job never runs in this fixture); the next command reads the outcome.
   const replaying = s.transport();
   replaying.waitUntil = Date.now();
   const saved = await replaying.dispatch('save', command);

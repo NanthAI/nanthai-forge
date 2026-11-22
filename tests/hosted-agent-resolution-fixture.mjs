@@ -155,13 +155,15 @@ export function nextEpoch(f) {
   });
   return project.sourceAuthority.epoch;
 }
-/** The client loses its connection on the first call to `name`, before the server runs it. */
-export function dropFirst(s, name) {
+/** Lose the reply of the next `times` calls of `name`. A save replays once inside the command
+ * (Item 3f76a3df), so a save whose outcome stays unknown loses both attempts: `times` 2. */
+export function dropFirst(s, name, times = 1) {
   const client = s.exchange.client,
     mutation = client.mutation;
+  let left = times;
   client.mutation = async (ref, args) => {
     if (getFunctionName(ref) !== name) return mutation(ref, args);
-    client.mutation = mutation;
+    if (--left <= 0) client.mutation = mutation;
     throw new TypeError('fetch failed');
   };
 }

@@ -109,7 +109,7 @@ import { nativeOwner } from './native-source.js';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { ConvexExchange } from './exchange-client.js';
-import { hostedActionError, hostedFailureDetail } from './hosted-action-error.js';
+import { hostedActionError, hostedFailureCauseOf } from './hosted-action-error.js';
 import { limitRefusal, refusedWait, retryableExchangeError } from './exchange-retry.js';
 import { ForgeError, invariant } from './errors.js';
 import { hostedMainV2Schema } from './hosted-main.js';
@@ -353,6 +353,10 @@ export type HostedAgentResponse = Partial<CliProvenance> & {
 };
 /** The shared CLI/MCP transport. Source bytes use the existing verified exchange;
  * every dispatch is finite and every mutation is pinned before network IO. */
+/** A retained client journal entry exists for this operation id: a wait or replay can resume it. */
+const retainedOperation = (root: string, operationId: string) =>
+  z.uuid().safeParse(operationId).success &&
+  existsSync(resolve(clientCacheRoot(root), 'agent', `${operationId}.json`));
 export class HostedAgentTransport {
   private priorityReads: boolean | undefined;
   private defaults: EffectiveAgentDefaults | undefined;
@@ -390,6 +394,10 @@ export class HostedAgentTransport {
     id: string | null;
     sourceNotice?: ExactConflictNotice | undefined;
     protectedPathNotice?: ReturnType<typeof protectedPathNotice>;
+    /** This operation's dependency refresh relinked node_modules (a lockfile change, Item 3f76a3df). */
+    relinked?: true;
+    /** This preflight began its local run: a later failure is never replayed inside the command. */
+    localRun?: true;
   }>();
   private get sourceNotice() {
     return this.operationContext.getStore()?.sourceNotice;
@@ -730,7 +738,7 @@ export class HostedAgentTransport {
     try {
       const response = await withLaneCommand(running, requestedAction, () =>
         withExchangeProgress({ ...(signal ? { signal } : {}) }, () =>
-          this.dispatchCaller(requestedAction, input, signal),
+          this.reconciledDispatch(requestedAction, input, signal),
         ),
       );
       this.retainCaller(requestedAction, { result: response.result }, response.operationId);
@@ -756,6 +764,42 @@ export class HostedAgentTransport {
           error,
         );
       throw error;
+    }
+  }
+  /** A save, test read or preflight that failed for a transient cause replays its same retained
+   * operation once inside this command, so a save that completed answers with its receipt instead of a
+   * failure (Item 3f76a3df). The healthy path makes no extra call; the failure path makes one. */
+  private async reconciledDispatch(
+    requestedAction: string,
+    input: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<HostedAgentResponse> {
+    let attemptInput = input;
+    for (let attempt = 1; ; attempt++) {
+      const context = this.operationContext.getStore();
+      if (context) {
+        delete context.relinked;
+        delete context.localRun;
+      }
+      try {
+        return await this.dispatchCaller(requestedAction, attemptInput, signal);
+      } catch (error) {
+        // Only a failing command loads the replay rules (the CLI's import weight stays put).
+        const { replayInside, replayTiming } = await import('./hosted-failure-reply.js');
+        const cause =
+          signal?.aborted || context?.localRun
+            ? undefined
+            : replayInside(requestedAction, error, attempt, context?.relinked === true);
+        if (!cause) throw error;
+        // The replay names the operation the first attempt retained, so it reads that receipt.
+        const retained = this.callerOperationId;
+        if (retained && retainedOperation(this.root, retained))
+          attemptInput = { ...input, operationId: retained };
+        process.stderr.write(
+          `${requestedAction}: HOSTED_ACTION_FAILED (cause: ${cause}); replaying the same operation once to read its outcome.\n`,
+        );
+        await new Promise(resolve => setTimeout(resolve, replayTiming.delayMs));
+      }
     }
   }
   /** Local Lane activity for idle listing and prune: one small file write, no network. */
@@ -1112,6 +1156,13 @@ export class HostedAgentTransport {
       } catch (error) {
         const safe = hostedActionError(error, 'agent capability discovery');
         if (safe.code !== 'HOSTED_ACTION_FAILED') throw safe;
+        // A transient server or connection failure is not a missing API: it keeps its cause and the
+        // command's own replay (Item 3f76a3df: the first wait after a save reported it as unavailable).
+        if (
+          hostedFailureCauseOf(safe.message) !== 'local-exception' &&
+          !(error instanceof Error && /Could not find|No (?:public )?function/i.test(error.message))
+        )
+          throw safe;
         throw new ForgeError(
           'HOSTED_AGENT_UNAVAILABLE',
           'Hosted agent capability discovery is unavailable at this deployment. A compatible hosted agent API is required; no native owner or local listener fallback was attempted.',
@@ -1966,11 +2017,22 @@ export class HostedAgentTransport {
         safe.code === 'HOSTED_SCHEMA_REJECTED'
       )
         throw safe;
+      // Every HOSTED_ACTION_FAILED names its cause and one next command (Item 3f76a3df).
+      if (safe.code === 'HOSTED_ACTION_FAILED')
+        throw (await import('./hosted-failure-reply.js')).hostedFailureReply({
+          root: hostedAgentRoot(this.root),
+          action,
+          safe,
+          error,
+          operationId: this.callerOperationId,
+          retained: Boolean(this.callerOperationId && retainedOperation(this.root, this.callerOperationId)),
+          input,
+        });
       throw new ForgeError(
         safe.code,
         gateCodes.has(safe.code)
           ? safe.message
-          : `${safe.code === 'HOSTED_ACTION_FAILED' ? `Hosted agent ${action} failed${hostedFailureDetail(safe.message)}.` : safe.message} Retry the original hosted agent action and parameters to reconcile its retained operation.`,
+          : `${safe.message} Retry the original hosted agent action and parameters to reconcile its retained operation.`,
       );
     }
   }
@@ -2066,6 +2128,8 @@ export class HostedAgentTransport {
         refresh: true,
         announce: announceRegistryHosts,
       });
+      const context = this.operationContext.getStore();
+      if ('relinked' in shared && shared.relinked && context) context.relinked = true;
       if ('relinked' in shared && shared.relinked)
         process.stderr.write(
           shared.relinked.restored
@@ -2449,6 +2513,8 @@ export class HostedAgentTransport {
           : `Save first: preflight records a result for the saved head, and the files here differ from it. ${rerun}`,
       );
     checkSource();
+    const context = this.operationContext.getStore();
+    if (context) context.localRun = true;
     const receipt = runPreflight(
       root,
       laneId,

@@ -8,6 +8,9 @@ const longActions = new Set([
   'projectExchangeMigration:migrate',
   'projectWorkActions:exportJournal',
   'projectWorkIndexActions:ensure',
+  // Reads every test-selection source file of the Candidate head before it answers: a large project
+  // passes the 30-second header deadline on every replay (friction b9a054d9, Item 3f76a3df).
+  'projectIntentTests:execute',
 ]);
 export const longConvexAction = (name: string) => longActions.has(name);
 

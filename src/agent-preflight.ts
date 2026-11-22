@@ -39,6 +39,12 @@ export { guardGateFields } from './preflight-guard-set.js';
 import { commentOnlyPaths } from './preflight-comment-only.js';
 import { spawnCaptured, failureExcerpt } from './agent-preflight-capture.js';
 import {
+  dropKeptStatic,
+  keepPassedStatic,
+  keptPassedStatic,
+  staticScopeKey,
+} from './preflight-kept-static.js';
+import {
   dependenciesEnvironmentSchema,
   dependenciesMissing,
   runnerDependenciesMissing,
@@ -1724,10 +1730,22 @@ export function runPreflight(
     heavyKind = kind;
     return env;
   };
+  // A run that passed these checks for this head and then stopped kept them (Item 3f76a3df).
+  const staticNames = plan.static?.selected.map(check => check.name) ?? [];
+  const keptScope = staticScopeKey(changed);
+  const kept =
+    options.staticDone || staticOnly || !staticNames.length
+      ? undefined
+      : keptPassedStatic<StaticCheckResult>(root, laneId, head, keptScope, staticNames);
+  if (kept)
+    process.stderr.write(
+      `preflight: static checks passed for this head in the run that stopped; kept, not run again: ${staticNames.join(', ')}\n`,
+    );
+  const staticDone = options.staticDone ?? kept;
   try {
-    if (options.staticDone) {
+    if (staticDone) {
       // The receipt kept every field the earlier run returned.
-      staticResults = options.staticDone as StaticCheckResult[];
+      staticResults = staticDone as StaticCheckResult[];
       if (staticResults.some(result => result.outcome === 'failed')) exitCode = 1;
     } else if (plan.static?.selected.length) {
       const checks = plan.static.selected.map(check => ({ ...check, inputs: null }));
@@ -1767,6 +1785,8 @@ export function runPreflight(
         staticResults.push(...runStaticChecks(root, narrowed.selected, compilerEnv, undefined, scope));
       }
       if (staticResults.some(result => result.outcome === 'failed')) exitCode = 1;
+      else if (!staticOnly && !typecheckUntouched.length)
+        keepPassedStatic(root, laneId, head, keptScope, staticNames, staticResults);
     }
     if (!staticOnly && plan.tests.length && exitCode === 0) {
       // Keep the static batch's lease if one was needed so this preflight waits at most once.
@@ -2181,6 +2201,7 @@ export function runPreflight(
         )
       : 0;
   writePreflightReceipt(root, receipt);
+  dropKeptStatic(root, laneId);
   process.stderr.write(`${runSummary(receipt, plan, typecheckUntouched)}\n`);
   // An incomplete run is still a clean timing sample; only a pass seeds the fallback estimate.
   if (receipt.incomplete && receipt.tests > 0) recordTiming(root, receipt);

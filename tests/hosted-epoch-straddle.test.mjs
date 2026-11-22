@@ -276,7 +276,7 @@ test('a plain save that began at the old epoch is refused naming save, and that 
     f = s.f;
   await s.transport().dispatch('open', { laneId: f.lane.laneId });
   writeFileSync(join(s.root, 'a.txt'), 'saved across a cutover\n');
-  dropFirst(s, 'projectHostedSaveJobs:submit');
+  dropFirst(s, 'projectHostedSaveJobs:submit', 2);
   const command = { message: 'Save across a cutover', operationId: randomUUID() };
   await assert.rejects(s.transport().dispatch('save', command));
   assert.equal(f.tables.projectHostedSaves.size, 1, 'the save began at the old epoch');
@@ -335,7 +335,7 @@ async function pendingOldEpochSave(s) {
   const f = s.f;
   await s.transport().dispatch('open', { laneId: f.lane.laneId });
   writeFileSync(join(s.root, 'a.txt'), 'left pending across a cutover\n');
-  dropFirst(s, 'projectHostedSaveJobs:submit');
+  dropFirst(s, 'projectHostedSaveJobs:submit', 2);
   await assert.rejects(
     s.transport().dispatch('save', { message: 'Pending save', operationId: randomUUID() }),
   );
@@ -455,7 +455,7 @@ test('a finish after a save that never began before a cutover rebuilds that save
     f = s.f;
   await s.transport().dispatch('open', { laneId: f.lane.laneId });
   writeFileSync(join(s.root, 'a.txt'), 'never began before a cutover\n');
-  dropFirst(s, 'projectHostedSaves:prepare');
+  dropFirst(s, 'projectHostedSaves:prepare', 2);
   const lost = { message: 'Never began', operationId: randomUUID() };
   await assert.rejects(s.transport().dispatch('save', lost), { code: 'HOSTED_ACTION_FAILED' });
   const epoch = nextEpoch(f);

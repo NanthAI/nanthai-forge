@@ -113,7 +113,8 @@ test('owner transition journals before IO and resumes a hosted success whose rep
   };
   await assert.rejects(
     transitionBoundSourceAuthority(f.store, input, client),
-    /Hosted source authority transition failed/,
+    // A death on this machine after the hosted CAS names its local cause (Item 3f76a3df).
+    /source authority transition failed \(cause: local-exception\)/,
   );
   assert.deepEqual(f.s.tables.hostedProjects.get(f.projectId).sourceAuthority, server);
   assert.equal(readHostState(f.store).binding.sourceAuthority, undefined);

@@ -595,12 +595,15 @@ function nextEpoch(f) {
   return project.sourceAuthority.epoch;
 }
 /** The client loses its connection on the first call to `name`, before the server runs it. */
-function dropFirst(c, name) {
+/** Lose the reply of the next `times` calls of `name`. A save replays once inside the command
+ * (Item 3f76a3df), so a save whose outcome stays unknown loses both attempts: `times` 2. */
+function dropFirst(c, name, times = 1) {
   const client = c.s.exchange.client,
     mutation = client.mutation;
+  let left = times;
   client.mutation = async (ref, args) => {
     if (getFunctionName(ref) !== name) return mutation(ref, args);
-    client.mutation = mutation;
+    if (--left <= 0) client.mutation = mutation;
     throw new TypeError('fetch failed');
   };
 }
@@ -658,7 +661,7 @@ test('a resolve whose save completed but whose sync never began rebuilds the syn
 test('a plain save refused for an older authority epoch drops its request and rebuilds it at the current one (review b1448b61 N3)', async t => {
   const c = await conflicted(t);
   c.s.eagerSource(true);
-  dropFirst(c, 'projectHostedSaves:prepare');
+  dropFirst(c, 'projectHostedSaves:prepare', 2);
   const command = { message: 'Chosen side', operationId: randomUUID() },
     save = () => c.transport().dispatch('save', command);
   await assert.rejects(save(), { code: 'HOSTED_ACTION_FAILED' });

@@ -178,12 +178,18 @@ for (const [action, api] of [
       abandon: { reason: 'Superseded' },
     }[action];
     s.lose(api);
-    await assert.rejects(s.transport().dispatch(action, command), errorCode('HOSTED_ACTION_FAILED'));
+    // A save whose reply was lost replays its own operation once inside the same command: its first
+    // reply is the completed receipt, never a failure (Item 3f76a3df). Other actions report the loss.
+    const answered =
+      action === 'save'
+        ? await s.transport().dispatch(action, command)
+        : await assert.rejects(s.transport().dispatch(action, command), errorCode('HOSTED_ACTION_FAILED'));
     const firstCalls = structuredClone(s.calls);
-    const first = await s.transport().dispatch(action, command);
+    const first = answered ?? (await s.transport().dispatch(action, command));
     // A bare identical save with nothing new answers nothing-to-save with the saved head (ad80e037);
     // the save's own operation still replays its original result.
     if (action === 'save') {
+      assert.equal(first.result.outcome.status, 'completed');
       const bare = await s.transport().dispatch(action, command);
       assert.equal(bare.result.status, 'nothing-to-save');
       assert.equal(bare.result.head, first.result.outcome.result.head);

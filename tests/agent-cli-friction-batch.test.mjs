@@ -54,7 +54,8 @@ test('a platform failure names its cause class and keeps the request id, never t
   );
   assert.equal(hostedFailureCause(new Error('fetch failed')), 'connection');
   assert.equal(hostedFailureCause(new Error('[Request ID: x] Server Error')), 'server-exception');
-  assert.equal(hostedFailureCause(new Error('surprising')), 'unknown');
+  // A failure with no server trace happened in this CLI: named, never 'unknown' (Item 3f76a3df).
+  assert.equal(hostedFailureCause(new Error('surprising')), 'local-exception');
   assert.match(
     hostedActionError(new Error('Too many documents read'), 'agent finish').message,
     /likely to fail the same way/,

@@ -4,7 +4,7 @@ import { printedReceipt } from './receipt-slim.js';
 import type { ExactConflictNotice } from './hosted-conflict-notice.js';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { ForgeError, invariant } from './errors.js';
-import { describeFailure, recordFailure } from './system-errors.js';
+import { reportFailure } from './system-errors.js';
 import { agentDeadEnd, cliTeachContext, teachReceipt } from './error-teaching.js';
 import { cliBuildIdentity, withCliBuildProvenance } from './cli-installation.js';
 
@@ -466,8 +466,7 @@ try {
     typeof error.recovery?.retryAt === 'string';
   const teaching = forwardLimit ? undefined : cliTeachContext(process.argv.slice(2));
   // Known errors stay terse; system and unexpected errors also log the stack and name the log.
-  const failure =
-    error instanceof ForgeError ? describeFailure(error, teaching) : recordFailure(error, teaching);
+  const failure = reportFailure(error, teaching);
   const deadEnd =
     !forwardLimit &&
     ['agent', 'x', 'wait'].includes(process.argv[2] ?? '') &&

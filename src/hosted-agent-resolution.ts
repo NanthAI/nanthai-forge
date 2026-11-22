@@ -17,7 +17,7 @@ import { conflictFinishOptions } from './hosted-conflict-finish-options.js';
 import { UNCHANGED_SIDE, failedCode, unchangedSideRefusal } from './hosted-unchanged-side.js';
 import { clientCacheRoot } from './root-paths.js';
 import { retainSyncHandoff, clearSyncHandoff } from './hosted-sync-handoff.js';
-import { hostedActionError } from './hosted-action-error.js';
+import { hostedActionError, hostedFailureCauseOf, hostedFailureDetail } from './hosted-action-error.js';
 import { HostedAgentJournal } from './hosted-agent-journal.js';
 import { resolutionFinishSelection } from './hosted-resolution-selection.js';
 import { mkdirSync } from 'node:fs';
@@ -518,10 +518,12 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     if (safe.code !== 'HOSTED_ACTION_FAILED' || safe.recovery) throw safe;
     throw new ForgeError(
       safe.code,
-      `Resolution outcome is unknown. Continue: ${continuation.command}`,
+      `Resolution outcome is unknown${hostedFailureDetail(safe.message)}. Continue: ${continuation.command}`,
       undefined,
       {
         root: session.root,
+        cause: hostedFailureCauseOf(safe.message) ?? 'server-exception',
+        retryable: true,
         ...continuation,
       },
     );

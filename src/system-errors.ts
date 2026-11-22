@@ -2,7 +2,7 @@
 import { appendFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { ForgeError } from './errors.js';
+import { ForgeError, localFailureOf } from './errors.js';
 import { type TeachContext, withTeaching } from './error-teaching.js';
 import { refuseRealUserState } from './test-isolation.js';
 
@@ -98,7 +98,9 @@ export function writeDiagnostics(directory: string, entry: string): string | und
 /** Log the full stack and command words (never arguments: they can carry payloads). The log lives in the per-user `~/.forge/logs`, else the temp directory, never inside an owner or checkout root: a checkout treats unknown files in its `.forge` as local work and refuses to pull over them. */
 export function recordFailure(error: unknown, context?: TeachContext): Failure {
   const failure = describeFailure(error, context);
-  const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  // A coded failure that stopped on a local error carries that error for this log only (Item 3f76a3df).
+  const logged = localFailureOf(error) ?? error;
+  const detail = logged instanceof Error ? (logged.stack ?? logged.message) : String(logged);
   const entry = `${new Date().toISOString()} ${failure.code} pid=${process.pid} command=${process.argv
     .slice(2, 4)
     .filter(arg => /^[a-z][a-z-]*$/.test(arg))
@@ -108,4 +110,12 @@ export function recordFailure(error: unknown, context?: TeachContext): Failure {
     if (diagnostics) return { ...failure, diagnostics };
   }
   return failure;
+}
+
+/** The CLI's reply for any thrown value: known codes stay terse; system, unexpected and coded local
+ * failures also log their stack and name the log. */
+export function reportFailure(error: unknown, context?: TeachContext): Failure {
+  return error instanceof ForgeError && localFailureOf(error) === undefined
+    ? describeFailure(error, context)
+    : recordFailure(error, context);
 }

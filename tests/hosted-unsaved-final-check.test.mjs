@@ -63,7 +63,7 @@ test('48835eea incident replay: a killed save --sync rerun after an edit names t
   const command = { laneId: f.lane.laneId, operationId: randomUUID(), apply: true };
   // The CLI dies once the server holds the sync (a T3 restart): its handoff and request stay retained.
   s.lose('projectHostedSyncJobs:submit');
-  await assert.rejects(s.transport().dispatch('sync', command), /Retry the original hosted agent action/);
+  await assert.rejects(s.transport().dispatch('sync', command), /agent sync failed \(cause: [a-z-]+\)/);
   assert(existsSync(join(clientCacheRoot(root), 'sync-handoff.json')), 'the killed sync left its handoff');
   writeFileSync(join(root, 'after-kill.md'), 'edited after the kill\n');
   await assert.rejects(s.transport().dispatch('sync', command), error => {
