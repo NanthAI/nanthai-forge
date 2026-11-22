@@ -31,6 +31,7 @@ import { overtakeMark } from '../src/landing-overtake';
 import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
 import { retrySoloLandingCheck } from './projectHostedLandingCheckRetry';
 import { clearCiDown, holdSoloForCiDown } from './projectHostedLandingCiDown';
+import { environmentEndOf } from './projectHostedLandingEnvironmentHold';
 import { checkFailureKind } from '../src/hosted-landing-admission';
 import { parkExactOnMainRed, parkRedOnlyEntry } from './projectHostedLandingParkExact';
 import { loadHostedCheck } from './projectHostedCheckStore';
@@ -253,8 +254,15 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
       const { run } = await loadHostedCheck(ctx, { projectId: claim.projectId, runId: check.runId });
       retainCheckProgress(state, run, now);
       replay = checkReplay(run);
+      // An environment end (Item 0d14c456) counts toward the hold; failure path only, switch on.
+      const environment = reviewing ? null : await environmentEndOf(ctx, claim.projectId, run);
       // A verdict (a pass or a failing test) shows CI runs checks: a CI-down hold ends (0 I/O unset).
-      if (held?.ciDown && hostedCheckTerminal(run) && checkFailureKind(run, { conflicts: [] }) !== 'platform')
+      if (
+        held?.ciDown &&
+        !environment &&
+        hostedCheckTerminal(run) &&
+        checkFailureKind(run, { conflicts: [] }) !== 'platform'
+      )
         await clearCiDown(ctx, held);
       const semantic = semanticVerdict(
         attempt.semanticPlan ?? run.semanticPlan,
@@ -290,7 +298,7 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
       } else if (
         !reviewing &&
         hostedCheckTerminal(run) &&
-        (await holdSoloForCiDown(ctx, claim, { row, state, attempt }, run, held))
+        (await holdSoloForCiDown(ctx, claim, { row, state, attempt }, run, held, environment))
       ) {
         await releaseLandingQueue(ctx, held, now);
         return (await loadLanding(ctx, claim)).state;

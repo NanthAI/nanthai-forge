@@ -34,23 +34,25 @@ import { predecessorStatus } from './projectHostedLandingPipeline';
 import { invariant } from '../src/errors';
 import { canonicalPayload } from '../src/hosted-source-operation';
 
-/** One small queue write per settled shared check sizes later cohorts. */
+/** One small queue write per settled shared check sizes later cohorts. `environment`: the failure was
+ * an environment end already counted toward the hold (Item 0d14c456), so it is no verdict. */
 export async function recordCohortOutcome(
   ctx: MutationCtx,
   input: BatchIdentity,
   batch: LandingBatch,
   passed: boolean,
+  environment = false,
 ) {
   const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
   if (!queue) return;
   // A shared check's verdict shows CI runs checks: a CI-down hold ends (nothing to do when unset).
-  await clearCiDown(ctx, queue);
+  if (!environment) await clearCiDown(ctx, queue);
   const kind = batch.admitted ? 'admitted' : 'first';
   await ctx.db.patch(queue._id, {
     checkHistory: { ...queue.checkHistory, [kind]: recordOutcome(queue.checkHistory?.[kind], passed) },
   });
 }
-async function pendingMembers(ctx: MutationCtx, input: BatchIdentity, batch: LandingBatch) {
+export async function pendingMembers(ctx: MutationCtx, input: BatchIdentity, batch: LandingBatch) {
   const included = batch.members.filter(m => !batch.included || batch.included.includes(m.submissionId));
   const loaded = await Promise.all(
     included.map(async original => ({

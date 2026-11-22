@@ -400,6 +400,7 @@ export async function releaseHeldPage(
     .paginate({ cursor: null, numItems, maximumRowsRead: 100, maximumBytesRead: 512 * 1024 });
   const park = rearmReady;
   let released = false;
+  const ids: string[] = [];
   for (const row of page.page) {
     // An ended entry never resumes (a withdrawn or superseded park must not land): drop its hold.
     if (row.phase === 'landed' || row.phase === 'terminal-failed') {
@@ -407,6 +408,7 @@ export async function releaseHeldPage(
       continue;
     }
     released = true;
+    ids.push(row.submissionId);
     const state = storedLandingStateSchema.parse(JSON.parse(row.value));
     state.version++;
     state.error = null;
@@ -434,7 +436,7 @@ export async function releaseHeldPage(
     });
   }
   if (released) await wakeLandingQueue(ctx, { projectId, channel: 'main' });
-  return { released, isDone: page.isDone };
+  return { released, isDone: page.isDone, ids };
 }
 /** writeLanding's cohort window rule for a queued entry, from the row in hand (0 reads): parking
  * kept `batchSelection`, which writeLanding sets whenever the attempt defers its check. */

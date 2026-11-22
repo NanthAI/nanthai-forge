@@ -3,6 +3,7 @@ import { mainAuditStatus } from './projectHostedMainAuditState';
 import { mirrorCadenceRead } from './projectGithubMirrorCadence';
 import { bindingInstallation, requireStoredRepositoryBinding, runnerGrant } from './githubBindingAccess';
 import { refreshCheckEntries } from './projectHostedCheckEntries';
+import { clearCiDownOnSettingChange } from './projectHostedLandingEnvironmentHold';
 import { ciStatusRunner } from './projectCiStatus';
 import { z } from 'zod';
 import { v } from 'convex/values';
@@ -160,6 +161,9 @@ export async function saveCheckSetting(
   if (old) await ctx.db.replace(old._id, saved);
   else await ctx.db.insert('projectHostedCheckSettings', saved);
   await refreshCheckEntries(ctx, projectId);
+  // Item 0d14c456: a changed check or runner configuration is the resume step of an environment
+  // hold: it ends and its held landings go back to the queue (one queue read, settings writes only).
+  await clearCiDownOnSettingChange(ctx, projectId);
   const result = { kind, key, version: saved.version, digest, value, rule };
   await completeCheckOperation(ctx, prepared.operation, result);
   return canonicalPayload(result);

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { heldCommand } from './projectHostedLandingEnvironmentHold';
+import { ciDownMessage } from './projectHostedLandingCiDown';
 import { checkCause, submittedCheckCause, type CheckCause } from '../src/hosted-check';
 import { refreshCheckEntries, requireLandingCheck } from './projectHostedCheckEntries';
 import { earlyPredecessor } from './projectHostedEarlyResolution';
@@ -8,7 +10,7 @@ import { batchEligible } from '../src/hosted-landing-batch';
 import { semanticMember, mergeSemanticMembers } from './projectSemanticContracts';
 import type { SemanticPlan } from '../src/intent-semantic-conflict';
 import type { MutationCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { requireMemberAuthority } from './projectLaneAuthority';
 import { readHostedRecord, hostedWriteProject } from './projectHostedRecords';
 import { hostedStartMain } from './projectHostedChannels';
@@ -67,6 +69,8 @@ export async function pinLandingAttempt(
     reviewedPolicy?: string;
     /** Current main is already read for pin validation; source preparation may have raced it. */
     mainMoved?: (moved: boolean) => void;
+    /** The queue row's CI-down hold, when the caller has the row in hand (submission). */
+    heldCheck?: Doc<'projectHostedLandingQueues'>['ciDown'];
   },
 ) {
   invariant(
@@ -241,6 +245,13 @@ export async function pinLandingAttempt(
       }
     }
     if (!check && r.check && !deferredCheck) {
+      // Item 0d14c456: a check its environment fails every time is not dispatched again; the
+      // submission is refused with the hold's cause and resume step (no run, nothing to undo).
+      invariant(
+        !heldCommand(input.heldCheck, r),
+        'RUNNER_UNAVAILABLE',
+        input.heldCheck ? ciDownMessage(input.heldCheck) : 'Check environment hold.',
+      );
       const run =
         r.check.kind === 'run'
           ? (await loadHostedCheck(ctx, { projectId: input.projectId, runId: r.check.runId })).run

@@ -582,6 +582,25 @@ streak; the entry joins the queue unadmitted as before. The streak is a field on
 written only on an infrastructure end or its clear, so a healthy queue reads and writes nothing
 more. Turning the switch off stops new holds; a verdict still releases what it held.
 
+The same switch holds a check whose environment fails it the same way every time (Item 0d14c456).
+An environment end is a failed check with no failing test file whose job summary carries Forge's own
+attribution of the fault: a check input Forge wrote that the Candidate user could not use, or
+`CANDIDATE_ISOLATION_UNAVAILABLE`. A shell's own `Permission denied` or `command not found` is not
+enough, because a Lane can cause it (a script that lost its execute bit exits 126 too). After three
+such ends with the same check pins (check, runner configuration and environment) and the same failing
+line, normalized for temp names and numbers, an entry with that check parks before dispatch, so a
+fourth identical run never starts. Its admission check is skipped, and a direct check on those pins is
+refused with `RUNNER_UNAVAILABLE`. `wait` prints `HELD: CHECK ENVIRONMENT IS FAILING` with the failing
+line and the resume step: fix the runner or environment, then change the check or runner configuration
+(`configure-check`, `configure-runner`). The change ends the hold and puts held entries back in the
+queue. A pass, a failing test, an infrastructure end or another failing line also ends it. One probe
+lets one held entry check again after 30 minutes, 2 hours and then every 6 hours; the permit belongs to
+that entry, so a change that arrives meanwhile still parks. A failed build or other failure without
+that evidence never counts. On a failed check the hold reads the run's sealed output streams once (at
+most 64 rows); a passing check reads and writes nothing more. Known gaps: a cohort already composing
+when the hold trips runs its one check, and its end parks every member; Candidate output that prints
+Forge's own line could trip the hold, which costs that project a config change, not a wrong landing.
+
 **Optional red-audit drill.** To exercise detection and recovery, the owner can start a drill.
 It is advice, never an eligibility condition. From an agent sign-in, the existing owner
 approval still applies:

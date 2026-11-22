@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { providerRetryDelay } from '../src/ci-provider-recovery';
-import { clearCiDown, holdOnCiDown, infraEnd, noteInfraEnd } from './projectHostedLandingCiDown';
+import {
+  clearCiDown,
+  holdOnCiDown,
+  infraEnd,
+  noteEnvironmentEnd,
+  noteInfraEnd,
+} from './projectHostedLandingCiDown';
+import { environmentEndOf } from './projectHostedLandingEnvironmentHold';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { LandingClaim, requireLandingLease } from './projectHostedLandingControl';
@@ -101,10 +108,16 @@ export async function startLandingAdmission(
   }
   return run.id;
 }
-async function recordFirstCheck(ctx: MutationCtx, projectId: Id<'hostedProjects'>, passed: boolean) {
+async function recordFirstCheck(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  passed: boolean,
+  environment = false,
+) {
   const queue = await landingQueue(ctx, { projectId, channel: 'main' });
-  // A verdict shows CI runs checks: a CI-down hold ends (nothing to do when unset).
-  await clearCiDown(ctx, queue);
+  // A verdict shows CI runs checks: a CI-down hold ends (nothing to do when unset). An environment
+  // end already counted toward the hold (Item 0d14c456) is no verdict.
+  if (!environment) await clearCiDown(ctx, queue);
   if (queue)
     await ctx.db.patch(queue._id, {
       checkHistory: { ...queue.checkHistory, first: recordOutcome(queue.checkHistory?.first, passed) },
@@ -133,6 +146,14 @@ export async function settleLandingAdmission(
   if (holdOnCiDown() && infraEnd(run)) {
     const queue = await landingQueue(ctx, { projectId: row.projectId, channel: 'main' });
     if (queue) await noteInfraEnd(ctx, queue, run);
+  }
+  // Item 0d14c456: an environment end counts toward the hold. Once it trips, the entry is not judged:
+  // it joins the queue unadmitted, where the hold parks it before any further dispatch.
+  const environment = kind === 'tests' ? await environmentEndOf(ctx, row.projectId, run) : null;
+  let environmentHeld = false;
+  if (environment) {
+    const queue = await landingQueue(ctx, { projectId: row.projectId, channel: 'main' });
+    if (queue) environmentHeld = await noteEnvironmentEnd(ctx, queue, environment);
   }
   // Keep the run (fa2c1383, review a09af93a nit 4): a kept run checked an older main, and the elapsed
   // share the keep was for is lost with the platform's result. A restart there would pay a whole fresh
@@ -197,7 +218,7 @@ export async function settleLandingAdmission(
   // not this change's failure. Unjudged, like a platform result, it waits under the main-red hold;
   // releaseMainHolds puts it back in the queue on green, where its ordinary check runs.
   const parked =
-    kind === 'tests' && parkOnMainRed()
+    kind === 'tests' && !environmentHeld && parkOnMainRed()
       ? await redOnlyFailure(
           ctx,
           row.projectId,
@@ -230,23 +251,25 @@ export async function settleLandingAdmission(
   }
   // A kept run settles here like any admission (review 563c595b F3c): its first check is recorded
   // below, and installFinishCompose names why it did not carry. Only a test verdict retains `kept`.
+  const settled = environmentHeld ? 'platform' : kind;
   const admission = {
     ...(row.admission.full ? { full: true as const, ...(retries ? { retries } : {}) } : {}),
-    ...(row.admission.kept && kind !== 'platform' ? { kept: true as const } : {}),
+    ...(row.admission.kept && settled !== 'platform' ? { kept: true as const } : {}),
     runId: run.id,
     status:
-      kind === 'passed'
+      settled === 'passed'
         ? ('passed' as const)
-        : kind === 'tests'
+        : settled === 'tests'
           ? ('failed' as const)
           : ('unavailable' as const),
     endedAt: Date.now(),
   };
   await ctx.db.patch(row._id, { admission });
-  if (kind !== 'platform') await recordFirstCheck(ctx, row.projectId, kind === 'passed');
-  const detail = kind === 'tests' ? await describeCheckFailure(ctx, row.projectId, run) : '';
+  if (settled !== 'platform')
+    await recordFirstCheck(ctx, row.projectId, settled === 'passed', Boolean(environment));
+  const detail = settled === 'tests' ? await describeCheckFailure(ctx, row.projectId, run) : '';
   const next =
-    kind === 'tests'
+    settled === 'tests'
       ? {
           ...state,
           version: state.version + 1,
@@ -268,8 +291,8 @@ export async function settleLandingAdmission(
           observation: landingObservation('queued'),
           error: null,
         };
-  await writeLanding(ctx, { ...row, admission }, next, kind !== 'tests', true, undefined, { replay });
-  if (kind === 'tests') await settleLandingOperation(ctx, next);
+  await writeLanding(ctx, { ...row, admission }, next, settled !== 'tests', true, undefined, { replay });
+  if (settled === 'tests') await settleLandingOperation(ctx, next);
   return true;
 }
 /** The exact admission run, when it is still acceptance evidence for this

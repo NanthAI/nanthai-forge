@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { heldCommand } from './projectHostedLandingEnvironmentHold';
 import { memberWorkBudgetReply } from './abuseLimits';
 import { checkCause, submittedCheckCause } from '../src/hosted-check';
 import { withoutAuthorship, personStampValid } from '../src/work-actor-types';
@@ -454,9 +455,12 @@ export async function enqueueHostedLanding(
   let paths: string[] | null = null;
   let mainMoved = false;
   let earlyReview: string | null = null;
+  // Read before pinning (same reads): a direct check consults the environment hold.
+  const queue = await ensureLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
   const attempt = await pinLandingAttempt(ctx, {
     projectId: input.projectId,
     actor,
+    heldCheck: queue.ciDown,
     allowStaleMain: reserved !== undefined,
     githubProof: reserved?.githubProof,
     grant: input.grant,
@@ -480,13 +484,13 @@ export async function enqueueHostedLanding(
     review: reason => (earlyReview = reason),
     mainMoved: value => (mainMoved = value),
   });
-  const queue = await ensureLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
   const staleAdmission = mainMoved && attempt.deferredCheck;
   const stacked = staleAdmission
     ? null
     : await pipelineAdmission(ctx, { project, attempt, request, paths, queue });
+  // Item 0d14c456: while an environment hold covers this check, no admission run (0 I/O when unset).
   const admission =
-    stacked || staleAdmission
+    stacked || staleAdmission || heldCommand(queue.ciDown, request)
       ? null
       : await startLandingAdmission(ctx, { projectId: input.projectId, attempt, request });
   // Issue 10d253c6: the same work superseded after a passed check reserves its files now.

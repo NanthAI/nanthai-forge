@@ -1,0 +1,180 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingBatchSplit.ts": "90316b1fac80f86589dd340829ce009e128dd5acc9e8559c64b407ad65d7ef81"
+  },
+  "replay": {
+    "incident": "bf111983",
+    "test": "incident replay bf111983 line 4 (Item 0d14c456): a cohort whose check environment fails waits under the hold instead of splitting into re-checks that fail the same way",
+    "receipt": "647007ed-f137-418d-8fe5-f915d0ebf6ed"
+  },
+  "authorModel": "claude-opus-5-5",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "receipt": "66fa1317-889a-4fe6-addf-6758e8dcb018",
+    "session": "thread:delegated-task:command%3Amcp%3A82a1c440-3a91-487e-b138-09eb6eab7604%3Adelegate-task%3Aa4a055e3-7d1a-4aff-8354-93edb3e03547"
+  },
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Aee82a897-c2c3-45d5-a691-8854deddd930",
+  "exercised": {
+    "convex/projectHostedLandingBatchSplit.ts": {
+      "executed": [
+        "adoptAdmission",
+        "pendingMembers",
+        "recordCohortOutcome",
+        "splitLandingBatch"
+      ],
+      "digest": "d7172b8f67dbad890d822dbfb171f5fcd6a5a552e93915e960ff4a2ed52db122",
+      "units": [
+        [
+          "HOSTED_PLATFORM_RETRIES",
+          "a57c5199141e915ebda790d0498418eac8066ba6e570ea211a11337c88efbcf6"
+        ],
+        [
+          "admissionProof",
+          "01e82cbcf7481b022119a04a72e75f77859b33e4c3a66c934230d34ccab47f2f"
+        ],
+        [
+          "adoptAdmission",
+          "39b1fbb17447cc2d9494e3e0ac381dad64779bc6024d773bccc6fbaf0f5953dc"
+        ],
+        [
+          "batchMemberDiagnostic",
+          "a045b6869457b7e8cb4f948bf8e91a87be21735e3c563cf8d669cd3c2d69d8fa"
+        ],
+        [
+          "batchSchema",
+          "bf9d7d74e961ef85155a80e623dae5f14e3c0d35df635eaade50cbdd7ef29c7d"
+        ],
+        [
+          "bindAdmissionProof",
+          "9377f57f8918346a3da951bb738a5fcdeb29c4c2c2890140fa92d32f9683cd00"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "checkAlone",
+          "c18f5ffb90494fc3af4e9910a7312b1a6416c89bd1c16327991721dd3e696937"
+        ],
+        [
+          "checkCause",
+          "951898d2c83b24b33455ecfb98acea9ce436ed50e52d985a280b89061f7ab66d"
+        ],
+        [
+          "checkReplay",
+          "f3cc6df65bbced203300af732d3802af68f99f923fa9ce3b38861ed477e5dd5b"
+        ],
+        [
+          "clearCiDown",
+          "4d1bcdd279a7b220bc246aef89bc3b3402434facd44671dc9d16d97953641a86"
+        ],
+        [
+          "enqueueBatchCheck",
+          "e73b77709f674ad67a5ca1d2eeb79a328e787cf8429a579193a287391c19c113"
+        ],
+        [
+          "failLandingBatchPlatform",
+          "58f43fd825edde799417fb5c8f7e40694d5c0b2f5e2f883ed161744b0c575c92"
+        ],
+        [
+          "holdBatchForCiDown",
+          "38c8bece35a68e2cf67d12016c49ddf5466353f1af1f041883f40bbd35ba30fd"
+        ],
+        [
+          "hostedStartMain",
+          "b363e9608e562023c7b2963703c2aa02c302faf29032c2afe9c22405b82e1a0a"
+        ],
+        [
+          "installBatchAttempt",
+          "a925337da4b53568ae4a08ee7d6382ca9296ea11e078ae34aa5b8f7a91cec9b2"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "landingObservation",
+          "09012ed641a96f08b1189eb8956b8639de4d4f07ad39d94d952cd1c01d4cade8"
+        ],
+        [
+          "landingQueue",
+          "133b8765bccbb695ac3fb29795469a9976b57700cf9bc517906aafaf600427f8"
+        ],
+        [
+          "loadFinish",
+          "aef79203df0cea79db8071f8a5ced5d7c6e03632dff0e042fb11c308442932f1"
+        ],
+        [
+          "loadLanding",
+          "ebcbbc4824870ad74803810ad5144fbbc671303f4a51f289356b20578d07ace2"
+        ],
+        [
+          "loadLandingAttempt",
+          "0e7a8090a6e014f352bec9ef0e1fccd9dbcbb8bbb583cf5e0aa3c3058790a9f7"
+        ],
+        [
+          "pendingMembers",
+          "28d177eab3705d11bd5d5c3b7a8e91530c3a48f8029dabeb773e84317ea2df9b"
+        ],
+        [
+          "predecessorStatus",
+          "3f5e14b02ffc9c0a5103d645feddbbbf5b3614382a254a5e0c6c44e9d097e0d1"
+        ],
+        [
+          "providerRetryDelay",
+          "8f2d84ee3aa40ba72faaad605949552b07832f91bc230885a2a60e269e323c17"
+        ],
+        [
+          "recordCohortOutcome",
+          "ef4eb191de8712a8f885f206a1384a3c8ec02086e710ab46c99c71e72ebe9d6e"
+        ],
+        [
+          "recordOutcome",
+          "85a89ccd3b3036747916e0e1f7af1bb54ef38e7e55bb37d12f992b7cc31353ba"
+        ],
+        [
+          "reserveFinishRetry",
+          "d614cb0da1a790e665f56f87dac66093ac8e368511d253cb41e34a3cb29e2d05"
+        ],
+        [
+          "retryLandingBatch",
+          "53e5d70361be7423bbca6dcd08ed0d5a5e4052d4201f412a5e9ead063b6e50f3"
+        ],
+        [
+          "retryLandingBatchCheck",
+          "bb1f478ac0062f4c3686521ede3360a609af516d8d55a57c200f36f8ec2c507d"
+        ],
+        [
+          "settleBatchConflicts",
+          "87ec6e8269ce805261bb6cea4d13aef636e43b38fe7af1d8bd3660fcfabad88a"
+        ],
+        [
+          "settleLandingOperation",
+          "0337a93ddf0c38fb6bdef6bad3834ab5392022e0c97e8a92f837c42e1aaeeb4e"
+        ],
+        [
+          "splitGroups",
+          "fe23bf264bc3456b3795e53325722bf6cf80195f3244b9bd0ae4a40130ba44f4"
+        ],
+        [
+          "splitLandingBatch",
+          "e42b1ae63f8748920a55c52d1888915f152e4d0168cc154b7d8b215a51a82539"
+        ],
+        [
+          "wakeBatch",
+          "a4a14e4bdff0e7ac24045986403ccd54091252b7d741b15c531dcbd5b0da845e"
+        ],
+        [
+          "writeBatch",
+          "6243c96915dac73d9f4479bbf75d8f781cae2776d3b77b128f47fbb7fcc29a07"
+        ],
+        [
+          "writeLanding",
+          "66d679cf148e8bffa47ba33cf08bb2006907e465b1d2a27dae0b275f4082152c"
+        ]
+      ]
+    }
+  }
+}

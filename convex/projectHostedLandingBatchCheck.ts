@@ -11,10 +11,13 @@ import { checkFailureKind } from '../src/hosted-landing-admission';
 import { admittedReuseFirst, loneAdmission } from './projectHostedLandingAdmission';
 import { holdForPeers } from './projectHostedLandingCohortHold';
 import {
+  pendingMembers,
   recordCohortOutcome,
   retryLandingBatchCheck,
   splitLandingBatch,
 } from './projectHostedLandingBatchSplit';
+import { holdBatchForCiDown } from './projectHostedLandingCiDown';
+import { environmentEndOf, holdBeforeDispatch } from './projectHostedLandingEnvironmentHold';
 import { ForgeError, invariant } from '../src/errors';
 import { readHostedRecord } from './projectHostedRecords';
 import { hostedRecordSchema } from '../src/hosted-records';
@@ -212,6 +215,26 @@ async function prepareLandingCheckOnce(
           // No failing test file: name the failing step from the sealed job
           // summaries (bounded, failure-only, no fetch). Wave 1: build:web budget.
           const step = await checkFailureStep(ctx, claim.projectId, run);
+          // Item 0d14c456: an environment end counts toward the hold; once it trips, every pending
+          // member parks instead of splitting into re-checks that fail the same way.
+          const environment =
+            semantic.conflicts.length || semantic.overBudget
+              ? null
+              : await environmentEndOf(ctx, claim.projectId, run);
+          if (
+            environment &&
+            (await holdBatchForCiDown(
+              ctx,
+              key,
+              batch,
+              run,
+              () => pendingMembers(ctx, key, batch),
+              environment,
+            ))
+          ) {
+            await releaseLandingQueue(ctx, queue, now);
+            return true;
+          }
           const failure = diagnoseBatchFailure(originals, run, semantic, previous, step);
           // Item 687d1eda: a shared run that failed only on main's red tests, naming no member,
           // parks the cohort instead of splitting it into re-checks on red main (switch, off by
@@ -255,7 +278,7 @@ async function prepareLandingCheckOnce(
             await parkFailedBatch(ctx, key, batch, failure, run, pending, redOnly);
           } else {
             // A main-red park is no cohort failure: only a failure that splits counts.
-            await recordCohortOutcome(ctx, key, batch, false);
+            await recordCohortOutcome(ctx, key, batch, false, Boolean(environment));
             if (
               !(await isolateFailedBatch(
                 ctx,
@@ -293,6 +316,11 @@ async function prepareLandingCheckOnce(
     return true;
   }
   if (!attempt.deferredCheck) return false;
+  // Item 0d14c456: a tripped environment hold for this check parks the entry instead of a new run.
+  if (await holdBeforeDispatch(ctx, selected, queue)) {
+    await releaseLandingQueue(ctx, queue, now);
+    return true;
+  }
   const protectedReview = selected.row.earlyReview === true;
   if (protectedReview) {
     const ahead = await reviewCheckAhead(ctx, queue, selected.row);

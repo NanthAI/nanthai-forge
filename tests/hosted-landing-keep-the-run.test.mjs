@@ -816,9 +816,9 @@ const MUTANTS = [
     patches: [
       {
         file: 'convex/projectHostedLandingAdmission.ts',
-        find: "  if (kind === 'tests') await settleLandingOperation(ctx, next);\n  return true;\n}",
+        find: "  if (settled === 'tests') await settleLandingOperation(ctx, next);\n  return true;\n}",
         replace:
-          "  if (kind === 'tests') await settleLandingOperation(ctx, next);\n  return !admission.kept;\n}",
+          "  if (settled === 'tests') await settleLandingOperation(ctx, next);\n  return !admission.kept;\n}",
       },
     ],
   },
