@@ -6,7 +6,10 @@
 // 25 Lanes with more, and dated coverage still being prepared. `?data=one` is exactly one Lane; `?data=empty` is
 // nothing left; `?data=loading` never answers; `?data=error` fails the live read and a retry answers.
 // `&fail=page` fails the first next-page call; `&fail=stale` refuses the first dated cursor as WORK_STALE; `&fail=set`
-// fails the first set-aside call; `&owner=0` is a member. A Lane set aside or saved meanwhile leaves the live read.
+// fails the first set-aside call; `&fail=trash` fails the first trash call; `&owner=0` is a member. A Lane set aside or
+// saved meanwhile leaves the live read and comes back when Undo reopens it; a project in the trash leaves it and comes
+// back when restored. tidepool-import-test changed meanwhile, so its trash call is refused (WORK_STALE). The clipboard
+// is recorded (window.copied).
 import { ConvexProvider, type ConvexReactClient } from 'convex/react';
 import { getFunctionName, type FunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
@@ -42,15 +45,18 @@ const project = (n: number, name: string, days: number | null, role = 'owner') =
   role,
   lastLandingAt: days === null ? null : ago(days * day),
   reason: days === null ? 'No landing recorded since creation' : 'No landing in the past 30 days',
+  ...(role === 'owner' ? { trash: { expectedRevision: 10 + n } } : {}),
 });
-const dated = (n: number, text: string, date: string, reason: string, title = 'v3 release') => ({
+const dated = (n: number, text: string, date: string, reason: string, title = 'v3 release', extra = {}) => ({
   selection: { itemId: `0e6c1f2a-0000-4000-8000-${String(n).padStart(12, '0')}`, expectedVersion: 9 },
   title,
   date,
   line: 3,
   text,
   reason,
+  ...extra,
 });
+const waiting = [{ id: 'req-1', selector: 'the trash', projects: 40, byDevice: true }];
 const checked = {
   reported: false as const,
   why: 'A passed check that nobody asked to land is not recorded per Lane yet.',
@@ -108,6 +114,7 @@ function first(): LooseEndsRead {
         projects: {
           reported: true,
           continueCursor: 'projects-p2',
+          deleteRequests: [{ ...waiting[0]!, projects: 212 }],
           rows: [
             project(
               1,
@@ -130,7 +137,10 @@ function first(): LooseEndsRead {
               'Date passed',
               'Revert "Revert "Stream parser: handle split UTF-8 sequences across chunk boundaries""',
             ),
-            dated(2, 'x', '2027-01-01', 'Upcoming date'),
+            dated(2, 'x', '2027-01-01', 'Upcoming date', 'v3 release', {
+              owner: `@${LONG}/${LONG_AGENT}`,
+              proposed: true,
+            }),
           ],
         },
         active: {
@@ -161,13 +171,17 @@ function first(): LooseEndsRead {
       projects: {
         reported: true,
         continueCursor: 'projects-p2',
+        deleteRequests: waiting,
         rows: [project(1, 'mara-scratch', 41), project(2, 'tidepool-import-test', null)],
       },
       dated: {
         reported: true,
         continueCursor: 'dated-p2',
         rows: [
-          dated(1, 'Run the benchmark again after v3 ships', '2026-12-01', 'Upcoming date'),
+          dated(1, 'Run the benchmark again after v3 ships', '2026-12-01', 'Upcoming date', 'v3 release', {
+            owner: '@mara',
+            proposed: true,
+          }),
           dated(2, 'Re-check the mirror lag', '2026-11-20', 'Date passed', 'Mirror health'),
         ],
       },
@@ -210,6 +224,7 @@ function next(cursor: string): LooseEndsRead {
 const calls: string[] = [];
 let pageFailures = fail === 'page' ? 1 : 0;
 let setFailures = fail === 'set' ? 1 : 0;
+let trashFailures = fail === 'trash' ? 1 : 0;
 let subscriptions = 0;
 let staleSeen = false;
 /** Lanes the live read no longer lists: set aside, or saved meanwhile (no longer idle). */
@@ -220,8 +235,15 @@ const live = () => {
   const read = first();
   const idle = read.groups.idle;
   if (idle?.reported) idle.rows = idle.rows.filter(row => !gone.has(row.laneId));
+  const projects = read.groups.projects;
+  if (projects?.reported) projects.rows = projects.rows.filter(row => !gone.has(row.projectId));
   return JSON.stringify(read);
 };
+const rerun = () => queueMicrotask(() => listeners.forEach(listener => listener()));
+const copied: string[] = [];
+Object.defineProperty(navigator, 'clipboard', {
+  value: { writeText: async (text: string) => void copied.push(text) },
+});
 const fake = {
   watchQuery(query: FunctionReference<'query'>, args: Record<string, unknown>) {
     const { projectId: _, ...rest } = args;
@@ -257,22 +279,55 @@ const fake = {
     if (args.cursor && pageFailures-- > 0) throw new Error('Synthetic page failure');
     return JSON.stringify(args.cursor ? next(args.cursor) : first());
   },
-  async mutation(mutation: FunctionReference<'mutation'>, args: { abandon: string[] }) {
-    calls.push(`mutation ${name(mutation)} ${JSON.stringify(args.abandon)}`);
+  async mutation(
+    mutation: FunctionReference<'mutation'>,
+    args: {
+      abandon?: string[];
+      reopen?: { laneId: string; version: number }[];
+      projectId?: string;
+      expectedRevision?: number;
+    },
+  ) {
+    const called = name(mutation);
+    if (called === 'projectLifecycle:trash' || called === 'projectLifecycle:restore') {
+      calls.push(`mutation ${called} ${args.projectId} ${args.expectedRevision}`);
+      if (called === 'projectLifecycle:trash' && trashFailures-- > 0)
+        throw new Error('Synthetic trash failure');
+      if (called === 'projectLifecycle:trash' && args.projectId === 'p2')
+        throw new ConvexError({ code: 'WORK_STALE', message: 'Project changed.' });
+      if (called === 'projectLifecycle:trash') gone.add(args.projectId!);
+      else gone.delete(args.projectId!);
+      rerun();
+      return null;
+    }
+    if (args.reopen?.length) {
+      calls.push(`mutation ${called} reopen ${JSON.stringify(args.reopen)}`);
+      for (const pin of args.reopen) gone.delete(pin.laneId);
+      rerun();
+      return JSON.stringify({
+        results: args.reopen.map(pin => ({
+          laneId: pin.laneId,
+          result: 'reopened',
+          version: pin.version + 1,
+        })),
+      });
+    }
+    calls.push(`mutation ${called} ${JSON.stringify(args.abandon)}`);
     if (setFailures-- > 0) throw new Error('Synthetic set-aside failure');
     // Lane 2 gained a save while the reader was choosing. Both leave the live list, which re-runs at once.
-    for (const laneId of args.abandon) gone.add(laneId);
-    queueMicrotask(() => listeners.forEach(listener => listener()));
+    for (const laneId of args.abandon ?? []) gone.add(laneId);
+    rerun();
     return JSON.stringify({
-      results: args.abandon.map(laneId => ({
-        laneId,
-        result: laneId.endsWith('000000000002') ? 'not-dormant' : 'abandoned',
-      })),
+      results: (args.abandon ?? []).map(laneId =>
+        laneId.endsWith('000000000002')
+          ? { laneId, result: 'not-dormant' }
+          : { laneId, result: 'abandoned', version: 5 },
+      ),
     });
   },
 };
 const reads = createLiveReads();
-Object.assign(window, { calls, reads });
+Object.assign(window, { calls, reads, copied });
 const client = reads.client(fake) as unknown as ConvexReactClient;
 const route = {
   frame: 'project' as const,
@@ -296,7 +351,7 @@ createRoot(document.getElementById('root')!).render(
     <ConvexProvider client={client}>
       <LooseEnds
         route={route}
-        projectId={'fixture-project' as never}
+        projectId={(params.get('here') ?? 'fixture-project') as never}
         projectName="tidepool"
         feed={undefined}
         viewerHandle="sample-one"

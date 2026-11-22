@@ -103,9 +103,11 @@ test('one read lists dormant and quiet Lanes oldest first and names the groups i
   assert.equal(view.groups[0].rows[0].who, 'owner/quiet-otter');
   const screen = looseEndsScreen(result, {}, result.at);
   assert.equal(screen.total, 3);
+  // Lead mock check (a): the mock sentence; a group not reported says so on its own band, never here.
+  assert.equal(screen.sentence.bold, '3 loose ends, none urgent.');
   assert.match(
     screen.sentence.rest,
-    /nothing here is deleted\. Checked, never landed, Leftover projects and Waiting for a date are not reported yet/,
+    /^The oldest is a Lane with no save for 9 days\. Setting a Lane aside keeps every save; a project in the trash can be restored for 90 days\.$/,
   );
 });
 
@@ -147,6 +149,8 @@ test('an agent lists dated checks and inactive projects in bounded pages without
         title: 'Release checklist',
         body,
         version: 3,
+        // Lead mock check (f): a dated row names its Item's owner and says when the Item is still proposed.
+        ...(status === 'proposed' ? { owner: '@owner/quiet-otter' } : {}),
       },
       position,
     );
@@ -190,6 +194,24 @@ test('an agent lists dated checks and inactive projects in bounded pages without
   ]) {
     s.tables.projectHostedAcceptances.set(id, { _id: id, _creationTime: now - age * day, projectId: id });
   }
+  // Lead mock check (d): an open permanent-delete request of the account waits on the first page; an expired one never.
+  for (const [id, expiresAt] of [
+    ['request-open', now + 60_000],
+    ['request-expired', now - 1],
+  ])
+    s.tables.projectDeleteRequests.set(id, {
+      _id: id,
+      _creationTime: 1,
+      owner: 'owner',
+      requester: { device: true },
+      operationId: id,
+      request: '{}',
+      selector: 'the trash',
+      at: now - 60_000,
+      expiresAt,
+      projects: Array.from({ length: 40 }, (_, i) => ({ projectId: `trashed-${i}` })),
+      status: 'requested',
+    });
   const meter = meterReads(s.ctx);
   const started = performance.now(),
     heapAtStart = process.memoryUsage().heapUsed;
@@ -216,6 +238,13 @@ test('an agent lists dated checks and inactive projects in bounded pages without
   });
   assert.equal(projects.rows.length, 21);
   assert.ok(projects.rows.every(row => row.projectId.startsWith('owned-')));
+  assert.ok(
+    projects.rows.every(row => row.trash?.expectedRevision === 1),
+    'each of the reader’s own projects carries the revision its trash call pins',
+  );
+  assert.deepEqual(projects.deleteRequests, [
+    { id: 'request-open', selector: 'the trash', projects: 40, byDevice: true },
+  ]);
   assert.equal(projects.rows[0].lastLandingAt, now - 30 * day);
   assert.match(projects.rows[1].reason, /since creation/);
   assert.ok(cost.documents <= 110);
@@ -230,8 +259,11 @@ test('an agent lists dated checks and inactive projects in bounded pages without
     ['owned-26'],
   );
   assert.equal(later.groups.dated.rows[0].reason, 'Upcoming date');
+  assert.equal(later.groups.dated.rows[0].proposed, true);
+  assert.equal(later.groups.dated.rows[0].owner, '@owner/quiet-otter');
   const moreProjects = await read(s, 'owner', { cursor: projects.continueCursor });
   assert.deepEqual(Object.keys(moreProjects.groups), ['projects']);
+  assert.equal(moreProjects.groups.projects.deleteRequests, undefined, 'only the first page says what waits');
   assert.deepEqual(
     moreProjects.groups.projects.rows.map(row => row.projectId),
     ['owned-22', 'owned-23', 'owned-24', 'owned-25', 'owned-26'],
@@ -377,7 +409,15 @@ test('fc1831eb page: the details read renders the five groups, dated Item links 
     'checked-never-landed stays unreported until its record exists',
   );
   assert.match(byKey.checked.why, /not recorded per Lane/);
-  assert.equal(byKey.idle.pickable, true, 'the owner may set Lanes nobody holds aside');
+  assert.ok(
+    byKey.idle.rows.every(row => row.pickable && row.action === 'set-aside'),
+    'the owner may set Lanes nobody holds aside',
+  );
+  assert.ok(
+    byKey.stopped.rows.every(row => row.pickable && row.action === 'hand'),
+    'a stopped Lane is handed to an agent',
+  );
+  assert.match(byKey.stopped.rows[0].evidence, /^1 file not landed\. Why it stopped: not reported$/);
   assert.deepEqual(
     byKey.idle.rows.map(row => [row.title, row.age]),
     [
@@ -417,18 +457,20 @@ test('fc1831eb page: the details read renders the five groups, dated Item links 
     { title: 'Synthetic project', mono: true, laneId: null, itemId: null, age: 'never landed' },
   );
   assert.match(project.evidence, /No landing recorded since creation; you are its owner/);
-  assert.equal(
-    byKey.projects.pickable || byKey.dated.pickable || byKey.stopped.pickable,
-    false,
-    'only Lanes are set aside here',
+  assert.deepEqual(
+    [project.action, project.pickable, project.trash],
+    ['trash', true, { expectedRevision: 1, expectedLastLanding: null }],
+    'the owner moves a leftover project to the trash, pinned to its revision and to the landing it saw (none)',
+  );
+  assert.ok(
+    byKey.dated.rows.every(row => !row.pickable && row.action === 'open'),
+    'a dated check only opens its Item',
   );
   assert.ok(byKey.projects.cursor && byKey.dated.cursor, 'more than one page in both account-wide groups');
   assert.equal(byKey.dated.why, null, 'complete dated coverage says nothing extra');
-  assert.match(screen.sentence.bold, /^\d+ or more loose ends\.$/);
-  assert.match(
-    screen.sentence.rest,
-    /The oldest is a Lane with no save for 9 days\. .*Checked, never landed is not reported yet; it says why\./,
-  );
+  // One dated line in four has passed: those are the urgent ones.
+  assert.match(screen.sentence.bold, /^\d+ or more loose ends, \d+ urgent\.$/);
+  assert.doesNotMatch(screen.sentence.rest, /not reported/);
   assert.equal(now, first.at);
 });
 
@@ -1031,5 +1073,146 @@ test('an Item with one listed quiet Lane reads no Lane record: a resolution need
   assert.deepEqual(
     opened.filter(id => String(id).startsWith('record-')),
     [],
+  );
+});
+
+const actions = await import(moduleUrl('../web/src/app/needs/loose-actions.ts'));
+const { handText, trashWord } = await import(moduleUrl('../web/src/app/needs/loose-ends.ts'));
+const { ConvexError } = await import('convex/values');
+const lid = n => `5d1c7a0e-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+test('fc1831eb set aside: a Lane saved meanwhile is skipped and named, a failed batch alone retries, Undo pins the version', async () => {
+  const sent = [];
+  let failNext = false;
+  const sweep = async args => {
+    sent.push(args);
+    if (failNext) {
+      failNext = false;
+      throw new Error('Synthetic network failure');
+    }
+    return JSON.stringify({
+      results: [
+        ...args.abandon.map((laneId, i) =>
+          i === 1 ? { laneId, result: 'not-dormant' } : { laneId, result: 'abandoned', version: 7 },
+        ),
+        ...(args.reopen ?? []).map(pin =>
+          pin.version === 7
+            ? { laneId: pin.laneId, result: 'reopened', version: 8 }
+            : { laneId: pin.laneId, result: 'changed' },
+        ),
+      ],
+    });
+  };
+  // 27 Lanes: two calls of at most 25; the second fails as a whole.
+  const ids = Array.from({ length: 27 }, (_, i) => lid(i + 1));
+  const first = await actions.setAsideLanes(
+    async args => {
+      if (args.abandon.length === 2) failNext = true;
+      return sweep(args);
+    },
+    4,
+    ids,
+  );
+  assert.deepEqual(
+    sent.map(args => args.abandon.length),
+    [25, 2],
+  );
+  assert.ok(sent.every(args => args.versions === true && args.authorityEpoch === 4));
+  assert.equal(first.results[lid(2)], 'not-dormant', 'saved meanwhile: skipped, not set aside');
+  assert.equal(setAsideWord(first.results[lid(2)]).word, 'Skipped: it was saved meanwhile');
+  assert.deepEqual([first.results[lid(26)], first.results[lid(27)]], ['failed', 'failed']);
+  assert.equal(first.versions[lid(1)], 7);
+  // Retry carries only the failed Lanes.
+  const failed = ids.filter(id => first.results[id] === 'failed');
+  sent.length = 0;
+  const retry = await actions.setAsideLanes(sweep, 4, failed);
+  assert.deepEqual(
+    sent.map(args => args.abandon),
+    [[lid(26), lid(27)]],
+  );
+  assert.equal(retry.results[lid(26)], 'abandoned');
+  // Undo sends the pins it was given; one changed since stays set aside.
+  sent.length = 0;
+  const back = await actions.bringBackLanes(sweep, 4, [
+    { laneId: lid(1), version: 7 },
+    { laneId: lid(3), version: 6 },
+  ]);
+  assert.deepEqual(sent, [
+    {
+      authorityEpoch: 4,
+      abandon: [],
+      reopen: [
+        { laneId: lid(1), version: 7 },
+        { laneId: lid(3), version: 6 },
+      ],
+      versions: true,
+    },
+  ]);
+  assert.deepEqual(back, { [lid(1)]: 'reopened', [lid(3)]: 'changed' });
+  assert.equal(setAsideWord('changed').word, 'Skipped: it changed meanwhile');
+});
+
+test('fc1831eb trash: one owner call per project; a changed project is skipped, a failure keeps its operation for retry; Undo restores at the next revision', async () => {
+  const calls = [];
+  const stale = () => new ConvexError({ code: 'WORK_STALE', message: 'Project changed.' });
+  const trash = async pin => {
+    calls.push(['trash', pin]);
+    if (pin.projectId === 'p2') throw stale();
+    if (pin.projectId === 'p3') throw new Error('Synthetic network failure');
+    // p4 was already moved by another tab: the pinned trash answers that this operation did not move it.
+    return { applied: pin.projectId !== 'p4' };
+  };
+  const pins = ['p1', 'p2', 'p3', 'p4'].map((projectId, i) => ({
+    projectId,
+    operationId: `op-${projectId}`,
+    expectedRevision: 10 + i,
+  }));
+  const results = await actions.trashProjects(trash, pins);
+  assert.deepEqual(results, { p1: 'trashed', p2: 'changed', p3: 'failed', p4: 'changed' });
+  assert.deepEqual(
+    [trashWord('changed').word, trashWord('failed').retry, trashWord('trashed').done],
+    ['Skipped: it changed meanwhile', true, true],
+  );
+  const restore = async pin => {
+    calls.push(['restore', pin]);
+    if (pin.expectedRevision !== 11) throw stale();
+    return null;
+  };
+  const back = await actions.restoreProjects(restore, [
+    { projectId: 'p1', operationId: 'undo-p1', expectedRevision: 11 },
+  ]);
+  assert.deepEqual(back, { p1: 'restored' });
+  assert.equal(calls.length, 5, 'one call per project per action, nothing else');
+});
+
+test('fc1831eb hand to an agent: one prompt for every picked Lane through the existing explicit takeover', () => {
+  const project = { name: 'tidepool', projectId: 'proj-1', backend: 'https://example.convex.cloud' };
+  const text = handText(
+    [
+      { laneId: lid(1), title: 'Fix flaky\n retry timer' },
+      { laneId: lid(4), title: 'Docs: migration guide v3' },
+    ],
+    project,
+  );
+  assert.match(
+    text,
+    /^Take over these 2 Lanes of the Forge project "tidepool" \(project ID proj-1\) from Loose ends/,
+  );
+  assert.match(
+    text,
+    /an existing checkout of that project \(ROOT below\), or make one with nforge clone proj-1 NEW_DIRECTORY --deployment https:\/\/example\.convex\.cloud\./,
+    'an agent opened anywhere finds or makes the checkout',
+  );
+  assert.match(
+    text,
+    /nforge agent ROOT start --open '\{"laneId":"LANE_ID","takeover":true,"reason":"Handed over from Loose ends"\}'/,
+  );
+  assert.match(
+    text,
+    /\n- Fix flaky retry timer \(5d1c7a0e-0000-4000-8000-000000000001\)\n- Docs: migration guide v3 \(/,
+  );
+  assert.match(
+    handText([{ laneId: lid(1), title: 'x' }], project),
+    /^Take over this Lane of the Forge project "tidepool" \(project ID proj-1\) from Loose ends and finish it\./,
   );
 });

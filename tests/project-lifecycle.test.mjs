@@ -202,6 +202,36 @@ test('M1 guards: restore on an active project and trash on a trashed one are no-
     e => e.data.code === 'WORK_STALE',
   );
 });
+test('fc1831eb pinned trash: a landing since the read refuses it, and the reply says whether this operation moved the project', async () => {
+  const s = fixture();
+  const project = () => s.tables.hostedProjects.get('project');
+  const trash = input => modules.projectLifecycle.trash._handler(s.ctx, input);
+  // Loose ends saw no landing; one landed since (a landing does not move the project revision).
+  s.tables.projectHostedAcceptances.set('landing-1', {
+    _id: 'landing-1',
+    _creationTime: 5,
+    projectId: 'project',
+  });
+  const before = structuredClone(project());
+  await assert.rejects(
+    trash({ ...s.operation(), expectedLastLanding: null }),
+    e => e.data.code === 'WORK_STALE',
+  );
+  assert.deepEqual(project(), before, 'a refused trash writes nothing');
+  // Pinned to the landing it saw, it moves the project, and a replay of the same operation says so again.
+  const op = { ...s.operation(), expectedLastLanding: 'landing-1' };
+  assert.deepEqual(await trash(op), { applied: true });
+  assert.equal(project().removal, 'trash');
+  assert.deepEqual(await trash(op), { applied: true }, 'a lost reply is recovered by the same request');
+  // A second tab's own operation finds it already in the trash: not its own, so it offers no Undo.
+  assert.deepEqual(
+    await trash({ ...s.operation(), expectedRevision: before.revision, expectedLastLanding: 'landing-1' }),
+    { applied: false },
+  );
+  // Callers that send no landing pin keep the null reply.
+  await modules.projectLifecycle.restore._handler(s.ctx, s.operation());
+  assert.equal(await trash(s.operation()), null);
+});
 test('M1 phase derive: one row per state, a reason for each purge-blocked code, and no false "permanently deleted"', () => {
   const now = 1_000;
   const row = (project, state, extra = {}) => {

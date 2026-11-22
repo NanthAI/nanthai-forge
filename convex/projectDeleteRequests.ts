@@ -223,6 +223,23 @@ export const read = query({
   },
 });
 
+/** The account's unexpired open requests, newest first: one bounded indexed read (the account page and Loose ends). */
+export async function openDeleteRequests(ctx: QueryCtx, owner: string, now = Date.now()) {
+  const rows = await ctx.db
+    .query('projectDeleteRequests')
+    .withIndex('by_owner_and_status', q => q.eq('owner', owner).eq('status', 'requested'))
+    .order('desc')
+    .take(10);
+  return rows
+    .filter(row => row.expiresAt > now)
+    .map(row => ({
+      id: row._id as string,
+      selector: row.selector,
+      projects: row.projects.length,
+      byDevice: row.requester.device,
+    }));
+}
+
 /** The account's open requests, newest first (the account page lists them). One bounded indexed read. */
 export const open = query({
   args: {},
@@ -230,21 +247,13 @@ export const open = query({
   handler: async ctx => {
     try {
       const user = await caller(ctx);
-      const rows = await ctx.db
-        .query('projectDeleteRequests')
-        .withIndex('by_owner_and_status', q => q.eq('owner', user.subject).eq('status', 'requested'))
-        .order('desc')
-        .take(10);
-      const now = Date.now();
       return canonicalPayload(
-        rows
-          .filter(row => row.expiresAt > now)
-          .map(row => ({
-            id: row._id,
-            selector: row.selector,
-            projects: row.projects.length,
-            url: deleteRequestUrl(row._id),
-          })),
+        (await openDeleteRequests(ctx, user.subject)).map(row => ({
+          id: row.id,
+          selector: row.selector,
+          projects: row.projects,
+          url: deleteRequestUrl(row.id),
+        })),
       );
     } catch (error) {
       return report(error);

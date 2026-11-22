@@ -24,6 +24,7 @@ import { startRetention, stopRetention, purgeSettleMs } from './projectRetention
 import { purgeProjectRowsPage } from './projectPurgeRows';
 import { projectPurgeWriter } from './projectFinishReadWriter';
 import { dropProjectOrder, restoreProjectOrder } from './accountProjectOrder';
+import { latestLanding } from './projectLatestLanding';
 
 const args = { projectId: v.id('hostedProjects'), operationId: v.string(), expectedRevision: v.number() };
 async function schedule(ctx: MutationCtx, project: Doc<'hostedProjects'>) {
@@ -39,8 +40,9 @@ export async function transition(
   ctx: MutationCtx,
   input: { projectId: Id<'hostedProjects'>; operationId: string; expectedRevision: number; confirm?: string },
   action: 'trash' | 'restore' | 'delete',
-  /** Account deletion carries its own reviewed plan as the confirmation. */
-  options: { confirmed?: boolean } = {},
+  /** Account deletion carries its own reviewed plan as the confirmation. `guard` checks a caller's own evidence pin
+   * on a new owner transition, after authority and replay and before the revision check. */
+  options: { confirmed?: boolean; guard?: (project: Doc<'hostedProjects'>) => Promise<void> } = {},
 ) {
   const user = await ctx.auth.getUserIdentity(),
     project = await ctx.db.get(input.projectId);
@@ -80,6 +82,7 @@ export async function transition(
   // re-measures retention and moves its expiry.
   if ((action === 'restore' && !project.removal) || (action === 'trash' && project.removal === 'trash'))
     return null;
+  await options.guard?.(project);
   invariant(
     project.revision === input.expectedRevision,
     'WORK_STALE',
@@ -326,13 +329,29 @@ async function applyRename(ctx: MutationCtx, project: Doc<'hostedProjects'>, inp
     },
   });
 }
+/** `expectedLastLanding` (Loose ends, Item fc1831eb): the landing receipt id the reader saw, or null for none. A
+ * project that landed since is refused as WORK_STALE (a landing does not move the project revision), and the reply
+ * says whether this operation moved the project (`applied`), so a project another tab trashed is not claimed as
+ * this caller's. Callers that omit it keep the null reply. */
 export const trash = mutation({
-  args,
-  returns: v.null(),
-  handler: async (ctx, input) => {
+  args: { ...args, expectedLastLanding: v.optional(v.union(v.string(), v.null())) },
+  returns: v.union(v.null(), v.object({ applied: v.boolean() })),
+  handler: async (ctx, { expectedLastLanding, ...input }) => {
     try {
-      await transition(ctx, input, 'trash');
-      return null;
+      if (expectedLastLanding === undefined) {
+        await transition(ctx, input, 'trash');
+        return null;
+      }
+      await transition(ctx, input, 'trash', {
+        guard: async project =>
+          invariant(
+            ((await latestLanding(ctx, project._id))?._id ?? null) === expectedLastLanding,
+            'WORK_STALE',
+            'The project landed work since you looked. It was left alone.',
+          ),
+      });
+      const after = await ctx.db.get(input.projectId);
+      return { applied: after?.removal === 'trash' && after.lifecycle?.operationId === input.operationId };
     } catch (error) {
       return report(error);
     }

@@ -7,6 +7,7 @@ import type { Doc } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 import { latestLanding } from './projectLatestLanding';
 import { readProjectRole } from './projectAuthority';
+import { openDeleteRequests } from './projectDeleteRequests';
 import { workHead } from './projectWorkHead';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import schema from './schema';
@@ -72,7 +73,8 @@ async function inactive(ctx: QueryCtx, project: Project | null, actor: string, c
   if (!project || project.removal || project._creationTime > cutoff) return null;
   const role = await readProjectRole(ctx, project, actor);
   if (!role) return null;
-  const lastLandingAt = (await latestLanding(ctx, project._id))?._creationTime ?? null;
+  const landing = await latestLanding(ctx, project._id);
+  const lastLandingAt = landing?._creationTime ?? null;
   if (lastLandingAt !== null && lastLandingAt > cutoff) return null;
   return {
     projectId: project._id,
@@ -80,6 +82,11 @@ async function inactive(ctx: QueryCtx, project: Project | null, actor: string, c
     role,
     lastLandingAt,
     reason: lastLandingAt === null ? 'No landing recorded since creation' : 'No landing in the past 30 days',
+    // Only the owner moves a project to the trash (projectLifecycle:trash), pinned to this revision and to the
+    // landing seen here (a landing does not move the revision).
+    ...(project.owner === actor
+      ? { trash: { expectedRevision: project.revision, expectedLastLanding: landing?._id ?? null } }
+      : {}),
   };
 }
 
@@ -100,7 +107,11 @@ export async function inactiveProjects(
   const range = stream(ctx.db, schema)
     .query('accountProjectOrder')
     .withIndex('by_person_and_activity', q => q.eq('person', actor));
-  const { rows, boundary } = await page(range, cursor ? [actor, ...cursor.after] : null);
+  const [{ rows, boundary }, waiting] = await Promise.all([
+    page(range, cursor ? [actor, ...cursor.after] : null),
+    // The first page also says which of the account's projects wait for a permanent-delete approval.
+    cursor ? null : openDeleteRequests(ctx, actor, now),
+  ]);
   const matches = await Promise.all(
     rows.map(async row =>
       inactive(ctx, row.projectId === project._id ? project : await ctx.db.get(row.projectId), actor, cutoff),
@@ -108,6 +119,7 @@ export async function inactiveProjects(
   );
   return {
     reported: true,
+    ...(waiting?.length ? { deleteRequests: waiting } : {}),
     rows: matches.filter(row => row !== null),
     continueCursor: boundary
       ? prefix + JSON.stringify({ group: 'projects', at, after: [boundary.activityHour, boundary.projectId] })
@@ -158,9 +170,11 @@ export async function datedChecks(
       ? {}
       : { why: 'The Plan search index is still being prepared. Dated checks may be incomplete.' }),
     rows: rows.flatMap(row => {
-      const { title, version, dueCheck } = JSON.parse(row.value) as {
+      const { title, version, dueCheck, status, owner } = JSON.parse(row.value) as {
         title: string;
         version: number;
+        status: string;
+        owner?: string;
         dueCheck?: { date: string; line: number; text: string };
       };
       if (!dueCheck) return [];
@@ -168,6 +182,8 @@ export async function datedChecks(
         {
           selection: { itemId: row.key, expectedVersion: version },
           title,
+          ...(owner ? { owner } : {}),
+          ...(status === 'proposed' ? { proposed: true } : {}),
           ...dueCheck,
           reason:
             dueCheck.date < today ? 'Date passed' : dueCheck.date === today ? 'Due today' : 'Upcoming date',

@@ -2,7 +2,8 @@
 // Loose ends (Item fc1831eb) as data. `looseEndsView` is the folded Needs me region's Lane groups. `looseEndsScreen`
 // is the Loose ends page from the details read (projectLooseEnds:read with details: true): the five groups in the
 // approved order, each with its rows, its next page cursor, or why it is not reported, plus pages the reader asked for
-// merged once per group. `setAsideWord` says what happened to each Lane the owner set aside. Pure.
+// merged once per group. `setAsideWord` says what happened to each Lane the owner set aside, `trashWord` to each
+// project moved to the trash, and `handText` is the one prompt that hands Lanes to an agent. Pure.
 import { waited, whoOf } from './model';
 
 export type LooseRow = {
@@ -27,7 +28,11 @@ export type ProjectRow = {
   role: string;
   lastLandingAt: number | null;
   reason: string;
+  /** Present on the reader's own projects: what projectLifecycle:trash pins (revision and the landing seen). */
+  trash?: ProjectTrash;
 };
+/** An open permanent-delete request of the reader's account (projectDeleteRequests openDeleteRequests). */
+export type DeleteRequestRow = { id: string; selector: string; projects: number; byDevice: boolean };
 /** The first unchecked Done-when line with a date on an open Item (projectLooseEndsDetails datedChecks). */
 export type DatedRow = {
   selection: { itemId: string; expectedVersion: number };
@@ -36,6 +41,9 @@ export type DatedRow = {
   line: number;
   text: string;
   reason: string;
+  /** The Item's owner (`@handle` or `@handle/agent`) and whether it is still proposed. */
+  owner?: string;
+  proposed?: true;
 };
 type Listed<Row> = {
   reported: true;
@@ -44,6 +52,8 @@ type Listed<Row> = {
   continueCursor?: string | null;
   /** A reported group whose coverage is incomplete says so. */
   why?: string;
+  /** Leftover projects only: the account's projects waiting for a permanent-delete approval. */
+  deleteRequests?: DeleteRequestRow[];
 };
 type NotReported = { reported: false; why: string };
 type Group<Row = LooseRow> = Listed<Row> | NotReported;
@@ -122,9 +132,14 @@ export function mergePage(pages: Pages, key: GroupKey, reply: LooseEndsRead): Pa
   return next;
 }
 
+/** What a row offers: the owner sets an idle Lane aside, anyone hands a stopped one to an agent, the owner of a
+ * leftover project moves it to the trash, a dated check opens its Item. */
+export type ProjectTrash = { expectedRevision: number; expectedLastLanding?: string | null };
+export type RowAction = 'set-aside' | 'hand' | 'trash' | 'open';
 export type ScreenRow = {
   key: string;
   title: string;
+  /** `@handle` or `handle/agent`, shown whole as the approved page does. */
   who: string | null;
   /** The project name is code-like and set in mono. */
   mono: boolean;
@@ -132,6 +147,13 @@ export type ScreenRow = {
   age: string;
   laneId: string | null;
   itemId: string | null;
+  action: RowAction | null;
+  /** The row has a tick box: its action can run on many at once. */
+  pickable: boolean;
+  /** Leftover projects: what the trash pins. */
+  trash: ProjectTrash | null;
+  /** Dated checks: the Item is still proposed. */
+  proposed: boolean;
 };
 export type Section = {
   key: GroupKey | 'active';
@@ -142,7 +164,8 @@ export type Section = {
   why: string | null;
   rows: ScreenRow[];
   cursor: string | null;
-  pickable: boolean;
+  /** Leftover projects only: open permanent-delete requests of the account. */
+  deleteRequests: DeleteRequestRow[];
 };
 
 const SCREEN_META: { key: GroupKey | 'active'; title: string; hint: string }[] = [
@@ -154,7 +177,7 @@ const SCREEN_META: { key: GroupKey | 'active'; title: string; hint: string }[] =
   },
   { key: 'stopped', title: 'Stopped mid-task', hint: 'no save, sync or start for over 90 minutes' },
   { key: 'projects', title: 'Leftover projects', hint: 'no landing for 30 days' },
-  { key: 'dated', title: 'Waiting for a date', hint: 'a Done-when line with a date' },
+  { key: 'dated', title: 'Waiting for a date', hint: 'nothing to do until then' },
   { key: 'active', title: 'Still active', hint: 'has a live landing or recent activity, left alone' },
 ];
 const files = (n: number) => (n ? `${n.toLocaleString('en')} ${n === 1 ? 'file' : 'files'}` : 'no files yet');
@@ -184,46 +207,60 @@ function dueWords(date: string, reason: string, now: number) {
       : `due ${words}`;
 }
 
-function laneRow(row: LooseRow, key: GroupKey | 'active', now: number): ScreenRow {
+const plain = { laneId: null, itemId: null, trash: null, proposed: false, pickable: false };
+function laneRow(row: LooseRow, key: GroupKey | 'active', now: number, owner: boolean): ScreenRow {
   const age = since(row.at, now);
+  const extra =
+    (row.replacedBy ? `, replaced by Lane ${row.replacedBy.slice(0, 8)}` : '') +
+    (row.heldBy ? ` · ${row.heldBy}` : '');
+  const action: RowAction | null =
+    key === 'idle' ? (owner ? 'set-aside' : null) : key === 'active' ? null : 'hand';
   return {
+    ...plain,
     key: row.laneId,
     title: row.title || 'Lane without a goal',
     who: whoOf(row.actor, row.agent),
     mono: false,
     evidence:
-      files(row.paths) +
-      (row.replacedBy ? `, replaced by Lane ${row.replacedBy.slice(0, 8)}` : '') +
-      (row.heldBy ? ` · ${row.heldBy}` : ''),
+      key === 'stopped'
+        ? `${row.paths ? `${files(row.paths)} not landed` : 'Nothing saved yet'}${extra}. Why it stopped: not reported`
+        : files(row.paths) + extra,
     age: key === 'stopped' ? `not seen for ${age}` : age,
     laneId: row.laneId,
-    itemId: null,
+    action,
+    // Picking many is the owner's: the selection's Set aside needs the owner's authority.
+    pickable: owner && action !== null,
   };
 }
-const projectRow = (row: ProjectRow, now: number): ScreenRow => ({
+const projectRow = (row: ProjectRow, now: number, viewer: string | undefined): ScreenRow => ({
+  ...plain,
   key: row.projectId,
   title: row.name,
-  who: null,
+  who: row.trash && viewer ? `@${viewer.replace(/^@/, '')}` : null,
   mono: true,
   evidence: `${row.reason}; you are its ${row.role}`,
   age: row.lastLandingAt === null ? 'never landed' : `no landing for ${since(row.lastLandingAt, now)}`,
-  laneId: null,
-  itemId: null,
+  action: row.trash ? 'trash' : null,
+  pickable: !!row.trash,
+  trash: row.trash ?? null,
 });
 const datedRow = (row: DatedRow, now: number): ScreenRow => ({
+  ...plain,
   key: `${row.selection.itemId}:${row.line}`,
   title: row.text,
-  who: null,
+  who: row.owner ?? null,
   mono: false,
   evidence: `Done-when line ${row.line} on the Item “${row.title}”`,
   age: dueWords(row.date, row.reason, now),
-  laneId: null,
   itemId: row.selection.itemId,
+  action: 'open',
+  proposed: !!row.proposed,
 });
 
 /** The Loose ends page: the five groups in the approved order (and the Lanes held meanwhile), the sentence over them.
- * Only Lanes nobody holds can be picked, and only by the owner (the read carries the set-aside authority). */
-export function looseEndsScreen(read: LooseEndsRead, pages: Pages, now: number) {
+ * The owner (the read carries the set-aside authority) picks Lanes; a project is picked by its own owner. */
+export function looseEndsScreen(read: LooseEndsRead, pages: Pages, now: number, viewer?: string) {
+  const owner = !!read.setAside;
   // The live read classifies a Lane: a continued row of a Lane the live read now lists elsewhere (held meanwhile, or
   // moved between groups) is dropped, so one Lane is shown, and picked, once.
   const live = new Set(
@@ -234,6 +271,7 @@ export function looseEndsScreen(read: LooseEndsRead, pages: Pages, now: number) 
   );
   // A Lane a continued page found held meanwhile is shown under Still active, not where an older page listed it.
   const heldLater = new Set(((pages.active?.rows ?? []) as LooseRow[]).map(row => row.laneId));
+  let urgent = 0;
   const sections = SCREEN_META.flatMap((meta): Section[] => {
     const extra = pages[meta.key];
     // Lanes found held on a continued page form Still active even when the live first page held none.
@@ -241,20 +279,19 @@ export function looseEndsScreen(read: LooseEndsRead, pages: Pages, now: number) 
       read.groups[meta.key] ?? (extra ? { reported: true as const, rows: [], continueCursor: null } : null);
     if (!group) return [];
     if (!group.reported)
-      return [{ ...meta, reported: false, why: group.why, rows: [], cursor: null, pickable: false }];
+      return [{ ...meta, reported: false, why: group.why, rows: [], cursor: null, deleteRequests: [] }];
     const lanes = meta.key !== 'projects' && meta.key !== 'dated';
     const continued = ((extra?.rows ?? []) as LooseRow[]).filter(
       row => !lanes || (!live.has(row.laneId) && (meta.key === 'active' || !heldLater.has(row.laneId))),
     );
     const seen = new Set<string>();
     const rows = [...group.rows, ...continued]
-      .map(row =>
-        meta.key === 'projects'
-          ? projectRow(row as ProjectRow, now)
-          : meta.key === 'dated'
-            ? datedRow(row as DatedRow, now)
-            : laneRow(row as LooseRow, meta.key, now),
-      )
+      .map(row => {
+        if (meta.key === 'projects') return projectRow(row as ProjectRow, now, viewer);
+        if (meta.key !== 'dated') return laneRow(row as LooseRow, meta.key, now, owner);
+        if ((row as DatedRow).reason === 'Date passed') urgent++;
+        return datedRow(row as DatedRow, now);
+      })
       .filter(row => !seen.has(row.key) && !!seen.add(row.key));
     return [
       {
@@ -263,7 +300,7 @@ export function looseEndsScreen(read: LooseEndsRead, pages: Pages, now: number) 
         why: group.why ?? null,
         rows,
         cursor: extra ? (extra.cursor ?? null) : (group.continueCursor ?? null),
-        pickable: meta.key === 'idle' && !!read.setAside,
+        deleteRequests: (group as { deleteRequests?: DeleteRequestRow[] }).deleteRequests ?? [],
       },
     ];
   });
@@ -271,30 +308,30 @@ export function looseEndsScreen(read: LooseEndsRead, pages: Pages, now: number) 
   const total = loose.reduce((sum, section) => sum + section.rows.length, 0);
   const more = loose.some(section => section.cursor);
   const partial = loose.some(section => section.reported && section.why);
-  const quiet = loose.filter(section => !section.reported);
   const oldest = sections.find(section => section.key === 'idle')?.rows[0];
-  const notYet = quiet.length
-    ? ` ${new Intl.ListFormat('en-GB').format(quiet.map(section => section.title))} ${quiet.length === 1 ? 'is' : 'are'} not reported yet; ${quiet.length === 1 ? 'it says' : 'each says'} why.`
-    : '';
-  // "Nothing" only once every reported group is read to its end with full coverage.
+  // "Nothing" only once every reported group is read to its end with full coverage. A group not reported says so
+  // on its own band, never in this sentence.
   const exhausted = !more && !partial;
+  const one = total === 1 && !more;
   return {
     sections,
     total,
     exhausted,
     sentence: total
       ? {
-          bold: `${total.toLocaleString('en')}${more ? ' or more' : ''} loose ${total === 1 && !more ? 'end' : 'ends'}.`,
-          rest: `${oldest ? `The oldest is a Lane with no save for ${oldest.age}. ` : ''}Setting a Lane aside keeps every save; nothing here is deleted.${notYet}`,
+          bold: `${total.toLocaleString('en')}${more ? ' or more' : ''} loose ${one ? 'end' : 'ends'}, ${urgent ? `${urgent.toLocaleString('en')} urgent` : one ? 'not urgent' : 'none urgent'}.`,
+          rest: `${oldest ? `The oldest is a Lane with no save for ${oldest.age}. ` : ''}Setting a Lane aside keeps every save; a project in the trash can be restored for 90 days.`,
         }
       : exhausted
         ? {
             bold: 'Nothing is left lying around.',
-            rest: `No Lane, project or dated check is waiting.${notYet}`,
+            rest: 'Every open Lane had a recent save, and every project landed something in the last 30 days.',
           }
         : {
             bold: 'No loose ends shown yet.',
-            rest: `${more ? 'Some groups have more to read; Show 25 more keeps looking.' : 'Some groups are not fully read yet; each says why.'}${notYet}`,
+            rest: more
+              ? 'Some groups have more to read; Show 25 more keeps looking.'
+              : 'Some groups are not fully read yet; each says why.',
           },
   };
 }
@@ -304,12 +341,18 @@ export function setAsideWord(result: string | 'failed') {
   switch (result) {
     case 'abandoned':
       return { word: 'Set aside', done: true, retry: false };
+    case 'reopened':
+      return { word: 'Brought back', done: false, retry: false };
     case 'has-saved-work':
       return { word: 'Skipped: it holds work that is not on main', done: false, retry: false };
     case 'not-dormant':
       return { word: 'Skipped: it was saved meanwhile', done: false, retry: false };
+    case 'changed':
+      return { word: 'Skipped: it changed meanwhile', done: false, retry: false };
     case 'pinned':
       return { word: 'Skipped: it is pinned', done: false, retry: false };
+    case 'in-queue':
+      return { word: 'Skipped: it is in the landing queue', done: false, retry: false };
     case 'not-open':
     case 'not-found':
       return { word: 'Skipped: it is already closed', done: false, retry: false };
@@ -318,4 +361,36 @@ export function setAsideWord(result: string | 'failed') {
     default:
       return { word: `Skipped (${result})`, done: false, retry: false };
   }
+}
+
+/** What projectLifecycle:trash did to one project. `changed` is its WORK_STALE refusal: the project changed since the
+ * list was read, so it was left alone. */
+export function trashWord(result: 'trashed' | 'changed' | 'failed' | 'restored') {
+  switch (result) {
+    case 'trashed':
+      return { word: 'In the trash', done: true, retry: false };
+    case 'restored':
+      return { word: 'Restored', done: false, retry: false };
+    case 'changed':
+      return { word: 'Skipped: it changed meanwhile', done: false, retry: false };
+    default:
+      return { word: 'Could not move to the trash', done: false, retry: true };
+  }
+}
+
+/** The one prompt "Hand to an agent" copies: the existing explicit takeover (`start --open` with `takeover`) for each
+ * Lane, then the agent finishes or abandons it. It names the project, so an agent opened anywhere finds its checkout
+ * (or clones one). Nothing is sent; the reader pastes it into their own agent app. */
+export function handText(
+  lanes: { laneId: string; title: string }[],
+  project: { name: string; projectId: string; backend: string },
+) {
+  const list = lanes.map(lane => `- ${lane.title.replace(/\s+/g, ' ').trim()} (${lane.laneId})`).join('\n');
+  return (
+    `Take over ${lanes.length === 1 ? 'this Lane' : `these ${lanes.length} Lanes`} of the Forge project ${JSON.stringify(project.name)} (project ID ${project.projectId}) from Loose ends and finish ${lanes.length === 1 ? 'it' : 'them'}. ` +
+    `Work in an existing checkout of that project (ROOT below), or make one with nforge clone ${project.projectId} NEW_DIRECTORY --deployment ${project.backend}. ` +
+    `For each Lane run nforge agent ROOT start --open '{"laneId":"LANE_ID","takeover":true,"reason":"Handed over from Loose ends"}', ` +
+    'work in the Lane path it returns, read its Item and saves, then land it with nforge agent ROOT land --save, or abandon it with a reason if the work is no longer needed. Every save is kept either way.\n' +
+    list
+  );
 }

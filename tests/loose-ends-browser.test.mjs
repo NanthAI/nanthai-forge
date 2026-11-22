@@ -4,8 +4,11 @@
 // a hidden tab drops it and catches up with one subscription; each Show 25 more is one call with the group's cursor,
 // an empty continued page keeps going, and a failed page retries only itself; dated checks link to their Item; a Lane
 // saved meanwhile is skipped and named, and retry repeats only the Lane whose call failed; selection works from the
-// keyboard with a mixed group tick and Esc; axe is clean with no sideways scroll at desk and phone width in both
-// themes for demo, worst case, one, empty, loading and failed. Set FORGE_LOOSE_SHOTS to a folder to keep screenshots.
+// keyboard with a mixed group tick and Esc; Hand to an agent copies one prompt and calls nothing; Undo brings back
+// the Lanes set aside and restores projects moved to the trash at their pinned versions; a project changed meanwhile
+// is skipped and named and a failed trash call alone retries; axe is clean with no sideways scroll at desk and phone
+// width in both themes for demo, worst case, one, empty, loading, failed and a partial result. Set FORGE_LOOSE_SHOTS
+// to a folder to keep screenshots.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -24,6 +27,8 @@ const PHONE = { width: 390, height: 844 };
 const FIXTURE = 'tests/browser/loose-ends.tsx';
 const READ = 'projectLooseEnds:read';
 const SET_ASIDE = 'projectHostedDormant:abandon';
+const TRASH = 'projectLifecycle:trash';
+const RESTORE = 'projectLifecycle:restore';
 const laneId = n => `5d1c7a0e-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
 async function buildFixture(out) {
@@ -151,18 +156,192 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
       const projects = group(page, 'Leftover projects');
       assert.match(
         await projects.locator('.row.le').nth(1).textContent(),
-        /tidepool-import-test.*No landing recorded since creation; you are its owner.*never landed/,
+        /tidepool-import-test.*@sample-one.*No landing recorded since creation; you are its owner.*never landed.*Move to the trash/,
       );
-      assert.equal(await projects.locator('input[type=checkbox]').count(), 0, 'only Lanes are picked here');
+      // Lead mock check (d): owner, Move to the trash, and the projects waiting for a permanent-delete approval.
+      const wait = projects.getByRole('link', { name: /40 projects in the trash wait for you/ });
+      assert.equal(await wait.getAttribute('href'), '/-/account?request=req-1');
+      assert.match(await wait.textContent(), /an agent or device asked to delete them for good/);
+      const stopped = group(page, 'Stopped mid-task');
       assert.match(
-        await group(page, 'Stopped mid-task').locator('.row.le').textContent(),
-        /not seen for 3 h/,
+        await stopped.locator('.row.le').textContent(),
+        /jun\/copper-moth.*3 files not landed\. Why it stopped: not reported.*not seen for 3 h.*Hand to an agent/,
+      );
+      // (b) identities read whole, as owner/lane; (f) a dated row names its Item's owner and says proposed.
+      assert.match(
+        await group(page, 'Lanes nobody holds').locator('.row.le').nth(1).textContent(),
+        /mara\/salt-wren/,
       );
       assert.match(
-        await page.locator('.head').textContent(),
-        /8 or more loose ends\..*The oldest is a Lane with no save for 6 days\./,
+        await dated.locator('.row.le').first().locator('.le-what').textContent(),
+        /@mara.*proposed/,
+      );
+      assert.equal(await dated.locator('.row.le').nth(1).locator('.prop').count(), 0);
+      // (e) every actionable group has its tick; dated checks only open their Item.
+      for (const name of ['Lanes nobody holds', 'Stopped mid-task', 'Leftover projects'])
+        assert.equal(await group(page, name).locator('.band input[type=checkbox]').count(), 1, name);
+      assert.equal(await dated.locator('input[type=checkbox]').count(), 0);
+      // (a) the mock sentence; a group not reported says so only on its band.
+      const head = await page.locator('.head').textContent();
+      assert.match(
+        head,
+        /8 or more loose ends, 1 urgent\. The oldest is a Lane with no save for 6 days\. Setting a Lane aside keeps every save; a project in the trash can be restored for 90 days\./,
+      );
+      assert.doesNotMatch(head, /not reported/);
+    });
+
+    await t.test('Hand to an agent copies one prompt for the picked Lanes and calls nothing', async t => {
+      const page = await open(t, DESK);
+      await group(page, 'Lanes nobody holds').getByRole('checkbox').nth(1).check();
+      await group(page, 'Stopped mid-task').getByRole('checkbox').first().check();
+      const bulk = page.getByRole('region', { name: 'Selected' });
+      assert.match(await bulk.textContent(), /2 selected.*Set aside 1.*Hand to an agent/);
+      await bulk.getByRole('button', { name: 'Hand to an agent' }).click();
+      await page
+        .locator('.toasts')
+        .getByText(/Copied one prompt that hands 2 Lanes to an agent/)
+        .waitFor();
+      const [text] = await page.evaluate(() => window.copied);
+      assert.match(text, /start --open .*"takeover":true/);
+      assert.match(
+        text,
+        /of the Forge project "tidepool" \(project ID fixture-project\)/,
+        'the prompt names its project',
+      );
+      assert.ok(text.includes(laneId(1)) && text.includes(laneId(4)), 'both picked Lanes are in the prompt');
+      assert.equal(await page.locator('.toasts').getByRole('button', { name: 'Undo' }).count(), 0);
+      await group(page, 'Stopped mid-task').getByRole('button', { name: 'Hand to an agent' }).click();
+      await page
+        .locator('.toasts')
+        .getByText(/Copied a prompt that hands this Lane/)
+        .waitFor();
+      assert.deepEqual((await calls(page)).slice(1), [], 'copying a prompt calls nothing');
+    });
+
+    await t.test(
+      'Undo brings back the Lanes the last set-aside changed, pinned to their versions',
+      async t => {
+        const page = await open(t, DESK);
+        const idle = group(page, 'Lanes nobody holds');
+        await idle.getByRole('checkbox', { name: 'Select Fix flaky retry timer' }).check();
+        await idle.getByRole('checkbox', { name: 'Select Docs: typo sweep' }).check();
+        await page
+          .getByRole('region', { name: 'Selected' })
+          .getByRole('button', { name: 'Set aside 2' })
+          .click();
+        const toast = page.locator('.toasts');
+        await toast.getByText('Set aside 2 Lanes. Every save is kept.').waitFor();
+        await page.waitForFunction(() => document.querySelectorAll('.row.le').length === 6);
+        await toast.getByRole('button', { name: 'Undo' }).click();
+        await page.waitForFunction(() => document.querySelectorAll('.row.le').length === 8);
+        assert.match(await said(page), /Brought back 2 Lanes\. The Lanes are open again\./);
+        assert.deepEqual(
+          (await calls(page)).filter(call => call.startsWith('mutation')),
+          [
+            `mutation ${SET_ASIDE} ${JSON.stringify([laneId(1), laneId(3)])}`,
+            `mutation ${SET_ASIDE} reopen ${JSON.stringify([
+              { laneId: laneId(1), version: 5 },
+              { laneId: laneId(3), version: 5 },
+            ])}`,
+          ],
+        );
+      },
+    );
+
+    await t.test(
+      'a partial result offers See what is left and Undo, and Undo touches only what changed',
+      async t => {
+        const page = await open(t, DESK);
+        const idle = group(page, 'Lanes nobody holds');
+        await idle.getByRole('checkbox', { name: 'Select the 3 shown in Lanes nobody holds' }).check();
+        await page
+          .getByRole('region', { name: 'Selected' })
+          .getByRole('button', { name: 'Set aside 3' })
+          .click();
+        const notice = page.getByRole('alert');
+        await notice.getByText(/1 could not be set aside/).waitFor();
+        assert.match(
+          await notice.textContent(),
+          /2 Lanes were set aside in your last try\. “Try streaming decoder” skipped: it was saved meanwhile\. Every save is kept\./,
+        );
+        await notice.getByRole('button', { name: 'Undo' }).click();
+        await page.waitForFunction(() =>
+          document.querySelector('[data-announce]')?.textContent.includes('Brought back 2'),
+        );
+        assert.equal(
+          (await calls(page)).at(-1),
+          `mutation ${SET_ASIDE} reopen ${JSON.stringify([
+            { laneId: laneId(1), version: 5 },
+            { laneId: laneId(3), version: 5 },
+          ])}`,
+          'the skipped Lane is not part of Undo',
+        );
+        // See what is left names every row left alone; the notice stays until the next action.
+        await notice.getByRole('button', { name: 'See what is left' }).click();
+        assert.equal(await notice.getByRole('button', { name: 'See what is left' }).count(), 0);
+        assert.match(await notice.textContent(), /“Try streaming decoder” skipped: it was saved meanwhile/);
+      },
+    );
+
+    await t.test('the project this page belongs to is not moved to the trash from its own page', async t => {
+      const page = await open(t, DESK, { here: 'p2' });
+      const projects = group(page, 'Leftover projects');
+      const own = projects.locator('.row.le').nth(1);
+      const button = own.getByRole('button', { name: 'Move to the trash' });
+      assert.equal(await button.isDisabled(), true);
+      assert.match(await button.getAttribute('title'), /Open another project to move it to the trash/);
+      assert.equal(await own.getByRole('checkbox').count(), 0, 'no tick for it either');
+      await projects.getByRole('checkbox', { name: 'Select the 1 shown in Leftover projects' }).check();
+      await page
+        .getByRole('region', { name: 'Selected' })
+        .getByRole('button', { name: 'Move 1 to the trash' })
+        .click();
+      await page
+        .locator('.toasts')
+        .getByText(/mara-scratch moved to the trash/)
+        .waitFor();
+      assert.deepEqual(
+        (await calls(page)).filter(call => call.startsWith('mutation')),
+        ['mutation projectLifecycle:trash p1 11'],
+        'only the other project',
       );
     });
+
+    await t.test(
+      'trash: a project changed meanwhile is skipped and named, a failed call alone retries, Undo restores',
+      async t => {
+        const page = await open(t, DESK, { fail: 'trash' });
+        const projects = group(page, 'Leftover projects');
+        await projects.getByRole('checkbox', { name: 'Select the 2 shown in Leftover projects' }).check();
+        await page
+          .getByRole('region', { name: 'Selected' })
+          .getByRole('button', { name: 'Move 2 to the trash' })
+          .click();
+        const notice = page.getByRole('alert');
+        await notice.getByText(/2 could not be moved to the trash/).waitFor();
+        assert.match(
+          await notice.textContent(),
+          /“mara-scratch” could not be reached; “tidepool-import-test” skipped: it changed meanwhile/,
+        );
+        await notice.getByRole('button', { name: 'Retry 1 that failed' }).click();
+        await notice.getByText(/^1 could not be moved to the trash/).waitFor();
+        await notice.getByRole('button', { name: 'Undo' }).click();
+        await page.waitForFunction(() =>
+          document.querySelector('[data-announce]')?.textContent.includes('Restored 1 project'),
+        );
+        assert.deepEqual(
+          (await calls(page)).filter(call => call.startsWith('mutation')),
+          [
+            `mutation ${TRASH} p1 11`,
+            `mutation ${TRASH} p2 12`,
+            `mutation ${TRASH} p1 11`,
+            `mutation ${RESTORE} p1 12`,
+          ],
+          'one call per project; the retry carries only the failed one; Undo restores at the next revision',
+        );
+        await projects.getByText('mara-scratch').waitFor();
+      },
+    );
 
     await t.test('each Show 25 more is one call with its cursor; an empty page keeps going', async t => {
       const page = await open(t, DESK);
@@ -244,7 +423,7 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
         await page.waitForFunction(() => document.querySelectorAll('.row.le').length === 6);
         assert.match(
           await notice.textContent(),
-          /1 Lane was set aside in your last try\. “Fix flaky retry timer” could not be reached; “Try streaming decoder” skipped: it was saved meanwhile\. Every save is kept\./,
+          /1 Lane was set aside in your last try\. “Try streaming decoder” skipped: it was saved meanwhile; “Fix flaky retry timer” could not be reached\. Every save is kept\./,
         );
         await notice.getByRole('button', { name: 'Retry 1 that failed' }).click();
         await notice.getByText(/^1 could not be set aside/).waitFor();
@@ -254,7 +433,8 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
           'nothing failed is left',
         );
         await notice.getByRole('button', { name: 'See what is left' }).click();
-        assert.equal(await page.getByRole('alert').count(), 0);
+        assert.equal(await notice.getByRole('button', { name: 'See what is left' }).count(), 0);
+        assert.match(await notice.textContent(), /“Try streaming decoder” skipped/);
         assert.deepEqual(
           (await calls(page)).filter(call => call.startsWith('mutation')),
           [
@@ -289,7 +469,8 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
           'Select Fix flaky retry timer',
         );
         const member = await open(t, DESK, { owner: '0' });
-        assert.equal(await member.locator('.loose-ends input[type=checkbox]').count(), 0);
+        for (const name of ['Lanes nobody holds', 'Stopped mid-task'])
+          assert.equal(await group(member, name).locator('input[type=checkbox]').count(), 0, name);
         assert.equal(await member.getByRole('button', { name: 'Set aside' }).count(), 0);
       },
     );
@@ -322,17 +503,31 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
     });
 
     await t.test('axe and widths: every state, both themes, desk and phone', async t => {
-      for (const [data, ready] of [
+      for (const [state, ready] of [
         ['demo'],
         ['worst'],
         ['one'],
         ['empty', '.loose-ends .quietline'],
         ['loading', '.loose-ends [aria-busy=true]'],
         ['error', '.loose-ends .notice'],
+        ['partial'],
       ])
         for (const viewport of [DESK, PHONE]) {
+          const data = state === 'partial' ? 'demo' : state;
           const page = await open(t, viewport, { data }, ready);
-          if (data === 'demo') await group(page, 'Lanes nobody holds').getByRole('checkbox').nth(1).check();
+          const idle = group(page, 'Lanes nobody holds');
+          // As the approved page's "Some selected": the first two Lanes nobody holds are picked.
+          if (data === 'demo') for (const n of [1, 2]) await idle.getByRole('checkbox').nth(n).check();
+          if (state === 'partial') {
+            await page
+              .getByRole('region', { name: 'Selected' })
+              .getByRole('button', { name: 'Set aside 2' })
+              .click();
+            await page
+              .getByRole('alert')
+              .getByText(/could not be set aside/)
+              .waitFor();
+          }
           await page.addScriptTag({ path: axePath });
           for (const theme of ['dark', 'light']) {
             await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
@@ -348,7 +543,7 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
             ]);
             assert.ok(
               scroll <= inner,
-              `no sideways scroll at ${viewport.width} ${theme} ${data}: ${scroll} > ${inner}`,
+              `no sideways scroll at ${viewport.width} ${theme} ${state}: ${scroll} > ${inner}`,
             );
             await page.evaluate(() => scrollTo(0, 0));
             const violations = await page.evaluate(async () => {
@@ -362,10 +557,10 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
                   .map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`)
               );
             });
-            assert.deepEqual(violations, [], `axe at ${viewport.width} ${theme} ${data}`);
+            assert.deepEqual(violations, [], `axe at ${viewport.width} ${theme} ${state}`);
             if (shots)
               await page.screenshot({
-                path: join(shots, `loose-${data}-${viewport.width}-${theme}.png`),
+                path: join(shots, `loose-${state}-${viewport.width}-${theme}.png`),
                 fullPage: true,
               });
           }

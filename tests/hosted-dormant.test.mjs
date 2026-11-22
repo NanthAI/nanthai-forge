@@ -700,3 +700,104 @@ test('a landed Lane supersedes its quiet same-Intent siblings: no presence, no a
   );
   assert.equal(overlapRow(quietBlocking.id).superseded, undefined, 'reopen ends supersession');
 });
+
+test('fc1831eb Undo: the sweep returns each set-aside version on request and brings back only a Lane still at it', async () => {
+  const { s, lane, readLane } = await project();
+  const empty = await lane('Never saved, idle', { idleMs: 3 * DAY });
+  const other = await lane('Also idle', { idleMs: 3 * DAY });
+  for (const laneRecord of [empty, other]) {
+    const current = await readLane(laneRecord.id);
+    await s.transaction(
+      'rewind',
+      {
+        _handler: ctx =>
+          records.writeHostedRecord(ctx, {
+            projectId: s.projectId,
+            actor: 'owner',
+            authorityEpoch: 1,
+            expectedVersion: current.version,
+            record: { ...current, head: current.base.head, version: current.version + 1, at: current.at },
+          }),
+      },
+      {},
+    );
+  }
+  const sweep = args =>
+    s
+      .transaction(
+        'abandon',
+        dormant.abandon,
+        { projectId: s.projectId, authorityEpoch: 1, abandon: [], ...args },
+        'owner',
+      )
+      .then(JSON.parse);
+  // An older CLI parses the reply strictly: without `versions` it carries no version.
+  const plain = await sweep({ abandon: [other.id] });
+  assert.deepEqual(plain.results, [{ laneId: other.id, result: 'abandoned' }]);
+  const done = await sweep({ abandon: [empty.id], versions: true });
+  const version = (await readLane(empty.id)).version;
+  assert.deepEqual(done.results, [{ laneId: empty.id, result: 'abandoned', version }]);
+  // A stale pin is left alone; the exact pin reopens with the saved head kept; a repeat finds it changed.
+  const stale = await sweep({ reopen: [{ laneId: empty.id, version: version - 1 }], versions: true });
+  assert.deepEqual(stale.results, [{ laneId: empty.id, result: 'changed' }]);
+  assert.equal((await readLane(empty.id)).state, 'abandoned');
+  const back = await sweep({ reopen: [{ laneId: empty.id, version }], versions: true });
+  assert.deepEqual(back.results, [{ laneId: empty.id, result: 'reopened', version: version + 1 }]);
+  const reopened = await readLane(empty.id);
+  assert.equal(reopened.state, 'active');
+  assert.equal(reopened.head, empty.base.head, 'the saved head is kept');
+  const again = await sweep({ reopen: [{ laneId: empty.id, version }] });
+  assert.deepEqual(again.results, [{ laneId: empty.id, result: 'changed' }]);
+  // Only the owner brings Lanes back.
+  const otherVersion = (await readLane(other.id)).version;
+  await assert.rejects(
+    s.transaction(
+      'abandon',
+      dormant.abandon,
+      {
+        projectId: s.projectId,
+        authorityEpoch: 1,
+        abandon: [],
+        reopen: [{ laneId: other.id, version: otherVersion }],
+      },
+      PEER,
+    ),
+    /./,
+  );
+  assert.equal((await readLane(other.id)).state, 'abandoned');
+  // A Lane in the landing queue is held there even when its record did not change: a stale set-aside skips it.
+  const queued = await lane('Queued while idle', { idleMs: 3 * DAY });
+  const current = await readLane(queued.id);
+  await s.transaction(
+    'rewind',
+    {
+      _handler: ctx =>
+        records.writeHostedRecord(ctx, {
+          projectId: s.projectId,
+          actor: 'owner',
+          authorityEpoch: 1,
+          expectedVersion: current.version,
+          record: { ...current, head: current.base.head, version: current.version + 1, at: current.at },
+        }),
+    },
+    {},
+  );
+  // The Lane's own live-line mark (the Lane write keeps one per Lane) moves into the queue.
+  const [markId, mark] = [...s.tables.projectLiveLineLanes].find(([, row]) => row.laneId === queued.id) ?? [
+    'mark',
+    {
+      _id: 'mark',
+      _creationTime: 1,
+      projectId: s.projectId,
+      sourceId: 'row',
+      laneId: queued.id,
+      held: false,
+    },
+  ];
+  for (const stage of ['queued', 'checking', 'ready']) {
+    s.tables.projectLiveLineLanes.set(markId, { ...mark, stage });
+    const held = await sweep({ abandon: [queued.id], versions: true });
+    assert.deepEqual(held.results, [{ laneId: queued.id, result: 'in-queue' }], stage);
+    assert.equal((await readLane(queued.id)).state, 'active');
+  }
+});

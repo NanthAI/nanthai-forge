@@ -29,11 +29,17 @@ for dormant Lanes, stopped Lanes, checked work, inactive projects and dated Issu
 A group reports why its evidence is unavailable. Pass its `continueCursor` as `cursor` to read
 its next page. The inactive-project search follows the account's accessible project list in bounded
 pages, so a page can be empty before the end. It looks for 30 days since the last landing receipt, or
-since creation when a project has no receipt. A project-scoped device sees only its selected project.
+since creation when a project has no receipt. A project-scoped device sees only its selected project. Each of the reader's own projects carries
+`trash.expectedRevision` and `trash.expectedLastLanding` for `projectLifecycle:trash`. A project that landed
+since is refused as `WORK_STALE`, and with that pin the reply's `applied` says whether this operation moved
+the project. The first page lists the account's open permanent-delete requests as `deleteRequests`. The web
+page's Undo for a set-aside Lane sends `reopen:[{laneId,version}]` to the dormant sweep with the version it
+returned (`versions:true`); a Lane changed since is skipped as `changed`. The sweep skips a Lane in the landing
+queue as `in-queue`.
 
 Add a date to an unchecked Done-when line with `- [ ] @due 2026-12-01 Review the changes`.
 Loose ends reports the earliest pending date per Issue, the line number in its body and the viewed
-version. Date results follow open Issues in bounded pages and a page can be empty before the end. A date added before date support appears when its Issue's search record is next written or rebuilt.
+version, plus the Item's `owner` and `proposed:true` while the Item is proposed. Date results follow open Issues in bounded pages and a page can be empty before the end. A date added before date support appears when its Issue's search record is next written or rebuilt.
 Set Issues aside with `status:"archived"` or hand them to an agent with `owner:"@handle/agent"`. Send
 the selected rows' `selection` fields with the chosen change in a `put-planning-item` batch. The
 existing batch returns a version-pinned Undo for changed rows and a result for each stale row. For a

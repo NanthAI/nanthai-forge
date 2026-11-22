@@ -64,7 +64,7 @@ export default function ProjectLifecycle({ project }: { project: Project }) {
         kind === 'trash'
           ? 'Project deleted. You can restore it here for 90 days.'
           : kind === 'restore'
-            ? `Project restored with its source and Work${moved ? ` at ${moved.slug}: another project now uses ${moved.previousSlug}` : ''}. Grant access and register runners again.`
+            ? `Project restored with its source and Work${moved && 'slug' in moved ? ` at ${moved.slug}: another project now uses ${moved.previousSlug}` : ''}. Grant access and register runners again.`
             : 'Permanent removal started. Its progress updates here.',
       );
     } catch (e) {

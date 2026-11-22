@@ -39,6 +39,8 @@
   .loose-ends .band .ckhit { margin-left: -6px; margin-right: 0; }
   /* The key cap's dimming fails contrast on the selection bar's tint in light theme (axe). */
   .loose-ends .bulk .btn kbd { opacity: 1; }
+  .loose-ends .row.le-waiting { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; color: inherit; text-decoration: none; }
+  .loose-ends .le-what > .meta .prop { margin-left: var(--s-2); }
   .loose-ends .le-more { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); color: var(--text-2); font-size: var(--t-meta); }
   @container (max-width: 700px) {
     .loose-ends .row.le { grid-template-columns: 22px minmax(0, 1fr) auto; row-gap: 2px; }

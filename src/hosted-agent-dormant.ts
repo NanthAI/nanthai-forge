@@ -47,7 +47,11 @@ export const onMainProof = (
       : !!file && file.blob === change.after.blob && file.mode === change.after.mode;
   });
 const resultSchema = z
-  .object({ results: z.array(z.object({ laneId: z.uuid(), result: z.string() }).strict()) })
+  .object({
+    results: z.array(
+      z.object({ laneId: z.uuid(), result: z.string(), version: z.number().int().optional() }).strict(),
+    ),
+  })
   .strict();
 
 /** `x abandon-dormant`: lists open Lanes idle past the project's dormantAfterDays and which of them hold
