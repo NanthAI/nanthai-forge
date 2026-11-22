@@ -8,7 +8,7 @@ import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { moduleUrl } from './convex-module.mjs';
 
-const { Who, whoWords } = await import(moduleUrl('../web/src/ds/marks.tsx'));
+const { Who, whoParts, whoWords } = await import(moduleUrl('../web/src/ds/marks.tsx'));
 const { whoLinks } = await import(moduleUrl('../web/src/app/who-links.ts'));
 const text = html => html.replace(/<[^>]+>/g, '');
 const project = { handle: 'sample-owner', project: 'sample-project' };
@@ -56,4 +56,29 @@ test('a public viewer and a row that is itself a link get the same words as text
   const links = whoLinks('sample-one/amber-fox');
   assert.equal(links.runHref, undefined);
   assert.equal(links.personHref, '/-/sample-one');
+});
+
+test('an owner stored as @handle/run is the run of @handle, never @@handle (Plan board mock check, d3357f40)', () => {
+  assert.deepEqual(whoParts('@sample-one/amber-fox'), {
+    agent: true,
+    person: '@sample-one',
+    run: 'amber-fox',
+  });
+  assert.deepEqual(whoParts('sample-one/amber-fox'), whoParts('@sample-one/amber-fox'));
+  assert.equal(whoParts('@@sample-one').person, '@sample-one');
+  const html = renderToStaticMarkup(h(Who, { handle: '@sample-one/amber-fox' }));
+  assert.doesNotMatch(text(html), /@@/);
+  assert.match(text(html), /for @sample-one$/);
+});
+
+test('the whole identity shows handle/run or @handle in full, with no model and no "for @person"', () => {
+  const run = renderToStaticMarkup(
+    h(Who, { handle: '@sample-one/amber-fox', model: 'sample-model-1', whole: true }),
+  );
+  assert.equal(text(run), 'afagent run sample-one/amber-fox');
+  assert.match(run, /class="av ag"/);
+  assert.match(run, /title="sample-one\/amber-fox · sample-model-1"/);
+  const person = renderToStaticMarkup(h(Who, { handle: 'sample-one', whole: true }));
+  assert.equal(text(person), 'so@sample-one');
+  assert.doesNotMatch(person, /agent run/);
 });

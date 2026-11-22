@@ -29,7 +29,7 @@
   .plan .plan-prog .plan-pl { flex: 0 1 auto; min-width: 0; white-space: normal; }
   /* The breakdown (b7a0dff1): the roll's ticks and the words' swatches share one colour per part, in one order
      (web/src/app/progress.ts): done green, in progress blue, open the unreached rail, proposed a ring, removed grey. */
-  .plan .roll i.prop, .plan .plan-bp i.prop { background: transparent; box-shadow: inset 0 0 0 1px var(--text-3); }
+  .plan .roll i.proposed, .plan .plan-bp i.proposed { background: transparent; box-shadow: inset 0 0 0 1px var(--text-3); }
   .plan .roll i.gone, .plan .plan-bp i.gone { background: var(--text-3); }
   .plan .plan-bp { white-space: nowrap; }
   .plan .plan-bp i { display: inline-block; width: 8px; height: 8px; margin-inline-end: 4px; border-radius: 1px; background: var(--rail-off); }
@@ -117,8 +117,9 @@
   .plan .brow .plan-facts > * { min-width: 0; }
   .plan .brow .flag { color: var(--text-3); white-space: nowrap; }
   .plan .brow .flag.cut { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-  .plan .brow .who { max-width: 150px; overflow: hidden; }
-  .plan .brow .who .a-run { flex-shrink: 1; }
+  /* The whole public identity (mock 02-plan-board), cut at its end only when the row runs out of room. */
+  .plan .brow .who { max-width: 100%; overflow: hidden; }
+  .plan .brow .flag.hold { color: var(--waiting); font-weight: var(--w-strong); }   /* the reason it waits on the reader */
   /* A link inside a sentence is underlined, so it is not told apart by colour alone. */
   .plan .plan-nomatch a.lk { text-decoration: underline; }
   .plan .brow .subroll { display: inline-flex; align-items: center; gap: 6px; }
@@ -143,6 +144,7 @@
     .plan .plan-tbar .find { flex: 1 1 0; }
     .plan .plan-tbar .find .inp { height: var(--ctl-h-touch); }
     .plan .plan-save { min-height: var(--ctl-h-touch); }
+    .plan .plan-tbar > .n { flex: 1 1 100%; order: 1; }   /* the board's count, on a line of its own (mock 02-plan-board) */
     .plan-with-views .plan-body .ph > .tools { display: none; }
     /* An Item row: handle and tick, then its number and name; the status and the flags share one line under the name,
        so the name keeps the width. Done-when and owner are on the Item page (plan-wide). Descendant selectors: a

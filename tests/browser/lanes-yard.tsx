@@ -357,7 +357,16 @@ const fake = fakeConvex({
           ? JSON.stringify(overviewQueue)
           : name === 'projectNowOverlaps:now'
             ? JSON.stringify({ signals: overlap })
-            : null,
+            : name === 'projectPlanCounts:read'
+              ? // The project's Item counts (Needs me's and Plan's read); ?state=nocounts: the read gives none.
+                state === 'nocounts'
+                ? null
+                : {
+                    exact: true,
+                    issue: { proposed: 2, open: 9, inProgress: 4, closed: 31, abandoned: 1 },
+                    closedToday: null,
+                  }
+              : null,
 });
 Object.assign(window, { forgeReads: fake.stats, forgeLive: (name: string) => fake.count(name) });
 // The real registry, collected the way screens.tsx collects it; each entry is named by its folder and index.

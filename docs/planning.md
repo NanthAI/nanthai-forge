@@ -251,6 +251,15 @@ is shown in the parent's roll instead of as its own row. Each column's total cou
 the read is partial. A cell shows 20 rows, then 20 more at a time. Board reorders nothing; order inside a cell is the
 plan order or the chosen sort. Grouping, totals and paging work on rows already read, so they make no call.
 
+An In progress row says its Lane's state in the words Lanes and Needs me use: "Needs you" with the reason when it waits
+on the reader, the hold's own word (Conflict, Check failed) when it waits on someone else, otherwise the Lane's stop
+(Editing, Checking, Ready to land). The words come from reads the page already holds: the shell's Needs me read and
+line feed, joined to the Item through the Plan's who-works-on-it read, which returns each Lane's id. A Lane none of
+them names still says "in Lane". Owners show as their whole public identity (`handle/run` or `@handle`). The page
+sentence reads "N Items are left; next is X. M in progress, K of them wait on you.", with N and M from the standing
+line, whose hints are landings today, Lanes open and how many need you, and the next Item. The board's toolbar ends
+with its row count, and the agent's command (`planning {"status":"open"}`) sits beside New Item.
+
 ## Next
 
 The web Plan derives "Next" from the loaded Plan rows. It selects the first Planned Item in plan order with no owner,

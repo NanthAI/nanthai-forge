@@ -157,7 +157,22 @@ test('the plan read lists live work and counts settled Items of live Initiatives
     'owned and blocked Items are skipped; the next free planned Item is derived',
   );
   assert.equal(group.lines.find(line => line.row.id === second.id).blockedBy.id, first.id);
-  assert.equal(planSentence(view).bold, 'The next free Item is Item 004.');
+  // The mock's sentence (02-plan-board, lead mock check 2026-11-22): left and next, then in progress and what waits
+  // on the reader; with the standing line's figures it uses those, so the two never disagree.
+  assert.equal(planSentence(view).bold, '3 Items are left; next is Item 004.');
+  assert.deepEqual(planSentence(view, { left: 7, inProgress: 5, atLeast: false, waitOnYou: 2 }), {
+    bold: '7 Items are left; next is Item 004.',
+    rest: '5 in progress, 2 of them wait on you.',
+  });
+  assert.equal(
+    planSentence(view, { left: 1, inProgress: 1, atLeast: true, waitOnYou: 0 }).bold,
+    '1+ Items are left; next is Item 004.',
+  );
+  assert.equal(
+    planSentence(view, { left: 7, inProgress: 5, atLeast: false, waitOnYou: 1, waitAtLeast: true }).rest,
+    '5 in progress, 1+ of them wait on you.',
+    'a tally past the reads that say who waits is a lower bound',
+  );
 
   // Find filters the rows, never the counts.
   const found = planView(result, 'item 003');
@@ -185,7 +200,7 @@ test('the Plan names an eligible sub-item as Next even when the list filters it 
     filtered.groups[0].lines.map(line => line.row.id),
     [parent.id],
   );
-  assert.equal(planSentence(filtered).bold, 'The next free Item is Check split bytes.');
+  assert.equal(planSentence(filtered).bold, '3 Items are left; next is Check split bytes.');
 });
 
 test('Plan keeps a sub-item under its displayed parent while counting it under its stored Initiative', () => {
@@ -461,7 +476,7 @@ test('an Initiative breakdown counts every Item once, in one fixed order, and it
       ['done', 'ok'],
       ['inProgress', 'run'],
       ['open', 'open'],
-      ['proposed', 'prop'],
+      ['proposed', 'proposed'],
       ['removed', 'gone'],
     ],
     'proposed appears only when there is one, between open and removed',
@@ -477,6 +492,35 @@ test('an Initiative breakdown counts every Item once, in one fixed order, and it
   });
   assert.equal(breakdownWords(capped), '1,000+ done · 0 in progress · 3 open · 2+ removed');
   assert.equal(breakdownTotal(capped), '1,005+ Items');
+});
+
+test('a roll tick class is never also a bare global class (mock check d3357f40: "prop" drew the amber .prop ring)', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const ticks = groupBreakdown({
+    done: 1,
+    inProgress: 1,
+    open: 1,
+    proposed: 1,
+    dropped: 1,
+    atLeast: false,
+  }).parts.map(part => part.tick);
+  const bare = new Set();
+  const walk = dir => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) walk(path);
+      else if (entry.name.endsWith('.css'))
+        for (const [, selectors] of readFileSync(path, 'utf8').matchAll(/([^{}]+)\{/g))
+          for (const selector of selectors.split(','))
+            if (/^\.[\w-]+$/.test(selector.trim())) bare.add(selector.trim());
+    }
+  };
+  walk(new URL('../web/src', import.meta.url).pathname);
+  assert.ok(bare.has('.prop'), 'the scan sees the design system’s own bare classes');
+  assert.deepEqual(
+    ticks.filter(tick => bare.has(`.${tick}`)),
+    [],
+  );
 });
 
 test('Group by a field (d3357f40): owner puts unowned Items under "No one yet", last; every row lands in one band', async () => {
@@ -576,4 +620,79 @@ test('Board sub-items (d3357f40 review): deeper chains roll into the top Item, a
     planBands(view, 'owner', [], { openShown: true, hideEmpty: false }).map(b => [b.id, b.title]),
     [['owner:', 'No one yet']],
   );
+});
+
+test('board Lane words join loaded reads only: the newest Lane decides, questions join by Item or Lane (d3357f40)', async () => {
+  const { itemLanes, lanesNeedingYou } = await import(moduleUrl('../web/src/app/plan/lane-words.ts'));
+  const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  // Intent → Item: 1→A, 2→B, 3→C, 4→D.
+  const asked = new Map([
+    [id(1), 'A'],
+    [id(2), 'B'],
+    [id(3), 'C'],
+    [id(4), 'D'],
+  ]);
+  const lanes = [
+    { intentId: id(1), actor: 'x', at: 10, laneId: id(101) },
+    { intentId: id(1), actor: 'x', at: 20, laneId: id(102) },
+    { intentId: id(2), actor: 'x', at: 10, laneId: id(103) },
+    { intentId: id(3), actor: 'x', at: 10, laneId: id(104) },
+  ];
+  const feed = {
+    lanes: [
+      { laneId: id(101), stage: 'editing', held: false, overlap: false, changedAt: 1 },
+      { laneId: id(102), stage: 'ready', held: true, overlap: false, changedAt: 2 },
+      { laneId: id(103), stage: 'checking', held: false, overlap: false, changedAt: 1 },
+      { laneId: id(104), stage: 'editing', held: false, overlap: false, changedAt: 1 },
+    ],
+    more: 0,
+    moreIsLowerBound: false,
+    main: null,
+  };
+  const ask = (n, extra) => ({
+    id: `q${n}`,
+    at: 1,
+    actor: 'x',
+    agent: null,
+    text: '?',
+    choices: [],
+    laneId: null,
+    ...extra,
+  });
+  const needs = {
+    held: [
+      {
+        laneId: id(105),
+        intentId: id(4),
+        title: null,
+        actor: 'x',
+        agent: null,
+        why: 'review',
+        note: null,
+        submissionId: null,
+        since: 1,
+      },
+    ],
+    more: 0,
+    moreIsLowerBound: false,
+    approvals: '{"requests":[]}',
+    canDecide: true,
+    asks: [
+      ask(1, { laneId: id(104) }),
+      ask(2, { planningItemId: 'B', laneId: id(999) }),
+      ask(3, { planningItemId: 'A', ahead: true }),
+    ],
+  };
+  const out = itemLanes({ asked, needs, feed, lanes, now: 1 });
+  // A: its newest Lane (102) is held for a reason no read names, so the older Lane's "Editing" never shows.
+  assert.equal(out.has('A'), false, 'a question asked ahead does not hold work');
+  assert.equal(out.get('B')?.why, 'a question', 'a question joins by its Item');
+  assert.equal(out.get('C')?.why, 'a question', 'a question joins by its Lane, before the feed stop');
+  assert.equal(out.get('D')?.you, true);
+  assert.equal(itemLanes({ asked, needs: undefined, feed, lanes, now: 1 }).get('C')?.word, 'Editing');
+  assert.equal(itemLanes({ asked, needs: undefined, feed, lanes, now: 1 }).has('A'), false);
+  // "need you" counts Lanes, each once, never questions; a capped read stays a lower bound.
+  assert.deepEqual(lanesNeedingYou(needs, 1), { n: 1, atLeast: false });
+  assert.deepEqual(lanesNeedingYou({ ...needs, more: 3 }, 1), { n: 1, atLeast: true });
+  assert.equal(lanesNeedingYou(undefined, 1), null);
 });

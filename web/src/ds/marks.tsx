@@ -173,21 +173,28 @@ export function Avatar({ handle, large = false }: { handle: string; large?: bool
   );
 }
 
-/** What a run's identity reads as: `handle/run` is an agent run, anything else a person (`@handle`). */
+/** What a run's identity reads as: `handle/run` is an agent run, anything else a person (`@handle`). A stored
+ * `@handle/run` (an Item's owner can be written either way) is the same run: the person is `@handle`, never `@@handle`. */
 export function whoParts(handle: string) {
   const slash = handle.indexOf('/');
-  if (slash < 0)
-    return { agent: false as const, person: handle.startsWith('@') ? handle : `@${handle}`, run: '' };
-  return { agent: true as const, person: `@${handle.slice(0, slash)}`, run: handle.slice(slash + 1) };
+  const at = (name: string) => `@${name.replace(/^@+/, '')}`;
+  if (slash < 0) return { agent: false as const, person: at(handle), run: '' };
+  return { agent: true as const, person: at(handle.slice(0, slash)), run: handle.slice(slash + 1) };
+}
+
+/** The whole public identity as one name: `@handle` for a person, `handle/run` for an agent run. */
+function whoName(handle: string) {
+  const { agent, person, run } = whoParts(handle);
+  return agent ? `${person.slice(1)}/${run}` : person;
 }
 
 /** Who did it (Item 41514fee), as the hover title: a run's full public address (`handle/run-name`, what a person
  * copies or searches for) and the model it declared. */
 export function whoWords(handle: string, model?: string | null) {
-  const { agent, person, run } = whoParts(handle);
+  const { agent, person } = whoParts(handle);
   if (!agent) return person;
   const said = model === undefined ? null : model || 'model not declared';
-  return [`${person.slice(1)}/${run}`, said].filter(Boolean).join(' · ');
+  return [whoName(handle), said].filter(Boolean).join(' · ');
 }
 
 export type WhoProps = {
@@ -205,6 +212,9 @@ export type WhoProps = {
   size?: 'md';
   /** Leave out "for @person" (on that person's own page). */
   nofor?: boolean;
+  /** The whole public identity as one name (`handle/run`, `@handle`), as the Plan board shows an owner: no model,
+   * no "for @person"; it cuts only at the end when the space runs out. */
+  whole?: boolean;
   /** Where the handle and the run name lead. Without one the name is text (also inside a row that is itself a link). */
   personHref?: string;
   runHref?: string;
@@ -221,6 +231,7 @@ export function Who({
   layout = 'inline',
   size,
   nofor,
+  whole,
   personHref,
   runHref,
   onFollow,
@@ -237,6 +248,16 @@ export function Who({
       </span>
     );
   const cls = `who${layout === 'line' ? ' one' : ''}${size ? ` a-${size}` : ''}`;
+  if (whole) {
+    const said = whoName(handle);
+    return (
+      <span className={`${cls} whole`} data-kind={agent ? 'agent' : 'person'} title={whoWords(handle, model)}>
+        <Avatar handle={handle} />
+        {agent ? <span className="sr">agent run </span> : null}
+        {name(said, agent ? runHref : personHref, 'mono')}
+      </span>
+    );
+  }
   if (!agent)
     return (
       <span className={cls} data-kind="person" title={person}>

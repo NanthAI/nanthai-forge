@@ -47,6 +47,9 @@ import { InitiativePage } from './Initiative';
 import type { ReadInitiativeWork } from './InitiativeWork';
 import { COLS, DoneWhen, Line, Owner, Status } from './rows';
 import { useWorkers, type ActiveLane, type Workers } from './workers';
+import { itemLanes, lanesNeedingYou } from './lane-words';
+import type { NeedsRead } from '../needs/count';
+import { mainToday } from '../../../../src/flow-day';
 import { Tick, type Ticker } from './Tick';
 import { Versions } from './Versions';
 import { isShelf, shelfWords, shelve, ShelfList, unshelve, type Shelf } from './Shelf';
@@ -138,7 +141,7 @@ function useSettled(
 }
 export type Settled = ReturnType<typeof useSettled>;
 
-function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: PlaceProps) {
+function PlanScreen({ route, projectId, projectName, feed, viewerHandle, needsRead }: PlaceProps) {
   const search = useSearch();
   const query = useMemo(() => readQuery(search), [search.toString()]);
   const [observeClose, setObserveClose] = useState<string>();
@@ -228,6 +231,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
       projectId={projectId}
       projectName={projectName}
       feed={feed}
+      needs={needsRead}
       read={read}
       stale={Boolean(live.error) && Boolean(last.current)}
       put={put}
@@ -245,7 +249,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
       linkedItem={linkedItem}
       resolvedShortId={shortLink ? (linked.value?.id ?? null) : undefined}
       showDone={showDone}
-      progress={counts.value}
+      progress={counts.error ? null : counts.value}
       clearCloseObservation={() => setObserveClose(undefined)}
     />
   );
@@ -265,6 +269,8 @@ const scopeWords = {
   archived: 'Archive',
   deleted: 'Deleted',
 } as const;
+/** What an agent runs for the same Items (the chip beside New Item). */
+const planCommand = `nforge agent . planning '{"status":"open"}'`;
 const ownerOf = (owner: string | null | undefined) => owner?.replace(/^@/, '').split('/')[0];
 
 /** The screen from its read; an `undefined` read draws as loading. */
@@ -293,9 +299,13 @@ export function PlanScreenView({
   showDone = () => undefined,
   progress: progressRead,
   clearCloseObservation,
+  needs,
 }: Pick<PlaceProps, 'route' | 'projectName' | 'feed'> & {
-  /** The project's progress counts (convex/projectPlanCounts.ts), the same read Needs me shows. */
-  progress?: PlanCountsRead | undefined;
+  /** The shell's Needs me read (App.tsx), already held: which Lanes wait on the reader, for the board's state words. */
+  needs?: NeedsRead | undefined;
+  /** The project's progress counts (convex/projectPlanCounts.ts), the same read Needs me shows; null when the read
+   * gave none (failed, or no counts), and then the strip is not drawn rather than say "not reported" three times. */
+  progress?: PlanCountsRead | null | undefined;
   clearCloseObservation?: () => void;
   /** The Item resolved by a direct link outside the open Plan. */
   linkedItem?: PlanRow | null | 'loading';
@@ -327,6 +337,7 @@ export function PlanScreenView({
   const [versions, setVersions] = useState(false);
   const [purging, setPurging] = useState<PlanRow | null>(null);
   const [error, setError] = useState('');
+  const [cli, setCli] = useState(false);
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [toast, setToast] = useState<{ outcome: BatchOutcome; words: string } | null>(null);
   // The Item just archived or deleted from its page, so the page can say where it went and bring it back.
@@ -381,7 +392,14 @@ export function PlanScreenView({
     byItem: workers,
     observedLanes,
     missingIdentity,
+    lanes: workerLanes,
+    asked: workerAsked,
   } = useWorkers(reads?.workers, workerRows, Boolean(selectedInitiative));
+  // Each working Item's Lane state from reads already held (lane-words.ts): no read of its own.
+  const lanes = useMemo(
+    () => itemLanes({ asked: workerAsked, needs, feed, lanes: workerLanes, now: Date.now() }),
+    [workerAsked, needs, feed, workerLanes],
+  );
   const settledRows = useMemo(
     () =>
       [...closed.rows, ...dropped.rows].filter(
@@ -553,8 +571,36 @@ export function PlanScreenView({
         }
       />
     );
-  const sentence = view ? planSentence(view) : null;
+  const progress = progressOf(progressRead ?? undefined);
+  const waiting = lanesNeedingYou(needs, Date.now());
+  const waitOnYou = view
+    ? [...lanes].filter(([id, lane]) => lane.you && view.byId.get(id)?.status === 'in-progress').length
+    : 0;
+  // The join covers the Items the workers read asks about (at most 50) and the Needs me read's first page.
+  const askedItems = new Set(workerAsked?.values() ?? []);
+  const waitAtLeast =
+    Boolean(waiting?.atLeast) ||
+    (view
+      ? [...view.byId.values()].some(
+          row => row.kind === 'issue' && row.status === 'in-progress' && !askedItems.has(row.id),
+        )
+      : false);
+  const sentence = view
+    ? planSentence(
+        view,
+        progress
+          ? {
+              left: progress.left,
+              inProgress: progress.inProgress,
+              atLeast: progress.atLeast,
+              waitOnYou,
+              waitAtLeast,
+            }
+          : null,
+      )
+    : null;
   const lanesOpen = feed ? feed.lanes.length + feed.more : null;
+  const landedToday = feed?.flow ? mainToday(feed.flow, Date.now()).landed : null;
   const byHand = query.sort === 'hand' && !filtered(query);
   const shelfScope = isShelf(query.scope) ? query.scope : null;
   const openShown = query.scope === 'open' || query.scope === 'all';
@@ -735,7 +781,10 @@ export function PlanScreenView({
       <Head
         trail={trail}
         sentence={
-          sentence ? (
+          // An empty board says only that (mock 02-plan-board, rendered review 2026-11-19); its one key is below.
+          boardEmpty ? (
+            <b>Nothing is planned yet.</b>
+          ) : sentence ? (
             <>
               <b>{sentence.bold}</b> {sentence.rest}
             </>
@@ -749,17 +798,40 @@ export function PlanScreenView({
             New Item
           </Key>
         ) : null}
+        <button
+          type="button"
+          className="cli mono"
+          aria-controls="plan-cli"
+          aria-expanded={cli}
+          title="What an agent gets"
+          onClick={() => setCli(open => !open)}
+        >
+          <span>{planCommand}</span>
+        </button>
       </Head>
-      <Standing
-        of="app"
-        {...progressCells(progressOf(progressRead), {
-          inProgress:
-            lanesOpen === null
-              ? undefined
-              : `${lanesOpen.toLocaleString()} ${lanesOpen === 1 ? 'Lane' : 'Lanes'} open`,
-          hrefs: { inProgress: at({ place: 'lanes' }) },
-        })}
-      />
+      {cli ? (
+        <pre className="cli-out mono" id="plan-cli">
+          <b>$ {planCommand}</b>
+          {'\n'}The same Items as a list, in plan order. The board is a view of it, read by status; an agent
+          moves an Item with put-planning-item (status).
+        </pre>
+      ) : null}
+      {boardEmpty || progressRead === null ? null : (
+        <Standing
+          of="app"
+          {...progressCells(progress, {
+            done: landedToday === null ? undefined : `${landedToday.toLocaleString()} landed today`,
+            inProgress:
+              lanesOpen === null
+                ? undefined
+                : `${lanesOpen.toLocaleString()}${feed?.moreIsLowerBound ? '+' : ''} ${lanesOpen === 1 && !feed?.moreIsLowerBound ? 'Lane' : 'Lanes'} open${
+                    waiting?.n ? `, ${waiting.n.toLocaleString()}${waiting.atLeast ? '+' : ''} need you` : ''
+                  }`,
+            left: view?.next ? `next: ${view.next.title}` : undefined,
+            hrefs: { inProgress: at({ place: 'lanes' }) },
+          })}
+        />
+      )}
       <div className="plan-body">
         <Region
           title={scopeWords[query.scope]}
@@ -879,6 +951,7 @@ export function PlanScreenView({
                   abandoned: dropped.more || dropped.loading || dropped.failed,
                 }}
                 workers={workers}
+                lanes={lanes}
                 loaded={byId}
                 ticker={ticker}
               />

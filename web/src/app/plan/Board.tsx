@@ -8,6 +8,7 @@ import { useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { PlanRow } from '../../../../src/planning-model';
 import { Key, State, Who } from '../../ds';
 import { initiativeBreakdown, type Breakdown } from '../progress';
+import type { ItemLane } from './lane-words';
 import { A } from '../frames';
 import type { PlaceProps } from '../screens';
 import { boardColumns, columnTotals, subItems, type BoardColumn, type PlanBand } from './bands';
@@ -40,6 +41,18 @@ const Ring = ({ dotted = false }: { dotted?: boolean }) => (
 const plus = (atLeast: boolean) => (atLeast ? '+' : '');
 const count = (n: number, atLeast = false) => `${n.toLocaleString()}${plus(atLeast)}`;
 
+/** A band's roll as the board mock draws it (02-plan-board): done, then in progress, then the rest as plain ticks;
+ * dropped Items are not drawn, as "x of y done" does not count them. The list's header keeps the full breakdown. */
+function boardRoll(breakdown: Breakdown): Breakdown {
+  const part = (key: string) => breakdown.parts.find(p => p.key === key);
+  const rest = breakdown.parts.filter(p => p.key === 'open' || p.key === 'proposed');
+  const parts = [part('done'), part('inProgress')].filter(p => p !== undefined);
+  const left = rest.reduce((sum, p) => sum + p.n, 0);
+  parts.push({ key: 'open', word: 'left', tick: 'open', n: left, atLeast: rest.some(p => p.atLeast) });
+  const total = parts.reduce((sum, p) => sum + p.n, 0);
+  return { total, atLeast: breakdown.atLeast, parts };
+}
+
 /** A band's roll and its words. An Initiative band uses the whole plan's counts (the list's header does too); any
  * other band counts its own rows, and says how many done only when done Items were read. */
 function bandSummary(band: PlanBand, settledRead: boolean, liveAtLeast: boolean) {
@@ -47,7 +60,7 @@ function bandSummary(band: PlanBand, settledRead: boolean, liveAtLeast: boolean)
     const breakdown = groupBreakdown(band.group);
     const total = breakdown.total - band.group.dropped;
     return {
-      breakdown,
+      breakdown: boardRoll(breakdown),
       words: total
         ? `${count(band.group.done, band.group.atLeast)} of ${count(total, breakdown.atLeast)} done`
         : 'Nothing in it yet',
@@ -64,7 +77,7 @@ function bandSummary(band: PlanBand, settledRead: boolean, liveAtLeast: boolean)
   const breakdown: Breakdown = initiativeBreakdown({ ...n, atLeast: false, liveAtLeast });
   const live = n.inProgress + n.open + n.proposed;
   return {
-    breakdown,
+    breakdown: boardRoll(breakdown),
     words: !breakdown.total
       ? 'Nothing in it yet'
       : settledRead
@@ -105,7 +118,7 @@ function BandHead({
           {band.title}
         </A>
       ) : band.field === 'owner' && !band.rest ? (
-        <Who handle={band.title} />
+        <Who handle={band.title} whole />
       ) : (
         <span className="ttl" dir="auto" title={band.title}>
           {band.title}
@@ -133,9 +146,12 @@ function BoardRow({
   subs,
   settledRead,
   ticker,
+  lane,
 }: {
   line: PlanLine;
   at: At;
+  /** Its Lane's state, when a read the page holds names it (lane-words.ts). */
+  lane: ItemLane | undefined;
   workers: Workers | undefined;
   subs: { total: number; done: number; running: number } | undefined;
   settledRead: boolean;
@@ -158,7 +174,16 @@ function BoardRow({
         ) : status === 'abandoned' ? (
           <State word="Abandoned" />
         ) : null}
-        {row.inLane && !settled ? <span className="flag">in Lane</span> : null}
+        {settled ? null : lane ? (
+          <>
+            <State word={lane.glyph} state={lane.kind}>
+              {lane.word}
+            </State>
+            {lane.why ? <span className={`flag${lane.you ? ' hold' : ''}`}>{lane.why}</span> : null}
+          </>
+        ) : row.inLane ? (
+          <span className="flag">in Lane</span>
+        ) : null}
         {line.next ? (
           <span
             className="nextmark"
@@ -182,6 +207,7 @@ function BoardRow({
         <Owner
           owner={row.owner}
           workers={settled ? undefined : workers ? (workers.get(row.id) ?? []) : undefined}
+          whole
         />
       </span>
     </div>
@@ -246,7 +272,10 @@ export function Board({
   workers,
   loaded,
   ticker,
+  lanes,
 }: {
+  /** Each working Item's Lane state, from reads the page already holds (lane-words.ts). */
+  lanes?: ReadonlyMap<string, ItemLane> | undefined;
   /** Board bands (bands.ts boardBands): sub-items already rolled into their parents. */
   bands: readonly PlanBand[];
   sort: Sort;
@@ -340,6 +369,7 @@ export function Board({
                                 line={line}
                                 at={at}
                                 workers={workers}
+                                lane={lanes?.get(line.row.id)}
                                 subs={subs.get(line.row.id)}
                                 settledRead={settled}
                                 ticker={ticker}

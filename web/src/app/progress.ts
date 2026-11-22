@@ -32,10 +32,16 @@ export function progressOf(read: PlanCountsRead | undefined, now = Date.now()): 
   };
 }
 
-/** The three Standing cells; `extra` adds the page's own secondary words (Lanes open, the last landing). */
+/** The three Standing cells; `extra` adds the page's own secondary words (Lanes open, landings today, what is next),
+ * each in place of that cell's default. */
 export function progressCells(
   progress: Progress | null,
-  extra: { inProgress?: string; hrefs?: { done?: string; inProgress?: string; left?: string } } = {},
+  extra: {
+    done?: string | undefined;
+    inProgress?: string | undefined;
+    left?: string | undefined;
+    hrefs?: { done?: string; inProgress?: string; left?: string };
+  } = {},
 ): { done: StandingCell; inProgress: StandingCell; left: StandingCell } {
   const join = (...words: (string | false | null | undefined)[]) =>
     words.filter(Boolean).join(', ') || undefined;
@@ -43,13 +49,13 @@ export function progressCells(
     return {
       done: { n: 0, more: 'loading', href: extra.hrefs?.done },
       inProgress: { n: 0, more: extra.inProgress, href: extra.hrefs?.inProgress },
-      left: { n: 0, href: extra.hrefs?.left },
+      left: { n: 0, more: extra.left, href: extra.hrefs?.left },
     };
   return {
     done: {
       n: progress.done,
       atLeast: progress.atLeast,
-      more: progress.today ? `${progress.today.toLocaleString()} today` : undefined,
+      more: extra.done ?? (progress.today ? `${progress.today.toLocaleString()} today` : undefined),
       href: extra.hrefs?.done,
     },
     inProgress: {
@@ -61,7 +67,9 @@ export function progressCells(
     left: {
       n: progress.left,
       atLeast: progress.atLeast,
+      // The page's own fact first (Plan: the next Item), then the proposals beside Left.
       more: join(
+        extra.left,
         progress.proposed > 0 &&
           `${progress.proposed.toLocaleString()}${progress.atLeast ? '+' : ''} proposed`,
       ),
@@ -91,7 +99,7 @@ const breakdownOrder: readonly { key: BreakdownKey; word: string; tick: string }
   { key: 'done', word: 'done', tick: 'ok' },
   { key: 'inProgress', word: 'in progress', tick: 'run' },
   { key: 'open', word: 'open', tick: 'open' },
-  { key: 'proposed', word: 'proposed', tick: 'prop' },
+  { key: 'proposed', word: 'proposed', tick: 'proposed' },
   { key: 'removed', word: 'removed', tick: 'gone' },
 ];
 

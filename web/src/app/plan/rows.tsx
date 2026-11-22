@@ -51,12 +51,15 @@ export function DoneWhen({ row }: { row: PlanRow }) {
 export function Owner({
   owner,
   workers,
+  whole = false,
 }: {
   owner?: string | null | undefined;
+  /** The whole public identity (`handle/run`), as the board shows it. */
+  whole?: boolean;
   /** Public labels of the Item's active Lanes; empty when nobody; undefined when not known. */
   workers?: readonly string[] | undefined;
 }) {
-  if (owner) return <Who handle={owner} />;
+  if (owner) return <Who handle={owner} whole={whole} />;
   // Not asked about (past the read's cap, or before its answer): say nothing rather than a "no one yet" that may be
   // wrong.
   if (!workers) return null;
@@ -64,7 +67,7 @@ export function Owner({
   const [first, ...rest] = workers;
   return (
     <span className="plan-who" title={`Working on it now: ${workers.join(', ')}`}>
-      <Who handle={first!} />
+      <Who handle={first!} whole={whole} />
       {rest.length ? <span className="t3 num"> +{rest.length}</span> : null}
     </span>
   );

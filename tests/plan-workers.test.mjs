@@ -80,8 +80,13 @@ test('Plan workers: one call, one indexed range per asked Intent, newest first, 
   );
   assert.deepEqual(
     Object.keys(reply.lanes[0]).sort(),
-    ['actor', 'at', 'intentId'],
+    ['actor', 'at', 'intentId', 'laneId'],
     'no goal, paths or session',
+  );
+  // The Lane id joins the shell's line feed, so the board says each Lane's state with no read of its own (d3357f40).
+  assert.deepEqual(
+    reply.lanes.map(lane => `${lane.intentId} ${lane.laneId}`).sort(),
+    w.lanes.map(lane => `${lane.intentId} ${lane.laneId}`).sort(),
   );
   // 30 presence rows, 60 empty follow-up ranges, and the project with its role check: measured, then held.
   assert.ok(cost.documents <= 94, JSON.stringify(cost));

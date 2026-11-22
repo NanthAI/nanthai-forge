@@ -192,7 +192,17 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
             ['Left', count[2], 'Items', `· ${proposed}`],
           ];
           assert.deepEqual(await standing(needs), expected, 'Needs me project labels, units and figures');
-          assert.deepEqual(await standing(plan), expected, 'Plan project labels, units and figures');
+          // Plan names its next Item before the proposals (mock 02-plan-board, d3357f40); the figures are the same.
+          const planned = await standing(plan);
+          assert.ok(
+            planned[2].at(-1).startsWith('· next: ') && planned[2].at(-1).endsWith(`, ${proposed}`),
+            planned[2].at(-1),
+          );
+          assert.deepEqual(
+            planned.map((cell, i) => (i === 2 ? [...cell.slice(0, -1), `· ${proposed}`] : cell)),
+            expected,
+            'Plan project labels, units and figures',
+          );
           const header = plan.locator('.plan-gh').filter({ hasText: 'Parser release' });
           const detail = await open(t, DESK, 'initiative', 'dark', {
             ...options,

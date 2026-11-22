@@ -6,6 +6,7 @@
 import type { ComponentType } from 'react';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type { LineFeed } from './Line';
+import type { NeedsRead } from './needs/count';
 import type { AccountPlace, AppRoute, ProjectPlace } from './paths';
 
 export type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
@@ -19,6 +20,8 @@ export type PlaceProps = {
   feedError?: boolean;
   feedReadAt?: number;
   viewerHandle: string | undefined;
+  /** The shell's Needs me read (App.tsx), shared so a place never subscribes to it again. */
+  needsRead?: NeedsRead | undefined;
 };
 
 /** What an account page gets from the account frame. */

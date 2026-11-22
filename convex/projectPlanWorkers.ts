@@ -8,7 +8,8 @@
 // is made. The web calls it once per page open, again only when the asked Intents change or a hidden tab is shown
 // again, never subscribed, so an idle or hidden tab costs nothing. Presence is for members with write access only, as
 // for the overlap read: anyone else gets `withheld`, which the page shows as nothing, never as "no one yet". `actor` is mapped at the public identity boundary
-// (convex/publicPeople.ts) to `handle/slug` or a handle; only the Intent, that actor and the time leave the server.
+// (convex/publicPeople.ts) to `handle/slug` or a handle; only the Intent, the Lane id, that actor and the time leave the
+// server. The Lane id lets the board say the Lane's state from the shell's line feed, which the page already holds.
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { activeProject } from './projectAuthority';
@@ -60,6 +61,7 @@ export const read = query({
       );
       const lanes = ranges.flat().map(row => ({
         intentId: row.intentId,
+        laneId: row.laneId,
         actor: agentActor(row.actor, row.agent),
         at: row.at,
       }));

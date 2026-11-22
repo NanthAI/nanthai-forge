@@ -25,7 +25,6 @@
   .yard .zones .zs span b { font: var(--w-strong) var(--t-micro)/1 var(--font-mono); color: var(--text); }
   .yard .zones .zs span.zm { padding: 0; overflow: visible; justify-content: center; color: var(--text); border-left: 0; }
   .region[data-weight="ref"] .yard .zones { background: var(--ref-surface); }
-  .lanes-stands .nr { color: var(--text-3); }
   .yard .ln .lab .who a, .row.hv .who a { display: inline-block; line-height: var(--s-6); }
   .yard .ln-open { color: inherit; text-decoration: none; min-block-size: var(--s-6); }
   .yard .ln-open::after { content: ''; position: absolute; inset: 0; }

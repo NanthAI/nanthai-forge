@@ -287,8 +287,9 @@ export function Toolbar({
       <Key className="plan-save" size="sm" onClick={() => setSaving(true)}>
         Save this view
       </Key>
-      {/* The region's head shows the count; this says it again only to assistive tech when a filter changes it. */}
-      <span className="sr" aria-live="polite">
+      {/* The board's count sits at the toolbar's end (mock 02-plan-board); the list's head already shows its own, so
+          there it is said only to assistive tech, again when a filter changes it. */}
+      <span className={query.layout === 'board' ? 'n' : 'sr'} aria-live="polite">
         {count}
       </span>
       {tuning ? (

@@ -177,14 +177,34 @@ const reads = {
   // Open Lanes active in the last 48 hours (d3357f40): three on the unowned in-progress Item, one on an owned
   // in-progress Item. The page asks by Intent: each in-progress Item and two follow-ups (window.workerAsked).
   workers: async ids => (window.workerReads = (window.workerReads ?? 0) + 1, window.workerAsked = [...ids], { lanes: [
-    { intentId: uuid(17), actor: 'example-builder/amber-fox', at: 30 },
-    { intentId: uuid(17), actor: 'peer-builder', at: 20 },
-    { intentId: uuid(17), actor: 'peer-builder/copper-moth', at: 10 },
-    { intentId: uuid(11), actor: 'peer-builder/ocean-lark', at: 5 },
-    { intentId: uuid(11), actor: 'example-builder/amber-fox', at: 4 },
-    { intentId: uuid(11), actor: 'peer-builder', at: 3 },
+    { intentId: uuid(17), laneId: uuid(201), actor: 'example-builder/amber-fox', at: 30 },
+    { intentId: uuid(17), laneId: uuid(202), actor: 'peer-builder', at: 20 },
+    { intentId: uuid(17), laneId: uuid(203), actor: 'peer-builder/copper-moth', at: 10 },
+    { intentId: uuid(11), laneId: uuid(204), actor: 'peer-builder/ocean-lark', at: 5 },
+    { intentId: uuid(11), laneId: uuid(205), actor: 'example-builder/amber-fox', at: 4 },
+    { intentId: uuid(11), laneId: uuid(206), actor: 'peer-builder', at: 3 },
   ] }),
 };
+// What the shell already holds (mock check d3357f40): the project's counts from this fixture's own rows, the line
+// feed (the newest Lane on Item 17 is checking) and the Needs me read (Item 11's Lane waits on the reader's approval).
+const issues = JSON.parse(read.rows).filter(row => row.kind === 'issue');
+const by = status => issues.filter(row => row.status === status).length;
+const progress = emptyPlan ? { exact: true, issue: { proposed: 0, open: 0, inProgress: 0, closed: 0, abandoned: 0 }, closedToday: null } : {
+  exact: !read.more,
+  issue: { proposed: by('proposed'), open: by('open'), inProgress: by('in-progress'),
+    closed: read.settled.reduce((sum, entry) => sum + entry.done, 0), abandoned: read.settled.reduce((sum, entry) => sum + entry.dropped, 0) },
+  closedToday: { day: new Date().toISOString().slice(0, 10), n: 3 },
+};
+const planFeed = emptyPlan ? undefined : { lanes: [
+  { laneId: uuid(201), stage: 'checking', held: false, overlap: false, changedAt: 1 },
+  { laneId: uuid(202), stage: 'editing', held: false, overlap: false, changedAt: 1 },
+  { laneId: uuid(204), stage: 'ready', held: true, overlap: false, changedAt: 1 },
+], more: 0, moreIsLowerBound: false, main: null,
+  // Main's day: 14 landings this hour, not the 3 Items closed today, so the Done hint shows which figure it reads.
+  flow: { hours: [[Math.floor(Date.now() / 3_600_000), 14, 0, 0, 0, 0, 0]], took: [] } };
+const planNeeds = emptyPlan ? undefined : { held: [{ laneId: uuid(204), intentId: uuid(11), title: null, actor: 'peer-builder',
+  agent: 'ocean-lark', why: 'review', note: null, submissionId: null, since: 1 }], more: 0, moreIsLowerBound: false,
+  approvals: '{"requests":[]}', canDecide: true };
 function Fixture() {
   const search = useSearch();
   const rest = decodeURIComponent(location.pathname.split('/plan/')[1] ?? '');
@@ -199,7 +219,8 @@ function Fixture() {
     <React.Suspense fallback={<h1>Loading</h1>}>{window.livePlan ?
       <ConvexProvider client={linkBackend.client}><LivePlan route={route} projectId="synthetic"
         projectName="Synthetic project" viewerHandle="example-builder" /></ConvexProvider> :
-      <PlanScreenView route={route} projectId={rest === uuid(16) ? undefined : "synthetic"} projectName="Synthetic project" feed={undefined}
+      <PlanScreenView route={route} projectId={rest === uuid(16) ? undefined : "synthetic"} projectName="Synthetic project" feed={planFeed}
+      progress={boardFlags.has('no-counts') ? null : boardFlags.has('loading-plan') ? undefined : progress} needs={planNeeds}
       read={boardFlags.has('loading-plan') ? undefined : read} stale={boardFlags.has('stale-plan')}
       put={put} run={run} purge={purge} reads={reads} query={query} go={go} viewer="example-builder"
       readInitiativeWork={window.readItemWork ? initiativeId => window.readItemWork({initiativeId}) : undefined}
@@ -590,7 +611,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
         }
         const launch = boxes.find(box => box.chip === 9);
         assert.equal(launch?.words, '4 done · 1 in progress · 2 open · 1 proposed · 1 removed');
-        assert.deepEqual(launch.ticks, ['ok', 'ok', 'ok', 'ok', 'run', 'open', 'open', 'prop', 'gone']);
+        assert.deepEqual(launch.ticks, ['ok', 'ok', 'ok', 'ok', 'run', 'open', 'open', 'proposed', 'gone']);
         if (shots && width !== 390)
           await page.screenshot({ path: join(shots, `plan-headers-${width}-${theme}.png`), fullPage: true });
         if (width === 1024) {
@@ -1408,10 +1429,81 @@ test('plan views and bulk bar: real components keep the view in the address and 
       }
     },
   );
+  // Lead mock check 2026-11-22 (d3357f40, receipt 7bf49416 vs 02-plan-board): the standing line's real figures and
+  // hints, the mock's sentence, each Lane's state word from reads the page holds, whole identities, the count and the
+  // agent's command beside New Item, and a band roll in the mock's colours.
+  for (const width of [1440, 390])
+    await t.test(
+      `board ${width}: the mock's figures, sentence, Lane words, identities, count and command`,
+      async () => {
+        const { page, errors, context } = await open(width, 'dark', '?view=board');
+        const main = page.locator('main');
+        await main.locator('.brow').first().waitFor();
+        const standing = page.getByRole('navigation', { name: 'Where the project stands' });
+        assert.match(await standing.textContent(), /Done127Items· 14 landed today/);
+        assert.match(await standing.textContent(), /In progress2Items· 3 Lanes open, 1 need you/);
+        assert.match(
+          await standing.textContent(),
+          /Left5Items· next: Bench the parser against the old reader, \d+ proposed/,
+        );
+        assert.doesNotMatch(await standing.textContent(), /loading/);
+        assert.ok(await standing.locator('.roll i.ok').count(), 'the stacked bar draws the done Items');
+        assert.match(
+          await main.locator('.sit').textContent(),
+          /^5 Items are left; next is Bench the parser against the old reader\. 2 in progress, 1 of them waits on you\.$/,
+        );
+        const row = title => main.locator('.brow').filter({ has: page.getByRole('link', { name: title }) });
+        const held = row('Recover from a truncated frame without losing the next one');
+        assert.match(await held.locator('.plan-facts').first().textContent(), /^Needs youapproval/);
+        assert.equal(await held.getByText('in Lane', { exact: true }).count(), 0);
+        const checking = row('Last open step of the long release');
+        assert.match(await checking.locator('.plan-facts').first().textContent(), /^Checking/);
+        // Whole public identities, never "@@" and never cut while the row has room.
+        const who = checking.locator('.who.whole').first();
+        assert.equal(await who.getAttribute('title'), 'example-builder/amber-fox');
+        assert.match(await who.textContent(), /example-builder\/amber-fox$/);
+        if (width === 1440)
+          assert.ok(
+            await who.evaluate(node => node.scrollWidth <= node.clientWidth),
+            'not cut with room to spare',
+          );
+        assert.doesNotMatch(await main.textContent(), /@@/);
+        // The count beside the view switch and the agent's command beside New Item, which opens what an agent runs.
+        assert.equal((await main.locator('.plan-tbar > .n').textContent()).trim(), '7 Items');
+        const cli = main.getByRole('button', { name: `nforge agent . planning '{"status":"open"}'` });
+        assert.equal(await cli.getAttribute('aria-expanded'), 'false');
+        await cli.click();
+        assert.match(await main.locator('#plan-cli').textContent(), /^\$ nforge agent \. planning/);
+        // The band roll in the mock's colours: done, in progress and the rest; no proposed ring, no removed tick.
+        const ticks = await main
+          .locator('.plan-band .roll i')
+          .evaluateAll(nodes => nodes.map(node => node.className));
+        assert.ok(ticks.length);
+        assert.deepEqual(
+          [...new Set(ticks)].filter(tick => !['ok', 'run', 'open'].includes(tick)),
+          [],
+        );
+        assert.deepEqual(errors, []);
+        await context.close();
+        // With no counts (the read failed or gave none) the strip is not drawn, never "not reported".
+        const bare = await open(width, 'dark', '?view=board&no-counts');
+        await bare.page.locator('main .brow').first().waitFor();
+        assert.equal(
+          await bare.page.getByRole('navigation', { name: 'Where the project stands' }).count(),
+          0,
+        );
+        assert.match(await bare.page.locator('main .sit').textContent(), /Items are left; next is/);
+        assert.deepEqual(bare.errors, []);
+        await bare.context.close();
+      },
+    );
   await t.test('board: no Items, loading, failed refresh, no match and the worst case', async () => {
     {
       const { page, errors, context } = await open(1440, 'dark', '?view=board&empty-plan');
       await page.getByRole('heading', { name: 'Nothing is planned yet' }).waitFor();
+      // The mock's empty page: the sentence says only that, and no standing line of zeros is drawn.
+      assert.equal((await page.locator('.sit').textContent()).trim(), 'Nothing is planned yet.');
+      assert.equal(await page.getByRole('navigation', { name: 'Where the project stands' }).count(), 0);
       assert.equal(
         await page.getByRole('button', { name: /^New Item/ }).count(),
         1,

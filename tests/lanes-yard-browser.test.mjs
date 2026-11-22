@@ -297,8 +297,8 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
           assert.equal(await screen(), 'lanes#0', 'the overview is the Lanes place itself');
           assert.equal(
             await page.evaluate(() => window.forgeReads.adds),
-            4,
-            "the frame's Needs me read, then Lanes, queue and shared files: one read each, none per row or per link",
+            5,
+            "the frame's Needs me read, then Lanes, queue, shared files and the project's Item counts: one read each, none per row or per link",
           );
           assert.equal(
             await page.evaluate(() => window.forgeLive('projectNeedsMe:read')),
@@ -407,10 +407,14 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
             reply,
             /\nheld  Public pages: share cards, sitemap and page… Needs you, waiting for approval\n/,
           );
-          // Where the project stands: Item counts are not in these reads, so they say so.
+          // Where the project stands: the project's Item counts (projectPlanCounts:read, as Needs me and Plan), with
+          // the open Lanes and those that need the reader beside In progress (lead mock check 2026-11-22, d3357f40).
           const stands = page.getByRole('navigation', { name: 'Where the project stands' });
-          assert.deepEqual(await stands.locator('.nr').allTextContents(), Array(3).fill('not reported'));
-          assert.match(await stands.textContent(), /11 Lanes open, 1 needs you/);
+          const said = (await stands.textContent()).replace(/\s+/g, ' ');
+          assert.match(said, /Done31ItemsIn progress/);
+          assert.match(said, /In progress4Items· 11 Lanes open, 1 needs you/);
+          assert.match(said, /Left9Items· 2 proposed/);
+          assert.doesNotMatch(said, /not reported/);
           assert.equal(
             await page.evaluate(() => window.forgeReads.adds),
             reads,
@@ -449,6 +453,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
         ['?state=loading', '.sk-rows'],
         ['?state=failed', '.yard .ln'],
         ['?state=worst', '.yard .ln'],
+        ['?state=nocounts', '.yard .ln'],
       ];
       for (const [viewport, query, path, ready] of [
         [DESK, ''],
@@ -461,6 +466,12 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
         ]),
       ]) {
         const page = await open(t, viewport, query, path, ready);
+        if (query === '?state=nocounts')
+          assert.equal(
+            await page.getByRole('navigation', { name: 'Where the project stands' }).count(),
+            0,
+            'with no Item counts the strip is not drawn, never "not reported" three times',
+          );
         // Keyboard: every link and control is reached by Tab and shows a focus ring.
         if (path) {
           await page.keyboard.press('Tab');

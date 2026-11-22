@@ -61,6 +61,7 @@ export type PlanView = {
   next: PlanRow | null;
   live: number;
   planned: number;
+  inProgress: number;
   more: boolean;
   canEdit: boolean;
   byId: Map<string, PlanRow>;
@@ -164,19 +165,52 @@ export function planView(
     next,
     live: items.length,
     planned: count('open'),
+    inProgress: count('in-progress'),
     more: read.more,
     canEdit: read.canEdit,
     byId,
   };
 }
 
-/** The page sentence points to available work. Project totals come from the shared Standing row. */
-export function planSentence(view: PlanView): { bold: string; rest: string } {
-  if (view.next) return { bold: `The next free Item is ${view.next.title}.`, rest: '' };
-  if (view.more) return { bold: 'No free Item among the Items shown.', rest: '' };
-  if (view.planned) return { bold: 'Every planned Item is owned, in a Lane or blocked.', rest: '' };
-  if (view.live) return { bold: 'No Items are ready to pick up.', rest: '' };
-  return { bold: 'No open Items.', rest: 'Add an Item, or let an agent propose one.' };
+/** The project's figures the sentence uses: the standing line's Left and In progress (progress.ts), and how many
+ * in-progress Items wait on the reader (lane-words.ts). Without them the sentence counts the Plan's own rows. */
+export type PlanFigures = {
+  left: number;
+  inProgress: number;
+  atLeast: boolean;
+  waitOnYou: number;
+  /** Some in-progress Items were past the reads that say who waits: the tally is a lower bound. */
+  waitAtLeast?: boolean;
+};
+
+const items = (n: number, atLeast: boolean) =>
+  `${n.toLocaleString()}${atLeast ? '+' : ''} ${n === 1 && !atLeast ? 'Item is' : 'Items are'}`;
+
+/** The page sentence, as the board mock says it (02-plan-board): "7 Items are left; next is X. 5 in progress, 2 of
+ * them wait on you." Left and In progress are the standing line's own figures, so the two never disagree. */
+export function planSentence(view: PlanView, figures?: PlanFigures | null): { bold: string; rest: string } {
+  const left = figures?.left ?? view.planned;
+  const inProgress = figures?.inProgress ?? view.inProgress;
+  const atLeast = figures ? figures.atLeast : view.more;
+  const waits = figures?.waitOnYou ?? 0;
+  const waitsMore = figures?.waitAtLeast ? '+' : '';
+  const rest = inProgress
+    ? `${inProgress.toLocaleString()}${atLeast ? '+' : ''} in progress${
+        waits
+          ? `, ${waits.toLocaleString()}${waitsMore} of them ${waits === 1 && !waitsMore ? 'waits' : 'wait'} on you`
+          : ''
+      }.`
+    : '';
+  if (!left && !inProgress && !view.live)
+    return { bold: 'No open Items.', rest: 'Add an Item, or let an agent propose one.' };
+  const head = left || atLeast ? `${items(left, atLeast)} left` : 'No Items are left';
+  if (view.next) return { bold: `${head}; next is ${view.next.title}.`, rest };
+  const why = view.more
+    ? 'no free Item among the Items shown'
+    : view.planned
+      ? 'every planned Item is owned, in a Lane or blocked'
+      : 'none is ready to pick up';
+  return { bold: left || atLeast ? `${head}; ${why}.` : `${head}.`, rest };
 }
 
 /** The visible status word for a row. */

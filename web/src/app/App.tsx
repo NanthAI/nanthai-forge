@@ -392,6 +392,7 @@ function ProjectView({
         feedError={feedError}
         feedReadAt={lastLine.at}
         viewerHandle={controls.viewerHandle}
+        needsRead={needsLive}
       />
       {overlays((project?.id ?? null) as Id<'hostedProjects'> | null)}
     </ProjectFrame>

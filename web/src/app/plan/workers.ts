@@ -12,7 +12,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { successorIntentId } from '../../../../src/hosted-intent-chain';
 import type { PlanRow } from '../../../../src/planning-model';
 
-export type ActiveLane = { intentId: string; actor?: string | null; at: number | null };
+export type ActiveLane = {
+  intentId: string;
+  /** Joins the shell's line feed for the Lane's state (lane-words.ts); older servers leave it out. */
+  laneId?: string;
+  actor?: string | null;
+  at: number | null;
+};
 /** Item id to the public labels working on it, newest first, each once; an empty list means asked and nobody. An
  * Item missing from the map was not asked about: nothing is said. */
 export type Workers = ReadonlyMap<string, readonly string[]>;
@@ -136,6 +142,10 @@ export function useWorkers(
     const seen = current ? answer.lanes.filter(lane => current.has(lane.intentId)) : [];
     return {
       byItem: workersByItem(seen, rows ?? [], current || new Map(), includeOpenLanes),
+      /** The asked Lanes themselves, each with its Intent (and Lane id when sent). */
+      lanes: seen,
+      /** Each asked Intent's Item, known from the rows before any answer (askedIntents). */
+      asked,
       observedLanes: seen.length,
       missingIdentity: seen.some(lane => !publicLabel(lane.actor)),
     };

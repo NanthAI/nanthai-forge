@@ -128,6 +128,8 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
               'projectHostedQueueView:read',
               'projectNeedsMe:read',
               'projectNowOverlaps:now',
+              // The strip's Item counts: the stored counter Needs me and Plan read (d3357f40).
+              'projectPlanCounts:read',
             ],
           ],
           [`${board}/${laneId}`, 'Changed files', ['projectLaneReview:read']],

@@ -9,12 +9,15 @@
 // Who is touching what. They are built from the reads above, so following one adds no read here.
 // What waits on the reader (Needs you) is Needs me's own rule over Needs me's own read, the one the top bar's count
 // already subscribes to (App.tsx), so the head, the filter, the band and the top bar agree and the page adds no read.
-// Under the head, where the project stands: Items done, in progress and left. The Lanes reads hold no Item counts
-// (they are projectPlanCounts:read, Item 3fa3187d), so those figures say "not reported" here rather than add a read;
-// what the page knows, the open Lanes and those that need you, stands beside In progress.
+// Under the head, where the project stands: Items done, in progress and left, from projectPlanCounts:read (Item
+// 3fa3187d), the one stored counter Needs me and Plan show, in the same DS strip (lead mock check 2026-11-22, Item
+// d3357f40). What this page knows, the open Lanes and those that need you, stands beside In progress. With no counts
+// (the read failed or gave none) the strip is not drawn, never "not reported" three times.
 // The command chip shows what an agent gets from `nforge agent . queue`, drawn from the queue read already here.
 import { useMemo, useState, type ReactNode } from 'react';
-import { Dock, Glyph, Key, Region, useDockLayout, type DockLayout } from '../../ds';
+import { api } from '../../../../convex/_generated/api';
+import { Dock, Key, Region, Standing, useDockLayout, type DockLayout } from '../../ds';
+import { progressCells, progressOf } from '../progress';
 import { useSafeQuery } from '../../safe-query';
 import { needsRead } from '../needs/count';
 import { queueEntryState } from '../lane-state';
@@ -63,6 +66,7 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
   // The frame's own subscription (same query, same args): no second read. If it fails, the yard still shows and
   // says it could not tell which held Lanes need the reader.
   const { value: needs, error: needsError } = useSafeQuery(needsRead, { projectId });
+  const counts = useSafeQuery(api.projectPlanCounts.read, { projectId });
   const [cli, setCli] = useState(false);
   const [layout, setLayout, resetLayout, moved] = useDockLayout('lanes', LAYOUT);
   // Ages ("saved 4 min ago") are worked out when the data changes, never on a timer. Rows wait for all three reads, so
@@ -241,14 +245,24 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
       <pre className="cli-out mono" id="lanes-cli" hidden={!cli}>
         {cli ? queueReply(queue, queueError, lanes, feed) : null}
       </pre>
-      <Stands
-        lanes={yard ? yard.open : null}
-        needs={yard?.counts.needs ?? 0}
-        hrefs={{
-          done: hrefFor({ ...route, place: 'code', section: '', rest: '' }),
-          left: hrefFor({ ...route, place: 'plan', section: '', rest: '' }),
-        }}
-      />
+      {counts.error || counts.value === null ? null : (
+        <Standing
+          of="app"
+          {...progressCells(progressOf(counts.value), {
+            inProgress: yard
+              ? `${yard.open.toLocaleString()} ${yard.open === 1 ? 'Lane' : 'Lanes'} open${
+                  yard.counts.needs
+                    ? `, ${yard.counts.needs.toLocaleString()} need${yard.counts.needs === 1 ? 's' : ''} you`
+                    : ''
+                }`
+              : undefined,
+            hrefs: {
+              done: hrefFor({ ...route, place: 'code', section: '', rest: '' }),
+              left: hrefFor({ ...route, place: 'plan', section: '', rest: '' }),
+            },
+          })}
+        />
+      )}
       {lanes?.map(({ laneId, intent, saveFailure }) => {
         if (!saveFailure) return null;
         const short = laneId.slice(0, 8);
@@ -271,53 +285,6 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
         onReset={resetLayout}
       />
     </>
-  );
-}
-
-/** Where the project stands (DESIGN.md `.pstate`, the approved flow under the Lanes head). Item counts are not in
- * the Lanes reads, so each says "not reported" (rule 15) instead of a read added for them; In progress also says
- * what this page knows: how many Lanes are open and how many need the reader. */
-function Stands({
-  lanes,
-  needs,
-  hrefs,
-}: {
-  lanes: number | null;
-  needs: number;
-  hrefs: { done: string; left: string };
-}) {
-  const open =
-    lanes === null
-      ? null
-      : `${lanes.toLocaleString()} ${lanes === 1 ? 'Lane' : 'Lanes'} open${needs ? `, ${needs.toLocaleString()} need${needs === 1 ? 's' : ''} you` : ''}`;
-  return (
-    <nav className="pstate lanes-stands" aria-label="Where the project stands">
-      <span className="pstate-scope">
-        <span>Items in this project</span>
-      </span>
-      <A className="ps" href={hrefs.done}>
-        <span className="st" data-st="passed">
-          <Glyph of="passed" />
-          Done
-        </span>
-        <span className="nr">not reported</span>
-      </A>
-      <span className="ps">
-        <span className="st" data-st="active">
-          <Glyph of="active" />
-          In progress
-        </span>
-        <span className="nr">not reported</span>
-        {open ? <span className="more">· {open}</span> : null}
-      </span>
-      <A className="ps" href={hrefs.left}>
-        <span className="st" data-st="stale">
-          <Glyph of="planned" />
-          Left
-        </span>
-        <span className="nr">not reported</span>
-      </A>
-    </nav>
   );
 }
 
