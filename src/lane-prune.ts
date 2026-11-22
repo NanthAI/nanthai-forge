@@ -24,6 +24,7 @@ import { readClientSettings, type ClientSettings } from './client-settings.js';
 import { hostedLaneDirty } from './hosted-lane-dirty.js';
 import { invariant } from './errors.js';
 import { digest } from './hash.js';
+import { hostedLaneMarkerName } from './forge-cache-paths.js';
 import { readCacheUse, cacheUsePath } from './client-cache-use.js';
 import type { PruneFolder } from './lane-prune-inventory.js';
 import { processBlocker, workingProcesses } from './clean-processes.js';
@@ -80,6 +81,8 @@ function scanTree(root: string, snapshots: string | null, deadline = Infinity, c
   const cache = clientCacheRoot(root);
   const use = snapshots && readCacheUse(root, false) ? exists(cacheUsePath(root)) : null;
   const scratch = join(root, '.forge', 'scratch');
+  const recovery = join(cache, 'kept-apply');
+  const laneMarkerSuffix = `${sep}.forge${sep}${hostedLaneMarkerName}`;
   let newest = 0,
     bytes = 0,
     scratchBytes = 0,
@@ -106,8 +109,17 @@ function scanTree(root: string, snapshots: string | null, deadline = Infinity, c
     if (!snapshotBookkeeping && !cacheUseReplacement) newest = Math.max(newest, stat.mtimeMs);
     bytes += stat.blocks * 512;
     if (inside(path, scratch)) scratchBytes += stat.blocks * 512;
+    if (stat.isFile() && path.endsWith(laneMarkerSuffix) && !inside(path, recovery)) {
+      const checkout = dirname(dirname(path));
+      if (checkout !== root && markerIdentity(checkout)) nested = true;
+    }
     if (stat.isDirectory()) {
-      if (path !== root && isLaneDirectoryName(basename(path)) && nestedLaneParent(dirname(path))) {
+      if (
+        path !== root &&
+        !inside(path, recovery) &&
+        isLaneDirectoryName(basename(path)) &&
+        nestedLaneParent(dirname(path))
+      ) {
         nested = true;
         if (!countNested) continue;
       }
@@ -125,6 +137,35 @@ const nestedLanes = (root: string) => {
   }
 };
 const inside = (path: string, root: string) => path === root || path.startsWith(root + sep);
+
+/** A redirect or checkout can appear after the age/source walk. Read only directory entries
+ * here, and skip the recovery archive that the cache remover leaves intact. */
+function nestedCheckoutBlocker(root: string, deadline: number) {
+  const cache = clientCacheRoot(root);
+  const recovery = join(cache, 'kept-apply');
+  const directories = [root];
+  try {
+    if (lstatSync(cache, { throwIfNoEntry: false })?.isDirectory()) directories.push(cache);
+    while (directories.length) {
+      if (Date.now() >= deadline) return 'nested checkout recheck deferred';
+      const directory = directories.pop()!;
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const path = join(directory, entry.name);
+        if (path === recovery) continue;
+        if (
+          (isLaneDirectoryName(entry.name) && nestedLaneParent(directory)) ||
+          (entry.name === '.forge' && directory !== root && markerIdentity(directory))
+        )
+          return 'contains other Lane roots';
+        directories.push(path);
+      }
+    }
+  } catch {
+    return 'checkout could not be fully inspected';
+  }
+  return null;
+}
 
 /** Idle listing plus prune of finished Lane roots, from the local registry and one batched read. */
 export async function laneHousekeeping(input: {
@@ -544,6 +585,11 @@ export async function laneHousekeeping(input: {
         kept(entry, 'Lane use changed during prune');
         return;
       }
+      const nestedCheckout = nestedCheckoutBlocker(root, deadline);
+      if (nestedCheckout) {
+        kept(entry, nestedCheckout);
+        return;
+      }
       logLanePrune(
         {
           laneId: entry.laneId,
@@ -555,10 +601,19 @@ export async function laneHousekeeping(input: {
         },
         now,
       );
-      for (const path of siblings(root))
-        if (path === clientCacheRoot(root)) removeCachePreservingKept(path);
-        else rmSync(path, { recursive: true, force: true });
-      if (!deleted) for (const link of links.get(root) ?? []) rmSync(link, { force: true });
+      try {
+        // Keep the checkout and its verifiable marker available for another pass if
+        // adjacent generated files cannot be removed.
+        removeCachePreservingKept(clientCacheRoot(root));
+        rmSync(rootSibling(root, '.forge-metrics.jsonl'), { force: true, recursive: true });
+        rmSync(root, { recursive: true, force: true });
+        if (!deleted) for (const link of links.get(root) ?? []) rmSync(link, { force: true });
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'ENOTEMPTY') throw error;
+        kept(entry, 'removal interrupted (ENOTEMPTY); remaining files retained');
+        return;
+      }
       forgetLane(entry.laneId);
       recordResult();
     });

@@ -53,7 +53,9 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   local process or snapshot worker is using it. A finished Lane's snapshot worker and cache
   inventory bookkeeping still count toward its size. The timestamp from replacing an
   unchanged inventory record does not count as use. Recent source and recovery changes
-  still count as activity. A Lane containing another Lane root is retained.
+  still count as activity. A Lane containing another checkout with a Forge marker is retained,
+  including custom paths under scratch. Prune rechecks for nested checkout markers before
+  deletion and retains recovery archives in the adjacent cache.
 - An `active` Lane with no Forge action for `activeLanePruneHours` (7 days) is also removed, but only when no
   Forge command of this machine runs in it and its
   checkout has no unsaved edits. The read-only check compares files against the saved State.
@@ -84,7 +86,8 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   discovered checkouts that remain and removes dangling links to missing nested copies.
   Use `--finished-only` to reclaim abandoned Lanes and completed Lanes whose checkout head
   has a current landing receipt. It previews dependency eviction after releasing their links.
-  Receipt reads use pages of up to 48 Lane identities. An explicit prune with
+  If a directory changes during removal and the filesystem returns `ENOTEMPTY`, prune
+  reports that root and continues with other eligible roots. Receipt reads use pages of up to 48 Lane identities. An explicit prune with
   `autoPruneHours` set to 0 uses 3 hours.
 - One root per Lane: `open` at a new path moves the copy `start` made under
   `ROOT.forge-client/lanes/` there instead of downloading a second tree. It reports

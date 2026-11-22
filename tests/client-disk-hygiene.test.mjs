@@ -3,7 +3,8 @@ import './automatic-cleanup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import {
+import { syncBuiltinESMExports } from 'node:module';
+import fs, {
   chmodSync,
   existsSync,
   lstatSync,
@@ -445,12 +446,19 @@ test('finished Lane prune releases dependency links despite cache inventory writ
   const parent = await make('parent-dddddddd');
   const recent = await make('recent-eeeeeeee');
   const raced = await make('raced-ffffffff');
-  const nested = join(parent.root, '.forge', 'scratch', 'sub.forge-client', 'lanes', randomUUID());
+  const lateParent = await make('late-parent-abcdef01');
+  const lateStage = join(directory, 'late-stage');
+  const lateNest = join(lateParent.root, '.forge', 'scratch', 'bench', 'late-checkout');
+  const retained = join(`${done.root}.forge-client`, 'kept-apply', 'round', 'prior-checkout');
+  await realCheckout(retained, done.laneId);
+  await realCheckout(lateStage);
+  mkdirSync(join(lateNest, '..'), { recursive: true });
+  const nested = join(parent.root, '.forge', 'scratch', 'bench', 'another-checkout');
   await realCheckout(nested);
   symlinkSync(modules, join(done.root, 'node_modules'));
   touchDependencyEntry(installed, done.root);
   writeFileSync(join(dirty.root, 'src', 'a.txt'), 'unsaved');
-  for (const lane of [done, dirty, live, parent, recent, raced]) {
+  for (const lane of [done, dirty, live, parent, recent, raced, lateParent]) {
     ageTree(lane.root, 10);
     ageTree(`${lane.root}.forge-client`, 10);
     age(`${lane.root}.forge-metrics.jsonl`, 10);
@@ -474,10 +482,13 @@ test('finished Lane prune releases dependency links despite cache inventory writ
       return hostedLaneDirty(root);
     },
     readStates: async (_address, ids) => new Map(ids.map(id => [id, 'completed'])),
-    processes: () => ({
-      paths: [`${live.root}.forge-client`, ...(sourceInspected ? [join(raced.root, 'src', 'a.txt')] : [])],
-      unknown: false,
-    }),
+    processes: () => {
+      if (sourceInspected && existsSync(lateStage)) renameSync(lateStage, lateNest);
+      return {
+        paths: [`${live.root}.forge-client`, ...(sourceInspected ? [join(raced.root, 'src', 'a.txt')] : [])],
+        unknown: false,
+      };
+    },
   });
   assert.deepEqual(
     result.pruned.map(item => item.laneId),
@@ -485,10 +496,12 @@ test('finished Lane prune releases dependency links despite cache inventory writ
   );
   assert(!existsSync(done.root));
   assert.equal(readFileSync(join(dirty.root, 'src', 'a.txt'), 'utf8'), 'unsaved');
-  assert(existsSync(nested));
+  assert(existsSync(nested) && existsSync(lateNest));
+  assert(existsSync(join(retained, '.forge', 'hosted-lane.json')));
   const reasons = new Map(result.kept.map(row => [row.laneId, row.reason]));
   assert.equal(reasons.get(dirty.laneId), 'unsaved edits');
   assert.equal(reasons.get(parent.laneId), 'contains other Lane roots');
+  assert.equal(reasons.get(lateParent.laneId), 'contains other Lane roots');
   assert.equal(reasons.get(recent.laneId), 'modified within 3h');
   assert.match(reasons.get(live.laneId), /process is working/);
   assert.match(reasons.get(raced.laneId), /process is working/);
@@ -575,6 +588,59 @@ test('prune inventories stale registry paths, unregistered checkouts, cache comp
   assert(existsSync(outsideRoot) && !byRoot.has(outsideRoot));
   assert(byRoot.get(active).scratchBytes >= 16_384);
   assert.equal(byRoot.get(active).largeScratch, true);
+});
+
+test('prune reports ENOTEMPTY for the interrupted root and reclaims other finished roots', async t => {
+  const directory = realpathSync(isolated(t));
+  const now = Date.parse('2026-01-02T00:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const interrupted = join(directory, 'interrupted');
+  const finished = join(directory, 'finished');
+  const companion = join(directory, 'companion');
+  const interruptedId = await realCheckout(interrupted);
+  const companionId = await realCheckout(companion);
+  const finishedId = await realCheckout(finished);
+  for (const [root, laneId] of [
+    [interrupted, interruptedId],
+    [companion, companionId],
+    [finished, finishedId],
+  ]) {
+    ageTree(root, 10);
+    ageTree(`${root}.forge-client`, 10);
+    age(`${root}.forge-metrics.jsonl`, 10);
+    recordLane({ root, laneId, ...address, lastActionAt: now - 10 * hour }, now);
+  }
+  const originalRemove = fs.rmSync;
+  const remove = t.mock.method(fs, 'rmSync', (path, options) => {
+    if (path === interrupted || path === `${companion}.forge-client`)
+      throw Object.assign(new Error('Directory changed during removal'), { code: 'ENOTEMPTY' });
+    return originalRemove(path, options);
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = await laneHousekeeping({
+      apply: true,
+      readStates: async (_address, ids) => new Map(ids.map(id => [id, 'abandoned'])),
+      processes: () => ({ paths: [], unknown: false }),
+    });
+    assert.deepEqual(
+      result.pruned.map(row => row.laneId),
+      [finishedId],
+    );
+    assert.equal(
+      result.kept.find(row => row.laneId === interruptedId).reason,
+      'removal interrupted (ENOTEMPTY); remaining files retained',
+    );
+    assert(existsSync(interrupted));
+    assert(existsSync(join(companion, '.forge', 'hosted-lane.json')));
+    assert.equal(
+      result.kept.find(row => row.laneId === companionId).reason,
+      'removal interrupted (ENOTEMPTY); remaining files retained',
+    );
+  } finally {
+    remove.mock.restore();
+    syncBuiltinESMExports();
+  }
 });
 
 test('bounded start cleanup resumes after a slow dirty Lane', async t => {
