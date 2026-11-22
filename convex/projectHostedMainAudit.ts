@@ -10,6 +10,10 @@ import {
   mainAuditStatus,
   auditRow,
   armAudit,
+  auditCadenceFor,
+  nextMainAudit,
+  rescheduleMainAudit,
+  savedAuditSettings,
   onGateRunTerminal,
   noteMainLanding,
   releaseMainHolds,
@@ -24,6 +28,7 @@ import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 import { hostedOperationRow } from './projectHostedOperations';
 import { insertHostedCheckRun } from './projectHostedChecks';
 import { readHostedRecord } from './projectHostedRecords';
+import { recentAuditDonors } from './projectMetricReadProjection';
 import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
 import { hostedRecordSchema } from '../src/hosted-records';
 import {
@@ -109,16 +114,9 @@ export async function configureMainAudit(
   );
   // A held change altered nothing; the audit schedule moves only when it is applied.
   if (heldSettingReply(saved)) return saved;
-  const row = await auditRow(ctx, input.projectId);
-  if (!replay && row?.unaudited?.count && (!row.audit || hostedCheckTerminal(row.audit))) {
-    if (row.wake) await cancelPendingTask(ctx, row.wake.taskId);
-    await armAudit(
-      ctx,
-      { ...row, wake: undefined },
-      row.unaudited.count >= request.settings.landings
-        ? Date.now()
-        : Date.parse(row.unaudited.firstAt!) + request.settings.minutes * 60_000,
-    );
+  if (!replay) {
+    const project = await ctx.db.get(input.projectId);
+    if (project) await rescheduleMainAudit(ctx, project);
   }
   return saved;
 }
@@ -253,6 +251,29 @@ export const start = internalMutation({
       .take(1);
     if (!latest[0]) return blocked('SOURCE_UNAVAILABLE', 'Main audit requires an accepted main receipt.');
     const receipt = hostedAcceptanceSchema.parse(JSON.parse(latest[0].value));
+    const sequence = receipt.snapshot.revision;
+    const oldestAt = row.unaudited.firstAt ?? receipt.at;
+    const firstSequence = Math.min(
+      sequence,
+      row.lastGreen
+        ? row.lastGreen.sequence + 1
+        : (row.pendingFirstSequence ?? Math.max(1, sequence - row.unaudited.count + 1)),
+    );
+    const cadence = auditCadenceFor(row, project, await savedAuditSettings(ctx, input.projectId));
+    const reason =
+      input.retry || row.startFailure
+        ? 'retry'
+        : input.wakeAt === undefined
+          ? 'manual-start'
+          : nextMainAudit(row, cadence).reason;
+    const cover = {
+      firstSequence,
+      throughSequence: sequence,
+      landings: sequence - firstSequence + 1,
+      oldestAt,
+      reason,
+      cadence,
+    };
     const definition = receipt.check
       ? await checkSetting(ctx, input.projectId, 'definition', receipt.check.checkId)
       : null;
@@ -286,13 +307,18 @@ export const start = internalMutation({
       )
         return null;
       // Replays adopt the original result; they never submit identical content again.
+      const coverage = { ...cover, startedAt: new Date(Date.now()).toISOString(), reused: true as const };
       await ctx.db.patch(row._id, {
         audit: {
           runId: run.id,
           head: run.request.expectedHead,
-          sequence: receipt.snapshot.revision,
+          sequence,
           status: 'queued',
+          coverage: canonicalPayload(coverage),
         },
+        unaudited: { count: row.unaudited.count, firstAt: null },
+        pendingFirstSequence: undefined,
+        failedFullCheck: undefined,
         startFailure: undefined,
       });
       if (hostedCheckTerminal(run)) {
@@ -304,9 +330,9 @@ export const start = internalMutation({
             ...run.gate!,
             reason: auditReason({
               ...auditMetadata(run),
-              sequence: receipt.snapshot.revision,
+              sequence,
               count: row.unaudited.count,
-              firstAt: row.unaudited.firstAt ?? receipt.at,
+              firstAt: oldestAt,
             }),
           },
         });
@@ -350,6 +376,10 @@ export const start = internalMutation({
       expected: { authorityEpoch: request.authorityEpoch, head: request.expectedHead },
       payload: request,
     });
+    // Snapshot the latest compact run metrics for the next wake. The current receipt
+    // names the policy and threshold that actually scheduled this run.
+    const donorSignal = await recentAuditDonors(ctx, input.projectId);
+    const coverage = { ...cover, startedAt: prepared.operation.firstAttempt.at };
     const run = hostedCheckRunSchema.parse({
       schema: 1,
       id: prepared.operation.firstAttempt.ids.run!,
@@ -363,9 +393,9 @@ export const start = internalMutation({
       gate: {
         mode: 'audit',
         reason: auditReason({
-          sequence: receipt.snapshot.revision,
+          sequence,
           count: row.unaudited.count,
-          firstAt: row.unaudited.firstAt ?? receipt.at,
+          firstAt: oldestAt,
           attempt,
           key,
         }),
@@ -397,14 +427,20 @@ export const start = internalMutation({
       output: null,
       cost: { status: 'unknown' },
     });
-    await insertHostedCheckRun(ctx, run, checkCause.audit);
+    const coverageReceipt = canonicalPayload(coverage);
+    await insertHostedCheckRun(ctx, run, checkCause.audit, undefined, { coverage: coverageReceipt });
     await ctx.db.patch(row._id, {
       audit: {
         runId: run.id,
         head: request.expectedHead,
-        sequence: receipt.snapshot.revision,
+        sequence,
         status: 'queued',
+        coverage: coverageReceipt,
       },
+      lastAuditStartAt: Date.now(),
+      donorSignal,
+      pendingFirstSequence: undefined,
+      failedFullCheck: undefined,
       unaudited: { count: row.unaudited.count, firstAt: null },
       startFailure: undefined,
     });

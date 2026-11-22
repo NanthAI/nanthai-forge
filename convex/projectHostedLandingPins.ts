@@ -55,6 +55,7 @@ export async function pinLandingAttempt(
     githubProof?: GithubInboundProof;
     checkCause?: CheckCause;
     providerDelayReason?: string;
+    auditDonor?: boolean;
     /** Reuses the initial submission's reservation lookup for cause attribution. */
     intent?: (intentId: string) => Promise<CheckCause>;
     paths?: (paths: string[] | null) => void;
@@ -212,6 +213,7 @@ export async function pinLandingAttempt(
           ? (await loadHostedCheck(ctx, { projectId: input.projectId, runId: r.check.runId })).run
           : await enqueueHostedCheck(ctx, {
               cause,
+              ...(input.auditDonor === undefined ? {} : { auditDonor: input.auditDonor }),
               usageSubmissions: [input.submissionId],
               projectId: input.projectId,
               actor: input.actor.id,

@@ -50,6 +50,9 @@ export const hostedCheckTables = {
   ]),
   projectHostedCheckRuns: defineTable({
     cause: v.optional(v.union(...Object.values(checkCause).map(code => v.literal(code)))),
+    /** First-check donor reuse evaluated. False retains the existing audit-baseline refusal. */
+    auditDonor: v.optional(v.boolean()),
+    auditCoverage: v.optional(v.string()),
     replayClock: v.optional(
       v.object({
         dispatchedAt: v.optional(v.number()),

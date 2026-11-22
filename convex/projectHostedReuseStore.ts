@@ -113,6 +113,11 @@ export const complete = internalMutation({
           ? decision.reason
           : (lapsed?.relaxed[0] ?? input.reason ?? 'source-unavailable'),
       reads.checkedRun,
+      !proof && current
+        ? true
+        : 'reason' in decision && decision.reason === 'audit-baseline'
+          ? false
+          : undefined,
     );
     return null;
   },

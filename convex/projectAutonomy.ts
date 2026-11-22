@@ -44,6 +44,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import { retargetGithubMirror } from './projectGithubMirrorRetarget';
 import { resumeMirrorQueue } from './projectGithubMirrorCatchup';
+import { rescheduleMainAudit } from './projectHostedMainAuditState';
 /** Device identity always uses agent authority; callers may explicitly downscope to it. */
 export async function acceptanceActor(
   ctx: QueryCtx | MutationCtx | ActionCtx,
@@ -86,6 +87,7 @@ const policyBase = (policy: AutonomyPolicy) =>
       acceptance: acceptancePolicyDigest(policy),
       unchecked: policy.acceptance.withoutCheck ?? null,
       mirror: policy.githubMirror ?? null,
+      ...(policy.mainAudit ? { mainAudit: policy.mainAudit } : {}),
     }),
   );
 function parsePolicyCommand(text: string) {
@@ -133,6 +135,11 @@ async function writePolicy(
         : project.githubMirrorPausedInbound
       : undefined;
   await ctx.db.patch(project._id, { autonomyPolicy: policy, githubMirrorPausedInbound: pausedInbound });
+  if (
+    command.mainAudit &&
+    canonicalPayload(previous.mainAudit ?? null) !== canonicalPayload(policy.mainAudit ?? null)
+  )
+    await rescheduleMainAudit(ctx, { ...project, autonomyPolicy: policy });
   // Friction 77518c88: connecting GitHub sync creates the mirror queue row the pull request and
   // push webhooks look up, so the first PR is checked without a landing first. Only on an edit that
   // changes the connection: one indexed read, one insert at most; every other edit adds nothing.

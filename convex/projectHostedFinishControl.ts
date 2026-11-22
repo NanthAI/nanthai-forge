@@ -112,7 +112,16 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
           await retryFinish(ctx, row, input);
           return { kind: 'reuse', pendingId: value.pending.id };
         }
-        await installFinishCompose(ctx, row, value, undefined, source, decision?.reason);
+        await installFinishCompose(
+          ctx,
+          row,
+          value,
+          undefined,
+          source,
+          decision?.reason,
+          undefined,
+          decision?.reason === 'audit-baseline' ? false : undefined,
+        );
         return null;
       }
       if (source.state.status === 'submitted') {

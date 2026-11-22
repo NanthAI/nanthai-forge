@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { metricRunRow } from '../src/self-metrics-run';
+import { FAST_WINDOW, auditDonorSignal } from '../src/landing-mode';
+import type { QueryCtx } from './server';
+import type { Id } from './_generated/dataModel';
 import { type HostedCheckRun, checkCauseSchema } from '../src/hosted-check';
 
 export const metricRunKind = 'projectMetricCheckRuns';
@@ -21,8 +24,25 @@ export function metricReadProjection(row: Record<string, unknown>) {
     projectId: row.projectId as HostedCheckRun['projectId'],
     runId: row.runId as string,
     sourceCreatedAt,
-    value: canonicalPayload(metricRunRow(run, row.reportFlakes, checkCauseSchema.safeParse(row.cause).data)),
+    value: canonicalPayload(
+      metricRunRow(run, row.reportFlakes, checkCauseSchema.safeParse(row.cause).data, {
+        auditDonor: typeof row.auditDonor === 'boolean' ? row.auditDonor : undefined,
+        auditCoverage: typeof row.auditCoverage === 'string' ? row.auditCoverage : undefined,
+      }),
+    ),
   };
+}
+
+/** One bounded read at an automatic audit start, off the check-start path. */
+export async function recentAuditDonors(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
+  const recent = await ctx.db
+    .query('projectFinishReadRows')
+    .withIndex('by_kind_and_project_and_source_time', q =>
+      q.eq('kind', metricRunKind).eq('projectId', projectId),
+    )
+    .order('desc')
+    .take(FAST_WINDOW);
+  return auditDonorSignal(recent.map(row => JSON.parse(row.value) as ReturnType<typeof metricRunRow>));
 }
 
 export function metricAttemptRow(attempt: import('../src/hosted-landing').HostedLandingAttempt) {

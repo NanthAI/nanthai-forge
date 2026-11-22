@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedFinishCompose.ts": "c37ced18f3ad287baa7feb70e317ea9e1b0c6cf991dae78db3824c261928c81d",
+    "convex/projectHostedFinishControl.ts": "059e78a86d3aa385918e4b2c734dbe9509da70d0e38f12662aa9b83959bf3798",
+    "convex/projectHostedLandingBatchCheck.ts": "9178a38649fc8a2a3346a3fa12e226d271f0b64450f2d172d941dd906b7c8cff",
+    "convex/projectHostedLandingBatchFinish.ts": "6d0f21660bc3c21de63e9f1b8f1b298caeb308aeba15fcd31b7a27b025abbdaa",
+    "convex/projectHostedLandingBatchPublish.ts": "e8625255ae5d4746fd30758ea23ae304a3a2f3ddff04066841aa33f99f7142bc",
+    "convex/projectHostedLandingBatchStore.ts": "e8c79d89d0ff7356ecf1e3089056b828f0e064a6b30209904cb0ed03df67f477",
+    "convex/projectHostedLandingPins.ts": "9309081338db9738e726f9f0d94d3d3d222d240478f43bc5c49e6b379290be05",
+    "convex/projectHostedReuseStore.ts": "e321cb9254060ecbd37c09f14a67b3c4249e511b3d717386b70464a137cd836a"
+  },
+  "replay": {
+    "incident": "a7de3a93",
+    "test": "incident a7de3a93 shape: a lost dispatch on ${name} is re-checked and every entry lands",
+    "receipt": "08c55ad6-3ef0-46bd-b6f8-2b434d438e08"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A84935dfc-2229-46da-a380-28bb19c128a8",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A591e2511-daeb-40a5-ac66-8d0c3d8a9f76%3Adelegate-task%3Adf3ca856-ef43-4ae7-b2d0-9aa7b7ec7b20",
+    "receipt": "8046fdf6-0720-4965-bcac-0fba4b320370"
+  }
+}

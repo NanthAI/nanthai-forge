@@ -1215,7 +1215,7 @@ test('a new project with fast policy resumes after its first green main audit', 
 test('flake classification replaces the failed audit, and coalesced green coverage advances the red horizon', () => {
   const failed = auditWindow(undefined, { verdict: 'red', landings: 0, runId: 'audit' });
   const flake = auditWindowFlake(failed, 'audit', 50);
-  assert.deepEqual(flake, [{ audit: { verdict: 'unclear' } }]);
+  assert.deepEqual(flake, [{ audit: { verdict: 'unclear', auditedLandings: 50 } }]);
   assert.equal(fastEffective('fast', flake, fresh), true);
   const green = auditWindowGreen(history([result('red'), result('red'), result('red')]), 500);
   assert.equal(fastEffective('fast', green, fresh), true);

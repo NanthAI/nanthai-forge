@@ -118,6 +118,7 @@ export async function enqueueHostedCheck(
     cause: CheckCause;
     usageSubmissions?: string[];
     providerDelayReason?: string;
+    auditDonor?: boolean;
     /** Explicit proof-page action: execute the full configured command on these pins, without borrowing an old pass. */
     fullCheck?: { afterRunId: string };
     /** Main-race retry: a full gate may become the scoped recheck selection. */
@@ -328,6 +329,7 @@ export async function enqueueHostedCheck(
     run,
     recoveryGate && input.cause === checkCause.first ? checkCause.needsFix : input.cause,
     input.usageSubmissions,
+    input.auditDonor === undefined ? undefined : { donor: input.auditDonor },
   );
 }
 
@@ -337,12 +339,15 @@ export async function insertHostedCheckRun(
   run: HostedCheckRun,
   cause: CheckCause,
   usageSubmissions?: string[],
+  audit?: { donor?: boolean; coverage?: string },
 ): Promise<HostedCheckRun> {
   const reportsInR2 =
     process.env.FORGE_CHECK_REPORTS_R2 === '1' && run.configuration.provider !== 'ci-status';
   if (reportsInR2) useObjectReports(run);
   await ctx.db.insert('projectHostedCheckRuns', {
     cause,
+    ...(audit?.donor === undefined ? {} : { auditDonor: audit.donor }),
+    ...(audit?.coverage ? { auditCoverage: audit.coverage } : {}),
     ...(usageSubmissions?.length ? { cancelledUsage: { submissions: [...new Set(usageSubmissions)] } } : {}),
     ...(reportsInR2 ? { reportStorage: 'r2' as const } : {}),
     projectId: run.projectId as Id<'hostedProjects'>,

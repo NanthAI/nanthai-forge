@@ -42,7 +42,7 @@
 | `policy` | `operationId?` |
 | `approve-link` | `operationId?` |
 | `request-approval` | `laneId?, reason?, withdraw?, operationId?` |
-| `x set-policy` | `governanceVersion?, dryRun?, expectedPolicy?, preset?, acceptance?, checks?, integrationPreview?, ownerRootUpdates?, accessIdentities?, autoSnapshot?, autoSnapshotIntervalMinutes?, checkLogs?, laneUpdates?, lifecycle?, notify?, githubMirror?, trust?, agentDefaults?, autoExchange?, operationId?` |
+| `x set-policy` | `governanceVersion?, dryRun?, expectedPolicy?, preset?, acceptance?, checks?, integrationPreview?, ownerRootUpdates?, accessIdentities?, mainAudit?, autoSnapshot?, autoSnapshotIntervalMinutes?, checkLogs?, laneUpdates?, lifecycle?, notify?, githubMirror?, trust?, agentDefaults?, autoExchange?, operationId?` |
 | `planning` | `planningItemId?, id?, itemId?, transfer?, search?, kind?, status?, initiativeId?, waitingOn?, type?, owner?, relation?, counts?, limit?, cursor?, reconcile?, schedule?, operationId?` |
 | `put-planning-item` | `expectedVersion?, kind?, title?, body?, status?, reason?, intentIds?, initiativeId?, planningItemId?, id?, itemId?, fields?, batch?, operationId?` |
 | `comment-planning-item` | `itemId?, authorLabel?, text, replyTo?, decision?, planningItemId?, id?, operationId?` |

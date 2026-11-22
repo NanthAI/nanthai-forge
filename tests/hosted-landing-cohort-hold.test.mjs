@@ -144,6 +144,25 @@ test('admitted changes that miss proved reuse wait for each other and form one c
   assert.equal(f.pending().length, 0, 'idle after settling: no timers or polling');
 });
 
+test('one shared replacement retains a donor refusal from its evaluated members', async t => {
+  const { f } = await wave(t, (_, fixture) => {
+    const cohort = batches(fixture).find(entry => entry.phase === 'composing');
+    for (const [index, member] of (cohort?.members ?? []).entries()) {
+      const selected = row(fixture, member.submissionId);
+      const usable = index !== 0;
+      if (selected.admission?.auditDonor?.usable !== usable)
+        fixture.patch('projectHostedLandingRequests', selected._id, {
+          admission: { ...selected.admission, auditDonor: { attemptId: member.id, usable } },
+        });
+    }
+    return null;
+  });
+  const [replacement] = queueRuns(f);
+  assert.equal(queueRuns(f).length, 1);
+  const stored = [...f.tables.projectHostedCheckRuns.values()].find(run => run.runId === replacement.id);
+  assert.equal(stored.auditDonor, false);
+});
+
 test('a lost release wake is re-driven by the hold’s own wake at its bound (c329d191 class)', async t => {
   let lost = false;
   const late = lateLastChange();

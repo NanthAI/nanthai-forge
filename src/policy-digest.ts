@@ -18,6 +18,7 @@ function landingPolicy(policy: AutonomyPolicy) {
   delete kept.agentDefaults;
   delete kept.notify;
   delete kept.githubMirror;
+  delete kept.mainAudit;
   delete kept.preset;
   if (!policy.trust?.enabled) delete kept.trust;
   return kept;
@@ -46,6 +47,7 @@ export const acceptancePolicyDigest = (policy: AutonomyPolicy) =>
 const legacyDigest = (policy: AutonomyPolicy) => {
   const legacy: Partial<AutonomyPolicy> = { ...policy, acceptance: pinnedAcceptance(policy) };
   delete legacy.agentDefaults;
+  delete legacy.mainAudit;
   return digest(canonicalPayload(legacy));
 };
 /** True when an attempt pinned to `pinned` is still valid under `policy`. */
@@ -103,6 +105,7 @@ const timing = 'alert timing, capped by the schema (first alert within 24 h, rep
  * field applies at once, for the stated reason. A field that is not listed is gated, and a test fails
  * until it is listed (tests/public-governance.test.mjs). */
 export const OWNER_GATE: Readonly<Record<string, GateClass>> = {
+  mainAudit: 'gated',
   preset: { exempt: 'a label: an edit that changes behaviour also changes a gated field' },
   'githubMirror.repo': 'gated',
   'githubMirror.autoPush': 'gated',

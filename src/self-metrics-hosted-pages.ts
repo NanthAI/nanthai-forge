@@ -136,7 +136,10 @@ const rowSchemas = {
       .optional(),
     selectionFallback: z.string().min(1).max(64).nullable().optional(),
     gateFallback: z.string().min(1).max(64).nullable().optional(),
+    audit: z.literal(true).optional(),
+    auditDonor: z.boolean().optional(),
     auditRunnerSeconds: z.number().nonnegative().nullable().optional(),
+    auditCoverage: z.object({ landings: z.number().positive(), threshold: z.number().positive() }).optional(),
   }),
   attempts: z.object({
     id: z.string(),

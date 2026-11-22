@@ -9117,6 +9117,34 @@
         "src/scoped-recheck-policy.ts"
       ],
       "test": "incident 9064e885: passed independent followers publish within one check of their pass"
+    },
+    {
+      "incident": "4e013cdb",
+      "what": "Replayed arrivals reduce physical main audit starts within the allowed red detection delay and retain an audited reuse donor.",
+      "file": "tests/hosted-main-audit-cadence.test.mjs",
+      "test": "replayed continuous arrivals use fewer audits and keep red detection within the cadence bound",
+      "paths": [
+        "convex/projectHostedActionsDirect.ts",
+        "convex/projectHostedActionsReports.ts",
+        "convex/projectHostedCheckClock.ts",
+        "convex/projectHostedCheckDefinitions.ts",
+        "convex/projectHostedCheckEntries.ts",
+        "convex/projectHostedCheckLease.ts",
+        "convex/projectHostedCheckReports.ts",
+        "convex/projectHostedCheckStore.ts",
+        "convex/projectHostedCheckVerdictReuse.ts",
+        "convex/projectHostedChecks.ts",
+        "convex/projectHostedLandingCheckWake.ts",
+        "convex/projectHostedMainAudit.ts",
+        "convex/projectHostedMainAuditState.ts",
+        "convex/projectMetricAliasWriter.ts",
+        "src/first-check-risk.ts",
+        "src/hosted-check-evidence.ts",
+        "src/hosted-check.ts",
+        "src/hosted-cross-head-proof.ts",
+        "src/landing-audit-cadence.ts",
+        "src/landing-mode.ts"
+      ]
     }
   ]
 }

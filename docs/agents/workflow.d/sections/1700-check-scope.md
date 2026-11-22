@@ -81,3 +81,35 @@ and preserves its check, attempt and live lease. Urgent READY work takes the nex
 free acceptance lease ahead of normal READY work; an existing live lease and a
 reserved shared batch check continue unchanged. Settled submissions retain their
 recorded priority. Use another priority change with the current version to undo.
+
+
+## Main audit cadence
+
+A landing whose actual main tree has not had a full check leaves audit work. Forge starts one
+full audit at a time and lets it finish. In Automatic mode, the first landing after an idle
+period starts an audit immediately. The next audit starts when the count reaches k or the
+oldest uncovered landing has waited T. At that point Forge checks the newest accepted head.
+A burst can exceed k while an audit is running, so the receipt records the actual covered
+sequence range, size and start reason. Coverage changes, failed full checks and red main
+expedite the next audit. An exact full pass can verify main directly.
+
+Forge computes the red rate as `(confirmed red audits + 1) / (verified landings + 2)` from
+the project's bounded audit window. Its wake threshold k is `floor(0.25 / red rate)`,
+clamped to 1–5. A new project starts at 1. T is the median elapsed time from audit start
+to verdict, clamped to 2–15 minutes. A free slot starts by the oldest landing's deadline.
+If the deadline passes during an audit, the follow-up starts when that audit settles.
+The verdict then takes the configured runner's usual time. The existing landing debt and
+fast-mode freshness gates still apply.
+
+Read `check-settings` to see the effective value, Automatic's signal and choice, the owner
+override and the latest coverage receipt. Use `set-policy '{"mainAudit":{"cadence":"every-landing"}}'`
+to wake on every landing that needs an audit. Use
+`set-policy '{"mainAudit":{"cadence":"manual","landings":3,"minutes":10}}'` to set both
+thresholds or `{"mainAudit":{"cadence":"automatic"}}` to go back to automatic. Saved older
+cadence settings still apply where no policy override is present. `metrics` reports p50,
+p90, maximum and share above the selected threshold for starts with coverage evidence.
+
+At each audit start Forge samples up to 50 recent compact check records for the next
+wake. It lowers k by one when at least a quarter of evaluated first-check replacement
+runs refused the audit baseline. Checks without a donor evaluation stay out of that
+rate. Metrics report evaluated runs, refusals and unevaluated starts separately.

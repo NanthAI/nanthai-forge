@@ -17,15 +17,15 @@ import { hostedWriteProject, readHostedRecord, writeHostedRecord } from './proje
 import { completeIntentWhenLanesDone } from './projectHostedIntentCompletion';
 import { prepareHostedRevert } from './projectHostedRevert';
 import {
-  armAudit,
-  auditSettings,
+  armMainAudit,
+  savedAuditSettings,
   closeDrill,
   coverageLanding,
   noteRedCause,
 } from './projectHostedMainAuditState';
 import { recoveredRed } from './projectGuardMainRed';
 import { controlBuildReason, type ControlBuildChange } from './projectHostedMainAuditFields';
-import { auditMetadata, auditDebt, auditDue } from '../src/main-audit';
+import { auditMetadata, auditDebt, defaultMainAuditSettings } from '../src/main-audit';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { autoRevertEnabled, autoRevertHold } from '../src/auto-revert-policy';
 import { hostedStartMain } from './projectHostedChannels';
@@ -75,6 +75,7 @@ type Identity = { projectId: Id<'hostedProjects'>; runId: string };
 type Recovery = {
   audit: HostedCheckRun;
   episode?: string;
+  auditedCount?: number;
   recoveryId?: string;
   evidence?: NeedsFix['failed'];
   missing?: string[];
@@ -614,6 +615,36 @@ type ReportEvidence = {
   digest: string;
   reports: NonNullable<HostedCheckRun['contractReports']>;
 };
+/** A replayed failure can share a flake probe only for the same source, check pins and named evidence. */
+async function sameFailedAudit(
+  ctx: MutationCtx,
+  current: Doc<'projectHostedMainAudits'> | null,
+  state: Recovery,
+) {
+  const red = current?.red;
+  if (!red || red.head !== state.audit.request.expectedHead) return false;
+  if (red.runId === state.audit.id) return true;
+  const sequence = red.sequence ?? (current.audit?.runId === red.runId ? current.audit.sequence : undefined);
+  if (sequence !== state.range.at(-1)?.sequence) return false;
+  const saved = await ctx.db
+    .query('projectHostedCheckRuns')
+    .withIndex('by_project_and_run', q => q.eq('projectId', current.projectId).eq('runId', red.runId))
+    .unique();
+  if (!saved) return false;
+  const latest = hostedCheckRunSchema.parse(JSON.parse(saved.value));
+  const failures = culpritFailures(latest);
+  return (
+    latest.status === 'failed' &&
+    latest.terminalDigest !== null &&
+    latest.request.expectedHead === red.head &&
+    latest.request.authorityEpoch === state.audit.request.authorityEpoch &&
+    matchingCheckPins(state.audit, latest) &&
+    latest.controlBuildKey === state.audit.controlBuildKey &&
+    (!latest.testFiles || latest.testFiles.counts.failed === failures.length) &&
+    canonicalPayload(failures) === canonicalPayload(culpritFailures(state.audit))
+  );
+}
+
 async function classify(
   ctx: MutationCtx,
   input: Identity,
@@ -630,12 +661,11 @@ async function classify(
       .query('projectHostedMainAudits')
       .withIndex('by_project', q => q.eq('projectId', input.projectId))
       .unique();
-    if (
-      !auditRow?.red ||
-      episodeId(auditRow.red.since) !== input.runId ||
-      auditRow.audit?.runId !== auditRow.red.runId
-    )
-      return;
+    if (!auditRow?.red || episodeId(auditRow.red.since) !== input.runId) return;
+    const redSequence =
+      auditRow.red.sequence ??
+      (auditRow.audit?.runId === auditRow.red.runId ? auditRow.audit.sequence : undefined);
+    if (redSequence === undefined) return;
     const { run: audit } = await loadHostedCheck(ctx, { ...input, runId: auditRow.red.runId });
     if (audit.status !== 'failed' || audit.gate?.mode !== 'audit' || !audit.endedAt || !audit.terminalDigest)
       return;
@@ -649,7 +679,7 @@ async function classify(
             q
               .eq('projectId', input.projectId)
               .gt('sequence', auditRow.lastGreen?.sequence ?? 0)
-              .lte('sequence', auditRow.audit!.sequence),
+              .lte('sequence', redSequence),
           )
           .order('asc')
           .paginate({ cursor: null, numItems: 100, maximumRowsRead: 100, maximumBytesRead: 512 * 1024 });
@@ -660,6 +690,7 @@ async function classify(
     state = {
       audit,
       episode: auditRow.red.since,
+      ...(auditRow.red.auditedCount === undefined ? {} : { auditedCount: auditRow.red.auditedCount }),
       recoveryId: input.runId,
       range,
       failed: culpritFailures(audit),
@@ -738,7 +769,7 @@ async function classify(
   if (
     pending.flake &&
     verdict === 'pass' &&
-    (currentAudit?.red?.head !== state.audit.request.expectedHead ||
+    (!(await sameFailedAudit(ctx, currentAudit, state)) ||
       state.evidence?.some(
         f => !state.failed.some(original => canonicalPayload(original) === canonicalPayload(f)),
       ))
@@ -761,10 +792,7 @@ async function classify(
       `${fileList(state.failed.map(f => f.file))} passed on the audited head (a flake), so no landing is reverted.`,
     );
   if (pending.flake && verdict === 'pass') {
-    const auditRow = await ctx.db
-      .query('projectHostedMainAudits')
-      .withIndex('by_project', q => q.eq('projectId', input.projectId))
-      .unique();
+    const auditRow = currentAudit;
     await ctx.db.insert('projectHostedMainAuditEvents', {
       projectId: input.projectId,
       kind: 'flake',
@@ -777,30 +805,50 @@ async function classify(
     if (auditRow?.red && sameEpisode(auditRow.red, state)) {
       // A receipt range can include uncounted docs landings. B2.3 retains the
       // covered counted total in its audit reason and the newer work's clock.
-      const covered = state.audit.gate?.reason?.startsWith('Main audit ')
-        ? auditMetadata(state.audit).count
-        : state.range.length; // Legacy audit runs predate the coverage metadata.
+      const covered =
+        state.auditedCount ??
+        (state.audit.gate?.reason?.startsWith('Main audit ')
+          ? auditMetadata(state.audit).count
+          : state.range.length); // Legacy audit runs predate the coverage metadata.
       const count = Math.max(0, (auditRow.unaudited?.count ?? covered) - covered);
-      const firstAt = count ? (auditRow.unaudited?.firstAt ?? null) : null;
-      const settings = count ? await auditSettings(ctx, input.projectId) : undefined;
+      const sequence = state.range.at(-1)!.sequence;
+      const active = auditRow.audit;
+      const overlaps = active && !hostedCheckTerminal(active) && active.sequence > sequence;
+      const newerAt = auditRow.red.firstNewerAt;
+      const pendingAt = count ? (auditRow.unaudited?.firstAt ?? null) : null;
+      const firstAt = count && !overlaps ? (newerAt ?? pendingAt) : pendingAt;
+      const settings = count ? await savedAuditSettings(ctx, input.projectId) : null;
       if (!count && auditRow.wake) await cancelPendingTask(ctx, auditRow.wake.taskId);
       // A drill whose red was a flake ends without counting (fe7d67a8).
       const drill = await closeDrill(ctx, auditRow, null);
-      await ctx.db.patch(auditRow._id, {
+      const patch = {
+        ...(overlaps
+          ? {
+              audit: {
+                ...active,
+                alreadyVerified: (active.alreadyVerified ?? 0) + covered,
+                ...(newerAt ? { firstUnverifiedAt: newerAt } : {}),
+              },
+            }
+          : {}),
         ...(drill ? { drill: undefined } : {}),
         red: undefined,
         lastRed: recoveredRed(auditRow.red, run.request.expectedHead, run.endedAt!),
-        lastGreen: { sequence: state.range.at(-1)!.sequence, head: run.request.expectedHead, runId: run.id },
+        lastGreen: { sequence, head: run.request.expectedHead, runId: run.id },
         unaudited: { count, firstAt },
-        debt: count ? auditDebt(count, firstAt, settings) : false,
+        pendingFirstSequence: undefined,
+        debt: count
+          ? auditDebt(count, overlaps ? (newerAt ?? firstAt) : firstAt, settings ?? defaultMainAuditSettings)
+          : false,
         ...(!count ? { wake: undefined } : {}),
         // Flake policy (81d12a32): the later pass vouches for the audit, the flake is counted.
         window: auditWindowFlake(auditRow.window, state.audit.id, covered),
         earned: undefined,
-      });
+      };
+      await ctx.db.patch(auditRow._id, patch);
       // A flake ends the red without a revert or a fix: main passes again (Flow view, Item 85f456c1).
       await lineMainState(ctx.db, input.projectId, { red: false, at: run.endedAt! });
-      if (count) await armAudit(ctx, auditRow, auditDue(count, firstAt, settings));
+      if (count) await armMainAudit(ctx, { ...auditRow, ...patch }, project, settings);
       await ctx.scheduler.runAfter(
         0,
         makeFunctionReference<'mutation'>('projectHostedMainAudit:releaseHeld'),

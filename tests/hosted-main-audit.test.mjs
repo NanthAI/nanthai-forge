@@ -68,7 +68,7 @@ test('docs coverage cannot bridge an unaudited code landing', async () => {
 
 for (const effective of ['docs', 'contract'])
   test(`a passed ${effective} audit cannot re-green main or erase its unaudited clock`, async () => {
-    const f = await auditFixture();
+    const f = await auditFixture({ manual: true });
     await f.land('full');
     const green = f.row().lastGreen;
     const at = new Date(Date.now() - 2 * 3600000).toISOString();
@@ -111,11 +111,11 @@ test('a passed not-full audit preserves red main, debt and all outstanding landi
   await f.land('contract', { at });
   await f.start();
   await f.terminal('failed');
-  const red = f.row().red;
   await f.land('contract', { actorKind: 'person' });
   await f.start();
   for (let i = 0; i < 18; i++) await f.land('contract', { actorKind: 'person' });
   assert.equal(f.row().debt, true);
+  const red = f.row().red;
   const selected = f.currentRun();
   await f.terminal('passed', { ...selected, gate: { ...selected.gate, effective: 'docs' } });
   assert.deepEqual(f.row().lastGreen, green);
@@ -124,7 +124,7 @@ test('a passed not-full audit preserves red main, debt and all outstanding landi
   assert.deepEqual(f.row().unaudited, { count: 20, firstAt: at });
   assert.equal((await readGate(f)).hold, 'main-red');
   assert.equal((await readStatus(f)).alarm.step, 'not-full');
-  assert.equal(f.pending().length, 0);
+  assert.equal(f.pending().length, 1, 'newer landings retain a red-main audit wake');
   assert.equal(f.pending('projectHostedMainAudit:releaseHeld').length, 0);
 });
 
@@ -173,7 +173,7 @@ test('12 counted landings coalesce, audit newest main, and full-gated fix leaves
 });
 
 test('24h wake audits one landing; full and green-parent docs adopt evidence for free', async () => {
-  const f = await auditFixture();
+  const f = await auditFixture({ manual: true });
   await f.land('full');
   await f.land('docs');
   assert.equal(f.row().unaudited.count, 0);
@@ -258,7 +258,7 @@ test('new landings during an audit are retained and do not cancel the pinned run
 });
 
 test('full-gate failure requests early audit; a failed contract does not', async () => {
-  const f = await auditFixture();
+  const f = await auditFixture({ manual: true });
   const { run } = await f.land();
   await f.run('contractFailure', ctx => state.onGateRunTerminal(ctx, { ...run, status: 'failed' }));
   assert(f.row().wake.at > Date.now());
@@ -278,7 +278,7 @@ test('circuit breaker uses the existing audit row: coalesced green coverage, one
     },
   });
   await f.land('full');
-  assert.deepEqual(f.row().window, [{ audit: { verdict: 'green' } }]);
+  assert.deepEqual(f.row().window, [{ audit: { verdict: 'green', auditedLandings: 1 } }]);
   for (let i = 0; i < 12; i++) await f.land();
   await f.tick(f.pending()[0]);
   await f.terminal();
@@ -367,7 +367,10 @@ async function counted(f) {
   for (let i = 0; i < 12; i++) await f.land();
   await f.tick(f.pending()[0]);
   await f.terminal();
-  assert.deepEqual(f.row().window, [{ audit: { verdict: 'green' } }, { audit: { verdict: 'green' } }]);
+  assert.deepEqual(f.row().window, [
+    { audit: { verdict: 'green', auditedLandings: 1 } },
+    { audit: { verdict: 'green', auditedLandings: 12 } },
+  ]);
 }
 async function red(f) {
   await f.land();
@@ -746,7 +749,7 @@ test('a full-gate failure during an active audit requests an early audit of newe
   await f.run('inFlightFullFailure', ctx =>
     state.onGateRunTerminal(ctx, { ...run, gate: { mode: 'full' }, status: 'failed' }),
   );
-  await f.tick(f.pending()[0]);
+  assert.equal(f.pending().length, 0, 'the active audit owns the slot');
   assert.equal(f.tables.projectHostedCheckRuns.size, 2, 'one fixture run plus the pinned audit');
   await f.terminal();
   assert(f.row().wake.at <= Date.now());
@@ -788,14 +791,13 @@ test('retained machine lease failure is surfaced and reconciled without a new wa
   }
   assert.equal(f.currentRun().status, 'runner-unavailable');
   assert.equal((await readStatus(f)).alarm.code, 'MAIN_AUDIT_STALLED');
-  await f.start();
-  assert.equal(f.row().audit.status, 'runner-unavailable');
+  assert.equal(f.row().audit.status, 'runner-unavailable', 'the watchdog releases the audit slot itself');
   assert.equal(f.pending().length, 1);
   assert.equal(f.pending()[0].args[0].retry, true);
 });
 
 test('docs during an audit do not start the clock for later counted landings', async () => {
-  const f = await auditFixture();
+  const f = await auditFixture({ manual: true });
   const now = Date.now();
   const first = new Date(now - 2 * 3600000).toISOString();
   const docs = new Date(now - 3600000).toISOString();

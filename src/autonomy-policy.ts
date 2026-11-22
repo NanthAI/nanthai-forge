@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { landingModeSchema } from './landing-mode.js';
+import { auditCadencePolicySchema, landingModeSchema } from './landing-mode.js';
 import { z } from 'zod';
 import { checkLogsSchema } from './check-log-policy.js';
 import { invariant } from './errors.js';
@@ -33,6 +33,7 @@ export const autonomyPolicySchema = z.object({
     })
     .refine(value => !value.inbound || value.autoPush, 'Two-way sync needs autoPush.')
     .optional(),
+  mainAudit: auditCadencePolicySchema.optional(),
   autoExchange: autoExchangeSchema.optional(),
   checkLogs: checkLogsSchema.optional(),
   /** B2.6: absent is off; enabling is an owner decision. */
@@ -233,6 +234,7 @@ export const policyWriteObject = z
     integrationPreview: autonomyPolicySchema.shape.integrationPreview,
     ownerRootUpdates: autonomyPolicySchema.shape.ownerRootUpdates,
     accessIdentities: autonomyPolicySchema.shape.accessIdentities,
+    mainAudit: autonomyPolicySchema.shape.mainAudit,
     autoSnapshot: autonomyPolicySchema.shape.autoSnapshot,
     autoSnapshotIntervalMinutes: autonomyPolicySchema.shape.autoSnapshotIntervalMinutes,
     checkLogs: checkLogsSchema.optional(),
@@ -269,6 +271,7 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
       : command.preset
         ? policyPreset(command.preset)
         : previous;
+  const mainAudit = command.mainAudit ?? previous.mainAudit;
   const edited =
     command.integrationPreview ||
     command.autoExchange ||
@@ -306,6 +309,7 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
       ...(previous.acceptance.withoutCheck ? { withoutCheck: previous.acceptance.withoutCheck } : {}),
       ...command.acceptance,
     },
+    ...(mainAudit ? { mainAudit } : {}),
     integrationPreview: command.integrationPreview ?? base.integrationPreview ?? { auto: false },
     ownerRootUpdates: command.ownerRootUpdates ?? base.ownerRootUpdates,
     ...((command.accessIdentities ?? previous.accessIdentities) !== undefined

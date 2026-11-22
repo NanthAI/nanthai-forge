@@ -42,11 +42,16 @@ export const mainAuditFields = {
     }),
   ),
   unaudited: v.optional(v.object({ count: v.number(), firstAt: v.union(v.string(), v.null()) })),
+  pendingFirstSequence: v.optional(v.number()),
   audit: v.optional(
     v.object({
       runId: v.string(),
       head: v.string(),
       sequence: v.number(),
+      /** Coverage receipt for this occurrence, even when the check result was reused. */
+      coverage: v.optional(v.string()),
+      alreadyVerified: v.optional(v.number()),
+      firstUnverifiedAt: v.optional(v.string()),
       status: v.union(
         v.literal('queued'),
         v.literal('preparing'),
@@ -64,6 +69,10 @@ export const mainAuditFields = {
   red: v.optional(
     v.object({
       since: v.string(),
+      sequence: v.optional(v.number()),
+      auditedCount: v.optional(v.number()),
+      /** Head of the work newer than this failed audit, even while the next audit is active. */
+      firstNewerAt: v.optional(v.string()),
       head: v.string(),
       runId: v.string(),
       culprit: v.optional(v.string()),
@@ -92,7 +101,17 @@ export const mainAuditFields = {
   debt: v.optional(v.boolean()),
   /** Newest main revision that landed on its first check (7fe54c7c); audited promptly. */
   firstCheck: v.optional(v.number()),
-  wake: v.optional(v.object({ taskId: v.id('_scheduled_functions'), at: v.number() })),
+  wake: v.optional(
+    v.object({ taskId: v.id('_scheduled_functions'), at: v.number(), retry: v.optional(v.literal(true)) }),
+  ),
+  lastAuditStartAt: v.optional(v.number()),
+  /** A coverage change (or revert) can arrive while the single audit is in flight. */
+  coverageThrough: v.optional(v.number()),
+  failedFullCheck: v.optional(v.boolean()),
+  donorSignal: v.optional(v.object({ evaluated: v.number(), refusals: v.number(), unevaluated: v.number() })),
+  coverageSamples: v.optional(
+    v.array(v.object({ landings: v.number(), threshold: v.number(), wallMs: v.optional(v.number()) })),
+  ),
   /** Circuit breaker (509a0ffa): at most 50 compact verdicts, written only by existing
    * audit/landing transactions. Missing starts empty, without a history backfill. */
   window: v.optional(
@@ -104,6 +123,7 @@ export const mainAuditFields = {
             verdict: v.union(v.literal('green'), v.literal('red'), v.literal('unclear'), v.literal('drill')),
             runId: v.optional(v.string()),
             landings: v.optional(v.number()),
+            auditedLandings: v.optional(v.number()),
           }),
         ),
       }),
@@ -155,6 +175,7 @@ export const hostedMainAuditTables = {
     head: v.string(),
     runId: v.string(),
     sequence: v.number(),
+    coverage: v.optional(v.string()),
     culprit: v.optional(v.string()),
     /** On a 'culprit'-kind event with no `culprit`: the receipt that made a newly covered red's tests
      * run (Item 687d1eda). Written once per episode, so the name survives recovery; never a culprit. */

@@ -5,6 +5,8 @@ import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
 import { loadHostedCheck, writeHostedCheck, type CheckIdentity } from './projectHostedCheckStore';
 import { hostedOperationRow } from './projectHostedOperations';
+import { onGateRunTerminal } from './projectHostedMainAuditState';
+import { auditCoverageSchema } from '../src/landing-audit-cadence';
 import {
   completeHostedOperation,
   hostedOperationSchema,
@@ -68,10 +70,12 @@ export async function expireMacLease(
           status: run.status,
           head: run.request.expectedHead,
           terminalDigest: run.terminalDigest,
+          ...(row.auditCoverage ? { audit: auditCoverageSchema.parse(JSON.parse(row.auditCoverage)) } : {}),
         },
       },
     });
     await ctx.db.patch(operationRow._id, { value: canonicalPayload(completed) });
+    if (run.gate?.mode === 'audit') await onGateRunTerminal(ctx, run);
   } else {
     run.leaseRetries = 1;
     run.status = 'queued';

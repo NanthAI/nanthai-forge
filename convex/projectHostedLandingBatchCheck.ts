@@ -330,8 +330,10 @@ async function prepareLandingCheckOnce(
         : selected.row.admission
           ? checkCause.admissionFollowup
           : (attempt.checkCause ?? submittedCheckCause(state.request.retryReason)));
+  const auditDonor = selected.row.admission?.auditDonor;
   const run = await enqueueHostedCheck(ctx, {
     cause,
+    ...(auditDonor?.attemptId === attempt.id ? { auditDonor: auditDonor.usable } : {}),
     usageSubmissions: [state.id],
     projectId: claim.projectId,
     actor: attempt.actor.id,

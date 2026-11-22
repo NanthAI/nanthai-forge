@@ -16,6 +16,7 @@ import {
 import { hostedVerdictKey } from '../src/hosted-check-evidence';
 import { hostedCheckClock } from './projectHostedCheckClock';
 import { onGateRunTerminal } from './projectHostedMainAuditState';
+import { auditCoverageSchema } from '../src/landing-audit-cadence';
 import { semanticPayload } from '../src/semantic-payload';
 import { wakeExpiredLogs } from './projectCheckLogRetention';
 import { checkReportHeader } from '../src/check-file-summary';
@@ -228,7 +229,7 @@ export async function writeHostedCheck(
 export async function completeHostedCheck(
   ctx: MutationCtx,
   run: HostedCheckRun,
-  source?: Pick<Doc<'projectHostedCheckRuns'>, 'cancelledUsage' | 'cause'>,
+  source?: Pick<Doc<'projectHostedCheckRuns'>, 'cancelledUsage' | 'cause' | 'auditCoverage'>,
 ) {
   if (run.status === 'cancelled')
     deferCancelledRunWrite(ctx, run.id, source?.cancelledUsage?.submissions ?? [], () =>
@@ -282,11 +283,15 @@ export async function completeHostedCheck(
   );
   invariant(row, 'SOURCE_UNAVAILABLE', 'The original check operation is unavailable.');
   const operation = hostedOperationSchema.parse(JSON.parse(row.value));
+  const audit = source?.auditCoverage
+    ? auditCoverageSchema.parse(JSON.parse(source.auditCoverage))
+    : undefined;
   await completeCheckOperation(ctx, operation, {
     runId: run.id,
     status: run.status,
     head: run.request.expectedHead,
     terminalDigest: run.terminalDigest,
+    ...(audit ? { audit } : {}),
   });
   if (!operation.terminal) await recordCheckFeed(ctx, run, source?.cause);
 }

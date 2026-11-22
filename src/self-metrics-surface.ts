@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { speedBudgets } from './speed-budgets.js';
+import { auditCoverageDistribution, auditDonorSignal } from './landing-mode.js';
 import { speedBudgetRows } from './speed-budgets-report.js';
 import { FIRST_TRY_PATHS, calculateSelfMetrics } from './self-metrics.js';
 import { calculateWaste } from './self-metrics-waste.js';
@@ -236,9 +237,13 @@ export function metricsSurface(records: MetricRecords, period: MetricPeriod) {
     });
     at = end;
   }
+  const checks = records.runs.filter(run => during(run.at, period));
+  const auditCoverage = checks.flatMap(run => (run.auditCoverage ? [run.auditCoverage] : []));
   return {
     schema: 1,
     period,
+    ...(auditCoverage.length ? { auditCoverage: auditCoverageDistribution(auditCoverage) } : {}),
+    ...(checks.length ? { auditDonors: auditDonorSignal(checks) } : {}),
     ...(records.error ? { error: records.error } : {}),
     ...(records.source ? { source: records.source } : {}),
     totals: metricTotals(records, period),

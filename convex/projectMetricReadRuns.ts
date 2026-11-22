@@ -74,7 +74,7 @@ export async function metricRunsPage(
     return {
       ...rows,
       page: rows.page.map(row =>
-        metricRunRow(JSON.parse(row.value) as HostedCheckRun, row.reportFlakes, row.cause),
+        metricRunRow(JSON.parse(row.value) as HostedCheckRun, row.reportFlakes, row.cause, row),
       ),
       continueCursor: rows.isDone
         ? ''

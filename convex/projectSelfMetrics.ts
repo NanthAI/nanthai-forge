@@ -430,6 +430,10 @@ export const page = query({
               JSON.parse(row.value) as HostedCheckRun,
               'reportFlakes' in row ? row.reportFlakes : undefined,
               'cause' in row ? row.cause : undefined,
+              {
+                auditDonor: 'auditDonor' in row ? row.auditDonor : undefined,
+                auditCoverage: 'auditCoverage' in row ? row.auditCoverage : undefined,
+              },
             );
           if (input.stream === 'requests') return metricRequestRow(row);
           if (input.stream === 'attempts') return metricAttemptSource(row);

@@ -265,6 +265,8 @@ export const hostedLandingTables = {
         kept: v.optional(v.literal(true)),
         /** Why that Lane run did not carry the landing (receipt `firstCheck`, 7fe54c7c). */
         recheck: v.optional(v.string()),
+        /** Only the replacement generation that evaluated its first-check donor can report it. */
+        auditDonor: v.optional(v.object({ attemptId: v.string(), usable: v.boolean() })),
         /** Its one cohort hold for peers still deciding their own Lane proof (10b0a94b). */
         hold: v.optional(
           v.object({

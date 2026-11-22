@@ -29,14 +29,6 @@ export function auditDebt(
     (count > 0 && firstAt !== null && now - Date.parse(firstAt) >= 2 * settings.minutes * 60_000)
   );
 }
-export function auditDue(
-  count: number,
-  firstAt: string | null,
-  settings = defaultMainAuditSettings,
-  now = Date.now(),
-) {
-  return count >= settings.landings ? now : Date.parse(firstAt!) + settings.minutes * 60_000;
-}
 /** Q3 content identity excludes Candidate/operation IDs: identical source and execution inputs reuse evidence. */
 export const mainAuditKey = (input: {
   projectId: string;

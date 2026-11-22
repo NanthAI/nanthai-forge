@@ -185,7 +185,7 @@ async function evidence(
   const audit =
     first.find(row => row.kind === 'culprit' && (row.culprit === receipt.id || row.covered === receipt.id)) ??
     first[0];
-  bytes += near.length * 160;
+  bytes += near.reduce((size, row) => size + 160 + (row.coverage?.length ?? 0), 0);
   const admissionBase = attempts[0]?.main ?? null;
   const landedBase = receipt.previous;
   // Before builder stamps, the attempt named the submitter while the receipt named the approver.
@@ -224,6 +224,7 @@ async function evidence(
             runId: audit.runId,
             verdict: followingAuditVerdict(audit, receipt.id),
             sequence: audit.sequence,
+            ...(audit.coverage ? { coverage: JSON.parse(audit.coverage) } : {}),
           }
         : null,
       // A check binding replaces an attempt without composing again: count distinct Candidates.

@@ -5,6 +5,17 @@ import { z } from 'zod';
  * circuit breaker. Fast relaxes tested-doc and non-order-sensitive global-risk only. */
 export const landingModeSchema = z.enum(['strict', 'fast']);
 export type LandingMode = z.infer<typeof landingModeSchema>;
+const manual = z
+  .object({ landings: z.number().safe().positive(), minutes: z.number().finite().positive() })
+  .strict();
+
+export const auditCadencePolicySchema = z.discriminatedUnion('cadence', [
+  z.object({ cadence: z.literal('automatic') }).strict(),
+  z.object({ cadence: z.literal('every-landing') }).strict(),
+  manual.extend({ cadence: z.literal('manual') }),
+]);
+export type AuditCadencePolicy = z.infer<typeof auditCadencePolicySchema>;
+
 export const FAST_WINDOW = 50;
 export const FAST_BREAKER_COUNT = 3;
 export const FAST_MAX_UNAUDITED = 10;
@@ -20,7 +31,7 @@ export type AuditOutcome = { verdict: Verdict; landings: number; runId?: string 
 export type AuditWindowSlot = {
   /** Age relative to lastGreen; a failed audit's unaudited position has negative age. */
   red?: { age: number; count: number; drill: number };
-  audit?: { verdict: Verdict; runId?: string; landings?: number };
+  audit?: { verdict: Verdict; runId?: string; landings?: number; auditedLandings?: number };
 };
 function streams(window: readonly AuditWindowSlot[] | undefined) {
   return {
@@ -57,6 +68,7 @@ export function auditWindow(window: readonly AuditWindowSlot[] | undefined, outc
   }
   next.audits.push({
     verdict: outcome.verdict,
+    ...(outcome.verdict === 'green' ? { auditedLandings: outcome.landings } : {}),
     ...(outcome.runId ? { runId: outcome.runId, landings: outcome.landings } : {}),
   });
   return pack(next);
@@ -78,9 +90,10 @@ export function auditWindowFlake(
   for (const entry of next.reds) entry.age += landings;
   if (failed) {
     failed.verdict = 'unclear';
+    failed.auditedLandings = landings;
     delete failed.runId;
     delete failed.landings;
-  } else next.audits.push({ verdict: 'unclear' });
+  } else next.audits.push({ verdict: 'unclear', auditedLandings: landings });
   return pack(next);
 }
 /** A timely optional drill is excluded from real reds; a late drill is real.
@@ -239,5 +252,39 @@ export function landingModeView(
     reason: null,
     nextStep: 'Nothing to do.',
     advice: null,
+  };
+}
+
+export type AuditCoverageSample = { landings: number; threshold: number; wallMs?: number };
+export function auditDonorSignal(
+  runs: readonly {
+    audit?: boolean | undefined;
+    auditDonor?: boolean | undefined;
+    started?: boolean | undefined;
+  }[],
+) {
+  const signal = { evaluated: 0, refusals: 0, unevaluated: 0 };
+  for (const run of runs) {
+    if (run.audit || run.started === false) continue;
+    if (run.auditDonor === undefined) signal.unevaluated++;
+    else {
+      signal.evaluated++;
+      if (!run.auditDonor) signal.refusals++;
+    }
+  }
+  return signal;
+}
+
+export function auditCoverageDistribution(samples: readonly AuditCoverageSample[]) {
+  const counts = samples.map(s => s.landings).sort((a, b) => a - b);
+  const percentile = (p: number) => counts[Math.ceil(counts.length * p) - 1] ?? null;
+  return {
+    samples: counts.length,
+    p50: percentile(0.5),
+    p90: percentile(0.9),
+    max: counts.at(-1) ?? null,
+    shareAboveThreshold: counts.length
+      ? samples.filter(s => s.landings > s.threshold).length / counts.length
+      : null,
   };
 }

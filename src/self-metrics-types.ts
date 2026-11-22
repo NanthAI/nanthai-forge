@@ -104,6 +104,9 @@ export type MetricRun = {
   cause?: CheckCause | undefined;
   /** Shard seconds of a terminal main audit, already on its run row. */
   auditRunnerSeconds?: number | null;
+  audit?: boolean | undefined;
+  auditDonor?: boolean | undefined;
+  auditCoverage?: import('./landing-mode.js').AuditCoverageSample | undefined;
   /** Physical execution identities deduplicate adopted shards, including retries. */
   executions?: { id: string; minutes: number }[];
   reusedFrom?: string | undefined;

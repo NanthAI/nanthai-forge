@@ -156,6 +156,7 @@ export async function batchFinishStep(
     const included = batch.members.filter(m => !dropped.some(d => d.candidateId === m.candidate.id));
     const unadmittedCauses = new Set<CheckCause>();
     let hadAdmission = false;
+    let auditDonor: boolean | undefined;
     let admissionMainMoved = false;
     for (const member of batch.members) {
       const current = await loadLanding(ctx, {
@@ -179,6 +180,8 @@ export async function batchFinishStep(
         await hostedWriteProject(ctx, input.projectId, member.actor.id, member.authorityEpoch);
         if (current.row.admission) {
           hadAdmission = true;
+          const memberDonor = current.row.admission.auditDonor;
+          if (memberDonor?.attemptId === member.id) auditDonor = (auditDonor ?? true) && memberDonor.usable;
           admissionMainMoved ||=
             (member.parentAttemptId !== null && member.checkCause === checkCause.mainMoved) ||
             (predecessor !== 'pending' &&
@@ -248,6 +251,7 @@ export async function batchFinishStep(
                 : checkCause.first);
     const run = await enqueueBatchCheck(ctx, {
       cause,
+      ...(auditDonor === undefined ? {} : { auditDonor }),
       usageSubmissions: included.map(member => member.submissionId),
       projectId: input.projectId,
       actor: state.actor,

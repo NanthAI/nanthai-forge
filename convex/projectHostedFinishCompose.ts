@@ -301,6 +301,7 @@ export async function installFinishCompose(
   preparedSource?: Awaited<ReturnType<typeof loadCompose>>,
   recheckReason?: string,
   checkedRun?: HostedCheckRun,
+  auditDonor?: boolean,
 ) {
   const input = { projectId: row.projectId, submissionId: row.submissionId };
   const { row: landing, state } = await loadLanding(ctx, input),
@@ -525,17 +526,6 @@ export async function installFinishCompose(
       'The original check proof changed.',
     );
   } else proof = undefined;
-  // The receipt names why an admitted change did not land on its first check.
-  // Only the attempt bound to the admission run records it, once, on this row.
-  if (
-    !proof &&
-    landing.admission?.status === 'passed' &&
-    !landing.admission.recheck &&
-    previous?.check?.runId === landing.admission.runId
-  )
-    await ctx.db.patch(landing._id, {
-      admission: { ...landing.admission, recheck: recheckReason ?? 'not-eligible' },
-    });
   // A main race without a transferable proof may recheck only the shared impact.
   const recheck =
     !proof &&
@@ -549,6 +539,23 @@ export async function installFinishCompose(
       ? scopedRecheckFallback(previous, recheck)
       : undefined;
   const { id: attemptId, ...fork } = await forkLandingAttempt(ctx, state, pending);
+  // This replacement may start now or later in the queue. Attach the donor evaluation to
+  // its attempt on the same write that already records the first-check refusal.
+  const checkedAdmission = landing.admission;
+  const firstCheckRefusal =
+    !proof &&
+    checkedAdmission?.status === 'passed' &&
+    !checkedAdmission.recheck &&
+    previous?.check?.runId === checkedAdmission.runId;
+  const firstCheckDonor = firstCheckRefusal ? auditDonor : undefined;
+  if (firstCheckRefusal)
+    await ctx.db.patch(landing._id, {
+      admission: {
+        ...checkedAdmission,
+        recheck: recheckReason ?? 'not-eligible',
+        ...(firstCheckDonor === undefined ? {} : { auditDonor: { attemptId, usable: firstCheckDonor } }),
+      },
+    });
   const checked = previous?.check || landing.admission;
   const moved =
     previous &&
@@ -586,6 +593,7 @@ export async function installFinishCompose(
   }
   const attempt = await pinLandingAttempt(ctx, {
     ...(cause === undefined ? {} : { checkCause: cause }),
+    ...(firstCheckDonor === undefined ? {} : { auditDonor: firstCheckDonor }),
     ...(recheck ? { recheck } : {}),
     ...(providerDelayReason ? { providerDelayReason } : {}),
     ...input,

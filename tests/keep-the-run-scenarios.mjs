@@ -25,7 +25,9 @@ const LANDED_FEED_ROW_BYTES = 490;
  * fixtures add 1,672 to 34,173 read bytes and 223 to 8,502 write bytes, with the same call and
  * document counts. The two C1 follower cases also exercise the order-history fields.
  * Item ced8e98f adds 2,085 to 15,392 read bytes and 1,014 to 4,781 write bytes
- * on existing rows, with the same call and document counts. */
+ * on existing rows, with the same call and document counts.
+ * Item 4e013cdb: cadence and first-check donor evidence ride existing rows. The C1 cases
+ * each read 4,002 B and write 884 B more, with unchanged calls and document counts. */
 export const MEASURED = {
   'global-risk mover, strict': {
     calls: 59,
@@ -84,14 +86,14 @@ export const MEASURED = {
   'global-risk mover, strict, C1 follower': {
     calls: 128,
     documents: 2605,
-    readBytes: 2_621_548,
-    writeBytes: 916_774 + 3 * LANDED_FEED_ROW_BYTES,
+    readBytes: 2_625_550,
+    writeBytes: 917_658 + 3 * LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, strict, C1 follower': {
     calls: 136,
     documents: 2924,
-    readBytes: 3_135_574,
-    writeBytes: 1_010_204 + 3 * LANDED_FEED_ROW_BYTES,
+    readBytes: 3_139_576,
+    writeBytes: 1_011_088 + 3 * LANDED_FEED_ROW_BYTES,
   },
   'no checking row, strict': {
     calls: 23,
@@ -185,9 +187,11 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // The keep and retire paths touch those rows a different number of times. Calls are unchanged.
 // Item ced8e98f records replay evidence on existing writes. Each arm touches those rows at
 // different stages. The measured deltas preserve the alias-write split and exact call counts.
+// Item 4e013cdb: audit and first-check donor evidence add 180 read bytes to carry and
+// 4,162 read/884 write bytes to scoped recheck. The red delta and call counts are unchanged.
 export const WIRED = {
-  carry: { calls: 7, readBytes: 423_903, writeBytes: 78_193 },
-  'scoped-recheck': { calls: 17, readBytes: 557_333, writeBytes: 148_084 },
+  carry: { calls: 7, readBytes: 424_083, writeBytes: 78_193 },
+  'scoped-recheck': { calls: 17, readBytes: 561_495, writeBytes: 148_968 },
   red: { calls: -17, readBytes: -388_081, writeBytes: -145_208 },
 };
 

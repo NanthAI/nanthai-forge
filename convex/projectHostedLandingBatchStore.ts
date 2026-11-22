@@ -256,6 +256,7 @@ export async function enqueueBatchCheck(
     request: unknown;
     cause: CheckCause;
     usageSubmissions?: string[];
+    auditDonor?: boolean;
     recheck?: ScopedRecheckBasis[] | undefined;
     providerDelayReason?: string;
   },

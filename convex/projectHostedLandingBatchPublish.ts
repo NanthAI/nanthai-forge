@@ -533,7 +533,13 @@ export async function publishLandingBatch(
   await endLandedApprovals(ctx, granted);
   await writeBatch(ctx, key, { ...batch, phase: 'landed' });
   await releaseLandingQueue(ctx, queue, now, last.id);
-  await noteMainLanding(ctx, { project, receipt: last, run, paths: candidate.governance?.paths ?? null });
+  await noteMainLanding(ctx, {
+    project,
+    receipt: last,
+    run,
+    paths: candidate.governance?.paths ?? null,
+    firstSequence: receipts[0]!.snapshot.revision,
+  });
   await enqueueGithubMirror(ctx, project, last);
   await alertSecretAllowAdded(ctx, project, last);
   const newlyPublished = members.filter(member => member.state.request.closes !== false).length;

@@ -2,6 +2,13 @@
 import { v } from 'convex/values';
 import { defineTable } from 'convex/server';
 export const autonomyPolicy = v.object({
+  mainAudit: v.optional(
+    v.union(
+      v.object({ cadence: v.literal('automatic') }),
+      v.object({ cadence: v.literal('every-landing') }),
+      v.object({ cadence: v.literal('manual'), landings: v.number(), minutes: v.number() }),
+    ),
+  ),
   checkLogs: v.optional(v.object({ uploadLocal: v.boolean(), retentionDays: v.number() })),
   autoExchange: v.optional(
     v.object({

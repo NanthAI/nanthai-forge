@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedCheckLease.ts": "9516046112df95df6cd19fb5aa1ac5db04739985442878a41d06a42896bd288e",
+    "convex/projectHostedCheckStore.ts": "35eb485620de2f1f21647a163af709883b6571fc84c96906a1e284e8a9fc0d10",
+    "convex/projectHostedChecks.ts": "e4e00da469d8763dd14949df2184ee15c02fa21f5b3666d4b6407459f2c10f48",
+    "convex/projectHostedMainAudit.ts": "c2f41fe00930d4d0b52b80170368d6c5fe280533c995bf503ee78ccd79257b3d",
+    "convex/projectHostedMainAuditState.ts": "17f8654dc2c4f69c27aac727797bd7d6e203b421ced82cb7c3c0772f5c3bf530",
+    "src/landing-audit-cadence.ts": "66b79b979bbda91aeea036065d36c602af15abc5564baed34307493f7554b03c",
+    "src/landing-mode.ts": "ef72d0f3f82977c09633c2b1ce0908c6ddb0598b33ec606e2421bf15b87132fe"
+  },
+  "replay": {
+    "incident": "4e013cdb",
+    "test": "replayed continuous arrivals use fewer audits and keep red detection within the cadence bound",
+    "receipt": "08c55ad6-3ef0-46bd-b6f8-2b434d438e08"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A84935dfc-2229-46da-a380-28bb19c128a8",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A591e2511-daeb-40a5-ac66-8d0c3d8a9f76%3Adelegate-task%3Adf3ca856-ef43-4ae7-b2d0-9aa7b7ec7b20",
+    "receipt": "8046fdf6-0720-4965-bcac-0fba4b320370"
+  }
+}

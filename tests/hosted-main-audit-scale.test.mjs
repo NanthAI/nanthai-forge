@@ -9,7 +9,7 @@ import { stateSchema } from '../dist/state/format.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 
 test('600 Intents, 575 receipts and 3k files: a 30-landing day runs three bounded audits; idle zero', async t => {
-  const f = await auditFixture();
+  const f = await auditFixture({ manual: true });
   const { receipt } = await f.land('full');
   const at = new Date().toISOString();
   for (let i = 0; i < 600; i++) {

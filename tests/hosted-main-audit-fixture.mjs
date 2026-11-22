@@ -5,15 +5,23 @@ import { checksFixture } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { hostedAcceptanceSchema } from '../dist/hosted-acceptance.js';
 import { hostedCheckRunSchema, checkPin } from '../dist/hosted-check.js';
+import { effectivePolicy } from '../dist/autonomy-policy.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 export const state = await import(moduleUrl('../convex/projectHostedMainAuditState.ts'));
 export const audit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const checkStore = await import(moduleUrl('../convex/projectHostedCheckStore.ts'));
-export async function auditFixture() {
+export async function auditFixture({ manual = false } = {}) {
   const f = await checksFixture();
   const template = await f.enqueue(f.selection());
   const project = f.tables.hostedProjects.get(f.projectId);
+  if (manual)
+    f.patch('hostedProjects', f.projectId, {
+      autonomyPolicy: {
+        ...effectivePolicy(project),
+        mainAudit: { cadence: 'manual', landings: 10, minutes: 1440 },
+      },
+    });
   f.tables._scheduled_functions = new Map();
   f.decorateContext(ctx => {
     ctx.db.system = { get: ctx.db.get };
@@ -145,6 +153,7 @@ export async function auditFixture() {
         receipt,
         run: selected,
         ...('paths' in options ? { paths: options.paths } : {}),
+        ...(options.firstSequence === undefined ? {} : { firstSequence: options.firstSequence }),
       });
     });
     previousHead = head;
@@ -191,8 +200,8 @@ export async function auditFixture() {
       exitCode: status === 'passed' ? 0 : 1,
     });
     await run('auditTerminal', async ctx => {
-      await checkStore.completeHostedCheck(ctx, finished);
       const stored = [...f.tables.projectHostedCheckRuns.values()].find(r => r.runId === selected.id);
+      await checkStore.completeHostedCheck(ctx, finished, stored);
       await checkStore.writeHostedCheck(ctx, stored._id, finished);
     });
     return finished;

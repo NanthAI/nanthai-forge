@@ -441,6 +441,20 @@ test('a later different failure is retained when the original probe passes', asy
   assert.equal(f.tables.projectHostedSyncs.size, 0);
 });
 
+test('an older passing flake probe preserves a newer failed run on identical source', async () => {
+  const f = await fixture(1);
+  await f.runCulprit();
+  const original = f.tables.projectHostedMainAudits.get(f.auditRow).red;
+  const next = randomUUID();
+  f.patch('projectHostedMainAudits', f.auditRow, { red: { ...original, runId: next } });
+  await f.complete(f.probes()[0], false);
+  assert.equal(f.tables.projectHostedMainAudits.get(f.auditRow).red.runId, next);
+  assert.equal(
+    [...f.tables.projectHostedMainAuditEvents.values()].some(event => event.kind === 'flake'),
+    false,
+  );
+});
+
 test('a passing original probe cannot clear a later red audit on different source', async () => {
   const f = await fixture(1);
   await f.runCulprit();
@@ -1848,6 +1862,28 @@ test('every single culprit position stays within the logarithmic probe budget', 
   t.diagnostic(JSON.stringify({ boundaries: measurements }));
 });
 
+test('a newer running audit leaves the full previous red span available to bisect', async () => {
+  const span = 8;
+  const f = await fixture(span);
+  const row = f.tables.projectHostedMainAudits.get(f.auditRow);
+  f.patch('projectHostedMainAudits', f.auditRow, {
+    red: { ...row.red, sequence: 575, auditedCount: span },
+    audit: { runId: randomUUID(), sequence: 576, head: checkPin('newer main'), status: 'running' },
+  });
+  await f.runCulprit();
+  for (;;) {
+    const next = f.probes().find(run => run.status === 'queued');
+    if (!next) break;
+    assert.deepEqual(next.gate.tests, ['tests/red.test.mjs']);
+    await f.complete(next, f.heads.indexOf(next.request.expectedHead) >= 7);
+  }
+  const recovery = JSON.parse(f.recovery().recovery);
+  assert.equal(recovery.range.length, span);
+  assert.equal(recovery.target.id, f.receipts[573].id);
+  assert.equal(recovery.stage, 'sync');
+  assert(f.probes().length <= culpritProbeBudget(span));
+});
+
 test('593fc2d7: a full green at or after a needs-fix notice clears it; an older green or a reverted notice keeps it', async () => {
   const f = await fixture();
   await f.runCulprit();
@@ -2547,6 +2583,13 @@ test('flake recovery retains newer audit debt and cadence when covered receipts 
   const { auditReason } = await import('../dist/main-audit.js');
   for (const coveredCount of [1, 2]) {
     const f = await fixture(2);
+    const project = f.tables.hostedProjects.get(f.projectId);
+    f.patch('hostedProjects', f.projectId, {
+      autonomyPolicy: {
+        ...effectivePolicy(project),
+        mainAudit: { cadence: 'manual', landings: 10, minutes: 1440 },
+      },
+    });
     const firstAt = new Date().toISOString();
     f.audit.gate.reason = auditReason({
       sequence: 575,
@@ -2575,6 +2618,45 @@ test('flake recovery retains newer audit debt and cadence when covered receipts 
     );
     assert.equal(audit.wake.at, next.args.wakeAt);
   }
+});
+
+test('an older flake and a newer overlapping green audit deduct their shared landings once', async () => {
+  const f = await fixture(2);
+  await f.runCulprit();
+  const available = f.tables.projectHostedMainAudits.get(f.auditRow);
+  const newer = {
+    ...f.audit,
+    id: randomUUID(),
+    gate: {
+      mode: 'audit',
+      reason: auditReason({ sequence: 577, count: 4, attempt: 0, key: hash, firstAt: at }),
+    },
+    status: 'passed',
+  };
+  const firstAt = new Date(Date.parse(at) + 5_000).toISOString();
+  const firstUnverifiedAt = new Date(Date.parse(at) + 3_000).toISOString();
+  f.patch('projectHostedMainAudits', f.auditRow, {
+    audit: { ...available.audit, runId: newer.id, sequence: 577, status: 'running' },
+    red: { ...available.red, firstNewerAt: firstUnverifiedAt },
+    unaudited: { count: 5, firstAt },
+  });
+  await f.complete(f.probes()[0], false);
+  const afterFlake = f.tables.projectHostedMainAudits.get(f.auditRow);
+  assert.equal(afterFlake.audit.alreadyVerified, 2);
+  assert.equal(afterFlake.unaudited.count, 3);
+  const gate = await f.transaction(
+    'readAuditClockAfterFlake',
+    {
+      _handler: ctx => auditState.mainGate(ctx, f.projectId, afterFlake),
+    },
+    {},
+  );
+  assert.equal(gate.unaudited.firstAt, firstUnverifiedAt);
+  await f.transaction('newerAuditSettles', { _handler: ctx => auditState.onGateRunTerminal(ctx, newer) }, {});
+  const afterGreen = f.tables.projectHostedMainAudits.get(f.auditRow);
+  assert.equal(afterGreen.lastGreen.sequence, 577);
+  assert.deepEqual(afterGreen.unaudited, { count: 1, firstAt });
+  assert(f.scheduled.some(task => task.name === 'projectHostedMainAudit:start'));
 });
 
 test('W19: the notice records at most three failing files and how many more', () => {
