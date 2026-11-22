@@ -6,6 +6,7 @@ import { callback as githubOAuthCallback } from './githubBindingOAuth';
 import { handle as actionsHttp } from './projectHostedActionsHttp';
 import { serve as gitServe } from './gitServe';
 import { serve as publicServe } from './publicHttp';
+import { serve as discussionAttachment } from './discussionAttachmentHttp';
 import { makeFunctionReference } from 'convex/server';
 import { httpRouter } from 'convex/server';
 import { httpAction } from './_generated/server';
@@ -222,4 +223,5 @@ http.route({
 });
 // Public discovery reads, cached by the site's CDN; a cache hit never reaches here (convex/publicHttp.ts).
 http.route({ pathPrefix: '/public/v1/', method: 'GET', handler: publicServe });
+http.route({ path: '/discussion/attachment', method: 'GET', handler: discussionAttachment });
 export default http;

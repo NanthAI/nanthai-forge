@@ -4,13 +4,11 @@
 // planning writers), so reactions widen with comments, never ahead of them. A reaction is a person's: agent (device)
 // credentials are refused, as for stars, and a reaction must name a comment that exists on that Item.
 import { v } from 'convex/values';
-import { isDeviceIdentity, mutation, query, type MutationCtx } from './cliServer';
-import type { Doc } from './_generated/dataModel';
+import { isDeviceIdentity, mutation, query } from './cliServer';
 import { accessibleProject, activeProject } from './projectAuthority';
 import { invariant } from '../src/errors';
 import { reactionKind, reactionKinds } from './planningReactionFields';
-import { recordHead } from './projectHostedRecords';
-import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
+import { commentOnItem } from './planningCommentRead';
 
 /** An Item's reactions are read in one page. Owner-only writers make far fewer; past this the counts say so. */
 const REACTION_READ_LIMIT = 2000;
@@ -42,23 +40,6 @@ export const forItem = query({
     return { counts: [...counts.values()], complete: rows.length <= REACTION_READ_LIMIT };
   },
 });
-
-/** Whether this comment is on this Item: one head read from the record store, or one index row from the Work index. */
-async function commentOnItem(
-  ctx: MutationCtx,
-  project: Doc<'hostedProjects'>,
-  itemId: string,
-  commentId: string,
-) {
-  if (project.workStore === 'records') {
-    const head = await recordHead(ctx, project._id, 'comment', commentId);
-    return head?.status === 'comment' && head.parent === itemId;
-  }
-  const generation = await selectedGeneration(ctx, project);
-  if (!generation) return false;
-  const row = await record(ctx, recordPartition(generation), 'planningComments', commentId);
-  return row?.parent === itemId;
-}
 
 /** Adds the viewer's reaction of this kind to the comment, or takes it off when it is there. Retrying a lost reply
  * converges: the reply says whether the reaction is now on. */

@@ -97,6 +97,11 @@ nforge agent ROOT start '{"planningItemId":"ISSUE_ID","model":"unknown"}' # your
 
 **Who wrote a comment.** A hosted server records the writer from your sign-in (`author`, read as `@handle`, or `handle/agent` for a device credential: the session slug it sent, or one derived from the credential). It does not store `authorLabel` from a signed-in writer, so put a role in the text. A comment is at most 65,536 characters (`BAD_ARGUMENT` above). Reactions are a person's; agent credentials cannot react.
 
+**Discussion attachment downloads.** The hosted server verifies a committed attachment against its project,
+Item and comment. It applies the current discussion visibility before reading from private R2 and checks
+access again before sending the verified bytes as a download. Permanent Item deletion ends access to its
+attachments. Uploads and client download controls are pending.
+
 **Suggested schedule.** `planning {"kind":"issue","schedule":true}` adds `schedule`: which open and in-progress Issues can run in parallel and which should stack, with the reason. It groups Issues by the repository files their title and body name (`src/work-schedule.ts`); a stack lists started Issues first, then the oldest, and names the shared files. Markdown docs never make Issues stack, since landing merges them. An Issue that names no file is `unknown`, not independent: a missing name proves nothing. It reads up to five pages (`coverage` says whether that reached the end) and no item details: a long body's named files are kept on its index header when it is written. It is advice for the lead or agent choosing the next work; nothing is started, ordered or blocked. The web planning board shows the same suggestion as a `Stack n/m` chip on the Issues that should stack, with the order and reason on hover.
 
 Search before filing: one `planning {"search":"words","limit":10,"status":"all"}` returns ranked indexed title/body matches with status/kind/initiative filters; do not page `nextCursor` for a duplicate check (each search is billed at the whole index size). Filing returns advisory `likelyDuplicates`. See [planning search](../../../data-placement.md#planning-search) for filters, preparation and costs.
