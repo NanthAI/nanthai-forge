@@ -299,8 +299,7 @@ export function landingStallReport(
       `Source step ${failure.step ?? '?'} failed: ${failure.code}${failure.stage ? ` at ${failure.stage}` : ''}` +
         (failure.slowestPhase ? `, longest phase ${failure.slowestPhase}` : '') +
         (failure.attempts ? ` (attempt ${failure.attempts} of ${failure.maxAttempts ?? '?'})` : '') +
-        (failure.retryAt ? `; next try from ${failure.retryAt}` : '') +
-        '. The server retries it by itself.',
+        (failure.retryAt ? `. Next try from ${failure.retryAt}.` : '. Retry schedule unknown.'),
     );
   if (replayCommand)
     lines.push(`Replay the original land request to see or continue its recovery: ${replayCommand}`);

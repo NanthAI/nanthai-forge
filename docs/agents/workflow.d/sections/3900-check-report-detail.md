@@ -21,8 +21,9 @@ Preparing landings appear in `queue` after admitted entries, with `position:null
 `waitingOn.kind:"source-preparation"`. They wait for their server source/landing
 controller, not another queue entry; dispatch rank is assigned at admission.
 `waitingOn.sourceStep` names the source step in progress, and a step whose last
-attempt failed adds `waitingOn.sourceFailure:{step,code,stage,attempts,maxAttempts,retryAt}`;
-the server retries it by itself. A `wait` on a stalled landing prints the stall, that
-failure, the original land replay and, for a Lane far behind main, the sync to run.
+attempt failed adds `waitingOn.sourceFailure:{step,code,stage,attempts,maxAttempts,retryAt}`.
+A `wait` on a stalled landing prints the stall, that failure, the original land replay
+and, for a Lane far behind main, the sync to run. It shows when the next attempt may
+start if the reply includes `retryAt`. Otherwise it reports the retry schedule as unknown.
 Replaying the original land request repairs a failed preparation wake under the same
 submission and operation identity. A running wake is fenced, never cancelled.

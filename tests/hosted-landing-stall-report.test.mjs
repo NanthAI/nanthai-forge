@@ -39,6 +39,7 @@ test('incident replay e62d834b (friction c7f3afac): a stalled landing wait names
   assert(report, 'a stalled landing is reported, not silent');
   assert.equal(report.lines[0], `STALLED LANDING_STALLED: ${stall.message}`);
   assert.match(report.lines[1], /^Source step 1 failed: SOURCE_JOB_FENCED at small-save \(attempt 2 of 6\)/);
+  assert(report.lines[1].endsWith('Next try from 2026-11-20T04:21:00.000Z.'));
   assert.match(report.lines[2], /land '\{"laneId":"lane-1","message":"m","operationId":"op-1"\}'$/);
   assert.match(report.lines[3], /sync '\{"laneId":"lane-1"\}'$/, 'a far-behind Lane is told to sync');
   assert.equal(report.stall.sourceFailure.code, 'SOURCE_JOB_FENCED');
@@ -54,4 +55,30 @@ test('incident replay e62d834b (friction c7f3afac): a pending land reply carries
     lines.join('\n'),
   );
   assert(!landSummary(pending({})).some(line => line.startsWith('STALLED')), 'a healthy wait adds nothing');
+});
+
+test('Issue 9a04d916: a failed compose without a recorded retry time reports an unknown schedule and preserves the original replay', () => {
+  const { retryAt, ...failure } = { ...sourceFailure, code: 'SOURCE_WORKER_STEP_FAILED' };
+  const reply = pending({ stall });
+  reply.result.sourceFailure = failure;
+  const report = landingStallReport(reply.result, {
+    root: '/repo with spaces',
+    action: 'finish',
+    command: {
+      laneId: '386a0edf-a9d9-47d2-b412-59051075b45f',
+      message: 'Keep the original capture',
+      accept: true,
+    },
+    operationId: '77054f3e-87a7-4030-97c3-487c8434650e',
+  });
+  const failureLine =
+    'Source step 1 failed: SOURCE_WORKER_STEP_FAILED at small-save (attempt 2 of 6). Retry schedule unknown.';
+  assert.equal(report.lines[1], failureLine);
+  assert(landSummary(reply).includes(failureLine));
+  assert.deepEqual(report.stall.sourceFailure, failure);
+  assert.equal(
+    report.stall.replayCommand,
+    `nforge agent '/repo with spaces' finish '{"laneId":"386a0edf-a9d9-47d2-b412-59051075b45f","message":"Keep the original capture","accept":true,"operationId":"77054f3e-87a7-4030-97c3-487c8434650e"}'`,
+  );
+  assert(report.lines[2].endsWith(report.stall.replayCommand));
 });
