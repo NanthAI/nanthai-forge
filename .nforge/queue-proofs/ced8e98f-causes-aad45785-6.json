@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingBatchConflict.ts": "db11eee5fed12bcb296784775959199395a4fbfa132e30385b2d8364fdc1abba"
+  },
+  "replay": {
+    "incident": "aad45785",
+    "test": "C1 wasted checks: overlapping admission composes before spending a check, predecessor fails=${failed}, width=${concurrency}, mode=${landingMode}",
+    "receipt": "02aaad71-6472-4823-af25-a604ceb08300"
+  },
+  "authorModel": "claude-opus-5-5",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A9d634eb2-0bd0-4613-af6e-be394a725fc2",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A4211b7bf-1c71-4dbc-a939-fff7c07f90c1%3Adelegate-task%3Ac92f646d-e820-48fd-8225-7c7af9119cc0",
+    "receipt": "02aaad71-6472-4823-af25-a604ceb08300"
+  },
+  "exercised": {
+    "convex/projectHostedLandingBatchConflict.ts": {
+      "executed": [
+        "retainBatchConflict",
+        "settleMemberBatchConflict"
+      ],
+      "digest": "37a2909cf24179049eb8a6b406c9f6f7a20e2313e9c173b849141c90049a1483",
+      "units": [
+        [
+          "ForgeError",
+          "c8934d5ec6f70ce797a0d05c3ecfb78031a48937ad3336194885e4520006a12d"
+        ],
+        [
+          "activeProject",
+          "d18cc6b641cd45a0e474d0afe7700101c46cef8057b70e172637d1e1d30d2be9"
+        ],
+        [
+          "candidateOwnerInputs",
+          "7e64861abde58bdaf07c327eef9d0fde40ac8372b76393250653932226dc1bf6"
+        ],
+        [
+          "failFinish",
+          "c41a5ea50ac2bf3cdecac808a561e736ebb6f793c82054780b7882b4252905ea"
+        ],
+        [
+          "forkLandingAttempt",
+          "d36ff5ed92e3983e8262cc9f8cf6ef7f39267b830a00aa37285281e373697a42"
+        ],
+        [
+          "forkRaceReason",
+          "0c8132306961a3b99eb6268fe248e4fcb0937153dc1f34cca5d18abafed54dfc"
+        ],
+        [
+          "hostedRecordSchema",
+          "508c659caa39090faf59eafb8c7320cc42ca43240ec90785756c1840e7c03f61"
+        ],
+        [
+          "hostedStartMain",
+          "b363e9608e562023c7b2963703c2aa02c302faf29032c2afe9c22405b82e1a0a"
+        ],
+        [
+          "insertLandingAttempt",
+          "e89f5ed577ce7edc9ff353d7289c40f8f39db6c79a521514c81bc3f19d76d5a3"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "loadLanding",
+          "ebcbbc4824870ad74803810ad5144fbbc671303f4a51f289356b20578d07ace2"
+        ],
+        [
+          "loadLandingAttempt",
+          "0e7a8090a6e014f352bec9ef0e1fccd9dbcbb8bbb583cf5e0aa3c3058790a9f7"
+        ],
+        [
+          "readHostedRecord",
+          "f8ebe857e46255798f036f3db0acb78682a740661afb1147e12c1163e7ad5ee2"
+        ],
+        [
+          "retainBatchConflict",
+          "92b854b7aea0b696a31a6d989867b34c6e05de403c1279ca7d17d34dddf6739a"
+        ],
+        [
+          "settleMemberBatchConflict",
+          "1a5ab374498586aa776c20a6fde144293b9c4c26558a4e91853b5176e6cc4adf"
+        ],
+        [
+          "writeHostedRecord",
+          "fc8651df82e1fc039dedf06d867148f410393e198d708a05ff5017b7966dfe4f"
+        ],
+        [
+          "writeLanding",
+          "66d679cf148e8bffa47ba33cf08bb2006907e465b1d2a27dae0b275f4082152c"
+        ]
+      ]
+    }
+  }
+}

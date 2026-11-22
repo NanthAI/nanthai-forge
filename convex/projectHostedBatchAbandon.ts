@@ -71,6 +71,7 @@ async function cancelCandidateMembers(
     await cancelHostedLanding(ctx, {
       projectId: input.projectId,
       actor: state.actor,
+      replacementCause: { kind: 'cancelled', link: 'lifecycle-abandon' },
       request: {
         operationId: crypto.randomUUID(),
         authorityEpoch: state.request.authorityEpoch,

@@ -268,7 +268,8 @@ export async function retireSoloCheck(
     void [_proof, _check, _fork];
     const next = {
       ...pins,
-      ...(await forkLandingAttempt(ctx, state)),
+      // The fork keeps the old base until its finish recomposes; the mover is current main.
+      ...(await forkLandingAttempt(ctx, state, { kind: 'main-race', link: main.receipt.id })),
       check: null,
       deferredCheck: true as const,
       operations: { check: crypto.randomUUID(), accept: crypto.randomUUID() },
@@ -293,9 +294,6 @@ export async function retireSoloCheck(
     },
     false,
     false,
-    undefined,
-    // The fork keeps the old base until its finish recomposes; the mover is current main.
-    { replacementReplay: { replacementCause: { kind: 'main-race', link: main.receipt.id } } },
   );
   // Publication of the replacement's durable wake and cancellation share
   // this transaction. A throw rolls both back; no process owns rescheduling.

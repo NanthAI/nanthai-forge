@@ -75,7 +75,8 @@ export async function retainBatchConflict(
   void [deferredCheck, recheckReason, forkReason, scopedFallback];
   const attempt = {
     ...pins,
-    ...(await forkLandingAttempt(ctx, current.state)),
+    // The exposed conflict replaces the attempt; the link is its conflict Candidate.
+    ...(await forkLandingAttempt(ctx, current.state, { kind: 'conflict', link: candidate.id })),
     main: input.main,
     check: null,
     candidate: { ...member.candidate, id: candidate.id, digest: record.digest, head: null },

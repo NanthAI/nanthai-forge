@@ -549,6 +549,8 @@ export async function onCulpritRunTerminal(ctx: MutationCtx, run: HostedCheckRun
                   actor: project.owner,
                   reason:
                     'The recovery re-check failed; widen the same red episode without publishing this reverse.',
+                  // The red audit's failed re-check ends this reverse.
+                  replacementCause: { kind: 'audit', link: run.id },
                   request: {
                     operationId: culpritId({ cancelReverse: run.id }),
                     authorityEpoch: project.sourceAuthority!.epoch,

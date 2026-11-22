@@ -394,7 +394,8 @@ export async function bindAdmissionProof(
       ...pins.operations,
       ...(attempt.id !== original.id ? { accept: crypto.randomUUID() } : {}),
     },
-    ...(await forkLandingAttempt(ctx, state)),
+    // The queue binds the held proof without a recheck.
+    ...(await forkLandingAttempt(ctx, state, { kind: 'check-binding', link: check.runId })),
     check,
   };
   await insertLandingAttempt(ctx, next);

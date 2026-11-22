@@ -322,7 +322,15 @@ export async function installBatchAttempt(
           : {}),
       ...(input.checkOperationId ? { check: input.checkOperationId } : {}),
     },
-    ...(await forkLandingAttempt(ctx, state)),
+    // With no named mover or retry, this binds the queue's check: a predicted cohort prefix is
+    // not a main race, even when it changes the attempt's base (ced8e98f).
+    ...(await forkLandingAttempt(
+      ctx,
+      state,
+      input.moverReceiptId
+        ? { kind: 'main-race', link: input.moverReceiptId }
+        : (input.replacementReplay?.replacementCause ?? { kind: 'check-binding', link: input.check.runId }),
+    )),
     check: input.check,
     ...(input.candidate ? { candidate: input.candidate, memberCandidate: original.candidate } : {}),
     // The cohort's next generation on a moved main discards the parent's shared run (c3c69c57).
@@ -349,15 +357,10 @@ export async function installBatchAttempt(
     input.checkSettled ?? false,
     true,
     undefined,
-    {
-      // With no named mover or retry, this binds the queue's check: a predicted cohort prefix is
-      // not a main race, even when it changes the attempt's base (ced8e98f).
-      replacementReplay: input.moverReceiptId
-        ? { replacementCause: { kind: 'main-race', link: input.moverReceiptId } }
-        : (input.replacementReplay ?? {
-            replacementCause: { kind: 'check-binding', link: input.check.runId },
-          }),
-    },
+    // A named mover outranks the caller's retry evidence, as the fork cause above says.
+    input.replacementReplay && !input.moverReceiptId
+      ? { replacementReplay: input.replacementReplay }
+      : undefined,
   );
   return attempt;
 }

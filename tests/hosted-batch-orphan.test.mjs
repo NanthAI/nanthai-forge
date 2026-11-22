@@ -353,6 +353,7 @@ const supersede = (f, submissionId) =>
           actor: stateOf(f, submissionId).actor,
           request: { operationId: randomUUID(), authorityEpoch: 1, submissionId },
           supersede: { laneId: randomUUID(), head: 'a'.repeat(40) },
+          replacementCause: { kind: 'new-save', link: 'a'.repeat(40) },
         }),
     },
     {},

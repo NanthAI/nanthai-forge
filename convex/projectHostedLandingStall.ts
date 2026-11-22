@@ -260,6 +260,7 @@ export async function repairStalledLanding(
       projectId: input.projectId,
       actor: state.actor,
       drop: true,
+      replacementCause: { kind: 'cancelled', link: 'stall-drop' },
       request: {
         operationId: crypto.randomUUID(),
         authorityEpoch: state.request.authorityEpoch,
@@ -534,6 +535,7 @@ async function resolveQueued(
     projectId: input.projectId,
     actor: after.state.actor,
     drop: true,
+    replacementCause: { kind: 'cancelled', link: 'stall-drop' },
     request: {
       operationId: crypto.randomUUID(),
       authorityEpoch: after.state.request.authorityEpoch,

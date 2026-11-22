@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingWithdraw.ts": "2cbaa1b34852ea68c5c9d76b54bcad020db8c385e64b3fd1679df6818a290cb4"
+  },
+  "replay": {
+    "incident": "78a97771",
+    "test": "withdraw by Lane cancels the live landing, keeps the Lane and fences the late check",
+    "receipt": "02aaad71-6472-4823-af25-a604ceb08300"
+  },
+  "authorModel": "claude-opus-5-5",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A9d634eb2-0bd0-4613-af6e-be394a725fc2",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A4211b7bf-1c71-4dbc-a939-fff7c07f90c1%3Adelegate-task%3Ac92f646d-e820-48fd-8225-7c7af9119cc0",
+    "receipt": "02aaad71-6472-4823-af25-a604ceb08300"
+  },
+  "exercised": {
+    "convex/projectHostedLandingWithdraw.ts": {
+      "executed": [
+        "withdraw",
+        "withdrawHostedLanding",
+        "withdrawReason"
+      ],
+      "digest": "f4c47db0f6b3cd5a4de7652df3dbdd6089eb67ab11be58311006fa8980487356",
+      "units": [
+        [
+          "acceptanceActor",
+          "0c9112e8326de402fdb77b8cece78b3ea8676c6d95760b6ea8075135b05abaf0"
+        ],
+        [
+          "activeProject",
+          "d18cc6b641cd45a0e474d0afe7700101c46cef8057b70e172637d1e1d30d2be9"
+        ],
+        [
+          "cancelHostedLanding",
+          "aaeb910dfe4433ba79699ea0b5937dc6ec8acb8992dad4f6595cd8fd90957d06"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "hostedLandingWithdrawSchema",
+          "68d969672ddecab5ae1c1b4c452f9ce33692bc94573054f79fcea6d4b2bc4c4b"
+        ],
+        [
+          "hostedOperationRow",
+          "ee7e2a160495859d4314eb653ae41935074ff132cd68cad10cfdfdf4eab2eb76"
+        ],
+        [
+          "hostedOperationSchema",
+          "a4a0088654440a511e5aaa4e2a3ee4d6be0692ef3e8f63a027c6e4e73a38ca96"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "landingWithoutClientHold",
+          "2603261c867a454942eae3edf6eb80d4dde8cb2dad054743c59551b96d3e8f44"
+        ],
+        [
+          "liveLaneFinish",
+          "09d37745b88de1ca569011d4643e5be8f154680c31e67ac02b4d45a0022a829e"
+        ],
+        [
+          "mutation",
+          "4f17c7855059ce010489b8b943f417aba3333721a20f7872a46abe0eee887bc9"
+        ],
+        [
+          "report",
+          "11f51c908ed7b15c3270a2410f7282cdb9c431b81d35e62cdff8695c9d306e0b"
+        ],
+        [
+          "requireMemberAuthorityById",
+          "10250b98ff6fdc67c07a34026f612da35b8cd7785dec9c347a1e6a473d9ca7f4"
+        ],
+        [
+          "saveLane",
+          "757bf837ee0fed358a6728e6e540cbf0422e0f7bdad2a06208e2a001d98a7a4c"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ],
+        [
+          "withdraw",
+          "d9fbb85cf61af12451c697b780fdd1afba675df973a9a82a1888bbbd9351d730"
+        ],
+        [
+          "withdrawHostedLanding",
+          "5f050c39a3d4323f29adaf81afced591bf2c0b3ca08d0b64b4280282588d3b26"
+        ],
+        [
+          "withdrawReason",
+          "992897f23c3aa64c3e631927d1f53ea5b124eba57f064c131922e149d910d0c4"
+        ]
+      ]
+    }
+  }
+}

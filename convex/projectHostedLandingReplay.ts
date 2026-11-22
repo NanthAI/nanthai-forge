@@ -15,7 +15,7 @@ const check = v.object({
   recordedEndAt: v.optional(v.string()),
   stop: v.optional(v.literal('CHECK_CANCELLED')),
 });
-const cause = v.object({
+export const replayCause = v.object({
   kind: v.union(
     v.literal('main-race'),
     v.literal('conflict'),
@@ -28,39 +28,28 @@ const cause = v.object({
     v.literal('check-binding'),
     // A new save of the author's Lane superseded the entry; the link is the saved Lane head.
     v.literal('new-save'),
-    // No writer named the cause; the link is the stop code, so the gap stays countable.
+    // An operator, the author, a lifecycle or an owner decline ended the entry and nothing replaced
+    // it; the link names that path.
+    v.literal('cancelled'),
+    // The writer knows no cause; the link names the writer and its stop code, so the gap stays countable.
     v.literal('unknown'),
   ),
   link: v.string(),
 });
-export type ReplayCause = Infer<typeof cause>;
+export type ReplayCause = Infer<typeof replayCause>;
 export const landingReplay = v.object({
   check: v.optional(check),
   earlierChecks: v.optional(v.array(check)),
   actualBase: v.optional(base),
   censor: v.optional(v.string()),
-  replacementCause: v.optional(cause),
+  replacementCause: v.optional(replayCause),
   replacedByAttemptId: v.optional(v.string()),
-  recheckCause: v.optional(cause),
-  // Stamped on the landed attempt when its receipt lists no order waits. Older landings omit it.
-  holdEdges: v.optional(v.literal('none')),
+  recheckCause: v.optional(replayCause),
+  // Stamped on the landed attempt: `none` when its receipt lists no order waits, `recorded` when
+  // each listed wait has its edge type. Landings before the stamp omit it.
+  holdEdges: v.optional(v.union(v.literal('none'), v.literal('recorded'))),
 });
 export type LandingReplay = Infer<typeof landingReplay>;
-
-/** The cause of a replacement whose writer named none, from the evidence in hand at that write
- * (Item ced8e98f): the successor's own pins and the stop code, never dates. */
-export function replacementCauseOf(input: {
-  code: string;
-  nextMain: { receiptId: string } | undefined;
-  successor: Pick<HostedLandingAttempt, 'candidate' | 'check'> | undefined;
-}): ReplayCause {
-  const { code, nextMain, successor } = input;
-  if (successor && successor.candidate.head === null)
-    return { kind: 'conflict', link: successor.candidate.id };
-  if (code === 'CHANNEL_CHANGED' && nextMain) return { kind: 'main-race', link: nextMain.receiptId };
-  if (successor?.check) return { kind: 'check-binding', link: successor.check.runId };
-  return { kind: 'unknown', link: code };
-}
 
 export function checkReplay(run: HostedCheckRun): LandingReplay {
   const clock = hostedCheckClock(run);
@@ -123,16 +112,30 @@ export function replayRead(
   };
 }
 
-/** Hold edges from the receipt's order waits. `none` needs the landed attempt's stamp, so a
- * receipt written before the stamp reads `unrecorded`, never an invented "no hold". */
+/** Hold edges from the request's claim waits and handoffs (`landingOrderEvidence`). Overlap or
+ * disjoint footprints are the edge type; a wait whose footprints were never read (an
+ * approved-check, combined, handed or reserved hold) is typed by its hold kind. `none` needs the
+ * landed attempt's stamp and a hold-kind type needs the `recorded` one, so a receipt written
+ * before either reads `unrecorded`, never an invented answer. */
 export function replayHoldEdges(
-  waits: readonly { submissionId: string; held: string; footprints: string; seconds?: number }[] | undefined,
+  waits:
+    | readonly { submissionId: string; held: string; footprints: string; seconds?: number }[]
+    | null
+    | undefined,
   replays: readonly (LandingReplay | undefined)[] = [],
 ) {
-  if (!waits?.length) return replays.some(replay => replay?.holdEdges === 'none') ? 'none' : 'unrecorded';
+  const stamp = replays.find(replay => replay?.holdEdges)?.holdEdges;
+  if (!waits?.length) return stamp ? 'none' : 'unrecorded';
   return waits.map(({ submissionId, held, footprints, seconds }) => ({
     holderSubmissionId: submissionId,
-    edgeType: held === 'dependent' ? 'dependent' : footprints === 'unknown' ? 'unrecorded' : footprints,
+    edgeType:
+      held === 'dependent'
+        ? 'dependent'
+        : footprints !== 'unknown'
+          ? footprints
+          : stamp === 'recorded'
+            ? held
+            : 'unrecorded',
     heldSeconds: seconds ?? 'unrecorded',
   }));
 }

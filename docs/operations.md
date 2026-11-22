@@ -551,16 +551,25 @@ receipt), `conflict` (the conflicting Candidate or batch), `pair-interaction`
 `flake-retry` (the retried submission), `provider-retry` (the provider run),
 `audit` (the audit run), `check-binding` (the queue bound an admission proof,
 deferred check or cohort check without a recheck; the run), `new-save` (a new
-save of the author's Lane superseded the entry; its saved head) or `unknown`
-(no writer named one; the stop code, or `LANDING_DRIVER_LOST_RETRY` when a retry replaced a
-queued landing whose driver was lost). An entry superseded before its first attempt is
+save of the author's Lane superseded the entry; its saved head), `cancelled` (an operator,
+the author, a lifecycle, an owner decline or the landing supervisor ended the entry and nothing
+replaced it; the path: `operator-cancel`, `withdraw`, `lifecycle-abandon`, `review-declined`,
+`stall-drop` or `driver-exhausted`; `check-cancelled` when a cancelled check ended the entry) or
+`unknown` (the writer knows no cause; the writer and stop code, such as
+`finish-retry:CHECK_EVIDENCE_REFRESH`, `retain:ATTEMPT_REPLACED` for a stop with no named writer,
+or `LANDING_DRIVER_LOST_RETRY` when a retry replaced a queued landing whose driver was lost). Every
+writer that forks a replacement attempt or cancels an entry names its cause in the same write; a
+recompose cancelled before its attempt was installed keeps the cause on its finish row. An entry superseded before its first attempt is
 reserved has no attempt to replace, never reaches a landed receipt, and its history reads
 `unrecorded` for the cause. `replacedByAttemptId` links the retiring
 attempt to its successor. Unavailable observations read as `unrecorded`. A check carried
 across attempts keeps the same run ID. Hold edges retain the holder's
-submission, dependency or footprint class, and recorded wait; a landing that
-never waited reads `none`. Receipts written before these fields existed read
-`unrecorded`. Follow
+submission, its edge type and recorded wait. The edge type is `dependent`, the footprint class
+(`overlap` or `disjoint`), or, for a hold whose footprints were never read, its hold kind (such
+as `approved-check`, `combined`, `handed`, `reserved` or `composing`); a holder handoff reads
+`handed`. A landed, failed or cancelled entry that never waited or was handed reads `none`; the
+landing or terminal write stamps that on the attempt it already writes. Receipts written before these fields existed read `unrecorded`, as does a
+hold kind on a receipt landed before edge types were stamped. Follow
 `attemptReplayPartial` to the submission's paged `queue {submissionId}`
 history for additional attempts, including archived ones. The ledger is project-scoped and
 uses the existing landing and check retention.

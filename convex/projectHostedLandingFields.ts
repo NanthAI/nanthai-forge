@@ -3,7 +3,7 @@ import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { landingCapsulePointer } from './projectLandingCapsuleFields';
 import type { Doc } from './_generated/dataModel';
-import { landingReplay } from './projectHostedLandingReplay';
+import { landingReplay, replayCause } from './projectHostedLandingReplay';
 
 type HoldRow = Pick<Doc<'projectHostedLandingRequests'>, 'admission' | 'phase' | 'runnable'>;
 /** A release time is measured only when the release transaction stamped it. */
@@ -130,6 +130,8 @@ export const hostedLandingTables = {
     preflightRan: v.optional(v.string()),
     preflightRuns: v.optional(v.number()),
     wake: v.union(v.object({ id: v.string(), taskId: v.id('_scheduled_functions') }), v.null()),
+    /** Why a cancel ended its observed initial reservation (ced8e98f); its history reads it. */
+    reservedCause: v.optional(replayCause),
   })
     .index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId'])
     .index('by_project_and_submission', ['projectId', 'submissionId'])
@@ -218,6 +220,9 @@ export const hostedLandingTables = {
     messageProjectId: v.optional(v.id('hostedProjects')),
   }),
   projectHostedLandingRequests: defineTable({
+    /** Why a cancel ended this entry, on its terminal write (ced8e98f): a reserved recompose that was
+     * never installed has no attempt row, so its history reads the cause here. */
+    reservedCause: v.optional(replayCause),
     /** The bound mirror repository and Forge writer rechecked at publication. */
     githubInboundProof: v.optional(v.object({ trigger: v.string(), repository: v.string() })),
     runnerAccounting,

@@ -525,8 +525,8 @@ export async function publishAcceptance(
     replay: {
       ...(run ? checkReplay(run) : {}),
       actualBase: receipt.previous,
-      // The receipt's order waits are the hold edges; with none, say so (ced8e98f).
-      ...(receipt.orderWaits ? {} : { holdEdges: 'none' as const }),
+      // Claim waits and handoffs are the hold edges, each typed; with neither, say so (ced8e98f).
+      holdEdges: receipt.orderWaits || row.orderHandoffs?.length ? ('recorded' as const) : ('none' as const),
     },
   });
   await endLandedApprovals(ctx, approvals);

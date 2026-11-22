@@ -12,6 +12,8 @@ test.after(() => {
     else process.env[k] = v;
   }
 });
+// Every child names why it replaces its parent (ced8e98f); these ordinal fixtures need no real cause.
+const forkCause = { kind: 'unknown', link: 'fixture:ordinal' };
 const ordinals = (f, id) =>
   [...f.tables.projectHostedLandingAttempts.values()]
     .map(r => JSON.parse(r.value))
@@ -103,7 +105,7 @@ for (const seed of [1, 17, 73])
               submissionId: initial.id,
             });
             if (kind === 'reserve') {
-              reserved ??= await store.forkLandingAttempt(ctx, state);
+              reserved ??= await store.forkLandingAttempt(ctx, state, forkCause);
               return;
             }
             const parent = await store.loadLandingAttempt(ctx, {
@@ -113,6 +115,7 @@ for (const seed of [1, 17, 73])
             const identity = await store.forkLandingAttempt(
               ctx,
               state,
+              forkCause,
               kind === 'install-finish' ? (reserved ?? undefined) : undefined,
             );
             if (kind === 'install-finish' && reserved) {

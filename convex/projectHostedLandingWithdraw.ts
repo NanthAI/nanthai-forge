@@ -44,6 +44,7 @@ export async function withdrawHostedLanding(
       actor,
       reason,
       withdrawLaneId: request.laneId,
+      replacementCause: { kind: 'cancelled', link: 'withdraw' },
       request: { operationId: request.operationId, authorityEpoch: request.authorityEpoch, submissionId },
     });
   const old = await hostedOperationRow(ctx, projectId, actor, request.operationId);

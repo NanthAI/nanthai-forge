@@ -37,6 +37,7 @@ export async function exhaustLanding(ctx: MutationCtx, state: HostedLandingState
     projectId: state.projectId as Id<'hostedProjects'>,
     actor: state.actor,
     drop: true,
+    replacementCause: { kind: 'cancelled', link: 'driver-exhausted' },
     code: LANDING_DRIVER_EXHAUSTED,
     request: {
       operationId: crypto.randomUUID(),

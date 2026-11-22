@@ -285,7 +285,17 @@ export async function batchFinishStep(
                   replacementCause: { kind: 'provider-retry' as const, link: batch.retriedRunId },
                 },
               }
-            : {}),
+            : batch.nextCheckCause === checkCause.evidenceRefresh
+              ? {
+                  // A refused scoped cohort recheck recomposes; the refusal reason is not retained.
+                  replacementReplay: {
+                    replacementCause: {
+                      kind: 'unknown' as const,
+                      link: 'cohort-retry:CHECK_EVIDENCE_REFRESH',
+                    },
+                  },
+                }
+              : {}),
         checkOperationId: run.request.operationId,
         candidate: {
           id: candidate.id,

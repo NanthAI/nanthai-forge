@@ -11,6 +11,7 @@ import { landingSelectionRead } from './projectHostedLandingSelectionRead';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { landingAttemptProgress, landingRow, landingStateFromRow } from './projectHostedLandingStore';
 import { finishRow } from './projectHostedFinishWake';
+import { landingOrderEvidence } from './projectHostedLandingOrder';
 import { reviewState } from './projectHostedOwnerReview';
 import { preparingSourceStep } from './projectHostedPreparingSource';
 import { hostedFinishSchema } from '../src/hosted-finish';
@@ -23,7 +24,7 @@ import {
 import { sourceStepFailureField } from '../src/hosted-source-retry';
 import { invariant } from '../src/errors';
 import { phaseDuration } from '../src/land-phases';
-import { replayHoldEdges, replayRead } from './projectHostedLandingReplay';
+import { replayHoldEdges, replayRead, type ReplayCause } from './projectHostedLandingReplay';
 import { capsuleHistoryContext } from './projectLandingCapsuleContext';
 import type { LandingCapsule } from '../src/landing-capsule';
 
@@ -153,6 +154,7 @@ export function archivedAttemptHistory(capsule: LandingCapsule, context: Record<
     attempts: live,
     nextBeforeAttempt,
     historyPartial,
+    stampedHoldEdges,
     ...reply
   } = context;
   const state = capsule.anchor;
@@ -178,9 +180,10 @@ export function archivedAttemptHistory(capsule: LandingCapsule, context: Record<
     );
   });
   const liveAttempts = live as Array<{ id: string; number: number; reserved?: true }>;
-  // After relocation the stamp travels in the capsule, not in the live rows (ced8e98f).
-  if (reply.holdEdges === 'unrecorded' && page.some(row => row.replay?.holdEdges === 'none'))
-    reply.holdEdges = 'none';
+  // After relocation the stamp travels in the capsule, not in the live rows (ced8e98f): the live
+  // read sends the stamped answer along for this case only.
+  const stamp = page.find(row => row.replay?.holdEdges)?.replay?.holdEdges;
+  if (stamp && stampedHoldEdges) reply.holdEdges = (stampedHoldEdges as Record<string, unknown>)[stamp];
   const merged = new Map(attempts.map(entry => [entry.number, entry as (typeof liveAttempts)[number]]));
   for (const entry of liveAttempts) if (!entry.reserved) merged.set(entry.number, entry);
   const selected = [...merged.values()].sort((a, b) => b.number - a.number).slice(0, PAGE);
@@ -202,6 +205,7 @@ async function reservedAttempt(
   attempt: { id: string; number: number; at: string; main: HostedLandingState['request']['expectedMain'] },
   composeOperationId: string,
   observedAt: string,
+  reservedCause?: ReplayCause,
 ) {
   const step = await preparingSourceStep(ctx, projectId, state.actor, composeOperationId);
   const failure = step ? sourceStepFailureField(step) : undefined;
@@ -219,7 +223,11 @@ async function reservedAttempt(
     current: true,
     reserved: true,
     phase: failed ? 'terminal-failed' : 'composing',
-    replay: replayRead(attempt, censor ? { censor } : undefined, state.phase),
+    replay: replayRead(
+      attempt,
+      censor ? { censor, ...(reservedCause ? { replacementCause: reservedCause } : {}) } : undefined,
+      state.phase,
+    ),
     composeOperationId,
     periods: composition ? [composition] : [],
     ...(failed ? { cause: cause(state.error) } : {}),
@@ -298,6 +306,7 @@ export const read = query({
                     attempt,
                     desired.composeOperationId,
                     observedAt,
+                    desired.reservedCause,
                   ),
                 ],
         });
@@ -360,6 +369,7 @@ export const read = query({
                 { id: pending.id, number: pending.number, at: pending.at, main: pending.main },
                 pending.operations.compose,
                 observedAt,
+                row.reservedCause,
               ),
             ]
           : [];
@@ -378,10 +388,15 @@ export const read = query({
         // The first page holds the landed attempt and its stamp; a later page has no answer to give.
         ...(beforeAttempt === undefined
           ? {
-              holdEdges: replayHoldEdges(
-                row.orderWaits,
-                rows.map(entry => entry.replay),
-              ),
+              // A live entry's waits are written by the current recorder; an ended one carries the
+              // stamp its landing or terminal write recorded. A cancel ends a reserved recompose without
+              // an attempt write, so the cause it keeps on the request row stands for that stamp.
+              holdEdges: replayHoldEdges(landingOrderEvidence(row, undefined), [
+                (row.phase !== 'landed' && row.phase !== 'terminal-failed') || row.reservedCause
+                  ? { holdEdges: 'recorded' }
+                  : undefined,
+                ...rows.map(entry => entry.replay),
+              ]),
             }
           : {}),
         ...(state.batchId ? { batchId: state.batchId } : {}),
@@ -394,6 +409,16 @@ export const read = query({
           ...reply,
           ...(row.admission ? { admissionRunId: row.admission.runId } : {}),
           ...(beforeAttempt === undefined ? {} : { beforeAttempt }),
+          ...(beforeAttempt === undefined
+            ? {
+                stampedHoldEdges: Object.fromEntries(
+                  (['none', 'recorded'] as const).map(stamp => [
+                    stamp,
+                    replayHoldEdges(landingOrderEvidence(row, undefined), [{ holdEdges: stamp }]),
+                  ]),
+                ),
+              }
+            : {}),
         });
       return JSON.stringify(row.capsule ? { ...reply, archived: true } : reply);
     } catch (error) {

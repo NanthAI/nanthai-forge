@@ -52,8 +52,9 @@ export async function cancelHostedLanding(
     /** A save of the same Lane moved its head (f7539ebb): the entry ends superseded, not cancelled.
      * The save already authorized the Lane write, so no separate submitter check applies. */
     supersede?: { laneId: string; head: string };
-    /** The caller's cause for the censored attempt (ced8e98f): a save names its head, a recovery its code. */
-    replacementCause?: import('./projectHostedLandingReplay').ReplayCause;
+    /** The caller's cause for the censored attempt (ced8e98f): a save names its head, a recovery its
+     * code, an ending with no replacement (`cancelled`) its path. Required, so no caller leaves it out. */
+    replacementCause: import('./projectHostedLandingReplay').ReplayCause;
   },
 ) {
   const { projectId, actor, request } = input;
@@ -144,6 +145,8 @@ export async function cancelHostedLanding(
       wake: null,
       alarm: null,
       preparing: undefined,
+      // The reservation never became an attempt row; its history reads the cause from here.
+      ...(previous.phase === 'terminal-failed' ? {} : { reservedCause: input.replacementCause }),
     });
     if (previous.phase !== 'terminal-failed') await recordLandingFeed(ctx, state);
     await notifyStackedLandingEnded(ctx, {
@@ -208,15 +211,10 @@ export async function cancelHostedLanding(
         },
       };
       // The caller names the censored attempt's cause; this write never infers it from supersede.
-      result = await writeLanding(
-        ctx,
-        row,
-        result,
-        false,
-        true,
-        undefined,
-        input.replacementCause ? { replay: { replacementCause: input.replacementCause } } : undefined,
-      );
+      result = await writeLanding(ctx, row, result, false, true, undefined, {
+        replay: { replacementCause: input.replacementCause },
+        reservedCause: input.replacementCause,
+      });
       await settleLandingOperation(ctx, result);
     }
     const batchId = state.batchId ?? state.batchOriginId;

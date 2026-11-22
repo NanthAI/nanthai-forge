@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedBatchAbandon.ts": "718db56e14cfa3263eb51933d2d1dc7d36fe0f97baefb34dd675aac0800b8f24"
+  },
+  "replay": {
+    "incident": "19328518",
+    "test": "abandon cancels the Lane ${phase} submission through the ordinary cancellation path; replay is inert",
+    "receipt": "02aaad71-6472-4823-af25-a604ceb08300"
+  },
+  "authorModel": "claude-opus-5-5",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A9d634eb2-0bd0-4613-af6e-be394a725fc2",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A4211b7bf-1c71-4dbc-a939-fff7c07f90c1%3Adelegate-task%3Ac92f646d-e820-48fd-8225-7c7af9119cc0",
+    "receipt": "02aaad71-6472-4823-af25-a604ceb08300"
+  },
+  "exercised": {
+    "convex/projectHostedBatchAbandon.ts": {
+      "executed": [
+        "schedule",
+        "scheduleAbandonedBatchReselection"
+      ],
+      "digest": "e67a82574accbc0102096a0acb84e2f3881066f2454421f42685dd69b9bf39ef",
+      "units": [
+        [
+          "cancelCandidateMembers",
+          "5ff89ae9f1ae274834fff9b5940e609eca8b34adc8618e59282a4d86f1eef356"
+        ],
+        [
+          "cancelHostedLanding",
+          "aaeb910dfe4433ba79699ea0b5937dc6ec8acb8992dad4f6595cd8fd90957d06"
+        ],
+        [
+          "fields",
+          "cd5d0c579fc7491a7cd6c00221d4c6ca3764601bcd43072da1ab08050b4a1971"
+        ],
+        [
+          "internalMutation",
+          "2d2e8c5fe8c87a66a55fab17b47bc1e8d757288506b6d2be6e2bbd8f4d58d9e4"
+        ],
+        [
+          "makeFunctionReference",
+          "90760cdb0f99f8303180da5ca3bbe536fdac31c89e78b170e62dbf914920e3e4"
+        ],
+        [
+          "readHostedRecord",
+          "f8ebe857e46255798f036f3db0acb78682a740661afb1147e12c1163e7ad5ee2"
+        ],
+        [
+          "reselect",
+          "6dfb3e6e9c1e320a64bbf0903be7a99f8045b978b88de965a5be1a30303eb545"
+        ],
+        [
+          "schedule",
+          "365b92436c71ac1e4d519aa9cfb060f131813008a5d2b77e6eaf437d082719c4"
+        ],
+        [
+          "scheduleAbandonedBatchReselection",
+          "8aaca4f9afa1bb91165db329499648be897b02fd95f8599940fb391656282df6"
+        ],
+        [
+          "storedLandingStateSchema",
+          "84f2e6ac995c11ec270f1529329561cce7a49b20ebc8bf42dd09977cfa51b6a4"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ]
+      ]
+    }
+  }
+}

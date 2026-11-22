@@ -7,7 +7,12 @@ import { publishLandingBatch } from './projectHostedLandingBatchPublish';
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
 import { loadFinish, failFinish } from './projectHostedFinishStore';
-import { loadLanding, writeLanding, type LandingIdentity } from './projectHostedLandingStore';
+import {
+  loadLanding,
+  loadLandingAttempt,
+  writeLanding,
+  type LandingIdentity,
+} from './projectHostedLandingStore';
 import { retryFinish, scheduleFinish, watchFinishCompose } from './projectHostedFinishWake';
 import { prepareFinishCompose, installFinishCompose, reserveFinishRetry } from './projectHostedFinishCompose';
 import { hostedComposeInput } from './projectHostedComposeStore';
@@ -291,7 +296,25 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
         // Yield the Channel so later independent runnable requests can advance.
         const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
         if (queue) await releaseLandingQueue(ctx, queue);
-        await reserveFinishRetry(ctx, (await ctx.db.get(row._id))!, value);
+        // A policy change names the pinned digest it outdated (the attempt pin is cached).
+        const policy =
+          error.code === 'POLICY_CHANGED'
+            ? {
+                kind: 'policy' as const,
+                link: (
+                  await loadLandingAttempt(ctx, { projectId: input.projectId, attemptId: state.attemptId })
+                ).policyDigest,
+              }
+            : undefined;
+        await reserveFinishRetry(
+          ctx,
+          (await ctx.db.get(row._id))!,
+          value,
+          undefined,
+          undefined,
+          undefined,
+          policy,
+        );
         const cohort =
           error.code === 'CHANNEL_CHANGED' ? await laneRefusalCohort(ctx, { row: landing, state }) : null;
         if (cohort) await wakeAfterLaneRefusal(ctx, input, cohort);

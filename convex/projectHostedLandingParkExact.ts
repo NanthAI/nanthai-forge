@@ -78,7 +78,12 @@ export async function parkEntry(
     ...pins,
     // A cohort-installed attempt checks the shared tree; the entry's own Candidate is its member one.
     ...(own.memberCandidate ? { candidate: own.memberCandidate } : {}),
-    ...(await forkLandingAttempt(ctx, entry.state)),
+    // Main red names its audit; a CI-down park names the run the provider could not serve.
+    ...(await forkLandingAttempt(
+      ctx,
+      entry.state,
+      as.auditRunId ? { kind: 'audit', link: as.auditRunId } : { kind: 'provider-retry', link: run.id },
+    )),
     check: null,
     deferredCheck: true as const,
     operations: { check: crypto.randomUUID(), accept: crypto.randomUUID() },
@@ -114,15 +119,7 @@ export async function parkEntry(
       error: as.error,
     },
     as.hold,
-    {
-      replacementReplay: {
-        ...checkReplay(run),
-        // Main red names its audit; a CI-down park names the run the provider could not serve.
-        replacementCause: as.auditRunId
-          ? { kind: 'audit', link: as.auditRunId }
-          : { kind: 'provider-retry', link: run.id },
-      },
-    },
+    { replacementReplay: checkReplay(run) },
   );
 }
 

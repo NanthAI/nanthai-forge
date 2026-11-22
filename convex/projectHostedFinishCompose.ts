@@ -6,7 +6,8 @@ import { finishChild } from '../src/finish-child';
 import { mainSemanticMembers, mergeSemanticMembers, semanticBaseSequence } from './projectSemanticContracts';
 import { readHostedRecord, hostedWriteProject } from './projectHostedRecords';
 import type { MutationCtx } from './_generated/server';
-import type { Doc } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
+import type { ReplayCause } from './projectHostedLandingReplay';
 import { hostedStartMain } from './projectHostedChannels';
 import { keepTheRunOn } from './projectHostedKeepSwitch';
 import { beginHostedOperation } from './projectHostedOperations';
@@ -33,7 +34,7 @@ import {
 } from '../src/hosted-finish';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
-import { storedLandingStateSchema, landingObservation } from '../src/hosted-landing';
+import { storedLandingStateSchema, landingObservation, type HostedLandingState } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
 import { validCrossHeadProof, type CrossHeadProof } from '../src/hosted-cross-head-proof';
 import { carriedCostCounts } from '../src/landing-speed-alerts';
@@ -75,6 +76,21 @@ async function continuePrecompose(ctx: MutationCtx, row: Doc<'projectHostedFinis
   );
   return true;
 }
+/** Why an install replaces the current attempt when its retry reservation recorded no cause (an
+ * attempt rotated after the reservation): the mover when the pending base moved, else unknown. */
+async function installCause(
+  ctx: MutationCtx,
+  state: HostedLandingState,
+  main: { head: string; receiptId: string },
+): Promise<ReplayCause> {
+  const parent = await loadLandingAttempt(ctx, {
+    projectId: state.projectId as Id<'hostedProjects'>,
+    attemptId: state.attemptId,
+  });
+  return parent.main.head !== main.head || parent.main.receiptId !== main.receiptId
+    ? { kind: 'main-race', link: main.receiptId }
+    : { kind: 'unknown', link: 'finish-install:ATTEMPT_REPLACED' };
+}
 /** A main race is not a retry of the old request or a reusable check. Retain a
  * named child before IO, yield with bounded backoff, and resume that child only. */
 export async function reserveFinishRetry(
@@ -84,7 +100,7 @@ export async function reserveFinishRetry(
   cause: 'BATCH_FALLBACK' | 'CHECK_EVIDENCE_REFRESH' = 'CHECK_EVIDENCE_REFRESH',
   precompose?: NonNullable<HostedFinish['pending']>['precompose'],
   observedMain?: { head: string; receipt: { id: string } },
-  replayCause?: import('./projectHostedLandingReplay').LandingReplay['replacementCause'],
+  replayCause?: ReplayCause,
 ) {
   invariant(!value.pending, 'WORK_STALE', 'Resume the already pending finish attempt.');
   const input = { projectId: row.projectId, submissionId: row.submissionId };
@@ -102,9 +118,18 @@ export async function reserveFinishRetry(
   // Batch fallback can rotate metadata attempts without changing this finish's
   // immutable original selection. Its same-main source cache remains valid;
   // installation independently checks exact input/dependency roots below.
+  const mainChanged = main.head !== previous.main.head || main.receipt.id !== previous.main.receiptId;
   const pending = {
     ...(precompose ? { precompose } : {}),
-    ...(await forkLandingAttempt(ctx, state)),
+    // The caller's named cause, else the mover when main moved; the retry code otherwise.
+    ...(await forkLandingAttempt(
+      ctx,
+      state,
+      replayCause ??
+        (mainChanged
+          ? { kind: 'main-race', link: main.receipt.id }
+          : { kind: 'unknown', link: `finish-retry:${cause}` }),
+    )),
     at: new Date(Date.now()).toISOString(),
     main: { head: main.head, receiptId: main.receipt.id },
     operations: {
@@ -113,7 +138,6 @@ export async function reserveFinishRetry(
       accept: crypto.randomUUID(),
     },
   };
-  const mainChanged = main.head !== previous.main.head || main.receipt.id !== previous.main.receiptId;
   if (!precompose)
     await retainLandingProgress(
       ctx,
@@ -127,7 +151,7 @@ export async function reserveFinishRetry(
             : 'The acceptance evidence needs an exact refresh; main did not change.',
       },
       pending.main,
-      { replacedByAttemptId: pending.id, ...(replayCause ? { replacementCause: replayCause } : {}) },
+      { replacedByAttemptId: pending.id },
     );
   const retiringSolo =
     !precompose && !state.batchId && (state.phase === 'checking' || state.phase === 'ready');
@@ -427,7 +451,12 @@ export async function installFinishCompose(
         projectId: row.projectId,
         attemptId: state.firstAttemptId,
       });
-      const { id: attemptId, ...fork } = await forkLandingAttempt(ctx, state, pending);
+      const { id: attemptId, ...fork } = await forkLandingAttempt(
+        ctx,
+        state,
+        { kind: 'conflict', link: candidate.id },
+        pending,
+      );
       const attempt = await pinLandingAttempt(ctx, {
         ...input,
         actor: original.actor,
@@ -541,7 +570,15 @@ export async function installFinishCompose(
     !proof && previous && candidate.result.status === 'clean'
       ? scopedRecheckFallback(previous, recheck)
       : undefined;
-  const { id: attemptId, ...fork } = await forkLandingAttempt(ctx, state, pending);
+  const { id: attemptId, ...fork } = await forkLandingAttempt(
+    ctx,
+    state,
+    // An exposed conflict outranks the base comparison, as it did when the cause was derived.
+    candidate.result.status === 'conflict'
+      ? { kind: 'conflict', link: candidate.id }
+      : await installCause(ctx, state, pending.main),
+    pending,
+  );
   // This replacement may start now or later in the queue. Attach the donor evaluation to
   // its attempt on the same write that already records the first-check refusal.
   const checkedAdmission = landing.admission;

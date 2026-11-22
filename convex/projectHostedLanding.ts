@@ -93,6 +93,7 @@ export const cancel = mutation({
         projectId: input.projectId,
         actor: actor.id,
         request: hostedLandingCancelSchema.parse(JSON.parse(input.request)),
+        replacementCause: { kind: 'cancelled', link: 'operator-cancel' },
       });
       return canonicalPayload(
         await landingMessageForReader(ctx, input.projectId, landingWithoutClientHold(result)),

@@ -767,3 +767,21 @@ test('the accepted landing ledger exports replay evidence with no check-run look
   assert.deepEqual(current.attemptReplay[0].actualBase, base);
   assert.equal(current.holdEdges, 'none');
 });
+
+test('ced8e98f: a stamped receipt types an approved-check hold; one landed before the stamp reads unrecorded', async () => {
+  const f = fixture();
+  const orderWaits = [
+    { submissionId: id('sub', 1), held: 'approved-check', footprints: 'unknown', seconds: 9 },
+  ];
+  f.landing(1, { at: 60 });
+  f.landing(2, { at: 90, orderWaits });
+  const edges = async () => (await f.read()).landings[1].holdEdges;
+  assert.deepEqual(await edges(), [
+    { holderSubmissionId: id('sub', 1), edgeType: 'unrecorded', heldSeconds: 9 },
+  ]);
+  const landed = f.tables.projectHostedLandingAttempts.find(row => row.submissionId === id('sub', 2));
+  landed.replay = { holdEdges: 'recorded' };
+  assert.deepEqual(await edges(), [
+    { holderSubmissionId: id('sub', 1), edgeType: 'approved-check', heldSeconds: 9 },
+  ]);
+});

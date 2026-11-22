@@ -467,7 +467,9 @@ export async function publishLandingBatch(
       replay: {
         ...checkReplay(run),
         actualBase: receipt.previous,
-        ...(receipt.orderWaits ? {} : { holdEdges: 'none' as const }),
+        // Claim waits and handoffs are the hold edges, each typed; with neither, say so (ced8e98f).
+        holdEdges:
+          receipt.orderWaits || currentRow.orderHandoffs?.length ? ('recorded' as const) : ('none' as const),
       },
     });
     await settleLandingOperation(ctx, next);

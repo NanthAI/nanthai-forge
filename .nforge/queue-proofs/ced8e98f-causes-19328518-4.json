@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingExhaust.ts": "c50dae8ca07453436e0036e5672186be42cc0a424929a2aed54aaaf2c6f2c3e5"
+  },
+  "replay": {
+    "incident": "19328518",
+    "test": "incident replay 2026-10-30 13:23/14:20: a step that fails on every retry ends with a typed reason and an alert",
+    "receipt": "02aaad71-6472-4823-af25-a604ceb08300"
+  },
+  "authorModel": "claude-opus-5-5",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A9d634eb2-0bd0-4613-af6e-be394a725fc2",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A4211b7bf-1c71-4dbc-a939-fff7c07f90c1%3Adelegate-task%3Ac92f646d-e820-48fd-8225-7c7af9119cc0",
+    "receipt": "02aaad71-6472-4823-af25-a604ceb08300"
+  },
+  "exercised": {
+    "convex/projectHostedLandingExhaust.ts": {
+      "executed": [
+        "alertExhausted",
+        "exhaustLanding",
+        "exhaustedReason"
+      ],
+      "digest": "825baae0a8142be715b46b2fc4984c92e488ca531dca2197be177aad1f974c45",
+      "units": [
+        [
+          "LANDING_DRIVER_EXHAUSTED",
+          "7673fb04300773d4b8431d17f8cf8767d5030614e20de08b63398251a6c98083"
+        ],
+        [
+          "alertExhausted",
+          "9fdda8a69852acc08f3b60c3a4d2b869ca4b7805cdfc4d6c532989724aca6bee"
+        ],
+        [
+          "cancelHostedLanding",
+          "aaeb910dfe4433ba79699ea0b5937dc6ec8acb8992dad4f6595cd8fd90957d06"
+        ],
+        [
+          "exhaustLanding",
+          "fc71bc09dffd45039ebe95cdda523a17be03e5e1d41af541e9ca736bf6b55cfc"
+        ],
+        [
+          "exhaustedReason",
+          "fe4f5b6cc07b2ceaf121ea2c3e7b0b5758f2492a621cbb11fa6c0d34232df411"
+        ],
+        [
+          "hostedLandingProgressAt",
+          "934f487989ee4215885647fb5284123fb12fd3c9469dffa80e0484b2244e414e"
+        ],
+        [
+          "raiseExhaustedAlert",
+          "091498ba18347cff271b09f3cc9be11fb00a21f3cb9a13944395ad03b292c5ad"
+        ]
+      ]
+    }
+  }
+}

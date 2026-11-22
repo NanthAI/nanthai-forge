@@ -5,7 +5,7 @@ import { wakeLandingCapsule, landingCapsuleGraceMs } from './projectLandingCapsu
 import { withLandingCapsule } from './projectLandingCapsuleStore';
 import { unsealedBy } from '../src/landing-overtake';
 export { landingAttemptRow, loadLandingAttempt } from './projectHostedLandingAttemptRead';
-import { checkReplay, replacementCauseOf, type LandingReplay } from './projectHostedLandingReplay';
+import { checkReplay, type LandingReplay, type ReplayCause } from './projectHostedLandingReplay';
 import { recordLandingFeed } from './projectFeedTerminal';
 import { landingAttemptRow, loadLandingAttempt, pinsFor } from './projectHostedLandingAttemptRead';
 import { closeOrderWait, holdsLandingOrder, landingPriorityState } from './projectHostedLandingOrder';
@@ -89,19 +89,27 @@ export function landingStateFromRow(row: LandingRow) {
   );
   return landingPriorityState(row, state);
 }
+// Why each forked parent is being replaced, for the retire write later in the same invocation.
+const forkCauses = new WeakMap<MutationCtx, Map<string, ReplayCause>>();
 /** One ordinal allocator for every immutable child, including a finish whose source IO
  * reserved its identity before another writer forked. The current landing head, not a retained
  * reservation's old parent/number, owns the next ordinal. Existing invocation-local pin reads
- * are reused; the disjoint path performs no additional DB work. */
+ * are reused; the disjoint path performs no additional DB work. Every child names why it
+ * replaces its parent (ced8e98f): the retire write records that cause, so no retiring path can
+ * leave it unrecorded (the fork guard keeps this the only allocator). */
 export async function forkLandingAttempt(
   ctx: MutationCtx,
   state: HostedLandingState,
+  cause: ReplayCause,
   reserved?: { id: string },
 ) {
   const parent = await loadLandingAttempt(ctx, {
     projectId: state.projectId as Id<'hostedProjects'>,
     attemptId: state.attemptId,
   });
+  let causes = forkCauses.get(ctx);
+  if (!causes) forkCauses.set(ctx, (causes = new Map()));
+  causes.set(`${state.projectId}:${parent.id}`, cause);
   return { id: reserved?.id ?? crypto.randomUUID(), parentAttemptId: parent.id, number: parent.number + 1 };
 }
 
@@ -180,6 +188,8 @@ export async function writeLanding(
     publishedMainReceiptId?: string;
     replay?: LandingReplay | undefined;
     replacementReplay?: LandingReplay;
+    /** A cancel's cause, kept on the request row it already writes (a reserved recompose). */
+    reservedCause?: ReplayCause;
   },
 ) {
   const hold = options?.hold;
@@ -310,14 +320,10 @@ export async function writeLanding(
   }
   const changedAttempt = previous.attemptId !== state.attemptId;
   if (changedAttempt)
-    await retainLandingProgress(
-      ctx,
-      previous,
-      true,
-      attempt.main,
-      { ...options?.replacementReplay, replacedByAttemptId: state.attemptId },
-      attempt,
-    );
+    await retainLandingProgress(ctx, previous, true, attempt.main, {
+      ...options?.replacementReplay,
+      replacedByAttemptId: state.attemptId,
+    });
   // Retain a repaired cohort owner's diagnosis in later observations and the terminal receipt.
   // Its progress token distinguishes historical recovery from a current stall.
   if (!state.observation.stall && retainedStallOwner(previous.observation.stall))
@@ -350,7 +356,15 @@ export async function writeLanding(
   // The existing release lookup can supply the exact check when a withdrawal
   // ends a live run before its first landing progress update. Freeze once.
   const freezeAfterRelease = ended && !changedAttempt && releaseRun && row.runId !== null;
-  if (!freezeAfterRelease) await retainLandingProgress(ctx, state, false, undefined, options?.replay);
+  // A failed or cancelled entry keeps its hold edges typed, as a landed one does (ced8e98f).
+  const endReplay: LandingReplay | undefined =
+    state.phase === 'terminal-failed' && previous.phase !== 'terminal-failed' && !options?.replay?.holdEdges
+      ? {
+          ...options?.replay,
+          holdEdges: row.orderWaits?.length || row.orderHandoffs?.length ? 'recorded' : 'none',
+        }
+      : options?.replay;
+  if (!freezeAfterRelease) await retainLandingProgress(ctx, state, false, undefined, endReplay);
   const advice = row.wouldConflict ? JSON.parse(row.wouldConflict) : undefined;
   const speculative = Boolean(advice?.predecessor);
   const retireAdvice =
@@ -427,6 +441,7 @@ export async function writeLanding(
       : undefined;
   const ownerDecision = reviewState(row, state);
   await ctx.db.patch(row._id, {
+    ...(options?.reservedCause ? { reservedCause: options.reservedCause } : {}),
     ...(ownerDecision !== row.reviewState ? { reviewState: ownerDecision } : {}),
     ...(alarm && alarm.id === row._id ? { alarm: alarm.alarm } : {}),
     ...(unsealed ? { unsealed } : {}),
@@ -510,7 +525,7 @@ export async function writeLanding(
       : null;
   if (freezeAfterRelease)
     await retainLandingProgress(ctx, state, false, undefined, {
-      ...options?.replay,
+      ...endReplay,
       ...(releasedRun && !options?.replay?.check ? checkReplay(releasedRun) : {}),
     });
   if (state.phase === 'landed' && previous.phase !== 'landed' && state.acceptance) {
@@ -641,8 +656,6 @@ export async function retainLandingProgress(
   replaced: boolean | { code: string; message: string } = false,
   nextMain?: HostedLandingAttempt['main'],
   replay?: LandingReplay,
-  /** The attempt that replaces this one, when the writer installs it now. */
-  successor?: Pick<HostedLandingAttempt, 'candidate' | 'check'>,
 ) {
   const row = await landingAttemptRow(ctx, {
     projectId: state.projectId as Id<'hostedProjects'>,
@@ -698,14 +711,15 @@ export async function retainLandingProgress(
       : {}),
     ...(nextMain ? { actualBase: nextMain } : {}),
     ...(censor ? { censor } : {}),
-    // Every replacement names its cause in this same write; `unknown` keeps an unnamed one countable.
-    ...(replacement && !replay?.replacementCause && !row.replay?.replacementCause
+    // Every replacement or censor records its cause in this same write: the writer's, else its
+    // fork's. A cancelled check ended the entry; anything else unnamed stays countable as `unknown`.
+    ...(censor && !replay?.replacementCause && !row.replay?.replacementCause
       ? {
-          replacementCause: replacementCauseOf({
-            code: replacement.code,
-            nextMain: mainChanged ? nextMain : undefined,
-            successor,
-          }),
+          replacementCause:
+            (replacement && forkCauses.get(ctx)?.get(`${state.projectId}:${state.attemptId}`)) ||
+            (!replacement && censor === 'CHECK_CANCELLED'
+              ? { kind: 'cancelled' as const, link: 'check-cancelled' }
+              : { kind: 'unknown' as const, link: `retain:${censor}` }),
         }
       : {}),
   };

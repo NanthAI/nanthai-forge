@@ -73,6 +73,7 @@ async function cancelLanePage(
           projectId: plan.projectId,
           actor: plan.actor,
           abandonOperationId: plan.operationId,
+          replacementCause: { kind: 'cancelled', link: 'lifecycle-abandon' },
           reason: `Saved lane ${laneId} was abandoned by lifecycle ${plan.operationId}; its pending ${(state.batchId ?? state.batchOriginId) ? 'batch landing was cancelled and peers requeued' : 'landing was cancelled'}. Reopen the saved work and finish again to propose it.`,
           request: { operationId, authorityEpoch: plan.authorityEpoch, submissionId: row.submissionId },
         });

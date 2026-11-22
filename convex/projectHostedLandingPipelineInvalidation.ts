@@ -145,7 +145,8 @@ async function invalidatePipelineOnce(
       void _fork;
       const attempt = {
         ...kept,
-        ...(await forkLandingAttempt(ctx, state)),
+        // The pinned predecessor's change retires this stacked attempt.
+        ...(await forkLandingAttempt(ctx, state, { kind: 'pair-interaction', link: pinned.submissionId })),
         check: null,
         deferredCheck: true as const,
         operations: { check: crypto.randomUUID(), accept: crypto.randomUUID() },
@@ -171,10 +172,7 @@ async function invalidatePipelineOnce(
         false,
         undefined,
         {
-          replacementReplay: {
-            ...retiredCheck,
-            replacementCause: { kind: 'pair-interaction', link: pinned.submissionId },
-          },
+          replacementReplay: retiredCheck,
         },
       );
     }

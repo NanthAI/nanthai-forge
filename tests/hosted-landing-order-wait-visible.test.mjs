@@ -218,10 +218,16 @@ test('replay 19328518: a parked passed landing names the older submission it wai
           wait.held === 'dependent'
             ? 'dependent'
             : wait.footprints === 'unknown'
-              ? 'unrecorded'
+              ? wait.held
               : wait.footprints,
         heldSeconds: PARKED_MS / 1000,
       });
+      assert.notEqual(reply.landings[0].holdEdges[0].edgeType, 'unrecorded', 'a stamped hold is typed');
+      // ced8e98f: the landed attempt carries the stamp that types every listed hold kind.
+      const landedRow = [...f.tables.projectHostedLandingAttempts.values()].find(
+        row => row.attemptId === accepted.attemptId,
+      );
+      assert.equal(landedRow.replay?.holdEdges, 'recorded', 'a held landing is stamped recorded');
     }
   }
   const olderChain = attempts(f, older.id);

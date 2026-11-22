@@ -229,17 +229,12 @@ test('attempt replay records the mover and checked prefix, links a conflict rech
       projectId: f.projectId,
       attemptId: state.attemptId,
     });
-    const child = { ...original, ...(await store.forkLandingAttempt(ctx, state)) };
+    const child = {
+      ...original,
+      ...(await store.forkLandingAttempt(ctx, state, { kind: 'conflict', link: conflictBatch })),
+    };
     await store.insertLandingAttempt(ctx, child);
-    await store.writeLanding(
-      ctx,
-      row,
-      { ...state, attemptId: child.id, version: state.version + 1 },
-      false,
-      true,
-      undefined,
-      { replacementReplay: { replacementCause: { kind: 'conflict', link: conflictBatch } } },
-    );
+    await store.writeLanding(ctx, row, { ...state, attemptId: child.id, version: state.version + 1 }, false);
     await ctx.db.patch(row._id, {
       orderWaits: [{ submissionId: first.id, held: 'dependent', footprints: 'overlap', seconds: 37 }],
     });
@@ -259,6 +254,10 @@ test('attempt replay records the mover and checked prefix, links a conflict rech
   assert.deepEqual(history.attempts[1].replay.replacementCause, { kind: 'conflict', link: conflictBatch });
   assert.equal(history.attempts[0].replay.outcome, 'censored');
   assert.equal(history.attempts[0].replay.censorReason, 'LANDING_CANCELLED');
+  assert.deepEqual(history.attempts[0].replay.replacementCause, {
+    kind: 'cancelled',
+    link: 'operator-cancel',
+  });
   assert.equal(history.attempts[0].replay.waitedToStartMs, 'unrecorded');
 
   // Lead live check 8866a6ed: 57 ATTEMPT_REPLACED and 3 CHANNEL_CHANGED attempts had no cause.
@@ -304,7 +303,7 @@ test('attempt replay records the mover and checked prefix, links a conflict rech
   assert.equal(deferred.censorReason, 'CHANNEL_CHANGED');
   assert.deepEqual(deferred.replacementCause, { kind: 'main-race', link: raced.receipt.id });
 
-  // A child installed on a moved main with no named cause still names the mover (the 3 CHANNEL_CHANGED).
+  // A child installed on a moved main records the mover its fork names (the 3 CHANNEL_CHANGED).
   const moved = await f.enqueue(f.request({ check: null, message: 'Recomposed on a moved main' }));
   const movedKey = { projectId: f.projectId, submissionId: moved.id };
   const movedMain = { head: '9'.repeat(64), receiptId: randomUUID() };
@@ -314,7 +313,11 @@ test('attempt replay records the mover and checked prefix, links a conflict rech
       projectId: f.projectId,
       attemptId: state.attemptId,
     });
-    const child = { ...original, ...(await store.forkLandingAttempt(ctx, state)), main: movedMain };
+    const child = {
+      ...original,
+      ...(await store.forkLandingAttempt(ctx, state, { kind: 'main-race', link: movedMain.receiptId })),
+      main: movedMain,
+    };
     await store.insertLandingAttempt(ctx, child);
     await store.writeLanding(ctx, row, { ...state, attemptId: child.id, version: state.version + 1 }, false);
   });

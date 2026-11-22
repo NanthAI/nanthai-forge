@@ -123,6 +123,7 @@ export async function declineHeldLanding(
     projectId: input.projectId,
     actor,
     code: 'REVIEW_DECLINED',
+    replacementCause: { kind: 'cancelled', link: 'review-declined' },
     reason: `Declined by the project owner${why ? `: ${why}` : '.'} Address it in the same Lane and land again.`,
     request: {
       operationId: input.operationId,

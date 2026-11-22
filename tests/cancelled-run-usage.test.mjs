@@ -836,6 +836,7 @@ for (const [mode, reportFirst] of [
           projectId: f.projectId,
           actor: original.actor,
           request: { operationId: randomUUID(), submissionId: original.id, authorityEpoch: 1 },
+          replacementCause: { kind: 'cancelled', link: 'operator-cancel' },
         });
         const operationId = randomUUID();
         const actor = { kind: 'agent', id: original.actor };
