@@ -1,0 +1,36 @@
+{
+  "baseline": {
+    "trace_rate": 5,
+    "offers_per_hour": 5,
+    "full_minutes": 9.5,
+    "full_worker_minutes": 80,
+    "full_slots": 12,
+    "full_fraction": 0.6,
+    "scoped_minutes": 7.72,
+    "scoped_worker_minutes": 78.25,
+    "scoped_slots": 12,
+    "packages": 12,
+    "shared_path_fraction": 0.2
+  },
+  "slow-ci": {
+    "full_minutes": 60,
+    "full_worker_minutes": 505.2631578947368,
+    "scoped_minutes": 48.7578947368421,
+    "scoped_worker_minutes": 494.2105263157895
+  },
+  "high-traffic-30": {
+    "trace_rate": 30,
+    "offers_per_hour": 30
+  },
+  "high-traffic-60": {
+    "trace_rate": 60,
+    "offers_per_hour": 60
+  },
+  "weak-selection": {
+    "full_fraction": 0.8
+  },
+  "large-monorepo": {
+    "packages": 200,
+    "shared_path_fraction": 0.6
+  }
+}
