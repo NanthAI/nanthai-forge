@@ -21,6 +21,7 @@ The [code structure audit](#code-structure-audit) records proposed path conventi
 | --- | --- | --- | --- |
 | `forge/no-convex-collect` | lint, `convex/` | `.collect()` reads every matching document at any scale (e32cb0e7: 3 unbounded metrics reads cost about $0.11; 1b66b35a: 149 KB pages) | `tests/lint-rules.test.mjs` |
 | `forge/convex-bounded-query` | lint, `convex/` | `db.query()` with no index and no limit is a full-table scan (same incidents) | `tests/lint-rules.test.mjs` |
+| [Bounded web reads](#bounded-web-reads) | test | a web page open that follows every page of a collection reads more the larger the project grows (ac886ed1 on Item 686ecdde: 80 to 800 calls and 26 to 41 MB per open, about $4 per 1,000 landings) | `tests/web-bounded-reads.test.mjs` |
 | `forge/no-readonly-fsync` | lint, `src/` | fsync through a read-only handle: a directory, or a file opened only to flush it. Windows refuses both with EPERM (89460350: `init-native` failed on windows-latest); use the `state/durability.ts` helpers | `tests/lint-rules.test.mjs` |
 | `forge/native-path-separator` | lint, `src/` | a `/` appended to a `node:path` `join`/`resolve`/`dirname` or `realpathSync` result never matches on Windows (89460350: `save` refused every native Lane on windows-latest); use `sep`, or `posix` for repository paths | `tests/lint-rules.test.mjs` |
 | `forge/no-raw-mode-bits` | lint, `src/` | `mode & 0o111` or `mode & 0o077` read straight from disk: Windows stores neither, so a save there recorded every executable file as plain and `import-native-git` refused every retained file (89460350); use `src/file-mode.ts` | `tests/lint-rules.test.mjs` |
@@ -45,6 +46,25 @@ The [code structure audit](#code-structure-audit) records proposed path conventi
 | BYOCI parity | test | a landing fast path that works for Forge's check but not for a project's own command on a pnpm tree with a link and a submodule (05df5aed) | `tests/byoci-parity.test.mjs` |
 | Cross-head shared risk | test | identical-entry overlap removal also removed global/declared inputs and shared-folder risk (1018d0f8 review). Analysis and publication must judge the complete deltas; only an unchanged complete tree bypasses path risk | `tests/hosted-cross-head-reuse.test.mjs`, `tests/hosted-first-check-landing.test.mjs` |
 | Message mirror | test | the finish message dropped from the mirror commit (eacfdb6e, b30284de) | `tests/landing-message-mirror.test.mjs` |
+
+## Bounded web reads
+
+Every page of the rebuilt app (`web/src/app/`, each place and the shell) opens with one bounded
+page or a server summary, never a whole collection. A page reads the same at 100 and at 10,000
+rows; the next page is read only when the reader asks (a "Show more" or "earlier" key).
+
+- Use `useWorkPage` from `web/src/hosted-work-index.ts` (one newest page, `more` for the next),
+  or a paginated server read with an explicit cursor, or a summary query that stops at a fixed
+  `take`/`paginate` size. Server reads also follow `forge/no-convex-collect` and
+  `forge/convex-bounded-query`.
+- Do not call `useWorkRecords`, `useSharedWorkRecords`, `useProjectedDecisions` or
+  `readProjectedDecisions`, and do not ask for the next page from an effect as soon as one
+  arrives (`status === 'CanLoadMore'` then `loadMore`). They follow every cursor and are kept
+  only for the old screens until those are removed.
+- `tests/web-bounded-reads.test.mjs` walks every module the rebuilt app can load (static and
+  lazy imports from `App.tsx` and each `route.ts`) and fails on those calls, and checks that the
+  bounded hook reads one page at 100 and at 10,000 rows. A reviewed exception names why it does
+  not grow with a project or its visitors in the test's `allowed` list.
 
 ## Test hygiene allowlist
 

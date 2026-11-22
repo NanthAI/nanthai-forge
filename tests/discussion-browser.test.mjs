@@ -150,12 +150,17 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
         const page = await open(t, DESK, 'notePages=1');
         const section = page.locator('section[aria-label="Comments"]');
         const count = 'section[aria-label="Comments"] .band .cnt';
+        // Item 686ecdde: an open reads one page, the newest 50 notes; the older page is read only when asked.
+        await page.waitForFunction(selector => document.querySelector(selector)?.textContent === '50', count);
+        assert.match(await section.locator('.band').textContent(), /loaded so far/);
+        await section.getByRole('button', { name: /^Show .* earlier$/ }).click();
+        await section.getByRole('button', { name: /^Show .* earlier$/ }).click();
         await page.waitForFunction(selector => document.querySelector(selector)?.textContent === '51', count);
+        // A new landing moves the first page's boundary; the older page re-reads from the new cut.
         await page.evaluate(() => window.addLandingNote());
         await page.waitForFunction(selector => document.querySelector(selector)?.textContent === '52', count);
-        await section.getByRole('button', { name: /^Show .* earlier$/ }).click();
-        await section.getByRole('button', { name: /^Show .* earlier$/ }).click();
         assert.equal(await section.getByText('Landing note 2', { exact: true }).count(), 1);
+        assert.equal(await section.getByText('Landing note 1', { exact: true }).count(), 1);
       },
     );
 
@@ -224,6 +229,57 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
         await section.getByRole('button', { name: 'Show 20 earlier' }).click();
         await section.getByText('Message 2', { exact: true }).waitFor();
         assert.equal(await section.getByText('Chosen elsewhere').count(), 1);
+      },
+    );
+
+    await t.test(
+      '686ecdde: Versions reads the newest 100 on open and older ones only when asked',
+      async t => {
+        for (const viewport of [DESK, PHONE]) {
+          const page = await open(t, viewport, 'versions=150');
+          const reads = () =>
+            page.evaluate(() =>
+              [...new Set(window.__versionReads.map(read => JSON.stringify(read)))].map(JSON.parse),
+            );
+          assert.deepEqual(await reads(), [], 'an Item page reads no versions until the sheet opens');
+          await page.getByRole('button', { name: 'Versions', exact: true }).click();
+          const sheet = page.getByRole('dialog', { name: 'Version 149 beside version 150' });
+          await sheet.waitFor();
+          const first = await reads();
+          assert.equal(first.length, 1, 'one page on open');
+          assert.equal(first[0].newestFirst, true);
+          assert.deepEqual(first[0].paginationOpts, { cursor: null, numItems: 100 });
+          assert.equal(await sheet.getByLabel('Older').locator('option').count(), 100);
+          await page.addScriptTag({ path: axePath });
+          for (const theme of ['dark', 'light']) {
+            await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
+            await settleBrowserPage(page);
+            const [scroll, inner] = await page.evaluate(() => [
+              document.documentElement.scrollWidth,
+              innerWidth,
+            ]);
+            assert.ok(
+              scroll <= inner,
+              `no sideways scroll at ${viewport.width} ${theme}: ${scroll} > ${inner}`,
+            );
+            const violations = await page.evaluate(async () => {
+              const result = await window.axe.run(document, {
+                runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] },
+              });
+              return result.violations.map(
+                v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`,
+              );
+            });
+            assert.deepEqual(violations, [], `axe on Versions at ${viewport.width} ${theme}`);
+            await shot(page, `versions-${viewport.width}-${theme}`);
+          }
+          await sheet.getByRole('button', { name: 'Read older versions' }).click();
+          await sheet.getByLabel('Older').locator('option').nth(149).waitFor({ state: 'attached' });
+          const all = await reads();
+          assert.equal(all.length, 2, 'asking reads exactly one more page');
+          assert.equal(all[1].paginationOpts.cursor, '51');
+          assert.equal(await sheet.getByRole('button', { name: 'Read older versions' }).count(), 0);
+        }
       },
     );
 

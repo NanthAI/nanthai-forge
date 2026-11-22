@@ -16,7 +16,8 @@ export default function ItemDiscussion({
   itemId: string;
   project?: WhoProject | undefined;
 }) {
-  const { comments, loading, reactions, canWrite, post, react } = useDiscussion(projectId, itemId);
+  const { comments, loading, loadEarlier, loadingEarlier, failed, reactions, canWrite, post, react } =
+    useDiscussion(projectId, itemId);
   const conversation = useConversation(projectId, 'item', itemId);
   const answer = useAnswer(projectId);
   return (
@@ -27,6 +28,9 @@ export default function ItemDiscussion({
       reactions={reactions}
       canWrite={canWrite}
       loading={loading}
+      loadEarlier={loadEarlier}
+      loadingEarlier={loadingEarlier}
+      commentsFailed={failed}
       onPost={post}
       onReact={react}
     />

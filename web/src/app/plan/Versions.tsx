@@ -2,13 +2,13 @@
 // An Item's versions (Item 4c9e961e): compare any two by line and word, and restore one, which writes a new version
 // with that title and body through the batch call (retry-safe, with the 10-second Undo); no version is ever removed.
 // The server allows it to the project owner only, and refuses it when the Item changed meanwhile. Mounted only while
-// the sheet is open, so its pages are read on demand and an idle Item page reads nothing more. Text is shown as plain
-// text, never rendered.
+// the sheet is open, so its pages are read on demand and an idle Item page reads nothing more: the newest 100 versions,
+// and older ones only when asked (Item 686ecdde). Text is shown as plain text, never rendered.
 import { useState } from 'react';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { Key, Sheet } from '../../ds';
 import type { PlanningItem } from '../../../../src/work-planning-types';
-import { useResolvedWorkValue, useWorkIndex, useWorkRecords } from '../../hosted-work-index';
+import { useResolvedWorkValue, useWorkIndex, useWorkPage } from '../../hosted-work-index';
 import { lineDiff } from './diff';
 import type { BatchOutcome } from './batch';
 import type { BatchWrite } from '../../../../src/planning-batch';
@@ -26,7 +26,7 @@ export function Versions({
   onOpenChange: (open: boolean) => void;
 }) {
   const { workspace } = useWorkIndex(projectId);
-  const versions = useWorkRecords<PlanningItem>(projectId, workspace, 'planningVersions', itemId);
+  const versions = useWorkPage<PlanningItem>(projectId, workspace, 'planningVersions', itemId);
   const ordered = [...versions.records].sort((a, b) => b.version - a.version);
   const latest = ordered[0];
   const [left, setLeft] = useState<number | null>(null);
@@ -111,7 +111,9 @@ export function Versions({
             Reading versions…
           </p>
         ) : ordered.length < 2 ? (
-          <p className="t2">This Item has one version; there is nothing to compare yet.</p>
+          versions.complete ? (
+            <p className="t2">This Item has one version; there is nothing to compare yet.</p>
+          ) : null
         ) : (
           <>
             <div className="plan-pair">
@@ -137,9 +139,24 @@ export function Versions({
                 </span>
               ))}
             </pre>
-            {versions.loading ? <p className="t3">Reading older versions…</p> : null}
           </>
         )}
+        {!versions.initialLoading && (versions.more || versions.loadingMore) ? (
+          // Stays mounted while it reads, so keyboard focus is kept (a page can hold few large versions).
+          <Key
+            size="sm"
+            onClick={() => versions.more?.()}
+            aria-disabled={!versions.more}
+            aria-busy={versions.loadingMore}
+          >
+            {versions.loadingMore ? 'Reading older versions…' : 'Read older versions'}
+          </Key>
+        ) : null}
+        {versions.failed ? (
+          <p className="pf" role="alert">
+            Could not read the versions. Close and open Versions to try again.
+          </p>
+        ) : null}
         {error ? (
           <p className="pf" role="alert">
             {error}

@@ -92,13 +92,15 @@ export function useWorkIndex(
   };
 }
 
-/** Transparently page existing choices; no retained record is hidden behind a count ceiling. */
+/** Page a collection. `follow` (the old screens) reads every page; the rebuilt app reads one bounded page and asks
+ * for the next only on `more` (docs/agents/lint-rules.md#bounded-web-reads). */
 function useWorkRows(
   projectId: Id<'hostedProjects'>,
   workspace: WorkIndexWorkspace | null,
   collection: string,
   parentId?: string,
   enabled = true,
+  { follow = true, newestFirst = false }: { follow?: boolean; newestFirst?: boolean } = {},
 ) {
   const selection =
     workspace && enabled
@@ -106,17 +108,18 @@ function useWorkRows(
           projectId,
           generationId: workspace.generationId,
           collection,
-          ...(workspace.capabilities?.recentSummaryPages &&
-          parentId === undefined &&
-          [
-            'intents',
-            'lanes',
-            'views',
-            'runs',
-            'planningItems',
-            'channelMoves',
-            'hostedChannelMoves',
-          ].includes(collection)
+          ...(newestFirst ||
+          (workspace.capabilities?.recentSummaryPages &&
+            parentId === undefined &&
+            [
+              'intents',
+              'lanes',
+              'views',
+              'runs',
+              'planningItems',
+              'channelMoves',
+              'hostedChannelMoves',
+            ].includes(collection))
             ? { newestFirst: true }
             : {}),
           ...(parentId === undefined ? {} : { parentId }),
@@ -133,21 +136,26 @@ function useWorkRows(
   });
   const archived = useArchivePaginatedQuery(workIndex.records, archiveCapable ? selection : 'skip', {
     initialNumItems,
-    followLiveCursors: itemDiscussion,
+    // A newest-first page moves its cut when a record is added; later pages re-read from the new cut, so none is skipped.
+    followLiveCursors: itemDiscussion || !follow,
   });
   const { results, status, loadMore } = archiveCapable ? archived : ordinary;
   // Convex splits any page longer than twice `initialNumItems` into two new subscriptions; larger
   // continuation pages would each be re-read and split twice before the page settles.
   const pageSize = Math.min(100, initialNumItems * 2);
   useEffect(() => {
-    if (enabled && workspace && status === 'CanLoadMore') loadMore(pageSize);
-  }, [enabled, workspace?.generationId, status, loadMore, results.length, pageSize]);
+    if (follow && enabled && workspace && status === 'CanLoadMore') loadMore(pageSize);
+  }, [follow, enabled, workspace?.generationId, status, loadMore, results.length, pageSize]);
   return {
     rows: useMemo(() => [...results].sort((a, b) => a.position - b.position), [results]),
     complete: status === 'Exhausted',
     failed: status === 'Error',
-    loading: enabled && !!workspace && status !== 'Exhausted' && status !== 'Error',
+    loading:
+      enabled &&
+      !!workspace &&
+      (follow ? status !== 'Exhausted' && status !== 'Error' : status === 'LoadingMore'),
     initialLoading: enabled && (!workspace || status === 'LoadingFirstPage'),
+    more: !follow && enabled && status === 'CanLoadMore' ? () => loadMore(pageSize) : undefined,
   };
 }
 type RecordPage = {
@@ -189,6 +197,30 @@ export function useWorkRecords<T>(
         initialLoading: result.initialLoading,
         failed: result.failed,
       };
+}
+/** One bounded page of a collection (newest first by default), never every page: `more` reads the next page on
+ * request and is absent once the last page is read. Reads per open stay one page however large the collection grows
+ * (tests/web-bounded-reads.test.mjs). */
+export function useWorkPage<T>(
+  projectId: Id<'hostedProjects'>,
+  workspace: WorkIndexWorkspace | null,
+  collection: string,
+  parentId?: string,
+  { enabled = true, newestFirst = true }: { enabled?: boolean; newestFirst?: boolean } = {},
+) {
+  const result = useWorkRows(projectId, workspace, collection, parentId, enabled, {
+    follow: false,
+    newestFirst,
+  });
+  const records = useMemo(() => result.rows.map(row => JSON.parse(row.value) as T), [result.rows]);
+  return {
+    records,
+    complete: result.complete,
+    initialLoading: result.initialLoading,
+    loadingMore: result.loading,
+    failed: result.failed,
+    more: result.more,
+  };
 }
 const none: readonly never[] = [];
 /** Records the project frame already holds, never a subscription of its own: empty when not shared. */

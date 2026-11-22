@@ -72,7 +72,8 @@ If a command waits for approval and nobody can answer, cancel it and use the rou
    Compare secrets by hash; use private delivery. Tests use synthetic fixtures.
 3. State calls per record/operation, total Convex calls and DB I/O, peak memory and
    wall time at current scale plus growth. Calls must not rise; idle is zero.
-   Batch pages; no per-item calls, polling or whole-collection/Work loads. R2 holds
+   Batch pages; no per-item calls, polling or whole-collection/Work loads; a web page
+   opens with one bounded page or a summary ([bounded web reads](lint-rules.md#bounded-web-reads)). R2 holds
    bytes. V8 Convex functions use no Node-only globals. Assert relevant budgets.
 4. Fix root causes for every project, never tune to a benchmark. Search for every
    instance; fix or list them. [Repeated classes and reverted fixes need a build-failing guard](improvement-loop.md#fix-the-class).

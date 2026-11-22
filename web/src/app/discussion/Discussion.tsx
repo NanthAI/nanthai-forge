@@ -37,6 +37,11 @@ export type DiscussionProps = {
   canWrite: boolean;
   /** More comments are still being read; the count says so instead of looking final. */
   loading?: boolean;
+  /** Reads the next page of earlier comments; absent once every comment is read. */
+  loadEarlier?: (() => void) | undefined;
+  loadingEarlier?: boolean;
+  /** A comment page failed to read; what was read stays shown. */
+  commentsFailed?: boolean;
   onPost?: (input: PostInput) => Promise<void>;
   onReact?: (commentId: string, kind: ReactionKind) => Promise<void>;
   /** Threads shown before "Show earlier" (the latest ones). */
@@ -60,6 +65,9 @@ export function Discussion({
   reactions = [],
   canWrite,
   loading = false,
+  loadEarlier,
+  loadingEarlier = false,
+  commentsFailed = false,
   onPost,
   onReact,
   pageSize = 20,
@@ -85,7 +93,18 @@ export function Discussion({
     const row = root.conversation;
     return row?.type === 'question' && !row.answer && !row.ahead && !row.ended;
   });
-  const recent = all.filter(thread => !pending.includes(thread));
+  // Comments and the conversation are paged apart, newest first. While either has earlier pages, a thread older than
+  // the oldest entry that stream has read could sit before unread newer ones, so it waits until both reach it, unless
+  // it has a reply past that point.
+  const oldest = (times: string[]) => (times.length ? times.reduce((a, b) => (a < b ? a : b)) : '');
+  const frontier = [
+    loadEarlier ? oldest(comments.map(comment => comment.at)) : '',
+    conversation?.loadEarlier ? oldest(conversation.entries.map(row => new Date(row.at).toISOString())) : '',
+  ].reduce((a, b) => (a > b ? a : b), '');
+  const recent = all.filter(
+    thread =>
+      !pending.includes(thread) && [thread.root, ...thread.replies].some(comment => comment.at >= frontier),
+  );
   const anchor = useRef<HTMLElement>(null);
   useEffect(() => {
     if (location.hash !== '#discussion') return;
@@ -97,7 +116,15 @@ export function Discussion({
   const { visible, earlier } = latest(recent, shown);
   const total = comments.length + (conversation?.entries.length ?? 0);
   const reading = loading || conversation?.loading;
-  const more = conversation?.loadEarlier;
+  const earlierMessages = conversation?.loadEarlier;
+  const more =
+    earlierMessages || loadEarlier
+      ? () => {
+          earlierMessages?.();
+          loadEarlier?.();
+        }
+      : undefined;
+  const loadingMore = conversation?.loadingMore || loadingEarlier;
   const conversationActions = conversation ? { answer: conversation.answer } : {};
   return (
     <section className="sec discussion" id="discussion" aria-label={title} ref={anchor} tabIndex={-1}>
@@ -138,7 +165,7 @@ export function Discussion({
           ))}
         </div>
       ))}
-      {earlier || more ? (
+      {earlier || more || loadingMore ? (
         <div className="quietline">
           {earlier ? (
             <>
@@ -147,17 +174,22 @@ export function Discussion({
           ) : null}
           <Key
             size="sm"
-            disabled={conversation?.loadingMore}
+            aria-disabled={loadingMore}
+            aria-busy={loadingMore}
             onClick={() => {
+              if (loadingMore) return;
               if (earlier < pageSize) more?.();
               setShown(value => value + pageSize);
             }}
           >
-            {conversation?.loadingMore
+            {loadingMore
               ? 'Loading earlier…'
               : `Show ${more ? pageSize : Math.min(pageSize, earlier)} earlier`}
           </Key>
           {conversation?.failed ? <p role="alert">Could not read earlier messages. Try again.</p> : null}
+          {commentsFailed ? (
+            <p role="alert">Could not read earlier comments. Reload the page to try again.</p>
+          ) : null}
         </div>
       ) : null}
       {conversation?.readFailed ? (

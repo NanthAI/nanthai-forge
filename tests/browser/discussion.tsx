@@ -17,6 +17,8 @@ const reader = params.get('viewer') === 'reader';
 const withThread = params.has('thread');
 const withPages = params.has('pages');
 const withNotePages = params.has('notePages');
+// `?versions=N`: the Item has N versions, served newest first in pages of the size asked (Item 686ecdde).
+const versionCount = Number(params.get('versions') ?? 0);
 
 const uuid = (n: number) => `7be2c41a-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const ITEM = uuid(1),
@@ -104,12 +106,43 @@ const workspace = JSON.stringify({
 });
 const calls: string[] = [];
 const writes: unknown[] = [];
+const versionReads: unknown[] = [];
+type PageArgs = {
+  collection?: string;
+  newestFirst?: boolean;
+  paginationOpts?: { cursor: string | null; numItems: number };
+};
+function versionsPage(args: PageArgs) {
+  const newest = args.paginationOpts?.cursor ? Number(args.paginationOpts.cursor) - 1 : versionCount;
+  const oldest = Math.max(1, newest - (args.paginationOpts?.numItems ?? 100) + 1);
+  return {
+    page: Array.from({ length: newest - oldest + 1 }, (_, index) => {
+      const version = newest - index;
+      return {
+        id: `${ITEM}:${version}`,
+        position: version,
+        value: JSON.stringify({
+          ...rows[1],
+          version,
+          at: minutes(version),
+          body: `Body as of version ${version}.`,
+          ...(version > 1 ? { reason: `Edit ${version}` } : {}),
+        }),
+      };
+    }),
+    isDone: oldest === 1,
+    continueCursor: String(oldest),
+    generationId: 'generation',
+    revision: 1,
+  };
+}
 const watches = new Set<() => void>();
 let newest = 3,
   answered = false,
   noteTotal = 51;
 Object.assign(window, {
   __calls: calls,
+  __versionReads: versionReads,
   __writes: writes,
   changeThread: (change: 'append' | 'answer') => {
     if (change === 'append') newest++;
@@ -223,14 +256,15 @@ function answer(name: string, before?: Before, noteCursor?: string | null, hydra
   throw new Error(`Unexpected read ${name}`);
 }
 const client = {
-  watchQuery: (
-    fn: FunctionReference<'query'>,
-    args: { before?: Before; paginationOpts?: { cursor: string | null } },
-  ) => {
+  watchQuery: (fn: FunctionReference<'query'>, args: { before?: Before } & PageArgs) => {
     const name = getFunctionName(fn);
     calls.push(name);
+    if (args.collection === 'planningVersions') versionReads.push(args);
     return {
-      localQueryResult: () => answer(name, args.before, args.paginationOpts?.cursor),
+      localQueryResult: () =>
+        args.collection === 'planningVersions'
+          ? versionsPage(args)
+          : answer(name, args.before, args.paginationOpts?.cursor),
       journal: () => undefined,
       onUpdate: (notify: () => void) => {
         watches.add(notify);
