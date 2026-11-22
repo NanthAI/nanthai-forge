@@ -6,6 +6,15 @@ import { capsuleKind } from './projectLandingCapsuleStore';
 import { readMetricAttempt } from './projectMetricReadProjection';
 import { invariant } from '../src/errors';
 const prefix = 'metric-attempts-v1:';
+
+export async function metricAttemptIndexReady(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
+  const index = await ctx.db
+    .query('projectFinishReadRows')
+    .withIndex('by_kind_and_source', q => q.eq('kind', capsuleIndexKind).eq('sourceId', projectId))
+    .unique();
+  return Boolean(index && JSON.parse(index.value).done);
+}
+
 /** Index preparation copies original source creation times. Packing preserves these scalar rows. */
 export async function capsuleMetricsPage(
   ctx: QueryCtx,
@@ -14,11 +23,7 @@ export async function capsuleMetricsPage(
   to: number,
   cursor: string | null,
 ) {
-  const index = await ctx.db
-    .query('projectFinishReadRows')
-    .withIndex('by_kind_and_source', q => q.eq('kind', capsuleIndexKind).eq('sourceId', projectId))
-    .unique();
-  if (!index || !JSON.parse(index.value).done) return null;
+  if (!(await metricAttemptIndexReady(ctx, projectId))) return null;
   let selected = cursor;
   if (cursor) {
     if (!cursor.startsWith(prefix)) {

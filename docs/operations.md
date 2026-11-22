@@ -303,6 +303,33 @@ failed checks, prior passing reuse evidence and runs in requested provider bill 
 A missing or invalidated coverage marker selects the canonical history streams.
 Missing or out-of-horizon input versions remain explicitly unknown.
 
+Covered metrics use write-once lookup keys beside the existing request, attempt,
+compact run and compose records. These keys select candidates. The report reads
+the current record and verifies the predicate before using it. Wide pre-window
+history stays on the canonical reader unless the entire context is covered.
+Partial UTC creation days use a single indexed marker read for shifted bill
+runs. Only a marked day opens the creation-bounded range. Whole days can use
+the existing event-time range. Reports make no writes and there is no idle work.
+
+To enable coverage for a server-authority project with an accepted landing and
+its live main summary, run the internal
+`projectMetricContextBootstrap:begin` with `projectId`, a fresh `operationId`,
+`from` (the earliest covered creation time) and `through` (the time by which
+the alias writer was active), both in UTC epoch milliseconds. Continue with `projectMetricContextBootstrapAction:next`
+using that same project and operation and the returned `step`. The compose pass
+also includes legacy recoveries already visible when the bootstrap begins. The action commits
+at most one verified compose input page per mutation before paging the scalar
+streams. Replaying the same step returns the current checkpoint. Once the phase
+is `ready`, call `projectMetricContextBootstrap:grant` with the same project and
+operation. Grant checks the pinned authority, current main head and acceptance
+sequence, and compact run coverage for the historical horizon. A rollback that
+accepts a landing without the writer invalidates coverage. A writer-off interval
+with no accepted landing leaves no detectable continuity gap. For a writer-off
+rollout, call `projectMetricContextBootstrap:reset` with the active operation
+before turning the writer off. If the deployment has already happened, reset
+after restoring the bootstrap functions and run a fresh bootstrap before
+re-enabling coverage.
+
 New saves publish the compact fact and mark their existing save heads in the same
 transaction. Reports detect any unmarked saves through the existing status index and
 use canonical reads until coverage is complete. Exact saves ride on the first Lane

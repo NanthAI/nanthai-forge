@@ -3,7 +3,7 @@ import { streamQuery } from 'convex-helpers/server/pagination';
 import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 import schema from './schema';
-import { capsuleIndexKind } from './projectLandingCapsuleIndex';
+import { metricAttemptIndexReady } from './projectLandingCapsuleMetrics';
 import { landingRequestOriginalDb } from './projectLandingRequestBody';
 import { metricRunKind, readMetricAttempt } from './projectMetricReadProjection';
 import { metricAttemptSource, metricRequestRow } from './projectMetricSourceRow';
@@ -57,12 +57,7 @@ export function metricContextSources(ctx: QueryCtx, projectId: Id<'hostedProject
   const tickets = { db: landingRequestOriginalDb(ctx.db) };
   const identities = new Map<string, MetricLiveRow | null>();
   let compact: Promise<boolean> | undefined;
-  const compactAttempts = () =>
-    (compact ??= ctx.db
-      .query('projectFinishReadRows')
-      .withIndex('by_kind_and_source', q => q.eq('kind', capsuleIndexKind).eq('sourceId', projectId))
-      .unique()
-      .then(row => Boolean(row && JSON.parse(row.value).done)));
+  const compactAttempts = () => (compact ??= metricAttemptIndexReady(ctx, projectId));
   const remember = (stream: MetricContextStream, id: string, row: MetricLiveRow | null) => {
     identities.set(stream + ':' + id, row);
     return row;
