@@ -2,7 +2,16 @@
 import { canonicalRoot } from './root-paths.js';
 import { spawn } from 'node:child_process';
 import { isatty } from 'node:tty';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import type { HeavyAdmission, HeavyHolderUse } from './heavy-admission.js';
 import { availableParallelism, constants, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -83,15 +92,21 @@ function claimSlot(slot: string, pid: number) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     return false;
   }
-  writeFileSync(join(slot, 'pid'), String(pid));
-  const startTime = startIdentity(pid);
-  if (startTime) writeFileSync(join(slot, 'start'), startTime);
+  try {
+    writeFileSync(join(slot, 'pid'), String(pid));
+    const startTime = startIdentity(pid);
+    if (startTime) writeFileSync(join(slot, 'start'), startTime);
+  } catch (error) {
+    // A half-written claim would hold the folder for a live process until it exits.
+    rmSync(slot, { recursive: true, force: true });
+    throw error;
+  }
   return true;
 }
-/** An existing slot's holder, or null after reclaiming a slot whose holder died or ran far past its
- * bound. A slot without a pid file is still being claimed (pid 0), unless its claimer died a minute
- * ago. An overdue holder is not signalled: its process may still be someone's live work. */
-function liveHolder(slot: string, deep: boolean): { pid: number; claimedAt: number } | null {
+/** An existing slot's holder, and whether it is dead: its process gone, or running far past its bound.
+ * A slot without a pid file is still being claimed (pid 0), unless its claimer died a minute ago. An
+ * overdue holder is not signalled: its process may still be someone's live work. Removes nothing. */
+function inspectHolder(slot: string, deep: boolean): { pid: number; claimedAt: number; dead: boolean } {
   let holder = NaN,
     claimedAt = Date.now();
   try {
@@ -102,11 +117,65 @@ function liveHolder(slot: string, deep: boolean): { pid: number; claimedAt: numb
   const dead = valid
     ? !holderAlive(slot, holder, deep) || holderOverdue(slot)
     : Date.now() - claimedAt > 60_000;
-  if (!dead) return { pid: valid ? holder : 0, claimedAt };
-  rmSync(slot, { recursive: true, force: true });
-  return null;
+  return { pid: valid ? holder : 0, claimedAt, dead };
 }
-/** One attempt over all slots; a slot whose holder died, or ran far past its bound, is reclaimed. */
+const pidOf = (slot: string) => {
+  try {
+    const holder = Number(readFileSync(join(slot, 'pid'), 'utf8'));
+    return Number.isSafeInteger(holder) && holder > 0 ? holder : 0;
+  } catch {
+    return 0;
+  }
+};
+/**
+ * Remove `slot` only while `pid` still holds it (0 = a claim without a pid file yet). The folder is
+ * moved aside by rename, which one caller wins, and its holder checked there: a claim made after the
+ * caller looked is put back, never removed. Only a third claim of the same path in the instant
+ * between the move and the put-back loses the displaced one. True when the folder is gone.
+ */
+function removeIfHolder(slot: string, pid: number): boolean {
+  const aside = `${slot}.stale-${process.pid}-${Math.random().toString(36).slice(2)}`;
+  try {
+    renameSync(slot, aside);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    return true;
+  }
+  const same = pidOf(aside) === pid;
+  if (!same)
+    try {
+      renameSync(aside, slot);
+    } catch {} // Claimed again meanwhile: the displaced claim is dropped with the folder below.
+  rmSync(aside, { recursive: true, force: true });
+  return same;
+}
+/** An existing slot's holder, or null after removing a dead one. Only the admission lock's holder
+ * may call it: two callers that both see a dead holder would each remove the slot, and the second
+ * removal would take the claim the first had just made (Item ff33e9a6). */
+function liveHolder(slot: string, deep: boolean): { pid: number; claimedAt: number } | null {
+  const seen = inspectHolder(slot, deep);
+  if (!seen.dead) return seen;
+  return removeIfHolder(slot, seen.pid) ? null : { pid: seen.pid, claimedAt: seen.claimedAt };
+}
+const ADMIT_LOCK = 'admit.lock';
+/**
+ * Take the directory's admission lock (one folder, claimed like a slot by this process), or null when
+ * another live caller holds it. A lock whose holder died is moved aside by rename, which one caller
+ * wins, and the moved folder is checked to be the dead one seen: a fresh lock taken in between is
+ * put back, never removed.
+ */
+function takeAdmitLock(directory: string, deep: boolean): string | null {
+  const lock = join(directory, ADMIT_LOCK);
+  if (claimSlot(lock, process.pid)) return lock;
+  const seen = inspectHolder(lock, deep);
+  if (!seen.dead || !removeIfHolder(lock, seen.pid)) return null;
+  return claimSlot(lock, process.pid) ? lock : null;
+}
+/**
+ * One attempt over all slots. A slot whose holder died, or ran far past its bound, is reclaimed
+ * under the admission lock: the dead check is repeated there, so a slot another caller reclaimed and
+ * claimed first is seen as live and left alone. A busy lock leaves the slot to the next attempt.
+ */
 export function tryHeavySlot(
   directory: string,
   slots: number,
@@ -118,7 +187,18 @@ export function tryHeavySlot(
   for (let index = 1; index <= slots; index++) {
     const slot = join(directory, String(index));
     if (claimSlot(slot, pid)) return slot;
-    if (!liveHolder(slot, deep)) index--;
+    if (!inspectHolder(slot, deep).dead) continue;
+    const lock = takeAdmitLock(directory, deep);
+    if (!lock) continue;
+    try {
+      if (existsSync(slot)) {
+        const again = inspectHolder(slot, deep);
+        if (!again.dead || !removeIfHolder(slot, again.pid)) continue;
+      }
+      if (claimSlot(slot, pid)) return slot;
+    } finally {
+      rmSync(lock, { recursive: true, force: true });
+    }
   }
   return null;
 }
@@ -171,9 +251,8 @@ export function tryHeavyAdmission(
   mkdirSync(directory, { recursive: true });
   // Held by the deciding process (a preflight claims for its parent through a child); one folder,
   // removed whole, so nothing stays behind. A lock whose holder died is reclaimed.
-  const lock = join(directory, ADMIT_LOCK);
-  if (!claimSlot(lock, process.pid) && (liveHolder(lock, deep) || !claimSlot(lock, process.pid)))
-    return { slot: null, reason: null };
+  const lock = takeAdmitLock(directory, deep);
+  if (!lock) return { slot: null, reason: null };
   try {
     const limit = admission.limit(base);
     const holders = holderUses(directory, slotIndexes(directory, limit), deep, now);
@@ -188,7 +267,6 @@ export function tryHeavyAdmission(
     rmSync(lock, { recursive: true, force: true });
   }
 }
-const ADMIT_LOCK = 'admit.lock';
 export type HeavyWait = {
   /** 1 = next to run. */
   position: number;
@@ -303,15 +381,6 @@ export function acquireHeavySlot(
 
 /** How long a stopped command may take to exit before heavy kills it. */
 export const HEAVY_KILL_GRACE_MS = 10_000;
-/** This process still holds the slot (a waiter may have freed it as overdue since). */
-function ownsSlot(slot: string) {
-  try {
-    return readFileSync(join(slot, 'pid'), 'utf8') === String(process.pid);
-  } catch {
-    return false;
-  }
-}
-
 const WAKE = 'slots-changed';
 /** Touch the slot directory so every waiter re-runs its attempt now (its watcher fires) and reads
  * the slot count again; local only, nothing is created where no one has waited. */
@@ -659,7 +728,7 @@ export async function heavyCli(
   let sampler: ReturnType<typeof sampleHold> | undefined;
   const release = () => {
     // A waiter may have freed this slot as overdue and another caller taken it: never remove theirs.
-    if (slot && ownsSlot(slot)) rmSync(slot, { recursive: true, force: true });
+    if (slot) removeIfHolder(slot, process.pid);
     if (moduleCache) rmSync(moduleCache, { recursive: true, force: true, maxRetries: 3 });
     // An in-process caller keeps its own environment, never a removed preload.
     for (const [name, value] of before)

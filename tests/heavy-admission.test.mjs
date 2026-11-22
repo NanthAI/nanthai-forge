@@ -207,6 +207,104 @@ test('ff33e9a6: measured callers decide and claim one at a time: a held admissio
   assert(!existsSync(lock), 'the lock is removed after each attempt');
 });
 
+/** A pid no process has: the holder of a dead slot. */
+const DEAD_PID = 2 ** 22 + 12345;
+/**
+ * Run `during` the first time `observer` asks whether DEAD_PID is alive, as a second caller that
+ * reclaims the same dead slot between the first caller's dead check and its removal would.
+ */
+function interleaveOnDeadCheck(t, during, nth = 1) {
+  const real = process.kill;
+  let checks = 0;
+  process.kill = (pid, signal) => {
+    if (pid === DEAD_PID && signal === 0) {
+      if (++checks === nth) during();
+      throw Object.assign(new Error('no such process'), { code: 'ESRCH' });
+    }
+    return real.call(process, pid, signal);
+  };
+  t.after(() => {
+    process.kill = real;
+  });
+}
+
+test('ff33e9a6: two callers reclaiming one dead holder: exactly one holds the slot, the other never removes its claim', t => {
+  const directory = isolated(t);
+  const [first] = sleepers(t, 1);
+  mkdirSync(join(directory, '1'));
+  writeFileSync(join(directory, '1', 'pid'), String(DEAD_PID));
+  let second = null;
+  // The second caller (this process) reclaims and claims slot 1 while the first is between its
+  // dead check and its removal.
+  interleaveOnDeadCheck(t, () => {
+    second = tryHeavySlot(directory, 1, process.pid);
+  });
+  const result = tryHeavySlot(directory, 1, first);
+  assert.equal(second, join(directory, '1'), 'the second caller reclaimed the dead slot');
+  assert.equal(result, null, 'the first caller finds the slot live and queues');
+  assert.equal(readFileSync(join(directory, '1', 'pid'), 'utf8'), String(process.pid), 'the claim stands');
+  assert(!existsSync(join(directory, 'admit.lock')), 'the lock is removed after the reclaim');
+});
+
+test("ff33e9a6: a claim made between the reclaimer's last dead check and its removal is put back, not removed", t => {
+  const directory = isolated(t);
+  const [first] = sleepers(t, 1);
+  mkdirSync(join(directory, '1'));
+  writeFileSync(join(directory, '1', 'pid'), String(DEAD_PID));
+  // The 2nd dead check is the one under the lock; a new claimant takes the path right after it.
+  interleaveOnDeadCheck(
+    t,
+    () => {
+      rmSync(join(directory, '1'), { recursive: true });
+      mkdirSync(join(directory, '1'));
+      writeFileSync(join(directory, '1', 'pid'), String(process.pid));
+    },
+    2,
+  );
+  assert.equal(tryHeavySlot(directory, 1, first), null);
+  assert.equal(readFileSync(join(directory, '1', 'pid'), 'utf8'), String(process.pid), 'the claim stands');
+  assert(!existsSync(join(directory, 'admit.lock')));
+});
+
+test('ff33e9a6: a dead holder is reclaimed by the first of two callers and the other takes another slot', t => {
+  const directory = isolated(t);
+  const [first] = sleepers(t, 1);
+  mkdirSync(join(directory, '1'));
+  writeFileSync(join(directory, '1', 'pid'), String(DEAD_PID));
+  let second = null;
+  interleaveOnDeadCheck(t, () => {
+    second = tryHeavySlot(directory, 2, process.pid);
+  });
+  const result = tryHeavySlot(directory, 2, first);
+  assert.equal(second, join(directory, '1'));
+  assert.equal(result, join(directory, '2'));
+  assert.equal(readFileSync(join(directory, '1', 'pid'), 'utf8'), String(process.pid));
+  assert.equal(readFileSync(join(directory, '2', 'pid'), 'utf8'), String(first));
+});
+
+test('ff33e9a6: a dead admission lock is reclaimed once; a fresh lock taken meanwhile is kept', t => {
+  const directory = isolated(t);
+  const [live] = sleepers(t, 1);
+  const lock = join(directory, 'admit.lock');
+  mkdirSync(lock);
+  writeFileSync(join(lock, 'pid'), String(DEAD_PID));
+  const policy = heavyAdmission({ cores: 10, sample: () => machine({ load: 1 }) });
+  // Another caller reclaims the dead lock and is still inside its decision when the first removes.
+  interleaveOnDeadCheck(t, () => {
+    rmSync(lock, { recursive: true });
+    mkdirSync(lock);
+    writeFileSync(join(lock, 'pid'), String(live));
+  });
+  assert.deepEqual(tryHeavyAdmission(directory, 3, policy, process.pid, true, NOW), {
+    slot: null,
+    reason: null,
+  });
+  assert.equal(readFileSync(join(lock, 'pid'), 'utf8'), String(live), 'the other holder keeps its lock');
+  assert(!existsSync(join(directory, '1')), 'nothing was claimed without the lock');
+  rmSync(lock, { recursive: true });
+  assert.equal(tryHeavyAdmission(directory, 3, policy, process.pid, true, NOW).slot, join(directory, '1'));
+});
+
 test('ff33e9a6: a queued caller held at the ceiling starts once load drops, and says why it waits', async t => {
   const directory = isolated(t);
   const pids = sleepers(t, 3);
