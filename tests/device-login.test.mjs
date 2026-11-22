@@ -53,6 +53,13 @@ function fixture(t) {
   };
   return s;
 }
+// Every sign-in is the stable device flow; `stable` is the proven device identity the HTTP action passes in.
+const begin = (s, input) =>
+  actions.beginDeviceLogin(s.ctx, {
+    ...input,
+    stable: { id: input.operationId, key: 'synthetic-device-key' },
+    forceApproval: true,
+  });
 const start = (s, extra = {}) => {
   const input = {
     operationId: randomUUID(),
@@ -61,7 +68,7 @@ const start = (s, extra = {}) => {
     scope: 'cli',
     ...extra,
   };
-  return actions.start._handler(s.ctx, input).then(flow => ({
+  return begin(s, input).then(flow => ({
     input,
     flow,
     pollInput: { deviceCode: flow.device_code },
@@ -77,17 +84,17 @@ const rejected = code => error => (error.data?.code ?? error.code) === code;
 test('device flow hashes secrets, reconciles retries, signs Forge JWTs, and binds the approving identity', async t => {
   const s = fixture(t),
     { input, flow, row, pollInput } = await start(s);
-  const retry = await actions.start._handler(s.ctx, input);
+  const retry = await begin(s, input);
   assert.deepEqual({ ...retry, expires_in: flow.expires_in }, flow);
   assert.equal(s.tables.deviceCodes.size, 1);
   await assert.rejects(
-    actions.start._handler(s.ctx, { ...input, clientNonce: '0'.repeat(64) }),
+    begin(s, { ...input, clientNonce: '0'.repeat(64) }),
     rejected('AUTH_OPERATION_CHANGED'),
   );
   assert.equal((await poll(s, { deviceCode: input.clientNonce })).status, 'expired_token');
   assert.notEqual(flow.device_code, input.clientNonce);
   assert.ok(flow.expires_in >= 599 && flow.expires_in <= 600);
-  assert.equal(flow.verification_uri, 'https://forge.example/device');
+  assert.equal(flow.verification_uri, 'https://forge.example/-/device');
   assert.match(flow.user_code, /^[A-Z2-9]{5}-[A-Z2-9]{5}$/);
   assert.equal(JSON.stringify([...s.tables.deviceCodes.values()]).includes(flow.device_code), false);
   assert.equal(JSON.stringify([...s.tables.deviceCodes.values()]).includes(flow.user_code), false);
@@ -359,21 +366,35 @@ test('device HTTP routes return no-store responses, reject malformed bodies and 
     name: 'Synthetic HTTP CLI',
     scope: 'cli',
   };
-  const response = await route('/auth/device/start')._handler(
-    ctx,
+  const { flow } = await start(s);
+  assert.match(flow.device_code, /^[0-9a-f]{64}$/);
+  // A CLI that predates the stable device flow posts to the earlier start: it is told to update and nothing is stored.
+  const earlier = await route('/auth/device/start')._handler(
+    { runAction: () => assert.fail('The earlier start must not run a sign-in.') },
     new Request('https://forge.example/auth/device/start', { method: 'POST', body: JSON.stringify(input) }),
   );
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.get('Cache-Control'), 'no-store');
-  const flow = await response.json();
-  assert.notEqual(flow.device_code, input.clientNonce);
-  assert.match(flow.device_code, /^[0-9a-f]{64}$/);
-  const bad = await route('/auth/device/start')._handler(
+  assert.equal(earlier.status, 426);
+  assert.equal(earlier.headers.get('Cache-Control'), 'no-store');
+  const refusal = await earlier.json();
+  assert.equal(refusal.error, 'update_required');
+  assert.match(refusal.error_description, /Update it with: nforge update\. Then run: nforge login/);
+  assert.equal(s.tables.deviceCodes.size, 1);
+  const bad = await route('/auth/device/poll')._handler(
     { runAction: () => assert.fail('Malformed JSON must not execute an action.') },
-    new Request('https://forge.example/auth/device/start', { method: 'POST', body: 'invalid json' }),
+    new Request('https://forge.example/auth/device/poll', { method: 'POST', body: 'invalid json' }),
   );
   assert.equal(bad.status, 400);
   assert.equal(s.tables.deviceCodes.size, 1);
+  const polled = await route('/auth/device/poll')._handler(
+    ctx,
+    new Request('https://forge.example/auth/device/poll', {
+      method: 'POST',
+      body: JSON.stringify({ deviceCode: flow.device_code, operationId: randomUUID() }),
+    }),
+  );
+  assert.equal(polled.status, 200);
+  assert.equal(polled.headers.get('Cache-Control'), 'no-store');
+  assert.equal((await polled.json()).status, 'authorization_pending');
   const publicKey = await route('/auth/jwks')._handler(ctx, new Request('https://forge.example/auth/jwks'));
   assert.equal(publicKey.status, 200);
   assert.equal(publicKey.headers.get('cache-control'), 'public, max-age=300, must-revalidate');
@@ -416,7 +437,7 @@ test('device-login defaults to 120 starts per minute and a limited start writes 
   const first = await start(s);
   for (let i = 1; i < 120; i++) await start(s);
   assert.equal(s.tables.deviceCodes.size, perMinute);
-  const limited = await actions.start._handler(s.ctx, {
+  const limited = await begin(s, {
     operationId: randomUUID(),
     clientNonce: randomBytes(32).toString('hex'),
     name: 'Synthetic CLI',
@@ -425,21 +446,7 @@ test('device-login defaults to 120 starts per minute and a limited start writes 
   assert.deepEqual(limited, { error: 'slow_down', interval: 60 });
   assert.equal(s.tables.deviceCodes.size, perMinute);
   // A retry of an accepted start still reconciles while the limit holds.
-  assert.equal((await actions.start._handler(s.ctx, first.input)).device_code, first.flow.device_code);
-  const { default: http } = await import(moduleUrl('../convex/http.ts'));
-  const route = http.getRoutes().find(([value]) => value === '/auth/device/start')[2];
-  const ctx = { runAction: (ref, args) => actions[getFunctionName(ref).split(':')[1]]._handler(s.ctx, args) };
-  const response = await route._handler(
-    ctx,
-    new Request('https://forge.example/auth/device/start', {
-      method: 'POST',
-      body: JSON.stringify({ ...first.input, operationId: randomUUID() }),
-    }),
-  );
-  assert.equal(response.status, 429);
-  assert.equal(response.headers.get('Retry-After'), '60');
-  assert.equal(response.headers.get('Cache-Control'), 'no-store');
-  assert.equal((await response.json()).error, 'slow_down');
+  assert.equal((await begin(s, first.input)).device_code, first.flow.device_code);
   // Starts older than a minute no longer count.
   const nextMinute = Date.now() + 61_000;
   t.mock.method(Date, 'now', () => nextMinute);
@@ -494,5 +501,5 @@ test('device starts honor the shared configured budget while retries keep the or
   await start(s);
   assert.equal((await start(s)).flow.error, 'slow_down');
   assert.equal(s.tables.deviceCodes.size, 2);
-  assert.equal((await actions.start._handler(s.ctx, first.input)).device_code, first.flow.device_code);
+  assert.equal((await begin(s, first.input)).device_code, first.flow.device_code);
 });

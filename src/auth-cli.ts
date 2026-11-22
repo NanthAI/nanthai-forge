@@ -34,13 +34,6 @@ async function request(origin: string, operation: string, input: unknown) {
     'AUTH_SLOW_DOWN',
     'Too many device logins were started on this Forge deployment. Try again in a minute.',
   );
-  if (response.status === 404)
-    throw new ForgeError(
-      'AUTH_REQUEST_FAILED',
-      'This deployment uses the earlier device approval protocol.',
-      undefined,
-      { httpStatus: 404 },
-    );
   invariant(
     response.ok,
     'AUTH_REQUEST_FAILED',
@@ -146,23 +139,7 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
       projectId: projectId ?? null,
     }),
   };
-  let protocol = 'start-v2';
-  const start = async () => {
-    try {
-      return await request(origin, protocol, input);
-    } catch (error) {
-      if (
-        !(error instanceof ForgeError) ||
-        error.code !== 'AUTH_REQUEST_FAILED' ||
-        error.recovery?.httpStatus !== 404 ||
-        protocol !== 'start-v2'
-      )
-        throw error;
-      protocol = 'start';
-      process.stderr.write('This deployment uses the earlier browser device approval.\n');
-      return request(origin, protocol, { clientNonce, operationId, name, scope });
-    }
-  };
+  const start = () => request(origin, 'start-v2', input);
   let flow;
   // Retry the same operation after an unknown network outcome.
   try {
@@ -201,7 +178,7 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
     'Forge returned an invalid verification URL.',
   );
   process.stderr.write(
-    `${protocol === 'start-v2' ? `Device ${deviceCode(device.publicKey)} (key reference)\n` : ''}Code: ${flow.user_code}\nApprove this device (${scope}) in Forge.\n${named ? '' : `This device is named ${name}. Rename it any time: nforge auth rename NAME\n`}`,
+    `Device ${deviceCode(device.publicKey)} (key reference)\nCode: ${flow.user_code}\nApprove this device (${scope}) in Forge.\n${named ? '' : `This device is named ${name}. Rename it any time: nforge auth rename NAME\n`}`,
   );
   browserApproval(verification.href, !browser);
   const deadline = Date.now() + flow.expires_in * 1000,
@@ -241,7 +218,7 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
       'AUTH_RESPONSE_INVALID',
       'Forge returned an invalid credential.',
     );
-    if (protocol === 'start-v2' && typeof result.deviceId !== 'string')
+    if (typeof result.deviceId !== 'string')
       process.stderr.write(
         'This project uses the earlier device approval. The returned sign-in is a 30-day credential; stable device settings are not enabled here.\n',
       );

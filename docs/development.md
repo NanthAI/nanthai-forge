@@ -653,7 +653,7 @@ Configuration is written to the ignored `.env.local`.
 - `GITHUB_WEBHOOK_SECRET`: set the App webhook to `/github/webhook` on the deployment's `.convex.site` URL, with SSL verification and the Push event. Deliveries are verified by HMAC-SHA256 over the original bytes. Webhooks only record diagnostics. Re-index stays an explicit action.
 - `FORGE_CLI_PRIVATE_KEY`: RSA PKCS#8 private PEM for Forge-issued CLI credentials. Generate a dedicated RSA 2048-bit or larger key; keep it server-side, never under `VITE_`.
 - `FORGE_CLI_ISSUER`: exact HTTPS Convex HTTP origin, e.g. `https://your-deployment.convex.site`, without a trailing slash. It must differ from the Clerk issuer. `/auth/jwks` publishes only its public RSA JWK; the new custom JWT provider accepts audience `forge-cli`.
-- `FORGE_WEB_URL`: HTTPS origin of the Forge web app serving `/device` with the existing Clerk login. Deploy the Convex auth config, HTTP actions, functions and schema together, then publish the hosted web build. Existing Clerk/GitHub settings remain required. For a custom HTTP origin, set `FORGE_HTTP_URL` in the CLI environment; standard `.convex.cloud` deployment URLs derive `.convex.site`.
+- `FORGE_WEB_URL`: HTTPS origin of the Forge web app serving `/-/device` (an earlier `/device` address opens it). Deploy the Convex auth config, HTTP actions, functions and schema together, then publish the hosted web build. Existing Clerk/GitHub settings remain required. For a custom HTTP origin, set `FORGE_HTTP_URL` in the CLI environment; standard `.convex.cloud` deployment URLs derive `.convex.site`.
 - `FORGE_SECRET_KEYS`: the Secret Object keyring (see [operations](operations.md)).
 - `GITHUB_PUBLIC_TOKEN`: optional, for public GitHub API reads only.
 - `GITHUB_APP_SLUG`: optional, the Forge GitHub App's URL slug. An import refusal for an owner without an installation links `https://github.com/apps/SLUG/installations/new` when it is set.
@@ -760,11 +760,12 @@ layer out of both first paints.
   session storage and only same-origin `/-` paths are followed. The client is
   wrapped by `withRefreshHold` (rule 1) and the passkey hook is mounted only
   inside `WhileAwake` (rule 2).
-- `/-/device` approves a terminal sign-in with the same `deviceActions` and
-  the same page rules as `/device` (docs/security.md, "CLI device
-  credentials"). `nforge login` still links to `/device`: most existing
-  accounts cannot sign in under `/-` before the account backfill and linking
-  work, so the link moves with Clerk removal.
+- `/-/device` approves a terminal sign-in (`deviceActions`; page rules in
+  docs/security.md, "CLI device credentials"). `nforge login` links to it, and the
+  address printed by earlier builds, `/device`, is rewritten to it in the browser
+  before the app starts (`normalizeDevicePathname`). Only the stable device flow
+  (`/auth/device/start-v2`) starts a sign-in; a CLI that still posts to
+  `/auth/device/start` gets HTTP 426 telling it to run `nforge update`.
 - One Lane, `/-/{handle}/{project}/lanes/{laneId}` (`web/src/app/lane/`, lazy
   with its route): one bounded read, `projectLaneReview.read`, names the pinned
   saved head and every changed path with its exact blobs from the Lane's overlap
@@ -1184,10 +1185,9 @@ dev billed-usage measurement.
 
 The removal slice deletes Clerk's web provider/dependency, issuer entry and
 distinctness checks, `CLERK_*` setup/bot helpers, and retained provider lookups in
-GitHub access, linked identities, recipient checks and project people. It
-points the CLI approval link (`verification` in `convex/deviceActions.ts`, today
-`/device`) at `/-/device` in the same landing that removes `web/src/DeviceLogin.tsx`
-(`tests/ui-device.test.mjs` fails while the link names a page nobody serves). Integrate
+GitHub access, linked identities, recipient checks and project people. The
+CLI approval link already points at `/-/device` and `web/src/DeviceLogin.tsx` is gone
+(`tests/ui-device.test.mjs` fails if the link names a page nobody serves). Integrate
 recipient/account lookup with `users` and the unified devices UI first, then
 remove the old path. Live GitHub, real phones/cross-device sign-in, refresh/autofill
 UI behavior, backfill and security review remain open on Item de67c77d.

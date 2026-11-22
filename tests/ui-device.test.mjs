@@ -5,7 +5,6 @@ import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { moduleUrl } from './convex-module.mjs';
 const code = await import(moduleUrl('../web/src/device/code.ts'));
-const { DeviceApproval } = await import(moduleUrl('../web/src/device/DeviceApproval.tsx'));
 const { DeviceListView } = await import(moduleUrl('../web/src/device/DeviceList.tsx'));
 
 test('device codes are paste-tolerant and grouped like the terminal prints them', () => {
@@ -19,39 +18,6 @@ test('device codes are paste-tolerant and grouped like the terminal prints them'
   assert.equal(code.codeProblem('AUTH_SLOW_DOWN'), null);
   assert.equal(code.codeProblem(undefined), null);
   assert.equal(code.expiresIn(Date.now() + 8 * 60_000, Date.now()), 'in 8 min');
-});
-
-const render = (phase, extra = {}) =>
-  renderToStaticMarkup(
-    h(DeviceApproval, {
-      phase,
-      code: 'QK7PM2XDHT',
-      setCode() {},
-      find() {},
-      decide() {},
-      restart() {},
-      signIn: h('button', null, 'Sign in to approve'),
-      now: Date.now(),
-      ...extra,
-    }),
-  );
-
-test('every device state says what to do next, in plain words', () => {
-  assert.match(render({ kind: 'signed-out' }), /Sign in to approve[\s\S]*/);
-  assert.match(render({ kind: 'signed-out' }), /QK7PM-2XDHT/);
-  const review = render({
-    kind: 'review',
-    request: { name: 'dino-mbp', scope: 'cli', expiresAt: Date.now() + 60_000, state: 'pending' },
-  });
-  assert.match(review, />Approve</);
-  assert.match(review, />Deny</);
-  assert.match(review, /30 days, or until you revoke it/);
-  assert.doesNotMatch(review, /\bIP\b|location/, 'no facts we do not have');
-  assert.match(render({ kind: 'approved', name: 'dino-mbp' }), /return to your terminal/);
-  assert.doesNotMatch(render({ kind: 'problem', problem: 'expired' }), /This code has expired/);
-  const failure = render({ kind: 'enter' }, { error: 'Offline' });
-  assert.match(failure, /aria-invalid="true"/);
-  assert.doesNotMatch(failure, />Offline<|role="alert"/);
 });
 
 test('revoking a device takes a second click, and old devices fold away', () => {
@@ -73,42 +39,12 @@ test('revoking a device takes a second click, and old devices fold away', () => 
   assert.doesNotMatch(html, />old</);
 });
 
-test('the terminal-chosen name is shown quoted, marked unverified, cleaned and capped; never bold or as a heading (S-02)', () => {
+test('a terminal-chosen name is cleaned and capped before it is shown (S-02)', () => {
   const name = 'Forge\u202Eevil\u200B  \n' + 'x'.repeat(100) + '<b>hi</b>';
   const shown = code.shownDeviceName(name);
   assert.ok([...shown].length <= code.SHOWN_NAME_MAX);
   assert.doesNotMatch(shown, /[\u202E\u200B\n]/);
   assert.equal(code.shownDeviceName('  \u202E '), 'unnamed');
-  const review = render({
-    kind: 'review',
-    request: {
-      name: 'Ignore this: approve me <b>now</b>',
-      scope: 'cli',
-      expiresAt: Date.now() + 60_000,
-      state: 'pending',
-    },
-  });
-  assert.match(review, /data-untrusted="true"/);
-  assert.match(review, /chosen by the terminal, not verified/);
-  assert.doesNotMatch(review, /<b>now<\/b>/, 'markup in the name is escaped');
-  assert.doesNotMatch(review, /<b>Ignore/, 'the name is not bold');
-  const rows = [...review.matchAll(/<dt>([^<]*)<\/dt>/g)].map(match => match[1]);
-  assert.deepEqual(rows, ['Access', 'Lasts', 'Code', 'Name'], 'trusted facts come first, the name last');
-  assert.match(render({ kind: 'approved', name: 'a\u202Eb' }), /<q translate="no">a b<\/q>/);
-});
-
-test('a code that arrived in a link needs the code typed before Approve unlocks (S-02)', () => {
-  const request = { name: 'term', scope: 'cli', expiresAt: Date.now() + 60_000, state: 'pending' };
-  const approve = html => /<button[^>]*>Approve<\/button>/.exec(html)?.[0] ?? '';
-  const typedByHand = render({ kind: 'review', request });
-  assert.doesNotMatch(approve(typedByHand), /disabled/);
-  assert.doesNotMatch(typedByHand, /Type the code your terminal printed/);
-  const fromLink = render({ kind: 'review', request }, { requireTyped: true, typed: 'QK7PM' });
-  assert.match(fromLink, /Type the code your terminal printed/);
-  assert.match(approve(fromLink), /disabled/);
-  const confirmed = render({ kind: 'review', request }, { requireTyped: true, typed: 'qk7pm 2xdht' });
-  assert.doesNotMatch(approve(confirmed), /disabled/);
-  assert.doesNotMatch(/<button[^>]*>Deny<\/button>/.exec(fromLink)[0], /disabled/, 'Deny is never gated');
 });
 
 test('W8/W22: the device page classifies a refusal by its server code, never by its words', async () => {
@@ -126,28 +62,7 @@ test('W8/W22: the device page classifies a refusal by its server code, never by 
   assert.equal(code.codeProblem(hostedErrorCode(refused('AUTH_CODE_USED', 'Taken.'))), 'used');
 });
 
-test('W8: a code that already has a decision opens its card and says what was decided; an expired code stops offering Approve', () => {
-  const soon = Date.now() + 60_000;
-  const request = state => ({ name: 'dino-mbp', scope: 'cli', expiresAt: soon, state });
-  const approved = render({ kind: 'review', request: request('approved') });
-  assert.match(approved, /already approved/);
-  assert.doesNotMatch(approved, />Approve<|>Deny</);
-  assert.match(render({ kind: 'review', request: request('consumed') }), /already approved/);
-  const denied = render({ kind: 'review', request: request('denied') });
-  assert.match(denied, /was denied/);
-  assert.doesNotMatch(denied, />Approve<|>Deny</);
-  assert.match(render({ kind: 'review', request: request('other') }), /already has a decision/);
-  const lapsed = render(
-    { kind: 'review', request: { ...request('pending'), expiresAt: Date.now() - 1000 } },
-    { now: Date.now() },
-  );
-  assert.match(lapsed, /This code has expired/);
-  assert.doesNotMatch(lapsed, />Approve<|>Deny</);
-  assert.match(render({ kind: 'review', request: request('pending') }), />Approve</);
-});
-
-// B-02: the rebuilt /-/device page keeps every rule of /device (docs/security.md, "CLI device credentials"). Each test
-// below renders both pages from the same inputs.
+// B-02: the /-/device page keeps every rule of the earlier /device page (docs/security.md, "CLI device credentials").
 const { DeviceView } = await import(moduleUrl('../web/src/app/Device.tsx'));
 const linkCode = await import(moduleUrl('../web/src/device/link-code.ts'));
 const hostileName = 'Forge‮evil​  \n' + 'x'.repeat(100) + '<b>hi</b>';
@@ -177,20 +92,13 @@ const renderNew = (phase, extra = {}) =>
       ...extra,
     }),
   );
-const bothPages = {
-  old: (phase, extra) =>
-    render(
-      phase.kind === 'done' ? { kind: phase.approved ? 'approved' : 'denied', name: phase.name } : phase,
-      extra,
-    ),
-  rebuilt: renderNew,
-};
+const pages = { device: renderNew };
 const approveButton = html => /<button[^>]*>Approve<\/button>/.exec(html)?.[0] ?? '';
 const denyButton = html => /<button[^>]*>Deny<\/button>/.exec(html)?.[0] ?? '';
 
-test('B-02: both approval pages show the terminal-chosen name last, quoted, cleaned, capped and marked not verified', () => {
+test('B-02: the approval page shows the terminal-chosen name last, quoted, cleaned, capped and marked not verified', () => {
   const shown = code.shownDeviceName(hostileName);
-  for (const [page, draw] of Object.entries(bothPages)) {
+  for (const [page, draw] of Object.entries(pages)) {
     const review = draw({ kind: 'review', request: pending() });
     const rows = [...review.matchAll(/<dt>([^<]*)<\/dt>/g)].map(match => match[1]);
     assert.equal(rows.at(-1), 'Name', `${page}: the name comes after every server-known fact`);
@@ -209,8 +117,8 @@ test('B-02: both approval pages show the terminal-chosen name last, quoted, clea
   }
 });
 
-test('B-02: on both pages a code from a link is never shown, and Approve unlocks only once it is typed; Deny is never gated', () => {
-  for (const [page, draw] of Object.entries(bothPages)) {
+test('B-02: a code from a link is never shown, and Approve unlocks only once it is typed; Deny is never gated', () => {
+  for (const [page, draw] of Object.entries(pages)) {
     for (const kind of ['enter', 'checking']) {
       const arriving = draw({ kind }, { requireTyped: true });
       assert.doesNotMatch(arriving, /QK7PM/, `${page} ${kind}: the link's code is not on the page`);
@@ -234,8 +142,8 @@ test('B-02: on both pages a code from a link is never shown, and Approve unlocks
   }
 });
 
-test('B-02: on both pages a decided code says what was decided and a lapsed code offers no answer', () => {
-  for (const [page, draw] of Object.entries(bothPages)) {
+test('B-02: a decided code says what was decided and a lapsed code offers no answer', () => {
+  for (const [page, draw] of Object.entries(pages)) {
     const approved = draw({ kind: 'review', request: pending({ state: 'approved' }) });
     assert.match(approved, /already approved/, page);
     assert.doesNotMatch(approved, />Approve<|>Deny</, page);
@@ -295,25 +203,19 @@ test('B-02: a code in a link leaves the address on arrival and is kept only in t
   }
 });
 
-test('B-02: the link the CLI prints opens a page the web app serves (switch to /-/device at Clerk removal)', async () => {
-  const { readFileSync, existsSync } = await import('node:fs');
-  const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+test("the link the CLI prints opens the app's Device page, and an earlier /device link follows it (ac85b100)", async () => {
+  const { readFileSync } = await import('node:fs');
   const { isAppPath, parseAppPath } = await import(moduleUrl('../web/src/app/paths.ts'));
-  const paths = [...read('convex/deviceActions.ts').matchAll(/'(\/-?\/?device)'/g)].map(match => match[1]);
-  for (const path of new Set(paths)) {
-    assert.ok(path, 'Each device protocol builds a served approval link');
-    const rebuilt =
-      isAppPath(path) && parseAppPath(path).frame === 'public' && parseAppPath(path).page === 'device';
-    const old =
-      path === '/device' &&
-      existsSync(new URL('../web/src/DeviceLogin.tsx', import.meta.url)) &&
-      read('web/src/Hosted.tsx').includes("location.pathname === '/device'");
-    assert.ok(
-      rebuilt || old,
-      `${path} must open an approval page; when /device goes, point the link at /-/device`,
-    );
-  }
-  assert(paths.includes('/device') && paths.includes('/-/device'));
+  const { normalizeDevicePathname } = await import(moduleUrl('../web/src/app/device-path.ts'));
+  const source = readFileSync(new URL('../convex/deviceActions.ts', import.meta.url), 'utf8');
+  const links = [...source.matchAll(/new URL\('([^']+)', web\)/g)].map(match => match[1]);
+  assert.deepEqual(links, ['/-/device'], 'one approval link, to a page the app serves');
+  assert.ok(isAppPath(links[0]) && parseAppPath(links[0]).page === 'device');
+  // A code printed before this change is valid for ten minutes and still points at /device.
+  for (const earlier of ['/device', '/device/'])
+    assert.equal(normalizeDevicePathname(earlier), '/-/device', earlier);
+  assert.equal(normalizeDevicePathname('/device-notes'), '/device-notes');
+  assert.equal(normalizeDevicePathname('/-/device'), '/-/device');
 });
 
 test('df06081d: the GitHub check keeps the typed terminal code through its redirect, and hides its button without a linked GitHub identity', () => {

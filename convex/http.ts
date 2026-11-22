@@ -158,27 +158,33 @@ http.route({
     return new Response(null, { status: 204 });
   }),
 });
-for (const operation of ['start', 'poll'] as const)
-  http.route({
-    path: `/auth/device/${operation}`,
-    method: 'POST',
-    handler: httpAction(async (ctx, request) => {
-      try {
-        const result = await ctx.runAction(internal.deviceActions[operation], await request.json());
-        if ('error' in result)
-          return Response.json(
-            { ...result, error_description: 'Too many device logins started. Try again in a minute.' },
-            { status: 429, headers: { 'Cache-Control': 'no-store', 'Retry-After': String(result.interval) } },
-          );
-        return Response.json(result, { headers: { 'Cache-Control': 'no-store' } });
-      } catch {
-        return Response.json(
-          { error: 'Device login request failed.' },
-          { status: 400, headers: { 'Cache-Control': 'no-store' } },
-        );
-      }
-    }),
-  });
+/** A CLI that predates the stable device flow still posts here: it gets the fix, not a sign-in. */
+const updateCliBody = {
+  error: 'update_required',
+  error_description: 'This CLI is too old to sign in. Update it with: nforge update. Then run: nforge login',
+};
+http.route({
+  path: '/auth/device/start',
+  method: 'POST',
+  handler: httpAction(async () =>
+    Response.json(updateCliBody, { status: 426, headers: { 'Cache-Control': 'no-store' } }),
+  ),
+});
+http.route({
+  path: '/auth/device/poll',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    try {
+      const result = await ctx.runAction(internal.deviceActions.poll, await request.json());
+      return Response.json(result, { headers: { 'Cache-Control': 'no-store' } });
+    } catch {
+      return Response.json(
+        { error: 'Device login request failed.' },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+  }),
+});
 for (const operation of ['start-v2', 'renew'] as const)
   http.route({
     path: `/auth/device/${operation}`,

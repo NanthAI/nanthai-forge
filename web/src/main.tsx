@@ -16,6 +16,7 @@ import './ui/components.css';
 import { isAppPath, normalizeAccountPathname } from './app/paths';
 import { oldAddress } from './app/old-address';
 import { applyMotion } from './motion-pref';
+import { normalizeDevicePathname } from './app/device-path';
 class AppBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {
@@ -49,7 +50,7 @@ installErrorCapture();
 applyMotion();
 const root = createRoot(document.getElementById('root')!);
 // The CDN can serve the shell after normalizing the origin request while the browser keeps the original path.
-const pathname = normalizeAccountPathname(location.pathname);
+const pathname = normalizeDevicePathname(normalizeAccountPathname(location.pathname));
 if (pathname !== location.pathname)
   history.replaceState(history.state, '', pathname + location.search + location.hash);
 // The rebuilt app (Item 84125787) serves every address under /-; everything else is the old app until stage C.

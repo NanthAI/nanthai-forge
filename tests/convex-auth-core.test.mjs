@@ -14,6 +14,13 @@ const auth = await import(moduleUrl('../convex/auth.ts'));
 const handles = await import(moduleUrl('../convex/urlAccounts.ts'));
 const firstPasskey = await import(moduleUrl('../convex/authFirstPasskey.ts'));
 const device = await import(moduleUrl('../convex/deviceActions.ts'));
+// Every sign-in is the stable device flow (ac85b100); `stable` is the proven device the HTTP action passes in.
+const begin = (ctx, input) =>
+  device.beginDeviceLogin(ctx, {
+    ...input,
+    stable: { id: input.operationId, key: 'synthetic-device-key' },
+    forceApproval: true,
+  });
 const deviceStore = await import(moduleUrl('../convex/deviceStore.ts'));
 const tokenStore = await import(moduleUrl('../convex/githubUserTokens.ts'));
 const tokenActions = await import(moduleUrl('../convex/githubUserTokenActions.ts'));
@@ -235,7 +242,7 @@ test('Clerk and a linked Convex Auth session approve bulk requests for the same 
 test('a copied browser token loses reads and device approval after session revocation', async t => {
   const s = fixture(t),
     copied = s.browser();
-  const flow = await device.start._handler(s.ctx, {
+  const flow = await begin(s.ctx, {
     operationId: randomUUID(),
     clientNonce: randomBytes(32).toString('hex'),
     name: 'Synthetic device',
@@ -269,7 +276,7 @@ test('CLI and retained Clerk identities add no session or users reads; missing u
 
 test('revoking the browser between inspection and decision leaves the device pending', async t => {
   const s = fixture(t);
-  const flow = await device.start._handler(s.ctx, {
+  const flow = await begin(s.ctx, {
     operationId: randomUUID(),
     clientNonce: randomBytes(32).toString('hex'),
     name: 'Synthetic race',
@@ -304,7 +311,7 @@ test('an action refuses its result when the browser session is revoked during ex
 
 test('a Convex Auth browser approval issues the normal Forge CLI credential; a CLI token cannot approve', async t => {
   const s = fixture(t);
-  const flow = await device.start._handler(s.ctx, {
+  const flow = await begin(s.ctx, {
     operationId: randomUUID(),
     clientNonce: randomBytes(32).toString('hex'),
     name: 'Synthetic CLI',

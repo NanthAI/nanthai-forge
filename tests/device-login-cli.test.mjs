@@ -16,6 +16,7 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
     startName = '',
     renamed,
     stableProtocol = false;
+  const startUrls = [];
   // The HTTP fixture issues claim-shaped tokens; signature checks remain the server's job.
   const tokenFor = signIn =>
     `header.${Buffer.from(
@@ -33,13 +34,11 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
     for await (const chunk of request) chunks.push(chunk);
     const input = JSON.parse(Buffer.concat(chunks).toString());
     response.setHeader('Content-Type', 'application/json');
-    if (request.url === '/auth/device/start-v2' && !stableProtocol) {
-      response.statusCode = 404;
-      response.end('{}');
-    } else if ((request.url === '/auth/device/start' || request.url === '/auth/device/start-v2') && limited) {
+    if (request.url.startsWith('/auth/device/start')) startUrls.push(request.url);
+    if (request.url === '/auth/device/start-v2' && limited) {
       response.statusCode = 429;
       response.end(JSON.stringify({ error: 'slow_down', interval: 60 }));
-    } else if (request.url === '/auth/device/start' || request.url === '/auth/device/start-v2') {
+    } else if (request.url === '/auth/device/start-v2') {
       assert.match(input.clientNonce, /^[0-9a-f]{64}$/);
       assert.equal(input.scope, 'cli');
       startName = input.name;
@@ -47,8 +46,8 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
         JSON.stringify({
           device_code: 'a'.repeat(64),
           user_code: 'ABCDE-FGHJK',
-          verification_uri: 'https://forge.example/device',
-          verification_uri_complete: 'https://forge.example/device?code=ABCDE-FGHJK',
+          verification_uri: 'https://forge.example/-/device',
+          verification_uri_complete: 'https://forge.example/-/device?code=ABCDE-FGHJK',
           expires_in: 600,
           interval: 5,
         }),
@@ -210,6 +209,11 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
   const cached = JSON.parse(readFileSync(file, 'utf8'));
   cached.deployments[deployment].expiresAt = 0;
   writeFileSync(file, JSON.stringify(cached), { mode: 0o600 });
+  // Every sign-in used the stable device flow; none asked for the earlier one (ac85b100).
+  assert.ok(
+    startUrls.length > 0 && startUrls.every(url => url === '/auth/device/start-v2'),
+    startUrls.join(),
+  );
   const logout = await run(['logout', deployment], envToken);
   assert.equal(logout.code, 0);
   assert.equal(revoked, true);

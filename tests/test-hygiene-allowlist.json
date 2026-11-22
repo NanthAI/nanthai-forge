@@ -406,7 +406,7 @@
   "tests/still-clock.mjs": {"date":1},
   "tests/test-bootstrap-cleanup.test.mjs": {"date":1},
   "tests/trusted-origin.mjs": {"date":1},
-  "tests/ui-device.test.mjs": {"date":14},
+  "tests/ui-device.test.mjs": {"date":7},
   "tests/ui-feedback.test.mjs": {"date":1},
   "tests/ui-now.test.mjs": {"date":4},
   "tests/ui-owner-decisions-browser.test.mjs": {"sleep":1,"poll":1},

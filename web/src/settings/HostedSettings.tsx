@@ -14,7 +14,7 @@ import { useSection } from '../WorkspaceUI';
 import { type WorkIndexWorkspace } from '../hosted-work-index';
 import { hostedError } from '../snapshot';
 import ProjectContributors from '../ProjectContributors';
-import { DeviceCredentials } from '../DeviceLogin';
+import { DeviceCredentials } from '../device/DeviceList';
 import { useUser } from '@clerk/react';
 import { navigate } from '../ui/navigation';
 import { settingsHref } from './SettingsLayout';

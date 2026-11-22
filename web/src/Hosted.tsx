@@ -39,10 +39,9 @@ const ImportedSourceSettings = lazy(() => import('./settings/ImportedSourceSetti
 const Teams = lazy(() => import('./Teams'));
 const Secrets = lazy(() => import('./Secrets'));
 const ProjectBackups = lazy(() => import('./ProjectBackups'));
-const DeviceLogin = lazy(() => import('./DeviceLogin'));
 const OwnerApprove = lazy(() => import('./OwnerApprove'));
 const DeviceCredentials = lazy(() =>
-  import('./DeviceLogin').then(module => ({ default: module.DeviceCredentials })),
+  import('./device/DeviceList').then(module => ({ default: module.DeviceCredentials })),
 );
 
 type Job = {
@@ -666,13 +665,7 @@ export default function Hosted() {
     <ClerkProvider publishableKey={key}>
       <ConvexProviderWithClerk client={client} useAuth={useConvexTokenAuth}>
         <Suspense fallback={<AppLoader />}>
-          {location.pathname === '/device' ? (
-            <DeviceLogin />
-          ) : location.pathname === '/approve' ? (
-            <OwnerApprove />
-          ) : (
-            <ConnectedExplorer />
-          )}
+          {location.pathname === '/approve' ? <OwnerApprove /> : <ConnectedExplorer />}
         </Suspense>
       </ConvexProviderWithClerk>
     </ClerkProvider>

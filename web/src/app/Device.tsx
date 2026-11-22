@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Approve or deny an `nforge login` from the browser, signed in with Convex Auth. The same backend as the old /device
-// page (convex/deviceActions.ts): one inspect when the code is complete, one decide per answer. A decision keeps its
+// Approve or deny an `nforge login` from the browser, signed in with Convex Auth. The backend is convex/deviceActions.ts: one inspect when the code is complete, one decide per answer. A decision keeps its
 // operation id until it succeeds, so a retry after a lost reply never records two decisions. The full device and
 // session screens are stage C (Item df06081d); this page is the approval step the CLI links to.
-// It keeps every rule of the old page (docs/security.md, "CLI device credentials"): server-known facts first and the
+// It keeps every rule of the earlier /device page (docs/security.md, "CLI device credentials"): server-known facts first and the
 // terminal-chosen name last, quoted, cleaned and marked not verified; a code from a link leaves the address on arrival,
 // is never shown and must be typed again before Approve; a decided or lapsed code offers no answer. No timers: expiry
 // is read when the card renders and again before an answer.

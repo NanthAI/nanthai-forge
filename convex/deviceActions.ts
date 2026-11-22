@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
-import { randomUUID } from 'node:crypto';
 import { v, type Infer } from 'convex/values';
 import type { Doc } from './_generated/dataModel';
 import { accountAction, internalAction, isDeviceIdentity } from './cliServer';
@@ -52,22 +51,6 @@ type DeviceFlow = {
   interval: number;
 };
 type SlowDown = typeof startSlowDown;
-export const start = internalAction({
-  args: { operationId: v.string(), clientNonce: v.string(), name: v.string(), scope: deviceScope },
-  returns: v.union(
-    v.object({
-      device_code: v.string(),
-      user_code: v.string(),
-      verification_uri: v.string(),
-      verification_uri_complete: v.string(),
-      expires_in: v.number(),
-      interval: v.number(),
-    }),
-    v.object({ error: v.literal('slow_down'), interval: v.number() }),
-  ),
-  handler: async (ctx, args): Promise<DeviceFlow | SlowDown> =>
-    beginDeviceLogin(ctx, args) as Promise<DeviceFlow | SlowDown>,
-});
 export async function beginDeviceLogin(
   ctx: import('./_generated/server').ActionCtx,
   args: {
@@ -76,7 +59,7 @@ export async function beginDeviceLogin(
     name: string;
     scope: 'cli' | 'coordination';
     projectId?: string;
-    stable?: { id: string; key: string };
+    stable: { id: string; key: string };
     forceApproval?: true;
   },
 ): Promise<DeviceFlow | SlowDown | { known: Doc<'cliCredentials'> }> {
@@ -90,7 +73,7 @@ export async function beginDeviceLogin(
   );
   const deviceCode = deviceSecret(key, args.operationId, args.clientNonce);
   const code = userCode(key, args.operationId, deviceCode),
-    verification = new URL(args.stable ? '/-/device' : '/device', web).href;
+    verification = new URL('/-/device', web).href;
   const row = await ctx.runMutation(internal.deviceStore.start, {
     operationId: args.operationId,
     ...(args.forceApproval ? { forceApproval: true } : {}),
@@ -100,17 +83,17 @@ export async function beginDeviceLogin(
     request: JSON.stringify({
       name,
       scope: args.scope,
-      ...(args.stable
-        ? { deviceVersion: 1, projectId: args.projectId ?? null, deviceKey: args.stable.key }
-        : {}),
+      deviceVersion: 1,
+      projectId: args.projectId ?? null,
+      deviceKey: args.stable.key,
     }),
     deviceHash: deviceHash(deviceCode),
     userHash: deviceHash(normalizedCode(code)),
     expiresAt: Date.now() + 600_000,
     nextPollAt: 0,
     state: 'pending',
-    credentialId: args.stable?.id ?? randomUUID(),
-    ...(args.stable ? { deviceKey: args.stable.key } : {}),
+    credentialId: args.stable.id,
+    deviceKey: args.stable.key,
     // The bearer secret is never persisted.
   });
   if (!row) return startSlowDown;
