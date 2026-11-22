@@ -75,5 +75,7 @@ export const hostedApprovalTables = {
     version: v.number(),
   })
     .index('by_project_and_lane', ['projectId', 'laneId'])
-    .index('by_project_and_live', ['projectId', 'live']),
+    .index('by_project_and_live', ['projectId', 'live'])
+    // Open requests are the rows not yet ended; the owner's list reads only these, never the closed history.
+    .index('by_project_and_ended', ['projectId', 'ended.kind']),
 };

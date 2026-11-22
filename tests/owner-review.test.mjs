@@ -1208,6 +1208,32 @@ test('M3 list: every open request kind (Lane, fork run, held settings) with a de
     assert.match(request.url, /^https:\/\/forge\.example\.invalid\/approve\?project=/);
   }
 });
+// Item 4f1f7984: the list read the newest 100 not-live rows, a window shared with closed Lane rows, so
+// enough abandoned/withdrawn Lanes pushed a pending fork request out of Needs me (complete:false).
+test('4f1f7984 list: a pending fork request is still listed after 150 newer closed rows', async t => {
+  const { f, laneId } = await requestedLane(t);
+  const row = fields => ({
+    projectId: f.projectId,
+    operationId: randomUUID(),
+    requester: 'owner',
+    reason: 'synthetic reason',
+    head: 'a'.repeat(64),
+    status: 'requested',
+    live: false,
+    version: 1,
+    ...fields,
+  });
+  // The pending fork request is the oldest row; 150 closed rows come after it.
+  f.insert('projectHostedApprovals', row({ laneId: 'fork-pending', pullRequest: 7, at: 1 }));
+  for (let i = 0; i < 150; i++)
+    f.insert(
+      'projectHostedApprovals',
+      row({ laneId: `closed-${i}`, at: 10 + i, ended: { kind: 'settled', at: 10 + i } }),
+    );
+  const listed = JSON.parse(await f.tx('list', approvals.list, { projectId: f.projectId }, 'owner'));
+  assert.deepEqual(listed.requests.map(request => request.laneId).sort(), [laneId, 'fork-pending'].sort());
+  assert.equal(listed.complete, true, 'closed history never fills the pending page');
+});
 test('M3 derive: kind and phase for each request, one row per phase, unknown is never open', () => {
   const lane = { status: 'requested', live: true };
   const row = (record, kind, state, open, needsOwner) => {
