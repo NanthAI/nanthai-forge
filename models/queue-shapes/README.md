@@ -12,14 +12,18 @@ runs with seeds **137, 311 and 571**.
 
 ```sh
 nforge heavy -- python3 -B models/queue-shapes/shapes.py
+nforge heavy -- python3 -B models/queue-shapes/shapes.py --arm all
+nforge heavy -- python3 -B models/queue-shapes/shapes.py --bench
 nforge heavy -- python3 -B models/queue-shapes/shapes.py --refit
 ```
 
-The second command reproduces the measured-load incumbent from the queue refit
-at 15, 30 and 60 nominal solo-green offers/hour, with and without sampled
-historical holds. Its rates refer to a different denominator than the shape
-cells' raw offers/hour. This arm retains the historical random main-race
-rechecks and historical competing jobs for reproducibility.
+The default command runs the calibrated `incumbent` arm on all six shapes. Pass
+`--arm a` (opportunistic batching, zero artificial hold when a slot is free,
+culprit split on red), `--arm b` (keep disjoint stale passes while slots are
+saturated, full recheck only on intersection), `--arm a+b`, or `--arm all` to
+compare all four arms. `--bench` runs the `bench-30` calibration cell fitted to
+the live sustained-load bench (Item `b9a2cccd`, comment `0659ee5e`). `--refit`
+reproduces the measured-load incumbent from the earlier queue refit unchanged.
 
 - [base.json](base.json) retains the Forge profile, measurement counts, hold
   samples and needed columns from the refit's synthetic traces.

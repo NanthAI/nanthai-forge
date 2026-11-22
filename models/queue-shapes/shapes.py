@@ -6,10 +6,17 @@ import random
 from collections import Counter, defaultdict, deque
 from pathlib import Path
 
+from arms import BENCH_30_CALIBRATION, BENCH_30_SHAPE, CalibratedShapeExperiment, bench_30_rows
 from publisher.experiment import Experiment
 from run import nearest
 
 HERE = Path(__file__).resolve().parent
+ARMS = {
+    "incumbent": dict(batching=False, skip_stale=False),
+    "a": dict(batching=True, skip_stale=False),
+    "b": dict(batching=False, skip_stale=True),
+    "a+b": dict(batching=True, skip_stale=True),
+}
 
 
 class ShapeExperiment(Experiment):
@@ -153,31 +160,88 @@ def read(name):
     return json.loads((HERE / name).read_bytes())
 
 
-def replay(refit=False):
+def bench_replay(arms=None):
+    """Run the bench-30 calibration cell matching Item b9a2cccd comment 0659ee5e."""
+    base = read("base.json")
+    station = read("publisher/measurements.json")["service"]
+    rows = bench_30_rows()
+    cal = BENCH_30_CALIBRATION
+    bench_arms = {
+        "incumbent": dict(batching=False, skip_stale=False, scoped_recheck_fraction=cal["scoped_recheck_fraction"]),
+        "strict-8": dict(
+            batching=True,
+            skip_stale=False,
+            strict_admission_only_batch=True,
+            max_batch=8,
+            scoped_recheck_fraction=0.0,
+        ),
+        "a": dict(batching=True, skip_stale=False, scoped_recheck_fraction=cal["scoped_recheck_fraction"]),
+        "b": dict(batching=False, skip_stale=True, scoped_recheck_fraction=cal["scoped_recheck_fraction"]),
+        "a+b": dict(batching=True, skip_stale=True, scoped_recheck_fraction=cal["scoped_recheck_fraction"]),
+    }
+    selected = list(bench_arms) if arms is None else arms
+    for arm_name in selected:
+        kwargs = bench_arms[arm_name]
+        for seed in base["seeds"]:
+            model = CalibratedShapeExperiment(
+                base,
+                rows,
+                seed,
+                station,
+                [],
+                BENCH_30_SHAPE,
+                bench_mode=True,
+                dispatch_order="fifo",
+                capacity_override=cal["capacity"],
+                check_overhead_min=cal["check_overhead_min"],
+                refusal_rate=cal["refusal_rate"],
+                **kwargs,
+            )
+            yield dict(shape="bench-30", arm=arm_name, seed=seed, **model.measure())
+
+
+def replay(refit=False, arm="incumbent", uncalibrated=False):
     base, shapes = read("base.json"), read("shapes.json")
     station = read("publisher/measurements.json")["service"]
     background = read("publisher/background.json")
-    for seed in base["seeds"]:
-        jobs = background[str(seed)]
-        if refit:
+    if refit:
+        for seed in base["seeds"]:
+            jobs = background[str(seed)]
             for rate in (15, 30, 60):
                 rows = base["traces"][f"B/{rate}/{seed}"]
                 for hold in (False, True):
                     model = Experiment(base, rows, seed, station, jobs, hold)
                     yield dict(shape=f"refit-{rate}", seed=seed, historical_hold=hold, **model.measure())
-            continue
-        jobs = [job for job in jobs if job[2] != "github-mirror-verify"]
-        for name, overrides in shapes.items():
-            shape = shapes["baseline"] | overrides
-            rate = shape["trace_rate"]
-            keep = shape["offers_per_hour"] * (1 - base["profile"]["p"]) / rate
-            rows = [row for row in base["traces"][f"B/{rate}/{seed}"] if row[2] < keep]
-            model = ShapeExperiment(base, rows, seed, station, jobs, shape)
-            yield dict(shape=name, seed=seed, **model.measure())
+        return
+    arm_names = list(ARMS) if arm == "all" else [arm]
+    for arm_name in arm_names:
+        kwargs = ARMS[arm_name]
+        for seed in base["seeds"]:
+            jobs = [job for job in background[str(seed)] if job[2] != "github-mirror-verify"]
+            for name, overrides in shapes.items():
+                shape = shapes["baseline"] | overrides
+                rate = shape["trace_rate"]
+                keep = shape["offers_per_hour"] * (1 - base["profile"]["p"]) / rate
+                rows = [row for row in base["traces"][f"B/{rate}/{seed}"] if row[2] < keep]
+                if uncalibrated and arm_name == "incumbent":
+                    model = ShapeExperiment(base, rows, seed, station, jobs, shape)
+                    yield dict(shape=name, arm="uncalibrated", seed=seed, **model.measure())
+                else:
+                    model = CalibratedShapeExperiment(base, rows, seed, station, jobs, shape, **kwargs)
+                    yield dict(shape=name, arm=arm_name, seed=seed, **model.measure())
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--refit", action="store_true", help="replay the earlier incumbent arm unchanged")
+    parser.add_argument("--bench", action="store_true", help="run the bench-30 calibration cell (b9a2cccd)")
+    parser.add_argument("--uncalibrated", action="store_true", help="run the original uncalibrated singleton model")
+    parser.add_argument(
+        "--arm",
+        choices=(*ARMS, "all"),
+        default="incumbent",
+        help="queue rule arm to run (default: incumbent)",
+    )
     args = parser.parse_args()
-    print(json.dumps(list(replay(args.refit)), indent=2, allow_nan=False))
+    rows = list(bench_replay()) if args.bench else list(replay(args.refit, args.arm, args.uncalibrated))
+    print(json.dumps(rows, indent=2, allow_nan=False))

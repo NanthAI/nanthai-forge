@@ -64,6 +64,37 @@ stages. The controller fixtures separately exercise actual queue code at their
 original load. They verify order behavior and provide a separate source of evidence
 from the shape projections.
 
+## Calibration and switchable arms (`arms.py`)
+
+The uncalibrated singleton arm (`--uncalibrated`) assigned 40% of first checks to
+uncarriable `scoped` gates and pinned `main` at queue entry rather than runner
+dispatch, inflating 30/h checks/landing to 4.2–4.9 against 1.70 in the live
+sustained-load bench (Item `b9a2cccd`, comment `0659ee5e`). `CalibratedShapeExperiment`
+fixes both: first checks run full admission (`admissionCheck="full"`) and carry
+across disjoint main moves, scoped selection applies only on refusal rechecks, and
+checks pin `main` when they acquire runner slots.
+
+- **`bench-30` calibration cell (`--bench`)**: replays the exact 60-minute
+  40-task schedule from `scripts/bench-t3code/sustained-plan.mjs` (30 greens,
+  10 solo reds, 3 overlap pairs) on 2-shard 9-minute checks with 1.5-minute
+  runner setup/plan overhead, 14 bench slots, 5 periodic audits, 15% extra
+  refusal rate (~20% total refused share) and FIFO runner-queue dispatch.
+  Dogfood incumbent lands near 1.73 checks/landing and 50.0 min p90 (bench
+  1.70 / 55.1 min); the `strict-8` real-world reference (full admission +
+  group-8 refusal batching) lands near 1.57 checks/landing and 37.9 min p90
+  (bench 1.50 / 38.0 min).
+- **Arm `a` (batching)**: zero artificial hold when a runner slot is free
+  (never holds a landing that would land alone sooner). When slots are busy,
+  compatible ready rechecks (≥2) or fresh arrivals (≥4) up to 8 group into one
+  full check while preserving acyclic path-order dependencies. Red batches split
+  suspects solo with the clean remainder rechecking together, or bisect by
+  halves when unattributed, matching `splitGroups`.
+- **Arm `b` (no stale-pass recheck while saturated)**: while runner slots are
+  saturated (`waiting`, `pending_checks`, or `used + slots > capacity`), a pass
+  on an older `main` is kept when intervening `main` moves do not intersect its
+  `paths`; intersecting moves trigger a full recheck. When unsaturated, incumbent
+  rules apply unchanged.
+
 ## Measures
 
 - **Offers and landings/hour** use the score window. The landing count includes

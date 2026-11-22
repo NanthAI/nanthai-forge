@@ -2,7 +2,8 @@
 
 import unittest
 
-from shapes import ShapeExperiment, read
+from arms import BENCH_30_CALIBRATION, BENCH_30_SHAPE, CalibratedShapeExperiment, bench_30_rows
+from shapes import ShapeExperiment, bench_replay, read, replay
 
 
 class ShapeTest(unittest.TestCase):
@@ -49,6 +50,168 @@ class ShapeTest(unittest.TestCase):
         self.assertEqual(result["pending"], [1, 1])
         self.assertEqual(result["scored_landed"], 0)
         self.assertFalse(result["flow"])
+
+
+class CalibratedArmsTest(unittest.TestCase):
+    def calibrated(self, rows, *, capacity=2, full_minutes=4, scoped_minutes=2, paths=None, solo=None, pairs=None, **kwargs):
+        base = read("base.json")
+        base["warm_hours"], base["score_hours"], base["flake"] = 0, 2, 0
+        base["capture"]["check_q"] = [10, 10]
+        shape = read("shapes.json")["baseline"] | {
+            "full_minutes": full_minutes,
+            "full_worker_minutes": full_minutes,
+            "full_slots": 1,
+            "scoped_minutes": scoped_minutes,
+            "scoped_worker_minutes": scoped_minutes,
+            "scoped_slots": 1,
+        }
+        station = {"commit_seconds": [1], "recompose_seconds": [1]}
+        model = CalibratedShapeExperiment(
+            base, rows, 137, station, [], shape, capacity_override=capacity, **kwargs
+        )
+        if paths is not None:
+            model.paths = paths
+        else:
+            model.paths = {i: {i} for i in range(len(rows))}
+        model.solo = set() if solo is None else set(solo)
+        model.pairs = [set() for _ in rows] if pairs is None else pairs
+        return model
+
+    def test_batching_never_holds_a_landing_when_a_slot_is_free(self):
+        model = self.calibrated([[0, 0.99], [1, 0.99]], capacity=2, full_minutes=4, batching=True, min_fresh_batch=2)
+        result = model.measure()
+        self.assertEqual(result["stats"].get("batches_started", 0), 0)
+        self.assertAlmostEqual(model.pub[0], 4 + 1 / 60, places=3)
+        # Arrival 1 starts immediately at t=1 (zero wait), finishes check at t=5, carries via 1s recompose + 1s commit.
+        self.assertAlmostEqual(model.pub[1], 5 + 2 / 60, places=3)
+
+    def test_batching_groups_queued_landings_and_splits_solo_culprit(self):
+        # Slot 0 is occupied by arrival 0 (t=0..4); arrivals 1,2,3 queue and batch at t=4; arrival 2 is solo-red.
+        model = self.calibrated(
+            [[0, 0.99], [1, 0.99], [2, 0.99], [3, 0.99]],
+            capacity=1,
+            full_minutes=4,
+            batching=True,
+            min_fresh_batch=2,
+            solo={2},
+        )
+        result = model.measure()
+        self.assertEqual(sorted(model.pub), [0, 1, 3])
+        self.assertEqual(sorted(model.rej), [2])
+        self.assertGreaterEqual(result["stats"]["batches_started"], 2)
+        self.assertEqual(result["stats"]["batch_splits"], 1)
+
+    def test_batching_splits_unattributed_pair_incompatibility_by_halves(self):
+        # Pairwise incompatibility occurs only on overlapping paths (matching incompatible_pairs).
+        paths = {0: {0}, 1: {"shared"}, 2: {"shared"}, 3: {3}}
+        pairs = [set(), {2}, {1}, set()]
+        model = self.calibrated(
+            [[0, 0.99], [1, 0.99], [2, 0.99], [3, 0.99]],
+            capacity=1,
+            full_minutes=4,
+            batching=True,
+            min_fresh_batch=2,
+            paths=paths,
+            pairs=pairs,
+        )
+        result = model.measure()
+        # Arrival 1 and 2 are pairwise incompatible: [1,2,3] splits into [1,2]+[3], then [1,2] splits into [1]+[2].
+        self.assertEqual(sorted(model.pub), [0, 1, 3])
+        self.assertEqual(sorted(model.rej), [2])
+        self.assertEqual(result["stats"]["batch_splits"], 2)
+
+    def test_acyclic_batch_selection_avoids_deadlock_with_overlapping_fixed_entry(self):
+        # Arrival 0 occupies the single slot; arrivals 1,2,3 wait with 2 fixed (overlapping 1 and 3).
+        paths = {0: {0}, 1: {"a"}, 2: {"a", "b"}, 3: {"b"}}
+        model = self.calibrated(
+            [[0, 0.99], [1, 0.99], [2, 0.99], [3, 0.99]],
+            capacity=1,
+            full_minutes=2,
+            batching=True,
+            min_fresh_batch=2,
+            paths=paths,
+        )
+        # Mark arrival 2 as fixed after submit to exercise the cycle guard against mixed fixed/ready queues.
+        model.submit(0)
+        model.enqueue_check(1, "ready", (1, False))
+        model.live.add(1)
+        model.path_offers["a"].append(1)
+        model.enqueue_check(2, "fixed", [2])
+        model.live.add(2)
+        model.path_offers["a"].append(2)
+        model.path_offers["b"].append(2)
+        model.enqueue_check(3, "ready", (3, False))
+        model.live.add(3)
+        model.path_offers["b"].append(3)
+        model.events = [ev for ev in model.events if ev[2] != model.submit]
+        model.measure()
+        self.assertEqual(sorted(model.pub), [0, 1, 2, 3])
+
+    def test_skip_stale_keeps_disjoint_scoped_pass_only_while_saturated_and_rechecks_on_intersection(self):
+        # Arrival 0 (t=0..4) lands at ~4.0; arrival 1 (t=0.5..4.5, overlapping p0) enters scoped recheck
+        # (t=4.5..10.5, duration 6). Arrival 2 (t=1.5, starts at t=4..8) lands on disjoint p2 at ~8.0 while
+        # 1 is still running; arrivals 3 and 4 keep capacity=2 saturated at t=10.5 when 1 finishes.
+        paths = {0: {"p0"}, 1: {"p0"}, 2: {"p2"}, 3: {"p3"}, 4: {"p4"}}
+        rows = [[0, 0.99], [0.5, 0.99], [1.5, 0.99], [8.5, 0.99], [9.0, 0.99]]
+        model_inc = self.calibrated(
+            rows, capacity=2, full_minutes=4, scoped_minutes=6, paths=paths, skip_stale=False, scoped_recheck_fraction=1.0
+        )
+        res_inc = model_inc.measure()
+        self.assertGreaterEqual(res_inc["stats"].get("scoped_rechecks", 0), 1)
+
+        model_b = self.calibrated(
+            rows, capacity=2, full_minutes=4, scoped_minutes=6, paths=paths, skip_stale=True, scoped_recheck_fraction=1.0
+        )
+        res_b = model_b.measure()
+        self.assertEqual(sorted(model_b.pub), [0, 1, 2, 3, 4])
+        self.assertEqual(res_b["stats"].get("scoped_rechecks", 0), 0)
+        self.assertGreaterEqual(res_b["stats"].get("stale_pass_kept", 0), 1)
+
+        # On intersecting path move, arm b still runs a recheck (never publishes stale intersecting pass).
+        paths_hit = {0: {"p0"}, 1: {"p0"}}
+        model_hit = self.calibrated(
+            [[0, 0.99], [0.5, 0.99]],
+            capacity=2,
+            full_minutes=4,
+            scoped_minutes=2,
+            paths=paths_hit,
+            skip_stale=True,
+            scoped_recheck_fraction=1.0,
+        )
+        res_hit = model_hit.measure()
+        self.assertEqual(sorted(model_hit.pub), [0, 1])
+        self.assertEqual(res_hit["stats"].get("related_rechecks", 0), 1)
+
+    def test_bench_30_calibration_matches_sustained_load_bench_envelope(self):
+        rows = list(bench_replay(["incumbent", "strict-8"]))
+        by_arm = {arm: [r for r in rows if r["arm"] == arm] for arm in ("incumbent", "strict-8")}
+        med = lambda arm, key: sorted(r[key] for r in by_arm[arm])[1]
+        # Item b9a2cccd comment 0659ee5e: dogfood 1.70 chk/l, p90 55.1 min; strict-8 1.50 chk/l, p90 38.0 min.
+        self.assertGreaterEqual(med("incumbent", "checks_per_landing"), 1.55)
+        self.assertLessEqual(med("incumbent", "checks_per_landing"), 1.95)
+        self.assertGreaterEqual(med("strict-8", "checks_per_landing"), 1.40)
+        self.assertLessEqual(med("strict-8", "checks_per_landing"), 1.70)
+        self.assertLess(med("strict-8", "checks_per_landing"), med("incumbent", "checks_per_landing"))
+        self.assertLess(med("strict-8", "p90"), med("incumbent", "p90"))
+
+    def test_arms_do_not_regress_forge_baseline_at_any_seed(self):
+        base = read("base.json")
+        shape = read("shapes.json")["baseline"]
+        station = read("publisher/measurements.json")["service"]
+        background = read("publisher/background.json")
+        keep = shape["offers_per_hour"] * (1 - base["profile"]["p"]) / shape["trace_rate"]
+        for seed in base["seeds"]:
+            jobs = [job for job in background[str(seed)] if job[2] != "github-mirror-verify"]
+            rows = [row for row in base["traces"][f"B/{shape['trace_rate']}/{seed}"] if row[2] < keep]
+            inc = CalibratedShapeExperiment(base, rows, seed, station, jobs, shape).measure()
+            for kw in (dict(batching=True), dict(skip_stale=True), dict(batching=True, skip_stale=True)):
+                res = CalibratedShapeExperiment(base, rows, seed, station, jobs, shape, **kw).measure()
+                self.assertTrue(res["flow"])
+                self.assertGreaterEqual(res["per_hour"], inc["per_hour"])
+                self.assertLessEqual(res["p50"], inc["p50"])
+                self.assertLessEqual(res["p90"], inc["p90"])
+                self.assertLessEqual(res["checks_per_landing"], inc["checks_per_landing"])
+                self.assertLessEqual(res["worker_minutes_per_landing"], inc["worker_minutes_per_landing"])
 
 
 if __name__ == "__main__":
