@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { planningIntentStatus } from './work-planning-lifecycle.js';
-import { invariant, itemChanged } from './errors.js';
+import { invariant } from './errors.js';
 import {
   discussionFields,
   refusePurged,
@@ -11,6 +11,7 @@ import {
 import { resolveIntentId, type IntentAlias } from './work-intent-local.js';
 import {
   isShelved,
+  itemChanged,
   planningModelPutKeys,
   type PlanningItem,
   type PlanningWrite,

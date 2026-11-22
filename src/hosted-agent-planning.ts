@@ -26,12 +26,13 @@ import {
 } from './hosted-contract-features.js';
 import { retryableCodes } from './exchange-retry.js';
 import { readIndexedWorkDetail } from './hosted-work-client.js';
-import { ForgeError, invariant, itemChanged } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { isPlanningPrefix, planningIdMaxCandidates } from './planning-id.js';
 import { planningIssueArguments } from './planning-issue-arguments.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 import {
   isShelved,
+  itemChanged,
   planningCommentCommandSchema,
   planningPutAgentFields,
   planningPutSchema,

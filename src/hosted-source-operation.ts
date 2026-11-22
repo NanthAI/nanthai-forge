@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { digest } from './state/hash.js';
-import { invariant, tagShapeSource } from './errors.js';
+import { invariant } from './errors.js';
 
 /** How long an operation receipt answers a retry of its operation id (same value as overlap answers).
  * Longer than any retry or dormant-Lane resume rule. */
@@ -73,6 +73,20 @@ export const hostedOperationSchema = hostedOperationRequestSchema
 export type HostedExpectedPins = z.infer<typeof hostedExpectedPinsSchema>;
 export type HostedOperation = z.infer<typeof hostedOperationSchema>;
 export type HostedTerminalReceipt = z.infer<typeof hostedTerminalReceiptSchema>;
+
+const shapeSource = Symbol.for('forge.shapeSource');
+/** Names the record or schema a local parse checked, so a shape error can say where it failed
+ * (the first, innermost name wins). Names only, never values. */
+function tagShapeSource<T>(error: T, source: string): T {
+  if (error && typeof error === 'object' && Object.isExtensible(error) && !(shapeSource in error))
+    Object.defineProperty(error, shapeSource, { value: source });
+  return error;
+}
+export function shapeSourceOf(error: unknown): string | undefined {
+  const source =
+    error && typeof error === 'object' ? (error as Record<symbol, unknown>)[shapeSource] : undefined;
+  return typeof source === 'string' ? source : undefined;
+}
 
 // One stateless schema: z.json() builds a new recursive schema on every call, which cost about a fifth of
 // the first-check proof (called per manifest entry) before it was shared.

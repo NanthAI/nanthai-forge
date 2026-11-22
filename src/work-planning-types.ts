@@ -2,6 +2,7 @@
 // Pure planning schemas can be validated in the Convex non-Node runtime.
 import { z } from 'zod';
 import { AGENT_CLIENT } from './agent-slug.js';
+import { ForgeError } from './errors.js';
 const id = z.string().uuid();
 const oid = z.string().regex(/^[0-9a-f]{40,64}$/);
 const agentSlugShape = /^[a-z]{2,10}-[a-z]{2,10}$/;
@@ -209,3 +210,19 @@ export const planningCommandSchema = z.discriminatedUnion('action', [
 export type PlanningItem = z.infer<typeof planningItemSchema>;
 export type PlanningCommand = z.infer<typeof planningCommandSchema>;
 export type PlanningWrite = z.infer<typeof planningWriteSchema>;
+
+/** A versioned Work item moved past the version a write expected (flip 5, Issue 0695ab24). It names the
+ * item and both versions, so a caller re-reads that one item instead of the whole project. */
+export function itemChanged(item: {
+  kind: string;
+  id: string;
+  expectedVersion: number;
+  currentVersion: number;
+}) {
+  return new ForgeError(
+    'ITEM_CHANGED',
+    `The ${item.kind} ${item.id} is at version ${item.currentVersion}, not ${item.expectedVersion}. Read it again before saving; your existing work remains available.`,
+    undefined,
+    item,
+  );
+}

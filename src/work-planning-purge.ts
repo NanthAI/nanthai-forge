@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Pure: the reducer half of permanent deletion (Item 4c9e961e, purge Lane 1). Also runs in the Convex runtime.
-import { invariant, itemChanged } from './errors.js';
+import { invariant } from './errors.js';
 import { refusePurged } from './work-planning-put.js';
 import {
   PURGED_ITEM_TITLE,
+  itemChanged,
   planningModelPutKeys,
   type PlanningItem,
   type PlanningPurge,

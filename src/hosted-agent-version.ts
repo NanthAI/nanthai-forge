@@ -3,7 +3,8 @@ import { clientCacheRoot } from './root-paths.js';
 import { dirname, join } from 'node:path';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
-import { ForgeError, shapeSourceOf } from './errors.js';
+import { ForgeError } from './errors.js';
+import { shapeSourceOf } from './hosted-source-operation.js';
 import { hostedAgentActions } from './hosted-agent-contract.js';
 import { durableReplace } from './state/durability.js';
 
