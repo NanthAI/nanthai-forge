@@ -425,7 +425,9 @@ test('past the change-row cap, everyone who can plan here is marked, even with n
 });
 
 // Done-when 22:05Z (Item a61d3c91): a day left not measured is not a closed day.
-test('a close after a day left not measured counts that day’s Lanes, marked partial', async () => {
+test('a close after a day left not measured counts that day’s Lanes, marked partial', async t => {
+  // Keep the gap within planning retention so only the unmeasured day is partial.
+  storageClock(t);
   const tables = {
     projectStatsDays: [closedDay('2026-11-05'), failedDay('2026-11-06', '2026-11-06')],
     projectHostedAcceptances: [receipt('2026-11-08T09:00:00.000Z')],
