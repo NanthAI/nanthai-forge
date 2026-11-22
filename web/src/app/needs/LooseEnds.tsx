@@ -59,6 +59,8 @@ const trashRef = makeFunctionReference<'mutation', LifecycleCall, { applied: boo
   'projectLifecycle:trash',
 );
 const restoreRef = makeFunctionReference<'mutation', LifecycleCall, unknown>('projectLifecycle:restore');
+/** Select all reads at most this many 25-row pages of one group (1,000 Lanes) before it stops and says more remain. */
+const SELECT_ALL_PAGES = 40;
 const AGENT_READ = `nforge agent . lanes '{"view":"loose-ends"}'`;
 
 export default function LooseEnds({ route, projectId, projectName, viewerHandle }: PlaceProps) {
@@ -138,6 +140,9 @@ export function LooseEndsView({
   const [busy, setBusy] = useState(false);
   const [pages, setPages] = useState<Pages>({});
   const [paging, setPaging] = useState<Partial<Record<GroupKey, 'loading' | 'failed'>>>({});
+  const [selecting, setSelecting] = useState(false);
+  /** Bumped by every Clear and Esc: a Select all still reading pages when it moves on must not repick. */
+  const clears = useRef(0);
   /** Titles of the rows submitted, so a row the live read drops meanwhile is still named in the notice. */
   const [titles, setTitles] = useState<Record<string, string>>({});
   /** What the last action changed, for its Undo; and how many it changed. */
@@ -161,7 +166,11 @@ export function LooseEndsView({
   const endToast = useCallback(() => setToast(null), []);
   useEffect(() => {
     if (!picked.size) return;
-    const clear = (event: KeyboardEvent) => event.key === 'Escape' && setPicked(new Set());
+    const clear = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      clears.current++;
+      setPicked(new Set());
+    };
     document.addEventListener('keydown', clear);
     return () => document.removeEventListener('keydown', clear);
   }, [picked.size]);
@@ -253,6 +262,36 @@ export function LooseEndsView({
     setToast(null);
   };
   const allRows = () => screen.sections.flatMap(section => section.rows);
+  // Select all: the owner's Lanes nobody holds, every page of the group (the existing page read, one call per page).
+  const idle = screen.sections.find(section => section.key === 'idle' && section.reported);
+  const idleEligible = idle && read.setAside ? idle.rows.filter(eligible).map(row => row.key) : [];
+  const idleOn = idleEligible.filter(id => picked.has(id)).length;
+  const selectAll = async () => {
+    if (!idle) return;
+    setSelecting(true);
+    const started = clears.current;
+    const ids = new Set(idleEligible);
+    let cursor = idle.cursor;
+    for (let n = 0; cursor && n < SELECT_ALL_PAGES; n++) {
+      try {
+        const reply = JSON.parse(await page(cursor)) as LooseEndsRead;
+        setPages(old => mergePage(old, 'idle', reply));
+        const group = reply.groups.idle;
+        if (!group?.reported) break;
+        for (const row of group.rows) ids.add(row.laneId);
+        cursor = group.continueCursor ?? null;
+      } catch {
+        announce('Could not load every Lane. The Lanes loaded so far are selected.');
+        break;
+      }
+    }
+    setSelecting(false);
+    if (clears.current !== started) return;
+    toggle([...ids], true);
+    announce(
+      `${ids.size.toLocaleString('en')} Lanes nobody holds selected${cursor ? '; more remain, use Select all again' : ''}.`,
+    );
+  };
 
   /** Set Lanes aside. A retry (only the ids that failed) keeps the Undo pins of the rows that already succeeded. */
   const setAsideNow = async (ids: string[], retrying = false) => {
@@ -562,6 +601,13 @@ export function LooseEndsView({
         {pickable.length ? (
           <div className="bulk" role="region" aria-label="Selected">
             <b className="num">{pickable.length.toLocaleString('en')} selected</b>
+            {idleEligible.length && (idleOn < idleEligible.length || idle?.cursor) ? (
+              <Key size="sm" kind="ghost" disabled={busy || selecting} onClick={() => void selectAll()}>
+                {selecting
+                  ? 'Selecting…'
+                  : `Select all ${idleEligible.length.toLocaleString('en')}${idle?.cursor ? ' or more' : ''} Lanes nobody holds`}
+              </Key>
+            ) : null}
             <span className="grow" />
             {pickedIdle.length ? (
               <Key
@@ -592,7 +638,10 @@ export function LooseEndsView({
               kind="ghost"
               keys="Esc"
               aria-label="Clear the selection"
-              onClick={() => setPicked(new Set())}
+              onClick={() => {
+                clears.current++;
+                setPicked(new Set());
+              }}
             >
               Clear
             </Key>

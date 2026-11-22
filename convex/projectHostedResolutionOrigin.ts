@@ -124,9 +124,12 @@ export async function completeResolutionOrigins(
       .query('projectHostedOverlapLanes')
       .withIndex('by_project_and_lane', q => q.eq('projectId', input.projectId).eq('laneId', current.id))
       .unique();
+    if (overlap?.passedMark) await ctx.db.delete(overlap.passedMark);
     if (overlap && overlap.head === current.head && overlap.landed?.receiptId !== input.receiptId)
       await ctx.db.patch(overlap._id, {
         open: false,
+        passedAt: undefined,
+        passedMark: undefined,
         ...(input.commit
           ? {
               landed: {

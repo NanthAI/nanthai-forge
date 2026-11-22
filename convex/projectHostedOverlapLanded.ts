@@ -103,9 +103,16 @@ export async function retireLandedOverlapLanes(
     }
     await ctx.db.patch(row._id, {
       open: false,
+      // A landing ends the unrequested-pass stamp (Item fc1831eb).
+      passedAt: undefined,
+      passedMark: undefined,
       ...(closesMark ? { planLaneMark: undefined, planLanePin: undefined } : {}),
       ...(stamped ? {} : { landed: stamp }),
     });
+    // Only a Lane that was stamped by an unrequested pass pays these writes.
+    if (row.passedMark) await ctx.db.delete(row.passedMark);
+    if (row.passedAt !== undefined && row.presenceRow)
+      await ctx.db.patch(row.presenceRow.id, { passedAt: undefined });
     retired++;
   }
   for (const [id, planIds] of planLanes) await removePlanLanes(ctx, id, planIds);

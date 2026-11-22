@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Needs me › Loose ends (Item fc1831eb) on synthetic data, through the real shell frame and the real route screen, with
 // a Convex client that records every call (window.calls) behind the app's sleeping live reads (window.reads).
-// `?data=demo` has all five groups (checked not reported), with more pages in Lanes nobody holds, leftover projects
+// `?data=demo` has all five groups, with more pages in Lanes nobody holds, leftover projects
 // and dated checks; the second dated page is empty and continues. `?data=worst` has long, right-to-left and CJK text,
 // 25 Lanes with more, and dated coverage still being prepared. `?data=one` is exactly one Lane; `?data=empty` is
 // nothing left; `?data=loading` never answers; `?data=error` fails the live read and a retry answers.
@@ -39,12 +39,19 @@ const lane = (n: number, title: string, minutes: number, extra = {}) => ({
   at: ago(minutes),
   ...extra,
 });
-const project = (n: number, name: string, days: number | null, role = 'owner') => ({
+const project = (
+  n: number,
+  name: string,
+  days: number | null,
+  role = 'owner',
+  stored: { openLanes?: number; bytes?: number } = {},
+) => ({
   projectId: `p${n}`,
   name,
   role,
   lastLandingAt: days === null ? null : ago(days * day),
   reason: days === null ? 'No landing recorded since creation' : 'No landing in the past 30 days',
+  ...stored,
   ...(role === 'owner' ? { trash: { expectedRevision: 10 + n } } : {}),
 });
 const dated = (n: number, text: string, date: string, reason: string, title = 'v3 release', extra = {}) => ({
@@ -57,24 +64,28 @@ const dated = (n: number, text: string, date: string, reason: string, title = 'v
   ...extra,
 });
 const waiting = [{ id: 'req-1', selector: 'the trash', projects: 40, byDevice: true }];
-const checked = {
-  reported: false as const,
-  why: 'A passed check that nobody asked to land is not recorded per Lane yet.',
-};
 const none = { reported: true as const, rows: [], continueCursor: null };
 
 function first(): LooseEndsRead {
   const setAside = params.get('owner') === '0' ? null : { authorityEpoch: 1 };
   if (data === 'empty')
-    return { at: NOW, setAside, groups: { idle: none, stopped: none, checked, projects: none, dated: none } };
+    return {
+      at: NOW,
+      setAside,
+      groups: { idle: none, stopped: none, checked: none, projects: none, dated: none },
+    };
   if (data === 'one')
     return {
       at: NOW,
       setAside,
       groups: {
-        idle: { reported: true, rows: [lane(1, 'Fix flaky retry timer', 6 * day)], continueCursor: null },
+        idle: {
+          reported: true,
+          rows: [lane(1, 'Fix flaky retry timer', 6 * day, { saves: 3 })],
+          continueCursor: null,
+        },
         stopped: none,
-        checked,
+        checked: none,
         projects: none,
         dated: none,
       },
@@ -92,11 +103,17 @@ function first(): LooseEndsRead {
               actor: LONG,
               agent: LONG_AGENT,
               paths: 12_840,
+              saves: 1_284,
             }),
-            lane(2, 'x', 2 * day, { actor: 'jo', agent: 'ox', paths: 1 }),
+            lane(2, 'x', 2 * day, { actor: 'jo', agent: 'ox', paths: 1, saves: 1 }),
+            // A Lane written before the counts existed: its row says "not recorded", never a guessed number.
             lane(3, '', 3 * day, { paths: 0 }),
             ...Array.from({ length: 22 }, (_, i) =>
-              lane(10 + i, `Sample Lane ${i + 4}`, (4 + i) * day, i % 2 ? {} : { actor: LONG }),
+              lane(10 + i, `Sample Lane ${i + 4}`, (4 + i) * day, {
+                saves: i + 2,
+                ...(i % 2 ? {} : { actor: LONG }),
+                ...(i === 3 ? { landedBefore: true } : {}),
+              }),
             ),
           ],
         },
@@ -107,10 +124,22 @@ function first(): LooseEndsRead {
             lane(40, 'Benachrichtigungseinstellungen für Übersetzungsaufträge', 3 * day, {
               actor: LONG,
               agent: LONG_AGENT,
+              saves: 318,
             }),
           ],
         },
-        checked,
+        checked: {
+          reported: true,
+          continueCursor: null,
+          rows: [
+            lane(
+              45,
+              'Revert "Revert "Stream parser: handle split UTF-8 sequences across chunk boundaries when the upstream transform emits zero-length buffers""',
+              330 * day,
+              { actor: 'jo', agent: 'ox', saves: 4, passedAt: ago(330 * day) },
+            ),
+          ],
+        },
         projects: {
           reported: true,
           continueCursor: 'projects-p2',
@@ -120,9 +149,11 @@ function first(): LooseEndsRead {
               1,
               'tidepool-benchmark-streaming-backpressure-integration-fixtures-zoo-n10-rerun-after-queue-fix-2',
               400,
+              'owner',
+              { openLanes: 37, bytes: 1_200_000_000_000 },
             ),
             project(2, 'x', null),
-            project(3, 'مشروع-اختبار-٣', 31, 'write'),
+            project(3, 'مشروع-اختبار-٣', 31, 'write', { openLanes: 0, bytes: 0 }),
           ],
         },
         dated: {
@@ -157,22 +188,55 @@ function first(): LooseEndsRead {
         reported: true,
         continueCursor: 'idle-p2',
         rows: [
-          lane(1, 'Fix flaky retry timer', 6 * day, { paths: 2 }),
-          lane(2, 'Try streaming decoder', 3 * day, { actor: 'mara', agent: 'salt-wren', paths: 7 }),
-          lane(3, 'Docs: typo sweep', 3 * day - 60, { actor: 'mara', agent: 'still-heron', paths: 1 }),
+          lane(1, 'Fix flaky retry timer', 6 * day, { paths: 2, saves: 3 }),
+          lane(2, 'Try streaming decoder', 3 * day, {
+            actor: 'mara',
+            agent: 'salt-wren',
+            paths: 7,
+            saves: 1,
+          }),
+          lane(3, 'Revert the parser rewrite', 3 * day - 60, {
+            actor: 'mara',
+            agent: 'still-heron',
+            paths: 1,
+            saves: 1,
+            landedBefore: true,
+          }),
         ],
       },
       stopped: {
         reported: true,
         continueCursor: null,
-        rows: [lane(4, 'Docs: migration guide v3', 180, { actor: 'jun', agent: 'copper-moth', paths: 3 })],
+        rows: [
+          lane(4, 'Docs: migration guide v3', 180, {
+            actor: 'jun',
+            agent: 'copper-moth',
+            paths: 3,
+            saves: 3,
+          }),
+        ],
       },
-      checked,
+      checked: {
+        reported: true,
+        continueCursor: null,
+        rows: [
+          lane(5, 'Docs: typo sweep', 3 * day, {
+            actor: 'mara',
+            agent: 'still-heron',
+            paths: 1,
+            saves: 2,
+            passedAt: ago(3 * day),
+          }),
+        ],
+      },
       projects: {
         reported: true,
         continueCursor: 'projects-p2',
         deleteRequests: waiting,
-        rows: [project(1, 'mara-scratch', 41), project(2, 'tidepool-import-test', null)],
+        rows: [
+          project(1, 'mara-scratch', 41, 'owner', { openLanes: 0, bytes: 12_000_000 }),
+          project(2, 'tidepool-import-test', null, 'owner', { openLanes: 0, bytes: 310_000_000 }),
+        ],
       },
       dated: {
         reported: true,
@@ -204,7 +268,11 @@ function next(cursor: string): LooseEndsRead {
     return {
       at: NOW,
       groups: {
-        projects: { reported: true, continueCursor: null, rows: [project(9, 'tidepool-docs-old', 30)] },
+        projects: {
+          reported: true,
+          continueCursor: null,
+          rows: [project(9, 'tidepool-docs-old', 30, 'owner', { openLanes: 1, bytes: 88_000_000 })],
+        },
       },
     };
   if (cursor === 'dated-p2')

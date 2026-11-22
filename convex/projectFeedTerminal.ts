@@ -4,9 +4,10 @@ import type { MutationCtx } from './_generated/server';
 import type { HostedLandingState } from '../src/hosted-landing';
 import { checkCause, type CheckCause, type HostedCheckRun } from '../src/hosted-check';
 import { recordFeedEvent, type FeedWrite } from './projectFeedStore';
+import { stampLanePass } from './projectLooseEndStamp';
 
 type Project = Id<'hostedProjects'>;
-type FeedLane = { laneId: string; actor: string };
+type FeedLane = { laneId: string; actor: string; head?: string; since?: number };
 
 async function* composeLanes(
   ctx: MutationCtx,
@@ -26,7 +27,11 @@ async function* composeLanes(
           .gt('key', after),
       )
       .take(100);
-    yield rows.map(row => ({ laneId: row.key, actor: row.laneActor ?? row.actor }));
+    yield rows.map(row => ({
+      laneId: row.key,
+      actor: row.laneActor ?? row.actor,
+      ...(row.head ? { head: row.head, since: row._creationTime } : {}),
+    }));
     if (rows.length < 100) break;
     after = rows.at(-1)!.key;
   }
@@ -116,7 +121,8 @@ export async function recordLandingFeed(
       ctx,
       ...page.map<FeedWrite>(lane => ({
         projectId,
-        ...lane,
+        laneId: lane.laneId,
+        actor: lane.actor,
         kind,
         operationId: state.operationId,
         submissionId: state.id,
@@ -132,15 +138,21 @@ export async function recordCheckFeed(ctx: MutationCtx, run: HostedCheckRun, cau
   const kind = run.status === 'passed' ? 'check.passed' : 'check.failed';
   const compose = await candidateCompose(ctx, projectId, run.request.candidateId);
   if (!compose) return;
-  for await (const page of composeLanes(ctx, projectId, compose))
+  for await (const page of composeLanes(ctx, projectId, compose)) {
     await recordFeedEvent(
       ctx,
       ...page.map<FeedWrite>(lane => ({
         projectId,
-        ...lane,
+        laneId: lane.laneId,
+        actor: lane.actor,
         kind,
         operationId: run.request.operationId,
         runId: run.id,
       })),
     );
+    // The same Lanes this unrequested pass already names get their pass stamp (Item fc1831eb): no extra read of
+    // the compose, one indexed overlap row per Lane, and a write only for a Lane still on the checked head.
+    if (run.status === 'passed' && run.endedAt)
+      await stampLanePass(ctx, projectId, page, Date.parse(run.endedAt));
+  }
 }

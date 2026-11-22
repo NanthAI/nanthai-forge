@@ -9,7 +9,12 @@ export const LOOSE_ENDS_ACTIVITY_MS = 30 * 60_000;
 type LooseEnd = { laneId: string; replacedBy?: string; next?: string; heldBy?: string };
 type Listed<Row> = { reported: true; rows: Row[]; more: boolean; continueCursor?: string | null };
 type Group<Row> = Listed<Row> | { reported: false; why: string };
-type QuietGroups<Row> = { idle?: Group<Row> | null; stopped: Listed<Row>; active?: Listed<Row> };
+type QuietGroups<Row> = {
+  idle?: Group<Row> | null;
+  stopped?: Listed<Row>;
+  checked?: Group<Row> | null;
+  active?: Listed<Row>;
+};
 
 /** A page cursor describes examined candidates, even if some belong in the activity group. */
 export function withLooseEndsHolders<Row extends LooseEnd, Groups extends QuietGroups<Row>>(
@@ -33,10 +38,12 @@ export function withLooseEndsHolders<Row extends LooseEnd, Groups extends QuietG
   };
   const idle = split(groups.idle);
   const stopped = split(groups.stopped);
+  const checked = split(groups.checked);
   return {
     ...groups,
     ...(idle ? { idle } : {}),
-    stopped,
+    ...(checked ? { checked } : {}),
+    ...(stopped ? { stopped } : {}),
     ...(active.length ? { active: { reported: true, rows: active, more: false } } : {}),
   };
 }

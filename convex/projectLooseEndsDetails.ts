@@ -6,6 +6,8 @@ import { invariant } from '../src/errors';
 import type { Doc } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 import { latestLanding } from './projectLatestLanding';
+import type { OpenSummary } from './projectLiveLineOpen';
+import { lineSummary } from './projectLiveLineStore';
 import { readProjectRole } from './projectAuthority';
 import { openDeleteRequests } from './projectDeleteRequests';
 import { workHead } from './projectWorkHead';
@@ -13,6 +15,11 @@ import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import schema from './schema';
 
 const limit = 25;
+/** Open Lanes counted per listed project; more says "25+" rather than a number it did not count. */
+const OPEN_LANES_CAP = 25;
+/** The first page of leftover projects: each listed project costs its row, its latest landing and its summary, so the
+ * details read stays within its page budget (Item b294a5d8); Show 25 more reads the rest, 25 a page. */
+const firstProjects = 10;
 const inactiveMs = 30 * 24 * 60 * 60_000;
 const prefix = 'forge-loose-ends-details-v1:';
 const position = z.discriminatedUnion('group', [
@@ -45,7 +52,11 @@ export function looseEndsPosition(cursor: string | undefined, now: number) {
   return parsed.data;
 }
 
-async function page<T extends GenericDocument>(range: QueryStream<T>, after: (string | number)[] | null) {
+async function page<T extends GenericDocument>(
+  range: QueryStream<T>,
+  after: (string | number)[] | null,
+  size = limit,
+) {
   const candidates = after
     ? range.narrow({
         lowerBound: after,
@@ -58,12 +69,12 @@ async function page<T extends GenericDocument>(range: QueryStream<T>, after: (st
   let bytes = 0;
   // Ordinary search roots can contain up to a document's worth of indexed body text. Allow one
   // large root to advance the cursor, and keep only one lookahead beyond the row or byte budget.
-  for await (const [row, , size] of candidates.iterWithKeys(true)) {
+  for await (const [row, , length] of candidates.iterWithKeys(true)) {
     if (!row) continue;
-    if (rows.length === limit || (rows.length && bytes + size > 512_000))
+    if (rows.length === size || (rows.length && bytes + length > 512_000))
       return { rows, boundary: rows.at(-1)! };
     rows.push(row);
-    bytes += size;
+    bytes += length;
   }
   return { rows, boundary: null };
 }
@@ -76,12 +87,27 @@ async function inactive(ctx: QueryCtx, project: Project | null, actor: string, c
   const landing = await latestLanding(ctx, project._id);
   const lastLandingAt = landing?._creationTime ?? null;
   if (lastLandingAt !== null && lastLandingAt > cutoff) return null;
+  // Size: stored on the project's live-line summary (convex/projectLiveLineOpen.ts), one point read per listed
+  // project; absent means not measured yet and the row says so. Open Lanes: the project's presence rows (one slim row
+  // per open Lane, none for a closed or superseded one), one bounded range per listed project that is empty for a
+  // project nobody uses. A Lane start must not write a shared counter row, so there is none to read.
+  const [summary, open] = await Promise.all([
+    lineSummary(ctx.db, project._id),
+    ctx.db
+      .query('projectHostedPresence')
+      .withIndex('by_project_and_at', q => q.eq('projectId', project._id))
+      .take(OPEN_LANES_CAP + 1),
+  ]);
+  const stored = (summary ? JSON.parse(summary.value) : {}) as OpenSummary;
   return {
     projectId: project._id,
     name: project.name,
     role,
     lastLandingAt,
     reason: lastLandingAt === null ? 'No landing recorded since creation' : 'No landing in the past 30 days',
+    openLanes: Math.min(open.length, OPEN_LANES_CAP),
+    ...(open.length > OPEN_LANES_CAP ? { openLanesMore: true as const } : {}),
+    ...(stored.size ? { bytes: stored.size.bytes } : {}),
     // Only the owner moves a project to the trash (projectLifecycle:trash), pinned to this revision and to the
     // landing seen here (a landing does not move the revision).
     ...(project.owner === actor
@@ -108,7 +134,7 @@ export async function inactiveProjects(
     .query('accountProjectOrder')
     .withIndex('by_person_and_activity', q => q.eq('person', actor));
   const [{ rows, boundary }, waiting] = await Promise.all([
-    page(range, cursor ? [actor, ...cursor.after] : null),
+    page(range, cursor ? [actor, ...cursor.after] : null, cursor ? limit : firstProjects),
     // The first page also says which of the account's projects wait for a permanent-delete approval.
     cursor ? null : openDeleteRequests(ctx, actor, now),
   ]);

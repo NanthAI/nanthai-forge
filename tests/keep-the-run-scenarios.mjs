@@ -29,84 +29,86 @@ const LANDED_FEED_ROW_BYTES = 490;
  * Item 4e013cdb: cadence and first-check donor evidence ride existing rows. The C1 cases
  * each read 4,002 B and write 884 B more, with unchanged calls and document counts.
  * Item ced8e98f follow-up: each replaced attempt names its cause and each landed attempt
- * its no-hold stamp, on the same writes: 0 to 180 read and 109 to 398 write bytes more. */
+ * its no-hold stamp, on the same writes: 0 to 180 read and 109 to 398 write bytes more.
+ * Item fc1831eb: the Lane overlap row carries `saves` for Loose ends, on rows already read: 50 to 170 read bytes more in the
+ * cases, with unchanged calls and document counts. */
 export const MEASURED = {
   'global-risk mover, strict': {
     calls: 59,
     documents: 1194,
-    readBytes: 1_179_826,
+    readBytes: 1_179_936,
     writeBytes: 444_740 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'global-risk mover, fast': {
     calls: 59,
     documents: 1194,
-    readBytes: 1_179_386,
+    readBytes: 1_179_496,
     writeBytes: 444_704 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'order-sensitive mover, strict': {
     calls: 59,
     documents: 1194,
-    readBytes: 1_179_858,
+    readBytes: 1_179_968,
     writeBytes: 444_760 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'order-sensitive mover, fast': {
     calls: 59,
     documents: 1194,
-    readBytes: 1_179_418,
+    readBytes: 1_179_528,
     writeBytes: 444_724 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, fast': {
     calls: 66,
     documents: 1457,
-    readBytes: 1_571_538,
+    readBytes: 1_571_648,
     writeBytes: 511_949 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'global-risk mover, fast, carry off': {
     calls: 59,
     documents: 1194,
-    readBytes: 1_186_006,
+    readBytes: 1_186_116,
     writeBytes: 445_266 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, fast, carry off': {
     calls: 73,
     documents: 1542,
-    readBytes: 1_618_195,
+    readBytes: 1_618_305,
     writeBytes: 569_857 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'global-risk mover, strict, red': {
     calls: 49,
     documents: 978,
-    readBytes: 985_583,
+    readBytes: 985_643,
     writeBytes: 384_647 + LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, strict, red': {
     calls: 32,
     documents: 556,
-    readBytes: 582_430,
+    readBytes: 582_490,
     writeBytes: 230_043 + LANDED_FEED_ROW_BYTES,
   },
   'global-risk mover, strict, C1 follower': {
     calls: 128,
     documents: 2605,
-    readBytes: 2_625_640,
-    writeBytes: 917_985 + 3 * LANDED_FEED_ROW_BYTES,
+    readBytes: 2_625_810,
+    writeBytes: 918_025 + 3 * LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, strict, C1 follower': {
     calls: 136,
     documents: 2924,
-    readBytes: 3_139_756,
-    writeBytes: 1_011_486 + 3 * LANDED_FEED_ROW_BYTES,
+    readBytes: 3_139_926,
+    writeBytes: 1_011_526 + 3 * LANDED_FEED_ROW_BYTES,
   },
   'no checking row, strict': {
     calls: 23,
     documents: 432,
-    readBytes: 443_960,
+    readBytes: 444_010,
     writeBytes: 170_948 + LANDED_FEED_ROW_BYTES,
   },
   'no checking row, fast': {
     calls: 23,
     documents: 432,
-    readBytes: 443_796,
+    readBytes: 443_846,
     writeBytes: 170_930 + LANDED_FEED_ROW_BYTES,
   },
 };

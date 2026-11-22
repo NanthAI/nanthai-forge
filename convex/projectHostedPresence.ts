@@ -23,6 +23,14 @@ type PresenceValue = {
   at: number;
   /** The Lane record's park (Item e1633718). */
   park?: LanePark;
+  /** Loose ends details (Item fc1831eb): the overlap row's saves count, landed-before flag and check-pass time. The
+   * count rides the rewrites this row already makes (new files, goal, holder, park, the 10-minute refresh); a save of
+   * the same files inside that window does not rewrite it for the count alone, so the count here can trail the
+   * overlap row's exact one by the saves of such a burst and is never above it. The flag and the stamp change
+   * rarely and force the rewrite. */
+  saves?: number;
+  landedBefore?: true;
+  passedAt?: number;
 };
 type Pointer = { id: Id<'projectHostedPresence'>; at: number };
 /** A Lane whose presence data is unchanged rewrites its row at most this often (activity time only). */
@@ -47,6 +55,9 @@ export async function trackHostedPresence(
     goal: string;
     changes: string;
     park?: LanePark;
+    saves?: number;
+    landedBefore?: true;
+    passedAt?: number;
   } | null,
   value: PresenceValue | null,
 ): Promise<Pointer | undefined> {
@@ -66,6 +77,9 @@ export async function trackHostedPresence(
     ...presencePaths(value.changes),
     at: value.at,
     ...(value.park ? { park: value.park } : {}),
+    ...(value.saves === undefined ? {} : { saves: value.saves }),
+    ...(value.landedBefore ? { landedBefore: true as const } : {}),
+    ...(value.passedAt === undefined ? {} : { passedAt: value.passedAt }),
   };
   if (pointer) {
     const before = presencePaths(old.changes);
@@ -79,6 +93,8 @@ export async function trackHostedPresence(
       same(before.paths, row.paths) &&
       before.pathBloom === row.pathBloom &&
       samePark(old.park, value.park) &&
+      old.landedBefore === value.landedBefore &&
+      old.passedAt === value.passedAt &&
       row.at - pointer.at < PRESENCE_REFRESH_MS
     )
       return pointer;

@@ -94,6 +94,15 @@ export const hostedOverlapTables = {
     conflicted: v.optional(v.literal(true)),
     /** The Lane record's park (Item e1633718), kept here so a record write knows when presence must change. */
     park,
+    /** Loose ends details (Item fc1831eb), kept here so a presence rewrite carries them with no read. `saves`: heads
+     * this Lane has saved since the count began (absent: not recorded, never guessed). `passedAt`: ms of the newest
+     * unrequested check that passed on this exact head; a newer save or a landing clears it. */
+    saves: v.optional(v.number()),
+    passedAt: v.optional(v.number()),
+    /** The presence row already carries `landedBefore`, so a write that keeps it needs no rewrite. */
+    landedMark: v.optional(v.literal(true)),
+    /** The Loose ends marker row of this stamp (projectFinishReadRows kind projectLooseChecked), deleted with it. */
+    passedMark: v.optional(v.id('projectFinishReadRows')),
   })
     .index('by_project_and_lane', ['projectId', 'laneId'])
     // index-order: caller: convex/projectHostedDormancy.ts#liveOpenOverlapLanes; order: dormancy-off peer window selects newest Lanes by creation time.
@@ -148,6 +157,11 @@ export const hostedOverlapTables = {
     at: v.number(),
     /** A parked Lane's park (Item e1633718), for Needs me to show; absent while the Lane is not parked. */
     park,
+    /** Loose ends details (Item fc1831eb), copied from the overlap row on the writes that already happen. */
+    saves: v.optional(v.number()),
+    /** True when a landing of this Lane's work was recorded before (it was saved again after). */
+    landedBefore: v.optional(v.literal(true)),
+    passedAt: v.optional(v.number()),
   })
     .index('by_project_and_lane', ['projectId', 'laneId'])
     .index('by_project_and_at', ['projectId', 'at'])

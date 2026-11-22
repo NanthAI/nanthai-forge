@@ -14,6 +14,12 @@ export type LooseRow = {
   agent: string | null;
   paths: number;
   at: number;
+  /** Saves this Lane has had, stored by its own writes (Item fc1831eb). Absent: not recorded, never guessed. */
+  saves?: number;
+  /** A landing of this Lane's work was recorded before; absent means it never landed. */
+  landedBefore?: true;
+  /** When an unrequested check last passed on this exact head (Checked, never landed rows). */
+  passedAt?: number;
   /** Another open Lane of the same Item is live: this one was left behind, and its agent abandons it. */
   replacedBy?: string;
   /** Current liveness evidence, for rows in the Still active group. */
@@ -28,6 +34,11 @@ export type ProjectRow = {
   role: string;
   lastLandingAt: number | null;
   reason: string;
+  /** Stored by the project's own writes (Item fc1831eb); absent means not recorded yet. */
+  openLanes?: number;
+  /** More than the counted number of open Lanes. */
+  openLanesMore?: true;
+  bytes?: number;
   /** Present on the reader's own projects: what projectLifecycle:trash pins (revision and the landing seen). */
   trash?: ProjectTrash;
 };
@@ -181,6 +192,20 @@ const SCREEN_META: { key: GroupKey | 'active'; title: string; hint: string }[] =
   { key: 'active', title: 'Still active', hint: 'has a live landing or recent activity, left alone' },
 ];
 const files = (n: number) => (n ? `${n.toLocaleString('en')} ${n === 1 ? 'file' : 'files'}` : 'no files yet');
+const saves = (n: number) => `${n.toLocaleString('en')} ${n === 1 ? 'save' : 'saves'}`;
+/** A stored size, as the approved page words it: "12 MB", "1.2 TB". Decimal units from MB up, no decimals from 10. */
+export function sizeWords(bytes: number) {
+  if (bytes <= 0) return '0 MB';
+  if (bytes < 1_000_000) return '<1 MB';
+  const units = ['MB', 'GB', 'TB', 'PB'];
+  let unit = 0,
+    size = bytes / 1_000_000;
+  while (size >= 1000 && unit < units.length - 1) {
+    size /= 1000;
+    unit++;
+  }
+  return `${(size >= 10 ? Math.round(size) : Math.round(size * 10) / 10).toLocaleString('en')} ${units[unit]}`;
+}
 
 /** How long ago, as the approved page words it: "40 min", "3 h", "6 days". */
 function since(at: number, now: number) {
@@ -207,6 +232,28 @@ function dueWords(date: string, reason: string, now: number) {
       : `due ${words}`;
 }
 
+/** What a Lane row says about its saves and landing, from the fields its own writes stored. A Lane written before
+ * those fields existed says "not recorded" until its next save; the file count stays as the recorded fact. */
+function laneEvidence(row: LooseRow, key: GroupKey | 'active', now: number) {
+  const extra =
+    (row.replacedBy ? `, replaced by Lane ${row.replacedBy.slice(0, 8)}` : '') +
+    (row.heldBy ? ` · ${row.heldBy}` : '');
+  // A row without a save count was written before the counts existed: its landing history is not asserted either.
+  const landed = row.landedBefore ? 'landed before' : row.saves === undefined ? '' : 'never landed';
+  if (key === 'checked')
+    return `passed its check ${since(row.passedAt ?? row.at, now)} ago; landing was never asked for`;
+  if (key === 'stopped')
+    return `${
+      row.saves === 0
+        ? 'Nothing saved yet'
+        : row.saves === undefined
+          ? row.paths
+            ? `${files(row.paths)} now, saves not recorded`
+            : 'Saves not recorded'
+          : `${saves(row.saves)} not landed`
+    }${extra}. Why it stopped: not reported`;
+  return `${[row.saves === undefined ? 'saves not recorded' : saves(row.saves), files(row.paths), landed].filter(Boolean).join(', ')}${extra}`;
+}
 const plain = { laneId: null, itemId: null, trash: null, proposed: false, pickable: false };
 function laneRow(row: LooseRow, key: GroupKey | 'active', now: number, owner: boolean): ScreenRow {
   const age = since(row.at, now);
@@ -221,24 +268,33 @@ function laneRow(row: LooseRow, key: GroupKey | 'active', now: number, owner: bo
     title: row.title || 'Lane without a goal',
     who: whoOf(row.actor, row.agent),
     mono: false,
-    evidence:
+    evidence: laneEvidence(row, key, now) + (key === 'checked' ? extra : ''),
+    age:
       key === 'stopped'
-        ? `${row.paths ? `${files(row.paths)} not landed` : 'Nothing saved yet'}${extra}. Why it stopped: not reported`
-        : files(row.paths) + extra,
-    age: key === 'stopped' ? `not seen for ${age}` : age,
+        ? `not seen for ${age}`
+        : key === 'checked' && row.passedAt
+          ? since(row.passedAt, now)
+          : age,
     laneId: row.laneId,
     action,
     // Picking many is the owner's: the selection's Set aside needs the owner's authority.
     pickable: owner && action !== null,
   };
 }
+const projectEvidence = (row: ProjectRow) => {
+  const lanes =
+    row.openLanes === undefined
+      ? 'open Lanes not recorded'
+      : `${row.openLanes.toLocaleString('en')}${row.openLanesMore ? '+' : ''} open ${row.openLanes === 1 && !row.openLanesMore ? 'Lane' : 'Lanes'}`;
+  return row.bytes === undefined ? `size not recorded, ${lanes}` : `${sizeWords(row.bytes)}, ${lanes}`;
+};
 const projectRow = (row: ProjectRow, now: number, viewer: string | undefined): ScreenRow => ({
   ...plain,
   key: row.projectId,
   title: row.name,
   who: row.trash && viewer ? `@${viewer.replace(/^@/, '')}` : null,
   mono: true,
-  evidence: `${row.reason}; you are its ${row.role}`,
+  evidence: projectEvidence(row),
   age: row.lastLandingAt === null ? 'never landed' : `no landing for ${since(row.lastLandingAt, now)}`,
   action: row.trash ? 'trash' : null,
   pickable: !!row.trash,

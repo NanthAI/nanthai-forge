@@ -125,7 +125,7 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
         ]);
         assert.equal(
           await page.locator('.row.le').count(),
-          8,
+          9,
           'the rows stay while asleep and after the catch-up',
         );
       },
@@ -141,7 +141,15 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
         'Leftover projects',
         'Waiting for a date',
       ]);
-      assert.match(await group(page, 'Checked, never landed').textContent(), /Not reported\. A passed check/);
+      // Lead mock check (c): the row details come from fields stored on the rows, in the mock's words.
+      assert.match(
+        await group(page, 'Checked, never landed').locator('.row.le').textContent(),
+        /Docs: typo sweep.*mara\/still-heron.*passed its check 3 days ago; landing was never asked for.*3 days.*Hand to an agent/,
+      );
+      const idleRows = group(page, 'Lanes nobody holds').locator('.row.le');
+      assert.match(await idleRows.nth(0).textContent(), /3 saves, 2 files, never landed.*6 days/);
+      assert.match(await idleRows.nth(1).textContent(), /1 save, 7 files, never landed.*3 days/);
+      assert.match(await idleRows.nth(2).textContent(), /1 save, 1 file, landed before/);
       const dated = group(page, 'Waiting for a date');
       const link = dated.getByRole('link', { name: 'Open the Item' }).first();
       assert.equal(
@@ -156,7 +164,11 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
       const projects = group(page, 'Leftover projects');
       assert.match(
         await projects.locator('.row.le').nth(1).textContent(),
-        /tidepool-import-test.*@sample-one.*No landing recorded since creation; you are its owner.*never landed.*Move to the trash/,
+        /tidepool-import-test.*@sample-one.*310 MB, 0 open Lanes.*never landed.*Move to the trash/,
+      );
+      assert.match(
+        await projects.locator('.row.le').nth(0).textContent(),
+        /mara-scratch.*12 MB, 0 open Lanes/,
       );
       // Lead mock check (d): owner, Move to the trash, and the projects waiting for a permanent-delete approval.
       const wait = projects.getByRole('link', { name: /40 projects in the trash wait for you/ });
@@ -165,7 +177,7 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
       const stopped = group(page, 'Stopped mid-task');
       assert.match(
         await stopped.locator('.row.le').textContent(),
-        /jun\/copper-moth.*3 files not landed\. Why it stopped: not reported.*not seen for 3 h.*Hand to an agent/,
+        /jun\/copper-moth.*3 saves not landed\. Why it stopped: not reported.*not seen for 3 h.*Hand to an agent/,
       );
       // (b) identities read whole, as owner/lane; (f) a dated row names its Item's owner and says proposed.
       assert.match(
@@ -185,10 +197,41 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
       const head = await page.locator('.head').textContent();
       assert.match(
         head,
-        /8 or more loose ends, 1 urgent\. The oldest is a Lane with no save for 6 days\. Setting a Lane aside keeps every save; a project in the trash can be restored for 90 days\./,
+        /9 or more loose ends, 1 urgent\. The oldest is a Lane with no save for 6 days\. Setting a Lane aside keeps every save; a project in the trash can be restored for 90 days\./,
       );
       assert.doesNotMatch(head, /not reported/);
     });
+
+    await t.test(
+      'Select all reads the rest of Lanes nobody holds, one call per page, and picks every one',
+      async t => {
+        const page = await open(t, DESK, { data: 'worst' });
+        const idle = group(page, 'Lanes nobody holds');
+        // Lanes written before the counts existed say "not recorded"; none shows an invented number.
+        assert.match(
+          await idle.locator('.row.le').nth(2).textContent(),
+          /saves not recorded, no files yet(?!, never)/,
+        );
+        assert.match(
+          await idle.locator('.row.le').first().textContent(),
+          /1,284 saves, 12,840 files, never landed/,
+        );
+        await idle.getByRole('checkbox').nth(1).check();
+        const bulk = page.getByRole('region', { name: 'Selected' });
+        await bulk.getByRole('button', { name: 'Select all 25 or more Lanes nobody holds' }).click();
+        await bulk.getByText('26 selected').waitFor();
+        assert.deepEqual((await calls(page)).slice(1), [`query ${READ} idle-p2`]);
+        assert.equal(await bulk.getByRole('button', { name: /Select all/ }).count(), 0, 'all are picked');
+        assert.match(await bulk.textContent(), /Set aside 26/);
+        const projects = group(page, 'Leftover projects');
+        assert.match(await projects.locator('.row.le').nth(0).textContent(), /1\.2 TB, 37 open Lanes/);
+        assert.match(
+          await projects.locator('.row.le').nth(1).textContent(),
+          /size not recorded, open Lanes not recorded/,
+        );
+        assert.match(await projects.locator('.row.le').nth(2).textContent(), /0 MB, 0 open Lanes/);
+      },
+    );
 
     await t.test('Hand to an agent copies one prompt for the picked Lanes and calls nothing', async t => {
       const page = await open(t, DESK);
@@ -224,16 +267,16 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
         const page = await open(t, DESK);
         const idle = group(page, 'Lanes nobody holds');
         await idle.getByRole('checkbox', { name: 'Select Fix flaky retry timer' }).check();
-        await idle.getByRole('checkbox', { name: 'Select Docs: typo sweep' }).check();
+        await idle.getByRole('checkbox', { name: 'Select Revert the parser rewrite' }).check();
         await page
           .getByRole('region', { name: 'Selected' })
           .getByRole('button', { name: 'Set aside 2' })
           .click();
         const toast = page.locator('.toasts');
         await toast.getByText('Set aside 2 Lanes. Every save is kept.').waitFor();
-        await page.waitForFunction(() => document.querySelectorAll('.row.le').length === 6);
+        await page.waitForFunction(() => document.querySelectorAll('.row.le').length === 7);
         await toast.getByRole('button', { name: 'Undo' }).click();
-        await page.waitForFunction(() => document.querySelectorAll('.row.le').length === 8);
+        await page.waitForFunction(() => document.querySelectorAll('.row.le').length === 9);
         assert.match(await said(page), /Brought back 2 Lanes\. The Lanes are open again\./);
         assert.deepEqual(
           (await calls(page)).filter(call => call.startsWith('mutation')),
@@ -420,7 +463,7 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
         // Both leave the live read at once; the one saved meanwhile is still named, from its title at submission.
         const notice = page.getByRole('alert');
         await notice.getByText(/2 could not be set aside/).waitFor();
-        await page.waitForFunction(() => document.querySelectorAll('.row.le').length === 6);
+        await page.waitForFunction(() => document.querySelectorAll('.row.le').length === 7);
         assert.match(
           await notice.textContent(),
           /1 Lane was set aside in your last try\. “Try streaming decoder” skipped: it was saved meanwhile; “Fix flaky retry timer” could not be reached\. Every save is kept\./,
@@ -479,7 +522,11 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
       const empty = await open(t, PHONE, { data: 'empty' }, '.loose-ends .quietline');
       assert.match(await empty.locator('.head').textContent(), /Nothing is left lying around\./);
       assert.match(await empty.locator('.quietline').first().textContent(), /^No loose ends\./);
-      assert.match(await group(empty, 'Checked, never landed').textContent(), /Not reported\./);
+      assert.equal(
+        await group(empty, 'Checked, never landed').count(),
+        0,
+        'a group with nothing is not drawn',
+      );
       const loading = await open(t, PHONE, { data: 'loading' }, '.loose-ends [aria-busy=true]');
       assert.equal(await loading.locator('.skrow').count(), 6);
       const failed = await open(t, PHONE, { data: 'error' }, '.loose-ends .notice');

@@ -377,10 +377,12 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // Item ced8e98f adds 3,475 read and 1,758 write bytes for replay evidence on those existing writes.
   // Item 4e013cdb: audit cadence bookkeeping adds 20 write bytes on existing rows.
   // Item ced8e98f follow-up: replacement causes and the no-hold stamp add 218 write bytes there.
+  // Item fc1831eb: the Lane overlap row carries `saves` (and presence the copy) for Loose ends: +110 read and +100 write
+  // bytes for the pair on rows already read and written; no call, no row.
   const measured = canonicalReplayCost(pair);
   assert.deepEqual(
     measured,
-    { calls: 109, readBytes: 1_885_164, writeBytes: 613_308 },
+    { calls: 109, readBytes: 1_885_274, writeBytes: 613_408 },
     'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
@@ -431,10 +433,11 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // Item ced8e98f adds the same 3,475 read and 1,758 write bytes at 4,000 files.
   // Item 4e013cdb: the same 20 write bytes at 4,000 files, with unchanged calls and reads.
   // Item ced8e98f follow-up: the same 218 write bytes for replacement causes and the no-hold stamp.
+  // Item fc1831eb: the same +110 read and +100 write bytes for the pair's `saves` fields.
   const measured = canonicalReplayCost(after);
   assert.deepEqual(
     measured,
-    { calls: 109, readBytes: 1_890_372, writeBytes: 615_813 },
+    { calls: 109, readBytes: 1_890_482, writeBytes: 615_913 },
     'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(after.idle, 0);

@@ -21,6 +21,7 @@ import { hostedRecordBody } from './projectHostedRecords';
 
 import { looseEndIntentCursor } from '../src/hosted-lifecycle';
 import { readLooseEndIntents } from './projectLooseEndIntents';
+import { checkedKind } from './projectLooseEndStamp';
 import { datedChecks, inactiveProjects, looseEndsPosition } from './projectLooseEndsDetails';
 
 /** The Lane a resolution Lane continues, from its record; nothing for any other Lane or an unreadable record. */
@@ -36,8 +37,12 @@ const resolutionOrigin = (value: string): string | undefined => {
 
 /** Rows per group. */
 const LOOSE_ENDS_LIMIT = 25;
+/** Checked, never landed rows on the details read's first page. Each costs a presence row and a landing-queue lookup,
+ * so the first page stays within the page budget (Item b294a5d8); Show 25 more reads the rest, 25 a page. */
+const CHECKED_FIRST_PAGE = 3;
 const stoppedCursorPrefix = 'forge-loose-ends-stopped-v1:';
 const idleCursorPrefix = 'forge-loose-ends-idle-v1:';
+const checkedCursorPrefix = 'forge-loose-ends-checked-v1:';
 const badCursor = () =>
   new ForgeError('BAD_ARGUMENT', 'Use a Loose ends group’s continueCursor or start a new read.');
 
@@ -46,12 +51,21 @@ type StoppedCursor = {
   upTo: number;
   after: [at: number, creationTime: number, id: Id<'projectHostedPresence'>];
 };
+type CheckedCursor = {
+  projectId: Id<'hostedProjects'>;
+  upTo: number;
+  after: [passedAt: number, laneId: string, creationTime: number, id: Id<'projectFinishReadRows'>];
+};
 
 function lanePosition(
   projectId: Id<'hostedProjects'>,
   token: string,
-): StoppedCursor & { group: 'idle' | 'stopped' } {
-  const prefix = token.startsWith(idleCursorPrefix) ? idleCursorPrefix : stoppedCursorPrefix;
+): (StoppedCursor & { group: 'idle' | 'stopped' }) | (CheckedCursor & { group: 'checked' }) {
+  const prefix = token.startsWith(idleCursorPrefix)
+    ? idleCursorPrefix
+    : token.startsWith(checkedCursorPrefix)
+      ? checkedCursorPrefix
+      : stoppedCursorPrefix;
   if (!token.startsWith(prefix)) throw badCursor();
   let position: StoppedCursor | null;
   try {
@@ -59,18 +73,24 @@ function lanePosition(
   } catch {
     throw badCursor();
   }
+  // A Lane cursor ends in the presence index key [at, creationTime, id]; Checked ends in the marker index key
+  // [passedAt, laneId, creationTime, id].
+  const tail = position?.after as unknown[] | undefined;
+  const marker = prefix === checkedCursorPrefix;
   if (
     position?.projectId !== projectId ||
     !Number.isFinite(position.upTo) ||
-    !Array.isArray(position.after) ||
-    position.after.length !== 3 ||
-    !Number.isFinite(position.after[0]) ||
-    position.after[0] > position.upTo ||
-    !Number.isFinite(position.after[1]) ||
-    typeof position.after[2] !== 'string'
+    !Array.isArray(tail) ||
+    tail.length !== (marker ? 4 : 3) ||
+    !Number.isFinite(tail[0]) ||
+    (tail[0] as number) > position.upTo ||
+    (marker
+      ? typeof tail[1] !== 'string' || !Number.isFinite(tail[2]) || typeof tail[3] !== 'string'
+      : !Number.isFinite(tail[1]) || typeof tail[2] !== 'string')
   )
     throw badCursor();
-  return { ...position, group: prefix === idleCursorPrefix ? 'idle' : 'stopped' };
+  if (marker) return { ...(position as unknown as CheckedCursor), group: 'checked' };
+  return { ...(position as StoppedCursor), group: prefix === idleCursorPrefix ? 'idle' : 'stopped' };
 }
 
 /** Open Lanes read per Item to find the one that replaced a quiet Lane (Item d9e1ac62). */
@@ -87,6 +107,10 @@ const row = (presence: Presence, replacedBy: ReadonlyMap<string, string>) => {
     agent: presence.agent ?? null,
     paths: presence.pathCount,
     at: presence.at,
+    // Stored on the presence row by the writes that already happen (Item fc1831eb); absent means "not recorded".
+    ...(presence.saves === undefined ? {} : { saves: presence.saves }),
+    ...(presence.landedBefore ? { landedBefore: true as const } : {}),
+    ...(presence.passedAt === undefined ? {} : { passedAt: presence.passedAt }),
     // Another open Lane of the same Item is still live: this one was left behind. Its agent abandons it.
     ...(by
       ? {
@@ -96,10 +120,10 @@ const row = (presence: Presence, replacedBy: ReadonlyMap<string, string>) => {
       : {}),
   };
 };
-const listed = (rows: Presence[], replacedBy: ReadonlyMap<string, string>) => ({
+const listed = (rows: Presence[], replacedBy: ReadonlyMap<string, string>, size = LOOSE_ENDS_LIMIT) => ({
   reported: true as const,
-  rows: rows.slice(0, LOOSE_ENDS_LIMIT).map(presence => row(presence, replacedBy)),
-  more: rows.length > LOOSE_ENDS_LIMIT,
+  rows: rows.slice(0, size).map(presence => row(presence, replacedBy)),
+  more: rows.length > size,
 });
 
 /** A quiet Lane is replaced when its Item has another open Lane that is not quiet, or when a listed quiet Lane of the
@@ -168,6 +192,50 @@ function presenceBetween(ctx: QueryCtx, projectId: Id<'hostedProjects'>, after: 
         : q.eq('projectId', projectId).gt('at', after).lte('at', upTo),
     )
     .take(LOOSE_ENDS_LIMIT + 1);
+}
+
+type Marker = Doc<'projectFinishReadRows'>;
+
+/** Lanes an unrequested check passed on, oldest pass first, that passed at least a quiet period ago: the stamp's marker
+ * rows (convex/projectLooseEndStamp.ts), one indexed range. A save, a landing or a close deletes the marker with the
+ * stamp, and each marker is checked against its Lane's presence row below, so a stale one is never listed. */
+function checkedMarkers(ctx: QueryCtx, projectId: Id<'hostedProjects'>, upTo: number) {
+  return ctx.db
+    .query('projectFinishReadRows')
+    .withIndex('by_kind_and_project_and_source_time', q =>
+      q.eq('kind', checkedKind).eq('projectId', projectId).lte('sourceCreatedAt', upTo),
+    )
+    .take(CHECKED_FIRST_PAGE + 1);
+}
+
+/** The markers after the cursor's key, strictly, even if the Lane at that key was saved or landed meanwhile. */
+async function continueMarkers(ctx: QueryCtx, { projectId, upTo, after }: CheckedCursor) {
+  const markers: Marker[] = [];
+  for await (const [marker] of streamQuery(ctx, {
+    table: 'projectFinishReadRows',
+    index: 'by_kind_and_project_and_source_time',
+    schema,
+    startIndexKey: [checkedKind, projectId, ...after],
+    endIndexKey: [checkedKind, projectId, upTo],
+  })) {
+    markers.push(marker);
+    if (markers.length > LOOSE_ENDS_LIMIT) break;
+  }
+  return markers;
+}
+
+/** The presence rows of the first `size` markers (one indexed point read each), those still carrying that exact stamp. */
+async function stampedLanes(ctx: QueryCtx, projectId: Id<'hostedProjects'>, markers: Marker[], size: number) {
+  const rows = await Promise.all(
+    markers.slice(0, size).map(async marker => {
+      const presence = await ctx.db
+        .query('projectHostedPresence')
+        .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', marker.sourceId))
+        .unique();
+      return presence?.passedAt === marker.sourceCreatedAt ? presence : null;
+    }),
+  );
+  return rows.filter((presence): presence is Presence => presence !== null);
 }
 
 /** Resume strictly after an index key, even if the Lane at that key was removed or saved meanwhile. */
@@ -244,7 +312,7 @@ export const read = query({
       const quietFrom = now - QUIET_MS;
       const position = cursor === undefined ? null : lanePosition(projectId, cursor);
       const cutoff = position ? null : dormantCutoff(project, now);
-      const [idle, stopped, extra] = await Promise.all([
+      const [idle, stopped, markers, extra] = await Promise.all([
         position?.group === 'idle'
           ? continueLanes(ctx, position)
           : cutoff === null
@@ -252,9 +320,17 @@ export const read = query({
             : presenceBetween(ctx, projectId, null, cutoff),
         position?.group === 'stopped'
           ? continueLanes(ctx, position)
-          : position?.group === 'idle' || (cutoff !== null && cutoff >= quietFrom)
+          : position?.group === 'idle' ||
+              position?.group === 'checked' ||
+              (cutoff !== null && cutoff >= quietFrom)
             ? []
             : presenceBetween(ctx, projectId, cutoff, quietFrom),
+        // Checked, never landed (Item fc1831eb): only the details read and its own continuation read this range.
+        position?.group === 'checked'
+          ? continueMarkers(ctx, position)
+          : details && !position
+            ? checkedMarkers(ctx, projectId, quietFrom)
+            : null,
         details && !position
           ? Promise.all([
               inactiveProjects(ctx, project, user.subject, now),
@@ -262,23 +338,40 @@ export const read = query({
             ])
           : null,
       ]);
+      const checkedSize = position ? LOOSE_ENDS_LIMIT : CHECKED_FIRST_PAGE;
+      const checked = markers ? await stampedLanes(ctx, projectId, markers, checkedSize) : null;
       const quiet = [...(idle ?? []), ...stopped];
+      // A Lane an unrequested check passed on shows once, under Checked, not again as quiet.
+      const passedQuiet = (presence: Presence) =>
+        presence.passedAt !== undefined && presence.passedAt <= quietFrom;
+      // Idle and stopped pages of the details session leave out a Lane Checked lists; the cursor still follows the
+      // examined rows, so no row is skipped or shown twice.
+      const separate = Boolean(details || position);
       const [replacedBy, holders] = await Promise.all([
         quiet.length ? replacements(ctx, projectId, quiet, quietFrom) : new Map<string, string>(),
         currentHolders(
           ctx,
           projectId,
-          [...(idle ?? []).slice(0, LOOSE_ENDS_LIMIT), ...stopped.slice(0, LOOSE_ENDS_LIMIT)],
+          [
+            // A Lane Checked lists is held (or not) on that group; it is not looked up a second time as quiet.
+            ...(idle ?? []).slice(0, LOOSE_ENDS_LIMIT).filter(row => !separate || !passedQuiet(row)),
+            ...stopped.slice(0, LOOSE_ENDS_LIMIT).filter(row => !separate || !passedQuiet(row)),
+            ...(checked ?? []),
+          ],
           now,
         ),
       ]);
       const group = (rows: Presence[], kind: 'idle' | 'stopped', upTo: number) => {
         const boundary = rows.length > LOOSE_ENDS_LIMIT ? rows[LOOSE_ENDS_LIMIT - 1] : undefined;
         const prefix = kind === 'idle' ? idleCursorPrefix : stoppedCursorPrefix;
-        const value = listed(rows, replacedBy);
+        // The lookahead row is never shown: slice to the examined page first, then leave out what Checked lists.
+        const examined = rows.slice(0, LOOSE_ENDS_LIMIT);
+        const shown = separate ? examined.filter(row => !passedQuiet(row)) : examined;
+        const value = listed(shown, replacedBy);
         const reason = kind === 'idle' ? 'Past the project’s dormant cutoff' : 'Quiet for 90 minutes';
         return {
           ...value,
+          more: rows.length > LOOSE_ENDS_LIMIT,
           ...(details || position?.group === 'idle'
             ? { rows: value.rows.map(row => ({ ...row, reason })) }
             : {}),
@@ -292,8 +385,28 @@ export const read = query({
             : null,
         };
       };
+      // Checked, never landed: the rows are the presence rows still carrying their marker's stamp; the cursor follows
+      // the markers, so a stale marker is skipped without losing the place.
+      const checkedGroup = () => {
+        const boundary = markers!.length > checkedSize ? markers![checkedSize - 1] : undefined;
+        const value = listed(checked!, replacedBy, checkedSize);
+        return {
+          ...value,
+          more: markers!.length > checkedSize,
+          rows: value.rows.map(row => ({ ...row, reason: 'An unrequested check passed' })),
+          continueCursor: boundary
+            ? checkedCursorPrefix +
+              canonicalPayload({
+                projectId,
+                upTo: position?.upTo ?? quietFrom,
+                after: [boundary.sourceCreatedAt, boundary.sourceId, boundary._creationTime, boundary._id],
+              })
+            : null,
+        };
+      };
       const stoppedGroup = group(stopped, 'stopped', position?.upTo ?? quietFrom);
       const idleGroup = idle ? group(idle, 'idle', position?.upTo ?? cutoff!) : null;
+      const checkedRows = markers ? checkedGroup() : null;
       return canonicalPayload({
         at: now,
         // The owner sets Lanes aside through projectHostedDormant:abandon, which needs the current authority epoch.
@@ -302,7 +415,9 @@ export const read = query({
           position
             ? position.group === 'idle'
               ? { idle: idleGroup, stopped: stoppedGroup }
-              : { stopped: stoppedGroup }
+              : position.group === 'checked'
+                ? { checked: checkedRows! }
+                : { stopped: stoppedGroup }
             : {
                 idle: idleGroup
                   ? details
@@ -310,9 +425,9 @@ export const read = query({
                     : listed(idle!, replacedBy)
                   : notReported('This project turned dormant Lanes off (agentDefaults.dormantAfterDays 0).'),
                 stopped: stoppedGroup,
-                checked: notReported(
-                  'A passed check that nobody asked to land is not recorded per Lane yet.',
-                ),
+                checked:
+                  checkedRows ??
+                  notReported('Checked work that never landed is listed on the Loose ends page.'),
                 projects:
                   extra?.[0] ??
                   notReported(

@@ -37,6 +37,14 @@ page's Undo for a set-aside Lane sends `reopen:[{laneId,version}]` to the dorman
 returned (`versions:true`); a Lane changed since is skipped as `changed`. The sweep skips a Lane in the landing
 queue as `in-queue`.
 
+Each Lane row says what its own writes stored: `saves` (moved heads since the count began), `landedBefore:true`
+when its work landed and it was saved again, and `paths`. The `checked` group lists Lanes an unrequested check
+passed on and nobody saved or landed since, oldest pass first, with `passedAt`; its first page holds 8 rows and the
+continuation 25. A Lane written before these fields existed omits `saves`: that means not recorded, not zero, until
+its next save. A listed project carries `openLanes` and `bytes` from its project row, kept by Lane starts and ends
+(size is read at most every 10 minutes); both are omitted until the one-time backfill
+(`internal.projectLooseEndBackfill.backfill`, 10 projects or 50 Lanes per run) or the project's next Lane start.
+
 Add a date to an unchecked Done-when line with `- [ ] @due 2026-12-01 Review the changes`.
 Loose ends reports the earliest pending date per Issue, the line number in its body and the viewed
 version, plus the Item's `owner` and `proposed:true` while the Item is proposed. Date results follow open Issues in bounded pages and a page can be empty before the end. A date added before date support appears when its Issue's search record is next written or rebuilt.

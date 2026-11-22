@@ -2,6 +2,7 @@
 import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { lineOwner, detachLineOwner } from './projectLiveLineOwners';
+import { measureSize } from './projectLiveLineOpen';
 import { internal } from './_generated/api';
 import { nextActivityHour } from './accountProjectOrderHour';
 import { readFlowLandings } from './projectLiveLineRecovery';
@@ -33,11 +34,14 @@ export async function lineExit(
   projectId: Id<'hostedProjects'>,
   exit: { laneId: string; kind: 'landed' | 'set-aside'; at: number } | null,
   step?: FlowStep,
+  /** Re-read the stored size too (a set-aside; a landing reads no shards). */
+  measure = false,
 ) {
   const old = await lineSummary(db, projectId);
   const value = old ? JSON.parse(old.value) : {};
   // Last removal only, never a history/replay. Missing events never imply an exit kind.
   if (exit) value.exit = exit;
+  if (measure) await measureSize(db, projectId, value, exit?.at ?? Date.now());
   if (step) value.flow = stepFlow(value.flow, exit?.at ?? Date.now(), step);
   const next = { kind: summaryKind, sourceId: String(projectId), projectId, value: JSON.stringify(value) };
   if (old) await db.replace(old._id, next);
@@ -70,7 +74,14 @@ export async function removeLineMark(db: Db, old: Mark, kind: 'landed' | 'set-as
   const owner = await lineOwner(db, old.laneId);
   await detachLineOwner(db, owner);
   if (owner) await db.delete(owner._id);
-  await lineExit(db, old.projectId, { laneId: old.laneId, kind, at: Date.now() });
+  // A landing reads no storage shards (the landing cost guard holds its reads); a set-aside may re-measure the size.
+  await lineExit(
+    db,
+    old.projectId,
+    { laneId: old.laneId, kind, at: Date.now() },
+    undefined,
+    kind === 'set-aside',
+  );
 }
 /** A mark's check key and main-red hold ride its stage/held patches (Item 85f456c1); a key in `patch` set to
  * undefined clears it, a key left out keeps it. */

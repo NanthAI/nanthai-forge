@@ -225,8 +225,8 @@ test('an agent lists dated checks and inactive projects in bounded pages without
   );
   const { idle, stopped, checked, dated, projects } = initial.groups;
   assert.ok(idle.rows[0].reason && stopped.rows[0].reason);
-  assert.equal(checked.reported, false);
-  assert.match(checked.why, /passed check/);
+  // Checked, never landed is read on the details page from the stored stamp: none passed in this fixture.
+  assert.deepEqual([checked.reported, checked.rows], [true, []]);
   assert.equal(dated.rows.length, 25);
   assert.deepEqual(dated.rows[0], {
     selection: { itemId: 'owned-01', expectedVersion: 3 },
@@ -236,7 +236,9 @@ test('an agent lists dated checks and inactive projects in bounded pages without
     text: 'Inspect receipts',
     reason: 'Date passed',
   });
-  assert.equal(projects.rows.length, 21);
+  // The first page examines 10 account rows (four filtered out: a recent landing, a new project, a removed one and one
+  // the reader has no role on); the rest follow in pages of 25.
+  assert.equal(projects.rows.length, 6);
   assert.ok(projects.rows.every(row => row.projectId.startsWith('owned-')));
   assert.ok(
     projects.rows.every(row => row.trash?.expectedRevision === 1),
@@ -266,7 +268,7 @@ test('an agent lists dated checks and inactive projects in bounded pages without
   assert.equal(moreProjects.groups.projects.deleteRequests, undefined, 'only the first page says what waits');
   assert.deepEqual(
     moreProjects.groups.projects.rows.map(row => row.projectId),
-    ['owned-22', 'owned-23', 'owned-24', 'owned-25', 'owned-26'],
+    Array.from({ length: 20 }, (_, i) => `owned-${String(i + 7).padStart(2, '0')}`),
   );
 
   s.tables.cliCredentials.set('credential', {
@@ -359,10 +361,49 @@ async function pageFixture(t, scale, { ready = true } = {}) {
     projectId: 'project',
     backupId: 'backup',
   });
+  // Checked, never landed (Item fc1831eb): two Lanes an unrequested check passed on, the stamp on their presence rows.
+  for (const [laneId, days, goal] of [
+    ['checked-old', 12, 'Passed long ago'],
+    ['checked-new', 3, 'Passed last week'],
+  ]) {
+    s.tables.projectHostedPresence.set(`presence-${laneId}`, {
+      _id: `presence-${laneId}`,
+      _creationTime: 1,
+      projectId: 'project',
+      laneId,
+      intentId: `intent-${laneId}`,
+      actor: 'owner',
+      agent: 'quiet-otter',
+      goal,
+      paths: ['src/a.ts'],
+      pathCount: 1,
+      at: now - days * day,
+      saves: 2,
+      passedAt: now - days * day,
+    });
+    s.tables.projectFinishReadRows.set(`mark-${laneId}`, {
+      _id: `mark-${laneId}`,
+      _creationTime: 1,
+      kind: 'projectLooseChecked',
+      sourceId: laneId,
+      sourceCreatedAt: now - days * day,
+      projectId: 'project',
+      value: '{}',
+    });
+  }
   const n = 26 * scale;
   for (let i = 1; i <= n; i++) {
     const id = `owned-${String(i).padStart(3, '0')}`;
     s.tables.hostedProjects.set(id, projectRow({ _id: id, _creationTime: now - 60 * day }));
+    // Open Lanes and size ride on the project's live-line summary (convex/projectLiveLineOpen.ts).
+    s.tables.projectFinishReadRows.set(`summary-${id}`, {
+      _id: `summary-${id}`,
+      _creationTime: i,
+      kind: 'projectLiveLineSummary',
+      sourceId: id,
+      projectId: id,
+      value: JSON.stringify({ lanes: 0, size: { bytes: 12_000_000, at: now - day } }),
+    });
     s.tables.accountProjectOrder.set(`order-${id}`, {
       _id: `order-${id}`,
       _creationTime: i,
@@ -403,12 +444,15 @@ test('fc1831eb page: the details read renders the five groups, dated Item links 
     'the approved order; nothing is held meanwhile in this fixture',
   );
   const byKey = Object.fromEntries(screen.sections.map(section => [section.key, section]));
-  assert.equal(
-    byKey.checked.reported,
-    false,
-    'checked-never-landed stays unreported until its record exists',
+  assert.equal(byKey.checked.reported, true, 'checked-never-landed reads the stamp the pass wrote');
+  assert.deepEqual(
+    byKey.checked.rows.map(row => [row.title, row.evidence, row.age]),
+    [
+      ['Passed long ago', 'passed its check 12 days ago; landing was never asked for', '12 days'],
+      ['Passed last week', 'passed its check 3 days ago; landing was never asked for', '3 days'],
+    ],
+    'oldest pass first, in the approved words, with how long ago it passed',
   );
-  assert.match(byKey.checked.why, /not recorded per Lane/);
   assert.ok(
     byKey.idle.rows.every(row => row.pickable && row.action === 'set-aside'),
     'the owner may set Lanes nobody holds aside',
@@ -417,7 +461,10 @@ test('fc1831eb page: the details read renders the five groups, dated Item links 
     byKey.stopped.rows.every(row => row.pickable && row.action === 'hand'),
     'a stopped Lane is handed to an agent',
   );
-  assert.match(byKey.stopped.rows[0].evidence, /^1 file not landed\. Why it stopped: not reported$/);
+  assert.match(
+    byKey.stopped.rows[0].evidence,
+    /^1 file now, saves not recorded\. Why it stopped: not reported$/,
+  );
   assert.deepEqual(
     byKey.idle.rows.map(row => [row.title, row.age]),
     [
@@ -456,7 +503,11 @@ test('fc1831eb page: the details read renders the five groups, dated Item links 
     },
     { title: 'Synthetic project', mono: true, laneId: null, itemId: null, age: 'never landed' },
   );
-  assert.match(project.evidence, /No landing recorded since creation; you are its owner/);
+  assert.equal(
+    project.evidence,
+    '12 MB, 0 open Lanes',
+    'size and open Lanes come from the stored project row',
+  );
   assert.deepEqual(
     [project.action, project.pickable, project.trash],
     ['trash', true, { expectedRevision: 1, expectedLastLanding: null }],

@@ -13,9 +13,11 @@ export function withLocalLooseEndsHolders(reply: unknown, { projectId, url }: Ho
   const result = reply as {
     groups?: Parameters<typeof withLooseEndsHolders>[0];
   } | null;
-  if (!result?.groups?.stopped?.reported) return reply;
+  if (!result?.groups) return reply;
   const { groups } = result;
-  const rows = [...(groups.idle?.reported ? groups.idle.rows : []), ...groups.stopped.rows];
+  const rows = [groups.idle, groups.checked, groups.stopped].flatMap(group =>
+    group?.reported ? group.rows : [],
+  );
   if (!rows.length) return reply;
   let slots: ReturnType<typeof heavySlotHolders> = [];
   try {

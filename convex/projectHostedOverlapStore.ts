@@ -14,6 +14,32 @@ import { addPlanLane, planLaneItem, removePlanLanes } from './projectPlanLaneMar
 import { recordHead } from './projectHostedRecords';
 import { recordFeedEvent } from './projectFeedStore';
 
+/** Loose ends details (Item fc1831eb), computed from the row this write already read. `saves` counts moved heads (the
+ * same event as the feed's lane.saved) from the first write that sees the field, so a Lane written before it keeps
+ * "not recorded" until the one-time backfill sets a count. `passedAt` belongs to one head: any other head, and a
+ * closed Lane, drop it. */
+function looseEndDetails(
+  old: Doc<'projectHostedOverlapLanes'> | null,
+  lane: z.infer<typeof hostedLaneSchema>,
+  sameHead: boolean,
+  unchangedBase: boolean,
+) {
+  const saves = old
+    ? old.saves === undefined
+      ? undefined
+      : old.saves + (sameHead ? 0 : 1)
+    : unchangedBase
+      ? 0
+      : 1;
+  const open = ['active', 'paused', 'ready'].includes(lane.state);
+  return {
+    ...(saves === undefined ? {} : { saves }),
+    ...(old?.passedAt !== undefined && sameHead && open
+      ? { passedAt: old.passedAt, ...(old.passedMark ? { passedMark: old.passedMark } : {}) }
+      : {}),
+  };
+}
+
 export async function trackHostedOverlapLane(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
@@ -170,6 +196,8 @@ export async function trackHostedOverlapLane(
     ...(old?.saveFailure ? { saveFailure: old.saveFailure } : {}),
     // Parked (Item e1633718): only an open Lane is parked; closing it ends the park with its presence row.
     ...(open && lane.park ? { park: lane.park } : {}),
+    ...looseEndDetails(old, lane, sameHead, unchangedBase),
+    ...(open && !superseded && old?.landed ? { landedMark: true as const } : {}),
     ...projection,
   };
   const at = Date.parse(lane.at);
@@ -185,6 +213,7 @@ export async function trackHostedOverlapLane(
             : (lane.holder?.actor ?? old.actor),
           pointer: old.presenceRow,
           goal: old.intent,
+          ...(old.landedMark ? { landedBefore: true as const } : {}),
         }
       : null,
     value.open && !superseded
@@ -197,6 +226,9 @@ export async function trackHostedOverlapLane(
           changes: value.changes,
           at: Number.isFinite(at) ? at : Date.now(),
           ...(value.park ? { park: value.park } : {}),
+          ...(value.saves === undefined ? {} : { saves: value.saves }),
+          ...(value.landed ? { landedBefore: true as const } : {}),
+          ...(value.passedAt === undefined ? {} : { passedAt: value.passedAt }),
         }
       : null,
   );
@@ -209,6 +241,8 @@ export async function trackHostedOverlapLane(
     old?.presenceRow && old.park ? parkedFor(old.park, lane.actor) : undefined,
     presenceRow && value.park ? parkedFor(value.park, lane.actor) : undefined,
   );
+  // A stamp that did not carry over (a newer head, or a closed Lane) takes its marker row with it.
+  if (old?.passedMark && value.passedMark !== old.passedMark) await ctx.db.delete(old.passedMark);
   const stored = { ...value, ...(presenceRow ? { presenceRow } : {}) };
   const sourceId = old ? old._id : await ctx.db.insert('projectHostedOverlapLanes', stored);
   if (old) await ctx.db.replace(old._id, stored);
@@ -300,9 +334,12 @@ export async function materializeHostedOverlapLifecycle(
     .unique();
   if (row?.presenceRow) await ctx.db.delete(row.presenceRow.id);
   if (row) await dropLanePark(ctx, row);
+  if (row?.passedMark) await ctx.db.delete(row.passedMark);
   if (row)
     await ctx.db.patch(row._id, {
       open: false,
+      passedAt: undefined,
+      passedMark: undefined,
       recordVersion,
       lifecyclePlanId: undefined,
       planLaneMark: undefined,
