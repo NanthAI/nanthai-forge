@@ -217,7 +217,7 @@ test('attempt replay records the mover and checked prefix, links a conflict rech
     censorReason: 'CHANNEL_CHANGED',
     replacementCause: { kind: 'main-race', link: mover.receipt.id },
     replacedByAttemptId: replacement.id,
-    recheckCause: 'unrecorded',
+    recheckCause: 'none',
   });
 
   const follower = await f.enqueue(f.request({ check: null, message: 'Follower with a conflicting prefix' }));
@@ -252,6 +252,9 @@ test('attempt replay records the mover and checked prefix, links a conflict rech
     { holderSubmissionId: first.id, edgeType: 'dependent', heldSeconds: 37 },
   ]);
   assert.deepEqual(history.attempts[1].replay.replacementCause, { kind: 'conflict', link: conflictBatch });
+  // The conflict recheck names why it exists: its parent's replacement cause; the first attempt had none.
+  assert.deepEqual(history.attempts[0].replay.recheckCause, { kind: 'conflict', link: conflictBatch });
+  assert.equal(history.attempts[1].replay.recheckCause, 'none');
   assert.equal(history.attempts[0].replay.outcome, 'censored');
   assert.equal(history.attempts[0].replay.censorReason, 'LANDING_CANCELLED');
   assert.deepEqual(history.attempts[0].replay.replacementCause, {

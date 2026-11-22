@@ -785,3 +785,33 @@ test('ced8e98f: a stamped receipt types an approved-check hold; one landed befor
     { holderSubmissionId: id('sub', 1), edgeType: 'approved-check', heldSeconds: 9 },
   ]);
 });
+
+test('ced8e98f: a receipt reads a recheck attempt cause from its parent, and a stamped attempt with none reads none', async () => {
+  const f = fixture();
+  f.landing(1, {
+    at: 60,
+    attempts: [
+      [0, 'R0', 'chk-0', {}],
+      [1, 'R1', 'chk-1', {}],
+    ],
+  });
+  const [parent, child] = f.tables.projectHostedLandingAttempts;
+  const cause = { kind: 'main-race', link: 'R1' };
+  parent.replay = {
+    causes: 'recorded',
+    censor: 'CHANNEL_CHANGED',
+    replacementCause: cause,
+    replacedByAttemptId: 'child-1',
+  };
+  child.replay = { causes: 'recorded' };
+  const read = async () => (await f.read()).landings[0].attemptReplay;
+  let [first, second] = await read();
+  assert.equal(first.recheckCause, 'none', 'the first attempt had no recheck');
+  assert.deepEqual(second.recheckCause, cause, 'the recheck names why its parent was replaced');
+  assert.equal(second.censorReason, 'none');
+  assert.equal(second.replacementCause, 'none');
+  delete child.replay.causes;
+  child.replay.actualBase = { head: 'h-R1', receiptId: 'R1' };
+  [, second] = await read();
+  assert.equal(second.censorReason, 'unrecorded', 'a row from before the stamp stays unknown');
+});

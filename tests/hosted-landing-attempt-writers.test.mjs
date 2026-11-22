@@ -25,7 +25,9 @@ const landingApi = await import(moduleUrl('../convex/projectHostedLanding.ts'));
 const park = await import(moduleUrl('../convex/projectHostedLandingParkExact.ts'));
 const { exhaustLanding } = await import(moduleUrl('../convex/projectHostedLandingExhaust.ts'));
 const { reserveFinishRetry } = await import(moduleUrl('../convex/projectHostedFinishCompose.ts'));
-const { replayHoldEdges } = await import(moduleUrl('../convex/projectHostedLandingReplay.ts'));
+const { inheritRecheckCause, replayHoldEdges, replayRead } = await import(
+  moduleUrl('../convex/projectHostedLandingReplay.ts')
+);
 const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -427,6 +429,83 @@ test('a cohort member that was handed a hold lands stamped recorded, so history 
   );
 });
 
+test('an attempt with no censor, replacement or recheck reads none, not unrecorded (ced8e98f live check)', async t => {
+  const f = await batchesFixture(t, { count: 2 });
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  const [first] = f.entries.map(entry => entry.state.id);
+  const landed = states(f).find(state => state.id === first);
+  assert.equal(landed.phase, 'landed', 'the cohort published the member');
+  const attempt = [...f.tables.projectHostedLandingAttempts.values()].find(
+    row => row.attemptId === landed.attemptId,
+  );
+  assert.equal(attempt.replay?.causes, 'recorded', 'the landing write stamps the causes');
+  const attempts = (await read(f, first)).attempts;
+  const { replay } = attempts.find(entry => entry.id === landed.attemptId);
+  for (const field of ['censorReason', 'replacementCause', 'replacedByAttemptId'])
+    assert.equal(replay[field], 'none', `${field} of the landed attempt`);
+  assert.equal(replay.outcome, 'landed');
+  // The admission proof's binding made the landed attempt a recheck of the first; the first had none.
+  assert.equal(replay.recheckCause.kind, 'check-binding');
+  assert.equal(attempts.at(-1).replay.recheckCause, 'none', 'the first attempt had no recheck');
+  // The same rows from before the stamp: the causes were never written, so they stay unknown.
+  const unstamp = row => {
+    const { causes, ...old } = row.replay;
+    f.patch('projectHostedLandingAttempts', row._id, { replay: old });
+  };
+  const rows = [...f.tables.projectHostedLandingAttempts.values()].filter(row => row.submissionId === first);
+  assert.ok(
+    rows.every(row => row.replay?.causes === 'recorded'),
+    'every attempt of the entry is stamped',
+  );
+  rows.forEach(unstamp);
+  const after = (await read(f, first)).attempts;
+  const before = after.find(entry => entry.id === landed.attemptId).replay;
+  for (const field of ['censorReason', 'replacementCause', 'replacedByAttemptId'])
+    assert.equal(before[field], 'unrecorded', `${field} of an unstamped receipt`);
+  assert.equal(after.at(-1).replay.recheckCause, 'unrecorded', 'an unstamped first attempt');
+});
+
+test('a stamp alone proves no outcome or base, and a later attempt without its parent cause stays unrecorded', () => {
+  const attempt = { number: 0, main: { head: 'a'.repeat(64), receiptId: 'main' } };
+  const stampOnly = replayRead(attempt, { causes: 'recorded' }, 'landed');
+  assert.equal(stampOnly.outcome, 'unrecorded');
+  assert.equal(stampOnly.actualBase, 'unrecorded');
+  assert.equal(stampOnly.recheckCause, 'none');
+  const second = replayRead({ ...attempt, number: 1 }, { causes: 'recorded' }, undefined);
+  assert.equal(second.recheckCause, 'unrecorded', 'a recheck whose parent is not read is not none');
+  const parent = { replacedByAttemptId: 'child', replacementCause: { kind: 'main-race', link: 'r' } };
+  assert.deepEqual(replayRead({ ...attempt, number: 1 }, undefined, undefined, parent).recheckCause, {
+    kind: 'main-race',
+    link: 'r',
+  });
+  assert.equal(
+    replayRead({ ...attempt, number: 1 }, undefined, undefined, { replacementCause: parent.replacementCause })
+      .recheckCause,
+    'unrecorded',
+    'a parent with no successor recorded is no evidence',
+  );
+});
+
+test('a legacy empty replay still reads its outcome and base; only a stamp alone proves nothing', () => {
+  const attempt = { number: 0, main: { head: 'a'.repeat(64), receiptId: 'main' } };
+  assert.equal(replayRead(attempt, {}, 'landed').outcome, 'landed');
+  assert.deepEqual(replayRead(attempt, {}, 'landed').actualBase, attempt.main);
+  assert.equal(replayRead(attempt, {}, 'terminal-failed').outcome, 'failed');
+});
+
+test('a live child whose parent was archived inherits the parent cause when the merged read names it', () => {
+  const cause = { kind: 'conflict', link: 'b' };
+  const child = { replay: { recheckCause: 'unrecorded' } };
+  inheritRecheckCause(child, { replay: { replacedByAttemptId: 'c', replacementCause: cause } });
+  assert.deepEqual(child.replay.recheckCause, cause);
+  const other = { replay: { recheckCause: 'unrecorded' } };
+  inheritRecheckCause(other, { replay: { replacedByAttemptId: 'unrecorded', replacementCause: 'none' } });
+  inheritRecheckCause(other, undefined);
+  assert.equal(other.replay.recheckCause, 'unrecorded');
+});
+
 test('a cancelled entry keeps its typed hold, and a recompose cancelled before install names its cause', async t => {
   const f = await finishFixture(t);
   const holder = await f.enqueue(f.request({ check: null, message: 'Holder' }));
@@ -446,6 +525,12 @@ test('a cancelled entry keeps its typed hold, and a recompose cancelled before i
   assert.ok(reserved, 'the reserved recompose is the current attempt');
   assert.equal(reserved.replay.outcome, 'censored');
   assert.deepEqual(reserved.replay.replacementCause, { kind: 'cancelled', link: 'operator-cancel' });
+  assert.equal(
+    reserved.replay.recheckCause.kind,
+    'main-race',
+    'the reservation names why its parent was replaced',
+  );
+  assert.equal(reserved.replay.censorReason, 'LANDING_CANCELLED');
 });
 
 test('a check cancelled with nothing replacing it records a cancelled cause', async t => {

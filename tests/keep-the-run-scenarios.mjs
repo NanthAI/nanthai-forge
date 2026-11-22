@@ -199,10 +199,13 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // (option B), adding 724 read bytes to scoped recheck. Writes, red, carry and calls are unchanged.
 // Item 5b4b5918: the keep arms judge their bound admission proof in the binding tick, so a claim and
 // an advance go: carry and scoped recheck each 2 fewer calls, about 51 KB fewer reads and 21 KB fewer writes.
+// Item ced8e98f (recheck none): every attempt write stamps the causes on the replay it already
+// writes, adding 251 read/40 write bytes to carry, 375 read/122 write bytes to scoped recheck and
+// moves red by -233 read/-122 write bytes. No call is added.
 export const WIRED = {
-  carry: { calls: 5, readBytes: 373_093, writeBytes: 57_206 },
-  'scoped-recheck': { calls: 15, readBytes: 511_230, writeBytes: 128_063 },
-  red: { calls: -17, readBytes: -388_081, writeBytes: -145_208 },
+  carry: { calls: 5, readBytes: 373_344, writeBytes: 57_246 },
+  'scoped-recheck': { calls: 15, readBytes: 511_605, writeBytes: 128_185 },
+  red: { calls: -17, readBytes: -388_314, writeBytes: -145_330 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */

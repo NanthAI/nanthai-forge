@@ -48,6 +48,9 @@ export const landingReplay = v.object({
   // Stamped on the landed attempt: `none` when its receipt lists no order waits, `recorded` when
   // each listed wait has its edge type. Landings before the stamp omit it.
   holdEdges: v.optional(v.union(v.literal('none'), v.literal('recorded'))),
+  // Stamped by every attempt write once its writers name their causes: an absent censor, replacement
+  // cause or recheck cause then means none, not a receipt written before the fields existed.
+  causes: v.optional(v.literal('recorded')),
 });
 export type LandingReplay = Infer<typeof landingReplay>;
 
@@ -71,8 +74,17 @@ export function replayRead(
   attempt: Pick<HostedLandingAttempt, 'number' | 'main'>,
   replay: LandingReplay | undefined,
   phase: HostedLandingState['phase'] | undefined,
+  /** The replay of the attempt just before this one (number - 1): a recheck's cause is why that
+   * parent was replaced. A parent's `replacedByAttemptId` means its one successor exists. */
+  parent?: Pick<LandingReplay, 'replacedByAttemptId' | 'replacementCause'>,
 ) {
   const unrecorded = 'unrecorded' as const;
+  // Without the stamp an absent cause is unknown (an old receipt); with it, absent means none.
+  const none = replay?.causes ? ('none' as const) : unrecorded;
+  // The stamp alone is no evidence of an outcome or base: only a recorded field is.
+  const evidence = replay && !(replay.causes && Object.keys(replay).length === 1);
+  const parentCause =
+    parent?.replacedByAttemptId && parent.replacementCause ? parent.replacementCause : undefined;
   const check = replay?.check;
   const dispatch = check?.dispatchedAt;
   const start = check?.startedAt;
@@ -91,7 +103,7 @@ export function replayRead(
     predictedBase: check ? (check.predictedBase ?? attempt.main) : unrecorded,
     actualBase:
       replay?.actualBase ??
-      (replay && (phase === 'landed' || replay.replacedByAttemptId) ? attempt.main : unrecorded),
+      (evidence && (phase === 'landed' || replay?.replacedByAttemptId) ? attempt.main : unrecorded),
     dispatchedAt: dispatch === undefined ? unrecorded : new Date(dispatch).toISOString(),
     startedAt: start === undefined ? unrecorded : new Date(start).toISOString(),
     endedAt: check?.endedAt === undefined ? unrecorded : new Date(check.endedAt).toISOString(),
@@ -100,15 +112,17 @@ export function replayRead(
       start !== undefined && dispatch !== undefined && start >= dispatch ? start - dispatch : unrecorded,
     outcome: replay?.censor
       ? 'censored'
-      : replay && phase === 'landed'
+      : evidence && phase === 'landed'
         ? 'landed'
-        : replay && phase === 'terminal-failed'
+        : evidence && phase === 'terminal-failed'
           ? 'failed'
           : unrecorded,
-    censorReason: replay?.censor ?? unrecorded,
-    replacementCause: replay?.replacementCause ?? unrecorded,
-    replacedByAttemptId: replay?.replacedByAttemptId ?? unrecorded,
-    recheckCause: replay?.recheckCause ?? unrecorded,
+    censorReason: replay?.censor ?? none,
+    replacementCause: replay?.replacementCause ?? none,
+    replacedByAttemptId: replay?.replacedByAttemptId ?? none,
+    // A later attempt is a recheck whose cause is its parent's replacement cause; only a first
+    // attempt with the stamp had no recheck.
+    recheckCause: replay?.recheckCause ?? parentCause ?? (attempt.number === 0 ? none : unrecorded),
   };
 }
 
@@ -138,4 +152,19 @@ export function replayHoldEdges(
             : 'unrecorded',
     heldSeconds: seconds ?? 'unrecorded',
   }));
+}
+
+/** An attempt read with no recheck cause takes its parent's replacement cause: for a read that
+ * merges rows from two places (archived parent, live child). */
+export function inheritRecheckCause(
+  entry: { replay: { recheckCause: unknown } },
+  parent: { replay: { replacedByAttemptId: unknown; replacementCause: unknown } } | undefined,
+) {
+  if (
+    entry.replay.recheckCause === 'unrecorded' &&
+    typeof parent?.replay.replacementCause === 'object' &&
+    typeof parent.replay.replacedByAttemptId === 'string' &&
+    parent.replay.replacedByAttemptId !== 'unrecorded'
+  )
+    entry.replay.recheckCause = parent.replay.replacementCause;
 }

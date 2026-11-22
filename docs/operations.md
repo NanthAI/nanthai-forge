@@ -562,7 +562,10 @@ writer that forks a replacement attempt or cancels an entry names its cause in t
 recompose cancelled before its attempt was installed keeps the cause on its finish row. An entry superseded before its first attempt is
 reserved has no attempt to replace, never reaches a landed receipt, and its history reads
 `unrecorded` for the cause. `replacedByAttemptId` links the retiring
-attempt to its successor. Unavailable observations read as `unrecorded`. A check carried
+attempt to its successor. An attempt write stamps that its causes are recorded: from then on an
+attempt that was not censored reads `none` for `censorReason`, `replacementCause` and
+`replacedByAttemptId`, and a first attempt reads `none` for `recheckCause`. A later attempt's
+`recheckCause` is its parent's replacement cause. Attempts written before the stamp read `unrecorded`. Unavailable observations read as `unrecorded`. A check carried
 across attempts keeps the same run ID. Hold edges retain the holder's
 submission, its edge type and recorded wait. The edge type is `dependent`, the footprint class
 (`overlap` or `disjoint`), or, for a hold whose footprints were never read, its hold kind (such

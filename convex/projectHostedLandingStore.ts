@@ -711,6 +711,9 @@ export async function retainLandingProgress(
     !replay?.recheckCause
       ? { recheckCause: { kind: 'flake-retry', link: state.supersedes } }
       : {}),
+    // Every attempt write names its causes (a censor, a replacement, a recheck) or has none, so an
+    // absent one reads `none`; rows without the stamp predate it and read `unrecorded`.
+    causes: 'recorded',
     ...(nextMain ? { actualBase: nextMain } : {}),
     ...(censor ? { censor } : {}),
     // Every replacement or censor records its cause in this same write: the writer's, else its

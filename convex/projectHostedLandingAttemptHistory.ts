@@ -24,7 +24,13 @@ import {
 import { sourceStepFailureField } from '../src/hosted-source-retry';
 import { invariant } from '../src/errors';
 import { phaseDuration } from '../src/land-phases';
-import { replayHoldEdges, replayRead, type ReplayCause } from './projectHostedLandingReplay';
+import {
+  inheritRecheckCause,
+  replayHoldEdges,
+  replayRead,
+  type LandingReplay,
+  type ReplayCause,
+} from './projectHostedLandingReplay';
 import { capsuleHistoryContext } from './projectLandingCapsuleContext';
 import type { LandingCapsule } from '../src/landing-capsule';
 
@@ -124,6 +130,7 @@ function installedAttempt(
   current: boolean,
   runId: string | undefined,
   observedAt?: string,
+  parentReplay?: LandingReplay,
 ) {
   const failure = cause(progress?.error);
   return {
@@ -132,7 +139,7 @@ function installedAttempt(
     at: attempt.at,
     current,
     main: attempt.main,
-    replay: replayRead(attempt, row.replay, progress?.phase),
+    replay: replayRead(attempt, row.replay, progress?.phase, parentReplay),
     candidateId: attempt.candidate.id,
     ...(runId ? { runId } : {}),
     ...(attempt.checkCause ? { checkCause: attempt.checkCause } : {}),
@@ -164,6 +171,7 @@ export function archivedAttemptHistory(capsule: LandingCapsule, context: Record<
     .sort((a, b) => b.number - a.number)
     .slice(0, PAGE + 1);
   const progress = new Map(page.map(row => [row.attemptId, landingAttemptProgress(row, state)]));
+  const replays = new Map(page.map(row => [row.attemptId, row.replay]));
   const attempts = page.map(row => {
     const attempt = hostedLandingAttemptSchema.parse(JSON.parse(row.value));
     const parent = attempt.parentAttemptId ? progress.get(attempt.parentAttemptId)?.timing : undefined;
@@ -177,6 +185,8 @@ export function archivedAttemptHistory(capsule: LandingCapsule, context: Record<
       parent,
       attempt.id === reply.currentAttemptId,
       runId,
+      undefined,
+      attempt.parentAttemptId ? replays.get(attempt.parentAttemptId) : undefined,
     );
   });
   const liveAttempts = live as Array<{ id: string; number: number; reserved?: true }>;
@@ -186,6 +196,9 @@ export function archivedAttemptHistory(capsule: LandingCapsule, context: Record<
   if (stamp && stampedHoldEdges) reply.holdEdges = (stampedHoldEdges as Record<string, unknown>)[stamp];
   const merged = new Map(attempts.map(entry => [entry.number, entry as (typeof liveAttempts)[number]]));
   for (const entry of liveAttempts) if (!entry.reserved) merged.set(entry.number, entry);
+  // A live child whose parent was archived reads its cause from the archived parent.
+  for (const entry of merged.values())
+    inheritRecheckCause(entry as never, merged.get(entry.number - 1) as never);
   const selected = [...merged.values()].sort((a, b) => b.number - a.number).slice(0, PAGE);
   const next = merged.size > PAGE || nextBeforeAttempt != null ? selected.at(-1)!.number : null;
   const gap = selected.some((entry, index) => index > 0 && selected[index - 1]!.number !== entry.number + 1);
@@ -206,6 +219,7 @@ async function reservedAttempt(
   composeOperationId: string,
   observedAt: string,
   reservedCause?: ReplayCause,
+  parentReplay?: LandingReplay,
 ) {
   const step = await preparingSourceStep(ctx, projectId, state.actor, composeOperationId);
   const failure = step ? sourceStepFailureField(step) : undefined;
@@ -225,8 +239,13 @@ async function reservedAttempt(
     phase: failed ? 'terminal-failed' : 'composing',
     replay: replayRead(
       attempt,
-      censor ? { censor, ...(reservedCause ? { replacementCause: reservedCause } : {}) } : undefined,
+      // A reservation is written by the current writers, so it carries the causes stamp.
+      {
+        causes: 'recorded',
+        ...(censor ? { censor, ...(reservedCause ? { replacementCause: reservedCause } : {}) } : {}),
+      },
       state.phase,
+      parentReplay,
     ),
     composeOperationId,
     periods: composition ? [composition] : [],
@@ -338,6 +357,7 @@ export const read = query({
             : landingAttemptProgress(entry, state),
         ]),
       );
+      const rowReplays = new Map(rows.map(entry => [entry.attemptId, entry.replay]));
       const attempts = await Promise.all(
         rows.slice(0, PAGE).map(async entry => {
           const attempt = await loadLandingAttempt(ctx, { projectId, attemptId: entry.attemptId }, entry);
@@ -356,6 +376,7 @@ export const read = query({
             current,
             runId,
             current && open && !progress?.settled ? observedAt : undefined,
+            attempt.parentAttemptId ? rowReplays.get(attempt.parentAttemptId) : undefined,
           );
         }),
       );
@@ -370,6 +391,7 @@ export const read = query({
                 pending.operations.compose,
                 observedAt,
                 row.reservedCause,
+                rowReplays.get(state.attemptId),
               ),
             ]
           : [];

@@ -275,7 +275,12 @@ async function evidence(
         archived?.holdEdges ? { holdEdges: archived.holdEdges } : undefined,
       ]),
       attemptReplay: attempts.map((attempt, index) =>
-        replayRead(attempt, chain[index]?.replay, progress[index]?.phase),
+        replayRead(
+          attempt,
+          chain[index]?.replay,
+          progress[index]?.phase,
+          chain[index - 1]?.number === attempt.number - 1 ? chain[index - 1]?.replay : undefined,
+        ),
       ),
       ...(last && (chain.at(-1)?.number ?? -1) < last.number ? { attemptReplayPartial: true } : {}),
     },
