@@ -4,6 +4,9 @@ import type { HostedCheckRun } from '../../../src/hosted-check';
 import type { HostedAcceptance } from '../../../src/hosted-acceptance';
 import type { Tone } from '../ui/status';
 import { landingStateOf, type LandingStateName } from '../../../src/landing-state';
+/** The fact line beside Approve when no check ran on the change (Item e6f1290b; owner decision 2026-11-19 on question 46:
+ * a fact, never a confirm step). Plain text, shown only where the page's own read says no check ran. */
+export const NO_CHECK_FACT = 'No check ran yet; it will be checked before landing.';
 export type LandingRead = {
   request: HostedLandingState;
   attempt: HostedLandingAttempt;

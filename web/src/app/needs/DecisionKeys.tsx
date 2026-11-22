@@ -143,6 +143,9 @@ export function AheadKeys({
   );
 }
 
+/** No "No check ran" fact line here (Item e6f1290b): the Needs me and Lane-page row (projectNeedsMe:read) carries no
+ * check data, and saying nothing is better than guessing or adding a read. The Review page and a held landing's own
+ * page say it from their own landing read (lane/landing-model.ts NO_CHECK_FACT). */
 export function DecisionKeys({
   laneId,
   target,

@@ -7,7 +7,7 @@ import { Button, Panel } from '../ui/primitives';
 import { Glyph } from '../ui/Glyph';
 import { ErrorToast } from '../ui/Toast';
 import { LandingProgress, LandingRail } from './LandingProgress';
-import { landingState, elapsed, type LandingRead } from './landing-model';
+import { landingState, elapsed, NO_CHECK_FACT, type LandingRead } from './landing-model';
 import { RequestChanges, type ReviewRecipient } from '../review/RequestChanges';
 import { ReviewDisposition, type ReviewAcceptance } from '../review/ReviewDisposition';
 import type { OwnerReview } from './OwnerReviewActions';
@@ -22,6 +22,8 @@ export type LandingDecisionProps = {
   acceptance?: ReviewAcceptance;
   candidateLabel: string;
   canAccept: boolean;
+  /** True when this page's read says no check ran on the Candidate; the line beside Approve says so. */
+  unchecked?: boolean;
   canComment: boolean;
   onRequestSent?: () => void;
   busy?: boolean;
@@ -215,7 +217,9 @@ export function LandingDecision(props: LandingDecisionProps) {
                 Approve and land
               </Button>
               <p className="fx-decide-after">
-                Lands through the queue · checked again only if main moves first
+                {props.unchecked
+                  ? NO_CHECK_FACT
+                  : 'Lands through the queue · checked again only if main moves first'}
               </p>
             </div>
           )}

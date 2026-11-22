@@ -16,7 +16,7 @@ Follow `nextCursor` with the same pinned selection when a diff is partial. Missi
 
 ## Check and land
 
-`land --save` saves, updates from main, composes the result and checks it under project policy. Review-required or protected work waits for the configured person's approval. A person should read what changed and the evidence before answering the held request.
+`land --save` saves, updates from main, composes the result and checks it under project policy. Review-required or protected work waits for the configured person's approval. A person should read what changed and the evidence before answering the held request. Where no check has run yet on the change, the page says so in one line beside **Approve and land** ("No check ran yet; it will be checked before landing."); Approve is still one action, with no extra confirmation. Needs me and the Lane page do not show that line, because their read carries no check data.
 
 ```sh
 nforge agent ROOT land --save '{"laneId":"LANE_ID","message":"Describe the change"}'

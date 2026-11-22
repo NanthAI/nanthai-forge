@@ -322,6 +322,7 @@ export function HostedReview({
               acceptance={acceptance}
               candidateLabel={reviewViewLabel(views, view.id)}
               canAccept={owner && view.status === 'clean' && Boolean(view.head)}
+              unchecked={Boolean(story) && !run}
               canComment={editable}
               failures={landing.failures}
               log={landing.log}

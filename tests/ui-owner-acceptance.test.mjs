@@ -176,3 +176,39 @@ test('a source-size refusal shows phase, count, limit and docs in the ordinary l
   assert(html.includes(sourceSizeDocs));
   assert.doesNotMatch(html, /Try again|Retry source|Repair in Lane/);
 });
+
+// Item e6f1290b (owner decision 2026-11-19, question 46): no confirm step; a plain fact line beside Approve where the
+// page's own read says no check ran. Needs me and the Lane page carry no check data, so they say nothing.
+test('Approve and land says when no check ran, and only then', async () => {
+  const { NO_CHECK_FACT } = await import(moduleUrl('../web/src/lane/landing-model.ts'));
+  const ready = variantProps('01-ready');
+  const unchecked = render(h(LandingDecision, { ...ready, unchecked: true }));
+  assert.ok(unchecked.includes(NO_CHECK_FACT), 'the fact line is beside the button');
+  assert.ok(unchecked.includes('Approve and land'));
+  assert.doesNotMatch(unchecked, /checked again only if main moves first/);
+  assert.doesNotMatch(unchecked, /<dialog|role="dialog"|fx-confirm/, 'no added step');
+  const checked = render(h(LandingDecision, ready));
+  assert.ok(!checked.includes(NO_CHECK_FACT));
+  assert.match(checked, /checked again only if main moves first/);
+  const viewer = render(h(LandingDecision, { ...ready, canAccept: false, unchecked: true }));
+  assert.ok(!viewer.includes(NO_CHECK_FACT), 'no button, no line');
+});
+test('a landing held for review shows the line only while no check ran on it', () => {
+  const held = run => {
+    const read = landingRead('waiting-for-review');
+    read.run = run;
+    return render(
+      h(LandingDecision, {
+        ...variantProps('02-queued'),
+        read,
+        review: { accept() {}, decline() {} },
+      }),
+    );
+  };
+  const html = held(null);
+  assert.match(html, /No check ran yet; it will be checked before landing\./);
+  assert.match(html, /Approve and land/);
+  const withRun = held(landingRead('checking').run);
+  assert.doesNotMatch(withRun, /No check ran yet/);
+  assert.match(withRun, /Approve and land/);
+});

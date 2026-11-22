@@ -2,7 +2,7 @@
 import { hostedHref } from '../cockpit/hosted-links';
 import { Glyph } from '../ui/Glyph';
 import { Button } from '../ui/primitives';
-import { clockTime, elapsed, landingState, type LandingRead } from './landing-model';
+import { clockTime, elapsed, landingState, NO_CHECK_FACT, type LandingRead } from './landing-model';
 import { OwnerReviewActions, type OwnerReview } from './OwnerReviewActions';
 export function LandingRail({
   landed = false,
@@ -150,7 +150,10 @@ export function LandingProgress({
         </li>
       </ol>
       {held && review ? (
-        <OwnerReviewActions review={{ ...review, busy: review.busy ?? busy }} />
+        <>
+          {!run && <p className="fx-decide-after">{NO_CHECK_FACT}</p>}
+          <OwnerReviewActions review={{ ...review, busy: review.busy ?? busy }} />
+        </>
       ) : (
         <div className="fx-land-actions">
           {cancel && (
