@@ -7,6 +7,8 @@ from publisher.experiment import Experiment
 from run import nearest, noop
 
 
+HOLD_MINUTES = 5.0  # HOSTED_TRAIN_HOLD_MS
+
 BENCH_30_SHAPE = {
     "offers_per_hour": 40,
     "full_minutes": 9.0,
@@ -73,8 +75,19 @@ class CalibratedShapeExperiment(Experiment):
         refusal_rate=0.0,
         capacity_override=None,
         scoped_recheck_fraction=None,
+        full_recheck_saturated=False,
+        hold_deciding=False,
     ):
         self.shape = shape
+        # Cohort hold (Item 10b0a94b; option B, owner 2026-11-22): a refused entry waits, at most
+        # HOLD_MINUTES, for peers already deciding their own first pass, and a deciding peer fills the
+        # free slot for lever 2. Only peers deciding before the hold began keep it.
+        self.hold_deciding = hold_deciding
+        self.deciding, self.held, self.hold_waits = {}, {}, {}
+        # Lever 2 (owner 2026-11-22, Item 10b0a94b): a recheck that starts with no free slot left
+        # runs full, so its pass can carry across later disjoint main moves.
+        self.full_recheck_saturated = full_recheck_saturated
+        assert not full_recheck_saturated or shape["full_slots"] == shape["scoped_slots"]
         self.batching = batching
         self.skip_stale = skip_stale
         self.max_batch = max_batch
@@ -159,7 +172,17 @@ class CalibratedShapeExperiment(Experiment):
     def check_kind_for(self, i, is_recheck=False):
         if i in self.force_full or not is_recheck:
             return "full"
-        return "full" if i in self.full_recheck else "scoped"
+        if i in self.full_recheck:
+            return "full"
+        # Decided once, when the check takes its slots (run_single): no slot left for the next entry.
+        # Dispatch only sizes the slot request, which the lever needs equal for both kinds.
+        if self.full_recheck_saturated and getattr(self, "_starting", False):
+            needed = self.shape["full_slots"]
+            if self.waiting or self.pending_checks or self.used + needed >= self.capacity:
+                return "full"
+            if self.hold_deciding and any(peer != i for peer in self.deciding):
+                return "full"
+        return "scoped"
 
     def enqueue_check(self, order_key, tag, payload, priority=1):
         self.q_seq += 1
@@ -278,7 +301,9 @@ class CalibratedShapeExperiment(Experiment):
         self.pins[i] = self.prepared[i] = len(self.pub)
         self.generations[i] += 1
         self.started_at[i] = self.now
+        self._starting = True
         kind = self.check_kind_for(i, is_recheck=is_recheck)
+        self._starting = False
         self.last_kind[i] = kind
         slots, wall, work = (self.shape[f"{kind}_{key}"] for key in ("slots", "minutes", "worker_minutes"))
         bad = self.invalid_single(i)
@@ -298,6 +323,8 @@ class CalibratedShapeExperiment(Experiment):
             self.stats["transient"] += 1
             self.enqueue_check(i, "fixed", [i], priority=0)
         else:
+            if self.hold_deciding and i not in self.first_pass:
+                self.deciding[i] = self.now
             self.admitted.add(i)
             self.first_pass.setdefault(i, self.now)
             self.last_pass_at[i] = self.now
@@ -308,7 +335,9 @@ class CalibratedShapeExperiment(Experiment):
             offers = self.path_offers[path]
             while offers and offers[0] not in self.live:
                 offers.popleft()
-            if offers and offers[0] < i and offers[0] not in members:
+            # A held entry holds no queue order (the code's cohort hold), so peers it awaits pass it.
+            first = next((o for o in offers if o not in self.held), None)
+            if first is not None and first < i and first not in members:
                 return True
         return any(
             older < i
@@ -332,10 +361,27 @@ class CalibratedShapeExperiment(Experiment):
         return None
 
     def discarded(self, i):
+        self.stop_deciding(i)
         self.source_job("recompose", self.enqueue_recheck, i)
 
+    def stop_deciding(self, i):
+        if self.deciding.pop(i, None) is None:
+            return
+        oldest = min(self.deciding.values(), default=None)
+        for held, since in sorted(self.held.items()):
+            if oldest is None or oldest > since:
+                self.release_hold(held)
+
+    def release_hold(self, i):
+        if i in self.held:
+            self.hold_waits[i] = self.now - self.held.pop(i)
+            self.enqueue_check(i, "ready", (i, True))
+
     def enqueue_recheck(self, i):
-        if self.batching:
+        if self.batching and self.hold_deciding and i not in self.hold_waits and self.deciding:
+            self.held[i] = self.now
+            self.at(self.now + HOLD_MINUTES, self.release_hold, i)
+        elif self.batching:
             self.enqueue_check(i, "ready", (i, True))
         else:
             self.enqueue_check(i, "fixed", [i])
@@ -365,6 +411,7 @@ class CalibratedShapeExperiment(Experiment):
         self.settle(i)
 
     def reject(self, i):
+        self.stop_deciding(i)
         self.overtaken.pop(i, None)
         super().reject(i)
 
@@ -382,6 +429,7 @@ class CalibratedShapeExperiment(Experiment):
         self._mark_overtaken(i, {i})
         self.overtaken.pop(i, None)
         self.publish(i)
+        self.stop_deciding(i)
         self.check_to_commit[i] = self.now - self.last_pass_at[i]
         for path in self.paths[i]:
             self.last_main_move[path] = len(self.pub)
@@ -508,6 +556,7 @@ class CalibratedShapeExperiment(Experiment):
     def measure(self):
         result = super().measure()
         assert not self.parked and not self.parked_batches and not self.batches and not self.pending_checks
+        assert not self.held
         scored = [i for i in self.pub if self.start <= self.rows[i][0] < self.end]
         scored_landed = sum(self.pub[i] < self.end for i in scored)
         before, after = result["pending"]
@@ -520,6 +569,9 @@ class CalibratedShapeExperiment(Experiment):
             "checks_per_landing": landing_checks / landed if landed else None,
             "worker_minutes_per_landing": landing_work / landed if landed else None,
             "order_wait_p90": nearest([self.order_wait[i] for i in scored], 0.9),
+            "held": len(self.hold_waits),
+            "hold_wait_p50": nearest(list(self.hold_waits.values()), 0.5) or 0.0,
+            "hold_wait_p90": nearest(list(self.hold_waits.values()), 0.9) or 0.0,
             "check_to_commit_p90_s": (nearest([self.check_to_commit[i] for i in scored], 0.9) or 0.0) * 60.0,
         }
         if self.bench_mode:

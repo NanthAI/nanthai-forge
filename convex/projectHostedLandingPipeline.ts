@@ -159,6 +159,40 @@ export async function pipelinePredecessor(
   };
 }
 
+/** No free check slot (10b0a94b, owner option B 2026-11-22): an admitted peer is still deciding its
+ * own Lane run (reuse or publication undecided, so it may yet need the slot), or the retained
+ * train's live groups fill the pipeline width. The queue's own count, any runner (BYOCI). One
+ * indexed read (at most one row past `own`, the checked submissions, which may still carry their
+ * own stamp while they recompose, and whose own train slots count as free); the train rows only when
+ * nothing is deciding and the train is at width, which the tick reads anyway. */
+export async function pipelineFull(
+  ctx: QueryCtx | MutationCtx,
+  input: LandingChannel,
+  policy: HostedLandingAttempt['policy'],
+  own: readonly string[] = [],
+) {
+  const deciding = await ctx.db
+    .query('projectHostedLandingRequests')
+    .withIndex('by_project_and_channel_and_deciding', q =>
+      q.eq('projectId', input.projectId).eq('channel', input.channel).gt('deciding', 0),
+    )
+    .take(own.length + 1);
+  if (deciding.some(row => !own.includes(row.submissionId))) return true;
+  // A recheck replaces its own run, so its own train slot is free to it (keep-the-run scoped recheck).
+  const train = ((await landingQueue(ctx, input))?.train ?? []).filter(id => !own.includes(id));
+  const width = hostedPipelineWidth(policy);
+  if (train.length < width) return false;
+  const rows = (
+    await Promise.all(
+      train.map(submissionId => landingRow(ctx, { projectId: input.projectId, submissionId })),
+    )
+  ).filter(livePipelineRow);
+  const groups = new Set(
+    rows.map(row => storedLandingStateSchema.parse(JSON.parse(row.value)).batchId ?? row.submissionId),
+  );
+  return groups.size >= width;
+}
+
 /** Pending predecessors are allowed during source/check preparation, never at
  * publication. Their reserved receipt and head must remain the same generation. */
 export async function predecessorStatus(ctx: MutationCtx, input: BatchIdentity, batch: LandingBatch) {

@@ -254,6 +254,19 @@ is enabled; the measured comparison below explains the default.
    A refused change waits for peers still deciding their own Lane run (bounded by
    the train hold, holding no queue order, with one armed wake), so the refused
    changes of one wave share one cohort check (Issue 10b0a94b).
+   **Passed-change grouping** is the default here (Issue 10b0a94b):
+   only changes whose own Lane check passed form a cohort; a change that entered
+   unadmitted (its Lane check ended without a result three times) checks alone,
+   since grouping such changes made 69% red groups of 4. A refused change waits
+   only when no check slot is free, and a peer still deciding its own Lane run
+   fills the free slot, so with no peer deciding and a free runner nothing waits;
+   in a wave it is the hold above, at most five minutes. The cohort size is the
+   automatic size (below) or `acceptance.batchMaxSize`.
+   A main-race recheck (single or cohort) that starts with no free check slot runs
+   the full check instead of the [scoped recheck](workflows.md#hosted-acceptance-gate),
+   so its pass can carry across the coming disjoint main moves; with a free slot it
+   stays scoped. Neither rule adds a Convex call; the slot read is one indexed read
+   when a recheck starts.
    A Lane run that a moved main has made stale is refused before its turn when
    every older change holding order is itself refused or stale and nothing else
    can move main first, so the wave recomposes in one pass instead of one change

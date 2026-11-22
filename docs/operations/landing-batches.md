@@ -304,6 +304,10 @@ A retained compose with no live check holds its slot for at most five minutes
 existing path. Metadata selection reads only bounded indexed cohort windows and
 the bounded active train, independent of queue length and retained history.
 
+With `acceptance.admissionCheck: "full"`, only changes whose own Lane check
+passed form a cohort; an unadmitted change checks alone
+([passed-change grouping](../pre-queue-checks.md#decision)).
+
 Cohort size is `acceptance.batchMaxSize` (1 to 8) when set. Absent, the queue
 picks the k that minimises expected checks per member, 1/k + 1 - (1-p)^k, capped
 at 8. p is the failure rate of the last 20 shared checks of that kind (first

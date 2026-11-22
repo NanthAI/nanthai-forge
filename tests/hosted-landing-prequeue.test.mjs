@@ -116,6 +116,30 @@ test('a Lane check that ends without a failing test restarts twice, then enters 
   assert.equal(landed(f), 1, 'unknown is not red');
 });
 
+// Passed-change grouping (owner 2026-11-22, Item 10b0a94b): with pre-queue Lane checks only changes
+// whose own check passed form a cohort. A fresh arrival (here: unadmitted after its Lane check
+// ended without a failing test three times) checks alone; grouping such changes was measured at
+// 69% red groups of 4 and not adopted.
+test('passed-change grouping: unadmitted arrivals never share a cohort check', async t => {
+  const f = await batchesFixture(t, { ...full, count: 3 });
+  for (let i = 0; i < 3; i++) {
+    for (const run of f.runs().filter(r => r.status === 'queued'))
+      await f.rawChecks.callback(
+        f.rawChecks.complete(await f.rawChecks.activate(run.id), 'runner-unavailable'),
+      );
+    await f.drain();
+  }
+  assert(rows(f).every(row => row.admission.status === 'unavailable'));
+  while (await round(f, []));
+  assert.equal(landed(f), 3, 'unknown is not red');
+  const cohorts = [...f.tables.projectHostedLandingBatches.values()].filter(
+    row => JSON.parse(row.value).members.length > 1,
+  );
+  // Before: the three entered together and shared one cohort check.
+  assert.equal(cohorts.length, 0, 'each checks alone');
+  assert.equal(f.pending().length, 0, 'idle after settling');
+});
+
 test('a new submission of a red Intent records a needs-fix check at dispatch', async t => {
   const f = await batchesFixture(t, { ...full, count: 1 });
   await round(f, ['member-0']);

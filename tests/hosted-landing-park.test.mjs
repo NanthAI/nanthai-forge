@@ -14,6 +14,7 @@ const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'
 const admissionWake = await import(moduleUrl('../convex/projectHostedLandingAdmissionWake.ts'));
 const auditState = await import(moduleUrl('../convex/projectHostedMainAuditState.ts'));
 const redrive = await import(moduleUrl('../convex/projectHostedLandingRedrive.ts'));
+const gate = await import(moduleUrl('../convex/projectHostedGate.ts'));
 const landingsRead = await import(moduleUrl('../convex/projectHostedLandings.ts'));
 const laneHistory = await import(moduleUrl('../convex/projectHostedLaneHistory.ts'));
 import { controllerMetadataFits } from './observer-projection-budget.mjs';
@@ -555,6 +556,29 @@ test('687d1eda D round 2 finding 1: with the switch on a released publication ho
     } else
       assert.equal(row.alarm ?? null, null, 'switch off: main keeps the publication hold release unchanged');
   }
+});
+
+// Item 10b0a94b review: a row parked at publication on red main no longer decides its own run, so
+// it neither fills a check slot (forcing every recheck full) nor keeps peers' cohort holds until
+// main recovers.
+test('a publication hold on red main clears the parked row deciding stamp', async t => {
+  const f = await redMain(t);
+  const id = f.landingRow()._id;
+  f.patch('projectHostedLandingRequests', id, { deciding: Date.parse('2026-01-01T12:00:00.000Z') });
+  await f.transaction(
+    'park',
+    {
+      _handler: async ctx => {
+        const row = await ctx.db.get(id);
+        await gate.holdMainRed(ctx, row, JSON.parse(row.value));
+      },
+    },
+    {},
+  );
+  const row = f.tables.projectHostedLandingRequests.get(id);
+  assert.equal(row.hold, 'main-red');
+  // Before: the stamp stayed and the parked row counted as a deciding peer until release.
+  assert.equal(row.deciding, undefined);
 });
 
 test('687d1eda D round 2 finding 2: more than 100 parked rows release outside the green mutation in bounded pages', async t => {

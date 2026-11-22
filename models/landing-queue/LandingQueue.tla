@@ -14,7 +14,11 @@ CONSTANTS PreQueue, Red, Independent, LaneInfra, SuffixWaits
 \* the same hold, but it keeps its queue order (litmus only). "early" (7fe54c7c,
 \* today's code): "hold", and a stale Lane proof is refused before its turn while
 \* every older entry holding order is itself refused or a refusable Lane proof of
-\* the same cohort and no other group can move main first.
+\* the same cohort and no other group can move main first. "slot" (owner
+\* 2026-11-22, passed-change grouping, option B): "early", where a refused member
+\* holds only with no free check slot, and a peer still deciding its own Lane run
+\* fills one, so the hold is "early"'s; and only members whose own Lane check
+\* passed group (Groups): an unadmitted (platform) entry checks alone.
 CONSTANTS Hold
 \* Breaks (7fe54c7c, change 556): Independent changes whose own check passes on
 \* their base but whose content breaks a check once anything else is beside it
@@ -91,7 +95,7 @@ Deciding == {e \in Entries : PreQueue /\ q.phase[e] = "queued" /\ q.lane[e] = "p
 \* Held: a refused member (tried, batchable, free) while a peer is deciding and its
 \* bounded hold has not expired. Released in the transaction that ends the last
 \* decision (derived state); a lost wake is the Incidents `cohorthold` litmus.
-Held == IF Hold \in {"hold", "keep-order", "early"}
+Held == IF Hold \in {"hold", "keep-order", "early", "slot"}
         THEN {e \in Entries : q.phase[e] = "queued" /\ e \in q.tried /\ e \notin q.expired
                               /\ (\A g \in Entries : q.batches[g].phase \in {"composing", "checking", "ready"}
                                    => e \notin q.batches[g].members)
@@ -227,7 +231,7 @@ LaneAdopt(g) ==
 RefusableLane(h) == q.batches[h].lane /\ q.batches[h].phase = "ready"
                     /\ ~Exact(h) /\ ~CarryOnMain(q.batches[h])
 EarlyRefusal(g, older) ==
-  /\ Hold = "early"
+  /\ Hold \in {"early", "slot"}
   /\ ~\E h \in Active : ~q.batches[h].lane
   /\ \A e \in older : /\ Cohort[e] = Cohort[Earliest(q.batches[g].included)]
                      /\ \/ e \in Free \cap q.tried
@@ -258,6 +262,8 @@ Gate(e) == /\ Arrives(e)
 Precompose(e) == /\ AllowAdvice /\ e \in Free /\ e \notin q.advice
                 /\ q' = [q EXCEPT !.advice = @ \cup {e}]
                 /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
+\* Passed-change grouping ("slot"): only an entry whose own Lane check passed joins a cohort.
+Groups(e) == Hold = "slot" /\ PreQueue => q.lane[e] = "passed"
 Form(g) ==
   /\ running /\ claim = 0 /\ Sel # {} /\ g = Min(Entries \ Active)
   /\ Len(q.train) < Width
@@ -266,8 +272,8 @@ Form(g) ==
      /\ (entry \in q.solo => ~\E e \in QueueLive \cap q.solo : q.rank[e] < q.rank[entry])
      /\ (IF TrainTail = 0 \/ entry \in q.solo THEN TRUE
           ELSE q.batches[TrainTail].phase \in {"checking", "ready"})
-     /\ LET members == IF entry \in q.solo THEN {entry}
-                       ELSE {e \in Sel : Cohort[e] = Cohort[entry] /\ e \notin q.solo}
+     /\ LET members == IF entry \in q.solo \/ ~Groups(entry) THEN {entry}
+                       ELSE {e \in Sel : Cohort[e] = Cohort[entry] /\ e \notin q.solo /\ Groups(e)}
             base == IF TrainTail = 0 \/ entry \in q.solo THEN main ELSE q.batches[TrainTail].head
             rev == IF TrainTail = 0 \/ entry \in q.solo THEN stamp ELSE q.batches[TrainTail].receipt
         IN q' = [q EXCEPT !.batches[g] = [Empty EXCEPT !.phase = "composing",
@@ -559,6 +565,12 @@ NoQueueCheck == \A g \in Entries : q.batches[g].phase # "checking"
 \* No refused member forms a cohort while a peer still decides its own proof,
 \* unless its bounded hold expired.
 NoEarlyCohort == ~q.early
+\* Passed-change grouping ("slot"): every multi-member queue cohort holds only
+\* members whose own Lane check passed, and a held member is in no cohort.
+PassedCohorts == \A g \in Active :
+  (~q.batches[g].lane /\ Cardinality(q.batches[g].members) > 1) =>
+    \A m \in q.batches[g].members : PreQueue => q.lane[m] = "passed"
+NoHeldMember == \A e \in Held : ~InBatch(e)
 L1 == \A e \in Entries : (q.phase[e] # "new") ~> (q.phase[e] \in Terminal)
 L2 == \A e \in Entries : (e \in Live) ~> (e \notin Live)
 =============================================================================

@@ -18,6 +18,14 @@ ARMS = {
     "a+b": dict(batching=True, skip_stale=True),
     # Sensitivity arm: arm a restricted to entries with their own pass (today's admitted cohorts).
     "a-admitted": dict(batching=True, skip_stale=False, min_fresh_batch=None),
+    # The two adopted levers (owner 2026-11-22, Item 10b0a94b) alone and together.
+    "full-recheck": dict(batching=False, skip_stale=False, full_recheck_saturated=True),
+    "a-admitted+full": dict(batching=True, skip_stale=False, min_fresh_batch=None, full_recheck_saturated=True),
+    # Today's cohort hold for deciding peers, and option B (owner 2026-11-22): both levers with that hold.
+    "a-admitted+hold": dict(batching=True, skip_stale=False, min_fresh_batch=None, hold_deciding=True),
+    "option-b": dict(
+        batching=True, skip_stale=False, min_fresh_batch=None, full_recheck_saturated=True, hold_deciding=True
+    ),
 }
 
 
@@ -185,6 +193,34 @@ def bench_replay(arms=None):
             skip_stale=False,
             min_fresh_batch=None,
             scoped_recheck_fraction=cal["scoped_recheck_fraction"],
+        ),
+        "full-recheck": dict(
+            batching=False,
+            skip_stale=False,
+            scoped_recheck_fraction=cal["scoped_recheck_fraction"],
+            full_recheck_saturated=True,
+        ),
+        "a-admitted+full": dict(
+            batching=True,
+            skip_stale=False,
+            min_fresh_batch=None,
+            scoped_recheck_fraction=cal["scoped_recheck_fraction"],
+            full_recheck_saturated=True,
+        ),
+        "a-admitted+hold": dict(
+            batching=True,
+            skip_stale=False,
+            min_fresh_batch=None,
+            scoped_recheck_fraction=cal["scoped_recheck_fraction"],
+            hold_deciding=True,
+        ),
+        "option-b": dict(
+            batching=True,
+            skip_stale=False,
+            min_fresh_batch=None,
+            scoped_recheck_fraction=cal["scoped_recheck_fraction"],
+            full_recheck_saturated=True,
+            hold_deciding=True,
         ),
     }
     selected = list(bench_arms) if arms is None else arms

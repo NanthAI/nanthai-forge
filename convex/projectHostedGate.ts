@@ -252,6 +252,7 @@ import {
   type LandingRow,
 } from './projectHostedLandingStore';
 import { finishRow, wakeLandingOrderWaiters } from './projectHostedFinishWake';
+import { releaseCohortHolds } from './projectHostedLandingCohortHold';
 import { semanticPayload } from '../src/semantic-payload';
 import type { HostedLandingState } from '../src/hosted-landing';
 import { openMainRedHold } from '../src/hosted-acceptance';
@@ -273,6 +274,9 @@ export async function holdMainRed(ctx: MutationCtx, row: LandingRow, next: Hoste
     alarm: null,
     orderLive: undefined,
     orderWaited: undefined,
+    // Parked, it no longer decides its own run (10b0a94b): it must not fill a check slot or keep
+    // peers' cohort holds until main recovers.
+    deciding: undefined,
     // Its alarm and wake are gone: a reservation it kept would park later landings of the
     // same files on a row nothing drives, as Fix D's park already clears (review e7137e30 4b).
     reservedUntil: undefined,
@@ -282,4 +286,5 @@ export async function holdMainRed(ctx: MutationCtx, row: LandingRow, next: Hoste
   });
   // A held entry gives up its submission-order place; the next waiter re-reads the gate.
   if (row.orderWaited) await wakeLandingOrderWaiters(ctx, row);
+  if (row.deciding !== undefined) await releaseCohortHolds(ctx, row.projectId);
 }

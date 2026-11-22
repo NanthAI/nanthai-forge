@@ -61,6 +61,9 @@ npm run model:landing-queue -- prequeue-cohort        # cohort hold: refused cha
 npm run model:landing-queue -- prequeue-cohort-mixed  # the same with a red and an independent change
 npm run model:landing-queue -- prequeue-cohort-before # expected: a cohort forms while peers decide
 npm run model:landing-queue -- prequeue-hold-order    # expected: a hold that keeps its order deadlocks
+npm run model:landing-queue -- prequeue-slot-free     # passed-change grouping (option B): the hold is early's, only passed changes group
+npm run model:landing-queue -- prequeue-slot-mixed    # the same with a red, an independent and Lane-check platform failures
+npm run model:landing-queue -- prequeue-slot-before   # expected: today's early mode groups an unadmitted entry (PassedCohorts)
 npm run model:landing-queue -- prequeue-early         # early refusal: stale Lane proofs refused together
 npm run model:landing-queue -- prequeue-early-mixed   # the same with a red and an independent change
 npm run model:landing-queue -- cohorthold             # expected: lost release wake (10b0a94b)

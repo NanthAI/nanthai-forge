@@ -94,7 +94,7 @@ export function landingSettings(policy: AutonomyPolicy, landing?: LandingModeVie
                 ? `Up to ${a.batchMaxSize.toLocaleString()}`
                 : 'Up to 8',
             source: !grouped || a.batchMaxSize !== undefined ? 'set by the owner' : 'Automatic',
-            does: 'Changes waiting to land share one check. When that check fails, Forge finds the failing change and the rest still land.',
+            does: 'Changes waiting to land share one check. When that check fails, Forge finds the failing change and the rest still land. When changes are checked before they queue, only changes that passed their own check are grouped, and a change waits for its group only while no runner slot is free (at most 5 minutes).',
             costs:
               'A larger group spends fewer minutes per change while changes pass, and more re-checks when one fails. Automatic picks the size from how often the last 20 shared checks failed.',
             change: 'held',

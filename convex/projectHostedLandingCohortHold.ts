@@ -84,6 +84,8 @@ export async function holdForPeers(
       q.eq('projectId', row.projectId).eq('channel', 'main').gt('deciding', 0).lte('deciding', since),
     )
     .take(1);
+  // Passed-change grouping, option B (owner 2026-11-22): a peer still deciding fills the free check
+  // slot (`pipelineFull`), so this hold is the saturated case too; with none deciding nothing waits.
   if (!peer) return false;
   const taskId = await ctx.scheduler.runAfter(HOSTED_TRAIN_HOLD_MS, END, {
     projectId: row.projectId,

@@ -9,6 +9,7 @@ import { cancelHostedCheck } from './projectHostedCheckCancel';
 import { scheduleDirectActions } from './projectHostedActionsDirect';
 import { refreshCheckEntries } from './projectHostedCheckEntries';
 import { hostedGateForCandidates, hostedGateInput } from './projectHostedGate';
+import { pipelineFull } from './projectHostedLandingPipeline';
 import {
   scopedRecheckBatchGate,
   scopedRecheckEligible,
@@ -274,6 +275,25 @@ export async function enqueueHostedCheck(
     )
   )
     gate = scopedRecheckBatchGate(input.cohortRecheck);
+  // Lever 2 (owner 2026-11-22, Item 10b0a94b): a main-race recheck that starts with no free check
+  // slot runs full, so its pass carries across later disjoint main moves; the healthy path stays
+  // scoped. Decided here, where every recheck becomes a gate, and read only for a recheck that would
+  // run less than full. A reduced (contract) gate would not carry either; recovery keeps its own.
+  if (
+    direct &&
+    (input.recheck || input.cohortRecheck?.length) &&
+    gate &&
+    gate.mode !== 'full' &&
+    !recoveryGate &&
+    project.autonomyPolicy &&
+    (await pipelineFull(
+      ctx,
+      { projectId: input.projectId, channel: 'main' },
+      project.autonomyPolicy,
+      input.usageSubmissions,
+    ))
+  )
+    gate = { mode: 'full', reason: 'A main-race recheck with no free check slot runs the full check.' };
   if (input.protectedReview && direct)
     gate = { mode: 'full', reason: 'Protected landing requires the full configured check.' };
   else if (input.fullCheck)

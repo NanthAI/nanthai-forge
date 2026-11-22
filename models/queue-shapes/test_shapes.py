@@ -235,6 +235,16 @@ class CalibratedArmsTest(unittest.TestCase):
         self.assertLess(med("strict-8", "checks_per_landing"), med("incumbent", "checks_per_landing"))
         self.assertLess(med("strict-8", "p90"), med("incumbent", "p90"))
 
+    def test_option_b_beats_the_incumbent_at_every_seed_with_a_hold_bounded_at_five_minutes(self):
+        # Item 10b0a94b, owner decision 2026-11-22 (option B): both levers with today's deciding-peer hold.
+        rows = list(bench_replay(["incumbent", "option-b"]))
+        for seed in read("base.json")["seeds"]:
+            inc, b = (next(r for r in rows if r["arm"] == arm and r["seed"] == seed) for arm in ("incumbent", "option-b"))
+            for key in ("p50", "p90", "checks_per_landing", "worker_minutes_per_landing", "pending_greens_60"):
+                self.assertLessEqual(b[key], inc[key], f"{key} at seed {seed}")
+            self.assertGreaterEqual(b["per_hour"], inc["per_hour"])
+            self.assertLessEqual(b["hold_wait_p90"], 5.0)
+
     def test_arms_do_not_regress_forge_baseline_at_any_seed(self):
         base = read("base.json")
         shape = read("shapes.json")["baseline"]

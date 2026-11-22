@@ -275,7 +275,7 @@ const effective = (f, runId, value) => {
   run.gate = { ...run.gate, effective: value };
   f.patch('projectHostedCheckRuns', row._id, { gate: run.gate, value: JSON.stringify(run) });
 };
-async function race(t, { mainFiles = overlapping, policy = {} } = {}) {
+async function race(t, { mainFiles = overlapping, policy = {}, decidingPeer = false } = {}) {
   const f = await finishFixture(t, {
     baselineFiles,
     selectedFiles: [
@@ -315,6 +315,21 @@ async function race(t, { mainFiles = overlapping, policy = {} } = {}) {
     projectId: f.projectId,
     lastGreen: { sequence: main.sourceRevision, head: main.head, runId: parent.id },
   });
+  // An admitted peer still deciding its own Lane run (its `deciding` stamp) fills the free slot.
+  if (decidingPeer) {
+    const { _id, _creationTime, requestBodyId, selectionBodyId, ...own } = [
+      ...f.tables.projectHostedLandingRequests.values(),
+    ][0];
+    f.insert('projectHostedLandingRequests', {
+      ...own,
+      submissionId: randomUUID(),
+      operationId: randomUUID(),
+      runnable: false,
+      batchable: false,
+      orderLive: undefined,
+      deciding: Date.parse('2026-01-01T12:00:00.000Z'),
+    });
+  }
   const calls = f.counts.length;
   for (let n = 0; n < 80 && (await f.current(state.id)).submission.phase !== 'checking'; n++) {
     if ((await f.current(state.id)).submission.phase === 'landed') break;
@@ -410,6 +425,18 @@ test("under the full gate a contributor's race keeps the full recheck", async t 
   const { attempt } = await f.status(state.id);
   const run = await f.rawChecks.status(attempt.check.runId);
   assert.equal(run.gate?.mode ?? 'full', 'full');
+});
+
+// Lever 2 (owner 2026-11-22, Item 10b0a94b): with no free check slot (option B: a peer still
+// deciding its own run fills it) the recheck runs full, so its pass carries across the peer's
+// coming disjoint main move. With a free slot the scoped recheck above is unchanged.
+test('a main-race recheck that starts while an admitted peer is still deciding runs full, not scoped', async t => {
+  const { f, state } = await race(t, { decidingPeer: true });
+  const { attempt } = await f.status(state.id);
+  assert.notEqual(attempt.recheck, undefined, 'the recheck basis is still recorded');
+  const run = await f.rawChecks.status(attempt.check.runId);
+  // Before: { mode: 'scoped', reason: 'scoped-recheck:<base>' } whatever the slots.
+  assert.equal(run.gate.mode, 'full');
 });
 
 test('scopedRecheck:false keeps the full recheck; on costs no extra Convex calls or writes', async t => {

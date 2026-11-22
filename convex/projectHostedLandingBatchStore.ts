@@ -18,7 +18,7 @@ import {
   landingObservation,
 } from '../src/hosted-landing';
 import { hostedBatching } from '../src/hosted-landing-batch';
-import { cohortSize, hostedAdmission } from '../src/hosted-landing-admission';
+import { cohortSize, hostedAdmission, preQueueCheck } from '../src/hosted-landing-admission';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import {
   landingRow,
@@ -124,6 +124,13 @@ export async function formLandingBatch(
   const own = hostedLandingAttemptSchema.parse(JSON.parse(selected.row.batchSelection));
   // Grouping policy is pinned; members share its digest.
   if (!hostedBatching(own.policy)) return false;
+  // Passed-change grouping (owner 2026-11-22, 10b0a94b): with pre-queue Lane checks only changes
+  // whose own check passed form a cohort; a fresh arrival (unadmitted after platform restarts)
+  // checks alone. Grouping a fresh arrival was measured at 69% red groups of 4 and not adopted.
+  const passedOnly = preQueueCheck(own.policy);
+  const passed = (row: typeof selected.row) => row.admission?.full && row.admission.status === 'passed';
+  // An unadmitted entry still waits for its pins and may stack alone; it groups with nobody.
+  const alone = passedOnly && !passed(selected.row);
   const admission = hostedAdmission(own.policy),
     queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' }),
     limit = cohortSize(own.policy, queue?.checkHistory, admission);
@@ -186,6 +193,7 @@ export async function formLandingBatch(
       const state = storedLandingStateSchema.parse(JSON.parse(row.value));
       if (
         row.earlyReview ||
+        (alone ? row.submissionId !== selected.row.submissionId : passedOnly && !passed(row)) ||
         !row.batchSelection ||
         state.batchId ||
         state.batchSolo ||
