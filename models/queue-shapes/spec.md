@@ -83,17 +83,41 @@ checks pin `main` when they acquire runner slots.
   1.70 / 55.1 min); the `strict-8` real-world reference (full admission +
   group-8 refusal batching) lands near 1.57 checks/landing and 37.9 min p90
   (bench 1.50 / 38.0 min).
-- **Arm `a` (batching)**: zero artificial hold when a runner slot is free
-  (never holds a landing that would land alone sooner). When slots are busy,
+- **Arm `a` (batching)**: zero artificial hold; grouping happens only among
+  entries already waiting for a runner slot. When slots are busy,
   compatible ready rechecks (≥2) or fresh arrivals (≥4) up to 8 group into one
   full check while preserving acyclic path-order dependencies. Red batches split
   suspects solo with the clean remainder rechecking together, or bisect by
-  halves when unattributed, matching `splitGroups`.
+  halves when unattributed, matching `splitGroups`. A red batch costs its clean
+  members one more check. Batch verdicts name the exact culprit whenever a
+  member is individually red, so the fresh-arrival case is optimistic against
+  product attribution: a group of 4 fresh arrivals at the 0.255 first-red rate
+  contains a red 69% of the time.
+- **Arm `a-admitted`**: arm `a` with fresh-arrival batching off
+  (`min_fresh_batch=None`). Only entries that already passed their own check
+  group, as today's admitted cohorts do, so a member's red risk is interaction
+  only. On `bench-30` this arm keeps scoped rechecks; `strict-8` is the same
+  grouping with full rechecks.
 - **Arm `b` (no stale-pass recheck while saturated)**: while runner slots are
   saturated (`waiting`, `pending_checks`, or `used + slots > capacity`), a pass
   on an older `main` is kept when intervening `main` moves do not intersect its
   `paths`; intersecting moves trigger a full recheck. When unsaturated, incumbent
-  rules apply unchanged.
+  rules apply unchanged. Change paths stand in for a scoped pass's selected
+  inputs, so the kept-pass share is an upper bound: exact per-test input closure
+  reuses far less (Item `4e013cdb`, comment `9947bfb0`).
+
+Calibration limits. Shape cells use the calibrated structure (full admission,
+pin at dispatch) but not the bench-only refusal, overhead and audit terms. The
+Forge baseline median matches recent hosted receipts, but its tail does not.
+The slowest hosted decile is dominated by time held after a passing check
+(main moved before publication, order waits), and the baseline's Poisson
+plateaus never saturate the slot pool (19–25% used). Arms `a` and `b` act only
+under saturation, so at the baseline shape they show no effect in either
+direction; `bench-30` is the reference for burst behaviour. The capacity-bound
+cells (slow CI, 30/h, 60/h) need about one Check start per offer before any
+recheck: 5 concurrent full checks give about 31 starts/hour at 9.5 minutes and
+5/hour at 60 minutes. No recheck rule can pass flow there; only putting more
+than one fresh change in a Check raises the ceiling.
 
 ## Measures
 

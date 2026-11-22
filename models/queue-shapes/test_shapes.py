@@ -101,6 +101,47 @@ class CalibratedArmsTest(unittest.TestCase):
         self.assertGreaterEqual(result["stats"]["batches_started"], 2)
         self.assertEqual(result["stats"]["batch_splits"], 1)
 
+    def test_admitted_only_batching_never_groups_a_landing_without_its_own_pass(self):
+        # Same saturated queue as the culprit-split case: arrivals 1-3 wait behind arrival 0.
+        # With fresh batching off, each fresh arrival checks alone, so solo red 2 delays nobody.
+        model = self.calibrated(
+            [[0, 0.99], [1, 0.99], [2, 0.99], [3, 0.99]],
+            capacity=1,
+            full_minutes=4,
+            batching=True,
+            min_fresh_batch=None,
+            solo={2},
+        )
+        result = model.measure()
+        self.assertEqual(sorted(model.pub), [0, 1, 3])
+        self.assertEqual(sorted(model.rej), [2])
+        self.assertEqual(result["stats"].get("batches_started", 0), 0)
+        self.assertEqual(result["counts"]["full"], 4)
+
+    def test_admitted_only_batching_groups_rechecks_of_passed_landings(self):
+        # Arrival 0 holds the only slot; arrivals 1 and 2 already passed alone and wait to recheck.
+        # When the slot frees they recheck together in one full check and land together.
+        model = self.calibrated(
+            [[0, 0.99], [0, 0.99], [0, 0.99]],
+            capacity=1,
+            full_minutes=4,
+            batching=True,
+            min_fresh_batch=None,
+            scoped_recheck_fraction=0.0,
+        )
+        model.submit(0)
+        for i in (1, 2):
+            model.live.add(i)
+            model.admitted.add(i)
+            model.path_offers[i].append(i)
+            model.enqueue_check(i, "ready", (i, True))
+        model.events = [ev for ev in model.events if ev[2] != model.submit]
+        result = model.measure()
+        self.assertEqual(sorted(model.pub), [0, 1, 2])
+        self.assertEqual(result["stats"]["batches_started"], 1)
+        self.assertEqual(result["stats"]["batch_members_landed"], 2)
+        self.assertEqual(result["counts"], {"full": 1, "batch_full": 1})
+
     def test_batching_splits_unattributed_pair_incompatibility_by_halves(self):
         # Pairwise incompatibility occurs only on overlapping paths (matching incompatible_pairs).
         paths = {0: {0}, 1: {"shared"}, 2: {"shared"}, 3: {3}}

@@ -16,6 +16,8 @@ ARMS = {
     "a": dict(batching=True, skip_stale=False),
     "b": dict(batching=False, skip_stale=True),
     "a+b": dict(batching=True, skip_stale=True),
+    # Sensitivity arm: arm a restricted to entries with their own pass (today's admitted cohorts).
+    "a-admitted": dict(batching=True, skip_stale=False, min_fresh_batch=None),
 }
 
 
@@ -178,6 +180,12 @@ def bench_replay(arms=None):
         "a": dict(batching=True, skip_stale=False, scoped_recheck_fraction=cal["scoped_recheck_fraction"]),
         "b": dict(batching=False, skip_stale=True, scoped_recheck_fraction=cal["scoped_recheck_fraction"]),
         "a+b": dict(batching=True, skip_stale=True, scoped_recheck_fraction=cal["scoped_recheck_fraction"]),
+        "a-admitted": dict(
+            batching=True,
+            skip_stale=False,
+            min_fresh_batch=None,
+            scoped_recheck_fraction=cal["scoped_recheck_fraction"],
+        ),
     }
     selected = list(bench_arms) if arms is None else arms
     for arm_name in selected:

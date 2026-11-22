@@ -182,7 +182,13 @@ class CalibratedShapeExperiment(Experiment):
         return (order_key, seq)
 
     def _select_batch_indices(self, anchor_i, anchor_rec):
-        """Pick up to max_batch compatible ready entries without introducing a path-order cycle."""
+        """Pick up to max_batch compatible ready entries without introducing a path-order cycle.
+
+        `min_fresh_batch=None` batches only entries that already passed their own check
+        (today's admitted cohorts); a fresh arrival always checks alone.
+        """
+        if not anchor_rec and self.min_fresh_batch is None:
+            return [0]
         same_class = [
             (idx, payload[0])
             for idx, (_, _, _, _, tag, payload) in enumerate(self.pending_checks)

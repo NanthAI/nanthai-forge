@@ -20,8 +20,9 @@ nforge heavy -- python3 -B models/queue-shapes/shapes.py --refit
 The default command runs the calibrated `incumbent` arm on all six shapes. Pass
 `--arm a` (opportunistic batching, zero artificial hold when a slot is free,
 culprit split on red), `--arm b` (keep disjoint stale passes while slots are
-saturated, full recheck only on intersection), `--arm a+b`, or `--arm all` to
-compare all four arms. `--bench` runs the `bench-30` calibration cell fitted to
+saturated, full recheck only on intersection), `--arm a+b`, `--arm a-admitted`
+(arm a for landings that already passed their own check; fresh arrivals check
+alone, as in today's admitted cohorts), or `--arm all` to compare all five arms. `--bench` runs the `bench-30` calibration cell fitted to
 the live sustained-load bench (Item `b9a2cccd`, comment `0659ee5e`). `--refit`
 reproduces the measured-load incumbent from the earlier queue refit unchanged.
 
