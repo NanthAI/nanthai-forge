@@ -18,7 +18,11 @@ import { makeFunctionReference } from 'convex/server';
 import { HostedAgentJournal } from './hosted-agent-journal.js';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { hostedActionError } from './hosted-action-error.js';
-import { planningWaitingFeature } from './hosted-contract-features.js';
+import {
+  initiativeProgressRequested,
+  planningInitiativeCountsFeature,
+  planningWaitingFeature,
+} from './hosted-contract-features.js';
 import { retryableCodes } from './exchange-retry.js';
 import { readIndexedWorkDetail } from './hosted-work-client.js';
 import { ForgeError, invariant, itemChanged } from './errors.js';
@@ -694,7 +698,11 @@ async function readPlanning(
     }
   }
   const filtered = port.serverFeatures?.includes('planning-filtered-reads');
+  const initiativeProgress = initiativeProgressRequested(input);
+  const initiativeCounter =
+    initiativeProgress && port.serverFeatures?.includes(planningInitiativeCountsFeature);
   const planningFilter = {
+    // Preserve the indexed selection of an older count cursor, including an omitted kind filter.
     ...(input.kind ? { kind: input.kind } : {}),
     ...(typeof status === 'string' && status !== 'all' && status !== 'active' ? { status } : {}),
     ...(input.initiativeId ? { initiativeId: input.initiativeId } : {}),
@@ -708,7 +716,9 @@ async function readPlanning(
     );
     const supplied = readCursor();
     let bound = supplied === null ? null : decodeBound(supplied);
-    const counts: Record<string, number> = {};
+    const counts: Record<string, number> = initiativeProgress
+      ? { proposed: 0, open: 0, 'in-progress': 0, closed: 0, abandoned: 0 }
+      : {};
     let done = false;
     let needsPreparation = false;
     for (let pages = 0; pages < maxCountPages && !done; pages++) {
@@ -719,6 +729,7 @@ async function readPlanning(
           collection: 'planningItems',
           planningFilter,
           counts: true,
+          ...(initiativeCounter && !bound ? { initiativeProgress: true } : {}),
           paginationOpts: { cursor: bound?.cursor ?? null, numItems: 1000 },
         },
       );
@@ -727,14 +738,17 @@ async function readPlanning(
         'WORK_STALE',
         stale,
       );
-      for (const [status, count] of Object.entries(result.counts))
-        counts[status] = (counts[status] ?? 0) + count;
+      for (const [state, count] of Object.entries(result.counts)) {
+        if (initiativeProgress && (state === 'archived' || state === 'deleted')) continue;
+        counts[state] = (counts[state] ?? 0) + count;
+      }
       needsPreparation ||= result.coverage === 'partial-needs-preparation';
       done = result.isDone;
       bound = { generationId: result.generationId, cursor: result.continueCursor };
     }
     return {
       counts,
+      ...(initiativeProgress ? { total: Object.values(counts).reduce((sum, n) => sum + n, 0) } : {}),
       coverage: needsPreparation ? 'partial-needs-preparation' : done ? 'complete' : 'partial',
       nextCursor: done ? null : prefix + encode(bound!, bound!.cursor!),
       ...(!done

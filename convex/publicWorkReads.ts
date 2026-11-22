@@ -323,7 +323,11 @@ export async function publicWorkResult(
       // A counts page reads plan roots and returns no rows: count the visible roots it read.
       const counted: ObjectValue[] = [];
       if (command.counts === true) {
-        for (const root of handlerRoots) if (await allowed(root.id)) counted.push(root);
+        // The selection guard can also load the Initiative itself before the count page runs.
+        const { initiativeId } = object(command.planningFilter);
+        for (const root of handlerRoots)
+          if ((initiativeId === undefined || root.initiativeId === initiativeId) && (await allowed(root.id)))
+            counted.push(root);
       } else
         for (const row of Array.isArray(out.page) ? out.page : [])
           counted.push(object(parse(object(row).value)));

@@ -5,6 +5,8 @@ import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 import {
   feedCommitOrder,
   hostedContractFeatures,
+  initiativeProgressRequested,
+  planningInitiativeCountsFeature,
   planningWaitingFeature,
   startLaneTitle,
 } from './hosted-contract-features.js';
@@ -23,8 +25,13 @@ export function capabilityOptions(
   status = false,
   startWithIntent = false,
   action?: string,
+  input: Record<string, unknown> = {},
 ): Record<string, unknown> {
   const settling = backgroundSaveOperation(root);
+  const planningFeature =
+    action === 'planning' && initiativeProgressRequested(input)
+      ? planningInitiativeCountsFeature
+      : planningWaitingFeature;
   return {
     // Named contract features (a83b6fd5): the reply lists the ones this server implements.
     features: status
@@ -36,7 +43,7 @@ export function capabilityOptions(
           ),
           'metric-cli-provenance',
           ...(startWithIntent ? [startLaneTitle] : []),
-          ...(action === 'planning' || action === 'put-planning-item' ? [planningWaitingFeature] : []),
+          ...(action === 'planning' || action === 'put-planning-item' ? [planningFeature] : []),
         ],
     noticeVersion: 1,
     resolveVersion: 1,
@@ -96,6 +103,7 @@ export function startEarlyCapabilities(
   status = false,
   startWithIntent = false,
   action?: string,
+  input: Record<string, unknown> = {},
 ) {
   let exchange: ConvexExchange;
   try {
@@ -105,7 +113,7 @@ export function startEarlyCapabilities(
   }
   const args = {
     clientVersion: CUTOVER_CLI_VERSION,
-    ...capabilityOptions(root, status, startWithIntent, action),
+    ...capabilityOptions(root, status, startWithIntent, action, input),
   };
   // Each command reads afresh: an earlier command's untaken read (it stopped at its gate) is replaced.
   const call = exchange.client

@@ -22,6 +22,14 @@ export const startLaneTitle = 'start-lane-title';
 export const laneUndo = 'lane-undo';
 /** Planning asks for versioned wait reasons in the slot reserved for bare status. */
 export const planningWaitingFeature = 'planning-waiting-on';
+/** The unfiltered Initiative count uses the planning wait feature's discovery slot. */
+export const planningInitiativeCountsFeature = 'planning-initiative-counts';
+export const initiativeProgressRequested = (input: Record<string, unknown>) =>
+  input.counts === true &&
+  typeof input.initiativeId === 'string' &&
+  input.kind !== 'initiative' &&
+  input.status === undefined &&
+  input.waitingOn === undefined;
 export const hostedContractFeatures = [
   /** Reader expansion precedes this writer: start/save/land accept declared source authorship. */
   'source-authorship-v1',
@@ -243,6 +251,7 @@ export const advertisedFeatures = (asked: readonly string[]) => [
   ...(asked.includes(startLaneTitle) ? [startLaneTitle] : []),
   ...(asked.includes(laneUndo) ? [laneUndo] : []),
   ...(asked.includes(planningWaitingFeature) ? [planningWaitingFeature] : []),
+  ...(asked.includes(planningInitiativeCountsFeature) ? [planningInitiativeCountsFeature] : []),
   ...hostedContractFeatures.filter(feature => asked.includes(feature)),
   ...(asked.includes('feed') ? ['feed'] : []),
 ];

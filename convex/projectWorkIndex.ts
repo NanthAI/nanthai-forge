@@ -17,13 +17,13 @@ import { effectivePolicy } from '../src/autonomy-policy';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { query } from './cliServer';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, readProjectRole } from './projectAuthority';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { invariant } from '../src/errors';
 import { hasWriteRole } from './projectRole';
 import { report } from './errors';
 import { actorSummary } from './projectActorNames';
-import { planningFilter, planningPage } from './projectPlanningList';
+import { countedInitiative, planningFilter, planningPage } from './projectPlanningList';
 import { readsStore, storeItem, storePage } from './projectWorkStoreReads';
 import { linkedLandingCursor, withLandingNotes } from './projectWorkIndexLandingNotes';
 const selection = {
@@ -107,6 +107,7 @@ export const records = query({
     collection: v.string(),
     planningFilter: v.optional(planningFilter),
     counts: v.optional(v.boolean()),
+    initiativeProgress: v.optional(v.literal(true)),
     newestFirst: v.optional(v.boolean()),
     parentId: v.optional(v.string()),
     paginationOpts: paginationOptsValidator,
@@ -233,6 +234,7 @@ export async function journalWorkRecordsRead(
     collection: string;
     planningFilter?: Infer<typeof planningFilter>;
     counts?: boolean;
+    initiativeProgress?: true;
     newestFirst?: boolean;
     parentId?: string;
     paginationOpts: PaginationOptions;
@@ -253,6 +255,21 @@ export async function journalWorkRecordsRead(
     );
     if (!generation || (input.generationId && input.generationId !== generation._id))
       return { generationId: null, revision: null, page: [], isDone: true, continueCursor: '' };
+    if (
+      input.initiativeProgress &&
+      input.counts &&
+      input.collection === 'planningItems' &&
+      input.planningFilter &&
+      (await readProjectRole(ctx, project, user.subject))
+    ) {
+      const page = await countedInitiative(
+        ctx,
+        generation,
+        input.planningFilter,
+        input.paginationOpts.cursor,
+      );
+      if (page) return { ...page, generationId: generation._id, revision: generation.initialRevision };
+    }
     const numItems = Math.min(input.paginationOpts.numItems, 100);
     const store = readsStore(project, input.collection, input.parentId);
     const partition = recordPartition(generation);

@@ -14,7 +14,7 @@ import { installPlanningSearch } from './planning-search-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { executeHostedPlanning } from '../dist/hosted-agent-planning.js';
 import { hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
-import { hostedContractFeatures } from '../dist/hosted-contract-features.js';
+import { hostedContractFeatures, planningInitiativeCountsFeature } from '../dist/hosted-contract-features.js';
 import { planningSearchTerms } from '../dist/planning-search.js';
 import { successorIntentId } from '../dist/hosted-intent-chain.js';
 import { v } from 'convex/values';
@@ -78,7 +78,7 @@ function port(s) {
       return typeof value === 'string' ? JSON.parse(value) : value;
     },
     mutation: () => assert.fail('a read made a write'),
-    serverFeatures: [...hostedContractFeatures],
+    serverFeatures: [...hostedContractFeatures, planningInitiativeCountsFeature],
   };
 }
 
@@ -298,6 +298,10 @@ for (const policy of POLICIES)
                 ),
               ])(),
               (async () => [
+                `CLI counts by Initiative (${name})`,
+                await seen(() => cli(p, { counts: true, initiativeId })),
+              ])(),
+              (async () => [
                 `planning list by Initiative (${name})`,
                 await seen(() =>
                   index.records._handler(s.ctx, {
@@ -418,12 +422,26 @@ for (const policy of POLICIES)
         }
       // Selecting a hidden Initiative answers exactly as an absent one, page by page.
       if (!member && secret.includes('initiative'))
-        for (const surface of ['web Plan settled page by Initiative', 'planning list by Initiative'])
+        for (const surface of [
+          'web Plan settled page by Initiative',
+          'planning list by Initiative',
+          'CLI counts by Initiative',
+        ])
           assert.deepEqual(
             surfaces[`${surface} (initiative)`],
             surfaces[`${surface} (absent Initiative)`],
             cell(`${surface} of a hidden Initiative`),
           );
+      if (viewer !== 'signed-out') {
+        const counts = surfaces['CLI counts by Initiative (initiative)'].ok;
+        const shownInInitiative = member || !secret.includes('initiative') ? 1 : 0;
+        assert.deepEqual(
+          counts.counts,
+          { proposed: 0, open: shownInInitiative, 'in-progress': 0, closed: shownInInitiative, abandoned: 0 },
+          cell('Initiative count visibility'),
+        );
+        assert.equal(counts.total, shownInInitiative * 2, cell('Initiative total visibility'));
+      }
       if (member)
         assert.ok(
           JSON.stringify(surfaces['web Plan settled page by Initiative (initiative)'].ok).includes(

@@ -19,7 +19,11 @@ import {
 } from '../dist/hosted-agent-planning.js';
 import { hostedAgentCommandSchemas, hostedAgentActions } from '../dist/hosted-agent-contract.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
-import { hostedContractFeatures, planningWaitingFeature } from '../dist/hosted-contract-features.js';
+import {
+  hostedContractFeatures,
+  planningInitiativeCountsFeature,
+  planningWaitingFeature,
+} from '../dist/hosted-contract-features.js';
 import { printedReceipt } from '../dist/receipt-slim.js';
 import { planningIssueArguments } from '../dist/planning-issue-arguments.js';
 import { z } from 'zod';
@@ -58,7 +62,12 @@ const code = expected => error => (error.data?.code ?? error.code) === expected;
 /** The agent's port over the real Convex handlers; Intent states are the one stub (tested with
  * the Convex lanes fixture). Counts every Convex call the agent makes. The real handlers keep
  * omitted put fields, so the port advertises that by default, as the transport does after discovery. */
-function port(s, states = new Map(), serverFeatures = [...hostedContractFeatures], realIntentStates = false) {
+function port(
+  s,
+  states = new Map(),
+  serverFeatures = [...hostedContractFeatures, planningInitiativeCountsFeature],
+  realIntentStates = false,
+) {
   const searches = installPlanningSearch(s);
   const calls = [],
     frictions = new Map();
@@ -2440,10 +2449,17 @@ test('a comment on a friction id names the Issue it was triaged to; other failur
   assert(!p.calls.includes('projectHostedFriction:lookup'));
 });
 
+const planCounterRow = (s, generationId) =>
+  [...s.tables.projectWorkDataRecords.values()].find(
+    row => row.generationId === generationId && row.collection === '_workStorePlanCounts',
+  );
+
 test('filtered planning and one-read Initiative counts charge only matching rows on a 1500-item board (5a85cb5f)', async t => {
   const s = await setup(t),
     p = port(s, new Map(), [...hostedContractFeatures], true);
   const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
+  // This fixture loads legacy roots directly, before the counter's writer existed.
+  await s.ctx.db.delete(planCounterRow(s, generationId)._id);
   const initiativeId = randomUUID();
   const statuses = ['open', 'open', 'proposed', 'in-progress', 'abandoned'];
   const items = Array.from({ length: 1500 }, (_, i) => ({
@@ -2620,11 +2636,169 @@ test('indexed planning preserves all filter combinations, record-store bodies, p
   );
 });
 
+test('Initiative progress agrees across Plan, CLI and MCP after status and scope moves (b7a0dff1)', async t => {
+  const s = await setup(t);
+  const p = port(s);
+  const { transport: agent } = transport(s, { planning: true, features: p.serverFeatures });
+  const tools = new Map();
+  t.after(
+    registerHostedAgentWorkflow(
+      {
+        registerTool(name, _config, call) {
+          tools.set(name, call);
+        },
+      },
+      agent,
+    ),
+  );
+  const webRead = await import(moduleUrl('../convex/projectPlanView.ts'));
+  const { planView } = await import(moduleUrl('../web/src/app/plan/model.ts'));
+  const projectId = s.projectId;
+  const group = async title => (await put(p, { kind: 'initiative', title })).result.itemId;
+  const initiativeId = await group('First Initiative');
+  const other = await group('Second Initiative');
+  const item = async (title, status, extra = {}) =>
+    (await put(p, { kind: 'issue', initiativeId, title, status, ...extra })).result.itemId;
+  const update = async (itemId, changes) => {
+    const { item: current } = await list(p, { id: itemId, reconcile: false });
+    await put(p, { itemId, expectedVersion: current.version, ...changes });
+  };
+  const parentId = await item('Parent', 'open');
+  const child = await item('Child', 'proposed', { fields: { parentId } });
+  const moving = await item('Moving', 'in-progress');
+  await item('Done', 'closed');
+  await item('Dropped', 'abandoned');
+  const archived = await item('Archived', 'open');
+  await update(archived, { status: 'archived' });
+  const deleted = await item('Deleted', 'open');
+  await update(deleted, { status: 'deleted' });
+
+  const check = async (id, expected, from = p) => {
+    const board = planView(await webRead.read._handler(s.ctx, { projectId }));
+    const group = board.groups.find(group => group.initiative?.id === id);
+    const { proposed, open, inProgress, done, dropped, total } = group;
+    const selection = { counts: true, initiativeId: id };
+    from.calls.length = 0;
+    const cli = await list(from, selection);
+    assert.deepEqual(from.calls, ['projectWorkIndex:records']);
+    assert.deepEqual(cli.counts, expected);
+    assert.deepEqual(cli.counts, {
+      proposed,
+      open,
+      'in-progress': inProgress,
+      closed: done,
+      abandoned: dropped,
+    });
+    assert.equal(cli.total, total);
+    assert.equal(
+      cli.total,
+      Object.values(cli.counts).reduce((sum, count) => sum + count, 0),
+    );
+    assert.equal(cli.coverage, 'complete');
+    assert.equal(cli.nextCursor, null);
+
+    const mcp = await tools.get('forge_planning')({ command: { action: 'planning', ...selection } });
+    assert.ok(!mcp.isError, JSON.stringify(mcp.content));
+    assert.deepEqual(JSON.parse(mcp.content[0].text).result, cli);
+  };
+  const initial = { proposed: 1, open: 1, 'in-progress': 1, closed: 1, abandoned: 1 };
+  await check(initiativeId, initial);
+  const olderServer = port(
+    s,
+    new Map(),
+    p.serverFeatures.filter(f => f !== planningInitiativeCountsFeature),
+  );
+  await check(initiativeId, initial, olderServer);
+  const shelves = await list(p, { counts: true, initiativeId, status: 'all' });
+  assert.equal(shelves.counts.archived, 1);
+  assert.equal(shelves.counts.deleted, 1);
+  assert.equal(shelves.total, undefined);
+
+  await update(moving, { status: 'closed' });
+  await update(child, { status: 'open' });
+  await update(moving, { initiativeId: other });
+  await check(initiativeId, { proposed: 0, open: 2, 'in-progress': 0, closed: 1, abandoned: 1 });
+  await check(other, { proposed: 0, open: 0, 'in-progress': 0, closed: 1, abandoned: 0 });
+
+  await update(parentId, { fields: { hidden: true } });
+  await check(initiativeId, { proposed: 0, open: 2, 'in-progress': 0, closed: 1, abandoned: 1 });
+});
+
+test('maintained Initiative counts use one bounded read at current and doubled board scale (b7a0dff1)', async t => {
+  const s = await setup(t);
+  const p = port(s);
+  const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
+  const initiativeId = (await put(p, { kind: 'initiative', title: 'Group' })).result.itemId;
+  const { workRecordWriter, finishWorkRecordWrites } = await import(
+    moduleUrl('../convex/projectWorkRecordWriter.ts')
+  );
+  const selection = { counts: true, initiativeId };
+  const legacy = port(
+    s,
+    new Map(),
+    p.serverFeatures.filter(f => f !== planningInitiativeCountsFeature),
+  );
+  const meter = meterReads(s.ctx);
+  t.after(() => meter.restore());
+
+  for (const scale of [352, 704]) {
+    const writer = workRecordWriter(s.ctx);
+    for (let position = scale - 352; position < scale; position++) {
+      const id = randomUUID();
+      await writer.db.insert('projectPlanningRecords', {
+        projectId: s.projectId,
+        generationId,
+        collection: 'planningSearch',
+        key: id,
+        parent: '',
+        position: position + 1,
+        value: JSON.stringify({
+          id,
+          kind: 'issue',
+          status: 'closed',
+          initiativeId,
+          title: 'Retained detail',
+        }),
+        planning: {
+          text: 'Retained detail. '.repeat(100),
+          kind: 'issue',
+          status: 'closed',
+          initiativeId,
+          open: false,
+        },
+      });
+    }
+    await finishWorkRecordWrites(writer);
+    let result;
+    const measure = async client => {
+      client.calls.length = 0;
+      const start = performance.now();
+      const read = await meter.cost(async () => {
+        result = await list(client, selection);
+      });
+      const milliseconds = performance.now() - start;
+      assert.equal(result.total, scale);
+      assert.equal(result.counts.closed, scale);
+      assert.equal(result.coverage, 'complete');
+      return { ...read, calls: client.calls.length, milliseconds: +milliseconds.toFixed(2) };
+    };
+    const indexed = await measure(legacy);
+    const maintained = await measure(p);
+    assert.equal(maintained.calls, 1);
+    assert.ok(maintained.documents <= 5, JSON.stringify(maintained));
+    assert.ok(maintained.bytes < 10_000, JSON.stringify(maintained));
+    assert.ok(maintained.bytes < indexed.bytes);
+    t.diagnostic(JSON.stringify({ scale, indexed, maintained }));
+  }
+});
+
 test('planning counts sum every page and refuse stale generations, invalid cursors and old servers (5a85cb5f)', async t => {
   const s = await setup(t),
     p = port(s);
   const initiativeId = randomUUID();
   const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
+  // This fixture loads legacy roots directly, before the counter's writer existed.
+  await s.ctx.db.delete(planCounterRow(s, generationId)._id);
   for (let i = 0; i < 1001; i++) {
     const id = randomUUID();
     await s.ctx.db.insert('projectPlanningRecords', {
@@ -2661,6 +2835,24 @@ test('planning counts sum every page and refuse stale generations, invalid curso
   assert.equal(counted.nextCursor, null);
   assert.equal(counted.next, undefined);
   assert.equal(p.calls.length, 2, 'one read per page, no workspace, reconciliation or per-item reads');
+  const oldPage = await index.records._handler(s.ctx, {
+    projectId: s.projectId,
+    collection: 'planningItems',
+    planningFilter: { initiativeId },
+    counts: true,
+    paginationOpts: { cursor: null, numItems: 1000 },
+  });
+  const oldCursor =
+    'forge-planning-v1:' +
+    Buffer.from(JSON.stringify({ cursor: oldPage.continueCursor, generationId })).toString('base64url');
+  const queryWithCursor = p.query;
+  p.query = (name, args) => {
+    // Convex's cursor is opaque and tied to this exact indexed selection.
+    assert.deepEqual(args.planningFilter, { initiativeId });
+    return queryWithCursor(name, args);
+  };
+  assert.equal((await list(p, { counts: true, initiativeId, cursor: oldCursor })).total, 1);
+  p.query = queryWithCursor;
   await assert.rejects(list(p, { counts: true, cursor: 'bad' }), code('BAD_ARGUMENT'));
   const stale =
     'forge-planning-v1:' +
@@ -2688,6 +2880,8 @@ test('planning count page cap labels incomplete totals and continues without los
     p = port(s);
   const initiativeId = randomUUID();
   const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
+  // This fixture loads legacy roots directly, before the counter's writer existed.
+  await s.ctx.db.delete(planCounterRow(s, generationId)._id);
   for (let i = 0; i < 20001; i++)
     await s.ctx.db.insert('projectPlanningRecords', {
       projectId: s.projectId,
@@ -2702,6 +2896,7 @@ test('planning count page cap labels incomplete totals and continues without los
   const first = await list(p, { counts: true, initiativeId });
   assert.equal(first.coverage, 'partial');
   assert.equal(first.counts.closed, 20000);
+  assert.equal(first.total, 20000);
   assert.match(first.nextCursor, /^forge-planning-v1:/);
   assert.match(first.next, /counts are incomplete after 20 pages/);
   assert.match(first.next, /same filters and nextCursor as cursor/);
@@ -2709,6 +2904,7 @@ test('planning count page cap labels incomplete totals and continues without los
   assert.equal(p.calls.length, 20, 'bounded to 20 records reads and no writes');
   const last = await list(p, { counts: true, initiativeId, cursor: first.nextCursor });
   assert.equal(first.counts.closed + last.counts.closed, 20001);
+  assert.equal(first.total + last.total, 20001);
   assert.equal(last.coverage, 'complete');
   assert.equal(last.nextCursor, null);
   assert.equal(last.next, undefined);

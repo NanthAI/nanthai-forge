@@ -37,12 +37,21 @@ call, so the read makes no extra call. About 30 documents and 8 KB for an Issue 
 four Lanes; nothing per landing; nothing idle. Signed-out readers get no Lanes, and
 people are named by the public identity rule.
 
-`planning {"counts":true,"initiativeId":"INITIATIVE_UUID"}` sums stored counts by status
-(`proposed`, `open`, `in-progress`, `closed`, `abandoned`) across up to 20 pages in one command
-without reconciliation or execution-state reads, returning `coverage:"complete"` when finished
-or `partial` with `nextCursor` and instructions to continue and add totals when capped.
-`partial-needs-preparation` identifies an older search projection with incomplete coverage;
-it is not a complete board count.
+`planning {"counts":true,"initiativeId":"INITIATIVE_UUID"}` returns the Plan status breakdown
+for Issues assigned to that Initiative in CLI and MCP. The stored keys map to the Plan labels: `closed` (done),
+`in-progress`, `open` (planned), `proposed` and `abandoned` (removed). `total` sums those
+five counts. Archived and Deleted Issues are excluded. Use `status:"all"` for the stored
+counts including the shelves, or a single stored status to select one. `waitingOn` also
+uses the indexed count path.
+
+When the maintained counter covers the Initiative exactly for a member, the command uses
+one bounded read. Visitors and older, incomplete or overflowed counters use indexed Issue
+pages, applying the current Plan visibility rule for visitors. Counts read up to 20 pages
+without reconciliation or execution-state reads. `coverage:"complete"` marks the final
+page. When `nextCursor` is present, pass it back as `cursor` with the same filters and add
+the returned counts and totals. `partial-needs-preparation` identifies an older search
+projection whose counts can still be incomplete after the last page.
+
 Ordinary list reads keep reconciliation and the `forge-planning-v1:` cursor envelope.
 On a current projection, kind/status/initiative filters use ordinary database indexes,
 read only matching roots and hydrate only those items. They do not run a billed text search.

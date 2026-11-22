@@ -477,6 +477,7 @@ async function runAgentCli(
             bareStatus(action, command),
             action === 'start' && typeof command.intentId === 'string',
             action,
+            command,
           );
         if (!(await options.beforeDispatch(stdin === undefined ? undefined : { stdin }))) return;
       }

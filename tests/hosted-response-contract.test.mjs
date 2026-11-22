@@ -16,7 +16,11 @@ import {
 import { hostedLandingStateSchema } from '../dist/hosted-landing.js';
 import { hostedAgentCapabilitiesSchema } from '../dist/hosted-agent-contract.js';
 import { effectiveAgentDefaultsSchema } from '../dist/agent-parallel-defaults.js';
-import { hostedContractFeatures, planningWaitingFeature } from '../dist/hosted-contract-features.js';
+import {
+  hostedContractFeatures,
+  planningInitiativeCountsFeature,
+  planningWaitingFeature,
+} from '../dist/hosted-contract-features.js';
 import { capabilityOptions } from '../dist/hosted-capabilities-early.js';
 import {
   checkResponseCompatibility,
@@ -84,6 +88,17 @@ test('only planning reads and puts negotiate waiting reasons within the existing
   }
   const general = await candidateCapabilities();
   assert.ok(!general.features.includes(planningWaitingFeature));
+});
+
+test('Initiative progress shares the planning discovery slot and keeps filtered counts compatible', async () => {
+  const count = { counts: true, initiativeId: randomUUID() };
+  const options = input => capabilityOptions('synthetic-root', false, false, 'planning', input);
+  const exact = await candidateCapabilities(options(count).features);
+  const filtered = await candidateCapabilities(options({ ...count, waitingOn: 'none' }).features);
+  assert.ok(exact.features.includes(planningInitiativeCountsFeature));
+  assert.ok(!exact.features.includes(planningWaitingFeature));
+  assert.ok(filtered.features.includes(planningWaitingFeature));
+  assert.ok(!filtered.features.includes(planningInitiativeCountsFeature));
 });
 
 test('incident replay: a strict CLI rejects an added agentDefaults field; the reply boundary drops it', async () => {
