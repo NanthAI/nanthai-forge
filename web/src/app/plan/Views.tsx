@@ -12,14 +12,23 @@ import { planViewLinks, type PlanViewCounts } from './view-links';
 import {
   agentRead,
   agentReadNote,
+  groupings,
   loadViews,
   removeView,
   saveView,
   writeQuery,
+  type GroupBy,
   type PlanQuery,
   type SavedView,
   type Sort,
 } from './query';
+
+const groupWords: Record<GroupBy, string> = {
+  initiative: 'Initiative',
+  owner: 'Owner',
+  type: 'Type',
+  none: 'None',
+};
 
 const sortWords: Record<Sort, string> = {
   hand: 'by hand',
@@ -241,6 +250,18 @@ export function Toolbar({
         }))}
         onNavigate={navigate}
       />
+      {/* One Group chip for List and Board alike (d3357f40); always set, so it stays on the bar on a phone too. */}
+      <Menu
+        label={`Group: ${groupWords[query.group]}`}
+        className="chip"
+        items={groupings.map(group => ({
+          id: group,
+          label: group === 'none' ? 'No groups' : `By ${groupWords[group].toLowerCase()}`,
+          onAction: () => go({ group }),
+        }))}
+      >
+        <i>Group</i> <span>{groupWords[query.group]}</span>
+      </Menu>
       {facets.map(facet =>
         facet.value ? (
           <Chip key={facet.label} label={facet.label} value={facet.value} onRemove={facet.clear} />

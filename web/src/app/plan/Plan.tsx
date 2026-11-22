@@ -38,7 +38,8 @@ import {
   type BatchOutcome,
   type RunBatch,
 } from './batch';
-import { Board } from './Board';
+import { boardBands, planBands } from './bands';
+import { Board, BoardLoading, FieldList } from './Board';
 import { Capture } from './Capture';
 import { isShut, NO_INITIATIVE, usePlanFolds } from './fold';
 import { Groups } from './Groups';
@@ -562,7 +563,22 @@ export function PlanScreenView({
     ? shelved.rows.filter(row => keep(row) && (!find.trim() || matches(row, find.trim())))
     : [];
   const liveShown = view ? view.groups.reduce((sum, group) => sum + group.lines.length, 0) : 0;
-  const shown = (openShown ? liveShown : 0) + (settledShown ? settledRows.length : 0) + shelfRows.length;
+  const hideEmpty = filtered(query) || !openShown;
+  // Group by a field (d3357f40): the list's bands and the board's, from the same rows plus done and dropped ones.
+  const listBands =
+    view && query.layout !== 'board' && query.group !== 'initiative' && !shelfScope
+      ? planBands(view, query.group, settledShown ? settledRows : [], { openShown, hideEmpty })
+      : null;
+  const board =
+    view && query.layout === 'board' && !shelfScope
+      ? boardBands(planBands(view, query.group, settledShown ? settledRows : [], { openShown, hideEmpty }))
+      : null;
+  const boardRows = board ? board.reduce((sum, band) => sum + band.lines.length, 0) : 0;
+  const shown = board
+    ? boardRows
+    : (openShown ? liveShown : 0) + (settledShown ? settledRows.length : 0) + shelfRows.length;
+  // The board's one way to make the first Item is the key in its empty region (rendered review a36cae1d).
+  const boardEmpty = Boolean(board && openShown && view && !view.live && !boardRows && !filtered(query));
   const loadedIds = [
     ...(openShown && view ? view.groups.flatMap(group => group.lines.map(line => line.row.id)) : []),
     ...(settledShown ? settledRows.map(row => row.id) : []),
@@ -679,13 +695,16 @@ export function PlanScreenView({
         <Announcer message={message} />
       </>
     );
-  const allShut =
-    Boolean(view?.groups.length) &&
-    (view?.groups ?? []).every(group => isShut(folds, group.initiative?.id ?? NO_INITIATIVE));
-  const anyShut = (view?.groups ?? []).some(group => isShut(folds, group.initiative?.id ?? NO_INITIATIVE));
+  const foldIds = listBands
+    ? query.group === 'none'
+      ? []
+      : listBands.map(band => band.id)
+    : (view?.groups ?? []).map(group => group.initiative?.id ?? NO_INITIATIVE);
+  const allShut = Boolean(foldIds.length) && foldIds.every(id => isShut(folds, id));
+  const anyShut = foldIds.some(id => isShut(folds, id));
   /** Collapse all and Expand all: quiet in the region's head on a desk, solid keys in the phone's sheet. */
   const foldKeys = (kind?: 'ghost') =>
-    view && openShown && query.layout !== 'board' && view.groups.length > 1 ? (
+    view && openShown && query.layout !== 'board' && foldIds.length > 1 ? (
       <>
         <Key size="sm" kind={kind} disabled={allShut} onClick={() => setFolds('shut')}>
           Collapse all
@@ -725,7 +744,7 @@ export function PlanScreenView({
           )
         }
       >
-        {view?.canEdit ? (
+        {view?.canEdit && !boardEmpty ? (
           <Key size="sm" keys="n" onClick={() => setCapture(true)}>
             New Item
           </Key>
@@ -801,9 +820,13 @@ export function PlanScreenView({
             </div>
           ) : null}
           {!view ? (
-            <div className="quietline" aria-busy="true">
-              Loading the plan…
-            </div>
+            query.layout === 'board' && !isShelf(query.scope) ? (
+              <BoardLoading settled={settledShown} />
+            ) : (
+              <div className="quietline" aria-busy="true">
+                Loading the plan…
+              </div>
+            )
           ) : shelfScope ? (
             <ShelfList
               shelf={shelfScope}
@@ -813,22 +836,69 @@ export function PlanScreenView({
               onPurge={whole?.canEdit && shelfScope === 'deleted' && purge ? setPurging : undefined}
               onDone={done}
             />
-          ) : query.layout === 'board' ? (
-            <Board
-              rows={[
-                ...(openShown ? view.groups.flatMap(group => group.lines.map(line => line.row)) : []),
-                ...(settledShown ? settledRows : []),
-              ]}
-              sort={query.sort}
-              byId={byId}
-              at={at}
-              ticker={ticker}
-              settled={settledShown}
-              workers={workers}
-            />
+          ) : board ? (
+            boardEmpty ? (
+              <div className="empty">
+                <h3>Nothing is planned yet</h3>
+                <p>Items appear here as they are added, by you or by an agent. A title is enough to start.</p>
+                {view.canEdit ? (
+                  <Key kind="primary" onClick={() => setCapture(true)}>
+                    New Item
+                  </Key>
+                ) : null}
+              </div>
+            ) : (find.trim() || filtered(query)) && !boardRows ? (
+              <div className="quietline plan-nomatch">
+                No Item matches <b>{words.join(', ')}</b>.{' '}
+                <A
+                  className="lk"
+                  href={
+                    at({}) +
+                    writeQuery({
+                      scope: query.scope,
+                      sort: query.sort,
+                      layout: query.layout,
+                      group: query.group,
+                    })
+                  }
+                >
+                  Clear the filter
+                </A>
+              </div>
+            ) : (
+              <Board
+                bands={board}
+                sort={query.sort}
+                at={at}
+                folds={folds}
+                onToggle={toggleFold}
+                settled={settledShown}
+                liveAtLeast={openShown && view.more}
+                settledAtLeast={{
+                  done: closed.more || closed.loading || closed.failed,
+                  abandoned: dropped.more || dropped.loading || dropped.failed,
+                }}
+                workers={workers}
+                loaded={byId}
+                ticker={ticker}
+              />
+            )
           ) : (
             <>
-              {openShown ? (
+              {listBands ? (
+                <FieldList
+                  bands={listBands}
+                  sort={query.sort}
+                  at={at}
+                  ticker={ticker}
+                  folds={folds}
+                  onToggle={toggleFold}
+                  workers={workers}
+                  tree={query.layout === 'tree'}
+                  liveAtLeast={openShown && view.more}
+                  settledRead={settledShown}
+                />
+              ) : openShown ? (
                 <Groups
                   view={view}
                   query={query}
@@ -870,7 +940,7 @@ export function PlanScreenView({
               ) : null}
             </>
           )}
-          {settledShown && query.layout !== 'board' ? (
+          {settledShown && query.layout !== 'board' && !listBands ? (
             <SettledList rows={settledRows} sort={query.sort} at={at} ticker={ticker} />
           ) : null}
           {settledShown ? <SettledPager closed={closed} dropped={dropped} /> : null}

@@ -206,6 +206,20 @@ their own rank, then No Initiative; within each group, Items by rank, each follo
 Initiatives move the same way: a moved Initiative stores one `order` between its neighbours among the Initiatives
 shown (the web Plan's group headers and the Initiatives overview).
 
+## Groups and the board
+
+The web Plan groups its rows by Initiative (the default), owner, type or nothing. The choice is one Group chip, kept in
+the address as `group=` beside the layout, and List and Board use the same bands. An owner band holds the owner as
+set (with or without `@`). Items with no owner come last under "No one yet", and Items with no type under "No type".
+Grouping by owner, type or nothing does not drag in List, because hand order is kept within Initiatives. A band
+folds, and the fold is kept on this browser (the same record as the Initiative folds).
+
+Board puts each Item as one row in its status column: Proposed, Planned and In progress, plus Done and Won't do when
+the scope reads settled Items. Columns meet at seams, and each band runs across them. A sub-item whose parent is a row
+is shown in the parent's roll instead of as its own row. Each column's total counts the rows it draws, with `+` when
+the read is partial. A cell shows 20 rows, then 20 more at a time. Board reorders nothing; order inside a cell is the
+plan order or the chosen sort. Grouping, totals and paging work on rows already read, so they make no call.
+
 ## Next
 
 The web Plan derives "Next" from the loaded Plan rows. It selects the first Planned Item in plan order with no owner,

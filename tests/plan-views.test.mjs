@@ -15,6 +15,7 @@ const { readQuery, writeQuery, agentRead, keeps, sortRows, filtered } = await im
   moduleUrl('../web/src/app/plan/query.ts')
 );
 const { planView } = await import(moduleUrl('../web/src/app/plan/model.ts'));
+const { planViewLinks } = await import(moduleUrl('../web/src/app/plan/view-links.ts'));
 const settled = await import(moduleUrl('../convex/projectPlanSettled.ts'));
 
 const row = (fields, i) => ({
@@ -30,7 +31,9 @@ const row = (fields, i) => ({
 test('a view round-trips through the address and leaves defaults out', () => {
   assert.equal(writeQuery(readQuery(new URLSearchParams(''))), '');
   const query = readQuery(
-    new URLSearchParams('scope=all&type=Bug&owner=%40sample&relation=none&sort=owner&view=board&q=login'),
+    new URLSearchParams(
+      'scope=all&type=Bug&owner=%40sample&relation=none&sort=owner&view=board&group=owner&q=login',
+    ),
   );
   assert.deepEqual(
     { ...query },
@@ -38,6 +41,7 @@ test('a view round-trips through the address and leaves defaults out', () => {
       scope: 'all',
       sort: 'owner',
       layout: 'board',
+      group: 'owner',
       type: 'Bug',
       owner: '@sample',
       relation: 'none',
@@ -47,11 +51,12 @@ test('a view round-trips through the address and leaves defaults out', () => {
   );
   assert.equal(
     writeQuery(query),
-    '?scope=all&type=Bug&owner=%40sample&relation=none&sort=owner&view=board&q=login',
+    '?scope=all&type=Bug&owner=%40sample&relation=none&sort=owner&view=board&group=owner&q=login',
   );
   // Unknown values fall back instead of failing the screen.
-  const odd = readQuery(new URLSearchParams('scope=nope&sort=x&view=y&relation=z'));
+  const odd = readQuery(new URLSearchParams('scope=nope&sort=x&view=y&relation=z&group=w'));
   assert.equal(odd.scope, 'open');
+  assert.equal(odd.group, 'initiative');
   assert.equal(odd.sort, 'hand');
   assert.equal(odd.layout, 'list');
   assert.equal(odd.relation, undefined);
@@ -60,6 +65,15 @@ test('a view round-trips through the address and leaves defaults out', () => {
     agentRead(query),
     `nforge agent . planning '{"status":"all","type":"Bug","owner":"@sample","relation":"none","search":"login"}'`,
   );
+});
+
+test('Group is part of the address like the layout: views keep it and match whatever the group (d3357f40)', () => {
+  const query = readQuery(new URLSearchParams('owner=none&view=board&group=type'));
+  const links = planViewLinks('/plan', query, 'sample', []);
+  assert.equal(links.on?.id, 'unowned', 'the group never changes which view is current');
+  assert.equal(links.href(''), '/plan?view=board&group=type', 'moving to another view keeps the group');
+  // The group is presentation only: the agent command is the same whatever the group.
+  assert.equal(agentRead(query), agentRead({ ...query, group: 'initiative' }));
 });
 
 test('filters keep the rows the agent read keeps, and other sorts never renumber the hand order', () => {

@@ -478,3 +478,102 @@ test('an Initiative breakdown counts every Item once, in one fixed order, and it
   assert.equal(breakdownWords(capped), '1,000+ done · 0 in progress · 3 open · 2+ removed');
   assert.equal(breakdownTotal(capped), '1,005+ Items');
 });
+
+test('Group by a field (d3357f40): owner puts unowned Items under "No one yet", last; every row lands in one band', async () => {
+  const { planBands, boardBands, columnTotals, subItems } = await import(
+    moduleUrl('../web/src/app/plan/bands.ts')
+  );
+  const launch = item({ kind: 'initiative', title: 'Launch' }, 0);
+  const a = item({ initiativeId: launch.id, owner: '@sample', type: 'bug' }, 1);
+  const b = item({ initiativeId: launch.id, status: 'in-progress', type: 'Bug' }, 2);
+  const c = item({ owner: 'sample', status: 'proposed' }, 3);
+  const d = item({ owner: '@peer/amber-fox', initiativeId: launch.id, parentId: a.id }, 4);
+  const done = item(
+    { status: 'closed', initiativeId: launch.id, owner: '@peer/amber-fox', parentId: a.id },
+    5,
+  );
+  const read = { rows: JSON.stringify([launch, a, b, c, d]), more: false, settled: [], canEdit: true };
+  const view = planView(read);
+  const bands = (by, settled = []) =>
+    planBands(view, by, settled, { openShown: true, hideEmpty: false }).map(band => [
+      band.title,
+      band.lines.map(line => line.row.id),
+    ]);
+  // Owner: the handle as set, with and without "@" and in any case, is one person; no owner is "No one yet", last.
+  assert.deepEqual(bands('owner'), [
+    ['@sample', [a.id, c.id]],
+    ['@peer/amber-fox', [d.id]],
+    ['No one yet', [b.id]],
+  ]);
+  assert.deepEqual(bands('type'), [
+    ['Bug', [a.id, b.id]],
+    ['No type', [d.id, c.id]],
+  ]);
+  assert.deepEqual(bands('none'), [['All Items', [a.id, d.id, b.id, c.id]]]);
+  // Done Items read for the scope join their Initiative's band; the Initiative keeps its whole-plan counts.
+  const byInitiative = planBands(view, 'initiative', [done], { openShown: true, hideEmpty: false });
+  assert.deepEqual(
+    byInitiative.map(band => [band.title, band.lines.length]),
+    [
+      ['Launch', 4],
+      ['No Initiative', 1],
+    ],
+  );
+  assert.equal(byInitiative[0].group.initiative.id, launch.id);
+  // The board: a sub-item whose parent is a row is in the parent's roll, not a row; each column's total is its rows.
+  const board = boardBands(byInitiative);
+  assert.deepEqual(
+    board[0].lines.map(line => line.row.id),
+    [a.id, b.id],
+  );
+  assert.deepEqual(Object.fromEntries(columnTotals(board)), {
+    proposed: 1,
+    planned: 1,
+    'in-progress': 1,
+    done: 0,
+    abandoned: 0,
+  });
+  assert.deepEqual(subItems([launch, a, b, c, d, done]).get(a.id), { total: 2, done: 1, running: 0 });
+  // A filter hides bands with nothing in them; without one a live Initiative with nothing open keeps its band.
+  const quiet = item({ kind: 'initiative', title: 'Quiet' }, 6);
+  const withQuiet = planView({ ...read, rows: JSON.stringify([launch, quiet, a]) });
+  const titles = hideEmpty =>
+    planBands(withQuiet, 'initiative', [], { openShown: true, hideEmpty }).map(band => band.title);
+  assert.deepEqual(titles(false), ['Launch', 'Quiet']);
+  assert.deepEqual(titles(true), ['Launch']);
+});
+
+test('Board sub-items (d3357f40 review): deeper chains roll into the top Item, a cycle keeps one row, "@" is no owner', async () => {
+  const { planBands, boardBands, subItems } = await import(moduleUrl('../web/src/app/plan/bands.ts'));
+  const top = item({}, 10);
+  const mid = item({ parentId: top.id }, 11);
+  const leaf = item({ parentId: mid.id, status: 'closed' }, 12);
+  const x = item({ owner: '@' }, 13);
+  const y = item({ parentId: x.id }, 14);
+  x.parentId = y.id;
+  const tail = item({ parentId: x.id }, 15);
+  const rows = [top, mid, leaf, x, y, tail];
+  const band = {
+    id: 'all',
+    field: 'none',
+    title: 'All Items',
+    lines: rows.map(row => ({ row, depth: 0, rank: 0, next: false })),
+  };
+  const cycleRow = [x.id, y.id].sort()[0];
+  // Every row is either a board row or in exactly one top Item's roll; nothing vanishes.
+  assert.deepEqual(
+    boardBands([band])[0]
+      .lines.map(line => line.row.id)
+      .sort(),
+    [top.id, cycleRow].sort(),
+  );
+  const subs = subItems(rows);
+  assert.deepEqual(subs.get(top.id), { total: 2, done: 1, running: 0 });
+  assert.deepEqual(subs.get(cycleRow), { total: 2, done: 0, running: 0 });
+  // An owner that is only "@" is no owner: it joins "No one yet", never an empty-named band.
+  const view = planView({ rows: JSON.stringify([x]), more: false, settled: [], canEdit: true });
+  assert.deepEqual(
+    planBands(view, 'owner', [], { openShown: true, hideEmpty: false }).map(b => [b.id, b.title]),
+    [['owner:', 'No one yet']],
+  );
+});

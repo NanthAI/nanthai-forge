@@ -8,10 +8,13 @@ import type { PlanRow } from '../../../../src/planning-model';
 export type Scope = 'open' | 'closed' | 'all' | 'archived' | 'deleted';
 export type Sort = 'hand' | 'title' | 'status' | 'owner' | 'type';
 export type Layout = 'list' | 'tree' | 'board';
+/** Bands of the list and the board (d3357f40): a presentation choice like the layout, never a filter. */
+export type GroupBy = 'initiative' | 'owner' | 'type' | 'none';
 export type PlanQuery = PlanFilter & {
   scope: Scope;
   sort: Sort;
   layout: Layout;
+  group: GroupBy;
   initiative?: string | undefined;
   find: string;
 };
@@ -19,6 +22,7 @@ export type PlanQuery = PlanFilter & {
 const scopes: readonly Scope[] = ['open', 'closed', 'all', 'archived', 'deleted'];
 const sorts: readonly Sort[] = ['hand', 'title', 'status', 'owner', 'type'];
 const layouts: readonly Layout[] = ['list', 'tree', 'board'];
+export const groupings: readonly GroupBy[] = ['initiative', 'owner', 'type', 'none'];
 const relations = ['depends-on', 'duplicate-of', 'related', 'none'] as const;
 const pick = <T extends string>(value: string | null, from: readonly T[], fallback: T): T =>
   value && (from as readonly string[]).includes(value) ? (value as T) : fallback;
@@ -32,6 +36,7 @@ export function readQuery(search: URLSearchParams): PlanQuery {
     scope: pick(search.get('scope'), scopes, 'open'),
     sort: pick(search.get('sort'), sorts, 'hand'),
     layout: pick(search.get('view'), layouts, 'list'),
+    group: pick(search.get('group'), groupings, 'initiative'),
     type: text(search.get('type'), 32),
     owner: text(search.get('owner'), 200),
     relation: pick(search.get('relation'), [...relations, ''] as const, '') || undefined,
@@ -50,6 +55,7 @@ export function writeQuery(query: Partial<PlanQuery>) {
   if (query.initiative) params.set('initiative', query.initiative);
   if (query.sort && query.sort !== 'hand') params.set('sort', query.sort);
   if (query.layout && query.layout !== 'list') params.set('view', query.layout);
+  if (query.group && query.group !== 'initiative') params.set('group', query.group);
   if (query.find?.trim()) params.set('q', query.find);
   const out = params.toString();
   return out ? `?${out}` : '';

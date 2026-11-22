@@ -66,6 +66,23 @@ if (largeInitiative) {
       item(1000 + index * 500 + n, { title: 'Synthetic release step', status, initiativeId: big.id }),
     ));
 }
+// Board states (d3357f40): no Items, the first read on its way, a failed refresh, and the worst case drawn in the
+// approved mock (CJK Initiative, right-to-left and one-letter titles, long and emoji handles, 60 sub-items, 60
+// done-when lines, 1,284 Planned Items per scale step; worst-plan=2 doubles them).
+const boardFlags = new URLSearchParams(location.search);
+const emptyPlan = boardFlags.has('empty-plan');
+const worstPlan = boardFlags.has('worst-plan') ? Number(boardFlags.get('worst-plan') || 1) : 0;
+if (worstPlan) {
+  const cjk = { id: uuid(4), kind: 'initiative', title: 'ストリーミング v3: チャンク境界とバックプレッシャーの完全な再設計', status: 'open', position: 3, version: 1 };
+  rows.push(
+    cjk,
+    item(40, { title: 'x', initiativeId: cjk.id, status: 'proposed', doneWhen: null }),
+    item(41, { title: 'מנתח זרם: טיפול ב-UTF-8 מפוצל על פני גבולות נתחים, כולל רצפים באורך ארבעה בתים', initiativeId: cjk.id, owner: 'bartholomew-fitzgerald/incandescent-mantis-shrimp-of-the-eastern-reef', type: 'bug', doneWhen: [0, 60] }),
+    item(42, { title: '🦊 Rewrite every adapter test so that it reads from the shared fixture loader and never from disk again', initiativeId: cjk.id, owner: '@🦊fox', status: 'in-progress', inLane: true }),
+    ...Array.from({ length: 60 }, (_, n) => item(100 + n, { title: 'Sub-item ' + (n + 1), initiativeId: cjk.id, parentId: uuid(41), status: n ? 'open' : 'in-progress' })),
+    ...Array.from({ length: 1284 * worstPlan }, (_, n) => item(10000 + n, { title: 'One of many planned Items ' + (n + 1), doneWhen: null })),
+  );
+}
 const bigSettled = largeInitiative
   ? { done: 1000, dropped: 1000, atLeast: true }
   : { done: 123, dropped: 7, atLeast: false };
@@ -73,10 +90,10 @@ const launchProgress = exactCounts
   ? { done: 1024, dropped: 1, atLeast: false, live: { inProgress: 1, open: 525, proposed: 1 } }
   : { done: 4, dropped: 1, atLeast: false };
 const read = {
-  rows: JSON.stringify(partialCounts ? rows.filter(row => row.initiativeId !== docs.id) : rows),
+  rows: emptyPlan ? '[]' : JSON.stringify(partialCounts ? rows.filter(row => row.initiativeId !== docs.id) : rows),
   more: exactCounts || partialCounts,
   liveMore: exactCounts || partialCounts,
-  settled: [{ initiativeId: launch.id, ...launchProgress }, { initiativeId: docs.id, done: partialCounts ? 2 : 0, dropped: 0, atLeast: partialCounts }, { initiativeId: big.id, ...bigSettled }],
+  settled: emptyPlan ? [] : [{ initiativeId: launch.id, ...launchProgress }, { initiativeId: docs.id, done: partialCounts ? 2 : 0, dropped: 0, atLeast: partialCounts }, { initiativeId: big.id, ...bigSettled }],
   canEdit: true,
 };
 const settledRows = [item(20, { title: 'Old reader removed', status: 'closed', initiativeId: launch.id }), item(21, { title: 'Ship a second parser', status: 'abandoned' })];
@@ -182,7 +199,8 @@ function Fixture() {
     <React.Suspense fallback={<h1>Loading</h1>}>{window.livePlan ?
       <ConvexProvider client={linkBackend.client}><LivePlan route={route} projectId="synthetic"
         projectName="Synthetic project" viewerHandle="example-builder" /></ConvexProvider> :
-      <PlanScreenView route={route} projectId={rest === uuid(16) ? undefined : "synthetic"} projectName="Synthetic project" feed={undefined} read={read}
+      <PlanScreenView route={route} projectId={rest === uuid(16) ? undefined : "synthetic"} projectName="Synthetic project" feed={undefined}
+      read={boardFlags.has('loading-plan') ? undefined : read} stale={boardFlags.has('stale-plan')}
       put={put} run={run} purge={purge} reads={reads} query={query} go={go} viewer="example-builder"
       readInitiativeWork={window.readItemWork ? initiativeId => window.readItemWork({initiativeId}) : undefined}
       closed={query.scope === 'open' && !rest ? undefined : settled}
@@ -295,6 +313,23 @@ test('plan views and bulk bar: real components keep the view in the address and 
     );
   };
 
+  // The board's columns (d3357f40): each head's name and total beside the rows drawn under it in every band.
+  const boardColumns = page =>
+    page.evaluate(() => {
+      const heads = [...document.querySelectorAll('.plan-bwrap .bgrid.heads > div')];
+      return heads.map((head, index) => ({
+        name: (clone => (
+          clone.querySelectorAll('.cnt, .hint').forEach(part => part.remove()),
+          clone.textContent.trim()
+        ))(head.cloneNode(true)),
+        head: head.querySelector('.cnt').textContent,
+        rows: [...document.querySelectorAll('.plan-bwrap .bgroup > .bgrid')].reduce(
+          (sum, grid) => sum + (grid.children[index]?.querySelectorAll('.brow').length ?? 0),
+          0,
+        ),
+      }));
+    });
+
   // Behaviour at desk width: filters in the address, only ticked rows change, a refused row is named.
   {
     const { page, errors, context } = await open(1440, 'dark');
@@ -393,7 +428,13 @@ test('plan views and bulk bar: real components keep the view in the address and 
     );
     await page.getByRole('button', { name: 'Board', exact: true }).click();
     assert.match(page.url(), /view=board/);
-    assert.equal(await page.locator('.plan-col').count(), 3, 'open scope: Proposed, Planned, In progress');
+    const columns = await boardColumns(page);
+    assert.deepEqual(
+      columns.map(column => column.name),
+      ['Proposed', 'Planned', 'In progress'],
+      'open scope: Proposed, Planned, In progress',
+    );
+    for (const column of columns) assert.equal(column.head, String(column.rows), column.name);
     await page.getByRole('button', { name: /^Order: / }).click();
     await page.getByRole('menuitem', { name: 'By title' }).click();
     assert.match(page.url(), /sort=title/);
@@ -1247,10 +1288,205 @@ test('plan views and bulk bar: real components keep the view in the address and 
       else workCosts = costs;
     });
   }
+  // The board as system rows (d3357f40, design cecab403, decision f4e28113): no cards, bands across the columns that
+  // fold, one Group chip in the address for List and Board, each head's total equal to its rows (with "+" when the
+  // read is partial), a sub-item rolled into its parent, the Done and Won't do columns only with the settled scope.
+  await t.test('board: rows and seams, group bands, exact and lower-bound totals', async () => {
+    const { page, errors, context } = await open(1440, 'dark', '?view=board');
+    assert.equal(await page.locator('.plan-card, .plan-col').count(), 0, 'the card board is gone');
+    const row = page
+      .locator('.brow')
+      .filter({ has: page.getByRole('link', { name: 'Stream parser: preserve split bytes across reads' }) });
+    assert.equal(await row.evaluate(node => getComputedStyle(node).borderTopLeftRadius), '0px');
+    assert.equal(await row.evaluate(node => getComputedStyle(node).boxShadow), 'none');
+    assert.match(await row.textContent(), /1 open sub-item/, 'the parent rolls its sub-item');
+    assert.equal(
+      await page.locator('.brow').filter({ hasText: 'Bench the parser against the old reader' }).count(),
+      0,
+      'a sub-item whose parent is on the board is not a row',
+    );
+    const totals = await boardColumns(page);
+    assert.deepEqual(
+      totals.map(column => [column.name, column.head, column.rows]),
+      [
+        ['Proposed', '1', 1],
+        ['Planned', '4', 4],
+        ['In progress', '2', 2],
+      ],
+    );
+    assert.deepEqual(await page.locator('.plan-band .ttl').allTextContents(), [
+      'Launch the parser',
+      'Documentation and recovery paths',
+      'A long running release with a name that will not fit on a phone line',
+      'No Initiative',
+    ]);
+    // A band folds and stays folded for this reader; its rows leave every column and the totals stay the plan's.
+    const band = page.locator('.bgroup', { has: page.locator('.ttl', { hasText: 'Launch the parser' }) });
+    const fold = band.getByRole('button', { name: 'Items of Launch the parser' });
+    await fold.click();
+    assert.equal(await band.locator('.brow').count(), 0);
+    assert.equal(await fold.getAttribute('aria-expanded'), 'false');
+    assert.equal((await boardColumns(page))[1].head, '4');
+    await page.reload();
+    await page.locator('.plan-bwrap').waitFor();
+    assert.equal(await band.locator('.brow').count(), 0, 'the fold is kept on this browser');
+    await band.locator('.plan-band .hint').click();
+    assert.ok(await band.locator('.brow').count(), 'a click on the band opens it');
+    // Group by owner: the handle as set, "No one yet" last; Type and None; the List takes the same bands.
+    await page.getByRole('button', { name: 'Group: Initiative' }).click();
+    await page.getByRole('menuitem', { name: 'By owner' }).click();
+    assert.match(page.url(), /view=board&group=owner/);
+    await page.locator('.plan-band', { hasText: 'No one yet' }).waitFor();
+    const owners = await page.locator('.plan-band').allTextContents();
+    assert.match(owners.at(-1), /^No one yet/);
+    assert.ok(owners.some(name => name.includes('peer-builder')));
+    for (const column of await boardColumns(page))
+      assert.equal(column.head, String(column.rows), column.name);
+    await page.getByRole('button', { name: 'Group: Owner' }).click();
+    await page.getByRole('menuitem', { name: 'No groups' }).click();
+    assert.match(page.url(), /group=none/);
+    await page.locator('.plan-bwrap .bgroup[aria-label="All Items"]').waitFor();
+    assert.equal(await page.locator('.plan-band').count(), 0, 'None draws the columns without bands');
+    assert.deepEqual(
+      (await boardColumns(page)).map(column => column.rows),
+      totals.map(column => column.rows),
+    );
+    await page.getByRole('button', { name: 'List', exact: true }).click();
+    assert.match(page.url(), /group=none/);
+    await page.getByRole('list', { name: 'Items', exact: true }).waitFor();
+    assert.equal(
+      await page.getByRole('list', { name: 'Items', exact: true }).getByRole('listitem').count(),
+      8,
+    );
+    assert.deepEqual(errors, []);
+    await context.close();
+  });
+  await t.test(
+    'board: Back returns the previous group (the real page writes each change as a step)',
+    async () => {
+      const { page, errors, context } = await open(1440, 'light', '?view=board', false, true);
+      await page.locator('.plan-bwrap').waitFor();
+      await page.getByRole('button', { name: 'Group: Initiative' }).click();
+      await page.getByRole('menuitem', { name: 'By type' }).click();
+      await page.locator('.plan-band', { hasText: 'Bug' }).waitFor();
+      assert.match(page.url(), /group=type/);
+      await page.goBack();
+      await page.getByRole('button', { name: 'Group: Initiative' }).waitFor();
+      assert.doesNotMatch(page.url(), /group=/);
+      assert.equal(await page.locator('.plan-band', { hasText: 'Bug' }).count(), 0);
+      assert.deepEqual(errors, []);
+      await context.close();
+    },
+  );
+  await t.test(
+    'board: partial read totals are lower bounds; the settled scope adds Done and Won’t do',
+    async () => {
+      {
+        const { page, errors, context } = await open(1440, 'dark', '?view=board&partial-counts');
+        const columns = await boardColumns(page);
+        for (const column of columns) assert.equal(column.head, `${column.rows}+`, column.name);
+        assert.deepEqual(errors, []);
+        await context.close();
+      }
+      {
+        const { page, errors, context } = await open(1440, 'dark', '?scope=all&view=board');
+        const columns = await boardColumns(page);
+        assert.deepEqual(
+          columns.map(column => [column.name, column.head, column.rows]),
+          [
+            ['Proposed', '1', 1],
+            ['Planned', '4', 4],
+            ['In progress', '2', 2],
+            ['Done', '1', 1],
+            ['Won’t do', '1', 1],
+          ],
+        );
+        // Five columns scroll inside the board, never the page.
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+        assert.deepEqual(errors, []);
+        await context.close();
+      }
+    },
+  );
+  await t.test('board: no Items, loading, failed refresh, no match and the worst case', async () => {
+    {
+      const { page, errors, context } = await open(1440, 'dark', '?view=board&empty-plan');
+      await page.getByRole('heading', { name: 'Nothing is planned yet' }).waitFor();
+      assert.equal(
+        await page.getByRole('button', { name: /^New Item/ }).count(),
+        1,
+        'one way to make the first Item',
+      );
+      assert.deepEqual(errors, []);
+      await context.close();
+    }
+    {
+      const { page, errors, context } = await open(1440, 'dark', '?view=board&loading-plan');
+      assert.equal(await page.locator('.plan-bwrap[aria-busy="true"] .bgrid.heads > div').count(), 3);
+      assert.deepEqual(errors, []);
+      await context.close();
+    }
+    {
+      const { page, errors, context } = await open(1440, 'dark', '?view=board&stale-plan');
+      await page.getByText('Forge could not refresh the plan; these are the rows read last.').waitFor();
+      assert.ok(await page.locator('.brow').count(), 'the last read stays on the board');
+      assert.deepEqual(errors, []);
+      await context.close();
+    }
+    {
+      const { page, errors, context } = await open(1440, 'dark', '?view=board&q=nothing-matches-this');
+      await page.getByText('No Item matches').waitFor();
+      await page.getByRole('link', { name: 'Clear the filter' }).click();
+      await page.locator('.brow').first().waitFor();
+      assert.doesNotMatch(page.url(), /q=/);
+      assert.match(page.url(), /view=board/);
+      assert.deepEqual(errors, []);
+      await context.close();
+    }
+    for (const width of [1440, 390]) {
+      const { page, errors, context } = await open(width, 'light', '?view=board&worst-plan');
+      const loose = page.locator('.bgroup', { has: page.locator('.ttl', { hasText: 'No Initiative' }) });
+      await loose.getByText('20 of 1,285 shown').waitFor();
+      await loose.getByRole('button', { name: /^Show 20 more/ }).click();
+      await loose.getByText('40 of 1,285 shown').waitFor();
+      // Focus moves to the first row the key revealed, not to the page.
+      await page.waitForFunction(() =>
+        document.activeElement?.closest('[role="list"] > [role="listitem"]:nth-child(21)'),
+      );
+      // Bulk select stays on the board for a reader who may edit, as in the list.
+      assert.ok(await loose.locator('.brow.tk .ckb').count());
+      const parent = page.locator('.brow').filter({ hasText: 'מנתח זרם' });
+      assert.match(await parent.textContent(), /60 open sub-items.*0\/60/);
+      // A long title takes two lines at most and starts at the left like the others; a band's count is never cut.
+      for (const title of await page.locator('.brow .ttl a').all()) {
+        const box = await title.evaluate(node => ({
+          lines: Math.round(node.clientHeight / parseFloat(getComputedStyle(node).lineHeight)),
+          align: getComputedStyle(node).textAlign,
+        }));
+        assert.ok(box.lines <= 2, JSON.stringify(box));
+        assert.equal(box.align, 'left');
+      }
+      for (const hint of await page.locator('.plan-band .hint').all())
+        assert.ok(
+          await hint.evaluate(node => node.scrollWidth <= node.clientWidth),
+          await hint.textContent(),
+        );
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      assert.deepEqual(errors, []);
+      await context.close();
+    }
+  });
   for (const [name, search] of [
     ['list', ''],
     ['tree', '?view=tree'],
     ['board', '?scope=all&view=board'],
+    ['board by owner', '?view=board&group=owner'],
+    ['board empty', '?view=board&empty-plan'],
+    ['board loading', '?view=board&loading-plan'],
+    ['board failed', '?view=board&stale-plan'],
+    ['board no match', '?view=board&owner=nobody-at-all'],
+    ['board worst', '?view=board&worst-plan'],
+    ['list by type', '?group=type'],
     ['closed', '?scope=closed&sort=title'],
     ['archive', '?scope=archived'],
     ['deleted', '?scope=deleted'],

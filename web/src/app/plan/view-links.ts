@@ -38,12 +38,14 @@ export function planViewLinks(
     ...builtIn,
     ...saved.map(view => ({ ...view, id: `saved:${view.name}`, saved: true })),
   ];
-  const filters = (value: PlanQuery) => writeQuery({ ...value, sort: 'hand', layout: 'list', find: '' });
+  const filters = (value: PlanQuery) =>
+    writeQuery({ ...value, sort: 'hand', layout: 'list', group: 'initiative', find: '' });
   const current = filters(query);
   const parsed = (value: string) => readQuery(new URLSearchParams(value));
   return {
     all,
     on: all.find(view => filters(parsed(view.query)) === current),
-    href: (value: string) => base + writeQuery({ ...parsed(value), sort: query.sort, layout: query.layout }),
+    href: (value: string) =>
+      base + writeQuery({ ...parsed(value), sort: query.sort, layout: query.layout, group: query.group }),
   };
 }

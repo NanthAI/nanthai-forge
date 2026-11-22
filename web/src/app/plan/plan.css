@@ -88,12 +88,44 @@
   .plan-pick > label { display: flex; gap: var(--s-2); align-items: baseline; color: var(--text); }
   .plan-pick .plan-split-line { display: grid; grid-template-columns: minmax(0, 1fr) minmax(8em, 14em); gap: var(--s-2); align-items: center; }
   .plan-saved { display: flex; flex-wrap: wrap; gap: var(--s-1); }
-  .plan .plan-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(168px, 1fr); gap: var(--s-3); padding: var(--s-2) var(--gut); overflow-x: auto; }
-  .plan .plan-col { display: grid; gap: var(--s-2); align-content: start; min-width: 0; }
-  .plan .plan-col-h { margin: 0; font-size: var(--t-small); font-weight: var(--w-strong); display: flex; gap: var(--s-2); align-items: baseline; }
-  .plan .plan-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-1) var(--s-2); padding: var(--s-2); border: var(--rule) solid var(--line); border-radius: var(--r); background: var(--surface-2); font-size: var(--t-small); }
-  .plan .plan-card > :not(.ckhit) { grid-column: 2; }
-  .plan .plan-card .ttl { font-weight: var(--w-strong); overflow-wrap: anywhere; color: var(--text); }
+  /* The board (d3357f40, design cecab403): the system board, lists side by side that meet at one-pixel seams, each
+     Item a row with a seam under it; no radius, no card surface. A band per group crosses every column and folds. Five
+     columns scroll sideways inside the board, never the page. On a phone: one column, each non-empty cell a label. */
+  .plan .plan-bwrap { overflow-x: auto; overscroll-behavior-x: contain; background: var(--surface); border-top: var(--rule) solid var(--line); border-bottom: var(--rule) solid var(--line); }
+  .plan .bgrid { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(232px, 1fr)); min-width: calc(var(--cols, 3) * 232px); }
+  .plan .bgrid > div { min-width: 0; border-left: var(--rule) solid var(--line); }
+  .plan .bgrid > div:first-child { border-left: 0; }
+  .plan .bgrid.heads { position: sticky; top: 0; z-index: 3; background: var(--surface); border-bottom: var(--rule) solid var(--line); }
+  .plan .bgrid.heads > div { display: flex; align-items: center; gap: var(--s-2); min-height: 34px; padding: 0 var(--gut); font-size: var(--t-meta); font-weight: var(--w-bold); color: var(--text-2); white-space: nowrap; }
+  .plan .bgrid.heads .hint { font-weight: var(--w-regular); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .plan .bgroup > .band { border-top: var(--rule) solid var(--line); border-bottom: var(--rule) solid var(--line); background: var(--bg); position: sticky; left: 0; }
+  .plan .bgroup:first-of-type > .band { border-top: 0; }
+  .plan .bgroup.shut > .band { border-bottom: 0; }
+  .plan .bgroup > .bgrid > div { min-height: var(--row-h); }
+  /* A band: the name gives way, the roll, count and fold never do (the Wrap Rule). */
+  .plan .plan-band { min-height: 36px; padding-block: 0; }
+  .plan .plan-band > :is(.ttl, .who) { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-small); font-weight: var(--w-bold); color: var(--text); }
+  .plan .plan-band > .hint { flex: none; overflow: visible; }
+  .plan .plan-band > .tw { margin-left: auto; }
+  .plan .row.brow { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; align-items: start; padding-block: 9px; }
+  .plan .row.brow.tk { grid-template-columns: 28px minmax(0, 1fr); }   /* bulk select, as in the list */
+  .plan .brow.tk > :not(.ckhit) { grid-column: 2; }
+  .plan .brow.tk > .ckhit { grid-row: 1 / span 3; align-self: start; }
+  .plan .brow .ttl a { color: inherit; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-align: left; }   /* a right-to-left title keeps its reading order and starts at the left like every other (rendered review a36cae1d) */
+  .plan .brow .plan-facts { display: flex; flex-wrap: wrap; gap: 2px var(--s-3); align-items: center; min-width: 0; color: var(--text-2); font-size: var(--t-meta); }
+  .plan .brow .plan-facts:empty { display: none; }
+  .plan .brow .plan-facts > * { min-width: 0; }
+  .plan .brow .flag { color: var(--text-3); white-space: nowrap; }
+  .plan .brow .flag.cut { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .plan .brow .who { max-width: 150px; overflow: hidden; }
+  .plan .brow .who .a-run { flex-shrink: 1; }
+  /* A link inside a sentence is underlined, so it is not told apart by colour alone. */
+  .plan .plan-nomatch a.lk { text-decoration: underline; }
+  .plan .brow .subroll { display: inline-flex; align-items: center; gap: 6px; }
+  .plan .brow .subroll .roll { width: 44px; flex: none; }
+  .plan .bcol-label { display: none; }
+  /* Loading: the heads at once, still bars only after 300 ms, so a quick read never flashes them. */
+  .plan .plan-bload { animation: plan-late 300ms step-end; }
   .plan-pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2); }
   .plan-diff { margin: 0; max-height: 50vh; overflow: auto; padding: var(--s-2); border: var(--rule) solid var(--line); border-radius: var(--r); font: var(--t-meta)/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
   .plan-diff .old { color: var(--text-2); background: var(--del-bg); }
@@ -123,7 +155,13 @@
     /* With its status line a group's row is at least 55px tall: the list reserves 52px a row while its rows render. */
     .plan .plan-grp .ds-list { --ds-row-min: calc(var(--row-h) + var(--s-3)); }
     .plan .plan-gh .grip, .plan .plan-gh .plan-gsp { margin-left: 0; }
-    .plan .plan-board { grid-auto-flow: row; grid-auto-columns: auto; overflow-x: visible; }
+    .plan .plan-bwrap { overflow-x: visible; }
+    .plan .bgrid { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+    .plan .bgrid.heads { display: none; }
+    .plan .bgrid > div { border-left: 0; }
+    .plan .bgroup > .bgrid > div { min-height: 0; }
+    .plan .bgroup > .bgrid > div:empty { display: none; }
+    .plan .bcol-label { display: flex; align-items: center; gap: var(--s-2); padding: 10px var(--gut) 4px; font-size: var(--t-meta); font-weight: var(--w-bold); color: var(--text-2); }
     .plan .plan-bulk .plan-why { flex-basis: 100%; max-width: none; }
     .plan .plan-wide { display: none; }
     .plan .ph { flex-wrap: wrap; }
@@ -139,3 +177,4 @@
     .plan .plan-gsp { width: 34px; }
   }
 }
+@keyframes plan-late { from { visibility: hidden; } }
