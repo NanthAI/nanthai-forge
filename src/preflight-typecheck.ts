@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { delimiter, dirname, join, normalize, relative } from 'node:path';
 import { spawnCaptured } from './agent-preflight-capture.js';
@@ -196,13 +195,20 @@ export function runTypecheckSetup(
  * includes and imports alike, relative to ROOT). Null when it cannot be listed: then it runs. */
 function programTouches(root: string, check: Step, changed: Set<string>, env: NodeJS.ProcessEnv) {
   const [program, ...args] = check.command as [string, ...string[]];
-  const listed = spawnSync(program, [...args, '--listFilesOnly'], {
-    cwd: root,
-    env,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-    timeout: 60_000,
-  });
+  // A compiler run like the check itself: its own process group, never outliving preflight.
+  let stdout = '';
+  const listed = spawnCaptured(
+    program,
+    [...args, '--listFilesOnly'],
+    { cwd: root, env, timeout: 60_000 },
+    false,
+    {
+      echo: false,
+      onText: text => {
+        if (stdout.length < 64 * 1024 * 1024) stdout += text;
+      },
+    },
+  );
   if (listed.status !== 0) return null;
   const roots = [root];
   try {
@@ -210,7 +216,7 @@ function programTouches(root: string, check: Step, changed: Set<string>, env: No
   } catch {
     /* The path as given still matches. */
   }
-  for (const line of listed.stdout.split('\n')) {
+  for (const line of stdout.split('\n')) {
     const path = line.trim();
     if (!path) continue;
     for (const at of roots) {

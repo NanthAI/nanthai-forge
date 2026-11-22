@@ -53,7 +53,30 @@ export const FINISH_REFUSALS = new Set([
   'PREFLIGHT_REQUIRED',
   'PREFLIGHT_BUDGET_EXCEEDED',
   'QUEUE_PROOF_REQUIRED',
+  // Cheap pass (Item 168e4ed8): files changed after this land saved them; nothing was composed.
+  'LANE_DIRTY',
 ]);
+/** Journal key: the last code this finish stopped on before it submitted anything (any code). */
+export const finishStoppedKey = 'finish-stopped';
+/** Journal key: this finish stopped on a transient hosted failure before it submitted anything, so
+ * the next land on the same source resumes it, even under a fresh operationId (Item 168e4ed8). */
+export const finishTransientKey = 'finish-transient';
+/** A retained finish the next land on the same source resumes instead of restarting: it stopped
+ * before submitting on a transient hosted failure or on the inline preflight budget. */
+export function resumableFinish(values: Record<string, unknown>) {
+  if (
+    values['desired-landing'] !== undefined ||
+    values['finish-request'] !== undefined ||
+    values['finish-check-run'] !== undefined ||
+    values['finish-source-failed'] !== undefined
+  )
+    return false;
+  const refused = values[finishRefusedKey];
+  return (
+    refused === 'PREFLIGHT_BUDGET_EXCEEDED' ||
+    (refused === undefined && values[finishTransientKey] !== undefined)
+  );
+}
 export type FinishContext = {
   command: Record<string, unknown>;
   clean: HostedLaneSelection | null;
@@ -284,6 +307,10 @@ export async function selectHostedFinish(
   const directory = hostedAgentDirectory(root);
   const source = finishSourceSelection(command);
   const index = join(directory, `finish-${digest(canonicalPayload({ root, address, actor, source }))}.json`);
+  // A fresh operationId that resumed a retained finish keeps resuming it, so its own retry never
+  // starts a second landing beside the one it resumed.
+  const alias = operationId ? join(directory, `finish-resumed-${operationId}.json`) : undefined;
+  if (alias && checkoutPathExists(alias)) operationId = z.uuid().parse(readAgentJson(alias));
   const explicitReplay = operationId && checkoutPathExists(join(directory, `${operationId}.json`));
   if (explicitReplay) return new HostedAgentJournal(root, address, actor, 'finish', command, operationId);
   const fingerprint = finishSourceFingerprint(root, command, operationId);
@@ -366,7 +393,43 @@ export async function selectHostedFinish(
       prior.command.maxChecks !== command.maxChecks
     );
   };
-  let selected = operationId;
+  const withoutId = (value: Record<string, unknown>) => {
+    const { operationId: _id, ...rest } = value;
+    void _id;
+    return canonicalPayload(rest);
+  };
+  // A fresh operationId on unchanged source and options resumes a finish that stopped on a
+  // transient failure or the preflight budget: its save, preflight and compose are not redone.
+  const priorValues = (prior: FinishSelection) => {
+    const path = join(directory, `${prior.operationId}.json`);
+    return checkoutPathExists(path)
+      ? (readAgentJson(path) as { values: Record<string, unknown> }).values
+      : undefined;
+  };
+  // Its clean pins are not this checkout's: resuming would compose on pins the server moved past.
+  const pinsMoved = (values: Record<string, unknown>) => {
+    const pinned = (values['finish-context'] as FinishContext | undefined)?.clean;
+    const now = clean ? marker.selection : null;
+    return Boolean(
+      pinned &&
+      (!now ||
+        (['head', 'version', 'sourceVersion', 'lifecycleVersion'] as const).some(
+          key => pinned[key] !== now[key],
+        )),
+    );
+  };
+  const resumable = (prior: FinishSelection | undefined): prior is FinishSelection => {
+    const values = prior && priorValues(prior);
+    return Boolean(
+      prior &&
+      values &&
+      withoutId(prior.command) === withoutId(command as Record<string, unknown>) &&
+      resumableFinish(values) &&
+      !pinsMoved(values),
+    );
+  };
+  const resumes = operationId !== undefined && sameSource && resumable(previous);
+  let selected = resumes ? previous!.operationId : operationId;
   if (!selected && previous && !sameSource && !(await terminal(previous))) selected = previous.operationId;
   if (!selected && previous && sameSource && previous.command.accept === command.accept) {
     // A pre-submit WORK_STALE pinned that operation to Lane pins that moved on: never replay it.
@@ -389,7 +452,7 @@ export async function selectHostedFinish(
     // Another caller may have reserved the next generation while terminality
     // was observed outside the lock. Reconcile that unknown outcome first.
     if (
-      !operationId &&
+      (!operationId || resumes) &&
       latest &&
       latest.operationId !== previous?.operationId &&
       latest.fingerprint === fingerprint &&
@@ -400,9 +463,9 @@ export async function selectHostedFinish(
       sameClaim(latest);
       return latest;
     }
-    if (!operationId && previous && selected === previous.operationId) sameClaim(previous);
-    const retainedCommand =
-      !operationId && previous && selected === previous.operationId ? previous.command : command;
+    const following = (!operationId || resumes) && previous && selected === previous.operationId;
+    if (following) sameClaim(previous);
+    const retainedCommand = following ? previous.command : command;
     const value = {
       operationId: selected!,
       fingerprint: previous && selected === previous.operationId ? previous.fingerprint : fingerprint,
@@ -410,9 +473,14 @@ export async function selectHostedFinish(
       ...(checkoutLaneId ? { checkoutLaneId } : {}),
     };
     durableReplace(index, canonicalPayload(value));
+    if (resumes && alias && following) durableReplace(alias, canonicalPayload(value.operationId));
     return value;
   });
   selected = reservation.operationId;
+  if (resumes && alias && reservation.operationId !== operationId)
+    process.stderr.write(
+      `land: resuming retained operation ${reservation.operationId} (it stopped before submitting) instead of starting ${operationId}; its finished steps are not redone. Change the source to start a new landing.\n`,
+    );
   const journal = new HostedAgentJournal(root, address, actor, 'finish', reservation.command, selected);
   await journal.retain<FinishContext>('finish-context', () => ({
     command: reservation.command,

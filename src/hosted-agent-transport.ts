@@ -1348,7 +1348,10 @@ export class HostedAgentTransport {
       if (action === 'start' || action === 'open') hostedRootLanePath(root, this.address);
       const replaying =
         typeof operationId === 'string' &&
-        existsSync(resolve(clientCacheRoot(root), 'agent', `${operationId}.json`));
+        (existsSync(resolve(clientCacheRoot(root), 'agent', `${operationId}.json`)) ||
+          // A fresh id that resumed a retained finish (Item 168e4ed8) replays it too.
+          (action === 'finish' &&
+            existsSync(resolve(clientCacheRoot(root), 'agent', `finish-resumed-${operationId}.json`))));
       if (action === 'finish' && !replaying) await this.refuseLandingInFlight(command.data, operationId);
       const pendingSync =
         action === 'finish' && !replaying ? await reconcileHostedSync(root, this.exchange) : null;
@@ -1569,7 +1572,13 @@ export class HostedAgentTransport {
             state: { ...capture.marker.state, files: [...files.values()] },
           });
         },
-        finishGates: async (laneId: string, head: string, tree?: string, message?: string) => {
+        finishGates: async (
+          laneId: string,
+          head: string,
+          tree?: string,
+          message?: string,
+          early?: Parameters<NonNullable<HostedAgentSession['finishGates']>>[4],
+        ) => {
           await this.protectedNotice(readHostedLaneCheckout(root));
           const read = await this.overlapAdvice(laneId, capabilities.agentDefaults?.preflight !== 'off');
           const selected = readHostedLaneCheckout(root)?.selection;
@@ -1601,6 +1610,13 @@ export class HostedAgentTransport {
                   advice.changedPaths,
                 )
               : undefined;
+          // Cheap refusals first, together, before any heavy-slot wait or test (Item 168e4ed8): the
+          // proof preview above is local, and the dirty scan is the one the preflight run repeats.
+          const thisCheckout = selected?.laneId === laneId && selected.head === head;
+          await early?.({
+            queueProof: hostedChecks?.queueProof,
+            dirty: thisCheckout && hostedLaneDirty(root, { refresh: true, selection: { laneId, head } }),
+          });
           // The gates read the preflight planner and the test-selection graph; only a finish loads them.
           const { finishGates } = await import('./agent-default-gates.js');
           const gates = finishGates(
@@ -2818,6 +2834,11 @@ export type HostedAgentSession = {
     head: string,
     tree?: string,
     message?: string,
+    /** Called once with the local proof preview and dirty scan before any preflight run; throws to refuse. */
+    early?: (found: {
+      queueProof?: import('./hosted-agent-finish.js').QueueProofPreview | undefined;
+      dirty?: boolean;
+    }) => Promise<void>,
   ) => Promise<
     Record<string, unknown> & ReturnType<typeof import('./preflight-hosted-checks.js').reportPreflightChecks>
   >;

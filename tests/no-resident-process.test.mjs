@@ -9,6 +9,8 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 
 const DETACHED_JOBS = {
+  'agent-preflight-capture.ts':
+    'runs one preflight command in its own process group; it ends with that command or with preflight (Item 168e4ed8)',
   'browser-approval.ts': 'opens one login or GitHub approval page in the system browser',
   'board-claim-queue.ts': 'sends one file-claim note from the first-write hook',
   'check-controller.ts': 'owner-store: drives one local check run',

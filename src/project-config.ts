@@ -12,7 +12,8 @@ export type PreflightKey =
   | 'guardSet'
   | 'wrappers'
   | 'budgetSeconds'
-  | 'ceilingSeconds';
+  | 'ceilingSeconds'
+  | 'fileTimeoutSeconds';
 export type DeclaredPreflight = {
   value: unknown;
   /** The file that declares it. */

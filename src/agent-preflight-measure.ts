@@ -22,6 +22,26 @@ const errorCode = (error: Error | undefined) =>
     ? (error as NodeJS.ErrnoException).code!
     : null;
 
+let timeUsable: boolean | undefined;
+/** The /usr/bin/time prefix that writes the peak resident set to OUT, or null where this platform
+ * cannot say. The probe runs once per process. */
+export function measuredPrefix(out: string) {
+  const mode = flag();
+  if (!mode || !existsSync(TIME)) return null;
+  if (timeUsable === undefined) {
+    const directory = mkdtempSync(join(tmpdir(), 'forge-preflight-rss-'));
+    try {
+      timeUsable =
+        spawnSync(TIME, [mode, '-o', join(directory, 'probe.txt'), process.execPath, '-e', ''], {
+          stdio: 'ignore',
+        }).status === 0;
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+  return timeUsable ? [TIME, mode, '-o', out] : null;
+}
+
 /** Runs a command and reports its status and peak resident memory when this platform can say.
  * Wrapping never changes the command's exit status; a missing or unusable `time` just runs it. */
 export function spawnMeasured(command: string, args: string[], options: SpawnSyncOptions) {

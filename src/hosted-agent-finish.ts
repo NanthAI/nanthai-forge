@@ -30,16 +30,19 @@ import {
 } from './hosted-agent-actions.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { ForgeError, invariant } from './errors.js';
-import { hostedActionError } from './hosted-action-error.js';
+import { hostedActionError, hostedFailureCause } from './hosted-action-error.js';
 import { shellQuote } from './shell-quote.js';
 import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 import {
   FINISH_REFUSALS,
   finishRefusedKey,
+  finishStoppedKey,
+  finishTransientKey,
   finishRetryHint,
   type FinishContext,
 } from './hosted-agent-finish-identity.js';
 import { landWaitCommand } from './hosted-land-wait.js';
+import type { QueueProofDetail } from '../scripts/test-queue-proof.mjs';
 import { LAND_HELD_MS_ENV, markLandStep } from './land-timing.js';
 import {
   changedPathsAgainstBase,
@@ -489,6 +492,35 @@ function staleBeforeCompose(session: HostedAgentSession, error: unknown) {
   );
 }
 
+/** Every stop before submission keeps its code in the journal, so extra land runs can be counted by
+ * cause (friction, Item 168e4ed8); a transient hosted failure also marks the operation resumable. */
+async function recordFinishStop(session: HostedAgentSession, error: unknown) {
+  if (submittedFinish(session)) return;
+  const safe = hostedActionError(error, 'finish');
+  // retain() never overwrites: each stop replaces the last one's markers, so a resumed run that
+  // then stops for good is never resumed again.
+  session.journal.forget(finishStoppedKey);
+  session.journal.forget(finishTransientKey);
+  if (session.journal.get(finishRefusedKey) === 'PREFLIGHT_BUDGET_EXCEEDED')
+    session.journal.forget(finishRefusedKey);
+  await session.journal.retain(finishStoppedKey, () => safe.code);
+  const cause = hostedFailureCause(error);
+  if (safe.code === 'HOSTED_ACTION_FAILED' && cause !== 'server-limit')
+    await session.journal.retain(finishTransientKey, () => cause);
+}
+/** The code a pre-submit refusal ends its operation with: WORK_STALE whenever the cheap pass named
+ * stale pins among several, so the next land never replays those pins (593fc2d7). */
+function refusedCode(error: unknown, code: unknown) {
+  const refusals = (error as { recovery?: { refusals?: { code?: unknown }[] } }).recovery?.refusals;
+  return Array.isArray(refusals) && refusals.some(refusal => refusal?.code === 'WORK_STALE')
+    ? 'WORK_STALE'
+    : code;
+}
+const submittedFinish = (session: HostedAgentSession) =>
+  session.journal.get('desired-landing') !== undefined ||
+  session.journal.get('finish-request') !== undefined ||
+  session.journal.get('finish-check-run') !== undefined;
+
 export async function executeHostedFinish(session: HostedAgentSession, input: unknown) {
   let result: unknown;
   for (let tries = 1; ;)
@@ -517,10 +549,11 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
           `Main moved during each of ${tries} tries to land on its current head. Nothing began, and the stale request was dropped: a replay of this same operation composes on the new main.`,
         );
       }
+      await recordFinishStop(session, error);
       // Ended before anything was submitted: a re-run on new source is new work, not a replay (ac13de6b).
       const code = (error as { code?: unknown }).code;
       if (typeof code === 'string' && FINISH_REFUSALS.has(code))
-        await session.journal.retain(finishRefusedKey, () => code);
+        await session.journal.retain(finishRefusedKey, () => refusedCode(error, code));
       // Lane pins moved before any compose request was built: this operation can only replay the
       // stale pins, so the next shorthand land is new work on the folder's pins (593fc2d7).
       else if (staleBeforeCompose(session, error))
@@ -663,9 +696,11 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     command.candidateId = checked.candidateId;
     command.composeOperationId = checked.composeOperationId;
   }
+  // The server Lane this pass read before any save: a clean land compares its pins at no extra call.
+  let serverLane: Awaited<ReturnType<typeof selectAgentLane>> | undefined;
   if (!command.after && !command.candidateId && !command.inputs)
     command.after = await session.journal.retain('stack-parent-entry', async () => {
-      const selected = await selectAgentLane(session, command.laneId);
+      const selected = (serverLane = await selectAgentLane(session, command.laneId));
       if (selected.earlyResolution) return null; // The exact predicted-head pipeline owns its acceptance fence.
       const entryId = selected.stack && !selected.stack.detached ? (selected.stack.entryId ?? null) : null;
       if (entryId) await refuseFailedStackParent(session, selected.laneId, entryId);
@@ -787,6 +822,58 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     )
       throw nothingToLandError(selection.laneId);
     await session.journal.retain(finishChangedPathsKey, () => changed);
+    // Cheap refusals, in one pass before any heavy-slot wait, preflight or compose (Item 168e4ed8).
+    // Pins: a clean land composes against the checkout's pins; the Lane read above shows a move.
+    const stale =
+      clean && serverLane && serverLane.laneId === selection.laneId
+        ? stalePinsRefusal(
+            selection,
+            serverLane,
+            hostedRecoveryCommand(session.root, 'save', { message: 'Bring the Lane binding up to date' }),
+          )
+        : undefined;
+    const retry = { ...parameters };
+    delete retry.operationId;
+    const next = {
+      land: hostedRecoveryCommand(session.root, 'land --save', retry),
+      sync: hostedRecoveryCommand(session.root, 'save --sync', { laneId: selection.laneId }),
+    };
+    // An extra source input or a stacked parent can change the proof comparison.
+    const proofApplies = () => !command.dependencies.length && !command.after && !command.composeOperationId;
+    // One check selection read for a flagged proof, reused at submission.
+    let standardCheck: Promise<boolean> | undefined;
+    const standard = () =>
+      (standardCheck ??= (async () => {
+        let isStandard = false;
+        selectedCheck = checkSelection(session, command.check, () => {
+          isStandard = true;
+        });
+        // Check-selection errors still surface at submission, so they cannot hide source conflicts.
+        await selectedCheck.catch(() => {
+          isStandard = false;
+        });
+        return isStandard;
+      })());
+    const early = async (found: { queueProof?: QueueProofPreview | undefined; dirty?: boolean }) => {
+      const refusals: CheapRefusal[] = [];
+      if (found.dirty)
+        refusals.push({
+          code: 'LANE_DIRTY',
+          message:
+            'Files here changed after this land saved them, so its preflight would test other bytes than it lands. Nothing ran. Replay land --save to save them.',
+          recovery: { command: next.land },
+        });
+      if (stale) refusals.push(stale);
+      const proof = found.queueProof;
+      // A finding refuses here only against current main and the standard check: one main read,
+      // only when the local preview found a gap. Main moved since the preview: compose decides.
+      if (proof && proofApplies() && (await standard())) {
+        const main = await session.query<{ head?: string }>('projectHostedChannels:current', {});
+        if (main?.head === proof.main) refusals.push(queueProofRefusal(proof, next));
+      }
+      const error = cheapRefusalError(refusals);
+      if (error) throw error;
+    };
     // Agent defaults (preflight) judge the saved head this finish will land.
     if (session.finishGates) {
       const advice = await session.finishGates(
@@ -794,50 +881,19 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         selection.head,
         savedMarker?.selection.head === selection.head ? savedMarker.tree : undefined,
         command.message,
+        early,
       );
-      const proof = advice.queueProof;
-      // An extra source input or a stacked parent can change the proof comparison.
-      if (proof && !command.dependencies.length && !command.after && !command.composeOperationId) {
+      const proof = advice.queueProof as QueueProofPreview | undefined;
+      if (proof && proofApplies()) {
         checkProof = async mainHead => {
-          selectedCheck = undefined;
           // Use the main compose already reads. A finding for a superseded comparison is advisory.
           if (proof.main !== mainHead) return;
-          let standard = false;
-          selectedCheck = checkSelection(session, command.check, () => {
-            standard = true;
-          });
-          // Check-selection errors still surface after compose, so they cannot hide source conflicts.
-          await selectedCheck.catch(() => {
-            standard = false;
-          });
-          if (!standard) return;
-          const retry = { ...parameters };
-          delete retry.operationId;
-          const next = hostedRecoveryCommand(session.root, 'land --save', retry);
-          // Main changed a covered file (ec229a55): sync onto it, refresh the named proofs offline, then land.
-          if (proof.refresh) {
-            const sync = hostedRecoveryCommand(session.root, 'save --sync', { laneId: selection.laneId });
-            throw new ForgeError(
-              'QUEUE_PROOF_REQUIRED',
-              `${proof.message} Sync with ${sync}; after the refresh, run ${next}.`,
-              undefined,
-              {
-                sync,
-                command: next,
-              },
-            );
-          }
-          const attach = '.nforge/queue-proofs/<change>.json';
-          throw new ForgeError(
-            'QUEUE_PROOF_REQUIRED',
-            `${proof.message} Attach the proof at ${attach} in this Lane, then run ${next}.`,
-            undefined,
-            { attach, command: next },
-          );
+          if (!(await standard())) return;
+          throw cheapRefusalError([queueProofRefusal(proof, next)])!;
         };
       }
       if (Object.keys(advice).length) await session.journal.retain('finish-defaults', () => advice);
-    }
+    } else await early({});
     markLandStep('gated');
     command.inputs = [
       {
@@ -1009,4 +1065,84 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
 function revertField(session: HostedAgentSession, composeOperationId: string) {
   const revertOf = composedRevertOf(session, composeOperationId);
   return revertOf ? { revertOf } : {};
+}
+
+// Cheap refusals (Item 168e4ed8): kept here, beside their one caller, so the CLI/MCP graph gains no module.
+/** One refusal a land can name from local state or reads it already made (Item 168e4ed8). */
+type CheapRefusal = {
+  code: string;
+  message: string;
+  recovery?: Record<string, unknown>;
+};
+/** The local queue proof preview (src/preflight-hosted-checks.ts), as land retains it. */
+export type QueueProofPreview = {
+  main: string;
+  message: string;
+  refresh?: boolean;
+  detail?: QueueProofDetail;
+};
+
+const lines = (detail: QueueProofDetail | undefined) => [
+  ...(detail?.missing ?? []).map(item => `${item.path}: ${item.next}`),
+  ...(detail?.uncoverable ?? []).map(item => item.next),
+  ...(detail?.stale ?? []).map(item => `${item.path}: refresh with ${item.next}`),
+];
+
+/** QUEUE_PROOF_REQUIRED from the local preview: every path with its own next step, then the one
+ * land command. A proof main changed under needs a sync first (ec229a55). */
+function queueProofRefusal(proof: QueueProofPreview, next: { land: string; sync: string }): CheapRefusal {
+  const each = lines(proof.detail);
+  const steps = each.length ? ` Per path: ${each.join(' ')}` : '';
+  const detail = proof.detail && Object.keys(proof.detail).length ? { queueProof: proof.detail } : {};
+  if (proof.refresh)
+    return {
+      code: 'QUEUE_PROOF_REQUIRED',
+      message: `${proof.message} Sync with ${next.sync}; after the refresh, run ${next.land}.${steps}`,
+      recovery: { sync: next.sync, command: next.land, ...detail },
+    };
+  const attach = '.nforge/queue-proofs/<change>.json';
+  return {
+    code: 'QUEUE_PROOF_REQUIRED',
+    message: `${proof.message} Attach the proof at ${attach} in this Lane, then run ${next.land}.${steps}`,
+    recovery: { attach, command: next.land, ...detail },
+  };
+}
+
+/** Every cheap refusal found in one pass, as one error: the first one's code and recovery, and
+ * `refusals` naming each when there are several, so one fix round clears them all. */
+function cheapRefusalError(refusals: CheapRefusal[]) {
+  const [first] = refusals;
+  if (!first) return undefined;
+  if (refusals.length === 1) return new ForgeError(first.code, first.message, undefined, first.recovery);
+  return new ForgeError(
+    first.code,
+    `Land refused before any preflight or compose: ${refusals.length} checks failed. ${refusals
+      .map((refusal, at) => `${at + 1}) ${refusal.code}: ${refusal.message}`)
+      .join(' ')}`,
+    undefined,
+    {
+      ...first.recovery,
+      refusals: refusals.map(refusal => ({
+        code: refusal.code,
+        message: refusal.message,
+        ...(refusal.recovery ? { recovery: refusal.recovery } : {}),
+      })),
+    },
+  );
+}
+
+type Pins = { head: string; version: number; sourceVersion: number; lifecycleVersion: number };
+/** The Lane pins this land would compose against moved on the server: the Lane read land already
+ * made before any save says so, at no extra call. Compose would refuse WORK_STALE after the
+ * preflight; this names it first (Item 168e4ed8). */
+function stalePinsRefusal(local: Pins, server: Pins, save: string): CheapRefusal | undefined {
+  const moved = (['head', 'version', 'sourceVersion', 'lifecycleVersion'] as const).filter(
+    key => local[key] !== server[key],
+  );
+  if (!moved.length) return undefined;
+  return {
+    code: 'WORK_STALE',
+    message: `This checkout's Lane pins are stale: the server Lane moved (${moved.join(', ')}). Nothing ran. Bring the binding up to date with ${save}, then land again.`,
+    recovery: { command: save },
+  };
 }

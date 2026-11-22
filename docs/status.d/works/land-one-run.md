@@ -1,0 +1,7 @@
+Land names its cheap refusals first: a dirty Lane, stale Lane pins and a missing
+queue proof come back together, before any heavy-slot wait, preflight or
+compose. Queue proof refusals list every path with its own next step, and name
+files no replay can reach. A land that stopped on a transient failure or the
+preflight budget resumes instead of restarting. Preflight runs budget and
+contract guards early, kills a test file past its per-file limit and names it,
+and leaves no process running after it exits. The healthy path adds no calls.

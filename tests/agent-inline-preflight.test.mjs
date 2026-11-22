@@ -17,7 +17,7 @@ import {
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { queueProofPaths, REGISTRY } from '../scripts/core-queue-paths.mjs';
-import { verifyQueueProof } from '../scripts/test-queue-proof.mjs';
+import { REFRESH_QUEUE_PROOF, verifyQueueProof } from '../scripts/test-queue-proof.mjs';
 import { slimReceipt } from '../dist/receipt-slim.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { submitHostedLand } from '../dist/hosted-land-cli.js';
@@ -464,7 +464,7 @@ test('preflight and land scan a saved resolution against the main it merged in a
   );
 });
 
-async function queueProofFixture(t, { attach, standard = true } = {}) {
+async function queueProofFixture(t, { attach, standard = true, preflight = 'advise' } = {}) {
   const source = 'src/hosted-landing.ts';
   const receipt = '.nforge/queue-proofs/landing-notes.json';
   const saved = 'Saved synthetic landing change';
@@ -501,7 +501,7 @@ async function queueProofFixture(t, { attach, standard = true } = {}) {
     lane: { ...base, [source]: saved, ...(proofBytes ? { [receipt]: proofBytes } : {}) },
   });
   s.caps.main = s.main;
-  s.caps.agentDefaults = effectiveAgentDefaults({ preflight: 'advise' });
+  s.caps.agentDefaults = effectiveAgentDefaults({ preflight });
   const query = s.exchange.client.query;
   s.exchange.client.query = async (ref, args) => {
     const text = await query(ref, args);
@@ -541,7 +541,16 @@ test('preflight reports the same stale queue proof as the hosted check on saved 
   writeFileSync(join(s.root, receipt), JSON.stringify(proof));
   const from = s.calls.length;
   const preflight = await s.transport().dispatch('preflight', { run: false });
-  const expected = { main: s.main.head, code: 'QUEUE_PROOF_REQUIRED', message };
+  const detail = {
+    stale: [
+      {
+        path: source,
+        proofs: [receipt],
+        next: `\`${REFRESH_QUEUE_PROOF} ${receipt}\``,
+      },
+    ],
+  };
+  const expected = { main: s.main.head, code: 'QUEUE_PROOF_REQUIRED', message, detail };
   assert.deepEqual(preflight.result.queueProof, expected);
   assert.deepEqual(slimReceipt(preflight).result.queueProof, expected);
   const preflightCalls = s.calls.slice(from).map(call => call.name);
@@ -605,7 +614,12 @@ test('incident 9cd6c0ec: a proof main changed under refuses land before compose;
       const root = realpathSync(s.root);
       const sync = `nforge agent '${root}' save --sync '${JSON.stringify({ laneId: s.lane.laneId })}'`;
       const command = `nforge agent '${root}' land --save '${JSON.stringify({ after: null, dependencies: [], message })}'`;
-      assert.deepEqual(error.recovery, { sync, command });
+      const { queueProof, ...next } = error.recovery;
+      assert.deepEqual(next, { sync, command });
+      assert.deepEqual(
+        queueProof.stale.map(item => item.path),
+        ['src/hosted-landing.ts'],
+      );
       assert.ok(error.message.includes(`refresh-queue-proof.mjs ${receipt}`), error.message);
       assert.ok(error.message.includes(sync) && error.message.includes(command));
       return true;
@@ -650,7 +664,17 @@ test('incident 7e5f0ad3: missing queue proof refuses land before any hosted job,
     );
     const command = `nforge agent '${realpathSync(s.root)}' land --save '${JSON.stringify(retry)}'`;
     const attach = '.nforge/queue-proofs/<change>.json';
-    assert.deepEqual(error.recovery, { attach, command });
+    const { queueProof, ...next } = error.recovery;
+    assert.deepEqual(next, { attach, command });
+    // Item 168e4ed8: each missing path, the replays that reach it and the refresh command.
+    assert.deepEqual(queueProof.missing, [
+      {
+        path: 'src/hosted-landing.ts',
+        replays: [{ incident: '2bf85ddf', test: 'synthetic incident replay for landing notes' }],
+        next: `Add src/hosted-landing.ts to "changes" of a replay proof at ${attach} that names one of the replays that reach it (incident 2bf85ddf), then run \`${REFRESH_QUEUE_PROOF} ${attach}\`.`,
+      },
+    ]);
+    assert(error.message.includes(`src/hosted-landing.ts: Add src/hosted-landing.ts`));
     assert(error.message.includes(attach));
     assert(error.message.includes(command));
     return true;
@@ -708,6 +732,30 @@ test('incident 7e5f0ad3: missing queue proof refuses land before any hosted job,
     );
   }
   assert.deepEqual(calls[0], calls[1], 'the standard and custom normal paths use the same Convex calls');
+});
+
+test('Item 168e4ed8: missing queue proof refuses a required-preflight land before its preflight runs', async t => {
+  const { s } = await queueProofFixture(t, { preflight: 'require' });
+  t.mock.method(process.stderr, 'write', () => true);
+  const from = s.calls.length;
+  await assert.rejects(
+    submitHostedLand(
+      s.root,
+      { operationId: randomUUID(), message: 'Unproven core change' },
+      s.address,
+      s.transport(),
+    ),
+    error => {
+      assert.equal(error.code, 'QUEUE_PROOF_REQUIRED');
+      assert.deepEqual(
+        error.recovery.queueProof.missing.map(item => item.path),
+        ['src/hosted-landing.ts'],
+      );
+      return true;
+    },
+  );
+  assert.equal(readPreflightReceipt(s.root, s.lane.laneId), null, 'no preflight ran');
+  assert(!s.calls.slice(from).some(call => /Compose:prepare|Jobs:submit|Landing.*:enqueue$/.test(call.name)));
 });
 
 test('a queue proof preview on older main does not refuse a newer compose pin', async t => {

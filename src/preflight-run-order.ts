@@ -14,6 +14,10 @@
  *    out run right after step 4;
  * 2. declared guards and the learned guard set (as before);
  * 3. the change's own test files (as before: right after the guards);
+ * 3b. budget and contract guards among the must-run files (a file named for a budget, weight,
+ *    growth, ceiling, cost, contract, ratchet, baseline or limit guard, such as a tool-list weight,
+ *    growth, DB I/O or cost guard): a guard the landing check would fail on fails here first when
+ *    the plan is over budget (Item 168e4ed8). Membership never changes, only the order;
  * 3a. the tests that load a changed module, module by module, most specific module (fewest loaders)
  *    first, then the tests that run one through one other module, in the same module order, while
  *    they fit what the guards, the change's own tests and the first 10 s of fast files leave of the
@@ -37,6 +41,12 @@
  * 8. smoke and explicit-coverage tests (fixed smoke, document readers, slower scans, path rules).
  * Unprotected tiers follow in their own order. Membership never changes: the same files run, only
  * sooner or later. Pure: no file read, no call. */
+/** A test file named for a budget or contract guard (step 3b), on its own name only. */
+export const CONTRACT_GUARD_NAME =
+  /(?:^|[-_.])(?:budgets?|weights?|growth|ceilings?|costs?|contracts?|ratchet|baselines?|limits?|dbio)(?:[-_.]|$)/i;
+// The file name up to its first dot, in any ecosystem: budget.test.mjs, test_budget.py, budget_test.go.
+export const contractGuardTest = (test: string) =>
+  CONTRACT_GUARD_NAME.test(test.slice(test.lastIndexOf('/') + 1).split('.')[0]!);
 export const FAST_GUARD_SECONDS = 2;
 export const FAST_GUARDS_TOTAL_SECONDS = 30;
 export const FAST_ALWAYS_SECONDS = 10;
@@ -103,13 +113,20 @@ export function protectedRunOrder(input: RunOrderInput): string[] {
   const own = new Set(input.ownTests.filter(test => present.has(test) && !input.guards.has(test)));
   const guardSeconds = seconds(guardTests);
   const failing = input.failing ?? new Set<string>();
+  const fastTree = new Set(input.treeGuards.filter(timedFast));
+  // Step 3b's files (a fast repo-wide guard keeps step 1): each counts once, in step 3b only.
+  const contractSet = new Set(
+    protectedTests.filter(
+      test => contractGuardTest(test) && !input.guards.has(test) && !own.has(test) && !fastTree.has(test),
+    ),
+  );
   // Files that failed before: the learned tier and any protected file in `failing`.
   const failedBefore = [
     ...new Set([
       ...(input.tiers.find(item => item.tier === 'learned')?.tests ?? []),
       ...protectedTests.filter(test => failing.has(test)),
     ]),
-  ].filter(test => present.has(test) && !input.guards.has(test) && !own.has(test));
+  ].filter(test => present.has(test) && !input.guards.has(test) && !own.has(test) && !contractSet.has(test));
   const failedSet = new Set(failedBefore);
   // Step 3a, inside what the guards, the change's own tests and the first fast files leave of the
   // budget; each file counts once. Files that failed before get up to half of that room: first the
@@ -118,14 +135,20 @@ export function protectedRunOrder(input: RunOrderInput): string[] {
   // specific first, take the rest and whatever that half leaves unused, so neither side pushes the
   // other past the budget: a hub's learned loaders never crowd out the only test of a changed module.
   // A fast repo-wide guard keeps its place among the first fast files (step 1).
-  const fastTree = new Set(input.treeGuards.filter(timedFast));
   const groups = (input.specificModules ?? []).map(group =>
     group.tests.filter(
-      test => present.has(test) && !input.guards.has(test) && !own.has(test) && !fastTree.has(test),
+      test =>
+        present.has(test) &&
+        !input.guards.has(test) &&
+        !own.has(test) &&
+        !fastTree.has(test) &&
+        !contractSet.has(test),
     ),
   );
   const grouped = new Set(groups.flat());
-  const left = input.budgetSeconds - guardSeconds - seconds(own) - FAST_ALWAYS_SECONDS;
+  // Step 3b runs before 3a, so its files come out of 3a's room.
+  const contractSeconds = seconds(contractSet);
+  const left = input.budgetSeconds - guardSeconds - seconds(own) - contractSeconds - FAST_ALWAYS_SECONDS;
   const half = Math.max(0, left) / 2;
   const specificTests: string[] = [];
   const chosen = new Set<string>();
@@ -154,6 +177,7 @@ export function protectedRunOrder(input: RunOrderInput): string[] {
             input.budgetSeconds -
               guardSeconds -
               seconds(own) -
+              contractSeconds -
               specificSeconds -
               seconds(failedBefore.filter(test => !chosen.has(test))),
           ),
@@ -171,6 +195,7 @@ export function protectedRunOrder(input: RunOrderInput): string[] {
       !own.has(test) &&
       !input.guards.has(test) &&
       !failedSet.has(test) &&
+      !contractSet.has(test) &&
       !chosen.has(test),
   );
   let fastSeconds = 0;
@@ -184,6 +209,7 @@ export function protectedRunOrder(input: RunOrderInput): string[] {
   );
   const guards = take(guardTests);
   const ownFirst = take(protectedTests.filter(test => own.has(test)));
+  const contract = take(protectedTests.filter(test => contractSet.has(test)));
   const specific = take(specificTests);
   const learned = take([...failedBefore].sort(bySaving));
   // Fast files the room left out still run before named tests.
@@ -198,6 +224,7 @@ export function protectedRunOrder(input: RunOrderInput): string[] {
     ...fast,
     ...guards,
     ...ownFirst,
+    ...contract,
     ...specific,
     ...learned,
     ...fastLater,

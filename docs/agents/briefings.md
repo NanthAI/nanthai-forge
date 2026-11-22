@@ -266,7 +266,9 @@ For an **incident replay**, identify the incident and exact test title in
 your path in place of the example. Each matching entry names the incident, test file and
 title. The `paths` lists come from function calls observed during each isolated replay.
 If there is no matching entry, use an on-path bench cell or add a replay that reaches the
-path. To refresh the registry after replay or source changes, build the project and run
+path. A pure schema or validator module (all of its code runs at load) never appears in
+a replay's `paths`: prove it with an on-path bench cell. `QUEUE_PROOF_REQUIRED` lists such files
+under `recovery.queueProof.uncoverable`, and every other path with its own next step. To refresh the registry after replay or source changes, build the project and run
 `nforge heavy node scripts/incident-replay-coverage.mjs --write` from the Lane. The
 normal suite checks existing mappings during their replays. Registry edits schedule the
 named replays in the landing check. The read-only `--check` command verifies the mappings in

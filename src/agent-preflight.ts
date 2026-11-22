@@ -96,6 +96,7 @@ import {
 } from './project-test-runner.js';
 import { CODE_FILE, importGraphTests, jsImportGraph } from './js-import-graph.js';
 import { declaredPreflight, FORGE_CONFIG_FILE } from './project-config.js';
+import { FILE_TIMEOUT_ENV } from './agent-preflight-reporter.js';
 import {
   PREFLIGHT_LOCAL_BUDGET_SECONDS,
   PREFLIGHT_RUN_CEILING_SECONDS,
@@ -133,6 +134,31 @@ export const preflightRuntime = { filesystemEventHealth };
 
 /** Default local cost per selected test file at concurrency 1, used for the time estimate. */
 export const PREFLIGHT_SECONDS_PER_FILE = 4;
+/** Per-file kill limit (Item 168e4ed8). Signal: the file's measured seconds on this machine.
+ * Formula: 3 x measured, at least PREFLIGHT_FILE_LIMIT_FLOOR_SECONDS; a file never timed here gets
+ * PREFLIGHT_FILE_LIMIT_UNKNOWN_SECONDS. Override: preflight.fileTimeoutSeconds (forge.json or
+ * package.json forge). A file past it is killed with its process group and named as failed. */
+export const PREFLIGHT_FILE_LIMIT_FLOOR_SECONDS = 120;
+export const PREFLIGHT_FILE_LIMIT_UNKNOWN_SECONDS = 300;
+export function preflightFileLimitSeconds(declared: number | undefined, measuredMs: number | undefined) {
+  if (declared !== undefined) return declared;
+  return measuredMs === undefined
+    ? PREFLIGHT_FILE_LIMIT_UNKNOWN_SECONDS
+    : Math.max(PREFLIGHT_FILE_LIMIT_FLOOR_SECONDS, Math.ceil((3 * measuredMs) / 1000));
+}
+/** The project's declared per-file limit, when it is a positive number. */
+function declaredFileLimitSeconds(root: string) {
+  try {
+    const value = declaredPreflight(
+      'fileTimeoutSeconds',
+      laneText(root, 'package.json'),
+      laneText(root, FORGE_CONFIG_FILE),
+    )?.value;
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
 /** Default cost of one package command (it builds and tests whole packages) when neither this
  * machine nor a hosted check has timed one yet. */
 export const PREFLIGHT_SECONDS_PER_PACKAGE_COMMAND = 60;
@@ -230,6 +256,11 @@ export const preflightReceiptSchema = z
       .optional(),
     /** Planned tests not started because an earlier group had already failed. */
     stoppedForFailure: z.number().int().nonnegative().optional(),
+    /** Files killed at the per-file limit (a fixture that never resolves), with their run time. */
+    timedOut: z
+      .array(z.object({ file: z.string(), seconds: z.number().nonnegative() }).strict())
+      .max(10)
+      .optional(),
     /** The slowest test files of this run, so a long preflight names its cause. */
     slowest: z
       .array(z.object({ file: z.string(), ms: z.number().nonnegative() }).strict())
@@ -1543,6 +1574,7 @@ const observationSchema = z.union([
     failed: [] as string[],
     ms: {} as Record<string, number>,
     skipped: {} as Record<string, string>,
+    timedOut: undefined as { file: string; seconds: number }[] | undefined,
   })),
   z
     .object({
@@ -1550,6 +1582,7 @@ const observationSchema = z.union([
       failed: z.array(z.string()),
       ms: z.record(z.string(), z.number()),
       skipped: z.record(z.string(), z.string()).default({}),
+      timedOut: z.array(z.object({ file: z.string(), seconds: z.number() }).strict()).optional(),
     })
     .strict(),
 ]);
@@ -1650,6 +1683,7 @@ export function runPreflight(
   // The group whose run failed and the start of its error output (file-pinned failures replace the group).
   let failingGroup: string[] = [];
   let failureTail: string | undefined;
+  const timedOut: { file: string; seconds: number }[] = [];
   let buildMs: number | undefined;
   let testMs: number | undefined;
   let peakRssMb: number | null = null;
@@ -1745,11 +1779,13 @@ export function runPreflight(
       })();
       if (scripts?.['build:core']) {
         const buildStarted = Date.now();
-        const build = spawnSync('npm', ['run', '-s', 'build:core'], {
-          cwd: root,
-          env: buildAndTestEnv,
-          stdio: ['ignore', 2, 2],
-        });
+        // In its own process group like every preflight command: nothing it starts outlives preflight.
+        const build = spawnCaptured(
+          'npm',
+          ['run', '-s', 'build:core'],
+          { cwd: root, env: buildAndTestEnv },
+          false,
+        );
         exitCode = build.status;
         buildMs = Date.now() - buildStarted;
       }
@@ -1767,6 +1803,10 @@ export function runPreflight(
         const budgetMs = plan.local && plan.local.trim !== false ? plan.local.budgetSeconds * 1000 : Infinity;
         const stats = preflightFileStats(root);
         const fallbackSeconds = plan.local?.secondsPerFile ?? PREFLIGHT_SECONDS_PER_FILE;
+        const declaredFileLimit = declaredFileLimitSeconds(root);
+        const fileLimitMs = (group: string[]) =>
+          Math.max(...group.map(test => preflightFileLimitSeconds(declaredFileLimit, stats[test]?.ms))) *
+          1000;
         // The budget is a wall-time cap on this test phase. Tests run in plan order (mandatory, then
         // learned, direct, then the ranked tiers) in groups of about PREFLIGHT_GROUP_SECONDS, each sized
         // from known per-file times or this run's observed speed and never past the time left, so a slow
@@ -1861,7 +1901,11 @@ export function runPreflight(
             argv.slice(1),
             {
               cwd: root,
-              env: { ...env, FORGE_PREFLIGHT_REPORT: report },
+              env: {
+                ...env,
+                FORGE_PREFLIGHT_REPORT: report,
+                ...(plan.runner ? {} : { [FILE_TIMEOUT_ENV]: String(fileLimitMs(group)) }),
+              },
               stdio: ['ignore', 2, 2],
               ...(left !== null ? { timeout: Math.max(1_000, left) } : {}),
             },
@@ -1911,6 +1955,14 @@ export function runPreflight(
             );
             failedFiles.push(...group.filter(test => observed.failed.includes(test)));
             Object.assign(fileMs, observed.ms);
+            for (const hung of observed.timedOut ?? []) {
+              timedOut.push(hung);
+              if (exitCode === 0) exitCode = run.status || 124;
+              failingGroup = group;
+              const line = `✖ ${hung.file} timed out: killed after ${hung.seconds} s at the per-file limit of ${Math.round(fileLimitMs(group) / 1000)} s (a test that never resolves). Its process group was stopped.`;
+              process.stderr.write(`preflight: ${line}\n`);
+              failureTail = `${line}\n${failureTail ?? ''}`;
+            }
           } catch {
             /* Missing report: no per-file pass is reusable. */
           }
@@ -2070,6 +2122,7 @@ export function runPreflight(
     ...(skippedFiles.length ? { skipped: skippedFiles } : {}),
     ...(rerun ? { rerun } : {}),
     ...(stopped.length ? { stoppedForFailure: stopped.length } : {}),
+    ...(timedOut.length ? { timedOut: timedOut.slice(0, 10) } : {}),
     ...(staticResults.length ? { static: staticResults } : {}),
     ...(slowest.length ? { slowest } : {}),
     ...(plan.local

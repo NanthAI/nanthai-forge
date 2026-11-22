@@ -569,3 +569,42 @@ test('13ea93bf 2026-11-20 timeline-id miss: a test that runs a changed module th
   assert.ok(at('tests/learned-0.test.mjs') < at('tests/intent-detail.test.mjs'), plan.tests.join(' '));
   assert.ok(at('tests/learned-0.test.mjs') < at('tests/learned-1.test.mjs'), plan.tests.join(' '));
 });
+
+test('Item 168e4ed8: over budget, budget and contract guards run right after the own tests, then the loaders of changed modules', () => {
+  const smoke = Array.from({ length: 30 }, (_, i) => `tests/smoke-${String(i).padStart(2, '0')}.test.mjs`);
+  const tiers = [
+    {
+      tier: 'mandatory',
+      tests: [
+        ...smoke,
+        'tests/own.test.mjs',
+        'tests/mcp-tool-list-weight.test.mjs',
+        'tests/convex-dbio-budget.test.mjs',
+      ],
+    },
+    { tier: 'direct', tests: ['tests/near.test.mjs', 'tests/loader.test.mjs'] },
+  ];
+  const order = protectedRunOrder({
+    tiers,
+    isProtected: tier => protectedTiers.has(tier),
+    guards: new Set(),
+    treeGuards: [],
+    leadTests: ['tests/own.test.mjs'],
+    ownTests: ['tests/own.test.mjs'],
+    specificModules: [{ module: 'src/changed.ts', tests: ['tests/loader.test.mjs'] }],
+    // 33 files of 20 s against a 180 s budget: the clock stops most of them.
+    budgetSeconds: 180,
+    measuredSeconds: () => 20,
+    secondsFor: () => 20,
+    failureSeconds: () => 0,
+  });
+  assert.deepEqual(order.slice(0, 4), [
+    'tests/own.test.mjs',
+    'tests/mcp-tool-list-weight.test.mjs',
+    'tests/convex-dbio-budget.test.mjs',
+    'tests/loader.test.mjs',
+  ]);
+  // All four start inside the budget; membership never changes.
+  assert.deepEqual(started(order, () => 20, 180).slice(0, 4), order.slice(0, 4));
+  assert.deepEqual([...order].sort(), tiers.flatMap(item => item.tests).sort());
+});

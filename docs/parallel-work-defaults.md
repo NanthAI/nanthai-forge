@@ -729,14 +729,21 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   phase, protected tiers included: the run goes in groups of about 30 estimated seconds, each sized
   from known file times or the speed this run has observed and never past the time left, starts no
   file once the budget is spent (the first file always runs), and so ends within the budget plus
-  about one file. Because the clock can stop protected files, they run in this order: files this
+  about one file. A test file still running past its per-file limit (3 times its measured
+  time, at least 120 s; 300 s when never timed; `"fileTimeoutSeconds":N` overrides) is killed and
+  named in the receipt's `timedOut` and the failure, so a test that never resolves cannot hold a
+  heavy slot. Every command preflight runs (the build, typechecks, static checks and tests) gets its own process group: when the command ends,
+  anything it left running is killed, and a watchdog kills the group and removes its capture folder
+  when the preflight process itself exits for any reason (budget, error, signal or SIGKILL). A command whose wrapper is killed from outside is no longer waited on. Because the clock can stop protected files, they run in this order: files this
   machine timed at about 2 s or less, repo-wide guard tests for the change first, then files whose
   learned saving beats their seconds (ahead of the declared guards, which are never stopped, so they
   always start): the first 10 s of them always (so nothing after them starts more than 10 s later),
   up to 30 s while the guards, the change's own test files, the changed modules' tests below and the
   files that failed before still fit
   the budget; declared and learned guards; the change's own
-  test files; the tests that load a changed module, a whole module at a time, the module the fewest
+  test files; budget and contract guards (files named for a budget, weight, growth, ceiling, cost,
+  contract, ratchet, baseline, limit or DB I/O guard), so a guard the landing check would fail on
+  fails here first; the tests that load a changed module, a whole module at a time, the module the fewest
   tests load first, then the tests that run one through one other module, while they fit what the
   guards, own tests and the first 10 s of fast files leave of the budget, with up to half of that kept
   for files that failed before (loaders that failed before go first, across all modules; a module
@@ -825,9 +832,14 @@ check scans the composed Candidate and decides the outcome.
 For the standard Forge check, the same local preview verifies queue proof from
 saved paths, digests and available proof and replay registry files. With preflight
 enabled, `land --save` refuses a confirmed missing or stale proof for a single
-Lane before it composes, when the selected check runs the standard Forge recipe.
-`QUEUE_PROOF_REQUIRED` names the proof, where to attach it in the Lane and the
-command to retry after attaching it. When main also changed a covered file, composition gives
+Lane before its heavy-slot wait and preflight, when the selected check runs the standard Forge recipe
+(one fresh main read, only when the preview found a gap).
+`QUEUE_PROOF_REQUIRED` names every missing or stale path (never "and N more"), where to attach the
+proof in the Lane and the command to retry after attaching it. `recovery.queueProof` gives each
+path its own next step: the registered replays that reach it and the refresh command, the
+refresh command of each stale proof, and, under `uncoverable`, any changed core file no registered
+replay reaches. A replay records only code it calls, so a pure schema or validator module (all of
+its code runs at load) is proven with an on-path bench cell instead. When main also changed a covered file, composition gives
 that file new bytes, so a proof with no recorded replay scope, or whose Lane bytes are not the proven
 ones, refuses there too. A change of mode alone keeps the proven bytes. The refusal
 names the files, the `save --sync` command and the offline refresh, which re-runs only the
@@ -839,6 +851,16 @@ signatures and removed units stay bound. The planner pins that result for the st
 That path reads main's bytes of those files once. Otherwise it reads nothing extra.
 When static verification is the reported
 cause, the compact landing receipt retains the first safe coded diagnostic line.
+
+`land --save` checks the cheap refusals in one pass, after its save and before any heavy-slot wait,
+preflight or compose: an edited Lane folder (`LANE_DIRTY`), Lane pins the server Lane moved past
+(`WORK_STALE`, from the Lane read land already makes) and the queue proof above. The landing message limit is checked before
+any call. Several refusals come back as one error: the first one's
+code and recovery, and `recovery.refusals` naming each, so one fix round clears them all. A land
+that stopped before submitting on a transient `HOSTED_ACTION_FAILED` (not a server limit) or on
+`PREFLIGHT_BUDGET_EXCEEDED` is resumed by the next land of the same source and command, under the
+same or a fresh `operationId`: its saved preflight, compose and operation are reused, nothing runs
+twice. The journal keeps the stop's code (`finish-stopped`), so a later read can count it.
 
 - The landing carries `gates`: the CLI's preflight result for each Lane head it composed. The
   server finds those Lanes and heads in one indexed read of the composition. A landing that names

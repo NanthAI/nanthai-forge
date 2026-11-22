@@ -10488,9 +10488,7 @@
       "what": "The same case before submission: a proof main changed under refuses land before compose with the sync and offline refresh commands",
       "file": "tests/agent-inline-preflight.test.mjs",
       "paths": [
-        "src/hosted-compose.ts",
         "src/hosted-finish-guard.ts",
-        "src/hosted-land-gates.ts",
         "src/hosted-would-conflict.ts",
         "src/landing-freeze.ts",
         "src/queue-ahead-hosted.ts"

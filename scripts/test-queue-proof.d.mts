@@ -18,6 +18,20 @@ export type QueueProofGaps = {
 export const REFRESH_QUEUE_PROOF: string;
 export function queueProofGaps(changes: QueueProofChanges, reads: QueueProofReads): QueueProofGaps;
 export function queueProofMessage(gaps: Pick<QueueProofGaps, 'missing' | 'stale'>): string;
+export type QueueProofDetail = {
+  missing?: {
+    path: string;
+    replays: { incident: string; test: string }[];
+    moreReplays?: number;
+    next: string;
+  }[];
+  uncoverable?: { path: string; next: string }[];
+  stale?: { path: string; proofs: string[]; next: string }[];
+};
+export function queueProofDetail(
+  gaps: Pick<QueueProofGaps, 'missing' | 'stale'>,
+  registry: string | undefined,
+): QueueProofDetail;
 export function assertQueueProof(changes: QueueProofChanges, reads: QueueProofReads): Record<string, string>;
 export function planQueueProof(
   changes: QueueProofChanges,

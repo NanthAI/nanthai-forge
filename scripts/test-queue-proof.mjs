@@ -103,8 +103,8 @@ export const REFRESH_QUEUE_PROOF =
 const shellWord = word => (/^[\w./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`);
 const printable = path =>
   path.replace(/\p{Cc}/gu, char => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0'));
-const shown = paths =>
-  paths.slice(0, 5).map(printable).join(', ') + (paths.length > 5 ? ` and ${paths.length - 5} more` : '');
+// Every path, never "and N more": a builder fixes all of them in one pass (Item 168e4ed8).
+const shown = paths => paths.map(printable).join(', ');
 
 /** Validate retained links and their applicability in this exact checkout. No external lookups.
  * A qualifying proof covers a changed core file at its exact bytes, or at a scope the trusted
@@ -166,6 +166,61 @@ export function queueProofMessage({ missing, stale }) {
     );
   }
   return `QUEUE_PROOF_REQUIRED: ${parts.join(' ')} See “Attaching queue proof” in the agent briefings.`;
+}
+
+/** The replay registry entries whose recorded paths include each file (Item 168e4ed8). */
+function replaysFor(files, replays) {
+  const by = new Map(files.map(file => [file, []]));
+  for (const entry of replays)
+    if (Array.isArray(entry?.paths) && typeof entry.incident === 'string' && typeof entry.test === 'string')
+      for (const path of entry.paths) by.get(path)?.push({ incident: entry.incident, test: entry.test });
+  return by;
+}
+/** Per-path next steps for a QUEUE_PROOF_REQUIRED refusal (Item 168e4ed8): every missing core path
+ * with the registered replays that reach it and the command that writes its proof digests, every
+ * missing path no registered replay reaches (with what to do instead), and every stale path with
+ * the refresh command for its proofs. `registry` is the replay registry text; local, no lookups. */
+export function queueProofDetail({ missing, stale }, registry) {
+  const replays = registeredQueueReplays(registry);
+  const reach = replaysFor(missing, replays);
+  const proof = '.nforge/queue-proofs/<change>.json';
+  const covered = [],
+    uncoverable = [];
+  for (const path of missing) {
+    const found = reach.get(path);
+    if (found.length)
+      covered.push({
+        path,
+        replays: found.slice(0, 3),
+        ...(found.length > 3 ? { moreReplays: found.length - 3 } : {}),
+        next: `Add ${printable(path)} to "changes" of a replay proof at ${proof} that names one of the replays that reach it (${found
+          .slice(0, 3)
+          .map(item => `incident ${item.incident}`)
+          .join(
+            ', ',
+          )}${found.length > 3 ? ` and ${found.length - 3} other replays` : ''}), then run \`${REFRESH_QUEUE_PROOF} ${proof}\`.`,
+      });
+    else
+      uncoverable.push({
+        path,
+        next: `No registered replay reaches ${printable(path)}. A replay records only code it calls, so a module whose only code runs at load (a pure schema or validator module) can never be reached: prove it with an on-path bench cell (a bench proof whose rule lists it). Otherwise add a replay test that calls code in it, run \`nforge heavy node scripts/incident-replay-coverage.mjs --write\`, and attach that replay's proof.`,
+      });
+  }
+  const refresh = [...stale]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([path, proofs]) => ({
+      path,
+      proofs: [...proofs].sort(),
+      next: `\`${REFRESH_QUEUE_PROOF} ${[...proofs]
+        .sort()
+        .map(item => shellWord(printable(item)))
+        .join(' ')}\``,
+    }));
+  return {
+    ...(covered.length ? { missing: covered } : {}),
+    ...(uncoverable.length ? { uncoverable } : {}),
+    ...(refresh.length ? { stale: refresh } : {}),
+  };
 }
 
 /** Throws QUEUE_PROOF_REQUIRED; returns the files a scope covered. */

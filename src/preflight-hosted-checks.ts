@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { REGISTRY, queueProofPaths } from '../scripts/core-queue-paths.mjs';
-import { queueProofGaps, queueProofMessage, validExercisedScope } from '../scripts/test-queue-proof.mjs';
+import {
+  queueProofDetail,
+  queueProofGaps,
+  queueProofMessage,
+  validExercisedScope,
+} from '../scripts/test-queue-proof.mjs';
 import { scrubText } from './client-error-text.js';
 import { STANDARD_CHECK_ENTRY } from './standard-check.js';
 import type { readSource } from './files.js';
@@ -145,16 +150,17 @@ function previewQueueProof(
   };
   try {
     for (const path of changed.receipts) candidate(path);
+    const readText = (path: string) => {
+      const file = candidate(path);
+      if (!file && path !== REGISTRY) return 'null';
+      if (!file) throw new Error();
+      if (file.mode === 'symlink') throw new Error();
+      const bytes = read(file);
+      if (!bytes) throw new Error();
+      return bytes.toString('utf8');
+    };
     const gaps = queueProofGaps(changed, {
-      readText: path => {
-        const file = candidate(path);
-        if (!file && path !== REGISTRY) return 'null';
-        if (!file) throw new Error();
-        if (file.mode === 'symlink') throw new Error();
-        const bytes = read(file);
-        if (!bytes) throw new Error();
-        return bytes.toString('utf8');
-      },
+      readText,
       // No proof digest names composed bytes this preview cannot produce.
       digest: path => (composed.has(path) ? 'composed' : sourceBlob(path)),
       // The planner tests main's change against the scope; the Lane's own bytes must be the proven ones.
@@ -166,9 +172,17 @@ function previewQueueProof(
     if (!gaps.missing.length && !gaps.stale.size) return undefined;
     const code = 'QUEUE_PROOF_REQUIRED';
     const message = queueProofMessage(gaps).replace(/\s+/g, ' ');
+    let registry: string | undefined;
+    try {
+      registry = readText(REGISTRY);
+    } catch {
+      /* No readable registry here: no per-path detail rather than a wrong "no replay reaches it". */
+    }
     return {
       code,
-      message: scrubText(message, 700),
+      // Every path is named (Item 168e4ed8): the cap only bounds a pathological list.
+      message: scrubText(message, 4000),
+      ...(registry === undefined ? {} : { detail: queueProofDetail(gaps, registry) }),
       ...([...gaps.stale.keys()].some(path => composed.has(path)) ? { refresh: true } : {}),
     };
   } catch {
