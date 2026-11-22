@@ -224,22 +224,32 @@ test('incomplete approval coverage is reported, not read as none', () => {
   assert.equal(view.approvalsComplete, false);
 });
 
-test('one progress definition (3fa3187d): Done is all closed Issues, today beside it, capped figures read N+', async () => {
+test('one progress definition (3fa3187d): Done is all closed Issues, Left is planned plus proposed (d3357f40), capped figures read N+', async () => {
   const { progressOf, progressCells } = await import(moduleUrl('../web/src/app/progress.ts'));
   const issue = { closed: 579, inProgress: 57, open: 237, proposed: 8, abandoned: 4 };
   const now = Date.parse('2026-11-17T15:00:00Z');
   const exact = progressOf({ exact: true, issue, closedToday: { day: '2026-11-17', n: 12 } }, now);
-  assert.deepEqual(exact, { done: 579, inProgress: 57, left: 237, proposed: 8, today: 12, atLeast: false });
+  assert.deepEqual(exact, { done: 579, inProgress: 57, left: 245, proposed: 8, today: 12, atLeast: false });
   const cells = progressCells(exact, { inProgress: '3 Lanes open' });
   assert.deepEqual(
     [cells.done.n, cells.done.more, cells.done.atLeast, cells.left.more, cells.inProgress.more],
-    [579, '12 today', false, '8 proposed', '3 Lanes open'],
+    [579, '12 today', false, undefined, '3 Lanes open'],
   );
   assert.equal(progressOf({ exact: true, issue, closedToday: { day: '2026-11-16', n: 9 } }, now).today, 0);
   const capped = progressCells(progressOf({ exact: false, issue, closedToday: null }, now));
   assert.deepEqual(
     [capped.done.atLeast, capped.inProgress.atLeast, capped.left.atLeast, capped.done.more, capped.left.more],
-    [true, true, true, undefined, '8+ proposed'],
+    [true, true, true, undefined, undefined],
+  );
+  assert.equal(
+    capped.left.n,
+    245,
+    'Left counts the proposals too, so the strip and the headline share one number',
+  );
+  assert.equal(
+    progressCells(exact, { left: 'next: X' }).left.more,
+    'next: X',
+    "only the page's own hint rides beside Left",
   );
   assert.equal(progressOf(undefined), null, 'no read is loading, never zero');
 });

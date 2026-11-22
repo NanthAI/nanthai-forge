@@ -159,7 +159,8 @@ test('the plan read lists live work and counts settled Items of live Initiatives
   assert.equal(group.lines.find(line => line.row.id === second.id).blockedBy.id, first.id);
   // The mock's sentence (02-plan-board, lead mock check 2026-11-22): left and next, then in progress and what waits
   // on the reader; with the standing line's figures it uses those, so the two never disagree.
-  assert.equal(planSentence(view).bold, '3 Items are left; next is Item 004.');
+  assert.equal(view.left, view.planned + 1, 'Left is planned plus proposed (d3357f40)');
+  assert.equal(planSentence(view).bold, `${view.left} Items are left; next is Item 004.`);
   assert.deepEqual(planSentence(view, { left: 7, inProgress: 5, atLeast: false, waitOnYou: 2 }), {
     bold: '7 Items are left; next is Item 004.',
     rest: '5 in progress, 2 of them wait on you.',
@@ -695,4 +696,24 @@ test('board Lane words join loaded reads only: the newest Lane decides, question
   assert.deepEqual(lanesNeedingYou(needs, 1), { n: 1, atLeast: false });
   assert.deepEqual(lanesNeedingYou({ ...needs, more: 3 }, 1), { n: 1, atLeast: true });
   assert.equal(lanesNeedingYou(undefined, 1), null);
+});
+
+test('d3357f40: Left counts proposed Items with planned ones, in the headline and without the project figures', () => {
+  const planned = item({ title: 'Reuse the buffer' }, 0);
+  const idea = item({ title: 'Drop the CommonJS build?', status: 'proposed' }, 1);
+  const moving = item({ title: 'Stream parser', status: 'in-progress' }, 2);
+  const view = planView({
+    rows: JSON.stringify([planned, idea, moving]),
+    more: false,
+    settled: [],
+    canEdit: true,
+  });
+  assert.equal(view.left, 2, 'one planned plus one proposed');
+  assert.equal(planSentence(view).bold, '2 Items are left; next is Reuse the buffer.');
+  const only = planView({ rows: JSON.stringify([idea]), more: false, settled: [], canEdit: true });
+  assert.equal(
+    planSentence(only).bold,
+    '1 Item is left; none is ready to pick up.',
+    'an Idea alone is still left',
+  );
 });

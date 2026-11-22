@@ -789,7 +789,7 @@ export function PlanScreenView({
               <b>{sentence.bold}</b> {sentence.rest}
             </>
           ) : (
-            'Loading the plan…'
+            'The plan.'
           )
         }
       >

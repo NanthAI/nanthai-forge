@@ -61,6 +61,8 @@ export type PlanView = {
   next: PlanRow | null;
   live: number;
   planned: number;
+  /** Left: planned plus proposed Items, the figure the standing line calls Left (web/src/app/progress.ts). */
+  left: number;
   inProgress: number;
   more: boolean;
   canEdit: boolean;
@@ -165,6 +167,7 @@ export function planView(
     next,
     live: items.length,
     planned: count('open'),
+    left: count('open') + count('proposed'),
     inProgress: count('in-progress'),
     more: read.more,
     canEdit: read.canEdit,
@@ -189,7 +192,7 @@ const items = (n: number, atLeast: boolean) =>
 /** The page sentence, as the board mock says it (02-plan-board): "7 Items are left; next is X. 5 in progress, 2 of
  * them wait on you." Left and In progress are the standing line's own figures, so the two never disagree. */
 export function planSentence(view: PlanView, figures?: PlanFigures | null): { bold: string; rest: string } {
-  const left = figures?.left ?? view.planned;
+  const left = figures?.left ?? view.left;
   const inProgress = figures?.inProgress ?? view.inProgress;
   const atLeast = figures ? figures.atLeast : view.more;
   const waits = figures?.waitOnYou ?? 0;

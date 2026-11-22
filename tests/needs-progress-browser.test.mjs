@@ -101,7 +101,7 @@ test('Needs me: exact progress, N+ when capped, a withdrawn landing under FYI; a
       const [done, inProgress, left] = await standing(page);
       assert.match(done, /^Done 579 Items · 12 today$/);
       assert.match(inProgress, /^In progress 57 Items/);
-      assert.match(left, /^Left 237 Items · 8 proposed$/);
+      assert.match(left, /^Left 245 Items$/);
       // FYI is the quiet group of Item 48049998: the withdrawal is a row there, never counted in Needs you.
       assert.deepEqual(await page.getByText(/^Refused$/).allTextContents(), []);
       assert.match(
@@ -118,7 +118,7 @@ test('Needs me: exact progress, N+ when capped, a withdrawn landing under FYI; a
       const [done, inProgress, left] = await standing(page);
       assert.match(done, /^Done 200\+ Items$/);
       assert.match(inProgress, /^In progress 7\+ Items/);
-      assert.match(left, /^Left 49\+ Items · 3\+ proposed$/);
+      assert.match(left, /^Left 52\+ Items$/);
     });
     await t.test('axe and widths: both themes, desk and phone', async t => {
       for (const viewport of [DESK, PHONE]) {

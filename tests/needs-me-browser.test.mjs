@@ -147,13 +147,12 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
   }
   const region = (page, name) => page.locator(`section.region[aria-label="${name}"]`);
   try {
-    for (const { name, query, count, proposed, unit } of [
-      { name: 'exact', query: {}, count: ['1,207', '1', '3'], proposed: '2 proposed', unit: 'Item' },
+    for (const { name, query, count, unit } of [
+      { name: 'exact', query: {}, count: ['1,207', '1', '5'], unit: 'Item' },
       {
         name: 'capped',
         query: { capped: '1' },
-        count: ['989+', '1+', '3+'],
-        proposed: '2+ proposed',
+        count: ['989+', '1+', '5+'],
         unit: 'Items',
       },
     ]) {
@@ -161,17 +160,19 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
         `3fa3187d: Needs me and Plan render the same ${name} project counts with an Initiative filter`,
         async t => {
           const initiative = '00000000-0000-4000-8000-000000000001';
-          // The Left detail appears when the project counts arrive.
+          // The stacked bar is drawn once the project counts arrive.
           const options = {
             fixture: '/progress.html',
             locale: 'en-US',
-            ready: '.pstate .ps:last-child .more',
+            ready: '.pstate .roll',
           };
           const needs = await open(t, DESK, 'needs', 'dark', { ...options, query });
           const plan = await open(t, DESK, 'plan', 'dark', { ...options, query: { ...query, initiative } });
           const standing = async page => {
             const scope = page.getByRole('navigation', { name: 'Where the project stands' });
-            assert.equal(await scope.getByText('Items in this project', { exact: true }).isVisible(), true);
+            // The bar is the strip's first part and names itself for readers (mock 02-plan-board: no label line).
+            assert.match(await scope.getByRole('img').getAttribute('aria-label'), /^Items in this project: /);
+            assert.equal(await scope.getByText('Items in this project', { exact: true }).count(), 0);
             assert.equal(
               await scope.locator('.roll').evaluate(roll => {
                 const edge = roll.getBoundingClientRect().right;
@@ -189,17 +190,14 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
           const expected = [
             ['Done', count[0], 'Items'],
             ['In progress', count[1], unit],
-            ['Left', count[2], 'Items', `· ${proposed}`],
+            ['Left', count[2], 'Items'],
           ];
           assert.deepEqual(await standing(needs), expected, 'Needs me project labels, units and figures');
-          // Plan names its next Item before the proposals (mock 02-plan-board, d3357f40); the figures are the same.
+          // Plan names its next Item beside Left (mock 02-plan-board, d3357f40); Left already counts the proposals.
           const planned = await standing(plan);
-          assert.ok(
-            planned[2].at(-1).startsWith('· next: ') && planned[2].at(-1).endsWith(`, ${proposed}`),
-            planned[2].at(-1),
-          );
+          assert.ok(planned[2].at(-1).startsWith('· next: '), planned[2].at(-1));
           assert.deepEqual(
-            planned.map((cell, i) => (i === 2 ? [...cell.slice(0, -1), `· ${proposed}`] : cell)),
+            planned.map((cell, i) => (i === 2 ? cell.slice(0, -1) : cell)),
             expected,
             'Plan project labels, units and figures',
           );

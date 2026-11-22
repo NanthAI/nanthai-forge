@@ -1442,15 +1442,46 @@ test('plan views and bulk bar: real components keep the view in the address and 
         const standing = page.getByRole('navigation', { name: 'Where the project stands' });
         assert.match(await standing.textContent(), /Done127Items· 14 landed today/);
         assert.match(await standing.textContent(), /In progress2Items· 3 Lanes open, 1 need you/);
+        // Left is planned plus proposed (d3357f40 check 2), the same figure as the sentence below; only the next hint rides beside it.
+        const left = Number((await standing.textContent()).match(/Left(\d+)Items/)?.[1]);
+        assert.ok(left > 5, 'Left counts the proposed Items with the planned ones');
         assert.match(
           await standing.textContent(),
-          /Left5Items· next: Bench the parser against the old reader, \d+ proposed/,
+          /Left\d+Items· next: Bench the parser against the old reader$/,
         );
-        assert.doesNotMatch(await standing.textContent(), /loading/);
+        assert.doesNotMatch(await standing.textContent(), /loading|proposed/);
+        // The strip as the mock draws it: the bar inline first, then Done, In progress and Left, with no label line.
+        assert.equal(await standing.getByText('Items in this project', { exact: true }).count(), 0);
+        assert.match(
+          await standing.getByRole('img').getAttribute('aria-label'),
+          new RegExp(`^Items in this project: .*, ${left} left$`),
+        );
+        const tops = await standing
+          .locator('.ps')
+          .evaluateAll(nodes => nodes.map(node => Math.round(node.getBoundingClientRect().top)));
+        if (width === 1440) {
+          assert.equal(new Set(tops).size, 1, `one line at 1440: ${tops}`);
+          assert.ok((await standing.boundingBox()).height < 56, 'the strip is one line high');
+        }
+        const hint = standing.locator('.ps').last().locator('.more');
+        assert.equal(await hint.getAttribute('title'), 'next: Bench the parser against the old reader');
+        if (width === 390) {
+          // One line, cut with an ellipsis; the title holds the whole hint.
+          assert.equal(
+            await standing
+              .locator('.ps')
+              .last()
+              .evaluate(node => node.getBoundingClientRect().height < 30),
+            true,
+          );
+          assert.equal(await hint.evaluate(node => getComputedStyle(node).textOverflow), 'ellipsis');
+        }
         assert.ok(await standing.locator('.roll i.ok').count(), 'the stacked bar draws the done Items');
         assert.match(
           await main.locator('.sit').textContent(),
-          /^5 Items are left; next is Bench the parser against the old reader\. 2 in progress, 1 of them waits on you\.$/,
+          new RegExp(
+            `^${left} Items are left; next is Bench the parser against the old reader\\. 2 in progress, 1 of them waits on you\\.$`,
+          ),
         );
         const row = title => main.locator('.brow').filter({ has: page.getByRole('link', { name: title }) });
         const held = row('Recover from a truncated frame without losing the next one');
@@ -1515,6 +1546,8 @@ test('plan views and bulk bar: real components keep the view in the address and 
     {
       const { page, errors, context } = await open(1440, 'dark', '?view=board&loading-plan');
       assert.equal(await page.locator('.plan-bwrap[aria-busy="true"] .bgrid.heads > div').count(), 3);
+      // The mock's loading sentence, exactly (board-loading-1440-light).
+      assert.equal((await page.locator('.sit').textContent()).trim(), 'The plan.');
       assert.deepEqual(errors, []);
       await context.close();
     }

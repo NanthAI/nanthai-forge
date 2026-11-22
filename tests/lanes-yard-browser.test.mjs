@@ -413,7 +413,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
           const said = (await stands.textContent()).replace(/\s+/g, ' ');
           assert.match(said, /Done31ItemsIn progress/);
           assert.match(said, /In progress4Items· 11 Lanes open, 1 needs you/);
-          assert.match(said, /Left9Items· 2 proposed/);
+          assert.match(said, /Left11Items$/);
           assert.doesNotMatch(said, /not reported/);
           assert.equal(
             await page.evaluate(() => window.forgeReads.adds),

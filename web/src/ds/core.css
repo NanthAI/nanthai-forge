@@ -365,16 +365,17 @@
     details.sumdec > summary .meta { grid-column: 1 / -1; grid-row: 3; flex-wrap: wrap; white-space: normal; gap: 2px var(--s-3); }
     details.sumdec[open] > summary { grid-template-columns: minmax(0, 1fr) 28px; } details.sumdec[open] > summary .meta { grid-row: 2; }
   }
-  .pstate { display: flex; align-items: center; gap: var(--s-2) var(--s-6); flex-wrap: wrap; min-height: var(--ph-h); padding: var(--s-2) var(--gut-head); background: var(--surface); border-bottom: var(--rule) solid var(--line); min-width: 0; }
-  .pstate-scope { flex: 0 1 256px; display: flex; align-items: center; gap: var(--s-2); color: var(--text-2); font-size: var(--t-small); }
-  .pstate-scope .roll { flex: 1; min-width: 64px; height: 9px; gap: var(--rule); }
-  .pstate-scope .roll i { min-width: 0; max-width: none; }
+  .pstate { display: flex; align-items: center; gap: var(--s-2) var(--s-6); min-height: var(--ph-h); padding: var(--s-2) var(--gut-head); background: var(--surface); border-bottom: var(--rule) solid var(--line); min-width: 0; }
+  .pstate > .roll { flex: 0 1 220px; min-width: 96px; height: 9px; gap: var(--rule); }
+  .pstate > .roll i { min-width: 0; max-width: none; }
   .pstate .ps { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; color: var(--text-2); font-size: var(--t-small); white-space: nowrap; }
+  /* On one line the last cell (Left, with the next Item's title) gives way first. */
+  .pstate .ps:not(:last-child) { flex-shrink: 0.03; }
   .pstate .ps .st { align-self: center; }
   .pstate .ps b { color: var(--text); font: var(--w-bold) var(--t-body)/1 var(--font-mono); font-variant-numeric: tabular-nums; }
-  .pstate .ps .more { overflow-wrap: anywhere; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .pstate .ps .more { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   @media (hover: hover) and (pointer: fine) { .pstate a.ps:hover { color: var(--text); } .pstate a.ps:hover .more { color: var(--text-2); } }
-  @media (max-width: 860px) { .pstate { padding-inline: var(--gut); gap: var(--s-1) var(--s-4); } .pstate-scope { flex-basis: 100%; } .pstate .ps { flex: 1 1 100%; white-space: normal; flex-wrap: wrap; } .pstate a.ps { min-block-size: 24px; align-items: center; } }
+  @media (max-width: 860px) { .pstate { flex-wrap: wrap; padding-inline: var(--gut); gap: var(--s-1) var(--s-4); } .pstate > .roll { flex-basis: 100%; } .pstate .ps { flex: 1 1 100%; } .pstate a.ps { min-block-size: 24px; align-items: center; } }
   [data-weight="ref"] .nums b { font-size: var(--t-body); line-height: var(--lh-body); letter-spacing: 0; }
   [data-weight="ref"] .nums > div { padding-block: var(--s-2); }
   [data-weight="ref"] .nums span { color: var(--ref-ink-2); }

@@ -350,7 +350,11 @@ export function Standing({ of, done, inProgress, left }: StandingProps) {
         </span>
         <b>{amount(value.n, value.atLeast)}</b>
         <span>{value.n === 1 && !value.atLeast ? unit[0] : unit[1]}</span>
-        {value.more ? <span className="more">· {value.more}</span> : null}
+        {value.more ? (
+          <span className="more" title={typeof value.more === 'string' ? value.more : undefined}>
+            · {value.more}
+          </span>
+        ) : null}
       </>
     );
     return value.href ? (
@@ -363,17 +367,18 @@ export function Standing({ of, done, inProgress, left }: StandingProps) {
   };
   return (
     <nav className="pstate" aria-label="Where the project stands">
-      {of === 'app' ? (
-        <span className="pstate-scope">
-          <span>Items in this project</span>
-          <span className="roll" aria-hidden="true">
-            {Array.from({ length: ticks }, (_, i) => (
-              <i
-                key={i}
-                className={i * step < done.n ? 'ok' : i * step < done.n + inProgress.n ? 'run' : undefined}
-              />
-            ))}
-          </span>
+      {of === 'app' && ticks ? (
+        <span
+          className="roll"
+          role="img"
+          aria-label={`Items in this project: ${amount(done.n, done.atLeast)} of ${total.toLocaleString()} done, ${amount(inProgress.n, inProgress.atLeast)} in progress, ${amount(left.n, left.atLeast)} left`}
+        >
+          {Array.from({ length: ticks }, (_, i) => (
+            <i
+              key={i}
+              className={i * step < done.n ? 'ok' : i * step < done.n + inProgress.n ? 'run' : undefined}
+            />
+          ))}
         </span>
       ) : null}
       {cell('Done', 'passed', 'passed', done, units.done)}

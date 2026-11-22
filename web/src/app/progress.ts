@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // One definition of the project's progress (Item 3fa3187d), for Needs me and Plan: Issues in this project, from the
-// stored counter (convex/projectPlanCounts.ts). Done is every closed Issue, In progress is in-progress, Left is open,
-// and proposed Issues are named beside Left. A figure from a capped read is a lower bound: shown "N+", never bare.
+// stored counter (convex/projectPlanCounts.ts). Done is every closed Issue, In progress is in-progress, and Left is
+// planned plus proposed (the mock's "7 Items left" includes the Ideas). A figure from a capped read is a lower bound:
+// shown "N+", never bare.
 import type { StandingCell } from '../ds';
 
 export type PlanCountsRead = {
@@ -25,7 +26,7 @@ export function progressOf(read: PlanCountsRead | undefined, now = Date.now()): 
   return {
     done: read.issue.closed,
     inProgress: read.issue.inProgress,
-    left: read.issue.open,
+    left: read.issue.open + read.issue.proposed,
     proposed: read.issue.proposed,
     today: !read.exact ? null : read.closedToday?.day === day ? read.closedToday.n : 0,
     atLeast: !read.exact,
@@ -43,8 +44,6 @@ export function progressCells(
     hrefs?: { done?: string; inProgress?: string; left?: string };
   } = {},
 ): { done: StandingCell; inProgress: StandingCell; left: StandingCell } {
-  const join = (...words: (string | false | null | undefined)[]) =>
-    words.filter(Boolean).join(', ') || undefined;
   if (!progress)
     return {
       done: { n: 0, more: 'loading', href: extra.hrefs?.done },
@@ -67,12 +66,8 @@ export function progressCells(
     left: {
       n: progress.left,
       atLeast: progress.atLeast,
-      // The page's own fact first (Plan: the next Item), then the proposals beside Left.
-      more: join(
-        extra.left,
-        progress.proposed > 0 &&
-          `${progress.proposed.toLocaleString()}${progress.atLeast ? '+' : ''} proposed`,
-      ),
+      // Left already counts the proposals; only the page's own fact (Plan: the next Item) goes beside it.
+      more: extra.left,
       href: extra.hrefs?.left,
     },
   };
