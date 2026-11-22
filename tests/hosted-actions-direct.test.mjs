@@ -16,6 +16,9 @@ import { savePin } from '../dist/hosted-save.js';
 import { OPTIONAL_PACK_JOB, requiredJobsConclusion } from '../dist/hosted-check-verdict.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { fakeSourceR2 } from './convex-source-r2-fixture.mjs';
+import { waitEventLine } from '../dist/hosted-wait-line.js';
+import { providerRetryDelay } from '../dist/ci-provider-recovery.js';
+import { landingStateOf } from '../dist/landing-state.js';
 const { githubAppJwt, installationToken, actionsPermissions } = await import(
   moduleUrl('../convex/githubAppToken.ts')
 );
@@ -3726,4 +3729,180 @@ test('keep the run F2: the first session after the plan stamps the shard start o
     await s.call(sessions, 'session', s.input());
     assert.equal(row().shardStartedAt, first, 'one write per run');
   }
+});
+
+/** The words a waiting agent and `status` read for a check whose run holds this reason. The landing
+ * turns any `provider-delayed:` run reason into `pending-infra` (hosted-provider-delay.test.mjs
+ * drives that forwarding through the real landing); this renders the real reason strings. */
+const landingWords = reason => {
+  assert.match(reason, /^provider-delayed:/, 'only a provider-delayed reason reaches status and the wait');
+  const record = { observation: { state: 'pending', pendingReason: 'pending-infra' }, providerDelay: reason };
+  return {
+    label: landingStateOf(record).label,
+    line: waitEventLine({
+      type: 'submission',
+      operationId: randomUUID(),
+      submission: { phase: 'checking', ...record },
+      providerDelay: reason,
+    }).line,
+  };
+};
+const providerFetch = (t, reads, answer) =>
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (url.endsWith('/installation')) return Response.json({ id: 9 });
+    if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+    const visibility = repositoryRead(url);
+    if (visibility) return visibility;
+    if (url.endsWith('/dispatches')) return Response.json({ workflow_run_id: 123 });
+    reads.push(url);
+    return Response.json(answer(url));
+  });
+const appVariables = t =>
+  variables(t, {
+    GITHUB_APP_ID: '12345',
+    GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+  });
+const confirmTasks = s =>
+  s.scheduled.filter(item => item.name.endsWith('projectHostedActionsVerdict:confirm'));
+
+test('incident 238b3573 replay: startup_failure with no webhook settles within five minutes, the retry and land wait say why, healthy adds zero reads', async t => {
+  // 2026-11-11 20:26/20:29Z: GitHub accepted the dispatch, marked the run startup_failure and
+  // never sent workflow_run. Forge showed `preparing` until the 12 h watchdog.
+  for (const healthy of [false, true])
+    await t.test(healthy ? 'healthy startup' : 'startup_failure, no webhook', async st => {
+      appVariables(st);
+      const s = await fixture(st);
+      const reads = [];
+      providerFetch(st, reads, () => ({ id: 123, status: 'completed', conclusion: 'startup_failure' }));
+      const ctx = { runMutation: (ref, input) => s.raw(direct, getFunctionName(ref).split(':')[1], input) };
+      await direct.dispatch._handler(ctx, s.id);
+      const [task] = reconcileTasks(s);
+      const watchdog = s.scheduled.find(item => item.name.endsWith('projectHostedActionsDirect:expire'));
+      assert.equal(task.delay, 5 * 60_000);
+      assert.equal(watchdog.delay, 12 * 60 * 60_000, 'the 12 h watchdog is the only other backstop');
+      if (healthy) {
+        await s.prepare();
+        assert(s.cancelled.includes(task.id), 'a healthy startup cancels the read in its existing write');
+        await direct.reconcile._handler(ctx, task.input);
+        assert.equal(reads.length, 0, 'healthy path: zero added provider reads');
+        assert.equal((await s.status(s.run.id)).failureReason, undefined);
+        return;
+      }
+      assert.equal(reads.length, 0, 'nothing is read before the bounded deadline');
+      await direct.reconcile._handler(ctx, task.input);
+      assert.equal(reads.length, 1, 'one lookup per affected check');
+      const run = await s.status(s.run.id);
+      assert.equal(run.status, 'runner-unavailable');
+      assert.match(run.failureReason, /^Provider outage: GitHub concluded startup_failure/);
+      // The platform retry carries the settled reason; status and the land wait show it.
+      const words = landingWords(providerRetryDelay(run.failureReason));
+      assert.equal(words.label, 'Waiting for check infrastructure');
+      assert.match(
+        words.line.providerDelay,
+        /^provider-delayed: retrying after Provider outage: .*startup_failure/,
+      );
+    });
+});
+
+test('incident 238b3573 replay: twelve passing shards with run and eleven jobs in_progress read a bounded series and show provider-delayed words', async t => {
+  // 2026-11-11 20:19Z: all 12 shards passed, GitHub kept the run and 11 jobs in_progress.
+  const offsets = [10_000, 30_000, 5 * 60_000, 30 * 60_000, 60 * 60_000, 2 * 60 * 60_000, 4 * 60 * 60_000];
+  const passShards = async s => {
+    await s.bind();
+    await s.prepare();
+    for (let index = 0; index < 12; index++)
+      await s.call(results, 'result', { ...s.input(), result: JSON.stringify({ index, exitCode: 0 }) });
+  };
+  await t.test('healthy: the signed event arrives first', async st => {
+    appVariables(st);
+    const reads = [];
+    providerFetch(st, reads, () => ({ status: 'in_progress', conclusion: null }));
+    const s = await fixture(st, 12);
+    await passShards(s);
+    const pending = confirmTasks(s);
+    assert(pending.length > 0);
+    assert.equal((await s.conclude('success')).status, 'passed');
+    assert(
+      pending.every(task => s.cancelled.includes(task.id)),
+      'the event cancels every fallback read it replaces',
+    );
+    assert.equal(reads.length, 0, 'healthy path: zero added provider reads');
+  });
+  for (const stepsCompleted of [true, false])
+    await t.test(
+      stepsCompleted ? 'every step completed under in_progress jobs' : 'provider steps still running',
+      async st => {
+        appVariables(st);
+        let now = Date.parse('2026-11-11T20:19:00Z');
+        st.mock.method(Date, 'now', () => now);
+        const reads = [];
+        const jobs = Array.from({ length: 12 }, (_, i) => ({
+          name: `forge-hosted-${i}`,
+          status: i === 0 ? 'completed' : 'in_progress',
+          conclusion: i === 0 ? 'success' : null,
+          steps: [
+            {
+              status: i === 0 || stepsCompleted ? 'completed' : 'in_progress',
+              conclusion: i === 0 || stepsCompleted ? 'success' : null,
+            },
+          ],
+        }));
+        providerFetch(st, reads, url =>
+          url.endsWith('/jobs?per_page=100')
+            ? { total_count: jobs.length, jobs }
+            : { status: 'in_progress', conclusion: null },
+        );
+        const s = await fixture(st, 12);
+        await passShards(s);
+        const since = now;
+        assert.equal((await s.status(s.run.id)).counts.passed, 12);
+        const watchdog = s.scheduled.find(item => item.name.endsWith('projectHostedActionsDirect:expire'));
+        assert.equal(watchdog.delay, 12 * 60 * 60_000);
+        let sawDelay = false;
+        for (const offset of offsets) {
+          const task = confirmTasks(s).at(-1);
+          assert.equal(
+            task.delay,
+            since + offset - now,
+            `the read at +${offset / 1000} s is scheduled, not polled`,
+          );
+          now = since + offset;
+          await verdicts.confirm._handler(
+            { runMutation: (ref, input) => s.call(verdicts, getFunctionName(ref).split(':')[1], input) },
+            task.input,
+          );
+          const run = await s.status(s.run.id);
+          if (stepsCompleted && offset === 30 * 60_000) {
+            // The decided policy: signed passes plus complete provider steps settle at +30 min.
+            assert.equal(run.status, 'passed');
+            assert.match(run.failureReason, /^provider-delayed: GitHub run status lagged/);
+            assert.equal(reads.length, 4, 'four reads, nothing beyond the original fallback');
+            assert.equal(confirmTasks(s).length, 4);
+            return;
+          }
+          assert.equal(run.status, 'running', 'incomplete provider steps never pass on signed shards alone');
+          if (offset < 30 * 60_000) continue;
+          sawDelay = true;
+          assert.match(run.failureReason, /^provider-delayed: waiting on GitHub since /);
+          const words = landingWords(run.failureReason);
+          assert.equal(words.label, 'Waiting for check infrastructure');
+          assert.equal(
+            words.line.providerDelay,
+            run.failureReason,
+            'status and the land wait carry one reason',
+          );
+        }
+        assert(sawDelay);
+        assert(offsets.at(-1) < watchdog.delay, 'the series ends inside the watchdog');
+        assert.equal(
+          reads.length,
+          7,
+          'seven record reads for the affected check, three beyond the original four',
+        );
+        assert.equal(confirmTasks(s).length, 7, 'no further read is scheduled: the series is finite');
+        // Then the documented policy: the existing 12 h watchdog is the only backstop.
+        await s.call(direct, 'expire', { ...s.id, fence: 1 });
+        assert.equal((await s.status(s.run.id)).status, 'interrupted');
+      },
+    );
 });

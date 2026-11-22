@@ -152,12 +152,24 @@ for (const admission of [false, true])
       {
         _handler: async ctx => {
           const selected = await checks.writableHostedCheck(ctx, { projectId: f.projectId, runId: run.id });
-          await direct.settleDirectActions(
-            ctx,
-            selected,
-            'runner-unavailable',
-            'Provider outage: synthetic CI concluded startup_failure before any runner acknowledged the check; one lookup after 5 minutes. Forge checks again.',
-          );
+          // The accepted dispatch's recovery read found startup_failure: the real reconcile settles it.
+          selected.run.dispatchStarted = true;
+          selected.run.actions = {
+            reservedAt: Date.parse('2026-11-11T20:26:00Z'),
+            fence: selected.run.fence,
+            outcome: 'accepted',
+            watchdog: null,
+            confirm: null,
+          };
+          await checks.writeHostedCheck(ctx, selected.row._id, selected.run);
+          await direct.reconcileDirectActions(ctx, {
+            projectId: f.projectId,
+            runId: run.id,
+            fence: selected.run.fence,
+            executionId: '123',
+            lookup: 'found',
+            conclusion: 'startup_failure',
+          });
         },
       },
       {},
