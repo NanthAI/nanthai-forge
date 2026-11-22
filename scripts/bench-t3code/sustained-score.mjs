@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkTerminal } from '../../dist/check-run-state.js';
 import { replayDigest } from './replay-schedule.mjs';
 import { sustainedVerdict } from './sustained-oracle.mjs';
 
@@ -9,9 +10,9 @@ const sum = values => values.reduce((total, value) => total + value, 0);
 const ratio = (numerator, denominator) => (denominator ? numerator / denominator : null);
 const unique = values => [...new Set(values)];
 
-/** A fast landing can retain a passed admission check on its earlier head. */
+/** A fast landing can retain a passed check on its earlier head. */
 export function certifyingSustainedCheck(
-  { head, checkRunIds, proofRunId, firstCheck, moreCheckRunIds, checkRunIdsPartial },
+  { head, checkRunIds, proofRunId, moreCheckRunIds, checkRunIdsPartial },
   runs,
 ) {
   const passed = id => runs.get(id)?.status === 'passed' && runs.get(id)?.gate?.mode !== 'audit';
@@ -19,8 +20,12 @@ export function certifyingSustainedCheck(
   const retained = unique(checkRunIds).filter(passed);
   const exact = retained.findLast(id => runs.get(id).request?.expectedHead === head);
   if (exact) return exact;
-  if (moreCheckRunIds || checkRunIdsPartial || firstCheck?.landedOn !== 'admission-run') return undefined;
-  if (retained.length === 1 && retained[0] === checkRunIds[0]) return retained[0];
+  const incomplete = checkRunIds.some(id => {
+    const run = runs.get(id);
+    return !run || (run.gate?.mode !== 'audit' && !checkTerminal(run.status));
+  });
+  if (moreCheckRunIds || checkRunIdsPartial || incomplete) return undefined;
+  if (retained.length === 1) return retained[0];
 }
 
 function scoreMain(plan, publications, missing) {

@@ -108,13 +108,29 @@ test('fast-mode s03 joins the one retained passed check pinned to its earlier he
     checkRunIds: ['admission', 'failed', 'audit'],
   };
   assert.equal(certifyingSustainedCheck(receipt, runs), 'admission');
-  assert.equal(certifyingSustainedCheck({ ...receipt, firstCheck: null }, runs), undefined);
+  assert.equal(
+    certifyingSustainedCheck({ ...receipt, checkRunIds: ['admission', 'unobserved'] }, runs),
+    undefined,
+  );
   assert.equal(certifyingSustainedCheck({ ...receipt, moreCheckRunIds: 1 }, runs), undefined);
   assert.equal(certifyingSustainedCheck({ ...receipt, checkRunIdsPartial: true }, runs), undefined);
   receipt.checkRunIds.push('other-pass');
   assert.equal(certifyingSustainedCheck(receipt, runs), undefined);
   receipt.checkRunIds.push('exact');
   assert.equal(certifyingSustainedCheck(receipt, runs), 'exact');
+});
+
+test('fast-mode s02 joins the only passed recheck when the earlier attempt was cancelled', () => {
+  const receipt = { head: 'published-head', checkRunIds: ['cancelled', 'recheck'], firstCheck: null };
+  const runs = new Map([
+    ['cancelled', { status: 'cancelled', request: { expectedHead: 'first-head' } }],
+    ['recheck', { status: 'passed', request: { expectedHead: 'rechecked-head' } }],
+  ]);
+  assert.equal(certifyingSustainedCheck(receipt, runs), 'recheck');
+  for (const status of ['running', 'unknown']) {
+    runs.set('cancelled', { status });
+    assert.equal(certifyingSustainedCheck(receipt, runs), undefined);
+  }
 });
 
 test('scorer uses exact published States and keeps planted reds apart from discarded runner minutes', () => {
