@@ -63,12 +63,14 @@ export function options(args) {
   if (
     pages.some(
       p =>
-        !/^(bootstrap|landing|home|now|intents|lanes|planning|activity|code|code-graph|settings(?::(?:general|agents|autonomy|checks|access|backups|appearance|devices|contributions|transfer|github))?|device|(?:lane|review|intent|view|initiative):[A-Za-z0-9_-]+)$/.test(
+        !/^(bootstrap|landing|home|now|intents|lanes|planning|stats|activity|code|code-graph|settings(?::(?:general|agents|autonomy|checks|access|backups|appearance|devices|contributions|transfer|github))?|device|(?:lane|review|intent|view|initiative):[A-Za-z0-9_-]+)$/.test(
           p,
         ),
     )
   )
-    throw new ShotError('Unknown page. Use landing,now,intents,lanes,lane:<id>,review:<id>,settings,device.');
+    throw new ShotError(
+      'Unknown page. Use landing,now,intents,lanes,stats,lane:<id>,review:<id>,settings,device.',
+    );
   if (pages.includes('bootstrap') && pages.length !== 1)
     throw new ShotError('Capture synthetic bootstrap separately from signed-in pages.');
   if (pages.includes('landing') && pages.length !== 1)

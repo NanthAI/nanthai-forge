@@ -31,7 +31,12 @@ async function verify(browser, config, entry) {
   return withPage(browser, {}, async page => {
     const session = observePasskeySession(page, config.deployment);
     await signInWithPasskey(page, credential, session, timeout);
-    return session.token();
+    const token = await session.readyToken(timeout);
+    if (!token)
+      throw new ShotError(
+        'Could not verify the native bot browser session on the configured Convex deployment.',
+      );
+    return token;
   });
 }
 

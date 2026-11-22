@@ -43,7 +43,7 @@ export async function browserSamples(config) {
       await signInPage.goto(destination(config.base, project, 'now'), { waitUntil: 'domcontentloaded' });
       await signInPage.waitForFunction(() => Boolean(window.Clerk?.session));
     }
-    const token = await bot.token();
+    const token = await bot.readyToken(config.timeout);
     const deployment = bot.deployment();
     if (!token || !deployment) throw new Error('PERF_PROJECT_CONNECTION');
     const client = deadlineConvexClient(deployment, { logger: false });
@@ -127,12 +127,19 @@ export async function browserSamples(config) {
             queries: observed.mark.queries,
           });
         } catch {
+          // A signed-in page with no marker object at all is a frontend built without VITE_FORGE_PERF=1.
+          const unmarked =
+            (await Promise.resolve()
+              .then(() => sampleBot.authenticated())
+              .catch(() => false)) &&
+            (await page.evaluate(() => window.__forgeCritical === undefined).catch(() => false));
           result[kind].push({
             startedAt,
             endedAt: new Date().toISOString(),
             durationMs: null,
-            reason:
-              'Navigation, authentication, readiness marker or successful source diff was unavailable. No page content or error payload retained.',
+            reason: unmarked
+              ? 'Signed in, but no readiness marker was observed on the page; the usual cause is a frontend built without VITE_FORGE_PERF=1.'
+              : 'Navigation, authentication, readiness marker or successful source diff was unavailable. No page content or error payload retained.',
           });
         } finally {
           await context.close();

@@ -127,6 +127,36 @@ test('browser handoff uses only a verified bot viewer on the configured deployme
   assert.equal(session.token(), null);
 });
 
+test('project access waits through the re-authentication the app sends right after native sign-in (lead check 2026-11-22)', async () => {
+  const page = new EventEmitter();
+  const session = observeBotSession(page, { kind: 'passkey', deployment });
+  const socket = new EventEmitter();
+  socket.url = () => ws;
+  page.emit('websocket', socket);
+  const send = (event, message) => socket.emit(event, { payload: JSON.stringify(message) });
+  const confirm = identity =>
+    send('framereceived', {
+      type: 'Transition',
+      endVersion: { identity },
+      modifications: [{ type: 'QueryUpdated', queryId: 7, value: { handle } }],
+    });
+  send('framesent', { type: 'Authenticate', tokenType: 'User', baseVersion: 0, value: 'first-token' });
+  send('framesent', {
+    type: 'ModifyQuerySet',
+    modifications: [{ type: 'Add', queryId: 7, udfPath: 'urlAccounts:current' }],
+  });
+  confirm(1);
+  assert.equal(await session.readyToken(1000), 'first-token');
+  // The refreshed token is pending until the server confirms it; an immediate read must wait, not fail.
+  send('framesent', { type: 'Authenticate', tokenType: 'User', baseVersion: 1, value: fixtureToken });
+  assert.equal(session.token(), null);
+  const ready = session.readyToken(1000);
+  confirm(2);
+  assert.equal(await ready, fixtureToken);
+  send('framesent', { type: 'Authenticate', tokenType: 'User', baseVersion: 2, value: 'never-confirmed' });
+  assert.equal(await session.readyToken(50), null);
+});
+
 test('native capture uses rebuilt addresses and refuses legacy-only screens explicitly', () => {
   const project = { handle: 'fixture-owner', slug: 'fixture-project' };
   const root = `${base}/-/fixture-owner/fixture-project`;
@@ -136,6 +166,7 @@ test('native capture uses rebuilt addresses and refuses legacy-only screens expl
     `${root}/plan?view=board`,
   );
   assert.equal(passkeyDestination(base, project, 'lane:example'), `${root}/lanes/example`);
+  assert.equal(passkeyDestination(base, project, 'stats'), `${root}/stats`);
   assert.equal(
     passkeyDestination(base, project, 'code', { diffFile: 'src/has space.ts' }),
     `${root}/code/files/src/has%20space.ts`,

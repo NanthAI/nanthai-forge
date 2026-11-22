@@ -57,20 +57,30 @@ export function observePasskeySession(page, deployment) {
       if (current === state) current = undefined;
     });
   });
+  async function waitForViewer(timeout) {
+    const known = viewer();
+    if (known) return known;
+    const pending = new AbortController();
+    const timer = setTimeout(() => pending.abort(), timeout);
+    try {
+      return (await once(events, 'viewer', { signal: pending.signal }))[0];
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  const token = () => (viewer() === botHandle ? current.token : null);
   return {
     viewer,
-    async waitForViewer(timeout) {
-      const known = viewer();
-      if (known) return known;
-      const pending = new AbortController();
-      const timer = setTimeout(() => pending.abort(), timeout);
+    waitForViewer,
+    token,
+    /** The app re-authenticates right after sign-in; wait until the server confirms the bot on the new token. */
+    async readyToken(timeout) {
       try {
-        return (await once(events, 'viewer', { signal: pending.signal }))[0];
-      } finally {
-        clearTimeout(timer);
+        return (await waitForViewer(timeout)) === botHandle ? token() : null;
+      } catch {
+        return null;
       }
     },
-    token: () => (viewer() === botHandle ? current.token : null),
   };
 }
 
@@ -116,8 +126,19 @@ export async function submitNativeBotSignIn(page, origin, session, timeout) {
     { origin, accountPath },
   );
   await outcome.dispose();
-  if (page.url() !== new URL(accountPath, origin).href)
-    throw new ShotError('The native passkey sign-in did not reach the account page.');
+  if (page.url() !== new URL(accountPath, origin).href) {
+    // Only a recognised refusal gets its own fixed words; page text is never copied (it can carry provider detail).
+    const said = await page
+      .locator('form.signin [role="alert"]')
+      .first()
+      .textContent({ timeout: 1000 })
+      .catch(() => '');
+    throw new ShotError(
+      /^Too many sign-in attempts/.test(said?.trim() ?? '')
+        ? 'The native passkey sign-in hit the sign-in rate limit. Wait a minute, then retry.'
+        : 'The native passkey sign-in did not reach the account page.',
+    );
+  }
   try {
     if ((await session.waitForViewer(timeout)) === botHandle && session.token()) return;
   } catch {

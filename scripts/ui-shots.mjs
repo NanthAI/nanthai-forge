@@ -47,6 +47,8 @@ try {
       config.variants.some(v => v !== 'unified')
     )
       throw new ShotError('The requested Lane variants are only available in the Clerk screenshot flow.');
+    if (!passkey && config.pages.includes('stats'))
+      throw new ShotError('Stats is only available in the native screenshot flow.');
     stage = 'launch (install Chromium with npx playwright install chromium)';
     browser = await launchBotBrowser(credentials);
     const context = await browser.newContext({
@@ -67,7 +69,7 @@ try {
     stage = 'project access';
     // Use this site's actual deployment and the bot's browser identity. Queries only; no admin key.
     async function query(name, args) {
-      const token = await session.token();
+      const token = await session.readyToken(timeout);
       const deployment = session.deployment();
       if (!token || !deployment) throw new ShotError('Could not identify the signed-in Convex connection.');
       const client = deadlineConvexClient(deployment, { logger: false });

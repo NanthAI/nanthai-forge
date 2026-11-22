@@ -29,6 +29,7 @@ const words: Record<string, string> = {
   WEBAUTHN_UNSUPPORTED: 'This browser cannot use passkeys here. Continue with GitHub.',
   PASSKEY_ALREADY_REGISTERED: 'This device already holds a Forge passkey. Sign in with it.',
   USERNAME_TAKEN: 'That handle is taken. If it is yours, sign in with its passkey or GitHub.',
+  RATE_LIMITED: 'Too many sign-in attempts just now. Wait a minute, then try again.',
 };
 const say = (code: string | undefined) =>
   (code && words[code]) ?? 'Forge could not finish signing in. Try again.';
@@ -77,8 +78,15 @@ function HandleSignIn() {
     setProblem(null);
     remember({ next, method: 'passkey', handle: username });
     const result = await hook.signIn({ username });
+    // Our own server refusals (the passkey rate limit) arrive folded as OTHER_ERROR with the ConvexError as cause.
     if (result.status === 'error' && result.userError.error !== 'ALREADY_PENDING')
-      setProblem(say(result.userError.error));
+      setProblem(
+        say(
+          result.userError.error === 'OTHER_ERROR'
+            ? errorCode(result.userError.cause)
+            : result.userError.error,
+        ),
+      );
   };
   const onState = (hook: PasskeyHook) => {
     driver.current = hook;

@@ -44,6 +44,7 @@ export function observeBotSession(page, credentials) {
   return {
     deployment: () => deployment,
     token: () => convexToken(page),
+    readyToken: () => convexToken(page),
     authenticated: () => page.evaluate(() => Boolean(window.Clerk?.user)),
   };
 }

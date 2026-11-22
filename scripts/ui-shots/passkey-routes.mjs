@@ -10,6 +10,7 @@ const projectPlaces = {
   lanes: 'lanes',
   lane: 'lanes',
   code: 'code',
+  stats: 'stats',
   settings: 'settings',
 };
 const settingsSections = { access: '', checks: 'checks', github: 'mirror' };
